@@ -42,10 +42,8 @@ fn checked_malloc_instr<'ctx>(
     // Libc-free: route through `verum_os_alloc` (mmap on Linux/macOS,
     // VirtualAlloc on Windows) instead of libc malloc.
     // See `docs/architecture/no-libc-architecture.md`.
-    let malloc_fn = module.get_function("verum_os_alloc").unwrap_or_else(|| {
-        let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-        module.add_function("verum_os_alloc", fn_type, None)
-    });
+    let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+        let malloc_fn = super::error::get_or_declare_function(module, "verum_os_alloc", fn_type);
 
     let raw_ptr = builder
         .build_call(malloc_fn, &[size.into()], name)
@@ -4219,10 +4217,8 @@ pub fn lower_instruction<'ctx>(
             let i64_type = ctx.types().i64_type();
             let module = ctx.get_module();
 
-            let await_fn = module.get_function("verum_pool_await").unwrap_or_else(|| {
-                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                module.add_function("verum_pool_await", fn_type, None)
-            });
+            let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let await_fn = super::error::get_or_declare_function(module, "verum_pool_await", fn_type);
 
             let task_val = ctx.get_register(task.0)?;
             let result = ctx
@@ -4284,13 +4280,9 @@ pub fn lower_instruction<'ctx>(
             }
 
             // Declare verum_select_channels(chan_ptrs: ptr, n: i64, timeout_ns: i64) -> i64
-            let select_fn = module
-                .get_function("verum_select_channels")
-                .unwrap_or_else(|| {
-                    let fn_type = i64_type
+            let fn_type = i64_type
                         .fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_select_channels", fn_type, None)
-                });
+        let select_fn = super::error::get_or_declare_function(module, "verum_select_channels", fn_type);
 
             let n_val = i64_type.const_int(n as u64, false);
             let timeout = i64_type.const_int(0, true); // 0 = infinite wait
@@ -4622,12 +4614,8 @@ pub fn lower_instruction<'ctx>(
 
             let module = ctx.get_module();
             let ptr_type = ctx.types().ptr_type();
-            let release_fn = module
-                .get_function("verum_cbgr_ref_release")
-                .unwrap_or_else(|| {
-                    let fn_type = ctx.types().void_type().fn_type(&[ptr_type.into()], false);
-                    module.add_function("verum_cbgr_ref_release", fn_type, None)
-                });
+            let fn_type = ctx.types().void_type().fn_type(&[ptr_type.into()], false);
+        let release_fn = super::error::get_or_declare_function(module, "verum_cbgr_ref_release", fn_type);
 
             ctx.builder()
                 .build_call(release_fn, &[ptr.into()], "")
@@ -4813,10 +4801,8 @@ pub fn lower_instruction<'ctx>(
 
             // Use verum_text_concat(i64 text_a, i64 text_b) -> i64 text_result
             // Both operands are Text* pointers stored as i64.
-            let concat_fn = module.get_function("verum_text_concat").unwrap_or_else(|| {
-                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                module.add_function("verum_text_concat", fn_type, None)
-            });
+            let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let concat_fn = super::error::get_or_declare_function(module, "verum_text_concat", fn_type);
 
             // Coerce register values to i64 (Text* pointers stored as i64)
             let a_i64 = as_i64(ctx, a_val, "concat_a")?;
@@ -5044,10 +5030,8 @@ pub fn lower_instruction<'ctx>(
                 end_val
             };
 
-            let range_fn = module.get_function("verum_range_new").unwrap_or_else(|| {
-                let fn_type = ptr_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                module.add_function("verum_range_new", fn_type, None)
-            });
+            let fn_type = ptr_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let range_fn = super::error::get_or_declare_function(module, "verum_range_new", fn_type);
 
             let result = ctx
                 .builder()
@@ -5511,12 +5495,8 @@ pub fn lower_instruction<'ctx>(
             let i64_type = ctx.types().i64_type();
             let module = ctx.get_module();
 
-            let is_done_fn = module
-                .get_function("verum_thread_is_done")
-                .unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_thread_is_done", fn_type, None)
-                });
+            let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let is_done_fn = super::error::get_or_declare_function(module, "verum_thread_is_done", fn_type);
 
             let task_val = ctx.get_register(future.0)?;
             let result = ctx
@@ -5536,10 +5516,8 @@ pub fn lower_instruction<'ctx>(
             let i64_type = ctx.types().i64_type();
             let module = ctx.get_module();
 
-            let join_fn = module.get_function("verum_thread_join").unwrap_or_else(|| {
-                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                module.add_function("verum_thread_join", fn_type, None)
-            });
+            let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let join_fn = super::error::get_or_declare_function(module, "verum_thread_join", fn_type);
 
             let task_val = ctx.get_register(future.0)?;
             let result = ctx
@@ -5914,8 +5892,7 @@ pub fn lower_instruction<'ctx>(
             let module = ctx.get_module();
 
             // Declare verum_io_poll(engine: i64, results: i64, max: i64, timeout_ns: i64) -> i64
-            let poll_fn = module.get_function("verum_io_poll").unwrap_or_else(|| {
-                let fn_type = i64_type.fn_type(
+            let fn_type = i64_type.fn_type(
                     &[
                         i64_type.into(),
                         i64_type.into(),
@@ -5924,8 +5901,7 @@ pub fn lower_instruction<'ctx>(
                     ],
                     false,
                 );
-                module.add_function("verum_io_poll", fn_type, None)
-            });
+        let poll_fn = super::error::get_or_declare_function(module, "verum_io_poll", fn_type);
 
             let engine_val = ctx.get_register(engine.0)?;
             let timeout_val = ctx.get_register(timeout.0)?;
@@ -5981,10 +5957,8 @@ pub fn lower_instruction<'ctx>(
             let module = ctx.get_module();
 
             // Declare verum_nursery_new(max_tasks: i64) -> i64
-            let nursery_fn = module.get_function("verum_nursery_new").unwrap_or_else(|| {
-                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                module.add_function("verum_nursery_new", fn_type, None)
-            });
+            let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let nursery_fn = super::error::get_or_declare_function(module, "verum_nursery_new", fn_type);
 
             let max_tasks = i64_type.const_int(256, false);
             let nursery = ctx
@@ -6076,13 +6050,9 @@ pub fn lower_instruction<'ctx>(
             let module = ctx.get_module();
 
             // Declare verum_nursery_spawn(nursery: i64, func_ptr: i64, arg: i64) -> i64
-            let spawn_fn = module
-                .get_function("verum_nursery_spawn")
-                .unwrap_or_else(|| {
-                    let fn_type = i64_type
+            let fn_type = i64_type
                         .fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_nursery_spawn", fn_type, None)
-                });
+        let spawn_fn = super::error::get_or_declare_function(module, "verum_nursery_spawn", fn_type);
 
             let nursery_val = ctx.get_register(nursery.0)?;
             let task_val = ctx.get_register(task.0)?;
@@ -6108,12 +6078,8 @@ pub fn lower_instruction<'ctx>(
             let module = ctx.get_module();
 
             // Declare verum_nursery_await_all(nursery: i64) -> i64
-            let await_fn = module
-                .get_function("verum_nursery_await_all")
-                .unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_nursery_await_all", fn_type, None)
-                });
+            let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let await_fn = super::error::get_or_declare_function(module, "verum_nursery_await_all", fn_type);
 
             let nursery_val = ctx.get_register(nursery.0)?;
             let raw_result = ctx
@@ -6147,12 +6113,8 @@ pub fn lower_instruction<'ctx>(
             let module = ctx.get_module();
 
             // verum_nursery_get_error(nursery: i64) -> i64 (1 if error, 0 if ok)
-            let get_error_fn = module
-                .get_function("verum_nursery_get_error")
-                .unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_nursery_get_error", fn_type, None)
-                });
+            let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let get_error_fn = super::error::get_or_declare_function(module, "verum_nursery_get_error", fn_type);
 
             let nursery_val = ctx.get_register(nursery.0)?;
             let result = ctx
@@ -7213,12 +7175,8 @@ pub fn lower_instruction<'ctx>(
             let f64_ty = ctx.types().f64_type();
             let module = ctx.get_module();
             // Call verum_random_float() to get [0,1), then scale to [low, high)
-            let rng_fn = module
-                .get_function("verum_random_float")
-                .unwrap_or_else(|| {
-                    let fn_type = f64_ty.fn_type(&[], false);
-                    module.add_function("verum_random_float", fn_type, None)
-                });
+            let fn_type = f64_ty.fn_type(&[], false);
+        let rng_fn = super::error::get_or_declare_function(module, "verum_random_float", fn_type);
             let rnd = ctx
                 .builder()
                 .build_call(rng_fn, &[], "rnd01")
@@ -8566,10 +8524,7 @@ fn lower_call<'ctx>(
                 let cap_stderr_raw = ctx.get_register(args.start.0 + 3)?;
                 let cap_stderr = as_i64(ctx, cap_stderr_raw, "cap_se")?;
 
-                let spawn_fn = module
-                    .get_function("verum_process_spawn_cmd")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(
+                let fn_type = i64_type.fn_type(
                             &[
                                 ptr_type.into(),
                                 i64_type.into(),
@@ -8578,8 +8533,7 @@ fn lower_call<'ctx>(
                             ],
                             false,
                         );
-                        module.add_function("verum_process_spawn_cmd", fn_type, None)
-                    });
+        let spawn_fn = super::error::get_or_declare_function(module, "verum_process_spawn_cmd", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -8623,12 +8577,8 @@ fn lower_call<'ctx>(
                 let args_list_raw = ctx.get_register(args.start.0 + 1)?;
                 let args_list = as_i64(ctx, args_list_raw, "args_i64")?;
 
-                let exec_fn = module
-                    .get_function("verum_process_exec")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-                        module.add_function("verum_process_exec", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+        let exec_fn = super::error::get_or_declare_function(module, "verum_process_exec", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(exec_fn, &[program_ptr.into(), args_list.into()], "exec_raw")
@@ -8644,12 +8594,8 @@ fn lower_call<'ctx>(
                 // __process_wait_raw(pid: Int) -> Int
                 // Returns: raw waitpid status, or -1 on error
                 let pid_val = as_i64(ctx, ctx.get_register(args.start.0)?, "pid_i64")?;
-                let wait_fn = module
-                    .get_function("verum_process_wait")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_process_wait", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let wait_fn = super::error::get_or_declare_function(module, "verum_process_wait", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(wait_fn, &[pid_val.into()], "wait_raw")
@@ -8665,10 +8611,8 @@ fn lower_call<'ctx>(
                 // __fd_read_all_raw(fd: Int) -> Int
                 // Returns: pointer to List<Byte> header, or 0 on failure
                 let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "fd_i64")?;
-                let read_fn = module.get_function("verum_fd_read_all").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_fd_read_all", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let read_fn = super::error::get_or_declare_function(module, "verum_fd_read_all", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(read_fn, &[fd_val.into()], "fd_read_raw")
@@ -8684,10 +8628,8 @@ fn lower_call<'ctx>(
             "__fd_close_raw" => {
                 // __fd_close_raw(fd: Int) -> Int (returns 0)
                 let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "fd_i64")?;
-                let close_fn = module.get_function("verum_fd_close").unwrap_or_else(|| {
-                    let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_fd_close", fn_type, None)
-                });
+                let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let close_fn = super::error::get_or_declare_function(module, "verum_fd_close", fn_type);
                 ctx.builder()
                     .build_call(close_fn, &[fd_val.into()], "")
                     .or_llvm_err()?;
@@ -8876,12 +8818,8 @@ fn lower_call<'ctx>(
                     .or_internal("text_get_ptr: no value")?
                     .into_pointer_value();
 
-                let read_fn = module
-                    .get_function("verum_file_read_to_string")
-                    .unwrap_or_else(|| {
-                        let fn_type = ptr_type.fn_type(&[ptr_type.into()], false);
-                        module.add_function("verum_file_read_to_string", fn_type, None)
-                    });
+                let fn_type = ptr_type.fn_type(&[ptr_type.into()], false);
+        let read_fn = super::error::get_or_declare_function(module, "verum_file_read_to_string", fn_type);
                 let char_result = ctx
                     .builder()
                     .build_call(read_fn, &[path_ptr.into()], "file_content")
@@ -8912,10 +8850,8 @@ fn lower_call<'ctx>(
 
             "__args_count_raw" => {
                 // __args_count_raw() -> Int
-                let argc_fn = module.get_function("verum_get_argc").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[], false);
-                    module.add_function("verum_get_argc", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[], false);
+        let argc_fn = super::error::get_or_declare_function(module, "verum_get_argc", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(argc_fn, &[], "argc")
@@ -8931,10 +8867,8 @@ fn lower_call<'ctx>(
                 // __arg_raw(index: Int) -> Text
                 // Returns: C string pointer to argv[index], wrap in Text
                 let index_val = ctx.get_register(args.start.0)?;
-                let argv_fn = module.get_function("verum_get_argv").unwrap_or_else(|| {
-                    let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_get_argv", fn_type, None)
-                });
+                let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+        let argv_fn = super::error::get_or_declare_function(module, "verum_get_argv", fn_type);
                 let char_result = ctx
                     .builder()
                     .build_call(argv_fn, &[index_val.into()], "argv_i")
@@ -8992,12 +8926,8 @@ fn lower_call<'ctx>(
                     .or_internal("text_get_ptr: no value")?
                     .into_pointer_value();
 
-                let write_fn = module
-                    .get_function("verum_file_write_string")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
-                        module.add_function("verum_file_write_string", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
+        let write_fn = super::error::get_or_declare_function(module, "verum_file_write_string", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -9015,10 +8945,8 @@ fn lower_call<'ctx>(
 
             "__mutex_new_raw" => {
                 // __mutex_new_raw() -> Int (mutex pointer)
-                let mutex_fn = module.get_function("verum_mutex_new").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[], false);
-                    module.add_function("verum_mutex_new", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[], false);
+        let mutex_fn = super::error::get_or_declare_function(module, "verum_mutex_new", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(mutex_fn, &[], "mutex_ptr")
@@ -9070,12 +8998,8 @@ fn lower_call<'ctx>(
             "__mutex_trylock_raw" => {
                 // __mutex_trylock_raw(mutex: Int) -> Int (1 = acquired, 0 = failed)
                 let mutex_val = as_i64(ctx, ctx.get_register(args.start.0)?, "mtx_i64")?;
-                let trylock_fn = module
-                    .get_function("verum_mutex_trylock_bridge")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_mutex_trylock_bridge", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let trylock_fn = super::error::get_or_declare_function(module, "verum_mutex_trylock_bridge", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(trylock_fn, &[mutex_val.into()], "trylock_result")
@@ -9092,10 +9016,8 @@ fn lower_call<'ctx>(
             // ============================================================
             "__cond_new_raw" => {
                 // __cond_new_raw() -> Int (condvar handle as pointer-sized int)
-                let cond_fn = module.get_function("verum_cond_new").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[], false);
-                    module.add_function("verum_cond_new", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[], false);
+        let cond_fn = super::error::get_or_declare_function(module, "verum_cond_new", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(cond_fn, &[], "cond_ptr")
@@ -9131,13 +9053,9 @@ fn lower_call<'ctx>(
                 let mutex_val = as_i64(ctx, ctx.get_register(Reg(args.start.0 + 1).0)?, "mtx_i64")?;
                 let timeout_val =
                     as_i64(ctx, ctx.get_register(Reg(args.start.0 + 2).0)?, "to_i64")?;
-                let timedwait_fn = module
-                    .get_function("verum_cond_timedwait_bridge")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type
+                let fn_type = i64_type
                             .fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_cond_timedwait_bridge", fn_type, None)
-                    });
+        let timedwait_fn = super::error::get_or_declare_function(module, "verum_cond_timedwait_bridge", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -9210,12 +9128,8 @@ fn lower_call<'ctx>(
             // ============================================================
             "__io_engine_new_raw" => {
                 // __io_engine_new_raw() -> Int (engine handle)
-                let engine_fn = module
-                    .get_function("verum_io_engine_new")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_io_engine_new", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let engine_fn = super::error::get_or_declare_function(module, "verum_io_engine_new", fn_type);
                 let capacity: verum_llvm::values::BasicValueEnum = if args.count > 0 {
                     as_i64(ctx, ctx.get_register(args.start.0)?, "cap_i64")?.into()
                 } else {
@@ -9234,12 +9148,8 @@ fn lower_call<'ctx>(
 
             "__time_monotonic_nanos_raw" => {
                 // __time_monotonic_nanos_raw() -> Int (nanoseconds)
-                let time_fn = module
-                    .get_function("verum_time_monotonic_nanos")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[], false);
-                        module.add_function("verum_time_monotonic_nanos", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[], false);
+        let time_fn = super::error::get_or_declare_function(module, "verum_time_monotonic_nanos", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(time_fn, &[], "mono_nanos")
@@ -9345,12 +9255,8 @@ fn lower_call<'ctx>(
             "__metal_alloc_with_data" => {
                 let data_ptr = as_i64(ctx, ctx.get_register(args.start.0)?, "m_dp")?;
                 let size = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "m_sz")?;
-                let c_fn = module
-                    .get_function("verum_metal_alloc_with_data")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_metal_alloc_with_data", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let c_fn = super::error::get_or_declare_function(module, "verum_metal_alloc_with_data", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &[data_ptr.into(), size.into()], "metal_buf")
@@ -9389,12 +9295,8 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_int_to_ptr(src, ptr_type, "src_ptr")
                     .or_llvm_err()?;
-                let c_fn = module
-                    .get_function("verum_metal_compile_shader")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-                        module.add_function("verum_metal_compile_shader", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+        let c_fn = super::error::get_or_declare_function(module, "verum_metal_compile_shader", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &[src_ptr.into(), len.into()], "metal_lib")
@@ -9414,12 +9316,8 @@ fn lower_call<'ctx>(
                     .builder()
                     .build_int_to_ptr(name, ptr_type, "nm_ptr")
                     .or_llvm_err()?;
-                let c_fn = module
-                    .get_function("verum_metal_get_pipeline")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
-                        module.add_function("verum_metal_get_pipeline", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
+        let c_fn = super::error::get_or_declare_function(module, "verum_metal_get_pipeline", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &[lib.into(), name_ptr.into()], "metal_pipeline")
@@ -9493,12 +9391,8 @@ fn lower_call<'ctx>(
                 let void_type = ctx.types().void_type();
                 let param_types: Vec<BasicMetadataTypeEnum> =
                     (0..7).map(|_| i64_type.into()).collect();
-                let c_fn = module
-                    .get_function("verum_metal_dispatch_2d")
-                    .unwrap_or_else(|| {
-                        let fn_type = void_type.fn_type(&param_types, false);
-                        module.add_function("verum_metal_dispatch_2d", fn_type, None)
-                    });
+                let fn_type = void_type.fn_type(&param_types, false);
+        let c_fn = super::error::get_or_declare_function(module, "verum_metal_dispatch_2d", fn_type);
                 ctx.builder()
                     .build_call(c_fn, &call_args, "")
                     .or_llvm_err()?;
@@ -9508,12 +9402,8 @@ fn lower_call<'ctx>(
 
             "__metal_execution_time_ns" => {
                 let handle = as_i64(ctx, ctx.get_register(args.start.0)?, "m_h")?;
-                let c_fn = module
-                    .get_function("verum_metal_execution_time_ns")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_metal_execution_time_ns", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let c_fn = super::error::get_or_declare_function(module, "verum_metal_execution_time_ns", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &[handle.into()], "gpu_time_ns")
@@ -9561,10 +9451,8 @@ fn lower_call<'ctx>(
                 let void_type = ctx.types().void_type();
                 let param_types: Vec<BasicMetadataTypeEnum> =
                     (0..6).map(|_| i64_type.into()).collect();
-                let c_fn = module.get_function("verum_metal_sgemm").unwrap_or_else(|| {
-                    let fn_type = void_type.fn_type(&param_types, false);
-                    module.add_function("verum_metal_sgemm", fn_type, None)
-                });
+                let fn_type = void_type.fn_type(&param_types, false);
+        let c_fn = super::error::get_or_declare_function(module, "verum_metal_sgemm", fn_type);
                 ctx.builder()
                     .build_call(c_fn, &call_args, "")
                     .or_llvm_err()?;
@@ -9586,12 +9474,8 @@ fn lower_call<'ctx>(
                 }
                 let param_types: Vec<BasicMetadataTypeEnum> =
                     (0..6).map(|_| i64_type.into()).collect();
-                let c_fn = module
-                    .get_function("verum_metal_benchmark")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&param_types, false);
-                        module.add_function("verum_metal_benchmark", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&param_types, false);
+        let c_fn = super::error::get_or_declare_function(module, "verum_metal_benchmark", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &call_args, "bench_ns")
@@ -9673,11 +9557,9 @@ fn lower_call<'ctx>(
                 let a = as_f64(ctx, ctx.get_register(args.start.0)?, "fma_a")?;
                 let b = as_f64(ctx, ctx.get_register(args.start.0 + 1)?, "fma_b")?;
                 let c = as_f64(ctx, ctx.get_register(args.start.0 + 2)?, "fma_c")?;
-                let fma_fn = module.get_function("llvm.fma.f64").unwrap_or_else(|| {
-                    let fn_type = f64_type
+                let fn_type = f64_type
                         .fn_type(&[f64_type.into(), f64_type.into(), f64_type.into()], false);
-                    module.add_function("llvm.fma.f64", fn_type, None)
-                });
+        let fma_fn = super::error::get_or_declare_function(module, "llvm.fma.f64", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(fma_fn, &[a.into(), b.into(), c.into()], "fma_result")
@@ -9850,10 +9732,8 @@ fn lower_call<'ctx>(
                 } else {
                     i64_type.const_int(0o644, false)
                 };
-                let open_fn = module.get_function("verum_file_open").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-                    module.add_function("verum_file_open", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+        let open_fn = super::error::get_or_declare_function(module, "verum_file_open", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(open_fn, &[path_ptr.into(), flags.into()], "fd")
@@ -9867,10 +9747,8 @@ fn lower_call<'ctx>(
 
             "__file_close_raw" => {
                 let fd_val = ctx.get_register(args.start.0)?;
-                let close_fn = module.get_function("verum_file_close").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_file_close", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let close_fn = super::error::get_or_declare_function(module, "verum_file_close", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(close_fn, &[fd_val.into()], "close_r")
@@ -9915,10 +9793,8 @@ fn lower_call<'ctx>(
             }
 
             "__time_now_ms_raw" => {
-                let time_fn = module.get_function("verum_time_now_ms").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[], false);
-                    module.add_function("verum_time_now_ms", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[], false);
+        let time_fn = super::error::get_or_declare_function(module, "verum_time_now_ms", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(time_fn, &[], "now_ms")
@@ -9960,10 +9836,8 @@ fn lower_call<'ctx>(
                 // Canonical signature: verum_dealloc(ptr, size: i64) -> void.
                 // Matches platform_ir.rs::emit_allocator and the size-class
                 // freelist contract.
-                let dealloc_fn = module.get_function("verum_dealloc").unwrap_or_else(|| {
-                    let fn_type = void_type.fn_type(&[ptr_ty.into(), i64_type.into()], false);
-                    module.add_function("verum_dealloc", fn_type, None)
-                });
+                let fn_type = void_type.fn_type(&[ptr_ty.into(), i64_type.into()], false);
+        let dealloc_fn = super::error::get_or_declare_function(module, "verum_dealloc", fn_type);
                 // ptr_val arrives as i64 in the register file; reify to ptr type.
                 let ptr_arg = ctx
                     .builder()
@@ -10127,10 +10001,8 @@ fn lower_call<'ctx>(
                 let fn_val = ctx.get_register(args.start.0)?;
                 let arg_val = ctx.get_register(args.start.0 + 1)?;
                 let void_type = ctx.types().void_type();
-                let push_fn = module.get_function("verum_defer_push").unwrap_or_else(|| {
-                    let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_defer_push", fn_type, None)
-                });
+                let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let push_fn = super::error::get_or_declare_function(module, "verum_defer_push", fn_type);
                 ctx.builder()
                     .build_call(push_fn, &[fn_val.into(), arg_val.into()], "")
                     .or_llvm_err()?;
@@ -10140,10 +10012,8 @@ fn lower_call<'ctx>(
 
             "__defer_pop_raw" => {
                 let void_type = ctx.types().void_type();
-                let pop_fn = module.get_function("verum_defer_pop").unwrap_or_else(|| {
-                    let fn_type = void_type.fn_type(&[], false);
-                    module.add_function("verum_defer_pop", fn_type, None)
-                });
+                let fn_type = void_type.fn_type(&[], false);
+        let pop_fn = super::error::get_or_declare_function(module, "verum_defer_pop", fn_type);
                 ctx.builder()
                     .build_call(pop_fn, &[], "")
                     .or_llvm_err()?;
@@ -10154,12 +10024,8 @@ fn lower_call<'ctx>(
             "__defer_run_to_raw" => {
                 let depth_val = ctx.get_register(args.start.0)?;
                 let void_type = ctx.types().void_type();
-                let run_fn = module
-                    .get_function("verum_defer_run_to")
-                    .unwrap_or_else(|| {
-                        let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_defer_run_to", fn_type, None)
-                    });
+                let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let run_fn = super::error::get_or_declare_function(module, "verum_defer_run_to", fn_type);
                 ctx.builder()
                     .build_call(run_fn, &[depth_val.into()], "")
                     .or_llvm_err()?;
@@ -10168,10 +10034,8 @@ fn lower_call<'ctx>(
             }
 
             "__defer_depth_raw" => {
-                let depth_fn = module.get_function("verum_defer_depth").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[], false);
-                    module.add_function("verum_defer_depth", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[], false);
+        let depth_fn = super::error::get_or_declare_function(module, "verum_defer_depth", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(depth_fn, &[], "defer_depth")
@@ -10187,12 +10051,8 @@ fn lower_call<'ctx>(
             // WaitGroup
             // ============================================================
             "__waitgroup_new_raw" => {
-                let wg_fn = module
-                    .get_function("verum_waitgroup_new")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[], false);
-                        module.add_function("verum_waitgroup_new", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[], false);
+        let wg_fn = super::error::get_or_declare_function(module, "verum_waitgroup_new", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(wg_fn, &[], "waitgroup")
@@ -10208,12 +10068,8 @@ fn lower_call<'ctx>(
                 let wg_val = ctx.get_register(args.start.0)?;
                 let delta_val = ctx.get_register(args.start.0 + 1)?;
                 let void_type = ctx.types().void_type();
-                let add_fn = module
-                    .get_function("verum_waitgroup_add")
-                    .unwrap_or_else(|| {
-                        let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_waitgroup_add", fn_type, None)
-                    });
+                let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let add_fn = super::error::get_or_declare_function(module, "verum_waitgroup_add", fn_type);
                 ctx.builder()
                     .build_call(add_fn, &[wg_val.into(), delta_val.into()], "")
                     .or_llvm_err()?;
@@ -10224,12 +10080,8 @@ fn lower_call<'ctx>(
             "__waitgroup_done_raw" => {
                 let wg_val = ctx.get_register(args.start.0)?;
                 let void_type = ctx.types().void_type();
-                let done_fn = module
-                    .get_function("verum_waitgroup_done")
-                    .unwrap_or_else(|| {
-                        let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_waitgroup_done", fn_type, None)
-                    });
+                let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let done_fn = super::error::get_or_declare_function(module, "verum_waitgroup_done", fn_type);
                 ctx.builder()
                     .build_call(done_fn, &[wg_val.into()], "")
                     .or_llvm_err()?;
@@ -10240,12 +10092,8 @@ fn lower_call<'ctx>(
             "__waitgroup_wait_raw" => {
                 let wg_val = ctx.get_register(args.start.0)?;
                 let void_type = ctx.types().void_type();
-                let wait_fn = module
-                    .get_function("verum_waitgroup_wait")
-                    .unwrap_or_else(|| {
-                        let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_waitgroup_wait", fn_type, None)
-                    });
+                let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let wait_fn = super::error::get_or_declare_function(module, "verum_waitgroup_wait", fn_type);
                 ctx.builder()
                     .build_call(wait_fn, &[wg_val.into()], "")
                     .or_llvm_err()?;
@@ -10256,12 +10104,8 @@ fn lower_call<'ctx>(
             "__waitgroup_destroy_raw" => {
                 let wg_val = ctx.get_register(args.start.0)?;
                 let void_type = ctx.types().void_type();
-                let destroy_fn = module
-                    .get_function("verum_waitgroup_destroy")
-                    .unwrap_or_else(|| {
-                        let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_waitgroup_destroy", fn_type, None)
-                    });
+                let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let destroy_fn = super::error::get_or_declare_function(module, "verum_waitgroup_destroy", fn_type);
                 ctx.builder()
                     .build_call(destroy_fn, &[wg_val.into()], "")
                     .or_llvm_err()?;
@@ -10275,12 +10119,8 @@ fn lower_call<'ctx>(
             "__io_engine_destroy_raw" => {
                 let engine_val = ctx.get_register(args.start.0)?;
                 let void_type = ctx.types().void_type();
-                let destroy_fn = module
-                    .get_function("verum_io_engine_destroy")
-                    .unwrap_or_else(|| {
-                        let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_io_engine_destroy", fn_type, None)
-                    });
+                let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let destroy_fn = super::error::get_or_declare_function(module, "verum_io_engine_destroy", fn_type);
                 ctx.builder()
                     .build_call(destroy_fn, &[engine_val.into()], "")
                     .or_llvm_err()?;
@@ -10293,11 +10133,9 @@ fn lower_call<'ctx>(
                 let engine_val = ctx.get_register(args.start.0)?;
                 let fd_val = ctx.get_register(args.start.0 + 1)?;
                 let events_val = ctx.get_register(args.start.0 + 2)?;
-                let submit_fn = module.get_function("verum_io_submit").unwrap_or_else(|| {
-                    let fn_type = i64_type
+                let fn_type = i64_type
                         .fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_io_submit", fn_type, None)
-                });
+        let submit_fn = super::error::get_or_declare_function(module, "verum_io_submit", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -10318,8 +10156,7 @@ fn lower_call<'ctx>(
                 let engine_val = ctx.get_register(args.start.0)?;
                 let max_val = ctx.get_register(args.start.0 + 1)?;
                 let timeout_val = ctx.get_register(args.start.0 + 2)?;
-                let poll_fn = module.get_function("verum_io_poll").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(
+                let fn_type = i64_type.fn_type(
                         &[
                             i64_type.into(),
                             i64_type.into(),
@@ -10328,8 +10165,7 @@ fn lower_call<'ctx>(
                         ],
                         false,
                     );
-                    module.add_function("verum_io_poll", fn_type, None)
-                });
+        let poll_fn = super::error::get_or_declare_function(module, "verum_io_poll", fn_type);
                 let null_ptr = i64_type.const_int(0, false);
                 let result = ctx
                     .builder()
@@ -10355,10 +10191,8 @@ fn lower_call<'ctx>(
                 // __io_remove_raw(engine: Int, fd: Int) -> Int
                 let engine_val = ctx.get_register(args.start.0)?;
                 let fd_val = ctx.get_register(args.start.0 + 1)?;
-                let remove_fn = module.get_function("verum_io_remove").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_io_remove", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let remove_fn = super::error::get_or_declare_function(module, "verum_io_remove", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(remove_fn, &[engine_val.into(), fd_val.into()], "io_remove")
@@ -10375,11 +10209,9 @@ fn lower_call<'ctx>(
                 let engine_val = ctx.get_register(args.start.0)?;
                 let fd_val = ctx.get_register(args.start.0 + 1)?;
                 let events_val = ctx.get_register(args.start.0 + 2)?;
-                let modify_fn = module.get_function("verum_io_modify").unwrap_or_else(|| {
-                    let fn_type = i64_type
+                let fn_type = i64_type
                         .fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_io_modify", fn_type, None)
-                });
+        let modify_fn = super::error::get_or_declare_function(module, "verum_io_modify", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -10405,10 +10237,8 @@ fn lower_call<'ctx>(
                 } else {
                     i64_type.const_int(4, false).into()
                 };
-                let create_fn = module.get_function("verum_pool_create").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_pool_create", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let create_fn = super::error::get_or_declare_function(module, "verum_pool_create", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(create_fn, &[nw_val.into()], "pool")
@@ -10425,11 +10255,9 @@ fn lower_call<'ctx>(
                 let pool_val = ctx.get_register(args.start.0)?;
                 let func_val = ctx.get_register(args.start.0 + 1)?;
                 let arg_val = ctx.get_register(args.start.0 + 2)?;
-                let submit_fn = module.get_function("verum_pool_submit").unwrap_or_else(|| {
-                    let fn_type = i64_type
+                let fn_type = i64_type
                         .fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_pool_submit", fn_type, None)
-                });
+        let submit_fn = super::error::get_or_declare_function(module, "verum_pool_submit", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -10448,10 +10276,8 @@ fn lower_call<'ctx>(
             "__pool_await_raw" => {
                 // __pool_await_raw(handle: Int) -> Int (result)
                 let handle_val = ctx.get_register(args.start.0)?;
-                let await_fn = module.get_function("verum_pool_await").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_pool_await", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let await_fn = super::error::get_or_declare_function(module, "verum_pool_await", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(await_fn, &[handle_val.into()], "pool_result")
@@ -10466,12 +10292,8 @@ fn lower_call<'ctx>(
             "__pool_destroy_raw" => {
                 let pool_val = ctx.get_register(args.start.0)?;
                 let void_type = ctx.types().void_type();
-                let destroy_fn = module
-                    .get_function("verum_pool_destroy")
-                    .unwrap_or_else(|| {
-                        let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_pool_destroy", fn_type, None)
-                    });
+                let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let destroy_fn = super::error::get_or_declare_function(module, "verum_pool_destroy", fn_type);
                 ctx.builder()
                     .build_call(destroy_fn, &[pool_val.into()], "")
                     .or_llvm_err()?;
@@ -10483,12 +10305,8 @@ fn lower_call<'ctx>(
                 // __pool_global_submit_raw(func: Int, arg: Int) -> Int (handle)
                 let func_val = ctx.get_register(args.start.0)?;
                 let arg_val = ctx.get_register(args.start.0 + 1)?;
-                let submit_fn = module
-                    .get_function("verum_pool_global_submit")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_pool_global_submit", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let submit_fn = super::error::get_or_declare_function(module, "verum_pool_global_submit", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -10544,13 +10362,9 @@ fn lower_call<'ctx>(
                 let engine_val = ctx.get_register(args.start.0)?;
                 let fd_val = ctx.get_register(args.start.0 + 1)?;
                 let timeout_val = ctx.get_register(args.start.0 + 2)?;
-                let accept_fn = module
-                    .get_function("verum_async_accept")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type
+                let fn_type = i64_type
                             .fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_async_accept", fn_type, None)
-                    });
+        let accept_fn = super::error::get_or_declare_function(module, "verum_async_accept", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -10573,8 +10387,7 @@ fn lower_call<'ctx>(
                 let buf_val = ctx.get_register(args.start.0 + 2)?;
                 let len_val = ctx.get_register(args.start.0 + 3)?;
                 let timeout_val = ctx.get_register(args.start.0 + 4)?;
-                let read_fn = module.get_function("verum_async_read").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(
+                let fn_type = i64_type.fn_type(
                         &[
                             i64_type.into(),
                             i64_type.into(),
@@ -10584,8 +10397,7 @@ fn lower_call<'ctx>(
                         ],
                         false,
                     );
-                    module.add_function("verum_async_read", fn_type, None)
-                });
+        let read_fn = super::error::get_or_declare_function(module, "verum_async_read", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -10614,8 +10426,7 @@ fn lower_call<'ctx>(
                 let buf_val = ctx.get_register(args.start.0 + 2)?;
                 let len_val = ctx.get_register(args.start.0 + 3)?;
                 let timeout_val = ctx.get_register(args.start.0 + 4)?;
-                let write_fn = module.get_function("verum_async_write").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(
+                let fn_type = i64_type.fn_type(
                         &[
                             i64_type.into(),
                             i64_type.into(),
@@ -10625,8 +10436,7 @@ fn lower_call<'ctx>(
                         ],
                         false,
                     );
-                    module.add_function("verum_async_write", fn_type, None)
-                });
+        let write_fn = super::error::get_or_declare_function(module, "verum_async_write", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -10841,19 +10651,11 @@ fn lower_call<'ctx>(
         let module = ctx.get_module();
 
         // Helper: get or declare verum_text_get_ptr
-        let text_get_ptr_fn = module
-            .get_function("verum_text_get_ptr")
-            .unwrap_or_else(|| {
-                let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-                module.add_function("verum_text_get_ptr", fn_type, None)
-            });
+        let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+        let text_get_ptr_fn = super::error::get_or_declare_function(module, "verum_text_get_ptr", fn_type);
         // Helper: get or declare verum_text_from_cstr
-        let text_from_cstr_fn = module
-            .get_function("verum_text_from_cstr")
-            .unwrap_or_else(|| {
-                let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-                module.add_function("verum_text_from_cstr", fn_type, None)
-            });
+        let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
+        let text_from_cstr_fn = super::error::get_or_declare_function(module, "verum_text_from_cstr", fn_type);
 
         match intrinsic_key {
             // ============================================================
@@ -10875,10 +10677,8 @@ fn lower_call<'ctx>(
                 } else {
                     i64_type.const_int(0, false) // READ mode default
                 };
-                let open_fn = module.get_function("verum_file_open").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-                    module.add_function("verum_file_open", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+        let open_fn = super::error::get_or_declare_function(module, "verum_file_open", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(open_fn, &[path_ptr.into(), mode_val.into()], "fd")
@@ -11012,12 +10812,8 @@ fn lower_call<'ctx>(
                     .or_internal("text_get_ptr: no value")?
                     .into_pointer_value();
                 let data_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "fap_data")?;
-                let append_fn = module
-                    .get_function("verum_file_append_all")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-                        module.add_function("verum_file_append_all", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+        let append_fn = super::error::get_or_declare_function(module, "verum_file_append_all", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(append_fn, &[path_ptr.into(), data_val.into()], "fap_n")
@@ -11032,10 +10828,8 @@ fn lower_call<'ctx>(
             "file_close" => {
                 // file_close(fd: Int) -> Int
                 let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "fclose_fd")?;
-                let close_fn = module.get_function("verum_file_close").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_file_close", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let close_fn = super::error::get_or_declare_function(module, "verum_file_close", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(close_fn, &[fd_val.into()], "fclose_r")
@@ -11058,12 +10852,8 @@ fn lower_call<'ctx>(
                     .basic()
                     .or_internal("text_get_ptr: no value")?
                     .into_pointer_value();
-                let read_all_fn = module
-                    .get_function("verum_file_read_all")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-                        module.add_function("verum_file_read_all", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
+        let read_all_fn = super::error::get_or_declare_function(module, "verum_file_read_all", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(read_all_fn, &[path_ptr.into()], "fra_text")
@@ -11118,10 +10908,8 @@ fn lower_call<'ctx>(
                     .basic()
                     .or_internal("text_get_ptr: no value")?
                     .into_pointer_value();
-                let exists_fn = module.get_function("verum_file_exists").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-                    module.add_function("verum_file_exists", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
+        let exists_fn = super::error::get_or_declare_function(module, "verum_file_exists", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(exists_fn, &[path_ptr.into()], "fex_r")
@@ -11144,10 +10932,8 @@ fn lower_call<'ctx>(
                     .basic()
                     .or_internal("text_get_ptr: no value")?
                     .into_pointer_value();
-                let delete_fn = module.get_function("verum_file_delete").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-                    module.add_function("verum_file_delete", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
+        let delete_fn = super::error::get_or_declare_function(module, "verum_file_delete", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(delete_fn, &[path_ptr.into()], "fdel_r")
@@ -11196,10 +10982,8 @@ fn lower_call<'ctx>(
 
             "time_now" | "time_now_ms" => {
                 // time_now() / time_now_ms() -> Int (milliseconds since epoch)
-                let time_fn = module.get_function("verum_time_now_ms").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[], false);
-                    module.add_function("verum_time_now_ms", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[], false);
+        let time_fn = super::error::get_or_declare_function(module, "verum_time_now_ms", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(time_fn, &[], "time_ms")
@@ -11226,10 +11010,8 @@ fn lower_call<'ctx>(
                     .or_internal("text_get_ptr: no value")?
                     .into_pointer_value();
                 let port_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "tc_port")?;
-                let connect_fn = module.get_function("verum_tcp_connect").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-                    module.add_function("verum_tcp_connect", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+        let connect_fn = super::error::get_or_declare_function(module, "verum_tcp_connect", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(connect_fn, &[host_ptr.into(), port_val.into()], "tc_fd")
@@ -11249,10 +11031,8 @@ fn lower_call<'ctx>(
                 } else {
                     i64_type.const_int(10, false)
                 };
-                let listen_fn = module.get_function("verum_tcp_listen").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_tcp_listen", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let listen_fn = super::error::get_or_declare_function(module, "verum_tcp_listen", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(listen_fn, &[port_val.into(), backlog.into()], "tl_fd")
@@ -11267,10 +11047,8 @@ fn lower_call<'ctx>(
             "tcp_accept" => {
                 // tcp_accept(listen_fd: Int) -> Int (client fd)
                 let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "ta_fd")?;
-                let accept_fn = module.get_function("verum_tcp_accept").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_tcp_accept", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let accept_fn = super::error::get_or_declare_function(module, "verum_tcp_accept", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(accept_fn, &[fd_val.into()], "ta_client")
@@ -11303,10 +11081,7 @@ fn lower_call<'ctx>(
                 let port_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "tlv2_port")?;
                 let backlog_val = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "tlv2_backlog")?;
                 let flags_val = as_i64(ctx, ctx.get_register(args.start.0 + 3)?, "tlv2_flags")?;
-                let listen_fn = module
-                    .get_function("verum_tcp_listen_v2")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(
+                let fn_type = i64_type.fn_type(
                             &[
                                 ptr_type.into(),
                                 i64_type.into(),
@@ -11315,8 +11090,7 @@ fn lower_call<'ctx>(
                             ],
                             false,
                         );
-                        module.add_function("verum_tcp_listen_v2", fn_type, None)
-                    });
+        let listen_fn = super::error::get_or_declare_function(module, "verum_tcp_listen_v2", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -11340,12 +11114,8 @@ fn lower_call<'ctx>(
             "tcp_local_port" => {
                 // tcp_local_port(fd: Int) -> Int — recover OS-chosen port.
                 let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "tlp_fd")?;
-                let lp_fn = module
-                    .get_function("verum_tcp_local_port")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_tcp_local_port", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let lp_fn = super::error::get_or_declare_function(module, "verum_tcp_local_port", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(lp_fn, &[fd_val.into()], "tlp_port")
@@ -11361,12 +11131,8 @@ fn lower_call<'ctx>(
                 // tcp_send(fd: Int, data: Text) -> Int (bytes sent)
                 let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "ts_fd")?;
                 let data_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "ts_data")?;
-                let send_fn = module
-                    .get_function("verum_tcp_send_text")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_tcp_send_text", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let send_fn = super::error::get_or_declare_function(module, "verum_tcp_send_text", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(send_fn, &[fd_val.into(), data_val.into()], "ts_n")
@@ -11386,12 +11152,8 @@ fn lower_call<'ctx>(
                 } else {
                     i64_type.const_int(4096, false)
                 };
-                let recv_fn = module
-                    .get_function("verum_tcp_recv_text")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_tcp_recv_text", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let recv_fn = super::error::get_or_declare_function(module, "verum_tcp_recv_text", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(recv_fn, &[fd_val.into(), max_len.into()], "tr_text")
@@ -11407,10 +11169,8 @@ fn lower_call<'ctx>(
             "tcp_close" => {
                 // tcp_close(fd: Int) -> Int
                 let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "tcl_fd")?;
-                let close_fn = module.get_function("verum_tcp_close").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_tcp_close", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let close_fn = super::error::get_or_declare_function(module, "verum_tcp_close", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(close_fn, &[fd_val.into()], "tcl_r")
@@ -11428,10 +11188,8 @@ fn lower_call<'ctx>(
             "udp_bind" => {
                 // udp_bind(port: Int) -> Int (fd)
                 let port_val = as_i64(ctx, ctx.get_register(args.start.0)?, "ub_port")?;
-                let bind_fn = module.get_function("verum_udp_bind").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_udp_bind", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let bind_fn = super::error::get_or_declare_function(module, "verum_udp_bind", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(bind_fn, &[port_val.into()], "ub_fd")
@@ -11457,10 +11215,7 @@ fn lower_call<'ctx>(
                     .or_internal("text_get_ptr: no value")?
                     .into_pointer_value();
                 let port_val = as_i64(ctx, ctx.get_register(args.start.0 + 3)?, "us_port")?;
-                let send_fn = module
-                    .get_function("verum_udp_send_text")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(
+                let fn_type = i64_type.fn_type(
                             &[
                                 i64_type.into(),
                                 i64_type.into(),
@@ -11469,8 +11224,7 @@ fn lower_call<'ctx>(
                             ],
                             false,
                         );
-                        module.add_function("verum_udp_send_text", fn_type, None)
-                    });
+        let send_fn = super::error::get_or_declare_function(module, "verum_udp_send_text", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -11499,12 +11253,8 @@ fn lower_call<'ctx>(
                 } else {
                     i64_type.const_int(4096, false)
                 };
-                let recv_fn = module
-                    .get_function("verum_udp_recv_text")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_udp_recv_text", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let recv_fn = super::error::get_or_declare_function(module, "verum_udp_recv_text", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(recv_fn, &[fd_val.into(), max_len.into()], "ur_text")
@@ -11520,10 +11270,8 @@ fn lower_call<'ctx>(
             "udp_close" => {
                 // udp_close(fd: Int) -> Int (reuses tcp_close / close())
                 let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "ucl_fd")?;
-                let close_fn = module.get_function("verum_tcp_close").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_tcp_close", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let close_fn = super::error::get_or_declare_function(module, "verum_tcp_close", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(close_fn, &[fd_val.into()], "ucl_r")
@@ -11542,15 +11290,11 @@ fn lower_call<'ctx>(
                 let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "trt_fd")?;
                 let max_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "trt_max")?;
                 let to_val = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "trt_to")?;
-                let helper = module
-                    .get_function("verum_tcp_recv_timeout")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(
+                let fn_type = i64_type.fn_type(
                             &[i64_type.into(), i64_type.into(), i64_type.into()],
                             false,
                         );
-                        module.add_function("verum_tcp_recv_timeout", fn_type, None)
-                    });
+        let helper = super::error::get_or_declare_function(module, "verum_tcp_recv_timeout", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -11571,15 +11315,11 @@ fn lower_call<'ctx>(
                 let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "tst_fd")?;
                 let data_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "tst_data")?;
                 let to_val = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "tst_to")?;
-                let helper = module
-                    .get_function("verum_tcp_send_timeout")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(
+                let fn_type = i64_type.fn_type(
                             &[i64_type.into(), i64_type.into(), i64_type.into()],
                             false,
                         );
-                        module.add_function("verum_tcp_send_timeout", fn_type, None)
-                    });
+        let helper = super::error::get_or_declare_function(module, "verum_tcp_send_timeout", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -11621,15 +11361,11 @@ fn lower_call<'ctx>(
                 let host_val = as_i64(ctx, ctx.get_register(args.start.0)?, "tct_host")?;
                 let port_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "tct_port")?;
                 let to_val = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "tct_to")?;
-                let helper = module
-                    .get_function("verum_tcp_connect_timeout")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(
+                let fn_type = i64_type.fn_type(
                             &[i64_type.into(), i64_type.into(), i64_type.into()],
                             false,
                         );
-                        module.add_function("verum_tcp_connect_timeout", fn_type, None)
-                    });
+        let helper = super::error::get_or_declare_function(module, "verum_tcp_connect_timeout", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -11649,15 +11385,11 @@ fn lower_call<'ctx>(
                 let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "urt_fd")?;
                 let max_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "urt_max")?;
                 let to_val = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "urt_to")?;
-                let helper = module
-                    .get_function("verum_udp_recv_timeout")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(
+                let fn_type = i64_type.fn_type(
                             &[i64_type.into(), i64_type.into(), i64_type.into()],
                             false,
                         );
-                        module.add_function("verum_udp_recv_timeout", fn_type, None)
-                    });
+        let helper = super::error::get_or_declare_function(module, "verum_udp_recv_timeout", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -11748,10 +11480,8 @@ fn lower_call<'ctx>(
     if func_name.contains(WKT::Channel.as_str()) && func_name.contains("new") {
         let i64_type = ctx.types().i64_type();
         let module = ctx.get_module();
-        let chan_new_fn = module.get_function("verum_chan_new").unwrap_or_else(|| {
-            let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-            module.add_function("verum_chan_new", fn_type, None)
-        });
+        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let chan_new_fn = super::error::get_or_declare_function(module, "verum_chan_new", fn_type);
         let cap_val = if args.count > 0 {
             ctx.get_register(args.start.0)?
         } else {
@@ -11780,10 +11510,8 @@ fn lower_call<'ctx>(
         match method {
             "send" if args.count >= 2 => {
                 // args[0]=self (channel ptr), args[1]=value
-                let send_fn = module.get_function("verum_chan_send").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_chan_send", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let send_fn = super::error::get_or_declare_function(module, "verum_chan_send", fn_type);
                 let chan_val = as_i64(ctx, ctx.get_register(args.start.0)?, "chan_i64")?;
                 let value = ctx.get_register(args.start.0 + 1)?;
                 let result = ctx
@@ -11804,10 +11532,8 @@ fn lower_call<'ctx>(
                 // args[0]=self (channel ptr)
                 // verum_chan_recv(chan, &ok_out) -> value
                 let ptr_type = ctx.types().ptr_type();
-                let recv_fn = module.get_function("verum_chan_recv").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
-                    module.add_function("verum_chan_recv", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
+        let recv_fn = super::error::get_or_declare_function(module, "verum_chan_recv", fn_type);
                 let chan_val = as_i64(ctx, ctx.get_register(args.start.0)?, "chan_i64")?;
                 let ok_alloca = ctx
                     .builder()
@@ -11907,10 +11633,8 @@ fn lower_call<'ctx>(
                 return Ok(());
             }
             "len" if args.count >= 1 => {
-                let len_fn = module.get_function("verum_chan_len").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_chan_len", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let len_fn = super::error::get_or_declare_function(module, "verum_chan_len", fn_type);
                 let chan_val = as_i64(ctx, ctx.get_register(args.start.0)?, "chan_i64")?;
                 let result = ctx
                     .builder()
@@ -11923,12 +11647,8 @@ fn lower_call<'ctx>(
                 return Ok(());
             }
             "try_send" if args.count >= 2 => {
-                let try_send_fn = module
-                    .get_function("verum_chan_try_send")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_chan_try_send", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let try_send_fn = super::error::get_or_declare_function(module, "verum_chan_try_send", fn_type);
                 let chan_val = as_i64(ctx, ctx.get_register(args.start.0)?, "chan_i64")?;
                 let value = ctx.get_register(args.start.0 + 1)?;
                 let result = ctx
@@ -12423,10 +12143,8 @@ fn lower_call_method<'ctx>(
     if bare_method_early == "new" && receiver_type_name.as_deref() == Some(WKT::Channel.as_str()) {
         let i64_type = ctx.types().i64_type();
         let module = ctx.get_module();
-        let chan_new_fn = module.get_function("verum_chan_new").unwrap_or_else(|| {
-            let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-            module.add_function("verum_chan_new", fn_type, None)
-        });
+        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let chan_new_fn = super::error::get_or_declare_function(module, "verum_chan_new", fn_type);
         let cap_val = if args.count > 0 {
             ctx.get_register(args.start.0)?
         } else {
@@ -12928,13 +12646,11 @@ fn lower_call_method<'ctx>(
                     .or_llvm_err()?;
                 // Sort via LLVM IR helper (emitted by define_list_ir_helpers)
                 let module = ctx.get_module();
-                let sort_fn = module.get_function("verum_list_sort").unwrap_or_else(|| {
-                    let fn_type = ctx
+                let fn_type = ctx
                         .llvm_context()
                         .void_type()
                         .fn_type(&[ptr_type.into(), i64_type.into()], false);
-                    module.add_function("verum_list_sort", fn_type, None)
-                });
+        let sort_fn = super::error::get_or_declare_function(module, "verum_list_sort", fn_type);
                 ctx.builder()
                     .build_call(sort_fn, &[backing_ptr.into(), len.into()], "")
                     .or_llvm_err()?;
@@ -12949,13 +12665,11 @@ fn lower_call_method<'ctx>(
                 let ptr_type = ctx.types().ptr_type();
                 // Extend via LLVM IR helper (emitted by define_list_ir_helpers)
                 let module = ctx.get_module();
-                let extend_fn = module.get_function("verum_list_extend").unwrap_or_else(|| {
-                    let fn_type = ctx
+                let fn_type = ctx
                         .llvm_context()
                         .void_type()
                         .fn_type(&[ptr_type.into(), ptr_type.into()], false);
-                    module.add_function("verum_list_extend", fn_type, None)
-                });
+        let extend_fn = super::error::get_or_declare_function(module, "verum_list_extend", fn_type);
                 ctx.builder()
                     .build_call(extend_fn, &[dst_ptr.into(), src_ptr.into()], "")
                     .or_llvm_err()?;
@@ -13194,10 +12908,8 @@ fn lower_call_method<'ctx>(
                 let module = ctx.get_module();
                 // Clone via LLVM IR helper (emitted by define_list_ir_helpers)
                 let module = ctx.get_module();
-                let clone_fn = module.get_function("verum_list_clone").unwrap_or_else(|| {
-                    let fn_type = ptr_type.fn_type(&[ptr_type.into()], false);
-                    module.add_function("verum_list_clone", fn_type, None)
-                });
+                let fn_type = ptr_type.fn_type(&[ptr_type.into()], false);
+        let clone_fn = super::error::get_or_declare_function(module, "verum_list_clone", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(clone_fn, &[list_ptr.into()], "cloned_list")
@@ -13348,11 +13060,9 @@ fn lower_call_method<'ctx>(
                 let i64_type = ctx.types().i64_type();
                 let ptr_type = ctx.types().ptr_type();
                 let module = ctx.get_module();
-                let insert_fn = module.get_function("verum_list_insert").unwrap_or_else(|| {
-                    let fn_type = ptr_type
+                let fn_type = ptr_type
                         .fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_list_insert", fn_type, None)
-                });
+        let insert_fn = super::error::get_or_declare_function(module, "verum_list_insert", fn_type);
                 ctx.builder()
                     .build_call(
                         insert_fn,
@@ -13370,10 +13080,8 @@ fn lower_call_method<'ctx>(
                 let i64_type = ctx.types().i64_type();
                 let ptr_type = ctx.types().ptr_type();
                 let module = ctx.get_module();
-                let remove_fn = module.get_function("verum_list_remove").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-                    module.add_function("verum_list_remove", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+        let remove_fn = super::error::get_or_declare_function(module, "verum_list_remove", fn_type);
                 let removed = ctx
                     .builder()
                     .build_call(remove_fn, &[list_ptr.into(), index.into()], "list_remove")
@@ -13390,12 +13098,8 @@ fn lower_call_method<'ctx>(
                 let i64_type = ctx.types().i64_type();
                 let ptr_type = ctx.types().ptr_type();
                 let module = ctx.get_module();
-                let reverse_fn = module
-                    .get_function("verum_list_reverse")
-                    .unwrap_or_else(|| {
-                        let fn_type = ptr_type.fn_type(&[ptr_type.into()], false);
-                        module.add_function("verum_list_reverse", fn_type, None)
-                    });
+                let fn_type = ptr_type.fn_type(&[ptr_type.into()], false);
+        let reverse_fn = super::error::get_or_declare_function(module, "verum_list_reverse", fn_type);
                 ctx.builder()
                     .build_call(reverse_fn, &[list_ptr.into()], "")
                     .or_llvm_err()?;
@@ -13410,11 +13114,9 @@ fn lower_call_method<'ctx>(
                 let i64_type = ctx.types().i64_type();
                 let ptr_type = ctx.types().ptr_type();
                 let module = ctx.get_module();
-                let swap_fn = module.get_function("verum_list_swap").unwrap_or_else(|| {
-                    let fn_type = ptr_type
+                let fn_type = ptr_type
                         .fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_list_swap", fn_type, None)
-                });
+        let swap_fn = super::error::get_or_declare_function(module, "verum_list_swap", fn_type);
                 ctx.builder()
                     .build_call(swap_fn, &[list_ptr.into(), idx_a.into(), idx_b.into()], "")
                     .or_llvm_err()?;
@@ -15077,10 +14779,8 @@ fn lower_call_method<'ctx>(
                 };
                 let addr_i64 = coerce_value(ctx, addr_val, i64_type.into(), "tcp_addr")?;
                 // Pass host:port as text, port=0 (let C runtime parse)
-                let connect_fn = module.get_function("verum_tcp_connect").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_tcp_connect", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let connect_fn = super::error::get_or_declare_function(module, "verum_tcp_connect", fn_type);
                 let port = i64_type.const_int(0, false);
                 let fd = ctx
                     .builder()
@@ -15100,10 +14800,8 @@ fn lower_call_method<'ctx>(
                     i64_type.const_int(0, false).into()
                 };
                 let addr_i64 = coerce_value(ctx, addr_val, i64_type.into(), "tcp_bind_addr")?;
-                let listen_fn = module.get_function("verum_tcp_listen").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_tcp_listen", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let listen_fn = super::error::get_or_declare_function(module, "verum_tcp_listen", fn_type);
                 let fd = ctx
                     .builder()
                     .build_call(listen_fn, &[addr_i64.into()], "tcp_listen_fd")
@@ -15116,10 +14814,8 @@ fn lower_call_method<'ctx>(
             }
             ("TcpListener", "accept") | ("TcpListener", "accept_client") => {
                 let recv_val = as_i64(ctx, ctx.get_register(receiver.0)?, "tcp_recv")?;
-                let accept_fn = module.get_function("verum_tcp_accept").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_tcp_accept", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let accept_fn = super::error::get_or_declare_function(module, "verum_tcp_accept", fn_type);
                 let client_fd = ctx
                     .builder()
                     .build_call(accept_fn, &[recv_val.into()], "tcp_client_fd")
@@ -15142,12 +14838,8 @@ fn lower_call_method<'ctx>(
                 } else {
                     i64_type.const_int(0, false).into()
                 };
-                let send_fn = module
-                    .get_function("verum_tcp_send_text")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_tcp_send_text", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let send_fn = super::error::get_or_declare_function(module, "verum_tcp_send_text", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(send_fn, &[recv_val.into(), data_val.into()], "tcp_sent")
@@ -15170,12 +14862,8 @@ fn lower_call_method<'ctx>(
                 } else {
                     i64_type.const_int(4096, false).into()
                 };
-                let recv_fn = module
-                    .get_function("verum_tcp_recv_text")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_tcp_recv_text", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let recv_fn = super::error::get_or_declare_function(module, "verum_tcp_recv_text", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(recv_fn, &[recv_val.into(), max_len.into()], "tcp_recvd")
@@ -15189,10 +14877,8 @@ fn lower_call_method<'ctx>(
             }
             ("TcpStream", "close") | ("TcpStream", "shutdown") | ("TcpListener", "close") => {
                 let recv_val = as_i64(ctx, ctx.get_register(receiver.0)?, "tcp_fd")?;
-                let close_fn = module.get_function("verum_tcp_close").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_tcp_close", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let close_fn = super::error::get_or_declare_function(module, "verum_tcp_close", fn_type);
                 ctx.builder()
                     .build_call(close_fn, &[recv_val.into()], "tcp_closed")
                     .or_llvm_err()?;
@@ -15210,10 +14896,8 @@ fn lower_call_method<'ctx>(
                 } else {
                     i64_type.const_int(0, false).into()
                 };
-                let bind_fn = module.get_function("verum_udp_bind").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_udp_bind", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let bind_fn = super::error::get_or_declare_function(module, "verum_udp_bind", fn_type);
                 let fd = ctx
                     .builder()
                     .build_call(bind_fn, &[addr_val.into()], "udp_fd")
@@ -15246,11 +14930,9 @@ fn lower_call_method<'ctx>(
                 } else {
                     i64_type.const_int(0, false).into()
                 };
-                let send_fn = module.get_function("verum_udp_sendto").unwrap_or_else(|| {
-                    let fn_type = i64_type
+                let fn_type = i64_type
                         .fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_udp_sendto", fn_type, None)
-                });
+        let send_fn = super::error::get_or_declare_function(module, "verum_udp_sendto", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(
@@ -15277,12 +14959,8 @@ fn lower_call_method<'ctx>(
                 } else {
                     i64_type.const_int(4096, false).into()
                 };
-                let recv_fn = module
-                    .get_function("verum_udp_recvfrom")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_udp_recvfrom", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let recv_fn = super::error::get_or_declare_function(module, "verum_udp_recvfrom", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(recv_fn, &[recv_val.into(), max_len.into()], "udp_recvd")
@@ -15296,10 +14974,8 @@ fn lower_call_method<'ctx>(
             }
             ("UdpSocket", "close") => {
                 let recv_val = as_i64(ctx, ctx.get_register(receiver.0)?, "udp_fd")?;
-                let close_fn = module.get_function("verum_tcp_close").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_tcp_close", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let close_fn = super::error::get_or_declare_function(module, "verum_tcp_close", fn_type);
                 ctx.builder()
                     .build_call(close_fn, &[recv_val.into()], "udp_closed")
                     .or_llvm_err()?;
@@ -16184,10 +15860,8 @@ fn lower_call_method<'ctx>(
         let module = ctx.get_module();
         match bare_method {
             "send" if args.count == 1 => {
-                let send_fn = module.get_function("verum_chan_send").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                    module.add_function("verum_chan_send", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let send_fn = super::error::get_or_declare_function(module, "verum_chan_send", fn_type);
                 let chan_val = as_i64(ctx, ctx.get_register(receiver.0)?, "chan_i64")?;
                 let value = ctx.get_register(args.start.0)?;
                 let result = ctx
@@ -16207,10 +15881,8 @@ fn lower_call_method<'ctx>(
             "recv" | "receive" if args.count == 0 => {
                 // verum_chan_recv(chan, &ok_out) -> value
                 let ptr_type = ctx.types().ptr_type();
-                let recv_fn = module.get_function("verum_chan_recv").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
-                    module.add_function("verum_chan_recv", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
+        let recv_fn = super::error::get_or_declare_function(module, "verum_chan_recv", fn_type);
                 let chan_val = as_i64(ctx, ctx.get_register(receiver.0)?, "chan_i64")?;
                 let ok_alloca = ctx
                     .builder()
@@ -16310,10 +15982,8 @@ fn lower_call_method<'ctx>(
                 return Ok(());
             }
             "len" if args.count == 0 => {
-                let len_fn = module.get_function("verum_chan_len").unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_chan_len", fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let len_fn = super::error::get_or_declare_function(module, "verum_chan_len", fn_type);
                 let chan_val = as_i64(ctx, ctx.get_register(receiver.0)?, "chan_i64")?;
                 let result = ctx
                     .builder()
@@ -16326,12 +15996,8 @@ fn lower_call_method<'ctx>(
                 return Ok(());
             }
             "try_send" if args.count == 1 => {
-                let try_send_fn = module
-                    .get_function("verum_chan_try_send")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_chan_try_send", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let try_send_fn = super::error::get_or_declare_function(module, "verum_chan_try_send", fn_type);
                 let chan_val = as_i64(ctx, ctx.get_register(receiver.0)?, "chan_i64")?;
                 let value = ctx.get_register(args.start.0)?;
                 let result = ctx
@@ -16407,10 +16073,7 @@ fn lower_call_method<'ctx>(
                         });
                 // Libc-free: route through llvm.memset.p0.i64 intrinsic.
                 let bool_type = ctx.types().bool_type();
-                let memset_fn = module
-                    .get_function("llvm.memset.p0.i64")
-                    .unwrap_or_else(|| {
-                        let fn_type = void_type.fn_type(
+                let fn_type = void_type.fn_type(
                             &[
                                 ptr_type.into(),
                                 i8_type.into(),
@@ -16419,8 +16082,7 @@ fn lower_call_method<'ctx>(
                             ],
                             false,
                         );
-                        module.add_function("llvm.memset.p0.i64", fn_type, None)
-                    });
+        let memset_fn = super::error::get_or_declare_function(module, "llvm.memset.p0.i64", fn_type);
 
                 let gen_val = ctx.get_register(receiver.0)?;
 
@@ -16511,12 +16173,8 @@ fn lower_call_method<'ctx>(
                 return Ok(());
             }
             "has_next" if args.count == 0 => {
-                let has_next_fn = module
-                    .get_function("verum_gen_has_next")
-                    .unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_gen_has_next", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let has_next_fn = super::error::get_or_declare_function(module, "verum_gen_has_next", fn_type);
                 let gen_val = ctx.get_register(receiver.0)?;
                 let result = ctx
                     .builder()
@@ -16530,10 +16188,8 @@ fn lower_call_method<'ctx>(
                 return Ok(());
             }
             "close" if args.count == 0 => {
-                let close_fn = module.get_function("verum_gen_close").unwrap_or_else(|| {
-                    let fn_type = ctx.types().void_type().fn_type(&[i64_type.into()], false);
-                    module.add_function("verum_gen_close", fn_type, None)
-                });
+                let fn_type = ctx.types().void_type().fn_type(&[i64_type.into()], false);
+        let close_fn = super::error::get_or_declare_function(module, "verum_gen_close", fn_type);
                 let gen_val = ctx.get_register(receiver.0)?;
                 ctx.builder()
                     .build_call(close_fn, &[gen_val.into()], "gen_close_result")
@@ -18686,10 +18342,8 @@ fn lower_text_extended<'ctx>(
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
             // Prefer verum_int_to_text (LLVM IR, snprintf-based) — compiled Text.from_int has broken push_byte.
-            let to_text_fn = module.get_function("verum_int_to_text").unwrap_or_else(|| {
-                let fn_type = i64_ty.fn_type(&[i64_ty.into()], false);
-                module.add_function("verum_int_to_text", fn_type, None)
-            });
+            let fn_type = i64_ty.fn_type(&[i64_ty.into()], false);
+        let to_text_fn = super::error::get_or_declare_function(module, "verum_int_to_text", fn_type);
             let coerced = coerce_value(
                 ctx,
                 val,
@@ -22547,10 +22201,8 @@ fn build_overflowing_tuple<'ctx>(
         .or_llvm_err()?;
     // Allocate 2-element tuple: malloc(16)
     let ptr_type = ctx.types().ptr_type();
-    let alloc_fn = module.get_function("verum_alloc").unwrap_or_else(|| {
-        let fn_type = ptr_type.fn_type(&[i64_ty.into()], false);
-        module.add_function("verum_alloc", fn_type, None)
-    });
+    let fn_type = ptr_type.fn_type(&[i64_ty.into()], false);
+        let alloc_fn = super::error::get_or_declare_function(module, "verum_alloc", fn_type);
     let tuple_ptr = ctx
         .builder()
         .build_call(
@@ -25280,10 +24932,8 @@ fn lower_float_pow<'ctx>(
     let f64_type = ctx.types().f64_type();
 
     // Get or declare llvm.pow.f64 intrinsic
-    let pow_fn = module.get_function("llvm.pow.f64").unwrap_or_else(|| {
-        let fn_type = f64_type.fn_type(&[f64_type.into(), f64_type.into()], false);
-        module.add_function("llvm.pow.f64", fn_type, None)
-    });
+    let fn_type = f64_type.fn_type(&[f64_type.into(), f64_type.into()], false);
+        let pow_fn = super::error::get_or_declare_function(module, "llvm.pow.f64", fn_type);
 
     // Call the intrinsic
     let result = ctx
@@ -25336,12 +24986,8 @@ fn lower_throw<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, error_reg: Reg) -> Res
     // It never returns.
     let module = ctx.get_module();
     let void_type = ctx.types().context().void_type();
-    let throw_fn = module
-        .get_function("verum_exception_throw")
-        .unwrap_or_else(|| {
-            let fn_type = void_type.fn_type(&[i64_type.into()], false);
-            module.add_function("verum_exception_throw", fn_type, None)
-        });
+    let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let throw_fn = super::error::get_or_declare_function(module, "verum_exception_throw", fn_type);
 
     ctx.builder()
         .build_call(throw_fn, &[throw_val.into()], "")
@@ -25385,12 +25031,8 @@ fn lower_try_end<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>) -> Result<()> {
     // Call verum_exception_pop() to remove the setjmp handler
     let module = ctx.get_module();
     let void_type = ctx.types().context().void_type();
-    let pop_fn = module
-        .get_function("verum_exception_pop")
-        .unwrap_or_else(|| {
-            let fn_type = void_type.fn_type(&[], false);
-            module.add_function("verum_exception_pop", fn_type, None)
-        });
+    let fn_type = void_type.fn_type(&[], false);
+        let pop_fn = super::error::get_or_declare_function(module, "verum_exception_pop", fn_type);
 
     ctx.builder()
         .build_call(pop_fn, &[], "")
@@ -25407,12 +25049,8 @@ fn lower_get_exception<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg) -> R
     // Call verum_exception_get() to retrieve the exception value from the C runtime
     let module = ctx.get_module();
     let i64_type = ctx.types().i64_type();
-    let get_fn = module
-        .get_function("verum_exception_get")
-        .unwrap_or_else(|| {
-            let fn_type = i64_type.fn_type(&[], false);
-            module.add_function("verum_exception_get", fn_type, None)
-        });
+    let fn_type = i64_type.fn_type(&[], false);
+        let get_fn = super::error::get_or_declare_function(module, "verum_exception_get", fn_type);
 
     let exception_value = ctx
         .builder()
@@ -26543,10 +26181,8 @@ fn lower_len<'ctx>(
     let arr_val = ctx.get_register(arr.0)?;
     let arr_i64 = as_i64(ctx, arr_val, "len_obj")?;
     let module = ctx.get_module();
-    let generic_len_fn = module.get_function("verum_generic_len").unwrap_or_else(|| {
-        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        module.add_function("verum_generic_len", fn_type, None)
-    });
+    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let generic_len_fn = super::error::get_or_declare_function(module, "verum_generic_len", fn_type);
     let result = ctx
         .builder()
         .build_call(generic_len_fn, &[arr_i64.into()], "generic_len")
@@ -31835,10 +31471,8 @@ fn lower_spawn<'ctx>(
                     let pack_size = (2 + count) * 8; // func_ptr + count + N args
 
                     // Heap-allocate the packed struct
-                    let alloc_fn = module.get_function("verum_alloc").unwrap_or_else(|| {
-                        let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-                        module.add_function("verum_alloc", fn_type, None)
-                    });
+                    let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+        let alloc_fn = super::error::get_or_declare_function(module, "verum_alloc", fn_type);
                     let pack_ptr = ctx
                         .builder()
                         .build_call(
@@ -31905,12 +31539,8 @@ fn lower_spawn<'ctx>(
 
                     // Get trampoline function (verum_thread_spawn_multi handles
                     // unpacking args, calling func, and freeing the pack)
-                    let trampoline_fn = module
-                        .get_function("verum_thread_spawn_multi")
-                        .unwrap_or_else(|| {
-                            let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                            module.add_function("verum_thread_spawn_multi", fn_type, None)
-                        });
+                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let trampoline_fn = super::error::get_or_declare_function(module, "verum_thread_spawn_multi", fn_type);
                     let tramp_ptr = ctx
                         .builder()
                         .build_ptr_to_int(
@@ -31963,12 +31593,8 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
         // Extract char* via verum_text_get_ptr, then use libc puts.
         let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
         // Extract char* from Text object
-        let text_get_ptr_fn = module
-            .get_function("verum_text_get_ptr")
-            .unwrap_or_else(|| {
-                let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-                module.add_function("verum_text_get_ptr", fn_type, None)
-            });
+        let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+        let text_get_ptr_fn = super::error::get_or_declare_function(module, "verum_text_get_ptr", fn_type);
         let text_i64 = as_i64(ctx, val, "debug_text_i64")?;
         let ptr_result = ctx
             .builder()
@@ -32017,10 +31643,8 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
     } else if ctx.is_float_register(value.0) {
         // Float register: use printf("%g\n", val)
         let f64_type = ctx.types().f64_type();
-        let printf_fn = module.get_function("printf").unwrap_or_else(|| {
-            let fn_type = ctx.types().i32_type().fn_type(&[ptr_type.into()], true);
-            module.add_function("printf", fn_type, None)
-        });
+        let fn_type = ctx.types().i32_type().fn_type(&[ptr_type.into()], true);
+        let printf_fn = super::error::get_or_declare_function(module, "printf", fn_type);
         let f64_val = as_f64(ctx, val, "debug_f64")?;
         let fmt = ctx
             .builder()
@@ -32044,10 +31668,8 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
             }
             BasicValueEnum::FloatValue(v) => {
                 // SSA mode — float is directly available as FloatValue
-                let printf_fn = module.get_function("printf").unwrap_or_else(|| {
-                    let fn_type = ctx.types().i32_type().fn_type(&[ptr_type.into()], true);
-                    module.add_function("printf", fn_type, None)
-                });
+                let fn_type = ctx.types().i32_type().fn_type(&[ptr_type.into()], true);
+        let printf_fn = super::error::get_or_declare_function(module, "printf", fn_type);
                 let fmt = ctx
                     .builder()
                     .build_global_string_ptr("%g\n", "fmt_float_debug2")
@@ -32058,10 +31680,8 @@ fn lower_debug_print<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, value: Reg) -> R
             }
             _ => {
                 // Integer debug: use printf("%ld\n", val)
-                let printf_fn = module.get_function("printf").unwrap_or_else(|| {
-                    let fn_type = ctx.types().i32_type().fn_type(&[ptr_type.into()], true);
-                    module.add_function("printf", fn_type, None)
-                });
+                let fn_type = ctx.types().i32_type().fn_type(&[ptr_type.into()], true);
+        let printf_fn = super::error::get_or_declare_function(module, "printf", fn_type);
                 let i64_val = match val {
                     BasicValueEnum::IntValue(v) => {
                         if v.get_type().get_bit_width() == 64 {
@@ -32119,12 +31739,8 @@ fn lower_to_string<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg
 
     // Float → Text: prefer verum_float_to_text (emitted as LLVM IR, uses snprintf).
     if ctx.is_float_register(src.0) {
-        let text_from_float_fn = module
-            .get_function("verum_float_to_text")
-            .unwrap_or_else(|| {
-                let fn_type = i64_type.fn_type(&[f64_type.into()], false);
-                module.add_function("verum_float_to_text", fn_type, None)
-            });
+        let fn_type = i64_type.fn_type(&[f64_type.into()], false);
+        let text_from_float_fn = super::error::get_or_declare_function(module, "verum_float_to_text", fn_type);
 
         let f64_val = as_f64(ctx, val, "tostr_f64")?;
 
@@ -32221,10 +31837,8 @@ fn lower_to_string<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg
     // Integer → Text: prefer verum_int_to_text (emitted as LLVM IR, uses snprintf).
     // The compiled Text.from_int from text.vr has broken push_byte in AOT,
     // so we use the direct IR implementation which is reliable.
-    let text_from_int_fn = module.get_function("verum_int_to_text").unwrap_or_else(|| {
-        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        module.add_function("verum_int_to_text", fn_type, None)
-    });
+    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let text_from_int_fn = super::error::get_or_declare_function(module, "verum_int_to_text", fn_type);
 
     let i64_val = match val {
         BasicValueEnum::IntValue(v) if v.get_type().get_bit_width() == 64 => v,
