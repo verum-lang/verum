@@ -391,17 +391,96 @@ pub enum PublishOutcome {
     },
 }
 
+/// Discriminator for [`PublishOutcome`] — zero-sized projection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PublishOutcomeKind {
+    Accepted,
+    Rejected,
+    VersionConflict,
+}
+
+/// Per-variant projection for [`PublishOutcomeKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PublishOutcomeKindMeta {
+    /// PascalCase wire form — matches the existing `name()`
+    /// surface that downstream JSON/audit consumers parse on.
+    pub name: &'static str,
+    /// Whether the outcome is *positive* (the publish succeeded
+    /// — Accepted singleton).
+    pub is_accepted: bool,
+    /// Whether the outcome is a *hard collision* — the
+    /// `(name, version)` already exists with a different
+    /// chain hash.  Singleton on `VersionConflict`.  Pinned
+    /// because immutable-release semantics mean this is the
+    /// only outcome that fundamentally cannot be retried with
+    /// the same version.
+    pub is_collision: bool,
+    /// Whether the variant carries a *chain-hash* payload
+    /// (Accepted + VersionConflict — both reference at least
+    /// one chain hash).  Decouples downstream display logic
+    /// from per-variant matching.
+    pub carries_chain_hash: bool,
+    /// Whether the variant carries a free-form *reason*
+    /// payload — Rejected singleton.
+    pub carries_reason: bool,
+}
+
+impl PublishOutcomeKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::Accepted,
+        Self::Rejected,
+        Self::VersionConflict,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> PublishOutcomeKindMeta {
+        match self {
+            PublishOutcomeKind::Accepted => PublishOutcomeKindMeta {
+                name: "Accepted",
+                is_accepted: true,
+                is_collision: false,
+                carries_chain_hash: true,
+                carries_reason: false,
+            },
+            PublishOutcomeKind::Rejected => PublishOutcomeKindMeta {
+                name: "Rejected",
+                is_accepted: false,
+                is_collision: false,
+                carries_chain_hash: false,
+                carries_reason: true,
+            },
+            PublishOutcomeKind::VersionConflict => PublishOutcomeKindMeta {
+                name: "VersionConflict",
+                is_accepted: false,
+                is_collision: true,
+                carries_chain_hash: true,
+                carries_reason: false,
+            },
+        }
+    }
+}
+
 impl PublishOutcome {
-    pub fn is_accepted(&self) -> bool {
-        matches!(self, Self::Accepted { .. })
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> PublishOutcomeKind {
+        match self {
+            PublishOutcome::Accepted { .. } => PublishOutcomeKind::Accepted,
+            PublishOutcome::Rejected { .. } => PublishOutcomeKind::Rejected,
+            PublishOutcome::VersionConflict { .. } => PublishOutcomeKind::VersionConflict,
+        }
     }
 
+    /// Whether the publish succeeded.  Routes through
+    /// `meta().is_accepted` — single source of truth.
+    pub fn is_accepted(&self) -> bool {
+        self.kind().meta().is_accepted
+    }
+
+    /// PascalCase variant name — preserved for downstream JSON
+    /// consumers.  Routes through `meta().name`.
     pub fn name(&self) -> &'static str {
-        match self {
-            Self::Accepted { .. } => "Accepted",
-            Self::Rejected { .. } => "Rejected",
-            Self::VersionConflict { .. } => "VersionConflict",
-        }
+        self.kind().meta().name
     }
 }
 
@@ -413,9 +492,79 @@ pub enum LookupOutcome {
     Error { message: Text },
 }
 
+/// Discriminator for [`LookupOutcome`] — zero-sized projection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum LookupOutcomeKind {
+    Found,
+    NotFound,
+    Error,
+}
+
+/// Per-variant projection for [`LookupOutcomeKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LookupOutcomeKindMeta {
+    /// PascalCase wire form.
+    pub name: &'static str,
+    /// Whether the lookup *succeeded* — Found singleton.
+    pub is_found: bool,
+    /// Whether the lookup *successfully concluded the manifest
+    /// is absent* — NotFound singleton.  Distinct from `Error`
+    /// which is a registry-side failure.
+    pub is_definite_absence: bool,
+    /// Whether the outcome carries a *manifest* payload —
+    /// Found singleton.
+    pub carries_manifest: bool,
+    /// Whether the outcome carries a free-form *error message*
+    /// — Error singleton.
+    pub carries_error: bool,
+}
+
+impl LookupOutcomeKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[Self::Found, Self::NotFound, Self::Error];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> LookupOutcomeKindMeta {
+        match self {
+            LookupOutcomeKind::Found => LookupOutcomeKindMeta {
+                name: "Found",
+                is_found: true,
+                is_definite_absence: false,
+                carries_manifest: true,
+                carries_error: false,
+            },
+            LookupOutcomeKind::NotFound => LookupOutcomeKindMeta {
+                name: "NotFound",
+                is_found: false,
+                is_definite_absence: true,
+                carries_manifest: false,
+                carries_error: false,
+            },
+            LookupOutcomeKind::Error => LookupOutcomeKindMeta {
+                name: "Error",
+                is_found: false,
+                is_definite_absence: false,
+                carries_manifest: false,
+                carries_error: true,
+            },
+        }
+    }
+}
+
 impl LookupOutcome {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> LookupOutcomeKind {
+        match self {
+            LookupOutcome::Found { .. } => LookupOutcomeKind::Found,
+            LookupOutcome::NotFound { .. } => LookupOutcomeKind::NotFound,
+            LookupOutcome::Error { .. } => LookupOutcomeKind::Error,
+        }
+    }
+
+    /// Whether the lookup succeeded.  Routes through
+    /// `meta().is_found`.
     pub fn is_found(&self) -> bool {
-        matches!(self, Self::Found { .. })
+        self.kind().meta().is_found
     }
 }
 
@@ -431,14 +580,119 @@ pub enum RegistryError {
     Other(Text),
 }
 
+/// Discriminator for [`RegistryError`] — zero-sized projection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum RegistryErrorKind {
+    Io,
+    Parse,
+    Auth,
+    Other,
+}
+
+/// Per-variant projection for [`RegistryErrorKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegistryErrorKindMeta {
+    /// Lower-snake-case wire form for telemetry surfaces.
+    pub name: &'static str,
+    /// Display-prefix used by the `Display` impl
+    /// (`"I/O: <msg>"` etc.).  Single source of truth — pre-
+    /// collapse the four prefix strings lived inline as match
+    /// arms.
+    pub display_prefix: &'static str,
+    /// Whether this error originates from the *transport / I/O*
+    /// layer — Io singleton.
+    pub is_io_failure: bool,
+    /// Whether this error originates from *parsing* the
+    /// registry payload — Parse singleton.
+    pub is_parse_failure: bool,
+    /// Whether this error originates from the *authentication*
+    /// surface (key check, token expiry) — Auth singleton.
+    pub is_auth_failure: bool,
+    /// Whether this is the catch-all *other* band — Other
+    /// singleton.  Pinned so adding a new variant doesn't
+    /// silently land in the catch-all.
+    pub is_catch_all: bool,
+}
+
+impl RegistryErrorKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] =
+        &[Self::Io, Self::Parse, Self::Auth, Self::Other];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> RegistryErrorKindMeta {
+        match self {
+            RegistryErrorKind::Io => RegistryErrorKindMeta {
+                name: "io",
+                display_prefix: "I/O: ",
+                is_io_failure: true,
+                is_parse_failure: false,
+                is_auth_failure: false,
+                is_catch_all: false,
+            },
+            RegistryErrorKind::Parse => RegistryErrorKindMeta {
+                name: "parse",
+                display_prefix: "parse: ",
+                is_io_failure: false,
+                is_parse_failure: true,
+                is_auth_failure: false,
+                is_catch_all: false,
+            },
+            RegistryErrorKind::Auth => RegistryErrorKindMeta {
+                name: "auth",
+                display_prefix: "auth: ",
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_auth_failure: true,
+                is_catch_all: false,
+            },
+            RegistryErrorKind::Other => RegistryErrorKindMeta {
+                name: "other",
+                // Other has no display prefix — the message is
+                // surfaced verbatim.
+                display_prefix: "",
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_auth_failure: false,
+                is_catch_all: true,
+            },
+        }
+    }
+}
+
+impl RegistryError {
+    /// Discriminator projection — strip the message, keep tag.
+    pub const fn kind(&self) -> RegistryErrorKind {
+        match self {
+            RegistryError::Io(_) => RegistryErrorKind::Io,
+            RegistryError::Parse(_) => RegistryErrorKind::Parse,
+            RegistryError::Auth(_) => RegistryErrorKind::Auth,
+            RegistryError::Other(_) => RegistryErrorKind::Other,
+        }
+    }
+
+    /// Returns the inner message text — every variant carries
+    /// one (all four are `Variant(Text)`).
+    pub fn message(&self) -> &Text {
+        match self {
+            RegistryError::Io(t) => t,
+            RegistryError::Parse(t) => t,
+            RegistryError::Auth(t) => t,
+            RegistryError::Other(t) => t,
+        }
+    }
+}
+
 impl std::fmt::Display for RegistryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(t) => write!(f, "I/O: {}", t.as_str()),
-            Self::Parse(t) => write!(f, "parse: {}", t.as_str()),
-            Self::Auth(t) => write!(f, "auth: {}", t.as_str()),
-            Self::Other(t) => write!(f, "{}", t.as_str()),
-        }
+        // Display prefix lives in the meta() table — single
+        // source of truth replacing the previous 4-arm match.
+        write!(
+            f,
+            "{}{}",
+            self.kind().meta().display_prefix,
+            self.message().as_str()
+        )
     }
 }
 
@@ -509,13 +763,131 @@ pub enum AttestationCryptoError {
     InvalidSecretKey(Text),
 }
 
+/// Discriminator for [`AttestationCryptoError`] — zero-sized
+/// projection.  Splits the four error variants into (decode
+/// failure × key-material kind) plus the unique
+/// SignatureMismatch verification-failure singleton.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum AttestationCryptoErrorKind {
+    InvalidPublicKey,
+    InvalidSignature,
+    SignatureMismatch,
+    InvalidSecretKey,
+}
+
+/// Per-variant projection for [`AttestationCryptoErrorKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AttestationCryptoErrorKindMeta {
+    /// Lower-snake-case wire form for telemetry surfaces.
+    pub name: &'static str,
+    /// Display message — single source of truth replacing the
+    /// previous 4-arm match in the `Display` impl.  For the
+    /// payload-bearing variants this is the *prefix* before
+    /// the inner Text; for `SignatureMismatch` it's the full
+    /// (no-payload) message.
+    pub display_text: &'static str,
+    /// Whether this error is a *decode failure* (the hex blob
+    /// couldn't be parsed as the expected length).
+    /// InvalidPublicKey + InvalidSignature + InvalidSecretKey.
+    /// `SignatureMismatch` is the unique non-decode failure —
+    /// the bytes parsed but the cryptographic check failed.
+    pub is_decode_failure: bool,
+    /// Whether this error involves a *secret key* — pinned so
+    /// secret-key-handling code paths can branch on the kind
+    /// without per-variant matching, and operators can gate
+    /// secret-key telemetry separately from public-key telemetry.
+    pub touches_secret_key: bool,
+    /// Whether the variant carries a *hex-input* payload
+    /// (Text with the bad hex blob) — the three Invalid* kinds.
+    /// SignatureMismatch carries no payload.
+    pub carries_hex_payload: bool,
+}
+
+impl AttestationCryptoErrorKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::InvalidPublicKey,
+        Self::InvalidSignature,
+        Self::SignatureMismatch,
+        Self::InvalidSecretKey,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> AttestationCryptoErrorKindMeta {
+        match self {
+            AttestationCryptoErrorKind::InvalidPublicKey => AttestationCryptoErrorKindMeta {
+                name: "invalid_public_key",
+                display_text: "invalid Ed25519 public key: ",
+                is_decode_failure: true,
+                touches_secret_key: false,
+                carries_hex_payload: true,
+            },
+            AttestationCryptoErrorKind::InvalidSignature => AttestationCryptoErrorKindMeta {
+                name: "invalid_signature",
+                display_text: "invalid Ed25519 signature: ",
+                is_decode_failure: true,
+                touches_secret_key: false,
+                carries_hex_payload: true,
+            },
+            AttestationCryptoErrorKind::SignatureMismatch => AttestationCryptoErrorKindMeta {
+                name: "signature_mismatch",
+                display_text: "Ed25519 signature did not verify",
+                is_decode_failure: false,
+                touches_secret_key: false,
+                carries_hex_payload: false,
+            },
+            AttestationCryptoErrorKind::InvalidSecretKey => AttestationCryptoErrorKindMeta {
+                name: "invalid_secret_key",
+                display_text: "invalid Ed25519 secret key: ",
+                is_decode_failure: true,
+                touches_secret_key: true,
+                carries_hex_payload: true,
+            },
+        }
+    }
+}
+
+impl AttestationCryptoError {
+    /// Discriminator projection — strip the hex-payload, keep
+    /// the tag.
+    pub const fn kind(&self) -> AttestationCryptoErrorKind {
+        match self {
+            AttestationCryptoError::InvalidPublicKey(_) => {
+                AttestationCryptoErrorKind::InvalidPublicKey
+            }
+            AttestationCryptoError::InvalidSignature(_) => {
+                AttestationCryptoErrorKind::InvalidSignature
+            }
+            AttestationCryptoError::SignatureMismatch => {
+                AttestationCryptoErrorKind::SignatureMismatch
+            }
+            AttestationCryptoError::InvalidSecretKey(_) => {
+                AttestationCryptoErrorKind::InvalidSecretKey
+            }
+        }
+    }
+
+    /// Returns the offending hex blob for the three decode-
+    /// failure variants.  `SignatureMismatch` returns `None`.
+    pub fn hex_payload(&self) -> Option<&Text> {
+        match self {
+            AttestationCryptoError::InvalidPublicKey(t)
+            | AttestationCryptoError::InvalidSignature(t)
+            | AttestationCryptoError::InvalidSecretKey(t) => Some(t),
+            AttestationCryptoError::SignatureMismatch => None,
+        }
+    }
+}
+
 impl std::fmt::Display for AttestationCryptoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidPublicKey(t) => write!(f, "invalid Ed25519 public key: {}", t.as_str()),
-            Self::InvalidSignature(t) => write!(f, "invalid Ed25519 signature: {}", t.as_str()),
-            Self::SignatureMismatch => write!(f, "Ed25519 signature did not verify"),
-            Self::InvalidSecretKey(t) => write!(f, "invalid Ed25519 secret key: {}", t.as_str()),
+        // Display text lives in the meta() table — single
+        // source of truth replacing the previous 4-arm match.
+        let m = self.kind().meta();
+        if let Some(payload) = self.hex_payload() {
+            write!(f, "{}{}", m.display_text, payload.as_str())
+        } else {
+            f.write_str(m.display_text)
         }
     }
 }
@@ -1113,6 +1485,289 @@ impl MirrorConsensusPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Drift-pin: `PublishOutcomeKind` discriminator projection.
+    /// Pins variant count, name uniqueness, four classifier
+    /// partitions (accepted / collision / chain-hash-bearing /
+    /// reason-bearing), and the cross-cutting invariants binding
+    /// them.
+    #[test]
+    fn meta_pin_publish_outcome_kind_round_trip_and_partitions() {
+        assert_eq!(PublishOutcomeKind::ALL.len(), 3);
+
+        // PascalCase wire form, unique names.
+        let mut seen = std::collections::HashSet::new();
+        for k in PublishOutcomeKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().next().map_or(false, |c| c.is_ascii_uppercase()),
+                "{:?}: name not PascalCase",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate", k);
+        }
+
+        // is_accepted: Accepted singleton.
+        let acc: Vec<_> = PublishOutcomeKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_accepted)
+            .copied()
+            .collect();
+        assert_eq!(acc, vec![PublishOutcomeKind::Accepted]);
+
+        // is_collision: VersionConflict singleton.
+        let col: Vec<_> = PublishOutcomeKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_collision)
+            .copied()
+            .collect();
+        assert_eq!(col, vec![PublishOutcomeKind::VersionConflict]);
+
+        // is_accepted ⊕ is_collision (an outcome is at most one
+        // of these — the third variant Rejected is neither).
+        for k in PublishOutcomeKind::ALL {
+            let m = k.meta();
+            assert!(!(m.is_accepted && m.is_collision), "{:?}: ⊕", k);
+        }
+
+        // carries_chain_hash: Accepted + VersionConflict.
+        let ch: Vec<_> = PublishOutcomeKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_chain_hash)
+            .copied()
+            .collect();
+        assert_eq!(
+            ch,
+            vec![
+                PublishOutcomeKind::Accepted,
+                PublishOutcomeKind::VersionConflict,
+            ],
+        );
+
+        // carries_reason: Rejected singleton.
+        let rs: Vec<_> = PublishOutcomeKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_reason)
+            .copied()
+            .collect();
+        assert_eq!(rs, vec![PublishOutcomeKind::Rejected]);
+
+        // carries_chain_hash ⊕ carries_reason (every variant
+        // carries exactly one structured payload).
+        for k in PublishOutcomeKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.carries_chain_hash ^ m.carries_reason,
+                "{:?}: must carry exactly one of chain_hash / reason",
+                k
+            );
+        }
+
+        // Live-payload kind() + name() routing.
+        let acc = PublishOutcome::Accepted {
+            chain_hash: Text::from("abc123"),
+        };
+        assert_eq!(acc.kind(), PublishOutcomeKind::Accepted);
+        assert!(acc.is_accepted());
+        assert_eq!(acc.name(), "Accepted");
+
+        let rej = PublishOutcome::Rejected {
+            reason: Text::from("malformed"),
+        };
+        assert_eq!(rej.kind(), PublishOutcomeKind::Rejected);
+        assert!(!rej.is_accepted());
+        assert_eq!(rej.name(), "Rejected");
+
+        let conf = PublishOutcome::VersionConflict {
+            existing_chain_hash: Text::from("a"),
+            proposed_chain_hash: Text::from("b"),
+        };
+        assert_eq!(conf.kind(), PublishOutcomeKind::VersionConflict);
+        assert!(!conf.is_accepted());
+    }
+
+    /// Drift-pin: `LookupOutcomeKind`.
+    #[test]
+    fn meta_pin_lookup_outcome_kind_round_trip_and_partitions() {
+        assert_eq!(LookupOutcomeKind::ALL.len(), 3);
+
+        // Singleton partitions (every variant is its own
+        // singleton — the three classifier flags partition the
+        // three variants).
+        let found: Vec<_> = LookupOutcomeKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_found)
+            .copied()
+            .collect();
+        assert_eq!(found, vec![LookupOutcomeKind::Found]);
+
+        let abs_: Vec<_> = LookupOutcomeKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_definite_absence)
+            .copied()
+            .collect();
+        assert_eq!(abs_, vec![LookupOutcomeKind::NotFound]);
+
+        let err_: Vec<_> = LookupOutcomeKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_error)
+            .copied()
+            .collect();
+        assert_eq!(err_, vec![LookupOutcomeKind::Error]);
+
+        // Each variant flips exactly one of {is_found,
+        // is_definite_absence, carries_error} — perfect
+        // partition pinned.
+        for k in LookupOutcomeKind::ALL {
+            let m = k.meta();
+            let count = (m.is_found as u32)
+                + (m.is_definite_absence as u32)
+                + (m.carries_error as u32);
+            assert_eq!(count, 1, "{:?}: must flip exactly one classifier", k);
+        }
+
+        // carries_manifest = is_found (only Found carries the
+        // manifest payload).
+        for k in LookupOutcomeKind::ALL {
+            let m = k.meta();
+            assert_eq!(m.carries_manifest, m.is_found);
+        }
+    }
+
+    /// Drift-pin: `RegistryErrorKind`.  Pins the Display-prefix
+    /// table, the four single-flag classifiers, and the
+    /// catch-all-singleton invariant.
+    #[test]
+    fn meta_pin_registry_error_kind_round_trip_and_display() {
+        assert_eq!(RegistryErrorKind::ALL.len(), 4);
+
+        // Each variant flips exactly one of the four
+        // single-flag classifiers (is_io / is_parse / is_auth
+        // / is_catch_all) — perfect partition.
+        for k in RegistryErrorKind::ALL {
+            let m = k.meta();
+            let count = (m.is_io_failure as u32)
+                + (m.is_parse_failure as u32)
+                + (m.is_auth_failure as u32)
+                + (m.is_catch_all as u32);
+            assert_eq!(count, 1, "{:?}: must flip exactly one classifier", k);
+        }
+
+        // Names are unique snake_case + match expected variant
+        // tags.
+        let mut seen = std::collections::HashSet::new();
+        for k in RegistryErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+        assert_eq!(RegistryErrorKind::Io.meta().name, "io");
+        assert_eq!(RegistryErrorKind::Parse.meta().name, "parse");
+        assert_eq!(RegistryErrorKind::Auth.meta().name, "auth");
+        assert_eq!(RegistryErrorKind::Other.meta().name, "other");
+
+        // Display-prefix table pinned.  Other has empty prefix
+        // (catch-all message surfaces verbatim).
+        assert_eq!(RegistryErrorKind::Io.meta().display_prefix, "I/O: ");
+        assert_eq!(RegistryErrorKind::Parse.meta().display_prefix, "parse: ");
+        assert_eq!(RegistryErrorKind::Auth.meta().display_prefix, "auth: ");
+        assert_eq!(RegistryErrorKind::Other.meta().display_prefix, "");
+
+        // Display impl routes through the meta() table.
+        let io = RegistryError::Io(Text::from("connection lost"));
+        assert_eq!(io.kind(), RegistryErrorKind::Io);
+        assert_eq!(format!("{}", io), "I/O: connection lost");
+
+        let other = RegistryError::Other(Text::from("misc"));
+        assert_eq!(other.kind(), RegistryErrorKind::Other);
+        assert_eq!(format!("{}", other), "misc");
+    }
+
+    /// Drift-pin: `AttestationCryptoErrorKind`.  Pins the four
+    /// classifiers (decode-failure, secret-key-touching,
+    /// hex-payload-bearing) and the SignatureMismatch singleton
+    /// invariant.
+    #[test]
+    fn meta_pin_attestation_crypto_error_kind_round_trip_and_partitions() {
+        assert_eq!(AttestationCryptoErrorKind::ALL.len(), 4);
+
+        // is_decode_failure — three Invalid* variants.
+        let decode: Vec<_> = AttestationCryptoErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_decode_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            decode,
+            vec![
+                AttestationCryptoErrorKind::InvalidPublicKey,
+                AttestationCryptoErrorKind::InvalidSignature,
+                AttestationCryptoErrorKind::InvalidSecretKey,
+            ],
+        );
+
+        // touches_secret_key — InvalidSecretKey singleton.
+        let sk: Vec<_> = AttestationCryptoErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().touches_secret_key)
+            .copied()
+            .collect();
+        assert_eq!(sk, vec![AttestationCryptoErrorKind::InvalidSecretKey]);
+
+        // carries_hex_payload = is_decode_failure (the three
+        // decode-failure variants are exactly the hex-bearing
+        // variants).  SignatureMismatch is the unique non-
+        // payload-bearing variant.
+        for k in AttestationCryptoErrorKind::ALL {
+            let m = k.meta();
+            assert_eq!(
+                m.carries_hex_payload, m.is_decode_failure,
+                "{:?}: hex_payload = decode_failure",
+                k
+            );
+        }
+
+        // SignatureMismatch is the unique verification failure
+        // (not a decode failure, no hex payload).
+        let mismatch: Vec<_> = AttestationCryptoErrorKind::ALL
+            .iter()
+            .filter(|k| !k.meta().is_decode_failure)
+            .copied()
+            .collect();
+        assert_eq!(mismatch, vec![AttestationCryptoErrorKind::SignatureMismatch]);
+
+        // touches_secret_key ⇒ is_decode_failure (you can only
+        // get a secret-key error during the decode — there's
+        // no signature-mismatch path that touches the secret
+        // key, by construction Ed25519 verification only uses
+        // the public key).
+        for k in AttestationCryptoErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                !m.touches_secret_key || m.is_decode_failure,
+                "{:?}: touches_secret_key ⇒ is_decode_failure",
+                k
+            );
+        }
+
+        // Display routing.
+        let pk = AttestationCryptoError::InvalidPublicKey(Text::from("bad-hex"));
+        assert_eq!(pk.kind(), AttestationCryptoErrorKind::InvalidPublicKey);
+        assert_eq!(pk.hex_payload().unwrap().as_str(), "bad-hex");
+        assert_eq!(
+            format!("{}", pk),
+            "invalid Ed25519 public key: bad-hex",
+        );
+
+        let mm = AttestationCryptoError::SignatureMismatch;
+        assert_eq!(mm.kind(), AttestationCryptoErrorKind::SignatureMismatch);
+        assert!(mm.hex_payload().is_none());
+        assert_eq!(format!("{}", mm), "Ed25519 signature did not verify");
+    }
 
     fn fixture_envelope() -> CogReproEnvelope {
         CogReproEnvelope::compute(b"sources", b"toolchain-pin", b"compiled-output")
