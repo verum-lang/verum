@@ -226,6 +226,12 @@ public type MemProt is {
     exec: Bool,
 };
 
+// IntCoercible (core.base.coercion) — MemProt packs into a
+// PROT_* bit-field i64 at every mmap syscall boundary; users
+// pass it through `to_unix_flags()` whose return type is `Int`.
+// The marker opts the type into Int-context coercion.
+implement IntCoercible for MemProt {}
+
 implement MemProt {
     /// No access.
     const NONE: MemProt = MemProt { read: false, write: false, exec: false };
@@ -294,6 +300,11 @@ public type MapFlags is {
     anonymous: Bool,
     fixed: Bool,
 };
+
+// IntCoercible (core.base.coercion) — MapFlags packs into a
+// MAP_* bit-field i64 at every mmap syscall boundary, same
+// rationale as `MemProt` above.
+implement IntCoercible for MapFlags {}
 
 implement MapFlags {
     /// Private anonymous mapping (typical for allocations).

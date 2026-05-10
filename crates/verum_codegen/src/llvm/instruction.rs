@@ -17805,16 +17805,7 @@ fn lower_fma_via_f64<'ctx>(
     let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fma_a")?;
     let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fma_b")?;
     let c = as_f64(ctx, ctx.get_register(op_reg(operands, 3))?, "fma_c")?;
-    let f64_ty = ctx.types().f64_type();
-    let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into(), f64_ty.into()], false);
-    let fma_fn = super::error::get_or_declare_function(ctx.get_module(), "llvm.fma.f64", fn_type);
-    let result = ctx
-        .builder()
-        .build_call(fma_fn, &[a.into(), b.into(), c.into()], "fma")
-        .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .or_internal("FMA: expected return value")?;
+    let result = build_ternary_intrinsic_f64(ctx, "llvm.fma.f64", "fma", a, b, c)?;
     ctx.set_register(dst, result);
     Ok(())
 }
@@ -20620,19 +20611,7 @@ fn lower_simd_extended<'ctx>(
             let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "fma_a")?;
             let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "fma_b")?;
             let c = as_f64(ctx, ctx.get_register(op_reg(operands, 3))?, "fma_c")?;
-            let f64_ty = ctx.types().f64_type();
-            let fn_ty = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into(), f64_ty.into()], false);
-            let func = ctx
-                .get_module()
-                .get_function("llvm.fma.f64")
-                .unwrap_or_else(|| ctx.get_module().add_function("llvm.fma.f64", fn_ty, None));
-            let result = ctx
-                .builder()
-                .build_call(func, &[a.into(), b.into(), c.into()], "simd_fma")
-                .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("fma returned void")?;
+            let result = build_ternary_intrinsic_f64(ctx, "llvm.fma.f64", "simd_fma", a, b, c)?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -22057,6 +22036,34 @@ fn build_binary_intrinsic_f64<'ctx>(
             LlvmLoweringError::internal(format!("{}: expected return value", intrinsic_name))
         })?
         .into_float_value();
+    Ok(result)
+}
+
+/// Build a call to a ternary LLVM `(f64, f64, f64) -> f64` intrinsic
+/// (`llvm.fma.f64` — fused-multiply-add).  Returns the BasicValueEnum
+/// (rather than FloatValue) because some callers store the result
+/// directly via `ctx.set_register(dst, result)` rather than
+/// converting to FloatValue first.
+fn build_ternary_intrinsic_f64<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    intrinsic_name: &str,
+    name: &str,
+    a: verum_llvm::values::FloatValue<'ctx>,
+    b: verum_llvm::values::FloatValue<'ctx>,
+    c: verum_llvm::values::FloatValue<'ctx>,
+) -> Result<BasicValueEnum<'ctx>> {
+    let f64_ty = ctx.types().f64_type();
+    let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into(), f64_ty.into()], false);
+    let func = super::error::get_or_declare_function(ctx.get_module(), intrinsic_name, fn_type);
+    let result = ctx
+        .builder()
+        .build_call(func, &[a.into(), b.into(), c.into()], name)
+        .or_llvm_err()?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| {
+            LlvmLoweringError::internal(format!("{}: expected return value", intrinsic_name))
+        })?;
     Ok(result)
 }
 

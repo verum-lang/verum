@@ -86,6 +86,12 @@ public type TimeSpec is {
     tv_nsec: Int64,
 };
 
+// IntCoercible (core.base.coercion) — TimeSpec is a POSIX
+// `struct timespec` mirror used in syscall arg passing; the
+// `(tv_sec, tv_nsec)` pair routinely coerces into Int contexts
+// at intrinsic call boundaries. Marker protocol opts in.
+implement IntCoercible for TimeSpec {}
+
 /// EngineDuration in nanoseconds (always non-negative by UInt64)
 public type EngineDuration is (UInt64);
 
