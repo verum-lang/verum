@@ -93,6 +93,127 @@ pub enum ReplCommand {
     Status,
 }
 
+/// Discriminator-only kind for [`ReplCommand`].
+///
+/// `ReplCommand` carries payloads (`Apply { tactic }` /
+/// `Hint { max }`); the kind enum is zero-sized so callers can
+/// iterate the surface (for telemetry / docs / autocomplete) without
+/// having to supply payload data. The kind tag matches the
+/// `#[serde(tag = "kind")]` discriminator on `ReplCommand`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReplCommandKind {
+    Apply,
+    Undo,
+    Redo,
+    ShowGoals,
+    ShowContext,
+    Visualise,
+    Hint,
+    Status,
+}
+
+/// Per-kind projection for [`ReplCommandKind`].
+///
+/// `name` matches the serde tag — the wire form persisted to JSONL
+/// audit trails. `is_mutation` flags commands that may mutate the
+/// proof state (Apply / Undo / Redo); the rest are read-only
+/// (ShowGoals / ShowContext / Visualise / Hint / Status).
+#[derive(Debug, Clone, Copy)]
+pub struct ReplCommandKindMeta {
+    pub name: &'static str,
+    pub is_mutation: bool,
+}
+
+impl ReplCommandKind {
+    pub const ALL: &'static [Self] = &[
+        Self::Apply,
+        Self::Undo,
+        Self::Redo,
+        Self::ShowGoals,
+        Self::ShowContext,
+        Self::Visualise,
+        Self::Hint,
+        Self::Status,
+    ];
+
+    pub const fn meta(self) -> ReplCommandKindMeta {
+        match self {
+            Self::Apply => ReplCommandKindMeta {
+                name: "Apply",
+                is_mutation: true,
+            },
+            Self::Undo => ReplCommandKindMeta {
+                name: "Undo",
+                is_mutation: true,
+            },
+            Self::Redo => ReplCommandKindMeta {
+                name: "Redo",
+                is_mutation: true,
+            },
+            Self::ShowGoals => ReplCommandKindMeta {
+                name: "ShowGoals",
+                is_mutation: false,
+            },
+            Self::ShowContext => ReplCommandKindMeta {
+                name: "ShowContext",
+                is_mutation: false,
+            },
+            Self::Visualise => ReplCommandKindMeta {
+                name: "Visualise",
+                is_mutation: false,
+            },
+            Self::Hint => ReplCommandKindMeta {
+                name: "Hint",
+                is_mutation: false,
+            },
+            Self::Status => ReplCommandKindMeta {
+                name: "Status",
+                is_mutation: false,
+            },
+        }
+    }
+
+    /// Canonical PascalCase tag (matches the `#[serde(tag="kind")]`
+    /// wire form on [`ReplCommand`]).
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().name == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+
+    /// True for commands that may mutate proof state (Apply / Undo
+    /// / Redo). Read-only commands (ShowGoals / ShowContext /
+    /// Visualise / Hint / Status) flag false.
+    #[inline]
+    pub const fn is_mutation(&self) -> bool {
+        self.meta().is_mutation
+    }
+}
+
+impl ReplCommand {
+    /// Discriminator-only kind for telemetry / surface enumeration.
+    pub fn kind(&self) -> ReplCommandKind {
+        match self {
+            Self::Apply { .. } => ReplCommandKind::Apply,
+            Self::Undo => ReplCommandKind::Undo,
+            Self::Redo => ReplCommandKind::Redo,
+            Self::ShowGoals => ReplCommandKind::ShowGoals,
+            Self::ShowContext => ReplCommandKind::ShowContext,
+            Self::Visualise => ReplCommandKind::Visualise,
+            Self::Hint { .. } => ReplCommandKind::Hint,
+            Self::Status => ReplCommandKind::Status,
+        }
+    }
+}
+
 // =============================================================================
 // Hypothesis / Goal / GoalStack — typed proof-state representation
 // =============================================================================
@@ -339,30 +460,156 @@ pub struct HintSuggestion {
     pub category: Text,
 }
 
-impl ReplResponse {
-    /// True iff the response represents a successful state mutation
-    /// (Accepted / Undone / Redone).
-    pub fn is_state_mutation(&self) -> bool {
-        matches!(
-            self,
-            ReplResponse::Accepted { .. }
-                | ReplResponse::Undone { .. }
-                | ReplResponse::Redone { .. }
-        )
+/// Discriminator-only kind for [`ReplResponse`]. Mirrors the
+/// payload-bearing variant set; lets callers iterate the response
+/// surface for telemetry / autocompletion / docs without supplying
+/// payload data. Tag values match the
+/// `#[serde(tag = "kind")]` discriminator on `ReplResponse`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReplResponseKind {
+    Accepted,
+    Rejected,
+    Undone,
+    Redone,
+    Status,
+    Hints,
+    Tree,
+    NoOp,
+    Error,
+}
+
+/// Per-kind projection for [`ReplResponseKind`].
+///
+/// `name` matches the serde tag (PascalCase, the wire form).
+/// `is_state_mutation` flags responses that represent a successful
+/// state mutation (Accepted / Undone / Redone). `is_error` flags
+/// the lone error response — Rejected is NOT an error: the kernel
+/// rejected the tactic but the REPL is healthy. Adding a new
+/// response variant forces an explicit decision on both flags
+/// in `meta()`.
+#[derive(Debug, Clone, Copy)]
+pub struct ReplResponseKindMeta {
+    pub name: &'static str,
+    pub is_state_mutation: bool,
+    pub is_error: bool,
+}
+
+impl ReplResponseKind {
+    pub const ALL: &'static [Self] = &[
+        Self::Accepted,
+        Self::Rejected,
+        Self::Undone,
+        Self::Redone,
+        Self::Status,
+        Self::Hints,
+        Self::Tree,
+        Self::NoOp,
+        Self::Error,
+    ];
+
+    pub const fn meta(self) -> ReplResponseKindMeta {
+        match self {
+            Self::Accepted => ReplResponseKindMeta {
+                name: "Accepted",
+                is_state_mutation: true,
+                is_error: false,
+            },
+            Self::Rejected => ReplResponseKindMeta {
+                name: "Rejected",
+                is_state_mutation: false,
+                is_error: false,
+            },
+            Self::Undone => ReplResponseKindMeta {
+                name: "Undone",
+                is_state_mutation: true,
+                is_error: false,
+            },
+            Self::Redone => ReplResponseKindMeta {
+                name: "Redone",
+                is_state_mutation: true,
+                is_error: false,
+            },
+            Self::Status => ReplResponseKindMeta {
+                name: "Status",
+                is_state_mutation: false,
+                is_error: false,
+            },
+            Self::Hints => ReplResponseKindMeta {
+                name: "Hints",
+                is_state_mutation: false,
+                is_error: false,
+            },
+            Self::Tree => ReplResponseKindMeta {
+                name: "Tree",
+                is_state_mutation: false,
+                is_error: false,
+            },
+            Self::NoOp => ReplResponseKindMeta {
+                name: "NoOp",
+                is_state_mutation: false,
+                is_error: false,
+            },
+            Self::Error => ReplResponseKindMeta {
+                name: "Error",
+                is_state_mutation: false,
+                is_error: true,
+            },
+        }
     }
 
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Accepted { .. } => "Accepted",
-            Self::Rejected { .. } => "Rejected",
-            Self::Undone { .. } => "Undone",
-            Self::Redone { .. } => "Redone",
-            Self::Status { .. } => "Status",
-            Self::Hints { .. } => "Hints",
-            Self::Tree { .. } => "Tree",
-            Self::NoOp { .. } => "NoOp",
-            Self::Error { .. } => "Error",
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().name == s {
+                return Some(*k);
+            }
         }
+        None
+    }
+
+    #[inline]
+    pub const fn is_state_mutation(&self) -> bool {
+        self.meta().is_state_mutation
+    }
+
+    #[inline]
+    pub const fn is_error(&self) -> bool {
+        self.meta().is_error
+    }
+}
+
+impl ReplResponse {
+    /// Discriminator-only kind for telemetry / surface enumeration.
+    pub fn kind(&self) -> ReplResponseKind {
+        match self {
+            Self::Accepted { .. } => ReplResponseKind::Accepted,
+            Self::Rejected { .. } => ReplResponseKind::Rejected,
+            Self::Undone { .. } => ReplResponseKind::Undone,
+            Self::Redone { .. } => ReplResponseKind::Redone,
+            Self::Status { .. } => ReplResponseKind::Status,
+            Self::Hints { .. } => ReplResponseKind::Hints,
+            Self::Tree { .. } => ReplResponseKind::Tree,
+            Self::NoOp { .. } => ReplResponseKind::NoOp,
+            Self::Error { .. } => ReplResponseKind::Error,
+        }
+    }
+
+    /// True iff the response represents a successful state mutation
+    /// (Accepted / Undone / Redone). Backed by `kind().is_state_
+    /// mutation()`.
+    #[inline]
+    pub fn is_state_mutation(&self) -> bool {
+        self.kind().is_state_mutation()
+    }
+
+    /// Canonical PascalCase tag.
+    #[inline]
+    pub fn name(&self) -> &'static str {
+        self.kind().name()
     }
 }
 
@@ -455,6 +702,125 @@ pub enum GoalRewriteOutcome {
     /// The tactic was malformed. Reported for diagnostics; state
     /// unchanged.
     Error { reason: Text },
+}
+
+/// Discriminator-only kind for [`GoalRewriteOutcome`].
+///
+/// `Split` and `Error` carry payloads; the kind enum is zero-sized
+/// so callers (telemetry / docs / dispatch tables) can iterate the
+/// outcome surface without payload data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GoalRewriteOutcomeKind {
+    Rewritten,
+    Split,
+    Closed,
+    NoMatch,
+    Error,
+}
+
+/// Per-kind projection for [`GoalRewriteOutcomeKind`].
+///
+/// `name` is the snake_case telemetry / log label.
+/// `mutates_display_state` flags outcomes where the goal-stack
+/// display changed (Rewritten / Split / Closed); NoMatch and Error
+/// leave the display unchanged. `closes_goal` is unique to
+/// `Closed`. `is_error` is unique to `Error` — note `NoMatch`
+/// is NOT an error: the rewriter just doesn't pattern-match this
+/// tactic shape, and the kernel checker has already validated
+/// the step's soundness independently.
+#[derive(Debug, Clone, Copy)]
+pub struct GoalRewriteOutcomeKindMeta {
+    pub name: &'static str,
+    pub mutates_display_state: bool,
+    pub closes_goal: bool,
+    pub is_error: bool,
+}
+
+impl GoalRewriteOutcomeKind {
+    pub const ALL: &'static [Self] = &[
+        Self::Rewritten,
+        Self::Split,
+        Self::Closed,
+        Self::NoMatch,
+        Self::Error,
+    ];
+
+    pub const fn meta(self) -> GoalRewriteOutcomeKindMeta {
+        match self {
+            Self::Rewritten => GoalRewriteOutcomeKindMeta {
+                name: "rewritten",
+                mutates_display_state: true,
+                closes_goal: false,
+                is_error: false,
+            },
+            Self::Split => GoalRewriteOutcomeKindMeta {
+                name: "split",
+                mutates_display_state: true,
+                closes_goal: false,
+                is_error: false,
+            },
+            Self::Closed => GoalRewriteOutcomeKindMeta {
+                name: "closed",
+                mutates_display_state: true,
+                closes_goal: true,
+                is_error: false,
+            },
+            Self::NoMatch => GoalRewriteOutcomeKindMeta {
+                name: "no_match",
+                mutates_display_state: false,
+                closes_goal: false,
+                is_error: false,
+            },
+            Self::Error => GoalRewriteOutcomeKindMeta {
+                name: "error",
+                mutates_display_state: false,
+                closes_goal: false,
+                is_error: true,
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().name == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn mutates_display_state(&self) -> bool {
+        self.meta().mutates_display_state
+    }
+
+    #[inline]
+    pub const fn closes_goal(&self) -> bool {
+        self.meta().closes_goal
+    }
+
+    #[inline]
+    pub const fn is_error(&self) -> bool {
+        self.meta().is_error
+    }
+}
+
+impl GoalRewriteOutcome {
+    /// Discriminator-only kind for telemetry / surface enumeration.
+    pub fn kind(&self) -> GoalRewriteOutcomeKind {
+        match self {
+            Self::Rewritten => GoalRewriteOutcomeKind::Rewritten,
+            Self::Split { .. } => GoalRewriteOutcomeKind::Split,
+            Self::Closed => GoalRewriteOutcomeKind::Closed,
+            Self::NoMatch => GoalRewriteOutcomeKind::NoMatch,
+            Self::Error { .. } => GoalRewriteOutcomeKind::Error,
+        }
+    }
 }
 
 /// Single dispatch interface for surface-tactic → goal-stack
@@ -1901,6 +2267,144 @@ mod tests {
                 }
             }
             _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn meta_pin_repl_command_kind_round_trip_and_mutation_partition() {
+        assert_eq!(ReplCommandKind::ALL.len(), 8);
+        let mut seen = Vec::new();
+        for k in ReplCommandKind::ALL {
+            let s = k.name();
+            assert_eq!(
+                ReplCommandKind::from_str(s),
+                Some(*k),
+                "ReplCommandKind::{:?}: '{}' round-trip",
+                k,
+                s
+            );
+            assert!(!seen.contains(&s), "duplicate name '{}'", s);
+            seen.push(s);
+        }
+        // Mutation partition: Apply / Undo / Redo = 3.
+        let mutation_count = ReplCommandKind::ALL
+            .iter()
+            .filter(|k| k.is_mutation())
+            .count();
+        assert_eq!(mutation_count, 3);
+        assert!(ReplCommandKind::Apply.is_mutation());
+        assert!(ReplCommandKind::Undo.is_mutation());
+        assert!(ReplCommandKind::Redo.is_mutation());
+        // Read-only: 5 (ShowGoals / ShowContext / Visualise / Hint /
+        // Status).
+        assert!(!ReplCommandKind::ShowGoals.is_mutation());
+        assert!(!ReplCommandKind::Status.is_mutation());
+
+        // Cross-pin: ReplCommand::kind() agrees with the kind tag
+        // for every payload-bearing variant.
+        assert_eq!(
+            ReplCommand::Apply { tactic: Text::from("intro") }.kind(),
+            ReplCommandKind::Apply
+        );
+        assert_eq!(
+            ReplCommand::Hint { max: 5 }.kind(),
+            ReplCommandKind::Hint
+        );
+        assert_eq!(ReplCommand::Undo.kind(), ReplCommandKind::Undo);
+    }
+
+    #[test]
+    fn meta_pin_repl_response_kind_round_trip_and_partitions() {
+        assert_eq!(ReplResponseKind::ALL.len(), 9);
+        for k in ReplResponseKind::ALL {
+            let s = k.name();
+            assert_eq!(ReplResponseKind::from_str(s), Some(*k));
+        }
+        // is_state_mutation partition: Accepted / Undone / Redone = 3.
+        let mutation_count = ReplResponseKind::ALL
+            .iter()
+            .filter(|k| k.is_state_mutation())
+            .count();
+        assert_eq!(mutation_count, 3);
+        assert!(ReplResponseKind::Accepted.is_state_mutation());
+        assert!(ReplResponseKind::Undone.is_state_mutation());
+        assert!(ReplResponseKind::Redone.is_state_mutation());
+        assert!(!ReplResponseKind::Rejected.is_state_mutation());
+        // is_error partition: Error only (1). Rejected is NOT an
+        // error — the kernel rejected the tactic but the REPL is
+        // healthy.
+        let error_count = ReplResponseKind::ALL
+            .iter()
+            .filter(|k| k.is_error())
+            .count();
+        assert_eq!(error_count, 1);
+        assert!(ReplResponseKind::Error.is_error());
+        assert!(!ReplResponseKind::Rejected.is_error());
+        // Cross-pin: state mutation and error are disjoint.
+        for k in ReplResponseKind::ALL {
+            assert!(
+                !(k.is_state_mutation() && k.is_error()),
+                "ReplResponseKind::{:?}: mutation ⊥ error must be disjoint",
+                k
+            );
+        }
+    }
+
+    #[test]
+    fn meta_pin_goal_rewrite_outcome_kind_classification() {
+        assert_eq!(GoalRewriteOutcomeKind::ALL.len(), 5);
+        for k in GoalRewriteOutcomeKind::ALL {
+            let s = k.name();
+            assert_eq!(GoalRewriteOutcomeKind::from_str(s), Some(*k));
+        }
+        // Wire form (snake_case for telemetry).
+        assert_eq!(GoalRewriteOutcomeKind::Rewritten.name(), "rewritten");
+        assert_eq!(GoalRewriteOutcomeKind::Split.name(), "split");
+        assert_eq!(GoalRewriteOutcomeKind::Closed.name(), "closed");
+        assert_eq!(GoalRewriteOutcomeKind::NoMatch.name(), "no_match");
+        assert_eq!(GoalRewriteOutcomeKind::Error.name(), "error");
+        // mutates_display_state: Rewritten / Split / Closed = 3;
+        // NoMatch / Error = 2 don't.
+        let mutate_count = GoalRewriteOutcomeKind::ALL
+            .iter()
+            .filter(|k| k.mutates_display_state())
+            .count();
+        assert_eq!(mutate_count, 3);
+        // closes_goal is unique to Closed.
+        let close_count = GoalRewriteOutcomeKind::ALL
+            .iter()
+            .filter(|k| k.closes_goal())
+            .count();
+        assert_eq!(close_count, 1);
+        assert!(GoalRewriteOutcomeKind::Closed.closes_goal());
+        // is_error is unique to Error.
+        let err_count = GoalRewriteOutcomeKind::ALL
+            .iter()
+            .filter(|k| k.is_error())
+            .count();
+        assert_eq!(err_count, 1);
+        assert!(GoalRewriteOutcomeKind::Error.is_error());
+        // Cross-cutting: closes_goal ⇒ mutates_display_state.
+        for k in GoalRewriteOutcomeKind::ALL {
+            if k.closes_goal() {
+                assert!(
+                    k.mutates_display_state(),
+                    "GoalRewriteOutcomeKind::{:?}: closes_goal ⇒ mutates_display_state",
+                    k
+                );
+            }
+        }
+        // Cross-cutting: NoMatch is the only kind that's neither
+        // mutation nor error — it's a "rewriter doesn't recognize
+        // this shape" signal.
+        for k in GoalRewriteOutcomeKind::ALL {
+            let neither = !k.mutates_display_state() && !k.is_error();
+            assert_eq!(
+                neither,
+                *k == GoalRewriteOutcomeKind::NoMatch,
+                "GoalRewriteOutcomeKind::{:?}: NoMatch is the lone non-mutation non-error",
+                k
+            );
         }
     }
 }

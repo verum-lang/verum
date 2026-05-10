@@ -226,15 +226,94 @@ pub enum RecheckReason {
     PreviousVerdictFailed { reason: Text },
 }
 
-impl RecheckReason {
-    /// Human-readable label (used by docs / CLI / metrics).
-    pub fn label(&self) -> &'static str {
+/// Discriminator-only metadata for [`RecheckReason`]. The variants
+/// are parameterized so meta() carries only the variant-discriminator
+/// kind (zero-sized representative) plus the snake_case label.
+///
+/// This lets callers iterate the *kinds* (without supplying payload
+/// data) for telemetry / docs / CLI surface enumeration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RecheckReasonKind {
+    NoCacheEntry,
+    FingerprintMismatch,
+    KernelVersionChanged,
+    PreviousVerdictFailed,
+}
+
+/// Per-kind projection for [`RecheckReasonKind`].
+#[derive(Debug, Clone, Copy)]
+pub struct RecheckReasonMeta {
+    pub label: &'static str,
+}
+
+impl RecheckReasonKind {
+    pub const ALL: &'static [Self] = &[
+        Self::NoCacheEntry,
+        Self::FingerprintMismatch,
+        Self::KernelVersionChanged,
+        Self::PreviousVerdictFailed,
+    ];
+
+    pub const fn meta(self) -> RecheckReasonMeta {
         match self {
-            RecheckReason::NoCacheEntry => "no_cache_entry",
-            RecheckReason::FingerprintMismatch { .. } => "fingerprint_mismatch",
-            RecheckReason::KernelVersionChanged { .. } => "kernel_version_changed",
-            RecheckReason::PreviousVerdictFailed { .. } => "previous_verdict_failed",
+            Self::NoCacheEntry => RecheckReasonMeta {
+                label: "no_cache_entry",
+            },
+            Self::FingerprintMismatch => RecheckReasonMeta {
+                label: "fingerprint_mismatch",
+            },
+            Self::KernelVersionChanged => RecheckReasonMeta {
+                label: "kernel_version_changed",
+            },
+            Self::PreviousVerdictFailed => RecheckReasonMeta {
+                label: "previous_verdict_failed",
+            },
         }
+    }
+
+    /// Stable snake_case label for telemetry / docs / CLI.
+    #[inline]
+    pub const fn label(&self) -> &'static str {
+        self.meta().label
+    }
+
+    /// Parse a kind label back to the typed kind. Closes a drift
+    /// defect: previously `RecheckReason::label()` was present but
+    /// no inverse mapping existed, so a serialised telemetry
+    /// label could not be re-typed.
+    pub fn from_label(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().label == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+}
+
+impl RecheckReason {
+    /// Discriminator-only kind for telemetry / aggregation.
+    pub fn kind(&self) -> RecheckReasonKind {
+        match self {
+            RecheckReason::NoCacheEntry => RecheckReasonKind::NoCacheEntry,
+            RecheckReason::FingerprintMismatch { .. } => {
+                RecheckReasonKind::FingerprintMismatch
+            }
+            RecheckReason::KernelVersionChanged { .. } => {
+                RecheckReasonKind::KernelVersionChanged
+            }
+            RecheckReason::PreviousVerdictFailed { .. } => {
+                RecheckReasonKind::PreviousVerdictFailed
+            }
+        }
+    }
+
+    /// Human-readable label (used by docs / CLI / metrics).
+    /// Backed by `RecheckReasonKind::label`; the same string is
+    /// emitted for every payload-carrying variant of a given kind.
+    #[inline]
+    pub fn label(&self) -> &'static str {
+        self.kind().label()
     }
 }
 
@@ -1267,5 +1346,62 @@ mod tests {
                 reason: RecheckReason::PreviousVerdictFailed { .. }
             }
         ));
+    }
+
+    #[test]
+    fn meta_pin_recheck_reason_kind_round_trip_unique_and_label_parity() {
+        assert_eq!(RecheckReasonKind::ALL.len(), 4);
+        let mut seen = Vec::new();
+        for k in RecheckReasonKind::ALL {
+            let s = k.label();
+            assert_eq!(
+                RecheckReasonKind::from_label(s),
+                Some(*k),
+                "RecheckReasonKind::{:?}: '{}' round-trip",
+                k,
+                s
+            );
+            assert!(!seen.contains(&s), "duplicate label '{}'", s);
+            seen.push(s);
+        }
+        // Wire form (matches docs / CLI / metrics labels).
+        assert_eq!(
+            RecheckReasonKind::NoCacheEntry.label(),
+            "no_cache_entry"
+        );
+        assert_eq!(
+            RecheckReasonKind::FingerprintMismatch.label(),
+            "fingerprint_mismatch"
+        );
+        assert_eq!(
+            RecheckReasonKind::KernelVersionChanged.label(),
+            "kernel_version_changed"
+        );
+        assert_eq!(
+            RecheckReasonKind::PreviousVerdictFailed.label(),
+            "previous_verdict_failed"
+        );
+        assert!(RecheckReasonKind::from_label("__bogus__").is_none());
+
+        // Cross-pin: every payload-bearing variant of `RecheckReason`
+        // produces the same label as its `kind()` projection. Pinned
+        // exhaustively for all 4 kinds so a future label edit on one
+        // side surfaces here.
+        let r0 = RecheckReason::NoCacheEntry;
+        let r1 = RecheckReason::FingerprintMismatch {
+            previous_closure_hash: Text::from(""),
+            current_closure_hash: Text::from(""),
+        };
+        let r2 = RecheckReason::KernelVersionChanged {
+            cached_version: Text::from(""),
+            current_version: Text::from(""),
+        };
+        let r3 = RecheckReason::PreviousVerdictFailed {
+            reason: Text::from(""),
+        };
+        for r in [&r0, &r1, &r2, &r3] {
+            assert_eq!(r.label(), r.kind().label(),
+                "RecheckReason payload-bearing label must equal kind().label()");
+        }
     }
 }
