@@ -242,6 +242,88 @@ impl WellKnownType {
         Self::from_name(name).is_some()
     }
 
+    /// Auto-derived protocols for primitive-like types.
+    ///
+    /// Single source of truth for the
+    /// `primitive_implements_protocol` table that previously
+    /// lived as a 6×N hardcoded `match` block at the bottom of
+    /// this file.  Each entry lists the protocols a primitive
+    /// (or primitive-shaped) type satisfies *axiomatically* —
+    /// part of the language definition, not of the standard
+    /// library.
+    ///
+    /// Returns `&[]` for types whose protocol set is determined
+    /// by user-side `implement` blocks (every non-primitive
+    /// well-known type, plus the user-extensible band).  The
+    /// `primitive_implements_protocol` consumer at
+    /// `verum_types::specialization_selection` returns `None`
+    /// for that empty case so the caller can fall through to
+    /// other discovery sources.
+    pub const fn primitive_protocols(self) -> &'static [WellKnownProtocol] {
+        match self {
+            // Int + Bool + Unit: full Copy-Eq-Ord-Hash band +
+            // Default.  Identical sets are pinned together by
+            // the drift test.
+            Self::Int => &[
+                WellKnownProtocol::Copy,
+                WellKnownProtocol::Clone,
+                WellKnownProtocol::Eq,
+                WellKnownProtocol::Ord,
+                WellKnownProtocol::Hash,
+                WellKnownProtocol::Default,
+            ],
+            Self::Bool => &[
+                WellKnownProtocol::Copy,
+                WellKnownProtocol::Clone,
+                WellKnownProtocol::Eq,
+                WellKnownProtocol::Ord,
+                WellKnownProtocol::Hash,
+                WellKnownProtocol::Default,
+            ],
+            // Float: Copy + Clone + Default; *not* Eq/Ord (NaN
+            // breaks reflexivity + total order) and not Hash
+            // (NaN+0/-0 collisions would violate consistency).
+            Self::Float => &[
+                WellKnownProtocol::Copy,
+                WellKnownProtocol::Clone,
+                WellKnownProtocol::Default,
+            ],
+            // Char: Copy-Eq-Ord-Hash band; *not* Default
+            // (no canonical zero codepoint outside U+0000 vs
+            // null-byte ambiguity — Verum forces explicit
+            // initialisation).
+            Self::Char => &[
+                WellKnownProtocol::Copy,
+                WellKnownProtocol::Clone,
+                WellKnownProtocol::Eq,
+                WellKnownProtocol::Ord,
+                WellKnownProtocol::Hash,
+            ],
+            // Text: Clone-Eq-Ord-Hash-Default; *not* Copy
+            // (heap-allocated — a bitwise duplicate would
+            // alias the backing buffer and break ownership).
+            Self::Text => &[
+                WellKnownProtocol::Clone,
+                WellKnownProtocol::Eq,
+                WellKnownProtocol::Ord,
+                WellKnownProtocol::Hash,
+                WellKnownProtocol::Default,
+            ],
+            // Everything else: protocol set is determined by
+            // user-side `implement` blocks (or by the type
+            // being non-primitive entirely).
+            _ => &[],
+        }
+    }
+
+    /// Whether this type contributes to the primitive auto-
+    /// implementation table.  True iff `primitive_protocols()`
+    /// is non-empty.  Pinned via the drift test so adding a new
+    /// primitive variant lights up here.
+    pub const fn has_auto_derived_protocols(self) -> bool {
+        !self.primitive_protocols().is_empty()
+    }
+
     /// Canonical archive-module prefixes that contain this well-known
     /// type's inherent + protocol-impl methods. Used by the archive
     /// lazy-loader (`verum_compiler::archive_ctx_loader`) to expand
@@ -1728,77 +1810,55 @@ pub fn method_to_protocol(method_name: &str) -> Option<WellKnownProtocol> {
 // Primitive Protocol Implementations (Builtin Registry)
 // =============================================================================
 
+/// Auto-derived protocols for the `Unit` / `()` primitive-shaped
+/// type.  `Unit` has no [`WellKnownType`] variant (the unit type
+/// is surfaced syntactically rather than nominally), so its row
+/// in the auto-derive table lives here as a sibling of
+/// [`WellKnownType::primitive_protocols`].  Pinned identical to
+/// `WellKnownType::Int.primitive_protocols()` — the unit type
+/// behaves as a singleton-cardinality version of Int for the
+/// purpose of Copy/Clone/Eq/Ord/Hash/Default.
+pub const UNIT_PRIMITIVE_PROTOCOLS: &[WellKnownProtocol] = &[
+    WellKnownProtocol::Copy,
+    WellKnownProtocol::Clone,
+    WellKnownProtocol::Eq,
+    WellKnownProtocol::Ord,
+    WellKnownProtocol::Hash,
+    WellKnownProtocol::Default,
+];
+
 /// Check if a primitive type name implements a given protocol.
 ///
-
-/// This centralizes the knowledge of which built-in/primitive types automatically
-/// satisfy which protocols. Previously this was scattered across
-/// `verum_types/src/specialization_selection.rs` in hardcoded match arms.
+/// Routes through [`WellKnownType::primitive_protocols`] for
+/// nominal primitives (Int / Float / Bool / Char / Text) and
+/// the [`UNIT_PRIMITIVE_PROTOCOLS`] constant for the unit type
+/// — single source of truth replacing the previous 7-arm
+/// hardcoded match that duplicated this knowledge across two
+/// spellings (`"Unit"` and `"()"`).  Returns `None` for types
+/// not in the auto-derive table; callers fall through to other
+/// discovery sources (user-side `implement` blocks, stdlib
+/// protocol scan).
 ///
-
-/// Note: This is intentionally hardcoded because primitive types are part of the
-/// language definition, not the standard library. Their protocol implementations
-/// cannot be discovered from source -- they are axioms of the type system.
+/// Note: The auto-derive table is intentionally co-located with
+/// the [`WellKnownType`] variant rather than discovered from .vr
+/// sources because primitive types are *axioms of the type
+/// system* — their protocol implementations are part of the
+/// language definition, not of the standard library.
 pub fn primitive_implements_protocol(type_name: &str, protocol_name: &str) -> Option<bool> {
     let proto = WellKnownProtocol::from_name(protocol_name)?;
 
-    let result = match type_name {
-        // Int: Copy, Clone, Eq, Ord, Hash, Default
-        "Int" => matches!(
-            proto,
-            WellKnownProtocol::Copy
-                | WellKnownProtocol::Clone
-                | WellKnownProtocol::Eq
-                | WellKnownProtocol::Ord
-                | WellKnownProtocol::Hash
-                | WellKnownProtocol::Default
-        ),
-        // Float: Copy, Clone, Default (NOT Eq/Ord due to NaN)
-        "Float" => matches!(
-            proto,
-            WellKnownProtocol::Copy | WellKnownProtocol::Clone | WellKnownProtocol::Default
-        ),
-        // Bool: Copy, Clone, Eq, Ord, Hash, Default
-        "Bool" => matches!(
-            proto,
-            WellKnownProtocol::Copy
-                | WellKnownProtocol::Clone
-                | WellKnownProtocol::Eq
-                | WellKnownProtocol::Ord
-                | WellKnownProtocol::Hash
-                | WellKnownProtocol::Default
-        ),
-        // Char: Copy, Clone, Eq, Ord, Hash
-        "Char" => matches!(
-            proto,
-            WellKnownProtocol::Copy
-                | WellKnownProtocol::Clone
-                | WellKnownProtocol::Eq
-                | WellKnownProtocol::Ord
-                | WellKnownProtocol::Hash
-        ),
-        // Text: Clone, Eq, Ord, Hash, Default (NOT Copy -- heap-allocated)
-        "Text" => matches!(
-            proto,
-            WellKnownProtocol::Clone
-                | WellKnownProtocol::Eq
-                | WellKnownProtocol::Ord
-                | WellKnownProtocol::Hash
-                | WellKnownProtocol::Default
-        ),
-        // Unit: Copy, Clone, Eq, Ord, Hash, Default
-        "Unit" | "()" => matches!(
-            proto,
-            WellKnownProtocol::Copy
-                | WellKnownProtocol::Clone
-                | WellKnownProtocol::Eq
-                | WellKnownProtocol::Ord
-                | WellKnownProtocol::Hash
-                | WellKnownProtocol::Default
-        ),
-        _ => return None, // Not a primitive -- caller should check other sources
+    // Unit type has no `WellKnownType` variant — handle the
+    // two textual forms here.
+    let protocols: &[WellKnownProtocol] = match type_name {
+        "Unit" | "()" => UNIT_PRIMITIVE_PROTOCOLS,
+        other => match WellKnownType::from_name(other) {
+            Some(wkt) if wkt.has_auto_derived_protocols() => wkt.primitive_protocols(),
+            // Not a primitive — caller should check other sources.
+            _ => return None,
+        },
     };
-    Some(result)
+
+    Some(protocols.iter().any(|p| *p == proto))
 }
 
 #[cfg(test)]
@@ -1934,6 +1994,145 @@ mod tests {
         assert_eq!(primitive_implements_protocol("MyType", "Clone"), None);
         // Unknown protocol returns None
         assert_eq!(primitive_implements_protocol("Int", "Serialize"), None);
+    }
+
+    /// Drift-pin: `WellKnownType::primitive_protocols()` is the
+    /// canonical auto-derive table.  Pins:
+    ///   * The exact primitive set (Int / Float / Bool / Char /
+    ///     Text — five nominal entries; Unit/() handled by
+    ///     `UNIT_PRIMITIVE_PROTOCOLS`).
+    ///   * The per-variant protocol-set contents and ordering
+    ///     (so the wire form is stable for downstream consumers
+    ///     iterating in declaration order).
+    ///   * `has_auto_derived_protocols()` reflects the
+    ///     non-empty subset.
+    ///   * Cross-cutting equality pins: Int == Bool == Unit
+    ///     (full Copy-Eq-Ord-Hash + Default band); Char drops
+    ///     Default.
+    #[test]
+    fn meta_pin_well_known_type_primitive_protocols_table() {
+        // 1. Variants with non-empty auto-derive sets are
+        //    exactly Int / Float / Bool / Char / Text.
+        let primitives_with_derives: Vec<_> = [
+            WellKnownType::Int,
+            WellKnownType::Float,
+            WellKnownType::Bool,
+            WellKnownType::Char,
+            WellKnownType::Text,
+        ]
+        .into_iter()
+        .filter(|w| w.has_auto_derived_protocols())
+        .collect();
+        assert_eq!(primitives_with_derives.len(), 5);
+
+        // 2. Empty for non-primitive nominal types.
+        for w in [
+            WellKnownType::List,
+            WellKnownType::Map,
+            WellKnownType::Maybe,
+            WellKnownType::Result,
+            WellKnownType::Heap,
+            WellKnownType::Channel,
+            WellKnownType::Duration,
+            WellKnownType::Range,
+        ] {
+            assert!(
+                !w.has_auto_derived_protocols(),
+                "{:?}: should not have auto-derives",
+                w
+            );
+            assert!(w.primitive_protocols().is_empty());
+        }
+
+        // 3. Per-variant table pinned by exact value.
+        let int = WellKnownType::Int.primitive_protocols();
+        assert_eq!(
+            int,
+            &[
+                WellKnownProtocol::Copy,
+                WellKnownProtocol::Clone,
+                WellKnownProtocol::Eq,
+                WellKnownProtocol::Ord,
+                WellKnownProtocol::Hash,
+                WellKnownProtocol::Default,
+            ],
+        );
+        // Bool == Int == Unit (full band).
+        assert_eq!(WellKnownType::Bool.primitive_protocols(), int);
+        assert_eq!(UNIT_PRIMITIVE_PROTOCOLS, int);
+
+        // Float = Copy + Clone + Default (no Eq/Ord — NaN; no
+        // Hash — NaN+0/-0 collisions).
+        assert_eq!(
+            WellKnownType::Float.primitive_protocols(),
+            &[
+                WellKnownProtocol::Copy,
+                WellKnownProtocol::Clone,
+                WellKnownProtocol::Default,
+            ],
+        );
+
+        // Char = full band minus Default (no canonical zero
+        // codepoint).
+        assert_eq!(
+            WellKnownType::Char.primitive_protocols(),
+            &[
+                WellKnownProtocol::Copy,
+                WellKnownProtocol::Clone,
+                WellKnownProtocol::Eq,
+                WellKnownProtocol::Ord,
+                WellKnownProtocol::Hash,
+            ],
+        );
+
+        // Text = full band minus Copy (heap-allocated — bitwise
+        // duplicate would alias the backing buffer).
+        assert_eq!(
+            WellKnownType::Text.primitive_protocols(),
+            &[
+                WellKnownProtocol::Clone,
+                WellKnownProtocol::Eq,
+                WellKnownProtocol::Ord,
+                WellKnownProtocol::Hash,
+                WellKnownProtocol::Default,
+            ],
+        );
+    }
+
+    /// Drift-pin: every protocol returned by
+    /// `primitive_implements_protocol("X", proto)` for primitive
+    /// X agrees with iterating `X.primitive_protocols()` and
+    /// asking whether `proto` is in the slice.  Single-source-of-
+    /// truth invariant — the consumer routes through the data
+    /// table, never reconstructs the matching independently.
+    #[test]
+    fn meta_pin_primitive_implements_routes_through_table() {
+        // Cover the five nominal primitives plus Unit/().
+        let primitives = ["Int", "Float", "Bool", "Char", "Text", "Unit", "()"];
+        // All Copy/Clone/Eq/Ord/Hash/Default protocols.
+        let protos = [
+            "Copy", "Clone", "Eq", "Ord", "Hash", "Default",
+        ];
+
+        for type_name in &primitives {
+            let table: &[WellKnownProtocol] = match *type_name {
+                "Unit" | "()" => UNIT_PRIMITIVE_PROTOCOLS,
+                other => WellKnownType::from_name(other)
+                    .expect("nominal primitive")
+                    .primitive_protocols(),
+            };
+            for proto_name in &protos {
+                let proto = WellKnownProtocol::from_name(proto_name).unwrap();
+                let table_says = table.iter().any(|p| *p == proto);
+                let consumer_says =
+                    primitive_implements_protocol(type_name, proto_name).unwrap();
+                assert_eq!(
+                    consumer_says, table_says,
+                    "{}/{}: consumer disagrees with table",
+                    type_name, proto_name
+                );
+            }
+        }
     }
 
     #[test]
