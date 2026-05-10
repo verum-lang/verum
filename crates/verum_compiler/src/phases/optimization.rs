@@ -59,13 +59,14 @@ pub struct OptimizationPhase {
     stats: OptimizationStats,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OptimizationLevel {
-    O0, // No optimization
-    O1, // Basic optimization
-    O2, // Standard optimization
-    O3, // Aggressive optimization
-}
+/// Optimization level — re-exported from `super::OptimizationLevel`
+/// (the canonical home in `phases/mod.rs`).  Pre-collapse the
+/// two definitions had identical 4-variant lists kept in sync
+/// by a 4-arm identity-shape mapper in `phases/mir_lowering.rs`
+/// (`super::OptimizationLevel::Ox => super::optimization::
+/// OptimizationLevel::Ox`).  Now a `pub use` — the mapper is
+/// structurally unreachable.
+pub use super::OptimizationLevel;
 
 /// Statistics for optimization passes
 #[derive(Debug, Clone, Default)]

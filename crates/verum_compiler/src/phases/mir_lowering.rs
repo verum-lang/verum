@@ -9622,16 +9622,14 @@ impl CompilationPhase for MirLoweringPhase {
         // and SSA form, enabling sophisticated interprocedural analysis.
         // ============================================================================
 
-        // Convert OptimizationLevel from super:: to optimization::
-        let opt_level = match input.context.opt_level {
-            super::OptimizationLevel::O0 => super::optimization::OptimizationLevel::O0,
-            super::OptimizationLevel::O1 => super::optimization::OptimizationLevel::O1,
-            super::OptimizationLevel::O2 => super::optimization::OptimizationLevel::O2,
-            super::OptimizationLevel::O3 => super::optimization::OptimizationLevel::O3,
-        };
-
-        let (_opt_stats, opt_warnings) =
-            super::optimization::optimize_mir_modules(&mut mir_modules, opt_level);
+        // OptimizationLevel is now a single canonical type (the
+        // `phases/optimization.rs` definition is a `pub use`
+        // re-export of `super::OptimizationLevel`); the previous
+        // 4-arm identity-shape mapper is structurally unreachable.
+        let (_opt_stats, opt_warnings) = super::optimization::optimize_mir_modules(
+            &mut mir_modules,
+            input.context.opt_level,
+        );
 
         tracing::debug!(
             "MIR optimization complete: opt_level={:?}, warnings={}",
