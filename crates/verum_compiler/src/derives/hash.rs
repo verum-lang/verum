@@ -60,7 +60,7 @@
 //! `where A: Hash, B: Hash` auto-emitted into the impl. Mirrors
 //! the sweep landed for the 6 sibling derives.
 
-use super::common::{DeriveContext, DeriveError, FieldInfo, TypeInfo, VariantInfo};
+use super::common::{DeriveContext, FieldInfo, TypeInfo, VariantInfo};
 use super::{DeriveMacro, DeriveResult, ident_expr, int_lit, method_call, self_ref};
 use verum_ast::Span;
 use verum_ast::decl::{FunctionDecl, FunctionParam, FunctionParamKind, Item, Visibility};
@@ -68,7 +68,7 @@ use verum_ast::expr::{Block, Expr, ExprKind};
 use verum_ast::pattern::{
     FieldPattern, MatchArm, Pattern, PatternKind, VariantPatternData,
 };
-use verum_ast::stmt::{Stmt, StmtKind};
+use verum_ast::stmt::Stmt;
 use verum_ast::ty::{Ident, Path, PathSegment, Type, TypeKind};
 use verum_common::{Heap, List, Maybe, Text};
 

@@ -46,7 +46,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use verum_ast::MetaValue;
-use verum_common::{Heap, List, Map, Maybe, OrderedMap, OrderedSet, Text};
+use verum_common::{Heap, List, Maybe, OrderedMap, OrderedSet, Text};
 
 /// Persistable shadow of [`MetaValue`].  Mirrors the primitive variant
 /// list 1:1; AST variants (`Expr`, `Type`, `Pattern`, `Item`, `Items`)

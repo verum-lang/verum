@@ -26,7 +26,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use tracing::{debug, info, warn};
+use tracing::debug;
 
 use verum_ast::Module;
 use verum_common::{Map, Text};

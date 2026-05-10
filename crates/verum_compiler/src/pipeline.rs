@@ -35,63 +35,42 @@
 //! context system, code generation, stdlib integration). The pipeline orchestrates
 //! all compilation phases from source to executable.
 
-use anyhow::{Context as AnyhowContext, Result};
-use colored::Colorize;
-use std::collections::HashSet;
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
-use verum_ast::{FileId, Item, Module, SourceFile, Span, decl::ItemKind};
+use verum_ast::Module;
 use verum_common::{List, Map, Text};
-use verum_diagnostics::{DiagnosticBuilder, Severity};
+use verum_diagnostics::DiagnosticBuilder;
 // VBC-first architecture imports
-use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
-use verum_vbc::interpreter::Interpreter as VbcInterpreter;
 
 // VBC → LLVM IR lowering (CPU compilation path)
-use verum_codegen::llvm::{
-    LoweringConfig as LlvmLoweringConfig, LoweringStats as LlvmLoweringStats, VbcToLlvmLowering,
-};
 
 // Compilation path analysis
-use crate::compilation_path::{
-    CompilationPath, TargetConfig as PathTargetConfig, analyze_function, determine_compilation_path,
-};
-use verum_lexer::Lexer;
 use verum_modules::{
-    ModuleId, ModuleInfo, ModuleLoader, ModulePath, ModuleRegistry, SharedModuleResolver,
-    extract_exports_from_module, resolve_glob_reexports, resolve_specific_reexport_kinds,
+    ModuleId, ModuleInfo, ModuleLoader, ModuleRegistry, SharedModuleResolver,
 };
 // CoherenceChecker / ImplEntry now used only inside
 // crate::pipeline::coherence (#106 Phase 6).
 // LanguageProfile / ProfileChecker now used only inside
 // crate::pipeline::profile_boundaries (#106 Phase 7).
-use verum_fast_parser::VerumParser;
-use verum_smt::{Context as SmtContext, CostTracker};
 // RefinementVerifier / SubsumptionChecker / SubsumptionConfig / VerificationError /
 // VerifyMode now used only inside crate::pipeline::refinement_verify (#106 Phase 4).
 // Note: Gradual verification is now handled by phases::verification_phase
 // See: BoundsCheckEliminator, CBGROptimizer, VerificationPipeline
-use verum_common::{Maybe, Shared};
-use verum_types::TypeChecker;
+use verum_common::Maybe;
 
-use crate::linker_config::ProjectConfig;
 use crate::meta::MetaRegistry;
-use crate::options::VerifyMode;
 // IntrinsicDiagnostics / IntrinsicLint / module_utils now used only inside
 // crate::pipeline::stdlib_bootstrap (#106 Phase 8).
 use crate::core_cache::global_cache_or_init;
 use crate::core_compiler::{CoreConfig, StdlibModuleResolver};
 use crate::core_source::CoreSource;
-use crate::phases::ExecutionTier;
-use crate::phases::linking::{FinalLinker, LinkingConfig, ObjectFile};
-use crate::phases::phase0_stdlib::{Phase0CoreCompiler, StdlibArtifacts};
-use crate::phases::type_error_to_diagnostic;
+use crate::phases::phase0_stdlib::StdlibArtifacts;
 use crate::session::Session;
 // StdlibCompilationResult / StdlibModule now used only inside
 // crate::pipeline::stdlib_bootstrap (#106 Phase 8).
-use crate::hash::compute_item_hashes_from_module;
 use crate::incremental_compiler::IncrementalCompiler;
 use crate::staged_pipeline::{StagedConfig, StagedPipeline};
 
@@ -114,7 +93,6 @@ mod gpu_detect;
 mod impl_axioms;
 mod interpreter;
 mod macros;
-use crate::pipeline::macros::MacroExpander;
 pub use macros::reset_test_isolation;
 mod llvm_lowering;
 mod loading;

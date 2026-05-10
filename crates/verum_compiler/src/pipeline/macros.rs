@@ -31,7 +31,6 @@ use tracing::debug;
 
 use verum_ast::Item;
 use verum_ast::Span;
-use verum_ast::visitor::{Visitor, walk_expr};
 use verum_common::{List, Maybe, Text};
 
 use crate::meta::MetaRegistry;

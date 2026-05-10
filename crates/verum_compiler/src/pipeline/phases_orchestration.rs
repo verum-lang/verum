@@ -38,14 +38,12 @@ use colored::Colorize;
 use tracing::{debug, info, warn};
 
 use verum_ast::Module;
-use verum_common::{List, Maybe, Shared, Text};
+use verum_common::List;
 use verum_diagnostics::{DiagnosticBuilder, Severity};
-use verum_modules::ModuleInfo;
 use verum_smt::{Context as SmtContext, CostTracker};
 use verum_types::TypeChecker;
 
 use crate::phases::type_error_to_diagnostic;
-use crate::session::Session;
 
 use super::CompilationPipeline;
 

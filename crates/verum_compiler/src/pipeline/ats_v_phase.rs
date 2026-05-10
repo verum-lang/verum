@@ -33,7 +33,7 @@ use verum_common::{List, Maybe};
 use verum_diagnostics::{DiagnosticBuilder, Severity};
 use verum_kernel::arch::Foundation;
 use verum_kernel::arch_anti_pattern::{AntiPatternViolation, Severity as KernelSeverity};
-use verum_kernel::arch_phase::{run_arch_phase_one_with, ModuleArchResult, PhaseInputs};
+use verum_kernel::arch_phase::{ModuleArchResult, PhaseInputs};
 
 use super::CompilationPipeline;
 

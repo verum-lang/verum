@@ -34,6 +34,7 @@
 //! invocation without requiring a binary rebuild.
 
 use std::fs;
+#[cfg(test)]
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;

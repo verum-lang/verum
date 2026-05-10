@@ -31,11 +31,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::{Context as AnyhowContext, Result};
+use anyhow::Result;
 use tracing::{debug, info, warn};
 
 use verum_ast::{FileId, Module, decl::ItemKind};
-use verum_common::{List, Map, Text};
+use verum_common::{List, Text};
 use verum_diagnostics::DiagnosticBuilder;
 use verum_fast_parser::VerumParser;
 use verum_lexer::Lexer;
@@ -44,7 +44,6 @@ use verum_modules::{
     resolve_specific_reexport_kinds,
 };
 
-use crate::phases::type_error_to_diagnostic;
 
 use super::{
     BuildMode, CachedStdlibModules, CompilationPipeline, compute_stdlib_content_hash,

@@ -79,6 +79,12 @@ use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::literal::{Literal, LiteralKind, StringLit};
 use verum_ast::span::Span;
 use verum_ast::ty::{Ident, Path, PathSegment};
+// `Maybe` is referenced from the `#[cfg(test)] mod tests { use super::*; ... }`
+// probe block (line ~593: `Maybe::None` arguments to
+// `SepAssertion::tree`).  cargo lib-only check warns it as
+// unused because `cfg(test)` code is gated out, but `cargo
+// test` requires the import to compile the test module.
+#[cfg_attr(not(test), allow(unused_imports))]
 use verum_common::{Heap, List, Maybe, Text};
 
 use verum_kernel::proof_checker::Term;

@@ -35,7 +35,6 @@
 //! The loader runs only on `verum verify --formal` and `verum audit`.
 //! Normal script execution never touches it.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -43,7 +42,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use verum_kernel::cert::SmtCertificate;
-use verum_vbc::module::{DischargeReceipt, TheoremEntry, TheoremId, VbcModule};
+use verum_vbc::module::{DischargeReceipt, TheoremEntry, VbcModule};
 
 // `blake3` is brought in transitively via verum_kernel; we rebuild
 // hashes inline here for body-integrity checks rather than wire a
@@ -465,7 +464,7 @@ mod tests {
     #[test]
     fn theorem_without_receipts_classifies_as_not_discharged() {
         use smallvec::SmallVec;
-        use verum_vbc::module::{TheoremEntry, TheoremKind, TheoremLifecycle};
+        use verum_vbc::module::{TheoremEntry, TheoremId, TheoremKind, TheoremLifecycle};
         let mut m = VbcModule::new("test".to_string());
         let name_id = m.intern_string("test_theorem");
         let path_id = m.intern_string("test.path");

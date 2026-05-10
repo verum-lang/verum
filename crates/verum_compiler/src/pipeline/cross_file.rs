@@ -27,7 +27,7 @@
 //!  `par_iter` from the multi-pass / orchestration entry
 //!  points.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -35,11 +35,10 @@ use anyhow::{Context as AnyhowContext, Result};
 use tracing::{debug, info, warn};
 
 use verum_ast::{FileId, Module, SourceFile, decl::ItemKind};
-use verum_common::{List, Map, Maybe, Shared, Text};
-use verum_diagnostics::{DiagnosticBuilder, Severity};
+use verum_common::{List, Shared, Text};
+use verum_diagnostics::DiagnosticBuilder;
 use verum_fast_parser::VerumParser;
 use verum_lexer::Lexer;
-use verum_modules::{ModuleId, ModuleInfo, ModulePath, ModuleRegistry};
 use verum_types::TypeChecker;
 
 use crate::phases::type_error_to_diagnostic;
