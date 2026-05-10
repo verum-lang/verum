@@ -23,7 +23,7 @@
 //! MTLSize struct: `{ NSUInteger, NSUInteger, NSUInteger }` = 24 bytes.
 //! On arm64, passed in registers (x0-x2 for each triple).
 
-use super::error::{BuildExt, OptionExt, Result};
+use super::error::{BuildExt, CallSiteExt, OptionExt, Result};
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::types::FunctionType;
@@ -141,9 +141,7 @@ impl<'ctx> MetalIR<'ctx> {
         let sel = builder
             .build_call(sel_fn, &[sel_str.into()], &format!("{}_sel", name))
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
 
         // Build args: [receiver, selector, ...extra_args]
@@ -417,9 +415,7 @@ impl<'ctx> MetalIR<'ctx> {
         let device = builder
             .build_call(create_device_fn, &[], "device")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
 
         // Check device != null
@@ -876,9 +872,7 @@ impl<'ctx> MetalIR<'ctx> {
         let retained = builder
             .build_call(retain_fn, &[buf.into()], "retained")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let result = self.ptr_to_handle(&builder, retained, "buf_i64")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
@@ -990,9 +984,7 @@ impl<'ctx> MetalIR<'ctx> {
         let retained = builder
             .build_call(retain_fn, &[buf.into()], "retained")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let result = self.ptr_to_handle(&builder, retained, "buf_i64")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
@@ -1213,9 +1205,7 @@ impl<'ctx> MetalIR<'ctx> {
         let nsstring_class = builder
             .build_call(get_class_fn, &[nsstring_name.into()], "nsstring_class")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
 
         // nsstr_alloc = objc_msgSend(NSString_class, "alloc")
@@ -1250,9 +1240,7 @@ impl<'ctx> MetalIR<'ctx> {
         let mtl_opts_class = builder
             .build_call(get_class_fn, &[mtl_opts_name.into()], "opts_class")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let options =
             self.build_objc_msg_send(module, &builder, mtl_opts_class, "new", &[], "options")?;
@@ -1287,9 +1275,7 @@ impl<'ctx> MetalIR<'ctx> {
         let retained = builder
             .build_call(retain_fn, &[lib.into()], "retained")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let result = self.ptr_to_handle(&builder, retained, "lib_i64")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
@@ -1370,9 +1356,7 @@ impl<'ctx> MetalIR<'ctx> {
         let nsstring_class = builder
             .build_call(get_class_fn, &[nsstring_name.into()], "nsstring_cls")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let nsname = self.build_objc_msg_send(
             module,
@@ -1437,9 +1421,7 @@ impl<'ctx> MetalIR<'ctx> {
         let retained = builder
             .build_call(retain_fn, &[pipeline.into()], "retained")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let result = self.ptr_to_handle(&builder, retained, "pipe_i64")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
@@ -2005,9 +1987,7 @@ impl<'ctx> MetalIR<'ctx> {
         let retained = builder
             .build_call(retain_fn, &[cmd_buf.into()], "retained")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let result = self.ptr_to_handle(&builder, retained, "cb_i64")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
@@ -2134,18 +2114,14 @@ impl<'ctx> MetalIR<'ctx> {
         let end_sel = builder
             .build_call(sel_fn, &[end_sel_str.into()], "end_sel")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
         let start_sel_str =
             self.build_global_str(module, &builder, "GPUStartTime", "sel_gpu_start");
         let start_sel = builder
             .build_call(sel_fn, &[start_sel_str.into()], "start_sel")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_pointer_value();
 
         // Call objc_msgSend_fp64(cb, endTimeSel) -> double
@@ -2156,9 +2132,7 @@ impl<'ctx> MetalIR<'ctx> {
                 "end_time",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_float_value();
         let start_time = builder
             .build_call(
@@ -2167,9 +2141,7 @@ impl<'ctx> MetalIR<'ctx> {
                 "start_time",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_float_value();
 
         // gpu_time = end_time - start_time (seconds as double)
@@ -2260,9 +2232,7 @@ impl<'ctx> MetalIR<'ctx> {
         let lib = builder
             .build_call(compile_fn, &[src_ptr.into(), src_len.into()], "lib")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         // get_pipeline(lib, "vector_add")
@@ -2275,9 +2245,7 @@ impl<'ctx> MetalIR<'ctx> {
         let pipeline = builder
             .build_call(get_pipe_fn, &[lib.into(), kernel_name.into()], "pipeline")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         // Build buffer array on stack: [a, b, result]
@@ -2424,9 +2392,7 @@ impl<'ctx> MetalIR<'ctx> {
         let lib = builder
             .build_call(compile_fn, &[src_ptr.into(), src_len.into()], "lib")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         let kernel_name = self.build_global_str(module, &builder, "sgemm", "sgemm_name");
@@ -2438,9 +2404,7 @@ impl<'ctx> MetalIR<'ctx> {
         let pipeline = builder
             .build_call(get_pipe_fn, &[lib.into(), kernel_name.into()], "pipeline")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         // Create constant buffers for M, N, K (4 bytes each, uint32)
@@ -2462,9 +2426,7 @@ impl<'ctx> MetalIR<'ctx> {
         let m_buf_h = builder
             .build_call(alloc_fn, &[m_ptr_i64.into(), four.into()], "m_buf")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         let n_alloca = builder
@@ -2478,9 +2440,7 @@ impl<'ctx> MetalIR<'ctx> {
         let n_buf_h = builder
             .build_call(alloc_fn, &[n_ptr_i64.into(), four.into()], "n_buf")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         let k_alloca = builder
@@ -2494,9 +2454,7 @@ impl<'ctx> MetalIR<'ctx> {
         let k_buf_h = builder
             .build_call(alloc_fn, &[k_ptr_i64.into(), four.into()], "k_buf")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         // Build buffer array: [A, B, C, m_buf, n_buf, k_buf]
@@ -2723,9 +2681,7 @@ impl<'ctx> MetalIR<'ctx> {
                 "cb",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         // wait
@@ -2747,9 +2703,7 @@ impl<'ctx> MetalIR<'ctx> {
         let ns = builder
             .build_call(time_fn, &[cb_handle.into()], "ns")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let new_total = builder
             .build_int_add(total_val, ns, "new_total")

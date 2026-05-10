@@ -52,7 +52,7 @@ use verum_llvm::module::Module;
 use verum_llvm::types::FunctionType;
 use verum_llvm::values::{FunctionValue, IntValue};
 
-use super::error::{BuildExt, LlvmLoweringError, OptionExt, Result as LlvmResult};
+use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result as LlvmResult};
 
 /// Argument or return-value classification under Verum's uniform-i64
 /// AOT ABI. Concrete `FunctionType` values are constructed lazily from
@@ -314,9 +314,7 @@ pub fn emit_linux_syscall_inline<'ctx>(
             "syscall_result",
         )
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .or_internal("syscall returned void")?
+            .basic_value_or("syscall returned void")?
         .into_int_value();
     Ok(result)
 }

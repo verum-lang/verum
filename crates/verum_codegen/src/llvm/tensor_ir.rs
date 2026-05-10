@@ -26,7 +26,7 @@
 //!  }
 //!  ```
 
-use super::error::{BuildExt, OptionExt, Result};
+use super::error::{BuildExt, CallSiteExt, OptionExt, Result};
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::types::FunctionType;
@@ -566,16 +566,12 @@ impl<'ctx> TensorIR<'ctx> {
             let s = builder
                 .build_call(sin_fn, &[x.into()], "s")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_float_value();
             let c = builder
                 .build_call(cos_fn, &[x.into()], "c")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_float_value();
             let result = builder.build_float_div(s, c, "tan").or_llvm_err()?;
             builder.build_return(Some(&result)).or_llvm_err()?;
@@ -596,16 +592,12 @@ impl<'ctx> TensorIR<'ctx> {
             let ep = builder
                 .build_call(exp_fn, &[x.into()], "ep")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_float_value();
             let em = builder
                 .build_call(exp_fn, &[neg_x.into()], "em")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_float_value();
             let num = builder.build_float_sub(ep, em, "num").or_llvm_err()?;
             let den = builder.build_float_add(ep, em, "den").or_llvm_err()?;
@@ -628,9 +620,7 @@ impl<'ctx> TensorIR<'ctx> {
             let exp_neg = builder
                 .build_call(exp_fn, &[neg_x.into()], "exp_neg")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_float_value();
             let one = f64_type.const_float(1.0);
             let denom = builder
@@ -668,9 +658,7 @@ impl<'ctx> TensorIR<'ctx> {
             let th = builder
                 .build_call(tanh_fn, &[scaled.into()], "th")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_float_value();
             let one_plus = builder.build_float_add(one, th, "one_plus").or_llvm_err()?;
             let half_x = builder.build_float_mul(half, x, "half_x").or_llvm_err()?;
@@ -692,9 +680,7 @@ impl<'ctx> TensorIR<'ctx> {
             let sig = builder
                 .build_call(sig_fn, &[x.into()], "sig")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_float_value();
             let result = builder.build_float_mul(x, sig, "silu").or_llvm_err()?;
             builder.build_return(Some(&result)).or_llvm_err()?;
@@ -718,9 +704,7 @@ impl<'ctx> TensorIR<'ctx> {
             let ax = builder
                 .build_call(fabs_fn, &[x.into()], "ax")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_float_value();
             // t = 1 / (1 + 0.3275911 * ax)
             let p = f64_type.const_float(0.3275911);
@@ -750,9 +734,7 @@ impl<'ctx> TensorIR<'ctx> {
             let exp_val = builder
                 .build_call(exp_fn, &[neg_ax2.into()], "exp_negax2")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_float_value();
             // result = 1 - poly * exp(-ax^2)
             let poly_exp = builder
@@ -822,9 +804,7 @@ impl<'ctx> TensorIR<'ctx> {
             let exp_x = builder
                 .build_call(exp_fn, &[x.into()], "exp_x")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_float_value();
             let one_plus = builder
                 .build_float_add(one, exp_x, "one_plus")
@@ -832,9 +812,7 @@ impl<'ctx> TensorIR<'ctx> {
             let log_val = builder
                 .build_call(log_fn, &[one_plus.into()], "log_val")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_float_value();
             builder.build_unconditional_branch(bb_ret).or_llvm_err()?;
 
@@ -860,16 +838,12 @@ impl<'ctx> TensorIR<'ctx> {
             let sp = builder
                 .build_call(sp_fn, &[x.into()], "sp")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_float_value();
             let th = builder
                 .build_call(th_fn, &[sp.into()], "th")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_float_value();
             let result = builder.build_float_mul(x, th, "mish").or_llvm_err()?;
             builder.build_return(Some(&result)).or_llvm_err()?;
@@ -1322,9 +1296,7 @@ impl<'ctx> TensorIR<'ctx> {
         let handle = builder
             .build_call(new_fn, &[ndim.into(), shape.into(), dtype.into()], "handle")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         // Get data pointer and numel
@@ -1416,9 +1388,7 @@ impl<'ctx> TensorIR<'ctx> {
         let handle = builder
             .build_call(new_fn, &[ndim.into(), shape.into(), dtype.into()], "handle")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
 
         // Copy data: memcpy(tensor->data, data_param, numel * 8)
@@ -1586,9 +1556,7 @@ impl<'ctx> TensorIR<'ctx> {
                 "clone",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
     }
@@ -1803,9 +1771,7 @@ impl<'ctx> TensorIR<'ctx> {
                 "result",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let result_ptr = self.handle_to_ptr(&builder, result_handle, "res_ptr")?;
         let result_data = self.load_header_ptr(&builder, result_ptr, OFF_DATA, "res_data")?;
@@ -1869,9 +1835,7 @@ impl<'ctx> TensorIR<'ctx> {
             let r = builder
                 .build_call(intr, &[x.into()], "r")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
                 .into_float_value();
             builder.build_unconditional_branch(bb_store).or_llvm_err()?;
             Ok(r)
@@ -1903,9 +1867,7 @@ impl<'ctx> TensorIR<'ctx> {
         let tanh_r = builder
             .build_call(tanh_fn, &[x.into()], "r")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_float_value();
         builder.build_unconditional_branch(bb_store).or_llvm_err()?;
 
@@ -1919,9 +1881,7 @@ impl<'ctx> TensorIR<'ctx> {
         let sigmoid_r = builder
             .build_call(sigmoid_fn, &[x.into()], "r")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_float_value();
         builder.build_unconditional_branch(bb_store).or_llvm_err()?;
 
@@ -2079,9 +2039,7 @@ impl<'ctx> TensorIR<'ctx> {
                 "result",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let result_ptr = self.handle_to_ptr(&builder, result_handle, "res_ptr")?;
         let result_data = self.load_header_ptr(&builder, result_ptr, OFF_DATA, "res_data")?;
@@ -2163,9 +2121,7 @@ impl<'ctx> TensorIR<'ctx> {
         let pow_r = builder
             .build_call(pow_fn, &[av.into(), bv.into()], "pow")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_float_value();
         builder.build_unconditional_branch(bb_store).or_llvm_err()?;
 
@@ -2177,9 +2133,7 @@ impl<'ctx> TensorIR<'ctx> {
         let min_r = builder
             .build_call(minnum_fn, &[av.into(), bv.into()], "min")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_float_value();
         builder.build_unconditional_branch(bb_store).or_llvm_err()?;
 
@@ -2191,9 +2145,7 @@ impl<'ctx> TensorIR<'ctx> {
         let max_r = builder
             .build_call(maxnum_fn, &[av.into(), bv.into()], "max")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_float_value();
         builder.build_unconditional_branch(bb_store).or_llvm_err()?;
 
@@ -2491,9 +2443,7 @@ impl<'ctx> TensorIR<'ctx> {
         let scalar = builder
             .build_call(reduce_all_fn, &[handle.into(), op.into()], "scalar")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_float_value();
 
         // Create a 1-element result tensor via tensor_fill
@@ -2535,9 +2485,7 @@ impl<'ctx> TensorIR<'ctx> {
                 "result_tensor",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder.build_unconditional_branch(bb_ret).or_llvm_err()?;
 
@@ -2682,9 +2630,7 @@ impl<'ctx> TensorIR<'ctx> {
                 "result",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let result_ptr = self.handle_to_ptr(&builder, result_handle, "res_ptr")?;
         let result_data = self.load_header_ptr(&builder, result_ptr, OFF_DATA, "res_data")?;
@@ -2879,9 +2825,7 @@ impl<'ctx> TensorIR<'ctx> {
                 "reshape",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
     }
@@ -2959,9 +2903,7 @@ impl<'ctx> TensorIR<'ctx> {
         let cloned = builder
             .build_call(clone_fn, &[handle.into()], "cloned")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         builder.build_return(Some(&cloned)).or_llvm_err()?;
 
@@ -3031,9 +2973,7 @@ impl<'ctx> TensorIR<'ctx> {
                 "result",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let result_ptr = self.handle_to_ptr(&builder, result_handle, "res_ptr")?;
         let result_data = self.load_header_ptr(&builder, result_ptr, OFF_DATA, "res_data")?;
@@ -3175,9 +3115,7 @@ impl<'ctx> TensorIR<'ctx> {
         let result_handle = builder
             .build_call(clone_fn, &[handle.into()], "clone")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_int_value();
         let result_ptr = self.handle_to_ptr(&builder, result_handle, "res_ptr")?;
         let result_data = self.load_header_ptr(&builder, result_ptr, OFF_DATA, "res_data")?;
@@ -3268,9 +3206,7 @@ impl<'ctx> TensorIR<'ctx> {
         let exp_val = builder
             .build_call(exp_fn, &[shifted.into()], "exp")
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
+            .basic_value_or("expected basic value")?
             .into_float_value();
         let dst_elem = unsafe {
             builder
@@ -3508,9 +3444,7 @@ impl<'ctx> TensorIR<'ctx> {
                 "result",
             )
             .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?;
+            .basic_value_or("expected basic value")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
     }

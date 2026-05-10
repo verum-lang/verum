@@ -64,7 +64,7 @@ use verum_vbc::module::{
 use verum_vbc::types::{TypeId, TypeRef};
 
 use super::context::FunctionContext;
-use super::error::{BuildExt, LlvmLoweringError, OptionExt, Result};
+use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
 use super::instruction::lower_instruction;
 use super::types::{RefTier, TypeLowering};
 use super::well_known_types::{WellKnownType as WKT, WellKnownTypeExt as _};
@@ -3749,18 +3749,14 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         .builder()
                         .build_call(push_fn, &[], "exception_push")
                         .or_llvm_err()?
-                        .try_as_basic_value()
-                        .basic()
-                        .or_internal("exception_push returned void")?;
+            .basic_value_or("exception_push returned void")?;
 
                     // Call setjmp(jmp_buf_ptr) → 0 if normal, non-zero if thrown
                     let setjmp_result = ctx
                         .builder()
                         .build_call(setjmp_fn, &[jmp_buf_ptr.into()], "setjmp_result")
                         .or_llvm_err()?
-                        .try_as_basic_value()
-                        .basic()
-                        .or_internal("setjmp returned void")?
+            .basic_value_or("setjmp returned void")?
                         .into_int_value();
 
                     // Compare setjmp result with 0
