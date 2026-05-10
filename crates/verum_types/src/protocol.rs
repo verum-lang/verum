@@ -195,6 +195,127 @@ pub enum ObjectSafetyError {
     TakesSelfByValue { method_name: Text },
 }
 
+/// Discriminator for `ObjectSafetyError` — the zero-sized projection
+/// of every `ObjectSafetyError` variant.  Object-safety failures live
+/// at three structural axes (signature shape, generics, sized-bound)
+/// which the classifier flags surface as inspectable partitions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ObjectSafetyErrorKind {
+    ReturnsSelf,
+    GenericMethod,
+    NoSelfParameter,
+    HasAssociatedConst,
+    RequiresSized,
+    TakesSelfByValue,
+}
+
+/// Static fact-pack for an `ObjectSafetyErrorKind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjectSafetyErrorKindMeta {
+    /// Lower-snake-case identifier — wire form for telemetry.
+    pub name: &'static str,
+    /// The violation lives in the *method-signature* axis (return
+    /// type, parameter list, self-parameter shape).
+    pub is_signature_shape: bool,
+    /// The violation involves *generic type parameters* — generics
+    /// at the method level break vtable dispatch because each
+    /// instantiation needs a separate slot.
+    pub is_generics_violation: bool,
+    /// The violation involves the *Sized* bound — protocol-object
+    /// safety requires `Self: ?Sized`-compatible methods.
+    pub is_sized_violation: bool,
+}
+
+impl ObjectSafetyErrorKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [ObjectSafetyErrorKind] = &[
+        ObjectSafetyErrorKind::ReturnsSelf,
+        ObjectSafetyErrorKind::GenericMethod,
+        ObjectSafetyErrorKind::NoSelfParameter,
+        ObjectSafetyErrorKind::HasAssociatedConst,
+        ObjectSafetyErrorKind::RequiresSized,
+        ObjectSafetyErrorKind::TakesSelfByValue,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> ObjectSafetyErrorKindMeta {
+        match self {
+            // Returns Self — return-type shape forbids vtable
+            // dispatch (caller can't size the result).
+            ObjectSafetyErrorKind::ReturnsSelf => ObjectSafetyErrorKindMeta {
+                name: "returns_self",
+                is_signature_shape: true,
+                is_generics_violation: false,
+                is_sized_violation: true,
+            },
+            // GenericMethod — vtable can't carry an unbounded
+            // family of monomorphisations.
+            ObjectSafetyErrorKind::GenericMethod => ObjectSafetyErrorKindMeta {
+                name: "generic_method",
+                is_signature_shape: true,
+                is_generics_violation: true,
+                is_sized_violation: false,
+            },
+            // NoSelfParameter — without self there's no way to
+            // pick the vtable; method must be associated.
+            ObjectSafetyErrorKind::NoSelfParameter => ObjectSafetyErrorKindMeta {
+                name: "no_self_parameter",
+                is_signature_shape: true,
+                is_generics_violation: false,
+                is_sized_violation: false,
+            },
+            // HasAssociatedConst — values requiring static dispatch
+            // can't live behind a dynamic protocol object.
+            ObjectSafetyErrorKind::HasAssociatedConst => ObjectSafetyErrorKindMeta {
+                name: "has_associated_const",
+                is_signature_shape: false,
+                is_generics_violation: false,
+                is_sized_violation: false,
+            },
+            // RequiresSized — Self: Sized in the bound list bars
+            // protocol-object construction.
+            ObjectSafetyErrorKind::RequiresSized => ObjectSafetyErrorKindMeta {
+                name: "requires_sized",
+                is_signature_shape: false,
+                is_generics_violation: false,
+                is_sized_violation: true,
+            },
+            // TakesSelfByValue — by-value self requires the size
+            // of Self to be known at the call site.
+            ObjectSafetyErrorKind::TakesSelfByValue => ObjectSafetyErrorKindMeta {
+                name: "takes_self_by_value",
+                is_signature_shape: true,
+                is_generics_violation: false,
+                is_sized_violation: true,
+            },
+        }
+    }
+
+    /// Inverse of `name` — recover the kind from the wire form.
+    pub fn from_name(name: &str) -> Option<ObjectSafetyErrorKind> {
+        ObjectSafetyErrorKind::ALL
+            .iter()
+            .copied()
+            .find(|k| k.meta().name == name)
+    }
+}
+
+impl ObjectSafetyError {
+    /// Discriminator projection — strip the payload, keep the tag.
+    pub const fn kind(&self) -> ObjectSafetyErrorKind {
+        match self {
+            ObjectSafetyError::ReturnsSelf { .. } => ObjectSafetyErrorKind::ReturnsSelf,
+            ObjectSafetyError::GenericMethod { .. } => ObjectSafetyErrorKind::GenericMethod,
+            ObjectSafetyError::NoSelfParameter { .. } => ObjectSafetyErrorKind::NoSelfParameter,
+            ObjectSafetyError::HasAssociatedConst { .. } => {
+                ObjectSafetyErrorKind::HasAssociatedConst
+            }
+            ObjectSafetyError::RequiresSized => ObjectSafetyErrorKind::RequiresSized,
+            ObjectSafetyError::TakesSelfByValue { .. } => ObjectSafetyErrorKind::TakesSelfByValue,
+        }
+    }
+}
+
 impl std::fmt::Display for ObjectSafetyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -12584,6 +12705,225 @@ impl std::fmt::Display for ConformanceError {
 
 impl std::error::Error for ConformanceError {}
 
+/// Discriminator for `ConformanceError` — the zero-sized projection.
+///
+/// Conformance failures partition into three structural axes:
+///   * the protocol/superprotocol surface itself is malformed or
+///     missing,
+///   * a *member* is missing or mismatched (method, associated
+///     type, associated const), or
+///   * a *bound* / where-clause is unsatisfied.
+///
+/// The `is_member_*` flags break the second axis into per-member-
+/// kind sub-classifiers so consumers can render targeted suggestions
+/// (rerun derive, add a method, supply a default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ConformanceErrorKind {
+    ProtocolNotFound,
+    SuperprotocolNotImplemented,
+    NegativeBoundViolation,
+    WhereClauseNotSatisfied,
+    MissingMethod,
+    MethodSignatureMismatch,
+    MissingAssociatedType,
+    AssociatedTypeBoundNotSatisfied,
+    AssociatedTypeVarianceMismatch,
+    MissingAssociatedConst,
+    InternalError,
+}
+
+/// Static fact-pack for a `ConformanceErrorKind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConformanceErrorKindMeta {
+    /// Lower-snake-case identifier — wire form for telemetry.
+    pub name: &'static str,
+    /// The protocol surface itself failed to resolve (the
+    /// protocol or one of its superprotocols is not in scope or
+    /// is undefined).
+    pub is_protocol_resolution: bool,
+    /// A *required member* is missing from the impl — method,
+    /// associated type, or associated constant.
+    pub is_missing_member: bool,
+    /// A *member is present but does not conform* — signature
+    /// mismatch, bound mismatch, variance mismatch.
+    pub is_member_mismatch: bool,
+    /// The violation involves an *associated type* (member or
+    /// bound) — used by the IDE to surface "supply this type"
+    /// quick-fix.
+    pub is_associated_type: bool,
+    /// The violation involves a *constraint* (negative bound or
+    /// where-clause).
+    pub is_constraint_failure: bool,
+    /// Catch-all internal-error band — diagnostic surface only,
+    /// must not appear in well-formed compilations.
+    pub is_internal: bool,
+}
+
+impl ConformanceErrorKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [ConformanceErrorKind] = &[
+        ConformanceErrorKind::ProtocolNotFound,
+        ConformanceErrorKind::SuperprotocolNotImplemented,
+        ConformanceErrorKind::NegativeBoundViolation,
+        ConformanceErrorKind::WhereClauseNotSatisfied,
+        ConformanceErrorKind::MissingMethod,
+        ConformanceErrorKind::MethodSignatureMismatch,
+        ConformanceErrorKind::MissingAssociatedType,
+        ConformanceErrorKind::AssociatedTypeBoundNotSatisfied,
+        ConformanceErrorKind::AssociatedTypeVarianceMismatch,
+        ConformanceErrorKind::MissingAssociatedConst,
+        ConformanceErrorKind::InternalError,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> ConformanceErrorKindMeta {
+        match self {
+            ConformanceErrorKind::ProtocolNotFound => ConformanceErrorKindMeta {
+                name: "protocol_not_found",
+                is_protocol_resolution: true,
+                is_missing_member: false,
+                is_member_mismatch: false,
+                is_associated_type: false,
+                is_constraint_failure: false,
+                is_internal: false,
+            },
+            ConformanceErrorKind::SuperprotocolNotImplemented => ConformanceErrorKindMeta {
+                name: "superprotocol_not_implemented",
+                is_protocol_resolution: true,
+                is_missing_member: false,
+                is_member_mismatch: false,
+                is_associated_type: false,
+                is_constraint_failure: false,
+                is_internal: false,
+            },
+            ConformanceErrorKind::NegativeBoundViolation => ConformanceErrorKindMeta {
+                name: "negative_bound_violation",
+                is_protocol_resolution: false,
+                is_missing_member: false,
+                is_member_mismatch: false,
+                is_associated_type: false,
+                is_constraint_failure: true,
+                is_internal: false,
+            },
+            ConformanceErrorKind::WhereClauseNotSatisfied => ConformanceErrorKindMeta {
+                name: "where_clause_not_satisfied",
+                is_protocol_resolution: false,
+                is_missing_member: false,
+                is_member_mismatch: false,
+                is_associated_type: false,
+                is_constraint_failure: true,
+                is_internal: false,
+            },
+            ConformanceErrorKind::MissingMethod => ConformanceErrorKindMeta {
+                name: "missing_method",
+                is_protocol_resolution: false,
+                is_missing_member: true,
+                is_member_mismatch: false,
+                is_associated_type: false,
+                is_constraint_failure: false,
+                is_internal: false,
+            },
+            ConformanceErrorKind::MethodSignatureMismatch => ConformanceErrorKindMeta {
+                name: "method_signature_mismatch",
+                is_protocol_resolution: false,
+                is_missing_member: false,
+                is_member_mismatch: true,
+                is_associated_type: false,
+                is_constraint_failure: false,
+                is_internal: false,
+            },
+            ConformanceErrorKind::MissingAssociatedType => ConformanceErrorKindMeta {
+                name: "missing_associated_type",
+                is_protocol_resolution: false,
+                is_missing_member: true,
+                is_member_mismatch: false,
+                is_associated_type: true,
+                is_constraint_failure: false,
+                is_internal: false,
+            },
+            ConformanceErrorKind::AssociatedTypeBoundNotSatisfied => ConformanceErrorKindMeta {
+                name: "associated_type_bound_not_satisfied",
+                is_protocol_resolution: false,
+                is_missing_member: false,
+                is_member_mismatch: true,
+                is_associated_type: true,
+                is_constraint_failure: true,
+                is_internal: false,
+            },
+            ConformanceErrorKind::AssociatedTypeVarianceMismatch => ConformanceErrorKindMeta {
+                name: "associated_type_variance_mismatch",
+                is_protocol_resolution: false,
+                is_missing_member: false,
+                is_member_mismatch: true,
+                is_associated_type: true,
+                is_constraint_failure: false,
+                is_internal: false,
+            },
+            ConformanceErrorKind::MissingAssociatedConst => ConformanceErrorKindMeta {
+                name: "missing_associated_const",
+                is_protocol_resolution: false,
+                is_missing_member: true,
+                is_member_mismatch: false,
+                is_associated_type: false,
+                is_constraint_failure: false,
+                is_internal: false,
+            },
+            ConformanceErrorKind::InternalError => ConformanceErrorKindMeta {
+                name: "internal_error",
+                is_protocol_resolution: false,
+                is_missing_member: false,
+                is_member_mismatch: false,
+                is_associated_type: false,
+                is_constraint_failure: false,
+                is_internal: true,
+            },
+        }
+    }
+
+    /// Inverse of `name`.
+    pub fn from_name(name: &str) -> Option<ConformanceErrorKind> {
+        ConformanceErrorKind::ALL
+            .iter()
+            .copied()
+            .find(|k| k.meta().name == name)
+    }
+}
+
+impl ConformanceError {
+    /// Discriminator projection — strip the payload, keep the tag.
+    pub const fn kind(&self) -> ConformanceErrorKind {
+        match self {
+            ConformanceError::ProtocolNotFound { .. } => ConformanceErrorKind::ProtocolNotFound,
+            ConformanceError::SuperprotocolNotImplemented { .. } => {
+                ConformanceErrorKind::SuperprotocolNotImplemented
+            }
+            ConformanceError::NegativeBoundViolation { .. } => {
+                ConformanceErrorKind::NegativeBoundViolation
+            }
+            ConformanceError::WhereClauseNotSatisfied { .. } => {
+                ConformanceErrorKind::WhereClauseNotSatisfied
+            }
+            ConformanceError::MissingMethod { .. } => ConformanceErrorKind::MissingMethod,
+            ConformanceError::MethodSignatureMismatch { .. } => {
+                ConformanceErrorKind::MethodSignatureMismatch
+            }
+            ConformanceError::MissingAssociatedType { .. } => {
+                ConformanceErrorKind::MissingAssociatedType
+            }
+            ConformanceError::AssociatedTypeBoundNotSatisfied { .. } => {
+                ConformanceErrorKind::AssociatedTypeBoundNotSatisfied
+            }
+            ConformanceError::AssociatedTypeVarianceMismatch { .. } => {
+                ConformanceErrorKind::AssociatedTypeVarianceMismatch
+            }
+            ConformanceError::MissingAssociatedConst { .. } => {
+                ConformanceErrorKind::MissingAssociatedConst
+            }
+            ConformanceError::InternalError { .. } => ConformanceErrorKind::InternalError,
+        }
+    }
+}
+
 // ==================== Errors ====================
 
 /// Coherence checking errors
@@ -12717,6 +13057,180 @@ pub enum ProtocolError {
         "Cyclic protocol inheritance detected: protocol {protocol} is part of a cycle involving {cycle:?}"
     )]
     CyclicInheritance { protocol: Text, cycle: List<Text> },
+}
+
+/// Discriminator for `ProtocolError` — the zero-sized projection.
+///
+/// `ProtocolError` lives at the *checker entry point*: callers fold
+/// `ConformanceError`-grade detail into compact protocol verdicts
+/// (`NotImplemented`, `BoundNotSatisfied`, `Violations(…)`).  The
+/// classifier flags partition the surface into the operationally-
+/// useful bands: bound-failure, resolution-failure, conflict,
+/// detailed-violation-bundle, and cycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ProtocolErrorKind {
+    NotImplemented,
+    MethodNotFound,
+    BoundNotSatisfied,
+    NegativeBoundViolated,
+    AssociatedTypeNotDefined,
+    ConflictingImpls,
+    ProtocolNotFound,
+    AssociatedTypeNotSpecified,
+    Violations,
+    CyclicInheritance,
+}
+
+/// Static fact-pack for a `ProtocolErrorKind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProtocolErrorKindMeta {
+    /// Lower-snake-case identifier — wire form for telemetry.
+    pub name: &'static str,
+    /// The protocol or type couldn't be resolved (lookup-side
+    /// failure rather than conformance-side).
+    pub is_resolution_failure: bool,
+    /// A bound `T: Protocol` (or its negation) failed.
+    pub is_bound_failure: bool,
+    /// Two impls conflict for the same (Protocol, Type) slot.
+    pub is_conflict: bool,
+    /// The error bundles a structured `ProtocolViolations` payload
+    /// — IDE consumers branch on this to render one outer message
+    /// + N inner-violation bullets.
+    pub is_detailed_bundle: bool,
+    /// Inheritance-graph property failed (cycle detected).
+    pub is_graph_property: bool,
+}
+
+impl ProtocolErrorKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [ProtocolErrorKind] = &[
+        ProtocolErrorKind::NotImplemented,
+        ProtocolErrorKind::MethodNotFound,
+        ProtocolErrorKind::BoundNotSatisfied,
+        ProtocolErrorKind::NegativeBoundViolated,
+        ProtocolErrorKind::AssociatedTypeNotDefined,
+        ProtocolErrorKind::ConflictingImpls,
+        ProtocolErrorKind::ProtocolNotFound,
+        ProtocolErrorKind::AssociatedTypeNotSpecified,
+        ProtocolErrorKind::Violations,
+        ProtocolErrorKind::CyclicInheritance,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> ProtocolErrorKindMeta {
+        match self {
+            ProtocolErrorKind::NotImplemented => ProtocolErrorKindMeta {
+                name: "not_implemented",
+                is_resolution_failure: false,
+                is_bound_failure: true,
+                is_conflict: false,
+                is_detailed_bundle: false,
+                is_graph_property: false,
+            },
+            ProtocolErrorKind::MethodNotFound => ProtocolErrorKindMeta {
+                name: "method_not_found",
+                is_resolution_failure: true,
+                is_bound_failure: false,
+                is_conflict: false,
+                is_detailed_bundle: false,
+                is_graph_property: false,
+            },
+            ProtocolErrorKind::BoundNotSatisfied => ProtocolErrorKindMeta {
+                name: "bound_not_satisfied",
+                is_resolution_failure: false,
+                is_bound_failure: true,
+                is_conflict: false,
+                is_detailed_bundle: false,
+                is_graph_property: false,
+            },
+            ProtocolErrorKind::NegativeBoundViolated => ProtocolErrorKindMeta {
+                name: "negative_bound_violated",
+                is_resolution_failure: false,
+                is_bound_failure: true,
+                is_conflict: false,
+                is_detailed_bundle: false,
+                is_graph_property: false,
+            },
+            ProtocolErrorKind::AssociatedTypeNotDefined => ProtocolErrorKindMeta {
+                name: "associated_type_not_defined",
+                is_resolution_failure: true,
+                is_bound_failure: false,
+                is_conflict: false,
+                is_detailed_bundle: false,
+                is_graph_property: false,
+            },
+            ProtocolErrorKind::ConflictingImpls => ProtocolErrorKindMeta {
+                name: "conflicting_impls",
+                is_resolution_failure: false,
+                is_bound_failure: false,
+                is_conflict: true,
+                is_detailed_bundle: false,
+                is_graph_property: false,
+            },
+            ProtocolErrorKind::ProtocolNotFound => ProtocolErrorKindMeta {
+                name: "protocol_not_found",
+                is_resolution_failure: true,
+                is_bound_failure: false,
+                is_conflict: false,
+                is_detailed_bundle: false,
+                is_graph_property: false,
+            },
+            ProtocolErrorKind::AssociatedTypeNotSpecified => ProtocolErrorKindMeta {
+                name: "associated_type_not_specified",
+                is_resolution_failure: true,
+                is_bound_failure: false,
+                is_conflict: false,
+                is_detailed_bundle: false,
+                is_graph_property: false,
+            },
+            ProtocolErrorKind::Violations => ProtocolErrorKindMeta {
+                name: "violations",
+                is_resolution_failure: false,
+                is_bound_failure: false,
+                is_conflict: false,
+                is_detailed_bundle: true,
+                is_graph_property: false,
+            },
+            ProtocolErrorKind::CyclicInheritance => ProtocolErrorKindMeta {
+                name: "cyclic_inheritance",
+                is_resolution_failure: false,
+                is_bound_failure: false,
+                is_conflict: false,
+                is_detailed_bundle: false,
+                is_graph_property: true,
+            },
+        }
+    }
+
+    /// Inverse of `name`.
+    pub fn from_name(name: &str) -> Option<ProtocolErrorKind> {
+        ProtocolErrorKind::ALL
+            .iter()
+            .copied()
+            .find(|k| k.meta().name == name)
+    }
+}
+
+impl ProtocolError {
+    /// Discriminator projection — strip the payload, keep the tag.
+    pub const fn kind(&self) -> ProtocolErrorKind {
+        match self {
+            ProtocolError::NotImplemented { .. } => ProtocolErrorKind::NotImplemented,
+            ProtocolError::MethodNotFound { .. } => ProtocolErrorKind::MethodNotFound,
+            ProtocolError::BoundNotSatisfied { .. } => ProtocolErrorKind::BoundNotSatisfied,
+            ProtocolError::NegativeBoundViolated { .. } => ProtocolErrorKind::NegativeBoundViolated,
+            ProtocolError::AssociatedTypeNotDefined { .. } => {
+                ProtocolErrorKind::AssociatedTypeNotDefined
+            }
+            ProtocolError::ConflictingImpls { .. } => ProtocolErrorKind::ConflictingImpls,
+            ProtocolError::ProtocolNotFound { .. } => ProtocolErrorKind::ProtocolNotFound,
+            ProtocolError::AssociatedTypeNotSpecified { .. } => {
+                ProtocolErrorKind::AssociatedTypeNotSpecified
+            }
+            ProtocolError::Violations(_) => ProtocolErrorKind::Violations,
+            ProtocolError::CyclicInheritance { .. } => ProtocolErrorKind::CyclicInheritance,
+        }
+    }
 }
 
 // ==================== Protocol Violation Types ====================
@@ -13667,6 +14181,27 @@ impl UnifiedProtocolError {
             UnifiedProtocolError::ObjectSafety(_) => "object_safety",
         }
     }
+
+    /// Returns the *inner* error's kind name for wrapper variants —
+    /// `"protocol/<inner>"`, `"conformance/<inner>"`,
+    /// `"object_safety/<inner>"` — and the outer category for
+    /// `NotImplemented` and `Coherence` (the latter has no
+    /// `kind()` accessor in the local CoherenceError yet).  This
+    /// gives metrics consumers a stable two-level classifier
+    /// without ad-hoc per-call-site downcasting.
+    pub fn inner_kind_name(&self) -> String {
+        match self {
+            UnifiedProtocolError::NotImplemented { .. } => "not_implemented".to_string(),
+            UnifiedProtocolError::Protocol(e) => format!("protocol/{}", e.kind().meta().name),
+            UnifiedProtocolError::Conformance(e) => {
+                format!("conformance/{}", e.kind().meta().name)
+            }
+            UnifiedProtocolError::Coherence(_) => "coherence".to_string(),
+            UnifiedProtocolError::ObjectSafety(e) => {
+                format!("object_safety/{}", e.kind().meta().name)
+            }
+        }
+    }
 }
 
 // ==================== Tests ====================
@@ -13675,6 +14210,354 @@ impl UnifiedProtocolError {
 mod tests {
     use super::*;
     use crate::advanced_protocols::*;
+
+    /// Drift-pin: `ObjectSafetyErrorKind` is the discriminator
+    /// projection.  Wires variant-count, name uniqueness, and the
+    /// three classifier partitions (signature-shape / generics /
+    /// sized) so any future expansion of the object-safety rule
+    /// surface lands here as a visible test edit.
+    #[test]
+    fn meta_pin_object_safety_error_kind_round_trip_and_partitions() {
+        // 1. Variant count pinned.
+        assert_eq!(
+            ObjectSafetyErrorKind::ALL.len(),
+            6,
+            "ObjectSafetyErrorKind variant count drift",
+        );
+
+        // 2. Names are snake_case + unique.
+        let mut seen = std::collections::HashSet::new();
+        for k in ObjectSafetyErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case: {}",
+                k,
+                m.name
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 3. from_name round-trips.
+        for k in ObjectSafetyErrorKind::ALL {
+            assert_eq!(
+                ObjectSafetyErrorKind::from_name(k.meta().name),
+                Some(*k),
+            );
+        }
+        assert_eq!(ObjectSafetyErrorKind::from_name("nope"), None);
+
+        // 4. Signature-shape partition — method-signature axes.
+        let sig: Vec<_> = ObjectSafetyErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_signature_shape)
+            .copied()
+            .collect();
+        assert_eq!(
+            sig,
+            vec![
+                ObjectSafetyErrorKind::ReturnsSelf,
+                ObjectSafetyErrorKind::GenericMethod,
+                ObjectSafetyErrorKind::NoSelfParameter,
+                ObjectSafetyErrorKind::TakesSelfByValue,
+            ],
+        );
+
+        // 5. Generics partition — singleton.
+        let gen_: Vec<_> = ObjectSafetyErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_generics_violation)
+            .copied()
+            .collect();
+        assert_eq!(gen_, vec![ObjectSafetyErrorKind::GenericMethod]);
+
+        // 6. Sized-violation partition — three kinds whose
+        //    failure mode reduces to "Self has unknown size".
+        let sized: Vec<_> = ObjectSafetyErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_sized_violation)
+            .copied()
+            .collect();
+        assert_eq!(
+            sized,
+            vec![
+                ObjectSafetyErrorKind::ReturnsSelf,
+                ObjectSafetyErrorKind::RequiresSized,
+                ObjectSafetyErrorKind::TakesSelfByValue,
+            ],
+        );
+
+        // 7. Live-payload kind() projection.
+        let err = ObjectSafetyError::ReturnsSelf {
+            method_name: "next".into(),
+        };
+        assert_eq!(err.kind(), ObjectSafetyErrorKind::ReturnsSelf);
+        assert_eq!(err.kind().meta().name, "returns_self");
+    }
+
+    /// Drift-pin: `ConformanceErrorKind` discriminator projection.
+    /// Six classifier flags partition 11 variants — the test pins
+    /// every partition + the conformance-grade member-mismatch
+    /// vs missing-member structural distinction.
+    #[test]
+    fn meta_pin_conformance_error_kind_round_trip_and_partitions() {
+        // 1. Variant count.
+        assert_eq!(
+            ConformanceErrorKind::ALL.len(),
+            11,
+            "ConformanceErrorKind variant count drift",
+        );
+
+        // 2. Names snake_case + unique + round-trip.
+        let mut seen = std::collections::HashSet::new();
+        for k in ConformanceErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case: {}",
+                k,
+                m.name
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+            assert_eq!(ConformanceErrorKind::from_name(m.name), Some(*k));
+        }
+
+        // 3. Resolution-failure partition — protocol-side surface
+        //    failed to be located.
+        let resolution: Vec<_> = ConformanceErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_protocol_resolution)
+            .copied()
+            .collect();
+        assert_eq!(
+            resolution,
+            vec![
+                ConformanceErrorKind::ProtocolNotFound,
+                ConformanceErrorKind::SuperprotocolNotImplemented,
+            ],
+        );
+
+        // 4. Missing-member partition — required member absent.
+        let missing: Vec<_> = ConformanceErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_missing_member)
+            .copied()
+            .collect();
+        assert_eq!(
+            missing,
+            vec![
+                ConformanceErrorKind::MissingMethod,
+                ConformanceErrorKind::MissingAssociatedType,
+                ConformanceErrorKind::MissingAssociatedConst,
+            ],
+        );
+
+        // 5. Member-mismatch partition — present but non-conformant.
+        let mismatch: Vec<_> = ConformanceErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_member_mismatch)
+            .copied()
+            .collect();
+        assert_eq!(
+            mismatch,
+            vec![
+                ConformanceErrorKind::MethodSignatureMismatch,
+                ConformanceErrorKind::AssociatedTypeBoundNotSatisfied,
+                ConformanceErrorKind::AssociatedTypeVarianceMismatch,
+            ],
+        );
+
+        // 6. Cross-cutting invariant: missing-member ⊕
+        //    member-mismatch (a member can't be both missing AND
+        //    mismatched in the same diagnostic).
+        for k in ConformanceErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                !(m.is_missing_member && m.is_member_mismatch),
+                "{:?}: cannot be both missing-member and member-mismatch",
+                k
+            );
+        }
+
+        // 7. Associated-type partition — three variants involve
+        //    associated-type members specifically.
+        let assoc: Vec<_> = ConformanceErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_associated_type)
+            .copied()
+            .collect();
+        assert_eq!(
+            assoc,
+            vec![
+                ConformanceErrorKind::MissingAssociatedType,
+                ConformanceErrorKind::AssociatedTypeBoundNotSatisfied,
+                ConformanceErrorKind::AssociatedTypeVarianceMismatch,
+            ],
+        );
+
+        // 8. Constraint-failure partition.
+        let constraint: Vec<_> = ConformanceErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_constraint_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            constraint,
+            vec![
+                ConformanceErrorKind::NegativeBoundViolation,
+                ConformanceErrorKind::WhereClauseNotSatisfied,
+                ConformanceErrorKind::AssociatedTypeBoundNotSatisfied,
+            ],
+        );
+
+        // 9. Internal-error partition is a singleton — a
+        //    catch-all that should never appear in well-formed
+        //    compilations.
+        let internal: Vec<_> = ConformanceErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_internal)
+            .copied()
+            .collect();
+        assert_eq!(internal, vec![ConformanceErrorKind::InternalError]);
+
+        // 10. Live-payload kind() projection.
+        let err = ConformanceError::ProtocolNotFound {
+            name: "Eq".into(),
+            span: Span::default(),
+        };
+        assert_eq!(err.kind(), ConformanceErrorKind::ProtocolNotFound);
+    }
+
+    /// Drift-pin: `ProtocolErrorKind` discriminator projection.
+    /// Five classifier flags partition 10 variants — pins the
+    /// resolution / bound / conflict / detailed-bundle / graph
+    /// classification axes used by the diagnostic surface.
+    #[test]
+    fn meta_pin_protocol_error_kind_round_trip_and_partitions() {
+        // 1. Variant count.
+        assert_eq!(
+            ProtocolErrorKind::ALL.len(),
+            10,
+            "ProtocolErrorKind variant count drift",
+        );
+
+        // 2. Names + round-trip.
+        let mut seen = std::collections::HashSet::new();
+        for k in ProtocolErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case: {}",
+                k,
+                m.name
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+            assert_eq!(ProtocolErrorKind::from_name(m.name), Some(*k));
+        }
+
+        // 3. Resolution-failure partition.
+        let resolution: Vec<_> = ProtocolErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_resolution_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            resolution,
+            vec![
+                ProtocolErrorKind::MethodNotFound,
+                ProtocolErrorKind::AssociatedTypeNotDefined,
+                ProtocolErrorKind::ProtocolNotFound,
+                ProtocolErrorKind::AssociatedTypeNotSpecified,
+            ],
+        );
+
+        // 4. Bound-failure partition.
+        let bound: Vec<_> = ProtocolErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_bound_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            bound,
+            vec![
+                ProtocolErrorKind::NotImplemented,
+                ProtocolErrorKind::BoundNotSatisfied,
+                ProtocolErrorKind::NegativeBoundViolated,
+            ],
+        );
+
+        // 5. Conflict-singleton partition.
+        let conflict: Vec<_> = ProtocolErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_conflict)
+            .copied()
+            .collect();
+        assert_eq!(conflict, vec![ProtocolErrorKind::ConflictingImpls]);
+
+        // 6. Detailed-bundle singleton — the variant carrying
+        //    `ProtocolViolations` for the IDE surface.
+        let bundle: Vec<_> = ProtocolErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_detailed_bundle)
+            .copied()
+            .collect();
+        assert_eq!(bundle, vec![ProtocolErrorKind::Violations]);
+
+        // 7. Graph-property singleton — cycle detection on the
+        //    inheritance DAG.
+        let graph: Vec<_> = ProtocolErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_graph_property)
+            .copied()
+            .collect();
+        assert_eq!(graph, vec![ProtocolErrorKind::CyclicInheritance]);
+
+        // 8. Each variant flips at most one of the five
+        //    classifier flags — they're pairwise disjoint by
+        //    design.  Pinned so a new variant flipping two flags
+        //    would surface here.
+        for k in ProtocolErrorKind::ALL {
+            let m = k.meta();
+            let count = (m.is_resolution_failure as u32)
+                + (m.is_bound_failure as u32)
+                + (m.is_conflict as u32)
+                + (m.is_detailed_bundle as u32)
+                + (m.is_graph_property as u32);
+            assert!(
+                count <= 1,
+                "{:?}: flips {} classifier flags (must be ≤1)",
+                k,
+                count
+            );
+        }
+    }
+
+    /// Drift-pin: `UnifiedProtocolError::inner_kind_name` exposes
+    /// the inner error's discriminator-kind name for wrapper
+    /// variants.  This couples the unified surface to the
+    /// inner-error kind projections so renaming an inner kind
+    /// surfaces here as a string-shape failure.
+    #[test]
+    fn meta_pin_unified_protocol_error_inner_kind_name() {
+        let p = UnifiedProtocolError::Protocol(ProtocolError::ProtocolNotFound {
+            name: "Eq".into(),
+        });
+        assert_eq!(p.inner_kind_name(), "protocol/protocol_not_found");
+
+        let c = UnifiedProtocolError::Conformance(ConformanceError::ProtocolNotFound {
+            name: "Eq".into(),
+            span: Span::default(),
+        });
+        assert_eq!(c.inner_kind_name(), "conformance/protocol_not_found");
+
+        let o = UnifiedProtocolError::ObjectSafety(ObjectSafetyError::ReturnsSelf {
+            method_name: "next".into(),
+        });
+        assert_eq!(o.inner_kind_name(), "object_safety/returns_self");
+
+        let n = UnifiedProtocolError::not_implemented("Eq", "Foo");
+        assert_eq!(n.inner_kind_name(), "not_implemented");
+    }
 
     #[test]
     fn test_associated_type_simple() {
