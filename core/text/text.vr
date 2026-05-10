@@ -45,6 +45,7 @@ mount core.intrinsics.runtime.text.{
     text_parse_int, text_parse_float, int_to_text,
     char_to_uppercase, char_to_lowercase,
     text_byte_len,
+    text_as_bytes,
 };
 
 // =============================================================================
@@ -517,13 +518,37 @@ implement Text {
         self
     }
 
+    /// Borrow this Text as a byte slice.
+    ///
+    /// Routes through the `text_as_bytes` intrinsic — the single canonical
+    /// materialisation point that handles all three runtime Text
+    /// representations:
+    ///
+    ///   * **small-string** — bytes packed inside the NaN-boxed Value
+    ///     itself.  No heap object exists; the Verum-level `{ptr, len, cap}`
+    ///     field layout is a fiction at this representation, so reading
+    ///     `self.ptr` / `self.len` via the structural-field path yields
+    ///     garbage.
+    ///   * **builder-layout** — 24-byte heap object holding three
+    ///     NaN-boxed fields `{ptr: Ptr, len: Int, cap: Int}`.  The
+    ///     intrinsic walks the object header and reads the inline
+    ///     payload pointers directly.
+    ///   * **heap-string** — `[ObjectHeader][len:u64][bytes…]` flat
+    ///     layout.  The intrinsic reads `len` from the inline u64 and
+    ///     returns a slice over the trailing byte payload.
+    ///
+    /// The previous lowering — `slice_from_raw_parts(self.ptr, self.len)` —
+    /// only worked for the builder layout *and* required GetF to land
+    /// on the right slot, which it doesn't for small-strings (no slots
+    /// exist) and is unreliable for builder-layout Texts whose ptr
+    /// field is NaN-boxed differently from the assumed raw pointer.
+    /// The intrinsic eliminates that representation-dependence:
+    /// callers see a single consistent `&[Byte]` regardless of how
+    /// the underlying Text was constructed (`Text.new()`, literal,
+    /// `from_utf8_unchecked`, `from_char`, ...).
     @inline(always)
     public fn as_bytes(&self) -> &[Byte] {
-        if self.len == 0 {
-            slice_from_raw_parts(null_ptr(), 0)
-        } else {
-            slice_from_raw_parts(self.ptr, self.len)
-        }
+        text_as_bytes(self)
     }
 
     /// Get raw pointer to bytes.

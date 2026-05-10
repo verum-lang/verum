@@ -367,6 +367,14 @@ pub enum InlineSequenceId {
     FloatToText,
     /// text_byte_len: get byte length of Text
     TextByteLen,
+    /// text_as_bytes: borrow Text as byte slice (FatRef), handling all
+    /// three Text representations — small-string (inline NaN-boxed),
+    /// builder-layout `{ptr, len, cap}` heap object, and heap-string
+    /// `[ObjectHeader][len:u64][bytes...]`. Routes through the runtime
+    /// AsBytes handler (text_extended.rs:196) which is the single
+    /// source of truth for the byte-view materialisation across all
+    /// Text representations.
+    TextAsBytes,
     /// uninit: allocate uninitialized memory on stack
     Uninit,
     /// zeroed: allocate zeroed memory on stack
@@ -1835,6 +1843,16 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TextByteLen),
         mlir_op: Some("verum.text.byte_len"),
         doc: "Get byte length of Text",
+    },
+    Intrinsic {
+        name: "text_as_bytes",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline],
+        param_count: 1,  // &Text
+        return_count: 1, // &[Byte]
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TextAsBytes),
+        mlir_op: Some("verum.text.as_bytes"),
+        doc: "Borrow Text as byte slice (handles all 3 representations: small-string, builder, heap-string)",
     },
     // =========================================================================
     // UTF-8 Intrinsics

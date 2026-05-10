@@ -486,12 +486,6 @@ impl VbcCodegen {
             }
         });
         if let Some(tid) = typed_ok {
-            if std::env::var("VBC_VARIANT_TRACE").is_ok() {
-                eprintln!(
-                    "[VBC_VARIANT_TRACE] emit MakeVariantTyped parent={:?} tid={} tag={} fc={}",
-                    parent_type_name, tid.0, tag, field_count
-                );
-            }
             self.ctx.emit(Instruction::MakeVariantTyped {
                 dst,
                 type_id: tid.0,
@@ -499,21 +493,6 @@ impl VbcCodegen {
                 field_count,
             });
         } else {
-            if std::env::var("VBC_VARIANT_TRACE").is_ok() {
-                let probe_tid = parent_type_name
-                    .and_then(|n| self.type_name_to_id.get(n).copied());
-                let probe_desc = parent_type_name
-                    .and_then(|n| self.type_name_to_id.get(n).copied())
-                    .and_then(|tid| self.types.iter().find(|d| d.id == tid));
-                eprintln!(
-                    "[VBC_VARIANT_TRACE] FALLBACK MakeVariant parent={:?} tid={:?} desc_variants={:?} tag={} fc={}",
-                    parent_type_name,
-                    probe_tid.map(|t| t.0),
-                    probe_desc.map(|d| d.variants.len()),
-                    tag,
-                    field_count,
-                );
-            }
             // Untyped emission — runtime falls back to the global
             // tag-scan in `format_variant_for_print_depth`, which can
             // mis-resolve when sum types share variant tags.  Trace
@@ -12749,8 +12728,23 @@ impl VbcCodegen {
             if let Some(func_info) = self.ctx.lookup_qualified_function(&qualified_rust).cloned() {
                 // If it's a variant constructor, emit MakeVariant instead of Call
                 if let Some(tag) = func_info.variant_tag {
-                    return self
-                        .compile_variant_constructor_with_tag(tag, &verum_common::List::new());
+                    // `parts` is the resolved module-path flatten ending
+                    // in the variant name; the immediate predecessor is
+                    // the parent sum-type name (`LocalPair` in
+                    // `LocalPair.LocalRight`). Forward it to the typed
+                    // emitter so the heap header carries the real parent
+                    // TypeId, not the synthetic `0x8000+tag` sentinel.
+                    let parent_name = if parts.len() >= 2 {
+                        Some(parts[parts.len() - 2].as_str())
+                    } else {
+                        None
+                    };
+                    return self.compile_variant_constructor_with_tag_named_and_parent(
+                        Some(field),
+                        tag,
+                        &verum_common::List::new(),
+                        parent_name,
+                    );
                 }
                 let dest = self.ctx.alloc_temp();
                 if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator {
@@ -12796,8 +12790,20 @@ impl VbcCodegen {
             {
                 // If it's a variant constructor, emit MakeVariant instead of Call
                 if let Some(tag) = func_info.variant_tag {
-                    return self
-                        .compile_variant_constructor_with_tag(tag, &verum_common::List::new());
+                    // Same parent-name extraction as the Rust-style
+                    // branch above — `parts[len-2]` is the syntactic
+                    // parent of the trailing variant segment.
+                    let parent_name = if parts.len() >= 2 {
+                        Some(parts[parts.len() - 2].as_str())
+                    } else {
+                        None
+                    };
+                    return self.compile_variant_constructor_with_tag_named_and_parent(
+                        Some(field),
+                        tag,
+                        &verum_common::List::new(),
+                        parent_name,
+                    );
                 }
                 let dest = self.ctx.alloc_temp();
                 if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator {
@@ -20727,6 +20733,43 @@ impl VbcCodegen {
                 self.emit_intrinsic_library_call("verum_text_byte_len", args, dest)?;
             }
 
+            InlineSequenceId::TextAsBytes => {
+                // Borrow Text as byte slice — routes through the
+                // TextSubOpcode::AsBytes runtime handler that
+                // correctly materialises a FatRef from all three
+                // Text layouts (small-string, builder, heap-string).
+                //
+                // Previously `Text.as_bytes()` was lowered inline as
+                // `slice_from_raw_parts(self.ptr, self.len)`, two
+                // separate GetF reads + a generic RefSliceRaw — which
+                // mis-resolves the ptr/len for small-string Texts
+                // (the NaN-box doesn't have separate ptr/len slots)
+                // and the builder-layout heap object (where GetF on
+                // a struct-field index doesn't pick up the inline
+                // payload bytes the way the layout-aware AsBytes
+                // handler does). The fix routes through the single
+                // canonical materialisation point.
+                if !args.is_empty() {
+                    let mut operands: Vec<u8> = Vec::with_capacity(4);
+                    let push_reg = |operands: &mut Vec<u8>, r: Reg| {
+                        if r.is_short() {
+                            operands.push(r.0 as u8);
+                        } else {
+                            operands.push(0x80 | ((r.0 >> 8) as u8));
+                            operands.push(r.0 as u8);
+                        }
+                    };
+                    push_reg(&mut operands, dest);
+                    push_reg(&mut operands, args[0]);
+                    self.ctx.emit(Instruction::TextExtended {
+                        sub_op: crate::instruction::TextSubOpcode::AsBytes as u8,
+                        operands,
+                    });
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
+            }
+
             // Random number generation - use FFI extended sub-opcodes for platform-specific impl
             InlineSequenceId::RandomU64 => {
                 // Format: dst:reg
@@ -24009,6 +24052,10 @@ impl VbcCodegen {
             }),
             "verum_text_byte_len" => self.ctx.emit(Instruction::TextExtended {
                 sub_op: TextSubOpcode::ByteLen as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_text_as_bytes" => self.ctx.emit(Instruction::TextExtended {
+                sub_op: TextSubOpcode::AsBytes as u8,
                 operands: encode_operands(dest, args),
             }),
             "verum_text_char_len" => self.ctx.emit(Instruction::TextExtended {

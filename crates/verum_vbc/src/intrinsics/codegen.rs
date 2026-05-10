@@ -691,6 +691,7 @@ impl<'a> IntrinsicCodegen<'a> {
                 self.emit_text_extended(TextSubOpcode::FloatToText, args)
             }
             InlineSequenceId::TextByteLen => self.emit_text_extended(TextSubOpcode::ByteLen, args),
+            InlineSequenceId::TextAsBytes => self.emit_text_extended(TextSubOpcode::AsBytes, args),
             // Random number generation - zero-cost typed dispatch via TensorExtSubOpcode
             InlineSequenceId::RandomU64 => {
                 self.emit_tensor_ext_extended(TensorExtSubOpcode::RandomU64, args)
@@ -1109,6 +1110,12 @@ impl<'a> IntrinsicCodegen<'a> {
             // path defers to the runtime extern call.
             InlineSequenceId::PermissionStatsRead => None,
             InlineSequenceId::PermissionStatsClear => None,
+            // `TextAsBytes` exposes the byte-buffer view of a Text
+            // value; the conversion happens via a runtime helper
+            // at call time rather than as an inline VBC opcode
+            // sequence.  MLIR codegen defers to the extern call,
+            // matching the Permission* siblings above.
+            InlineSequenceId::TextAsBytes => None,
         }
     }
 
