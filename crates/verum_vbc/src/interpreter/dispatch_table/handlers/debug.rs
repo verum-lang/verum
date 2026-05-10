@@ -397,13 +397,34 @@ fn format_variant_for_print_depth(
         let tag = *tag_ptr;
         let field_count = *tag_ptr.add(1) as usize;
 
-        // Type-scoped variant-name lookup. Falls back to the legacy
-        // global scan ONLY when the type-scoped lookup misses (header
-        // type_id == UNIT — happens for runtime-synthesised values
-        // that don't carry a real type_id, like raw closure invocations
-        // from the FFI bridge). This preserves the legacy display
-        // for those edge cases without compromising correctness for
-        // user-defined sum types, which always carry a real type_id.
+        // Type-scoped variant-name lookup.  When the header carries a
+        // real TypeId (the typed-emission path's
+        // `MakeVariantTyped { type_id: <user-type-id>, ... }`), the
+        // descriptor walk finds the parent type in O(N_types) and the
+        // tag-scan inside the descriptor's variants list is at most
+        // N_variants_of_that_type — both bounded by the module's
+        // declared type table.
+        //
+        // When the header carries a SYNTHETIC type_id
+        // (`SYNTHETIC_VARIANT_TYPE_ID_BASE + tag`, emitted by the
+        // legacy `MakeVariant` opcode for cases where codegen couldn't
+        // resolve the parent type), fall through to the global tag-scan
+        // — that's the only correct disambiguation since the synthetic
+        // id deliberately erases the parent.
+        //
+        // Pre-fix the fallback also fired for real-but-unmatched
+        // type_ids (e.g. cross-module variants whose descriptor never
+        // landed in the runtime's type table for this module).  In
+        // that case the global scan picked the FIRST non-protocol
+        // descriptor with a matching tag — typically the wrong one,
+        // surfacing as "ShellError.SpawnFailed" rendering as
+        // "file_write_all" or "Some(3)" rendering as
+        // "NonFiniteWeight(3)".  Gating on `is_synthetic_variant_type_id`
+        // keeps the synthetic-id path correct while refusing to guess
+        // for real-but-unmatched ids — they now render as the
+        // anonymous `Variant(tag, ...)` form which, while less
+        // descriptive, is at least not silently misleading.
+        use verum_common::layout::is_synthetic_variant_type_id;
         let name_from_metadata = state
             .module
             .types
@@ -419,27 +440,18 @@ fn format_variant_for_print_depth(
                 })
             })
             .or_else(|| {
-                // Fallback: scoped scan limited to sum-type
-                // descriptors. `MakeVariant` synthesises a sentinel
-                // type_id of `0x8000 + tag`, so the type-scoped
-                // lookup above misses for every variant emitted via
-                // that path; we then walk the type table looking for
-                // a sum-kind type with a matching variant.
-                //
-
+                if !is_synthetic_variant_type_id(type_id.0) {
+                    return None;
+                }
                 // CRITICAL: Protocol-kind types ALSO carry per-method
                 // entries in their `variants` list (registered at
                 // `vbc/codegen/mod.rs:1144` as the dyn: dispatch
                 // vtable keying — method NAMES are stored as
                 // variants whose `tag` is the method's index in
-                // `ctx_decl.methods`). Including them in this fallback
-                // walk causes a sum-type variant tag (e.g.
-                // `ShellError.SpawnFailed` tag=1) to misread as a
-                // protocol method name (e.g. `file_write_all` for the
-                // RuntimeIo context's 7th method) — the bug that
-                // produced "file_write_all(echo hello, …)" instead
-                // of the proper "SpawnFailed(echo hello, …)" display
-                // for shell-script panics. Filter them out.
+                // `ctx_decl.methods`).  Including them in this
+                // fallback walk causes a sum-type variant tag to
+                // misread as a protocol method name.  Filter them
+                // out.
                 use crate::types::TypeKind;
                 state
                     .module
