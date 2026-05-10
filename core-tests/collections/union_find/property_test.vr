@@ -1,0 +1,371 @@
+// =============================================================================
+// core-tests/collections/union_find/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for `core.collections.union_find` — both
+// UnionFindInt and the working subset of UnionFind<T>.
+//
+// Laws verified for UnionFindInt (canonical DSU on the dense Int domain):
+//   §1   Reflexivity            ∀i. same_set(i, i)
+//   §2   Symmetry               ∀i,j. same_set(i,j) = same_set(j,i)
+//   §3   Transitivity           ∀i,j,k. same_set(i,j) ∧ same_set(j,k) ⇒ same_set(i,k)
+//   §4   Union-introduces       union(i,j) ⇒ same_set(i,j)
+//   §5   Union return-value     `union` returns true iff (i,j) were in distinct sets
+//   §6   Idempotent union       second union(i,j) returns false; state unchanged
+//   §7   Component-count       Σ component_count + |edges merging distinct sets| = n
+//   §8   Component-size sum    Σ component_size(root_i) = n  for each root i
+//   §9   Find idempotency       find(find(i)) = find(i)
+//   §10  Path compression      after find(i), parent[i] = root(i) (observable as
+//                               unchanged find return value)
+//   §11  Clear restores        clear() ⇒ component_count = n ∧ ∀i. find(i) = i
+//   §12  same_set ⇔ find       same_set(i,j) = (find(i) == find(j))
+//
+// Domain choice: n=8 unless stated otherwise. Cartesian product of
+// (i,j,k) at n=8 is 512 cases — exhaustive within reason.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.union_find.{UnionFindInt, UnionFind};
+
+// -----------------------------------------------------------------------------
+// Helper: run `body` over every (i,j) pair in [0..n).
+// -----------------------------------------------------------------------------
+
+fn for_pairs<F: Fn(Int, Int)>(n: Int, body: F) {
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n {
+            body(i, j);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §1  Reflexivity: ∀i. same_set(i, i)
+// =============================================================================
+
+@test
+fn property_int_same_set_reflexive_exhaustive() {
+    let n = 8;
+    let mut uf = UnionFindInt.new(n);
+    let mut i = 0;
+    while i < n {
+        assert(uf.same_set(i, i));
+        i = i + 1;
+    }
+}
+
+@test
+fn property_int_same_set_reflexive_after_unions() {
+    let n = 6;
+    let mut uf = UnionFindInt.new(n);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(2, 3);
+    let _ = uf.union(4, 5);
+    let mut i = 0;
+    while i < n {
+        assert(uf.same_set(i, i));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §2  Symmetry: ∀i,j. same_set(i,j) = same_set(j,i)
+// =============================================================================
+
+@test
+fn property_int_same_set_symmetric_after_unions() {
+    let n = 6;
+    let mut uf = UnionFindInt.new(n);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(2, 3);
+    let _ = uf.union(4, 0);
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n {
+            assert_eq(uf.same_set(i, j), uf.same_set(j, i));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §3  Transitivity: same_set(i,j) ∧ same_set(j,k) ⇒ same_set(i,k)
+// =============================================================================
+
+@test
+fn property_int_same_set_transitive_exhaustive_n6() {
+    let n = 6;
+    let mut uf = UnionFindInt.new(n);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(1, 2);
+    let _ = uf.union(3, 4);
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n {
+            let mut k = 0;
+            while k < n {
+                if uf.same_set(i, j) && uf.same_set(j, k) {
+                    assert(uf.same_set(i, k));
+                }
+                k = k + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §4  Union-introduces equivalence: union(i,j) ⇒ same_set(i,j)
+// =============================================================================
+
+@test
+fn property_int_union_implies_same_set() {
+    let n = 8;
+    let mut uf = UnionFindInt.new(n);
+    let mut i = 0;
+    while i < n - 1 {
+        let _ = uf.union(i, i + 1);
+        assert(uf.same_set(i, i + 1));
+        i = i + 1;
+    }
+    // Whole structure now one component → every pair same_set.
+    let mut a = 0;
+    while a < n {
+        let mut b = 0;
+        while b < n {
+            assert(uf.same_set(a, b));
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+}
+
+// =============================================================================
+// §5  Union return-value: returns true iff (i,j) were previously distinct
+// =============================================================================
+
+@test
+fn property_int_union_return_value_partition() {
+    let n = 4;
+    let mut uf = UnionFindInt.new(n);
+    // First time: must be true
+    assert(uf.union(0, 1));
+    // Second time on same logical pair: must be false
+    assert(!uf.union(0, 1));
+    assert(!uf.union(1, 0));
+    // Disjoint: true
+    assert(uf.union(2, 3));
+    // Now (0,1) and (2,3) are different sets — merging is true
+    assert(uf.union(0, 2));
+    // …and any further pairing in the now-merged group is false.
+    assert(!uf.union(1, 3));
+    assert(!uf.union(0, 3));
+    assert(!uf.union(2, 1));
+}
+
+// =============================================================================
+// §6  Idempotent union: second call leaves state unchanged
+// =============================================================================
+
+@test
+fn property_int_idempotent_union_preserves_state() {
+    let mut uf = UnionFindInt.new(5);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(2, 3);
+    let cc_before = uf.component_count();
+    let s0 = uf.component_size(0);
+    let s2 = uf.component_size(2);
+    // Repeat unions
+    let _ = uf.union(0, 1);
+    let _ = uf.union(1, 0);
+    let _ = uf.union(2, 3);
+    assert_eq(uf.component_count(), cc_before);
+    assert_eq(uf.component_size(0), s0);
+    assert_eq(uf.component_size(2), s2);
+}
+
+// =============================================================================
+// §7  Component-count invariant:
+//     Each successful union decrements component_count by exactly 1;
+//     each unsuccessful union leaves it unchanged.
+// =============================================================================
+
+@test
+fn property_int_component_count_invariant_under_union() {
+    let n = 8;
+    let mut uf = UnionFindInt.new(n);
+    let mut expected = n;
+    let mut i = 0;
+    while i < n - 1 {
+        let merged = uf.union(i, i + 1);
+        if merged { expected = expected - 1; }
+        assert_eq(uf.component_count(), expected);
+        i = i + 1;
+    }
+    // n-1 successful unions → 1 component.
+    assert_eq(uf.component_count(), 1);
+}
+
+@test
+fn property_int_component_count_unchanged_on_failed_union() {
+    let mut uf = UnionFindInt.new(5);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(1, 2);
+    let cc = uf.component_count();
+    // (0,1), (0,2), (1,2) all in same set → all return false → count stable.
+    let _ = uf.union(0, 1);
+    let _ = uf.union(0, 2);
+    let _ = uf.union(1, 2);
+    assert_eq(uf.component_count(), cc);
+}
+
+// =============================================================================
+// §8  Component-size sum invariant: ∑ size(root_i) = n.
+// =============================================================================
+
+@test
+fn property_int_component_size_sum_equals_n() {
+    let n = 6;
+    let mut uf = UnionFindInt.new(n);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(2, 3);
+    let _ = uf.union(0, 2);   // merge {0,1,2,3}
+    // Walk every element; root canonicalises duplicates via a Set surrogate
+    // (we use a flag list since Set<Int> may itself be exercised by other
+    // tests in this folder).
+    let mut counted: List<Int> = [];
+    let mut i = 0;
+    while i < n {
+        counted.push(0);
+        i = i + 1;
+    }
+    let mut total = 0;
+    let mut j = 0;
+    while j < n {
+        let r = uf.find(j);
+        if counted[r] == 0 {
+            counted[r] = 1;
+            total = total + uf.component_size(r);
+        }
+        j = j + 1;
+    }
+    assert_eq(total, n);
+}
+
+// =============================================================================
+// §9  Find idempotency: find(find(i)) = find(i)
+// =============================================================================
+
+@test
+fn property_int_find_idempotent_after_unions() {
+    let n = 8;
+    let mut uf = UnionFindInt.new(n);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(2, 3);
+    let _ = uf.union(0, 2);
+    let _ = uf.union(4, 5);
+    let _ = uf.union(6, 7);
+    let mut i = 0;
+    while i < n {
+        let r = uf.find(i);
+        let rr = uf.find(r);
+        assert_eq(r, rr);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §10  Path compression observable invariant — find returns same root
+//      regardless of how many indirections the structure carried before.
+// =============================================================================
+
+@test
+fn property_int_path_compression_stable_root() {
+    let n = 6;
+    let mut uf = UnionFindInt.new(n);
+    // Build a deep chain: 0 -> 1 -> 2 -> 3 -> 4 -> 5
+    let _ = uf.union(0, 1);
+    let _ = uf.union(1, 2);
+    let _ = uf.union(2, 3);
+    let _ = uf.union(3, 4);
+    let _ = uf.union(4, 5);
+    // First find triggers compression along the chain.
+    let r0 = uf.find(0);
+    // Subsequent finds must agree exactly.
+    let mut i = 0;
+    while i < n {
+        assert_eq(uf.find(i), r0);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §11  Clear restores singleton state.
+// =============================================================================
+
+@test
+fn property_int_clear_restores_singletons() {
+    let n = 7;
+    let mut uf = UnionFindInt.new(n);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(2, 3);
+    let _ = uf.union(0, 4);
+    let _ = uf.union(5, 6);
+    uf.clear();
+    assert_eq(uf.component_count(), n);
+    let mut i = 0;
+    while i < n {
+        assert_eq(uf.find(i), i);
+        assert_eq(uf.component_size(i), 1);
+        let mut j = 0;
+        while j < n {
+            assert_eq(uf.same_set(i, j), i == j);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §12  same_set definition: same_set(i,j) ⇔ find(i) == find(j)
+// =============================================================================
+
+@test
+fn property_int_same_set_iff_find_equal() {
+    let n = 5;
+    let mut uf = UnionFindInt.new(n);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(2, 3);
+    let _ = uf.union(0, 2);
+    let mut i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n {
+            let lhs = uf.same_set(i, j);
+            let rhs = uf.find(i) == uf.find(j);
+            assert_eq(lhs, rhs);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §13  Generic UnionFind<Int> — same_set after union is currently blocked
+//      by Map.get / Maybe-match dispatch defects (see audit.md §3.1, 3.3).
+//      Once those close, restore the laws below.
+// =============================================================================
+
+// The post-union same_set / union-return-value invariants for the generic
+// path are pinned in regression_test.vr. They surface a runtime dispatch
+// failure when find() hits the `match map.get(...) { Some/None }` body.
+
+fn main() {}

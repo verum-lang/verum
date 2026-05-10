@@ -1,0 +1,197 @@
+// =============================================================================
+// core-tests/collections/union_find/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions surfaced while building the union_find conformance suite.
+//
+// Each `@ignore`d test reproduces a specific stdlib / language defect in the
+// minimum form possible. Re-enable each one by removing the `@ignore` once the
+// underlying defect is closed (cross-references to audit.md §X.Y carry the
+// fix-side detail).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.union_find.{UnionFindInt, UnionFind};
+mount core.collections.map.Map;
+
+// =============================================================================
+// §A  Generic UnionFind<Text> — make() idempotency on duplicate keys.
+//
+//   Defect class: Map.contains_key takes K by value, but union_find.vr:183
+//   passes &K.  At runtime the parameter mismatch silently makes
+//   contains_key always return false → make() inserts duplicates instead of
+//   short-circuiting on the second call.
+//
+//   Diagnosis pinned: see audit.md §3.2.
+//   Tracking task: "Audit: Map.contains_key(&K) silently returns false".
+// =============================================================================
+
+@ignore
+@test
+fn regression_uf_generic_make_idempotent_on_duplicate_key() {
+    let mut uf: UnionFind<Int> = UnionFind.new();
+    uf.make(7);
+    uf.make(7);
+    uf.make(7);
+    // Currently fails: len() == 3 (each make inserts) instead of 1.
+    assert_eq(uf.len(), 1);
+    assert_eq(uf.component_count(), 1);
+}
+
+// =============================================================================
+// §B  Generic UnionFind<T> — component_size on a registered key.
+//
+//   Defect class: union_find.vr:212 / 230 use
+//   `match self.size.get(&x) { Some(n) => *n, None => 1 }` — but
+//   `Map.get` returns V (lossy 0-on-miss), NOT `Maybe<V>`.  The match is
+//   typecheck-lenient-skipped and the runtime panics with
+//   "Maybe.is_some not found on Int" or returns wrong values.
+//
+//   Diagnosis pinned: audit.md §3.1.
+//   Tracking task: "Audit: Map.get returns V (not Maybe<V>) — root API defect".
+// =============================================================================
+
+@ignore
+@test
+fn regression_uf_generic_component_size_after_union() {
+    let mut uf: UnionFind<Int> = UnionFind.new();
+    let _ = uf.union(1, 2);
+    let _ = uf.union(2, 3);
+    // Expected: size == 3.  Currently fails because the
+    // match-on-Map.get pattern is broken.
+    assert_eq(uf.component_size(&1), 3);
+}
+
+// =============================================================================
+// §C  Map.contains_key(&K) silently returns false.
+//
+//   Minimal repro outside union_find: one insert, one contains_key with a
+//   reference query. The owned-K path works; the &K path doesn't.
+// =============================================================================
+
+@ignore
+@test
+fn regression_map_contains_key_ref_int() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(7, 70);
+    let k = 7;
+    // Currently fails: returns false despite key being present.
+    assert(m.contains_key(&k));
+}
+
+@ignore
+@test
+fn regression_map_contains_key_ref_text_literal() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("k", 7);
+    let k: Text = "k";
+    // Currently fails.
+    assert(m.contains_key(&k));
+}
+
+// =============================================================================
+// §D  Map.get_optional / Map.get_key_value not found at runtime.
+//
+//   Defect class: lenient compile-time skip drops the method from the
+//   dispatch table.  Runtime panic:
+//   "method 'Map.get_optional' not found on receiver of runtime kind `Object`".
+//
+//   Tracking task: "Audit: lenient-skip swallows Map.get_optional/get_key_value".
+// =============================================================================
+
+@ignore
+@test
+fn regression_map_get_optional_int_keyed() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(7, 70);
+    // Currently panics with "method not found".
+    let v = m.get_optional(7);
+    assert(v.is_some());
+    assert_eq(v.unwrap(), 70);
+}
+
+@ignore
+@test
+fn regression_map_get_key_value_int_keyed() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.insert(7, 70);
+    // Currently panics with "method not found".
+    let v = m.get_key_value(&7);
+    assert(v.is_some());
+}
+
+// =============================================================================
+// §E  Text.from(literal) yields a Text whose as_bytes() returns empty.
+//
+//   The struct field `len` is set correctly (5 for "alpha"), but
+//   `as_bytes()` returns a 0-length slice, breaking byte-wise Eq, Hash,
+//   and every Map<Text, V> built via the Text.from(...) construction path.
+//
+//   Tracking task: "Audit: Text.from_utf8_unchecked produces zero-length
+//   as_bytes() despite len field".
+// =============================================================================
+
+@ignore
+@test
+fn regression_text_from_as_bytes_length_matches_len() {
+    let a = Text.from("alpha");
+    assert_eq(a.len(), 5);
+    let bytes = a.as_bytes();
+    // Currently fails: bytes.len() == 0 even though a.len() == 5.
+    assert_eq(bytes.len(), 5);
+}
+
+@ignore
+@test
+fn regression_text_from_byte_zero_is_correct() {
+    let a = Text.from("k");
+    let bytes = a.as_bytes();
+    // Currently panics: "Slice index out of bounds: index 0 but length is 0".
+    assert_eq(bytes[0], 0x6B as Byte);
+}
+
+@ignore
+@test
+fn regression_text_literal_eq_method_two_literals() {
+    // Even two byte-identical literal Texts return false from .eq() —
+    // method dispatch lands on the wrong (structural) eq.
+    let a: Text = "k";
+    let b: Text = "k";
+    assert(a.eq(&b));
+}
+
+// =============================================================================
+// §F  Generic UnionFind<Int> — same_set / find after union.
+//
+//   `find(&T)` body matches `self.parent.get(x)` against `Some/None` patterns,
+//   but `Map.get` returns `V` (Int).  At runtime the dispatch panics, often
+//   with a confusing surface error like "method 'List.sort' not found on
+//   Int" because the type-confusion cascades through the calling code.
+//
+//   See audit.md §3.1 for the root cause.
+// =============================================================================
+
+@ignore
+@test
+fn regression_uf_generic_int_same_set_after_union() {
+    let mut uf: UnionFind<Int> = UnionFind.new();
+    let _ = uf.union(1, 2);
+    let _ = uf.union(3, 4);
+    // Currently panics inside same_set → find → match-on-Map.get path.
+    assert(uf.same_set(&1, &2));
+    assert(uf.same_set(&3, &4));
+    assert(!uf.same_set(&1, &3));
+}
+
+@ignore
+@test
+fn regression_uf_generic_int_merge_two_sets_returns_true() {
+    let mut uf: UnionFind<Int> = UnionFind.new();
+    assert(uf.union(1, 2));
+    assert(uf.union(3, 4));
+    // Currently panics on the third call when the two existing sets must
+    // be merged — find() hits the Maybe-match dispatch failure.
+    assert(uf.union(1, 3));
+}
+
+fn main() {}

@@ -1,0 +1,147 @@
+// =============================================================================
+// core-tests/collections/union_find/integration_test.vr
+// =============================================================================
+//
+// Integration tests for `core.collections.union_find` — DSU alongside the
+// rest of stdlib. Focuses on UnionFindInt (which currently works end-to-end
+// in the interpreter; the generic UnionFind<T> integration is gated on
+// audit.md §3 fixes).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.union_find.{UnionFindInt, UnionFind};
+
+// =============================================================================
+// §1  Kruskal-style "merge edges, count components" workflow
+// =============================================================================
+
+/// Edges drawn from a 6-node graph. After processing, we expect the
+/// connected-component count to match the textbook answer.
+@test
+fn integration_kruskal_component_count() {
+    let n = 6;
+    let mut uf = UnionFindInt.new(n);
+    // Edges: (0-1), (1-2), (3-4)  ⇒ components {0,1,2}, {3,4}, {5} → 3 components.
+    let _ = uf.union(0, 1);
+    let _ = uf.union(1, 2);
+    let _ = uf.union(3, 4);
+    assert_eq(uf.component_count(), 3);
+    assert(uf.same_set(0, 2));
+    assert(uf.same_set(3, 4));
+    assert(!uf.same_set(0, 5));
+}
+
+// =============================================================================
+// §2  Equivalence-class partition recovery
+//
+// Build a partition from union operations, then read it back as a list of
+// (root, members) — exercising find + component_size + iteration.
+// =============================================================================
+
+@test
+fn integration_partition_recovery() {
+    let n = 8;
+    let mut uf = UnionFindInt.new(n);
+    // Two cliques: {0,1,2,3} and {4,5,6,7}
+    let _ = uf.union(0, 1);
+    let _ = uf.union(1, 2);
+    let _ = uf.union(2, 3);
+    let _ = uf.union(4, 5);
+    let _ = uf.union(5, 6);
+    let _ = uf.union(6, 7);
+    assert_eq(uf.component_count(), 2);
+    // Each side has size 4
+    assert_eq(uf.component_size(0), 4);
+    assert_eq(uf.component_size(4), 4);
+    // Cross-side membership
+    assert(!uf.same_set(0, 4));
+    assert(!uf.same_set(3, 7));
+}
+
+// =============================================================================
+// §3  Composition with List — produce a list of root indices
+// =============================================================================
+
+@test
+fn integration_root_pairs_after_two_unions() {
+    let n = 5;
+    let mut uf = UnionFindInt.new(n);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(2, 3);
+    // Within each merged pair, the root is shared.
+    assert_eq(uf.find(0), uf.find(1));
+    assert_eq(uf.find(2), uf.find(3));
+    // Node 4 has no edges — it is its own root.
+    assert_eq(uf.find(4), 4);
+    // Pairs are still distinct.
+    assert(!uf.same_set(0, 2));
+    assert(!uf.same_set(1, 3));
+}
+
+// =============================================================================
+// §4  Repeated clear / re-union cycle (sanity)
+// =============================================================================
+
+@test
+fn integration_clear_reuse_cycle() {
+    let mut uf = UnionFindInt.new(4);
+    let mut iter = 0;
+    while iter < 3 {
+        let _ = uf.union(0, 1);
+        let _ = uf.union(2, 3);
+        assert_eq(uf.component_count(), 2);
+        uf.clear();
+        assert_eq(uf.component_count(), 4);
+        iter = iter + 1;
+    }
+}
+
+// =============================================================================
+// §5  Length protocol — `len` works as a free function and as a method
+// =============================================================================
+
+@test
+fn integration_length_method_int() {
+    let uf = UnionFindInt.new(7);
+    assert_eq(uf.len(), 7);
+}
+
+@test
+fn integration_length_method_generic_int_keyed() {
+    let mut uf: UnionFind<Int> = UnionFind.new();
+    let _ = uf.union(1, 2);
+    let _ = uf.union(3, 4);
+    assert_eq(uf.len(), 4);
+}
+
+// =============================================================================
+// §6  Stress — many disjoint unions then chain-merge
+// =============================================================================
+
+@test
+fn integration_stress_chain_then_merge() {
+    let n = 32;
+    let mut uf = UnionFindInt.new(n);
+    // Start: pair up adjacent elements → 16 components.
+    let mut i = 0;
+    while i < n {
+        let _ = uf.union(i, i + 1);
+        i = i + 2;
+    }
+    assert_eq(uf.component_count(), 16);
+    // Chain-merge the pairs → 1 component.
+    let mut j = 0;
+    while j + 2 < n {
+        let _ = uf.union(j, j + 2);
+        j = j + 2;
+    }
+    assert_eq(uf.component_count(), 1);
+    let r = uf.find(0);
+    let mut k = 1;
+    while k < n {
+        assert_eq(uf.find(k), r);
+        k = k + 1;
+    }
+}
+
+fn main() {}
