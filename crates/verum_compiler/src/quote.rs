@@ -4508,6 +4508,70 @@ pub enum GroupDelimiter {
     Bracket,
 }
 
+/// Per-variant projection for [`GroupDelimiter`].
+///
+/// `name` is the canonical short identifier accepted by `from_str` /
+/// returned by `as_str`. `open` / `close` are the bracket characters
+/// — preserving these in the meta lets diagnostic / formatter passes
+/// reconstruct the surface form without re-pattern-matching.
+#[derive(Debug, Clone, Copy)]
+pub struct GroupDelimiterMeta {
+    pub name: &'static str,
+    pub open: char,
+    pub close: char,
+}
+
+impl GroupDelimiter {
+    pub const ALL: &'static [Self] =
+        &[Self::Parenthesis, Self::Brace, Self::Bracket];
+
+    pub const fn meta(self) -> GroupDelimiterMeta {
+        match self {
+            Self::Parenthesis => GroupDelimiterMeta {
+                name: "parenthesis",
+                open: '(',
+                close: ')',
+            },
+            Self::Brace => GroupDelimiterMeta {
+                name: "brace",
+                open: '{',
+                close: '}',
+            },
+            Self::Bracket => GroupDelimiterMeta {
+                name: "bracket",
+                open: '[',
+                close: ']',
+            },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Opening bracket character (`(`, `{`, or `[`).
+    #[inline]
+    pub const fn open_char(&self) -> char {
+        self.meta().open
+    }
+
+    /// Closing bracket character (`)`, `}`, or `]`).
+    #[inline]
+    pub const fn close_char(&self) -> char {
+        self.meta().close
+    }
+}
+
 // ============================================================================
 // Stringify and format helpers
 // ============================================================================
@@ -5578,5 +5642,34 @@ mod tests {
 
         let stream = ref_type.into_token_stream();
         assert!(stream.len() >= 2); // & Int
+    }
+
+    #[test]
+    fn meta_pin_group_delimiter_round_trip_and_bracket_chars() {
+        assert_eq!(GroupDelimiter::ALL.len(), 3);
+        for v in GroupDelimiter::ALL {
+            let s = v.as_str();
+            assert_eq!(GroupDelimiter::from_str(s), Some(*v));
+        }
+        // Bracket pairs are asymmetric — pinned exactly.
+        assert_eq!(GroupDelimiter::Parenthesis.open_char(), '(');
+        assert_eq!(GroupDelimiter::Parenthesis.close_char(), ')');
+        assert_eq!(GroupDelimiter::Brace.open_char(), '{');
+        assert_eq!(GroupDelimiter::Brace.close_char(), '}');
+        assert_eq!(GroupDelimiter::Bracket.open_char(), '[');
+        assert_eq!(GroupDelimiter::Bracket.close_char(), ']');
+        // Cross-pin: open and close are always distinct (no
+        // self-paired bracket); each variant uses ASCII printable
+        // characters.
+        for v in GroupDelimiter::ALL {
+            assert_ne!(
+                v.open_char(),
+                v.close_char(),
+                "GroupDelimiter::{:?}: open/close must differ",
+                v
+            );
+            assert!(v.open_char().is_ascii());
+            assert!(v.close_char().is_ascii());
+        }
     }
 }
