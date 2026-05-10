@@ -13,44 +13,121 @@
 //! reproduces the old hard-coded behaviour, so existing code paths continue
 //! to work even when the client sends no init options.
 
+use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 use std::time::Duration;
 
 /// Validation mode requested by the client — caps per-call SMT latency.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Canonical home for the validator/initialize-handler/JSON-wire
+/// surface.  `refinement_validation::ValidationMode` re-exports
+/// this type rather than defining its own — pre-collapse the two
+/// were structural duplicates that an identity-shape mapper at the
+/// `apply_config` boundary kept in sync, with a per-mode
+/// `cfg.smt_timeout` fallback baked into the `Complete` arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ValidationMode {
     /// `<100ms` — suitable for on-type validation.
     Quick,
     /// `<1s` — suitable for on-save validation.
     Thorough,
-    /// Unlimited — reserved for CI/CD, not used by the LSP server directly.
+    /// Unlimited — reserved for CI/CD invocations that don't need
+    /// to fit inside a typical editor budget.  Per-call timeout
+    /// falls back to the configured `cfg.smt_timeout` (typically
+    /// tens of seconds) instead of a hardcoded short bound.  Pre-
+    /// fix the validator's `mode_to_timeout` silently normalised
+    /// `Complete` to `Thorough`, so clients that set
+    /// `verum.lsp.validationMode = "complete"` got the 1 s
+    /// Thorough timeout instead of the documented unlimited
+    /// latency.
     Complete,
 }
 
+/// Static fact-pack for a [`ValidationMode`] — pinned via the
+/// `meta_pin_validation_mode` drift test so the
+/// editor-budget / on-save-budget / CI-budget classification is
+/// kept in lock-step with `mode_to_timeout` consumers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ValidationModeMeta {
+    /// Canonical lowercase wire form — matches the JSON
+    /// `verum.lsp.validationMode` value.  Same surface as
+    /// `as_str()`.
+    pub name: &'static str,
+    /// Hard upper bound on per-call validator latency.  `None`
+    /// for unlimited (Complete falls back to the runtime-
+    /// configured `cfg.smt_timeout`).
+    pub fixed_timeout: Option<Duration>,
+    /// Whether this mode is suitable for the *on-type*
+    /// validation path (the keystroke-budget surface).
+    pub fits_on_type_budget: bool,
+    /// Whether this mode is suitable for the *on-save* path.
+    pub fits_on_save_budget: bool,
+    /// Whether this mode unlocks CI-grade verification —
+    /// unlimited timeout, intended for batch invocations.
+    pub is_ci_grade: bool,
+}
+
 impl ValidationMode {
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "quick" => Some(Self::Quick),
-            "thorough" => Some(Self::Thorough),
-            "complete" => Some(Self::Complete),
-            _ => None,
+    /// All variants in declaration order — drives drift-pin
+    /// tests and any downstream surface that enumerates the
+    /// full mode set.
+    pub const ALL: &'static [ValidationMode] = &[
+        ValidationMode::Quick,
+        ValidationMode::Thorough,
+        ValidationMode::Complete,
+    ];
+
+    /// Static fact-pack — the partition table behind
+    /// classification consumers (timeout selector, IDE warning
+    /// gate, CI ramp).
+    pub const fn meta(self) -> ValidationModeMeta {
+        match self {
+            ValidationMode::Quick => ValidationModeMeta {
+                name: "quick",
+                fixed_timeout: Some(Duration::from_millis(100)),
+                fits_on_type_budget: true,
+                fits_on_save_budget: true,
+                is_ci_grade: false,
+            },
+            ValidationMode::Thorough => ValidationModeMeta {
+                name: "thorough",
+                fixed_timeout: Some(Duration::from_secs(1)),
+                fits_on_type_budget: false,
+                fits_on_save_budget: true,
+                is_ci_grade: false,
+            },
+            ValidationMode::Complete => ValidationModeMeta {
+                name: "complete",
+                fixed_timeout: None,
+                fits_on_type_budget: false,
+                fits_on_save_budget: false,
+                is_ci_grade: true,
+            },
         }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        ValidationMode::ALL
+            .iter()
+            .copied()
+            .find(|m| m.meta().name == s)
     }
 
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Quick => "quick",
-            Self::Thorough => "thorough",
-            Self::Complete => "complete",
-        }
+        self.meta().name
     }
 
+    /// Returns the hard upper bound on per-call validator
+    /// latency, or a 10-minute placeholder for `Complete` so the
+    /// legacy `Duration`-returning surface still works for
+    /// callers that don't have access to a `cfg.smt_timeout`
+    /// fallback.  Prefer reading `meta().fixed_timeout` directly
+    /// when the caller can do its own None-handling.
     pub fn timeout(self) -> Duration {
-        match self {
-            Self::Quick => Duration::from_millis(100),
-            Self::Thorough => Duration::from_secs(1),
-            Self::Complete => Duration::from_secs(600),
-        }
+        self.meta()
+            .fixed_timeout
+            .unwrap_or(Duration::from_secs(600))
     }
 }
 
@@ -314,6 +391,103 @@ impl SharedLspConfig {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Drift-pin: `ValidationMode` is the canonical home for the
+    /// validator/initialize-handler/JSON-wire surface — pre-
+    /// collapse the same 3-variant enum lived in
+    /// `refinement_validation` too, kept in sync via an
+    /// identity-shape mapper.  This test pins the partition table
+    /// + wire-form round-trip + alias contract.
+    #[test]
+    fn meta_pin_validation_mode_round_trip_and_partitions() {
+        // 1. Variant count + names + as_str round-trip.
+        assert_eq!(ValidationMode::ALL.len(), 3);
+        let names: Vec<_> =
+            ValidationMode::ALL.iter().map(|m| m.meta().name).collect();
+        assert_eq!(names, vec!["quick", "thorough", "complete"]);
+
+        for m in ValidationMode::ALL {
+            assert_eq!(ValidationMode::from_str(m.as_str()), Some(*m));
+            assert_eq!(m.as_str(), m.meta().name);
+        }
+        assert_eq!(ValidationMode::from_str("nope"), None);
+
+        // 2. Editor-budget partition — `Quick` is the singleton
+        //    that fits the on-type budget; `Thorough` and
+        //    `Quick` both fit on-save; `Complete` is the
+        //    singleton CI-grade band.
+        let on_type: Vec<_> = ValidationMode::ALL
+            .iter()
+            .filter(|m| m.meta().fits_on_type_budget)
+            .copied()
+            .collect();
+        assert_eq!(on_type, vec![ValidationMode::Quick]);
+
+        let on_save: Vec<_> = ValidationMode::ALL
+            .iter()
+            .filter(|m| m.meta().fits_on_save_budget)
+            .copied()
+            .collect();
+        assert_eq!(
+            on_save,
+            vec![ValidationMode::Quick, ValidationMode::Thorough],
+        );
+
+        let ci: Vec<_> = ValidationMode::ALL
+            .iter()
+            .filter(|m| m.meta().is_ci_grade)
+            .copied()
+            .collect();
+        assert_eq!(ci, vec![ValidationMode::Complete]);
+
+        // 3. Cross-cutting: only `Complete` has unlimited
+        //    timeout (None).  The other two carry concrete
+        //    Duration bounds.
+        for m in ValidationMode::ALL {
+            let meta = m.meta();
+            assert_eq!(
+                meta.fixed_timeout.is_none(),
+                meta.is_ci_grade,
+                "{:?}: unlimited-timeout flag must equal CI-grade flag",
+                m,
+            );
+        }
+
+        // 4. JSON wire form is lowercase per
+        //    `serde(rename_all = "lowercase")`.
+        let q: ValidationMode = serde_json::from_str("\"quick\"").unwrap();
+        assert_eq!(q, ValidationMode::Quick);
+        let c: ValidationMode = serde_json::from_str("\"complete\"").unwrap();
+        assert_eq!(c, ValidationMode::Complete);
+
+        // 5. timeout() agrees with meta().fixed_timeout for the
+        //    bounded modes.
+        assert_eq!(
+            ValidationMode::Quick.timeout(),
+            ValidationMode::Quick.meta().fixed_timeout.unwrap(),
+        );
+        assert_eq!(
+            ValidationMode::Thorough.timeout(),
+            ValidationMode::Thorough.meta().fixed_timeout.unwrap(),
+        );
+    }
+
+    /// Alias contract: `refinement_validation::ValidationMode` is
+    /// a `pub use` re-export of `lsp_config::ValidationMode` —
+    /// asserts the two paths refer to the same type so consumers
+    /// can pass values across without an identity-shape mapper.
+    #[test]
+    fn validation_mode_alias_contract() {
+        // Compile-time alias check via assignment.
+        let m: crate::refinement_validation::ValidationMode =
+            ValidationMode::Quick;
+        assert_eq!(m, ValidationMode::Quick);
+
+        // Round-trip through both names.
+        let canonical: ValidationMode = ValidationMode::Complete;
+        let aliased: crate::refinement_validation::ValidationMode = canonical;
+        assert_eq!(aliased, ValidationMode::Complete);
+    }
 
     #[test]
     fn defaults_are_sane() {

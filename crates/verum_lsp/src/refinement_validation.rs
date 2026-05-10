@@ -92,26 +92,21 @@ pub struct QuickFix {
     pub description: Maybe<String>,
 }
 
-/// Quick fix kind
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum QuickFixKind {
-    RuntimeCheck,
-    InlineRefinement,
-    SigmaType,
-    Assertion,
-    WeakenRefinement,
-    PromoteToChecked,
-}
+/// Quick fix kind — re-exported from `crate::quick_fixes` so the
+/// JSON-wire surface and the in-tree fix-builders agree by
+/// construction.  Pre-collapse the two definitions had identical
+/// 6-variant variant lists; they were structural duplicates kept
+/// in sync only by convention.  Tests rely on the alias-contract
+/// pin in `meta_consolidation_pins`.
+pub use crate::quick_fixes::QuickFixKind;
 
-/// Quick fix impact level
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum QuickFixImpact {
-    Safe,
-    Breaking,
-    Unsafe,
-}
+/// Quick fix impact level — re-exported as an alias for the
+/// richer `quick_fixes::FixImpact` (4 variants:
+/// Safe / Breaking / MaybeBreaking / Unsafe).  The local 3-variant
+/// definition was a strict subset; the `MaybeBreaking` band was
+/// already populated by every `quick_fixes::FixImpact` consumer
+/// and is now exposed on the JSON wire too.
+pub type QuickFixImpact = crate::quick_fixes::FixImpact;
 
 /// SMT solver type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,25 +131,12 @@ fn default_validation_mode() -> ValidationMode {
     ValidationMode::Quick
 }
 
-/// Validation mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ValidationMode {
-    Quick,    // <100ms
-    Thorough, // <1s
-    /// Unlimited latency — reserved for CI/CD invocations that
-    /// don't need to fit inside a typical editor budget. The
-    /// per-call timeout falls back to the configured
-    /// `cfg.smt_timeout` (typically tens of seconds) instead of
-    /// a hardcoded short bound. Pre-fix the
-    /// `lsp_config::ValidationMode::Complete` variant was
-    /// silently normalised to `Thorough` at the validator
-    /// boundary, so clients that set
-    /// `verum.lsp.validationMode = "complete"` got the 1s
-    /// Thorough timeout instead of the documented unlimited
-    /// latency.
-    Complete,
-}
+/// Validation mode — re-exported from `crate::lsp_config` so the
+/// initialize-handler / validator / JSON-wire surfaces agree by
+/// construction.  Pre-collapse the two definitions had identical
+/// 3-variant lists kept in sync only by an identity-shape mapper
+/// at the `apply_config` boundary.
+pub use crate::lsp_config::ValidationMode;
 
 /// Result of validateRefinement request
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -421,16 +403,15 @@ impl RefinementValidator {
     pub fn apply_config(&self, cfg: &crate::lsp_config::LspConfig) {
         let mut guard = self.config.write();
         guard.enabled = cfg.enable_refinement_validation;
-        guard.default_mode = match cfg.validation_mode {
-            crate::lsp_config::ValidationMode::Quick => ValidationMode::Quick,
-            crate::lsp_config::ValidationMode::Thorough => ValidationMode::Thorough,
-            // Honour `Complete` as its own variant rather than
-            // collapsing to Thorough — clients that set
-            // `verum.lsp.validationMode = "complete"` get the
-            // documented unlimited-latency behaviour (the
-            // per-call timeout falls back to cfg.smt_timeout).
-            crate::lsp_config::ValidationMode::Complete => ValidationMode::Complete,
-        };
+        // ValidationMode is now a single canonical type
+        // (re-exported from `lsp_config`); the previous identity-
+        // shape mapper that collapsed `Complete` to `Thorough`
+        // is structurally unreachable.  Clients that set
+        // `verum.lsp.validationMode = "complete"` get the
+        // documented unlimited-latency behaviour (the per-call
+        // timeout falls back to cfg.smt_timeout via
+        // `mode_to_timeout`'s `Complete` arm).
+        guard.default_mode = cfg.validation_mode;
         guard.smt_timeout = cfg.smt_timeout;
         guard.show_counterexamples = cfg.show_counterexamples;
         guard.max_counterexample_traces = cfg.max_counterexample_traces;
@@ -2496,13 +2477,15 @@ impl Default for SmtRefinementChecker {
     }
 }
 
-/// SMT check result
-#[derive(Debug, Clone)]
-pub enum SmtCheckResult {
-    Valid,
-    Invalid { model: String },
-    Unknown,
-}
+/// SMT check result — re-exported from `crate::smt_worker` so the
+/// in-crate refinement validator and the worker-channel surface
+/// agree by construction.  Pre-collapse the two definitions had
+/// identical 3-variant variant lists; the previous match-arm
+/// adapter at `validate_async`'s reply-routing step is now a
+/// structural identity (collapsed to a single
+/// `match self.run_smt_check(...) {…}` site that returns the
+/// canonical type directly).
+pub use crate::smt_worker::SmtCheckResult;
 
 // ==================== Helper Functions ====================
 

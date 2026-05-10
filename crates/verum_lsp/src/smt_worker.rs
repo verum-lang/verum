@@ -51,9 +51,10 @@ use verum_smt::{RefinementVerifier, VerificationError, VerifyMode};
 
 /// Outcome of a single SMT refinement check.
 ///
-
-/// Mirrors the `SmtCheckResult` used by the legacy `SmtRefinementChecker`
-/// so callers can switch over without refactoring downstream matching.
+/// Canonical home for the SMT-running surface AND the in-crate
+/// refinement validator (which re-exports this type rather than
+/// defining its own — pre-collapse the two were structural
+/// duplicates kept in sync only by convention).
 #[derive(Debug, Clone)]
 pub enum SmtCheckResult {
     /// SMT proved the refinement holds.
@@ -64,6 +65,78 @@ pub enum SmtCheckResult {
     /// SMT could not conclude — timeout, solver panic, unsupported
     /// theory, etc. Callers usually map this to a "soft" diagnostic.
     Unknown,
+}
+
+/// Discriminator for [`SmtCheckResult`] — zero-sized projection
+/// used by metrics consumers that classify outcomes without
+/// cloning the counterexample model string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SmtCheckResultKind {
+    Valid,
+    Invalid,
+    Unknown,
+}
+
+/// Static fact-pack for a [`SmtCheckResultKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmtCheckResultKindMeta {
+    /// Lower-snake-case wire form — used in telemetry surfaces.
+    pub name: &'static str,
+    /// SMT returned a *definite* verdict (Valid or Invalid).
+    /// Inverse: `Unknown` is the unique non-definite kind.
+    pub is_definite: bool,
+    /// SMT returned the *positive* verdict (refinement holds).
+    /// Singleton — only `Valid` flips this.
+    pub is_positive: bool,
+    /// Whether the variant carries a counterexample-model
+    /// payload — pinned so downstream code that reaches into
+    /// `Invalid.model` is decoupled from the per-variant match.
+    pub carries_model: bool,
+}
+
+impl SmtCheckResultKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [SmtCheckResultKind] = &[
+        SmtCheckResultKind::Valid,
+        SmtCheckResultKind::Invalid,
+        SmtCheckResultKind::Unknown,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> SmtCheckResultKindMeta {
+        match self {
+            SmtCheckResultKind::Valid => SmtCheckResultKindMeta {
+                name: "valid",
+                is_definite: true,
+                is_positive: true,
+                carries_model: false,
+            },
+            SmtCheckResultKind::Invalid => SmtCheckResultKindMeta {
+                name: "invalid",
+                is_definite: true,
+                is_positive: false,
+                carries_model: true,
+            },
+            SmtCheckResultKind::Unknown => SmtCheckResultKindMeta {
+                name: "unknown",
+                is_definite: false,
+                is_positive: false,
+                carries_model: false,
+            },
+        }
+    }
+}
+
+impl SmtCheckResult {
+    /// Discriminator projection — strip the model payload, keep
+    /// the tag.
+    pub const fn kind(&self) -> SmtCheckResultKind {
+        match self {
+            SmtCheckResult::Valid => SmtCheckResultKind::Valid,
+            SmtCheckResult::Invalid { .. } => SmtCheckResultKind::Invalid,
+            SmtCheckResult::Unknown => SmtCheckResultKind::Unknown,
+        }
+    }
 }
 
 /// Requests the worker understands. Each variant carries a
@@ -235,5 +308,96 @@ mod tests {
     fn spawn_without_requests_is_fine() {
         let _h = SmtWorkerHandle::spawn();
         // Drop the handle — the channel closes, the worker loop exits.
+    }
+
+    /// Drift-pin: `SmtCheckResultKind` is the discriminator
+    /// projection.  The canonical home for the type is here in
+    /// `smt_worker`; `refinement_validation` re-exports it.
+    /// Pins variant count, name partition, and the
+    /// definite/positive/carries-model classifier flags.
+    #[test]
+    fn meta_pin_smt_check_result_kind_round_trip_and_partitions() {
+        // 1. Variant count.
+        assert_eq!(SmtCheckResultKind::ALL.len(), 3);
+
+        // 2. Names + uniqueness.
+        let mut seen = std::collections::HashSet::new();
+        for k in SmtCheckResultKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case: {}",
+                k,
+                m.name
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 3. Definite-verdict partition — Valid + Invalid.
+        //    Unknown is the unique non-definite kind.
+        let definite: Vec<_> = SmtCheckResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_definite)
+            .copied()
+            .collect();
+        assert_eq!(
+            definite,
+            vec![SmtCheckResultKind::Valid, SmtCheckResultKind::Invalid],
+        );
+
+        // 4. Positive-verdict partition — Valid singleton.
+        let positive: Vec<_> = SmtCheckResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_positive)
+            .copied()
+            .collect();
+        assert_eq!(positive, vec![SmtCheckResultKind::Valid]);
+
+        // 5. carries_model partition — Invalid singleton (the
+        //    counterexample-payload variant).
+        let with_model: Vec<_> = SmtCheckResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_model)
+            .copied()
+            .collect();
+        assert_eq!(with_model, vec![SmtCheckResultKind::Invalid]);
+
+        // 6. Cross-cutting: positive ⇒ definite (a positive
+        //    verdict means the SMT solver concluded).
+        for k in SmtCheckResultKind::ALL {
+            let m = k.meta();
+            assert!(
+                !m.is_positive || m.is_definite,
+                "{:?}: positive ⇒ definite invariant",
+                k
+            );
+        }
+
+        // 7. Live-payload kind() projection.
+        assert_eq!(SmtCheckResult::Valid.kind(), SmtCheckResultKind::Valid);
+        assert_eq!(
+            SmtCheckResult::Invalid {
+                model: "(model …)".into()
+            }
+            .kind(),
+            SmtCheckResultKind::Invalid,
+        );
+        assert_eq!(SmtCheckResult::Unknown.kind(), SmtCheckResultKind::Unknown);
+    }
+
+    /// Alias contract: `refinement_validation::SmtCheckResult` is
+    /// a `pub use` re-export of `smt_worker::SmtCheckResult` —
+    /// asserts the two paths refer to the same type.
+    #[test]
+    fn smt_check_result_alias_contract() {
+        // Compile-time alias check.
+        let v: crate::refinement_validation::SmtCheckResult =
+            SmtCheckResult::Valid;
+        assert!(matches!(v, SmtCheckResult::Valid));
+
+        let i: SmtCheckResult = crate::refinement_validation::SmtCheckResult::Invalid {
+            model: "x".into(),
+        };
+        assert_eq!(i.kind(), SmtCheckResultKind::Invalid);
     }
 }
