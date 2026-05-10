@@ -1,0 +1,138 @@
+// =============================================================================
+// core-tests/collections/toposort/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.collections.toposort`.  Each `@ignore`d
+// test reproduces a stdlib / language defect that gates correctness for
+// some axis of the public API.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.toposort.{TopoGraph, TopoError};
+
+// =============================================================================
+// §A  TopoGraph.contains uses Map.contains_key(&K).
+//
+//   contains(&node) calls self.in_deg.contains_key(node) which forwards
+//   to Map.contains_key(K) by value.  The implementation is broken on the
+//   &K argument shape (always returns false), so contains() always
+//   returns false.  See the Map regression in
+//   core-tests/collections/union_find/regression_test.vr §C.
+// =============================================================================
+
+@ignore
+@test
+fn regression_toposort_contains_after_add_node() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_node(7);
+    // Currently fails — contains returns false.
+    assert(g.contains(&7));
+}
+
+// =============================================================================
+// §B  toposort empties output via the Map.get → Maybe<V> defect.
+//
+//   The internal `match self.in_deg.get(n) { Some(d) => *d == 0, None => {} }`
+//   never enters the Some branch because Map.get returns V (Int) not
+//   Maybe<V>.  Result: even on a graph with no edges (every node has
+//   in_deg == 0), the queue stays empty, no node is emitted, and
+//   `out.len() != self.nodes.len()` triggers Cycle(...).  Symptom: a
+//   cycle-free graph reports a cycle.
+//
+//   See union_find audit §3.1 for the root Map.get defect.
+// =============================================================================
+
+@ignore
+@test
+fn regression_toposort_isolated_nodes_returns_them() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_node(10);
+    g.add_node(20);
+    g.add_node(30);
+    let r = g.toposort();
+    match r {
+        Ok(out) => {
+            assert_eq(out.len(), 3);
+            assert_eq(out[0], 10);
+            assert_eq(out[1], 20);
+            assert_eq(out[2], 30);
+        },
+        Err(_) => panic("isolated nodes must topo-sort to themselves"),
+    }
+}
+
+@ignore
+@test
+fn regression_toposort_linear_chain() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    // 1 → 2 → 3 → 4
+    g.add_edge(1, 2);
+    g.add_edge(2, 3);
+    g.add_edge(3, 4);
+    let r = g.toposort();
+    match r {
+        Ok(out) => {
+            assert_eq(out.len(), 4);
+            assert_eq(out[0], 1);
+            assert_eq(out[1], 2);
+            assert_eq(out[2], 3);
+            assert_eq(out[3], 4);
+        },
+        Err(_) => panic("acyclic chain must topo-sort"),
+    }
+}
+
+@ignore
+@test
+fn regression_toposort_diamond_dependency() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    // 1 → {2, 3} → 4
+    g.add_edge(1, 2);
+    g.add_edge(1, 3);
+    g.add_edge(2, 4);
+    g.add_edge(3, 4);
+    let r = g.toposort();
+    match r {
+        Ok(out) => assert_eq(out.len(), 4),
+        Err(_)  => panic("diamond is acyclic"),
+    }
+}
+
+// =============================================================================
+// §C  add_edge re-adds endpoints because add_node's idempotency check
+//      (contains_key(&node)) is broken — see §A.  Result: node_count()
+//      after `add_edge(1, 2)` reports 2, but after subsequent edges
+//      that reference 1 or 2 it grows beyond the unique-node count.
+// =============================================================================
+
+@ignore
+@test
+fn regression_toposort_add_edge_does_not_duplicate_nodes() {
+    let mut g: TopoGraph<Int> = TopoGraph.new();
+    g.add_node(1);
+    g.add_node(2);
+    g.add_node(3);
+    // Both endpoints already exist — nothing should be appended to nodes.
+    g.add_edge(1, 2);
+    g.add_edge(2, 3);
+    g.add_edge(1, 3);
+    // Currently fails — node_count grows because contains_key(&) is broken.
+    assert_eq(g.node_count(), 3);
+}
+
+// =============================================================================
+// §D  TopoError.Cycle variant requires Text.from at construction sites,
+//     which the codegen currently rejects with
+//     `UndefinedFunction("Text.from")` when the variant payload is built
+//     from a list literal `[Text.from("...")]` inline.
+// =============================================================================
+
+@ignore
+@test
+fn regression_toposort_error_equality_via_text_from() {
+    let e1 = TopoError.Cycle([Text.from("<node>")]);
+    let e2 = TopoError.Cycle([Text.from("<node>")]);
+    assert(e1 == e2);
+}
+
+fn main() {}
