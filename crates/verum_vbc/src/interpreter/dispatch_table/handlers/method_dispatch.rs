@@ -6584,106 +6584,34 @@ pub(super) fn dispatch_array_method(
         return Ok(Some(receiver));
     }
 
-    // Only handle Value arrays and Lists, not byte arrays or specialized collections
-    if header.type_id == TypeId::U8 {
-        return Ok(None);
-    }
-
-    // Skip Text — it's a primitive value type (type_id=4) whose stdlib
-    // `push`/`pop`/`len` methods operate on the `{ptr, len, cap}` struct
-    // layout, not on a List header. Routing them through the List
-    // dispatcher below treats the Text struct as if its first two Values
-    // were `(len, cap, backing_ptr)` — then `push` corrupts all three
-    // fields with list-header writes (field0 becomes 1, field1 becomes 8,
-    // field2 becomes an entirely new List allocation).
-    if header.type_id == TypeId::TEXT {
-        return Ok(None);
-    }
-
-    // Skip associative/channel builtins — they have their own dispatch in
-    // dispatch_primitive_method (Map has explicit filter/map/fold arms;
-    // Set/Deque/Channel are handled elsewhere or must fall through to the
-    // user-defined stdlib impl). Treating their
-    // `[count, capacity, entries_ptr]` header as a raw Value-array would
-    // iterate the metadata fields as if they were elements, producing
-    // nonsense like `filter` yielding `(count, capacity, entries_ptr)`
-    // triplets.
-    if header.type_id == TypeId::DEQUE
-        || header.type_id == TypeId::CHANNEL
-        || header.type_id == TypeId::MAP
-        || header.type_id == TypeId::SET
-    {
-        return Ok(None);
-    }
-
-    // Skip variant types (0x8000+ range) - they have their own dispatch in dispatch_variant_method
-    // and user-defined methods like Maybe.map should be called via function lookup, not here.
-    let type_id_val = header.type_id.0;
-    if (0x8000..0xA000).contains(&type_id_val) {
-        return Ok(None);
-    }
-
-    // Skip user-defined record types. These are not arrays/lists,
-    // and their methods (e.g. user-defined `swap`, `reverse`, `insert`,
-    // or builder chain `min`/`max`) must be looked up via the user
-    // function dispatch path, not treated as List ops.
+    // Polarity: only the array-shaped TypeIds whose heap layout
+    // `get_array_length` / `get_array_element` know how to read may
+    // continue past this point. The canonical predicate
+    // `TypeId::is_array_dispatchable` is the single source of truth
+    // (LIST / ARRAY / BYTE_LIST today); every other TypeId — built-in
+    // primitive (TEXT/U8/...), variant carrier (MAYBE/RESULT/...),
+    // associative collection (MAP/SET/DEQUE/CHANNEL), smart pointer
+    // (HEAP/SHARED), dependent-type packaging (PI/SIGMA/WITNESS),
+    // user record / user sum / user newtype, synthetic-variant
+    // `0x8000+` range, meta-system type (TOKEN_STREAM/...), or any
+    // future built-in — falls through here so its own dispatcher
+    // (`dispatch_variant_method`, `dispatch_primitive_method`, the
+    // user function table) runs next.
     //
-
-    // Historical note: the original guard was `(FIRST_USER..256)` — but
-    // user type IDs can exceed 256 whenever the module defines >240
-    // record types (stdlib easily does). Types with IDs in the gap
-    // 256..TypeId::LIST.0 were then incorrectly routed through the
-    // array dispatch: e.g. `FlexItem.min(5)` picked the array-min
-    // built-in, which returned a truncated object and later crashed
-    // with `field access out of bounds: field index 3 (offset 24+8 =
-    // 32) exceeds object data size 16`.
-    //
-
-    // The correct bound is "anything below the first built-in
-    // collection id" — LIST=512 today, so the range is `16..512`. If
-    // a new built-in lands between FIRST_USER and LIST we must update
-    // this alongside. Reproducer:
-    //  vcs/specs/L0-critical/vbc/struct_layout/flex_item_builder.vr
-    if (TypeId::FIRST_USER..TypeId::LIST.0).contains(&type_id_val) {
+    // The predicate replaces ten separate skip-list short-circuits
+    // plus a runtime `TypeKind::Sum/Newtype/Record/Protocol/Alias`
+    // peek and a defensive MAYBE/RESULT ID-fallback. Empirical
+    // canonical failure the predicate prevents: `r: Result<Int,Text>
+    // = Err("e"); r.map(|v| v*2)` previously returned a `[Err("e")]`
+    // *List* (header.type_id = LIST) instead of an `Err("e")`
+    // *Result*; subsequent `.is_err()` panicked with "method
+    // 'Result.is_err' not found on receiver of runtime kind Object".
+    // Drift defects of that class are now structurally impossible —
+    // a future TypeId that should share the array surface must be
+    // added explicitly to `is_array_dispatchable` (and
+    // `array_dispatchable_set_pinned` will catch the gap).
+    if !header.type_id.is_array_dispatchable() {
         return Ok(None);
-    }
-
-    // Skip stdlib well-known typed-variant carriers (Maybe/Result/Ordering
-    // and any other sum-type whose `TypeId` happens to land between
-    // `LIST.0` (the user-LIST cutoff) and the synthetic-variant range
-    // (`0x8000+`). These look like "post-LIST builtin range" by id but
-    // are SUM TYPES — running them through the List dispatcher allocates
-    // a fresh List-typed heap object, losing the original variant tag.
-    // Empirical canonical failure: `r: Result<Int, Text> = Err("e");
-    // r.map(|v| v * 2)` returned a `[Err("e")]` *List* (header.type_id =
-    // LIST) instead of an `Err("e")` *Result*; subsequent `.is_err()`
-    // panicked with "method 'Result.is_err' not found on receiver of
-    // runtime kind Object" because dispatch saw `is_builtin_collection`
-    // and skipped the Result method-table lookup.
-    //
-    // Source-of-truth check: peek the loaded `TypeDescriptor` and bail
-    // when its `kind` is `Sum` / `Newtype` / `Record` / `Protocol` —
-    // anything that isn't a primitive- or array-shaped builtin. Falls
-    // back to ID-list comparison (well-known TypeIds for stdlib carriers)
-    // when no descriptor exists in the user module's type table.
-    if let Some(desc) = state.module.get_type(header.type_id) {
-        use crate::types::TypeKind;
-        if matches!(
-            desc.kind,
-            TypeKind::Sum | TypeKind::Newtype | TypeKind::Record | TypeKind::Protocol | TypeKind::Alias
-        ) {
-            return Ok(None);
-        }
-    } else {
-        // Defensive fallback: when no descriptor is registered for the
-        // type id, route stdlib well-known sum types (Maybe / Result)
-        // through the variant dispatcher rather than the array
-        // dispatcher. The id list mirrors `TypeId::MAYBE` /
-        // `TypeId::RESULT` — same source-of-truth used by
-        // `register_builtin_variants`.
-        if type_id_val == TypeId::MAYBE.0 || type_id_val == TypeId::RESULT.0 {
-            return Ok(None);
-        }
     }
 
     let len = get_array_length(ptr, header)?;

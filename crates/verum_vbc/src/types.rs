@@ -240,6 +240,36 @@ impl TypeId {
         matches!(self.0, 512 | 527)
     }
 
+    /// Returns `true` for the (small) closed set of TypeIds whose heap
+    /// layout the array-method dispatcher
+    /// (`dispatch_array_method`) knows how to iterate: `LIST` (512),
+    /// `ARRAY` (518), and `BYTE_LIST` (527).
+    ///
+    /// Polarity discipline: the dispatcher previously routed every
+    /// pointer-typed receiver through its match arm and short-circuited
+    /// out for ~10 distinct *non*-array TypeIds (TEXT, U8, MAP, SET,
+    /// DEQUE, CHANNEL, the 0x8000+ synthetic-variant range, the
+    /// `FIRST_USER..LIST.0` user-record range, plus a runtime
+    /// `TypeKind` peek for SUM/NEWTYPE/RECORD/PROTOCOL/ALIAS, plus
+    /// defensive ID-list fallbacks for stdlib MAYBE/RESULT). Every
+    /// new built-in TypeId Verum adds (PI/SIGMA/WITNESS/HEAP/SHARED/
+    /// TUPLE/RANGE/TOKEN_STREAM/TOKEN/TOKEN_KIND/SPAN/...) had to
+    /// silently extend the skip list — drift between the dispatcher
+    /// and the type registry was inevitable. The canonical fix is to
+    /// invert the polarity and let this predicate be the single
+    /// source of truth: only the array-shaped TypeIds whose layout
+    /// `get_array_length` / `get_array_element` can read produce
+    /// meaningful results, and *every other* TypeId — present or
+    /// future — falls through automatically.
+    ///
+    /// Pinned by `array_dispatchable_set_pinned` in this crate's test
+    /// suite so a future addition that wants to share the array
+    /// surface (e.g. a future `STRIDE_LIST` for SoA layouts) must
+    /// extend this predicate explicitly.
+    pub fn is_array_dispatchable(self) -> bool {
+        matches!(self.0, 512 | 518 | 527)
+    }
+
     /// Canonical smart-pointer name → TypeId table.
     ///
     /// Single source of truth for Heap/Shared TypeIds shared by codegen
@@ -2435,6 +2465,87 @@ mod tests {
     // ========================================================================
     // Smart-pointer TypeId drift-guard (#39)
     // ========================================================================
+
+    /// The dispatcher's allowlist must contain exactly LIST / ARRAY /
+    /// BYTE_LIST today — every other built-in TypeId (TEXT, U8, MAP,
+    /// SET, DEQUE, CHANNEL, MAYBE, RESULT, RANGE, HEAP, SHARED,
+    /// TUPLE, PI, SIGMA, WITNESS, TOKEN_STREAM, TOKEN, TOKEN_KIND,
+    /// SPAN) must *not* match, because their heap layout differs
+    /// from the `[len, cap, backing]` shape that `get_array_length`
+    /// / `get_array_element` read. Synthetic-variant TypeIds
+    /// (`0x8000+`, used by `MakeVariant`) must also stay outside.
+    ///
+    /// Adding a new array-shaped TypeId (e.g. a future `STRIDE_LIST`)
+    /// MUST update this pin alongside `is_array_dispatchable` —
+    /// drift between the predicate and the dispatcher manifests as
+    /// silently routing the new shape through stale skip-list code.
+    #[test]
+    fn array_dispatchable_set_pinned() {
+        // Allowlist members.
+        assert!(TypeId::LIST.is_array_dispatchable());
+        assert!(TypeId::ARRAY.is_array_dispatchable());
+        assert!(TypeId::BYTE_LIST.is_array_dispatchable());
+        // Every primitive must stay outside the allowlist.
+        for tid in [
+            TypeId::BOOL,
+            TypeId::INT,
+            TypeId::FLOAT,
+            TypeId::TEXT,
+            TypeId::U8,
+            TypeId::U16,
+            TypeId::U32,
+            TypeId::U64,
+            TypeId::I8,
+            TypeId::I16,
+            TypeId::I32,
+            TypeId::F32,
+            TypeId::CHAR,
+            TypeId::PTR,
+        ] {
+            assert!(
+                !tid.is_array_dispatchable(),
+                "primitive {:?} must not be array-dispatchable",
+                tid
+            );
+        }
+        // Every other semantic builtin must stay outside, including
+        // the variant carriers MAYBE/RESULT whose silent inclusion
+        // was the original drift defect.
+        for tid in [
+            TypeId::MAP,
+            TypeId::SET,
+            TypeId::MAYBE,
+            TypeId::RESULT,
+            TypeId::RANGE,
+            TypeId::HEAP,
+            TypeId::SHARED,
+            TypeId::TUPLE,
+            TypeId::DEQUE,
+            TypeId::CHANNEL,
+            TypeId::PI,
+            TypeId::SIGMA,
+            TypeId::WITNESS,
+            TypeId::TOKEN_STREAM,
+            TypeId::TOKEN,
+            TypeId::TOKEN_KIND,
+            TypeId::SPAN,
+        ] {
+            assert!(
+                !tid.is_array_dispatchable(),
+                "non-array builtin {:?} must not be array-dispatchable",
+                tid
+            );
+        }
+        // The synthetic-variant range begins at 0x8000 — no member
+        // of that range can be array-dispatchable.
+        assert!(!TypeId(0x8000).is_array_dispatchable());
+        assert!(!TypeId(0x8001).is_array_dispatchable());
+        assert!(!TypeId(0x8042).is_array_dispatchable());
+        assert!(!TypeId(0x9FFF).is_array_dispatchable());
+        // User-record range (FIRST_USER..LIST.0).
+        assert!(!TypeId(TypeId::FIRST_USER).is_array_dispatchable());
+        assert!(!TypeId(TypeId::LIST.0 - 1).is_array_dispatchable());
+    }
 
     #[test]
     fn smart_pointer_type_ids_pinned() {
