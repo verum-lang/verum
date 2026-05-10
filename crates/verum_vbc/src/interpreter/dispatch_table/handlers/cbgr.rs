@@ -509,6 +509,31 @@ pub(in super::super) fn handle_drop_ref(
             // (see handle_new which stores obj.as_ptr() - the header pointer)
             let header_ptr = obj_ptr;
 
+            // Alignment guard: `ObjectHeader` is `#[repr(C, align(8))]` so every
+            // legitimate header is 8-byte aligned (see `heap::ObjectHeader`).
+            // Pre-fix the dereference assumed the alignment unconditionally,
+            // and any value that classified `is_regular_ptr() == true` but
+            // pointed at a non-header location (e.g. an interior pointer
+            // produced by ad-hoc casts in the test suite) would trip
+            // `panic_misaligned_pointer_dereference` and abort the whole
+            // interpreter via SIGABRT — losing every parallel test in the
+            // same `verum test --interp` invocation.  The aligned-or-skip
+            // path is the architecturally honest answer: a misaligned
+            // pointer cannot be a valid ObjectHeader, so there is no Drop
+            // impl to invoke; fall through to the existing CBGR cleanup
+            // path which operates on the raw bits independent of header
+            // structure.
+            const HEADER_ALIGN: usize = std::mem::align_of::<heap::ObjectHeader>();
+            if (header_ptr as usize) % HEADER_ALIGN != 0 {
+                tracing::trace!(
+                    "[drop_ref] skipping Drop check on misaligned ptr {:p} \
+                     (align={}); value will still go through CBGR cleanup",
+                    header_ptr,
+                    HEADER_ALIGN
+                );
+                return Ok(DispatchResult::Continue);
+            }
+
             // Read type_id from ObjectHeader
             let type_id = unsafe {
                 let header = header_ptr as *const heap::ObjectHeader;
@@ -642,6 +667,16 @@ pub(in super::super) fn handle_drop_ref(
         let is_cbgr_alloc = state
             .cbgr_allocations
             .contains(&(obj_ptr as usize).wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize));
+
+        // Same alignment guard as the user-defined-Drop branch above —
+        // ObjectHeader requires 8-byte alignment, and a misaligned
+        // pointer cannot be a valid header (so it cannot be a TUPLE
+        // either).  Skipping cleanly avoids SIGABRT under the parallel
+        // test runner.
+        const HEADER_ALIGN: usize = std::mem::align_of::<heap::ObjectHeader>();
+        if !is_cbgr_alloc && (obj_ptr as usize) % HEADER_ALIGN != 0 {
+            return Ok(DispatchResult::Continue);
+        }
 
         if !is_cbgr_alloc {
             let header = unsafe { &*(obj_ptr as *const heap::ObjectHeader) };
