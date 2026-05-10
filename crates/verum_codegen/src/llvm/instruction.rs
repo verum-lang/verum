@@ -9515,18 +9515,15 @@ fn lower_call<'ctx>(
             "__file_open_raw" => {
                 // __file_open_raw(path: Text, flags: Int, mode: Int) -> Int
                 let path_val = as_i64(ctx, ctx.get_register(args.start.0)?, "fo_path")?;
+                let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+                let text_get_ptr_fn = super::error::get_or_declare_function(
+                    module,
+                    "verum_text_get_ptr",
+                    fn_type,
+                );
                 let path_ptr = ctx
                     .builder()
-                    .build_call(
-                        module
-                            .get_function("verum_text_get_ptr")
-                            .unwrap_or_else(|| {
-                                let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-                                module.add_function("verum_text_get_ptr", fn_type, None)
-                            }),
-                        &[path_val.into()],
-                        "fo_cptr",
-                    )
+                    .build_call(text_get_ptr_fn, &[path_val.into()], "fo_cptr")
                     .or_llvm_err()?
                     .basic_value_or("no value")?
                     .into_pointer_value();
@@ -10512,14 +10509,12 @@ fn lower_call<'ctx>(
                     // fd-based legacy: file_read(fd, max_len) -> Text
                     let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "fread_fd")?;
                     let max_len = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "fread_max")?;
-                    let read_fn =
-                        module
-                            .get_function("verum_file_read_text")
-                            .unwrap_or_else(|| {
-                                let fn_type =
-                                    i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                                module.add_function("verum_file_read_text", fn_type, None)
-                            });
+                    let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+                    let read_fn = super::error::get_or_declare_function(
+                        module,
+                        "verum_file_read_text",
+                        fn_type,
+                    );
                     let result = ctx
                         .builder()
                         .build_call(read_fn, &[fd_val.into(), max_len.into()], "fread_text")
@@ -10546,14 +10541,12 @@ fn lower_call<'ctx>(
                     .basic_value_or("text_get_ptr: no value")?
                         .into_pointer_value();
                     let data_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "fwa_data")?;
-                    let write_all_fn =
-                        module
-                            .get_function("verum_file_write_all")
-                            .unwrap_or_else(|| {
-                                let fn_type =
-                                    i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-                                module.add_function("verum_file_write_all", fn_type, None)
-                            });
+                    let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+                    let write_all_fn = super::error::get_or_declare_function(
+                        module,
+                        "verum_file_write_all",
+                        fn_type,
+                    );
                     let result = ctx
                         .builder()
                         .build_call(write_all_fn, &[path_ptr.into(), data_val.into()], "fwa_n")
@@ -10566,14 +10559,12 @@ fn lower_call<'ctx>(
                     // Fd-based: file_write(fd, data)
                     let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "fwrite_fd")?;
                     let data_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "fwrite_data")?;
-                    let write_fn =
-                        module
-                            .get_function("verum_file_write_text")
-                            .unwrap_or_else(|| {
-                                let fn_type =
-                                    i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                                module.add_function("verum_file_write_text", fn_type, None)
-                            });
+                    let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+                    let write_fn = super::error::get_or_declare_function(
+                        module,
+                        "verum_file_write_text",
+                        fn_type,
+                    );
                     let result = ctx
                         .builder()
                         .build_call(write_fn, &[fd_val.into(), data_val.into()], "fwrite_n")
@@ -10658,14 +10649,12 @@ fn lower_call<'ctx>(
                     .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
                 let data_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "fwa_data")?;
-                let write_all_fn =
-                    module
-                        .get_function("verum_file_write_all")
-                        .unwrap_or_else(|| {
-                            let fn_type =
-                                i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
-                            module.add_function("verum_file_write_all", fn_type, None)
-                        });
+                let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+                let write_all_fn = super::error::get_or_declare_function(
+                    module,
+                    "verum_file_write_all",
+                    fn_type,
+                );
                 let result = ctx
                     .builder()
                     .build_call(write_all_fn, &[path_ptr.into(), data_val.into()], "fwa_n")
@@ -15391,11 +15380,8 @@ fn lower_call_method<'ctx>(
         let text_from_cstr_fn = {
             let ptr_type = ctx.types().ptr_type();
             let i64_type = ctx.types().i64_type();
-            let module = ctx.get_module();
             let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-            module
-                .get_function("verum_text_from_cstr")
-                .unwrap_or_else(|| module.add_function("verum_text_from_cstr", fn_type, None))
+            super::error::get_or_declare_function(ctx.get_module(), "verum_text_from_cstr", fn_type)
         };
         // Macro: extract char* from a register holding a Text* pointer
         macro_rules! text_extract_cptr {
@@ -18166,21 +18152,17 @@ fn lower_text_extended<'ctx>(
             let text_i64 = as_i64(ctx, text_val, "text_val_i64")?;
 
             // ptr = verum_text_get_ptr(text)
-            let get_ptr_fn = module
-                .get_function("verum_text_get_ptr")
-                .unwrap_or_else(|| {
-                    let fn_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
-                    module.add_function("verum_text_get_ptr", fn_ty, None)
-                });
+            let fn_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
+            let get_ptr_fn = super::error::get_or_declare_function(
+                module,
+                "verum_text_get_ptr",
+                fn_ty,
+            );
             let bytes_ptr_val = ctx
                 .builder()
                 .build_call(get_ptr_fn, &[text_i64.into()], "text_bytes_ptr")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("AsBytes: verum_text_get_ptr returned no value")
-                })?;
+                .basic_value_or("AsBytes: verum_text_get_ptr returned no value")?;
             let bytes_ptr = bytes_ptr_val.into_pointer_value();
             let ptr_as_i64 = ctx
                 .builder()
