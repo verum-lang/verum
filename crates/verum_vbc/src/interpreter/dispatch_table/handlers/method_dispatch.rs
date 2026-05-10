@@ -1200,7 +1200,6 @@ pub(in super::super) fn handle_call_method(
     let is_builtin_collection = if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
         let ptr = dispatch_receiver.as_ptr::<u8>();
         let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
-
         header.type_id == TypeId::MAP
             || header.type_id == TypeId::SET
             || header.type_id == TypeId::LIST
@@ -6647,6 +6646,44 @@ pub(super) fn dispatch_array_method(
     //  vcs/specs/L0-critical/vbc/struct_layout/flex_item_builder.vr
     if (TypeId::FIRST_USER..TypeId::LIST.0).contains(&type_id_val) {
         return Ok(None);
+    }
+
+    // Skip stdlib well-known typed-variant carriers (Maybe/Result/Ordering
+    // and any other sum-type whose `TypeId` happens to land between
+    // `LIST.0` (the user-LIST cutoff) and the synthetic-variant range
+    // (`0x8000+`). These look like "post-LIST builtin range" by id but
+    // are SUM TYPES — running them through the List dispatcher allocates
+    // a fresh List-typed heap object, losing the original variant tag.
+    // Empirical canonical failure: `r: Result<Int, Text> = Err("e");
+    // r.map(|v| v * 2)` returned a `[Err("e")]` *List* (header.type_id =
+    // LIST) instead of an `Err("e")` *Result*; subsequent `.is_err()`
+    // panicked with "method 'Result.is_err' not found on receiver of
+    // runtime kind Object" because dispatch saw `is_builtin_collection`
+    // and skipped the Result method-table lookup.
+    //
+    // Source-of-truth check: peek the loaded `TypeDescriptor` and bail
+    // when its `kind` is `Sum` / `Newtype` / `Record` / `Protocol` —
+    // anything that isn't a primitive- or array-shaped builtin. Falls
+    // back to ID-list comparison (well-known TypeIds for stdlib carriers)
+    // when no descriptor exists in the user module's type table.
+    if let Some(desc) = state.module.get_type(header.type_id) {
+        use crate::types::TypeKind;
+        if matches!(
+            desc.kind,
+            TypeKind::Sum | TypeKind::Newtype | TypeKind::Record | TypeKind::Protocol | TypeKind::Alias
+        ) {
+            return Ok(None);
+        }
+    } else {
+        // Defensive fallback: when no descriptor is registered for the
+        // type id, route stdlib well-known sum types (Maybe / Result)
+        // through the variant dispatcher rather than the array
+        // dispatcher. The id list mirrors `TypeId::MAYBE` /
+        // `TypeId::RESULT` — same source-of-truth used by
+        // `register_builtin_variants`.
+        if type_id_val == TypeId::MAYBE.0 || type_id_val == TypeId::RESULT.0 {
+            return Ok(None);
+        }
     }
 
     let len = get_array_length(ptr, header)?;
