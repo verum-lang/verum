@@ -12994,7 +12994,6 @@ impl VbcCodegen {
             new_desc.bytecode_offset = 0;
             new_desc.bytecode_length = 0;
             new_desc.instructions = Some(instructions.clone());
-
             self.functions
                 .push(crate::module::VbcFunction::new(new_desc, instructions));
             copied += 1;
