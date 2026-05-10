@@ -11168,13 +11168,8 @@ fn lower_call<'ctx>(
             "tcp_accept_timeout" => {
                 let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "tat_fd")?;
                 let to_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "tat_to")?;
-                let helper = module
-                    .get_function("verum_tcp_accept_timeout")
-                    .unwrap_or_else(|| {
-                        let fn_type =
-                            i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_tcp_accept_timeout", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let helper = super::error::get_or_declare_function(module, "verum_tcp_accept_timeout", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(helper, &[fd_val.into(), to_val.into()], "tat_r")
@@ -11239,13 +11234,8 @@ fn lower_call<'ctx>(
             "io_wait_readable" => {
                 let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "iwr_fd")?;
                 let to_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "iwr_to")?;
-                let helper = module
-                    .get_function("verum_io_wait_readable")
-                    .unwrap_or_else(|| {
-                        let fn_type =
-                            i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_io_wait_readable", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let helper = super::error::get_or_declare_function(module, "verum_io_wait_readable", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(helper, &[fd_val.into(), to_val.into()], "iwr_r")
@@ -11260,13 +11250,8 @@ fn lower_call<'ctx>(
             "io_wait_writable" => {
                 let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "iww_fd")?;
                 let to_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "iww_to")?;
-                let helper = module
-                    .get_function("verum_io_wait_writable")
-                    .unwrap_or_else(|| {
-                        let fn_type =
-                            i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                        module.add_function("verum_io_wait_writable", fn_type, None)
-                    });
+                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let helper = super::error::get_or_declare_function(module, "verum_io_wait_writable", fn_type);
                 let result = ctx
                     .builder()
                     .build_call(helper, &[fd_val.into(), to_val.into()], "iww_r")
@@ -30363,13 +30348,8 @@ fn lower_iter_next<'ctx>(
         let ptr_type = ctx.types().ptr_type();
         let void_type = ctx.types().void_type();
         let module = ctx.get_module();
-        let next_maybe_fn = module
-            .get_function("verum_gen_next_maybe")
-            .unwrap_or_else(|| {
-                let fn_type =
-                    void_type.fn_type(&[i64_type.into(), ptr_type.into(), ptr_type.into()], false);
-                module.add_function("verum_gen_next_maybe", fn_type, None)
-            });
+        let fn_type = void_type.fn_type(&[i64_type.into(), ptr_type.into(), ptr_type.into()], false);
+        let next_maybe_fn = super::error::get_or_declare_function(module, "verum_gen_next_maybe", fn_type);
         let gen_val = ctx.get_register(iter.0)?;
         let tag_alloca = ctx
             .builder()
@@ -31194,13 +31174,8 @@ fn lower_spawn<'ctx>(
                     let arg_i64 = coerce_value(ctx, arg_val, i64_type.into(), "spawn_arg")?;
 
                     // Use pool_global_submit for ~500x faster dispatch vs raw thread_spawn
-                    let pool_submit_fn = module
-                        .get_function("verum_pool_global_submit")
-                        .unwrap_or_else(|| {
-                            let fn_type =
-                                i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                            module.add_function("verum_pool_global_submit", fn_type, None)
-                        });
+                    let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let pool_submit_fn = super::error::get_or_declare_function(module, "verum_pool_global_submit", fn_type);
 
                     let pool_handle = ctx
                         .builder()
@@ -31303,13 +31278,8 @@ fn lower_spawn<'ctx>(
                         .or_llvm_err()?;
 
                     // Submit trampoline(pack) to pool
-                    let pool_submit_fn = module
-                        .get_function("verum_pool_global_submit")
-                        .unwrap_or_else(|| {
-                            let fn_type =
-                                i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                            module.add_function("verum_pool_global_submit", fn_type, None)
-                        });
+                    let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let pool_submit_fn = super::error::get_or_declare_function(module, "verum_pool_global_submit", fn_type);
                     let pool_handle = ctx
                         .builder()
                         .build_call(
