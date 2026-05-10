@@ -63,24 +63,78 @@ pub enum CheckDecision {
     Keep,
 }
 
+/// Per-variant projection for [`CheckDecision`].
+///
+/// Three parallel matches!() (legacy `can_eliminate` /
+/// `should_hoist` / `overhead_ns`) collapse to per-variant fields.
+/// Pinned cross-cutting invariants: `can_eliminate` and
+/// `should_hoist` are mutually exclusive (no decision both
+/// eliminates and hoists); `overhead_ns` is monotone-increasing
+/// in the elimination → hoist → keep direction (0 < 1 < 5 ns).
+#[derive(Debug, Clone, Copy)]
+pub struct CheckDecisionMeta {
+    pub name: &'static str,
+    pub can_eliminate: bool,
+    pub should_hoist: bool,
+    pub overhead_ns: u32,
+}
+
 impl CheckDecision {
+    pub const ALL: &'static [Self] = &[Self::Eliminate, Self::Hoist, Self::Keep];
+
+    pub const fn meta(self) -> CheckDecisionMeta {
+        match self {
+            Self::Eliminate => CheckDecisionMeta {
+                name: "eliminate",
+                can_eliminate: true,
+                should_hoist: false,
+                overhead_ns: 0,
+            },
+            Self::Hoist => CheckDecisionMeta {
+                name: "hoist",
+                can_eliminate: false,
+                should_hoist: true,
+                overhead_ns: 1, // One-time check
+            },
+            Self::Keep => CheckDecisionMeta {
+                name: "keep",
+                can_eliminate: false,
+                should_hoist: false,
+                overhead_ns: 5, // Per-access check
+            },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
     /// Check if bounds check can be eliminated
-    pub fn can_eliminate(&self) -> bool {
-        matches!(self, CheckDecision::Eliminate)
+    #[inline]
+    pub const fn can_eliminate(&self) -> bool {
+        self.meta().can_eliminate
     }
 
     /// Check if bounds check should be hoisted
-    pub fn should_hoist(&self) -> bool {
-        matches!(self, CheckDecision::Hoist)
+    #[inline]
+    pub const fn should_hoist(&self) -> bool {
+        self.meta().should_hoist
     }
 
     /// Get overhead in nanoseconds
-    pub fn overhead_ns(&self) -> u32 {
-        match self {
-            CheckDecision::Eliminate => 0,
-            CheckDecision::Hoist => 1, // One-time check
-            CheckDecision::Keep => 5,  // Per-access check
-        }
+    #[inline]
+    pub const fn overhead_ns(&self) -> u32 {
+        self.meta().overhead_ns
     }
 }
 
@@ -2305,3 +2359,57 @@ pub fn compute_elimination_stats(decisions: &List<CheckDecision>) -> Elimination
 }
 
 // Tests moved to tests/bounds_elimination_tests.rs per CLAUDE.md standards
+
+#[cfg(test)]
+mod meta_consolidation_pins {
+    use super::CheckDecision;
+
+    #[test]
+    fn check_decision_round_trip_unique_and_classification_invariants() {
+        assert_eq!(CheckDecision::ALL.len(), 3);
+        for v in CheckDecision::ALL {
+            let s = v.as_str();
+            assert_eq!(CheckDecision::from_str(s), Some(*v));
+        }
+        // Wire form.
+        assert_eq!(CheckDecision::Eliminate.as_str(), "eliminate");
+        assert_eq!(CheckDecision::Hoist.as_str(), "hoist");
+        assert_eq!(CheckDecision::Keep.as_str(), "keep");
+        // Cross-cutting: can_eliminate and should_hoist are mutually
+        // exclusive (no decision both eliminates and hoists).
+        for v in CheckDecision::ALL {
+            assert!(
+                !(v.can_eliminate() && v.should_hoist()),
+                "CheckDecision::{:?}: can_eliminate ⊕ should_hoist must be disjoint",
+                v
+            );
+        }
+        // Exactly one variant per classifier flag.
+        assert_eq!(
+            CheckDecision::ALL
+                .iter()
+                .filter(|v| v.can_eliminate())
+                .count(),
+            1
+        );
+        assert_eq!(
+            CheckDecision::ALL
+                .iter()
+                .filter(|v| v.should_hoist())
+                .count(),
+            1
+        );
+        // Overhead is monotone-increasing in elimination → hoist
+        // → keep direction (0 < 1 < 5 ns) — the optimization
+        // hierarchy.
+        assert!(
+            CheckDecision::Eliminate.overhead_ns()
+                < CheckDecision::Hoist.overhead_ns()
+        );
+        assert!(
+            CheckDecision::Hoist.overhead_ns()
+                < CheckDecision::Keep.overhead_ns()
+        );
+        assert_eq!(CheckDecision::Eliminate.overhead_ns(), 0);
+    }
+}

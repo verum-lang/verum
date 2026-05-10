@@ -292,6 +292,114 @@ pub enum ObligationKind {
     UserGoal,
 }
 
+/// Per-variant projection for [`ObligationKind`].
+///
+/// `name` is the canonical snake_case identifier (matches the
+/// telemetry/diagnostic wire form). `is_function_contract` flags
+/// Pre/Post — obligations that fire at the function boundary.
+/// `is_loop_obligation` flags InvariantEstablishment /
+/// InvariantPreservation / Termination — obligations that fire
+/// at loop boundaries. The rest are statement-level
+/// (Assertion / Refinement / MemorySafety / UserGoal).
+#[derive(Debug, Clone, Copy)]
+pub struct ObligationKindMeta {
+    pub name: &'static str,
+    pub is_function_contract: bool,
+    pub is_loop_obligation: bool,
+}
+
+impl ObligationKind {
+    pub const ALL: &'static [Self] = &[
+        Self::Precondition,
+        Self::Postcondition,
+        Self::InvariantEstablishment,
+        Self::InvariantPreservation,
+        Self::Termination,
+        Self::Assertion,
+        Self::Refinement,
+        Self::MemorySafety,
+        Self::UserGoal,
+    ];
+
+    pub const fn meta(self) -> ObligationKindMeta {
+        match self {
+            Self::Precondition => ObligationKindMeta {
+                name: "precondition",
+                is_function_contract: true,
+                is_loop_obligation: false,
+            },
+            Self::Postcondition => ObligationKindMeta {
+                name: "postcondition",
+                is_function_contract: true,
+                is_loop_obligation: false,
+            },
+            Self::InvariantEstablishment => ObligationKindMeta {
+                name: "invariant_establishment",
+                is_function_contract: false,
+                is_loop_obligation: true,
+            },
+            Self::InvariantPreservation => ObligationKindMeta {
+                name: "invariant_preservation",
+                is_function_contract: false,
+                is_loop_obligation: true,
+            },
+            Self::Termination => ObligationKindMeta {
+                name: "termination",
+                is_function_contract: false,
+                is_loop_obligation: true,
+            },
+            Self::Assertion => ObligationKindMeta {
+                name: "assertion",
+                is_function_contract: false,
+                is_loop_obligation: false,
+            },
+            Self::Refinement => ObligationKindMeta {
+                name: "refinement",
+                is_function_contract: false,
+                is_loop_obligation: false,
+            },
+            Self::MemorySafety => ObligationKindMeta {
+                name: "memory_safety",
+                is_function_contract: false,
+                is_loop_obligation: false,
+            },
+            Self::UserGoal => ObligationKindMeta {
+                name: "user_goal",
+                is_function_contract: false,
+                is_loop_obligation: false,
+            },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// True for `Precondition` / `Postcondition` — obligations
+    /// that fire at the function boundary.
+    #[inline]
+    pub const fn is_function_contract(&self) -> bool {
+        self.meta().is_function_contract
+    }
+
+    /// True for `InvariantEstablishment` / `InvariantPreservation`
+    /// / `Termination` — obligations that fire at loop boundaries.
+    #[inline]
+    pub const fn is_loop_obligation(&self) -> bool {
+        self.meta().is_loop_obligation
+    }
+}
+
 /// Status of a proof obligation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObligationStatus {
@@ -307,6 +415,93 @@ pub enum ObligationStatus {
     Timeout,
     /// Skipped (e.g., due to verification level)
     Skipped,
+}
+
+/// Per-variant projection for [`ObligationStatus`].
+///
+/// `is_terminal` flags statuses that the obligation has finished
+/// processing in (Discharged / Failed / Timeout / Skipped) — the
+/// progress states (Pending / InProgress) are not terminal.
+/// `is_success` is the unique happy-path status (Discharged only);
+/// every other terminal status counts as not-yet-proven.
+#[derive(Debug, Clone, Copy)]
+pub struct ObligationStatusMeta {
+    pub name: &'static str,
+    pub is_terminal: bool,
+    pub is_success: bool,
+}
+
+impl ObligationStatus {
+    pub const ALL: &'static [Self] = &[
+        Self::Pending,
+        Self::InProgress,
+        Self::Discharged,
+        Self::Failed,
+        Self::Timeout,
+        Self::Skipped,
+    ];
+
+    pub const fn meta(self) -> ObligationStatusMeta {
+        match self {
+            Self::Pending => ObligationStatusMeta {
+                name: "pending",
+                is_terminal: false,
+                is_success: false,
+            },
+            Self::InProgress => ObligationStatusMeta {
+                name: "in_progress",
+                is_terminal: false,
+                is_success: false,
+            },
+            Self::Discharged => ObligationStatusMeta {
+                name: "discharged",
+                is_terminal: true,
+                is_success: true,
+            },
+            Self::Failed => ObligationStatusMeta {
+                name: "failed",
+                is_terminal: true,
+                is_success: false,
+            },
+            Self::Timeout => ObligationStatusMeta {
+                name: "timeout",
+                is_terminal: true,
+                is_success: false,
+            },
+            Self::Skipped => ObligationStatusMeta {
+                name: "skipped",
+                is_terminal: true,
+                is_success: false,
+            },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// True for terminal statuses (Discharged / Failed / Timeout /
+    /// Skipped) — the obligation has finished processing.
+    #[inline]
+    pub const fn is_terminal(&self) -> bool {
+        self.meta().is_terminal
+    }
+
+    /// True for `Discharged` — the unique happy-path status.
+    #[inline]
+    pub const fn is_success(&self) -> bool {
+        self.meta().is_success
+    }
 }
 
 /// Global counter for obligation IDs
@@ -10779,5 +10974,108 @@ mod tests {
 
         let result = validator.prove_with_smt(&false_prop);
         assert!(result.is_err(), "Should fail to prove x > 0 && x < 0");
+    }
+
+    #[test]
+    fn meta_pin_obligation_kind_round_trip_unique_and_classification() {
+        assert_eq!(ObligationKind::ALL.len(), 9);
+        let mut seen = Vec::new();
+        for v in ObligationKind::ALL {
+            let s = v.as_str();
+            assert_eq!(ObligationKind::from_str(s), Some(*v));
+            assert!(!seen.contains(&s), "duplicate name '{}'", s);
+            seen.push(s);
+        }
+        // Function-contract partition: Pre + Post = 2.
+        let func_count = ObligationKind::ALL
+            .iter()
+            .filter(|v| v.is_function_contract())
+            .count();
+        assert_eq!(func_count, 2);
+        assert!(ObligationKind::Precondition.is_function_contract());
+        assert!(ObligationKind::Postcondition.is_function_contract());
+        // Loop-obligation partition: InvariantEstablishment +
+        // InvariantPreservation + Termination = 3.
+        let loop_count = ObligationKind::ALL
+            .iter()
+            .filter(|v| v.is_loop_obligation())
+            .count();
+        assert_eq!(loop_count, 3);
+        assert!(ObligationKind::InvariantEstablishment.is_loop_obligation());
+        assert!(ObligationKind::InvariantPreservation.is_loop_obligation());
+        assert!(ObligationKind::Termination.is_loop_obligation());
+        // Cross-cutting: function-contract ⊥ loop-obligation
+        // (disjoint). Statement-level (Assertion / Refinement /
+        // MemorySafety / UserGoal) is the implicit complement
+        // (4 variants).
+        for v in ObligationKind::ALL {
+            assert!(
+                !(v.is_function_contract() && v.is_loop_obligation()),
+                "ObligationKind::{:?}: function-contract ⊥ loop-obligation must hold",
+                v
+            );
+        }
+        let stmt_level_count = ObligationKind::ALL
+            .iter()
+            .filter(|v| !v.is_function_contract() && !v.is_loop_obligation())
+            .count();
+        assert_eq!(stmt_level_count, 4);
+        assert_eq!(
+            func_count + loop_count + stmt_level_count,
+            ObligationKind::ALL.len()
+        );
+    }
+
+    #[test]
+    fn meta_pin_obligation_status_round_trip_unique_and_terminal_partition() {
+        assert_eq!(ObligationStatus::ALL.len(), 6);
+        for v in ObligationStatus::ALL {
+            let s = v.as_str();
+            assert_eq!(ObligationStatus::from_str(s), Some(*v));
+        }
+        // Wire form (`InProgress` → "in_progress" snake-case).
+        assert_eq!(ObligationStatus::Pending.as_str(), "pending");
+        assert_eq!(ObligationStatus::InProgress.as_str(), "in_progress");
+        assert_eq!(ObligationStatus::Discharged.as_str(), "discharged");
+        // Terminal partition: 4 terminal (Discharged/Failed/Timeout/
+        // Skipped) + 2 progress (Pending/InProgress) = 6.
+        let terminal_count = ObligationStatus::ALL
+            .iter()
+            .filter(|v| v.is_terminal())
+            .count();
+        let progress_count = ObligationStatus::ALL
+            .iter()
+            .filter(|v| !v.is_terminal())
+            .count();
+        assert_eq!(terminal_count, 4);
+        assert_eq!(progress_count, 2);
+        // Success partition: only Discharged (1).
+        let success_count = ObligationStatus::ALL
+            .iter()
+            .filter(|v| v.is_success())
+            .count();
+        assert_eq!(success_count, 1);
+        assert!(ObligationStatus::Discharged.is_success());
+        // Cross-cutting: is_success ⇒ is_terminal.
+        for v in ObligationStatus::ALL {
+            if v.is_success() {
+                assert!(
+                    v.is_terminal(),
+                    "ObligationStatus::{:?}: is_success ⇒ is_terminal",
+                    v
+                );
+            }
+        }
+        // Cross-pin: progress states (Pending / InProgress) are
+        // never successes.
+        for v in ObligationStatus::ALL {
+            if !v.is_terminal() {
+                assert!(
+                    !v.is_success(),
+                    "ObligationStatus::{:?}: progress ⇒ ¬success",
+                    v
+                );
+            }
+        }
     }
 }
