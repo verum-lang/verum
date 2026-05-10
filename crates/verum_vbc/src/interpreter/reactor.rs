@@ -238,17 +238,15 @@ struct Shard {
 
 struct ShardInner {
     /// Map keyed by `fd << 1 | kind_bit`.  `kind_bit`: 0=read, 1=write.
-    /// Stored as parallel arrays (key, slot_index) for cache-line
-    /// linear scan in the very-small case.  HashMap takes over once
-    /// `keys.len() > LINEAR_SCAN_THRESHOLD`.
+    /// Stored as parallel arrays (key, slot_index) — a cache-line
+    /// linear scan beats HashMap at this cardinality (the SmallVec
+    /// stays inline for the typical ≤8-waiter shard).
     keys: smallvec::SmallVec<[u64; 8]>,
     slots: smallvec::SmallVec<[usize; 8]>,
     /// Slot indices freed since last allocation; reuse before
     /// growing the arena.
     freed: smallvec::SmallVec<[usize; 8]>,
 }
-
-const LINEAR_SCAN_THRESHOLD: usize = 32;
 
 impl Shard {
     fn new() -> Self {
@@ -400,17 +398,6 @@ fn pack_key(fd: i64, kind: InterestKind) -> u64 {
         InterestKind::Writable => 1u64,
     };
     ((fd as u64) << 1) | bit
-}
-
-#[inline]
-fn unpack_key(key: u64) -> (i64, InterestKind) {
-    let kind = if key & 1 == 1 {
-        InterestKind::Writable
-    } else {
-        InterestKind::Readable
-    };
-    let fd = (key >> 1) as i32 as i64; // sign-extend from i32
-    (fd, kind)
 }
 
 /// Public entry: wait for `fd` to become readable, up to `timeout`.

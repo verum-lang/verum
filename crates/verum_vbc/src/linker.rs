@@ -271,11 +271,6 @@ pub struct VbcLinker {
     /// Content-addressed string-pool dedup. Two modules interning
     /// `"hello"` collapse to one linker StringId.
     string_dedup: HashMap<String, StringId>,
-
-    /// Bytecode region offset for the next function appended. Each
-    /// per-source bytecode block is concatenated into `out.bytecode`;
-    /// per-function offsets land here.
-    bytecode_cursor: u32,
 }
 
 impl VbcLinker {
@@ -310,7 +305,6 @@ impl VbcLinker {
             cfg,
             out,
             string_dedup,
-            bytecode_cursor: 0,
         }
     }
 
