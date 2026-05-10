@@ -31,8 +31,16 @@ use crate::document::DocumentState;
 
 // ==================== Core Types ====================
 
-/// Kind of quick fix action
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Kind of quick fix action.
+///
+/// Canonical home for both the in-tree fix-builders and the JSON-
+/// wire surface that `refinement_validation` exposes.  The
+/// `refinement_validation::QuickFixKind` re-export is wired in
+/// that module rather than as a duplicate definition — pre-
+/// collapse the two enums had identical 6-variant lists kept in
+/// sync only by convention.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum QuickFixKind {
     /// Wrap with Result<T, E> using runtime check
     RuntimeCheck,
@@ -48,21 +56,106 @@ pub enum QuickFixKind {
     PromoteToChecked,
 }
 
+/// Static fact-pack for a [`QuickFixKind`] — the partition table
+/// behind code-action-kind dispatch + IDE / diagnostic
+/// classification surfaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuickFixKindMeta {
+    /// Canonical snake_case wire form — matches the
+    /// `serde(rename_all)` form.
+    pub name: &'static str,
+    /// Whether this fix counts as a *quick-fix* (LSP
+    /// `CodeActionKind::QUICKFIX`) — the in-place repair
+    /// surface.  The complement is *refactor* (broader
+    /// structural rewrite).
+    pub is_quickfix: bool,
+    /// Whether this fix introduces a *runtime check* (rather
+    /// than a static-only structural change).  Runtime-check
+    /// fixes carry deferred verification cost the IDE may
+    /// surface as a perf hint.
+    pub is_runtime_check: bool,
+    /// Whether this fix touches the *type* surface (refinement
+    /// or dependent-pair injection).  Type-touching fixes
+    /// require type-system re-validation downstream.
+    pub is_type_touching: bool,
+}
+
 impl QuickFixKind {
-    /// Get the LSP CodeActionKind for this fix
-    pub fn to_lsp_kind(&self) -> CodeActionKind {
+    /// All variants in declaration order — drives drift-pin
+    /// tests and any consumer that enumerates the full set.
+    pub const ALL: &'static [QuickFixKind] = &[
+        QuickFixKind::RuntimeCheck,
+        QuickFixKind::InlineRefinement,
+        QuickFixKind::SigmaType,
+        QuickFixKind::Assertion,
+        QuickFixKind::WeakenRefinement,
+        QuickFixKind::PromoteToChecked,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> QuickFixKindMeta {
         match self {
-            Self::RuntimeCheck
-            | Self::InlineRefinement
-            | Self::Assertion
-            | Self::PromoteToChecked => CodeActionKind::QUICKFIX,
-            Self::SigmaType | Self::WeakenRefinement => CodeActionKind::REFACTOR,
+            QuickFixKind::RuntimeCheck => QuickFixKindMeta {
+                name: "runtime_check",
+                is_quickfix: true,
+                is_runtime_check: true,
+                is_type_touching: false,
+            },
+            QuickFixKind::InlineRefinement => QuickFixKindMeta {
+                name: "inline_refinement",
+                is_quickfix: true,
+                is_runtime_check: false,
+                is_type_touching: true,
+            },
+            QuickFixKind::SigmaType => QuickFixKindMeta {
+                name: "sigma_type",
+                is_quickfix: false,
+                is_runtime_check: false,
+                is_type_touching: true,
+            },
+            QuickFixKind::Assertion => QuickFixKindMeta {
+                name: "assertion",
+                is_quickfix: true,
+                is_runtime_check: true,
+                is_type_touching: false,
+            },
+            QuickFixKind::WeakenRefinement => QuickFixKindMeta {
+                name: "weaken_refinement",
+                is_quickfix: false,
+                is_runtime_check: false,
+                is_type_touching: true,
+            },
+            QuickFixKind::PromoteToChecked => QuickFixKindMeta {
+                name: "promote_to_checked",
+                is_quickfix: true,
+                is_runtime_check: false,
+                is_type_touching: false,
+            },
+        }
+    }
+
+    /// Get the LSP CodeActionKind for this fix.  Routes
+    /// quick-fix surface through `is_quickfix` rather than a
+    /// separate match arm — single source of truth.
+    pub fn to_lsp_kind(&self) -> CodeActionKind {
+        if self.meta().is_quickfix {
+            CodeActionKind::QUICKFIX
+        } else {
+            CodeActionKind::REFACTOR
         }
     }
 }
 
-/// Impact level of applying a quick fix
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Impact level of applying a quick fix.
+///
+/// Canonical home for both `quick_fixes` consumers and the
+/// JSON-wire surface that `refinement_validation::QuickFixImpact`
+/// re-exports as an alias.  Pre-collapse `refinement_validation`
+/// had its own 3-variant version (Safe / Breaking / Unsafe) that
+/// was a strict subset of this 4-variant set — `MaybeBreaking`
+/// is now reachable from the JSON wire too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FixImpact {
     /// Safe: no breaking changes, only local modifications
     Safe,
@@ -75,6 +168,14 @@ pub enum FixImpact {
 }
 
 impl FixImpact {
+    /// All variants in declaration order.
+    pub const ALL: &'static [FixImpact] = &[
+        FixImpact::Safe,
+        FixImpact::Breaking,
+        FixImpact::MaybeBreaking,
+        FixImpact::Unsafe,
+    ];
+
     /// Get a human-readable description
     pub fn description(&self) -> &'static str {
         match self {
@@ -83,6 +184,24 @@ impl FixImpact {
             Self::MaybeBreaking => "maybe breaking",
             Self::Unsafe => "unsafe",
         }
+    }
+
+    /// Whether applying this fix is *guaranteed* to be a no-op
+    /// for callers — true only for `Safe`.
+    pub const fn is_caller_safe(self) -> bool {
+        matches!(self, FixImpact::Safe)
+    }
+
+    /// Whether this fix may break callers — `Breaking` or
+    /// `MaybeBreaking`.  IDE consumers gate the "show without
+    /// confirmation" surface on the negation.
+    pub const fn may_break_callers(self) -> bool {
+        matches!(self, FixImpact::Breaking | FixImpact::MaybeBreaking)
+    }
+
+    /// Whether this fix introduces unsafe code.  Singleton.
+    pub const fn introduces_unsafe(self) -> bool {
+        matches!(self, FixImpact::Unsafe)
     }
 }
 
@@ -1832,5 +1951,169 @@ mod tests {
                 || validation.contains("Err")
                 || validation.contains("if")
         );
+    }
+
+    /// Drift-pin: `QuickFixKind` is the canonical home — pre-
+    /// collapse `refinement_validation` had a duplicate 6-variant
+    /// enum that was kept in sync only by convention.  Pins
+    /// variant count, name partition, classifier flags, and the
+    /// to_lsp_kind() routing through is_quickfix.
+    #[test]
+    fn meta_pin_quick_fix_kind_round_trip_and_partitions() {
+        // 1. Variant count.
+        assert_eq!(QuickFixKind::ALL.len(), 6);
+
+        // 2. Names + uniqueness + JSON wire form (snake_case).
+        let mut seen = std::collections::HashSet::new();
+        for k in QuickFixKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case: {}",
+                k,
+                m.name
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 3. JSON wire form round-trips.
+        for k in QuickFixKind::ALL {
+            let json = serde_json::to_string(k).unwrap();
+            let decoded: QuickFixKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(decoded, *k);
+        }
+
+        // 4. Quickfix partition — fixes that route to
+        //    CodeActionKind::QUICKFIX.
+        let qf: Vec<_> = QuickFixKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_quickfix)
+            .copied()
+            .collect();
+        assert_eq!(
+            qf,
+            vec![
+                QuickFixKind::RuntimeCheck,
+                QuickFixKind::InlineRefinement,
+                QuickFixKind::Assertion,
+                QuickFixKind::PromoteToChecked,
+            ],
+        );
+
+        // 5. Runtime-check partition — RuntimeCheck + Assertion
+        //    are the two fixes that introduce deferred runtime
+        //    cost.
+        let rc: Vec<_> = QuickFixKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_runtime_check)
+            .copied()
+            .collect();
+        assert_eq!(
+            rc,
+            vec![QuickFixKind::RuntimeCheck, QuickFixKind::Assertion],
+        );
+
+        // 6. Type-touching partition — fixes that touch the
+        //    type surface and require type-system re-validation.
+        let tt: Vec<_> = QuickFixKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_type_touching)
+            .copied()
+            .collect();
+        assert_eq!(
+            tt,
+            vec![
+                QuickFixKind::InlineRefinement,
+                QuickFixKind::SigmaType,
+                QuickFixKind::WeakenRefinement,
+            ],
+        );
+
+        // 7. Disjointness: runtime-check ⊕ type-touching (a
+        //    single fix can't do both — runtime adds a guard,
+        //    type-touching changes the static type).
+        for k in QuickFixKind::ALL {
+            let m = k.meta();
+            assert!(
+                !(m.is_runtime_check && m.is_type_touching),
+                "{:?}: runtime-check ⊕ type-touching",
+                k
+            );
+        }
+
+        // 8. to_lsp_kind() routes through is_quickfix.
+        for k in QuickFixKind::ALL {
+            let expected = if k.meta().is_quickfix {
+                CodeActionKind::QUICKFIX
+            } else {
+                CodeActionKind::REFACTOR
+            };
+            assert_eq!(k.to_lsp_kind(), expected);
+        }
+    }
+
+    /// Drift-pin: `FixImpact` 4-variant set + classifier flags.
+    /// `refinement_validation::QuickFixImpact` is now an alias
+    /// for this richer 4-variant enum (pre-collapse a strict
+    /// 3-variant subset that excluded `MaybeBreaking`).
+    #[test]
+    fn meta_pin_fix_impact_round_trip_and_partitions() {
+        assert_eq!(FixImpact::ALL.len(), 4);
+
+        // 1. caller-safe is the Safe singleton.
+        let safe: Vec<_> = FixImpact::ALL
+            .iter()
+            .filter(|i| i.is_caller_safe())
+            .copied()
+            .collect();
+        assert_eq!(safe, vec![FixImpact::Safe]);
+
+        // 2. may-break-callers covers Breaking + MaybeBreaking.
+        let may: Vec<_> = FixImpact::ALL
+            .iter()
+            .filter(|i| i.may_break_callers())
+            .copied()
+            .collect();
+        assert_eq!(
+            may,
+            vec![FixImpact::Breaking, FixImpact::MaybeBreaking],
+        );
+
+        // 3. introduces-unsafe is the Unsafe singleton.
+        let uns: Vec<_> = FixImpact::ALL
+            .iter()
+            .filter(|i| i.introduces_unsafe())
+            .copied()
+            .collect();
+        assert_eq!(uns, vec![FixImpact::Unsafe]);
+
+        // 4. The three classifiers partition the variant set
+        //    perfectly (every variant flips exactly one).
+        for i in FixImpact::ALL {
+            let count = (i.is_caller_safe() as u32)
+                + (i.may_break_callers() as u32)
+                + (i.introduces_unsafe() as u32);
+            assert_eq!(count, 1, "{:?}: must flip exactly one classifier", i);
+        }
+
+        // 5. JSON wire form round-trips through serde.
+        for i in FixImpact::ALL {
+            let json = serde_json::to_string(i).unwrap();
+            let decoded: FixImpact = serde_json::from_str(&json).unwrap();
+            assert_eq!(decoded, *i);
+        }
+    }
+
+    /// Alias contract: `refinement_validation::QuickFixKind` /
+    /// `QuickFixImpact` re-exports.
+    #[test]
+    fn quick_fix_alias_contract() {
+        // Compile-time alias check via assignment.
+        let k: crate::refinement_validation::QuickFixKind =
+            QuickFixKind::RuntimeCheck;
+        assert_eq!(k, QuickFixKind::RuntimeCheck);
+
+        let i: crate::refinement_validation::QuickFixImpact = FixImpact::Safe;
+        assert_eq!(i, FixImpact::Safe);
     }
 }
