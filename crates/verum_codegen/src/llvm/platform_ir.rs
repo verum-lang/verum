@@ -248,14 +248,7 @@ impl<'ctx> PlatformIR<'ctx> {
             ))),
             Some(BasicTypeEnum::IntType(it)) => {
                 let raw = call_site
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        super::error::LlvmLoweringError::internal(format!(
-                            "{}: call returned no basic value",
-                            name
-                        ))
-                    })?
+                    .basic_value_or_else(|| format!("{}: call returned no basic value", name))?
                     .into_int_value();
                 let bits = it.get_bit_width();
                 if bits == 64 {
@@ -273,14 +266,7 @@ impl<'ctx> PlatformIR<'ctx> {
             }
             Some(BasicTypeEnum::PointerType(_)) => {
                 let raw = call_site
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        super::error::LlvmLoweringError::internal(format!(
-                            "{}: call returned no basic value",
-                            name
-                        ))
-                    })?
+                    .basic_value_or_else(|| format!("{}: call returned no basic value", name))?
                     .into_pointer_value();
                 builder
                     .build_ptr_to_int(raw, i64_type, &format!("{}_ret_p2i", name))

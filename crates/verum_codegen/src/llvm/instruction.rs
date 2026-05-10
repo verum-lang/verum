@@ -21714,11 +21714,7 @@ fn build_binary_intrinsic<'ctx>(
         .builder()
         .build_call(func, &[a.into(), b.into()], name)
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .ok_or_else(|| {
-            LlvmLoweringError::internal(format!("{}: expected return value", intrinsic_name))
-        })?;
+        .basic_value_or_else(|| format!("{}: expected return value", intrinsic_name))?;
     Ok(result.into_int_value())
 }
 
@@ -21736,11 +21732,7 @@ fn build_unary_intrinsic<'ctx>(
         .builder()
         .build_call(func, &[a.into()], name)
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .ok_or_else(|| {
-            LlvmLoweringError::internal(format!("{}: expected return value", intrinsic_name))
-        })?;
+        .basic_value_or_else(|| format!("{}: expected return value", intrinsic_name))?;
     Ok(result.into_int_value())
 }
 
@@ -21761,11 +21753,7 @@ fn build_round_intrinsic<'ctx>(
         .builder()
         .build_call(func, &[src.into()], name)
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .ok_or_else(|| {
-            LlvmLoweringError::internal(format!("{}: expected return value", intrinsic_name))
-        })?
+        .basic_value_or_else(|| format!("{}: expected return value", intrinsic_name))?
         .into_float_value();
     Ok(result)
 }
@@ -21790,11 +21778,7 @@ fn build_binary_intrinsic_f64<'ctx>(
         .builder()
         .build_call(func, &[a.into(), b.into()], name)
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .ok_or_else(|| {
-            LlvmLoweringError::internal(format!("{}: expected return value", intrinsic_name))
-        })?
+        .basic_value_or_else(|| format!("{}: expected return value", intrinsic_name))?
         .into_float_value();
     Ok(result)
 }
@@ -21819,11 +21803,7 @@ fn build_ternary_intrinsic_f64<'ctx>(
         .builder()
         .build_call(func, &[a.into(), b.into(), c.into()], name)
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .ok_or_else(|| {
-            LlvmLoweringError::internal(format!("{}: expected return value", intrinsic_name))
-        })?;
+        .basic_value_or_else(|| format!("{}: expected return value", intrinsic_name))?;
     Ok(result)
 }
 
@@ -21844,11 +21824,7 @@ fn build_unary_intrinsic_with_poison<'ctx>(
         .builder()
         .build_call(func, &[a.into(), is_zero_poison.into()], name)
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .ok_or_else(|| {
-            LlvmLoweringError::internal(format!("{}: expected return value", intrinsic_name))
-        })?;
+        .basic_value_or_else(|| format!("{}: expected return value", intrinsic_name))?;
     Ok(result.into_int_value())
 }
 
@@ -22106,11 +22082,7 @@ fn lower_math_unary_f64<'ctx>(
         .builder()
         .build_call(func, &[a.into()], name)
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .ok_or_else(|| {
-            LlvmLoweringError::internal(format!("{}: expected return value", intrinsic_name))
-        })?;
+        .basic_value_or_else(|| format!("{}: expected return value", intrinsic_name))?;
     ctx.set_register(dst, result);
     Ok(())
 }
@@ -22146,11 +22118,7 @@ fn lower_math_binary_f64<'ctx>(
         .builder()
         .build_call(func, &[a.into(), b.into()], name)
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .ok_or_else(|| {
-            LlvmLoweringError::internal(format!("{}: expected return value", intrinsic_name))
-        })?;
+        .basic_value_or_else(|| format!("{}: expected return value", intrinsic_name))?;
     ctx.set_register(dst, result);
     Ok(())
 }
@@ -26435,11 +26403,7 @@ fn call_tensor_runtime_f64<'ctx>(
         .builder()
         .build_call(func, &call_args, result_name)
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .ok_or_else(|| {
-            LlvmLoweringError::internal(format!("{}: expected return value", fn_name))
-        })?;
+        .basic_value_or_else(|| format!("{}: expected return value", fn_name))?;
     Ok(result)
 }
 

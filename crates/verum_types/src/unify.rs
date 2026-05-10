@@ -267,9 +267,82 @@ impl Unifier {
         self.array_coercible_types.insert(type_name);
     }
 
+    /// Walk `name` through any registered type aliases to its
+    /// terminal head name — the head of the deepest non-alias
+    /// `Named` target.  Returns `None` when `name` has no alias
+    /// chain (caller falls back to the literal-name lookup).
+    ///
+    /// **Bounded by the alias-cycle invariant** enforced at
+    /// `register_type_alias` (chains are guaranteed acyclic), so
+    /// the loop terminates without an explicit step counter.
+    /// **Type-only follow** — only walks `Named { path, .. }`
+    /// targets; an alias whose target is some non-named shape
+    /// (Tuple, Function, …) returns the previous step's head.
+    ///
+    /// Common cases:
+    ///   * `Tensor<T> is DynTensor<T>` → `"Tensor"` resolves to
+    ///     `"DynTensor"` so `is_tensor_family("Tensor")` returns
+    ///     `true` via DynTensor's `implement TensorLike`.
+    ///   * Darwin `SockaddrIn = DarwinSockaddrIn` → `"SockaddrIn"`
+    ///     resolves to `"DarwinSockaddrIn"` so
+    ///     `is_bytewise_ffi("SockaddrIn")` returns `true` via
+    ///     DarwinSockaddrIn's `implement BytewiseFfi`.
+    ///
+    /// Both seams previously required a 1-entry hardcoded
+    /// fallback (`TENSOR_FAMILY_STDLIB_NAMES = ["Tensor"]`,
+    /// `BYTEWISE_FFI_STDLIB_NAMES = ["SockaddrIn"]`); the
+    /// alias-aware lookup eliminates them entirely — the literal
+    /// alias name is checked first, and only falls through to
+    /// the resolved head when the direct lookup misses.
+    fn resolve_aliased_head_name(&self, name: &str) -> Option<String> {
+        let mut current = Text::from(name);
+        let mut step = false;
+        loop {
+            let target = match self.type_aliases.get(&current) {
+                Some(t) => t,
+                None => return if step { Some(current.to_string()) } else { None },
+            };
+            let head = match target {
+                Type::Named { path, .. } => path.segments.last().and_then(|seg| {
+                    match seg {
+                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
+                        _ => None,
+                    }
+                }),
+                _ => None,
+            };
+            match head {
+                Some(h) if h != current.as_str() => {
+                    current = Text::from(h);
+                    step = true;
+                }
+                _ => return if step { Some(current.to_string()) } else { None },
+            }
+        }
+    }
+
+    /// Helper: check `name` against `set`, falling back to the
+    /// alias-resolved head name. Centralises the alias-aware
+    /// pattern across the six family-check methods so the alias
+    /// rule is structurally identical for every coercion marker.
+    #[inline]
+    fn family_contains(
+        &self,
+        set: &std::collections::HashSet<Text>,
+        name: &str,
+    ) -> bool {
+        if set.contains(name) {
+            return true;
+        }
+        match self.resolve_aliased_head_name(name) {
+            Some(resolved) => set.contains(resolved.as_str()),
+            None => false,
+        }
+    }
+
     /// Check whether a type name supports array coercion (data-driven).
     fn is_array_coercible(&self, name: &str) -> bool {
-        self.array_coercible_types.contains(name)
+        self.family_contains(&self.array_coercible_types, name)
     }
 
     /// Register a type name as part of the tensor family (coerces with other tensor
@@ -278,10 +351,13 @@ impl Unifier {
         self.tensor_family_types.insert(type_name);
     }
 
-    /// Check whether a type name is in the tensor family (data-driven).
-    /// Replaces hardcoded `name.contains("Tensor") || name.contains("Vector")` checks.
+    /// Check whether a type name is in the tensor family
+    /// (alias-aware): the literal name is checked first, with
+    /// fallback to the alias-resolved head — so `Tensor<T>` (alias
+    /// for `DynTensor<T>`) inherits TensorLike via DynTensor's
+    /// `implement` block without a parallel hardcoded entry.
     fn is_tensor_family(&self, name: &str) -> bool {
-        self.tensor_family_types.contains(name)
+        self.family_contains(&self.tensor_family_types, name)
     }
 
     /// Register a Named type name that coerces bidirectionally with `Int`.
@@ -289,9 +365,10 @@ impl Unifier {
         self.int_coercible_named_types.insert(type_name);
     }
 
-    /// Check whether a Named type name coerces bidirectionally with `Int` (data-driven).
+    /// Check whether a Named type name coerces bidirectionally
+    /// with `Int` (alias-aware).
     fn is_int_coercible_named(&self, name: &str) -> bool {
-        self.int_coercible_named_types.contains(name)
+        self.family_contains(&self.int_coercible_named_types, name)
     }
 
     /// Register a type as indexable (supports integer indexing).
@@ -300,9 +377,10 @@ impl Unifier {
         self.indexable_collection_types.insert(type_name);
     }
 
-    /// Check whether a Generic collection type coerces with `Int` (indexing).
+    /// Check whether a Generic collection type coerces with `Int`
+    /// (indexing — alias-aware).
     fn is_indexable_collection(&self, name: &str) -> bool {
-        self.indexable_collection_types.contains(name)
+        self.family_contains(&self.indexable_collection_types, name)
     }
 
     /// Register a type as range-like (supports tuple/slice coercion).
@@ -311,9 +389,10 @@ impl Unifier {
         self.range_like_types.insert(type_name);
     }
 
-    /// Check whether a Generic type coerces with `Tuple` (range/slice pattern).
+    /// Check whether a Generic type coerces with `Tuple`
+    /// (range/slice pattern — alias-aware).
     fn is_range_like(&self, name: &str) -> bool {
-        self.range_like_types.contains(name)
+        self.family_contains(&self.range_like_types, name)
     }
 
     /// Register a type as sized numeric (cross-coerces with other sized numerics).
@@ -323,9 +402,10 @@ impl Unifier {
         self.sized_numeric_types.insert(type_name);
     }
 
-    /// Check whether a Named type is a sized numeric that cross-coerces with other sized numerics.
+    /// Check whether a Named type is a sized numeric that
+    /// cross-coerces with other sized numerics (alias-aware).
     fn is_sized_numeric(&self, name: &str) -> bool {
-        self.sized_numeric_types.contains(name)
+        self.family_contains(&self.sized_numeric_types, name)
     }
 
     /// Register a type as bytewise-FFI compatible — its in-memory
@@ -339,16 +419,18 @@ impl Unifier {
         self.bytewise_ffi_types.insert(type_name);
     }
 
-    /// True iff `name` is registered as a packed-C-struct byte
-    /// mirror compatible with `[Byte]` / `[UInt8]` at FFI
-    /// boundaries.  Replaces a hardcoded `matches!(name,
-    /// "Sockaddr" | "SocketAddr" | "SockaddrIn")` short-circuit
-    /// previously inline in the Named↔Named unification arm —
-    /// drift between the unifier's accept set and the stdlib's
-    /// declared `implement BytewiseFfi` blocks is now structurally
+    /// True iff `name` (or the head of its alias chain) is
+    /// registered as a packed-C-struct byte mirror compatible
+    /// with `[Byte]` / `[UInt8]` at FFI boundaries (alias-aware
+    /// — `SockaddrIn` on Darwin resolves to `DarwinSockaddrIn`).
+    /// Replaces a hardcoded `matches!(name, "Sockaddr" |
+    /// "SocketAddr" | "SockaddrIn")` short-circuit previously
+    /// inline in the Named↔Named unification arm — drift between
+    /// the unifier's accept set and the stdlib's declared
+    /// `implement BytewiseFfi` blocks is now structurally
     /// impossible.
     fn is_bytewise_ffi(&self, name: &str) -> bool {
-        self.bytewise_ffi_types.contains(name)
+        self.family_contains(&self.bytewise_ffi_types, name)
     }
 
     /// Set the variant type names registry for stdlib-agnostic unification.
@@ -5305,6 +5387,127 @@ impl Unifier {
 impl Default for Unifier {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod alias_aware_family_pins {
+    //! Pin tests for the alias-aware coercion-marker family
+    //! lookups (`is_tensor_family` / `is_bytewise_ffi` / etc.).
+    //! Each family-check method now consults the literal name
+    //! first then falls through to `resolve_aliased_head_name`,
+    //! letting alias names inherit their target's marker without
+    //! a parallel hardcoded fallback.
+    use super::*;
+
+    fn named(name: &str) -> Type {
+        Type::Named {
+            path: verum_ast::ty::Path {
+                segments: smallvec::smallvec![verum_ast::ty::PathSegment::Name(
+                    verum_ast::Ident::new(Text::from(name), Default::default()),
+                )],
+                span: Default::default(),
+            },
+            args: List::new(),
+        }
+    }
+
+    /// `Tensor<T> is DynTensor<T>` — `is_tensor_family("Tensor")`
+    /// must return true via alias resolution to `"DynTensor"`,
+    /// even though the literal `"Tensor"` is *not* registered.
+    /// Closes the architectural seam that previously kept
+    /// `TENSOR_FAMILY_STDLIB_NAMES = ["Tensor"]` as a hardcoded
+    /// alias-coverage fallback.
+    #[test]
+    fn tensor_family_resolves_through_alias() {
+        let mut u = Unifier::new();
+        u.register_tensor_family_type(Text::from("DynTensor"));
+        u.register_type_alias(Text::from("Tensor"), named("DynTensor"));
+
+        // Direct lookup on the registered head still works.
+        assert!(u.is_tensor_family("DynTensor"));
+        // Literal alias name not registered.
+        assert!(!u.tensor_family_types.contains("Tensor"));
+        // Alias-aware lookup resolves `Tensor → DynTensor`.
+        assert!(u.is_tensor_family("Tensor"));
+        // Types with no alias chain still produce the
+        // direct-lookup result.
+        assert!(!u.is_tensor_family("List"));
+    }
+
+    /// Darwin `type SockaddrIn = DarwinSockaddrIn;` —
+    /// `is_bytewise_ffi("SockaddrIn")` must follow the alias to
+    /// `"DarwinSockaddrIn"`, which carries
+    /// `implement BytewiseFfi`.  Closes the architectural seam
+    /// that previously kept `BYTEWISE_FFI_STDLIB_NAMES =
+    /// ["SockaddrIn"]` as hardcoded alias coverage.
+    #[test]
+    fn bytewise_ffi_resolves_through_alias() {
+        let mut u = Unifier::new();
+        u.register_bytewise_ffi_type(Text::from("DarwinSockaddrIn"));
+        u.register_type_alias(Text::from("SockaddrIn"), named("DarwinSockaddrIn"));
+        assert!(u.is_bytewise_ffi("DarwinSockaddrIn"));
+        assert!(u.is_bytewise_ffi("SockaddrIn"));
+        // Sum-type / arbitrary names still rejected.
+        assert!(!u.is_bytewise_ffi("SocketAddr"));
+    }
+
+    /// Multi-step alias chains resolve to their terminal head.
+    /// `A is B; B is C; register_tensor_family(C)` —
+    /// `is_tensor_family("A")` must walk both hops.
+    #[test]
+    fn alias_chain_walks_to_terminal_head() {
+        let mut u = Unifier::new();
+        u.register_tensor_family_type(Text::from("C"));
+        u.register_type_alias(Text::from("B"), named("C"));
+        u.register_type_alias(Text::from("A"), named("B"));
+
+        assert_eq!(
+            u.resolve_aliased_head_name("A"),
+            Some("C".to_string()),
+            "two-hop alias chain must resolve to its terminal head",
+        );
+        assert!(u.is_tensor_family("A"));
+        assert!(u.is_tensor_family("B"));
+        assert!(u.is_tensor_family("C"));
+    }
+
+    /// `resolve_aliased_head_name` returns `None` for names with
+    /// no alias chain — the family-check methods then fall
+    /// through to the direct-lookup result.
+    #[test]
+    fn resolve_aliased_head_returns_none_for_non_alias() {
+        let u = Unifier::new();
+        assert_eq!(u.resolve_aliased_head_name("UnknownType"), None);
+        assert_eq!(u.resolve_aliased_head_name("List"), None);
+    }
+
+    /// Cross-marker cross-cutting pin: every family-check
+    /// method (`is_tensor_family` / `is_bytewise_ffi` /
+    /// `is_int_coercible_named` / `is_indexable_collection` /
+    /// `is_range_like` / `is_sized_numeric`) is alias-aware via
+    /// the shared `family_contains` helper, so the alias rule
+    /// applies uniformly across all six markers — adding a new
+    /// family-check method must route through `family_contains`
+    /// or this pin's pattern of cross-checks fails.
+    #[test]
+    fn all_family_checks_alias_aware_uniformly() {
+        let mut u = Unifier::new();
+        u.register_type_alias(Text::from("AliasName"), named("HeadName"));
+        // Register HeadName in each family in turn and verify
+        // AliasName follows.
+        u.register_tensor_family_type(Text::from("HeadName"));
+        assert!(u.is_tensor_family("AliasName"));
+        u.register_bytewise_ffi_type(Text::from("HeadName"));
+        assert!(u.is_bytewise_ffi("AliasName"));
+        u.register_int_coercible_type(Text::from("HeadName"));
+        assert!(u.is_int_coercible_named("AliasName"));
+        u.register_indexable_type(Text::from("HeadName"));
+        assert!(u.is_indexable_collection("AliasName"));
+        u.register_range_like_type(Text::from("HeadName"));
+        assert!(u.is_range_like("AliasName"));
+        u.register_sized_numeric_type(Text::from("HeadName"));
+        assert!(u.is_sized_numeric("AliasName"));
     }
 }
 

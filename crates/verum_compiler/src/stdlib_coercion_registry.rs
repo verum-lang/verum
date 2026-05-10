@@ -66,7 +66,7 @@
 
 /// Stdlib type names that participate in tensor-family coercions.
 ///
-/// Per-entry status (#101 Step 2 migration):
+/// Per-entry status (#101 Step 2 migration — Step 4 reached):
 ///   * `DynTensor` — REMOVED. `core/math/tensor.vr` declares
 ///     `implement<T: Numeric> TensorLike for DynTensor<T> {}`;
 ///     `scan_protocol_implementations` registers it.
@@ -76,13 +76,13 @@
 ///     Cotangent` / `public type Tangent` exists in `core/`; the
 ///     types are spelled `CotangentVector` / `TangentVector` and
 ///     have their own implement blocks.
-///   * `Tensor` — KEPT. `core/math/tensor.vr` declares
+///   * `Tensor` — REMOVED. `core/math/tensor.vr` declares
 ///     `public type Tensor<T: Numeric> is DynTensor<T>` (alias);
-///     the unifier's `is_tensor_family` looks up by last-segment
-///     name and doesn't resolve aliases first, so the alias name
-///     `"Tensor"` must be registered explicitly until the unifier
-///     gains alias-aware tensor-family lookup.
-pub const TENSOR_FAMILY_STDLIB_NAMES: &[&str] = &["Tensor"];
+///     the unifier's `is_tensor_family` is now alias-aware
+///     (`Unifier::resolve_aliased_head_name`) so the alias
+///     resolves to `DynTensor` and inherits TensorLike via that
+///     type's implement block. No hardcoded fallback needed.
+pub const TENSOR_FAMILY_STDLIB_NAMES: &[&str] = &[];
 
 /// Stdlib type names that support integer indexing.
 ///
@@ -115,7 +115,7 @@ pub const RANGE_LIKE_STDLIB_NAMES: &[&str] = &[];
 /// short-circuit inline in `verum_types::unify::Unifier`'s
 /// Named↔Named arm.
 ///
-/// Per-entry status:
+/// Per-entry status (Step 4 reached):
 ///   * `Sockaddr` — REMOVED. `core/sys/darwin/libsystem.vr`
 ///     declares `implement BytewiseFfi for Sockaddr {}`;
 ///     `scan_protocol_implementations` registers the name.
@@ -125,19 +125,16 @@ pub const RANGE_LIKE_STDLIB_NAMES: &[&str] = &[];
 ///     mirror.  The unifier was over-permissive; including
 ///     this name accepted a high-level enum where only the
 ///     low-level FFI mirror should pass.
-///   * `SockaddrIn` — KEPT.  Linux declares
+///   * `SockaddrIn` — REMOVED.  Linux declares
 ///     `public type SockaddrIn is { ... }` with an explicit
 ///     `implement BytewiseFfi for SockaddrIn {}`;
 ///     Darwin declares `public type SockaddrIn =
-///     DarwinSockaddrIn;` (a type alias, not a separate
-///     `implement` site).  The protocol-scan walker doesn't
-///     project alias names onto the target type's impl
-///     blocks, so the `"SockaddrIn"` literal seen by the
-///     unifier on a Darwin-only build needs explicit fallback
-///     registration until the unifier learns alias-aware
-///     lookup.  This is the same architectural seam as
-///     `"Tensor"` in `TENSOR_FAMILY_STDLIB_NAMES`.
-pub const BYTEWISE_FFI_STDLIB_NAMES: &[&str] = &["SockaddrIn"];
+///     DarwinSockaddrIn;` and the unifier's `is_bytewise_ffi`
+///     is now alias-aware (`Unifier::resolve_aliased_head_name`)
+///     so the Darwin alias resolves to `DarwinSockaddrIn` and
+///     inherits the marker via that type's implement block.
+///     No hardcoded fallback needed.
+pub const BYTEWISE_FFI_STDLIB_NAMES: &[&str] = &[];
 
 /// Stdlib type names that cross-coerce with `Int` in unification.
 ///
@@ -409,14 +406,22 @@ mod migration_pins {
     /// hardcoded entry must justify why the protocol-scan path
     /// won't work for that type. The closure of #101 step 3 is
     /// reached when every count below is 0.
+    ///
+    /// **Status: 4 of 5 coercion-marker categories are at
+    /// Step 4.** Only `SIZED_NUMERIC_STDLIB_NAMES` retains a
+    /// non-zero baseline because that category follows a
+    /// separate timeline (the `Numeric` protocol query
+    /// in `core/base/protocols.vr` is not yet wired into the
+    /// unifier).
     #[test]
     fn migration_progress_pinned() {
-        // Tensor family: only the `Tensor` alias remains until the
-        // unifier learns to resolve aliases before consulting
-        // `is_tensor_family`.  All concrete tensor types
-        // (DynTensor, Vector) have implement blocks.
-        assert_eq!(TENSOR_FAMILY_STDLIB_NAMES.len(), 1);
-        assert_eq!(TENSOR_FAMILY_STDLIB_NAMES[0], "Tensor");
+        // Tensor family: Step 4 reached. The lone `"Tensor"`
+        // alias-coverage entry was eliminated by adding
+        // alias-aware lookup to `Unifier::is_tensor_family`
+        // (`resolve_aliased_head_name`), so `Tensor<T>`
+        // (alias for `DynTensor<T>`) now inherits TensorLike
+        // through DynTensor's implement block transparently.
+        assert_eq!(TENSOR_FAMILY_STDLIB_NAMES.len(), 0);
         // Indexable + RangeLike: every reachable Range-like /
         // indexable stdlib type carries its own implement block.
         assert_eq!(INDEXABLE_STDLIB_NAMES.len(), 0);
@@ -430,18 +435,13 @@ mod migration_pins {
         // SIZED_NUMERIC follows a different timeline (`Numeric`
         // protocol query landing) — keep its 3-entry baseline.
         assert_eq!(SIZED_NUMERIC_STDLIB_NAMES.len(), 3);
-        // BytewiseFfi: 1-entry baseline.  `Sockaddr` is registered
-        // via Darwin's `implement BytewiseFfi`; `SocketAddr` was
-        // dropped as architecturally wrong (sum type, not byte
-        // mirror); `SockaddrIn` stays as the alias-coverage
-        // fallback (Darwin declares it as `type SockaddrIn =
-        // DarwinSockaddrIn` which the protocol-scan doesn't
-        // project, so the alias name needs explicit
-        // registration until the unifier learns alias-aware
-        // lookup — same architectural seam as the lone
-        // `"Tensor"` entry in `TENSOR_FAMILY_STDLIB_NAMES`).
-        assert_eq!(BYTEWISE_FFI_STDLIB_NAMES.len(), 1);
-        assert_eq!(BYTEWISE_FFI_STDLIB_NAMES[0], "SockaddrIn");
+        // BytewiseFfi: Step 4 reached. The `"SockaddrIn"`
+        // alias-coverage entry was eliminated by the same
+        // alias-aware-lookup change — Darwin's
+        // `type SockaddrIn = DarwinSockaddrIn` alias now
+        // resolves through `is_bytewise_ffi` to the underlying
+        // `DarwinSockaddrIn` (which carries the marker block).
+        assert_eq!(BYTEWISE_FFI_STDLIB_NAMES.len(), 0);
     }
 
     /// `match_coercion_protocol` accepts exactly the four
