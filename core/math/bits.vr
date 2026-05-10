@@ -269,45 +269,25 @@ public fn propagate_rightmost_one(x: UInt64) -> UInt64 {
 }
 
 // =============================================================================
-// Bit Field Operations
+// Bit Field Operations  →  delegated to `core.sys.bitfield`
 // =============================================================================
-
-// Extract bit field: (x >> offset) & ((1 << width) - 1)
-@inline(always)
-public fn extract_bits(x: UInt64, offset: UInt32, width: UInt32) -> UInt64 {
-    (x >> (offset as UInt64)) & ((1 << (width as UInt64)) - 1)
-}
-
-// Insert bit field: clear bits at offset, then set new value
-@inline(always)
-public fn insert_bits(x: UInt64, value: UInt64, offset: UInt32, width: UInt32) -> UInt64 {
-    let mask = ((1 << (width as UInt64)) - 1) << (offset as UInt64);
-    (x & !mask) | ((value << (offset as UInt64)) & mask)
-}
-
-// Test if bit is set
-@inline(always)
-public fn test_bit(x: UInt64, n: UInt32) -> Bool {
-    (x & (1 << (n as UInt64))) != 0
-}
-
-// Set bit at position
-@inline(always)
-public fn set_bit(x: UInt64, n: UInt32) -> UInt64 {
-    x | (1 << (n as UInt64))
-}
-
-// Clear bit at position
-@inline(always)
-public fn clear_bit(x: UInt64, n: UInt32) -> UInt64 {
-    x & !(1 << (n as UInt64))
-}
-
-// Toggle bit at position
-@inline(always)
-public fn toggle_bit(x: UInt64, n: UInt32) -> UInt64 {
-    x ^ (1 << (n as UInt64))
-}
+//
+// The canonical home for bit-field manipulation primitives — `extract_bits`,
+// `insert_bits`, `test_bit`, `set_bit`, `clear_bit`, `toggle_bit`, plus the
+// mask-form `set_bits` / `clear_bits` and the `field_mask` builder — is
+// `core.sys.bitfield`. The functions there are typed over `USize`, the
+// platform-native bitfield word that pairs with the `BitfieldElement`
+// protocol; on any 64-bit target the LLVM lowering is bit-identical to the
+// UInt64 expressions that previously lived here.
+//
+// Callers that prefer a UInt64-typed surface should use the cast pattern:
+//
+//     mount core.sys.bitfield;
+//     let r: UInt64 = bitfield.extract_bits(x as USize, o as USize, w as USize) as UInt64;
+//
+// Removing the parallel UInt64 implementations eliminates a long-standing
+// name-collision in the global symbol table that prevented downstream code
+// from importing `set_bit`/`clear_bit`/etc. through `mount X.{name}`.
 
 // =============================================================================
 // Bit Interleaving (Morton Codes)

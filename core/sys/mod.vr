@@ -165,6 +165,8 @@ public mount .init.{
 public mount .bitfield.{
     BitfieldElement,
     Bitfield,
+    USIZE_BITS,
+    field_mask,
     extract_bits,
     insert_bits,
     set_bits,

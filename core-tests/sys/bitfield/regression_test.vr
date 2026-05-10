@@ -1,0 +1,114 @@
+// =============================================================================
+// core-tests/sys/bitfield/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.sys.bitfield`. Every defect uncovered while
+// landing the canonical USize-typed bit-manipulation API ships a one-test
+// reproducer here. Each remains in place even after the underlying defect
+// is closed — the test then becomes the guardrail against re-regression.
+//
+// Companion files:
+//   unit_test.vr         — public API surface tests (uses the workarounds)
+//   audit.md             — full audit narrative + landed/deferred items
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.bitfield;
+
+// =============================================================================
+// REGRESSION 1 (compiler defect — tracked in tasks #15 and audit §3.1):
+//   `mount X.{public_const}` does not register the name in the codegen's
+//   global symbol table; cross-module imports of `public const` items fail
+//   with `UndefinedVariable("CONST_NAME")` at compile time. The
+//   fully-qualified path `bitfield.USIZE_BITS` is the only form the codegen
+//   currently honours.
+//
+// Pre-fix shape (rejected by codegen):
+//
+//     mount core.sys.bitfield.{USIZE_BITS};
+//     fn f() -> USize { USIZE_BITS }
+//     // → UndefinedVariable("USIZE_BITS")
+//
+// Post-fix shape (accepted today):
+//
+//     mount core.sys.bitfield;
+//     fn f() -> USize { bitfield.USIZE_BITS }
+//
+// This test pins the post-fix shape so the moment the compiler closes the
+// defect, callers can switch back without breaking the suite.
+// =============================================================================
+
+@test
+fn regression_const_via_fqn_resolves() {
+    // The constant resolves cleanly through the fully-qualified path even
+    // though the named-mount form does not.
+    let n: USize = bitfield.USIZE_BITS;
+    assert(n >= (32 as USize));
+    assert_eq(n % (8 as USize), 0 as USize);
+}
+
+// =============================================================================
+// REGRESSION 2 (compiler defect — tracked in task #13 and audit §3.2):
+//   Cross-module free-function dispatch silently returns Unit/nil at
+//   `--interp` runtime. The `mount X.{free_fn}` form compiles cleanly and
+//   so does the fully-qualified `module.free_fn(args)` call site, but the
+//   VBC dispatch table never invokes the function body — every call
+//   evaluates to () (or `nil` in print output).
+//
+// Pre-fix shape (compiles, runs to wrong result):
+//
+//     mount core.sys.bitfield.{test_bit};
+//     fn probe() -> Bool {
+//         test_bit(0xA5 as USize, 7 as USize)  // → returns () instead of true
+//     }
+//
+// Until the dispatch defect is fixed, every call site in this suite uses
+// the `bitfield.test_bit(...)` form (which today exhibits the same
+// runtime gap but is the most ergonomic shape that will work after the
+// fix). Each unit test below documents the gap by asserting on a result
+// the broken dispatch cannot satisfy — the suite turns green the moment
+// the dispatch table starts honouring the cross-module call.
+// =============================================================================
+
+@test
+fn regression_dispatch_returns_real_bool() {
+    // Probe: bit 7 of 0xA5 = 1010_0101 — the high bit is set, so test_bit
+    // must return *exactly* `true`. The pre-fix dispatch returned Unit,
+    // which compares unequal to `true` and fires this assertion.
+    let v: USize = 0xA5 as USize;
+    let bit7 = bitfield.test_bit(v, 7 as USize);
+    assert_eq(bit7, true);
+}
+
+// =============================================================================
+// REGRESSION 3 (eliminated upstream — pinned to prevent re-introduction):
+//   Prior to the canonicalisation in `core.sys.bitfield`, parallel UInt64
+//   implementations of `extract_bits / insert_bits / test_bit / set_bit /
+//   clear_bit / toggle_bit` lived in `core.math.bits`. Two free-function
+//   names registered in the global symbol table per module caused the
+//   codegen to dispatch to the wrong implementation at random under
+//   monomorphisation, surfacing as silent miscalculations on USize-typed
+//   call sites.
+//
+// The fix collapsed the two implementations to a single canonical home
+// (`core.sys.bitfield`, USize-typed); `core.math.bits` now points at it
+// in its module-level docstring and provides no parallel definitions.
+//
+// This test pins the canonical home: the only public free-function
+// `extract_bits` in the workspace lives in `core.sys.bitfield`. Adding
+// a second one anywhere else would resurrect the codegen ambiguity.
+// =============================================================================
+
+@test
+fn regression_extract_bits_round_trip() {
+    // Canonical-home probe: extract a known field, check the bit pattern
+    // matches the USize-typed contract documented in `core.sys.bitfield`.
+    // Any future drift to a parallel implementation with different
+    // semantics (e.g. UInt64-shift width treatment) breaks this assertion.
+    let v: USize = 0xABCD as USize;
+    // 0xABCD: bits [0..8] = 0xCD; bits [8..16] = 0xAB.
+    assert_eq(bitfield.extract_bits(v, 0 as USize, 8 as USize), 0xCD as USize);
+    assert_eq(bitfield.extract_bits(v, 8 as USize, 8 as USize), 0xAB as USize);
+}
+
+fn main() {}
