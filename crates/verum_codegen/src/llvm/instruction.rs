@@ -18013,10 +18013,7 @@ fn lower_arith_extended<'ctx>(
             let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "atan2_b")?;
             let f64_ty = ctx.types().f64_type();
             let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
-            let module = ctx.get_module();
-            let func = module
-                .get_function("llvm.atan2.f64")
-                .unwrap_or_else(|| module.add_function("llvm.atan2.f64", fn_type, None));
+            let func = super::error::get_or_declare_function(ctx.get_module(), "llvm.atan2.f64", fn_type);
             let result = ctx
                 .builder()
                 .build_call(func, &[a.into(), b.into()], "atan2")
@@ -18040,10 +18037,7 @@ fn lower_arith_extended<'ctx>(
             let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "hypot_b")?;
             let f64_ty = ctx.types().f64_type();
             let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
-            let module = ctx.get_module();
-            let func = module
-                .get_function("llvm.hypot.f64")
-                .unwrap_or_else(|| module.add_function("llvm.hypot.f64", fn_type, None));
+            let func = super::error::get_or_declare_function(ctx.get_module(), "llvm.hypot.f64", fn_type);
             let result = ctx
                 .builder()
                 .build_call(func, &[a.into(), b.into()], "hypot")
@@ -18064,10 +18058,7 @@ fn lower_arith_extended<'ctx>(
             let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "copysign_b")?;
             let f64_ty = ctx.types().f64_type();
             let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
-            let module = ctx.get_module();
-            let func = module
-                .get_function("llvm.copysign.f64")
-                .unwrap_or_else(|| module.add_function("llvm.copysign.f64", fn_type, None));
+            let func = super::error::get_or_declare_function(ctx.get_module(), "llvm.copysign.f64", fn_type);
             let result = ctx
                 .builder()
                 .build_call(func, &[a.into(), b.into()], "copysign")
@@ -18088,10 +18079,7 @@ fn lower_arith_extended<'ctx>(
             let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "pow_b")?;
             let f64_ty = ctx.types().f64_type();
             let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
-            let module = ctx.get_module();
-            let func = module
-                .get_function("llvm.pow.f64")
-                .unwrap_or_else(|| module.add_function("llvm.pow.f64", fn_type, None));
+            let func = super::error::get_or_declare_function(ctx.get_module(), "llvm.pow.f64", fn_type);
             let result = ctx
                 .builder()
                 .build_call(func, &[a.into(), b.into()], "pow")
