@@ -812,6 +812,19 @@ impl<'s> CompilationPipeline<'s> {
                 all_ast_modules.push(ast_module);
             }
         }
+        // Pass 5.5: stdlib coercion-protocol discovery.
+        // Walks every loaded `.vr` module's AST for
+        // `implement <Marker> for X {}` blocks (six markers in
+        // `core/base/coercion.vr`: IntCoercible / TensorLike /
+        // Indexable / RangeLike / BytewiseFfi / SizedNumeric)
+        // and registers the target type with the unifier's
+        // matching coercion registry.  Sole registration path —
+        // the previous hardcoded-fallback `register_stdlib_coercions`
+        // was deleted at #101 step 4 close-out once every retrofit
+        // landed; the architectural rule in
+        // `verum_types/src/CLAUDE.md` ("NEVER hardcode stdlib/core
+        // type knowledge in the compiler") is now structurally
+        // enforced — there is no hardcoded list left to drift.
         let registered_via_protocol =
             crate::stdlib_coercion_registry::scan_protocol_implementations(
                 type_checker.unifier_mut(),
@@ -823,23 +836,6 @@ impl<'s> CompilationPipeline<'s> {
                 registered_via_protocol
             );
         }
-
-        // Pass 5.5b: Hardcoded fallback registration for stdlib types
-        // not yet retrofitted with implement blocks. Per the
-        // architectural rule in `verum_types/src/CLAUDE.md`
-        // ("NEVER hardcode stdlib/core type knowledge in the
-        // compiler"), the hardcoded scaffolding is contained in the
-        // dedicated `stdlib_coercion_registry` module so the violation
-        // lives in one identifiable spot.
-        //
-
-        // The unifier's register_*_type methods de-duplicate via
-        // HashSet, so calling 5.5b after 5.5a is harmless when an
-        // already-discovered type happens to be in the hardcoded list.
-        // Each stdlib retrofit (adding `implement IntCoercible for X`)
-        // lets us delete X from the hardcoded list with safe
-        // rollback at every step.
-        crate::stdlib_coercion_registry::register_stdlib_coercions(type_checker.unifier_mut());
 
         // Pass 6: Validate imports
         // Now that all types, functions, and protocols are registered,
