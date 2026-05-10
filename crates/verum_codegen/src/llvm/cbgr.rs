@@ -387,12 +387,8 @@ impl<'ctx> CbgrLowering<'ctx> {
             .or_llvm_err()?;
 
         // 6. Get or declare verum_cbgr_validate_ref(i64, i64) -> i1
-        let validate_fn = module
-            .get_function("verum_cbgr_validate_ref")
-            .unwrap_or_else(|| {
-                let fn_type = i1_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-                module.add_function("verum_cbgr_validate_ref", fn_type, None)
-            });
+        let fn_type = i1_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+        let validate_fn = super::error::get_or_declare_function(module, "verum_cbgr_validate_ref", fn_type);
 
         // 7. Call the validation function
         let call_result = builder
@@ -422,11 +418,9 @@ impl<'ctx> CbgrLowering<'ctx> {
 
         // Invalid path: call panic handler and unreachable
         builder.position_at_end(invalid_bb);
-        let panic_fn = module.get_function("verum_panic").unwrap_or_else(|| {
-            let void_type = self.context.void_type();
-            let fn_type = void_type.fn_type(&[ptr_type.into()], false);
-            module.add_function("verum_panic", fn_type, None)
-        });
+        let void_type = self.context.void_type();
+        let fn_type = void_type.fn_type(&[ptr_type.into()], false);
+        let panic_fn = super::error::get_or_declare_function(module, "verum_panic", fn_type);
         // Build a constant panic message
         let panic_msg = builder
             .build_global_string_ptr(
