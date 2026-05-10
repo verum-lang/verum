@@ -362,6 +362,114 @@ pub enum ConstraintCheckResult {
     },
 }
 
+/// Discriminator for [`ConstraintCheckResult`] — zero-sized
+/// projection.  Used by metrics consumers that classify the
+/// solver verdict band without cloning the model / conflict /
+/// reason payloads.  Mirrors the
+/// `verum_smt::backend_trait::SatResult` discriminator-Kind that
+/// covers the SMT-backend side of the same Yes / No / Unknown
+/// taxonomy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ConstraintCheckResultKind {
+    Satisfiable,
+    Unsatisfiable,
+    Unknown,
+}
+
+/// Per-variant projection for [`ConstraintCheckResultKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConstraintCheckResultKindMeta {
+    /// Lower-snake-case wire form — used in telemetry surfaces.
+    pub name: &'static str,
+    /// Solver returned a *definite* verdict (Satisfiable +
+    /// Unsatisfiable).  Inverse: `Unknown` is the unique non-
+    /// definite kind.
+    pub is_definite: bool,
+    /// Solver returned the *positive* verdict — Satisfiable
+    /// singleton.  The constraints have a model.
+    pub is_positive: bool,
+    /// Whether the variant carries a *model* payload — the
+    /// satisfying assignment.  Singleton on `Satisfiable`.
+    /// Pinned so downstream code that reaches into the model
+    /// is decoupled from per-variant matching.
+    pub carries_model: bool,
+    /// Whether the variant carries an *explanation* payload —
+    /// either the conflict-set explanation (Unsatisfiable) or
+    /// the timeout/unknown reason (Unknown).  Pinned partition.
+    pub carries_explanation: bool,
+}
+
+impl ConstraintCheckResultKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::Satisfiable,
+        Self::Unsatisfiable,
+        Self::Unknown,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> ConstraintCheckResultKindMeta {
+        match self {
+            ConstraintCheckResultKind::Satisfiable => ConstraintCheckResultKindMeta {
+                name: "satisfiable",
+                is_definite: true,
+                is_positive: true,
+                carries_model: true,
+                carries_explanation: false,
+            },
+            ConstraintCheckResultKind::Unsatisfiable => ConstraintCheckResultKindMeta {
+                name: "unsatisfiable",
+                is_definite: true,
+                is_positive: false,
+                carries_model: false,
+                carries_explanation: true,
+            },
+            ConstraintCheckResultKind::Unknown => ConstraintCheckResultKindMeta {
+                name: "unknown",
+                is_definite: false,
+                is_positive: false,
+                carries_model: false,
+                carries_explanation: true,
+            },
+        }
+    }
+}
+
+impl ConstraintCheckResult {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> ConstraintCheckResultKind {
+        match self {
+            ConstraintCheckResult::Satisfiable { .. } => ConstraintCheckResultKind::Satisfiable,
+            ConstraintCheckResult::Unsatisfiable { .. } => {
+                ConstraintCheckResultKind::Unsatisfiable
+            }
+            ConstraintCheckResult::Unknown { .. } => ConstraintCheckResultKind::Unknown,
+        }
+    }
+
+    /// Returns the satisfying-assignment model if this is the
+    /// `Satisfiable` band.  Decoupled from per-variant matching
+    /// via `meta().carries_model`.
+    pub fn model(&self) -> Option<&Map<Text, i64>> {
+        match self {
+            ConstraintCheckResult::Satisfiable { model } => Some(model),
+            _ => None,
+        }
+    }
+
+    /// Returns the explanation text for `Unsatisfiable` and
+    /// `Unknown` bands — both carry an explanation/reason
+    /// payload.  Decoupled from per-variant matching via
+    /// `meta().carries_explanation`.
+    pub fn explanation(&self) -> Option<&Text> {
+        match self {
+            ConstraintCheckResult::Satisfiable { .. } => None,
+            ConstraintCheckResult::Unsatisfiable { explanation, .. } => Some(explanation),
+            ConstraintCheckResult::Unknown { reason } => Some(reason),
+        }
+    }
+}
+
 /// System for tracking and validating dimension constraints
 ///
 
@@ -1080,6 +1188,127 @@ pub enum DimensionEqualityResult {
         /// Reason
         reason: Text,
     },
+}
+
+/// Discriminator for [`DimensionEqualityResult`].  Sibling of
+/// [`ConstraintCheckResultKind`] but carrying an extra
+/// `PossiblyEqual` band that exposes the *suggested constraint*
+/// the user could add to make equality hold — used by the
+/// IDE quick-fix surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum DimensionEqualityResultKind {
+    Equal,
+    NotEqual,
+    PossiblyEqual,
+    Unknown,
+}
+
+/// Per-variant projection for [`DimensionEqualityResultKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DimensionEqualityResultKindMeta {
+    /// Lower-snake-case wire form.
+    pub name: &'static str,
+    /// The verdict is *definite* (Equal + NotEqual).
+    /// `PossiblyEqual` is conditionally definite (definite under
+    /// the constraint suggestion); `Unknown` is genuinely
+    /// indeterminate.
+    pub is_definite: bool,
+    /// The verdict carries a *positive* answer (Equal +
+    /// PossiblyEqual — the latter under the suggested
+    /// constraint).  NotEqual + Unknown are negative/indef.
+    pub may_be_equal: bool,
+    /// The variant carries an *actionable suggestion* — the
+    /// constraint the IDE can offer as a quick-fix.
+    /// `PossiblyEqual` singleton.
+    pub carries_suggestion: bool,
+    /// The variant carries a *reason / explanation* payload.
+    /// NotEqual + Unknown.
+    pub carries_explanation: bool,
+}
+
+impl DimensionEqualityResultKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::Equal,
+        Self::NotEqual,
+        Self::PossiblyEqual,
+        Self::Unknown,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> DimensionEqualityResultKindMeta {
+        match self {
+            DimensionEqualityResultKind::Equal => DimensionEqualityResultKindMeta {
+                name: "equal",
+                is_definite: true,
+                may_be_equal: true,
+                carries_suggestion: false,
+                carries_explanation: false,
+            },
+            DimensionEqualityResultKind::NotEqual => DimensionEqualityResultKindMeta {
+                name: "not_equal",
+                is_definite: true,
+                may_be_equal: false,
+                carries_suggestion: false,
+                carries_explanation: true,
+            },
+            DimensionEqualityResultKind::PossiblyEqual => DimensionEqualityResultKindMeta {
+                name: "possibly_equal",
+                is_definite: false,
+                may_be_equal: true,
+                carries_suggestion: true,
+                carries_explanation: false,
+            },
+            DimensionEqualityResultKind::Unknown => DimensionEqualityResultKindMeta {
+                name: "unknown",
+                is_definite: false,
+                may_be_equal: false,
+                carries_suggestion: false,
+                carries_explanation: true,
+            },
+        }
+    }
+}
+
+impl DimensionEqualityResult {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> DimensionEqualityResultKind {
+        match self {
+            DimensionEqualityResult::Equal => DimensionEqualityResultKind::Equal,
+            DimensionEqualityResult::NotEqual { .. } => {
+                DimensionEqualityResultKind::NotEqual
+            }
+            DimensionEqualityResult::PossiblyEqual { .. } => {
+                DimensionEqualityResultKind::PossiblyEqual
+            }
+            DimensionEqualityResult::Unknown { .. } => {
+                DimensionEqualityResultKind::Unknown
+            }
+        }
+    }
+
+    /// Returns the suggested constraint for the `PossiblyEqual`
+    /// band — the IDE quick-fix surface.  Decoupled from
+    /// per-variant matching via `meta().carries_suggestion`.
+    pub fn suggested_constraint(&self) -> Option<&Text> {
+        match self {
+            DimensionEqualityResult::PossiblyEqual { constraint_needed } => {
+                Some(constraint_needed)
+            }
+            _ => None,
+        }
+    }
+
+    /// Returns the reason payload for the `NotEqual` and
+    /// `Unknown` bands.  Decoupled from per-variant matching
+    /// via `meta().carries_explanation`.
+    pub fn explanation(&self) -> Option<&Text> {
+        match self {
+            DimensionEqualityResult::NotEqual { reason } => Some(reason),
+            DimensionEqualityResult::Unknown { reason } => Some(reason),
+            _ => None,
+        }
+    }
 }
 
 // ==================== Original Types ====================
@@ -2225,5 +2454,247 @@ impl ShapeVerifier {
 impl Default for ShapeVerifier {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod result_meta_drift_pins {
+    use super::*;
+
+    /// Drift-pin: `ConstraintCheckResultKind` is the
+    /// discriminator projection.  Pins variant count, name
+    /// uniqueness, three classifier partitions
+    /// (definite / positive / carries-model / carries-explanation),
+    /// and the cross-cutting invariants binding them.
+    #[test]
+    fn meta_pin_constraint_check_result_kind_round_trip_and_partitions() {
+        // 1. Variant count + names + uniqueness.
+        assert_eq!(ConstraintCheckResultKind::ALL.len(), 3);
+        let mut seen = std::collections::HashSet::new();
+        for k in ConstraintCheckResultKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case: {}",
+                k,
+                m.name,
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 2. Definite-verdict partition — Satisfiable + Unsatisfiable.
+        let definite: Vec<_> = ConstraintCheckResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_definite)
+            .copied()
+            .collect();
+        assert_eq!(
+            definite,
+            vec![
+                ConstraintCheckResultKind::Satisfiable,
+                ConstraintCheckResultKind::Unsatisfiable,
+            ],
+        );
+
+        // 3. is_positive — Satisfiable singleton.
+        let positive: Vec<_> = ConstraintCheckResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_positive)
+            .copied()
+            .collect();
+        assert_eq!(positive, vec![ConstraintCheckResultKind::Satisfiable]);
+
+        // 4. carries_model — Satisfiable singleton.
+        let with_model: Vec<_> = ConstraintCheckResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_model)
+            .copied()
+            .collect();
+        assert_eq!(with_model, vec![ConstraintCheckResultKind::Satisfiable]);
+
+        // 5. carries_explanation — Unsatisfiable + Unknown.
+        let with_expl: Vec<_> = ConstraintCheckResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_explanation)
+            .copied()
+            .collect();
+        assert_eq!(
+            with_expl,
+            vec![
+                ConstraintCheckResultKind::Unsatisfiable,
+                ConstraintCheckResultKind::Unknown,
+            ],
+        );
+
+        // 6. Cross-cutting: positive ⇒ definite (a positive
+        //    verdict means the solver concluded).
+        for k in ConstraintCheckResultKind::ALL {
+            let m = k.meta();
+            assert!(
+                !m.is_positive || m.is_definite,
+                "{:?}: positive ⇒ definite",
+                k
+            );
+        }
+
+        // 7. carries_model ⊕ carries_explanation — every
+        //    variant carries exactly one structured payload type
+        //    (model OR explanation).  Pinned partition: model
+        //    only on Satisfiable; explanation on the other two.
+        for k in ConstraintCheckResultKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.carries_model ^ m.carries_explanation,
+                "{:?}: must carry exactly one of model / explanation",
+                k
+            );
+        }
+
+        // 8. Live-payload kind() + accessor projection.
+        let sat = ConstraintCheckResult::Satisfiable {
+            model: Map::new(),
+        };
+        assert_eq!(sat.kind(), ConstraintCheckResultKind::Satisfiable);
+        assert!(sat.model().is_some());
+        assert!(sat.explanation().is_none());
+
+        let uns = ConstraintCheckResult::Unsatisfiable {
+            conflicting_constraints: List::new(),
+            explanation: Text::from("conflict"),
+        };
+        assert_eq!(uns.kind(), ConstraintCheckResultKind::Unsatisfiable);
+        assert!(uns.model().is_none());
+        assert_eq!(uns.explanation().unwrap().as_str(), "conflict");
+
+        let unk = ConstraintCheckResult::Unknown {
+            reason: Text::from("timeout"),
+        };
+        assert_eq!(unk.kind(), ConstraintCheckResultKind::Unknown);
+        assert!(unk.model().is_none());
+        assert_eq!(unk.explanation().unwrap().as_str(), "timeout");
+    }
+
+    /// Drift-pin: `DimensionEqualityResultKind`.  4-variant
+    /// extension of the constraint-check taxonomy that carries
+    /// an extra `PossiblyEqual` band exposing IDE quick-fix
+    /// suggestions.
+    #[test]
+    fn meta_pin_dimension_equality_result_kind_round_trip_and_partitions() {
+        // 1. Variant count + names.
+        assert_eq!(DimensionEqualityResultKind::ALL.len(), 4);
+        let mut seen = std::collections::HashSet::new();
+        for k in DimensionEqualityResultKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case: {}",
+                k,
+                m.name,
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 2. Definite — Equal + NotEqual.
+        let definite: Vec<_> = DimensionEqualityResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_definite)
+            .copied()
+            .collect();
+        assert_eq!(
+            definite,
+            vec![
+                DimensionEqualityResultKind::Equal,
+                DimensionEqualityResultKind::NotEqual,
+            ],
+        );
+
+        // 3. may_be_equal — Equal + PossiblyEqual.
+        let may_eq: Vec<_> = DimensionEqualityResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().may_be_equal)
+            .copied()
+            .collect();
+        assert_eq!(
+            may_eq,
+            vec![
+                DimensionEqualityResultKind::Equal,
+                DimensionEqualityResultKind::PossiblyEqual,
+            ],
+        );
+
+        // 4. carries_suggestion — PossiblyEqual singleton.
+        let suggest: Vec<_> = DimensionEqualityResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_suggestion)
+            .copied()
+            .collect();
+        assert_eq!(
+            suggest,
+            vec![DimensionEqualityResultKind::PossiblyEqual],
+        );
+
+        // 5. carries_explanation — NotEqual + Unknown.
+        let expl: Vec<_> = DimensionEqualityResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_explanation)
+            .copied()
+            .collect();
+        assert_eq!(
+            expl,
+            vec![
+                DimensionEqualityResultKind::NotEqual,
+                DimensionEqualityResultKind::Unknown,
+            ],
+        );
+
+        // 6. Equal is the unique variant carrying neither
+        //    suggestion nor explanation (it's the "all green"
+        //    verdict — no payload needed).
+        let no_payload: Vec<_> = DimensionEqualityResultKind::ALL
+            .iter()
+            .filter(|k| {
+                let m = k.meta();
+                !m.carries_suggestion && !m.carries_explanation
+            })
+            .copied()
+            .collect();
+        assert_eq!(no_payload, vec![DimensionEqualityResultKind::Equal]);
+
+        // 7. carries_suggestion ⊕ carries_explanation (a single
+        //    variant doesn't carry both — they're mutually
+        //    exclusive payload bands).
+        for k in DimensionEqualityResultKind::ALL {
+            let m = k.meta();
+            assert!(
+                !(m.carries_suggestion && m.carries_explanation),
+                "{:?}: cannot carry both suggestion and explanation",
+                k
+            );
+        }
+
+        // 8. Live-payload kind() + accessors.
+        let eq = DimensionEqualityResult::Equal;
+        assert_eq!(eq.kind(), DimensionEqualityResultKind::Equal);
+        assert!(eq.suggested_constraint().is_none());
+        assert!(eq.explanation().is_none());
+
+        let neq = DimensionEqualityResult::NotEqual {
+            reason: Text::from("128 ≠ 64"),
+        };
+        assert_eq!(neq.kind(), DimensionEqualityResultKind::NotEqual);
+        assert_eq!(neq.explanation().unwrap().as_str(), "128 ≠ 64");
+
+        let pe = DimensionEqualityResult::PossiblyEqual {
+            constraint_needed: Text::from("M = N"),
+        };
+        assert_eq!(pe.kind(), DimensionEqualityResultKind::PossiblyEqual);
+        assert_eq!(pe.suggested_constraint().unwrap().as_str(), "M = N");
+        assert!(pe.explanation().is_none());
+
+        let unk = DimensionEqualityResult::Unknown {
+            reason: Text::from("z3 timeout"),
+        };
+        assert_eq!(unk.kind(), DimensionEqualityResultKind::Unknown);
+        assert_eq!(unk.explanation().unwrap().as_str(), "z3 timeout");
     }
 }
