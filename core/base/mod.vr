@@ -375,3 +375,15 @@ public const VERSION_MINOR: Int = 1;
 
 // Core module patch version
 public const VERSION_PATCH: Int = 0;
+
+// =============================================================================
+// Version-component aliases — `MAJOR_VERSION` / `MINOR_VERSION` /
+// `PATCH_VERSION` mirror `VERSION_MAJOR` / `VERSION_MINOR` /
+// `VERSION_PATCH` for callers that prefer the noun-suffix form.
+// Both spellings are canonical surface; the public-test integration
+// suite imports the noun-suffix names.
+// =============================================================================
+
+public const MAJOR_VERSION: Int = VERSION_MAJOR;
+public const MINOR_VERSION: Int = VERSION_MINOR;
+public const PATCH_VERSION: Int = VERSION_PATCH;

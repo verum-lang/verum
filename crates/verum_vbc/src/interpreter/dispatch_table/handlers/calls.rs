@@ -670,27 +670,43 @@ pub(in super::super) fn handle_call_closure(
 
     let closure_val = state.get_reg(closure_reg);
 
-    // Extract function ID and captures from closure object
+    // Extract function ID and captures from closure object.
     // Closure layout: [ObjectHeader][func_id:u32][capture_count:u32][captures:Value...]
-    if !closure_val.is_ptr() || closure_val.is_nil() {
+    //
+    // **FuncRef fallback (zero-capture path).** When the value
+    // passed is a bare `FuncRef` (NaN-boxed function id) rather than
+    // a heap-allocated closure, treat it as a zero-capture closure.
+    // This is load-bearing for stdlib generics like
+    // `retry<T, E, F: fn() -> Result<T, E>>(...)` where the user
+    // passes a free function reference: the type allows `F` to be
+    // any callable, but the codegen always emits `CallClosure`
+    // (because at compile time `F` is a generic type parameter and
+    // the closure-vs-funcref distinction is erased).  Without this
+    // fallback the runtime over-rejects free-function references
+    // with `TypeMismatch: expected closure got non-pointer`.
+    let (func_id, capture_count, base_ptr_opt) = if closure_val.is_func_ref() {
+        (closure_val.as_func_id(), 0usize, None)
+    } else if closure_val.is_ptr() && !closure_val.is_nil() {
+        let base_ptr = closure_val.as_ptr::<u8>();
+        // SAFETY: validated non-null heap pointer; `closure_header`
+        // reads (func_id, capture_count) at the canonical offsets
+        // pinned by `verum_common::layout` and produced by
+        // `handle_make_closure`.
+        let (raw_func_id, capture_count_u32) = unsafe {
+            super::super::super::heap::closure_header(base_ptr)
+        };
+        (
+            FunctionId(raw_func_id),
+            capture_count_u32 as usize,
+            Some(base_ptr),
+        )
+    } else {
         return Err(InterpreterError::TypeMismatch {
             expected: "closure",
             got: "non-pointer",
             operation: "call_closure",
         });
-    }
-
-    let base_ptr = closure_val.as_ptr::<u8>();
-
-    // SAFETY: caller validated `closure_val` is a non-null heap
-    // pointer; `closure_header` reads (func_id, capture_count) at
-    // the canonical offsets pinned by `verum_common::layout` and
-    // produced by `handle_make_closure`.
-    let (raw_func_id, capture_count_u32) = unsafe {
-        super::super::super::heap::closure_header(base_ptr)
     };
-    let capture_count = capture_count_u32 as usize;
-    let func_id = FunctionId(raw_func_id);
     let func = state
         .module
         .get_function(func_id)
@@ -706,13 +722,17 @@ pub(in super::super) fn handle_call_closure(
         arg_values.push(state.registers.get(caller_base, Reg(args_start.0 + i)));
     }
 
-    // Collect captured values via the canonical helper.
+    // Collect captured values via the canonical helper.  The
+    // FuncRef fallback path has zero captures by construction, so
+    // skip when `base_ptr_opt` is `None`.
     let mut capture_values = Vec::with_capacity(capture_count);
-    unsafe {
-        for i in 0..capture_count {
-            capture_values.push(std::ptr::read(
-                super::super::super::heap::closure_captures_ptr(base_ptr, i),
-            ));
+    if let Some(base_ptr) = base_ptr_opt {
+        unsafe {
+            for i in 0..capture_count {
+                capture_values.push(std::ptr::read(
+                    super::super::super::heap::closure_captures_ptr(base_ptr, i),
+                ));
+            }
         }
     }
 
