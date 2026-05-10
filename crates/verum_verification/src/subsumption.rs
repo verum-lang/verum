@@ -86,7 +86,95 @@ pub enum SubsumptionResult {
     },
 }
 
+/// Discriminator for [`SubsumptionResult`] — zero-sized
+/// projection.  Used by metrics consumers that classify the
+/// verification verdict band without cloning the
+/// counterexample / reason / timeout payloads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SubsumptionResultKind {
+    Holds,
+    Fails,
+    Unknown,
+    Timeout,
+}
+
+/// Per-variant projection for [`SubsumptionResultKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SubsumptionResultKindMeta {
+    /// Lower-snake-case wire form.
+    pub name: &'static str,
+    /// The verdict is *definite* (Holds + Fails — the SMT
+    /// backend reached a conclusion).  Unknown + Timeout are
+    /// indeterminate.
+    pub is_definite: bool,
+    /// The verdict is the *positive* answer (Holds singleton).
+    pub is_positive: bool,
+    /// The variant carries a *counterexample* payload —
+    /// `Fails` singleton.  Pinned so consumers reaching into
+    /// the counterexample are decoupled from per-variant
+    /// matching.
+    pub carries_counterexample: bool,
+    /// The variant indicates a *time-bound* failure (Timeout
+    /// singleton) — distinct from `Unknown` which is
+    /// solver-side indeterminacy.
+    pub is_time_bound_failure: bool,
+}
+
+impl SubsumptionResultKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::Holds,
+        Self::Fails,
+        Self::Unknown,
+        Self::Timeout,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> SubsumptionResultKindMeta {
+        match self {
+            SubsumptionResultKind::Holds => SubsumptionResultKindMeta {
+                name: "holds",
+                is_definite: true,
+                is_positive: true,
+                carries_counterexample: false,
+                is_time_bound_failure: false,
+            },
+            SubsumptionResultKind::Fails => SubsumptionResultKindMeta {
+                name: "fails",
+                is_definite: true,
+                is_positive: false,
+                carries_counterexample: true,
+                is_time_bound_failure: false,
+            },
+            SubsumptionResultKind::Unknown => SubsumptionResultKindMeta {
+                name: "unknown",
+                is_definite: false,
+                is_positive: false,
+                carries_counterexample: false,
+                is_time_bound_failure: false,
+            },
+            SubsumptionResultKind::Timeout => SubsumptionResultKindMeta {
+                name: "timeout",
+                is_definite: false,
+                is_positive: false,
+                carries_counterexample: false,
+                is_time_bound_failure: true,
+            },
+        }
+    }
+}
+
 impl SubsumptionResult {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> SubsumptionResultKind {
+        match self {
+            SubsumptionResult::Holds => SubsumptionResultKind::Holds,
+            SubsumptionResult::Fails { .. } => SubsumptionResultKind::Fails,
+            SubsumptionResult::Unknown { .. } => SubsumptionResultKind::Unknown,
+            SubsumptionResult::Timeout { .. } => SubsumptionResultKind::Timeout,
+        }
+    }
+
     /// Check if subsumption holds
     pub fn holds(&self) -> bool {
         matches!(self, Self::Holds)
@@ -97,9 +185,13 @@ impl SubsumptionResult {
         matches!(self, Self::Fails { .. })
     }
 
-    /// Check if result is unknown (needs runtime check)
+    /// Check if result is unknown (needs runtime check) — true
+    /// for both `Unknown` and `Timeout` (the historical
+    /// semantic that the runtime-fallback path consults).
+    /// Routes through `meta().is_definite` for the pinned
+    /// invariant `is_unknown == !is_definite`.
     pub fn is_unknown(&self) -> bool {
-        matches!(self, Self::Unknown { .. } | Self::Timeout { .. })
+        !self.kind().meta().is_definite
     }
 
     /// Get counterexample if subsumption fails
@@ -1675,4 +1767,122 @@ pub fn smt_check(pred1: &Expr, pred2: &Expr) -> SubsumptionResult {
 /// Extract counterexample from SMT model
 pub fn extract_counterexample(model: &Map<Text, Value>) -> Counterexample {
     Counterexample::new(model.clone(), Text::from("constraint"))
+}
+
+#[cfg(test)]
+mod kind_meta_drift_pins {
+    use super::*;
+
+    /// Drift-pin: `SubsumptionResultKind` discriminator
+    /// projection.  Sibling of
+    /// `tensor_shapes::ConstraintCheckResultKind` and
+    /// `vcgen::VCResultKind` — verification verdict bands.
+    #[test]
+    fn meta_pin_subsumption_result_kind_round_trip_and_partitions() {
+        // 1. Variant count + names + uniqueness.
+        assert_eq!(SubsumptionResultKind::ALL.len(), 4);
+        let mut seen = std::collections::HashSet::new();
+        for k in SubsumptionResultKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 2. is_definite — Holds + Fails.
+        let definite: Vec<_> = SubsumptionResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_definite)
+            .copied()
+            .collect();
+        assert_eq!(
+            definite,
+            vec![SubsumptionResultKind::Holds, SubsumptionResultKind::Fails],
+        );
+
+        // 3. is_positive — Holds singleton.
+        let positive: Vec<_> = SubsumptionResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_positive)
+            .copied()
+            .collect();
+        assert_eq!(positive, vec![SubsumptionResultKind::Holds]);
+
+        // 4. carries_counterexample — Fails singleton.
+        let cex: Vec<_> = SubsumptionResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_counterexample)
+            .copied()
+            .collect();
+        assert_eq!(cex, vec![SubsumptionResultKind::Fails]);
+
+        // 5. is_time_bound_failure — Timeout singleton.
+        let tb: Vec<_> = SubsumptionResultKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_time_bound_failure)
+            .copied()
+            .collect();
+        assert_eq!(tb, vec![SubsumptionResultKind::Timeout]);
+
+        // 6. Cross-cutting: positive ⇒ definite (a positive
+        //    verdict means the solver concluded).
+        for k in SubsumptionResultKind::ALL {
+            let m = k.meta();
+            assert!(
+                !m.is_positive || m.is_definite,
+                "{:?}: positive ⇒ definite",
+                k
+            );
+        }
+
+        // 7. carries_counterexample ⇒ ¬is_positive (a
+        //    counterexample evidences failure, not success).
+        for k in SubsumptionResultKind::ALL {
+            let m = k.meta();
+            assert!(
+                !m.carries_counterexample || !m.is_positive,
+                "{:?}: counterexample ⇒ ¬positive",
+                k
+            );
+        }
+
+        // 8. is_time_bound_failure ⇒ ¬is_definite (timeout
+        //    means the solver didn't conclude in time).
+        for k in SubsumptionResultKind::ALL {
+            let m = k.meta();
+            assert!(
+                !m.is_time_bound_failure || !m.is_definite,
+                "{:?}: timeout ⇒ ¬definite",
+                k
+            );
+        }
+
+        // 9. Live-payload kind() projection + is_unknown
+        //    routing through the meta().is_definite invariant.
+        let holds = SubsumptionResult::Holds;
+        assert_eq!(holds.kind(), SubsumptionResultKind::Holds);
+        assert!(holds.holds());
+        assert!(!holds.is_unknown());
+
+        let fails = SubsumptionResult::Fails {
+            counterexample: Counterexample::new(Map::new(), Text::from("c")),
+        };
+        assert_eq!(fails.kind(), SubsumptionResultKind::Fails);
+        assert!(fails.fails());
+        assert!(fails.counterexample().is_some());
+        assert!(!fails.is_unknown());
+
+        let unk = SubsumptionResult::Unknown {
+            reason: Text::from("z3 didn't conclude"),
+        };
+        assert_eq!(unk.kind(), SubsumptionResultKind::Unknown);
+        assert!(unk.is_unknown());
+
+        let to = SubsumptionResult::Timeout { time_ms: 1000 };
+        assert_eq!(to.kind(), SubsumptionResultKind::Timeout);
+        assert!(to.is_unknown());
+    }
 }

@@ -241,6 +241,140 @@ impl WellKnownType {
     pub fn has_builtin_dispatch(name: &str) -> bool {
         Self::from_name(name).is_some()
     }
+
+    /// Canonical archive-module prefixes that contain this well-known
+    /// type's inherent + protocol-impl methods. Used by the archive
+    /// lazy-loader (`verum_compiler::archive_ctx_loader`) to expand
+    /// `wanted_module_prefixes` when user code mentions a stdlib type
+    /// by name (e.g. `Text.new()` should pull in `core.text.text` so
+    /// `Text.new` is registered into `ctx.functions` for the user-side
+    /// codegen).
+    ///
+    /// Returns the *direct* archive entry first (e.g.
+    /// `"core.text.text"` for files declaring `module core.text.text;`)
+    /// followed by the parent-module bundle (e.g. `"core.text"`) since
+    /// the precompiler sometimes bundles inherent methods under the
+    /// grandparent entry depending on the module hierarchy.
+    ///
+    /// Returns an empty slice for types without a canonical archive
+    /// home (primitives whose methods are interpreter-built-in only:
+    /// Int, Float, Bool, Char) — those don't need archive loading.
+    ///
+    /// **Source-of-truth contract**: each returned string is a
+    /// candidate archive-entry name; at least ONE entry per well-known
+    /// type must resolve to an actual archive entry. A pin test
+    /// (`canonical_archive_modules_match_source` in
+    /// `verum_compiler::archive_ctx_loader`) enforces this.  The
+    /// alternates list both the source-declared path and the
+    /// grandparent-bundled fallback because the precompiler chooses
+    /// one or the other depending on hierarchy shape — the loader's
+    /// `wanted_module_prefixes` set is happy with whichever resolves.
+    pub const fn canonical_archive_modules(self) -> &'static [&'static str] {
+        match self {
+            // Text family — `core/text/text.vr` declares
+            // `module core.text.text;`. The text/ module-group also
+            // contains format.vr / builder.vr / regex.vr / numeric.vr;
+            // they hang off `Formatter` / `TextBuilder` / `Regex` /
+            // `Numeric` (separate well-known names not yet enumerated
+            // here — caller should mention them explicitly when used).
+            Self::Text | Self::Char => {
+                &["core.text.text", "core.text"]
+            }
+            // Collections — each has its own file under
+            // `core/collections/<name>.vr` declaring
+            // `module core.collections.<name>;`.
+            Self::List => &["core.collections.list", "core.collections"],
+            Self::Map => &["core.collections.map", "core.collections"],
+            Self::Set => &["core.collections.set", "core.collections"],
+            Self::Deque => &["core.collections.deque", "core.collections"],
+            Self::BTreeMap => {
+                &["core.collections.btree_map", "core.collections"]
+            }
+            Self::BTreeSet => {
+                &["core.collections.btree_set", "core.collections"]
+            }
+            Self::BinaryHeap => {
+                &["core.collections.binary_heap", "core.collections"]
+            }
+            // Wrappers — `core/base/<name>.vr`.
+            Self::Maybe => &["core.base.maybe", "core.base"],
+            Self::Result => &["core.base.result", "core.base"],
+            Self::Heap => &["core.mem.heap", "core.mem"],
+            Self::Shared => &["core.sync.shared", "core.sync"],
+            // Concurrency — `core/sync/<name>.vr` (Channel lives in
+            // core/async/channel.vr; Mutex/RwLock/Barrier/etc. in
+            // core/sync/).
+            Self::Channel => &["core.async.channel", "core.async"],
+            Self::Mutex => &["core.sync.mutex", "core.sync"],
+            Self::RwLock => &["core.sync.rwlock", "core.sync"],
+            Self::Barrier => &["core.sync.barrier", "core.sync"],
+            Self::WaitGroup => &["core.sync.wait_group", "core.sync"],
+            Self::Once => &["core.sync.once", "core.sync"],
+            Self::Semaphore => &["core.async.semaphore", "core.async"],
+            Self::Task => &["core.async.task", "core.async"],
+            Self::Nursery => &["core.async.nursery", "core.async"],
+            Self::AtomicInt => &["core.sync.atomic", "core.sync"],
+            Self::AtomicBool => &["core.sync.atomic", "core.sync"],
+            // Time — `core/time/<name>.vr`.
+            Self::Duration => &["core.time.duration", "core.time"],
+            Self::Instant => &["core.time.instant", "core.time"],
+            Self::Stopwatch => &["core.time.stopwatch", "core.time"],
+            Self::PerfCounter => &["core.time.perf_counter", "core.time"],
+            Self::DeadlineTimer => &["core.time.deadline_timer", "core.time"],
+            // Misc — `core/base/<name>.vr` for Never/Ordering/Range.
+            Self::Never => &["core.base"],
+            Self::Ordering => &["core.base.ordering", "core.base"],
+            Self::Range => &["core.base.range", "core.base"],
+            // Primitives — methods are interpreter-built-in only,
+            // no archive load needed.
+            Self::Int | Self::Float | Self::Bool => &[],
+        }
+    }
+}
+
+/// Conservatively classify a type name as a generic type parameter
+/// (e.g. `T`, `E`, `K`, `V`, `R`, `Item`, `Out`).
+///
+/// Verum's convention follows Rust/Haskell: type parameters are
+/// short PascalCase identifiers. The classifier accepts:
+///
+///   * **1 char**, ASCII uppercase: `T`, `E`, `K`, `V`, `R`, `S`, …
+///   * **2 chars**, uppercase + lowercase: `Tk`, `Vk`, `Rs`, …
+///
+/// 3+-char names like `Item`, `Output`, `Iter` are NOT classified
+/// as type params because they collide with concrete type names
+/// users define (e.g. `type Item is { … }` is real stdlib code).
+/// The grammar disambiguates these via `where T: Trait` clauses; in
+/// the absence of an unambiguous syntactic signal, the conservative
+/// classifier prevents misclassification of concrete types.
+///
+/// Used by VBC method-dispatch codegen to detect calls of the form
+/// `<generic>.method(...)` and emit the bare method name (letting
+/// runtime dispatch route by receiver kind) instead of a
+/// `T.method(...)` literal that no method-table entry can resolve.
+///
+/// Centralised here so the type-inference layer
+/// (`verum_types::infer`) and the VBC codegen layer agree on the
+/// same classification — drift between them produces silent miscompiles
+/// where the inferer treats a name as concrete while codegen treats
+/// it as generic (or vice-versa).
+pub fn looks_like_type_param(name: &str) -> bool {
+    match name.len() {
+        1 => name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase()),
+        2 => {
+            let mut chars = name.chars();
+            match (chars.next(), chars.next()) {
+                (Some(first), Some(second)) => {
+                    first.is_ascii_uppercase() && second.is_ascii_lowercase()
+                }
+                _ => false,
+            }
+        }
+        _ => false,
+    }
 }
 
 /// Well-known variant constructor tags used by stdlib sum types.
@@ -1707,6 +1841,45 @@ mod tests {
         assert!(WellKnownType::Int.is_primitive());
         assert!(WellKnownType::Maybe.is_wrapper());
         assert!(!WellKnownType::Text.is_collection());
+    }
+
+    #[test]
+    fn looks_like_type_param_matches_convention() {
+        // 1-char uppercase ASCII — canonical Rust/Haskell convention.
+        for name in ["T", "U", "V", "K", "E", "R", "S", "A", "B"] {
+            assert!(
+                looks_like_type_param(name),
+                "1-char uppercase '{}' should look like type param",
+                name
+            );
+        }
+        // 2-char Pascal-style: uppercase + lowercase.
+        for name in ["Tk", "Vk", "Rs", "Ts", "Ok"] {
+            assert!(
+                looks_like_type_param(name),
+                "2-char Pascal '{}' should look like type param",
+                name
+            );
+        }
+        // Concrete stdlib type names — must NOT classify.
+        for name in [
+            "Int", "Bool", "Text", "List", "Map", "Maybe", "Result", "Item",
+            "Cell", "Iter", "Self", "TT",
+        ] {
+            assert!(
+                !looks_like_type_param(name),
+                "concrete name '{}' must not be classified as type param",
+                name
+            );
+        }
+        // Lowercase or 1-letter lowercase — never type params.
+        for name in ["t", "x", "abc", ""] {
+            assert!(
+                !looks_like_type_param(name),
+                "non-uppercase '{}' must not classify",
+                name
+            );
+        }
     }
 
     #[test]
