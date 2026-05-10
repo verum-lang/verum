@@ -21554,7 +21554,7 @@ fn lower_extended<'ctx>(
                 r
             };
             // Decode three varints (type_id, tag, field_count).
-            let mut decode_varint = |idx: &mut usize| -> Option<u64> {
+            let decode_varint = |idx: &mut usize| -> Option<u64> {
                 let mut value: u64 = 0;
                 let mut shift: u32 = 0;
                 while *idx < operands.len() {
