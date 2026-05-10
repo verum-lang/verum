@@ -22,12 +22,10 @@ fn ident(name: &str) -> Ident {
 }
 
 fn endpoint_expr(name: &str) -> Heap<Expr> {
-    Heap::new(Expr {
-        kind: ExprKind::Path(verum_ast::ty::Path::single(ident(name))),
-        span: span(),
-        ref_kind: None,
-        check_eliminated: false,
-    })
+    Heap::new(Expr::new(
+        ExprKind::Path(verum_ast::ty::Path::single(ident(name))),
+        span(),
+    ))
 }
 
 #[test]

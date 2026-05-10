@@ -66,31 +66,22 @@ fn param(name: &str) -> FunctionParam {
 
 /// Helper to create a function call expression
 fn call_expr(func_name: &str, args: Vec<Expr>) -> Expr {
-    Expr {
-        kind: ExprKind::Call {
-            func: Box::new(Expr {
-                kind: ExprKind::Path(path(func_name)),
-                span: Span::default(),
-                ref_kind: None,
-                check_eliminated: false,
-            }),
+    Expr::new(
+        ExprKind::Call {
+            func: Box::new(Expr::new(
+                ExprKind::Path(path(func_name)),
+                Span::default(),
+            )),
             args: args.into_iter().collect(),
             type_args: vec![].into(),
         },
-        span: Span::default(),
-        ref_kind: None,
-        check_eliminated: false,
-    }
+        Span::default(),
+    )
 }
 
 /// Helper to create a path expression
 fn path_expr(name: &str) -> Expr {
-    Expr {
-        kind: ExprKind::Path(path(name)),
-        span: Span::default(),
-        ref_kind: None,
-        check_eliminated: false,
-    }
+    Expr::new(ExprKind::Path(path(name)), Span::default())
 }
 
 #[test]

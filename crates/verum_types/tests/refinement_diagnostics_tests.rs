@@ -50,6 +50,7 @@ fn create_int_literal(value: i64) -> Expr {
         span,
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     }
 }
 
@@ -62,6 +63,7 @@ fn create_var(name: &str) -> Expr {
         span,
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     }
 }
 
@@ -76,6 +78,7 @@ fn create_binary(op: BinOp, left: Expr, right: Expr) -> Expr {
         span,
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     }
 }
 

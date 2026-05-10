@@ -362,6 +362,7 @@ fn test_incremental_parsing_decision() {
         span: Span::default(),
         check_eliminated: false,
         ref_kind: Some(verum_ast::expr::ReferenceKind::Managed),
+        resolved_call_target: None,
     });
 
     state.cache_node(

@@ -27,18 +27,16 @@ fn dummy_span() -> Span {
 
 /// Create an integer literal expression.
 fn int_lit(value: i128) -> Expr {
-    Expr {
-        kind: ExprKind::Literal(Literal {
+    Expr::new(
+        ExprKind::Literal(Literal {
             kind: LiteralKind::Int(IntLit {
                 value,
                 suffix: None,
             }),
             span: dummy_span(),
         }),
-        span: dummy_span(),
-        ref_kind: None,
-        check_eliminated: false,
-    }
+        dummy_span(),
+    )
 }
 
 /// Create a simple function with just a return expression.

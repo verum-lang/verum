@@ -62,16 +62,14 @@ fn make_bool_expr(value: bool) -> Expr {
 
 // Helper to create a binary expression
 fn make_binary_expr(op: BinOp, left: Expr, right: Expr) -> Expr {
-    Expr {
-        kind: ExprKind::Binary {
+    Expr::new(
+        ExprKind::Binary {
             op,
             left: Heap::new(left),
             right: Heap::new(right),
         },
-        span: dummy_span(),
-        check_eliminated: false,
-        ref_kind: None,
-    }
+        dummy_span(),
+    )
 }
 
 // Helper to create a block expression
