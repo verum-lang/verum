@@ -1354,6 +1354,7 @@ mod tests {
             span: Span::dummy(),
             ref_kind: None,
             check_eliminated: false,
+            resolved_call_target: None,
         }
     }
 

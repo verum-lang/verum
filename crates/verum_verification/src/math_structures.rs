@@ -91,6 +91,135 @@ pub enum StructureCategory {
     TopologicalSpace,
 }
 
+/// Three-way partition of [`StructureCategory`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StructureFamily {
+    /// Group / AbelianGroup / Monoid / Ring / CommutativeRing /
+    /// Field / Module / VectorSpace.
+    Algebraic,
+    /// Category / Functor.
+    Categorical,
+    /// TopologicalSpace.
+    Topological,
+}
+
+/// Per-variant projection for [`StructureCategory`].
+///
+/// `name` is the canonical PascalCase identifier; `family` carries
+/// the three-way partition; `is_commutative` flags variants that
+/// bake commutativity into their axiom set (AbelianGroup,
+/// CommutativeRing, Field).
+#[derive(Debug, Clone, Copy)]
+pub struct StructureCategoryMeta {
+    pub name: &'static str,
+    pub family: StructureFamily,
+    pub is_commutative: bool,
+}
+
+impl StructureCategory {
+    pub const ALL: &'static [Self] = &[
+        Self::Group,
+        Self::AbelianGroup,
+        Self::Monoid,
+        Self::Ring,
+        Self::CommutativeRing,
+        Self::Field,
+        Self::Module,
+        Self::VectorSpace,
+        Self::Category,
+        Self::Functor,
+        Self::TopologicalSpace,
+    ];
+
+    pub const fn meta(self) -> StructureCategoryMeta {
+        match self {
+            Self::Group => StructureCategoryMeta {
+                name: "Group",
+                family: StructureFamily::Algebraic,
+                is_commutative: false,
+            },
+            Self::AbelianGroup => StructureCategoryMeta {
+                name: "AbelianGroup",
+                family: StructureFamily::Algebraic,
+                is_commutative: true,
+            },
+            Self::Monoid => StructureCategoryMeta {
+                name: "Monoid",
+                family: StructureFamily::Algebraic,
+                is_commutative: false,
+            },
+            Self::Ring => StructureCategoryMeta {
+                name: "Ring",
+                family: StructureFamily::Algebraic,
+                is_commutative: false,
+            },
+            Self::CommutativeRing => StructureCategoryMeta {
+                name: "CommutativeRing",
+                family: StructureFamily::Algebraic,
+                is_commutative: true,
+            },
+            Self::Field => StructureCategoryMeta {
+                name: "Field",
+                family: StructureFamily::Algebraic,
+                is_commutative: true,
+            },
+            Self::Module => StructureCategoryMeta {
+                name: "Module",
+                family: StructureFamily::Algebraic,
+                is_commutative: false,
+            },
+            Self::VectorSpace => StructureCategoryMeta {
+                name: "VectorSpace",
+                family: StructureFamily::Algebraic,
+                is_commutative: false,
+            },
+            Self::Category => StructureCategoryMeta {
+                name: "Category",
+                family: StructureFamily::Categorical,
+                is_commutative: false,
+            },
+            Self::Functor => StructureCategoryMeta {
+                name: "Functor",
+                family: StructureFamily::Categorical,
+                is_commutative: false,
+            },
+            Self::TopologicalSpace => StructureCategoryMeta {
+                name: "TopologicalSpace",
+                family: StructureFamily::Topological,
+                is_commutative: false,
+            },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    /// Canonical PascalCase identifier.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Three-way partition: Algebraic / Categorical / Topological.
+    #[inline]
+    pub const fn family(&self) -> StructureFamily {
+        self.meta().family
+    }
+
+    /// True for variants that bake commutativity into their axiom
+    /// set (AbelianGroup, CommutativeRing, Field).
+    #[inline]
+    pub const fn is_commutative(&self) -> bool {
+        self.meta().is_commutative
+    }
+}
+
 /// Mathematical operation
 #[derive(Debug, Clone)]
 pub struct MathOperation {
@@ -2190,5 +2319,59 @@ mod tests {
         // Should have a populated lemma database
         let db = verifier.lemma_database();
         assert!(db.lemmas_by_structure.len() > 0);
+    }
+
+    #[test]
+    fn meta_pin_structure_category_round_trip_unique_and_family_partition() {
+        assert_eq!(StructureCategory::ALL.len(), 11);
+        let mut seen = Vec::new();
+        for v in StructureCategory::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                StructureCategory::from_str(s),
+                Some(*v),
+                "StructureCategory::{:?}: '{}' round-trip",
+                v,
+                s
+            );
+            assert!(!seen.contains(&s), "duplicate name '{}'", s);
+            seen.push(s);
+        }
+        // Family partition: 8 algebraic + 2 categorical + 1
+        // topological = 11.
+        let mut counts = [0usize; 3];
+        for v in StructureCategory::ALL {
+            let i = match v.family() {
+                StructureFamily::Algebraic => 0,
+                StructureFamily::Categorical => 1,
+                StructureFamily::Topological => 2,
+            };
+            counts[i] += 1;
+        }
+        assert_eq!(counts, [8, 2, 1]);
+
+        // is_commutative partition: 3 (AbelianGroup, CommutativeRing,
+        // Field).
+        let commutative_count = StructureCategory::ALL
+            .iter()
+            .filter(|v| v.is_commutative())
+            .count();
+        assert_eq!(commutative_count, 3);
+        assert!(StructureCategory::AbelianGroup.is_commutative());
+        assert!(StructureCategory::CommutativeRing.is_commutative());
+        assert!(StructureCategory::Field.is_commutative());
+        assert!(!StructureCategory::Group.is_commutative());
+        assert!(!StructureCategory::Ring.is_commutative());
+        // Cross-pin: every commutative variant is in the algebraic
+        // family.
+        for v in StructureCategory::ALL {
+            if v.is_commutative() {
+                assert_eq!(
+                    v.family(),
+                    StructureFamily::Algebraic,
+                    "is_commutative ⇒ family == Algebraic"
+                );
+            }
+        }
     }
 }
