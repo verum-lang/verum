@@ -22,14 +22,67 @@ pub enum CheckVerdict {
     Unknown,
 }
 
+/// Per-variant projection for [`CheckVerdict`].
+///
+/// `name` matches the SMT-LIB2 `(check-sat)` output token verbatim,
+/// so a solver-supplied string round-trips through `from_str`/
+/// `as_str`. `is_definitive` flags `Sat` and `Unsat` (the two
+/// terminating verdicts); `Unknown` indicates timeout / resource
+/// exhaustion / undecidable fragment. Same shape as
+/// `verum_smt::backend_trait::SatResult` (consolidated in
+/// 3d6c96590) — the two enums are structural duplicates that
+/// long-term unification can collapse.
+#[derive(Debug, Clone, Copy)]
+pub struct CheckVerdictMeta {
+    pub name: &'static str,
+    pub is_definitive: bool,
+}
+
 impl CheckVerdict {
-    /// Canonical SMT-LIB verdict string.
-    pub fn as_str(&self) -> &'static str {
+    pub const ALL: &'static [Self] = &[Self::Sat, Self::Unsat, Self::Unknown];
+
+    pub const fn meta(self) -> CheckVerdictMeta {
         match self {
-            Self::Sat => "sat",
-            Self::Unsat => "unsat",
-            Self::Unknown => "unknown",
+            Self::Sat => CheckVerdictMeta {
+                name: "sat",
+                is_definitive: true,
+            },
+            Self::Unsat => CheckVerdictMeta {
+                name: "unsat",
+                is_definitive: true,
+            },
+            Self::Unknown => CheckVerdictMeta {
+                name: "unknown",
+                is_definitive: false,
+            },
         }
+    }
+
+    /// Canonical SMT-LIB verdict string.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Parse the SMT-LIB verdict token back to the typed verdict.
+    /// Closes a drift defect: previously `as_str` was present but
+    /// no inverse mapping existed, so callers receiving a
+    /// `(check-sat)` output line had to re-implement the lookup.
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    /// True for `Sat` / `Unsat` (terminating verdicts); false for
+    /// `Unknown` (timeout / resource exhaustion / undecidable
+    /// fragment).
+    #[inline]
+    pub const fn is_definitive(&self) -> bool {
+        self.meta().is_definitive
     }
 }
 
@@ -160,5 +213,23 @@ mod tests {
         let content = "(assert false) (check-sat)";
         let r = check_smtlib_string(content, "z3", 5);
         assert_eq!(r.unwrap(), CheckVerdict::Unsat);
+    }
+
+    #[test]
+    fn meta_pin_check_verdict_round_trip_and_definitive_partition() {
+        assert_eq!(CheckVerdict::ALL.len(), 3);
+        for v in CheckVerdict::ALL {
+            let s = v.as_str();
+            assert_eq!(CheckVerdict::from_str(s), Some(*v));
+        }
+        // Wire form matches SMT-LIB2 (check-sat) output tokens.
+        assert_eq!(CheckVerdict::Sat.as_str(), "sat");
+        assert_eq!(CheckVerdict::Unsat.as_str(), "unsat");
+        assert_eq!(CheckVerdict::Unknown.as_str(), "unknown");
+        // is_definitive partition: Sat/Unsat true; Unknown false.
+        assert!(CheckVerdict::Sat.is_definitive());
+        assert!(CheckVerdict::Unsat.is_definitive());
+        assert!(!CheckVerdict::Unknown.is_definitive());
+        assert!(CheckVerdict::from_str("__bogus__").is_none());
     }
 }
