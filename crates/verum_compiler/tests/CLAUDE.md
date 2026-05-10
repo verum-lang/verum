@@ -100,9 +100,13 @@ panic in the past:
 
   * **Closure-walker `super.*` resolution** (#163) — the transitive
     mount-closure pass treated `super` as a literal segment and missed
-    sibling modules.  `resolve_super_path` was added to
-    `pipeline.rs::collect_imported_stdlib_modules`; its 9 unit tests
-    live inline in `pipeline.rs::resolve_super_path_tests`.
+    sibling modules.  Historical fix added `resolve_super_path` +
+    `collect_imported_stdlib_modules` to `pipeline/vbc_codegen.rs`;
+    both helpers were retired once the canonical mount-closure path
+    moved into `archive_ctx_loader::apply_lazy_with_types` (the body-
+    merge architecture), which handles `super.*` paths inline. The
+    9 inline `resolve_super_path_tests` were deleted alongside the
+    helpers.
 
 ## Adding a new fixture
 

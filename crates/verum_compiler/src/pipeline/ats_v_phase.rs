@@ -281,57 +281,6 @@ fn build_violation_diagnostic(
     builder.build()
 }
 
-/// Walk an attribute list looking for `@arch_module(...)`.  Returns
-/// the kernel-side phase result (or `None` if no annotation found).
-///
-/// **Body-level data wiring**: alongside the `@arch_module(...)`
-/// extraction, this function ALSO scans the surrounding attribute
-/// list for `@framework(corpus, ...)` annotations and feeds them
-/// into the kernel phase via `PhaseInputs.foreign_foundation_constructs`.
-/// This activates the AP-026 FoundationContentMismatch check —
-/// without this wiring, AP-026 would only fire in unit tests
-/// (silent-regression risk identical in shape to the AT-1 wiring
-/// closed in Phase I of the ATS-V sweep).
-fn run_arch_phase_for_attrs(
-    attrs: &List<verum_ast::attr::Attribute>,
-    module_name: &str,
-) -> Option<ModuleArchResult> {
-    let mut arch_module_args: Option<&[verum_ast::expr::Expr]> = None;
-    for attr in attrs.iter() {
-        if attr.name.as_str() == "arch_module" {
-            // Extract the named-arg expressions.  An empty arg list
-            // is valid — it fires the "minimal shape" code path on
-            // the kernel side: `run_arch_phase_one` returns no
-            // parse errors and runs the canonical 32 anti-pattern
-            // checks against `Shape::default_for_unannotated()`,
-            // which passes every check vacuously.
-            arch_module_args = Some(match &attr.args {
-                Maybe::Some(args) => args.as_slice(),
-                Maybe::None => &[],
-            });
-        }
-    }
-    let args_slice = arch_module_args?;
-    let inputs = PhaseInputs {
-        capability_ontology_registry: None, // use kernel-static default
-        yoneda_verdicts_claimed: Vec::new(),
-        foreign_foundation_constructs: extract_foreign_foundation_constructs(attrs),
-        // Cross-cog and transitive fields populated by the
-        // registry-aware wrapper; this helper only handles the
-        // per-attribute fast path.
-        composed_foundations: Vec::new(),
-        cited_lifecycles: Vec::new(),
-        callee_tiers: Vec::new(),
-        inferred_used_capabilities: Vec::new(),
-        transitive_lifecycle_regressions: Vec::new(),
-        foundation_downgrades: Vec::new(),
-    };
-    Some(run_arch_phase_one_with(
-        module_name.to_string(),
-        args_slice,
-        &inputs,
-    ))
-}
 
 // =============================================================================
 // Q5 — Body-level capability inference (AP-001 production wiring)
@@ -657,75 +606,6 @@ fn expr_to_string_lit(expr: &verum_ast::expr::Expr) -> Option<String> {
     }
 }
 
-// =============================================================================
-// Tests
-// =============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use verum_ast::attr::Attribute;
-    use verum_ast::span::Span;
-    use verum_common::Text;
-
-    fn empty_attrs() -> List<Attribute> {
-        List::default()
-    }
-
-    fn attrs_with_arch_module(args: Maybe<List<verum_ast::expr::Expr>>) -> List<Attribute> {
-        let attr = Attribute {
-            name: Text::from("arch_module"),
-            args,
-            span: Span::dummy(),
-        };
-        let mut list: List<Attribute> = List::default();
-        list.push(attr);
-        list
-    }
-
-    #[test]
-    fn no_arch_module_attr_returns_none() {
-        // Architectural pin: phase walks attrs but skips modules
-        // without `@arch_module(...)` per spec §17.5 backward-compat.
-        // Returns `None` so the caller doesn't emit any diagnostic.
-        assert!(run_arch_phase_for_attrs(&empty_attrs(), "any").is_none());
-    }
-
-    #[test]
-    fn arch_module_attr_invokes_kernel_phase() {
-        // Pin: an `@arch_module(...)` attribute drives the kernel-side
-        // phase even with empty args.  Empty args → kernel returns a
-        // clean ModuleArchResult with no parse errors and no
-        // violations against the default shape.
-        let result = run_arch_phase_for_attrs(&attrs_with_arch_module(Maybe::None), "test_mod");
-        assert!(result.is_some(), "phase must fire when @arch_module is present");
-        let r = result.unwrap();
-        assert!(
-            r.parse_errors.is_empty(),
-            "empty-args case must produce no parse errors"
-        );
-        // Default-shape sanity: no violations under the default shape.
-        assert!(r.violations.is_empty(), "default shape must pass all checks");
-        assert_eq!(r.module_name, "test_mod");
-    }
-
-    #[test]
-    fn run_arch_phase_for_attrs_walks_first_arch_module_only() {
-        // Pin: when an attribute list contains a non-arch_module
-        // attribute first and then an arch_module, the walker still
-        // finds it (returning Some) so the diagnostic emit path runs.
-        let mut list: List<Attribute> = List::default();
-        list.push(Attribute::simple(Text::from("derive"), Span::dummy()));
-        list.push(Attribute {
-            name: Text::from("arch_module"),
-            args: Maybe::None,
-            span: Span::dummy(),
-        });
-        list.push(Attribute::simple(Text::from("inline"), Span::dummy()));
-        let result = run_arch_phase_for_attrs(&list, "test_mod");
-        assert!(result.is_some());
-    }
-}
 
 /// Best-effort display name for a top-level item — used in
 /// diagnostics so the user knows which declaration carried the
