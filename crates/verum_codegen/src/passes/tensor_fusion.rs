@@ -93,8 +93,8 @@ pub enum TensorOpKind {
 
     /// Layer norm — fusion sees this as a single primitive even
     /// though the runtime decomposes it into mean+var+normalize.
-    /// Future pass (#91-3) can split it for finer-grained fusion
-    /// with adjacent elementwise ops.
+    /// Future pass can split it for finer-grained fusion with
+    /// adjacent elementwise ops.
     LayerNorm,
 
     /// RMS norm — same shape as LayerNorm.
@@ -106,8 +106,167 @@ pub enum TensorOpKind {
     /// Flash attention — already a fused multi-step kernel, kept
     /// atomic at this level. Including it as a chain primitive lets
     /// the analyzer recognise `softmax(matmul(q, k^T)) @ v ` patterns
-    /// that emit a single Flash-Attention kernel via #91-3.
+    /// that emit a single Flash-Attention kernel via the fusion
+    /// pipeline.
     FlashAttention,
+}
+
+/// Discriminator-only tag for [`TensorOpKind`].
+///
+/// The original enum's name already ends in `Kind`, so the
+/// discriminator follows the meta() series convention with a `…Tag`
+/// suffix instead — same as `InterpolationTag` for
+/// `InterpolationKind`. `Binop` / `Unop` / `Reduce` carry `u8`
+/// op-byte payloads; the tag enum is zero-sized so callers iterating
+/// the fusion-classification surface don't supply op-byte data.
+///
+/// **Three-way fusion partition** (load-bearing for the LLVM
+/// fusion lowering — wrong classification miscompiles tile-and-fuse
+/// boundaries):
+///
+///   * `is_elementwise_fusable` — Binop / Unop. Freely fusable
+///     in either prologue or epilogue position.
+///   * `is_outer_loop_driver` — Matmul / Reduce. Cannot be freely
+///     fused; serves as the outer loop driver of any chain that
+///     contains them, with elementwise producers / consumers
+///     inlined at the boundary.
+///   * `is_atomic_primitive` — LayerNorm / RmsNorm / Softmax /
+///     FlashAttention. Treated as a single primitive at this
+///     level; not split for finer-grained fusion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TensorOpTag {
+    Binop,
+    Unop,
+    Matmul,
+    Reduce,
+    LayerNorm,
+    RmsNorm,
+    Softmax,
+    FlashAttention,
+}
+
+/// Per-tag projection for [`TensorOpTag`]. See the `TensorOpTag`
+/// docs for the three-way fusion partition; this struct lifts the
+/// classifiers into per-tag fields.
+#[derive(Debug, Clone, Copy)]
+pub struct TensorOpTagMeta {
+    pub name: &'static str,
+    pub is_elementwise_fusable: bool,
+    pub is_outer_loop_driver: bool,
+    pub is_atomic_primitive: bool,
+}
+
+impl TensorOpTag {
+    pub const ALL: &'static [Self] = &[
+        Self::Binop,
+        Self::Unop,
+        Self::Matmul,
+        Self::Reduce,
+        Self::LayerNorm,
+        Self::RmsNorm,
+        Self::Softmax,
+        Self::FlashAttention,
+    ];
+
+    pub const fn meta(self) -> TensorOpTagMeta {
+        match self {
+            Self::Binop => TensorOpTagMeta {
+                name: "binop",
+                is_elementwise_fusable: true,
+                is_outer_loop_driver: false,
+                is_atomic_primitive: false,
+            },
+            Self::Unop => TensorOpTagMeta {
+                name: "unop",
+                is_elementwise_fusable: true,
+                is_outer_loop_driver: false,
+                is_atomic_primitive: false,
+            },
+            Self::Matmul => TensorOpTagMeta {
+                name: "matmul",
+                is_elementwise_fusable: false,
+                is_outer_loop_driver: true,
+                is_atomic_primitive: false,
+            },
+            Self::Reduce => TensorOpTagMeta {
+                name: "reduce",
+                is_elementwise_fusable: false,
+                is_outer_loop_driver: true,
+                is_atomic_primitive: false,
+            },
+            Self::LayerNorm => TensorOpTagMeta {
+                name: "layer_norm",
+                is_elementwise_fusable: false,
+                is_outer_loop_driver: false,
+                is_atomic_primitive: true,
+            },
+            Self::RmsNorm => TensorOpTagMeta {
+                name: "rms_norm",
+                is_elementwise_fusable: false,
+                is_outer_loop_driver: false,
+                is_atomic_primitive: true,
+            },
+            Self::Softmax => TensorOpTagMeta {
+                name: "softmax",
+                is_elementwise_fusable: false,
+                is_outer_loop_driver: false,
+                is_atomic_primitive: true,
+            },
+            Self::FlashAttention => TensorOpTagMeta {
+                name: "flash_attention",
+                is_elementwise_fusable: false,
+                is_outer_loop_driver: false,
+                is_atomic_primitive: true,
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for t in Self::ALL {
+            if t.meta().name == s {
+                return Some(*t);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn is_elementwise_fusable(&self) -> bool {
+        self.meta().is_elementwise_fusable
+    }
+
+    #[inline]
+    pub const fn is_outer_loop_driver(&self) -> bool {
+        self.meta().is_outer_loop_driver
+    }
+
+    #[inline]
+    pub const fn is_atomic_primitive(&self) -> bool {
+        self.meta().is_atomic_primitive
+    }
+}
+
+impl TensorOpKind {
+    /// Discriminator-only tag for fusion-classification dispatch.
+    /// Named `tag` (not `kind`) to avoid the name collision with
+    /// this enum's own name (`TensorOpKind`).
+    pub fn tag(&self) -> TensorOpTag {
+        match self {
+            Self::Binop(_) => TensorOpTag::Binop,
+            Self::Unop(_) => TensorOpTag::Unop,
+            Self::Matmul => TensorOpTag::Matmul,
+            Self::Reduce(_) => TensorOpTag::Reduce,
+            Self::LayerNorm => TensorOpTag::LayerNorm,
+            Self::RmsNorm => TensorOpTag::RmsNorm,
+            Self::Softmax => TensorOpTag::Softmax,
+            Self::FlashAttention => TensorOpTag::FlashAttention,
+        }
+    }
 }
 
 /// Fusion plan derived from a `Vec<TensorChain>`. Tells the LLVM
@@ -432,3 +591,71 @@ fn instruction_reads(instr: &Instruction) -> Vec<Reg> {
 // variants they exercised.  When Этап C (compute unification) wires
 // `TensorExtended` into `classify` / `instruction_reads`, equivalent
 // chain coverage will be reinstated against the canonical wire form.
+
+#[cfg(test)]
+mod meta_consolidation_pins {
+    use super::{TensorOpKind, TensorOpTag};
+
+    #[test]
+    fn meta_pin_tensor_op_tag_round_trip_and_three_way_fusion_partition() {
+        assert_eq!(TensorOpTag::ALL.len(), 8);
+        let mut seen = Vec::new();
+        for t in TensorOpTag::ALL {
+            let s = t.name();
+            assert_eq!(TensorOpTag::from_str(s), Some(*t));
+            assert!(!seen.contains(&s), "duplicate name '{}'", s);
+            seen.push(s);
+        }
+        // Three-way fusion partition (load-bearing for tile-and-fuse
+        // boundary correctness):
+        //   * elementwise_fusable: Binop + Unop = 2
+        //   * outer_loop_driver: Matmul + Reduce = 2
+        //   * atomic_primitive: LayerNorm + RmsNorm + Softmax +
+        //     FlashAttention = 4
+        let elem = TensorOpTag::ALL
+            .iter()
+            .filter(|t| t.is_elementwise_fusable())
+            .count();
+        let driver = TensorOpTag::ALL
+            .iter()
+            .filter(|t| t.is_outer_loop_driver())
+            .count();
+        let atomic = TensorOpTag::ALL
+            .iter()
+            .filter(|t| t.is_atomic_primitive())
+            .count();
+        assert_eq!(elem, 2, "Binop + Unop");
+        assert_eq!(driver, 2, "Matmul + Reduce");
+        assert_eq!(atomic, 4, "LayerNorm + RmsNorm + Softmax + FlashAttention");
+        assert_eq!(elem + driver + atomic, TensorOpTag::ALL.len());
+        // Three-way disjointness: every variant lives in exactly
+        // one bucket.
+        for t in TensorOpTag::ALL {
+            let buckets = [
+                t.is_elementwise_fusable(),
+                t.is_outer_loop_driver(),
+                t.is_atomic_primitive(),
+            ];
+            let count = buckets.iter().filter(|b| **b).count();
+            assert_eq!(
+                count, 1,
+                "TensorOpTag::{:?}: must be in exactly one fusion bucket",
+                t
+            );
+        }
+        // Wire form spot pins (snake_case for telemetry).
+        assert_eq!(TensorOpTag::Binop.name(), "binop");
+        assert_eq!(TensorOpTag::LayerNorm.name(), "layer_norm");
+        assert_eq!(TensorOpTag::FlashAttention.name(), "flash_attention");
+        // Payload variant tag() agreement.
+        assert_eq!(TensorOpKind::Binop(0x12).tag(), TensorOpTag::Binop);
+        assert_eq!(TensorOpKind::Unop(0x34).tag(), TensorOpTag::Unop);
+        assert_eq!(TensorOpKind::Matmul.tag(), TensorOpTag::Matmul);
+        assert_eq!(TensorOpKind::Reduce(0xAB).tag(), TensorOpTag::Reduce);
+        assert_eq!(TensorOpKind::LayerNorm.tag(), TensorOpTag::LayerNorm);
+        assert_eq!(
+            TensorOpKind::FlashAttention.tag(),
+            TensorOpTag::FlashAttention
+        );
+    }
+}
