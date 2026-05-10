@@ -8,9 +8,10 @@ The CI contract: every `@test` here passes under both `verum test --interp`
 tests pin known stdlib / language-level defects and are excluded from the
 default green-suite gate.
 
-| module | unit | property | integration | regression | audit | open deferrals |
-|---|---:|---:|---:|---:|---:|---|
-| `collections/union_find` | 358 | 371 | 147 | 197 | 229 | 5 (Map.get → Maybe<V>; Map.contains_key(&K); lenient-skip on Map.get_optional/get_key_value; Text.from_utf8_unchecked zero-length as_bytes; Text.eq method dispatch) |
+| module | unit | property | integration | regression | open deferrals |
+|---|---:|---:|---:|---:|---|
+| `collections/union_find` | 358 | 371 | 147 | 197 | 5 (Map.get → Maybe<V>; Map.contains_key(&K); lenient-skip on Map.get_optional/get_key_value; Text.from_utf8_unchecked zero-length as_bytes; Text.eq method dispatch) |
+| `collections/reservoir`  | 176 | 140 | 104 |  99 | 1 (core.sys.common.random_bytes intrinsic missing from VBC dispatch table — gates the replacement-phase API) |
 
 ## Status legend
 

@@ -1,0 +1,104 @@
+// =============================================================================
+// core-tests/collections/reservoir/integration_test.vr
+// =============================================================================
+//
+// Integration tests for Reservoir<T> alongside the rest of stdlib —
+// scenarios that exercise the fill-phase API surface in cross-type
+// settings.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.reservoir.Reservoir;
+
+// =============================================================================
+// §1  Trace-sampling pattern (Datadog/Honeycomb tail-sampler shape)
+//      — bounded sample size, observed-count counter for telemetry.
+// =============================================================================
+
+@test
+fn integration_reservoir_telemetry_counters() {
+    // Cap intentionally larger than offered count to keep us inside the
+    // fill phase (replacement phase is gated on the CSPRNG intrinsic;
+    // pinned in regression_test.vr).
+    let mut sampler: Reservoir<Int> = Reservoir.new(100);
+    let traces = [101, 102, 103, 104, 105];
+    for tid in traces.iter() {
+        let _ = sampler.offer(*tid);
+    }
+    assert_eq(sampler.seen(), 5_u64);
+    assert_eq(sampler.len(), 5);
+    assert_eq(sampler.capacity(), 100);
+}
+
+// =============================================================================
+// §2  take consumes — cannot reuse the reservoir after take.
+// =============================================================================
+
+@test
+fn integration_reservoir_take_returns_owned_samples() {
+    let mut r: Reservoir<Int> = Reservoir.new(6);
+    let _ = r.offer(11);
+    let _ = r.offer(22);
+    let _ = r.offer(33);
+    let s = r.take();
+    // Samples are an owned List<Int>.
+    assert_eq(s.len(), 3);
+    // Membership inside the captured set (order is implementation-defined;
+    // we test by distinct-count rather than positions to keep the law
+    // representation-independent).
+    let mut found_11 = false;
+    let mut found_22 = false;
+    let mut found_33 = false;
+    for v in s.iter() {
+        if *v == 11 { found_11 = true; }
+        if *v == 22 { found_22 = true; }
+        if *v == 33 { found_33 = true; }
+    }
+    assert(found_11);
+    assert(found_22);
+    assert(found_33);
+}
+
+// =============================================================================
+// §3  reset enables reuse for the next sampling window.
+// =============================================================================
+
+@test
+fn integration_reservoir_window_rotation_via_reset() {
+    let mut r: Reservoir<Int> = Reservoir.new(4);
+    // Window 1
+    let _ = r.offer(1);
+    let _ = r.offer(2);
+    let _ = r.offer(3);
+    let _ = r.offer(4);
+    assert_eq(r.len(), 4);
+    assert_eq(r.seen(), 4_u64);
+    r.reset();
+    // Window 2 — same capacity, fresh state.
+    let _ = r.offer(10);
+    let _ = r.offer(20);
+    assert_eq(r.len(), 2);
+    assert_eq(r.seen(), 2_u64);
+    assert_eq(r.capacity(), 4);
+}
+
+// =============================================================================
+// §4  Multiple independent reservoirs don't share state.
+// =============================================================================
+
+@test
+fn integration_reservoir_independent_instances() {
+    let mut a: Reservoir<Int> = Reservoir.new(5);
+    let mut b: Reservoir<Int> = Reservoir.new(8);
+    let _ = a.offer(1);
+    let _ = a.offer(2);
+    let _ = b.offer(99);
+    assert_eq(a.len(), 2);
+    assert_eq(a.seen(), 2_u64);
+    assert_eq(a.capacity(), 5);
+    assert_eq(b.len(), 1);
+    assert_eq(b.seen(), 1_u64);
+    assert_eq(b.capacity(), 8);
+}
+
+fn main() {}
