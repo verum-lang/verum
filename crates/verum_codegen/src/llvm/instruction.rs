@@ -17448,17 +17448,8 @@ fn lower_arith_extended<'ctx>(
             let dst = op_reg(operands, 0);
             let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "atan2_a")?;
             let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "atan2_b")?;
-            let f64_ty = ctx.types().f64_type();
-            let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
-            let func = super::error::get_or_declare_function(ctx.get_module(), "llvm.atan2.f64", fn_type);
-            let result = ctx
-                .builder()
-                .build_call(func, &[a.into(), b.into()], "atan2")
-                .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("atan2: expected return value")?;
-            ctx.set_register(dst, result);
+            let result = build_binary_intrinsic_f64(ctx, "llvm.atan2.f64", "atan2", a, b)?;
+            ctx.set_register(dst, result.into());
             Ok(())
         }
         Some(ArithSubOpcode::Hypot) => {
@@ -17472,17 +17463,8 @@ fn lower_arith_extended<'ctx>(
             let dst = op_reg(operands, 0);
             let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "hypot_a")?;
             let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "hypot_b")?;
-            let f64_ty = ctx.types().f64_type();
-            let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
-            let func = super::error::get_or_declare_function(ctx.get_module(), "llvm.hypot.f64", fn_type);
-            let result = ctx
-                .builder()
-                .build_call(func, &[a.into(), b.into()], "hypot")
-                .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("hypot: expected return value")?;
-            ctx.set_register(dst, result);
+            let result = build_binary_intrinsic_f64(ctx, "llvm.hypot.f64", "hypot", a, b)?;
+            ctx.set_register(dst, result.into());
             Ok(())
         }
         Some(ArithSubOpcode::Copysign) => {
@@ -17493,17 +17475,8 @@ fn lower_arith_extended<'ctx>(
             let dst = op_reg(operands, 0);
             let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "copysign_a")?;
             let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "copysign_b")?;
-            let f64_ty = ctx.types().f64_type();
-            let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
-            let func = super::error::get_or_declare_function(ctx.get_module(), "llvm.copysign.f64", fn_type);
-            let result = ctx
-                .builder()
-                .build_call(func, &[a.into(), b.into()], "copysign")
-                .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("copysign: expected return value")?;
-            ctx.set_register(dst, result);
+            let result = build_binary_intrinsic_f64(ctx, "llvm.copysign.f64", "copysign", a, b)?;
+            ctx.set_register(dst, result.into());
             Ok(())
         }
         Some(ArithSubOpcode::Pow) => {
@@ -17514,17 +17487,8 @@ fn lower_arith_extended<'ctx>(
             let dst = op_reg(operands, 0);
             let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "pow_a")?;
             let b = as_f64(ctx, ctx.get_register(op_reg(operands, 2))?, "pow_b")?;
-            let f64_ty = ctx.types().f64_type();
-            let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
-            let func = super::error::get_or_declare_function(ctx.get_module(), "llvm.pow.f64", fn_type);
-            let result = ctx
-                .builder()
-                .build_call(func, &[a.into(), b.into()], "pow")
-                .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .or_internal("pow: expected return value")?;
-            ctx.set_register(dst, result);
+            let result = build_binary_intrinsic_f64(ctx, "llvm.pow.f64", "pow", a, b)?;
+            ctx.set_register(dst, result.into());
             Ok(())
         }
         Some(ArithSubOpcode::LogBase) => {
@@ -17911,16 +17875,7 @@ fn lower_is_inf_f64<'ctx>(
     let dst = op_reg(operands, 0);
     let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isinf_src")?;
     let f64_ty = ctx.types().f64_type();
-    let abs_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
-    let abs_fn = super::error::get_or_declare_function(ctx.get_module(), "llvm.fabs.f64", abs_fn_type);
-    let abs_val = ctx
-        .builder()
-        .build_call(abs_fn, &[a.into()], "fabs")
-        .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .or_internal("fabs: expected return value")?
-        .into_float_value();
+    let abs_val = build_round_intrinsic(ctx, "llvm.fabs.f64", "fabs", a)?;
     let inf = f64_ty.const_float(f64::INFINITY);
     let is_inf = ctx
         .builder()
@@ -17946,16 +17901,7 @@ fn lower_is_finite_f64<'ctx>(
     let dst = op_reg(operands, 0);
     let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isfinite_src")?;
     let f64_ty = ctx.types().f64_type();
-    let abs_fn_type = f64_ty.fn_type(&[f64_ty.into()], false);
-    let abs_fn = super::error::get_or_declare_function(ctx.get_module(), "llvm.fabs.f64", abs_fn_type);
-    let abs_val = ctx
-        .builder()
-        .build_call(abs_fn, &[a.into()], "fabs_finite")
-        .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .or_internal("fabs: expected return value")?
-        .into_float_value();
+    let abs_val = build_round_intrinsic(ctx, "llvm.fabs.f64", "fabs_finite", a)?;
     let inf = f64_ty.const_float(f64::INFINITY);
     let is_not_inf = ctx
         .builder()
@@ -22075,6 +22021,35 @@ fn build_round_intrinsic<'ctx>(
     let result = ctx
         .builder()
         .build_call(func, &[src.into()], name)
+        .or_llvm_err()?
+        .try_as_basic_value()
+        .basic()
+        .ok_or_else(|| {
+            LlvmLoweringError::internal(format!("{}: expected return value", intrinsic_name))
+        })?
+        .into_float_value();
+    Ok(result)
+}
+
+/// Build a call to a binary LLVM `(f64, f64) -> f64` intrinsic
+/// (`llvm.atan2.f64`, `llvm.hypot.f64`, `llvm.copysign.f64`,
+/// `llvm.pow.f64`).  Mirror of `build_round_intrinsic` for binary
+/// ops — collapses the 14-line declare+build_call+result-extract
+/// boilerplate that otherwise repeats verbatim across the four
+/// `Atan2`/`Hypot`/`Copysign`/`Pow` arms in `lower_arith_extended`.
+fn build_binary_intrinsic_f64<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    intrinsic_name: &str,
+    name: &str,
+    a: verum_llvm::values::FloatValue<'ctx>,
+    b: verum_llvm::values::FloatValue<'ctx>,
+) -> Result<verum_llvm::values::FloatValue<'ctx>> {
+    let f64_ty = ctx.types().f64_type();
+    let fn_type = f64_ty.fn_type(&[f64_ty.into(), f64_ty.into()], false);
+    let func = super::error::get_or_declare_function(ctx.get_module(), intrinsic_name, fn_type);
+    let result = ctx
+        .builder()
+        .build_call(func, &[a.into(), b.into()], name)
         .or_llvm_err()?
         .try_as_basic_value()
         .basic()
