@@ -97,21 +97,92 @@ pub enum Profile {
 // stay parallel and consistent via this consolidation.
 // =========================================================================
 
+/// Two-axis feature space carried by a `@profile(...)` declaration.
+///
+/// Application / Systems / Research are not arranged on a single
+/// linear restrictiveness axis — they sit on two **orthogonal**
+/// feature axes:
+///
+///   * `permits_unsafe` — the profile permits `unsafe` blocks /
+///     raw pointers / inline assembly.  `Systems` is the lone
+///     variant that flips this on; both `Application` and
+///     `Research` forbid unsafe.
+///   * `requires_verification` — the profile mandates formal
+///     verification of every contract.  `Research` is the lone
+///     variant that flips this on; both `Application` and
+///     `Systems` leave verification optional.
+///
+/// The structure is deliberately a per-variant flag set rather
+/// than an integer rank — a pre-fix `restriction_rank: u8` field
+/// claimed a linear order `Application(0) < Systems(1) <
+/// Research(2)` and the derived `is_more_restrictive_than`
+/// predicate asserted `Systems > Application` (because `1 > 0`).
+/// But Systems **permits** unsafe — a feature Application
+/// **forbids** — so on the unsafe axis Systems is *less*
+/// restrictive than Application, not more.  The linear rank
+/// conflated two orthogonal axes and produced semantically
+/// incoherent claims.  No production caller depended on the wrong
+/// rank (only tests pinned the broken behaviour); the fix replaces
+/// the rank with a proper feature-set representation that the
+/// compatibility predicate can use as a subset-inclusion check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ProfileFeatures {
+    /// `true` iff `unsafe` blocks / raw pointers / inline assembly
+    /// are admitted under this profile.
+    pub permits_unsafe: bool,
+    /// `true` iff formal verification of every contract is mandated
+    /// under this profile.
+    pub requires_verification: bool,
+}
+
+impl ProfileFeatures {
+    /// True iff every feature flag set on `self` is also set on
+    /// `parent` — the subset-inclusion test that backs the
+    /// parent-child profile compatibility check on
+    /// [`ProfileAttr::is_compatible_with`].
+    ///
+    /// Reading: a child module's `@profile(...)` is compatible
+    /// with its parent's `@profile(...)` iff every feature the
+    /// child uses is permitted under the parent.  Application
+    /// uses no orthogonal features, so it's compatible with every
+    /// parent.  Systems uses `permits_unsafe`, so it's only
+    /// compatible with a parent that also `permits_unsafe`.
+    /// Research uses `requires_verification`, so it's only
+    /// compatible with a parent that also `requires_verification`.
+    #[inline]
+    pub const fn subset_of(self, parent: Self) -> bool {
+        // (a ⊆ b) iff for every flag, (a.flag → b.flag).
+        (!self.permits_unsafe || parent.permits_unsafe)
+            && (!self.requires_verification || parent.requires_verification)
+    }
+}
+
 /// Co-located metadata for one `@profile` attribute variant.
 #[derive(Debug, Clone, Copy)]
 pub struct ProfileMeta {
     /// Canonical attribute spelling (`"application"` /
     /// `"systems"` / `"research"`).
     pub name: &'static str,
-    /// Restriction-hierarchy rank: `Application < Systems <
-    /// Research` (Research is most restrictive — requires
-    /// proofs; Application is least restrictive — most permissive
-    /// features).
-    pub restriction_rank: u8,
-    /// Whether this profile permits `unsafe` operations.
-    pub allows_unsafe: bool,
-    /// Whether this profile requires formal verification.
-    pub requires_verification: bool,
+    /// The two-axis feature set this profile uses.  Subsumes the
+    /// pre-fix scalar `permits_unsafe` / `requires_verification`
+    /// pair into a structured type that the compatibility
+    /// predicate can reason about as a set rather than as a pair
+    /// of booleans.
+    pub features: ProfileFeatures,
+}
+
+impl ProfileMeta {
+    /// Backwards-compatible shortcut for `features.permits_unsafe`.
+    #[inline]
+    pub const fn allows_unsafe(self) -> bool {
+        self.features.permits_unsafe
+    }
+
+    /// Backwards-compatible shortcut for `features.requires_verification`.
+    #[inline]
+    pub const fn requires_verification(self) -> bool {
+        self.features.requires_verification
+    }
 }
 
 impl Profile {
@@ -123,27 +194,30 @@ impl Profile {
     ];
 
     /// Returns co-located metadata for this profile.  Single
-    /// source of truth for `name`, `restriction_rank`,
-    /// `allows_unsafe`, `requires_verification`.
+    /// source of truth for `name` plus the two-axis feature set
+    /// (`permits_unsafe` / `requires_verification`).
     pub const fn meta(self) -> ProfileMeta {
         match self {
             Self::Application => ProfileMeta {
                 name: "application",
-                restriction_rank: 0,
-                allows_unsafe: false,
-                requires_verification: false,
+                features: ProfileFeatures {
+                    permits_unsafe: false,
+                    requires_verification: false,
+                },
             },
             Self::Systems => ProfileMeta {
                 name: "systems",
-                restriction_rank: 1,
-                allows_unsafe: true,
-                requires_verification: false,
+                features: ProfileFeatures {
+                    permits_unsafe: true,
+                    requires_verification: false,
+                },
             },
             Self::Research => ProfileMeta {
                 name: "research",
-                restriction_rank: 2,
-                allows_unsafe: false,
-                requires_verification: true,
+                features: ProfileFeatures {
+                    permits_unsafe: false,
+                    requires_verification: true,
+                },
             },
         }
     }
@@ -169,26 +243,49 @@ impl Profile {
         self.meta().name
     }
 
-    /// Check if this profile is more restrictive than another
-    ///
-    /// Restriction hierarchy: Application < Systems < Research
-    /// Research is most restrictive (requires proofs)
-    /// Application is least restrictive (most permissive features)
+    /// The two-axis feature set this profile uses.  Direct
+    /// projection of [`ProfileMeta::features`].
     #[inline]
-    pub const fn is_more_restrictive_than(&self, other: &Profile) -> bool {
-        self.meta().restriction_rank > other.meta().restriction_rank
+    pub const fn features(&self) -> ProfileFeatures {
+        self.meta().features
+    }
+
+    /// True iff every feature this child profile uses is also
+    /// available under the candidate parent — the proper
+    /// subset-inclusion check that backs
+    /// [`ProfileAttr::is_compatible_with`].
+    ///
+    /// Examples (`A.features_subset_of(B)` reads "A is admissible
+    /// as a child of B"):
+    ///
+    /// | child / parent | Application | Systems | Research |
+    /// |---------------|:-----------:|:-------:|:--------:|
+    /// | Application   | ✅          | ✅      | ✅       |
+    /// | Systems       | ❌          | ✅      | ❌       |
+    /// | Research      | ❌          | ❌      | ✅       |
+    ///
+    /// Application has the empty feature set, so it embeds in any
+    /// parent.  Systems uses `permits_unsafe` and is only
+    /// admissible under another Systems parent.  Research uses
+    /// `requires_verification` and is only admissible under another
+    /// Research parent.  Systems and Research are
+    /// **mutually incompatible** because their feature sets sit on
+    /// orthogonal axes — neither is a subset of the other.
+    #[inline]
+    pub const fn features_subset_of(&self, parent: &Profile) -> bool {
+        self.features().subset_of(parent.features())
     }
 
     /// Check if this profile allows unsafe operations.
     #[inline]
     pub const fn allows_unsafe(&self) -> bool {
-        self.meta().allows_unsafe
+        self.features().permits_unsafe
     }
 
     /// Check if this profile requires verification.
     #[inline]
     pub const fn requires_verification(&self) -> bool {
-        self.meta().requires_verification
+        self.features().requires_verification
     }
 }
 
@@ -247,17 +344,37 @@ impl ProfileAttr {
         self.profiles.contains(&profile)
     }
 
-    /// Check if this attribute is compatible with a parent's profile
+    /// Check if this attribute is compatible with a parent's profile.
     ///
-
-    /// Child can be more restrictive, not less restrictive
+    /// Compatibility is **feature-set inclusion**: every feature
+    /// the child uses must be permitted under the parent.  When
+    /// the child or parent declares multiple profiles, the child
+    /// is compatible iff at least one of its declared profiles is
+    /// a feature-subset of at least one of the parent's declared
+    /// profiles — the parent's profile list reads as a *union* of
+    /// permitted feature sets, the child's as a *union* of needed
+    /// feature sets, and the check passes iff some child profile's
+    /// needs land entirely inside some parent profile's
+    /// permissions.
+    ///
+    /// Examples:
+    ///   * Parent `@profile(systems)`, child `@profile(application)`:
+    ///     compatible — Application uses no orthogonal features so
+    ///     embeds in any parent.
+    ///   * Parent `@profile(application)`, child `@profile(systems)`:
+    ///     incompatible — Systems uses `permits_unsafe`, which
+    ///     Application doesn't permit.
+    ///   * Parent `@profile(systems)`, child `@profile(research)`:
+    ///     incompatible — Systems and Research sit on orthogonal
+    ///     feature axes (Systems permits unsafe, Research requires
+    ///     verification); neither feature set is a subset of the
+    ///     other.
     pub fn is_compatible_with(&self, parent: &ProfileAttr) -> bool {
-        // Child must support at least one profile that parent supports
         self.profiles.iter().any(|child_profile| {
-            parent.profiles.iter().any(|parent_profile| {
-                child_profile == parent_profile
-                    || child_profile.is_more_restrictive_than(parent_profile)
-            })
+            parent
+                .profiles
+                .iter()
+                .any(|parent_profile| child_profile.features_subset_of(parent_profile))
         })
     }
 }
@@ -9119,22 +9236,39 @@ mod meta_drift_pins {
         assert_eq!(Profile::from_str("invalid"), Maybe::None);
     }
 
-    /// `is_more_restrictive_than` follows the strict total order
-    /// `Application < Systems < Research`.  Pin the strict order
-    /// and asymmetry.
+    /// `features_subset_of` realises the proper parent-child
+    /// compatibility relation as feature-set inclusion (not the
+    /// pre-fix linear rank).  Pin the structure: reflexive,
+    /// Application embeds in any parent, Systems and Research
+    /// embed only in themselves, and the two non-Application
+    /// variants are mutually incomparable.
     #[test]
-    fn profile_restriction_order_strict() {
+    fn profile_features_subset_relation_pinned() {
+        // Reflexivity: every profile is a subset of itself.
         for &p in Profile::ALL {
-            // Reflexivity: not strictly more restrictive than self.
-            assert!(!p.is_more_restrictive_than(&p),
-                "{:?}: should NOT be strictly more restrictive than itself", p);
+            assert!(p.features_subset_of(&p),
+                "{:?}: features must be a subset of itself", p);
         }
-        // Asymmetry: only one direction holds for any pair of
-        // distinct profiles.
-        assert!(Profile::Research.is_more_restrictive_than(&Profile::Application));
-        assert!(!Profile::Application.is_more_restrictive_than(&Profile::Research));
-        assert!(Profile::Research.is_more_restrictive_than(&Profile::Systems));
-        assert!(Profile::Systems.is_more_restrictive_than(&Profile::Application));
+        // Application has the empty feature set so it embeds in
+        // every parent.
+        for &parent in Profile::ALL {
+            assert!(Profile::Application.features_subset_of(&parent),
+                "Application should embed under any parent ({:?})", parent);
+        }
+        // Systems is admissible only under a Systems parent —
+        // its `permits_unsafe` flag isn't carried by Application
+        // or Research.
+        assert!(!Profile::Systems.features_subset_of(&Profile::Application));
+        assert!(Profile::Systems.features_subset_of(&Profile::Systems));
+        assert!(!Profile::Systems.features_subset_of(&Profile::Research));
+        // Research is admissible only under a Research parent.
+        assert!(!Profile::Research.features_subset_of(&Profile::Application));
+        assert!(!Profile::Research.features_subset_of(&Profile::Systems));
+        assert!(Profile::Research.features_subset_of(&Profile::Research));
+        // Systems and Research are mutually incomparable —
+        // orthogonal feature axes.
+        assert!(!Profile::Systems.features_subset_of(&Profile::Research));
+        assert!(!Profile::Research.features_subset_of(&Profile::Systems));
     }
 
     /// Pin the canonical capability-flag set: only Systems

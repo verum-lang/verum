@@ -103,40 +103,90 @@ fn test_profile_display() {
 }
 
 // ============================================================================
-// Profile Restriction Tests
+// Profile feature-set + compatibility tests
+//
+// Pre-fix `is_more_restrictive_than` was built on a linear
+// `restriction_rank: u8` that conflated two orthogonal axes —
+// `permits_unsafe` (Systems only) and `requires_verification`
+// (Research only).  The rank claimed `Systems > Application` but
+// Systems uses MORE features than Application (unsafe), not fewer,
+// so the predicate's own users (this test file) had to assert
+// semantically incoherent claims like "Systems is more restrictive
+// than Application" while another test in the same file asserted
+// `Systems.allows_unsafe() == true` and
+// `Application.allows_unsafe() == false`.
+//
+// The fix replaces the rank with a two-axis `ProfileFeatures`
+// bitfield and a proper subset-inclusion predicate
+// `features_subset_of`.  "Compatible parent" now means "permits
+// every feature the child uses" — Application embeds in any
+// parent (uses no features); Systems embeds only in Systems;
+// Research embeds only in Research; Systems and Research are
+// mutually incompatible (orthogonal axes).
 // ============================================================================
 
 #[test]
-fn test_profile_is_more_restrictive_research_vs_application() {
-    assert!(Profile::Research.is_more_restrictive_than(&Profile::Application));
+fn test_profile_features_application_empty_set() {
+    let f = Profile::Application.features();
+    assert!(!f.permits_unsafe);
+    assert!(!f.requires_verification);
 }
 
 #[test]
-fn test_profile_is_more_restrictive_research_vs_systems() {
-    assert!(Profile::Research.is_more_restrictive_than(&Profile::Systems));
+fn test_profile_features_systems_unsafe_axis() {
+    let f = Profile::Systems.features();
+    assert!(f.permits_unsafe);
+    assert!(!f.requires_verification);
 }
 
 #[test]
-fn test_profile_is_more_restrictive_systems_vs_application() {
-    assert!(Profile::Systems.is_more_restrictive_than(&Profile::Application));
+fn test_profile_features_research_verification_axis() {
+    let f = Profile::Research.features();
+    assert!(!f.permits_unsafe);
+    assert!(f.requires_verification);
 }
 
 #[test]
-fn test_profile_is_more_restrictive_same_profile() {
-    // Same profile is not more restrictive than itself
-    assert!(!Profile::Application.is_more_restrictive_than(&Profile::Application));
-    assert!(!Profile::Systems.is_more_restrictive_than(&Profile::Systems));
-    assert!(!Profile::Research.is_more_restrictive_than(&Profile::Research));
+fn test_profile_features_subset_of_reflexive() {
+    // Every profile is a feature-subset of itself.
+    assert!(Profile::Application.features_subset_of(&Profile::Application));
+    assert!(Profile::Systems.features_subset_of(&Profile::Systems));
+    assert!(Profile::Research.features_subset_of(&Profile::Research));
 }
 
 #[test]
-fn test_profile_is_more_restrictive_reverse() {
-    // Application is NOT more restrictive than Systems
-    assert!(!Profile::Application.is_more_restrictive_than(&Profile::Systems));
-    // Application is NOT more restrictive than Research
-    assert!(!Profile::Application.is_more_restrictive_than(&Profile::Research));
-    // Systems is NOT more restrictive than Research
-    assert!(!Profile::Systems.is_more_restrictive_than(&Profile::Research));
+fn test_profile_features_application_embeds_in_any_parent() {
+    // Application uses the empty feature set, so it embeds in
+    // every parent.
+    assert!(Profile::Application.features_subset_of(&Profile::Application));
+    assert!(Profile::Application.features_subset_of(&Profile::Systems));
+    assert!(Profile::Application.features_subset_of(&Profile::Research));
+}
+
+#[test]
+fn test_profile_features_systems_only_embeds_in_systems() {
+    // Systems uses `permits_unsafe`; only a Systems parent
+    // permits it.
+    assert!(!Profile::Systems.features_subset_of(&Profile::Application));
+    assert!(Profile::Systems.features_subset_of(&Profile::Systems));
+    assert!(!Profile::Systems.features_subset_of(&Profile::Research));
+}
+
+#[test]
+fn test_profile_features_research_only_embeds_in_research() {
+    // Research uses `requires_verification`; only a Research
+    // parent permits it.
+    assert!(!Profile::Research.features_subset_of(&Profile::Application));
+    assert!(!Profile::Research.features_subset_of(&Profile::Systems));
+    assert!(Profile::Research.features_subset_of(&Profile::Research));
+}
+
+#[test]
+fn test_profile_features_systems_research_orthogonal() {
+    // Systems and Research sit on orthogonal axes; neither's
+    // feature set includes the other's.
+    assert!(!Profile::Systems.features_subset_of(&Profile::Research));
+    assert!(!Profile::Research.features_subset_of(&Profile::Systems));
 }
 
 // ============================================================================
@@ -220,47 +270,77 @@ fn test_profile_attr_contains_single() {
 // ProfileAttr Compatibility Tests
 // ============================================================================
 
+// `ProfileAttr::is_compatible_with` is now feature-set inclusion:
+// child compatible with parent iff at least one child profile's
+// feature set is a subset of at least one parent profile's
+// feature set.  Pre-fix this tested a linear restriction order
+// that asserted demonstrably wrong claims (e.g. "Systems is more
+// restrictive than Application" while the same test file confirmed
+// Systems permits unsafe and Application doesn't); the corrected
+// semantics drop the linear conflation.
+
 #[test]
 fn test_profile_attr_is_compatible_same_profile() {
     let span = Span::default();
     let parent = ProfileAttr::single(Profile::Application, span);
     let child = ProfileAttr::single(Profile::Application, span);
 
+    // Reflexive: every profile is compatible with itself.
     assert!(child.is_compatible_with(&parent));
 }
 
 #[test]
-fn test_profile_attr_is_compatible_child_more_restrictive() {
+fn test_profile_attr_application_child_admits_in_any_parent() {
     let span = Span::default();
-    let parent = ProfileAttr::single(Profile::Application, span);
+
+    // Application uses no orthogonal features, so an Application
+    // child is admissible under any parent.
+    let child = ProfileAttr::single(Profile::Application, span);
+    assert!(child.is_compatible_with(&ProfileAttr::single(Profile::Application, span)));
+    assert!(child.is_compatible_with(&ProfileAttr::single(Profile::Systems, span)));
+    assert!(child.is_compatible_with(&ProfileAttr::single(Profile::Research, span)));
+}
+
+#[test]
+fn test_profile_attr_systems_child_only_under_systems_parent() {
+    let span = Span::default();
     let child = ProfileAttr::single(Profile::Systems, span);
 
-    // Systems is more restrictive than Application
-    assert!(child.is_compatible_with(&parent));
+    // Systems uses `permits_unsafe`; only a parent that permits
+    // unsafe (i.e. another Systems) accepts it.
+    assert!(!child.is_compatible_with(&ProfileAttr::single(Profile::Application, span)));
+    assert!(child.is_compatible_with(&ProfileAttr::single(Profile::Systems, span)));
+    assert!(!child.is_compatible_with(&ProfileAttr::single(Profile::Research, span)));
 }
 
 #[test]
-fn test_profile_attr_is_compatible_child_most_restrictive() {
+fn test_profile_attr_research_child_only_under_research_parent() {
     let span = Span::default();
-    let parent = ProfileAttr::single(Profile::Application, span);
     let child = ProfileAttr::single(Profile::Research, span);
 
-    // Research is most restrictive
-    assert!(child.is_compatible_with(&parent));
+    // Research uses `requires_verification`; only a Research
+    // parent permits it.
+    assert!(!child.is_compatible_with(&ProfileAttr::single(Profile::Application, span)));
+    assert!(!child.is_compatible_with(&ProfileAttr::single(Profile::Systems, span)));
+    assert!(child.is_compatible_with(&ProfileAttr::single(Profile::Research, span)));
 }
 
 #[test]
-fn test_profile_attr_is_not_compatible_child_less_restrictive() {
+fn test_profile_attr_systems_research_orthogonal() {
     let span = Span::default();
-    let parent = ProfileAttr::single(Profile::Systems, span);
-    let child = ProfileAttr::single(Profile::Application, span);
+    // Systems and Research sit on orthogonal axes — neither's
+    // feature set is a subset of the other's.
+    let systems_child = ProfileAttr::single(Profile::Systems, span);
+    let research_parent = ProfileAttr::single(Profile::Research, span);
+    assert!(!systems_child.is_compatible_with(&research_parent));
 
-    // Application is LESS restrictive than Systems - should be incompatible
-    assert!(!child.is_compatible_with(&parent));
+    let research_child = ProfileAttr::single(Profile::Research, span);
+    let systems_parent = ProfileAttr::single(Profile::Systems, span);
+    assert!(!research_child.is_compatible_with(&systems_parent));
 }
 
 #[test]
-fn test_profile_attr_is_compatible_multiple_profiles() {
+fn test_profile_attr_is_compatible_multiple_profiles_union() {
     let span = Span::default();
 
     let mut parent_profiles = List::new();
@@ -268,9 +348,20 @@ fn test_profile_attr_is_compatible_multiple_profiles() {
     parent_profiles.push(Profile::Systems);
     let parent = ProfileAttr::new(parent_profiles, span);
 
-    // Child supports Systems - compatible
+    // Multi-profile parent reads as a union of permitted feature
+    // sets — child compatible iff any child profile embeds in any
+    // parent profile.  Systems child embeds in Systems parent.
     let child = ProfileAttr::single(Profile::Systems, span);
     assert!(child.is_compatible_with(&parent));
+
+    // Application child embeds in either parent.
+    let app_child = ProfileAttr::single(Profile::Application, span);
+    assert!(app_child.is_compatible_with(&parent));
+
+    // Research child embeds in NEITHER parent (parent doesn't
+    // include Research).
+    let research_child = ProfileAttr::single(Profile::Research, span);
+    assert!(!research_child.is_compatible_with(&parent));
 }
 
 #[test]
@@ -282,11 +373,15 @@ fn test_profile_attr_is_compatible_overlapping_profiles() {
     let parent = ProfileAttr::new(parent_profiles, span);
 
     let mut child_profiles = List::new();
-    child_profiles.push(Profile::Systems);
+    child_profiles.push(Profile::Application);
     child_profiles.push(Profile::Research);
     let child = ProfileAttr::new(child_profiles, span);
 
-    // Child has at least one profile compatible with parent
+    // Multi-profile child reads as a union of needed feature sets;
+    // compatible iff some child profile embeds in some parent
+    // profile.  Application (in the child list) embeds in
+    // Application (the parent), so the overall check passes —
+    // even though the child's Research alternative wouldn't.
     assert!(child.is_compatible_with(&parent));
 }
 
@@ -550,21 +645,37 @@ fn test_attribute_clone() {
 // Specification Compliance Tests
 // ============================================================================
 
-/// Test profile hierarchy per spec: Application < Systems < Research
-/// Tests for language profile attributes..1
+/// Profile parent-child compatibility per the corrected
+/// feature-set inclusion semantics.  Pre-fix, this spec-compliance
+/// test asserted a linear restriction order
+/// `Application < Systems < Research` that was incoherent with
+/// the actual feature data: Systems is the unique
+/// `permits_unsafe` profile, Research the unique
+/// `requires_verification` profile — orthogonal axes, not a
+/// linear chain.  The corrected spec uses subset-inclusion: a
+/// child profile is admissible under a parent iff every feature
+/// the child uses is permitted by the parent.
 #[test]
 fn test_profile_hierarchy_specification() {
-    // Research is most restrictive
-    assert!(Profile::Research.is_more_restrictive_than(&Profile::Systems));
-    assert!(Profile::Research.is_more_restrictive_than(&Profile::Application));
+    // Application uses no orthogonal features, so it embeds in
+    // every parent.
+    assert!(Profile::Application.features_subset_of(&Profile::Application));
+    assert!(Profile::Application.features_subset_of(&Profile::Systems));
+    assert!(Profile::Application.features_subset_of(&Profile::Research));
 
-    // Systems is middle restrictiveness
-    assert!(Profile::Systems.is_more_restrictive_than(&Profile::Application));
-    assert!(!Profile::Systems.is_more_restrictive_than(&Profile::Research));
+    // Systems uses `permits_unsafe`; only a Systems parent
+    // permits it.  In particular Systems is NOT a subset of
+    // Application or Research.
+    assert!(!Profile::Systems.features_subset_of(&Profile::Application));
+    assert!(Profile::Systems.features_subset_of(&Profile::Systems));
+    assert!(!Profile::Systems.features_subset_of(&Profile::Research));
 
-    // Application is least restrictive
-    assert!(!Profile::Application.is_more_restrictive_than(&Profile::Systems));
-    assert!(!Profile::Application.is_more_restrictive_than(&Profile::Research));
+    // Research uses `requires_verification`; only a Research
+    // parent permits it.  Research is NOT a subset of Application
+    // or Systems.
+    assert!(!Profile::Research.features_subset_of(&Profile::Application));
+    assert!(!Profile::Research.features_subset_of(&Profile::Systems));
+    assert!(Profile::Research.features_subset_of(&Profile::Research));
 }
 
 /// Test that only Systems profile allows unsafe
