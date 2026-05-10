@@ -59,6 +59,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{LazyLock, Mutex};
+#[cfg(test)]
 use std::time::Duration;
 
 /// IoEvent flag bits (mirror of `core/io/engine.vr::IoEvent.flags`).

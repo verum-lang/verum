@@ -886,7 +886,15 @@ impl ArchiveCtxCache {
             // Without this, the finalize-time stub-emitter synthesises
             // a `RetV` placeholder and every stdlib method call returns
             // Unit at runtime.
-            codegen.merge_archive_function_bodies(module, &func_id_remap);
+            let merged = codegen.merge_archive_function_bodies(module, &func_id_remap);
+            if std::env::var("VERUM_DBG_MERGE").is_ok() {
+                eprintln!(
+                    "[MERGE] module={} merged={} wanted={:?}",
+                    entry_name,
+                    merged,
+                    wanted.iter().filter(|n| n.starts_with("Result")).collect::<Vec<_>>()
+                );
+            }
         }
         // Unqualified-wanted second pass — same logic as apply_lazy's
         // tail block.  Module-prefix gate already filtered the

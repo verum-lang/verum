@@ -17,11 +17,10 @@
 //!  directly (script-mode persistent-cache hit path).
 //!  * `run_interpreter` — interpreter dispatch with args.
 
-use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
-use tracing::{debug, info};
+use tracing::info;
 
 use verum_common::{List, Text};
 use verum_vbc::interpreter::Interpreter as VbcInterpreter;

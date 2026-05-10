@@ -20,8 +20,6 @@
 //!  to the appropriate code-generator.
 
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Instant;
 
 use anyhow::Result;
 use tracing::{debug, info};
@@ -30,7 +28,6 @@ use verum_ast::Module;
 use verum_codegen::llvm::{
     LoweringConfig as LlvmLoweringConfig, LoweringStats as LlvmLoweringStats, VbcToLlvmLowering,
 };
-use verum_vbc::module::VbcModule;
 
 use crate::compilation_path::{
     CompilationPath, TargetConfig as PathTargetConfig, analyze_function, determine_compilation_path,
