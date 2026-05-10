@@ -154,22 +154,23 @@ pub const RANGE_LIKE_STDLIB_NAMES: &[&str] = &[];
 /// `implement IntCoercible` block and is dropped from this list
 /// (#101 step 3 close-out).
 pub const INT_COERCIBLE_STDLIB_NAMES: &[&str] = &[
-    // FFI integer typedefs.  `Timespec` is the Linux-side mirror
-    // (`core/sys/linux/syscall.vr`); the Darwin-side `TimeSpec`
-    // already carries `implement IntCoercible` in
-    // `core/sys/io_engine.vr`.  Pending mount addition in the
-    // Linux file before the implement block can land here too.
-    "Timespec",
-    // Path types.  `core/io/path.vr` uses a `mount core.*;`
-    // wildcard but doesn't yet pull in `core.base.coercion`;
-    // pending the explicit mount before implement blocks land.
-    "Path",
-    "PathBuf",
-    // Resource handles (opaque-i64).  Pending mount additions
-    // in `core/math/gpu.vr` and `core/math/distributed.vr`.
-    "GPUBuffer",
-    "DeviceRegistry",
-    "ProcessGroup",
+    // **Step 4 reached for IntCoercible.**  Every stdlib type
+    // that needs `Int`-context coercion now carries its own
+    // `implement IntCoercible for X {}` block in the
+    // source-of-truth `.vr` file:
+    //
+    //   * `Timespec` — `core/sys/linux/syscall.vr` (Linux-side);
+    //     `TimeSpec` (Darwin-side) — `core/sys/io_engine.vr`.
+    //   * `Path`, `PathBuf` — `core/io/path.vr`.
+    //   * `GPUBuffer`, `DeviceRegistry` — `core/math/gpu.vr`.
+    //   * `ProcessGroup` — `core/math/distributed.vr`.
+    //
+    // `scan_protocol_implementations` registers them via the
+    // AST walk; this hardcoded list is now empty.  The whole
+    // `register_stdlib_coercions` function still gets called as
+    // a no-op safety net so a future re-introduction of a
+    // hardcoded entry surfaces structurally at the
+    // `migration_progress_pinned` test.
 ];
 
 /// Stdlib type names that cross-coerce with each other in
@@ -380,11 +381,12 @@ mod migration_pins {
         // indexable stdlib type carries its own implement block.
         assert_eq!(INDEXABLE_STDLIB_NAMES.len(), 0);
         assert_eq!(RANGE_LIKE_STDLIB_NAMES.len(), 0);
-        // IntCoercible: 6 retrofits remain (Timespec needs the
-        // Linux-side mount addition; Path/PathBuf the wildcard
-        // mount expansion in core/io/path.vr; the three GPU /
-        // distributed handles their respective math-side mounts).
-        assert_eq!(INT_COERCIBLE_STDLIB_NAMES.len(), 6);
+        // IntCoercible: Step 4 reached. Every stdlib type that
+        // needs Int-context coercion now carries its own
+        // `implement IntCoercible for X {}` block in the .vr
+        // source. List is empty; protocol-scan is the sole
+        // registration path.
+        assert_eq!(INT_COERCIBLE_STDLIB_NAMES.len(), 0);
         // SIZED_NUMERIC follows a different timeline (`Numeric`
         // protocol query landing) — keep its 3-entry baseline.
         assert_eq!(SIZED_NUMERIC_STDLIB_NAMES.len(), 3);

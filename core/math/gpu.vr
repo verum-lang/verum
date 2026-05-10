@@ -93,6 +93,7 @@ mount core.list.List;
 mount core.base.ops.Drop;
 mount core.protocols.{Ord, Eq};
 mount core.ordering.Ordering;
+mount core.base.coercion.{IntCoercible};
 
 // =============================================================================
 // GPU Backend Types
@@ -472,6 +473,12 @@ public type DeviceRegistry is {
     devices: List<(DeviceId, DeviceInfo)>,
     default_device: DeviceId,
 };
+
+// IntCoercible (core.base.coercion) — DeviceRegistry indices /
+// device-handle ids coerce into Int contexts at GPU runtime
+// call sites; the marker opts the type into Int-context
+// coercion.
+implement IntCoercible for DeviceRegistry {}
 
 implement DeviceRegistry {
     // Initialize registry with runtime detection
@@ -921,6 +928,11 @@ public type GPUBuffer<T> is {
     device: DeviceId,
     generation: U64,        // CBGR generation counter
 };
+
+// IntCoercible (core.base.coercion) — GPUBuffer indexing / size
+// queries produce Int values that flow through GPU runtime
+// boundaries; opt the type into Int-context coercion.
+implement<T> IntCoercible for GPUBuffer<T> {}
 
 implement<T> GPUBuffer<T> {
     // Allocate buffer on GPU global memory
