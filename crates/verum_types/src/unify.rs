@@ -101,6 +101,16 @@ pub struct Unifier {
     /// These are arguably part of the language definition (not stdlib), but are
     /// still centralized here to avoid scattered string literals.
     sized_numeric_types: std::collections::HashSet<Text>,
+    /// Types whose in-memory layout is a packed-C-struct byte mirror
+    /// of a kernel/libsystem ABI (sockaddr family, etc.) and that
+    /// the unifier should accept against `[Byte]` / `[UInt8]` byte
+    /// buffers at FFI boundaries.  Populated by stdlib loading via
+    /// `register_bytewise_ffi_type` (driven by
+    /// `implement BytewiseFfi for X {}` blocks).  Replaces the
+    /// hardcoded `matches!(name, "Sockaddr" | "SocketAddr" |
+    /// "SockaddrIn")` short-circuit that previously lived inline in
+    /// the Named↔Named unification arm.
+    bytewise_ffi_types: std::collections::HashSet<Text>,
     /// Current Self type for implement blocks.
     /// When set, Type::Named("Self") is treated as equivalent to this type during unification.
     /// This prevents "expected 'Foo', found 'Self'" errors when Self leaks into type comparisons.
@@ -175,6 +185,15 @@ impl Unifier {
         .map(|s| Text::from(*s))
         .collect();
 
+        // BytewiseFfi types — packed C-struct byte mirrors of
+        // libsystem ABI types.  Populated dynamically via
+        // `register_bytewise_ffi_type()` from stdlib `implement
+        // BytewiseFfi for X {}` blocks; default is empty so a
+        // type that hasn't opted in correctly produces a
+        // type-mismatch error rather than a silent FFI-shape
+        // coercion.
+        let bytewise_ffi_types: std::collections::HashSet<Text> = std::collections::HashSet::new();
+
         Self {
             unify_count: 0,
             unify_depth: 0,
@@ -191,6 +210,7 @@ impl Unifier {
             indexable_collection_types,
             range_like_types,
             sized_numeric_types,
+            bytewise_ffi_types,
             self_type: None,
             context_bindings: IndexMap::new(),
             cubical_enabled: true,
@@ -306,6 +326,29 @@ impl Unifier {
     /// Check whether a Named type is a sized numeric that cross-coerces with other sized numerics.
     fn is_sized_numeric(&self, name: &str) -> bool {
         self.sized_numeric_types.contains(name)
+    }
+
+    /// Register a type as bytewise-FFI compatible — its in-memory
+    /// layout is a packed-C-struct byte mirror of a kernel /
+    /// libsystem ABI (sockaddr family, etc.) and the unifier
+    /// should accept it against `[Byte]` / `[UInt8]` byte buffers
+    /// at FFI boundaries.  Called from stdlib type registration
+    /// (`scan_protocol_implementations`) when a type carries
+    /// `implement BytewiseFfi for X {}`.
+    pub fn register_bytewise_ffi_type(&mut self, type_name: Text) {
+        self.bytewise_ffi_types.insert(type_name);
+    }
+
+    /// True iff `name` is registered as a packed-C-struct byte
+    /// mirror compatible with `[Byte]` / `[UInt8]` at FFI
+    /// boundaries.  Replaces a hardcoded `matches!(name,
+    /// "Sockaddr" | "SocketAddr" | "SockaddrIn")` short-circuit
+    /// previously inline in the Named↔Named unification arm —
+    /// drift between the unifier's accept set and the stdlib's
+    /// declared `implement BytewiseFfi` blocks is now structurally
+    /// impossible.
+    fn is_bytewise_ffi(&self, name: &str) -> bool {
+        self.bytewise_ffi_types.contains(name)
     }
 
     /// Set the variant type names registry for stdlib-agnostic unification.
@@ -2598,15 +2641,17 @@ impl Unifier {
                     if self.is_tensor_family(tn1) && self.is_tensor_family(tn2) {
                         return Ok(Substitution::new());
                     }
-                    // Allow Byte ↔ Sockaddr for FFI
-                    if (tn1 == "Byte" || tn1 == "UInt8")
-                        && matches!(tn2, "Sockaddr" | "SocketAddr" | "SockaddrIn")
-                    {
+                    // Byte / UInt8 ↔ BytewiseFfi-marked struct (sockaddr
+                    // family + any future packed-C-struct byte mirror).
+                    // Replaces the previously hardcoded
+                    // `matches!(name, "Sockaddr" | "SocketAddr" |
+                    // "SockaddrIn")` match — registry-driven via
+                    // `is_bytewise_ffi`, populated from stdlib
+                    // `implement BytewiseFfi for X {}` blocks.
+                    if (tn1 == "Byte" || tn1 == "UInt8") && self.is_bytewise_ffi(tn2) {
                         return Ok(Substitution::new());
                     }
-                    if (tn2 == "Byte" || tn2 == "UInt8")
-                        && matches!(tn1, "Sockaddr" | "SocketAddr" | "SockaddrIn")
-                    {
+                    if (tn2 == "Byte" || tn2 == "UInt8") && self.is_bytewise_ffi(tn1) {
                         return Ok(Substitution::new());
                     }
                     return Err(TypeError::Mismatch {
