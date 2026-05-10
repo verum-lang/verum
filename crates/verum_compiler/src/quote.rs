@@ -4860,6 +4860,84 @@ pub enum InterpolationKind {
     },
 }
 
+/// Discriminator-only kind for [`InterpolationKind`].
+///
+/// Both variants carry payloads (`Single(Text)` / `Repeat { var,
+/// separator }`); the kind enum is zero-sized so callers iterating
+/// the interpolation surface (for docs / diagnostic-bucket headers)
+/// don't supply payload data.
+///
+/// Note the legacy enum is *itself* called `InterpolationKind` — so
+/// the discriminator follows the meta() series convention with a
+/// `…Tag` suffix instead of the usual `…Kind` to avoid the name
+/// collision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InterpolationTag {
+    Single,
+    Repeat,
+}
+
+/// Per-tag projection for [`InterpolationTag`].
+///
+/// `name` matches the surface-syntax form the parser produces
+/// (`"#name"` for Single, `"#(#name),*"` for Repeat — short-form
+/// labels). `is_repeat` is the unique partition (Single / Repeat
+/// is binary).
+#[derive(Debug, Clone, Copy)]
+pub struct InterpolationTagMeta {
+    pub name: &'static str,
+    pub is_repeat: bool,
+}
+
+impl InterpolationTag {
+    pub const ALL: &'static [Self] = &[Self::Single, Self::Repeat];
+
+    pub const fn meta(self) -> InterpolationTagMeta {
+        match self {
+            Self::Single => InterpolationTagMeta {
+                name: "single",
+                is_repeat: false,
+            },
+            Self::Repeat => InterpolationTagMeta {
+                name: "repeat",
+                is_repeat: true,
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().name == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+
+    /// True for `Repeat` — the unique repeated-interpolation tag.
+    #[inline]
+    pub const fn is_repeat(&self) -> bool {
+        self.meta().is_repeat
+    }
+}
+
+impl InterpolationKind {
+    /// Discriminator-only tag for telemetry / surface enumeration.
+    /// Named `tag` (not `kind`) to avoid the name collision with
+    /// this enum's own name (`InterpolationKind`).
+    pub fn tag(&self) -> InterpolationTag {
+        match self {
+            Self::Single(_) => InterpolationTag::Single,
+            Self::Repeat { .. } => InterpolationTag::Repeat,
+        }
+    }
+}
+
 /// Context for expanding quote! macros
 ///
 
@@ -5671,5 +5749,29 @@ mod tests {
             assert!(v.open_char().is_ascii());
             assert!(v.close_char().is_ascii());
         }
+    }
+
+    #[test]
+    fn meta_pin_interpolation_tag_round_trip_and_repeat_partition() {
+        assert_eq!(InterpolationTag::ALL.len(), 2);
+        for t in InterpolationTag::ALL {
+            let s = t.name();
+            assert_eq!(InterpolationTag::from_str(s), Some(*t));
+        }
+        // Wire form.
+        assert_eq!(InterpolationTag::Single.name(), "single");
+        assert_eq!(InterpolationTag::Repeat.name(), "repeat");
+        // Binary partition: Repeat is the unique repeated tag.
+        assert!(!InterpolationTag::Single.is_repeat());
+        assert!(InterpolationTag::Repeat.is_repeat());
+        // Payload variant tag() agreement.
+        let single = InterpolationKind::Single(Text::from("name"));
+        assert_eq!(single.tag(), InterpolationTag::Single);
+        let repeat = InterpolationKind::Repeat {
+            var: Text::from("xs"),
+            separator: Maybe::None,
+        };
+        assert_eq!(repeat.tag(), InterpolationTag::Repeat);
+        assert!(InterpolationTag::from_str("__bogus__").is_none());
     }
 }
