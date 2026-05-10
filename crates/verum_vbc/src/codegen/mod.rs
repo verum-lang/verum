@@ -4689,6 +4689,47 @@ impl VbcCodegen {
                         break; // Found a valid file, stop trying candidates
                     }
                 }
+                // Glob-mount expansion: `mount core.*` / `mount core.text.*`
+                // — when the mount tree is a glob, walk every `.vr` file
+                // under the resolved directory.  Without this, the
+                // stdlib-internal compile harness can't see cross-module
+                // static methods (`Text.from_utf8_lossy`, `List.of`)
+                // because `mount core.*` previously degenerated into a
+                // single `core/mod.vr` candidate (which holds no mounts).
+                let globs = Self::extract_glob_mount_paths(&mount_decl.tree, &[]);
+                for module_path in globs {
+                    let file_candidates =
+                        Self::module_path_to_file_candidates(&module_path, source_path, core_root);
+                    for candidate in file_candidates {
+                        // The glob's "file" candidate is typically a
+                        // module file path; strip the `.vr` extension /
+                        // `mod.vr` suffix and walk the resolved
+                        // directory.  A single glob may contribute many
+                        // files via the recursive walk below.
+                        let dir = std::path::Path::new(&candidate);
+                        let walk_root: std::path::PathBuf = if candidate.ends_with("/mod.vr") {
+                            dir.parent().unwrap_or(dir).to_path_buf()
+                        } else if dir.extension().and_then(|s| s.to_str()) == Some("vr") {
+                            dir.with_extension("").to_path_buf()
+                        } else {
+                            dir.to_path_buf()
+                        };
+                        if walk_root.is_dir() {
+                            for vr_file in Self::walk_vr_files(&walk_root) {
+                                let canonical = match std::fs::canonicalize(&vr_file) {
+                                    Ok(c) => c.to_string_lossy().to_string(),
+                                    Err(_) => continue,
+                                };
+                                if resolved_files.contains(&canonical) {
+                                    continue;
+                                }
+                                resolved_files.insert(canonical);
+                                to_parse.push(vr_file);
+                            }
+                            break; // Walked one valid root, done with this glob
+                        }
+                    }
+                }
             }
         }
 
@@ -4712,6 +4753,90 @@ impl VbcCodegen {
                 }
             }
         }
+    }
+
+    /// Extracts only the module-path segments of GLOB-form mounts.
+    /// Sibling to `extract_mount_file_paths`; the glob form needs a
+    /// distinct extraction path because the resolver expands a glob
+    /// into a directory walk rather than a single-file candidate.
+    fn extract_glob_mount_paths(tree: &MountTree, prefix: &[String]) -> Vec<Vec<String>> {
+        let mut results = Vec::new();
+        match &tree.kind {
+            MountTreeKind::Path(_) => {}
+            MountTreeKind::Glob(path) => {
+                let mut segments: Vec<String> = prefix.to_vec();
+                for segment in path.segments.iter() {
+                    match segment {
+                        PathSegment::Name(ident) => segments.push(ident.name.to_string()),
+                        PathSegment::Super => segments.push("super".to_string()),
+                        PathSegment::Cog => segments.push("cog".to_string()),
+                        PathSegment::Relative => segments.push(".".to_string()),
+                        PathSegment::SelfValue => segments.push("self".to_string()),
+                    }
+                }
+                if !segments.is_empty() {
+                    results.push(segments);
+                }
+            }
+            MountTreeKind::Nested {
+                prefix: nested_prefix,
+                trees,
+            } => {
+                let mut segments: Vec<String> = prefix.to_vec();
+                for segment in nested_prefix.segments.iter() {
+                    match segment {
+                        PathSegment::Name(ident) => segments.push(ident.name.to_string()),
+                        PathSegment::Super => segments.push("super".to_string()),
+                        PathSegment::Cog => segments.push("cog".to_string()),
+                        PathSegment::Relative => segments.push(".".to_string()),
+                        PathSegment::SelfValue => segments.push("self".to_string()),
+                    }
+                }
+                for child in trees.iter() {
+                    let child_results = Self::extract_glob_mount_paths(child, &segments);
+                    results.extend(child_results);
+                }
+            }
+            MountTreeKind::File { .. } => {}
+        }
+        results
+    }
+
+    /// Walk a directory recursively and collect every `.vr` file path.
+    /// Used by the glob-mount expansion to enumerate all sibling
+    /// modules under a `mount core.*` / `mount core.text.*` declaration.
+    /// Skips hidden directories and target build artefacts.
+    fn walk_vr_files(root: &std::path::Path) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut stack: Vec<std::path::PathBuf> = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let entries = match std::fs::read_dir(&dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let file_type = match entry.file_type() {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                let name = match path.file_name().and_then(|n| n.to_str()) {
+                    Some(n) => n,
+                    None => continue,
+                };
+                if name.starts_with('.') || name == "target" {
+                    continue;
+                }
+                if file_type.is_dir() {
+                    stack.push(path);
+                } else if file_type.is_file()
+                    && path.extension().and_then(|s| s.to_str()) == Some("vr")
+                {
+                    out.push(path.to_string_lossy().to_string());
+                }
+            }
+        }
+        out
     }
 
     /// Extracts module path segments from a mount tree.
