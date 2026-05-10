@@ -41,7 +41,7 @@
 )
 module core.time.instant;
 mount core.*;
-mount core.base.coercion.{IntCoercible};
+mount core.base.coercion.{IntCoercible, SizedNumeric};
 mount time.duration.{Duration, NANOS_PER_SEC, NANOS_PER_MILLI};
 
 // =============================================================================
@@ -281,6 +281,12 @@ implement Copy for Instant {}
 // monotonic-nanosecond count, so the unifier should accept Instant ↔ Int
 // coercion in arithmetic / comparison contexts.
 implement IntCoercible for Instant {}
+
+// SizedNumeric (core.base.coercion) — Instant sits in the
+// cross-coercion lattice alongside `Duration` and the
+// language's sized-numeric primitives.  Same rationale as
+// `Duration`'s SizedNumeric block.
+implement SizedNumeric for Instant {}
 
 implement Hash for Instant {
     fn hash<H: Hasher>(&self, hasher: &mut H) {

@@ -2,11 +2,11 @@
 // core-tests/base/coercion/unit_test.vr
 // =============================================================================
 //
-// Per-marker tests for `core/base/coercion.vr`. The four protocols
-// (IntCoercible, TensorLike, Indexable, RangeLike) are MARKER protocols —
-// zero methods. Their *value* is exclusively the implement-block
-// existence: the unifier discovers them and applies the matching
-// coercion rule.
+// Per-marker tests for `core/base/coercion.vr`. The six protocols
+// (IntCoercible, TensorLike, Indexable, RangeLike, BytewiseFfi,
+// SizedNumeric) are MARKER protocols — zero methods. Their *value* is
+// exclusively the implement-block existence: the unifier discovers
+// them and applies the matching coercion rule.
 //
 // What "unit tests" mean for a marker: assert that the protocol can be
 // declared, can be implemented on a user type, and that the unifier
@@ -18,7 +18,10 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.coercion.{IntCoercible, TensorLike, Indexable, RangeLike};
+mount core.base.coercion.{
+    IntCoercible, TensorLike, Indexable, RangeLike,
+    BytewiseFfi, SizedNumeric,
+};
 
 // =============================================================================
 // Section 1: IntCoercible — Type ↔ Int coercion
@@ -83,7 +86,53 @@ fn test_range_like_marker_declared() {
 }
 
 // =============================================================================
-// Section 5: All four markers compose on a single type
+// Section 5: BytewiseFfi — `[Byte]` ↔ packed-C-struct mirror
+// =============================================================================
+//
+// BytewiseFfi marks types whose in-memory layout is a packed C-struct
+// byte mirror of a kernel / libsystem ABI (sockaddr family, etc.).  The
+// unifier accepts `[Byte]` / `[UInt8]` against any BytewiseFfi-marked
+// struct at FFI boundaries — replaces the previously hardcoded
+// `matches!(name, "Sockaddr" | "SocketAddr" | "SockaddrIn")`
+// short-circuit in the Named↔Named arm.
+
+@repr(C)
+type FakeSockaddr is {
+    sa_family: UInt8,
+    sa_data: [Byte; 14],
+};
+
+implement BytewiseFfi for FakeSockaddr {}
+
+@test
+fn test_bytewise_ffi_marker_declared() {
+    let s = FakeSockaddr { sa_family: 2, sa_data: [0; 14] };
+    assert_eq(s.sa_family, 2);
+}
+
+// =============================================================================
+// Section 6: SizedNumeric — cross-coercion lattice marker
+// =============================================================================
+//
+// SizedNumeric marks scalar wrappers that participate in the
+// cross-coercion lattice with language-primitive sized numerics
+// (Int8 / U64 / Float64, …).  Distinct from `core.base.protocols.Numeric`
+// — the latter is a method-bearing protocol for generic arithmetic;
+// SizedNumeric is marker-only and exclusively flips the coercion bit
+// in unification.
+
+type FrameDuration is { nanos: Int64 };
+
+implement SizedNumeric for FrameDuration {}
+
+@test
+fn test_sized_numeric_marker_declared() {
+    let d = FrameDuration { nanos: 16_666_666 };
+    assert_eq(d.nanos, 16_666_666);
+}
+
+// =============================================================================
+// Section 7: All six markers compose on a single type
 // =============================================================================
 // A pathological but valid case: nothing prevents one type from carrying
 // every coercion marker. The tests here confirm the protocols don't
@@ -95,15 +144,17 @@ implement IntCoercible for MultiMarker {}
 implement TensorLike for MultiMarker {}
 implement Indexable for MultiMarker {}
 implement RangeLike for MultiMarker {}
+implement BytewiseFfi for MultiMarker {}
+implement SizedNumeric for MultiMarker {}
 
 @test
-fn test_all_four_markers_on_single_type() {
+fn test_all_six_markers_on_single_type() {
     let m = MultiMarker { value: 99 };
     assert_eq(m.value, 99);
 }
 
 // =============================================================================
-// Section 6: Generic types implementing markers
+// Section 8: Generic types implementing markers
 // =============================================================================
 
 type DynBox<T> is { inner: T };
@@ -114,6 +165,28 @@ implement<T> TensorLike for DynBox<T> {}
 fn test_generic_marker_implementation() {
     let b: DynBox<Float> = DynBox { inner: 3.14 };
     assert(b.inner > 3.0);
+}
+
+// =============================================================================
+// Section 9: SizedNumeric vs Numeric — orthogonal axes
+// =============================================================================
+//
+// Implementing SizedNumeric does NOT require Numeric (the
+// arithmetic-method-bearing protocol from core.base.protocols).
+// SizedNumeric is purely a unifier-coercion marker; the two axes
+// are kept orthogonal so a type can opt into cross-coercion without
+// implementing arithmetic methods.
+
+type OpaqueScalar is { raw: Int64 };
+
+implement SizedNumeric for OpaqueScalar {}
+// Note: NO `implement Numeric for OpaqueScalar` — verifying that
+// SizedNumeric stands alone.
+
+@test
+fn test_sized_numeric_does_not_imply_arithmetic() {
+    let s = OpaqueScalar { raw: 42 };
+    assert_eq(s.raw, 42);
 }
 
 // =============================================================================

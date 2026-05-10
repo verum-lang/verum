@@ -16,7 +16,10 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.coercion.{IntCoercible, TensorLike, Indexable, RangeLike};
+mount core.base.coercion.{
+    IntCoercible, TensorLike, Indexable, RangeLike,
+    BytewiseFfi, SizedNumeric,
+};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -132,6 +135,61 @@ fn prop_bounds_preserve_int_pair(lo: Int, hi: Int) {
     let b = Bounds { lo: lo, hi: hi };
     assert_eq(b.lo, lo);
     assert_eq(b.hi, hi);
+}
+
+// =============================================================================
+// §F-bis  BytewiseFfi: byte-mirror layout is reflexive under field
+//         destructuring + reconstruction.
+// =============================================================================
+//
+// The marker says "this struct is a packed byte mirror of an FFI
+// ABI"; the *law* the unifier gates is "reading the fields then
+// recomposing the struct produces a value with the same byte image".
+
+@repr(C)
+type FakeAddr is {
+    family: UInt8,
+    port: UInt16,
+    addr: UInt32,
+};
+
+implement BytewiseFfi for FakeAddr {}
+
+@test
+fn law_bytewise_ffi_field_round_trip_preserves_image() {
+    let a = FakeAddr { family: 2, port: 8080, addr: 0x7F000001 };
+    let b = FakeAddr { family: a.family, port: a.port, addr: a.addr };
+    assert_eq(a.family, b.family);
+    assert_eq(a.port, b.port);
+    assert_eq(a.addr, b.addr);
+}
+
+// =============================================================================
+// §F-ter SizedNumeric: cross-coercion lattice is reflexive on the
+//         underlying scalar field.
+// =============================================================================
+//
+// SizedNumeric marks scalar wrappers; the law the unifier gates is
+// "constructing the wrapper from a scalar then reading the scalar
+// back returns the original value".
+
+type FrameDuration is { nanos: Int64 };
+
+implement SizedNumeric for FrameDuration {}
+
+@test
+fn law_sized_numeric_round_trip_preserves_underlying_scalar() {
+    let cases: List<Int64> = [0, 1, 16_666_666, 1_000_000_000, Int64.MAX];
+    for n in cases.iter() {
+        let d = FrameDuration { nanos: *n };
+        assert_eq(d.nanos, *n);
+    }
+}
+
+@property
+fn prop_sized_numeric_round_trip_int64(n: Int64) {
+    let d = FrameDuration { nanos: n };
+    assert_eq(d.nanos, n);
 }
 
 // =============================================================================
