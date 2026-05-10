@@ -729,6 +729,12 @@ public type Sockaddr is {
     sa_data: [Byte; 14],
 };
 
+// IntCoercible (core.base.coercion) — Sockaddr passes through
+// libsystem syscall boundaries as a 16-byte struct whose
+// numeric fields (sa_family, port-in-sa_data) routinely
+// coerce into Int contexts at intrinsic call sites.
+implement IntCoercible for Sockaddr {}
+
 /// sockaddr_in (IPv4)
 public type DarwinSockaddrIn is {
     sin_len: UInt8,
