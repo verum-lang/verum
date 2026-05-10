@@ -760,28 +760,75 @@ pub enum HouStrategy {
     FullHigherOrderUnification,
 }
 
+/// Per-variant projection for [`HouStrategy`].
+///
+/// `is_decidable` was previously a parallel matches!() that could
+/// silently drift if a new strategy variant landed without updating
+/// every match site (the kernel's admit policy gates on this flag —
+/// a wrong classification would let an undecidable strategy through
+/// without `@verify(thorough)`). Now it lives in `meta()` next to
+/// `name`, so adding a new strategy forces an explicit decidability
+/// decision.
+#[derive(Debug, Clone, Copy)]
+pub struct HouStrategyMeta {
+    pub name: &'static str,
+    pub is_decidable: bool,
+}
+
 impl HouStrategy {
     /// Production default Q#11.
     pub const DEFAULT: HouStrategy = HouStrategy::MillerPatternFragment;
+
+    pub const ALL: &'static [Self] = &[
+        Self::MillerPatternFragment,
+        Self::RestrictedHigherOrderMatching,
+        Self::FullHigherOrderUnification,
+    ];
+
+    pub const fn meta(self) -> HouStrategyMeta {
+        match self {
+            Self::MillerPatternFragment => HouStrategyMeta {
+                name: "miller-pattern",
+                is_decidable: true,
+            },
+            Self::RestrictedHigherOrderMatching => HouStrategyMeta {
+                name: "restricted-higher-order-matching",
+                is_decidable: true,
+            },
+            Self::FullHigherOrderUnification => HouStrategyMeta {
+                name: "full-hou",
+                is_decidable: false,
+            },
+        }
+    }
 
     /// `true` when this strategy is guaranteed to terminate. The
     /// V2 K-Elim per-case typing pass refuses to admit user
     /// programs whose dependent-pattern coverage requires a
     /// non-terminating strategy without an explicit
     /// `@verify(thorough)` or stronger annotation.
-    pub fn is_decidable(&self) -> bool {
-        match self {
-            Self::MillerPatternFragment | Self::RestrictedHigherOrderMatching => true,
-            Self::FullHigherOrderUnification => false,
-        }
+    #[inline]
+    pub const fn is_decidable(&self) -> bool {
+        self.meta().is_decidable
     }
 
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::MillerPatternFragment => "miller-pattern",
-            Self::RestrictedHigherOrderMatching => "restricted-higher-order-matching",
-            Self::FullHigherOrderUnification => "full-hou",
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Parse a strategy identifier back to its typed form. Closes
+    /// a drift defect: previously `as_str` was present but no
+    /// inverse mapping existed, so a CLI flag or audit-report token
+    /// could not be converted back to the typed strategy without
+    /// the caller re-implementing the lookup.
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
         }
+        None
     }
 }
 
@@ -836,5 +883,42 @@ mod hou_strategy_tests {
             format!("{}", HouStrategy::FullHigherOrderUnification),
             "full-hou"
         );
+    }
+
+    #[test]
+    fn meta_pin_round_trip_unique_and_decidability_partition() {
+        assert_eq!(HouStrategy::ALL.len(), 3);
+        let mut seen = Vec::new();
+        for v in HouStrategy::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                HouStrategy::from_str(s),
+                Some(*v),
+                "HouStrategy::{:?}: '{}' must round-trip",
+                v,
+                s
+            );
+            assert!(!seen.contains(&s), "duplicate name '{}'", s);
+            seen.push(s);
+        }
+        assert!(HouStrategy::from_str("__not_a_strategy__").is_none());
+        // Decidability partition: 2 decidable (Miller, Restricted),
+        // 1 undecidable (FullHou). The kernel admit policy gates on
+        // this — a wrong classification would let an undecidable
+        // strategy through without `@verify(thorough)`.
+        let decidable = HouStrategy::ALL
+            .iter()
+            .filter(|v| v.is_decidable())
+            .count();
+        let undecidable = HouStrategy::ALL
+            .iter()
+            .filter(|v| !v.is_decidable())
+            .count();
+        assert_eq!(decidable, 2);
+        assert_eq!(undecidable, 1);
+        // Spot pins.
+        assert!(HouStrategy::MillerPatternFragment.is_decidable());
+        assert!(HouStrategy::RestrictedHigherOrderMatching.is_decidable());
+        assert!(!HouStrategy::FullHigherOrderUnification.is_decidable());
     }
 }

@@ -411,20 +411,116 @@ pub enum SmtLogic {
     ALL,
 }
 
+/// Per-variant projection for [`SmtLogic`].
+///
+/// `name` is the canonical SMT-LIB2 logic identifier returned by
+/// `as_str` (uppercase, with underscores — `"QF_LIA"`, `"QF_AUFLIA"`,
+/// `"ALL"`, …). `is_quantifier_free` partitions the catalogue: every
+/// `QF_*` logic is decidable when its theories are decidable, while
+/// `ALL` admits arbitrary quantifier alternation. `is_arithmetic`
+/// flags logics that reason about Int / Real arithmetic; the
+/// remaining `QF_BV` (bit-vectors) and `QF_AX` (arrays-with-
+/// extensionality) are non-arithmetic. Adding a new logic forces
+/// an explicit decision in `meta()` instead of silently widening
+/// the partition.
+#[derive(Debug, Clone, Copy)]
+pub struct SmtLogicMeta {
+    pub name: &'static str,
+    pub is_quantifier_free: bool,
+    pub is_arithmetic: bool,
+}
+
 impl SmtLogic {
-    /// Convert to SMT-LIB2 string
-    pub fn as_str(&self) -> &'static str {
+    pub const ALL_LOGICS: &'static [Self] = &[
+        Self::QF_LIA,
+        Self::QF_LRA,
+        Self::QF_BV,
+        Self::QF_NIA,
+        Self::QF_NRA,
+        Self::QF_AX,
+        Self::QF_UFLIA,
+        Self::QF_AUFLIA,
+        Self::ALL,
+    ];
+
+    pub const fn meta(self) -> SmtLogicMeta {
         match self {
-            Self::QF_LIA => "QF_LIA",
-            Self::QF_LRA => "QF_LRA",
-            Self::QF_BV => "QF_BV",
-            Self::QF_NIA => "QF_NIA",
-            Self::QF_NRA => "QF_NRA",
-            Self::QF_AX => "QF_AX",
-            Self::QF_UFLIA => "QF_UFLIA",
-            Self::QF_AUFLIA => "QF_AUFLIA",
-            Self::ALL => "ALL",
+            Self::QF_LIA => SmtLogicMeta {
+                name: "QF_LIA",
+                is_quantifier_free: true,
+                is_arithmetic: true,
+            },
+            Self::QF_LRA => SmtLogicMeta {
+                name: "QF_LRA",
+                is_quantifier_free: true,
+                is_arithmetic: true,
+            },
+            Self::QF_BV => SmtLogicMeta {
+                name: "QF_BV",
+                is_quantifier_free: true,
+                is_arithmetic: false,
+            },
+            Self::QF_NIA => SmtLogicMeta {
+                name: "QF_NIA",
+                is_quantifier_free: true,
+                is_arithmetic: true,
+            },
+            Self::QF_NRA => SmtLogicMeta {
+                name: "QF_NRA",
+                is_quantifier_free: true,
+                is_arithmetic: true,
+            },
+            Self::QF_AX => SmtLogicMeta {
+                name: "QF_AX",
+                is_quantifier_free: true,
+                is_arithmetic: false,
+            },
+            Self::QF_UFLIA => SmtLogicMeta {
+                name: "QF_UFLIA",
+                is_quantifier_free: true,
+                is_arithmetic: true,
+            },
+            Self::QF_AUFLIA => SmtLogicMeta {
+                name: "QF_AUFLIA",
+                is_quantifier_free: true,
+                is_arithmetic: true,
+            },
+            Self::ALL => SmtLogicMeta {
+                name: "ALL",
+                is_quantifier_free: false,
+                is_arithmetic: false,
+            },
         }
+    }
+
+    /// Convert to SMT-LIB2 string.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Parse SMT-LIB2 logic name. Closes a drift defect: previously
+    /// `as_str` was present but no inverse mapping existed, so a
+    /// caller receiving an SMT-LIB2 logic identifier (e.g. from a
+    /// `(set-logic ...)` round-trip or from solver-supplied output)
+    /// had no symmetric way to recover the typed enum.
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL_LOGICS {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn is_quantifier_free(&self) -> bool {
+        self.meta().is_quantifier_free
+    }
+
+    #[inline]
+    pub const fn is_arithmetic(&self) -> bool {
+        self.meta().is_arithmetic
     }
 }
 
@@ -437,6 +533,58 @@ pub enum SatResult {
     Unsat,
     /// Solver could not determine
     Unknown,
+}
+
+/// Per-variant projection for [`SatResult`]. Names match the SMT-LIB2
+/// `(check-sat)` output tokens — so a solver-supplied string and the
+/// typed enum round-trip cleanly through `from_str` / `as_str`.
+#[derive(Debug, Clone, Copy)]
+pub struct SatResultMeta {
+    pub name: &'static str,
+    pub is_definitive: bool,
+}
+
+impl SatResult {
+    pub const ALL: &'static [Self] = &[Self::Sat, Self::Unsat, Self::Unknown];
+
+    pub const fn meta(self) -> SatResultMeta {
+        match self {
+            Self::Sat => SatResultMeta {
+                name: "sat",
+                is_definitive: true,
+            },
+            Self::Unsat => SatResultMeta {
+                name: "unsat",
+                is_definitive: true,
+            },
+            Self::Unknown => SatResultMeta {
+                name: "unknown",
+                is_definitive: false,
+            },
+        }
+    }
+
+    /// SMT-LIB2 result token (`"sat"` / `"unsat"` / `"unknown"`).
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    /// True for `Sat` / `Unsat`; false for `Unknown` (timeout,
+    /// resource exhaustion, undecidable fragment).
+    #[inline]
+    pub const fn is_definitive(&self) -> bool {
+        self.meta().is_definitive
+    }
 }
 
 /// Backend capabilities flags
@@ -495,6 +643,74 @@ pub enum BackendError {
 
     #[error("backend-specific error: {0}")]
     BackendSpecific(String),
+}
+
+#[cfg(test)]
+mod meta_consolidation_pins {
+    use super::*;
+
+    #[test]
+    fn smt_logic_round_trip_unique_and_classification() {
+        assert_eq!(SmtLogic::ALL_LOGICS.len(), 9);
+        let mut seen = Vec::new();
+        for v in SmtLogic::ALL_LOGICS {
+            let s = v.as_str();
+            assert_eq!(SmtLogic::from_str(s), Some(*v), "round-trip {:?}", v);
+            assert!(!seen.contains(&s), "duplicate name '{}'", s);
+            seen.push(s);
+        }
+        assert!(SmtLogic::from_str("__not_a_logic__").is_none());
+
+        // Quantifier-free partition: 8 QF_*, 1 ALL.
+        let qf = SmtLogic::ALL_LOGICS
+            .iter()
+            .filter(|v| v.is_quantifier_free())
+            .count();
+        let qfree_neg = SmtLogic::ALL_LOGICS
+            .iter()
+            .filter(|v| !v.is_quantifier_free())
+            .count();
+        assert_eq!(qf, 8);
+        assert_eq!(qfree_neg, 1);
+        // ALL is the unique non-quantifier-free logic.
+        assert!(!SmtLogic::ALL.is_quantifier_free());
+        // Arithmetic partition: QF_LIA / QF_LRA / QF_NIA / QF_NRA /
+        // QF_UFLIA / QF_AUFLIA = 6; QF_BV / QF_AX / ALL = 3 non-arith.
+        let arith = SmtLogic::ALL_LOGICS
+            .iter()
+            .filter(|v| v.is_arithmetic())
+            .count();
+        assert_eq!(arith, 6);
+        // Wire-form spot pin: identifiers are uppercase with
+        // underscores (matches SMT-LIB2 convention).
+        assert_eq!(SmtLogic::QF_AUFLIA.as_str(), "QF_AUFLIA");
+        assert_eq!(SmtLogic::ALL.as_str(), "ALL");
+    }
+
+    #[test]
+    fn sat_result_round_trip_unique_and_definitive_partition() {
+        assert_eq!(SatResult::ALL.len(), 3);
+        for v in SatResult::ALL {
+            let s = v.as_str();
+            assert_eq!(SatResult::from_str(s), Some(*v));
+        }
+        // SMT-LIB2 wire form is lowercase.
+        assert_eq!(SatResult::Sat.as_str(), "sat");
+        assert_eq!(SatResult::Unsat.as_str(), "unsat");
+        assert_eq!(SatResult::Unknown.as_str(), "unknown");
+        // Definitive partition: Sat/Unsat are definitive; Unknown is
+        // the lone non-definitive verdict.
+        assert!(SatResult::Sat.is_definitive());
+        assert!(SatResult::Unsat.is_definitive());
+        assert!(!SatResult::Unknown.is_definitive());
+        assert_eq!(
+            SatResult::ALL
+                .iter()
+                .filter(|v| !v.is_definitive())
+                .count(),
+            1
+        );
+    }
 }
 
 // ==================== Module Statistics ====================
