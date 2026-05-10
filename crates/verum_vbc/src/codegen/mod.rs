@@ -2052,11 +2052,7 @@ impl VbcCodegen {
         // automatically retunes this map. Bool's True/False are extras
         // not modelled by a layout constant (they're not a sum type) so
         // they're appended explicitly.
-        let layout_sources: &[&[(&str, u32)]] = &[
-            // Cast each layout to a slice of `(name, u32)` — unifies
-            // signed-vs-unsigned tag types under the lookup map. All
-            // canonical tags are non-negative; the `i32`-typed Ordering
-            // layout is widened safely into u32.
+        let layout_sources: &[&[verum_common::well_known_types::VariantLayoutEntry]] = &[
             verum_common::well_known_types::RESULT_VARIANT_LAYOUT,
             verum_common::well_known_types::MAYBE_VARIANT_LAYOUT,
             verum_common::well_known_types::ORDERING_VARIANT_LAYOUT,
@@ -2065,8 +2061,8 @@ impl VbcCodegen {
         let mut tag_map: std::collections::HashMap<&str, u32> =
             std::collections::HashMap::new();
         for layout in layout_sources {
-            for &(name, tag) in layout.iter() {
-                tag_map.insert(name, tag);
+            for entry in layout.iter() {
+                tag_map.insert(entry.name, entry.tag);
             }
         }
         // Bool literals — not a sum type but the codegen treats them
@@ -2106,8 +2102,8 @@ impl VbcCodegen {
             (verum_common::well_known_types::ORDERING_VARIANT_LAYOUT, "Ordering"),
             (verum_common::well_known_types::CONTROLFLOW_VARIANT_LAYOUT, "ControlFlow"),
         ] {
-            for &(vname, _) in layout.iter() {
-                parent_map.insert(vname, parent);
+            for entry in layout.iter() {
+                parent_map.insert(entry.name, parent);
             }
         }
 
@@ -5117,29 +5113,32 @@ impl VbcCodegen {
         // both paths agree.
         use crate::codegen::context::FunctionInfo;
         use crate::module::FunctionId;
-        // Variant arities for the carrier types (the layout constants
-        // only carry name+tag; arity is encoded here once).
-        let mut builtins: Vec<(&str, &str, u32, usize, Vec<String>)> = Vec::new();
-        for (name, tag) in verum_common::well_known_types::MAYBE_VARIANT_LAYOUT.iter() {
-            // The canonical Maybe layout is `None | Some(T)`: the SOME
-            // constructor carries a single payload, NONE is unit. Compare
-            // through the centralized `variant_tags::SOME` constant so
-            // a future rename in the canonical layout flows through here
-            // automatically.
-            let (arity, params): (usize, Vec<String>) =
-                if *name == verum_common::well_known_types::variant_tags::SOME {
-                    (1, vec!["_0".into()])
-                } else {
-                    (0, vec![])
-                };
-            builtins.push(("Maybe", *name, *tag, arity, params));
-        }
-        for (name, tag) in verum_common::well_known_types::RESULT_VARIANT_LAYOUT.iter() {
-            // Result variants both carry one payload (Ok(T) / Err(E)).
-            builtins.push(("Result", *name, *tag, 1, vec!["_0".into()]));
-        }
-        for (name, tag) in verum_common::well_known_types::ORDERING_VARIANT_LAYOUT.iter() {
-            builtins.push(("Ordering", *name, *tag, 0, vec![]));
+        use verum_common::well_known_types::VariantLayoutEntry;
+        // Source of truth for `(parent_type, layout)`: arity now lives
+        // in the canonical layout itself (see
+        // `VariantLayoutEntry::arity`), so this table no longer
+        // re-encodes per-type rules. Adding a new variant carrier
+        // (e.g. `Either<L,R>`) means only adding one entry here +
+        // a `_VARIANT_LAYOUT` constant — no new ad-hoc loop with
+        // type-specific arity branches.
+        let layout_sources: &[(&str, &[VariantLayoutEntry])] = &[
+            ("Maybe", verum_common::well_known_types::MAYBE_VARIANT_LAYOUT),
+            ("Result", verum_common::well_known_types::RESULT_VARIANT_LAYOUT),
+            ("Ordering", verum_common::well_known_types::ORDERING_VARIANT_LAYOUT),
+        ];
+        // (parent_type, variant_name, tag, arity, param_names) —
+        // expanded uniformly from the layouts.  Param names follow the
+        // tuple-payload convention (`_0`, `_1`, …) for nullary-or-N
+        // variant carriers; if a future variant carries N>1 payloads
+        // the name list grows automatically.
+        let mut builtins: Vec<(&str, &str, u32, usize, Vec<String>)> =
+            Vec::with_capacity(8);
+        for (parent, layout) in layout_sources {
+            for entry in layout.iter() {
+                let arity = entry.arity as usize;
+                let param_names: Vec<String> = (0..arity).map(|i| format!("_{}", i)).collect();
+                builtins.push((parent, entry.name, entry.tag, arity, param_names));
+            }
         }
         let builtins = &builtins;
         for (type_name, variant_name, tag, arity, param_names) in builtins {
