@@ -648,6 +648,114 @@ pub enum BackendError {
     BackendSpecific(String),
 }
 
+/// Discriminator-only kind for [`BackendError`].
+///
+/// All four variants carry the same `String` payload (a free-form
+/// diagnostic message), so the kind enum is zero-sized.  Lets
+/// telemetry / dispatch / metric callers iterate the error
+/// surface (for filtering / aggregation / docs) without supplying
+/// payload data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BackendErrorKind {
+    InitFailed,
+    NotAvailable,
+    Unsupported,
+    BackendSpecific,
+}
+
+/// Per-kind projection for [`BackendErrorKind`].
+///
+/// `name` is the snake_case telemetry label (`init_failed` /
+/// `not_available` / `unsupported` / `backend_specific`).
+/// `is_setup_failure` flags `InitFailed` and `NotAvailable` —
+/// both fire before the solver is usable, distinguishing them
+/// from per-query errors (`Unsupported` / `BackendSpecific`)
+/// that fire after a successful initialisation.
+/// `is_capability_gap` flags `Unsupported` and `NotAvailable` —
+/// both report features the backend genuinely doesn't carry,
+/// distinct from operational-failure modes (`InitFailed` /
+/// `BackendSpecific`) that report breakage rather than absence.
+#[derive(Debug, Clone, Copy)]
+pub struct BackendErrorKindMeta {
+    pub name: &'static str,
+    pub is_setup_failure: bool,
+    pub is_capability_gap: bool,
+}
+
+impl BackendErrorKind {
+    pub const ALL: &'static [Self] = &[
+        Self::InitFailed,
+        Self::NotAvailable,
+        Self::Unsupported,
+        Self::BackendSpecific,
+    ];
+
+    pub const fn meta(self) -> BackendErrorKindMeta {
+        match self {
+            Self::InitFailed => BackendErrorKindMeta {
+                name: "init_failed",
+                is_setup_failure: true,
+                is_capability_gap: false,
+            },
+            Self::NotAvailable => BackendErrorKindMeta {
+                name: "not_available",
+                is_setup_failure: true,
+                is_capability_gap: true,
+            },
+            Self::Unsupported => BackendErrorKindMeta {
+                name: "unsupported",
+                is_setup_failure: false,
+                is_capability_gap: true,
+            },
+            Self::BackendSpecific => BackendErrorKindMeta {
+                name: "backend_specific",
+                is_setup_failure: false,
+                is_capability_gap: false,
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().name == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+
+    /// True for `InitFailed` / `NotAvailable` — both fire before
+    /// the solver is usable for queries.
+    #[inline]
+    pub const fn is_setup_failure(&self) -> bool {
+        self.meta().is_setup_failure
+    }
+
+    /// True for `Unsupported` / `NotAvailable` — both report
+    /// missing capability rather than operational breakage.
+    #[inline]
+    pub const fn is_capability_gap(&self) -> bool {
+        self.meta().is_capability_gap
+    }
+}
+
+impl BackendError {
+    /// Discriminator-only kind for telemetry / surface enumeration.
+    pub fn kind(&self) -> BackendErrorKind {
+        match self {
+            Self::InitFailed(_) => BackendErrorKind::InitFailed,
+            Self::NotAvailable(_) => BackendErrorKind::NotAvailable,
+            Self::Unsupported(_) => BackendErrorKind::Unsupported,
+            Self::BackendSpecific(_) => BackendErrorKind::BackendSpecific,
+        }
+    }
+}
+
 #[cfg(test)]
 mod meta_consolidation_pins {
     use super::*;
@@ -688,6 +796,63 @@ mod meta_consolidation_pins {
         // underscores (matches SMT-LIB2 convention).
         assert_eq!(SmtLogic::QF_AUFLIA.as_str(), "QF_AUFLIA");
         assert_eq!(SmtLogic::ALL.as_str(), "ALL");
+    }
+
+    #[test]
+    fn meta_pin_backend_error_kind_round_trip_and_partitions() {
+        assert_eq!(BackendErrorKind::ALL.len(), 4);
+        for k in BackendErrorKind::ALL {
+            let s = k.name();
+            assert_eq!(BackendErrorKind::from_str(s), Some(*k));
+        }
+        // Wire form (snake_case for telemetry).
+        assert_eq!(BackendErrorKind::InitFailed.name(), "init_failed");
+        assert_eq!(BackendErrorKind::NotAvailable.name(), "not_available");
+        assert_eq!(BackendErrorKind::Unsupported.name(), "unsupported");
+        assert_eq!(
+            BackendErrorKind::BackendSpecific.name(),
+            "backend_specific"
+        );
+        // is_setup_failure: InitFailed + NotAvailable = 2.
+        let setup_count = BackendErrorKind::ALL
+            .iter()
+            .filter(|k| k.is_setup_failure())
+            .count();
+        assert_eq!(setup_count, 2);
+        // is_capability_gap: NotAvailable + Unsupported = 2.
+        let cap_count = BackendErrorKind::ALL
+            .iter()
+            .filter(|k| k.is_capability_gap())
+            .count();
+        assert_eq!(cap_count, 2);
+        // NotAvailable is the unique kind that's both setup-failure
+        // AND capability-gap (the backend isn't initialised because
+        // the capability isn't available).
+        for k in BackendErrorKind::ALL {
+            let both = k.is_setup_failure() && k.is_capability_gap();
+            assert_eq!(
+                both,
+                *k == BackendErrorKind::NotAvailable,
+                "NotAvailable is the unique setup-failure ∩ capability-gap kind"
+            );
+        }
+        // Payload variant kind() agreement.
+        assert_eq!(
+            BackendError::InitFailed("dummy".into()).kind(),
+            BackendErrorKind::InitFailed
+        );
+        assert_eq!(
+            BackendError::NotAvailable("dummy".into()).kind(),
+            BackendErrorKind::NotAvailable
+        );
+        assert_eq!(
+            BackendError::Unsupported("dummy".into()).kind(),
+            BackendErrorKind::Unsupported
+        );
+        assert_eq!(
+            BackendError::BackendSpecific("dummy".into()).kind(),
+            BackendErrorKind::BackendSpecific
+        );
     }
 
     #[test]
