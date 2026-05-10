@@ -133,7 +133,7 @@ implement Eq for SerdeError {
 /// instead of forcing each call site to spell out the full Result
 /// shape.  Mirrors the `IoResult<T> = Result<T, IoError>` pattern
 /// used by the `core.io` family.
-public type SerdeResult<T> = Result<T, SerdeError>;
+public type SerdeResult<T> is Result<T, SerdeError>;
 
 // =============================================================================
 // Serialize Protocol
