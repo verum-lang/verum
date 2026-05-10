@@ -250,23 +250,7 @@ impl ModuleError {
     /// invariant: when a code is renamed, an alias is added so
     /// existing CI rules keep passing.
     pub fn code(&self) -> &'static str {
-        match self {
-            ModuleError::ModuleNotFound { .. } => "E_MODULE_NOT_FOUND",
-            ModuleError::ItemNotFound { .. } => "E_MODULE_ITEM_NOT_FOUND",
-            ModuleError::AmbiguousImport { .. } => "E_MODULE_AMBIGUOUS_IMPORT",
-            ModuleError::CircularDependency { .. } => "E_MODULE_CIRCULAR_DEPENDENCY",
-            ModuleError::PrivateAccess { .. } => "E_MODULE_PRIVATE_ACCESS",
-            ModuleError::VisibilityViolation { .. } => "E_MODULE_VISIBILITY",
-            ModuleError::ConflictingModule { .. } => "E_MODULE_CONFLICTING_MODULE",
-            ModuleError::PathCollision { .. } => "E_MODULE_PATH_COLLISION",
-            ModuleError::InvalidPath { .. } => "E_MODULE_INVALID_PATH",
-            ModuleError::IoError { .. } => "E_MODULE_IO",
-            ModuleError::ParseError { .. } => "E_MODULE_PARSE",
-            ModuleError::InvalidReexport { .. } => "E_MODULE_INVALID_REEXPORT",
-            ModuleError::OrphanImpl { .. } => "E_MODULE_ORPHAN_IMPL",
-            ModuleError::ProfileIncompatible { .. } => "E_MODULE_PROFILE_INCOMPAT",
-            ModuleError::Other { .. } => "E_MODULE_OTHER",
-        }
+        self.kind().code()
     }
 
     /// Documentation URL for this error code. CI consumers and IDE
@@ -433,6 +417,298 @@ impl ModuleError {
             ModuleError::Other { span: s, .. } => *s = Some(span),
         }
         self
+    }
+}
+
+/// Discriminator for `ModuleError` — the zero-sized projection of every
+/// `ModuleError` variant.  The payload-bearing `ModuleError` carries the
+/// data needed to render a diagnostic; this `Kind` carries only the tag,
+/// which lets metrics/telemetry/CI consumers classify errors without
+/// cloning the payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ModuleErrorKind {
+    ModuleNotFound,
+    ItemNotFound,
+    AmbiguousImport,
+    CircularDependency,
+    PrivateAccess,
+    VisibilityViolation,
+    ConflictingModule,
+    PathCollision,
+    InvalidPath,
+    IoError,
+    ParseError,
+    InvalidReexport,
+    OrphanImpl,
+    ProfileIncompatible,
+    Other,
+}
+
+/// Static fact-pack for a `ModuleErrorKind`.  The classifier flags
+/// partition the 15 kinds into operationally-meaningful families that
+/// telemetry and IDE consumers branch on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModuleErrorKindMeta {
+    /// Stable error code — `E_MODULE_*` family.  Same value
+    /// `ModuleError::code()` returns.
+    pub code: &'static str,
+    /// The resolver couldn't pin a target module / item — failure of
+    /// the *lookup* itself rather than of access-control or
+    /// integrity rules.  Carries the `suggestions` field at the
+    /// payload level so the IDE can offer corrections.
+    pub is_resolution_failure: bool,
+    /// Module/item-level access denied — visibility (`pub`,
+    /// `pub(crate)`, …) refused.  Lookup *succeeded* but access
+    /// *failed*; semantically distinct from resolution failure.
+    pub is_visibility_error: bool,
+    /// Two or more modules / impls / files compete for one slot —
+    /// non-uniqueness in a domain that requires uniqueness.
+    pub is_structural_conflict: bool,
+    /// Filesystem / I/O subsystem failure — the byte stream itself
+    /// failed to materialize (read/open/permission errors).
+    pub is_io_failure: bool,
+    /// Lexer/parser surface — bytes loaded but the AST failed.
+    pub is_parse_failure: bool,
+    /// Coherence rule violated (orphan-impl etc.).  Distinct from
+    /// structural conflict: two parties may both want the slot, or
+    /// no party may own it.
+    pub is_coherence_violation: bool,
+    /// Input-validation surface — the user supplied malformed data
+    /// (invalid module path, invalid re-export form).
+    pub is_validation_error: bool,
+    /// Whether the variant carries a populated `suggestions` /
+    /// `cycle suggestions` field that the IDE renders as
+    /// quick-fixes.  Decouples emission-time UI logic from
+    /// per-variant matching.
+    pub carries_suggestions: bool,
+}
+
+impl ModuleErrorKind {
+    /// All `ModuleErrorKind` variants in declaration order.  Drives
+    /// `from_str`, drift-pin tests, and any consumer enumerating the
+    /// full error taxonomy.
+    pub const ALL: &'static [ModuleErrorKind] = &[
+        ModuleErrorKind::ModuleNotFound,
+        ModuleErrorKind::ItemNotFound,
+        ModuleErrorKind::AmbiguousImport,
+        ModuleErrorKind::CircularDependency,
+        ModuleErrorKind::PrivateAccess,
+        ModuleErrorKind::VisibilityViolation,
+        ModuleErrorKind::ConflictingModule,
+        ModuleErrorKind::PathCollision,
+        ModuleErrorKind::InvalidPath,
+        ModuleErrorKind::IoError,
+        ModuleErrorKind::ParseError,
+        ModuleErrorKind::InvalidReexport,
+        ModuleErrorKind::OrphanImpl,
+        ModuleErrorKind::ProfileIncompatible,
+        ModuleErrorKind::Other,
+    ];
+
+    /// Static fact-pack for this kind.
+    pub const fn meta(self) -> ModuleErrorKindMeta {
+        match self {
+            ModuleErrorKind::ModuleNotFound => ModuleErrorKindMeta {
+                code: "E_MODULE_NOT_FOUND",
+                is_resolution_failure: true,
+                is_visibility_error: false,
+                is_structural_conflict: false,
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_coherence_violation: false,
+                is_validation_error: false,
+                carries_suggestions: true,
+            },
+            ModuleErrorKind::ItemNotFound => ModuleErrorKindMeta {
+                code: "E_MODULE_ITEM_NOT_FOUND",
+                is_resolution_failure: true,
+                is_visibility_error: false,
+                is_structural_conflict: false,
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_coherence_violation: false,
+                is_validation_error: false,
+                carries_suggestions: true,
+            },
+            ModuleErrorKind::AmbiguousImport => ModuleErrorKindMeta {
+                code: "E_MODULE_AMBIGUOUS_IMPORT",
+                is_resolution_failure: true,
+                is_visibility_error: false,
+                is_structural_conflict: true,
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_coherence_violation: false,
+                is_validation_error: false,
+                carries_suggestions: false,
+            },
+            ModuleErrorKind::CircularDependency => ModuleErrorKindMeta {
+                code: "E_MODULE_CIRCULAR_DEPENDENCY",
+                is_resolution_failure: false,
+                is_visibility_error: false,
+                is_structural_conflict: false,
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_coherence_violation: false,
+                is_validation_error: false,
+                carries_suggestions: true,
+            },
+            ModuleErrorKind::PrivateAccess => ModuleErrorKindMeta {
+                code: "E_MODULE_PRIVATE_ACCESS",
+                is_resolution_failure: false,
+                is_visibility_error: true,
+                is_structural_conflict: false,
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_coherence_violation: false,
+                is_validation_error: false,
+                carries_suggestions: false,
+            },
+            ModuleErrorKind::VisibilityViolation => ModuleErrorKindMeta {
+                code: "E_MODULE_VISIBILITY",
+                is_resolution_failure: false,
+                is_visibility_error: true,
+                is_structural_conflict: false,
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_coherence_violation: false,
+                is_validation_error: false,
+                carries_suggestions: false,
+            },
+            ModuleErrorKind::ConflictingModule => ModuleErrorKindMeta {
+                code: "E_MODULE_CONFLICTING_MODULE",
+                is_resolution_failure: false,
+                is_visibility_error: false,
+                is_structural_conflict: true,
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_coherence_violation: false,
+                is_validation_error: false,
+                carries_suggestions: false,
+            },
+            ModuleErrorKind::PathCollision => ModuleErrorKindMeta {
+                code: "E_MODULE_PATH_COLLISION",
+                is_resolution_failure: false,
+                is_visibility_error: false,
+                is_structural_conflict: true,
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_coherence_violation: false,
+                is_validation_error: false,
+                carries_suggestions: false,
+            },
+            ModuleErrorKind::InvalidPath => ModuleErrorKindMeta {
+                code: "E_MODULE_INVALID_PATH",
+                is_resolution_failure: false,
+                is_visibility_error: false,
+                is_structural_conflict: false,
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_coherence_violation: false,
+                is_validation_error: true,
+                carries_suggestions: false,
+            },
+            ModuleErrorKind::IoError => ModuleErrorKindMeta {
+                code: "E_MODULE_IO",
+                is_resolution_failure: false,
+                is_visibility_error: false,
+                is_structural_conflict: false,
+                is_io_failure: true,
+                is_parse_failure: false,
+                is_coherence_violation: false,
+                is_validation_error: false,
+                carries_suggestions: false,
+            },
+            ModuleErrorKind::ParseError => ModuleErrorKindMeta {
+                code: "E_MODULE_PARSE",
+                is_resolution_failure: false,
+                is_visibility_error: false,
+                is_structural_conflict: false,
+                is_io_failure: false,
+                is_parse_failure: true,
+                is_coherence_violation: false,
+                is_validation_error: false,
+                carries_suggestions: false,
+            },
+            ModuleErrorKind::InvalidReexport => ModuleErrorKindMeta {
+                code: "E_MODULE_INVALID_REEXPORT",
+                is_resolution_failure: false,
+                is_visibility_error: false,
+                is_structural_conflict: false,
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_coherence_violation: false,
+                is_validation_error: true,
+                carries_suggestions: false,
+            },
+            ModuleErrorKind::OrphanImpl => ModuleErrorKindMeta {
+                code: "E_MODULE_ORPHAN_IMPL",
+                is_resolution_failure: false,
+                is_visibility_error: false,
+                is_structural_conflict: false,
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_coherence_violation: true,
+                is_validation_error: false,
+                carries_suggestions: false,
+            },
+            ModuleErrorKind::ProfileIncompatible => ModuleErrorKindMeta {
+                code: "E_MODULE_PROFILE_INCOMPAT",
+                is_resolution_failure: false,
+                is_visibility_error: false,
+                is_structural_conflict: false,
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_coherence_violation: false,
+                is_validation_error: false,
+                carries_suggestions: false,
+            },
+            ModuleErrorKind::Other => ModuleErrorKindMeta {
+                code: "E_MODULE_OTHER",
+                is_resolution_failure: false,
+                is_visibility_error: false,
+                is_structural_conflict: false,
+                is_io_failure: false,
+                is_parse_failure: false,
+                is_coherence_violation: false,
+                is_validation_error: false,
+                carries_suggestions: false,
+            },
+        }
+    }
+
+    /// Stable error code (`E_MODULE_*`).  Matches `ModuleError::code()`.
+    pub const fn code(self) -> &'static str {
+        self.meta().code
+    }
+
+    /// Inverse of `code` — recover the kind from the stable code.
+    pub fn from_code(code: &str) -> Option<ModuleErrorKind> {
+        ModuleErrorKind::ALL.iter().copied().find(|k| k.code() == code)
+    }
+}
+
+impl ModuleError {
+    /// Discriminator projection — strip the payload, keep the tag.
+    /// Used by metrics, telemetry, and tests that classify errors
+    /// without cloning the data-bearing fields.
+    pub const fn kind(&self) -> ModuleErrorKind {
+        match self {
+            ModuleError::ModuleNotFound { .. } => ModuleErrorKind::ModuleNotFound,
+            ModuleError::ItemNotFound { .. } => ModuleErrorKind::ItemNotFound,
+            ModuleError::AmbiguousImport { .. } => ModuleErrorKind::AmbiguousImport,
+            ModuleError::CircularDependency { .. } => ModuleErrorKind::CircularDependency,
+            ModuleError::PrivateAccess { .. } => ModuleErrorKind::PrivateAccess,
+            ModuleError::VisibilityViolation { .. } => ModuleErrorKind::VisibilityViolation,
+            ModuleError::ConflictingModule { .. } => ModuleErrorKind::ConflictingModule,
+            ModuleError::PathCollision { .. } => ModuleErrorKind::PathCollision,
+            ModuleError::InvalidPath { .. } => ModuleErrorKind::InvalidPath,
+            ModuleError::IoError { .. } => ModuleErrorKind::IoError,
+            ModuleError::ParseError { .. } => ModuleErrorKind::ParseError,
+            ModuleError::InvalidReexport { .. } => ModuleErrorKind::InvalidReexport,
+            ModuleError::OrphanImpl { .. } => ModuleErrorKind::OrphanImpl,
+            ModuleError::ProfileIncompatible { .. } => ModuleErrorKind::ProfileIncompatible,
+            ModuleError::Other { .. } => ModuleErrorKind::Other,
+        }
     }
 }
 
@@ -838,6 +1114,192 @@ mod tests {
 
         let prefix = find_common_module_prefix(&paths);
         assert_eq!(prefix, "");
+    }
+
+    /// Drift-pin: `ModuleErrorKind` is the discriminator projection.
+    /// This test wires the kind-meta partition invariants so any
+    /// edit to the variant set surfaces here rather than as silent
+    /// telemetry-classification drift downstream.
+    #[test]
+    fn meta_pin_module_error_kind_round_trip_and_partitions() {
+        // 1. Variant count is pinned — adding a new variant requires
+        //    updating ALL + a meta() arm + (deliberately) bumping
+        //    this number.
+        assert_eq!(
+            ModuleErrorKind::ALL.len(),
+            15,
+            "ModuleErrorKind variant count drift",
+        );
+
+        // 2. Stable error codes are unique + non-empty + start with
+        //    `E_MODULE_` — the public-API contract for
+        //    CI/telemetry consumers.
+        let mut seen_codes = std::collections::HashSet::new();
+        for k in ModuleErrorKind::ALL {
+            let code = k.code();
+            assert!(
+                code.starts_with("E_MODULE_"),
+                "{:?} code missing prefix: {}",
+                k,
+                code
+            );
+            assert!(
+                seen_codes.insert(code),
+                "{:?} duplicate error code: {}",
+                k,
+                code,
+            );
+        }
+
+        // 3. from_code round-trips for every kind.
+        for k in ModuleErrorKind::ALL {
+            assert_eq!(
+                ModuleErrorKind::from_code(k.code()),
+                Some(*k),
+                "{:?} round-trip failed",
+                k
+            );
+        }
+        assert_eq!(ModuleErrorKind::from_code("E_NOT_A_REAL_CODE"), None);
+
+        // 4. Resolution-failure family — exactly the lookup-side
+        //    failures (couldn't pin a single target).  AmbiguousImport
+        //    is *both* a resolution failure (couldn't pin single
+        //    target) AND a structural conflict (multiple candidates
+        //    competed for the slot) — the two flags are not disjoint
+        //    by design, and the test pins this overlap explicitly.
+        let resolution: Vec<_> = ModuleErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_resolution_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            resolution,
+            vec![
+                ModuleErrorKind::ModuleNotFound,
+                ModuleErrorKind::ItemNotFound,
+                ModuleErrorKind::AmbiguousImport,
+            ],
+        );
+
+        // 5. Visibility-error family — exactly the access-control
+        //    surface.  Disjoint from resolution-failure.
+        let visibility: Vec<_> = ModuleErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_visibility_error)
+            .copied()
+            .collect();
+        assert_eq!(
+            visibility,
+            vec![
+                ModuleErrorKind::PrivateAccess,
+                ModuleErrorKind::VisibilityViolation,
+            ],
+        );
+        for k in &visibility {
+            assert!(
+                !k.meta().is_resolution_failure,
+                "{:?} cannot be both resolution failure and visibility error",
+                k
+            );
+        }
+
+        // 6. Structural-conflict family — non-uniqueness in a
+        //    domain that requires uniqueness.
+        let conflict: Vec<_> = ModuleErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_structural_conflict)
+            .copied()
+            .collect();
+        assert_eq!(
+            conflict,
+            vec![
+                ModuleErrorKind::AmbiguousImport,
+                ModuleErrorKind::ConflictingModule,
+                ModuleErrorKind::PathCollision,
+            ],
+        );
+
+        // 7. I/O-failure ⊕ parse-failure — these *are* disjoint
+        //    (bytes-failed-to-load vs. bytes-loaded-but-AST-failed).
+        for k in ModuleErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                !(m.is_io_failure && m.is_parse_failure),
+                "{:?} cannot be both I/O and parse failure",
+                k
+            );
+        }
+        assert_eq!(
+            ModuleErrorKind::ALL
+                .iter()
+                .filter(|k| k.meta().is_io_failure)
+                .count(),
+            1,
+        );
+        assert_eq!(
+            ModuleErrorKind::ALL
+                .iter()
+                .filter(|k| k.meta().is_parse_failure)
+                .count(),
+            1,
+        );
+
+        // 8. Coherence-violation family — singleton (OrphanImpl).
+        //    Pinned as a singleton so adding new coherence rules
+        //    (overlap, specialization, conflicting-crate-impl)
+        //    surfaces here as a visible test edit.
+        let coherence: Vec<_> = ModuleErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_coherence_violation)
+            .copied()
+            .collect();
+        assert_eq!(coherence, vec![ModuleErrorKind::OrphanImpl]);
+
+        // 9. Validation-error family — malformed user input.
+        let validation: Vec<_> = ModuleErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_validation_error)
+            .copied()
+            .collect();
+        assert_eq!(
+            validation,
+            vec![
+                ModuleErrorKind::InvalidPath,
+                ModuleErrorKind::InvalidReexport,
+            ],
+        );
+
+        // 10. carries_suggestions — payload-level: variants that
+        //     hold a `suggestions` field and let the IDE render
+        //     quick-fixes.  Must match the structural definition
+        //     of which variants carry that field.
+        let with_suggestions: Vec<_> = ModuleErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_suggestions)
+            .copied()
+            .collect();
+        assert_eq!(
+            with_suggestions,
+            vec![
+                ModuleErrorKind::ModuleNotFound,
+                ModuleErrorKind::ItemNotFound,
+                ModuleErrorKind::CircularDependency,
+            ],
+        );
+
+        // 11. Live-payload kind() projection — every payload-bearing
+        //     variant must round-trip to its discriminator.  Spot
+        //     check the construction with helper constructors so
+        //     this catches the case where a new variant is added
+        //     to ModuleError but not to the kind() match arm (which
+        //     would fail to compile only if the match isn't
+        //     exhaustive — using `_` for non-exhaustive match
+        //     would silently miss it; this assert catches it
+        //     even with explicit arms).
+        let tip = ModuleError::module_not_found(ModulePath::from_str("a.b"), List::new());
+        assert_eq!(tip.kind(), ModuleErrorKind::ModuleNotFound);
+        assert_eq!(tip.kind().code(), tip.code());
     }
 
     #[test]

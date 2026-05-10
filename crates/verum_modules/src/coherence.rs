@@ -185,6 +185,124 @@ impl std::fmt::Display for CoherenceError {
 
 impl std::error::Error for CoherenceError {}
 
+/// Discriminator for `CoherenceError` — the zero-sized projection.
+/// Mirror of the `XKind` pattern applied across `ModuleError`,
+/// `BackendError`, `ReplayError`, and the rest of the diagnostic
+/// surface.  Tag-only carriers let metrics/CI consumers classify
+/// coherence violations without cloning protocol / cog name strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CoherenceErrorKind {
+    OrphanImpl,
+    OverlappingImpl,
+    InvalidSpecialization,
+    ConflictingCrateImpl,
+}
+
+/// Static fact-pack for a `CoherenceErrorKind`.  Classifier flags
+/// reflect the four-way partition of the coherence rule space:
+/// orphan-rule violations, overlap-rule violations, specialization
+/// hierarchy violations, and cross-cog conflicts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoherenceErrorKindMeta {
+    /// Stable error code — paired with `ModuleError::code()` for
+    /// the diagnostic surface.  Lives in the
+    /// `E_COHERENCE_*` namespace.
+    pub code: &'static str,
+    /// Lower-snake-case identifier — the canonical machine-readable
+    /// form for telemetry / structured logs.
+    pub name: &'static str,
+    /// Whether the violation involves rules about *which cog owns
+    /// the impl* (orphan rule + cross-cog conflict).  Useful for
+    /// supply-chain / coherence-audit consumers that want to
+    /// surface only the cog-boundary failures.
+    pub is_cog_boundary: bool,
+    /// Whether the violation involves *non-uniqueness* — two or
+    /// more impls competing for one (Protocol, Type) slot.
+    pub is_overlap_violation: bool,
+    /// Whether the violation involves the *specialization
+    /// hierarchy* (parent-child impl relationships).
+    pub is_specialization_violation: bool,
+}
+
+impl CoherenceErrorKind {
+    /// All `CoherenceErrorKind` variants in declaration order.
+    pub const ALL: &'static [CoherenceErrorKind] = &[
+        CoherenceErrorKind::OrphanImpl,
+        CoherenceErrorKind::OverlappingImpl,
+        CoherenceErrorKind::InvalidSpecialization,
+        CoherenceErrorKind::ConflictingCrateImpl,
+    ];
+
+    /// Static fact-pack for this kind.
+    pub const fn meta(self) -> CoherenceErrorKindMeta {
+        match self {
+            CoherenceErrorKind::OrphanImpl => CoherenceErrorKindMeta {
+                code: "E_COHERENCE_ORPHAN",
+                name: "orphan_impl",
+                is_cog_boundary: true,
+                is_overlap_violation: false,
+                is_specialization_violation: false,
+            },
+            CoherenceErrorKind::OverlappingImpl => CoherenceErrorKindMeta {
+                code: "E_COHERENCE_OVERLAP",
+                name: "overlapping_impl",
+                is_cog_boundary: false,
+                is_overlap_violation: true,
+                is_specialization_violation: false,
+            },
+            CoherenceErrorKind::InvalidSpecialization => CoherenceErrorKindMeta {
+                code: "E_COHERENCE_SPECIALIZATION",
+                name: "invalid_specialization",
+                is_cog_boundary: false,
+                is_overlap_violation: false,
+                is_specialization_violation: true,
+            },
+            CoherenceErrorKind::ConflictingCrateImpl => CoherenceErrorKindMeta {
+                code: "E_COHERENCE_CROSS_CRATE_CONFLICT",
+                name: "conflicting_crate_impl",
+                is_cog_boundary: true,
+                is_overlap_violation: true,
+                is_specialization_violation: false,
+            },
+        }
+    }
+
+    /// Stable error code (`E_COHERENCE_*`).
+    pub const fn code(self) -> &'static str {
+        self.meta().code
+    }
+
+    /// Inverse of `name` — recover the kind from the canonical
+    /// machine-readable identifier.
+    pub fn from_name(name: &str) -> Option<CoherenceErrorKind> {
+        CoherenceErrorKind::ALL
+            .iter()
+            .copied()
+            .find(|k| k.meta().name == name)
+    }
+}
+
+impl CoherenceError {
+    /// Discriminator projection — strip the payload, keep the tag.
+    pub const fn kind(&self) -> CoherenceErrorKind {
+        match self {
+            CoherenceError::OrphanImpl { .. } => CoherenceErrorKind::OrphanImpl,
+            CoherenceError::OverlappingImpl { .. } => CoherenceErrorKind::OverlappingImpl,
+            CoherenceError::InvalidSpecialization { .. } => {
+                CoherenceErrorKind::InvalidSpecialization
+            }
+            CoherenceError::ConflictingCrateImpl { .. } => {
+                CoherenceErrorKind::ConflictingCrateImpl
+            }
+        }
+    }
+
+    /// Stable error code via the kind projection.
+    pub fn code(&self) -> &'static str {
+        self.kind().code()
+    }
+}
+
 /// Entry for a protocol implementation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImplEntry {
@@ -1784,6 +1902,144 @@ pub fn path_to_string(path: &Path) -> Text {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Drift-pin: `CoherenceErrorKind` is the discriminator
+    /// projection.  Wires the partition invariants of the
+    /// coherence-rule classifier flags so any new variant
+    /// (e.g. a future `OrphanedAssociatedItem` rule) surfaces here
+    /// rather than as silent telemetry-classification drift.
+    #[test]
+    fn meta_pin_coherence_error_kind_round_trip_and_partitions() {
+        // 1. Variant count pinned.
+        assert_eq!(
+            CoherenceErrorKind::ALL.len(),
+            4,
+            "CoherenceErrorKind variant count drift",
+        );
+
+        // 2. Stable codes start with E_COHERENCE_, names are
+        //    snake_case, both are unique.
+        let mut seen_codes = std::collections::HashSet::new();
+        let mut seen_names = std::collections::HashSet::new();
+        for k in CoherenceErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.code.starts_with("E_COHERENCE_"),
+                "{:?} code missing prefix: {}",
+                k,
+                m.code,
+            );
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?} name not snake_case: {}",
+                k,
+                m.name,
+            );
+            assert!(
+                seen_codes.insert(m.code),
+                "{:?} duplicate code: {}",
+                k,
+                m.code,
+            );
+            assert!(
+                seen_names.insert(m.name),
+                "{:?} duplicate name: {}",
+                k,
+                m.name,
+            );
+        }
+
+        // 3. from_name round-trips for every kind.
+        for k in CoherenceErrorKind::ALL {
+            assert_eq!(
+                CoherenceErrorKind::from_name(k.meta().name),
+                Some(*k),
+                "{:?} round-trip failed",
+                k
+            );
+        }
+        assert_eq!(CoherenceErrorKind::from_name("not_a_real_name"), None);
+
+        // 4. Cog-boundary partition — orphan-rule + cross-cog
+        //    conflict (both involve "which cog owns this impl").
+        let cog_boundary: Vec<_> = CoherenceErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_cog_boundary)
+            .copied()
+            .collect();
+        assert_eq!(
+            cog_boundary,
+            vec![
+                CoherenceErrorKind::OrphanImpl,
+                CoherenceErrorKind::ConflictingCrateImpl,
+            ],
+        );
+
+        // 5. Overlap-violation partition — non-uniqueness in the
+        //    (Protocol, Type) → impl mapping.  Note the cross-cog
+        //    conflict is *both* a cog-boundary issue AND an
+        //    overlap (two cogs each carrying a competing impl).
+        //    The classifiers are not mutually exclusive by design.
+        let overlap: Vec<_> = CoherenceErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_overlap_violation)
+            .copied()
+            .collect();
+        assert_eq!(
+            overlap,
+            vec![
+                CoherenceErrorKind::OverlappingImpl,
+                CoherenceErrorKind::ConflictingCrateImpl,
+            ],
+        );
+
+        // 6. Specialization-violation — singleton.
+        let spec: Vec<_> = CoherenceErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_specialization_violation)
+            .copied()
+            .collect();
+        assert_eq!(spec, vec![CoherenceErrorKind::InvalidSpecialization]);
+
+        // 7. Cross-cutting: ConflictingCrateImpl is the unique kind
+        //    that is *both* a cog-boundary issue AND an overlap
+        //    violation — it sits at the intersection of two
+        //    classifier families.
+        let intersection: Vec<_> = CoherenceErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_cog_boundary && k.meta().is_overlap_violation)
+            .copied()
+            .collect();
+        assert_eq!(intersection, vec![CoherenceErrorKind::ConflictingCrateImpl]);
+
+        // 8. Specialization-violation is disjoint from both
+        //    overlap and cog-boundary partitions — it lives in
+        //    its own band.
+        for k in CoherenceErrorKind::ALL {
+            let m = k.meta();
+            if m.is_specialization_violation {
+                assert!(
+                    !m.is_cog_boundary && !m.is_overlap_violation,
+                    "{:?}: specialization violation must not overlap with other partitions",
+                    k
+                );
+            }
+        }
+
+        // 9. Live-payload kind() projection — assert the
+        //    discriminator agrees with the stable code surface.
+        let err = CoherenceError::OrphanImpl {
+            protocol: Text::from("Display"),
+            for_type: Text::from("Foo"),
+            protocol_crate: Text::from("std"),
+            type_crate: Text::from("upstream"),
+            current_crate: Text::from("local"),
+            span: None,
+        };
+        assert_eq!(err.kind(), CoherenceErrorKind::OrphanImpl);
+        assert_eq!(err.code(), "E_COHERENCE_ORPHAN");
+        assert_eq!(err.code(), err.kind().code());
+    }
 
     fn create_impl(protocol: &str, for_type: &str, module: &str) -> ImplEntry {
         ImplEntry::new(
