@@ -1,7 +1,7 @@
 // Debug script to parse test_async.vr and show errors
 use verum_ast::FileId;
 use verum_lexer::Lexer;
-use verum_parser::VerumParser;
+use verum_fast_parser::VerumParser;
 
 fn main() {
     let source =

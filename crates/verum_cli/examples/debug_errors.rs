@@ -1,6 +1,6 @@
 use verum_ast::FileId;
 use verum_lexer::Lexer;
-use verum_parser::VerumParser;
+use verum_fast_parser::VerumParser;
 
 fn main() {
     let source = std::fs::read_to_string("registry/verum-registry/src/domain/errors.vr")

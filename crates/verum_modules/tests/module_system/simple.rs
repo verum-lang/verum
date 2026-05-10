@@ -10,9 +10,7 @@
 use std::fs;
 use tempfile::TempDir;
 use verum_common::{List, Maybe, Text};
-use verum_lexer::Lexer;
 use verum_modules::*;
-use verum_parser::parse_module;
 
 /// Helper to create a temporary module structure
 struct TestProject {
