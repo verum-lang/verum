@@ -23,25 +23,18 @@ fn ident(name: &str) -> Ident {
 }
 
 fn path_expr(name: &str) -> Expr {
-    Expr {
-        kind: ExprKind::Path(Path::single(ident(name))),
-        span: sp(),
-        ref_kind: None,
-        check_eliminated: false,
-    }
+    Expr::new(ExprKind::Path(Path::single(ident(name))), sp())
 }
 
 fn add_xy() -> Expr {
-    Expr {
-        kind: ExprKind::Binary {
+    Expr::new(
+        ExprKind::Binary {
             op: verum_ast::expr::BinOp::Add,
             left: verum_common::Heap::new(path_expr("x")),
             right: verum_common::Heap::new(path_expr("y")),
         },
-        span: sp(),
-        ref_kind: None,
-        check_eliminated: false,
-    }
+        sp(),
+    )
 }
 
 #[test]
@@ -81,6 +74,7 @@ fn linear_used_twice_fails() {
         span: sp(),
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     };
     let err = tc.check_function_qtt(&decl, &body).unwrap_err();
     assert_eq!(err.kind, ViolationKind::OverUse);
@@ -98,6 +92,7 @@ fn omega_used_anywhere_passes() {
         span: sp(),
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     };
     assert!(tc.check_function_qtt(&decl, &body).is_ok());
 }
@@ -116,6 +111,7 @@ fn affine_two_uses_passes() {
         span: sp(),
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     };
     assert!(tc.check_function_qtt(&decl, &body).is_ok());
 }
@@ -189,6 +185,7 @@ fn red_team_1_6_2_meta_zero_escaping_to_runtime_caught() {
         span: sp(),
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     };
     let err = tc.check_function_qtt(&decl, &body).unwrap_err();
     assert_eq!(err.kind, ViolationKind::ErasedUsedAtRuntime);
@@ -213,6 +210,7 @@ fn red_team_1_6_2_meta_zero_used_multiple_times_still_erased_violation() {
         span: sp(),
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     };
     let err = tc.check_function_qtt(&decl, &body).unwrap_err();
     assert_eq!(err.kind, ViolationKind::ErasedUsedAtRuntime);
@@ -241,6 +239,7 @@ fn red_team_1_6_2_three_quantities_compose_consistently() {
         span: sp(),
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     };
     let outer_right = Expr {
         kind: ExprKind::Binary {
@@ -251,6 +250,7 @@ fn red_team_1_6_2_three_quantities_compose_consistently() {
         span: sp(),
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     };
     let body = Expr {
         kind: ExprKind::Binary {
@@ -261,6 +261,7 @@ fn red_team_1_6_2_three_quantities_compose_consistently() {
         span: sp(),
         ref_kind: None,
         check_eliminated: false,
+        resolved_call_target: None,
     };
     let usage = tc.check_function_qtt(&decl, &body).unwrap();
     assert_eq!(usage.lookup(&Text::from("erased_phantom")).runtime, 0);

@@ -598,12 +598,10 @@ fn test_kind_inference_with_refinements() {
 
     // Int{> 0} should have kind *
     let predicate = RefinementPredicate {
-        predicate: Expr {
-            kind: ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
-            span: Span::dummy(),
-            ref_kind: None,
-            check_eliminated: false,
-        },
+        predicate: Expr::new(
+            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
+            Span::dummy(),
+        ),
         binding: RefinementBinding::Inline,
         span: Span::dummy(),
     };

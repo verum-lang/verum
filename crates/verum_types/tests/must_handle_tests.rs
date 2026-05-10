@@ -84,12 +84,7 @@ fn result_type(ok_type: &str, err_type: &str) -> Type {
 
 /// Helper to create an expression
 fn expr(kind: ExprKind) -> Expr {
-    Expr {
-        kind,
-        span: test_span(1, 1),
-        ref_kind: None,
-        check_eliminated: false,
-    }
+    Expr::new(kind, test_span(1, 1))
 }
 
 #[test]
