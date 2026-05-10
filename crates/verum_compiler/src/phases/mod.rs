@@ -621,12 +621,35 @@ pub struct PhaseContext {
     pub opt_level: OptimizationLevel,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LanguageProfile {
-    Application,
-    Systems,
-    Research,
-}
+/// The compiler-wide profile concept — Application / Systems /
+/// Research — lives in [`crate::profile_system::Profile`].  Pre-
+/// unification, `phases::LanguageProfile` was a separate 3-variant
+/// enum carrying no methods, used only as a `PhaseContext` field
+/// type, with an identity-shape mapper
+/// (`ffi_boundary::language_profile_to_profile`) bridging it to the
+/// canonical type.  The two enums had identical shape, identical
+/// variant names, and zero divergent semantics.
+///
+/// Collapsing them into a single canonical type:
+///   * removes ~6 lines of structural-duplicate enum definition;
+///   * removes the identity-shape mapper at
+///     [`crate::phases::ffi_boundary::FfiBoundaryAnalysisPhase`];
+///   * preserves every existing call site (e.g.
+///     `verum_compiler::phases::LanguageProfile::Application` still
+///     resolves) because `LanguageProfile` is now a type alias of
+///     the canonical `Profile`;
+///   * unlocks every consolidated meta() projection
+///     (`is_vbc_interpretable`, `requires_aot`, `allows_embedded`,
+///     `default_execution_tier`, `enabled_features`, etc. — see
+///     `profile_system::Profile`) at every phase-side use site
+///     without re-implementing per-variant logic.
+///
+/// The alias is the structural source of truth for "are these two
+/// types the same now?" — the
+/// [`tests::language_profile_alias_contract`] pin would stop
+/// compiling if a future refactor accidentally re-introduced a
+/// distinct nominal type for the phase context.
+pub use crate::profile_system::Profile as LanguageProfile;
 
 /// Execution tier for Verum compilation.
 ///
@@ -951,5 +974,23 @@ mod ir_track_tests {
         ];
         let tags: std::collections::BTreeSet<_> = tracks.iter().map(|t| t.tag()).collect();
         assert_eq!(tags.len(), 3);
+    }
+
+    /// Pin: `phases::LanguageProfile` is a type alias of
+    /// `profile_system::Profile` after the structural-duplicate
+    /// collapse. If a future refactor accidentally re-introduces a
+    /// distinct nominal type for the phase context, the let-bindings
+    /// below stop compiling — the previous identity-shape mapper
+    /// (`ffi_boundary::language_profile_to_profile`) is gone, so any
+    /// drift surfaces immediately at the `input.context.profile`
+    /// flow site.
+    #[test]
+    fn language_profile_alias_contract() {
+        let phases_side: LanguageProfile = LanguageProfile::Application;
+        let canonical: crate::profile_system::Profile = phases_side;
+        let _: LanguageProfile = canonical;
+        // Variant set preserved through the alias.
+        let _ = LanguageProfile::Systems;
+        let _ = LanguageProfile::Research;
     }
 }

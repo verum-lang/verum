@@ -4429,20 +4429,16 @@ pub fn lower_instruction<'ctx>(
             let i32_ty = ctx.types().i32_type();
             let i64_type = ctx.types().i64_type();
             let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
-            let exit_fn = module
-                .get_function("verum_internal_exit_i64")
-                .unwrap_or_else(|| {
-                    let fn_type = ctx
-                        .llvm_context()
-                        .void_type()
-                        .fn_type(&[i64_type.into()], false);
-                    let f = module.add_function("verum_internal_exit_i64", fn_type, None);
-                    f.add_attribute(
-                        verum_llvm::attributes::AttributeLoc::Function,
-                        ctx.llvm_context().create_string_attribute("noreturn", ""),
-                    );
-                    f
-                });
+            let fn_type = ctx
+                .llvm_context()
+                .void_type()
+                .fn_type(&[i64_type.into()], false);
+            let exit_fn = super::error::get_or_declare_noreturn_function(
+                &module,
+                ctx.llvm_context(),
+                "verum_internal_exit_i64",
+                fn_type,
+            );
             let full_msg = format!("Assertion failed: {}", msg);
             let msg_ptr = ctx
                 .builder()
@@ -4479,20 +4475,16 @@ pub fn lower_instruction<'ctx>(
             let i32_ty = ctx.types().i32_type();
             let i64_type = ctx.types().i64_type();
             let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
-            let exit_fn = module
-                .get_function("verum_internal_exit_i64")
-                .unwrap_or_else(|| {
-                    let fn_type = ctx
-                        .llvm_context()
-                        .void_type()
-                        .fn_type(&[i64_type.into()], false);
-                    let f = module.add_function("verum_internal_exit_i64", fn_type, None);
-                    f.add_attribute(
-                        verum_llvm::attributes::AttributeLoc::Function,
-                        ctx.llvm_context().create_string_attribute("noreturn", ""),
-                    );
-                    f
-                });
+            let fn_type = ctx
+                .llvm_context()
+                .void_type()
+                .fn_type(&[i64_type.into()], false);
+            let exit_fn = super::error::get_or_declare_noreturn_function(
+                &module,
+                ctx.llvm_context(),
+                "verum_internal_exit_i64",
+                fn_type,
+            );
             let full_msg = format!("panic: {}", msg);
             let msg_ptr = ctx
                 .builder()
@@ -5820,11 +5812,10 @@ pub fn lower_instruction<'ctx>(
             let module = ctx.get_module();
 
             // Declare verum_io_submit(engine: i64, fd: i64, events: i64) -> i64
-            let submit_fn = module.get_function("verum_io_submit").unwrap_or_else(|| {
-                let fn_type =
-                    i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
-                module.add_function("verum_io_submit", fn_type, None)
-            });
+            let fn_type =
+                i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
+            let submit_fn =
+                super::error::get_or_declare_function(module, "verum_io_submit", fn_type);
 
             let engine_val = ctx.get_register(engine.0)?;
             let ops_val = ctx.get_register(ops.0)?;
@@ -8310,17 +8301,13 @@ fn emit_permission_panic<'ctx>(
         .or_llvm_err()?;
 
     let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
-    let exit_fn = module
-        .get_function("verum_internal_exit_i64")
-        .unwrap_or_else(|| {
-            let fn_type = llvm_ctx.void_type().fn_type(&[i64_ty.into()], false);
-            let f = module.add_function("verum_internal_exit_i64", fn_type, None);
-            f.add_attribute(
-                verum_llvm::attributes::AttributeLoc::Function,
-                llvm_ctx.create_string_attribute("noreturn", ""),
-            );
-            f
-        });
+    let fn_type = llvm_ctx.void_type().fn_type(&[i64_ty.into()], false);
+    let exit_fn = super::error::get_or_declare_noreturn_function(
+        &module,
+        llvm_ctx,
+        "verum_internal_exit_i64",
+        fn_type,
+    );
 
     ctx.builder()
         .build_call(puts_fn, &[msg_ptr.as_pointer_value().into()], "")
@@ -21457,17 +21444,13 @@ fn lower_extended<'ctx>(
             let module = ctx.get_module();
             let llvm_ctx = ctx.llvm_context();
             let i64_ty = llvm_ctx.i64_type();
-            let exit_fn = if let Some(f) = module.get_function("verum_internal_exit_i64") {
-                f
-            } else {
-                let fn_type = llvm_ctx.void_type().fn_type(&[i64_ty.into()], false);
-                let f = module.add_function("verum_internal_exit_i64", fn_type, None);
-                f.add_attribute(
-                    verum_llvm::attributes::AttributeLoc::Function,
-                    llvm_ctx.create_string_attribute("noreturn", ""),
-                );
-                f
-            };
+            let fn_type = llvm_ctx.void_type().fn_type(&[i64_ty.into()], false);
+            let exit_fn = super::error::get_or_declare_noreturn_function(
+                module,
+                llvm_ctx,
+                "verum_internal_exit_i64",
+                fn_type,
+            );
             ctx.builder()
                 .build_call(exit_fn, &[code_i64.into()], "")
                 .or_llvm_err()?;
@@ -24608,20 +24591,16 @@ fn safe_int_div<'ctx>(
     let i32_ty = ctx.types().i32_type();
     let i64_type = ctx.types().i64_type();
     let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
-    let exit_fn = module
-        .get_function("verum_internal_exit_i64")
-        .unwrap_or_else(|| {
-            let fn_type = ctx
-                .llvm_context()
-                .void_type()
-                .fn_type(&[i64_type.into()], false);
-            let f = module.add_function("verum_internal_exit_i64", fn_type, None);
-            f.add_attribute(
-                verum_llvm::attributes::AttributeLoc::Function,
-                ctx.llvm_context().create_string_attribute("noreturn", ""),
-            );
-            f
-        });
+    let fn_type = ctx
+        .llvm_context()
+        .void_type()
+        .fn_type(&[i64_type.into()], false);
+    let exit_fn = super::error::get_or_declare_noreturn_function(
+        &module,
+        ctx.llvm_context(),
+        "verum_internal_exit_i64",
+        fn_type,
+    );
     let msg_ptr = ctx
         .builder()
         .build_global_string_ptr("panic: integer division by zero", "div_zero_msg")
@@ -24684,20 +24663,16 @@ fn safe_int_rem<'ctx>(
     let i32_ty = ctx.types().i32_type();
     let puts_fn = get_or_declare_internal_puts(ctx.llvm_context(), &module);
     let i64_type = ctx.types().i64_type();
-    let exit_fn = module
-        .get_function("verum_internal_exit_i64")
-        .unwrap_or_else(|| {
-            let fn_type = ctx
-                .llvm_context()
-                .void_type()
-                .fn_type(&[i64_type.into()], false);
-            let f = module.add_function("verum_internal_exit_i64", fn_type, None);
-            f.add_attribute(
-                verum_llvm::attributes::AttributeLoc::Function,
-                ctx.llvm_context().create_string_attribute("noreturn", ""),
-            );
-            f
-        });
+    let fn_type = ctx
+        .llvm_context()
+        .void_type()
+        .fn_type(&[i64_type.into()], false);
+    let exit_fn = super::error::get_or_declare_noreturn_function(
+        &module,
+        ctx.llvm_context(),
+        "verum_internal_exit_i64",
+        fn_type,
+    );
     let msg_ptr = ctx
         .builder()
         .build_global_string_ptr("panic: integer remainder by zero", "rem_zero_msg")

@@ -292,15 +292,6 @@ impl FfiBoundaryPhase {
         }
     }
 
-    /// Convert LanguageProfile to Profile for feature checking
-    fn language_profile_to_profile(lang_profile: super::LanguageProfile) -> Profile {
-        match lang_profile {
-            super::LanguageProfile::Application => Profile::Application,
-            super::LanguageProfile::Systems => Profile::Systems,
-            super::LanguageProfile::Research => Profile::Research,
-        }
-    }
-
     /// Extract FFI boundaries from HIR modules, filtering by cfg conditions
     fn extract_ffi_boundaries(
         &self,
@@ -719,8 +710,11 @@ impl CompilationPhase for FfiBoundaryPhase {
         // Create mutable phase for processing
         let mut phase = Self::new();
 
-        // Convert language profile to profile for feature checking
-        let profile = Self::language_profile_to_profile(input.context.profile);
+        // `LanguageProfile` is a type alias of `Profile` (see
+        // `phases/mod.rs`), so the context profile flows directly
+        // into the feature-check surface — no nominal conversion
+        // required.
+        let profile = input.context.profile;
 
         // Extract FFI boundaries from HIR
         let boundaries = phase.extract_ffi_boundaries(_hir, profile)?;
