@@ -56,34 +56,92 @@ pub enum Scope {
     Transient,
 }
 
+/// Per-variant projection for [`Scope`].
+///
+/// `lifetime_rank` makes the implicit derived-`Ord` ordering on the
+/// variant declaration explicit and structural: Singleton=0
+/// (longest-lived, lives forever), Request=1, Transient=2 (shortest-
+/// lived, fresh per injection). The dependency rule "can depend on
+/// same or longer-lived scopes" collapses to a single rank
+/// comparison.
+///
+/// Pre-fix the rule was riding the derived `PartialOrd`/`Ord` on the
+/// variant declaration order — semantically correct but drift-prone:
+/// reordering the variants would silently invert the rule. The
+/// explicit rank field eliminates that hazard. Same shape as
+/// `verum_ast::attr::InjectionScope` and `verum_modules::profile::
+/// LanguageProfile` (Application=0, Research=2 — also a 3-tier
+/// permissiveness ladder).
+#[derive(Debug, Clone, Copy)]
+pub struct ScopeMeta {
+    pub name: &'static str,
+    pub lifetime_rank: u8,
+}
+
 impl Scope {
-    /// Parse scope from string
-    pub fn from_str(s: &str) -> Maybe<Self> {
-        match s {
-            "Singleton" => Maybe::Some(Scope::Singleton),
-            "Request" => Maybe::Some(Scope::Request),
-            "Transient" => Maybe::Some(Scope::Transient),
-            _ => Maybe::None,
-        }
-    }
+    pub const ALL: &'static [Self] = &[Self::Singleton, Self::Request, Self::Transient];
 
-    /// Get scope name
-    pub fn name(&self) -> &'static str {
+    pub const fn meta(self) -> ScopeMeta {
         match self {
-            Scope::Singleton => "Singleton",
-            Scope::Request => "Request",
-            Scope::Transient => "Transient",
+            Self::Singleton => ScopeMeta {
+                name: "Singleton",
+                lifetime_rank: 0,
+            },
+            Self::Request => ScopeMeta {
+                name: "Request",
+                lifetime_rank: 1,
+            },
+            Self::Transient => ScopeMeta {
+                name: "Transient",
+                lifetime_rank: 2,
+            },
         }
     }
 
-    /// Check if this scope is compatible with dependent scope
-    ///
+    /// Parse scope from string. Existing call sites use this with
+    /// `Maybe<Self>` — signature preserved verbatim.
+    pub fn from_str(s: &str) -> Maybe<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            let v = Self::ALL[i];
+            if v.meta().name.as_bytes() == s.as_bytes() {
+                return Maybe::Some(v);
+            }
+            i += 1;
+        }
+        Maybe::None
+    }
 
-    /// Rule: Can only depend on longer or equal lifetimes
-    /// Singleton < Request < Transient
-    pub fn can_depend_on(&self, dependency: Scope) -> bool {
-        // Can depend on same or longer-lived scopes
-        dependency <= *self
+    /// Get scope name.
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Convenience synonym for `name()` matching the meta() series
+    /// idiom across the codebase.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Lifetime hierarchy rank: Singleton=0 (longest-lived),
+    /// Transient=2 (shortest-lived).
+    #[inline]
+    pub const fn lifetime_rank(&self) -> u8 {
+        self.meta().lifetime_rank
+    }
+
+    /// Check if this scope is compatible with the dependent scope.
+    ///
+    /// Rule: a scope can only depend on same-or-longer-lived
+    /// scopes. In rank terms: `dependency.lifetime_rank <=
+    /// self.lifetime_rank`. Equivalent to the legacy `dependency
+    /// <= *self` (which rode the derived `Ord` on declaration
+    /// order); now structural rather than implicit.
+    #[inline]
+    pub const fn can_depend_on(&self, dependency: Scope) -> bool {
+        dependency.lifetime_rank() <= self.lifetime_rank()
     }
 }
 

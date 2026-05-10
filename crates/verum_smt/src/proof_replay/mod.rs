@@ -104,27 +104,71 @@ pub enum DeclKind {
     Corollary,
 }
 
+/// Per-variant projection for [`DeclKind`]. `name` matches the
+/// verum-AST keyword (`axiom`/`theorem`/`lemma`/`corollary`) so a
+/// serialised declaration round-trips through `from_str(x.as_str())
+/// == Some(x)` — the legacy implementation already satisfied this,
+/// the consolidation makes it structural.
+///
+/// `is_postulate` flags declarations that the kernel admits without
+/// proof (`Axiom`); the rest carry proof obligations. Different
+/// backend renderers (`Lean` / `Coq` / `Isabelle` / `Agda`) use
+/// distinct keywords for the proven kinds; the `name` field stays
+/// in lockstep with the verum-side keyword and the per-backend
+/// renderer maps from there.
+#[derive(Debug, Clone, Copy)]
+pub struct DeclKindMeta {
+    pub name: &'static str,
+    pub is_postulate: bool,
+}
+
 impl DeclKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const ALL: &'static [Self] =
+        &[Self::Axiom, Self::Theorem, Self::Lemma, Self::Corollary];
+
+    pub const fn meta(self) -> DeclKindMeta {
         match self {
-            Self::Axiom => "axiom",
-            Self::Theorem => "theorem",
-            Self::Lemma => "lemma",
-            Self::Corollary => "corollary",
+            Self::Axiom => DeclKindMeta {
+                name: "axiom",
+                is_postulate: true,
+            },
+            Self::Theorem => DeclKindMeta {
+                name: "theorem",
+                is_postulate: false,
+            },
+            Self::Lemma => DeclKindMeta {
+                name: "lemma",
+                is_postulate: false,
+            },
+            Self::Corollary => DeclKindMeta {
+                name: "corollary",
+                is_postulate: false,
+            },
         }
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
     }
 
     /// Map a verum-AST keyword string back to a [`DeclKind`].
     /// Returns `None` for unrecognised inputs so callers can fall
     /// back to a sensible default.
     pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "axiom" => Some(Self::Axiom),
-            "theorem" => Some(Self::Theorem),
-            "lemma" => Some(Self::Lemma),
-            "corollary" => Some(Self::Corollary),
-            _ => None,
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
         }
+        None
+    }
+
+    /// True for `Axiom` (kernel-admitted without proof). Every
+    /// other variant carries a proof obligation.
+    #[inline]
+    pub const fn is_postulate(&self) -> bool {
+        self.meta().is_postulate
     }
 }
 
@@ -485,5 +529,38 @@ mod tests {
         assert_ne!(format!("{}", e1), format!("{}", e2));
         assert_ne!(format!("{}", e2), format!("{}", e3));
         assert_ne!(format!("{}", e3), format!("{}", e4));
+    }
+
+    #[test]
+    fn meta_pin_decl_kind_round_trip_unique_and_postulate_partition() {
+        assert_eq!(DeclKind::ALL.len(), 4);
+        let mut seen = Vec::new();
+        for v in DeclKind::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                DeclKind::from_str(s),
+                Some(*v),
+                "DeclKind::{:?}: '{}' must round-trip",
+                v,
+                s
+            );
+            assert!(!seen.contains(&s), "duplicate name '{}'", s);
+            seen.push(s);
+        }
+        assert!(DeclKind::from_str("__not_a_decl_kind__").is_none());
+        // Postulate partition: Axiom is the lone postulate; the
+        // other 3 carry proof obligations.
+        assert!(DeclKind::Axiom.is_postulate());
+        assert!(!DeclKind::Theorem.is_postulate());
+        assert!(!DeclKind::Lemma.is_postulate());
+        assert!(!DeclKind::Corollary.is_postulate());
+        let postulate_count = DeclKind::ALL
+            .iter()
+            .filter(|v| v.is_postulate())
+            .count();
+        assert_eq!(
+            postulate_count, 1,
+            "exactly one postulate variant (Axiom)"
+        );
     }
 }
