@@ -63,6 +63,16 @@ implement SerdeError {
         SerdeError { message: message }
     }
 
+    /// Get a reference to the error message.
+    ///
+    /// Mirrors the accessor pattern used by `PanicInfo.message()` —
+    /// the field is also publicly readable, but a getter method is
+    /// the canonical access path for protocol-method-call sites that
+    /// need to dispatch through `Display` / `Describable` impls.
+    public fn message(&self) -> &Text {
+        &self.message
+    }
+
     /// Create an error for an unexpected type.
     public fn unexpected_type(expected: &Text, found: &Text) -> SerdeError {
         SerdeError {
@@ -116,6 +126,14 @@ implement Eq for SerdeError {
         self.message == other.message
     }
 }
+
+/// Canonical alias for serialization-result types.  Equivalent to
+/// `Result<T, SerdeError>` — the alias surface centralises the
+/// error-type choice across every Serialize / Deserialize impl
+/// instead of forcing each call site to spell out the full Result
+/// shape.  Mirrors the `IoResult<T> = Result<T, IoError>` pattern
+/// used by the `core.io` family.
+public type SerdeResult<T> = Result<T, SerdeError>;
 
 // =============================================================================
 // Serialize Protocol
