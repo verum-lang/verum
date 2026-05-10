@@ -37,34 +37,102 @@ pub enum UniverseTier {
     Kappa2,
 }
 
+/// Per-variant projection for [`UniverseTier`].
+///
+/// `rank` makes the strict ordering Truncated < κ_1 < κ_2 explicit
+/// and dense; the legacy `lt` rode a 6-arm match against the variant
+/// declaration order. `name` is the canonical text rendering for
+/// diagnostic surfaces.
+///
+/// Per Theorem 134.T (tight 2-inacc bound), only two non-trivial
+/// Grothendieck-universe levels are needed; the `Truncated` marker
+/// is reserved for the Cat-baseline that lives strictly below κ_1.
+/// The succ-saturation invariant `succ(Kappa2) == Kappa2` (Lemma
+/// 131.L3 Drake-reflection closure) is structurally enforced via
+/// the `successor_rank` field — it equals `rank` for `Kappa2`,
+/// `rank + 1` otherwise.
+#[derive(Debug, Clone, Copy)]
+pub struct UniverseTierMeta {
+    pub name: &'static str,
+    pub rank: u8,
+    pub successor_rank: u8,
+}
+
 impl UniverseTier {
-    /// Canonical text rendering for diagnostic surfaces.
-    pub fn as_str(&self) -> &'static str {
+    pub const ALL: &'static [Self] = &[Self::Truncated, Self::Kappa1, Self::Kappa2];
+
+    pub const fn meta(self) -> UniverseTierMeta {
         match self {
-            UniverseTier::Truncated => "truncated",
-            UniverseTier::Kappa1 => "κ_1",
-            UniverseTier::Kappa2 => "κ_2",
+            Self::Truncated => UniverseTierMeta {
+                name: "truncated",
+                rank: 0,
+                successor_rank: 1,
+            },
+            Self::Kappa1 => UniverseTierMeta {
+                name: "κ_1",
+                rank: 1,
+                successor_rank: 2,
+            },
+            Self::Kappa2 => UniverseTierMeta {
+                name: "κ_2",
+                // Lemma 131.L3 / Theorem 134.T: succ saturates at
+                // κ_2 — Drake reflection closes the ascent here.
+                rank: 2,
+                successor_rank: 2,
+            },
         }
+    }
+
+    /// Canonical text rendering for diagnostic surfaces.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Parse a tier name back to the typed form. Accepts the
+    /// canonical kebab-form (`"truncated"`) and the κ-glyph forms
+    /// (`"κ_1"`, `"κ_2"`). Closes a drift defect: previously
+    /// `as_str` was present but no inverse mapping existed.
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    /// Universe-ladder rank: Truncated=0, κ_1=1, κ_2=2.
+    #[inline]
+    pub const fn rank(&self) -> u8 {
+        self.meta().rank
     }
 
     /// Strict universe ordering: Truncated < κ_1 < κ_2.
-    pub fn lt(&self, other: &Self) -> bool {
-        match (self, other) {
-            (UniverseTier::Truncated, UniverseTier::Kappa1)
-            | (UniverseTier::Truncated, UniverseTier::Kappa2)
-            | (UniverseTier::Kappa1, UniverseTier::Kappa2) => true,
-            _ => false,
-        }
+    /// Collapses to a single rank comparison rather than a 6-arm
+    /// match.
+    #[inline]
+    pub const fn lt(&self, other: &Self) -> bool {
+        self.rank() < other.rank()
     }
 
     /// Successor: Truncated → κ_1 → κ_2 → κ_2 (saturates at the top
-    /// per Lemma 131.L3 / Theorem 134.T tight-bound).
-    pub fn succ(&self) -> Self {
-        match self {
-            UniverseTier::Truncated => UniverseTier::Kappa1,
-            UniverseTier::Kappa1 => UniverseTier::Kappa2,
-            UniverseTier::Kappa2 => UniverseTier::Kappa2,
+    /// per Lemma 131.L3 / Theorem 134.T tight-bound). Drift-pinned
+    /// in the test module.
+    #[inline]
+    pub const fn succ(&self) -> Self {
+        // Linear scan over ALL by `successor_rank` — tiny domain
+        // (3 variants), const-evaluable.
+        let target = self.meta().successor_rank;
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            if Self::ALL[i].meta().rank == target {
+                return Self::ALL[i];
+            }
+            i += 1;
         }
+        // Unreachable: succ_rank is always one of {0, 1, 2}.
+        *self
     }
 }
 
@@ -554,6 +622,120 @@ mod v2_tests {
                 "KappaTier::lt and Ordinal::lt disagree on ({:?}, {:?})",
                 a,
                 b
+            );
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // meta() consolidation drift pins for UniverseTier. The legacy
+    // `lt` was a 6-arm match; `succ` was a 3-arm match with an
+    // intentional saturation at κ_2 (Lemma 131.L3 / Theorem 134.T).
+    // The consolidation makes both rules ride a single dense
+    // `rank: u8` field; these pins close the structural rules so a
+    // future variant addition can't silently break them.
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn meta_pin_universe_tier_round_trip_unique_and_dense_rank() {
+        assert_eq!(UniverseTier::ALL.len(), 3);
+        for v in UniverseTier::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                UniverseTier::from_str(s),
+                Some(*v),
+                "UniverseTier::{:?}: '{}' must round-trip",
+                v,
+                s
+            );
+        }
+        // Names are unique.
+        let names: Vec<&str> =
+            UniverseTier::ALL.iter().map(|v| v.as_str()).collect();
+        let mut dedup = names.clone();
+        dedup.sort();
+        dedup.dedup();
+        assert_eq!(dedup.len(), names.len());
+        // Ranks are dense 0..=2 in declaration order.
+        for (i, v) in UniverseTier::ALL.iter().enumerate() {
+            assert_eq!(
+                v.rank() as usize,
+                i,
+                "UniverseTier::{:?}: rank drift at slot {}",
+                v,
+                i
+            );
+        }
+        // Wire-form spot pins.
+        assert_eq!(UniverseTier::Truncated.as_str(), "truncated");
+        assert_eq!(UniverseTier::Kappa1.as_str(), "κ_1");
+        assert_eq!(UniverseTier::Kappa2.as_str(), "κ_2");
+        assert!(UniverseTier::from_str("κ_3").is_none());
+    }
+
+    #[test]
+    fn meta_pin_universe_tier_lt_and_succ_invariants() {
+        // Strict ordering: Truncated < κ_1 < κ_2.
+        assert!(UniverseTier::Truncated.lt(&UniverseTier::Kappa1));
+        assert!(UniverseTier::Truncated.lt(&UniverseTier::Kappa2));
+        assert!(UniverseTier::Kappa1.lt(&UniverseTier::Kappa2));
+        // Reflexive: nothing < itself.
+        for v in UniverseTier::ALL {
+            assert!(!v.lt(v), "UniverseTier::{:?}: lt must be irreflexive", v);
+        }
+        // Antisymmetric: a < b ⇒ ¬(b < a).
+        for a in UniverseTier::ALL {
+            for b in UniverseTier::ALL {
+                if a.lt(b) {
+                    assert!(!b.lt(a), "lt antisymmetry: {:?} < {:?}", a, b);
+                }
+            }
+        }
+        // Transitive: a < b ∧ b < c ⇒ a < c.
+        for a in UniverseTier::ALL {
+            for b in UniverseTier::ALL {
+                for c in UniverseTier::ALL {
+                    if a.lt(b) && b.lt(c) {
+                        assert!(
+                            a.lt(c),
+                            "lt transitivity: {:?} < {:?} < {:?}",
+                            a,
+                            b,
+                            c
+                        );
+                    }
+                }
+            }
+        }
+
+        // Successor: Truncated → κ_1 → κ_2 → κ_2 (saturates at top
+        // per Lemma 131.L3 / Theorem 134.T tight 2-inacc bound).
+        // **This is a load-bearing kernel rule** — the kernel admit
+        // policy depends on it.
+        assert_eq!(UniverseTier::Truncated.succ(), UniverseTier::Kappa1);
+        assert_eq!(UniverseTier::Kappa1.succ(), UniverseTier::Kappa2);
+        assert_eq!(
+            UniverseTier::Kappa2.succ(),
+            UniverseTier::Kappa2,
+            "κ_2 must saturate per Drake-reflection closure"
+        );
+        // Cross-pin: succ never moves below the current tier.
+        for v in UniverseTier::ALL {
+            assert!(
+                !v.succ().lt(v),
+                "UniverseTier::{:?}: succ must not regress",
+                v
+            );
+        }
+        // Cross-pin: succ at non-top advances by exactly 1 in rank;
+        // succ at top stays.
+        for v in UniverseTier::ALL {
+            let advance = (v.succ().rank() as i32) - (v.rank() as i32);
+            let is_top = *v == UniverseTier::Kappa2;
+            assert_eq!(
+                advance,
+                if is_top { 0 } else { 1 },
+                "UniverseTier::{:?}: succ rank advance",
+                v
             );
         }
     }
