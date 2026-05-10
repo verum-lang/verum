@@ -247,6 +247,183 @@ impl SpecializationError {
     }
 }
 
+/// Discriminator for [`SpecializationError`] — zero-sized
+/// projection.  Classifies the six failure modes of
+/// specialization selection by *resolution stage*:
+///   * Multiple candidates competing (Ambiguous, Overlap)
+///   * No candidate matches (NoApplicableImpl)
+///   * Coherence rule violated (CoherenceViolation)
+///   * Negative-bound failure (NegativeBoundViolated +
+///     NegativeBoundUnknown)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SpecializationErrorKind {
+    Ambiguous,
+    Overlap,
+    NoApplicableImpl,
+    CoherenceViolation,
+    NegativeBoundViolated,
+    NegativeBoundUnknown,
+}
+
+/// Per-variant projection for [`SpecializationErrorKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpecializationErrorKindMeta {
+    /// Lower-snake-case wire form for telemetry surfaces.
+    pub name: &'static str,
+    /// Multiple candidates competed for the slot
+    /// (Ambiguous + Overlap).  Distinct from
+    /// `NoApplicableImpl` (no candidates).
+    pub is_ambiguity_failure: bool,
+    /// No applicable impl found — `NoApplicableImpl`
+    /// singleton.  The opposite of the ambiguity band.
+    pub is_no_match_failure: bool,
+    /// Coherence rule violated — `CoherenceViolation`
+    /// singleton.
+    pub is_coherence_violation: bool,
+    /// The error involves a *negative bound* (`T: !Protocol`)
+    /// — NegativeBoundViolated + NegativeBoundUnknown.
+    pub is_negative_bound_failure: bool,
+    /// The error is *indeterminate* — needs more information
+    /// (e.g. type-variable instantiation).
+    /// `NegativeBoundUnknown` singleton.
+    pub is_indeterminate: bool,
+    /// The variant carries a *protocol-name* payload —
+    /// 5/6 variants (every variant except CoherenceViolation
+    /// names the protocol whose specialization failed).
+    pub carries_protocol_name: bool,
+    /// The variant carries an actionable *suggestion* the IDE
+    /// can render as a quick-fix — Ambiguous + Overlap +
+    /// NoApplicableImpl.
+    pub carries_suggestion: bool,
+}
+
+impl SpecializationErrorKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::Ambiguous,
+        Self::Overlap,
+        Self::NoApplicableImpl,
+        Self::CoherenceViolation,
+        Self::NegativeBoundViolated,
+        Self::NegativeBoundUnknown,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> SpecializationErrorKindMeta {
+        match self {
+            SpecializationErrorKind::Ambiguous => SpecializationErrorKindMeta {
+                name: "ambiguous",
+                is_ambiguity_failure: true,
+                is_no_match_failure: false,
+                is_coherence_violation: false,
+                is_negative_bound_failure: false,
+                is_indeterminate: false,
+                carries_protocol_name: true,
+                carries_suggestion: true,
+            },
+            SpecializationErrorKind::Overlap => SpecializationErrorKindMeta {
+                name: "overlap",
+                is_ambiguity_failure: true,
+                is_no_match_failure: false,
+                is_coherence_violation: false,
+                is_negative_bound_failure: false,
+                is_indeterminate: false,
+                carries_protocol_name: true,
+                carries_suggestion: true,
+            },
+            SpecializationErrorKind::NoApplicableImpl => SpecializationErrorKindMeta {
+                name: "no_applicable_impl",
+                is_ambiguity_failure: false,
+                is_no_match_failure: true,
+                is_coherence_violation: false,
+                is_negative_bound_failure: false,
+                is_indeterminate: false,
+                carries_protocol_name: true,
+                carries_suggestion: true,
+            },
+            SpecializationErrorKind::CoherenceViolation => SpecializationErrorKindMeta {
+                name: "coherence_violation",
+                is_ambiguity_failure: false,
+                is_no_match_failure: false,
+                is_coherence_violation: true,
+                is_negative_bound_failure: false,
+                is_indeterminate: false,
+                carries_protocol_name: false,
+                carries_suggestion: false,
+            },
+            SpecializationErrorKind::NegativeBoundViolated => SpecializationErrorKindMeta {
+                name: "negative_bound_violated",
+                is_ambiguity_failure: false,
+                is_no_match_failure: false,
+                is_coherence_violation: false,
+                is_negative_bound_failure: true,
+                is_indeterminate: false,
+                carries_protocol_name: true,
+                carries_suggestion: false,
+            },
+            SpecializationErrorKind::NegativeBoundUnknown => SpecializationErrorKindMeta {
+                name: "negative_bound_unknown",
+                is_ambiguity_failure: false,
+                is_no_match_failure: false,
+                is_coherence_violation: false,
+                is_negative_bound_failure: true,
+                is_indeterminate: true,
+                carries_protocol_name: true,
+                carries_suggestion: false,
+            },
+        }
+    }
+}
+
+impl SpecializationError {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> SpecializationErrorKind {
+        match self {
+            SpecializationError::Ambiguous { .. } => SpecializationErrorKind::Ambiguous,
+            SpecializationError::Overlap { .. } => SpecializationErrorKind::Overlap,
+            SpecializationError::NoApplicableImpl { .. } => {
+                SpecializationErrorKind::NoApplicableImpl
+            }
+            SpecializationError::CoherenceViolation { .. } => {
+                SpecializationErrorKind::CoherenceViolation
+            }
+            SpecializationError::NegativeBoundViolated { .. } => {
+                SpecializationErrorKind::NegativeBoundViolated
+            }
+            SpecializationError::NegativeBoundUnknown { .. } => {
+                SpecializationErrorKind::NegativeBoundUnknown
+            }
+        }
+    }
+
+    /// Returns the protocol name for the 5 protocol-naming
+    /// variants.  CoherenceViolation returns `None` (it names
+    /// the offending impl by id, not the protocol).
+    pub fn protocol_name(&self) -> Option<&Text> {
+        match self {
+            SpecializationError::Ambiguous { protocol, .. } => Some(protocol),
+            SpecializationError::Overlap { protocol, .. } => Some(protocol),
+            SpecializationError::NoApplicableImpl { protocol, .. } => Some(protocol),
+            SpecializationError::CoherenceViolation { .. } => None,
+            SpecializationError::NegativeBoundViolated { protocol, .. } => Some(protocol),
+            SpecializationError::NegativeBoundUnknown { protocol, .. } => Some(protocol),
+        }
+    }
+
+    /// Returns the IDE-actionable suggestion text for the
+    /// three suggestion-bearing variants (Ambiguous + Overlap
+    /// + NoApplicableImpl).  Decoupled via
+    /// `meta().carries_suggestion`.
+    pub fn suggestion(&self) -> Option<&Text> {
+        match self {
+            SpecializationError::Ambiguous { suggestion, .. } => Some(suggestion),
+            SpecializationError::Overlap { suggestion, .. } => Some(suggestion),
+            SpecializationError::NoApplicableImpl { suggestion, .. } => Some(suggestion),
+            _ => None,
+        }
+    }
+}
+
 // ==================== Negative Bound Result ====================
 
 /// Result of checking a negative bound
@@ -2132,5 +2309,174 @@ mod tests {
 
         // Float doesn't fully implement Eq due to NaN
         assert!(!selector.builtin_implements_protocol(&Type::Float, &"Eq".into()));
+    }
+
+    /// Drift-pin: `SpecializationErrorKind` discriminator
+    /// projection.  Pins variant count, six classifier
+    /// partitions, perfect-partition over the four primary
+    /// resolution-stage flags, cross-cutting invariants, and
+    /// payload accessors.
+    #[test]
+    fn meta_pin_specialization_error_kind_round_trip_and_partitions() {
+        // 1. Variant count + names.
+        assert_eq!(SpecializationErrorKind::ALL.len(), 6);
+        let mut seen = std::collections::HashSet::new();
+        for k in SpecializationErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 2. is_ambiguity_failure — Ambiguous + Overlap.
+        let amb: Vec<_> = SpecializationErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_ambiguity_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            amb,
+            vec![
+                SpecializationErrorKind::Ambiguous,
+                SpecializationErrorKind::Overlap,
+            ],
+        );
+
+        // 3. is_no_match_failure — NoApplicableImpl singleton.
+        let nm: Vec<_> = SpecializationErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_no_match_failure)
+            .copied()
+            .collect();
+        assert_eq!(nm, vec![SpecializationErrorKind::NoApplicableImpl]);
+
+        // 4. is_coherence_violation — CoherenceViolation singleton.
+        let coh: Vec<_> = SpecializationErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_coherence_violation)
+            .copied()
+            .collect();
+        assert_eq!(coh, vec![SpecializationErrorKind::CoherenceViolation]);
+
+        // 5. is_negative_bound_failure — NegativeBoundViolated +
+        //    NegativeBoundUnknown.
+        let nb: Vec<_> = SpecializationErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_negative_bound_failure)
+            .copied()
+            .collect();
+        assert_eq!(
+            nb,
+            vec![
+                SpecializationErrorKind::NegativeBoundViolated,
+                SpecializationErrorKind::NegativeBoundUnknown,
+            ],
+        );
+
+        // 6. Perfect-partition over the four primary failure-
+        //    mode classifiers (ambiguity / no-match / coherence
+        //    / negative-bound) — every variant flips exactly
+        //    one.
+        for k in SpecializationErrorKind::ALL {
+            let m = k.meta();
+            let count = (m.is_ambiguity_failure as u32)
+                + (m.is_no_match_failure as u32)
+                + (m.is_coherence_violation as u32)
+                + (m.is_negative_bound_failure as u32);
+            assert_eq!(
+                count, 1,
+                "{:?}: must flip exactly one primary failure mode",
+                k
+            );
+        }
+
+        // 7. is_indeterminate — NegativeBoundUnknown singleton
+        //    (the only failure that can become a non-failure
+        //    once the type variable is instantiated).
+        let ind: Vec<_> = SpecializationErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().is_indeterminate)
+            .copied()
+            .collect();
+        assert_eq!(ind, vec![SpecializationErrorKind::NegativeBoundUnknown]);
+
+        // 8. is_indeterminate ⇒ is_negative_bound_failure
+        //    (currently only negative-bound checks are
+        //    indeterminate; other failure modes are always
+        //    decided at compile time).
+        for k in SpecializationErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                !m.is_indeterminate || m.is_negative_bound_failure,
+                "{:?}: indeterminate ⇒ negative-bound",
+                k
+            );
+        }
+
+        // 9. carries_protocol_name — every variant except
+        //    CoherenceViolation (which names the offending
+        //    impl by id, not the protocol).
+        let with_proto: Vec<_> = SpecializationErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_protocol_name)
+            .copied()
+            .collect();
+        assert_eq!(
+            with_proto,
+            vec![
+                SpecializationErrorKind::Ambiguous,
+                SpecializationErrorKind::Overlap,
+                SpecializationErrorKind::NoApplicableImpl,
+                SpecializationErrorKind::NegativeBoundViolated,
+                SpecializationErrorKind::NegativeBoundUnknown,
+            ],
+        );
+
+        // 10. carries_suggestion — Ambiguous + Overlap +
+        //     NoApplicableImpl (the three IDE-actionable bands).
+        let with_sug: Vec<_> = SpecializationErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_suggestion)
+            .copied()
+            .collect();
+        assert_eq!(
+            with_sug,
+            vec![
+                SpecializationErrorKind::Ambiguous,
+                SpecializationErrorKind::Overlap,
+                SpecializationErrorKind::NoApplicableImpl,
+            ],
+        );
+
+        // 11. Live-payload kind() + protocol_name() +
+        //     suggestion() projections.
+        let amb = SpecializationError::Ambiguous {
+            candidates: List::new(),
+            protocol: Text::from("Display"),
+            self_type: Type::Int,
+            suggestion: Text::from("disambiguate"),
+        };
+        assert_eq!(amb.kind(), SpecializationErrorKind::Ambiguous);
+        assert_eq!(amb.protocol_name().unwrap().as_str(), "Display");
+        assert_eq!(amb.suggestion().unwrap().as_str(), "disambiguate");
+
+        let coh = SpecializationError::CoherenceViolation {
+            impl_id: 7,
+            reason: Text::from("orphan"),
+        };
+        assert_eq!(coh.kind(), SpecializationErrorKind::CoherenceViolation);
+        assert!(coh.protocol_name().is_none());
+        assert!(coh.suggestion().is_none());
+
+        let unk = SpecializationError::NegativeBoundUnknown {
+            ty: Type::Var(TypeVar::with_id(0)),
+            protocol: Text::from("Copy"),
+        };
+        assert_eq!(unk.kind(), SpecializationErrorKind::NegativeBoundUnknown);
+        assert_eq!(unk.protocol_name().unwrap().as_str(), "Copy");
+        assert!(unk.suggestion().is_none());
     }
 }

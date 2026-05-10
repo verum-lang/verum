@@ -693,6 +693,128 @@ pub enum CapabilityError {
     },
 }
 
+/// Discriminator for [`CapabilityError`] — zero-sized projection.
+/// Used by metrics consumers and IDE quick-fix generators that
+/// classify capability-check failures without cloning the
+/// per-variant Text / TypeCapabilitySet payloads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CapabilityErrorKind {
+    ContextNotFound,
+    InsufficientCapabilities,
+    InvalidCapability,
+}
+
+/// Per-variant projection for [`CapabilityErrorKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CapabilityErrorKindMeta {
+    /// Lower-snake-case wire form for telemetry surfaces.
+    pub name: &'static str,
+    /// The named context wasn't found in the environment —
+    /// `ContextNotFound` singleton.
+    pub is_context_resolution_failure: bool,
+    /// The context exists but lacks the required capabilities
+    /// — `InsufficientCapabilities` singleton.
+    pub is_capability_check_failure: bool,
+    /// The capability *spec itself* is malformed at the
+    /// declaration site — `InvalidCapability` singleton.
+    pub is_validation_failure: bool,
+    /// The variant carries an *operation name* payload
+    /// (ContextNotFound + InsufficientCapabilities — both
+    /// describe an operation that needed the context).
+    /// InvalidCapability uses a `reason` field instead.
+    pub carries_operation: bool,
+    /// The variant carries the structured *capability set*
+    /// (required / available / missing).  `InsufficientCapabilities`
+    /// singleton — the only band that exposes the missing-list
+    /// for IDE quick-fix surfaces.
+    pub carries_capability_set: bool,
+}
+
+impl CapabilityErrorKind {
+    /// All variants in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::ContextNotFound,
+        Self::InsufficientCapabilities,
+        Self::InvalidCapability,
+    ];
+
+    /// Static fact-pack.
+    pub const fn meta(self) -> CapabilityErrorKindMeta {
+        match self {
+            CapabilityErrorKind::ContextNotFound => CapabilityErrorKindMeta {
+                name: "context_not_found",
+                is_context_resolution_failure: true,
+                is_capability_check_failure: false,
+                is_validation_failure: false,
+                carries_operation: true,
+                carries_capability_set: false,
+            },
+            CapabilityErrorKind::InsufficientCapabilities => CapabilityErrorKindMeta {
+                name: "insufficient_capabilities",
+                is_context_resolution_failure: false,
+                is_capability_check_failure: true,
+                is_validation_failure: false,
+                carries_operation: true,
+                carries_capability_set: true,
+            },
+            CapabilityErrorKind::InvalidCapability => CapabilityErrorKindMeta {
+                name: "invalid_capability",
+                is_context_resolution_failure: false,
+                is_capability_check_failure: false,
+                is_validation_failure: true,
+                carries_operation: false,
+                carries_capability_set: false,
+            },
+        }
+    }
+}
+
+impl CapabilityError {
+    /// Discriminator projection — strip the payload, keep tag.
+    pub const fn kind(&self) -> CapabilityErrorKind {
+        match self {
+            CapabilityError::ContextNotFound { .. } => CapabilityErrorKind::ContextNotFound,
+            CapabilityError::InsufficientCapabilities { .. } => {
+                CapabilityErrorKind::InsufficientCapabilities
+            }
+            CapabilityError::InvalidCapability { .. } => CapabilityErrorKind::InvalidCapability,
+        }
+    }
+
+    /// Returns the context name carried by every variant —
+    /// every CapabilityError refers to a specific context.
+    /// Pinned via the drift test.
+    pub fn context_name(&self) -> &Text {
+        match self {
+            CapabilityError::ContextNotFound { context_name, .. } => context_name,
+            CapabilityError::InsufficientCapabilities { context_name, .. } => context_name,
+            CapabilityError::InvalidCapability { context_name, .. } => context_name,
+        }
+    }
+
+    /// Returns the operation name for the two operation-bearing
+    /// variants (ContextNotFound + InsufficientCapabilities).
+    /// Decoupled from per-variant matching via
+    /// `meta().carries_operation`.
+    pub fn operation(&self) -> Option<&Text> {
+        match self {
+            CapabilityError::ContextNotFound { operation, .. } => Some(operation),
+            CapabilityError::InsufficientCapabilities { operation, .. } => Some(operation),
+            CapabilityError::InvalidCapability { .. } => None,
+        }
+    }
+
+    /// Returns the missing-capabilities list for the
+    /// `InsufficientCapabilities` band.  IDE quick-fix surface.
+    /// Decoupled via `meta().carries_capability_set`.
+    pub fn missing_capabilities(&self) -> Option<&List<TypeCapability>> {
+        match self {
+            CapabilityError::InsufficientCapabilities { missing, .. } => Some(missing),
+            _ => None,
+        }
+    }
+}
+
 impl CapabilityError {
     /// Get a human-readable error message
     pub fn message(&self) -> Text {
@@ -736,6 +858,103 @@ impl CapabilityError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Drift-pin: `CapabilityErrorKind` discriminator projection.
+    /// Pins variant count, three single-flag classifiers
+    /// (perfect partition over the 3 variants), payload-bearing
+    /// classifier flags + accessor agreement.
+    #[test]
+    fn meta_pin_capability_error_kind_round_trip_and_partitions() {
+        // 1. Variant count + names.
+        assert_eq!(CapabilityErrorKind::ALL.len(), 3);
+        let mut seen = std::collections::HashSet::new();
+        for k in CapabilityErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                m.name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{:?}: name not snake_case",
+                k
+            );
+            assert!(seen.insert(m.name), "{:?}: duplicate name", k);
+        }
+
+        // 2. Perfect partition: every variant flips exactly one
+        //    of the three primary failure-mode classifiers
+        //    (resolution / capability-check / validation).
+        for k in CapabilityErrorKind::ALL {
+            let m = k.meta();
+            let count = (m.is_context_resolution_failure as u32)
+                + (m.is_capability_check_failure as u32)
+                + (m.is_validation_failure as u32);
+            assert_eq!(count, 1, "{:?}: must flip exactly one failure mode", k);
+        }
+
+        // 3. carries_operation: ContextNotFound + InsufficientCapabilities.
+        let with_op: Vec<_> = CapabilityErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_operation)
+            .copied()
+            .collect();
+        assert_eq!(
+            with_op,
+            vec![
+                CapabilityErrorKind::ContextNotFound,
+                CapabilityErrorKind::InsufficientCapabilities,
+            ],
+        );
+
+        // 4. carries_capability_set: InsufficientCapabilities
+        //    singleton (the only band with structured set
+        //    payload).
+        let with_set: Vec<_> = CapabilityErrorKind::ALL
+            .iter()
+            .filter(|k| k.meta().carries_capability_set)
+            .copied()
+            .collect();
+        assert_eq!(with_set, vec![CapabilityErrorKind::InsufficientCapabilities]);
+
+        // 5. carries_capability_set ⇒ carries_operation
+        //    (structured-set errors always describe an
+        //    operation; context-resolution errors describe an
+        //    operation but no set; invalid-spec has neither).
+        for k in CapabilityErrorKind::ALL {
+            let m = k.meta();
+            assert!(
+                !m.carries_capability_set || m.carries_operation,
+                "{:?}: carries_capability_set ⇒ carries_operation",
+                k
+            );
+        }
+
+        // 6. Live-payload kind() + accessors.
+        let cn = CapabilityError::ContextNotFound {
+            context_name: Text::from("Database"),
+            operation: Text::from("query"),
+        };
+        assert_eq!(cn.kind(), CapabilityErrorKind::ContextNotFound);
+        assert_eq!(cn.context_name().as_str(), "Database");
+        assert_eq!(cn.operation().unwrap().as_str(), "query");
+        assert!(cn.missing_capabilities().is_none());
+
+        let ins = CapabilityError::InsufficientCapabilities {
+            context_name: Text::from("Database"),
+            operation: Text::from("write"),
+            required: TypeCapabilitySet::empty(),
+            available: TypeCapabilitySet::empty(),
+            missing: List::from(vec![TypeCapability::WriteOnly]),
+        };
+        assert_eq!(ins.kind(), CapabilityErrorKind::InsufficientCapabilities);
+        assert_eq!(ins.missing_capabilities().unwrap().len(), 1);
+
+        let inv = CapabilityError::InvalidCapability {
+            context_name: Text::from("X"),
+            capability: Text::from("nonexistent"),
+            reason: Text::from("typo"),
+        };
+        assert_eq!(inv.kind(), CapabilityErrorKind::InvalidCapability);
+        assert!(inv.operation().is_none());
+        assert!(inv.missing_capabilities().is_none());
+    }
 
     #[test]
     fn test_capability_set_operations() {
