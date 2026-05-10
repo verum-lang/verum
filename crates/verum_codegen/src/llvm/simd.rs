@@ -94,19 +94,66 @@ pub enum SimdFeatureLevel {
     V512,
 }
 
+/// Per-variant projection for [`SimdFeatureLevel`].
+///
+/// `max_bits` is the maximum SIMD vector width — also serves as the
+/// rank for the derived `PartialOrd`/`Ord` (None=0 < V128 < V256 <
+/// V512). `name` is the canonical short identifier (`"none"`, `"v128"`,
+/// `"v256"`, `"v512"`).
+#[derive(Debug, Clone, Copy)]
+pub struct SimdFeatureLevelMeta {
+    pub name: &'static str,
+    pub max_bits: usize,
+}
+
 impl SimdFeatureLevel {
-    /// Get the maximum vector width in bits.
-    pub fn max_bits(self) -> usize {
+    pub const ALL: &'static [Self] =
+        &[Self::None, Self::V128, Self::V256, Self::V512];
+
+    pub const fn meta(self) -> SimdFeatureLevelMeta {
         match self {
-            SimdFeatureLevel::None => 0,
-            SimdFeatureLevel::V128 => 128,
-            SimdFeatureLevel::V256 => 256,
-            SimdFeatureLevel::V512 => 512,
+            Self::None => SimdFeatureLevelMeta {
+                name: "none",
+                max_bits: 0,
+            },
+            Self::V128 => SimdFeatureLevelMeta {
+                name: "v128",
+                max_bits: 128,
+            },
+            Self::V256 => SimdFeatureLevelMeta {
+                name: "v256",
+                max_bits: 256,
+            },
+            Self::V512 => SimdFeatureLevelMeta {
+                name: "v512",
+                max_bits: 512,
+            },
         }
     }
 
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Get the maximum vector width in bits.
+    #[inline]
+    pub const fn max_bits(self) -> usize {
+        self.meta().max_bits
+    }
+
     /// Get the maximum vector width in bytes.
-    pub fn max_bytes(self) -> usize {
+    #[inline]
+    pub const fn max_bytes(self) -> usize {
         self.max_bits() / 8
     }
 }
@@ -140,31 +187,132 @@ pub enum SimdElementKind {
     F64,
 }
 
+/// Per-variant projection for [`SimdElementKind`].
+///
+/// Three parallel `matches!()` (legacy `bit_width` / `is_float` /
+/// `is_signed`) collapse to per-variant fields. `name` is the
+/// Verum-side type spelling (`"i8"`, `"u32"`, `"f64"`, …) — same
+/// form returned by `as_str` and accepted by `from_str`. The
+/// integer-vs-float partition is exhaustive: every variant is
+/// signed, unsigned, or float; cross-cutting pin enforces this.
+#[derive(Debug, Clone, Copy)]
+pub struct SimdElementKindMeta {
+    pub name: &'static str,
+    pub bit_width: usize,
+    pub is_float: bool,
+    pub is_signed: bool,
+}
+
 impl SimdElementKind {
-    /// Get the size in bits.
-    pub fn bit_width(self) -> usize {
+    pub const ALL: &'static [Self] = &[
+        Self::I8,
+        Self::I16,
+        Self::I32,
+        Self::I64,
+        Self::U8,
+        Self::U16,
+        Self::U32,
+        Self::U64,
+        Self::F32,
+        Self::F64,
+    ];
+
+    pub const fn meta(self) -> SimdElementKindMeta {
         match self {
-            SimdElementKind::I8 | SimdElementKind::U8 => 8,
-            SimdElementKind::I16 | SimdElementKind::U16 => 16,
-            SimdElementKind::I32 | SimdElementKind::U32 | SimdElementKind::F32 => 32,
-            SimdElementKind::I64 | SimdElementKind::U64 | SimdElementKind::F64 => 64,
+            Self::I8 => SimdElementKindMeta {
+                name: "i8",
+                bit_width: 8,
+                is_float: false,
+                is_signed: true,
+            },
+            Self::I16 => SimdElementKindMeta {
+                name: "i16",
+                bit_width: 16,
+                is_float: false,
+                is_signed: true,
+            },
+            Self::I32 => SimdElementKindMeta {
+                name: "i32",
+                bit_width: 32,
+                is_float: false,
+                is_signed: true,
+            },
+            Self::I64 => SimdElementKindMeta {
+                name: "i64",
+                bit_width: 64,
+                is_float: false,
+                is_signed: true,
+            },
+            Self::U8 => SimdElementKindMeta {
+                name: "u8",
+                bit_width: 8,
+                is_float: false,
+                is_signed: false,
+            },
+            Self::U16 => SimdElementKindMeta {
+                name: "u16",
+                bit_width: 16,
+                is_float: false,
+                is_signed: false,
+            },
+            Self::U32 => SimdElementKindMeta {
+                name: "u32",
+                bit_width: 32,
+                is_float: false,
+                is_signed: false,
+            },
+            Self::U64 => SimdElementKindMeta {
+                name: "u64",
+                bit_width: 64,
+                is_float: false,
+                is_signed: false,
+            },
+            Self::F32 => SimdElementKindMeta {
+                name: "f32",
+                bit_width: 32,
+                is_float: true,
+                is_signed: false,
+            },
+            Self::F64 => SimdElementKindMeta {
+                name: "f64",
+                bit_width: 64,
+                is_float: true,
+                is_signed: false,
+            },
         }
     }
 
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    /// Verum-side type spelling (`"i8"`, `"u32"`, `"f64"`, …).
+    #[inline]
+    pub const fn as_str(self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Get the size in bits.
+    #[inline]
+    pub const fn bit_width(self) -> usize {
+        self.meta().bit_width
+    }
+
     /// Check if this is a floating point type.
-    pub fn is_float(self) -> bool {
-        matches!(self, SimdElementKind::F32 | SimdElementKind::F64)
+    #[inline]
+    pub const fn is_float(self) -> bool {
+        self.meta().is_float
     }
 
     /// Check if this is a signed integer.
-    pub fn is_signed(self) -> bool {
-        matches!(
-            self,
-            SimdElementKind::I8
-                | SimdElementKind::I16
-                | SimdElementKind::I32
-                | SimdElementKind::I64
-        )
+    #[inline]
+    pub const fn is_signed(self) -> bool {
+        self.meta().is_signed
     }
 }
 
@@ -820,5 +968,108 @@ impl<'ctx> SimdLowering<'ctx> {
             .or_llvm_err()?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod meta_consolidation_pins {
+    use super::*;
+
+    #[test]
+    fn meta_pin_simd_feature_level_round_trip_and_max_bits_dense() {
+        assert_eq!(SimdFeatureLevel::ALL.len(), 4);
+        for v in SimdFeatureLevel::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                SimdFeatureLevel::from_str(s),
+                Some(*v),
+                "SimdFeatureLevel::{:?}: '{}' round-trip",
+                v,
+                s
+            );
+        }
+        // max_bits is dense in the SIMD-width family: 0/128/256/512.
+        let pairs: &[(SimdFeatureLevel, usize)] = &[
+            (SimdFeatureLevel::None, 0),
+            (SimdFeatureLevel::V128, 128),
+            (SimdFeatureLevel::V256, 256),
+            (SimdFeatureLevel::V512, 512),
+        ];
+        for (v, expected) in pairs {
+            assert_eq!(v.max_bits(), *expected);
+            assert_eq!(v.max_bytes(), expected / 8);
+        }
+        // PartialOrd derived ordering matches max_bits ordering
+        // (declaration order). Pin for the legacy `<` invariant.
+        for w in SimdFeatureLevel::ALL.windows(2) {
+            assert!(
+                w[0] < w[1],
+                "PartialOrd drift: {:?} < {:?}",
+                w[0],
+                w[1]
+            );
+            assert!(w[0].max_bits() < w[1].max_bits());
+        }
+    }
+
+    #[test]
+    fn meta_pin_simd_element_kind_round_trip_partition_and_widths() {
+        assert_eq!(SimdElementKind::ALL.len(), 10);
+        let mut seen = Vec::new();
+        for v in SimdElementKind::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                SimdElementKind::from_str(s),
+                Some(*v),
+                "SimdElementKind::{:?}: '{}' round-trip",
+                v,
+                s
+            );
+            assert!(!seen.contains(&s), "duplicate name '{}'", s);
+            seen.push(s);
+        }
+        // Three-way partition is exhaustive: every element is exactly
+        // one of {signed int, unsigned int, float}. Cross-pin: no
+        // variant is both signed and float; the unsigned bucket is
+        // the implicit complement.
+        let signed_count =
+            SimdElementKind::ALL.iter().filter(|v| v.is_signed()).count();
+        let float_count =
+            SimdElementKind::ALL.iter().filter(|v| v.is_float()).count();
+        let unsigned_count = SimdElementKind::ALL
+            .iter()
+            .filter(|v| !v.is_signed() && !v.is_float())
+            .count();
+        assert_eq!(signed_count, 4, "I8/I16/I32/I64");
+        assert_eq!(float_count, 2, "F32/F64");
+        assert_eq!(unsigned_count, 4, "U8/U16/U32/U64");
+        assert_eq!(signed_count + float_count + unsigned_count, 10);
+        for v in SimdElementKind::ALL {
+            assert!(
+                !(v.is_signed() && v.is_float()),
+                "SimdElementKind::{:?}: signed ⊕ float must be disjoint",
+                v
+            );
+        }
+        // Bit-width consistency: each variant's width matches the
+        // suffix on its name (`u8`→8, `f64`→64, …).
+        for v in SimdElementKind::ALL {
+            let name = v.as_str();
+            // Strip prefix (i/u/f), parse remaining digits.
+            let digits = &name[1..];
+            let expected: usize = digits.parse().expect("name suffix must be digits");
+            assert_eq!(
+                v.bit_width(),
+                expected,
+                "SimdElementKind::{:?}: name suffix '{}' vs bit_width {}",
+                v,
+                digits,
+                v.bit_width()
+            );
+        }
+        // Widths are restricted to {8, 16, 32, 64}.
+        for v in SimdElementKind::ALL {
+            assert!(matches!(v.bit_width(), 8 | 16 | 32 | 64));
+        }
     }
 }
