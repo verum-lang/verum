@@ -29,9 +29,11 @@ public mount sys.common.{OSError, FileDesc, IOVec, MemProt, MapFlags};
 // Import syscall intrinsic from consolidated stdlib.intrinsics
 mount core.intrinsics.syscall6;
 
-// IntCoercible marker for syscall-arg types — Timespec passes
-// through Linux syscalls as a (tv_sec, tv_nsec) i64 pair.
-mount core.base.coercion.{IntCoercible};
+// IntCoercible — for Timespec / SockaddrIn syscall-arg types.
+// BytewiseFfi — for SockaddrIn (packed `sockaddr_in` byte
+// mirror that the unifier accepts against `[Byte]` /
+// `[UInt8]` at FFI boundaries).
+mount core.base.coercion.{IntCoercible, BytewiseFfi};
 
 // Architecture-specific syscall numbers. `sys.linux.arch` chooses the
 // right numeric value for x86_64 or aarch64 via @cfg(target_arch).
@@ -1288,6 +1290,12 @@ public type SockaddrIn is {
     sin_addr: UInt32,           // Network byte order
     sin_zero: [UInt8; 8],
 };
+
+// BytewiseFfi (core.base.coercion) — Linux `sockaddr_in` byte
+// mirror; the unifier accepts `[Byte]` / `[UInt8]` against
+// this type at FFI boundaries (sendto / recvfrom / bind raw
+// buffer args).
+implement BytewiseFfi for SockaddrIn {}
 
 implement SockaddrIn {
     /// Create a new IPv4 socket address.

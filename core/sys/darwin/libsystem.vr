@@ -1,5 +1,5 @@
 module sys.darwin.libsystem;
-mount core.base.coercion.{IntCoercible};
+mount core.base.coercion.{IntCoercible, BytewiseFfi};
 
 // =============================================================================
 // sys/darwin/libsystem.vr - macOS libSystem.B.dylib FFI bindings
@@ -735,6 +735,12 @@ public type Sockaddr is {
 // coerce into Int contexts at intrinsic call sites.
 implement IntCoercible for Sockaddr {}
 
+// BytewiseFfi (core.base.coercion) — Sockaddr is a packed
+// C-struct byte mirror of the libsystem `sockaddr` ABI; the
+// unifier accepts `[Byte]` / `[UInt8]` against this type at
+// FFI boundaries (sendto / recvfrom / bind raw-buffer args).
+implement BytewiseFfi for Sockaddr {}
+
 /// sockaddr_in (IPv4)
 public type DarwinSockaddrIn is {
     sin_len: UInt8,
@@ -743,6 +749,13 @@ public type DarwinSockaddrIn is {
     sin_addr: UInt32,
     sin_zero: [Byte; 8],
 };
+
+// BytewiseFfi (core.base.coercion) — DarwinSockaddrIn is a
+// packed BSD-flavour `sockaddr_in` byte mirror; same FFI
+// raw-buffer rationale as `Sockaddr` above.  The
+// `SockaddrIn` cross-platform alias below resolves to this
+// type on macOS.
+implement BytewiseFfi for DarwinSockaddrIn {}
 
 /// Cross-platform alias — Linux defines its own `SockaddrIn` in
 /// `core/sys/linux/syscall.vr` (no sin_len byte; 16-byte total).

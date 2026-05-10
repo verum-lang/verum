@@ -162,3 +162,37 @@ public type Indexable is protocol {};
 // implement RangeLike for RangeTo {};
 // ```
 public type RangeLike is protocol {};
+
+// =============================================================================
+// BytewiseFfi — marker for byte-buffer ↔ FFI-struct coercion
+// =============================================================================
+//
+
+// Types that implement BytewiseFfi are accepted by the unifier
+// where a raw byte slice (`[Byte]` / `[UInt8]`) reaches a context
+// expecting an FFI-side struct, and vice versa.  Typical
+// targets: `Sockaddr`, `SockaddrIn`, `SocketAddr`, and any
+// future sockaddr-family / packed-FFI struct that user code
+// hands to a libsystem syscall as a raw-byte buffer (sendto,
+// recvfrom, bind, …).
+//
+
+// Implement when:
+//   * The type's in-memory layout is a packed C struct that
+//     mirrors a kernel/libsystem ABI byte sequence.
+//   * Callers routinely cast `[Byte; N]` ↔ this type at FFI
+//     boundaries (sockaddr is the canonical case).
+//
+// Do NOT implement for higher-level wrappers (`SocketStream`,
+// `UdpSocket`) — only for the literal byte-mirror struct.
+//
+
+// # Examples
+//
+
+// ```verum
+// implement BytewiseFfi for Sockaddr {};
+// implement BytewiseFfi for SockaddrIn {};
+// implement BytewiseFfi for DarwinSockaddrIn {};
+// ```
+public type BytewiseFfi is protocol {};

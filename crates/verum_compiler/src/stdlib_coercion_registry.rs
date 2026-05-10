@@ -105,6 +105,40 @@ pub const INDEXABLE_STDLIB_NAMES: &[&str] = &[];
 ///     its own `implement RangeLike` block.
 pub const RANGE_LIKE_STDLIB_NAMES: &[&str] = &[];
 
+/// Stdlib type names whose in-memory layout is a packed C-struct
+/// byte mirror of a kernel / libsystem ABI — the unifier accepts
+/// `[Byte]` / `[UInt8]` against any name in this set as an
+/// FFI-shape coercion.
+///
+/// Replaces the previously hardcoded
+/// `matches!(name, "Sockaddr" | "SocketAddr" | "SockaddrIn")`
+/// short-circuit inline in `verum_types::unify::Unifier`'s
+/// Named↔Named arm.
+///
+/// Per-entry status:
+///   * `Sockaddr` — REMOVED. `core/sys/darwin/libsystem.vr`
+///     declares `implement BytewiseFfi for Sockaddr {}`;
+///     `scan_protocol_implementations` registers the name.
+///   * `SocketAddr` — REMOVED (architecturally wrong).
+///     `core/net/addr.vr` declares `SocketAddr is V4(...) |
+///     V6(...)` — a sum type, not a packed-C-struct byte
+///     mirror.  The unifier was over-permissive; including
+///     this name accepted a high-level enum where only the
+///     low-level FFI mirror should pass.
+///   * `SockaddrIn` — KEPT.  Linux declares
+///     `public type SockaddrIn is { ... }` with an explicit
+///     `implement BytewiseFfi for SockaddrIn {}`;
+///     Darwin declares `public type SockaddrIn =
+///     DarwinSockaddrIn;` (a type alias, not a separate
+///     `implement` site).  The protocol-scan walker doesn't
+///     project alias names onto the target type's impl
+///     blocks, so the `"SockaddrIn"` literal seen by the
+///     unifier on a Darwin-only build needs explicit fallback
+///     registration until the unifier learns alias-aware
+///     lookup.  This is the same architectural seam as
+///     `"Tensor"` in `TENSOR_FAMILY_STDLIB_NAMES`.
+pub const BYTEWISE_FFI_STDLIB_NAMES: &[&str] = &["SockaddrIn"];
+
 /// Stdlib type names that cross-coerce with `Int` in unification.
 ///
 /// **Categories** (entries here are types whose `.vr` source has
@@ -209,6 +243,9 @@ pub fn register_stdlib_coercions(unifier: &mut verum_types::unify::Unifier) {
     for name in INT_COERCIBLE_STDLIB_NAMES {
         unifier.register_int_coercible_type(verum_common::Text::from(*name));
     }
+    for name in BYTEWISE_FFI_STDLIB_NAMES {
+        unifier.register_bytewise_ffi_type(verum_common::Text::from(*name));
+    }
 }
 
 // ============================================================================
@@ -248,6 +285,7 @@ fn match_coercion_protocol(path: &verum_ast::ty::Path) -> Option<&'static str> {
         "TensorLike" => Some("TensorLike"),
         "Indexable" => Some("Indexable"),
         "RangeLike" => Some("RangeLike"),
+        "BytewiseFfi" => Some("BytewiseFfi"),
         _ => None,
     }
 }
@@ -315,6 +353,7 @@ where
                 "TensorLike" => unifier.register_tensor_family_type(target_text),
                 "Indexable" => unifier.register_indexable_type(target_text),
                 "RangeLike" => unifier.register_range_like_type(target_text),
+                "BytewiseFfi" => unifier.register_bytewise_ffi_type(target_text),
                 _ => unreachable!("match_coercion_protocol guards this set"),
             }
             registered += 1;
@@ -349,6 +388,7 @@ mod migration_pins {
             ("RANGE_LIKE_STDLIB_NAMES", RANGE_LIKE_STDLIB_NAMES),
             ("INT_COERCIBLE_STDLIB_NAMES", INT_COERCIBLE_STDLIB_NAMES),
             ("SIZED_NUMERIC_STDLIB_NAMES", SIZED_NUMERIC_STDLIB_NAMES),
+            ("BYTEWISE_FFI_STDLIB_NAMES", BYTEWISE_FFI_STDLIB_NAMES),
         ] {
             let unique: std::collections::HashSet<&str> =
                 list.iter().copied().collect();
@@ -390,6 +430,18 @@ mod migration_pins {
         // SIZED_NUMERIC follows a different timeline (`Numeric`
         // protocol query landing) — keep its 3-entry baseline.
         assert_eq!(SIZED_NUMERIC_STDLIB_NAMES.len(), 3);
+        // BytewiseFfi: 1-entry baseline.  `Sockaddr` is registered
+        // via Darwin's `implement BytewiseFfi`; `SocketAddr` was
+        // dropped as architecturally wrong (sum type, not byte
+        // mirror); `SockaddrIn` stays as the alias-coverage
+        // fallback (Darwin declares it as `type SockaddrIn =
+        // DarwinSockaddrIn` which the protocol-scan doesn't
+        // project, so the alias name needs explicit
+        // registration until the unifier learns alias-aware
+        // lookup — same architectural seam as the lone
+        // `"Tensor"` entry in `TENSOR_FAMILY_STDLIB_NAMES`).
+        assert_eq!(BYTEWISE_FFI_STDLIB_NAMES.len(), 1);
+        assert_eq!(BYTEWISE_FFI_STDLIB_NAMES[0], "SockaddrIn");
     }
 
     /// `match_coercion_protocol` accepts exactly the four
@@ -399,7 +451,13 @@ mod migration_pins {
     /// this match arm in the same commit.
     #[test]
     fn coercion_protocol_match_pinned() {
-        for marker in ["IntCoercible", "TensorLike", "Indexable", "RangeLike"] {
+        for marker in [
+            "IntCoercible",
+            "TensorLike",
+            "Indexable",
+            "RangeLike",
+            "BytewiseFfi",
+        ] {
             // Build a dummy single-segment Path holding just the
             // marker name and assert the matcher accepts it.
             let path = verum_ast::ty::Path {
