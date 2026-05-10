@@ -166,9 +166,78 @@ pub enum CachedVerdict {
     },
 }
 
+/// Discriminator-only kind for [`CachedVerdict`].
+///
+/// `CachedVerdict` carries payloads (`Ok { elapsed_ms }` / `Failed
+/// { reason }`); the kind enum is zero-sized so callers (telemetry,
+/// docs, surface enumeration) can iterate without supplying payload
+/// data. Adding a new verdict variant forces an explicit decision
+/// in `meta()` instead of silently expanding the partition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CachedVerdictKind {
+    Ok,
+    Failed,
+}
+
+/// Per-kind projection for [`CachedVerdictKind`]. `name` matches the
+/// PascalCase serde tag. `is_ok` flags the happy-path verdict —
+/// the unique success kind (matches the legacy
+/// `CachedVerdict::is_ok` predicate exactly).
+#[derive(Debug, Clone, Copy)]
+pub struct CachedVerdictKindMeta {
+    pub name: &'static str,
+    pub is_ok: bool,
+}
+
+impl CachedVerdictKind {
+    pub const ALL: &'static [Self] = &[Self::Ok, Self::Failed];
+
+    pub const fn meta(self) -> CachedVerdictKindMeta {
+        match self {
+            Self::Ok => CachedVerdictKindMeta {
+                name: "Ok",
+                is_ok: true,
+            },
+            Self::Failed => CachedVerdictKindMeta {
+                name: "Failed",
+                is_ok: false,
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().name == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn is_ok(&self) -> bool {
+        self.meta().is_ok
+    }
+}
+
 impl CachedVerdict {
+    /// Discriminator-only kind for telemetry / surface enumeration.
+    pub fn kind(&self) -> CachedVerdictKind {
+        match self {
+            Self::Ok { .. } => CachedVerdictKind::Ok,
+            Self::Failed { .. } => CachedVerdictKind::Failed,
+        }
+    }
+
+    /// True iff this is the `Ok` verdict. Backed by `kind().is_ok()`.
+    #[inline]
     pub fn is_ok(&self) -> bool {
-        matches!(self, CachedVerdict::Ok { .. })
+        self.kind().is_ok()
     }
 }
 
@@ -200,6 +269,79 @@ pub enum CacheDecision {
     /// the specific cause. Callers should record the new verdict
     /// via [`IncrementalCacheStore::put`] after the recheck completes.
     Recheck { reason: RecheckReason },
+}
+
+/// Discriminator-only kind for [`CacheDecision`]. Lets telemetry
+/// / docs callers iterate the surface (Skip / Recheck) without
+/// supplying the carried `CacheEntry` / `RecheckReason` payloads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CacheDecisionKind {
+    Skip,
+    Recheck,
+}
+
+/// Per-kind projection for [`CacheDecisionKind`]. `is_skip` flags
+/// the cache-hit path (no kernel re-check needed); `is_recheck`
+/// is its complement (kernel will be invoked). Pinned: the two
+/// flags are exact complements (binary partition).
+#[derive(Debug, Clone, Copy)]
+pub struct CacheDecisionKindMeta {
+    pub name: &'static str,
+    pub is_skip: bool,
+}
+
+impl CacheDecisionKind {
+    pub const ALL: &'static [Self] = &[Self::Skip, Self::Recheck];
+
+    pub const fn meta(self) -> CacheDecisionKindMeta {
+        match self {
+            Self::Skip => CacheDecisionKindMeta {
+                name: "Skip",
+                is_skip: true,
+            },
+            Self::Recheck => CacheDecisionKindMeta {
+                name: "Recheck",
+                is_skip: false,
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().name == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+
+    /// True for `Skip` (cache hit — kernel re-check is bypassed).
+    #[inline]
+    pub const fn is_skip(&self) -> bool {
+        self.meta().is_skip
+    }
+
+    /// True for `Recheck` (cache miss — kernel will be invoked).
+    /// Exact complement of `is_skip`.
+    #[inline]
+    pub const fn is_recheck(&self) -> bool {
+        !self.meta().is_skip
+    }
+}
+
+impl CacheDecision {
+    /// Discriminator-only kind for telemetry / surface enumeration.
+    pub fn kind(&self) -> CacheDecisionKind {
+        match self {
+            Self::Skip { .. } => CacheDecisionKind::Skip,
+            Self::Recheck { .. } => CacheDecisionKind::Recheck,
+        }
+    }
 }
 
 /// Why a recheck is required.
@@ -1403,5 +1545,46 @@ mod tests {
             assert_eq!(r.label(), r.kind().label(),
                 "RecheckReason payload-bearing label must equal kind().label()");
         }
+    }
+
+    #[test]
+    fn meta_pin_cached_verdict_kind_round_trip_and_is_ok_partition() {
+        assert_eq!(CachedVerdictKind::ALL.len(), 2);
+        for k in CachedVerdictKind::ALL {
+            let s = k.name();
+            assert_eq!(CachedVerdictKind::from_str(s), Some(*k));
+        }
+        assert!(CachedVerdictKind::Ok.is_ok());
+        assert!(!CachedVerdictKind::Failed.is_ok());
+        // Cross-pin: CachedVerdict::is_ok agrees with kind().is_ok.
+        let v_ok = CachedVerdict::Ok { elapsed_ms: 100 };
+        let v_failed = CachedVerdict::Failed {
+            reason: Text::from("dummy"),
+        };
+        assert!(v_ok.is_ok());
+        assert!(!v_failed.is_ok());
+        assert_eq!(v_ok.kind(), CachedVerdictKind::Ok);
+        assert_eq!(v_failed.kind(), CachedVerdictKind::Failed);
+    }
+
+    #[test]
+    fn meta_pin_cache_decision_kind_round_trip_and_skip_recheck_complement() {
+        assert_eq!(CacheDecisionKind::ALL.len(), 2);
+        for k in CacheDecisionKind::ALL {
+            let s = k.name();
+            assert_eq!(CacheDecisionKind::from_str(s), Some(*k));
+        }
+        // Binary partition: is_skip and is_recheck are exact
+        // complements.
+        for k in CacheDecisionKind::ALL {
+            assert_eq!(
+                k.is_skip(),
+                !k.is_recheck(),
+                "CacheDecisionKind::{:?}: is_skip ⊕ is_recheck must be exact complements",
+                k
+            );
+        }
+        assert!(CacheDecisionKind::Skip.is_skip());
+        assert!(CacheDecisionKind::Recheck.is_recheck());
     }
 }

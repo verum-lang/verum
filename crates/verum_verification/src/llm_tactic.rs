@@ -366,15 +366,126 @@ impl KernelRejectReason {
         }
     }
 
-    /// Stable kebab-case label for telemetry.
+    /// Stable kebab-case label for telemetry. Backed by
+    /// `kind().label()`.
+    #[inline]
     pub fn label(&self) -> &'static str {
+        self.kind().label()
+    }
+
+    /// Discriminator-only kind for telemetry / surface enumeration.
+    pub fn kind(&self) -> KernelRejectReasonKind {
         match self {
-            Self::NotInScope { .. } => "not-in-scope",
-            Self::NotKernelAttested { .. } => "not-kernel-attested",
-            Self::UnknownTactic { .. } => "unknown-tactic",
-            Self::MalformedSyntax { .. } => "malformed-syntax",
-            Self::Other(_) => "other",
+            Self::NotInScope { .. } => KernelRejectReasonKind::NotInScope,
+            Self::NotKernelAttested { .. } => {
+                KernelRejectReasonKind::NotKernelAttested
+            }
+            Self::UnknownTactic { .. } => {
+                KernelRejectReasonKind::UnknownTactic
+            }
+            Self::MalformedSyntax { .. } => {
+                KernelRejectReasonKind::MalformedSyntax
+            }
+            Self::Other(_) => KernelRejectReasonKind::Other,
         }
+    }
+}
+
+/// Discriminator-only kind for [`KernelRejectReason`].
+///
+/// Five payload-bearing variants reduce to five zero-sized kinds.
+/// `is_lemma_resolution_failure` flags `NotInScope` /
+/// `NotKernelAttested` (both name-resolution failures);
+/// `is_tactic_shape_failure` flags `UnknownTactic` /
+/// `MalformedSyntax` (both step-shape failures); `Other` is the
+/// catch-all that doesn't fit either bucket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KernelRejectReasonKind {
+    NotInScope,
+    NotKernelAttested,
+    UnknownTactic,
+    MalformedSyntax,
+    Other,
+}
+
+/// Per-kind projection for [`KernelRejectReasonKind`].
+#[derive(Debug, Clone, Copy)]
+pub struct KernelRejectReasonKindMeta {
+    pub label: &'static str,
+    pub is_lemma_resolution_failure: bool,
+    pub is_tactic_shape_failure: bool,
+}
+
+impl KernelRejectReasonKind {
+    pub const ALL: &'static [Self] = &[
+        Self::NotInScope,
+        Self::NotKernelAttested,
+        Self::UnknownTactic,
+        Self::MalformedSyntax,
+        Self::Other,
+    ];
+
+    pub const fn meta(self) -> KernelRejectReasonKindMeta {
+        match self {
+            Self::NotInScope => KernelRejectReasonKindMeta {
+                label: "not-in-scope",
+                is_lemma_resolution_failure: true,
+                is_tactic_shape_failure: false,
+            },
+            Self::NotKernelAttested => KernelRejectReasonKindMeta {
+                label: "not-kernel-attested",
+                is_lemma_resolution_failure: true,
+                is_tactic_shape_failure: false,
+            },
+            Self::UnknownTactic => KernelRejectReasonKindMeta {
+                label: "unknown-tactic",
+                is_lemma_resolution_failure: false,
+                is_tactic_shape_failure: true,
+            },
+            Self::MalformedSyntax => KernelRejectReasonKindMeta {
+                label: "malformed-syntax",
+                is_lemma_resolution_failure: false,
+                is_tactic_shape_failure: true,
+            },
+            Self::Other => KernelRejectReasonKindMeta {
+                label: "other",
+                is_lemma_resolution_failure: false,
+                is_tactic_shape_failure: false,
+            },
+        }
+    }
+
+    /// Stable kebab-case label for telemetry.
+    #[inline]
+    pub const fn label(&self) -> &'static str {
+        self.meta().label
+    }
+
+    /// Parse a kebab-case telemetry label back to the typed kind.
+    /// Closes a drift defect: previously
+    /// `KernelRejectReason::label` was present but no inverse
+    /// mapping existed.
+    pub fn from_label(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().label == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+
+    /// True for `NotInScope` / `NotKernelAttested` — both name-
+    /// resolution failures.
+    #[inline]
+    pub const fn is_lemma_resolution_failure(&self) -> bool {
+        self.meta().is_lemma_resolution_failure
+    }
+
+    /// True for `UnknownTactic` / `MalformedSyntax` — both
+    /// step-shape failures.
+    #[inline]
+    pub const fn is_tactic_shape_failure(&self) -> bool {
+        self.meta().is_tactic_shape_failure
     }
 }
 
@@ -703,9 +814,73 @@ pub enum KernelVerdict {
     },
 }
 
+/// Discriminator-only kind for [`KernelVerdict`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KernelVerdictKind {
+    Accepted,
+    Rejected,
+}
+
+/// Per-kind projection for [`KernelVerdictKind`]. `is_accepted`
+/// flags the happy-path verdict (matches the legacy
+/// `KernelVerdict::is_accepted` predicate exactly); the binary
+/// partition is exact complements.
+#[derive(Debug, Clone, Copy)]
+pub struct KernelVerdictKindMeta {
+    pub name: &'static str,
+    pub is_accepted: bool,
+}
+
+impl KernelVerdictKind {
+    pub const ALL: &'static [Self] = &[Self::Accepted, Self::Rejected];
+
+    pub const fn meta(self) -> KernelVerdictKindMeta {
+        match self {
+            Self::Accepted => KernelVerdictKindMeta {
+                name: "Accepted",
+                is_accepted: true,
+            },
+            Self::Rejected => KernelVerdictKindMeta {
+                name: "Rejected",
+                is_accepted: false,
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().name == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn is_accepted(&self) -> bool {
+        self.meta().is_accepted
+    }
+}
+
 impl KernelVerdict {
+    /// Discriminator-only kind for telemetry / surface enumeration.
+    pub fn kind(&self) -> KernelVerdictKind {
+        match self {
+            Self::Accepted { .. } => KernelVerdictKind::Accepted,
+            Self::Rejected { .. } => KernelVerdictKind::Rejected,
+        }
+    }
+
+    /// True iff the kernel accepted the proposal. Backed by
+    /// `kind().is_accepted()`.
+    #[inline]
     pub fn is_accepted(&self) -> bool {
-        matches!(self, KernelVerdict::Accepted { .. })
+        self.kind().is_accepted()
     }
 }
 
@@ -751,14 +926,121 @@ pub enum LlmProtocolEvent {
     },
 }
 
+/// Discriminator-only kind for [`LlmProtocolEvent`].
+///
+/// Mirrors the variant set; lets telemetry callers iterate the
+/// audit-trail surface (for filtering / aggregation / docs)
+/// without supplying the rich payload data each variant carries.
+/// Tag values match the `#[serde(tag = "kind")]` discriminator on
+/// `LlmProtocolEvent` exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LlmProtocolEventKind {
+    LlmInvoked,
+    KernelAccepted,
+    KernelRejected,
+    ProtocolError,
+}
+
+/// Per-kind projection for [`LlmProtocolEventKind`].
+///
+/// `name` matches the serde tag (PascalCase wire form).
+/// `is_kernel_outcome` flags `KernelAccepted` / `KernelRejected` —
+/// events that report on kernel re-check verdicts.
+/// `is_terminal` flags every event that closes the LLM round-trip
+/// — only `LlmInvoked` is non-terminal (it records the query;
+/// every subsequent event is a verdict / failure that closes the
+/// round-trip). `is_failure` flags `KernelRejected` / `ProtocolError`
+/// — both unhappy-path outcomes.
+#[derive(Debug, Clone, Copy)]
+pub struct LlmProtocolEventKindMeta {
+    pub name: &'static str,
+    pub is_kernel_outcome: bool,
+    pub is_terminal: bool,
+    pub is_failure: bool,
+}
+
+impl LlmProtocolEventKind {
+    pub const ALL: &'static [Self] = &[
+        Self::LlmInvoked,
+        Self::KernelAccepted,
+        Self::KernelRejected,
+        Self::ProtocolError,
+    ];
+
+    pub const fn meta(self) -> LlmProtocolEventKindMeta {
+        match self {
+            Self::LlmInvoked => LlmProtocolEventKindMeta {
+                name: "LlmInvoked",
+                is_kernel_outcome: false,
+                is_terminal: false,
+                is_failure: false,
+            },
+            Self::KernelAccepted => LlmProtocolEventKindMeta {
+                name: "KernelAccepted",
+                is_kernel_outcome: true,
+                is_terminal: true,
+                is_failure: false,
+            },
+            Self::KernelRejected => LlmProtocolEventKindMeta {
+                name: "KernelRejected",
+                is_kernel_outcome: true,
+                is_terminal: true,
+                is_failure: true,
+            },
+            Self::ProtocolError => LlmProtocolEventKindMeta {
+                name: "ProtocolError",
+                is_kernel_outcome: false,
+                is_terminal: true,
+                is_failure: true,
+            },
+        }
+    }
+
+    #[inline]
+    pub const fn name(&self) -> &'static str {
+        self.meta().name
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for k in Self::ALL {
+            if k.meta().name == s {
+                return Some(*k);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn is_kernel_outcome(&self) -> bool {
+        self.meta().is_kernel_outcome
+    }
+
+    #[inline]
+    pub const fn is_terminal(&self) -> bool {
+        self.meta().is_terminal
+    }
+
+    #[inline]
+    pub const fn is_failure(&self) -> bool {
+        self.meta().is_failure
+    }
+}
+
 impl LlmProtocolEvent {
     /// Stable diagnostic name (matches the JSON `kind` tag).
+    /// Backed by `kind().name()`.
+    #[inline]
     pub fn name(&self) -> &'static str {
+        self.kind().name()
+    }
+
+    /// Discriminator-only kind for telemetry / aggregation.
+    pub fn kind(&self) -> LlmProtocolEventKind {
         match self {
-            Self::LlmInvoked { .. } => "LlmInvoked",
-            Self::KernelAccepted { .. } => "KernelAccepted",
-            Self::KernelRejected { .. } => "KernelRejected",
-            Self::ProtocolError { .. } => "ProtocolError",
+            Self::LlmInvoked { .. } => LlmProtocolEventKind::LlmInvoked,
+            Self::KernelAccepted { .. } => LlmProtocolEventKind::KernelAccepted,
+            Self::KernelRejected { .. } => LlmProtocolEventKind::KernelRejected,
+            Self::ProtocolError { .. } => LlmProtocolEventKind::ProtocolError,
         }
     }
 }
@@ -1487,5 +1769,160 @@ mod tests {
 
         // Same goal, applied through the trusted name: accept.
         assert!(c.check_step(&g, "apply legit_axiom").is_ok());
+    }
+
+    #[test]
+    fn meta_pin_kernel_verdict_kind_round_trip_and_accepted_partition() {
+        assert_eq!(KernelVerdictKind::ALL.len(), 2);
+        for k in KernelVerdictKind::ALL {
+            let s = k.name();
+            assert_eq!(KernelVerdictKind::from_str(s), Some(*k));
+        }
+        assert!(KernelVerdictKind::Accepted.is_accepted());
+        assert!(!KernelVerdictKind::Rejected.is_accepted());
+        // Cross-pin: KernelVerdict::is_accepted agrees with kind.
+        let v_acc = KernelVerdict::Accepted { steps_checked: 5 };
+        let v_rej = KernelVerdict::Rejected {
+            failed_step_index: 0,
+            reason: Text::from("dummy"),
+        };
+        assert!(v_acc.is_accepted());
+        assert!(!v_rej.is_accepted());
+        assert_eq!(v_acc.kind(), KernelVerdictKind::Accepted);
+        assert_eq!(v_rej.kind(), KernelVerdictKind::Rejected);
+    }
+
+    #[test]
+    fn meta_pin_kernel_reject_reason_kind_round_trip_and_failure_partition() {
+        assert_eq!(KernelRejectReasonKind::ALL.len(), 5);
+        let mut seen = Vec::new();
+        for k in KernelRejectReasonKind::ALL {
+            let s = k.label();
+            assert_eq!(
+                KernelRejectReasonKind::from_label(s),
+                Some(*k),
+                "round-trip {:?}",
+                k
+            );
+            assert!(!seen.contains(&s), "duplicate label '{}'", s);
+            seen.push(s);
+        }
+        // Wire form (kebab-case for telemetry).
+        assert_eq!(
+            KernelRejectReasonKind::NotInScope.label(),
+            "not-in-scope"
+        );
+        assert_eq!(
+            KernelRejectReasonKind::NotKernelAttested.label(),
+            "not-kernel-attested"
+        );
+        assert_eq!(
+            KernelRejectReasonKind::UnknownTactic.label(),
+            "unknown-tactic"
+        );
+        assert_eq!(
+            KernelRejectReasonKind::MalformedSyntax.label(),
+            "malformed-syntax"
+        );
+        assert_eq!(KernelRejectReasonKind::Other.label(), "other");
+        // Failure-class partition: 2 lemma-resolution + 2 tactic-shape
+        // + 1 catch-all (Other).
+        let lemma_count = KernelRejectReasonKind::ALL
+            .iter()
+            .filter(|k| k.is_lemma_resolution_failure())
+            .count();
+        let shape_count = KernelRejectReasonKind::ALL
+            .iter()
+            .filter(|k| k.is_tactic_shape_failure())
+            .count();
+        let other_count = KernelRejectReasonKind::ALL
+            .iter()
+            .filter(|k| {
+                !k.is_lemma_resolution_failure() && !k.is_tactic_shape_failure()
+            })
+            .count();
+        assert_eq!(lemma_count, 2);
+        assert_eq!(shape_count, 2);
+        assert_eq!(other_count, 1);
+        // Cross-pin: lemma-resolution and tactic-shape are disjoint.
+        for k in KernelRejectReasonKind::ALL {
+            assert!(
+                !(k.is_lemma_resolution_failure() && k.is_tactic_shape_failure()),
+                "KernelRejectReasonKind::{:?}: failure-class disjointness",
+                k
+            );
+        }
+        // Payload-bearing variant ↔ kind label parity.
+        let r = KernelRejectReason::NotInScope {
+            name: Text::from("foo"),
+        };
+        assert_eq!(r.label(), r.kind().label());
+        let r = KernelRejectReason::Other(Text::from("misc"));
+        assert_eq!(r.label(), "other");
+        assert_eq!(r.kind(), KernelRejectReasonKind::Other);
+    }
+
+    #[test]
+    fn meta_pin_llm_protocol_event_kind_round_trip_and_partitions() {
+        assert_eq!(LlmProtocolEventKind::ALL.len(), 4);
+        for k in LlmProtocolEventKind::ALL {
+            let s = k.name();
+            assert_eq!(LlmProtocolEventKind::from_str(s), Some(*k));
+        }
+        // Wire form (PascalCase, matches `#[serde(tag="kind")]`).
+        assert_eq!(LlmProtocolEventKind::LlmInvoked.name(), "LlmInvoked");
+        assert_eq!(
+            LlmProtocolEventKind::KernelAccepted.name(),
+            "KernelAccepted"
+        );
+        assert_eq!(
+            LlmProtocolEventKind::KernelRejected.name(),
+            "KernelRejected"
+        );
+        assert_eq!(
+            LlmProtocolEventKind::ProtocolError.name(),
+            "ProtocolError"
+        );
+        // is_kernel_outcome: 2 (KernelAccepted/KernelRejected).
+        let kernel_count = LlmProtocolEventKind::ALL
+            .iter()
+            .filter(|k| k.is_kernel_outcome())
+            .count();
+        assert_eq!(kernel_count, 2);
+        // is_terminal: 3 (everything except LlmInvoked).
+        let term_count = LlmProtocolEventKind::ALL
+            .iter()
+            .filter(|k| k.is_terminal())
+            .count();
+        assert_eq!(term_count, 3);
+        // is_failure: 2 (KernelRejected/ProtocolError).
+        let fail_count = LlmProtocolEventKind::ALL
+            .iter()
+            .filter(|k| k.is_failure())
+            .count();
+        assert_eq!(fail_count, 2);
+        // Cross-cutting: kernel_outcome ⇒ terminal (every kernel
+        // verdict closes the round-trip). is_failure ⇒ terminal
+        // (every failure closes too). LlmInvoked is the unique
+        // non-terminal event.
+        for k in LlmProtocolEventKind::ALL {
+            if k.is_kernel_outcome() {
+                assert!(
+                    k.is_terminal(),
+                    "kernel_outcome ⇒ terminal — {:?}",
+                    k
+                );
+            }
+            if k.is_failure() {
+                assert!(k.is_terminal(), "failure ⇒ terminal — {:?}", k);
+            }
+        }
+        for k in LlmProtocolEventKind::ALL {
+            assert_eq!(
+                !k.is_terminal(),
+                *k == LlmProtocolEventKind::LlmInvoked,
+                "LlmInvoked is the lone non-terminal event"
+            );
+        }
     }
 }
