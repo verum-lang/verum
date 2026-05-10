@@ -2567,9 +2567,7 @@ pub fn lower_instruction<'ctx>(
         Instruction::Call { dst, func_id, args } => lower_call(ctx, *dst, *func_id, args),
 
         Instruction::TailCall { func_id, args } => {
-            let vbc_mod = ctx.vbc_module().ok_or_else(|| {
-                LlvmLoweringError::internal("TailCall requires VBC module for function resolution")
-            })?;
+            let vbc_mod = ctx.vbc_module().or_internal("TailCall requires VBC module for function resolution")?;
             let func_desc = vbc_mod.get_function(FunctionId(*func_id)).or_internal_else(|| format!(
                     "TailCall: function id {} not found in VBC module",
                     func_id
@@ -4607,9 +4605,7 @@ pub fn lower_instruction<'ctx>(
         } => {
             // Generic function call. Post-monomorphization, this should be resolved
             // to a direct Call. As fallback, treat as direct call ignoring type_args.
-            let vbc_mod = ctx.vbc_module().ok_or_else(|| {
-                LlvmLoweringError::internal("CallG requires VBC module for function resolution")
-            })?;
+            let vbc_mod = ctx.vbc_module().or_internal("CallG requires VBC module for function resolution")?;
             let func_desc = vbc_mod.get_function(FunctionId(*func_id)).or_internal_else(|| format!("CallG: function id {} not found", func_id))?;
             let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
 
@@ -8287,9 +8283,7 @@ fn lower_call<'ctx>(
     func_id: u32,
     args: &verum_vbc::instruction::RegRange,
 ) -> Result<()> {
-    let vbc_mod = ctx.vbc_module().ok_or_else(|| {
-        LlvmLoweringError::internal("Call requires VBC module for function resolution")
-    })?;
+    let vbc_mod = ctx.vbc_module().or_internal("Call requires VBC module for function resolution")?;
     // Apply func_id_base offset for merged stdlib modules.
     // Bytecode-embedded func_ids are relative to the source module;
     // func_id_base converts them to the merged module's function table.
@@ -11531,9 +11525,7 @@ fn lower_call_method<'ctx>(
     method_id: u32,
     args: &verum_vbc::instruction::RegRange,
 ) -> Result<()> {
-    let vbc_mod = ctx.vbc_module().ok_or_else(|| {
-        LlvmLoweringError::internal("CallM requires VBC module for method resolution")
-    })?;
+    let vbc_mod = ctx.vbc_module().or_internal("CallM requires VBC module for method resolution")?;
 
     // method_id is a StringId (method name), NOT a FunctionId.
     // Resolution strategy (same as interpreter):
@@ -22612,9 +22604,7 @@ fn lower_ffi_extended<'ctx>(
                 .or_internal_else(|| format!("FFI symbol {} not found", symbol_idx))?;
 
             // Get symbol name
-            let symbol_name = vbc_module.strings.get(ffi_symbol.name).ok_or_else(|| {
-                LlvmLoweringError::internal("FFI symbol name not in string table")
-            })?;
+            let symbol_name = vbc_module.strings.get(ffi_symbol.name).or_internal("FFI symbol name not in string table")?;
 
             // Determine calling convention
             let calling_convention =
@@ -22754,9 +22744,7 @@ fn lower_ffi_extended<'ctx>(
 
         Some(SystemSubOpcode::CallFfiVariadic) => {
             // Get VBC module for FFI symbol table access
-            let vbc_module = ctx.vbc_module().ok_or_else(|| {
-                LlvmLoweringError::internal("Variadic FFI calls require VBC module")
-            })?;
+            let vbc_module = ctx.vbc_module().or_internal("Variadic FFI calls require VBC module")?;
 
             // Operand format: symbol_idx:u32, fixed_count:u8, variadic_count:u8, ret_reg:u8, [arg_regs...]
             if operands.len() < 7 {
@@ -22783,9 +22771,7 @@ fn lower_ffi_extended<'ctx>(
                 .get_ffi_symbol(FfiSymbolId(symbol_idx))
                 .or_internal_else(|| format!("FFI symbol {} not found", symbol_idx))?;
 
-            let symbol_name = vbc_module.strings.get(ffi_symbol.name).ok_or_else(|| {
-                LlvmLoweringError::internal("FFI symbol name not in string table")
-            })?;
+            let symbol_name = vbc_module.strings.get(ffi_symbol.name).or_internal("FFI symbol name not in string table")?;
 
             // Build function type (only fixed params in signature, variadic marker)
             let llvm_ctx = ctx.llvm_context();
@@ -22885,9 +22871,7 @@ fn lower_ffi_extended<'ctx>(
         Some(SystemSubOpcode::CallFfiIndirect) => {
             // Indirect call through function pointer
             // Operand format: ptr_reg:u8, signature_idx:u32, arg_count:u8, ret_reg:u8, [arg_regs...]
-            let vbc_module = ctx.vbc_module().ok_or_else(|| {
-                LlvmLoweringError::internal("Indirect FFI calls require VBC module")
-            })?;
+            let vbc_module = ctx.vbc_module().or_internal("Indirect FFI calls require VBC module")?;
 
             if operands.len() < 7 {
                 return Err(LlvmLoweringError::internal(
@@ -23032,9 +23016,7 @@ fn lower_ffi_extended<'ctx>(
                 .get_ffi_symbol(FfiSymbolId(symbol_idx))
                 .or_internal_else(|| format!("FFI symbol {} not found", symbol_idx))?;
 
-            let symbol_name = vbc_module.strings.get(ffi_symbol.name).ok_or_else(|| {
-                LlvmLoweringError::internal("FFI symbol name not in string table")
-            })?;
+            let symbol_name = vbc_module.strings.get(ffi_symbol.name).or_internal("FFI symbol name not in string table")?;
 
             // Declare the function and get its address as a pointer
             let llvm_ctx = ctx.llvm_context();
@@ -28510,9 +28492,7 @@ fn lower_load_const<'ctx>(
     dst: Reg,
     const_id: u32,
 ) -> Result<()> {
-    let vbc_mod = ctx.vbc_module().ok_or_else(|| {
-        LlvmLoweringError::internal("LoadK requires VBC module for constant pool access")
-    })?;
+    let vbc_mod = ctx.vbc_module().or_internal("LoadK requires VBC module for constant pool access")?;
     let constant = vbc_mod.get_constant(ConstId(const_id)).or_internal_else(|| format!("LoadK: constant {} not found in pool", const_id))?;
     let is_string_const = matches!(constant, Constant::String(_));
     let is_float_const = matches!(constant, Constant::Float(_));
