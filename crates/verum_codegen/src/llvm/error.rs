@@ -287,6 +287,12 @@ pub trait OptionExt<T> {
     /// Convert None into an internal error with the given message.
     fn or_internal(self, msg: &str) -> Result<T>;
 
+    /// Like [`or_internal`](Self::or_internal) but the message is
+    /// produced lazily by `f` — only invoked on the None error path.
+    /// Use when the message contains `format!()` interpolation that
+    /// would be wasted work on the (overwhelmingly common) Some path.
+    fn or_internal_else<F: FnOnce() -> String>(self, f: F) -> Result<T>;
+
     /// Convert None into a missing function error.
     fn or_missing_fn(self, name: &str) -> Result<T>;
 }
@@ -295,6 +301,11 @@ impl<T> OptionExt<T> for Option<T> {
     #[inline]
     fn or_internal(self, msg: &str) -> Result<T> {
         self.ok_or_else(|| LlvmLoweringError::Internal(msg.into()))
+    }
+
+    #[inline]
+    fn or_internal_else<F: FnOnce() -> String>(self, f: F) -> Result<T> {
+        self.ok_or_else(|| LlvmLoweringError::Internal(f().into()))
     }
 
     #[inline]

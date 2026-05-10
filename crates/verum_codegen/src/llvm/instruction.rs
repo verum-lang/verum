@@ -2570,12 +2570,10 @@ pub fn lower_instruction<'ctx>(
             let vbc_mod = ctx.vbc_module().ok_or_else(|| {
                 LlvmLoweringError::internal("TailCall requires VBC module for function resolution")
             })?;
-            let func_desc = vbc_mod.get_function(FunctionId(*func_id)).ok_or_else(|| {
-                LlvmLoweringError::internal(format!(
+            let func_desc = vbc_mod.get_function(FunctionId(*func_id)).or_internal_else(|| format!(
                     "TailCall: function id {} not found in VBC module",
                     func_id
-                ))
-            })?;
+                ))?;
             let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
             let llvm_fn = resolve_llvm_function(
                 ctx.get_module(),
@@ -2736,19 +2734,15 @@ pub fn lower_instruction<'ctx>(
             let vbc_mod = ctx
                 .vbc_module()
                 .or_internal("NewClosure requires VBC module")?;
-            let func_desc = vbc_mod.get_function(FunctionId(*func_id)).ok_or_else(|| {
-                LlvmLoweringError::internal(format!(
+            let func_desc = vbc_mod.get_function(FunctionId(*func_id)).or_internal_else(|| format!(
                     "NewClosure: function id {} not found",
                     func_id
-                ))
-            })?;
+                ))?;
             let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
-            let llvm_fn = ctx.get_module().get_function(func_name).ok_or_else(|| {
-                LlvmLoweringError::internal(format!(
+            let llvm_fn = ctx.get_module().get_function(func_name).or_internal_else(|| format!(
                     "NewClosure: function '{}' not found in LLVM module",
                     func_name
-                ))
-            })?;
+                ))?;
 
             // Determine if we need a trampoline: when wrapping a non-closure named function
             // as a closure, we need a trampoline that accepts (env_ptr, args...) and forwards
@@ -4616,9 +4610,7 @@ pub fn lower_instruction<'ctx>(
             let vbc_mod = ctx.vbc_module().ok_or_else(|| {
                 LlvmLoweringError::internal("CallG requires VBC module for function resolution")
             })?;
-            let func_desc = vbc_mod.get_function(FunctionId(*func_id)).ok_or_else(|| {
-                LlvmLoweringError::internal(format!("CallG: function id {} not found", func_id))
-            })?;
+            let func_desc = vbc_mod.get_function(FunctionId(*func_id)).or_internal_else(|| format!("CallG: function id {} not found", func_id))?;
             let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
 
             let module = ctx.get_module();
@@ -5262,16 +5254,12 @@ pub fn lower_instruction<'ctx>(
             let vbc_mod = ctx
                 .vbc_module()
                 .or_internal("CallC requires VBC module")?;
-            let func_info = vbc_mod.get_function(FunctionId(func_id)).ok_or_else(|| {
-                LlvmLoweringError::internal(format!("CallC: function {} not found", func_id))
-            })?;
+            let func_info = vbc_mod.get_function(FunctionId(func_id)).or_internal_else(|| format!("CallC: function {} not found", func_id))?;
             let func_name = vbc_mod.get_string(func_info.name).unwrap_or("<unknown>");
-            let llvm_fn = ctx.get_module().get_function(func_name).ok_or_else(|| {
-                LlvmLoweringError::internal(format!(
+            let llvm_fn = ctx.get_module().get_function(func_name).or_internal_else(|| format!(
                     "CallC: LLVM function '{}' not found",
                     func_name
-                ))
-            })?;
+                ))?;
             let arg_vals: Vec<BasicMetadataValueEnum> = args
                 .iter()
                 .enumerate()
@@ -22621,9 +22609,7 @@ fn lower_ffi_extended<'ctx>(
             // Look up FFI symbol
             let ffi_symbol = vbc_module
                 .get_ffi_symbol(FfiSymbolId(symbol_idx))
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal(format!("FFI symbol {} not found", symbol_idx))
-                })?;
+                .or_internal_else(|| format!("FFI symbol {} not found", symbol_idx))?;
 
             // Get symbol name
             let symbol_name = vbc_module.strings.get(ffi_symbol.name).ok_or_else(|| {
@@ -22795,9 +22781,7 @@ fn lower_ffi_extended<'ctx>(
             // Look up FFI symbol
             let ffi_symbol = vbc_module
                 .get_ffi_symbol(FfiSymbolId(symbol_idx))
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal(format!("FFI symbol {} not found", symbol_idx))
-                })?;
+                .or_internal_else(|| format!("FFI symbol {} not found", symbol_idx))?;
 
             let symbol_name = vbc_module.strings.get(ffi_symbol.name).ok_or_else(|| {
                 LlvmLoweringError::internal("FFI symbol name not in string table")
@@ -22929,12 +22913,10 @@ fn lower_ffi_extended<'ctx>(
             // Look up FFI signature (using signature_idx as FFI symbol index for the prototype)
             let ffi_symbol = vbc_module
                 .get_ffi_symbol(FfiSymbolId(signature_idx))
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal(format!(
+                .or_internal_else(|| format!(
                         "FFI signature {} not found",
                         signature_idx
-                    ))
-                })?;
+                    ))?;
 
             // Build function type from signature
             let llvm_ctx = ctx.llvm_context();
@@ -23048,9 +23030,7 @@ fn lower_ffi_extended<'ctx>(
             // Look up FFI symbol
             let ffi_symbol = vbc_module
                 .get_ffi_symbol(FfiSymbolId(symbol_idx))
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal(format!("FFI symbol {} not found", symbol_idx))
-                })?;
+                .or_internal_else(|| format!("FFI symbol {} not found", symbol_idx))?;
 
             let symbol_name = vbc_module.strings.get(ffi_symbol.name).ok_or_else(|| {
                 LlvmLoweringError::internal("FFI symbol name not in string table")
@@ -28533,9 +28513,7 @@ fn lower_load_const<'ctx>(
     let vbc_mod = ctx.vbc_module().ok_or_else(|| {
         LlvmLoweringError::internal("LoadK requires VBC module for constant pool access")
     })?;
-    let constant = vbc_mod.get_constant(ConstId(const_id)).ok_or_else(|| {
-        LlvmLoweringError::internal(format!("LoadK: constant {} not found in pool", const_id))
-    })?;
+    let constant = vbc_mod.get_constant(ConstId(const_id)).or_internal_else(|| format!("LoadK: constant {} not found in pool", const_id))?;
     let is_string_const = matches!(constant, Constant::String(_));
     let is_float_const = matches!(constant, Constant::Float(_));
     // Track constructor type name for Heap.new/Channel.new dispatch
@@ -28648,12 +28626,10 @@ fn lower_load_const<'ctx>(
                         .unwrap_or_default(),
                 )
                 .unwrap_or("<unknown>");
-            let llvm_fn = ctx.get_module().get_function(func_name).ok_or_else(|| {
-                LlvmLoweringError::internal(format!(
+            let llvm_fn = ctx.get_module().get_function(func_name).or_internal_else(|| format!(
                     "LoadK: function '{}' not found in LLVM module",
                     func_name
-                ))
-            })?;
+                ))?;
             llvm_fn.as_global_value().as_pointer_value().into()
         }
         Constant::Type(_) | Constant::Protocol(_) => {
@@ -30080,12 +30056,10 @@ fn lower_iter_next<'ctx>(
                 .or_llvm_err()?;
 
             ctx.builder().position_at_end(then_bb);
-            let next_fn = module.get_function(&next_name).ok_or_else(|| {
-                LlvmLoweringError::internal(format!(
+            let next_fn = module.get_function(&next_name).or_internal_else(|| format!(
                     "Custom iterator '{}' has has_next but missing next method",
                     type_name
-                ))
-            })?;
+                ))?;
             let next_val = ctx
                 .builder()
                 .build_call(next_fn, &[iter_as_i64.into()], "next_val")
