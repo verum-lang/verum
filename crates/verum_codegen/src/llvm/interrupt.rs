@@ -82,48 +82,130 @@ pub enum TargetArch {
     RiscV64,
 }
 
+/// Per-variant projection for [`TargetArch`].
+///
+/// `name` is the canonical lowercase identifier (matches the form
+/// produced by `triple.split('-').next()`); `interrupt_call_conv` is
+/// the LLVM CC ID for ISR codegen (83 = `x86_intrcc`, 67 = `ARM_AAPCS`,
+/// 0 = default C — RISC-V and AArch64 use default CC + attributes).
+/// `has_interrupt_cc` and `asm_dialect` were previously parallel
+/// `matches!()` calls; they now ride per-variant fields. Adding a new
+/// architecture forces explicit decisions on all four downstream
+/// projections in one place.
+#[derive(Debug, Clone, Copy)]
+pub struct TargetArchMeta {
+    pub name: &'static str,
+    pub interrupt_call_conv: u32,
+    pub has_interrupt_cc: bool,
+    pub asm_dialect: InlineAsmDialect,
+}
+
 impl TargetArch {
-    /// Parse architecture from a target triple.
+    pub const ALL: &'static [Self] = &[
+        Self::X86_64,
+        Self::X86,
+        Self::ARM,
+        Self::AArch64,
+        Self::RiscV32,
+        Self::RiscV64,
+    ];
+
+    pub const fn meta(self) -> TargetArchMeta {
+        match self {
+            Self::X86_64 => TargetArchMeta {
+                name: "x86_64",
+                interrupt_call_conv: 83, // x86_intrcc
+                has_interrupt_cc: true,
+                asm_dialect: InlineAsmDialect::Intel,
+            },
+            Self::X86 => TargetArchMeta {
+                name: "x86",
+                interrupt_call_conv: 83, // x86_intrcc
+                has_interrupt_cc: true,
+                asm_dialect: InlineAsmDialect::Intel,
+            },
+            Self::ARM => TargetArchMeta {
+                name: "arm",
+                interrupt_call_conv: 67, // ARM_AAPCS
+                has_interrupt_cc: false,
+                asm_dialect: InlineAsmDialect::ATT,
+            },
+            Self::AArch64 => TargetArchMeta {
+                name: "aarch64",
+                // AArch64 doesn't have a specific interrupt CC,
+                // uses default + attributes.
+                interrupt_call_conv: 0, // C calling convention
+                has_interrupt_cc: false,
+                asm_dialect: InlineAsmDialect::ATT,
+            },
+            Self::RiscV32 => TargetArchMeta {
+                name: "riscv32",
+                interrupt_call_conv: 0, // default + attributes
+                has_interrupt_cc: false,
+                asm_dialect: InlineAsmDialect::ATT,
+            },
+            Self::RiscV64 => TargetArchMeta {
+                name: "riscv64",
+                interrupt_call_conv: 0, // default + attributes
+                has_interrupt_cc: false,
+                asm_dialect: InlineAsmDialect::ATT,
+            },
+        }
+    }
+
+    /// Parse architecture from a target triple. Substring matching
+    /// on the first triple component — preserved verbatim from the
+    /// legacy implementation so existing call sites
+    /// (`linker_config.rs:341`) keep working.
     pub fn from_triple(triple: &str) -> Option<Self> {
         let arch = triple.split('-').next()?;
         match arch {
-            "x86_64" | "amd64" => Some(TargetArch::X86_64),
-            "i386" | "i486" | "i586" | "i686" | "x86" => Some(TargetArch::X86),
+            "x86_64" | "amd64" => Some(Self::X86_64),
+            "i386" | "i486" | "i586" | "i686" | "x86" => Some(Self::X86),
             "arm" | "armv6" | "armv7" | "thumb" | "thumbv6" | "thumbv7" | "thumbv7em" => {
-                Some(TargetArch::ARM)
+                Some(Self::ARM)
             }
-            "aarch64" | "arm64" => Some(TargetArch::AArch64),
-            "riscv32" => Some(TargetArch::RiscV32),
-            "riscv64" => Some(TargetArch::RiscV64),
+            "aarch64" | "arm64" => Some(Self::AArch64),
+            "riscv32" => Some(Self::RiscV32),
+            "riscv64" => Some(Self::RiscV64),
             _ => None,
         }
     }
 
-    /// Get the LLVM calling convention ID for interrupt handlers.
-    pub fn interrupt_call_conv(&self) -> u32 {
-        match self {
-            // x86_intrcc: X86 interrupt calling convention
-            TargetArch::X86_64 | TargetArch::X86 => 83,
-            // ARM AAPCS with interrupt attribute
-            TargetArch::ARM => 67, // ARM_AAPCS
-            // AArch64 doesn't have a specific interrupt CC, uses default + attributes
-            TargetArch::AArch64 => 0, // C calling convention
-            // RISC-V uses default CC with attributes
-            TargetArch::RiscV32 | TargetArch::RiscV64 => 0,
+    /// Parse the canonical lowercase architecture name (the form
+    /// returned by `as_str` / `meta().name`). For looser triple-
+    /// based matching, use [`TargetArch::from_triple`] instead.
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
         }
+        None
+    }
+
+    /// Canonical lowercase architecture name.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Get the LLVM calling convention ID for interrupt handlers.
+    #[inline]
+    pub const fn interrupt_call_conv(&self) -> u32 {
+        self.meta().interrupt_call_conv
     }
 
     /// Check if this architecture uses a dedicated interrupt calling convention.
-    pub fn has_interrupt_cc(&self) -> bool {
-        matches!(self, TargetArch::X86_64 | TargetArch::X86)
+    #[inline]
+    pub const fn has_interrupt_cc(&self) -> bool {
+        self.meta().has_interrupt_cc
     }
 
     /// Get the inline assembly dialect for this architecture.
-    pub fn asm_dialect(&self) -> InlineAsmDialect {
-        match self {
-            TargetArch::X86_64 | TargetArch::X86 => InlineAsmDialect::Intel,
-            _ => InlineAsmDialect::ATT,
-        }
+    #[inline]
+    pub const fn asm_dialect(&self) -> InlineAsmDialect {
+        self.meta().asm_dialect
     }
 }
 
@@ -144,26 +226,98 @@ pub enum InterruptHandlerKind {
     Reset,
 }
 
+/// Per-variant projection for [`InterruptHandlerKind`].
+///
+/// `name` is the canonical lowercase identifier (matches the
+/// `verum_ast::attr::InterruptKind` wire form, which is the
+/// user-facing `@interrupt(...)` argument). `arm_interrupt_type`
+/// is the ARM/AArch64 attribute string used in codegen — note that
+/// ARM has no NMI distinct from SWI, so both `NMI` and `Trap` map
+/// to `"SWI"` (preserved verbatim from the legacy table; this is
+/// not a parse-side accept set, just a codegen-side label).
+/// `requires_fpu_save` flags interrupts that may preempt FPU
+/// operations.
+#[derive(Debug, Clone, Copy)]
+pub struct InterruptHandlerKindMeta {
+    pub name: &'static str,
+    pub arm_interrupt_type: &'static str,
+    pub requires_fpu_save: bool,
+}
+
 impl InterruptHandlerKind {
-    /// Get the ARM/AArch64 interrupt type string for the attribute.
-    pub fn arm_interrupt_type(&self) -> &'static str {
+    pub const ALL: &'static [Self] = &[
+        Self::Regular,
+        Self::NMI,
+        Self::Fast,
+        Self::Exception,
+        Self::Trap,
+        Self::Reset,
+    ];
+
+    pub const fn meta(self) -> InterruptHandlerKindMeta {
         match self {
-            InterruptHandlerKind::Regular => "IRQ",
-            InterruptHandlerKind::NMI => "SWI", // NMI handled differently on ARM
-            InterruptHandlerKind::Fast => "FIQ",
-            InterruptHandlerKind::Exception => "ABORT",
-            InterruptHandlerKind::Trap => "SWI",
-            InterruptHandlerKind::Reset => "RESET",
+            Self::Regular => InterruptHandlerKindMeta {
+                name: "regular",
+                arm_interrupt_type: "IRQ",
+                requires_fpu_save: false,
+            },
+            Self::NMI => InterruptHandlerKindMeta {
+                name: "nmi",
+                // NMI handled differently on ARM — mapped to SWI.
+                arm_interrupt_type: "SWI",
+                requires_fpu_save: true,
+            },
+            Self::Fast => InterruptHandlerKindMeta {
+                name: "fast",
+                arm_interrupt_type: "FIQ",
+                requires_fpu_save: false,
+            },
+            Self::Exception => InterruptHandlerKindMeta {
+                name: "exception",
+                arm_interrupt_type: "ABORT",
+                requires_fpu_save: true,
+            },
+            Self::Trap => InterruptHandlerKindMeta {
+                name: "trap",
+                arm_interrupt_type: "SWI",
+                requires_fpu_save: false,
+            },
+            Self::Reset => InterruptHandlerKindMeta {
+                name: "reset",
+                arm_interrupt_type: "RESET",
+                requires_fpu_save: false,
+            },
         }
     }
 
+    /// Parse the canonical lowercase interrupt-kind name. Matches
+    /// the `verum_ast::attr::InterruptKind` wire form used by the
+    /// `@interrupt(...)` parser.
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    /// Canonical lowercase name.
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Get the ARM/AArch64 interrupt type string for the attribute.
+    #[inline]
+    pub const fn arm_interrupt_type(&self) -> &'static str {
+        self.meta().arm_interrupt_type
+    }
+
     /// Check if this interrupt type requires FPU state saving.
-    pub fn requires_fpu_save(&self) -> bool {
-        // NMI and exceptions may interrupt FPU operations
-        matches!(
-            self,
-            InterruptHandlerKind::NMI | InterruptHandlerKind::Exception
-        )
+    #[inline]
+    pub const fn requires_fpu_save(&self) -> bool {
+        self.meta().requires_fpu_save
     }
 }
 
@@ -745,5 +899,133 @@ mod tests {
             InterruptHandlerKind::Exception.arm_interrupt_type(),
             "ABORT"
         );
+    }
+
+    // ----------------------------------------------------------------
+    // meta() consolidation drift pins.
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn meta_pin_target_arch_round_trip_unique_and_classification() {
+        assert_eq!(TargetArch::ALL.len(), 6);
+        for v in TargetArch::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                TargetArch::from_str(s),
+                Some(*v),
+                "TargetArch::{:?}: '{}' must round-trip",
+                v,
+                s
+            );
+        }
+        // has_interrupt_cc partition: only x86 family has the
+        // dedicated `x86_intrcc` calling convention. Pinned 2/4.
+        let with_cc = TargetArch::ALL
+            .iter()
+            .filter(|v| v.has_interrupt_cc())
+            .count();
+        assert_eq!(with_cc, 2);
+        assert!(TargetArch::X86_64.has_interrupt_cc());
+        assert!(TargetArch::X86.has_interrupt_cc());
+        // CC ID consistency: has_interrupt_cc ⇔ interrupt_call_conv != 0
+        // (every arch with a dedicated CC carries a non-zero ID).
+        for v in TargetArch::ALL {
+            let cc = v.interrupt_call_conv();
+            // Note: ARM_AAPCS=67 is non-zero but `has_interrupt_cc`
+            // is false because ARM uses default CC + interrupt
+            // attribute (the legacy classification preserved
+            // verbatim). Pin the legacy classification exactly:
+            let expected_dedicated = matches!(
+                v,
+                TargetArch::X86_64 | TargetArch::X86
+            );
+            assert_eq!(
+                v.has_interrupt_cc(),
+                expected_dedicated,
+                "TargetArch::{:?}: has_interrupt_cc",
+                v
+            );
+            // x86 family uses CC 83 (x86_intrcc); ARM uses 67
+            // (ARM_AAPCS); AArch64/RISC-V use 0 (default C).
+            let expected_cc: u32 = match v {
+                TargetArch::X86_64 | TargetArch::X86 => 83,
+                TargetArch::ARM => 67,
+                TargetArch::AArch64
+                | TargetArch::RiscV32
+                | TargetArch::RiscV64 => 0,
+            };
+            assert_eq!(cc, expected_cc, "TargetArch::{:?}: cc id", v);
+        }
+        // from_triple → as_str round-trip on canonical first
+        // components.
+        let triples = &[
+            ("x86_64-unknown-linux-gnu", TargetArch::X86_64),
+            ("i686-pc-linux-gnu", TargetArch::X86),
+            ("armv7-unknown-linux-gnueabihf", TargetArch::ARM),
+            ("aarch64-apple-darwin", TargetArch::AArch64),
+            ("riscv32-unknown-none-elf", TargetArch::RiscV32),
+            ("riscv64-unknown-linux-gnu", TargetArch::RiscV64),
+        ];
+        for (triple, expected) in triples {
+            assert_eq!(
+                TargetArch::from_triple(triple),
+                Some(*expected),
+                "from_triple drift: {}",
+                triple
+            );
+        }
+    }
+
+    #[test]
+    fn meta_pin_interrupt_handler_kind_round_trip_and_partitions() {
+        assert_eq!(InterruptHandlerKind::ALL.len(), 6);
+        for v in InterruptHandlerKind::ALL {
+            let s = v.as_str();
+            assert_eq!(
+                InterruptHandlerKind::from_str(s),
+                Some(*v),
+                "InterruptHandlerKind::{:?}: '{}' round-trip",
+                v,
+                s
+            );
+        }
+        // requires_fpu_save partition: NMI + Exception (n=2).
+        // Cross-pin: legacy 2-arm match preserved exactly.
+        for v in InterruptHandlerKind::ALL {
+            let expected_fpu = matches!(
+                v,
+                InterruptHandlerKind::NMI | InterruptHandlerKind::Exception
+            );
+            assert_eq!(
+                v.requires_fpu_save(),
+                expected_fpu,
+                "InterruptHandlerKind::{:?}: requires_fpu_save",
+                v
+            );
+        }
+        // ARM interrupt-type table — preserved verbatim from legacy.
+        // Note that NMI and Trap both map to "SWI" (ARM has no
+        // distinct NMI; both go through the SWI vector); not a
+        // parse-side accept set.
+        assert_eq!(InterruptHandlerKind::Regular.arm_interrupt_type(), "IRQ");
+        assert_eq!(InterruptHandlerKind::NMI.arm_interrupt_type(), "SWI");
+        assert_eq!(InterruptHandlerKind::Fast.arm_interrupt_type(), "FIQ");
+        assert_eq!(
+            InterruptHandlerKind::Exception.arm_interrupt_type(),
+            "ABORT"
+        );
+        assert_eq!(InterruptHandlerKind::Trap.arm_interrupt_type(), "SWI");
+        assert_eq!(InterruptHandlerKind::Reset.arm_interrupt_type(), "RESET");
+        // Cross-cutting: name (lowercase) matches the
+        // `verum_ast::attr::InterruptKind` wire form. This pins
+        // the contract that the codegen-side enum and the AST-side
+        // enum stay in lockstep on the user-facing
+        // `@interrupt(...)` argument.
+        assert_eq!(InterruptHandlerKind::Regular.as_str(), "regular");
+        assert_eq!(InterruptHandlerKind::NMI.as_str(), "nmi");
+        assert_eq!(InterruptHandlerKind::Fast.as_str(), "fast");
+        assert_eq!(InterruptHandlerKind::Exception.as_str(), "exception");
+        assert_eq!(InterruptHandlerKind::Trap.as_str(), "trap");
+        assert_eq!(InterruptHandlerKind::Reset.as_str(), "reset");
     }
 }

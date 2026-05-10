@@ -82,15 +82,64 @@ pub enum VolatileOrdering {
     SeqCst,
 }
 
+/// Per-variant projection for [`VolatileOrdering`].
+///
+/// `name` is the canonical lowercase identifier (matches the C++ /
+/// LLVM-IR memory-ordering wire form: `"relaxed"`, `"acquire"`,
+/// `"release"`, `"seq_cst"`). `llvm_ordering` is the corresponding
+/// `AtomicOrdering` from `verum_llvm` — the legacy `to_llvm` was a
+/// 4-arm match; now folded into meta. Note: `Relaxed` maps to
+/// `AtomicOrdering::Monotonic` (not `Unordered` — Verum's "relaxed"
+/// matches C++'s `memory_order_relaxed`, which is LLVM's `monotonic`).
+#[derive(Debug, Clone, Copy)]
+pub struct VolatileOrderingMeta {
+    pub name: &'static str,
+    pub llvm_ordering: AtomicOrdering,
+}
+
 impl VolatileOrdering {
-    /// Convert to LLVM atomic ordering.
-    pub fn to_llvm(&self) -> AtomicOrdering {
+    pub const ALL: &'static [Self] =
+        &[Self::Relaxed, Self::Acquire, Self::Release, Self::SeqCst];
+
+    pub const fn meta(self) -> VolatileOrderingMeta {
         match self {
-            VolatileOrdering::Relaxed => AtomicOrdering::Monotonic,
-            VolatileOrdering::Acquire => AtomicOrdering::Acquire,
-            VolatileOrdering::Release => AtomicOrdering::Release,
-            VolatileOrdering::SeqCst => AtomicOrdering::SequentiallyConsistent,
+            Self::Relaxed => VolatileOrderingMeta {
+                name: "relaxed",
+                llvm_ordering: AtomicOrdering::Monotonic,
+            },
+            Self::Acquire => VolatileOrderingMeta {
+                name: "acquire",
+                llvm_ordering: AtomicOrdering::Acquire,
+            },
+            Self::Release => VolatileOrderingMeta {
+                name: "release",
+                llvm_ordering: AtomicOrdering::Release,
+            },
+            Self::SeqCst => VolatileOrderingMeta {
+                name: "seq_cst",
+                llvm_ordering: AtomicOrdering::SequentiallyConsistent,
+            },
         }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Convert to LLVM atomic ordering.
+    #[inline]
+    pub const fn to_llvm(&self) -> AtomicOrdering {
+        self.meta().llvm_ordering
     }
 }
 
@@ -107,19 +156,68 @@ pub enum RegisterWidth {
     Double,
 }
 
+/// Per-variant projection for [`RegisterWidth`].
+///
+/// `name` is the canonical short form (`"u8"`, `"u16"`, `"u32"`,
+/// `"u64"` — matches the Verum integer-type spelling). `size_bytes`
+/// is the width in bytes; `alignment` equals `size_bytes` (natural
+/// alignment for primitive integers). `llvm_type` stays as a method
+/// on the impl because it depends on a `TypeLowering` context that
+/// can't ride in `meta()`.
+#[derive(Debug, Clone, Copy)]
+pub struct RegisterWidthMeta {
+    pub name: &'static str,
+    pub size_bytes: u32,
+}
+
 impl RegisterWidth {
-    /// Get the size in bytes.
-    pub fn size_bytes(&self) -> u32 {
+    pub const ALL: &'static [Self] =
+        &[Self::Byte, Self::Half, Self::Word, Self::Double];
+
+    pub const fn meta(self) -> RegisterWidthMeta {
         match self {
-            RegisterWidth::Byte => 1,
-            RegisterWidth::Half => 2,
-            RegisterWidth::Word => 4,
-            RegisterWidth::Double => 8,
+            Self::Byte => RegisterWidthMeta {
+                name: "u8",
+                size_bytes: 1,
+            },
+            Self::Half => RegisterWidthMeta {
+                name: "u16",
+                size_bytes: 2,
+            },
+            Self::Word => RegisterWidthMeta {
+                name: "u32",
+                size_bytes: 4,
+            },
+            Self::Double => RegisterWidthMeta {
+                name: "u64",
+                size_bytes: 8,
+            },
         }
     }
 
+    pub fn from_str(s: &str) -> Option<Self> {
+        for v in Self::ALL {
+            if v.meta().name == s {
+                return Some(*v);
+            }
+        }
+        None
+    }
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Get the size in bytes.
+    #[inline]
+    pub const fn size_bytes(&self) -> u32 {
+        self.meta().size_bytes
+    }
+
     /// Get the alignment in bytes.
-    pub fn alignment(&self) -> u32 {
+    #[inline]
+    pub const fn alignment(&self) -> u32 {
         self.size_bytes()
     }
 
@@ -505,5 +603,64 @@ mod tests {
         other.volatile_loads = 2;
         stats.merge(&other);
         assert_eq!(stats.volatile_loads, 7);
+    }
+
+    // ----------------------------------------------------------------
+    // meta() consolidation drift pins for VolatileOrdering /
+    // RegisterWidth.
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn meta_pin_volatile_ordering_round_trip_and_llvm_mapping() {
+        assert_eq!(VolatileOrdering::ALL.len(), 4);
+        for v in VolatileOrdering::ALL {
+            let s = v.as_str();
+            assert_eq!(VolatileOrdering::from_str(s), Some(*v));
+        }
+        // Wire form matches the C++/LLVM-IR memory-ordering tokens.
+        assert_eq!(VolatileOrdering::Relaxed.as_str(), "relaxed");
+        assert_eq!(VolatileOrdering::Acquire.as_str(), "acquire");
+        assert_eq!(VolatileOrdering::Release.as_str(), "release");
+        assert_eq!(VolatileOrdering::SeqCst.as_str(), "seq_cst");
+        // Critical mapping: `Relaxed` → `Monotonic`, NOT `Unordered`
+        // (C++ memory_order_relaxed maps to LLVM monotonic). This
+        // pin protects against a refactor that swaps the two.
+        assert_eq!(
+            VolatileOrdering::Relaxed.to_llvm(),
+            AtomicOrdering::Monotonic
+        );
+        assert_eq!(
+            VolatileOrdering::SeqCst.to_llvm(),
+            AtomicOrdering::SequentiallyConsistent
+        );
+    }
+
+    #[test]
+    fn meta_pin_register_width_round_trip_size_and_alignment() {
+        assert_eq!(RegisterWidth::ALL.len(), 4);
+        for v in RegisterWidth::ALL {
+            let s = v.as_str();
+            assert_eq!(RegisterWidth::from_str(s), Some(*v));
+        }
+        // Wire form matches Verum integer-type spelling.
+        assert_eq!(RegisterWidth::Byte.as_str(), "u8");
+        assert_eq!(RegisterWidth::Half.as_str(), "u16");
+        assert_eq!(RegisterWidth::Word.as_str(), "u32");
+        assert_eq!(RegisterWidth::Double.as_str(), "u64");
+        // Sizes are 1/2/4/8 bytes (powers of 2). Alignment equals
+        // size_bytes (natural primitive alignment).
+        let pairs: &[(RegisterWidth, u32)] = &[
+            (RegisterWidth::Byte, 1),
+            (RegisterWidth::Half, 2),
+            (RegisterWidth::Word, 4),
+            (RegisterWidth::Double, 8),
+        ];
+        for (v, expected) in pairs {
+            assert_eq!(v.size_bytes(), *expected);
+            assert_eq!(v.alignment(), *expected);
+            assert_eq!(v.alignment(), v.size_bytes());
+            // Power-of-2 invariant.
+            assert!(v.size_bytes().is_power_of_two());
+        }
     }
 }
