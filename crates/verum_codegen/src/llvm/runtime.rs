@@ -8338,21 +8338,15 @@ impl<'ctx> RuntimeLowering<'ctx> {
             // ABI confusion only matters when the caller's declaration
             // mismatches). Since *we* control the callee's declaration
             // here, fixed-3 is safe.
-            let libsys = module
-                .get_function("__verum_libsys_open")
-                .unwrap_or_else(|| {
-                    let f = module.add_function(
-                        "__verum_libsys_open",
-                        i32_type
-                            .fn_type(&[ptr_type.into(), i32_type.into(), i32_type.into()], false),
-                        None,
-                    );
-                    f.add_attribute(
-                        verum_llvm::attributes::AttributeLoc::Function,
-                        self.context.create_string_attribute("verum.libsys", "open"),
-                    );
-                    f
-                });
+            let fn_type =
+                i32_type.fn_type(&[ptr_type.into(), i32_type.into(), i32_type.into()], false);
+            let libsys = super::error::get_or_declare_libsys_function(
+                module,
+                self.context,
+                "__verum_libsys_open",
+                fn_type,
+                "open",
+            );
             let ret = builder
                 .build_call(
                     libsys,
@@ -8432,21 +8426,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let fd_i32 = builder
                 .build_int_truncate(fd_i64, i32_type, "fd_i32")
                 .expect("close fd trunc");
-            let libsys_close = module
-                .get_function("__verum_libsys_close")
-                .unwrap_or_else(|| {
-                    let f = module.add_function(
-                        "__verum_libsys_close",
-                        i32_type.fn_type(&[i32_type.into()], false),
-                        None,
-                    );
-                    f.add_attribute(
-                        verum_llvm::attributes::AttributeLoc::Function,
-                        self.context
-                            .create_string_attribute("verum.libsys", "close"),
-                    );
-                    f
-                });
+            let fn_type = i32_type.fn_type(&[i32_type.into()], false);
+            let libsys_close = super::error::get_or_declare_libsys_function(
+                module,
+                self.context,
+                "__verum_libsys_close",
+                fn_type,
+                "close",
+            );
             let ret_i32 = builder
                 .build_call(libsys_close, &[fd_i32.into()], "ret")
                 .expect("close libsys call")
@@ -8512,21 +8499,15 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let fd_i32 = builder
                 .build_int_truncate(fd_i64, i32_type, "fd_i32")
                 .expect("read fd trunc");
-            let libsys_read = module
-                .get_function("__verum_libsys_read")
-                .unwrap_or_else(|| {
-                    let f = module.add_function(
-                        "__verum_libsys_read",
-                        i64_type
-                            .fn_type(&[i32_type.into(), ptr_type.into(), i64_type.into()], false),
-                        None,
-                    );
-                    f.add_attribute(
-                        verum_llvm::attributes::AttributeLoc::Function,
-                        self.context.create_string_attribute("verum.libsys", "read"),
-                    );
-                    f
-                });
+            let fn_type =
+                i64_type.fn_type(&[i32_type.into(), ptr_type.into(), i64_type.into()], false);
+            let libsys_read = super::error::get_or_declare_libsys_function(
+                module,
+                self.context,
+                "__verum_libsys_read",
+                fn_type,
+                "read",
+            );
             let ret = builder
                 .build_call(
                     libsys_read,
@@ -8594,21 +8575,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .expect("unlink ret trunc");
             builder.build_return(Some(&ret_i32)).expect("unlink return");
         } else {
-            let libsys = module
-                .get_function("__verum_libsys_unlink")
-                .unwrap_or_else(|| {
-                    let f = module.add_function(
-                        "__verum_libsys_unlink",
-                        i32_type.fn_type(&[ptr_type.into()], false),
-                        None,
-                    );
-                    f.add_attribute(
-                        verum_llvm::attributes::AttributeLoc::Function,
-                        self.context
-                            .create_string_attribute("verum.libsys", "unlink"),
-                    );
-                    f
-                });
+            let fn_type = i32_type.fn_type(&[ptr_type.into()], false);
+            let libsys = super::error::get_or_declare_libsys_function(
+                module,
+                self.context,
+                "__verum_libsys_unlink",
+                fn_type,
+                "unlink",
+            );
             let ret = builder
                 .build_call(libsys, &[path.into()], "ret")
                 .expect("unlink libsys call")
@@ -8661,22 +8635,15 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .expect("lseek syscall");
             builder.build_return(Some(&ret)).expect("lseek return");
         } else {
-            let libsys = module
-                .get_function("__verum_libsys_lseek")
-                .unwrap_or_else(|| {
-                    let f = module.add_function(
-                        "__verum_libsys_lseek",
-                        i64_type
-                            .fn_type(&[i32_type.into(), i64_type.into(), i32_type.into()], false),
-                        None,
-                    );
-                    f.add_attribute(
-                        verum_llvm::attributes::AttributeLoc::Function,
-                        self.context
-                            .create_string_attribute("verum.libsys", "lseek"),
-                    );
-                    f
-                });
+            let fn_type =
+                i64_type.fn_type(&[i32_type.into(), i64_type.into(), i32_type.into()], false);
+            let libsys = super::error::get_or_declare_libsys_function(
+                module,
+                self.context,
+                "__verum_libsys_lseek",
+                fn_type,
+                "lseek",
+            );
             let ret = builder
                 .build_call(
                     libsys,
@@ -8749,21 +8716,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .expect("access ret trunc");
             builder.build_return(Some(&ret_i32)).expect("access return");
         } else {
-            let libsys = module
-                .get_function("__verum_libsys_access")
-                .unwrap_or_else(|| {
-                    let f = module.add_function(
-                        "__verum_libsys_access",
-                        i32_type.fn_type(&[ptr_type.into(), i32_type.into()], false),
-                        None,
-                    );
-                    f.add_attribute(
-                        verum_llvm::attributes::AttributeLoc::Function,
-                        self.context
-                            .create_string_attribute("verum.libsys", "access"),
-                    );
-                    f
-                });
+            let fn_type = i32_type.fn_type(&[ptr_type.into(), i32_type.into()], false);
+            let libsys = super::error::get_or_declare_libsys_function(
+                module,
+                self.context,
+                "__verum_libsys_access",
+                fn_type,
+                "access",
+            );
             let ret = builder
                 .build_call(libsys, &[path.into(), mode_i32.into()], "ret")
                 .expect("access libsys call")
