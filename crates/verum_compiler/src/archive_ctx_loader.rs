@@ -814,6 +814,34 @@ impl ArchiveCtxCache {
                 to_add.push("Result");
             }
         }
+        // **Transitive foundation: always load Maybe + Result.**
+        //
+        // Stdlib bodies pervasively call `self.value.is_some()` /
+        // `result.unwrap()` / etc. — methods on Maybe and Result that
+        // need to be in `ctx.functions` for the dispatcher to resolve
+        // them at runtime.  Without this, user code that mounts a
+        // higher-level type (e.g. `OnceCell<T>` whose body internally
+        // calls `Maybe.is_some()`) hits "method 'Maybe.is_some' not
+        // found on receiver of runtime kind Object" because the
+        // archive's `core.base.maybe` entry never decodes — the
+        // wanted-prefix walker only sees `OnceCell` in user code, and
+        // the variant-tag-collision force-load above only triggers on
+        // bare `Some(x)` / `None` syntax.
+        //
+        // Maybe and Result are foundational — every stdlib non-trivial
+        // type returns one or the other, every error path uses them.
+        // The cost of always loading them (~70 functions for Maybe,
+        // ~80 for Result) is bounded by the archive's own size and
+        // amortised by the parallel-decode optimisation below.
+        wanted_module_prefixes.insert("core.base.maybe".to_string());
+        wanted_module_prefixes.insert("core.base.result".to_string());
+        wanted_module_prefixes.insert("core.base".to_string());
+        if !wanted.contains("Maybe") {
+            to_add.push("Maybe");
+        }
+        if !wanted.contains("Result") {
+            to_add.push("Result");
+        }
         for name in to_add {
             wanted.insert(name.to_string());
         }
