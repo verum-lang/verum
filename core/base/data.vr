@@ -850,8 +850,8 @@ implement JsonParser {
         }
     }
 
-    fn match_literal(&mut self, lit: &str) -> Bool {
-        let lit_text = lit.to_text();
+    fn match_literal(&mut self, lit: &Text) -> Bool {
+        let lit_text = lit.clone();
         let lit_len = lit_text.len();
         if self.pos + lit_len > self.input.len() {
             return false;

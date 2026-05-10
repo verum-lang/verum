@@ -425,7 +425,7 @@ fn parse_atom(s: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
     parse_atom_with_op(op, &rest)
 }
 
-fn parse_atom_with_op(op: &str, rest: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
+fn parse_atom_with_op(op: &Text, rest: &Text) -> Result<SemVerConstraint, SemVerConstraintError> {
     // Detect x-range: the version contains 'x', 'X', or '*' as a component.
     let x_ranged = is_x_ranged(rest);
     if x_ranged {

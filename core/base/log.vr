@@ -196,6 +196,26 @@ public type Logger is protocol {
 };
 
 // =============================================================================
+// Free-function level constructors
+// =============================================================================
+
+/// Constructor for the Trace severity. Intended for `mount` import sites
+/// that prefer free functions over `LogLevel.Trace`.
+public fn level_trace() -> LogLevel { Trace }
+
+/// Constructor for the Debug severity.
+public fn level_debug() -> LogLevel { Debug }
+
+/// Constructor for the Info severity.
+public fn level_info()  -> LogLevel { Info }
+
+/// Constructor for the Warn severity.
+public fn level_warn()  -> LogLevel { Warn }
+
+/// Constructor for the Error severity.
+public fn level_error() -> LogLevel { Error }
+
+// =============================================================================
 // Log Record
 // =============================================================================
 
@@ -209,6 +229,9 @@ public type LogRecord is {
     level: LogLevel,
     /// The log message.
     message: Text,
+    /// Structured key/value fields attached to this record.
+    /// Empty list when the call site only supplies a level + message.
+    fields: List<(Text, Text)>,
     /// The module path where the log was emitted.
     module_path: Maybe<Text>,
     /// The source file where the log was emitted.
@@ -218,11 +241,25 @@ public type LogRecord is {
 };
 
 implement LogRecord {
-    /// Create a new log record.
-    public fn new(level: LogLevel, message: Text) -> LogRecord {
+    /// Create a new log record with structured fields.
+    public fn new(level: LogLevel, message: Text, fields: List<(Text, Text)>) -> LogRecord {
         LogRecord {
             level: level,
             message: message,
+            fields: fields,
+            module_path: None,
+            file: None,
+            line: None,
+        }
+    }
+
+    /// Create a new log record with no structured fields. Convenience
+    /// for the common level-plus-message construction site.
+    public fn simple(level: LogLevel, message: Text) -> LogRecord {
+        LogRecord {
+            level: level,
+            message: message,
+            fields: [],
             module_path: None,
             file: None,
             line: None,
@@ -234,6 +271,7 @@ implement LogRecord {
         LogRecord {
             level: self.level,
             message: self.message,
+            fields: self.fields,
             module_path: Some(path),
             file: self.file,
             line: self.line,
@@ -245,6 +283,7 @@ implement LogRecord {
         LogRecord {
             level: self.level,
             message: self.message,
+            fields: self.fields,
             module_path: self.module_path,
             file: Some(file),
             line: self.line,
@@ -256,9 +295,24 @@ implement LogRecord {
         LogRecord {
             level: self.level,
             message: self.message,
+            fields: self.fields,
             module_path: self.module_path,
             file: self.file,
             line: Some(line),
+        }
+    }
+
+    /// Append a structured field to this record (chainable builder).
+    public fn with_field(self, key: Text, value: Text) -> LogRecord {
+        let mut fields = self.fields;
+        fields.push((key, value));
+        LogRecord {
+            level: self.level,
+            message: self.message,
+            fields: fields,
+            module_path: self.module_path,
+            file: self.file,
+            line: self.line,
         }
     }
 }
@@ -268,9 +322,130 @@ implement Clone for LogRecord {
         LogRecord {
             level: self.level.clone(),
             message: self.message.clone(),
+            fields: self.fields.clone(),
             module_path: self.module_path.clone(),
             file: self.file.clone(),
             line: self.line.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// LogRecordBuilder
+// =============================================================================
+
+/// Imperative builder for `LogRecord` — useful where a log site is
+/// assembled across multiple control-flow paths (e.g. attaching
+/// fields conditionally before the record is finalised).
+///
+/// All setters are chainable; `build()` materialises an immutable
+/// `LogRecord`. Defaults: level = Info, message = "", fields = [].
+public type LogRecordBuilder is {
+    rec_level: LogLevel,
+    rec_message: Text,
+    rec_fields: List<(Text, Text)>,
+    rec_module_path: Maybe<Text>,
+    rec_file: Maybe<Text>,
+    rec_line: Maybe<Int>,
+};
+
+implement LogRecordBuilder {
+    /// Create an empty builder. Defaults: Info / empty-message /
+    /// no fields / no source location.
+    public fn new() -> LogRecordBuilder {
+        LogRecordBuilder {
+            rec_level: Info,
+            rec_message: "",
+            rec_fields: [],
+            rec_module_path: None,
+            rec_file: None,
+            rec_line: None,
+        }
+    }
+
+    /// Override the severity level.
+    public fn level(self, lvl: LogLevel) -> LogRecordBuilder {
+        LogRecordBuilder {
+            rec_level: lvl,
+            rec_message: self.rec_message,
+            rec_fields: self.rec_fields,
+            rec_module_path: self.rec_module_path,
+            rec_file: self.rec_file,
+            rec_line: self.rec_line,
+        }
+    }
+
+    /// Override the message.
+    public fn message(self, msg: Text) -> LogRecordBuilder {
+        LogRecordBuilder {
+            rec_level: self.rec_level,
+            rec_message: msg,
+            rec_fields: self.rec_fields,
+            rec_module_path: self.rec_module_path,
+            rec_file: self.rec_file,
+            rec_line: self.rec_line,
+        }
+    }
+
+    /// Append a structured field.
+    public fn field(self, key: Text, value: Text) -> LogRecordBuilder {
+        let mut fields = self.rec_fields;
+        fields.push((key, value));
+        LogRecordBuilder {
+            rec_level: self.rec_level,
+            rec_message: self.rec_message,
+            rec_fields: fields,
+            rec_module_path: self.rec_module_path,
+            rec_file: self.rec_file,
+            rec_line: self.rec_line,
+        }
+    }
+
+    /// Set the module path.
+    public fn module_path(self, path: Text) -> LogRecordBuilder {
+        LogRecordBuilder {
+            rec_level: self.rec_level,
+            rec_message: self.rec_message,
+            rec_fields: self.rec_fields,
+            rec_module_path: Some(path),
+            rec_file: self.rec_file,
+            rec_line: self.rec_line,
+        }
+    }
+
+    /// Set the source file.
+    public fn file(self, file: Text) -> LogRecordBuilder {
+        LogRecordBuilder {
+            rec_level: self.rec_level,
+            rec_message: self.rec_message,
+            rec_fields: self.rec_fields,
+            rec_module_path: self.rec_module_path,
+            rec_file: Some(file),
+            rec_line: self.rec_line,
+        }
+    }
+
+    /// Set the source line.
+    public fn line(self, line: Int) -> LogRecordBuilder {
+        LogRecordBuilder {
+            rec_level: self.rec_level,
+            rec_message: self.rec_message,
+            rec_fields: self.rec_fields,
+            rec_module_path: self.rec_module_path,
+            rec_file: self.rec_file,
+            rec_line: Some(line),
+        }
+    }
+
+    /// Materialise the record.
+    public fn build(self) -> LogRecord {
+        LogRecord {
+            level: self.rec_level,
+            message: self.rec_message,
+            fields: self.rec_fields,
+            module_path: self.rec_module_path,
+            file: self.rec_file,
+            line: self.rec_line,
         }
     }
 }

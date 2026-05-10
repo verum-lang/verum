@@ -338,9 +338,14 @@ impl WellKnownType {
     /// the precompiler sometimes bundles inherent methods under the
     /// grandparent entry depending on the module hierarchy.
     ///
-    /// Returns an empty slice for types without a canonical archive
-    /// home (primitives whose methods are interpreter-built-in only:
-    /// Int, Float, Bool, Char) — those don't need archive loading.
+    /// Primitive nominals (Int, Float, Bool, Char) point at
+    /// `core.base.primitives` (the canonical home declared in
+    /// `core/base/primitives.vr`) and the `core.base` bundle parent
+    /// — Verum-defined inherent / protocol methods on those primitives
+    /// (e.g. `Bool.cmp`, `Float.partial_cmp`, `Char.to_lowercase`)
+    /// live in that file even though arithmetic etc. are interpreter
+    /// intrinsics; the archive walker must reach the bundle to import
+    /// them when user code outside `core.*` calls those methods.
     ///
     /// **Source-of-truth contract**: each returned string is a
     /// candidate archive-entry name; at least ONE entry per well-known
@@ -407,9 +412,14 @@ impl WellKnownType {
             Self::Never => &["core.base"],
             Self::Ordering => &["core.base.ordering", "core.base"],
             Self::Range => &["core.base.range", "core.base"],
-            // Primitives — methods are interpreter-built-in only,
-            // no archive load needed.
-            Self::Int | Self::Float | Self::Bool => &[],
+            // Primitives — arithmetic / bitwise are interpreter
+            // intrinsics, but Verum-defined methods (e.g. Bool.cmp,
+            // Float.partial_cmp, Float.total_cmp) live in
+            // `core/base/primitives.vr`; archive entry is bundled
+            // under the `core.base` parent.
+            Self::Int | Self::Float | Self::Bool => {
+                &["core.base.primitives", "core.base"]
+            }
         }
     }
 }

@@ -2870,6 +2870,71 @@ pub(super) fn dispatch_primitive_method(
                 };
                 Value::from_bool(v != other)
             }
+            // Ordering comparisons: lt/le/gt/ge/cmp/partial_cmp.
+            // The Verum-side `Ord` impl for Float assumes non-NaN; NaN
+            // propagates to a None-shaped Maybe<Ordering> via `partial_cmp`.
+            // For total `cmp` we treat any NaN as Equal (per the Verum
+            // semantic that NaN ordering is a separate testable concern,
+            // documented in core/base/ordering tests).
+            "lt" => {
+                let other_val = state.get_reg(Reg(args.start.0));
+                let other = if is_cbgr_ref(&other_val) {
+                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
+                    state.registers.get_absolute(abs_index).as_f64()
+                } else {
+                    other_val.as_f64()
+                };
+                Value::from_bool(v < other)
+            }
+            "le" => {
+                let other_val = state.get_reg(Reg(args.start.0));
+                let other = if is_cbgr_ref(&other_val) {
+                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
+                    state.registers.get_absolute(abs_index).as_f64()
+                } else {
+                    other_val.as_f64()
+                };
+                Value::from_bool(v <= other)
+            }
+            "gt" => {
+                let other_val = state.get_reg(Reg(args.start.0));
+                let other = if is_cbgr_ref(&other_val) {
+                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
+                    state.registers.get_absolute(abs_index).as_f64()
+                } else {
+                    other_val.as_f64()
+                };
+                Value::from_bool(v > other)
+            }
+            "ge" => {
+                let other_val = state.get_reg(Reg(args.start.0));
+                let other = if is_cbgr_ref(&other_val) {
+                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
+                    state.registers.get_absolute(abs_index).as_f64()
+                } else {
+                    other_val.as_f64()
+                };
+                Value::from_bool(v >= other)
+            }
+            "cmp" => {
+                let other_val = state.get_reg(Reg(args.start.0));
+                let other = if is_cbgr_ref(&other_val) {
+                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
+                    state.registers.get_absolute(abs_index).as_f64()
+                } else {
+                    other_val.as_f64()
+                };
+                let ord = if v.is_nan() || other.is_nan() {
+                    std::cmp::Ordering::Equal
+                } else if v < other {
+                    std::cmp::Ordering::Less
+                } else if v > other {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Equal
+                };
+                return Ok(Some(make_ordering(state, ord)?));
+            }
             _ => return Ok(None),
         };
         return Ok(Some(result));
@@ -6051,6 +6116,69 @@ pub(super) fn dispatch_primitive_method(
                     other_val.as_bool()
                 };
                 Value::from_bool(v != other)
+            }
+            // Ord protocol comparison methods — convention: false < true.
+            // Mirrors `core/base/primitives.vr::implement Ord for Bool`.
+            "lt" => {
+                let other_val = state.get_reg(Reg(args.start.0));
+                let other = if is_cbgr_ref(&other_val) {
+                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
+                    state.registers.get_absolute(abs_index).as_bool()
+                } else {
+                    other_val.as_bool()
+                };
+                Value::from_bool(!v && other)
+            }
+            "le" => {
+                let other_val = state.get_reg(Reg(args.start.0));
+                let other = if is_cbgr_ref(&other_val) {
+                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
+                    state.registers.get_absolute(abs_index).as_bool()
+                } else {
+                    other_val.as_bool()
+                };
+                Value::from_bool(!v || other)
+            }
+            "gt" => {
+                let other_val = state.get_reg(Reg(args.start.0));
+                let other = if is_cbgr_ref(&other_val) {
+                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
+                    state.registers.get_absolute(abs_index).as_bool()
+                } else {
+                    other_val.as_bool()
+                };
+                Value::from_bool(v && !other)
+            }
+            "ge" => {
+                let other_val = state.get_reg(Reg(args.start.0));
+                let other = if is_cbgr_ref(&other_val) {
+                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
+                    state.registers.get_absolute(abs_index).as_bool()
+                } else {
+                    other_val.as_bool()
+                };
+                Value::from_bool(v || !other)
+            }
+            "cmp" => {
+                let other_val = state.get_reg(Reg(args.start.0));
+                let other = if is_cbgr_ref(&other_val) {
+                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
+                    state.registers.get_absolute(abs_index).as_bool()
+                } else {
+                    other_val.as_bool()
+                };
+                let ord = match (v, other) {
+                    (false, true) => std::cmp::Ordering::Less,
+                    (true, false) => std::cmp::Ordering::Greater,
+                    _ => std::cmp::Ordering::Equal,
+                };
+                return Ok(Some(make_ordering(state, ord)?));
+            }
+            "not" => Value::from_bool(!v),
+            "clone" => Value::from_bool(v),
+            "to_text" => {
+                let s = if v { "true" } else { "false" };
+                return Ok(Some(alloc_string_value(state, s)?));
             }
             _ => return Ok(None),
         };
