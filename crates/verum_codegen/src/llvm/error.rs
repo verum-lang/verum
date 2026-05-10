@@ -228,6 +228,16 @@ pub trait CallSiteExt<'ctx> {
     /// or the call site has no usable return).
     fn basic_value_or(self, msg: &str) -> Result<verum_llvm::values::BasicValueEnum<'ctx>>;
 
+    /// Like [`basic_value_or`](Self::basic_value_or) but the message is
+    /// produced lazily by `f` — only invoked on the void-return error
+    /// path.  Use when the message contains `format!()` interpolation
+    /// that would be wasted work on the (overwhelmingly common)
+    /// success path.
+    fn basic_value_or_else<F: FnOnce() -> String>(
+        self,
+        f: F,
+    ) -> Result<verum_llvm::values::BasicValueEnum<'ctx>>;
+
     /// Same as [`basic_value_or`](Self::basic_value_or) but panics on
     /// missing return rather than producing an error.  Use in emit
     /// paths where a void-return from a fixed-shape helper would be a
@@ -241,6 +251,16 @@ impl<'ctx> CallSiteExt<'ctx> for verum_llvm::values::CallSiteValue<'ctx> {
         self.try_as_basic_value()
             .basic()
             .ok_or_else(|| LlvmLoweringError::Internal(msg.into()))
+    }
+
+    #[inline]
+    fn basic_value_or_else<F: FnOnce() -> String>(
+        self,
+        f: F,
+    ) -> Result<verum_llvm::values::BasicValueEnum<'ctx>> {
+        self.try_as_basic_value()
+            .basic()
+            .ok_or_else(|| LlvmLoweringError::Internal(f().into()))
     }
 
     /// Variant of [`basic_value_or`](Self::basic_value_or) that
