@@ -9080,10 +9080,8 @@ fn lower_call<'ctx>(
                     "__metal_gpu_core_count" => "verum_metal_gpu_core_count",
                     _ => unreachable!(),
                 };
-                let c_fn = module.get_function(c_name).unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[], false);
-                    module.add_function(c_name, fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[], false);
+        let c_fn = super::error::get_or_declare_function(module, c_name, fn_type);
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &[], "metal_result")
@@ -9103,10 +9101,8 @@ fn lower_call<'ctx>(
                     "__metal_buffer_length" => "verum_metal_buffer_length",
                     _ => unreachable!(),
                 };
-                let c_fn = module.get_function(c_name).unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function(c_name, fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let c_fn = super::error::get_or_declare_function(module, c_name, fn_type);
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &[arg.into()], "metal_result")
@@ -9142,10 +9138,8 @@ fn lower_call<'ctx>(
                     _ => unreachable!(),
                 };
                 let void_type = ctx.types().void_type();
-                let c_fn = module.get_function(c_name).unwrap_or_else(|| {
-                    let fn_type = void_type.fn_type(&[i64_type.into()], false);
-                    module.add_function(c_name, fn_type, None)
-                });
+                let fn_type = void_type.fn_type(&[i64_type.into()], false);
+        let c_fn = super::error::get_or_declare_function(module, c_name, fn_type);
                 ctx.builder()
                     .build_call(c_fn, &[arg.into()], "")
                     .or_llvm_err()?;
@@ -9217,19 +9211,15 @@ fn lower_call<'ctx>(
                     (0..5).map(|_| i64_type.into()).collect();
                 if func_name == "__metal_dispatch_1d" {
                     let void_type = ctx.types().void_type();
-                    let c_fn = module.get_function(c_name).unwrap_or_else(|| {
-                        let fn_type = void_type.fn_type(&param_types, false);
-                        module.add_function(c_name, fn_type, None)
-                    });
+                    let fn_type = void_type.fn_type(&param_types, false);
+        let c_fn = super::error::get_or_declare_function(module, c_name, fn_type);
                     ctx.builder()
                         .build_call(c_fn, &call_args, "")
                         .or_llvm_err()?;
                     ctx.set_register(dst.0, i64_type.const_int(0, false).into());
                 } else {
-                    let c_fn = module.get_function(c_name).unwrap_or_else(|| {
-                        let fn_type = i64_type.fn_type(&param_types, false);
-                        module.add_function(c_name, fn_type, None)
-                    });
+                    let fn_type = i64_type.fn_type(&param_types, false);
+        let c_fn = super::error::get_or_declare_function(module, c_name, fn_type);
                     let result = ctx
                         .builder()
                         .build_call(c_fn, &call_args, "metal_async")
@@ -9373,10 +9363,8 @@ fn lower_call<'ctx>(
                     _ => unreachable!(),
                 };
                 let arg = as_f64(ctx, ctx.get_register(args.start.0)?, "math_arg")?;
-                let intrinsic_fn = module.get_function(llvm_name).unwrap_or_else(|| {
-                    let fn_type = f64_type.fn_type(&[f64_type.into()], false);
-                    module.add_function(llvm_name, fn_type, None)
-                });
+                let fn_type = f64_type.fn_type(&[f64_type.into()], false);
+        let intrinsic_fn = super::error::get_or_declare_function(module, llvm_name, fn_type);
                 let result = ctx
                     .builder()
                     .build_call(intrinsic_fn, &[arg.into()], "math_result")
@@ -9401,10 +9389,8 @@ fn lower_call<'ctx>(
                 };
                 let a = as_f64(ctx, ctx.get_register(args.start.0)?, "math_a")?;
                 let b = as_f64(ctx, ctx.get_register(args.start.0 + 1)?, "math_b")?;
-                let intrinsic_fn = module.get_function(llvm_name).unwrap_or_else(|| {
-                    let fn_type = f64_type.fn_type(&[f64_type.into(), f64_type.into()], false);
-                    module.add_function(llvm_name, fn_type, None)
-                });
+                let fn_type = f64_type.fn_type(&[f64_type.into(), f64_type.into()], false);
+        let intrinsic_fn = super::error::get_or_declare_function(module, llvm_name, fn_type);
                 let result = ctx
                     .builder()
                     .build_call(intrinsic_fn, &[a.into(), b.into()], "math_result")
@@ -9643,10 +9629,8 @@ fn lower_call<'ctx>(
                 }
                 let param_types: Vec<BasicMetadataTypeEnum> =
                     (0..arg_count).map(|_| i64_type.into()).collect();
-                let c_fn = module.get_function(c_name).unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&param_types, false);
-                    module.add_function(c_name, fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&param_types, false);
+        let c_fn = super::error::get_or_declare_function(module, c_name, fn_type);
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &call_args, "result")
@@ -9679,10 +9663,8 @@ fn lower_call<'ctx>(
                 } else {
                     "verum_alloc_zeroed"
                 };
-                let alloc_fn = module.get_function(c_name).unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function(c_name, fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let alloc_fn = super::error::get_or_declare_function(module, c_name, fn_type);
                 let result = ctx
                     .builder()
                     .build_call(alloc_fn, &[size_val.into()], "alloc_ptr")
@@ -9808,10 +9790,8 @@ fn lower_call<'ctx>(
                         }
                     })
                     .collect();
-                let c_fn = module.get_function(c_name).unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&param_types, false);
-                    module.add_function(c_name, fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&param_types, false);
+        let c_fn = super::error::get_or_declare_function(module, c_name, fn_type);
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &call_args, "net_result")
@@ -9844,10 +9824,8 @@ fn lower_call<'ctx>(
                 }
                 let param_types: Vec<BasicMetadataTypeEnum> =
                     (0..args.count).map(|_| i64_type.into()).collect();
-                let c_fn = module.get_function(c_name).unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&param_types, false);
-                    module.add_function(c_name, fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&param_types, false);
+        let c_fn = super::error::get_or_declare_function(module, c_name, fn_type);
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &call_args, "ctx_result")
@@ -10208,10 +10186,8 @@ fn lower_call<'ctx>(
                     "__socket_get_error_raw" => "verum_socket_get_error",
                     _ => unreachable!(),
                 };
-                let c_fn = module.get_function(c_name).unwrap_or_else(|| {
-                    let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    module.add_function(c_name, fn_type, None)
-                });
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+        let c_fn = super::error::get_or_declare_function(module, c_name, fn_type);
                 let result = ctx
                     .builder()
                     .build_call(c_fn, &[fd_val.into()], "sock_result")
