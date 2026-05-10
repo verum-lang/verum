@@ -3727,46 +3727,19 @@ pub struct HigherPathConstructor {
 /// Usage quantities: `0` (erased, compile-time only), `1` (linear, use exactly once),
 /// `omega` (unrestricted, use any number of times). Graded modalities enable
 /// resource tracking: `fn linear_use(x: Text @1) -> Text @1`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Quantity {
-    /// Zero uses (erased at runtime)
-    Zero,
-    /// Exactly one use (linear)
-    One,
-    /// Unlimited uses (unrestricted)
-    Omega,
-}
-
-impl Quantity {
-    /// Multiply quantities (for function application)
-    pub fn mul(self, other: Quantity) -> Quantity {
-        match (self, other) {
-            (Quantity::Zero, _) | (_, Quantity::Zero) => Quantity::Zero,
-            (Quantity::One, Quantity::One) => Quantity::One,
-            _ => Quantity::Omega,
-        }
-    }
-
-    /// Add quantities (for pattern matching branches)
-    pub fn add(self, other: Quantity) -> Quantity {
-        match (self, other) {
-            (Quantity::Zero, q) | (q, Quantity::Zero) => q,
-            (Quantity::One, Quantity::One) => Quantity::Omega, // Used in both branches
-            _ => Quantity::Omega,
-        }
-    }
-
-    /// Check if this quantity is subsumed by another
-    /// 0 <: 1 <: ω
-    pub fn subsumed_by(self, other: Quantity) -> bool {
-        match (self, other) {
-            (_, Quantity::Omega) => true,
-            (Quantity::Zero, _) => true,
-            (Quantity::One, Quantity::One) => true,
-            _ => false,
-        }
-    }
-}
+///
+/// Re-exported from `verum_types::ty::Quantity` so the QTT lattice
+/// has a single canonical home.  Pre-collapse this module had a
+/// 3-variant subset of the verum_types 5-variant version (the
+/// latter additionally carries `AtMost(u32)` and `Graded(u32)`).
+/// The mul/add/subsumed_by methods on the canonical type cover
+/// every cell of the 5-variant lattice; the previous 3-variant
+/// duplicate's add() was *imprecise* (`1 + 1 = Omega`) where the
+/// canonical add() returns the precise `AtMost(2)` upper bound.
+/// Production code in verum_smt has zero callers of those
+/// methods — only test fixtures referenced them, and they have
+/// been updated to assert the more-precise canonical semantics.
+pub use verum_types::ty::Quantity;
 
 /// Quantified type binding
 ///
@@ -3937,6 +3910,25 @@ impl SubsetType {
 #[cfg(test)]
 mod finalize_tests {
     use super::*;
+
+    /// Alias contract: `crate::dependent::Quantity` is a
+    /// `pub use` re-export of `verum_types::ty::Quantity`.
+    /// Pre-collapse the two were structural duplicates — the
+    /// smt one a 3-variant subset of the 5-variant verum_types
+    /// version.  Asserts both paths resolve to the same nominal
+    /// type and the variant constructors round-trip.
+    #[test]
+    fn quantity_alias_contract() {
+        // Compile-time alias check via cross-path assignment.
+        let q: Quantity = verum_types::ty::Quantity::Zero;
+        assert_eq!(q, Quantity::Zero);
+
+        // Reverse direction + AtMost / Graded variants
+        // (previously unreachable via the smt 3-variant
+        // duplicate, now part of the canonical surface).
+        let canonical: verum_types::ty::Quantity = Quantity::AtMost(5);
+        assert_eq!(canonical, verum_types::ty::Quantity::AtMost(5));
+    }
 
     /// An InductiveType that hasn't been finalised carries None for
     /// both principles — callers that inject it into proof tactics
