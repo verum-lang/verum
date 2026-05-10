@@ -2141,11 +2141,7 @@ pub fn lower_instruction<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[lhs_i64.into()], "cmpi_str_a_ptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("text_get_ptr: expected return value")
-                    })?
+            .basic_value_or("text_get_ptr: expected return value")?
                     .into_pointer_value();
 
                 let rhs_i64 = as_i64(ctx, rhs_raw, "cmpi_str_b")?;
@@ -2153,11 +2149,7 @@ pub fn lower_instruction<'ctx>(
                     .builder()
                     .build_call(text_get_ptr_fn, &[rhs_i64.into()], "cmpi_str_b_ptr")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("text_get_ptr: expected return value")
-                    })?
+            .basic_value_or("text_get_ptr: expected return value")?
                     .into_pointer_value();
 
                 let _ = i32_type; // unused after libc-free migration
@@ -4890,11 +4882,7 @@ pub fn lower_instruction<'ctx>(
                         "set_contains",
                     )
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("Set.contains should return value")
-                    })?;
+            .basic_value_or("Set.contains should return value")?;
                 ctx.set_register(dst.0, result);
             } else {
                 ctx.set_register(dst.0, i64_type.const_int(0, false).into());
@@ -7181,11 +7169,7 @@ pub fn lower_instruction<'ctx>(
                     "mem_alloc_tensor",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("MemAllocTensor: expected return value")
-                })?;
+            .basic_value_or("MemAllocTensor: expected return value")?;
             ctx.set_register(dst.0, result);
             Ok(())
         }
@@ -7233,11 +7217,7 @@ pub fn lower_instruction<'ctx>(
                     "rms_norm",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("TensorRmsNorm: expected return value")
-                })?;
+            .basic_value_or("TensorRmsNorm: expected return value")?;
             ctx.set_register(dst.0, result);
             Ok(())
         }
@@ -7312,11 +7292,7 @@ pub fn lower_instruction<'ctx>(
                     "scatter",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("TensorScatter: expected return value")
-                })?;
+            .basic_value_or("TensorScatter: expected return value")?;
             ctx.set_register(dst.0, result);
             Ok(())
         }
@@ -7369,11 +7345,7 @@ pub fn lower_instruction<'ctx>(
                     "flash_attn",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("TensorFlashAttention: expected return value")
-                })?;
+            .basic_value_or("TensorFlashAttention: expected return value")?;
             ctx.set_register(dst.0, result);
             Ok(())
         }
@@ -7388,11 +7360,7 @@ pub fn lower_instruction<'ctx>(
                 .builder()
                 .build_call(cv_fn, &[src_val.into()], "contiguous_view")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("TensorContiguousView: expected return value")
-                })?;
+            .basic_value_or("TensorContiguousView: expected return value")?;
             ctx.set_register(dst.0, result);
             Ok(())
         }
@@ -11819,11 +11787,7 @@ fn lower_call_method<'ctx>(
                     .builder()
                     .build_call(generic_hash_fn, &[recv.into()], "generic_hash")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("verum_generic_hash: no return value")
-                    })?;
+            .basic_value_or("verum_generic_hash: no return value")?;
                 ctx.set_register(dst.0, hash_result);
                 return Ok(());
             }
@@ -11842,11 +11806,7 @@ fn lower_call_method<'ctx>(
                     .builder()
                     .build_call(generic_eq_fn, &[lhs.into(), rhs.into()], "dyn_generic_eq")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("verum_generic_eq: no return value")
-                    })?
+            .basic_value_or("verum_generic_eq: no return value")?
                     .into_int_value();
                 ctx.set_register(dst.0, eq_result.into());
                 return Ok(());
@@ -11959,11 +11919,7 @@ fn lower_call_method<'ctx>(
                     .builder()
                     .build_call(generic_hash_fn, &[recv.into()], "generic_hash")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("verum_generic_hash: no return value")
-                    })?;
+            .basic_value_or("verum_generic_hash: no return value")?;
                 ctx.set_register(dst.0, hash_result);
                 return Ok(());
             }
@@ -15391,11 +15347,7 @@ fn lower_call_method<'ctx>(
                 ctx.builder()
                     .build_call(text_get_ptr_fn, &[i64_val.into()], $name)
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("text_get_ptr: expected return value")
-                    })?
+            .basic_value_or("text_get_ptr: expected return value")?
                     .into_pointer_value()
             }};
         }
@@ -15544,11 +15496,7 @@ fn lower_call_method<'ctx>(
                     .builder()
                     .build_call(text_from_cstr_fn, &[char_result.into()], "join_text")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("text_from_cstr: expected return value")
-                    })?;
+            .basic_value_or("text_from_cstr: expected return value")?;
                 ctx.set_register(dst.0, text_result);
                 ctx.mark_text_register(dst.0);
                 return Ok(());
@@ -17416,21 +17364,13 @@ fn lower_arith_extended<'ctx>(
                 .builder()
                 .build_call(log_func, &[a.into()], "log_a")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("logbase: log(a) expected return value")
-                })?
+            .basic_value_or("logbase: log(a) expected return value")?
                 .into_float_value();
             let log_b = ctx
                 .builder()
                 .build_call(log_func, &[b.into()], "log_b")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("logbase: log(b) expected return value")
-                })?
+            .basic_value_or("logbase: log(b) expected return value")?
                 .into_float_value();
             let result = ctx
                 .builder()
@@ -18355,11 +18295,7 @@ fn lower_cbgr_extended<'ctx>(
                     .builder()
                     .build_call(cur_epoch_fn, &[], "epoch")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("current_epoch: expected return value")
-                    })?;
+            .basic_value_or("current_epoch: expected return value")?;
                 ctx.set_register(dst, result);
             } else {
                 // C fallback
@@ -18371,11 +18307,7 @@ fn lower_cbgr_extended<'ctx>(
                     .builder()
                     .build_call(epoch_fn, &[], "epoch")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("GetEpoch: expected return value")
-                    })?;
+            .basic_value_or("GetEpoch: expected return value")?;
                 ctx.set_register(dst, result);
             }
             Ok(())
@@ -18413,11 +18345,7 @@ fn lower_cbgr_extended<'ctx>(
                     .builder()
                     .build_call(is_valid_fn, &[ref_as_i64.into()], "cbgr_valid")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("ThinRef.is_valid: expected return value")
-                    })?;
+            .basic_value_or("ThinRef.is_valid: expected return value")?;
                 let extended = ctx
                     .builder()
                     .build_int_z_extend(result.into_int_value(), i64_ty, "cbgr_ext")
@@ -18434,11 +18362,7 @@ fn lower_cbgr_extended<'ctx>(
                     .builder()
                     .build_call(check_fn, &[ptr_val.into()], "cbgr_check")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("CbgrCheck: expected return value")
-                    })?;
+            .basic_value_or("CbgrCheck: expected return value")?;
                 let extended = ctx
                     .builder()
                     .build_int_z_extend(result.into_int_value(), i64_ty, "cbgr_ext")
@@ -19086,11 +19010,7 @@ fn lower_cbgr_extended<'ctx>(
                     .builder()
                     .build_call(is_valid_fn, &[ref_as_i64.into()], "cbgr_fat_valid")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("FatRef.is_valid: expected return value")
-                    })?;
+            .basic_value_or("FatRef.is_valid: expected return value")?;
                 let extended = ctx
                     .builder()
                     .build_int_z_extend(result.into_int_value(), i64_ty, "cbgr_fat_ext")
@@ -19117,11 +19037,7 @@ fn lower_cbgr_extended<'ctx>(
                     .builder()
                     .build_call(check_fn, &[ptr_val.into()], "cbgr_check_fat")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("CbgrCheckFat: expected return value")
-                    })?;
+            .basic_value_or("CbgrCheckFat: expected return value")?;
                 let extended = ctx
                     .builder()
                     .build_int_z_extend(result.into_int_value(), i64_ty, "cbgr_fat_ext")
@@ -19150,11 +19066,7 @@ fn lower_cbgr_extended<'ctx>(
                     .builder()
                     .build_call(can_write_fn, &[ref_as_i64.into()], "cbgr_can_write")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("ThinRef.can_write: expected return value")
-                    })?;
+            .basic_value_or("ThinRef.can_write: expected return value")?;
                 let extended = ctx
                     .builder()
                     .build_int_z_extend(result.into_int_value(), i64_ty, "cbgr_write_ext")
@@ -19179,11 +19091,7 @@ fn lower_cbgr_extended<'ctx>(
                     .builder()
                     .build_call(check_fn, &[ptr_val.into()], "cbgr_check_write")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("CbgrCheckWrite: expected return value")
-                    })?;
+            .basic_value_or("CbgrCheckWrite: expected return value")?;
                 let extended = ctx
                     .builder()
                     .build_int_z_extend(result.into_int_value(), i64_ty, "cbgr_write_ext")
@@ -19212,11 +19120,7 @@ fn lower_cbgr_extended<'ctx>(
                 .builder()
                 .build_call(newgen_fn, &[], "new_gen")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("NewGeneration: expected return value")
-                })?;
+            .basic_value_or("NewGeneration: expected return value")?;
             ctx.set_register(dst, result);
             Ok(())
         }
@@ -19254,11 +19158,7 @@ fn lower_cbgr_extended<'ctx>(
                     .builder()
                     .build_call(caps_fn, &[ref_as_i64.into()], "caps")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("ThinRef.capabilities: expected return value")
-                    })?;
+            .basic_value_or("ThinRef.capabilities: expected return value")?;
                 let caps_i64 = ctx
                     .builder()
                     .build_int_z_extend(result.into_int_value(), i64_ty, "caps_i64")
@@ -19519,11 +19419,7 @@ fn lower_mem_extended<'ctx>(
                 .builder()
                 .build_call(alloc_fn, &[size.into()], "mem_alloc_zeroed")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("MemAllocZeroed: expected return value")
-                })?;
+            .basic_value_or("MemAllocZeroed: expected return value")?;
             // Zero the allocated memory — result may be ptr or i64 depending on call target
             let ptr_val = match result {
                 BasicValueEnum::PointerValue(pv) => pv,
@@ -21745,11 +21641,7 @@ fn build_overflowing_tuple<'ctx>(
         .builder()
         .build_call(func, &[a.into(), b.into()], name)
         .or_llvm_err()?
-        .try_as_basic_value()
-        .basic()
-        .ok_or_else(|| {
-            LlvmLoweringError::internal("overflowing intrinsic: expected return value")
-        })?;
+            .basic_value_or("overflowing intrinsic: expected return value")?;
     let val = ctx
         .builder()
         .build_extract_value(result.into_struct_value(), 0, &format!("{}_val", name))
@@ -23487,11 +23379,7 @@ fn lower_ffi_extended<'ctx>(
                 .builder()
                 .build_call(alloc_fn, &[size.into()], "new_byte_array")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("NewByteArray: expected return value")
-                })?;
+            .basic_value_or("NewByteArray: expected return value")?;
             ctx.set_register(dst_reg, result);
             Ok(())
         }
@@ -23600,11 +23488,7 @@ fn lower_ffi_extended<'ctx>(
                     .builder()
                     .build_call(alloc_fn, &[size.into()], "new_typed_array")
                     .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .ok_or_else(|| {
-                        LlvmLoweringError::internal("NewTypedArray: expected return value")
-                    })?;
+            .basic_value_or("NewTypedArray: expected return value")?;
                 ctx.set_register(dst_reg, result);
             } else {
                 // Element addr: base + index * 8 (assuming 8-byte elements)
@@ -23697,11 +23581,7 @@ fn lower_ffi_extended<'ctx>(
                 .builder()
                 .build_call(time_fn, &[], "mono_nanos")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("TimeMonotonicNanos: expected return value")
-                })?;
+            .basic_value_or("TimeMonotonicNanos: expected return value")?;
             ctx.set_register(dst_reg, result);
             Ok(())
         }
@@ -23723,11 +23603,7 @@ fn lower_ffi_extended<'ctx>(
                 .builder()
                 .build_call(time_fn, &[], "real_nanos")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("TimeRealtimeNanos: expected return value")
-                })?;
+            .basic_value_or("TimeRealtimeNanos: expected return value")?;
             ctx.set_register(dst_reg, result);
             Ok(())
         }
@@ -23748,11 +23624,7 @@ fn lower_ffi_extended<'ctx>(
                 .builder()
                 .build_call(time_fn, &[], "raw_nanos")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("TimeMonotonicRawNanos: expected return value")
-                })?;
+            .basic_value_or("TimeMonotonicRawNanos: expected return value")?;
             ctx.set_register(dst_reg, result);
             Ok(())
         }
@@ -23790,11 +23662,7 @@ fn lower_ffi_extended<'ctx>(
                 .builder()
                 .build_call(time_fn, &[], "cpu_nanos")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("TimeCpuNanos: expected return value")
-                })?;
+            .basic_value_or("TimeCpuNanos: expected return value")?;
             ctx.set_register(dst_reg, result);
             Ok(())
         }
@@ -23960,11 +23828,7 @@ fn lower_ffi_extended<'ctx>(
                 .builder()
                 .build_call(getentropy_fn, &[buf.into(), length.into()], "getentropy")
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("SysGetentropy: expected return value")
-                })?;
+            .basic_value_or("SysGetentropy: expected return value")?;
             ctx.set_register(dst_reg, result);
             Ok(())
         }
@@ -26683,11 +26547,7 @@ fn lower_tensor_extended<'ctx>(
                     "fslice_new",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("FromSliceArgs: expected return value")
-                })?;
+            .basic_value_or("FromSliceArgs: expected return value")?;
             let tensor_i64 = as_i64(ctx, tensor, "fslice_t")?;
             // Set scalar at index 0 with the data value
             let f64_ty = ctx.types().f64_type();
@@ -26796,11 +26656,7 @@ fn lower_tensor_extended<'ctx>(
                     "tfill",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("FillFromArgs: expected return value")
-                })?;
+            .basic_value_or("FillFromArgs: expected return value")?;
             ctx.set_register(dst_reg, result);
         }
         Some(TensorSubOpcode::ReduceFromArgs) => {
@@ -26842,11 +26698,7 @@ fn lower_tensor_extended<'ctx>(
                     "reshape",
                 )
                 .or_llvm_err()?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    LlvmLoweringError::internal("ReshapeFromArgs: expected return value")
-                })?;
+            .basic_value_or("ReshapeFromArgs: expected return value")?;
             ctx.set_register(dst_reg, result);
         }
         Some(TensorSubOpcode::GetElementFromArgs) => {
