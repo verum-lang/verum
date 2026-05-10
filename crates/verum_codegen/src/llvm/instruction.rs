@@ -2135,14 +2135,8 @@ pub fn lower_instruction<'ctx>(
                 let i32_type = ctx.llvm_context().i32_type();
 
                 // Extract char* from Text objects via verum_text_get_ptr
-                let text_get_ptr_fn = ctx
-                    .get_module()
-                    .get_function("verum_text_get_ptr")
-                    .unwrap_or_else(|| {
-                        let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-                        ctx.get_module()
-                            .add_function("verum_text_get_ptr", fn_type, None)
-                    });
+                let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+        let text_get_ptr_fn = super::error::get_or_declare_function(ctx.get_module(), "verum_text_get_ptr", fn_type);
 
                 let lhs_i64 = as_i64(ctx, lhs_raw, "cmpi_str_a")?;
                 let lhs_ptr = ctx
@@ -29352,14 +29346,8 @@ fn lower_cmp_generic<'ctx>(
         let i8_type = ctx.llvm_context().i8_type();
 
         // Extract char* from Text objects via verum_text_get_ptr
-        let text_get_ptr_fn = ctx
-            .get_module()
-            .get_function("verum_text_get_ptr")
-            .unwrap_or_else(|| {
-                let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-                ctx.get_module()
-                    .add_function("verum_text_get_ptr", fn_type, None)
-            });
+        let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+        let text_get_ptr_fn = super::error::get_or_declare_function(ctx.get_module(), "verum_text_get_ptr", fn_type);
 
         let lhs_i64 = as_i64(ctx, lhs, "cmp_a_i64")?;
         let lhs_ptr_result = ctx
@@ -29546,14 +29534,8 @@ fn lower_cmp_generic<'ctx>(
             .build_ptr_to_int(rhs_ptr_raw, i64_type, "cmpg_p2i_b")
             .or_llvm_err()?;
 
-        let text_get_ptr_fn = ctx
-            .get_module()
-            .get_function("verum_text_get_ptr")
-            .unwrap_or_else(|| {
-                let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-                ctx.get_module()
-                    .add_function("verum_text_get_ptr", fn_type, None)
-            });
+        let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+        let text_get_ptr_fn = super::error::get_or_declare_function(ctx.get_module(), "verum_text_get_ptr", fn_type);
 
         let lhs_ptr = ctx
             .builder()
