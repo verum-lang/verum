@@ -1481,7 +1481,44 @@ impl VbcCodegen {
 
                 // Try to find as a function (for function references) or static/constant
                 // Extract func info first to avoid borrow conflicts
-                let func_info_opt = self.ctx.lookup_function(name).cloned();
+                //
+                // **Qualified-suffix fallback (task #138)**. The archive
+                // const-env loader registers public consts under their
+                // QUALIFIED name (e.g. `core.time.julian.JD_UNIX_EPOCH`)
+                // — bare-name mount imports `mount … {JD_UNIX_EPOCH}`
+                // are supposed to register the bare alias separately,
+                // but after the typechecker's primitive-inherent-methods
+                // const-env rewire that path can miss for stdlib-defined
+                // consts. When the exact-name lookup fails for an
+                // UPPERCASE_SNAKE_CASE identifier, walk the function
+                // table looking for an entry whose name ends with
+                // `.<name>` AND is a zero-param const-shaped function.
+                // Unambiguous match → use it.
+                let func_info_opt = self.ctx.lookup_function(name).cloned().or_else(|| {
+                    let is_const_shaped = !name.is_empty()
+                        && name.chars().all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
+                        && name.chars().next().is_some_and(|c| c.is_ascii_uppercase());
+                    if !is_const_shaped {
+                        return None;
+                    }
+                    let suffix = format!(".{}", name);
+                    let mut found: Option<crate::codegen::context::FunctionInfo> = None;
+                    let mut ambiguous = false;
+                    for (key, info) in self.ctx.functions.iter() {
+                        if !key.ends_with(&suffix) {
+                            continue;
+                        }
+                        if info.param_count != 0 {
+                            continue;
+                        }
+                        if found.is_some() {
+                            ambiguous = true;
+                            break;
+                        }
+                        found = Some(info.clone());
+                    }
+                    if ambiguous { None } else { found }
+                });
                 if let Some(func_info) = func_info_opt {
                     // Check if this is a variant constructor
                     if let Some(tag) = func_info.variant_tag {
@@ -3660,6 +3697,79 @@ impl VbcCodegen {
                         sub_op: sub_op as u8,
                         operands,
                     });
+                } else if let Some(deref_method_id) = inner_type
+                    .as_ref()
+                    .and_then(|ty_name| {
+                        // **User Deref-protocol dispatch (cell #119)**.
+                        // `*r` where `r: Ref<T>` / `RefMut<T>` / any
+                        // user type that `implement Deref for X { fn
+                        // deref(&self) -> &T }` should dispatch to that
+                        // method, NOT emit the low-level `Instruction::
+                        // Deref` (which performs identity-deref on
+                        // non-CBGR heap objects and returns the wrapper
+                        // unchanged).
+                        //
+                        // Gate the rewrite tightly: the inner's type
+                        // name must be known statically, and the
+                        // function table must already carry a
+                        // zero-arg `<TypeName>.deref` registered with
+                        // `parent_type_name = TypeName` — the canonical
+                        // shape produced by `implement Deref for Ref<T>
+                        // { fn deref(&self) -> &T }` codegen.
+                        //
+                        // Excludes Heap<T>/Shared<T> (handled by the
+                        // `is_heap_deref` branch above as transparent
+                        // wrappers) and primitive types (no Deref impl
+                        // — and even if user-impl'd, the typed_deref
+                        // branch above already handles them).
+                        if is_heap_deref { return None; }
+                        let base = ty_name
+                            .split('<')
+                            .next()
+                            .unwrap_or(ty_name)
+                            .trim()
+                            .to_string();
+                        if base.is_empty()
+                            || base == "Heap"
+                            || base == "Shared"
+                            || base == "Int"
+                            || base == "Float"
+                            || base == "Bool"
+                            || base == "Char"
+                            || base == "Byte"
+                            || base == "Text"
+                            || base.starts_with("&")
+                        {
+                            return None;
+                        }
+                        let qualified = format!("{}.deref", base);
+                        self.ctx
+                            .lookup_function(&qualified)
+                            .filter(|f| f.param_count == 1) // &self
+                            .map(|f| f.id.0)
+                    })
+                {
+                    // Emit CallM(dst, receiver=inner, method_id="…deref", args=[])
+                    // and let the runtime dispatch handle the rest.
+                    // Using CallM (not Call) so the method-dispatcher's
+                    // existing receiver-aware passes get a chance to
+                    // find the body even if its qualified form differs.
+                    let method_id_str = self.ctx.intern_string_raw("deref");
+                    self.ctx.emit(Instruction::CallM {
+                        dst: dest,
+                        receiver: inner_reg,
+                        method_id: method_id_str,
+                        args: crate::instruction::RegRange {
+                            start: inner_reg,
+                            count: 0,
+                        },
+                    });
+                    // `deref_method_id` is intentionally unused here —
+                    // the runtime dispatch resolves the actual function
+                    // id via the receiver-type-aware lookup. Holding
+                    // the binding ensures the gate above had a valid
+                    // hit before we commit to the CallM path.
+                    let _ = deref_method_id;
                 } else if is_heap_deref {
                     // Heap<T> is transparent — emit Deref so the CBGR runtime sets
                     // cbgr_deref_source. This enables `&*value` to produce a pointer
