@@ -6584,6 +6584,45 @@ impl TypeChecker {
                 };
                 return self.resolve_inline_module_path(&module_path, expr.span);
             }
+
+            // Mount-aliased module: `mount X.Y.Z;` (or `mount X.Y as Z;`)
+            // makes `Z` a module-namespace receiver, so `Z.field`
+            // resolves through qualified-name lookup
+            // `<full-path>.field` rather than synth_expr'ing `Z` as
+            // a value (which fails with `UnboundVariable: Z`).
+            //
+            // Mirrors the equivalent method-call dispatch path
+            // (`modules.rs` ~line 17914) — the two paths together
+            // cover both `Z.field` (here) and `Z.method(args)` (there)
+            // forms of bare-mount module-qualified access.  Closes
+            // the typechecker-side half of task #121.
+            if let Some(module_path) = self
+                .module_aliases
+                .get(&verum_common::Text::from(obj_name))
+                .cloned()
+            {
+                let field_name = field.name.as_str();
+                let qualified: verum_common::Text =
+                    format!("{}.{}", module_path, field_name).into();
+                // The qualified function/const may already be in env
+                // via the cross-module import pass that ran for the
+                // archive-side load.
+                if let Some(scheme) = self.ctx.env.lookup(&qualified) {
+                    let ty = scheme.instantiate();
+                    return Ok(InferResult::new(self.unifier.apply(&ty)));
+                }
+                if let Maybe::Some(scheme) = self.lookup_function_in_module(qualified.as_str()) {
+                    let ty = scheme.instantiate();
+                    return Ok(InferResult::new(self.unifier.apply(&ty)));
+                }
+                // Field-access fallback: lookup the simple field
+                // name in env as a last-ditch effort.  Same shape
+                // as the inline-module bail-out below.
+                if let Some(scheme) = self.ctx.env.lookup(field_name) {
+                    let ty = scheme.instantiate();
+                    return Ok(InferResult::new(self.unifier.apply(&ty)));
+                }
+            }
         }
 
         // Handle chained module access like `api.v2` -> `api.v2.func`
