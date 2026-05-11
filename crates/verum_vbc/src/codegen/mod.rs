@@ -4673,53 +4673,81 @@ impl VbcCodegen {
             }
         }
 
-        // Two-phase pass: process BLANKET impls before CONCRETE impls.
+        // Narrow pre-pass for BLANKET-impl REGISTRATION only.
         //
-        // Without this ordering, a concrete-type impl appearing earlier
-        // in the file (`implement Future for ReadyFuture`) runs
-        // `generate_default_protocol_methods("Future", "ReadyFuture")`
-        // BEFORE the blanket `implement<F: Future> FutureExt for F` is
-        // observed — and the blanket-impl-derivation walk inside
-        // `generate_default_protocol_methods` consults
-        // `self.blanket_impls` synchronously, so the inherited
-        // protocol's default methods (FutureExt.block / map / and_then)
-        // never get monomorphised onto ReadyFuture; every downstream
-        // `ready(v).block()` panics with "method 'ReadyFuture.block'
-        // not found".
+        // Walks the module once and identifies `implement<G: Base>
+        // Derived for G {}` impl blocks (the canonical blanket-impl
+        // shape).  Appends `BlanketImpl` records to
+        // `self.blanket_impls` WITHOUT running the full
+        // collect_declarations handling for those items.
         //
-        // Routing both phases through `collect_declarations` (which
-        // performs the FULL Impl-block handling including method
-        // registration, blanket-impl recording, AND
-        // generate_default_protocol_methods) means the two phases pick
-        // up the same downstream effects — no silent divergence
-        // between "blanket-only" and "blanket+concrete" semantics.
+        // This minimal pre-pass primes `self.blanket_impls` BEFORE any
+        // concrete-type `implement Future for ReadyFuture` triggers
+        // `generate_default_protocol_methods`'s walk of
+        // pending_derivations.  Routing the full collect_declarations
+        // for blankets here regresses the Poll suite (5 tests including
+        // test_poll_default_is_pending) because the blanket's
+        // `generate_default_protocol_methods` step runs with
+        // type_name="<generic param>" and double-registers the
+        // wrong-target default methods.  This narrow pre-pass avoids
+        // that side effect — only the `blanket_impls` table is
+        // primed.  Concrete-type impl-blocks below pick up the
+        // primed table when they run their own
+        // `generate_default_protocol_methods`.
         for item in module.items.iter() {
             if !self.should_compile_item(item) {
                 continue;
             }
-            let is_blanket = if let ItemKind::Impl(impl_decl) = &item.kind
-                && let verum_ast::decl::ImplKind::Protocol { for_type, .. } = &impl_decl.kind
+            if let ItemKind::Impl(impl_decl) = &item.kind
+                && let verum_ast::decl::ImplKind::Protocol {
+                    protocol, for_type, ..
+                } = &impl_decl.kind
+                && let Some(derived_name) = protocol.segments.last().and_then(|s| match s {
+                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                    _ => None,
+                })
+                && let Some(param_name) = Self::for_type_generic_param_name(for_type)
             {
-                Self::for_type_generic_param_name(for_type).is_some()
-            } else {
-                false
-            };
-            if is_blanket {
-                self.collect_declarations(item)?;
+                for g in impl_decl.generics.iter() {
+                    if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } = &g.kind
+                        && name.name.as_str() == param_name
+                    {
+                        for b in bounds.iter() {
+                            if let Some(base_name) = Self::type_bound_protocol_name(b) {
+                                let explicit_methods: std::collections::HashSet<String> =
+                                    impl_decl
+                                        .items
+                                        .iter()
+                                        .filter_map(|item| {
+                                            if let verum_ast::decl::ImplItemKind::Function(f) =
+                                                &item.kind
+                                            {
+                                                Some(f.name.name.to_string())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect();
+                                let already_present = self.blanket_impls.iter().any(|b| {
+                                    b.base_protocol == base_name
+                                        && b.derived_protocol == derived_name
+                                });
+                                if !already_present {
+                                    self.blanket_impls.push(BlanketImpl {
+                                        base_protocol: base_name,
+                                        derived_protocol: derived_name.clone(),
+                                        explicit_methods,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+
         for item in module.items.iter() {
-            if !self.should_compile_item(item) {
-                continue;
-            }
-            let is_blanket = if let ItemKind::Impl(impl_decl) = &item.kind
-                && let verum_ast::decl::ImplKind::Protocol { for_type, .. } = &impl_decl.kind
-            {
-                Self::for_type_generic_param_name(for_type).is_some()
-            } else {
-                false
-            };
-            if !is_blanket {
+            if self.should_compile_item(item) {
                 self.collect_declarations(item)?;
             }
         }
@@ -5720,6 +5748,36 @@ impl VbcCodegen {
                         // Populate TypeDescriptor.protocols for vtable-based dispatch.
                         // Look up protocol's TypeDescriptor to get canonical method order,
                         // then map each method to the concrete Type.method FunctionId.
+                        //
+                        // **Foreign-protocol auto-stub**: when the protocol is
+                        // imported from a different module (e.g. `mount
+                        // core.base.coercion.{ArrayCoercible}` in
+                        // `core/collections/list.vr` declaring
+                        // `implement<T> ArrayCoercible for List<T> {}`), the
+                        // protocol type itself is not in this module's
+                        // `type_name_to_id` table — pre-fix the entire impl
+                        // record was silently dropped from
+                        // `TypeDescriptor.protocols`, breaking the
+                        // archive-side `metadata.implementations` table that
+                        // drives user-side `register_coercion_markers_from_metadata`
+                        // (and `register_stdlib_impls_for_target` more
+                        // generally).  Synthesise a placeholder protocol-
+                        // type stub in the local table so the impl record
+                        // survives and archive_metadata can resolve the
+                        // protocol name via `type_id_to_name`.  The stub
+                        // carries the protocol's name only; method bodies
+                        // live with the impl's concrete-type registration.
+                        if !self.type_name_to_id.contains_key(&pn) {
+                            let proto_id = self.alloc_user_type_id();
+                            let name_sid = StringId(self.ctx.intern_string_raw(&pn));
+                            self.types.push(crate::types::TypeDescriptor {
+                                id: proto_id,
+                                name: name_sid,
+                                kind: crate::types::TypeKind::Protocol,
+                                ..Default::default()
+                            });
+                            self.type_name_to_id.insert(pn.clone(), proto_id);
+                        }
                         if let Some(&proto_type_id) = self.type_name_to_id.get(&pn) {
                             // Get protocol method names in vtable order (from protocol's variants)
                             let method_names: Vec<String> = self
