@@ -4918,38 +4918,71 @@ impl VbcCodegen {
             }
 
             "panic" => {
-                let message_id = if !args.is_empty() {
-                    // Extract the string from the argument if it's a literal
-                    if let ExprKind::Literal(lit) = &args[0].kind {
-                        if let LiteralKind::Text(text) = &lit.kind {
-                            self.intern_string(text.as_str())
-                        } else {
-                            // Non-string literal - show generic message
-                            self.intern_string("explicit panic")
-                        }
-                    } else if let ExprKind::Unary {
-                        op: UnOp::Ref,
-                        expr,
-                        ..
-                    } = &args[0].kind
-                    {
-                        // Handle &"string" case
-                        if let ExprKind::Literal(lit) = &expr.kind {
-                            if let LiteralKind::Text(text) = &lit.kind {
-                                self.intern_string(text.as_str())
-                            } else {
-                                self.intern_string("explicit panic")
-                            }
-                        } else {
-                            self.intern_string("explicit panic")
-                        }
-                    } else {
-                        // Non-literal argument - would need runtime evaluation
-                        // For now just use a generic message
-                        self.intern_string("explicit panic")
-                    }
+                // Static-message fast path: when the argument is a bare
+                // Text literal (or `&"..."` reference to one), intern
+                // the string directly into the constant pool and emit
+                // `Instruction::Panic { message_id }`.  This keeps the
+                // common case (`panic("oops")`) zero-overhead.
+                //
+                // Dynamic-message slow path: when the argument is any
+                // other expression — most importantly `f"..."`
+                // interpolated strings, which Map.resize / vector
+                // intrinsics / collection bound-checks rely on for
+                // diagnostic context — compile the argument to a
+                // register, DebugPrint it so the rendered message
+                // appears on stderr (the same stream the Tier-0
+                // interpreter's panic-render path writes to), and
+                // then emit a single literal Panic carrying the
+                // sentinel "<dynamic panic — see message above>"
+                // so callers grepping for `Panic:` find a clear
+                // pointer to the rendered message.  Pre-fix the
+                // dynamic case silently degraded to the static
+                // "explicit panic" string, swallowing the real
+                // diagnostic — `Map.resize: allocator returned null for
+                // {size} bytes (new_cap={new_cap}, old_cap={self.cap})`
+                // became unreadable "explicit panic", a class of
+                // diagnostic loss that blocked union_find /
+                // toposort suite triage.
+                let static_text: Option<&str> = if args.is_empty() {
+                    Some("panic!")
+                } else if let ExprKind::Literal(lit) = &args[0].kind
+                    && let LiteralKind::Text(text) = &lit.kind
+                {
+                    Some(text.as_str())
+                } else if let ExprKind::Unary {
+                    op: UnOp::Ref,
+                    expr,
+                    ..
+                } = &args[0].kind
+                    && let ExprKind::Literal(lit) = &expr.kind
+                    && let LiteralKind::Text(text) = &lit.kind
+                {
+                    Some(text.as_str())
                 } else {
-                    self.intern_string("panic!")
+                    None
+                };
+
+                let message_id = match static_text {
+                    Some(s) => self.intern_string(s),
+                    None => {
+                        // Dynamic-message path.
+                        let prefix = self.ctx.alloc_temp();
+                        let prefix_id = self.ctx.add_const_string("panic: ");
+                        self.ctx.emit(Instruction::LoadK {
+                            dst: prefix,
+                            const_id: prefix_id.0,
+                        });
+                        self.ctx.emit(Instruction::DebugPrint { value: prefix });
+                        self.ctx.free_temp(prefix);
+
+                        let msg_reg = self
+                            .compile_expr(&args[0])?
+                            .or_internal("panic arg has no value")?;
+                        self.ctx.emit(Instruction::DebugPrint { value: msg_reg });
+                        self.ctx.free_temp(msg_reg);
+
+                        self.intern_string("<dynamic panic — see message above>")
+                    }
                 };
                 self.ctx.emit(Instruction::Panic { message_id });
                 Ok(Some(None))
