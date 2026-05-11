@@ -6466,6 +6466,38 @@ impl VbcCodegen {
     /// any push site that bypasses this helper (audit aid).
     fn push_function_dedup(&mut self, vbc_func: VbcFunction) {
         let new_id = vbc_func.descriptor.id.0;
+        // Task #16 reland blocker #2: filter stage-1/2 stub FunctionIds
+        // at the codegen-emission boundary so they never enter
+        // `self.functions` (the per-module compiled bytecode set).
+        // Stubs are codegen-context entries only; they should NEVER
+        // appear as compiled VBC functions.
+        //
+        // Sentinel ranges match the codegen-side stub-overwrite
+        // gate at `stdlib_bootstrap.rs:1453`, the archive-metadata
+        // Pass 2 filter at `archive_metadata.rs::register_module_metadata`
+        // (commit `fdda6ee22`), AND the runtime sentinel handler at
+        // `verum_vbc::interpreter::handle_call` (commit `b5f5462d4`).
+        // All four sites use identical sentinel math, so the gating
+        // is consistent across codegen / archive-metadata / runtime
+        // layers.
+        //
+        // Without this gate, blanket-impl replay paths or
+        // `compile_pending_constants` flushes could leak stubs into
+        // `module.functions`, where downstream archive emission then
+        // exposes them to the typechecker's lazy-load via
+        // `metadata.functions`.  The archive-metadata filter (#3)
+        // catches the leak downstream as defence in depth; THIS gate
+        // catches it at source.
+        const STAGE1_STUB_BASE: u32 = u32::MAX - 0x40_0000;
+        const STAGE2_STUB_BASE: u32 = u32::MAX - 0xC0_0000;
+        const STUB_RANGE_WIDTH: u32 = 0x10_0000;
+        let in_stage1 =
+            new_id <= STAGE1_STUB_BASE && new_id >= STAGE1_STUB_BASE - STUB_RANGE_WIDTH;
+        let in_stage2 =
+            new_id <= STAGE2_STUB_BASE && new_id >= STAGE2_STUB_BASE - STUB_RANGE_WIDTH;
+        if in_stage1 || in_stage2 {
+            return;
+        }
         if let Some(existing_idx) = self.functions.iter().position(|f| f.descriptor.id.0 == new_id)
         {
             if self.ctx.prefer_existing_functions {
