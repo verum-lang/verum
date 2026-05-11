@@ -6293,37 +6293,37 @@ pub(super) fn dispatch_primitive_method(
                 return Ok(Some(alloc_string_value(state, &reversed)?));
             }
             "eq" => {
-                let arg = state.get_reg(Reg(args.start.0));
+                let arg = deref_cbgr_for_string(state, state.get_reg(Reg(args.start.0)));
                 let other = extract_string(&arg, state);
                 return Ok(Some(Value::from_bool(text == other)));
             }
             "ne" => {
-                let arg = state.get_reg(Reg(args.start.0));
+                let arg = deref_cbgr_for_string(state, state.get_reg(Reg(args.start.0)));
                 let other = extract_string(&arg, state);
                 return Ok(Some(Value::from_bool(text != other)));
             }
             "lt" => {
-                let arg = state.get_reg(Reg(args.start.0));
+                let arg = deref_cbgr_for_string(state, state.get_reg(Reg(args.start.0)));
                 let other = extract_string(&arg, state);
                 return Ok(Some(Value::from_bool(text < other)));
             }
             "le" => {
-                let arg = state.get_reg(Reg(args.start.0));
+                let arg = deref_cbgr_for_string(state, state.get_reg(Reg(args.start.0)));
                 let other = extract_string(&arg, state);
                 return Ok(Some(Value::from_bool(text <= other)));
             }
             "gt" => {
-                let arg = state.get_reg(Reg(args.start.0));
+                let arg = deref_cbgr_for_string(state, state.get_reg(Reg(args.start.0)));
                 let other = extract_string(&arg, state);
                 return Ok(Some(Value::from_bool(text > other)));
             }
             "ge" => {
-                let arg = state.get_reg(Reg(args.start.0));
+                let arg = deref_cbgr_for_string(state, state.get_reg(Reg(args.start.0)));
                 let other = extract_string(&arg, state);
                 return Ok(Some(Value::from_bool(text >= other)));
             }
             "cmp" => {
-                let arg = state.get_reg(Reg(args.start.0));
+                let arg = deref_cbgr_for_string(state, state.get_reg(Reg(args.start.0)));
                 let other = extract_string(&arg, state);
                 return Ok(Some(make_ordering(state, text.cmp(&other))?));
             }
@@ -7910,6 +7910,30 @@ pub(super) fn alloc_unit_variant(
 /// Ordering variants are unit-shaped (no payload); routes through the
 /// shared [`alloc_unit_variant`] helper so the layout matches `MakeVariant`
 /// for unit variants exactly.
+/// Deref a CBGR register reference to its inner Value when the
+/// caller intends to interpret the result as a Text/String.
+///
+/// Text-method intrinsics (`Text.cmp`/`eq`/`lt`/...) take `&Text`
+/// arguments which the caller passes as CBGR register references
+/// — negative-i64-encoded `(abs_index, generation)` pairs. Without
+/// this deref, `extract_string` reads garbage bytes off the negative
+/// integer's pointer projection and produces nonsense — surfaces at
+/// runtime as `apple.cmp(&banana) != Less` returning the wrong
+/// Ordering despite both sides being valid Text values. The Int
+/// dispatcher follows the same shape (see line ~2658).
+#[inline]
+pub(super) fn deref_cbgr_for_string(
+    state: &InterpreterState,
+    v: Value,
+) -> Value {
+    if is_cbgr_ref(&v) {
+        let (abs_index, _) = decode_cbgr_ref(v.as_i64());
+        state.registers.get_absolute(abs_index)
+    } else {
+        v
+    }
+}
+
 pub(super) fn make_ordering(
     state: &mut InterpreterState,
     ord: std::cmp::Ordering,
