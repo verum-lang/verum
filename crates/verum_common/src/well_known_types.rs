@@ -852,6 +852,73 @@ pub fn tag_of(layout: &[VariantLayoutEntry], name: &str) -> Option<u32> {
         .find_map(|e| (e.name == name).then_some(e.tag))
 }
 
+/// Canonical registry of stdlib sum types whose variant constructors
+/// are pre-registered as builtins by every compiler stage that needs
+/// to emit `MakeVariant` instructions or interpret variant-constructor
+/// calls without an in-scope `mount`.
+///
+/// **Single source of truth.** Consumers:
+///
+/// * `verum_vbc::codegen::VbcCodegen::register_builtin_variants` —
+///   pre-registers each `Parent.Variant` (and bare `Variant` on
+///   first-wins) function symbol so user code like `Maybe.Some(42)`,
+///   `Ordering.Less`, or bare `Ok(x)` after `mount core.base.{Ok}`
+///   emits the correct `MakeVariant` payload.
+/// * `verum_compiler::meta::sandbox::execution` — meta-evaluation
+///   builtin dispatch for variant constructors invoked from
+///   compile-time @meta function bodies.
+///
+/// Adding a new carrier (e.g. `Either<L, R>`) means appending one
+/// `(name, &LAYOUT)` entry here — every downstream consumer picks it
+/// up automatically, no ad-hoc table edits required.
+///
+/// **Drift contract:** every layout referenced here MUST be the
+/// canonical `*_VARIANT_LAYOUT` constant whose drift is pinned at the
+/// `well_known_types::tests` level; this registry is itself a
+/// composition of those layouts, so it inherits their drift guarantees.
+pub const BUILTIN_VARIANT_CARRIERS: &[(&str, &[VariantLayoutEntry])] = &[
+    ("Maybe", MAYBE_VARIANT_LAYOUT),
+    ("Result", RESULT_VARIANT_LAYOUT),
+    ("Ordering", ORDERING_VARIANT_LAYOUT),
+];
+
+/// Look up a variant constructor across [`BUILTIN_VARIANT_CARRIERS`]
+/// given a function-call name in either qualified (`Parent.Variant`)
+/// or bare (`Variant`) form.
+///
+/// Returns `Some((parent_name, entry))` on match.  Bare-name lookups
+/// use **first-wins ordering** over the registry — the first carrier
+/// that contains a variant with the given name owns the bare alias.
+/// This mirrors the same first-wins discipline that
+/// `register_builtin_variants` uses when registering bare aliases
+/// (its `if lookup_function(variant_name).is_none()` guard).
+///
+/// Bare-name resolution returns `None` for names that don't appear
+/// anywhere in the registry — callers MUST handle the absence
+/// (typically by falling through to other dispatch paths or returning
+/// an "unknown function" error).
+pub fn lookup_builtin_variant_constructor(
+    func_name: &str,
+) -> Option<(&'static str, &'static VariantLayoutEntry)> {
+    if let Some((parent, simple)) = func_name.split_once('.') {
+        for (carrier_name, layout) in BUILTIN_VARIANT_CARRIERS.iter() {
+            if *carrier_name == parent {
+                if let Some(entry) = layout.iter().find(|e| e.name == simple) {
+                    return Some((carrier_name, entry));
+                }
+            }
+        }
+        return None;
+    }
+
+    for (carrier_name, layout) in BUILTIN_VARIANT_CARRIERS.iter() {
+        if let Some(entry) = layout.iter().find(|e| e.name == func_name) {
+            return Some((carrier_name, entry));
+        }
+    }
+    None
+}
+
 /// Look up a variant's payload arity by name. Mirrors [`tag_of`] for
 /// the third axis of the canonical layout — used by the VBC
 /// codegen's `register_builtin_variants` so the per-type ad-hoc
@@ -2497,5 +2564,113 @@ mod tests {
         // Text is value-typed but heap-backed — explicitly excluded
         // from the primitive-value classification.
         assert!(!type_names::is_primitive_value_type("Text"));
+    }
+
+    // ====================================================================
+    // BUILTIN_VARIANT_CARRIERS registry + lookup_builtin_variant_constructor
+    // — pinned both for content (the carriers match the *_VARIANT_LAYOUT
+    // constants exactly) and for resolution semantics (qualified vs bare,
+    // first-wins ordering, arity-preserving).
+    // ====================================================================
+
+    #[test]
+    fn builtin_variant_carriers_match_canonical_layouts() {
+        for (carrier_name, layout) in BUILTIN_VARIANT_CARRIERS.iter() {
+            let canonical = match *carrier_name {
+                "Maybe" => MAYBE_VARIANT_LAYOUT,
+                "Result" => RESULT_VARIANT_LAYOUT,
+                "Ordering" => ORDERING_VARIANT_LAYOUT,
+                other => panic!(
+                    "BUILTIN_VARIANT_CARRIERS lists '{}' but no canonical *_VARIANT_LAYOUT \
+                     covers it; either remove the entry or pin its layout in this match",
+                    other
+                ),
+            };
+            assert_eq!(
+                layout.as_ptr(),
+                canonical.as_ptr(),
+                "BUILTIN_VARIANT_CARRIERS entry for '{}' references a different slice than \
+                 the canonical *_VARIANT_LAYOUT — both must point at the same source-of-truth",
+                carrier_name,
+            );
+        }
+    }
+
+    #[test]
+    fn lookup_qualified_variant_constructor() {
+        let (parent, entry) = lookup_builtin_variant_constructor("Maybe.Some").unwrap();
+        assert_eq!(parent, "Maybe");
+        assert_eq!(entry.name, "Some");
+        assert_eq!(entry.arity, 1);
+        assert_eq!(entry.tag, 1);
+
+        let (parent, entry) = lookup_builtin_variant_constructor("Result.Err").unwrap();
+        assert_eq!(parent, "Result");
+        assert_eq!(entry.name, "Err");
+        assert_eq!(entry.arity, 1);
+
+        let (parent, entry) = lookup_builtin_variant_constructor("Ordering.Less").unwrap();
+        assert_eq!(parent, "Ordering");
+        assert_eq!(entry.name, "Less");
+        assert_eq!(entry.arity, 0);
+    }
+
+    #[test]
+    fn lookup_bare_variant_constructor() {
+        let (parent, entry) = lookup_builtin_variant_constructor("Some").unwrap();
+        assert_eq!(parent, "Maybe");
+        assert_eq!(entry.arity, 1);
+
+        let (parent, entry) = lookup_builtin_variant_constructor("None").unwrap();
+        assert_eq!(parent, "Maybe");
+        assert_eq!(entry.arity, 0);
+
+        let (parent, entry) = lookup_builtin_variant_constructor("Ok").unwrap();
+        assert_eq!(parent, "Result");
+        assert_eq!(entry.arity, 1);
+
+        let (parent, entry) = lookup_builtin_variant_constructor("Greater").unwrap();
+        assert_eq!(parent, "Ordering");
+        assert_eq!(entry.arity, 0);
+    }
+
+    #[test]
+    fn lookup_unknown_variant_constructor_returns_none() {
+        // Not in any layout
+        assert!(lookup_builtin_variant_constructor("Frobnicate").is_none());
+        assert!(lookup_builtin_variant_constructor("Maybe.Frobnicate").is_none());
+        // Variant name exists but not in the named carrier
+        assert!(lookup_builtin_variant_constructor("Result.Some").is_none());
+        assert!(lookup_builtin_variant_constructor("Maybe.Ok").is_none());
+        assert!(lookup_builtin_variant_constructor("Ordering.None").is_none());
+        // Empty / malformed
+        assert!(lookup_builtin_variant_constructor("").is_none());
+        assert!(lookup_builtin_variant_constructor(".").is_none());
+    }
+
+    /// Bare-name resolution follows the carrier-list declaration order
+    /// (first-wins).  Today the registry has no name collisions across
+    /// carriers, but the pin documents the contract.
+    #[test]
+    fn bare_name_resolution_follows_registry_order() {
+        // For each carrier in order, every variant resolves bare-name
+        // to its OWN carrier (no later carrier shadows it — this would
+        // be the symptom of a same-named variant being added to a
+        // later carrier without auditing).
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for (carrier_name, layout) in BUILTIN_VARIANT_CARRIERS.iter() {
+            for entry in layout.iter() {
+                if seen.insert(entry.name) {
+                    let (resolved_parent, resolved_entry) =
+                        lookup_builtin_variant_constructor(entry.name).unwrap();
+                    assert_eq!(resolved_parent, *carrier_name,
+                        "bare '{}' resolves to '{}' but expected to be the property of '{}' \
+                         (first-wins registry order)",
+                        entry.name, resolved_parent, carrier_name);
+                    assert_eq!(resolved_entry.tag, entry.tag);
+                    assert_eq!(resolved_entry.arity, entry.arity);
+                }
+            }
+        }
     }
 }

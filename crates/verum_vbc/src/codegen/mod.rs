@@ -5358,19 +5358,14 @@ impl VbcCodegen {
         // both paths agree.
         use crate::codegen::context::FunctionInfo;
         use crate::module::FunctionId;
-        use verum_common::well_known_types::VariantLayoutEntry;
-        // Source of truth for `(parent_type, layout)`: arity now lives
-        // in the canonical layout itself (see
-        // `VariantLayoutEntry::arity`), so this table no longer
-        // re-encodes per-type rules. Adding a new variant carrier
-        // (e.g. `Either<L,R>`) means only adding one entry here +
-        // a `_VARIANT_LAYOUT` constant — no new ad-hoc loop with
-        // type-specific arity branches.
-        let layout_sources: &[(&str, &[VariantLayoutEntry])] = &[
-            ("Maybe", verum_common::well_known_types::MAYBE_VARIANT_LAYOUT),
-            ("Result", verum_common::well_known_types::RESULT_VARIANT_LAYOUT),
-            ("Ordering", verum_common::well_known_types::ORDERING_VARIANT_LAYOUT),
-        ];
+        // Source of truth: `BUILTIN_VARIANT_CARRIERS` in
+        // `verum_common::well_known_types`.  Adding a new variant
+        // carrier (e.g. `Either<L,R>`) means appending one entry to
+        // that constant — every consumer (this codegen registration
+        // and the meta-sandbox builtin-fn dispatch) picks it up
+        // automatically.  Arity lives inside each `VariantLayoutEntry`,
+        // so no per-type ad-hoc loop branches.
+        let layout_sources = verum_common::well_known_types::BUILTIN_VARIANT_CARRIERS;
         // (parent_type, variant_name, tag, arity, param_names) —
         // expanded uniformly from the layouts.  Param names follow the
         // tuple-payload convention (`_0`, `_1`, …) for nullary-or-N
