@@ -1427,28 +1427,37 @@ impl VbcCodegen {
                     }
                 }
 
-                // Always register the protocol — even when it has no
-                // default methods AND no super-protocols.  The blanket-
-                // impl monomorphization walk in
-                // `generate_default_protocol_methods` consults
-                // `protocol_registry` for EVERY protocol mentioned in
-                // `protocols_to_check` (including the directly-implemented
-                // protocol and any derived ones enqueued from
-                // `blanket_impls`); if a method-spec-only protocol like
-                // `Future` is absent from the registry, the walk's
-                // `protocol_registry.get(&proto_name)` returns None and
-                // the implementor's pending_derivations from that base
-                // protocol never get materialised.  Pre-fix the guard
-                // here silently dropped `Future`-shaped protocols whose
-                // only purpose IS providing a blanket-impl target.
-                self.protocol_registry.insert(
-                    protocol_name.clone(),
-                    ProtocolInfo {
-                        name: protocol_name,
-                        default_methods,
-                        super_protocols,
-                    },
-                );
+                // Register protocol info when it carries default methods
+                // OR super-protocols.  The "always-register" attempt
+                // caused regressions in the Poll suite (5 tests including
+                // test_poll_default_is_pending) because empty-protocol
+                // entries triggered additional protocol-walk iterations
+                // on Poll-implementers whose Default method was already
+                // materialised by the existing path — the second walk
+                // re-materialised the same default body under a different
+                // FunctionId and the runtime then dispatched to the wrong
+                // bytecode.
+                //
+                // For the blanket-impl case (Future → FutureExt), the
+                // `protocol_registry.get(&proto_name)` lookup in
+                // `generate_default_protocol_methods` was the symptom,
+                // not the root cause — the actual blanket walk consults
+                // `self.blanket_impls` (populated by the pre-pass in
+                // `collect_all_declarations`), and the loop visits
+                // EVERY queued protocol whether it's registered or not.
+                // The protocol_info lookup is gated to skip the inner
+                // default-method emission for empty protocols, which
+                // is correct (nothing to emit).
+                if !default_methods.is_empty() || !super_protocols.is_empty() {
+                    self.protocol_registry.insert(
+                        protocol_name.clone(),
+                        ProtocolInfo {
+                            name: protocol_name,
+                            default_methods,
+                            super_protocols,
+                        },
+                    );
+                }
             }
 
             // Context declarations also need TypeDescriptors for dyn: dispatch.
@@ -4664,85 +4673,53 @@ impl VbcCodegen {
             }
         }
 
-        // Pre-pass: register blanket impls (`implement<G: Base> Derived
-        // for G {}`) BEFORE any concrete-type impls.  Without this
-        // order, a concrete-type impl appearing earlier in the file
-        // (`implement Future for ReadyFuture`) runs
+        // Two-phase pass: process BLANKET impls before CONCRETE impls.
+        //
+        // Without this ordering, a concrete-type impl appearing earlier
+        // in the file (`implement Future for ReadyFuture`) runs
         // `generate_default_protocol_methods("Future", "ReadyFuture")`
-        // BEFORE the blanket `implement<F: Future> FutureExt for F`
-        // is observed.  The blanket-impl-derivation walk in
+        // BEFORE the blanket `implement<F: Future> FutureExt for F` is
+        // observed — and the blanket-impl-derivation walk inside
         // `generate_default_protocol_methods` consults
         // `self.blanket_impls` synchronously, so the inherited
         // protocol's default methods (FutureExt.block / map / and_then)
-        // never get monomorphised onto ReadyFuture — every downstream
+        // never get monomorphised onto ReadyFuture; every downstream
         // `ready(v).block()` panics with "method 'ReadyFuture.block'
         // not found".
         //
-        // The pre-pass walks the module once and processes ONLY blanket
-        // impls (detected via the same `for_type_generic_param_name`
-        // helper as `collect_declarations`'s Impl arm).  Concrete-type
-        // impls and other items are skipped here; the regular pass
-        // below handles them.
+        // Routing both phases through `collect_declarations` (which
+        // performs the FULL Impl-block handling including method
+        // registration, blanket-impl recording, AND
+        // generate_default_protocol_methods) means the two phases pick
+        // up the same downstream effects — no silent divergence
+        // between "blanket-only" and "blanket+concrete" semantics.
         for item in module.items.iter() {
             if !self.should_compile_item(item) {
                 continue;
             }
-            if let ItemKind::Impl(impl_decl) = &item.kind
-                && let verum_ast::decl::ImplKind::Protocol {
-                    protocol, for_type, ..
-                } = &impl_decl.kind
-                && let Some(derived_name) = protocol.segments.last().and_then(|s| match s {
-                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
-                    _ => None,
-                })
-                && let Some(param_name) = Self::for_type_generic_param_name(for_type)
+            let is_blanket = if let ItemKind::Impl(impl_decl) = &item.kind
+                && let verum_ast::decl::ImplKind::Protocol { for_type, .. } = &impl_decl.kind
             {
-                for g in impl_decl.generics.iter() {
-                    if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } = &g.kind
-                        && name.name.as_str() == param_name
-                    {
-                        for b in bounds.iter() {
-                            if let Some(base_name) = Self::type_bound_protocol_name(b) {
-                                let explicit_methods: std::collections::HashSet<String> =
-                                    impl_decl
-                                        .items
-                                        .iter()
-                                        .filter_map(|item| {
-                                            if let verum_ast::decl::ImplItemKind::Function(f) =
-                                                &item.kind
-                                            {
-                                                Some(f.name.name.to_string())
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .collect();
-                                // Deduplicate: if a (base, derived) pair
-                                // was already registered (e.g. via
-                                // multi-file collection), skip the
-                                // re-insert so a same-content blanket
-                                // doesn't fan out into N copies during
-                                // `pending_derivations`'s linear scan.
-                                let already_present = self.blanket_impls.iter().any(|b| {
-                                    b.base_protocol == base_name
-                                        && b.derived_protocol == derived_name
-                                });
-                                if !already_present {
-                                    self.blanket_impls.push(BlanketImpl {
-                                        base_protocol: base_name,
-                                        derived_protocol: derived_name.clone(),
-                                        explicit_methods,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
+                Self::for_type_generic_param_name(for_type).is_some()
+            } else {
+                false
+            };
+            if is_blanket {
+                self.collect_declarations(item)?;
             }
         }
-
         for item in module.items.iter() {
-            if self.should_compile_item(item) {
+            if !self.should_compile_item(item) {
+                continue;
+            }
+            let is_blanket = if let ItemKind::Impl(impl_decl) = &item.kind
+                && let verum_ast::decl::ImplKind::Protocol { for_type, .. } = &impl_decl.kind
+            {
+                Self::for_type_generic_param_name(for_type).is_some()
+            } else {
+                false
+            };
+            if !is_blanket {
                 self.collect_declarations(item)?;
             }
         }
