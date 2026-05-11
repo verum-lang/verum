@@ -1451,33 +1451,51 @@ impl<'s> CompilationPipeline<'s> {
         //
         // Task #16 stage-1/2 stub-overwrite: pre-registered stubs from
         // `pre_register_canonical_static_methods` /
-        // `pre_register_canonical_variant_constructors` live in the
-        // sentinel ID ranges `u32::MAX - 0x40_0000..` (Stage 1) and
-        // `u32::MAX - 0xC0_0000..` (Stage 2).  These were inserted
-        // BEFORE any module compiled so caller-modules see the names
-        // immediately; the per-module compile that owns the REAL body
-        // must then OVERWRITE the stub with the real FunctionInfo
-        // (real FunctionId, full param_type_names, real return_type,
-        // etc.).
+        // `pre_register_canonical_variant_constructors` live in two
+        // sentinel ID ranges that DESCEND from their base value:
         //
-        // Without this overwrite, `entry().or_insert()`'s first-wins
-        // discipline preserved the stub forever — every caller saw
-        // the stub's sentinel ID, dispatch emitted `Call { func_id =
-        // sentinel }`, and the runtime panicked with `Function N not
-        // found` because the sentinel id isn't a real function in
-        // the archive.  Pre-fix this regressed pass-rate from 80/146
-        // to 63/151 — the stubs blocked every real body.
-        const STAGE1_STUB_RANGE_BASE: u32 = u32::MAX - 0x40_0000;
-        const STAGE2_STUB_RANGE_BASE: u32 = u32::MAX - 0xC0_0000;
+        //   * Stage 1 (canonical-type static methods):
+        //       ids in [STAGE1_BASE - STUB_RANGE_WIDTH, STAGE1_BASE]
+        //       where STAGE1_BASE = u32::MAX - 0x40_0000 (0xFFBF_FFFF).
+        //   * Stage 2 (variant constructors):
+        //       ids in [STAGE2_BASE - STUB_RANGE_WIDTH, STAGE2_BASE]
+        //       where STAGE2_BASE = u32::MAX - 0xC0_0000 (0xFF3F_FFFF).
+        //
+        // The stub-emitting code assigns `id = BASE - <stub_index>`,
+        // so each stage occupies a window descending FROM the base.
+        // A 1M-slot window (`0x10_0000`) per stage is comfortably
+        // larger than any realistic stdlib stub count (current ~700)
+        // and stays well clear of the canonical sentinel ranges used
+        // elsewhere in the codegen: variant-tag descent `u32::MAX -
+        // tag` (tag ≤ ~100 → range starts at 0xFFFF_FF9C) and
+        // newtype-pass-through `u32::MAX / 2` (= 0x7FFF_FFFF).
+        //
+        // When the producing module exports its REAL body for a
+        // stubbed name, OVERWRITE the stub with the real FunctionInfo
+        // (real FunctionId from `next_func_id`, full param_type_names,
+        // real return_type, etc.).  For every other existing entry,
+        // preserve `entry().or_insert()` first-wins.
+        //
+        // Pre-fix this regressed pass-rate 80/146 → 63/151 because
+        // the stubs blocked every real body — `entry().or_insert()`
+        // is first-wins and the stub always wins.  The PREVIOUS
+        // overwrite gate (commit `37fc3fdc3` first attempt) was
+        // inverted: it used `id >= STAGE2_BASE` which excludes EVERY
+        // stub (stubs are BELOW their base).  This second attempt
+        // gets the direction right: check `BASE - WIDTH <= id <= BASE`.
+        const STAGE1_BASE: u32 = u32::MAX - 0x40_0000;
+        const STAGE2_BASE: u32 = u32::MAX - 0xC0_0000;
+        const STUB_RANGE_WIDTH: u32 = 0x10_0000; // 1M slots/stage
+        let is_in_stub_range = |id: u32| -> bool {
+            let in_stage1 = id <= STAGE1_BASE && id >= STAGE1_BASE - STUB_RANGE_WIDTH;
+            let in_stage2 = id <= STAGE2_BASE && id >= STAGE2_BASE - STUB_RANGE_WIDTH;
+            in_stage1 || in_stage2
+        };
         let new_functions = codegen.export_functions();
         for (name, info) in new_functions {
-            // Always overwrite if existing entry is a stage-1/2 stub
-            // — stubs have IDs in the sentinel ranges above.  For
-            // every other existing entry, preserve first-wins.
             let is_stub = matches!(
                 self.global_function_registry.get(&name),
-                Some(existing) if existing.id.0 >= STAGE2_STUB_RANGE_BASE
-                    && existing.id.0 <= STAGE1_STUB_RANGE_BASE
+                Some(existing) if is_in_stub_range(existing.id.0)
             );
             if is_stub {
                 self.global_function_registry.insert(name, info);
