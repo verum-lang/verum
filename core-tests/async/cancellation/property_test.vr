@@ -1,0 +1,47 @@
+// =============================================================================
+// core-tests/async/cancellation/property_test.vr
+// =============================================================================
+
+mount core.async.cancellation.{CancelReason};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section A: Partition — exactly one variant flag is set per value
+//
+//   Restricted to the three variants that don't carry an Instant
+//   payload (`Cancelled`, `ParentCancelled`, `Aborted(Text)`).
+//   The `Timeout { deadline }` arm is exercised via integration when
+//   an Instant is in scope.
+// =============================================================================
+
+@test
+fn property_cancellation_variant_partition_three_arms() {
+    fn flag_count(r: CancelReason) -> Int {
+        let mut n: Int = 0;
+        if r is CancelReason.Cancelled { n = n + 1; }
+        if r is CancelReason.ParentCancelled { n = n + 1; }
+        if r is CancelReason.Aborted { n = n + 1; }
+        n
+    }
+    assert_eq(flag_count(CancelReason.Cancelled), 1);
+    assert_eq(flag_count(CancelReason.ParentCancelled), 1);
+    assert_eq(flag_count(CancelReason.Aborted("x")), 1);
+}
+
+// =============================================================================
+// Section B: Aborted payload round-trip across multiple values
+// =============================================================================
+
+@test
+fn property_cancellation_aborted_payload_round_trip_exhaustive() {
+    let messages: List<Text> = ["", "user shutdown", "OOM", "deadline-soon"];
+    for m in messages.iter() {
+        let r: CancelReason = CancelReason.Aborted((*m).clone());
+        match r {
+            CancelReason.Aborted(extracted) => assert_eq(extracted, *m),
+            _ => assert(false),
+        }
+    }
+}
+
+fn main() {}

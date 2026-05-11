@@ -1,0 +1,40 @@
+// =============================================================================
+// core-tests/async/task/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.async.task`.  Routed to tracking
+// tasks #11 (protocol-default-method dispatch via blanket impl),
+// the runtime executor's blocking-method surface depends on it.
+// =============================================================================
+
+mount core.async.task.{TaskId, JoinError};
+mount core.async.future.{ready};
+
+// =============================================================================
+// §A  spawn / spawn_blocking / spawn_detached / JoinSet — gated by
+//     protocol-default-method dispatch (`FutureExt.block`) defect
+//     tracked in task #11.
+//
+//   `Task<T>.is_finished()` / `JoinHandle<T>.is_finished()` /
+//   `JoinSet<T>.spawn()` all bottom out on a Future.poll dispatch
+//   that needs the blanket-impl-derived FutureExt's `block` to be
+//   monomorphised onto the concrete Future type.  Until that
+//   monomorphisation lands, this surface stays pinned.
+// =============================================================================
+
+@ignore
+@test
+fn regression_task_id_new_increments() {
+    let a = TaskId.new();
+    let b = TaskId.new();
+    assert(a.id != b.id);
+}
+
+@ignore
+@test
+fn regression_task_join_error_debug_renders_qualified() {
+    let s = f"{JoinError.Cancelled:?}";
+    assert_eq(s, "JoinError.Cancelled");
+}
+
+fn main() {}

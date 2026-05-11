@@ -1,0 +1,64 @@
+// =============================================================================
+// core-tests/async/task/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.async.task`'s working surface (JoinError
+// variant algebra, TaskId equality).
+// =============================================================================
+
+mount core.async.task.{TaskId, JoinError};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section A: JoinError partition
+//
+//   Exactly one of `is JoinError.Cancelled` / `is JoinError.Panicked`
+//   is true for any value (mutually exclusive + exhaustive).
+// =============================================================================
+
+@test
+fn property_task_join_error_partition_exhaustive() {
+    let dom: List<JoinError> = [JoinError.Cancelled, JoinError.Panicked];
+    for e in dom.iter() {
+        let cancelled = (*e) is JoinError.Cancelled;
+        let panicked = (*e) is JoinError.Panicked;
+        assert(cancelled != panicked);
+        assert(cancelled || panicked);
+    }
+}
+
+@test
+fn property_task_join_error_match_yields_distinct_tags() {
+    fn tag(e: JoinError) -> Text {
+        match e {
+            JoinError.Cancelled => "cancelled",
+            JoinError.Panicked => "panicked",
+        }
+    }
+    assert(tag(JoinError.Cancelled) != tag(JoinError.Panicked));
+}
+
+// =============================================================================
+// Section B: TaskId — record-field round-trip
+// =============================================================================
+
+@test
+fn property_task_id_round_trip_via_field_access() {
+    let dom: List<Int> = [-1_000_000, -1, 0, 1, 42, 1_000_000];
+    for v in dom.iter() {
+        let t = TaskId { id: *v };
+        assert_eq(t.id, *v);
+    }
+}
+
+@test
+fn property_task_id_records_with_same_id_have_same_field() {
+    let dom: List<Int> = [0, 7, 99];
+    for v in dom.iter() {
+        let a = TaskId { id: *v };
+        let b = TaskId { id: *v };
+        assert_eq(a.id, b.id);
+    }
+}
+
+fn main() {}

@@ -1,0 +1,109 @@
+// =============================================================================
+// core-tests/async/task/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.async.task`'s working surface.
+// =============================================================================
+
+mount core.async.task.{TaskId, JoinError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section A: List<TaskId> — bookkeeping for active task registries
+//
+//   Real executors hold a List<TaskId> per scheduler tick; the
+//   record-pattern must survive bulk-container construction.
+// =============================================================================
+
+@test
+fn integration_task_id_list_bulk_construct() {
+    let mut ids: List<TaskId> = [];
+    let mut i: Int = 1;
+    while i <= 5 {
+        ids.push(TaskId { id: i });
+        i = i + 1;
+    }
+    assert_eq(ids.len(), 5);
+    assert_eq(ids[0].id, 1);
+    assert_eq(ids[4].id, 5);
+}
+
+@test
+fn integration_task_id_list_sum_of_ids() {
+    let ids: List<TaskId> = [
+        TaskId { id: 10 },
+        TaskId { id: 20 },
+        TaskId { id: 30 },
+    ];
+    let mut total: Int = 0;
+    for t in ids.iter() {
+        total = total + (*t).id;
+    }
+    assert_eq(total, 60);
+}
+
+// =============================================================================
+// Section B: JoinError → Maybe<TaskId> classification
+//
+//   A common executor pattern: convert a join-outcome to a Maybe
+//   representing whether the task warrants a respawn.  Exercise
+//   the match-arm dispatch shape.
+// =============================================================================
+
+@test
+fn integration_task_join_error_to_maybe_cancelled() {
+    fn respawn_token(e: JoinError) -> Maybe<TaskId> {
+        match e {
+            JoinError.Cancelled => Some(TaskId { id: 99 }),
+            JoinError.Panicked => None,
+        }
+    }
+    let r = respawn_token(JoinError.Cancelled);
+    match r {
+        Some(t) => assert_eq(t.id, 99),
+        None => assert(false),
+    }
+}
+
+@test
+fn integration_task_join_error_to_maybe_panicked() {
+    fn respawn_token(e: JoinError) -> Maybe<TaskId> {
+        match e {
+            JoinError.Cancelled => Some(TaskId { id: 99 }),
+            JoinError.Panicked => None,
+        }
+    }
+    let r = respawn_token(JoinError.Panicked);
+    match r {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+// =============================================================================
+// Section C: Match-coverage on List<JoinError>
+// =============================================================================
+
+@test
+fn integration_task_join_error_list_partition() {
+    let errors: List<JoinError> = [
+        JoinError.Cancelled,
+        JoinError.Panicked,
+        JoinError.Cancelled,
+        JoinError.Cancelled,
+        JoinError.Panicked,
+    ];
+    let mut cancelled_count: Int = 0;
+    let mut panicked_count: Int = 0;
+    for e in errors.iter() {
+        match *e {
+            JoinError.Cancelled => cancelled_count = cancelled_count + 1,
+            JoinError.Panicked => panicked_count = panicked_count + 1,
+        }
+    }
+    assert_eq(cancelled_count, 3);
+    assert_eq(panicked_count, 2);
+}
+
+fn main() {}

@@ -1,0 +1,131 @@
+// =============================================================================
+// core-tests/async/diagnostics/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.diagnostics` — TaskLifecycleState + TaskInfo
+// (snapshot metadata for live async tasks).  Pure data-type module:
+// no executor binding, no Future protocol dependency.
+// =============================================================================
+
+mount core.async.diagnostics.{TaskLifecycleState};
+
+// =============================================================================
+// Section 1: TaskLifecycleState — 6-variant lifecycle enum
+// =============================================================================
+
+@test
+fn test_diagnostics_lifecycle_pending_construction() {
+    let s: TaskLifecycleState = TaskLifecycleState.Pending;
+    assert(s is TaskLifecycleState.Pending);
+}
+
+@test
+fn test_diagnostics_lifecycle_running_construction() {
+    let s: TaskLifecycleState = TaskLifecycleState.Running;
+    assert(s is TaskLifecycleState.Running);
+}
+
+@test
+fn test_diagnostics_lifecycle_parked_construction() {
+    let s: TaskLifecycleState = TaskLifecycleState.Parked;
+    assert(s is TaskLifecycleState.Parked);
+}
+
+@test
+fn test_diagnostics_lifecycle_completed_construction() {
+    let s: TaskLifecycleState = TaskLifecycleState.Completed;
+    assert(s is TaskLifecycleState.Completed);
+}
+
+@test
+fn test_diagnostics_lifecycle_cancelled_construction() {
+    let s: TaskLifecycleState = TaskLifecycleState.Cancelled;
+    assert(s is TaskLifecycleState.Cancelled);
+}
+
+@test
+fn test_diagnostics_lifecycle_failed_construction() {
+    let s: TaskLifecycleState = TaskLifecycleState.Failed;
+    assert(s is TaskLifecycleState.Failed);
+}
+
+// =============================================================================
+// Section 2: Pairwise-distinct invariant — every variant is unique
+// =============================================================================
+
+@test
+fn test_diagnostics_lifecycle_variants_pairwise_distinct() {
+    let pending: TaskLifecycleState = TaskLifecycleState.Pending;
+    let running: TaskLifecycleState = TaskLifecycleState.Running;
+    let parked: TaskLifecycleState = TaskLifecycleState.Parked;
+    let completed: TaskLifecycleState = TaskLifecycleState.Completed;
+    let cancelled: TaskLifecycleState = TaskLifecycleState.Cancelled;
+    let failed: TaskLifecycleState = TaskLifecycleState.Failed;
+
+    assert(!(pending is TaskLifecycleState.Running));
+    assert(!(pending is TaskLifecycleState.Parked));
+    assert(!(pending is TaskLifecycleState.Completed));
+    assert(!(pending is TaskLifecycleState.Cancelled));
+    assert(!(pending is TaskLifecycleState.Failed));
+
+    assert(!(running is TaskLifecycleState.Pending));
+    assert(!(running is TaskLifecycleState.Parked));
+    assert(!(running is TaskLifecycleState.Completed));
+
+    assert(!(parked is TaskLifecycleState.Pending));
+    assert(!(parked is TaskLifecycleState.Cancelled));
+
+    assert(!(completed is TaskLifecycleState.Failed));
+    assert(!(cancelled is TaskLifecycleState.Failed));
+    assert(!(failed is TaskLifecycleState.Completed));
+}
+
+// =============================================================================
+// Section 3: Match-arm coverage — every variant has a distinct tag
+// =============================================================================
+
+@test
+fn test_diagnostics_lifecycle_match_exhaustive() {
+    fn tag(s: TaskLifecycleState) -> Text {
+        match s {
+            TaskLifecycleState.Pending   => "pending",
+            TaskLifecycleState.Running   => "running",
+            TaskLifecycleState.Parked    => "parked",
+            TaskLifecycleState.Completed => "completed",
+            TaskLifecycleState.Cancelled => "cancelled",
+            TaskLifecycleState.Failed    => "failed",
+        }
+    }
+    assert_eq(tag(TaskLifecycleState.Pending), "pending");
+    assert_eq(tag(TaskLifecycleState.Running), "running");
+    assert_eq(tag(TaskLifecycleState.Parked), "parked");
+    assert_eq(tag(TaskLifecycleState.Completed), "completed");
+    assert_eq(tag(TaskLifecycleState.Cancelled), "cancelled");
+    assert_eq(tag(TaskLifecycleState.Failed), "failed");
+}
+
+// =============================================================================
+// Section 4: Terminal-state classification (Completed / Cancelled / Failed)
+// =============================================================================
+
+@test
+fn test_diagnostics_terminal_states_classification() {
+    fn is_terminal(s: TaskLifecycleState) -> Bool {
+        match s {
+            TaskLifecycleState.Completed => true,
+            TaskLifecycleState.Cancelled => true,
+            TaskLifecycleState.Failed => true,
+            TaskLifecycleState.Pending => false,
+            TaskLifecycleState.Running => false,
+            TaskLifecycleState.Parked => false,
+        }
+    }
+    assert(is_terminal(TaskLifecycleState.Completed));
+    assert(is_terminal(TaskLifecycleState.Cancelled));
+    assert(is_terminal(TaskLifecycleState.Failed));
+    assert(!is_terminal(TaskLifecycleState.Pending));
+    assert(!is_terminal(TaskLifecycleState.Running));
+    assert(!is_terminal(TaskLifecycleState.Parked));
+}
+
+fn main() {}

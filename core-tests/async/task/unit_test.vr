@@ -1,0 +1,86 @@
+// =============================================================================
+// core-tests/async/task/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.task` — the spawn / join / cancel surface.
+//
+// JoinError variant algebra and TaskId/JoinHandle construction are
+// the testable today.  Live spawn/join + executor-bound surfaces
+// (`spawn`, `spawn_blocking`, `spawn_detached`, `JoinSet`) pull in
+// the runtime executor, which is gated by the protocol-default-
+// method dispatch defect tracked in task #11; those tests live in
+// regression_test.vr until the runtime executor's blocking surface
+// works end-to-end under interp.
+// =============================================================================
+
+mount core.async.task.{TaskId, JoinError};
+
+// =============================================================================
+// Section 1: JoinError variant identity
+// =============================================================================
+
+@test
+fn test_task_join_error_cancelled_is_cancelled() {
+    let e: JoinError = JoinError.Cancelled;
+    assert(e is JoinError.Cancelled);
+    assert(!(e is JoinError.Panicked));
+}
+
+@test
+fn test_task_join_error_panicked_is_panicked() {
+    let e: JoinError = JoinError.Panicked;
+    assert(e is JoinError.Panicked);
+    assert(!(e is JoinError.Cancelled));
+}
+
+@test
+fn test_task_join_error_variants_distinct() {
+    let cancelled: JoinError = JoinError.Cancelled;
+    let panicked: JoinError = JoinError.Panicked;
+    assert(!(cancelled is JoinError.Panicked));
+    assert(!(panicked is JoinError.Cancelled));
+}
+
+@test
+fn test_task_join_error_match_exhaustive() {
+    fn classify(e: JoinError) -> Text {
+        match e {
+            JoinError.Cancelled => "cancelled",
+            JoinError.Panicked => "panicked",
+        }
+    }
+    assert_eq(classify(JoinError.Cancelled), "cancelled");
+    assert_eq(classify(JoinError.Panicked), "panicked");
+}
+
+// =============================================================================
+// Section 2: TaskId record construction
+//
+//   `TaskId` is a single-field record (`id: Int`).  Construction
+//   via `TaskId.new()` requires an atomic counter — that hits the
+//   stdlib-precompile defect.  Direct record literal works.
+// =============================================================================
+
+@test
+fn test_task_id_record_literal_construction() {
+    let t = TaskId { id: 42 };
+    assert_eq(t.id, 42);
+}
+
+@test
+fn test_task_id_distinct_records() {
+    let a = TaskId { id: 1 };
+    let b = TaskId { id: 2 };
+    assert(a.id != b.id);
+}
+
+@test
+fn test_task_id_record_field_round_trip() {
+    let ids: List<Int> = [0, 1, 7, 999, 1_000_000];
+    for v in ids.iter() {
+        let t = TaskId { id: *v };
+        assert_eq(t.id, *v);
+    }
+}
+
+fn main() {}

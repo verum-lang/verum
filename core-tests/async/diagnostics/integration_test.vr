@@ -1,0 +1,125 @@
+// =============================================================================
+// core-tests/async/diagnostics/integration_test.vr
+// =============================================================================
+
+mount core.async.diagnostics.{TaskLifecycleState};
+mount core.collections.list.List;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section A: List<TaskLifecycleState> — task-state distribution
+//
+//   Real monitoring dashboards aggregate the state histogram across
+//   a live task table.  Exercise the count-by-state pattern.
+// =============================================================================
+
+@test
+fn integration_diagnostics_state_histogram() {
+    let snapshot: List<TaskLifecycleState> = [
+        TaskLifecycleState.Running,
+        TaskLifecycleState.Pending,
+        TaskLifecycleState.Running,
+        TaskLifecycleState.Completed,
+        TaskLifecycleState.Running,
+        TaskLifecycleState.Parked,
+        TaskLifecycleState.Failed,
+        TaskLifecycleState.Cancelled,
+    ];
+
+    let mut running: Int = 0;
+    let mut pending: Int = 0;
+    let mut completed: Int = 0;
+    let mut parked: Int = 0;
+    let mut failed: Int = 0;
+    let mut cancelled: Int = 0;
+
+    for s in snapshot.iter() {
+        match *s {
+            TaskLifecycleState.Pending   => pending = pending + 1,
+            TaskLifecycleState.Running   => running = running + 1,
+            TaskLifecycleState.Parked    => parked = parked + 1,
+            TaskLifecycleState.Completed => completed = completed + 1,
+            TaskLifecycleState.Cancelled => cancelled = cancelled + 1,
+            TaskLifecycleState.Failed    => failed = failed + 1,
+        }
+    }
+    assert_eq(running, 3);
+    assert_eq(pending, 1);
+    assert_eq(completed, 1);
+    assert_eq(parked, 1);
+    assert_eq(failed, 1);
+    assert_eq(cancelled, 1);
+}
+
+// =============================================================================
+// Section B: TaskLifecycleState ↔ Maybe interop — "what should I show?"
+//
+//   UI filter: collapse non-active states to None.
+// =============================================================================
+
+@test
+fn integration_diagnostics_active_filter() {
+    fn filter_active(s: TaskLifecycleState) -> Maybe<TaskLifecycleState> {
+        match s {
+            TaskLifecycleState.Pending => Some(s),
+            TaskLifecycleState.Running => Some(s),
+            TaskLifecycleState.Parked  => Some(s),
+            _ => None,
+        }
+    }
+    let active: List<TaskLifecycleState> = [
+        TaskLifecycleState.Pending,
+        TaskLifecycleState.Running,
+        TaskLifecycleState.Parked,
+    ];
+    let terminal: List<TaskLifecycleState> = [
+        TaskLifecycleState.Completed,
+        TaskLifecycleState.Cancelled,
+        TaskLifecycleState.Failed,
+    ];
+    for s in active.iter() {
+        match filter_active(*s) {
+            Some(_) => assert(true),
+            None => assert(false),
+        }
+    }
+    for s in terminal.iter() {
+        match filter_active(*s) {
+            Some(_) => assert(false),
+            None => assert(true),
+        }
+    }
+}
+
+// =============================================================================
+// Section C: Aggregate "any-failed" check across List<State>
+//
+//   Monitoring pattern: a Job is unhealthy if any of its tasks
+//   Failed; show health badge.
+// =============================================================================
+
+@test
+fn integration_diagnostics_any_failed_flag() {
+    fn has_any_failed(states: &List<TaskLifecycleState>) -> Bool {
+        for s in states.iter() {
+            if (*s) is TaskLifecycleState.Failed {
+                return true;
+            }
+        }
+        false
+    }
+    let healthy: List<TaskLifecycleState> = [
+        TaskLifecycleState.Running,
+        TaskLifecycleState.Completed,
+        TaskLifecycleState.Pending,
+    ];
+    let unhealthy: List<TaskLifecycleState> = [
+        TaskLifecycleState.Running,
+        TaskLifecycleState.Failed,
+        TaskLifecycleState.Pending,
+    ];
+    assert(!has_any_failed(&healthy));
+    assert(has_any_failed(&unhealthy));
+}
+
+fn main() {}

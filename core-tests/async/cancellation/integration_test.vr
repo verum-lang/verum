@@ -1,0 +1,80 @@
+// =============================================================================
+// core-tests/async/cancellation/integration_test.vr
+// =============================================================================
+
+mount core.async.cancellation.{CancelReason};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section A: Cancel-reason classification → user-facing tag
+// =============================================================================
+
+@test
+fn integration_cancellation_user_facing_tag() {
+    fn tag(r: CancelReason) -> Text {
+        match r {
+            CancelReason.Cancelled => "user",
+            CancelReason.Timeout { .. } => "timeout",
+            CancelReason.ParentCancelled => "parent",
+            CancelReason.Aborted(_) => "abort",
+        }
+    }
+    assert_eq(tag(CancelReason.Cancelled), "user");
+    assert_eq(tag(CancelReason.ParentCancelled), "parent");
+    assert_eq(tag(CancelReason.Aborted("x")), "abort");
+}
+
+// =============================================================================
+// Section B: Extract Aborted message → Maybe<Text>
+// =============================================================================
+
+@test
+fn integration_cancellation_aborted_message_to_maybe() {
+    fn abort_message(r: CancelReason) -> Maybe<Text> {
+        match r {
+            CancelReason.Aborted(msg) => Some(msg),
+            _ => None,
+        }
+    }
+    assert_eq(abort_message(CancelReason.Aborted("network-down")), Some("network-down"));
+    match abort_message(CancelReason.Cancelled) {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+    match abort_message(CancelReason.ParentCancelled) {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+// =============================================================================
+// Section C: List<CancelReason> histogram
+// =============================================================================
+
+@test
+fn integration_cancellation_reason_histogram() {
+    let reasons: List<CancelReason> = [
+        CancelReason.Cancelled,
+        CancelReason.ParentCancelled,
+        CancelReason.Aborted("a"),
+        CancelReason.Cancelled,
+        CancelReason.Aborted("b"),
+    ];
+    let mut cancelled: Int = 0;
+    let mut parent: Int = 0;
+    let mut aborted: Int = 0;
+    for r in reasons.iter() {
+        match *r {
+            CancelReason.Cancelled => cancelled = cancelled + 1,
+            CancelReason.Timeout { .. } => {},
+            CancelReason.ParentCancelled => parent = parent + 1,
+            CancelReason.Aborted(_) => aborted = aborted + 1,
+        }
+    }
+    assert_eq(cancelled, 2);
+    assert_eq(parent, 1);
+    assert_eq(aborted, 2);
+}
+
+fn main() {}

@@ -1,0 +1,105 @@
+// =============================================================================
+// core-tests/async/diagnostics/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for TaskLifecycleState — 6-valued enum.  Properties
+// exhausted over the full Cartesian product where applicable.
+// =============================================================================
+
+mount core.async.diagnostics.{TaskLifecycleState};
+mount core.collections.list.List;
+
+fn lifecycle_domain() -> List<TaskLifecycleState> {
+    [
+        TaskLifecycleState.Pending,
+        TaskLifecycleState.Running,
+        TaskLifecycleState.Parked,
+        TaskLifecycleState.Completed,
+        TaskLifecycleState.Cancelled,
+        TaskLifecycleState.Failed,
+    ]
+}
+
+// =============================================================================
+// Section A: 6-way partition — exactly one `is` check is true per value
+// =============================================================================
+
+@test
+fn property_diagnostics_lifecycle_partition_exhaustive() {
+    for s in lifecycle_domain().iter() {
+        let mut count: Int = 0;
+        if (*s) is TaskLifecycleState.Pending { count = count + 1; }
+        if (*s) is TaskLifecycleState.Running { count = count + 1; }
+        if (*s) is TaskLifecycleState.Parked { count = count + 1; }
+        if (*s) is TaskLifecycleState.Completed { count = count + 1; }
+        if (*s) is TaskLifecycleState.Cancelled { count = count + 1; }
+        if (*s) is TaskLifecycleState.Failed { count = count + 1; }
+        assert_eq(count, 1);
+    }
+}
+
+// =============================================================================
+// Section B: Match-arm coverage — every pair of variants produces
+//   distinct tags (no collision in the 6-arm match)
+// =============================================================================
+
+@test
+fn property_diagnostics_lifecycle_match_yields_distinct_tags_exhaustive() {
+    fn tag(s: TaskLifecycleState) -> Text {
+        match s {
+            TaskLifecycleState.Pending   => "pending",
+            TaskLifecycleState.Running   => "running",
+            TaskLifecycleState.Parked    => "parked",
+            TaskLifecycleState.Completed => "completed",
+            TaskLifecycleState.Cancelled => "cancelled",
+            TaskLifecycleState.Failed    => "failed",
+        }
+    }
+    let dom = lifecycle_domain();
+    let mut i: Int = 0;
+    while i < dom.len() {
+        let mut j: Int = i + 1;
+        while j < dom.len() {
+            assert(tag(dom[i]) != tag(dom[j]));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section C: Terminal-state partition — Completed/Cancelled/Failed
+//   are terminal; Pending/Running/Parked are active.
+// =============================================================================
+
+@test
+fn property_diagnostics_terminal_states_partition_exhaustive() {
+    fn is_terminal(s: TaskLifecycleState) -> Bool {
+        match s {
+            TaskLifecycleState.Completed => true,
+            TaskLifecycleState.Cancelled => true,
+            TaskLifecycleState.Failed => true,
+            TaskLifecycleState.Pending => false,
+            TaskLifecycleState.Running => false,
+            TaskLifecycleState.Parked => false,
+        }
+    }
+    let terminal: List<TaskLifecycleState> = [
+        TaskLifecycleState.Completed,
+        TaskLifecycleState.Cancelled,
+        TaskLifecycleState.Failed,
+    ];
+    let active: List<TaskLifecycleState> = [
+        TaskLifecycleState.Pending,
+        TaskLifecycleState.Running,
+        TaskLifecycleState.Parked,
+    ];
+    for s in terminal.iter() {
+        assert(is_terminal(*s));
+    }
+    for s in active.iter() {
+        assert(!is_terminal(*s));
+    }
+}
+
+fn main() {}
