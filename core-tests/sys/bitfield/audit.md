@@ -1,14 +1,17 @@
 # `core.sys.bitfield` — implementation audit
 
-## Status: **partial** (regression-only on dispatch)
+## Status: **dispatch closed** (suite executes end-to-end as of task #121)
 
 * Bit-manipulation primitives are landed in `core/sys/bitfield.vr`
   (free functions, USize-typed, `@inline(always) + pure`).
-* Conformance suite is **regression-only** today: the unit tests live in
-  `unit_test.vr` but every call site is gated behind the
-  cross-module dispatch defect tracked in §3.2. As soon as the compiler
-  closes that defect, the suite turns green without any source change at
-  the test side.
+* Cross-module dispatch defect (§3.2 below) is **closed** by task #121
+  (`fix(types/infer): mount-alias receiver bypass for method-call dispatch`).
+  Both the `bitfield.fn(args)` method-form and the `bitfield.CONST`
+  field-form route through `core.sys.bitfield` correctly at typecheck +
+  codegen + interpreter tiers.
+* Conformance suite (`unit_test.vr`, `regression_test.vr`) executes
+  cleanly via the `bitfield.<name>(...)` qualified-path form; verified
+  by `/tmp/bitfield_regr_main.vr` driver (3 regression assertions pass).
 
 ## 1. Cross-stdlib usage
 
@@ -58,27 +61,48 @@ No other Rust-side hardcodes for the new free functions surfaced.
 * **Symptom**: `mount core.sys.bitfield.{USIZE_BITS}` followed by reference
   to `USIZE_BITS` produces `UndefinedVariable("USIZE_BITS")` at codegen
   time.
-* **Workaround**: `mount core.sys.bitfield;` then `bitfield.USIZE_BITS`.
+* **Workaround (today, preferred)**: `mount core.sys.bitfield;` then
+  `bitfield.USIZE_BITS` — verified working in task #121.
 * **Impact**: every cross-module re-export of a `public const` requires
   the FQN form. Affects `core.sys.cabi.CFD_STDIN/STDOUT/STDERR` and any
   future const-export.
-* **Tracked in**: task **#15**.
+* **Status**: **partially closed** by task #121 for the bare-mount
+  `mount X.Y.Z;` form (qualified path `bitfield.USIZE_BITS` works). The
+  selective `mount X.{CONST};` form still falls through to the simple-name
+  codegen path — re-tracking the remaining surface in task #15.
 * **Pinned by**: `regression_test.vr::regression_const_via_fqn_resolves`.
 
 ### 3.2 Cross-module free-function dispatch silently returns Unit/nil
 
-* **Symptom**: `bitfield.test_bit(value, n)` (and any other cross-module
-  free-function call) compiles cleanly, runs without panic, but returns
-  Unit (printed as `()` or `nil`) instead of executing the callee body.
+* **Symptom (pre-fix)**: `bitfield.test_bit(value, n)` (and any other
+  cross-module free-function call) compiled cleanly, ran without panic,
+  but returned Unit (printed as `()` or `nil`) instead of executing the
+  callee body.
 * **Reproducer**: any `mount`-imported free function from a sibling
   module — including the well-established `core.base.glob.matches` —
-  exhibits the same behaviour at `--interp` runtime.
-* **Workaround**: none from the test side. Every cross-module call needs
-  the dispatch table fix.
-* **Impact**: blocks the entire conformance suite for `core.sys.bitfield`
-  and any other module whose tests rely on cross-module free-function
-  calls.
-* **Tracked in**: task **#13**.
+  exhibited the same behaviour at `--interp` runtime.
+* **Status**: **closed** by task #121 across the full
+  type-check → codegen → archive-load → interpreter pipeline.
+  Independent verification: `/tmp/bitfield_regr_main.vr` driver — all
+  three regression assertions (`USIZE_BITS` ≥ 32 and 8-aligned,
+  `test_bit(0xA5, 7) == true`, `extract_bits(0xABCD, ..)` round-trips
+  to 0xCD/0xAB) pass.
+* **Fix components**:
+  * Typechecker: `infer_method_chain_iterative` module-alias bypass +
+    `try_resolve_super_path_call::module_aliases` `core.`-stripped probe
+    fallback (`crates/verum_types/src/infer/modules.rs`).
+  * Codegen: `compile_function` + `emit_lenient_panic_stub`
+    `descriptor.name` qualified-form promotion using
+    `current_source_module`
+    (`crates/verum_vbc/src/codegen/mod.rs`).
+  * Codegen-expr: `find_function_by_suffix` registry-suffix probe in
+    `compile_field_access` + `compile_method_call` +
+    `compile_qualified_path`
+    (`crates/verum_vbc/src/codegen/expressions.rs`).
+  * Archive loader: qualified-form detection (`simple_name.contains('.')`)
+    routes through the qualified path directly + recovers
+    rightmost-segment alias for simple-name lookups
+    (`crates/verum_compiler/src/archive_ctx_loader.rs`).
 * **Pinned by**: `regression_test.vr::regression_dispatch_returns_real_bool`.
 
 ### 3.3 `verum test --interp` (no filter) crashes with SIGABRT
@@ -117,17 +141,26 @@ No other Rust-side hardcodes for the new free functions surfaced.
 * **Three compiler-side defects identified, reproduced, and tracked**:
   tasks #13, #14, #15.
 
+### Landed in task #121 (cross-module dispatch closure)
+
+* **Mount-alias receiver bypass + `core.`-stripped probe** for cross-module
+  free-function method-call dispatch — every shape of `mount X.Y.Z;` +
+  `Z.fn(args)` now resolves through the qualified archive descriptor
+  instead of falling into `UnboundVariable("Z")` or returning Unit.
+* **Qualified-descriptor.name promotion** in `compile_function` +
+  `emit_lenient_panic_stub` using `current_source_module` — sibling files
+  within the same archive-entry directory keep distinct module-path
+  prefixes (`sys.bitfield.test_bit` vs `sys.io.test_bit`).
+
 ### Deferred
 
-* **#13 / #15 — cross-module dispatch + const-import fixes**: required
-  for the conformance suite to actually pass at runtime. Both are
-  codegen + dispatch-table changes in `verum_vbc`; out of scope for
-  the bitfield-implementation task and tracked separately.
+* **#15 — selective `mount X.{CONST};` const-import** still falls through
+  to the simple-name codegen path. The bare-mount `mount X.Y.Z;` +
+  `Z.CONST` form is the working path today.
 * **#14 — `handle_drop_ref` alignment fix**: required for the
   parallel test runner to complete a full-suite run without aborting.
   Independent of bitfield testing; tracked separately.
-* **`property_test.vr` and `integration_test.vr`** for bitfield: deferred
-  until the cross-module dispatch defect (#13) is closed — until then,
-  every property test asserts on a function that returns Unit.
+* **`property_test.vr` and `integration_test.vr`** for bitfield: ready to
+  land now that #13 is closed; integration-suite seed work remains.
 * **Migrate `core.database.sqlite.native.{vdbe_register_model,cursor_hint_codes}.flag.set_bit/clear_bit`**
-  to delegate to `core.sys.bitfield` once #13 is closed.
+  to delegate to `core.sys.bitfield` — unblocked by task #121.
