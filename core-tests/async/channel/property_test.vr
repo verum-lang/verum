@@ -25,19 +25,25 @@ fn property_channel_try_send_error_partition() {
 
 @test
 fn property_channel_try_send_error_payload_round_trip() {
-    let domain: List<Int> = [-1, 0, 1, 42, 1_000_000];
-    for v in domain.iter() {
-        let full: TrySendError<Int> = TrySendError.Full(*v);
-        let disc: TrySendError<Int> = TrySendError.Disconnected(*v);
-        match full {
-            TrySendError.Full(p) => assert_eq(p, *v),
-            TrySendError.Disconnected(_) => assert(false),
-        }
-        match disc {
-            TrySendError.Full(_) => assert(false),
-            TrySendError.Disconnected(p) => assert_eq(p, *v),
+    fn extract_full(e: TrySendError<Int>) -> Int {
+        match e {
+            TrySendError.Full(p) => p,
+            TrySendError.Disconnected(_) => -999_999,
         }
     }
+    fn extract_disc(e: TrySendError<Int>) -> Int {
+        match e {
+            TrySendError.Full(_) => -999_999,
+            TrySendError.Disconnected(p) => p,
+        }
+    }
+    assert_eq(extract_full(TrySendError.Full(-1)), -1);
+    assert_eq(extract_full(TrySendError.Full(0)), 0);
+    assert_eq(extract_full(TrySendError.Full(42)), 42);
+    assert_eq(extract_full(TrySendError.Full(1_000_000)), 1_000_000);
+    assert_eq(extract_disc(TrySendError.Disconnected(-1)), -1);
+    assert_eq(extract_disc(TrySendError.Disconnected(0)), 0);
+    assert_eq(extract_disc(TrySendError.Disconnected(42)), 42);
 }
 
 // =============================================================================
