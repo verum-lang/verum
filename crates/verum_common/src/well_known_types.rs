@@ -386,8 +386,23 @@ impl WellKnownType {
             // Wrappers — `core/base/<name>.vr`.
             Self::Maybe => &["core.base.maybe", "core.base"],
             Self::Result => &["core.base.result", "core.base"],
-            Self::Heap => &["core.mem.heap", "core.mem"],
-            Self::Shared => &["core.sync.shared", "core.sync"],
+            // Heap<T> / Shared<T> are user-facing smart pointers declared
+            // in `core/base/memory.vr` (NOT `core/mem/heap.vr` which is the
+            // page-level allocator implementation `HeapPageHeader` /
+            // `LocalHeap`, NOR `core/sync/shared.vr` which does not exist).
+            // Pointing here at the allocator modules causes
+            // `build_wanted_module_prefixes` to miss the impl methods
+            // (`Heap.new` / `Heap.new_zeroed` / `Shared.new` / …); the
+            // archive entry that holds them is the grandparent-bundled
+            // `core.base` (or `core.base.memory` when the precompiler
+            // doesn't bundle).  Caller flow:
+            //   user code: `Heap.new_zeroed()`
+            //   harvester: inserts `Heap` + `Heap.new_zeroed` into wanted
+            //   prefix walker: `WellKnownType::from_name("Heap")`
+            //     => `canonical_archive_modules()` must reach the actual
+            //        declaring module so the archive walk loads it.
+            Self::Heap => &["core.base.memory", "core.base"],
+            Self::Shared => &["core.base.memory", "core.base"],
             // Concurrency — `core/sync/<name>.vr` (Channel lives in
             // core/async/channel.vr; Mutex/RwLock/Barrier/etc. in
             // core/sync/).

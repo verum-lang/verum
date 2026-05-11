@@ -11421,8 +11421,41 @@ impl VbcCodegen {
         // End function compilation
         let (instructions, register_count) = self.ctx.end_function();
 
+        // Promote the descriptor's stored name to the FULL source-
+        // module-qualified form (`sys.bitfield.test_bit` rather than
+        // bare `test_bit`) so the archive-load path's qualified-key
+        // registration finds the function under its file-declared
+        // module path.  Without this promotion every `.vr` file under
+        // e.g. `core/sys/` gets folded into a single archive entry
+        // named `core.sys`, sibling files collapse onto the same bare
+        // simple name, and cross-module bare-mount qualified access
+        // (`mount core.sys.bitfield; ... bitfield.test_bit(v, 7)`)
+        // misses the user-side function registry.
+        //
+        // Mirrors the equivalent promotion already in place at
+        // `register_constant_with_value` (inlinable-const stub) and
+        // `compile_pending_constants` (body-compiled-const) — the
+        // function-body path is the third sibling.  Impl methods
+        // (`lookup_name = "Type.method"`, already qualified) and
+        // nested-function names (with `$` separators) are left alone.
+        // Closes audit task #121's function-side gap.
+        let effective_module = self
+            .ctx
+            .current_source_module
+            .as_deref()
+            .unwrap_or(&self.config.module_name);
+        let descriptor_name = if !effective_module.is_empty()
+            && effective_module != "main"
+            && !lookup_name.contains('.')
+            && !lookup_name.contains('$')
+        {
+            format!("{}.{}", effective_module, lookup_name)
+        } else {
+            lookup_name.clone()
+        };
+
         // Create VBC function
-        let name_id = StringId(self.intern_string(&lookup_name));
+        let name_id = StringId(self.intern_string(&descriptor_name));
         let mut descriptor = FunctionDescriptor::new(name_id);
         descriptor.id = func_info.id;
         descriptor.register_count = register_count;
@@ -11681,7 +11714,28 @@ impl VbcCodegen {
         // descriptor-building block at the same call shape — same
         // name_id, same FunctionId, same params, same return_type, +
         // generator/async/context flags from the registered info.
-        let name_id = StringId(self.intern_string(&lookup_name));
+        //
+        // Apply the same source-module-qualified descriptor.name
+        // promotion as the success path (task #121): if the panic
+        // stub stands in for a top-level fn declared in e.g.
+        // `module sys.bitfield;`, the stub still needs to land in
+        // the archive under `sys.bitfield.<name>` so cross-module
+        // bare-mount dispatch reaches it.
+        let effective_module = self
+            .ctx
+            .current_source_module
+            .as_deref()
+            .unwrap_or(&self.config.module_name);
+        let descriptor_name = if !effective_module.is_empty()
+            && effective_module != "main"
+            && !lookup_name.contains('.')
+            && !lookup_name.contains('$')
+        {
+            format!("{}.{}", effective_module, lookup_name)
+        } else {
+            lookup_name.clone()
+        };
+        let name_id = StringId(self.intern_string(&descriptor_name));
         let mut descriptor = FunctionDescriptor::new(name_id);
         descriptor.id = func_info.id;
         descriptor.register_count = register_count;
