@@ -1,0 +1,393 @@
+// =============================================================================
+// core-tests/async/poll/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.poll.Poll<T>` — the two-state algebra
+// (Ready(T) | Pending) that the entire async layer is built on.
+//
+// One @test per public method, grouped by section banner. Every test
+// name is prefixed `test_poll_…` so the runner's substring filter
+// can isolate this module's suite without clashing with other
+// `unit_test.vr` siblings across `core-tests/`.
+//
+// Companion files:
+//   property_test.vr     — algebraic laws on the Functor/Monad-ish surface
+//   integration_test.vr  — interop with Maybe, Result, Future
+//   regression_test.vr   — pinned regressions
+//   audit.md             — implementation findings + action items
+// =============================================================================
+
+mount core.async.poll.{Poll};
+mount core.maybe.{Maybe, Some, None};
+mount core.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Variant construction
+// =============================================================================
+
+@test
+fn test_poll_ready_construction() {
+    let p: Poll<Int> = Poll.Ready(42);
+    assert(p is Poll.Ready);
+}
+
+@test
+fn test_poll_pending_construction() {
+    let p: Poll<Int> = Poll.Pending;
+    assert(p is Poll.Pending);
+}
+
+@test
+fn test_poll_variants_distinct() {
+    let r: Poll<Int> = Poll.Ready(1);
+    let p: Poll<Int> = Poll.Pending;
+    assert(!(r is Poll.Pending));
+    assert(!(p is Poll.Ready));
+}
+
+// =============================================================================
+// Section 2: is_ready()
+// =============================================================================
+
+@test
+fn test_poll_is_ready_on_ready() {
+    let p: Poll<Int> = Poll.Ready(7);
+    assert(p.is_ready());
+}
+
+@test
+fn test_poll_is_ready_on_pending() {
+    let p: Poll<Int> = Poll.Pending;
+    assert(!p.is_ready());
+}
+
+@test
+fn test_poll_is_ready_payload_agnostic() {
+    let p_int: Poll<Int> = Poll.Ready(0);
+    let p_text: Poll<Text> = Poll.Ready("");
+    let p_bool: Poll<Bool> = Poll.Ready(false);
+    assert(p_int.is_ready());
+    assert(p_text.is_ready());
+    assert(p_bool.is_ready());
+}
+
+// =============================================================================
+// Section 3: is_pending()
+// =============================================================================
+
+@test
+fn test_poll_is_pending_on_pending() {
+    let p: Poll<Int> = Poll.Pending;
+    assert(p.is_pending());
+}
+
+@test
+fn test_poll_is_pending_on_ready() {
+    let p: Poll<Int> = Poll.Ready(99);
+    assert(!p.is_pending());
+}
+
+@test
+fn test_poll_is_ready_pending_mutually_exclusive() {
+    let r: Poll<Int> = Poll.Ready(1);
+    let p: Poll<Int> = Poll.Pending;
+    assert(r.is_ready() != r.is_pending());
+    assert(p.is_ready() != p.is_pending());
+}
+
+// =============================================================================
+// Section 4: map()
+// =============================================================================
+
+@test
+fn test_poll_map_ready_applies_fn() {
+    let p: Poll<Int> = Poll.Ready(3);
+    let q = p.map(|x| x * 2);
+    assert_eq(q, Poll.Ready(6));
+}
+
+@test
+fn test_poll_map_pending_is_identity() {
+    let p: Poll<Int> = Poll.Pending;
+    let q = p.map(|x| x + 1);
+    assert(q is Poll.Pending);
+}
+
+@test
+fn test_poll_map_changes_payload_type() {
+    let p: Poll<Int> = Poll.Ready(5);
+    let q: Poll<Text> = p.map(|x| if x > 0 { "positive" } else { "non-positive" });
+    assert_eq(q, Poll.Ready("positive"));
+}
+
+@test
+fn test_poll_map_only_invokes_fn_when_ready() {
+    let mut called = false;
+    let p: Poll<Int> = Poll.Pending;
+    let _q = p.map(|x| {
+        called = true;
+        x
+    });
+    assert(!called);
+}
+
+// =============================================================================
+// Section 5: unwrap_or()
+// =============================================================================
+
+@test
+fn test_poll_unwrap_or_ready_returns_value() {
+    let p: Poll<Int> = Poll.Ready(11);
+    assert_eq(p.unwrap_or(0), 11);
+}
+
+@test
+fn test_poll_unwrap_or_pending_returns_default() {
+    let p: Poll<Int> = Poll.Pending;
+    assert_eq(p.unwrap_or(99), 99);
+}
+
+@test
+fn test_poll_unwrap_or_default_unused_on_ready() {
+    let p: Poll<Int> = Poll.Ready(5);
+    let result = p.unwrap_or(-1);
+    assert_eq(result, 5);
+}
+
+// =============================================================================
+// Section 6: ready() — conversion to Maybe<T>
+// =============================================================================
+
+@test
+fn test_poll_ready_to_maybe_some() {
+    let p: Poll<Int> = Poll.Ready(8);
+    let m: Maybe<Int> = p.ready();
+    assert_eq(m, Some(8));
+}
+
+@test
+fn test_poll_ready_to_maybe_none() {
+    let p: Poll<Int> = Poll.Pending;
+    let m: Maybe<Int> = p.ready();
+    assert_eq(m, None);
+}
+
+// =============================================================================
+// Section 7: ready_ok / ready_err constructors (Poll<Result<T, E>>)
+// =============================================================================
+
+@test
+fn test_poll_ready_ok_constructor() {
+    let p: Poll<Result<Int, Text>> = Poll.ready_ok(42);
+    assert_eq(p, Poll.Ready(Ok(42)));
+}
+
+@test
+fn test_poll_ready_err_constructor() {
+    let p: Poll<Result<Int, Text>> = Poll.ready_err("boom");
+    assert_eq(p, Poll.Ready(Err("boom")));
+}
+
+// =============================================================================
+// Section 8: map_ok / map_err (Poll<Result<T, E>>)
+// =============================================================================
+
+@test
+fn test_poll_map_ok_on_ready_ok() {
+    let p: Poll<Result<Int, Text>> = Poll.Ready(Ok(3));
+    let q = p.map_ok(|x| x + 10);
+    assert_eq(q, Poll.Ready(Ok(13)));
+}
+
+@test
+fn test_poll_map_ok_preserves_err() {
+    let p: Poll<Result<Int, Text>> = Poll.Ready(Err("e"));
+    let q = p.map_ok(|x| x + 1);
+    assert_eq(q, Poll.Ready(Err("e")));
+}
+
+@test
+fn test_poll_map_ok_preserves_pending() {
+    let p: Poll<Result<Int, Text>> = Poll.Pending;
+    let q = p.map_ok(|x| x + 1);
+    assert(q is Poll.Pending);
+}
+
+@test
+fn test_poll_map_err_on_ready_err() {
+    let p: Poll<Result<Int, Text>> = Poll.Ready(Err("oops"));
+    let q = p.map_err(|e| e.len());
+    assert_eq(q, Poll.Ready(Err(4)));
+}
+
+@test
+fn test_poll_map_err_preserves_ok() {
+    let p: Poll<Result<Int, Text>> = Poll.Ready(Ok(5));
+    let q = p.map_err(|e: Text| e.len());
+    assert_eq(q, Poll.Ready(Ok(5)));
+}
+
+@test
+fn test_poll_map_err_preserves_pending() {
+    let p: Poll<Result<Int, Text>> = Poll.Pending;
+    let q = p.map_err(|e: Text| e.len());
+    assert(q is Poll.Pending);
+}
+
+// =============================================================================
+// Section 9: Eq protocol
+// =============================================================================
+
+@test
+fn test_poll_eq_ready_same_payload() {
+    let a: Poll<Int> = Poll.Ready(7);
+    let b: Poll<Int> = Poll.Ready(7);
+    assert(a == b);
+}
+
+@test
+fn test_poll_eq_ready_different_payload() {
+    let a: Poll<Int> = Poll.Ready(1);
+    let b: Poll<Int> = Poll.Ready(2);
+    assert(a != b);
+}
+
+@test
+fn test_poll_eq_pending_pending() {
+    let a: Poll<Int> = Poll.Pending;
+    let b: Poll<Int> = Poll.Pending;
+    assert(a == b);
+}
+
+@test
+fn test_poll_eq_ready_vs_pending() {
+    let a: Poll<Int> = Poll.Ready(0);
+    let b: Poll<Int> = Poll.Pending;
+    assert(a != b);
+    assert(b != a);
+}
+
+@test
+fn test_poll_eq_reflexive() {
+    let a: Poll<Int> = Poll.Ready(42);
+    let b: Poll<Int> = Poll.Pending;
+    assert(a == a);
+    assert(b == b);
+}
+
+// =============================================================================
+// Section 10: Clone protocol
+// =============================================================================
+
+@test
+fn test_poll_clone_ready_value_equal() {
+    let original: Poll<Int> = Poll.Ready(123);
+    let cloned = original.clone();
+    assert_eq(original, cloned);
+}
+
+@test
+fn test_poll_clone_pending() {
+    let original: Poll<Int> = Poll.Pending;
+    let cloned = original.clone();
+    assert(cloned is Poll.Pending);
+}
+
+// =============================================================================
+// Section 11: Default protocol
+// =============================================================================
+
+@test
+fn test_poll_default_is_pending() {
+    let d: Poll<Int> = Poll.default();
+    assert(d is Poll.Pending);
+}
+
+@test
+fn test_poll_default_for_distinct_payload_types() {
+    let d_int: Poll<Int> = Poll.default();
+    let d_text: Poll<Text> = Poll.default();
+    assert(d_int.is_pending());
+    assert(d_text.is_pending());
+}
+
+// =============================================================================
+// Section 12: Debug protocol
+// =============================================================================
+
+@test
+fn test_poll_debug_ready_int() {
+    let p: Poll<Int> = Poll.Ready(7);
+    let s = f"{p:?}";
+    assert_eq(s, "Ready(7)");
+}
+
+@test
+fn test_poll_debug_pending() {
+    let p: Poll<Int> = Poll.Pending;
+    let s = f"{p:?}";
+    assert_eq(s, "Pending");
+}
+
+// =============================================================================
+// Section 13: Conversions (From<Maybe<T>>)
+//
+// The earlier blanket `From<T> for Poll<T>` impl was removed (see
+// regression_test.vr §B) — its overlap with `From<Maybe<T>> for
+// Poll<T>` was a coherence hazard.  `Poll.Ready(t)` is the explicit
+// constructor for the "wrap in Ready" case.
+// =============================================================================
+
+@test
+fn test_poll_from_some_becomes_ready() {
+    let m: Maybe<Int> = Some(11);
+    let p: Poll<Int> = Poll.from(m);
+    assert_eq(p, Poll.Ready(11));
+}
+
+@test
+fn test_poll_from_none_becomes_pending() {
+    let m: Maybe<Int> = None;
+    let p: Poll<Int> = Poll.from(m);
+    assert(p is Poll.Pending);
+}
+
+// =============================================================================
+// Section 14: Pattern matching
+// =============================================================================
+
+@test
+fn test_poll_pattern_match_exhaustive() {
+    fn describe(p: Poll<Int>) -> Text {
+        match p {
+            Poll.Ready(_) => "complete",
+            Poll.Pending => "in-flight",
+        }
+    }
+    assert_eq(describe(Poll.Ready(1)), "complete");
+    assert_eq(describe(Poll.Pending), "in-flight");
+}
+
+@test
+fn test_poll_pattern_destructures_payload() {
+    let p: Poll<Int> = Poll.Ready(13);
+    let extracted = match p {
+        Poll.Ready(n) => n,
+        Poll.Pending => -1,
+    };
+    assert_eq(extracted, 13);
+}
+
+@test
+fn test_poll_is_pattern_test() {
+    let r: Poll<Int> = Poll.Ready(0);
+    let p: Poll<Int> = Poll.Pending;
+    assert(r is Poll.Ready);
+    assert(p is Poll.Pending);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

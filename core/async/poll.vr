@@ -173,13 +173,21 @@ implement<T> Default for Poll<T> {
 
 // =============================================================================
 // Conversions
+//
+// Only the semantically-meaningful conversion lives here: Maybe<T> →
+// Poll<T> maps the Some/None partition onto Ready/Pending. The earlier
+// blanket `implement<T> From<T> for Poll<T>` was removed in favour of
+// the explicit `Poll.Ready(t)` constructor — the blanket impl overlapped
+// the `From<Maybe<T>>` impl under any substitution `T = Maybe<U>` and
+// the impl-coherence selector silently routed `Poll.from(non_maybe)`
+// through the Maybe-arm, materialising `Poll.Pending` for inputs that
+// were never meant to be Maybe-shaped (regression pinned by
+// `core-tests/async/poll/regression_test.vr` §B, now closed structurally).
+//
+// Callers that previously wrote `Poll.from(value)` for a non-Maybe
+// payload write `Poll.Ready(value)` — same byte-level result, no
+// coherence hazard, more honest about the wrap-up-in-Ready intent.
 // =============================================================================
-
-implement<T> From<T> for Poll<T> {
-    fn from(t: T) -> Poll<T> {
-        Ready(t)
-    }
-}
 
 implement<T> From<Maybe<T>> for Poll<T> {
     fn from(opt: Maybe<T>) -> Poll<T> {

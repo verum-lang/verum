@@ -1,0 +1,157 @@
+// =============================================================================
+// core-tests/async/poll/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions surfaced while building the `core.async.poll`
+// conformance suite. Each test reproduces a specific language /
+// runtime defect in the minimum form possible — kept here forever
+// as a guardrail against re-regression, even after the underlying
+// defect is closed.
+// =============================================================================
+
+mount core.async.poll.{Poll};
+mount core.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// §A  Variant-name auto-derive uses the global tag-scan fallback
+//
+//   When formatting `Poll<T>` (or any user-defined two-variant sum)
+//   via `f"{p:?}"`, the runtime walks
+//   `interpreter::dispatch_table::handlers::debug.rs::
+//   format_variant_for_print_depth` and reaches the global tag-scan
+//   fallback.  That fallback picks the FIRST non-protocol type-
+//   descriptor with a matching variant tag — which for tag 0 / 1 is
+//   `ProductivityResult.Productive` / `.NonProductive` (declared in
+//   core/base/coinductive.vr:67-72 and registered ahead of `Poll`
+//   during stdlib bootstrap).
+//
+//   Root cause: codegen for the `TypeName.Variant(args)` and
+//   `TypeName.Variant` (nullary path access) call sites emitted the
+//   legacy `MakeVariant { tag, field_count }` opcode (synthetic
+//   type_id) instead of `MakeVariantTyped { type_id, tag, … }`.
+//   The heap header therefore carried `SYNTHETIC_VARIANT_TYPE_ID_BASE
+//   + tag`, the runtime's type-scoped variant-name lookup couldn't
+//   fire, and the global tag-scan returned the first colliding
+//   variant name.
+//
+//   CLOSED 2026-05-11 — codegen now threads the syntactic parent
+//   (`type_name` from `TypeName.Variant…`) through
+//   `compile_variant_constructor_hinted` and
+//   `compile_variant_constructor_with_tag_named_and_parent` at every
+//   variant-construction call site. `MakeVariantTyped` lands
+//   uniformly. The type-scoped variant-name lookup in
+//   `format_variant_for_print_depth` resolves the correct parent's
+//   descriptor in O(N_variants_of_that_type).  Tests below kept as
+//   guardrails against re-regression.
+// =============================================================================
+
+@test
+fn regression_poll_debug_ready_renders_ready_not_productive() {
+    let p: Poll<Int> = Poll.Ready(7);
+    let s = f"{p:?}";
+    assert_eq(s, "Ready(7)");
+}
+
+@test
+fn regression_poll_debug_pending_renders_pending_not_nonproductive() {
+    let p: Poll<Int> = Poll.Pending;
+    let s = f"{p:?}";
+    assert_eq(s, "Pending");
+}
+
+@test
+fn regression_local_two_variant_sum_debug_uses_local_names() {
+    // Demonstrates the root cause was generic to any user-defined
+    // two-variant sum, not specific to Poll<T>.
+    type LocalPair is | LocalLeft(Int) | LocalRight;
+
+    let l = LocalPair.LocalLeft(42);
+    let r = LocalPair.LocalRight;
+    assert_eq(f"{l:?}", "LocalLeft(42)");
+    assert_eq(f"{r:?}", "LocalRight");
+}
+
+// =============================================================================
+// §B  Blanket `From<T> for Poll<T>` impl removed — coherence hazard
+//
+//   Original defect: `core/async/poll.vr` carried two From impls:
+//
+//     implement<T> From<T>        for Poll<T> { ... -> Ready(t)   }
+//     implement<T> From<Maybe<T>> for Poll<T> { Some/None routes  }
+//
+//   The first was a blanket convenience that overlapped the second
+//   under any substitution `T = Maybe<U>` — and the impl-coherence
+//   selector silently picked the Maybe arm for non-Maybe inputs,
+//   collapsing `Poll.from(99)` to `Poll.Pending`.
+//
+//   CLOSED 2026-05-11 — fundamental fix at the source: removed the
+//   blanket `From<T> for Poll<T>` impl.  The named constructor
+//   `Poll.Ready(t)` is more expressive about the wrap-up-in-Ready
+//   intent and carries no coherence hazard.  The remaining
+//   `From<Maybe<T>>` impl is the unambiguous semantic conversion:
+//   Some -> Ready, None -> Pending. No stdlib call sites used the
+//   blanket form (grep `Poll\.from\(` across `core/`).
+//
+//   Guardrails below confirm the structural fix: `Poll.from(maybe_v)`
+//   still routes via the Maybe-impl correctly; broken
+//   `Poll.from(non_maybe)` now fails the typechecker as it should,
+//   guiding callers to `Poll.Ready(non_maybe)`.
+// =============================================================================
+
+@test
+fn regression_poll_from_maybe_some_routes_to_ready() {
+    let m: Maybe<Int> = Some(99);
+    let p: Poll<Int> = Poll.from(m);
+    assert_eq(p, Poll.Ready(99));
+}
+
+@test
+fn regression_poll_from_maybe_none_routes_to_pending() {
+    let m: Maybe<Int> = None;
+    let p: Poll<Int> = Poll.from(m);
+    assert(p is Poll.Pending);
+}
+
+// =============================================================================
+// §C  Receiver-aware method-chain resolution lifted above hardcoded
+//     MAYBE_RETURNING_METHODS table
+//
+//   `crates/verum_vbc/src/codegen/expressions.rs::
+//   determine_method_return_type_prefix` carried a hardcoded
+//   `MAYBE_RETURNING_METHODS` / `MAYBE_METHODS` table that fired
+//   BEFORE the receiver-type-based lookup.  For any chained
+//   `expr.map(...).<outer>` where `<outer>` is also a Maybe method
+//   name, the dispatcher returned `Maybe.<outer>` regardless of the
+//   receiver's actual sum type — collapsing `Poll<T>` (and every
+//   other Functor-shape that shares `map` / `and_then` / ... method
+//   names with Maybe) into a Maybe-shaped dispatch.  Runtime
+//   panicked with `method 'Maybe.<outer>' not found on receiver`.
+//
+//   CLOSED 2026-05-11 — reordered the inference: receiver-type
+//   lookup (variable_type_names + lookup_function +
+//   infer_method_chain_return_type) now runs FIRST, and the
+//   hardcoded Maybe table runs only as last-resort fallback for
+//   receivers whose actual type is unknown.  This matches the
+//   "NEVER hardcode stdlib/core type knowledge in the compiler"
+//   rule in `crates/verum_types/src/CLAUDE.md`.
+// =============================================================================
+
+@test
+fn regression_poll_chained_map_dispatches_to_poll_not_maybe() {
+    let p: Poll<Int> = Poll.Ready(5);
+    let q = p.map(|x| x + 1).map(|x| x * 2);
+    assert_eq(q, Poll.Ready(12));
+}
+
+@test
+fn regression_poll_chained_map_pending_absorbs() {
+    let p: Poll<Int> = Poll.Pending;
+    let q = p.map(|x| x + 1).map(|x| x * 2);
+    assert(q is Poll.Pending);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
