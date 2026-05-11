@@ -1,0 +1,194 @@
+// =============================================================================
+// core-tests/async/future/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions surfaced while building the `core.async.future`
+// conformance suite. Each `@ignore`d test reproduces a specific
+// language / interpreter defect in the minimum form possible.  Every
+// pinned defect has a tracking task on the language-implementation
+// track — no `@ignore` is filed without a fix route.
+// =============================================================================
+
+mount core.async.future.{
+    Future, ReadyFuture, PendingFuture, Lazy, MapFuture, AndThenFuture,
+    Join2, Join3, Select2, SelectResult,
+    ready, pending, lazy, join, select, join3,
+};
+mount core.async.poll.{Poll};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  `&self` method-body field access auto-deref gap
+//
+//   Method bodies with `&self` receiver crash at the first
+//   `self.<field>` GetF with `NullPointerAt opcode 0x62`.  The
+//   interpreter doesn't auto-deref the reference before the field
+//   access, treating the &-ref as the target object directly.
+//
+//   Blocks Future.poll, FutureExt.block(), every combinator's
+//   poll body.  Tracking task: "Interpreter: `&self` receiver in
+//   method bodies must auto-deref before field-access GetF;
+//   current behaviour treats `self.field` on `self: &Self` as
+//   GetF on the reference".
+//
+//   Sibling pin: core-tests/async/waker/regression_test.vr §C.
+// =============================================================================
+
+@ignore
+@test
+fn regression_future_ready_block_returns_value() {
+    let r = ready(42);
+    assert_eq(r.block(), 42);
+}
+
+@ignore
+@test
+fn regression_future_ready_block_payload_round_trip() {
+    let domain: List<Int> = [-1_000_000, -1, 0, 1, 42, 1_000_000];
+    for v in domain.iter() {
+        let r = ready(*v);
+        assert_eq(r.block(), *v);
+    }
+}
+
+@ignore
+@test
+fn regression_future_lazy_invokes_closure_on_block() {
+    let mut invoked: Int = 0;
+    let l = lazy(|| { invoked = invoked + 1; 7 });
+    assert_eq(l.block(), 7);
+    assert_eq(invoked, 1);
+}
+
+@ignore
+@test
+fn regression_future_map_transforms_output() {
+    let m = ready(3).map(|x| x * 2);
+    assert_eq(m.block(), 6);
+}
+
+@ignore
+@test
+fn regression_future_map_composes_with_ready() {
+    let m = ready(10).map(|x| x + 1).map(|x| x * 2);
+    assert_eq(m.block(), 22);
+}
+
+@ignore
+@test
+fn regression_future_and_then_chains() {
+    let a = ready(3).and_then(|x| ready(x * 2));
+    assert_eq(a.block(), 6);
+}
+
+@ignore
+@test
+fn regression_future_join_yields_pair_when_both_ready() {
+    let f1 = ready(10);
+    let f2 = ready(20);
+    let j = join(f1, f2);
+    let (a, b) = j.block();
+    assert_eq(a, 10);
+    assert_eq(b, 20);
+}
+
+@ignore
+@test
+fn regression_future_join3_yields_triple_when_all_ready() {
+    let f1 = ready(1);
+    let f2 = ready(2);
+    let f3 = ready(3);
+    let j = join3(f1, f2, f3);
+    let (a, b, c) = j.block();
+    assert_eq(a, 1);
+    assert_eq(b, 2);
+    assert_eq(c, 3);
+}
+
+@ignore
+@test
+fn regression_future_select_yields_left_when_first_ready() {
+    let f1 = ready(7);
+    let f2: PendingFuture<Int> = pending();
+    let s = select(f1, f2);
+    let r = s.block();
+    match r {
+        SelectResult.Left(v) => assert_eq(v, 7),
+        SelectResult.Right(_) => assert(false),
+    }
+}
+
+@ignore
+@test
+fn regression_future_select_yields_right_when_second_ready() {
+    let f1: PendingFuture<Int> = pending();
+    let f2 = ready(99);
+    let s = select(f1, f2);
+    let r = s.block();
+    match r {
+        SelectResult.Left(_) => assert(false),
+        SelectResult.Right(v) => assert_eq(v, 99),
+    }
+}
+
+// =============================================================================
+// §B  type_field_layouts cross-mount registration race
+//
+//   `let f: ReadyFuture<Int> = ready(0); f.value` panics with
+//   "field index 1 exceeds object data size 8" when
+//   `mount core.collections.list.List` is also in scope.
+//   resolve_field_index falls into the global scan after the
+//   ReadyFuture-specific entry isn't found under the expected key.
+//
+//   Same surface reproduces for every record-type field-access
+//   where another type with same-named field is also mounted —
+//   e.g., Join2.fut1 / Select2.fut1 in property-test scope.
+//
+//   Tracking task: "Codegen: type_field_layouts registration race
+//   when same type is processed multiple times across mount
+//   passes; the prefer-existing guard skips re-registration but
+//   leaves the field-type map stale".
+// =============================================================================
+
+@ignore
+@test
+fn regression_future_ready_value_field_resolves_under_list_mount() {
+    let f: ReadyFuture<Int> = ready(0);
+    assert(f.value is Maybe.Some);
+}
+
+@ignore
+@test
+fn regression_future_join_result_fields_resolve_under_list_mount() {
+    let f1 = ready(1);
+    let f2 = ready(2);
+    let j: Join2<ReadyFuture<Int>, ReadyFuture<Int>> = join(f1, f2);
+    assert(j.result1 is Maybe.None);
+    assert(j.result2 is Maybe.None);
+    assert(j.fut1 is Maybe.Some);
+    assert(j.fut2 is Maybe.Some);
+}
+
+@ignore
+@test
+fn regression_future_select_fut_fields_resolve_under_list_mount() {
+    let f1 = ready(1);
+    let f2 = ready(2);
+    let s: Select2<ReadyFuture<Int>, ReadyFuture<Int>> = select(f1, f2);
+    assert(s.fut1 is Maybe.Some);
+    assert(s.fut2 is Maybe.Some);
+}
+
+@ignore
+@test
+fn regression_future_lazy_f_field_resolves_under_list_mount() {
+    let l = lazy(|| 7);
+    assert(l.f is Maybe.Some);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

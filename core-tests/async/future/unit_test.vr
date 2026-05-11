@@ -1,0 +1,142 @@
+// =============================================================================
+// core-tests/async/future/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.future` — the foundational Future
+// protocol + its canonical combinators (`ReadyFuture`,
+// `PendingFuture`, `Lazy`, `MapFuture`, `AndThenFuture`, `Join2`,
+// `Join3`, `Select2`).
+//
+// Every test name is prefixed `test_future_…`. Tests that exercise
+// `FutureExt.block()` or method dispatch through the Future protocol
+// are pinned in regression_test.vr §A pending the upstream
+// interpreter defects (waker §B/§C — `&self` field-access auto-deref
+// gap; CSPRNG intrinsic gap for jittered code paths).
+// =============================================================================
+
+mount core.async.future.{
+    Future, ReadyFuture, PendingFuture, Lazy,
+    Join2, Select2, SelectResult,
+    ready, pending, lazy, join, select, join3,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: ReadyFuture construction
+// =============================================================================
+
+@test
+fn test_future_ready_constructs_with_value() {
+    let _f: ReadyFuture<Int> = ready(42);
+    assert(true);
+}
+
+@test
+fn test_future_ready_payload_agnostic() {
+    let _a: ReadyFuture<Int> = ready(1);
+    let _b: ReadyFuture<Text> = ready("hi");
+    let _c: ReadyFuture<Bool> = ready(true);
+    assert(true);
+}
+
+// =============================================================================
+// Section 2: PendingFuture construction
+// =============================================================================
+
+@test
+fn test_future_pending_constructs() {
+    let _f: PendingFuture<Int> = pending();
+    assert(true);
+}
+
+@test
+fn test_future_pending_payload_agnostic() {
+    let _a: PendingFuture<Int> = pending();
+    let _b: PendingFuture<Text> = pending();
+    let _c: PendingFuture<Bool> = pending();
+    assert(true);
+}
+
+// =============================================================================
+// Section 3: Lazy construction
+// =============================================================================
+
+@test
+fn test_future_lazy_constructs_without_invoking_closure() {
+    // The closure must NOT be invoked at construction time —
+    // that's the whole "deferred computation" point of Lazy.
+    let mut invoked = false;
+    let _f = lazy(|| {
+        invoked = true;
+        42
+    });
+    assert(!invoked);
+}
+
+// =============================================================================
+// Section 4: Join combinator construction
+// =============================================================================
+
+@test
+fn test_future_join_constructs() {
+    let f1 = ready(1);
+    let f2 = ready(2);
+    let _joined = join(f1, f2);
+    assert(true);
+}
+
+@test
+fn test_future_join3_constructs() {
+    let f1 = ready(1);
+    let f2 = ready(2);
+    let f3 = ready(3);
+    let _joined = join3(f1, f2, f3);
+    assert(true);
+}
+
+// =============================================================================
+// Section 5: Select combinator construction
+// =============================================================================
+
+@test
+fn test_future_select_constructs() {
+    let f1 = ready(1);
+    let f2: PendingFuture<Int> = pending();
+    let _sel = select(f1, f2);
+    assert(true);
+}
+
+// =============================================================================
+// Section 6: SelectResult variant identity
+//
+//   The two-arm Left/Right sum carries the Race outcome.  Variant
+//   construction and `is`-pattern partition must be sound.
+// =============================================================================
+
+@test
+fn test_future_select_result_left_is_left() {
+    let r: SelectResult<Int, Text> = SelectResult.Left(7);
+    assert(r is SelectResult.Left);
+    assert(!(r is SelectResult.Right));
+}
+
+@test
+fn test_future_select_result_right_is_right() {
+    let r: SelectResult<Int, Text> = SelectResult.Right("won");
+    assert(r is SelectResult.Right);
+    assert(!(r is SelectResult.Left));
+}
+
+@test
+fn test_future_select_result_match_exhaustive() {
+    fn describe(r: SelectResult<Int, Text>) -> Text {
+        match r {
+            SelectResult.Left(_) => "left",
+            SelectResult.Right(_) => "right",
+        }
+    }
+    assert_eq(describe(SelectResult.Left(1)), "left");
+    assert_eq(describe(SelectResult.Right("hi")), "right");
+}
+
+fn main() {}
