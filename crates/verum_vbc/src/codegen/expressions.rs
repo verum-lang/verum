@@ -3363,27 +3363,44 @@ impl VbcCodegen {
                 }
             }
             UnOp::Not => {
-                // For built-in Bool / Int / unknown types, emit the direct
-                // `Instruction::Not` opcode — at runtime `handle_lnot`
-                // produces a logical NOT via `is_truthy`, never a bitwise
-                // complement.
+                // Type-aware split — `!` has TWO semantics depending on
+                // the operand type:
                 //
-
+                //   * Bool          → logical NOT (`Instruction::Not`,
+                //                     runtime `handle_lnot` via is_truthy).
+                //   * Int / UInt*   → bitwise NOT (`Instruction::Bitwise`,
+                //                     `BitwiseOp::Not`, runtime
+                //                     `handle_bitnot`). The Verum `Not`
+                //                     protocol impl in primitives.vr
+                //                     defines `Int.not`/`USize.not` as
+                //                     `bitnot(self)` so this matches the
+                //                     surface contract.
+                //   * Unknown       → Instruction::Not (defensive: type
+                //                     wasn't inferred so we fall back to
+                //                     the truthy-based runtime which works
+                //                     for any value).
+                //
                 // Method-dispatch path (CallM("not", ...)) is reserved for
                 // user types that explicitly `implement Not for MyType`.
                 // Going through method dispatch for Bool is unsound because
                 // both `Bool.not` (logical) and `Int.not` (bitwise) register
                 // under the same bare `not#1` key and the runtime picks
-                // whichever loaded first — surfacing as `!some_bool_call()`
-                // returning `-2` when `mount base.{...}` pulls in
-                // primitives.vr's `Int.not` after `Bool.not`. Live failure
-                // mode: `if !is_valid_page_size(4096)` taking the err branch
-                // for a perfectly-valid 4 KiB page.
+                // whichever loaded first.
+                //
+                // Pre-fix bug: every primitive (including all UInt/Int
+                // widths) emitted `Instruction::Not` and the runtime's
+                // logical-not handler returned a Bool, so any `!mask`
+                // expression on a USize / UInt32 / etc. silently became
+                // `false` (= 0 as USize) — `value & !field` collapsed to
+                // `value & 0 = 0` and bitfield insert/clear/etc. produced
+                // garbage at every callsite. Live failure: bitfield's
+                // `insert_bits(0xABCD, 0xEF, 0, 8)` returned `0xEF`
+                // instead of `0xABEF`.
                 let type_name = self.extract_expr_type_name(inner);
-                let is_builtin_not = matches!(
+                let is_bool = matches!(type_name.as_deref(), Some("Bool"));
+                let is_integer = matches!(
                     type_name.as_deref(),
-                    None | Some("Bool")
-                        | Some("Int")
+                    Some("Int")
                         | Some("Int8")
                         | Some("Int16")
                         | Some("Int32")
@@ -3399,6 +3416,7 @@ impl VbcCodegen {
                         | Some("USize")
                         | Some("Byte")
                 );
+                let is_builtin_not = is_bool || is_integer || type_name.is_none();
                 let has_not_method = !is_builtin_not
                     && type_name.as_ref().is_some_and(|name| {
                         let qualified = format!("{}.not", name);
@@ -3420,10 +3438,19 @@ impl VbcCodegen {
                     self.ctx.free_temp(inner_reg);
                     return Ok(Some(method_result));
                 }
-                self.ctx.emit(Instruction::Not {
-                    dst: dest,
-                    src: inner_reg,
-                });
+                if is_integer {
+                    self.ctx.emit(Instruction::Bitwise {
+                        op: BitwiseOp::Not,
+                        dst: dest,
+                        a: inner_reg,
+                        b: inner_reg, // b is ignored for NOT
+                    });
+                } else {
+                    self.ctx.emit(Instruction::Not {
+                        dst: dest,
+                        src: inner_reg,
+                    });
+                }
             }
             UnOp::BitNot => {
                 self.ctx.emit(Instruction::Bitwise {
@@ -8364,6 +8391,26 @@ impl VbcCodegen {
             }
         }
 
+        // Generic structural fallback — works for ANY non-Path /
+        // non-MethodCall inner_receiver shape (Unary Deref of an
+        // iterator binding, Paren-wrapped expressions, Field access,
+        // ...).  Defers to `extract_expr_type_name` which recursively
+        // unwraps Unary / Paren / Block / Field / Binary cases and
+        // walks `variable_type_names` for primary type names.  This
+        // closes the chain-inference gap for `(*iter_item).map(...).
+        // <outer>` and similar shapes whose receiver isn't a single
+        // identifier and isn't a method-call (the two cases above).
+        if let Some(rt) = self.extract_expr_type_name(inner_receiver) {
+            let base = VbcCodegen::strip_generic_args(&rt);
+            let qualified_inner = format!("{}.{}", base, inner_method.name);
+            if let Some(inner_func_info) = self.ctx.lookup_function(&qualified_inner)
+                && let Some(ref inner_ret_type) = inner_func_info.return_type_name
+            {
+                let ret_base = VbcCodegen::strip_generic_args(inner_ret_type);
+                return format!("{}.{}", ret_base, outer_method_name.name);
+            }
+        }
+
         // Last-resort fallback for receivers whose actual type the
         // codegen could not infer (deep chain, missing FunctionInfo,
         // typecheck-skipped lenient mode). Use the hardcoded
@@ -9365,8 +9412,38 @@ impl VbcCodegen {
         // "scan all types, pick most fields" tiebreaker, which silently
         // picks a wrong layout and panics downstream with
         // `field access out of bounds`. Mirrors let-RHS type propagation.
+        //
+        // Two iter-expression shapes are supported:
+        //
+        //   (a) `for x in container`  — `iter` is the container itself
+        //       (List<T> / Set<T> / Deque<T> / BinaryHeap<T> / BTreeSet<T> /
+        //       Range<T> / RangeInclusive<T>). Element = T.
+        //
+        //   (b) `for x in container.iter()` / `.iter_mut()` / `.into_iter()`
+        //       — `iter` is a MethodCall whose receiver IS the container
+        //       and whose method produces an iterator. The iterator's
+        //       Item is the same as the container's element. Recurse to
+        //       the receiver and apply the (a) extraction there.
+        //
+        // Pre-this branch only (a) propagated. Path (b) — the by-far
+        // most common form in user code — left the loop binder
+        // unregistered in `variable_type_names`. Downstream chained
+        // method calls then fell into the `extract_expr_type_name`
+        // method-call hardcode at line ~15280 and mis-inferred the
+        // result as `"Maybe"`, structurally breaking `(*p).map(...)
+        // .map(...)` on iterator-derived references.
+        let container_for_element = if let verum_ast::ExprKind::MethodCall {
+            receiver, method, ..
+        } = &iter.kind
+            && matches!(method.name.as_str(), "iter" | "iter_mut" | "into_iter")
+        {
+            Some(receiver.as_ref())
+        } else {
+            None
+        };
         if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
-            && let Some(iter_ty) = self.extract_expr_type_name(iter)
+            && let Some(iter_ty) =
+                self.extract_expr_type_name(container_for_element.unwrap_or(iter))
         {
             let first_inner = self.extract_inner_types(&iter_ty);
             let elem_ty = if iter_ty.starts_with("List<")
@@ -12593,7 +12670,27 @@ impl VbcCodegen {
                                 .unwrap_or(false);
 
                             if !is_local_var && !is_static_or_const && !is_type_name(&ident.name) {
-                                Some(vec![ident.name.to_string()])
+                                // Bare-mount module-alias expansion. When the
+                                // user wrote `mount X.Y.Z;` at module top, the
+                                // import processor registered `Z` →
+                                // `["X", "Y", "Z"]` in `module_aliases`. A use
+                                // site of `Z.fn(args)` / `Z.CONST` then arrives
+                                // here as a single-segment receiver Path; the
+                                // qualified-function registry stores the
+                                // function under the *full* module path
+                                // (`X.Y.Z.fn` / `X.Y.Z.CONST`), so we must
+                                // expand the receiver before the downstream
+                                // qualified-lookup runs. Without this branch
+                                // the lookup probes the unqualified leaf
+                                // (`Z.fn`) and silently misses, surfacing as
+                                // `unbound variable: Z` at codegen.
+                                if let Some(full_path) =
+                                    self.ctx.module_aliases.get(ident.name.as_str())
+                                {
+                                    Some(full_path.clone())
+                                } else {
+                                    Some(vec![ident.name.to_string()])
+                                }
                             } else {
                                 None // It's a local variable, static/const, or type name, not a module path
                             }
@@ -15204,79 +15301,46 @@ impl VbcCodegen {
                     return Some(chain_ret);
                 }
 
-                // Check if this is an instance method call that returns Maybe
-                // Methods like ok(), err(), next(), first(), last(), etc. return Maybe<T>
-                // NOTE: Do NOT add methods that return Self (like inspect, cloned, copied) -
-                // those return the same type as the receiver, not necessarily Maybe.
+                // Final fallback: search the function registry by SHORT name.
+                //
+                // This catches sites that lack receiver-type info (e.g.
+                // chained method receivers whose own type couldn't be
+                // inferred above).  Pre-this fallback the same gap was
+                // patched by a hardcoded `MAYBE_RETURNING_METHODS` list
+                // that returned `"Maybe"` for ~50 stdlib method names —
+                // a textbook hardcode that mis-categorised every user
+                // type defining a same-named method (Poll.map,
+                // Stream.next, custom .pop, …) as Maybe-shaped, mis-
+                // dispatching downstream chains.
+                //
+                // The registry walk below is type-honest:
+                //   - if exactly ONE registered function with this short
+                //     name has a declared return-type, use it;
+                //   - if MULTIPLE share the short name (Maybe.map AND
+                //     Poll.map etc.), we cannot disambiguate without
+                //     receiver type, so we return None and let the
+                //     caller's outer fallback take over.
+                //
+                // This is the same architectural commitment as the
+                // earlier `determine_method_return_type_prefix` reorder
+                // (commit ahead) — never substitute a hardcoded type
+                // guess for a type-honest lookup.
                 let method_name = &*method.name;
-                const MAYBE_RETURNING_METHODS: &[&str] = &[
-                    // Result methods returning Maybe
-                    "ok",
-                    "err",
-                    // Maybe methods returning Maybe (for chaining)
-                    "map",
-                    "and_then",
-                    "or_else",
-                    "as_ref",
-                    "as_mut",
-                    "take",
-                    "replace",
-                    "filter",
-                    "and",
-                    "or",
-                    "xor",
-                    "zip",
-                    "zip_with",
-                    "flatten",
-                    // Iterator methods returning Maybe
-                    "next",
-                    "first",
-                    "last",
-                    "nth",
-                    "find",
-                    "find_map",
-                    "min",
-                    "max",
-                    "min_by",
-                    "max_by",
-                    "min_by_key",
-                    "max_by_key",
-                    "reduce",
-                    "try_reduce",
-                    "try_fold",
-                    // Collection methods returning Maybe
-                    "get",
-                    "get_mut",
-                    "front",
-                    "back",
-                    "pop",
-                    "pop_front",
-                    "pop_back",
-                    // Checked arithmetic returning Maybe
-                    "checked_add",
-                    "checked_sub",
-                    "checked_mul",
-                    "checked_div",
-                    "checked_rem",
-                    "checked_neg",
-                    "checked_abs",
-                    // Data type methods returning Maybe
-                    "as_bool",
-                    "as_int",
-                    "as_float",
-                    "as_text",
-                    "as_array",
-                    "as_array_mut",
-                    "as_object",
-                    "as_object_mut",
-                    "at",
-                    "at_mut",
-                    "remove",
-                    "path",
-                    "to_number",
-                ];
-                if MAYBE_RETURNING_METHODS.contains(&method_name) {
-                    return Some("Maybe".to_string());
+                let mut hits: Vec<String> = Vec::new();
+                for fn_name in self.ctx.functions.keys() {
+                    if let Some(suffix) = fn_name.rsplit_once('.').map(|(_, s)| s) {
+                        if suffix == method_name
+                            && let Some(info) = self.ctx.lookup_function(fn_name)
+                            && let Some(ref rt) = info.return_type_name
+                        {
+                            hits.push(rt.clone());
+                        }
+                    }
+                }
+                hits.sort();
+                hits.dedup();
+                if hits.len() == 1 {
+                    return Some(hits.into_iter().next().unwrap());
                 }
                 None
             }
