@@ -300,6 +300,13 @@ fn register_module(
             // codegen treats stdlib `public const X` as a value
             // rather than a callable.
             is_const: fn_desc.is_const,
+            // Archive-loaded functions are NEVER transparent
+            // wrappers — only the synthetic newtype/single-tuple/
+            // quotient constructors get this flag, and those are
+            // re-registered by the in-process type-decl arms when
+            // the type itself is mounted.  See `is_transparent_wrapper`
+            // in `verum_vbc/src/codegen/context.rs`.
+            is_transparent_wrapper: false,
         };
 
         // Always register qualified — `module.path.simple` —
@@ -387,6 +394,7 @@ fn register_module(
                 return_type_name: Some(parent_name.clone()),
                 return_type_inner: None,
                 is_const: false,
+            is_transparent_wrapper: false,
             };
             ctx.register_function(qualified, info);
             stats.variant_ctors_resolved += 1;
@@ -2044,6 +2052,7 @@ fn register_module_filtered(
             return_type_inner,
             // #97 — see populate_ctx_from_archive for the rationale.
             is_const: fn_desc.is_const,
+            is_transparent_wrapper: false,
         };
         ctx.register_function(qualified.clone(), info.clone());
         // ALSO register under any qualified path from `wanted` whose
@@ -2216,6 +2225,7 @@ fn register_module_filtered(
                 return_type_name: Some(parent_name.clone()),
                 return_type_inner: None,
                 is_const: false,
+            is_transparent_wrapper: false,
             };
             ctx.register_function(qualified, info);
             // Deliberately skip simple-name registration — see the

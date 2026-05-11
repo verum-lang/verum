@@ -252,6 +252,30 @@ pub struct CodegenContext {
     /// with the same name (e.g., user's `Disconnected` vs stdlib's `TryRecvError.Disconnected`).
     pub user_defined_types: HashSet<String>,
 
+    /// Module aliases populated from bare-path `mount X.Y.Z;` declarations.
+    ///
+    /// Each entry maps the rightmost path segment (`Z`) to the **full
+    /// module-path segments** (`["X", "Y", "Z"]`). When the user later
+    /// writes `Z.fn(args)` or `Z.CONST`, the codegen path-resolution
+    /// (`try_flatten_module_path`) consults this table and expands the
+    /// single-segment receiver to the full module path, so the
+    /// downstream qualified-function lookup finds
+    /// `X.Y.Z.fn` / `X.Y.Z.CONST` in the registry.
+    ///
+    /// Distinct from the function-alias registration that
+    /// `process_import_tree` already does for `mount X.Y.fn` — that
+    /// path imports a *function* under its simple name. Module aliases
+    /// import a *module* under its rightmost segment, so callers reach
+    /// every exported function/const via qualified access.
+    ///
+    /// Without this table, `mount core.sys.bitfield;` followed by
+    /// `bitfield.test_bit(v, 7)` fails at codegen with `unbound
+    /// variable: bitfield`, blocking every cross-module conformance
+    /// suite that relies on the canonical module-qualified call form
+    /// (`core-tests/sys/bitfield`, `core-tests/collections/union_find`,
+    /// `core-tests/collections/toposort`).
+    pub module_aliases: HashMap<String, Vec<String>>,
+
     /// Variables that hold byte arrays (contiguous byte buffers).
     ///
 
@@ -503,6 +527,33 @@ pub struct FunctionInfo {
     /// from `mount X.zero_arg_fn`.  Round-trips through
     /// `vbc::FunctionDescriptor::is_const`.
     pub is_const: bool,
+
+    /// `true` when this function is the synthetic constructor of a
+    /// **transparent wrapper** type — newtype (`type X is T;`),
+    /// single-element tuple (`type X is (T,)`), or quotient
+    /// (`quotient X is T`).  Such a constructor has no compiled body;
+    /// calls compile to an identity Mov (the wrapper is zero-cost at
+    /// runtime — the value IS the inner value).
+    ///
+    /// Architecturally this discriminator REPLACES the prior crutch of
+    /// inspecting `id.0 == u32::MAX / 2 && args.len() == 1` in codegen
+    /// to decide whether to pass-through inner args. The sentinel ID
+    /// is shared by every body-less synthetic constructor (newtype,
+    /// record, unit, quotient), so the bare ID can't distinguish a
+    /// transparent wrapper (correct: pass-through) from a record
+    /// constructor whose `param_count` happens to be 1 — or worse,
+    /// from a same-id collision with a real protocol-impl method
+    /// (registration bug: previously routed `Text.from(s)` through
+    /// the passthrough path, returning the raw `s` literal as a
+    /// detagged Value and breaking every downstream method dispatch
+    /// on the result).
+    ///
+    /// Set ONLY by `compile_type_decl` arms in
+    /// `verum_vbc/src/codegen/mod.rs` when the type is genuinely a
+    /// transparent wrapper.  Every other sentinel-id constructor
+    /// (records / units / variants) leaves this flag at its default
+    /// `false`, so the disambiguation is structural, not heuristic.
+    pub is_transparent_wrapper: bool,
 }
 
 /// Statistics collected during codegen.
@@ -985,6 +1036,7 @@ impl CodegenContext {
             newtype_names: HashSet::new(),
             newtype_inner_type: HashMap::new(),
             user_defined_types: HashSet::new(),
+            module_aliases: HashMap::new(),
             byte_array_vars: HashSet::new(),
             typed_array_vars: HashMap::new(),
             try_recover_depth: 0,

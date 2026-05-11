@@ -8501,21 +8501,51 @@ impl VbcCodegen {
             return Ok(Some(result));
         }
 
-        // Handle type constructors with sentinel IDs (newtypes, unit types, etc.).
-        // These are registered with FunctionId(u32::MAX / 2) and don't have bytecode.
-        // Emitting a Call with this ID would cause "Function N not found" at runtime.
-        if func_info.id.0 == u32::MAX / 2 {
-            if args.len() == 1 {
-                // Newtype constructor — zero-cost wrapper, pass through the inner value
-                return self.compile_expr(&args[0]);
-            } else if args.is_empty() {
-                // Unit type constructor
-                let dest = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadUnit { dst: dest });
-                return Ok(Some(dest));
-            }
-            // Multi-field record: fall through to normal allocation path below
+        // Handle synthetic body-less constructors (newtype / single-tuple
+        // / quotient / unit type) by their EXPLICIT discriminator flags
+        // — never by the bare `id.0 == u32::MAX/2` sentinel check.
+        //
+        // The sentinel ID is shared by EVERY body-less synthetic
+        // constructor (newtype, record, unit, quotient, sigma-tuple)
+        // AND, due to a registration-side collision the precompiler
+        // pipeline can hit, by a small handful of protocol-impl
+        // methods (`Text.from`, etc.).  Inspecting the bare sentinel
+        // ID can therefore mistake a protocol-impl method with a real
+        // body for a transparent wrapper and silently emit a
+        // pass-through Mov, returning the inner arg as an unbranded
+        // Value.  Downstream method dispatch then panics at runtime
+        // with garbled errors (`method '' not found on receiver of
+        // runtime kind Int`, `method 'sin6_scope_id' not found`)
+        // because the receiver lost its method-table entry.
+        //
+        // The fundamental fix: every synthetic constructor that is
+        // genuinely a transparent wrapper carries `is_transparent_wrapper
+        // = true` (set in `compile_type_decl` for Newtype / single-
+        // element Tuple / Quotient).  We gate the pass-through arm on
+        // that flag, NOT on the sentinel ID.  Protocol-impl methods —
+        // even if a registration bug gives them the sentinel ID — keep
+        // the flag at `false` and fall through to the normal Call
+        // emission, which is the right behaviour for a function that
+        // owns a real body.
+        if func_info.is_transparent_wrapper && args.len() == 1 {
+            // Transparent wrapper (newtype / single-element tuple /
+            // quotient `of`): zero-cost passthrough.  The value IS
+            // the inner value at runtime — no boxing, no Call.
+            return self.compile_expr(&args[0]);
         }
+        if func_info.id.0 == u32::MAX / 2 && args.is_empty() {
+            // Unit-type constructor with sentinel ID — no body, just
+            // load the canonical Unit value.  The flag-gated arm above
+            // already handled 1-arg wrappers; this arm covers nullary
+            // record / unit / sigma constructors.
+            let dest = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadUnit { dst: dest });
+            return Ok(Some(dest));
+        }
+        // Multi-field record (sentinel ID, >1 arg) falls through to the
+        // normal Call emission; the registry's `Call` handler will
+        // route through the record-construction path because the
+        // resolved TypeDescriptor pins the record shape.
 
         // Check if this function is an intrinsic — resolve inline instead of emitting Call
         if let Some(intrinsic_name) = &func_info.intrinsic_name
@@ -16493,6 +16523,7 @@ impl VbcCodegen {
             return_type_name: closure_return_type_name,
             return_type_inner: None,
             is_const: false,
+            is_transparent_wrapper: false,
         };
         self.ctx.register_function(closure_name.clone(), info);
 
@@ -17621,6 +17652,7 @@ impl VbcCodegen {
             return_type_name: None,
             return_type_inner: None,
             is_const: false,
+            is_transparent_wrapper: false,
         };
         self.ctx.register_function(spawn_func_name.clone(), info);
 
@@ -25694,6 +25726,7 @@ impl VbcCodegen {
             return_type_name: None, // Generator return types are inferred
             return_type_inner: None,
             is_const: false,
+            is_transparent_wrapper: false,
         };
         self.ctx.register_function(gen_name.clone(), info);
 
