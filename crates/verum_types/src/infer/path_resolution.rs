@@ -1085,6 +1085,88 @@ impl TypeChecker {
                                         return Ok(InferResult::new(func_ty));
                                     }
                                 }
+                                // **Impl-method fallback**: when local_name
+                                // has shape `Type.method` (the module
+                                // resolver hands back the qualified Type
+                                // .method form for paths like
+                                // `Map.new` after multi-mount-driven
+                                // disambiguation), the top-level
+                                // ItemKind::Function walk above misses
+                                // the entry — `new` is declared inside
+                                // an `implement Map { ... }` block, not
+                                // as a top-level fn.  Search ImplDecl
+                                // blocks here for the matching method
+                                // so the fallback covers both top-level
+                                // fns AND impl-method dispatch.
+                                //
+                                // Pre-fix: 10 tests failed with
+                                // `unbound variable: core.collections.map.Map.new`
+                                // when `mount core.collections.map.Map`
+                                // appeared alongside any sibling
+                                // collection mount (List/Set) that
+                                // triggered the resolver to return the
+                                // dotted `local_name` form instead of
+                                // the bare method name.
+                                if let Some(dot_idx) = local_name.find('.') {
+                                    let type_part = &local_name[..dot_idx];
+                                    let method_part = &local_name[dot_idx + 1..];
+                                    for item in &items {
+                                        let verum_ast::ItemKind::Impl(impl_decl) = &item.kind
+                                        else {
+                                            continue;
+                                        };
+                                        // Match the impl-block target type's last segment.
+                                        let target_name = match &impl_decl.kind {
+                                            verum_ast::decl::ImplKind::Inherent(target) => target,
+                                            verum_ast::decl::ImplKind::Protocol {
+                                                for_type, ..
+                                            } => for_type,
+                                        };
+                                        // Walk a Type AST node down to its head Path's last
+                                        // segment.  Handles both `Map` (TypeKind::Path) and
+                                        // `Map<K, V>` (TypeKind::Generic wrapping the Path).
+                                        fn head_segment(
+                                            ty: &verum_ast::ty::Type,
+                                        ) -> Option<&str> {
+                                            match &ty.kind {
+                                                verum_ast::ty::TypeKind::Path(p) => p
+                                                    .segments
+                                                    .last()
+                                                    .and_then(|s| match s {
+                                                        verum_ast::ty::PathSegment::Name(id) => {
+                                                            Some(id.name.as_str())
+                                                        }
+                                                        _ => None,
+                                                    }),
+                                                verum_ast::ty::TypeKind::Generic {
+                                                    base, ..
+                                                } => head_segment(base),
+                                                _ => None,
+                                            }
+                                        }
+                                        let target_last = head_segment(target_name);
+                                        if target_last != Some(type_part) {
+                                            continue;
+                                        }
+                                        for impl_item in impl_decl.items.iter() {
+                                            let verum_ast::decl::ImplItemKind::Function(func_decl) =
+                                                &impl_item.kind
+                                            else {
+                                                continue;
+                                            };
+                                            if func_decl.name.name.as_str() != method_part {
+                                                continue;
+                                            }
+                                            let func_ty = self.infer_function_type(func_decl)?;
+                                            self.ctx.define_module_type(
+                                                resolved.module_id,
+                                                local_name,
+                                                func_ty.clone(),
+                                            );
+                                            return Ok(InferResult::new(func_ty));
+                                        }
+                                    }
+                                }
                             }
                             return Err(TypeError::UnboundVariable {
                                 name: self.path_to_string(path),
