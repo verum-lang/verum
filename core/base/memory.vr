@@ -31,7 +31,11 @@ mount super.super.mem.allocator.{
     get_header_from_ptr, AllocError,
 };
 mount super.super.mem.header.{AllocationHeader};
-mount core.intrinsics.atomic.{MemoryOrder};
+mount core.intrinsics.atomic.{
+    MemoryOrder,
+    ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE,
+    ORDERING_ACQ_REL, ORDERING_SEQ_CST,
+};
 
 // Import typed intrinsics from stdlib.intrinsics
 mount core.intrinsics.{
