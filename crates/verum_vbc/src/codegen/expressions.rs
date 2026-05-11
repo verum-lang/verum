@@ -3407,6 +3407,46 @@ impl VbcCodegen {
                 // `Instruction::Not` (logical), reintroducing the
                 // bitfield-clearing bug at every Binary-form bitwise
                 // expression in stdlib (clear_bit, field_mask, etc.).
+                // Local helper: peel through Paren / Cast / Binary
+                // (shift / bitwise / arithmetic) / nested Unary wrappers
+                // to recover integer-ness of the underlying operand.
+                // `extract_expr_type_name` only handles Path/Record/
+                // Variant receivers and `infer_expr_type_kind` doesn't
+                // recurse through Binary shift/bitwise operators
+                // (extending it there would change the semantics of
+                // every other consumer of that function — broke the
+                // type-aware bare-name resolver in earlier attempt).
+                fn peel_to_int(
+                    this: &VbcCodegen,
+                    e: &verum_ast::Expr,
+                ) -> bool {
+                    use verum_ast::expr::{BinOp, ExprKind};
+                    use verum_ast::ty::TypeKind;
+                    match &e.kind {
+                        ExprKind::Paren(inner) => peel_to_int(this, inner),
+                        ExprKind::Unary { expr: inner, .. } => peel_to_int(this, inner),
+                        ExprKind::Binary { op, left, right } => match op {
+                            BinOp::Shl
+                            | BinOp::Shr
+                            | BinOp::BitAnd
+                            | BinOp::BitOr
+                            | BinOp::BitXor
+                            | BinOp::Add
+                            | BinOp::Sub
+                            | BinOp::Mul
+                            | BinOp::Div
+                            | BinOp::Rem => {
+                                peel_to_int(this, left) || peel_to_int(this, right)
+                            }
+                            _ => false,
+                        },
+                        _ => matches!(
+                            this.infer_expr_type_kind(e),
+                            Some(TypeKind::Int) | Some(TypeKind::Char)
+                        ),
+                    }
+                }
+
                 let type_name = self.extract_expr_type_name(inner);
                 let type_kind = self.infer_expr_type_kind(inner);
                 let is_bool = matches!(type_name.as_deref(), Some("Bool"))
@@ -3433,7 +3473,9 @@ impl VbcCodegen {
                     type_kind,
                     Some(verum_ast::ty::TypeKind::Int) | Some(verum_ast::ty::TypeKind::Char)
                 );
-                let is_integer = is_integer_name || (is_integer_kind && !is_bool);
+                let is_integer_compound = !is_bool && peel_to_int(self, inner);
+                let is_integer =
+                    is_integer_name || (is_integer_kind && !is_bool) || is_integer_compound;
                 let is_builtin_not =
                     is_bool || is_integer || (type_name.is_none() && type_kind.is_none());
                 let has_not_method = !is_builtin_not
@@ -5643,6 +5685,47 @@ impl VbcCodegen {
         use verum_ast::expr::ResolvedCallTarget;
         match target {
             ResolvedCallTarget::StaticCall { qualified_name } => {
+                // Builtin-collection method override: the typechecker
+                // stamps `<Builtin>.<method>` as a static call to the
+                // compiled stdlib body, but those bodies use record
+                // field offsets that don't match the canonical runtime
+                // layout for the built-in collection types.
+                //
+                // Example: stdlib defines `type List<T> is { ptr, len,
+                // cap }` so `self.len` compiles to `GetF { field: 1 }`
+                // (skipping field 0 = ptr). But the runtime `NewList`
+                // opcode allocates the value as `[len, cap, backing_ptr]`
+                // — slot 0 is len, slot 1 is cap. `GetF { field: 1 }`
+                // on that value reads cap (default 16) instead of len.
+                // `xs.len()` for `let xs: List<Int> = [1, 2, 3]`
+                // returned 16 because the typechecker pre-resolved the
+                // call to `List.len`, the compiled body ran with the
+                // wrong field index, and the user-side `.len()` block
+                // in `compile_method_call` (line ~6707) — which knows
+                // to emit the canonical `Len` opcode for WKT collection
+                // types — never got a chance to run.
+                //
+                // Intercept the resolved-call path for the methods
+                // marked `requires_builtin_*` in
+                // `verum_common::well_known_types`. The receiver is
+                // the call-site syntactic receiver (`xs`); rest of
+                // dispatch falls through to the user-side method-call
+                // intercepts which already emit the canonical opcodes
+                // (`Len`, `LenCmpZero` for `is_empty`, etc.).  This
+                // bridges the pre-resolved fast path onto the same
+                // builtin-method dispatch surface that the legacy
+                // cascade reaches.
+                if let Some(recv) = receiver
+                    && let Some(redirect) = self.try_redirect_resolved_to_builtin(
+                        qualified_name.as_str(),
+                        method.name.as_str(),
+                        recv,
+                        args,
+                    )?
+                {
+                    return Ok(redirect);
+                }
+
                 // The typechecker already canonicalised the dispatch
                 // to a single qualified name; codegen does ONE
                 // O(1) `lookup_function` instead of the legacy
@@ -5967,6 +6050,76 @@ impl VbcCodegen {
     /// dispatch resolution; codegen reads its answer rather than
     /// re-deriving it through a string-cascade.  See
     /// `verum_ast::expr::ResolvedCallTarget` for the sidecar shape.
+    /// Bridge the pre-resolved StaticCall fast path back to the
+    /// builtin-collection method dispatcher when the typechecker
+    /// resolved a `.len()` / `.is_empty()` / similar call on a
+    /// WKT collection type (List, Map, Text, Set, Deque, Channel)
+    /// whose compiled stdlib body uses record-field offsets that
+    /// don't match the canonical runtime layout.
+    ///
+    /// Returns:
+    ///   * `Ok(Some(Some(reg)))` — redirect handled, emitted the
+    ///     canonical builtin opcode; caller returns immediately.
+    ///   * `Ok(None)` — not a redirectable case; caller proceeds
+    ///     with normal resolved-call dispatch.
+    ///
+    /// Implementation strategy: delegate to `compile_method_call`
+    /// itself with `resolved_target = None`, which lets the
+    /// user-side `.len()` / `.is_empty()` blocks (around line 6707
+    /// for `len`) run their existing WKT-aware `requires_builtin_*`
+    /// gates.  Those gates already emit `Instruction::Len` /
+    /// `Instruction::Len + CmpI`, and they already know how to
+    /// distinguish the canonical runtime layout from the
+    /// compiled-stdlib record layout via the WKT registry.
+    fn try_redirect_resolved_to_builtin(
+        &mut self,
+        qualified_name: &str,
+        method_name: &str,
+        receiver: &Expr,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Option<Reg>>> {
+        // Only intercept methods that the user-side dispatch has
+        // canonical-opcode emission for, AND only for the WKT base
+        // types where the runtime / stdlib layout mismatch is real.
+        // Currently bounded to `len` and `is_empty` — these are the
+        // two methods whose compiled stdlib bodies read field 1 of
+        // the user-side `{ptr, len, cap}` record, which is `cap` at
+        // the runtime List layout `[len, cap, backing_ptr]`.
+        //
+        // Extending this set requires the user-side block to also
+        // know how to emit a canonical opcode for the new method.
+        if method_name != "len" && method_name != "is_empty" {
+            return Ok(None);
+        }
+        let dot = qualified_name.find('.');
+        let type_name = match dot {
+            Some(pos) => &qualified_name[..pos],
+            None => return Ok(None),
+        };
+        let base_type = VbcCodegen::strip_generic_args(type_name);
+        let wkt = match verum_common::well_known_types::WellKnownType::from_name(base_type) {
+            Some(w) => w,
+            None => return Ok(None),
+        };
+        let canonical_required = match method_name {
+            "len" => wkt.requires_builtin_len(),
+            "is_empty" => wkt.requires_builtin_len(), // is_empty lowers to Len + CmpI 0
+            _ => false,
+        };
+        if !canonical_required {
+            return Ok(None);
+        }
+        // Re-dispatch through `compile_method_call` with
+        // `resolved_target = None`. The user-side method-call
+        // intercepts at lines ~6707 (len) / ~6858 (is_empty) will
+        // observe the WKT-required-builtin flag and emit the
+        // canonical opcode (Len / Len+CmpI), bypassing the compiled
+        // stdlib body whose field offsets don't match the runtime.
+        let method_ident = verum_ast::Ident::new(method_name, receiver.span);
+        let result = self.compile_method_call(receiver, &method_ident, args, None)?;
+        Ok(Some(result))
+    }
+
     fn compile_method_call(
         &mut self,
         receiver: &Expr,
