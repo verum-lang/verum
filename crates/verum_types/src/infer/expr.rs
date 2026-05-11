@@ -6615,6 +6615,44 @@ impl TypeChecker {
                     let ty = scheme.instantiate();
                     return Ok(InferResult::new(self.unifier.apply(&ty)));
                 }
+                // **Type.method canonical-form fallback**: when `mount
+                // core.X.Y.Z.T;` registers `T` as a module-alias
+                // mapping to the path `core.X.Y.Z.T`, but `T` is
+                // actually a TYPE (not a submodule), the qualified
+                // form `core.X.Y.Z.T.method` misses both env and
+                // module-fn lookups. The function is actually
+                // registered under the bare `T.method` canonical form
+                // by `register_coercion_markers_from_metadata` +
+                // archive_ctx_loader's Type.method-form-registration
+                // path (commit 74312ed4e). Probe that form here so
+                // `Map.new()` / `Reservoir.new()` / etc. resolve when
+                // the user has multi-mounted sibling collection types
+                // that pushed this site into the module-alias arm.
+                //
+                // Pre-fix 10 tests failed with:
+                //   `unbound variable: core.collections.map.Map.new`
+                // when `mount core.collections.map.Map` appeared
+                // alongside any sibling collection mount (List/Set).
+                let type_method_form: verum_common::Text = {
+                    let last_seg = module_path
+                        .as_str()
+                        .rsplit('.')
+                        .next()
+                        .unwrap_or(module_path.as_str());
+                    format!("{}.{}", last_seg, field_name).into()
+                };
+                if type_method_form != qualified {
+                    if let Some(scheme) = self.ctx.env.lookup(&type_method_form) {
+                        let ty = scheme.instantiate();
+                        return Ok(InferResult::new(self.unifier.apply(&ty)));
+                    }
+                    if let Maybe::Some(scheme) =
+                        self.lookup_function_in_module(type_method_form.as_str())
+                    {
+                        let ty = scheme.instantiate();
+                        return Ok(InferResult::new(self.unifier.apply(&ty)));
+                    }
+                }
                 // Field-access fallback: lookup the simple field
                 // name in env as a last-ditch effort.  Same shape
                 // as the inline-module bail-out below.
