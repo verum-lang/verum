@@ -372,6 +372,34 @@ impl SandboxedExecutor {
         arg_values: Vec<ConstValue>,
         ctx: &MetaContext,
     ) -> Result<ConstValue, SandboxError> {
+        // ====================================================================
+        // Builtin sum-type variant constructors — dispatched through the
+        // canonical `BUILTIN_VARIANT_CARRIERS` registry.  Covers both the
+        // qualified `Parent.Variant(args)` and bare `Variant(args)` forms.
+        // Adding a new carrier requires no edits here — append it to
+        // `verum_common::well_known_types::BUILTIN_VARIANT_CARRIERS` and
+        // the dispatch picks it up automatically.
+        // ====================================================================
+        if let Some((_, entry)) =
+            verum_common::well_known_types::lookup_builtin_variant_constructor(func_name)
+        {
+            if arg_values.len() != entry.arity as usize {
+                return Err(SandboxError::UnsafeOperation {
+                    operation: Text::from(entry.name),
+                    reason: Text::from(format!(
+                        "{} expects exactly {} argument(s)",
+                        entry.name, entry.arity
+                    )),
+                });
+            }
+            let mut result = List::new();
+            result.push(ConstValue::Text(Text::from(entry.name)));
+            for v in arg_values {
+                result.push(v);
+            }
+            return Ok(ConstValue::Tuple(result));
+        }
+
         match func_name {
             // ========== Collection Constructors ==========
             "List.new" | "list" | "List" => Ok(ConstValue::Array(arg_values.into_iter().collect())),
@@ -379,57 +407,6 @@ impl SandboxedExecutor {
                 Ok(ConstValue::Tuple(List::new())) // Empty map as tuple for now
             }
             "Set.new" | "set" | "Set" => Ok(ConstValue::Array(List::new())),
-
-            // ========== Option/Result Constructors ==========
-            "Maybe.Some" | "Some" => {
-                if arg_values.len() != 1 {
-                    return Err(SandboxError::UnsafeOperation {
-                        operation: Text::from("Some"),
-                        reason: Text::from("Some expects exactly 1 argument"),
-                    });
-                }
-                let mut result = List::new();
-                result.push(ConstValue::Text(Text::from("Some")));
-                result.push(arg_values.into_iter().next().unwrap());
-                Ok(ConstValue::Tuple(result))
-            }
-            "Maybe.None" | "None" => {
-                let mut result = List::new();
-                result.push(ConstValue::Text(Text::from("None")));
-                Ok(ConstValue::Tuple(result))
-            }
-            // Result.Ok / Result.Err — symmetric to Maybe.Some /
-            // Maybe.None above. Pre-fix the meta sandbox handled
-            // only Maybe constructors; meta code constructing
-            // `Ok(x)` or `Err(e)` errored out as "unknown function".
-            // Both forms (qualified `Result.Ok` and bare `Ok`)
-            // accepted to mirror the Maybe arms — `Ok` may be
-            // glob-imported via `mount core.base.{Ok}` in the meta
-            // function's source, so the bare form must work.
-            "Result.Ok" | "Ok" => {
-                if arg_values.len() != 1 {
-                    return Err(SandboxError::UnsafeOperation {
-                        operation: Text::from("Ok"),
-                        reason: Text::from("Ok expects exactly 1 argument"),
-                    });
-                }
-                let mut result = List::new();
-                result.push(ConstValue::Text(Text::from("Ok")));
-                result.push(arg_values.into_iter().next().unwrap());
-                Ok(ConstValue::Tuple(result))
-            }
-            "Result.Err" | "Err" => {
-                if arg_values.len() != 1 {
-                    return Err(SandboxError::UnsafeOperation {
-                        operation: Text::from("Err"),
-                        reason: Text::from("Err expects exactly 1 argument"),
-                    });
-                }
-                let mut result = List::new();
-                result.push(ConstValue::Text(Text::from("Err")));
-                result.push(arg_values.into_iter().next().unwrap());
-                Ok(ConstValue::Tuple(result))
-            }
 
             // ========== Collection Operations ==========
             "len" => {
