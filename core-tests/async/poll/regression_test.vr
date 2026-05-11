@@ -10,7 +10,7 @@
 // =============================================================================
 
 mount core.async.poll.{Poll};
-mount core.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // §A  Variant-name auto-derive uses the global tag-scan fallback
