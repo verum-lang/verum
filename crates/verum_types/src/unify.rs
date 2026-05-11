@@ -322,6 +322,18 @@ impl Unifier {
                         _ => None,
                     }
                 }),
+                // `parse_descriptor_type_string` produces `Type::Generic`
+                // for any alias target with type arguments (`Bytes = List<Byte>`
+                // → `Generic { name: "List", args: [Byte] }`). Without this
+                // arm, every alias to an instantiated collection type
+                // failed `is_array_coercible` / sibling family-check lookups
+                // because the head walk fell through `_ => None`.
+                // Concrete impact: `let bs: Bytes = [1, 2, 3]` failed to
+                // coerce the `[Int; 3]` array literal to `List<Byte>`
+                // (whose `ArrayCoercible` impl is registered) — surfaced
+                // as `expected 'List<Byte>', found '[Byte; 3]'` across
+                // base/mod + base/primitives + base/protocols clusters.
+                Type::Generic { name, .. } => Some(name.as_str()),
                 _ => None,
             };
             match head {
