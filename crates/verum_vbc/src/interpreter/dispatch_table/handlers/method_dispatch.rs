@@ -3837,12 +3837,32 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(result));
                 }
                 "get" if is_map => {
-                    // Map.get(key) -> V (returns default 0 for missing keys)
-                    // Matches MapGet opcode behavior for interpreter/AOT consistency.
+                    // Map.get(&self, key: K) -> Maybe<V>
+                    //
+                    // Industry-standard semantics (Rust HashMap, Java Optional,
+                    // Scala Map): explicit presence/absence wrapping in `Maybe<V>`
+                    // — never a sentinel-zero on miss.  This handler is the
+                    // single canonical materialisation point for Map.get
+                    // dispatch reaching the runtime fast-path.  The stdlib's
+                    // `core/collections/map.vr::Map.get` carries the same
+                    // signature; reaching this handler is the perf-tier
+                    // shortcut, not a semantic-divergent overload.
+                    //
+                    // The previous implementation returned `V` directly with
+                    // zero-on-miss — a hardcode that bypassed `core.base.maybe`
+                    // entirely and silently masked the missing-key case for
+                    // every `V` whose zero value is a legitimate domain
+                    // value (every numeric type, every Option-like inner V,
+                    // every bitflag).  Eliminated as part of the Map API
+                    // canonicalisation (task #12).
                     let caller_base = state.reg_base();
                     let key = state.registers.get(caller_base, Reg(args.start.0));
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
+                    if capacity == 0 {
+                        let none = make_none_value(state)?;
+                        return Ok(Some(none));
+                    }
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
                     let entries_data =
                         unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
@@ -3852,16 +3872,18 @@ pub(super) fn dispatch_primitive_method(
                     loop {
                         let entry_key = unsafe { *entries_data.add(idx * 2) };
                         if entry_key.is_unit() {
-                            // Not found - return default (0)
-                            return Ok(Some(Value::from_i64(0)));
+                            let none = make_none_value(state)?;
+                            return Ok(Some(none));
                         }
                         if value_eq(entry_key, key) {
                             let val = unsafe { *entries_data.add(idx * 2 + 1) };
-                            return Ok(Some(val));
+                            let some = make_some_value(state, val)?;
+                            return Ok(Some(some));
                         }
                         idx = (idx + 1) % capacity;
                         if idx == start {
-                            return Ok(Some(Value::from_i64(0)));
+                            let none = make_none_value(state)?;
+                            return Ok(Some(none));
                         }
                     }
                 }
