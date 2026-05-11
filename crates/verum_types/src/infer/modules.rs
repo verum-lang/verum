@@ -12624,11 +12624,26 @@ impl TypeChecker {
         // Step 1: Synthesize type of the base expression (NOT a method call, so no recursion issue)
         // Set in_call_arg_context so that path expressions use borrow_value instead of use_value.
         // This is critical for affine values in loops: methods like push(&mut self) borrow, not consume.
+        //
+        // Module-alias bypass: if the base is a single-segment Path that names a `mount X.Y.Z;`
+        // (or `mount X as A;`) alias, synth_expr would raise UnboundVariable because the alias has
+        // no value binding. The first method call is then resolved as `module_path.method(...)` by
+        // `try_resolve_super_path_call`'s module_aliases branch — which reads receiver.kind directly
+        // and ignores the precomputed receiver type. Substitute a fresh type variable as a
+        // placeholder so the chain dispatch proceeds.
+        let base_is_module_alias = matches!(&current_receiver.kind, ExprKind::Path(path)
+            if path.segments.len() == 1
+                && matches!(path.segments.first(), Some(verum_ast::ty::PathSegment::Name(ident))
+                    if self.module_aliases.contains_key(&ident.name)));
         let old_call_context = self.in_call_arg_context;
         self.in_call_arg_context = true;
-        let base_result = self.synth_expr(current_receiver)?;
+        let mut current_ty = if base_is_module_alias {
+            Type::Var(TypeVar::fresh())
+        } else {
+            let base_result = self.synth_expr(current_receiver)?;
+            base_result.ty
+        };
         self.in_call_arg_context = old_call_context;
-        let mut current_ty = base_result.ty;
 
         // Step 2: Process each method call iteratively (in reverse order to apply from base)
         //
@@ -17977,11 +17992,47 @@ impl TypeChecker {
         {
             let method_name = method.name.as_str();
             let qualified: Text = format!("{}.{}", module_path, method_name).into();
+            // `core.X.Y` → also probe `X.Y`: archives register descriptors
+            // by their `module.simple` form which strips the `core.` root
+            // prefix (see `archive_ctx_loader::register_module` qualified
+            // computation and `verum_vbc/src/codegen/mod.rs`
+            // `current_source_module` promotion).  Without the stripped
+            // probe, `mount core.sys.bitfield; bitfield.test_bit(...)`
+            // misses the archive-stored `sys.bitfield.test_bit` and falls
+            // into UnboundVariable.
+            let stripped: Option<Text> = module_path
+                .as_str()
+                .strip_prefix("core.")
+                .map(|rest| format!("{}.{}", rest, method_name).into());
 
             // Fast path: the function may already have been imported into
             // the type env under its qualified-module form by
             // `import_all_from_module` when the mount was processed.
-            if let Some(scheme) = self.ctx.env.lookup(&qualified).cloned() {
+            let env_hit = self
+                .ctx
+                .env
+                .lookup(&qualified)
+                .cloned()
+                .or_else(|| stripped.as_ref().and_then(|s| self.ctx.env.lookup(s).cloned()))
+                .or_else(|| {
+                    if let Maybe::Some(s) =
+                        self.lookup_function_in_module(qualified.as_str())
+                    {
+                        Some(s)
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| {
+                    stripped.as_ref().and_then(|s| {
+                        if let Maybe::Some(scheme) = self.lookup_function_in_module(s.as_str()) {
+                            Some(scheme)
+                        } else {
+                            None
+                        }
+                    })
+                });
+            if let Some(scheme) = env_hit {
                 let func_type = self.unifier.apply(&scheme.ty);
                 if let Type::Function {
                     params,
