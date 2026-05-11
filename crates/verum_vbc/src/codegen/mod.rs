@@ -11851,6 +11851,39 @@ impl VbcCodegen {
 
     /// Registers the field layout for a record type.
     /// Called during type declaration collection.
+    ///
+    /// **Registration invariants (drift-pinned):**
+    ///
+    ///   1.  `type_field_layouts[type_name]` is set on the FIRST
+    ///       registration and never overwritten by a later one —
+    ///       this preserves the user-phase declaration when the
+    ///       same type appears across multiple compilation passes
+    ///       (Pass 1b user-phase / Pass 1c stdlib-phase / cross-
+    ///       module mount tracing) so the field-index ordering is
+    ///       stable for the entire codegen lifetime.
+    ///
+    ///   2.  `type_field_type_names[(type_name, field)]` is
+    ///       ALWAYS populated by every registration call.  Pre-fix
+    ///       this map was gated by the same first-registration
+    ///       guard as the layout, but a partial first-registration
+    ///       (the type_decl reaches `register_record_fields` from
+    ///       a forward-reference path with an empty field-types
+    ///       list, or the stdlib precompile lands the layout but
+    ///       not the type-name entries) left the field-type map
+    ///       missing the canonical entries.  Downstream
+    ///       `infer_expr_type_name`'s Field arm then failed to
+    ///       recover the receiver type through `obj.field`
+    ///       chains, falling through to `resolve_field_index`'s
+    ///       global-scan path that picks an unrelated type's
+    ///       same-named field at a wrong index.  Surfaced as
+    ///       "field index N (offset …) exceeds object data
+    ///       size M" panics on `let f: ReadyFuture<Int> = ready(0);
+    ///       f.value` when collection types were also mounted.
+    ///
+    ///   3.  The simple-name cross-registration (for qualified
+    ///       `module.Type` declarations) follows the same two
+    ///       invariants — layout under guard, field-type names
+    ///       always.
     fn register_record_fields(
         &mut self,
         type_name: &str,
@@ -11861,34 +11894,39 @@ impl VbcCodegen {
         for name in &field_names {
             self.intern_field_name(name);
         }
-        // Store field type names for type inference through field access chains.
-        // Only insert if not already present — user-defined types are registered
-        // first (Pass 1b) and must not be overwritten by stdlib types (Pass 1c).
+
+        // Always populate the field-type map for THIS type_name —
+        // see invariant #2 above.  Re-registration with the SAME
+        // field-types is idempotent; re-registration with stale
+        // field-types is impossible here because each call carries
+        // the canonical AST-derived field set.
+        for (name, ty) in field_names.iter().zip(field_types.iter()) {
+            self.type_field_type_names
+                .insert((type_name.to_string(), name.clone()), ty.clone());
+        }
+
+        // Set the layout under the first-registration guard — see
+        // invariant #1 above.
         if !self.type_field_layouts.contains_key(type_name) {
-            for (name, ty) in field_names.iter().zip(field_types.iter()) {
-                self.type_field_type_names
-                    .insert((type_name.to_string(), name.clone()), ty.clone());
-            }
             self.type_field_layouts
                 .insert(type_name.to_string(), field_names.clone());
+        }
 
-            // Cross-module field access support: also register under the simple name
-            // (without module path) so imports using unqualified names can find fields.
-            // e.g., "module_a.Point" → also register as "Point"
-            if type_name.contains('.') {
-                let simple = type_name.rsplit('.').next().unwrap_or(type_name);
-                if !self.type_field_layouts.contains_key(simple) {
-                    for (name, ty) in field_names.iter().zip(field_types.iter()) {
-                        self.type_field_type_names
-                            .insert((simple.to_string(), name.clone()), ty.clone());
-                    }
-                    self.type_field_layouts
-                        .insert(simple.to_string(), field_names);
-                }
+        // Cross-module field access support: also register under the simple name
+        // (without module path) so imports using unqualified names can find fields.
+        // e.g., "module_a.Point" → also register as "Point"
+        if type_name.contains('.') {
+            let simple = type_name.rsplit('.').next().unwrap_or(type_name);
+            // Field-type map: always populate.
+            for (name, ty) in field_names.iter().zip(field_types.iter()) {
+                self.type_field_type_names
+                    .insert((simple.to_string(), name.clone()), ty.clone());
             }
-        } else {
-            // Type already registered (user type takes priority over stdlib).
-            // Still intern the field names for global lookup fallback.
+            // Layout: guarded.
+            if !self.type_field_layouts.contains_key(simple) {
+                self.type_field_layouts
+                    .insert(simple.to_string(), field_names);
+            }
         }
     }
 

@@ -1,0 +1,96 @@
+// =============================================================================
+// core-tests/async/future/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.async.future`'s working surface
+// (SelectResult variant + bulk-container patterns).  Surfaces that
+// require crossing the Future protocol dispatch boundary are pinned
+// in regression_test.vr §A.
+// =============================================================================
+
+mount core.async.future.{SelectResult};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section A: SelectResult interop with Maybe
+//
+//   The Race outcome must be readily convertible to a Maybe over the
+//   left or right arm — the canonical "did the first/second win?"
+//   query pattern.
+// =============================================================================
+
+@test
+fn integration_future_select_result_to_maybe_left_left() {
+    let r: SelectResult<Int, Text> = SelectResult.Left(7);
+    let m: Maybe<Int> = match r {
+        SelectResult.Left(v) => Some(v),
+        SelectResult.Right(_) => None,
+    };
+    assert_eq(m, Some(7));
+}
+
+@test
+fn integration_future_select_result_to_maybe_left_right() {
+    let r: SelectResult<Int, Text> = SelectResult.Right("won");
+    let m: Maybe<Int> = match r {
+        SelectResult.Left(v) => Some(v),
+        SelectResult.Right(_) => None,
+    };
+    assert_eq(m, None);
+}
+
+@test
+fn integration_future_select_result_to_maybe_right_right() {
+    let r: SelectResult<Text, Int> = SelectResult.Right(99);
+    let m: Maybe<Int> = match r {
+        SelectResult.Left(_) => None,
+        SelectResult.Right(v) => Some(v),
+    };
+    assert_eq(m, Some(99));
+}
+
+@test
+fn integration_future_select_result_to_maybe_right_left() {
+    let r: SelectResult<Text, Int> = SelectResult.Left("first");
+    let m: Maybe<Int> = match r {
+        SelectResult.Left(_) => None,
+        SelectResult.Right(v) => Some(v),
+    };
+    assert_eq(m, None);
+}
+
+// =============================================================================
+// Section B: Match-arm dispatching across the Race outcome
+//
+//   Real executors classify SelectResult outcomes into business
+//   states — verify that the dispatch returns the expected tag for
+//   every variant.
+// =============================================================================
+
+@test
+fn integration_future_select_result_classification() {
+    fn classify(r: SelectResult<Int, Int>) -> Text {
+        match r {
+            SelectResult.Left(_) => "primary-won",
+            SelectResult.Right(_) => "backup-won",
+        }
+    }
+    assert_eq(classify(SelectResult.Left(1)), "primary-won");
+    assert_eq(classify(SelectResult.Right(2)), "backup-won");
+}
+
+@test
+fn integration_future_select_result_payload_arithmetic() {
+    // Reduce a SelectResult<Int, Int> to a single Int — the canonical
+    // "race-winner-yields-an-int" shape.
+    fn into_int(r: SelectResult<Int, Int>) -> Int {
+        match r {
+            SelectResult.Left(v) => v,
+            SelectResult.Right(v) => v,
+        }
+    }
+    assert_eq(into_int(SelectResult.Left(10)), 10);
+    assert_eq(into_int(SelectResult.Right(20)), 20);
+}
+
+fn main() {}

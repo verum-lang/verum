@@ -1,0 +1,110 @@
+// =============================================================================
+// core-tests/async/future/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.async.future`'s working surface — focused
+// on the SelectResult variant algebra, which is the only laws-bearing
+// portion of the API testable without crossing the polling-side
+// interpreter defects (pinned in regression_test.vr §A) or the
+// per-test field-layout cross-test-state issue surfaced when mixing
+// future records with collection-shaped helpers.
+// =============================================================================
+
+mount core.async.future.{SelectResult};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section A: SelectResult variant-identity partition
+//
+//   Two-variant sum: Left(A) | Right(B).  For any value, exactly
+//   one of the two `is` checks returns true (mutually exclusive
+//   and exhaustive — the canonical Sum-type invariant).
+// =============================================================================
+
+@test
+fn property_future_select_result_left_only_matches_left() {
+    let l: SelectResult<Int, Int> = SelectResult.Left(0);
+    assert(l is SelectResult.Left);
+    assert(!(l is SelectResult.Right));
+}
+
+@test
+fn property_future_select_result_right_only_matches_right() {
+    let r: SelectResult<Int, Int> = SelectResult.Right(0);
+    assert(r is SelectResult.Right);
+    assert(!(r is SelectResult.Left));
+}
+
+@test
+fn property_future_select_result_left_payload_round_trip_zero() {
+    let l: SelectResult<Int, Int> = SelectResult.Left(0);
+    match l {
+        SelectResult.Left(x) => assert_eq(x, 0),
+        SelectResult.Right(_) => assert(false),
+    }
+}
+
+@test
+fn property_future_select_result_left_payload_round_trip_positive() {
+    let l: SelectResult<Int, Int> = SelectResult.Left(42);
+    match l {
+        SelectResult.Left(x) => assert_eq(x, 42),
+        SelectResult.Right(_) => assert(false),
+    }
+}
+
+@test
+fn property_future_select_result_left_payload_round_trip_negative() {
+    let l: SelectResult<Int, Int> = SelectResult.Left(-7);
+    match l {
+        SelectResult.Left(x) => assert_eq(x, -7),
+        SelectResult.Right(_) => assert(false),
+    }
+}
+
+@test
+fn property_future_select_result_right_payload_round_trip_zero() {
+    let r: SelectResult<Int, Int> = SelectResult.Right(0);
+    match r {
+        SelectResult.Left(_) => assert(false),
+        SelectResult.Right(x) => assert_eq(x, 0),
+    }
+}
+
+@test
+fn property_future_select_result_right_payload_round_trip_positive() {
+    let r: SelectResult<Int, Int> = SelectResult.Right(999);
+    match r {
+        SelectResult.Left(_) => assert(false),
+        SelectResult.Right(x) => assert_eq(x, 999),
+    }
+}
+
+@test
+fn property_future_select_result_right_payload_round_trip_negative() {
+    let r: SelectResult<Int, Int> = SelectResult.Right(-1);
+    match r {
+        SelectResult.Left(_) => assert(false),
+        SelectResult.Right(x) => assert_eq(x, -1),
+    }
+}
+
+@test
+fn property_future_select_result_distinct_payload_types_left() {
+    let l: SelectResult<Int, Text> = SelectResult.Left(7);
+    match l {
+        SelectResult.Left(x) => assert_eq(x, 7),
+        SelectResult.Right(_) => assert(false),
+    }
+}
+
+@test
+fn property_future_select_result_distinct_payload_types_right() {
+    let r: SelectResult<Int, Text> = SelectResult.Right("right-arm");
+    match r {
+        SelectResult.Left(_) => assert(false),
+        SelectResult.Right(x) => assert_eq(x, "right-arm"),
+    }
+}
+
+fn main() {}
