@@ -1,0 +1,106 @@
+// =============================================================================
+// core-tests/async/backoff/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.backoff` — retry-delay policies.  The
+// public-API surface is currently blocked at module-load time by the
+// `core.sys.common.random_bytes` intrinsic gap in the VBC dispatch
+// table (same upstream defect that gates `core.collections.reservoir`'s
+// replacement-phase suite).  `backoff.vr` mounts that fn at module
+// scope, so any reference to `Backoff.<ctor>` fails with
+// `FunctionNotFound` before any code runs.
+//
+// All public-API tests are routed to regression_test.vr §A as
+// `@ignore`d pins reproducing the lockstep failure; the unit suite
+// here exercises only what's reachable without crossing the mounted
+// CSPRNG fn (currently nothing — every constructor's body materialises
+// the record via `Backoff.mk`, which is itself reachable but lives in
+// the same module-load that pulls in the CSPRNG mount).
+// =============================================================================
+
+mount core.async.backoff.{BackoffStrategy};
+
+// =============================================================================
+// Section 1: Strategy enum — variant identity
+//
+//   The four canonical strategies are pure pattern-match cases; they
+//   don't pull in the CSPRNG intrinsic at the variant-construction
+//   site, so we can verify the enum's discriminator partition here.
+// =============================================================================
+
+@test
+fn test_backoff_strategy_no_jitter_distinct() {
+    let s: BackoffStrategy = BackoffStrategy.ExponentialNoJitter;
+    assert(s is BackoffStrategy.ExponentialNoJitter);
+}
+
+@test
+fn test_backoff_strategy_full_jitter_distinct() {
+    let s: BackoffStrategy = BackoffStrategy.ExponentialFullJitter;
+    assert(s is BackoffStrategy.ExponentialFullJitter);
+}
+
+@test
+fn test_backoff_strategy_decorrelated_distinct() {
+    let s: BackoffStrategy = BackoffStrategy.ExponentialDecorrelated;
+    assert(s is BackoffStrategy.ExponentialDecorrelated);
+}
+
+@test
+fn test_backoff_strategy_fibonacci_distinct() {
+    let s: BackoffStrategy = BackoffStrategy.FibonacciFullJitter;
+    assert(s is BackoffStrategy.FibonacciFullJitter);
+}
+
+@test
+fn test_backoff_strategy_variants_pairwise_disjoint() {
+    let no_jitter: BackoffStrategy = BackoffStrategy.ExponentialNoJitter;
+    let full_jitter: BackoffStrategy = BackoffStrategy.ExponentialFullJitter;
+    let decorr: BackoffStrategy = BackoffStrategy.ExponentialDecorrelated;
+    let fib: BackoffStrategy = BackoffStrategy.FibonacciFullJitter;
+
+    assert(!(no_jitter is BackoffStrategy.ExponentialFullJitter));
+    assert(!(no_jitter is BackoffStrategy.ExponentialDecorrelated));
+    assert(!(no_jitter is BackoffStrategy.FibonacciFullJitter));
+
+    assert(!(full_jitter is BackoffStrategy.ExponentialNoJitter));
+    assert(!(full_jitter is BackoffStrategy.ExponentialDecorrelated));
+    assert(!(full_jitter is BackoffStrategy.FibonacciFullJitter));
+
+    assert(!(decorr is BackoffStrategy.ExponentialNoJitter));
+    assert(!(decorr is BackoffStrategy.ExponentialFullJitter));
+    assert(!(decorr is BackoffStrategy.FibonacciFullJitter));
+
+    assert(!(fib is BackoffStrategy.ExponentialNoJitter));
+    assert(!(fib is BackoffStrategy.ExponentialFullJitter));
+    assert(!(fib is BackoffStrategy.ExponentialDecorrelated));
+}
+
+// =============================================================================
+// Section 2: Exhaustive match — every variant has a unique arm
+//
+//   Match-coverage law: a function dispatching on BackoffStrategy
+//   reaches exactly one arm per variant.
+// =============================================================================
+
+@test
+fn test_backoff_strategy_match_exhaustive() {
+    fn describe(s: BackoffStrategy) -> Text {
+        match s {
+            BackoffStrategy.ExponentialNoJitter   => "no-jitter",
+            BackoffStrategy.ExponentialFullJitter => "full-jitter",
+            BackoffStrategy.ExponentialDecorrelated => "decorrelated",
+            BackoffStrategy.FibonacciFullJitter   => "fibonacci",
+        }
+    }
+    assert_eq(describe(BackoffStrategy.ExponentialNoJitter), "no-jitter");
+    assert_eq(describe(BackoffStrategy.ExponentialFullJitter), "full-jitter");
+    assert_eq(describe(BackoffStrategy.ExponentialDecorrelated), "decorrelated");
+    assert_eq(describe(BackoffStrategy.FibonacciFullJitter), "fibonacci");
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
