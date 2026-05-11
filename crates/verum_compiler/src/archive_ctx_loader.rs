@@ -1017,6 +1017,17 @@ impl ArchiveCtxCache {
             // Without this, the finalize-time stub-emitter synthesises
             // a `RetV` placeholder and every stdlib method call returns
             // Unit at runtime.
+            //
+            // **Per-module remap is correct here**: archive function
+            // ids are per-module-local (each module's function table
+            // starts at 0), so unioning remaps across modules would
+            // collapse same-id entries from different modules. Cross-
+            // module calls are resolved at codegen-emit time via
+            // symbol-name lookup, not via raw bytecode `func_id`
+            // references inside archive bodies. The function-id-remap
+            // mismatch from task #118 root-causes to MISSING TRANSITIVE
+            // MODULES (callee's module not in `wanted_module_prefixes`),
+            // tracked separately.
             codegen.merge_archive_function_bodies(module, &func_id_remap);
         }
         // Unqualified-wanted second pass — same logic as apply_lazy's
