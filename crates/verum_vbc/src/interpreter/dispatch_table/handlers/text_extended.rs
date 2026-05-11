@@ -224,7 +224,23 @@ pub(in super::super) fn handle_text_extended(
                 }
             }
 
-            let (ptr, len): (*mut u8, u64) = if text.is_small_string() {
+            // FatRef representation: `Text.from_utf8_unchecked` (and every
+            // struct-literal Text-builder path) materialises the Text value
+            // at runtime as a `FatRef { ptr: byte_data, metadata: byte_len, ... }`
+            // — the Verum-level `{ptr, len, cap}` triple is collapsed into
+            // the FatRef's flat shape.  `as_bytes()` on such a value is
+            // already its own byte view; rebuild it as a `&[Byte]` FatRef
+            // with the byte-element stride marker (`reserved = 1`).
+            //
+            // This is the canonical heap-Text path — without it, the handler
+            // saw `is_ptr() == false` and fell through to `(null, 0)`, which
+            // is exactly the zero-length-slice defect that cascaded into
+            // `Hash for Text` collisions and `Eq for Text` vacuous-equality
+            // for every `Text.from(literal)` round-trip.
+            let (ptr, len): (*mut u8, u64) = if text.is_fat_ref() {
+                let fr = text.as_fat_ref();
+                (fr.ptr(), fr.len())
+            } else if text.is_small_string() {
                 // Small string: copy the inline bytes into a fresh heap
                 // buffer so the returned FatRef has a stable address for
                 // the full lifetime of the Value.
