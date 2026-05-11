@@ -5967,6 +5967,86 @@ impl TypeChecker {
         // intrinsic types used by core/ stdlib files, not user-defined types.
         self.ctx.add_cbgr_type_aliases();
     }
+}
+
+/// Canonical list of meta-reflection builtin function names registered by
+/// [`TypeChecker::register_meta_builtins`].  These functions have
+/// signatures the compiler must guarantee (typically `fn<T>(T) -> Bool`
+/// or `fn<T>(T) -> Int`) that no stdlib re-declaration could express
+/// faithfully — `register_function_signature` consults this list to
+/// refuse a stdlib re-registration of a meta builtin (since the stdlib
+/// version is always a less-correct stub).
+///
+/// **Drift contract:** every name in this slice MUST be registered by
+/// [`TypeChecker::register_meta_builtins`].  The
+/// `meta_reflection_builtins_all_registered` test asserts this — adding
+/// a new meta builtin to the registration site without appending here
+/// trips the test, and removing a name from registration without
+/// removing the protection entry produces a stale-protection silent
+/// miss that the same test catches.
+pub const META_REFLECTION_BUILTIN_NAMES: &[&str] = &[
+    "is_copy",
+    "is_send",
+    "is_sync",
+    "is_sized",
+    "needs_drop",
+    "is_struct",
+    "is_enum",
+    "is_tuple",
+    "implements",
+    "type_name",
+    "simple_name_of",
+    "kind_of",
+    "fields_of",
+    "type_fields",
+    "variants_of",
+    "type_id",
+    "size_of",
+    "align_of",
+];
+
+/// Canonical list of I/O + arithmetic builtin names that may be
+/// pre-registered by [`TypeChecker::register_intrinsics`] as fully
+/// polymorphic (`fn<T>(T) -> Unit` for print/println; theoretically
+/// poly numerics on the wishlist).  `register_function_signature`
+/// uses this list with the rule "skip re-registration if existing is
+/// MORE generic than the incoming stdlib version" — stdlib
+/// concrete-type re-registrations (`fn(Float) -> Float`) thus don't
+/// downgrade the polymorphic compiler intrinsic.
+///
+/// **Drift contract:** only names that are intended targets of the
+/// generic-vs-concrete protection rule belong here.  Names that are
+/// NOT registered by `register_intrinsics` as polymorphic (e.g. most
+/// of the arithmetic names today) are harmless — the protection check
+/// in `register_function_signature` falls through to `false` when the
+/// env doesn't already contain the name, so unregistered entries are
+/// silent no-ops.
+pub const IO_AND_NUMERIC_BUILTIN_NAMES: &[&str] = &[
+    "print",
+    "println",
+    "eprint",
+    "eprintln",
+    "add",
+    "sub",
+    "mul",
+    "div",
+    "rem",
+    "neg",
+    "abs",
+    "min",
+    "max",
+    "clamp",
+    "pow",
+    "sqrt",
+    "floor",
+    "ceil",
+    "round",
+    "sin",
+    "cos",
+    "tan",
+];
+
+impl TypeChecker {
 
     /// Register true compiler intrinsics that cannot be defined in stdlib.
     /// These require compiler-level support (source location, never-return, polymorphic output, etc.)
@@ -12044,5 +12124,59 @@ impl TypeChecker {
         }
 
         type_params
+    }
+}
+
+#[cfg(test)]
+mod builtin_protection_pin_tests {
+    use super::*;
+
+    /// Every name in `META_REFLECTION_BUILTIN_NAMES` MUST resolve in
+    /// the env after `register_builtins()` — otherwise the protection
+    /// rule in `register_function_signature` (decls.rs) would refer to
+    /// a non-existent symbol and the "always-protect" arm would always
+    /// fall through.
+    #[test]
+    fn meta_reflection_builtins_all_registered() {
+        let mut checker = TypeChecker::new();
+        checker.register_builtins();
+        for name in META_REFLECTION_BUILTIN_NAMES.iter() {
+            assert!(
+                checker.ctx.env.lookup(name).is_some(),
+                "META_REFLECTION_BUILTIN_NAMES lists '{}' but register_builtins() doesn't \
+                 register it.  Either remove the name from the constant or wire up the \
+                 missing registration in `register_meta_builtins`.",
+                name,
+            );
+        }
+    }
+
+    /// `IO_AND_NUMERIC_BUILTIN_NAMES` does NOT have a strict
+    /// "all-registered" invariant — the list intentionally enumerates
+    /// names that MIGHT be polymorphically-protected if/when an
+    /// intrinsic version exists.  But for names that ARE registered
+    /// at the intrinsic site (print / println today), the protection
+    /// rule must trigger: existing-generic-vs-stdlib-concrete
+    /// shadowing should be rejected.  This test pins that
+    /// `print` and `println` are registered as polymorphic, since
+    /// other code in `register_function_signature` depends on it.
+    #[test]
+    fn io_polymorphic_intrinsics_present() {
+        let mut checker = TypeChecker::new();
+        checker.register_builtins();
+        for name in ["print", "println"] {
+            let scheme = checker.ctx.env.lookup(name).unwrap_or_else(|| {
+                panic!(
+                    "expected '{}' to be registered as a polymorphic compiler intrinsic",
+                    name
+                )
+            });
+            assert!(
+                !scheme.vars.is_empty(),
+                "'{}' must be polymorphic (TypeScheme with at least 1 type var) for the \
+                 generic-vs-concrete protection rule in register_function_signature to fire",
+                name,
+            );
+        }
     }
 }
