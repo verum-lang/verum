@@ -275,3 +275,23 @@ fn decode_hex(b: Byte, pos: Int) -> Result<Int, UuidError> {
         })
     }
 }
+
+// =============================================================================
+// Free-function aliases
+// =============================================================================
+//
+// `mount core.base.uuid.{Uuid, v4, v7, nil, parse}` is the canonical
+// import shape; these wrappers route to the corresponding
+// `Uuid.new_v4` / `Uuid.new_v7` / `Uuid.nil` / `Uuid.parse` methods.
+
+/// Construct a fresh RFC 4122 v4 (random) UUID.
+public fn v4() -> Uuid { Uuid.new_v4() }
+
+/// Construct a fresh RFC 9562 v7 (time-ordered + random) UUID.
+public fn v7() -> Uuid { Uuid.new_v7() }
+
+/// The nil UUID (all zero bytes).
+public fn nil() -> Uuid { Uuid.nil() }
+
+/// Parse a canonical-form UUID Text.
+public fn parse(s: &Text) -> Result<Uuid, UuidError> { Uuid.parse(s) }

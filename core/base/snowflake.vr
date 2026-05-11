@@ -204,6 +204,19 @@ public type SnowflakeParts is {
     sequence:      UInt64,
 };
 
+/// Free-function alias for `Snowflake.using_default_epoch`.
+/// `mount core.base.snowflake.{using_default_epoch}` import-site
+/// convention; equivalent to `Snowflake.using_default_epoch(worker_id)`.
+public fn using_default_epoch(worker_id: UInt64) -> Result<Snowflake, SnowflakeError> {
+    Snowflake.using_default_epoch(worker_id)
+}
+
+/// Free-function alias for `Snowflake.new` — matches the
+/// `mount … {with_epoch}` import style used in tests.
+public fn with_epoch(epoch_ms: UInt64, worker_id: UInt64) -> Result<Snowflake, SnowflakeError> {
+    Snowflake.new(epoch_ms, worker_id)
+}
+
 public fn parse(id: UInt64, epoch_ms: UInt64) -> SnowflakeParts {
     let ts_offset = id >> TIMESTAMP_SHIFT;
     let worker    = (id >> WORKER_SHIFT) & MAX_WORKER;
