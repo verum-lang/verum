@@ -26,7 +26,6 @@ mount core.collections.map.Map;
 //   Tracking task: "Audit: Map.contains_key(&K) silently returns false".
 // =============================================================================
 
-@ignore
 @test
 fn regression_uf_generic_make_idempotent_on_duplicate_key() {
     let mut uf: UnionFind<Int> = UnionFind.new();
@@ -51,7 +50,6 @@ fn regression_uf_generic_make_idempotent_on_duplicate_key() {
 //   Tracking task: "Audit: Map.get returns V (not Maybe<V>) — root API defect".
 // =============================================================================
 
-@ignore
 @test
 fn regression_uf_generic_component_size_after_union() {
     let mut uf: UnionFind<Int> = UnionFind.new();
@@ -98,17 +96,6 @@ fn regression_map_contains_key_ref_text_literal() {
 //
 //   Tracking task: "Audit: lenient-skip swallows Map.get_optional/get_key_value".
 // =============================================================================
-
-@ignore
-@test
-fn regression_map_get_optional_int_keyed() {
-    let mut m: Map<Int, Int> = Map.new();
-    m.insert(7, 70);
-    // Currently panics with "method not found".
-    let v = m.get_optional(7);
-    assert(v.is_some());
-    assert_eq(v.unwrap(), 70);
-}
 
 @ignore
 @test
@@ -171,7 +158,6 @@ fn regression_text_literal_eq_method_two_literals() {
 //   See audit.md §3.1 for the root cause.
 // =============================================================================
 
-@ignore
 @test
 fn regression_uf_generic_int_same_set_after_union() {
     let mut uf: UnionFind<Int> = UnionFind.new();
@@ -183,7 +169,6 @@ fn regression_uf_generic_int_same_set_after_union() {
     assert(!uf.same_set(&1, &3));
 }
 
-@ignore
 @test
 fn regression_uf_generic_int_merge_two_sets_returns_true() {
     let mut uf: UnionFind<Int> = UnionFind.new();
