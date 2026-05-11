@@ -5639,7 +5639,7 @@ impl<'a> RecursiveParser<'a> {
             });
         }
 
-        let tree = self.parse_mount_tree()?;
+        let mut tree = self.parse_mount_tree()?;
 
         let alias = if self.stream.consume(&TokenKind::As).is_some() {
             // E063: Missing alias - `mount std.* as;`
@@ -5657,6 +5657,24 @@ impl<'a> RecursiveParser<'a> {
         } else {
             Maybe::None
         };
+
+        // Top-level `mount X.Y as Z;` form stores the alias on
+        // `MountDecl.alias`; nested-form `mount X.{Y as Z, W};` stores it
+        // on the inner `MountTree.alias`.  Downstream consumers across
+        // verum_types (decls/modules/env) and verum_modules historically
+        // inspected ONLY `tree.alias`, so the top-level form silently fell
+        // through to registering under the original leaf name (`random_bytes`
+        // instead of `sys_random_bytes`).  Mirror the outer alias onto the
+        // tree leaf when the tree has none of its own — both forms now
+        // flow through the same alias hop, regardless of which consumer
+        // is doing the lookup.  We KEEP the outer field populated too
+        // because existing parser tests / cross-module-deferred code paths
+        // continue to read it; both representations now agree.
+        if matches!(alias, Maybe::Some(_)) && matches!(tree.alias, Maybe::None) {
+            if let MountTreeKind::Path(_) = tree.kind {
+                tree.alias = alias.clone();
+            }
+        }
 
         // Semicolon is optional if followed by statement/block terminators
         if !self.allows_semicolon_omission() {

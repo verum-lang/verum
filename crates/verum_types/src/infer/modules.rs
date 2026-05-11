@@ -1445,13 +1445,40 @@ impl TypeChecker {
                     let item_name = &full_path_str[dot_pos + 1..];
                     // Mark as explicit import (single-path imports are explicit)
                     self.explicit_imports.insert(item_name.to_string());
-                    // Use span-aware import for proper error reporting
-                    self.import_item_from_module_with_span(
-                        &module_path,
-                        item_name,
-                        registry,
-                        import.tree.span,
-                    )?;
+
+                    // Honour `mount X.Y as Z;` at the leaf level — the
+                    // parser mirrors the outer `MountDecl.alias` onto
+                    // `tree.alias` for the Path form so the alias is
+                    // visible regardless of which surface the call site
+                    // inspects.  When an alias is present, route through
+                    // the alias-aware variant so the env entry registers
+                    // under `Z` instead of `Y`; otherwise the call site
+                    // tries to resolve `Z` and fails with `unbound
+                    // variable: Z` even though the underlying item is
+                    // wired through.
+                    let local_name: Option<&str> = match (&import.tree.alias, &import.alias) {
+                        (Maybe::Some(a), _) => Some(a.name.as_str()),
+                        (Maybe::None, Maybe::Some(a)) => Some(a.name.as_str()),
+                        _ => None,
+                    };
+                    if let Some(alias_str) = local_name {
+                        self.explicit_imports.insert(alias_str.to_string());
+                        self.import_item_from_module_with_alias_and_span(
+                            &module_path,
+                            item_name,
+                            Some(alias_str),
+                            registry,
+                            import.tree.span,
+                        )?;
+                    } else {
+                        // Use span-aware import for proper error reporting
+                        self.import_item_from_module_with_span(
+                            &module_path,
+                            item_name,
+                            registry,
+                            import.tree.span,
+                        )?;
+                    }
                 }
             }
 
