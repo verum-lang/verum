@@ -1464,6 +1464,8 @@ pub mod type_names {
     pub const INT64: &str = "Int64";
     pub const INT128: &str = "Int128";
     pub const INTSIZE: &str = "IntSize";
+    pub const ISIZE: &str = "ISize";
+    pub const UINT: &str = "UInt";
     pub const UINT8: &str = "UInt8";
     pub const UINT16: &str = "UInt16";
     pub const UINT32: &str = "UInt32";
@@ -1512,14 +1514,20 @@ pub mod type_names {
     ///
     /// Recognises all three naming conventions in lock-step with
     /// `verum_common::layout::primitive_size_by_name`:
-    /// canonical Verum (`Int`, `Int8`..`Int128`, `IntSize`),
+    /// canonical Verum (`Int`, `Int8`..`Int128`, `IntSize`, `ISize`),
     /// legacy uppercase-short (`I8`..`I128`, `Isize`),
     /// and Rust-style lowercase (`i8`..`i128`, `isize`).
+    ///
+    /// `ISize` is the canonical capitalised-S spelling that mirrors
+    /// the canonical `USize` form (`UInt`-style capitalisation); the
+    /// `Isize` and `isize` forms are legacy / Rust-style aliases.
+    /// Both `ISize` and `IntSize` resolve to the same 64-bit signed
+    /// pointer-width integer.
     pub fn is_signed_integer_type(name: &str) -> bool {
         matches!(
             name,
             // Canonical Verum
-            "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "IntSize"
+            "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "IntSize" | "ISize"
             // Legacy uppercase-short Verum aliases
             | "I8" | "I16" | "I32" | "I64" | "I128" | "Isize"
             // Rust-style lowercase aliases
@@ -1529,14 +1537,16 @@ pub mod type_names {
 
     /// Returns true if `name` is an unsigned integer type.
     ///
-    /// Recognises canonical Verum (`UInt8`..`UInt128`, `USize`, `UIntSize`,
-    /// `Byte`), legacy uppercase-short (`U8`..`U128`, `Usize`), and
-    /// Rust-style lowercase (`u8`..`u128`, `usize`).
+    /// Recognises canonical Verum (`UInt`, `UInt8`..`UInt128`, `USize`,
+    /// `UIntSize`, `Byte`), legacy uppercase-short (`U8`..`U128`, `Usize`),
+    /// and Rust-style lowercase (`u8`..`u128`, `usize`). Bare `UInt` is
+    /// the canonical 64-bit unsigned type — symmetric with bare `Int` —
+    /// used by FFI carrier types (`CULong is (UInt)` in `core/sys/cabi.vr`).
     pub fn is_unsigned_integer_type(name: &str) -> bool {
         matches!(
             name,
             // Canonical Verum
-            "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128"
+            "UInt" | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128"
             | "UIntSize" | "USize" | "Byte"
             // Legacy uppercase-short Verum aliases
             | "U8" | "U16" | "U32" | "U64" | "U128" | "Usize"
@@ -1641,10 +1651,11 @@ pub mod type_names {
             "Int32" | "UInt32" | "Float32" | "I32" | "U32" | "F32"
             | "i32" | "u32" | "f32" => Some(32),
             // 64-bit (incl. pointer-width aliases)
-            "Int" | "Int64" | "UInt64" | "Float" | "Float64"
+            "Int" | "Int64" | "UInt" | "UInt64" | "Float" | "Float64"
             | "I64" | "U64" | "F64"
             | "i64" | "u64" | "f64"
-            | "IntSize" | "USize" | "UIntSize" | "Isize" | "Usize" | "isize" | "usize" => Some(64),
+            | "IntSize" | "ISize" | "USize" | "UIntSize" | "Isize" | "Usize"
+            | "isize" | "usize" => Some(64),
             // 128-bit
             "Int128" | "UInt128" | "I128" | "U128" | "i128" | "u128" => Some(128),
             _ => None,
@@ -2291,7 +2302,8 @@ mod tests {
         ("Int32",   32,  true,  false, &["I32", "i32"]),
         ("Int64",   64,  true,  false, &["I64", "i64"]),
         ("Int128",  128, true,  false, &["I128", "i128"]),
-        ("IntSize", 64,  true,  false, &["Isize", "isize"]),
+        ("IntSize", 64,  true,  false, &["ISize", "Isize", "isize"]),
+        ("UInt",    64,  false, false, &["u64"]),
         ("UInt8",   8,   false, false, &["U8", "u8", "Byte"]),
         ("UInt16",  16,  false, false, &["U16", "u16"]),
         ("UInt32",  32,  false, false, &["U32", "u32"]),

@@ -311,7 +311,22 @@ fn register_module(
 
         // Always register qualified — `module.path.simple` —
         // unconditionally.  Cross-module dispatch path keys on this.
-        let qualified = format!("{}.{}", module_name, simple_name);
+        //
+        // The descriptor.name carrier now stores the FULL source-
+        // module-qualified form (e.g. `sys.bitfield.USIZE_BITS`)
+        // when codegen had a non-empty `current_source_module`, so
+        // sibling files inside the same archive-entry directory keep
+        // their distinct module-path prefixes — see the matching
+        // promotion in `verum_vbc/src/codegen/mod.rs::compile_function`
+        // (task #121).  Detect the qualified form by presence of `.`
+        // in `simple_name`; if already qualified, use it directly
+        // without re-prepending `module_name`.  Otherwise prepend
+        // the archive-entry module path the way the legacy path did.
+        let qualified = if simple_name.contains('.') {
+            simple_name.clone()
+        } else {
+            format!("{}.{}", module_name, simple_name)
+        };
         ctx.register_function(qualified, info.clone());
         stats.functions_registered += 1;
 
@@ -320,8 +335,17 @@ fn register_module(
         // a same-named variant in a later-loaded module.  Mirrors
         // `prefer_existing_functions=true` semantics that the
         // existing stdlib-load path uses.
-        if ctx.lookup_function(&simple_name).is_none() {
-            ctx.register_function(simple_name, info);
+        //
+        // For descriptors whose name is now qualified, the "simple"
+        // alias is the rightmost path segment.  Strip everything up
+        // to the last `.` to recover it.
+        let simple_alias: String = simple_name
+            .rsplit('.')
+            .next()
+            .unwrap_or(&simple_name)
+            .to_string();
+        if ctx.lookup_function(&simple_alias).is_none() {
+            ctx.register_function(simple_alias, info);
             stats.functions_registered += 1;
         }
     }
@@ -560,6 +584,34 @@ fn build_wanted_module_prefixes(
         .iter()
         .flat_map(|name| {
             let mut prefixes: Vec<String> = Vec::new();
+            // Module-form mount surface: `mount core.sys.bitfield;`
+            // adds the literal `core.sys.bitfield` qualified name to
+            // `wanted` (via `collect_mount_names`'s `full.join(".")`
+            // arm).  The user's intent is "load the bitfield module
+            // wholesale so `bitfield.<NAME>` resolves through the
+            // codegen-side suffix-match"; without including the
+            // dotted name itself in the prefix set, the
+            // `wanted_module_prefixes.contains(&entry.name)` gate at
+            // the archive walk loop misses the matching archive entry
+            // (`core.sys.bitfield`) entirely — its functions never
+            // register, and `bitfield.USIZE_BITS` falls through every
+            // suffix-match probe at the call site because the registry
+            // never received a `core.sys.bitfield.USIZE_BITS` key.
+            //
+            // Adding the dotted name itself is harmless for name-form
+            // mounts: `mount core.sys.bitfield.{USIZE_BITS}` adds
+            // `core.sys.bitfield.USIZE_BITS` to `wanted`; including
+            // it in `prefixes` is a no-op (no archive entry has that
+            // exact name — only `core.sys.bitfield`), and the ancestor
+            // walk below still adds the right module-level entry.
+            //
+            // Closes task #121 stage 2 — the precompiler-side and
+            // archive-loader-side were already registering qualified
+            // names; the gap was in the wanted-prefix expansion that
+            // gated whether the entry got loaded at all.
+            if name.contains('.') {
+                prefixes.push(name.clone());
+            }
             let mut cur = name.as_str();
             let mut hops = 0;
             while let Some(idx) = cur.rfind('.') {
@@ -1965,9 +2017,29 @@ fn register_module_filtered(
                 wanted.contains(parent)
             })
             .unwrap_or(false);
+        // Module-form mount surface: `mount core.sys.bitfield;` adds
+        // the literal qualified module name `core.sys.bitfield` to
+        // `wanted` (via `collect_mount_names`'s `full.join(".")`
+        // arm).  The user's intent is "load every public symbol of
+        // this module wholesale so `bitfield.<NAME>` resolves through
+        // the codegen-side suffix-match".  Without this branch the
+        // per-function filter rejects every symbol because neither
+        // its simple name nor its `<module_name>.<simple>` qualified
+        // form matches any literal-name entry in `wanted`, and the
+        // suffix-match at the call site has no qualified key to bind
+        // against.
+        //
+        // Closes task #121 stage 2.  Pairs with the parallel
+        // expansion in `build_wanted_module_prefixes` that now
+        // includes the literal qualified name in the prefix set so
+        // the entry-iteration gate also matches.  Both gates were
+        // dropping wholesale-module mounts on the floor before this
+        // commit.
+        let is_wholesale_module_mount = wanted.contains(module_name);
         if !wanted.contains(simple_name_str)
             && !wanted.contains(&qualified_borrowed)
             && !is_method_of_wanted_type
+            && !is_wholesale_module_mount
         {
             continue;
         }
@@ -2166,7 +2238,21 @@ fn register_module_filtered(
             let qualified = format!("{}.{}", parent_name_str, vn);
             wanted.contains(&qualified)
         });
-        if !parent_in_scope && !any_variant_wanted && !qualified_variant_wanted {
+        // Wholesale-module-mount fanout: same rationale as the Pass 3
+        // function-filter gate above.  `mount core.io.io;` (declared
+        // by `core/io/io.vr` as `module io.io;`) drops the literal
+        // qualified module name into `wanted`; the user expects every
+        // sum type's variant constructors in that module to register
+        // as if each had been individually `mount`ed.  Without this
+        // branch, only types/variants explicitly enumerated land in
+        // ctx.functions and qualified-form variant literals like
+        // `IoError.Permission` fall through every variant-tag lookup.
+        let is_wholesale_module_mount = wanted.contains(module_name);
+        if !parent_in_scope
+            && !any_variant_wanted
+            && !qualified_variant_wanted
+            && !is_wholesale_module_mount
+        {
             continue;
         }
         let parent_name = parent_name_str.to_string();
