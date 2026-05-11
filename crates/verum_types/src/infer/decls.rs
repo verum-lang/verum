@@ -6412,63 +6412,27 @@ impl TypeChecker {
         // When a generic builtin (e.g., fn<T>(T) -> T for abs) already exists,
         // don't let a concrete stdlib version (e.g., fn(Float) -> Float) override it.
         // But DO allow equally-or-more-generic re-registrations (e.g., mount core.intrinsics).
+        //
+        // Both name lists are sourced from canonical constants in `infer::env`
+        // so the registration site (`register_meta_builtins` /
+        // `register_intrinsics`) and the protection site stay in sync —
+        // drift is pinned by the `meta_reflection_builtins_all_registered`
+        // and `io_and_numeric_builtins_pinned` tests.
+        let func_name = func.name.name.as_str();
         let should_skip_registration = {
-            // Meta reflection builtins: ALWAYS protect. The compiler registers
-            // fn(Type) -> Bool (1 param) for compile-time type inspection, but
-            // stdlib declares fn<T>() -> Bool (0 params). The builtin version
-            // is always correct.
-            let is_meta_builtin = matches!(
-                func.name.name.as_str(),
-                "is_copy"
-                    | "is_send"
-                    | "is_sync"
-                    | "is_sized"
-                    | "needs_drop"
-                    | "is_struct"
-                    | "is_enum"
-                    | "is_tuple"
-                    | "implements"
-                    | "type_name"
-                    | "simple_name_of"
-                    | "kind_of"
-                    | "fields_of"
-                    | "type_fields"
-                    | "variants_of"
-                    | "type_id"
-                    | "size_of"
-                    | "align_of"
-            );
+            // Meta reflection builtins: ALWAYS protect.  The compiler registers
+            // fn<T>(T) -> Bool / fn<T>(T) -> Int for compile-time type
+            // inspection; any stdlib re-declaration is a less-correct stub.
+            let is_meta_builtin = crate::infer::env::META_REFLECTION_BUILTIN_NAMES
+                .contains(&func_name);
             if is_meta_builtin {
-                self.ctx.env.lookup(func.name.name.as_str()).is_some()
+                self.ctx.env.lookup(func_name).is_some()
             } else {
-                // I/O and arithmetic builtins: protect when existing is MORE generic
-                let is_potentially_protected = matches!(
-                    func.name.name.as_str(),
-                    "print"
-                        | "println"
-                        | "eprint"
-                        | "eprintln"
-                        | "add"
-                        | "sub"
-                        | "mul"
-                        | "div"
-                        | "rem"
-                        | "neg"
-                        | "abs"
-                        | "min"
-                        | "max"
-                        | "clamp"
-                        | "pow"
-                        | "sqrt"
-                        | "floor"
-                        | "ceil"
-                        | "round"
-                        | "sin"
-                        | "cos"
-                        | "tan"
-                );
+                // I/O and arithmetic builtins: protect when existing is MORE generic.
+                let is_potentially_protected = crate::infer::env::IO_AND_NUMERIC_BUILTIN_NAMES
+                    .contains(&func_name);
                 if is_potentially_protected {
-                    if let Some(existing) = self.ctx.env.lookup(func.name.name.as_str()) {
+                    if let Some(existing) = self.ctx.env.lookup(func_name) {
                         !existing.vars.is_empty() && scheme.vars.len() < existing.vars.len()
                     } else {
                         false
