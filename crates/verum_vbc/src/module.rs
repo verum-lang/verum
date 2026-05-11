@@ -560,7 +560,46 @@ impl VbcModule {
         receiver_type: TypeId,
         bare_method: &str,
     ) -> Option<FunctionId> {
-        let descriptor = self.types.iter().find(|t| t.id == receiver_type)?;
+        // Built-in TypeIds (Range/List/Map/Set/Maybe/Result/...) are
+        // allocated as constants in `crate::types::TypeId::*` — they
+        // don't have a matching `TypeDescriptor` in `self.types` unless
+        // the archive explicitly registered one. Resolve their canonical
+        // name first so the qualified-lookup fast-path can succeed
+        // before the descriptor walk falls through. Pairs with task
+        // #134: stdlib types whose method-table lives outside the
+        // Tier-0 inline dispatcher (e.g. `Range.collect` → Iterator's
+        // default `collect` body in core.base.iterator) need this
+        // name-resolved entrypoint.
+        let builtin_name: Option<&'static str> = match receiver_type {
+            TypeId::RANGE => Some("Range"),
+            TypeId::LIST => Some("List"),
+            TypeId::MAP => Some("Map"),
+            TypeId::SET => Some("Set"),
+            TypeId::DEQUE => Some("Deque"),
+            TypeId::MAYBE => Some("Maybe"),
+            TypeId::RESULT => Some("Result"),
+            TypeId::HEAP => Some("Heap"),
+            TypeId::SHARED => Some("Shared"),
+            TypeId::TEXT => Some("Text"),
+            TypeId::CHANNEL => Some("Channel"),
+            _ => None,
+        };
+        if let Some(name) = builtin_name {
+            let qualified = format!("{}.{}", name, bare_method);
+            if let Some(id) = self.find_function_by_name(&qualified) {
+                return Some(id);
+            }
+        }
+        let descriptor = match self.types.iter().find(|t| t.id == receiver_type) {
+            Some(d) => d,
+            None => {
+                // No descriptor for the receiver — built-in or otherwise.
+                // For built-in receivers we already attempted the name
+                // path above; for non-builtin unknown TypeIds there's
+                // nothing more to do.
+                return None;
+            }
+        };
         if let Some(type_name) = self.get_string(descriptor.name) {
             let qualified = format!("{}.{}", type_name, bare_method);
             if let Some(id) = self.find_function_by_name(&qualified) {
