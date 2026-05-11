@@ -253,7 +253,7 @@ pub(super) fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base
         if ptr.is_null() {
             return Vec::new();
         }
-        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
         if header.type_id == TypeId::LIST {
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             let len = unsafe { (*data_ptr).as_i64() } as usize;
@@ -304,7 +304,7 @@ pub(super) fn read_buffer_capacity(v: Value) -> Option<usize> {
         if ptr.is_null() {
             return None;
         }
-        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
         if header.type_id.is_list_like() {
             // Both `LIST` and `BYTE_LIST` share the 3-Value header
             // shape `[len, cap, backing_ptr]`; the layout difference
@@ -350,7 +350,7 @@ pub(super) fn write_into_byte_slice(v: Value, bytes: &[u8]) {
         if ptr.is_null() {
             return;
         }
-        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
         if header.type_id == TypeId::LIST {
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let cap = unsafe { (*data_ptr.add(1)).as_i64() } as usize;
@@ -455,7 +455,7 @@ pub(super) fn is_record_typed_as(state: &InterpreterState, v: Value, name: &str)
     if ptr.is_null() {
         return false;
     }
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     state
         .module
         .types

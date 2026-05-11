@@ -11,7 +11,7 @@
 // =============================================================================
 
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
-mount core.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.collections.list.List;
 
 // =============================================================================

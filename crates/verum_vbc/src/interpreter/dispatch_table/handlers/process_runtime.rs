@@ -190,7 +190,7 @@ fn read_command_record(state: &InterpreterState, v: Value) -> Option<CommandData
     if ptr.is_null() || !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
         return None;
     }
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     if (header.size as usize) < 7 * std::mem::size_of::<Value>() {
         return None;
     }
@@ -258,7 +258,7 @@ fn read_list_header(v: Value) -> Option<(usize, *const Value)> {
     if ptr.is_null() || !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
         return None;
     }
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     if header.type_id != TypeId::LIST {
         return None;
     }
@@ -759,7 +759,7 @@ fn read_stdio_tag(
     if ptr.is_null() {
         return 0;
     }
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     let needed = (_field_idx + 1) * std::mem::size_of::<Value>();
     if (header.size as usize) < needed {
         return 0;

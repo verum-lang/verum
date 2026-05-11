@@ -24,7 +24,7 @@ pub(super) fn extract_string(value: &Value, _state: &InterpreterState) -> String
         } else {
             // The pointer points TO the ObjectHeader.
             // Layout: [ObjectHeader (24 bytes)][len: u64 (8 bytes)][byte data...]
-            let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+            let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
 
             // Check for string types: TEXT (0x7004) or concat/heap-string (0x0001)
             if header.type_id == crate::types::TypeId::TEXT
@@ -121,7 +121,7 @@ pub(super) fn is_heap_string(v: &Value) -> bool {
     if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
         return false;
     }
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     // TEXT type or the concat type (0x0001)
     header.type_id == crate::types::TypeId::TEXT || header.type_id == crate::types::TypeId(0x0001)
 }
@@ -150,7 +150,7 @@ pub(super) fn resolve_string_value(v: &Value, state: &InterpreterState) -> Strin
         if !ptr.is_null() {
             unsafe {
                 let data_offset = heap::OBJECT_HEADER_SIZE;
-                let header = &*(ptr as *const heap::ObjectHeader);
+                let header = heap::ObjectHeader::ref_or_stub(ptr);
                 let size = header.size as usize;
 
                 // Text objects come in two runtime shapes sharing
@@ -507,8 +507,8 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             }
 
             // Same tag - compare all payload fields
-            let header_a = unsafe { &*(ptr_a as *const heap::ObjectHeader) };
-            let header_b = unsafe { &*(ptr_b as *const heap::ObjectHeader) };
+            let header_a = unsafe { heap::ObjectHeader::ref_or_stub(ptr_a) };
+            let header_b = unsafe { heap::ObjectHeader::ref_or_stub(ptr_b) };
             let size_a = header_a.size as usize;
             let size_b = header_b.size as usize;
             if size_a != size_b {
@@ -532,8 +532,8 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             && (type_id_b == 0 || type_id_b == TypeId::TUPLE.0)
         {
             // Both are tuple/pack objects (TypeId 0 or TypeId::TUPLE)
-            let header_a = unsafe { &*(ptr_a as *const heap::ObjectHeader) };
-            let header_b = unsafe { &*(ptr_b as *const heap::ObjectHeader) };
+            let header_a = unsafe { heap::ObjectHeader::ref_or_stub(ptr_a) };
+            let header_b = unsafe { heap::ObjectHeader::ref_or_stub(ptr_b) };
             let size_a = header_a.size as usize;
             let size_b = header_b.size as usize;
             if size_a != size_b {
@@ -555,8 +555,8 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             return true;
         } else if is_array_type_id(type_id_a) && is_array_type_id(type_id_b) {
             // Array/List structural comparison
-            let header_a = unsafe { &*(ptr_a as *const heap::ObjectHeader) };
-            let header_b = unsafe { &*(ptr_b as *const heap::ObjectHeader) };
+            let header_a = unsafe { heap::ObjectHeader::ref_or_stub(ptr_a) };
+            let header_b = unsafe { heap::ObjectHeader::ref_or_stub(ptr_b) };
             let len_a = super::super::get_array_length(ptr_a, header_a).unwrap_or(0);
             let len_b = super::super::get_array_length(ptr_b, header_b).unwrap_or(0);
             if len_a != len_b {

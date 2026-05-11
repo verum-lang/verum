@@ -319,7 +319,7 @@ fn read_text_list(state: &InterpreterState, v: Value) -> Vec<String> {
     if ptr.is_null() {
         return Vec::new();
     }
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     if (header.size as usize) < 3 * std::mem::size_of::<Value>() {
         return Vec::new();
     }
@@ -410,7 +410,7 @@ pub(in super::super) fn receiver_looks_like_shell_result(v: &Value) -> bool {
     if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
         return false;
     }
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     // Our shell_runtime intercept allocates exactly 5 fields (40 bytes).
     // Any record of EXACTLY this size + the field-shape check is a
     // safe signal — collisions with other 5-field heap records are
@@ -483,7 +483,7 @@ pub(in super::super) fn try_intercept_shell_result_inherent_call(
         return Ok(None);
     }
     use crate::interpreter::heap;
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     if (header.size as usize) < 5 * std::mem::size_of::<Value>() {
         return Ok(None);
     }
@@ -549,7 +549,7 @@ fn read_exit_status_raw(v: Value) -> i64 {
     if ptr.is_null() {
         return 0;
     }
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     if (header.size as usize) < std::mem::size_of::<Value>() {
         return 0;
     }
@@ -571,7 +571,7 @@ fn read_byte_list(v: Value) -> Vec<u8> {
     if ptr.is_null() {
         return Vec::new();
     }
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     if (header.size as usize) < 3 * std::mem::size_of::<Value>() {
         return Vec::new();
     }

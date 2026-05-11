@@ -228,7 +228,7 @@ fn read_field0(receiver: &Value) -> Option<Value> {
     if ptr.is_null() {
         return None;
     }
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     if (header.size as usize) < std::mem::size_of::<Value>() {
         return None;
     }

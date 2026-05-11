@@ -203,7 +203,7 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
         let base_ptr = value.as_ptr::<u8>();
         if !base_ptr.is_null() {
             // Read the ObjectHeader to determine the type
-            let header = unsafe { &*(base_ptr as *const heap::ObjectHeader) };
+            let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr) };
             let data_offset = heap::OBJECT_HEADER_SIZE;
 
             // Heap-allocated string: type_id == TEXT (4) or 0x0001 (legacy).
@@ -390,7 +390,7 @@ fn format_variant_for_print_depth(
         // Reading `header.type_id` and scoping the lookup to that type
         // alone is both correct AND faster (one `types[i]` indexed
         // access instead of an O(N_types · N_variants) scan).
-        let header = &*(base_ptr as *const heap::ObjectHeader);
+        let header = heap::ObjectHeader::ref_or_stub(base_ptr);
         let type_id = header.type_id;
 
         let tag_ptr = base_ptr.add(data_offset) as *const u32;
