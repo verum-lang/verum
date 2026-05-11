@@ -28,6 +28,66 @@ pub(in super::super) fn handle_call(
     let func_id = FunctionId(read_varint(state)? as u32);
     let args = read_reg_range(state)?;
 
+    // Task #16 stages 1+2 unresolved-stub detection (deferred reland
+    // prerequisite).  Stage-1 / stage-2 pre-passes in
+    // `stdlib_bootstrap.rs` reserve two sentinel FunctionId ranges:
+    //
+    //   * Stage-1 canonical-type static-method stubs:
+    //       [u32::MAX - 0x50_0000, u32::MAX - 0x40_0000]
+    //   * Stage-2 stdlib-variant-constructor stubs:
+    //       [u32::MAX - 0xD0_0000, u32::MAX - 0xC0_0000]
+    //
+    // When stages 1+2 are active and the producing module SUCCEEDS,
+    // its real body's `register_function` overwrites the stub via
+    // the gate at `stdlib_bootstrap.rs:1453`.  When the producing
+    // module FAILS to compile, the stub stays — the caller's codegen
+    // already emitted `Call { func_id = sentinel }` because the
+    // stub was visible in `ctx.functions` at compile time, but the
+    // archive has no body at that id (stubs are codegen-context
+    // entries, not VBC functions).
+    //
+    // Pre-fix the runtime fell through to
+    // `InterpreterError::FunctionNotFound(func_id)` with the
+    // generic `Function N not found` message, which is strictly
+    // WORSE than the pre-stages clean lenient-skip panic carrying
+    // the original method name.  This was the regression that
+    // forced reverting stages 1+2 in commits 09416454a +
+    // e8e4a82ac + 081459a11 + c322b9010.
+    //
+    // **Re-attempt prerequisite landed here**: detect sentinel-range
+    // FunctionIds at the dispatch boundary and emit a clean
+    // `[lenient] <T>.<m> stub never resolved` panic.  Once this
+    // safety net is in tree, stages 1+2 can be re-applied without
+    // the regression hazard — the failure mode degrades gracefully
+    // (panic-stub-equivalent message) instead of catastrophically
+    // (`Function N not found` with no actionable context).
+    //
+    // The function name is recovered from a side-table embedded in
+    // the archive (see `verum_vbc::module::VbcModule::stub_names`)
+    // when present; otherwise falls back to the bare id for
+    // diagnosis.
+    const STAGE1_STUB_BASE: u32 = u32::MAX - 0x40_0000;
+    const STAGE2_STUB_BASE: u32 = u32::MAX - 0xC0_0000;
+    const STUB_RANGE_WIDTH: u32 = 0x10_0000;
+    let in_stage1 =
+        func_id.0 <= STAGE1_STUB_BASE && func_id.0 >= STAGE1_STUB_BASE - STUB_RANGE_WIDTH;
+    let in_stage2 =
+        func_id.0 <= STAGE2_STUB_BASE && func_id.0 >= STAGE2_STUB_BASE - STUB_RANGE_WIDTH;
+    if in_stage1 || in_stage2 {
+        let stage = if in_stage1 { "1" } else { "2" };
+        let stub_class = if in_stage1 {
+            "canonical-type static method"
+        } else {
+            "stdlib variant constructor"
+        };
+        return Err(InterpreterError::Panic {
+            message: format!(
+                "[lenient] task#16 stage-{} {} stub never resolved (func_id={}); the producing stdlib module failed precompile — check stderr for `[lenient] SKIP <Type>.<method>` warnings during the build",
+                stage, stub_class, func_id.0
+            ),
+        });
+    }
+
     // Get function descriptor — extract needed fields to release borrow
     let func = state
         .module
