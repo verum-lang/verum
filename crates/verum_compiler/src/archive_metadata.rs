@@ -483,7 +483,49 @@ fn register_module_metadata(
     }
 
     // Pass 2: functions.
+    //
+    // Task #16 reland blocker #3: filter out stage-1/stage-2 stub
+    // FunctionDescriptors so they don't propagate into
+    // `metadata.functions`.  Stubs live in two sentinel FunctionId
+    // ranges reserved by `stdlib_bootstrap::pre_register_canonical_*`:
+    //
+    //   * Stage 1 (canonical-type static-method stubs):
+    //        [STAGE1_BASE - WIDTH, STAGE1_BASE] where
+    //        STAGE1_BASE = u32::MAX - 0x40_0000 (0xFFBF_FFFF).
+    //   * Stage 2 (stdlib variant-constructor stubs):
+    //        [STAGE2_BASE - WIDTH, STAGE2_BASE] where
+    //        STAGE2_BASE = u32::MAX - 0xC0_0000 (0xFF3F_FFFF).
+    //
+    // Stubs are codegen-context entries only — they should NEVER
+    // appear in the per-module compiled bytecode set.  When they
+    // leaked into `module.functions` during the first reland
+    // attempt, the typechecker's lazy-load (`register_inherent_methods_from_metadata`)
+    // saw them as real descriptors with `parent_type_name` that
+    // disrupted the canonical lookup (`Int.checked_add` regressed
+    // at typecheck despite Int not being in the stage-1
+    // canonical-types set — stubs for OTHER canonical types' static
+    // methods polluted the metadata function table and the
+    // typechecker mis-attributed methods across types).
+    //
+    // The runtime sentinel handler at
+    // `verum_vbc::interpreter::dispatch_table::handlers::calls::handle_call`
+    // (commit `b5f5462d4`) catches stuck stubs at the dispatch
+    // boundary; THIS filter catches them at the metadata-emission
+    // boundary so they never reach the typechecker's lazy-load
+    // path either.  Both gates together make stage-1+2 reland
+    // safe.
+    const STAGE1_STUB_BASE: u32 = u32::MAX - 0x40_0000;
+    const STAGE2_STUB_BASE: u32 = u32::MAX - 0xC0_0000;
+    const STUB_RANGE_WIDTH: u32 = 0x10_0000;
+    let is_stub_id = |id: u32| -> bool {
+        let in_stage1 = id <= STAGE1_STUB_BASE && id >= STAGE1_STUB_BASE - STUB_RANGE_WIDTH;
+        let in_stage2 = id <= STAGE2_STUB_BASE && id >= STAGE2_STUB_BASE - STUB_RANGE_WIDTH;
+        in_stage1 || in_stage2
+    };
     for fn_desc in &module.functions {
+        if is_stub_id(fn_desc.id.0) {
+            continue;
+        }
         let simple_name = match module.strings.get(fn_desc.name) {
             Some(s) => Text::from(s),
             None => continue,
