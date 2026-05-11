@@ -1,0 +1,59 @@
+// =============================================================================
+// core-tests/async/channel/property_test.vr
+// =============================================================================
+
+mount core.async.channel.{TrySendError, TryRecvError};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section A: TrySendError<T> partition (Full / Disconnected)
+// =============================================================================
+
+@test
+fn property_channel_try_send_error_partition() {
+    fn flag_count(e: TrySendError<Int>) -> Int {
+        let mut n: Int = 0;
+        if e is TrySendError.Full { n = n + 1; }
+        if e is TrySendError.Disconnected { n = n + 1; }
+        n
+    }
+    assert_eq(flag_count(TrySendError.Full(0)), 1);
+    assert_eq(flag_count(TrySendError.Disconnected(0)), 1);
+    assert_eq(flag_count(TrySendError.Full(42)), 1);
+    assert_eq(flag_count(TrySendError.Disconnected(99)), 1);
+}
+
+@test
+fn property_channel_try_send_error_payload_round_trip() {
+    let domain: List<Int> = [-1, 0, 1, 42, 1_000_000];
+    for v in domain.iter() {
+        let full: TrySendError<Int> = TrySendError.Full(*v);
+        let disc: TrySendError<Int> = TrySendError.Disconnected(*v);
+        match full {
+            TrySendError.Full(p) => assert_eq(p, *v),
+            TrySendError.Disconnected(_) => assert(false),
+        }
+        match disc {
+            TrySendError.Full(_) => assert(false),
+            TrySendError.Disconnected(p) => assert_eq(p, *v),
+        }
+    }
+}
+
+// =============================================================================
+// Section B: TryRecvError partition (Empty / Disconnected)
+// =============================================================================
+
+@test
+fn property_channel_try_recv_error_partition() {
+    fn flag_count(e: TryRecvError) -> Int {
+        let mut n: Int = 0;
+        if e is TryRecvError.Empty { n = n + 1; }
+        if e is TryRecvError.Disconnected { n = n + 1; }
+        n
+    }
+    assert_eq(flag_count(TryRecvError.Empty), 1);
+    assert_eq(flag_count(TryRecvError.Disconnected), 1);
+}
+
+fn main() {}

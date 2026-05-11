@@ -1,0 +1,43 @@
+// =============================================================================
+// core-tests/async/select/integration_test.vr
+// =============================================================================
+
+mount core.async.select.{Either};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section A: List<Either> race-outcome bookkeeping
+// =============================================================================
+
+@test
+fn integration_select_either_list_left_counts() {
+    let outcomes: List<Either<Int, Int>> = [
+        Either.Left(1),
+        Either.Right(2),
+        Either.Left(3),
+        Either.Right(4),
+        Either.Left(5),
+    ];
+    let mut left_n: Int = 0;
+    for r in outcomes.iter() {
+        if (*r) is Either.Left {
+            left_n = left_n + 1;
+        }
+    }
+    assert_eq(left_n, 3);
+}
+
+@test
+fn integration_select_either_to_maybe_left() {
+    fn left_only(r: Either<Int, Text>) -> Maybe<Int> {
+        match r {
+            Either.Left(v) => Some(v),
+            Either.Right(_) => None,
+        }
+    }
+    assert_eq(left_only(Either.Left(7)), Some(7));
+    assert_eq(left_only(Either.Right("x")), None);
+}
+
+fn main() {}

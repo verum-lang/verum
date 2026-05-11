@@ -1,0 +1,76 @@
+// =============================================================================
+// core-tests/async/broadcast/property_test.vr
+// =============================================================================
+
+mount core.async.broadcast.{BroadcastRecvError, TryRecvResult, LagPolicy};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section A: BroadcastRecvError partition (Closed / Lagged(Int))
+// =============================================================================
+
+@test
+fn property_broadcast_recv_error_partition() {
+    fn flag_count(e: BroadcastRecvError) -> Int {
+        let mut n: Int = 0;
+        if e is BroadcastRecvError.Closed { n = n + 1; }
+        if e is BroadcastRecvError.Lagged { n = n + 1; }
+        n
+    }
+    assert_eq(flag_count(BroadcastRecvError.Closed), 1);
+    assert_eq(flag_count(BroadcastRecvError.Lagged(0)), 1);
+    assert_eq(flag_count(BroadcastRecvError.Lagged(42)), 1);
+    assert_eq(flag_count(BroadcastRecvError.Lagged(-1)), 1);
+}
+
+@test
+fn property_broadcast_lagged_payload_round_trip() {
+    let domain: List<Int> = [0, 1, 7, 100, 1_000_000];
+    for v in domain.iter() {
+        let e: BroadcastRecvError = BroadcastRecvError.Lagged(*v);
+        match e {
+            BroadcastRecvError.Lagged(n) => assert_eq(n, *v),
+            BroadcastRecvError.Closed => assert(false),
+        }
+    }
+}
+
+// =============================================================================
+// Section B: TryRecvResult — 4-arm partition
+// =============================================================================
+
+@test
+fn property_broadcast_try_recv_result_partition() {
+    fn flag_count(r: TryRecvResult<Int>) -> Int {
+        let mut n: Int = 0;
+        if r is TryRecvResult.Value { n = n + 1; }
+        if r is TryRecvResult.Empty { n = n + 1; }
+        if r is TryRecvResult.Closed { n = n + 1; }
+        if r is TryRecvResult.Lagged { n = n + 1; }
+        n
+    }
+    assert_eq(flag_count(TryRecvResult.Value(7)), 1);
+    assert_eq(flag_count(TryRecvResult.Empty), 1);
+    assert_eq(flag_count(TryRecvResult.Closed), 1);
+    assert_eq(flag_count(TryRecvResult.Lagged(3)), 1);
+}
+
+// =============================================================================
+// Section C: LagPolicy — 3-arm partition
+// =============================================================================
+
+@test
+fn property_broadcast_lag_policy_partition() {
+    fn flag_count(p: LagPolicy) -> Int {
+        let mut n: Int = 0;
+        if p is LagPolicy.LagTolerant { n = n + 1; }
+        if p is LagPolicy.DropOldest { n = n + 1; }
+        if p is LagPolicy.DropSlowReceiver { n = n + 1; }
+        n
+    }
+    assert_eq(flag_count(LagPolicy.LagTolerant), 1);
+    assert_eq(flag_count(LagPolicy.DropOldest), 1);
+    assert_eq(flag_count(LagPolicy.DropSlowReceiver), 1);
+}
+
+fn main() {}

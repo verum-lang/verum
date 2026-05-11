@@ -1,0 +1,52 @@
+// =============================================================================
+// core-tests/async/broadcast/integration_test.vr
+// =============================================================================
+
+mount core.async.broadcast.{BroadcastRecvError, TryRecvResult};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section A: TryRecvResult<T> → Maybe<T> projection
+// =============================================================================
+
+@test
+fn integration_broadcast_try_recv_to_maybe() {
+    fn to_maybe(r: TryRecvResult<Int>) -> Maybe<Int> {
+        match r {
+            TryRecvResult.Value(v) => Some(v),
+            TryRecvResult.Empty => None,
+            TryRecvResult.Closed => None,
+            TryRecvResult.Lagged(_) => None,
+        }
+    }
+    assert_eq(to_maybe(TryRecvResult.Value(42)), Some(42));
+    assert_eq(to_maybe(TryRecvResult.Empty), None);
+    assert_eq(to_maybe(TryRecvResult.Closed), None);
+    assert_eq(to_maybe(TryRecvResult.Lagged(5)), None);
+}
+
+// =============================================================================
+// Section B: BroadcastRecvError List bookkeeping
+// =============================================================================
+
+@test
+fn integration_broadcast_recv_error_list_lag_count() {
+    let errors: List<BroadcastRecvError> = [
+        BroadcastRecvError.Closed,
+        BroadcastRecvError.Lagged(2),
+        BroadcastRecvError.Lagged(5),
+        BroadcastRecvError.Closed,
+        BroadcastRecvError.Lagged(1),
+    ];
+    let mut total_lag: Int = 0;
+    for e in errors.iter() {
+        match *e {
+            BroadcastRecvError.Lagged(n) => total_lag = total_lag + n,
+            BroadcastRecvError.Closed => {},
+        }
+    }
+    assert_eq(total_lag, 8);
+}
+
+fn main() {}

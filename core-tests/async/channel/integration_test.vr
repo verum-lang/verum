@@ -1,0 +1,63 @@
+// =============================================================================
+// core-tests/async/channel/integration_test.vr
+// =============================================================================
+
+mount core.async.channel.{TrySendError, TryRecvError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section A: TrySendError<T> payload-recovery pattern
+// =============================================================================
+
+@test
+fn integration_channel_try_send_recover_value() {
+    fn recover(e: TrySendError<Int>) -> Int {
+        match e {
+            TrySendError.Full(v) => v,
+            TrySendError.Disconnected(v) => v,
+        }
+    }
+    assert_eq(recover(TrySendError.Full(99)), 99);
+    assert_eq(recover(TrySendError.Disconnected(7)), 7);
+}
+
+// =============================================================================
+// Section B: TryRecvError → Maybe<Int> "should-retry" signal
+// =============================================================================
+
+@test
+fn integration_channel_try_recv_should_retry() {
+    fn retry_count(e: TryRecvError) -> Int {
+        match e {
+            TryRecvError.Empty => 3,  // backoff and retry
+            TryRecvError.Disconnected => 0,  // give up
+        }
+    }
+    assert_eq(retry_count(TryRecvError.Empty), 3);
+    assert_eq(retry_count(TryRecvError.Disconnected), 0);
+}
+
+// =============================================================================
+// Section C: List<TryRecvError> recovery accounting
+// =============================================================================
+
+@test
+fn integration_channel_recv_error_list_giveup_count() {
+    let errors: List<TryRecvError> = [
+        TryRecvError.Empty,
+        TryRecvError.Disconnected,
+        TryRecvError.Empty,
+        TryRecvError.Disconnected,
+        TryRecvError.Empty,
+    ];
+    let mut giveups: Int = 0;
+    for e in errors.iter() {
+        if (*e) is TryRecvError.Disconnected {
+            giveups = giveups + 1;
+        }
+    }
+    assert_eq(giveups, 2);
+}
+
+fn main() {}

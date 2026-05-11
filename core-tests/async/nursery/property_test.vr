@@ -1,0 +1,25 @@
+// =============================================================================
+// core-tests/async/nursery/property_test.vr
+// =============================================================================
+
+mount core.async.nursery.{NurseryErrorBehavior};
+
+// =============================================================================
+// 3-arm partition law for NurseryErrorBehavior
+// =============================================================================
+
+@test
+fn property_nursery_error_behavior_partition() {
+    fn flag_count(p: NurseryErrorBehavior) -> Int {
+        let mut n: Int = 0;
+        if p is NurseryErrorBehavior.CancelAll { n = n + 1; }
+        if p is NurseryErrorBehavior.WaitAll { n = n + 1; }
+        if p is NurseryErrorBehavior.FailFast { n = n + 1; }
+        n
+    }
+    assert_eq(flag_count(NurseryErrorBehavior.CancelAll), 1);
+    assert_eq(flag_count(NurseryErrorBehavior.WaitAll), 1);
+    assert_eq(flag_count(NurseryErrorBehavior.FailFast), 1);
+}
+
+fn main() {}

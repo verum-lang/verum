@@ -1,0 +1,42 @@
+// =============================================================================
+// core-tests/async/nursery/integration_test.vr
+// =============================================================================
+
+mount core.async.nursery.{NurseryErrorBehavior};
+mount core.collections.list.List;
+
+@test
+fn integration_nursery_policy_priority_ordering() {
+    // Real services tier: CancelAll is safest, WaitAll gathers all
+    // errors, FailFast leaves orphans.  Verify the canonical
+    // priority/severity ordering used by supervisor selection.
+    fn priority(p: NurseryErrorBehavior) -> Int {
+        match p {
+            NurseryErrorBehavior.CancelAll => 2,
+            NurseryErrorBehavior.WaitAll => 1,
+            NurseryErrorBehavior.FailFast => 0,
+        }
+    }
+    assert(priority(NurseryErrorBehavior.CancelAll) > priority(NurseryErrorBehavior.WaitAll));
+    assert(priority(NurseryErrorBehavior.WaitAll) > priority(NurseryErrorBehavior.FailFast));
+}
+
+@test
+fn integration_nursery_policy_list_count() {
+    let policies: List<NurseryErrorBehavior> = [
+        NurseryErrorBehavior.CancelAll,
+        NurseryErrorBehavior.WaitAll,
+        NurseryErrorBehavior.CancelAll,
+        NurseryErrorBehavior.FailFast,
+        NurseryErrorBehavior.CancelAll,
+    ];
+    let mut cancel_n: Int = 0;
+    for p in policies.iter() {
+        if (*p) is NurseryErrorBehavior.CancelAll {
+            cancel_n = cancel_n + 1;
+        }
+    }
+    assert_eq(cancel_n, 3);
+}
+
+fn main() {}

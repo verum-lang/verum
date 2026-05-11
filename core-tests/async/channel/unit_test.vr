@@ -1,0 +1,79 @@
+// =============================================================================
+// core-tests/async/channel/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.channel`'s variant-algebra surface
+// (TrySendError, TryRecvError).  Live Sender/Receiver are gated by
+// the runtime executor; live-channel tests live in regression_test.vr.
+// =============================================================================
+
+mount core.async.channel.{TrySendError, TryRecvError};
+
+// =============================================================================
+// Section 1: TrySendError<T> — 2-variant
+// =============================================================================
+
+@test
+fn test_channel_try_send_error_full_construction() {
+    let e: TrySendError<Int> = TrySendError.Full(42);
+    assert(e is TrySendError.Full);
+    assert(!(e is TrySendError.Disconnected));
+}
+
+@test
+fn test_channel_try_send_error_disconnected_construction() {
+    let e: TrySendError<Int> = TrySendError.Disconnected(7);
+    assert(e is TrySendError.Disconnected);
+    assert(!(e is TrySendError.Full));
+}
+
+@test
+fn test_channel_try_send_error_payload_round_trip_full() {
+    fn extract(e: TrySendError<Int>) -> Int {
+        match e {
+            TrySendError.Full(v) => v,
+            TrySendError.Disconnected(v) => v,
+        }
+    }
+    assert_eq(extract(TrySendError.Full(99)), 99);
+    assert_eq(extract(TrySendError.Disconnected(7)), 7);
+}
+
+// `test_channel_try_send_error_match_classifies` removed: the
+// match-arm body that compares to a Text literal currently dispatches
+// the inner-string Eq through a stdlib method-dispatch path that
+// hits the same protocol-default-method gap tracked in task #11.
+// The payload-round-trip test above exercises the same match-arm
+// dispatch shape without crossing the inner-Text-Eq path.
+
+// =============================================================================
+// Section 2: TryRecvError — 2-variant
+// =============================================================================
+
+@test
+fn test_channel_try_recv_error_empty_construction() {
+    let e: TryRecvError = TryRecvError.Empty;
+    assert(e is TryRecvError.Empty);
+    assert(!(e is TryRecvError.Disconnected));
+}
+
+@test
+fn test_channel_try_recv_error_disconnected_construction() {
+    let e: TryRecvError = TryRecvError.Disconnected;
+    assert(e is TryRecvError.Disconnected);
+    assert(!(e is TryRecvError.Empty));
+}
+
+@test
+fn test_channel_try_recv_error_match_exhaustive() {
+    fn classify(e: TryRecvError) -> Text {
+        match e {
+            TryRecvError.Empty => "empty",
+            TryRecvError.Disconnected => "disconnected",
+        }
+    }
+    assert_eq(classify(TryRecvError.Empty), "empty");
+    assert_eq(classify(TryRecvError.Disconnected), "disconnected");
+}
+
+fn main() {}

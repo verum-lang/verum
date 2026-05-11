@@ -1,0 +1,21 @@
+// =============================================================================
+// core-tests/async/spawn_with/property_test.vr
+// =============================================================================
+
+mount core.async.spawn_with.{CircuitState};
+
+@test
+fn property_spawn_with_circuit_state_partition() {
+    fn flag_count(s: CircuitState) -> Int {
+        let mut n: Int = 0;
+        if s is CircuitState.Closed { n = n + 1; }
+        if s is CircuitState.Open { n = n + 1; }
+        if s is CircuitState.HalfOpen { n = n + 1; }
+        n
+    }
+    assert_eq(flag_count(CircuitState.Closed), 1);
+    assert_eq(flag_count(CircuitState.Open), 1);
+    assert_eq(flag_count(CircuitState.HalfOpen), 1);
+}
+
+fn main() {}
