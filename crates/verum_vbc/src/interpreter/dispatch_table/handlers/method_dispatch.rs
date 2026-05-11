@@ -1366,6 +1366,67 @@ pub(in super::super) fn handle_call_method(
                 }
             }
 
+            // **Receiver-type override for qualified-name mismatch
+            // (task #127)**. When codegen emits `T.method` (e.g.
+            // `Text.is_err` because the user's `let r: Result<...> =`
+            // was lost through alias/inference), the runtime receiver
+            // is actually a different type (e.g. `Result`). Retry the
+            // lookup with the receiver's ACTUAL type's qualified name.
+            //
+            // Gate tightly: only fires when
+            //   * the call is qualified (`Text.is_err`)
+            //   * we have a recovered actual receiver type from the
+            //     heap object header
+            //   * that actual type differs from the qualifier the
+            //     codegen used (otherwise the standard qualified-name
+            //     passes already covered it)
+            //   * no earlier pass succeeded
+            if found_func_id.is_none()
+                && is_already_qualified
+                && dispatch_receiver.is_ptr()
+                && !dispatch_receiver.is_nil()
+            {
+                let codegen_qualifier = method_name.split('.').next().unwrap_or("");
+                let actual_ty: Option<String> = {
+                    let ptr = dispatch_receiver.as_ptr::<u8>();
+                    if !ptr.is_null()
+                        && (ptr as usize)
+                            .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+                    {
+                        // SAFETY: alignment verified; every heap object
+                        // begins with an ObjectHeader.
+                        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+                        state
+                            .module
+                            .get_type(header.type_id)
+                            .and_then(|td| {
+                                state.module.strings.get(td.name).map(|s| s.to_string())
+                            })
+                            .filter(|s| !s.is_empty())
+                    } else {
+                        None
+                    }
+                };
+                if let Some(actual_name) = actual_ty
+                    && actual_name != codegen_qualifier
+                    && let Some(bare) = method_name.rsplit('.').next()
+                {
+                    let dotted = format!(".{}.{}", actual_name, bare);
+                    let bare_q = format!("{}.{}", actual_name, bare);
+                    for func in &state.module.functions {
+                        let func_name = state.module.strings.get(func.name).unwrap_or("");
+                        let m = func_name == bare_q || func_name.ends_with(&dotted);
+                        if m
+                            && (func.params.len() == expected_param_count
+                                || func.register_count > 0)
+                        {
+                            found_func_id = Some(func.id);
+                            break;
+                        }
+                    }
+                }
+            }
+
             // Second pass: type-bounds-aware suffix-match fallback (#335).
             //
             // Pre-fix this fallback picked the FIRST `*.method_name` in
