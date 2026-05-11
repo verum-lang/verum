@@ -1435,15 +1435,34 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
             .map(|(_, n)| n)
             .unwrap_or_else(|| test.name.as_str())
     };
+    // Match either the exact stored name OR its last-segment (leaf):
+    // the precompiler's descriptor-name promotion (commit 53c7d5448)
+    // stores `<source_module>.<fn_name>` in the descriptor's name
+    // field rather than the bare leaf. For a test module declaring
+    // `module main;`, `test_page_size_canonical` lands as
+    // `main.test_page_size_canonical`; the runner's
+    // `find_by_name(leaf)` lookup must canonicalise the comparison
+    // to leaf-only, otherwise every per-test entry point misses.
+    let leaf_matches = |stored: Option<&str>| -> bool {
+        let Some(s) = stored else { return false; };
+        if s == fn_name_tail {
+            return true;
+        }
+        s.rsplit('.').next() == Some(fn_name_tail)
+    };
+    let main_leaf_matches = |stored: Option<&str>| -> bool {
+        let Some(s) = stored else { return false; };
+        s == "main" || s.rsplit('.').next() == Some("main")
+    };
     let fid_opt = module
         .functions
         .iter()
-        .find(|vf| module.get_string(vf.name) == Some(fn_name_tail))
+        .find(|vf| leaf_matches(module.get_string(vf.name)))
         .or_else(|| {
             module
                 .functions
                 .iter()
-                .find(|vf| module.get_string(vf.name) == Some("main"))
+                .find(|vf| main_leaf_matches(module.get_string(vf.name)))
         })
         .map(|vf| vf.id);
     let fid = match fid_opt {
