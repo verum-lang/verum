@@ -6404,10 +6404,6 @@ impl VbcCodegen {
                     return Ok(());
                 }
 
-                if std::env::var("VERUM_DEBUG_MOUNT").is_ok() {
-                    eprintln!("[MOUNT-ENTRY] full_path={:?}", full_path);
-                }
-
                 // The last segment is the function/item name
                 let func_name = match full_path.last() {
                     Some(name) => name.clone(),
@@ -6646,23 +6642,6 @@ impl VbcCodegen {
                         module_has_exports = self.ctx.functions.keys().any(|k| {
                             k.starts_with(&stripped_verum) || k.starts_with(&stripped_rust)
                         });
-                    }
-                    if std::env::var("VERUM_DEBUG_MOUNT").is_ok() {
-                        eprintln!(
-                            "[MOUNT] full_path={:?} prefix_verum={:?} module_has_exports={} fn_count={}",
-                            full_path,
-                            prefix_verum,
-                            module_has_exports,
-                            self.ctx.functions.len()
-                        );
-                        let sample: Vec<&String> = self
-                            .ctx
-                            .functions
-                            .keys()
-                            .filter(|k| k.contains("bitfield") || k.contains("USIZE_BITS"))
-                            .take(10)
-                            .collect();
-                        eprintln!("[MOUNT] sample bitfield/USIZE keys: {:?}", sample);
                     }
                     if module_has_exports {
                         let module_leaf = full_path.last().cloned().unwrap_or_default();
