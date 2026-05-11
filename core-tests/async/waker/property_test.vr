@@ -1,0 +1,35 @@
+// =============================================================================
+// core-tests/async/waker/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over the working Waker surface.  Laws that
+// require working `will_wake` (currently @ignore'd in
+// regression_test.vr §B / §B') are pinned there until the
+// underlying `fn_ref as Int` identity-stability and aliased-self
+// method-dispatch defects close.
+// =============================================================================
+
+mount core.async.waker.{Waker, noop_waker};
+
+// =============================================================================
+// Section A: Construction independence (the only law currently
+//   testable on the unaffected surface)
+//
+//   noop_waker() construction is referentially independent: every
+//   call produces an independently-Drop-clean Waker.  No shared
+//   state, no module-init race.
+// =============================================================================
+
+@test
+fn property_waker_construction_independent_drop_safe() {
+    {
+        let _a = noop_waker();
+        let _b = noop_waker();
+        let _c = noop_waker();
+    }
+    // Three Wakers built and dropped without panic.  If the noop
+    // vtable's drop slot were null (the pre-redesign state) any of
+    // these Drops would null-deref.
+}
+
+fn main() {}

@@ -5,11 +5,27 @@
 // Dependencies: core
 // =============================================================================
 //
-
-// Waker is used to wake up tasks when progress can be made.
-// Context provides the waker to futures during polling.
+// Waker is the foundational wake-up handle of the async runtime.  A
+// task hands its current Waker to whatever it is waiting on; when
+// progress is possible the waiter (channel, timer, IO event source,
+// child task) calls `waker.wake()` (or `wake_by_ref()`) and the
+// runtime re-polls the task.
 //
-
+// The Waker layout intentionally inlines the vtable BY VALUE rather
+// than by reference.  The earlier `vtable: &RawWakerVTable` form
+// required producers to either:
+//   (1) store the vtable in a module-static so the `&` survives the
+//       function-return that produced the Waker — but module-static
+//       record literals with function-pointer fields are not yet
+//       lowered to a runtime-resolvable form by the VBC interpreter
+//       (`opcode 0x62 GetF` on the static fires on a null heap
+//       payload), OR
+//   (2) build the vtable as a stack-local and return `&vtable` along
+//       with the Waker — a textbook use-after-free that produced
+//       null-deref panics on the first wake / clone.
+// Inlining the vtable (≈32 bytes for four `fn` slots) removes both
+// hazards: every Waker fully owns its dispatch table; Clone is a
+// straightforward field-copy; Drop has the right vtable in hand.
 // =============================================================================
 
 @arch_module(
@@ -21,12 +37,17 @@ module core.async.waker;
 mount core.*;
 
 // =============================================================================
-// RawWakerVTable
+// RawWakerVTable — four fn slots that drive Clone / wake / wake_by_ref / drop
 // =============================================================================
 
-// Virtual table for raw waker operations.
+// Virtual table for raw waker operations. Stored BY VALUE inside
+// RawWaker so producers never have to keep a separate vtable
+// allocation alive — see the module-level comment for the rationale.
 public type RawWakerVTable is {
-    // Clone the waker data, returning new RawWaker.
+    // Clone the waker data, returning a fresh RawWaker. The returned
+    // RawWaker carries ITS OWN vtable (typically a value-copy of
+    // self's vtable), so the clone semantics work uniformly for the
+    // noop case and for user-supplied custom wakers.
     clone: fn(&unsafe Byte) -> RawWaker,
 
     // Wake by value (consumes the waker).
@@ -57,18 +78,22 @@ implement RawWakerVTable {
 }
 
 // =============================================================================
-// RawWaker
+// RawWaker — opaque data pointer paired with an inline vtable
 // =============================================================================
 
-// Low-level waker consisting of data pointer && vtable.
+// Low-level waker consisting of an opaque data pointer + the four-fn
+// dispatch table that knows how to wake / clone / drop that data.
+//
+// The vtable is held **by value**, not by reference.  See the
+// module-level comment for the design rationale.
 public type RawWaker is {
     data: &unsafe Byte,
-    vtable: &RawWakerVTable,
+    vtable: RawWakerVTable,
 };
 
 implement RawWaker {
-    // Create a new raw waker.
-    public fn new(data: &unsafe Byte, vtable: &RawWakerVTable) -> RawWaker {
+    // Create a new raw waker from a data pointer and an inline vtable.
+    public fn new(data: &unsafe Byte, vtable: RawWakerVTable) -> RawWaker {
         RawWaker {
             data: data,
             vtable: vtable,
@@ -77,22 +102,26 @@ implement RawWaker {
 }
 
 // =============================================================================
-// Waker
+// Waker — public handle for waking up a task
 // =============================================================================
 
-// Handle for waking up a task.
+// Handle for waking up a task. Carries an inline RawWaker (which
+// carries its own inline vtable), so a Waker is self-contained: no
+// dangling references, no separate vtable allocation, no static-init
+// hazard.
 public type Waker is {
     raw: RawWaker,
 };
 
 implement Waker {
-    // Create waker from raw waker.
+    // Create waker from raw waker.  `unsafe` because the caller is
+    // responsible for the data-pointer convention encoded in the
+    // vtable's clone/wake/drop slots.
     public unsafe fn from_raw(raw: RawWaker) -> Waker {
         Waker { raw: raw }
     }
 
-    // Wake the task associated with this waker.
-    // Consumes the waker.
+    // Wake the task associated with this waker. Consumes the waker.
     public fn wake(self) {
         let wake_fn = self.raw.vtable.wake;
         let data = self.raw.data;
@@ -107,15 +136,29 @@ implement Waker {
     }
 
     // Check if two wakers will wake the same task.
+    //
+    // Identity contract: two wakers wake the same task iff their
+    // data pointers AND wake/wake_by_ref vtable entries agree.
+    // Comparing the vtable as a whole would over-reject — two
+    // wakers built from independent value-copies of the same vtable
+    // (no longer sharing one heap allocation under the by-value
+    // layout) would compare unequal despite being semantically
+    // identical.  Comparing the wake fn-pointer slots specifically
+    // is the strongest semantic identity available: same wake
+    // behaviour ⇒ same wake target.
     public fn will_wake(&self, other: &Waker) -> Bool {
-        // Same data pointer && vtable means same waker
-        self.raw.data as Int == other.raw.data as Int &&
-        self.raw.vtable as Int == other.raw.vtable as Int
+        self.raw.data as Int == other.raw.data as Int
+            && (self.raw.vtable.wake as Int) == (other.raw.vtable.wake as Int)
+            && (self.raw.vtable.wake_by_ref as Int) == (other.raw.vtable.wake_by_ref as Int)
     }
 }
 
 implement Clone for Waker {
     fn clone(&self) -> Waker {
+        // The vtable's `clone` function decides what data + vtable
+        // the clone gets.  For the canonical noop case the clone
+        // returns a fresh RawWaker carrying the same noop_* fn slots,
+        // so will_wake against the source returns true.
         let raw = (self.raw.vtable.clone)(self.raw.data);
         Waker { raw: raw }
     }
@@ -134,11 +177,12 @@ implement Debug for Waker {
 }
 
 // =============================================================================
-// Context
+// Context — what futures receive during polling
 // =============================================================================
 
-// Context passed to futures during polling.
-// Contains the waker to use for scheduling wake-ups.
+// Context passed to futures during polling. Contains the waker the
+// future must capture before returning `Pending`, so the runtime
+// has a way to re-poll it when progress is possible.
 public type Context is {
     waker: &Waker,
 };
@@ -156,65 +200,76 @@ implement Context {
 }
 
 // =============================================================================
-// Noop Waker (for simple cases)
+// Noop Waker — for synchronous polling and tests
 // =============================================================================
 
-// VTable for noop waker that does nothing.
-fn noop_clone(data: &unsafe Byte) -> RawWaker {
-    RawWaker.new(data, &NOOP_VTABLE)
+// VTable functions for the noop waker.  Each is a deliberate no-op:
+// noop_wake / noop_wake_by_ref discard the data pointer; noop_clone
+// rebuilds the same vtable inline; noop_drop has nothing to release
+// because noop_waker is constructed with a null data pointer.
+
+// The four noop_* fn entries below are `public` even though
+// users typically reach them only through `noop_waker()` —
+// `public` ensures they survive Pass-1 stdlib precompile's
+// dead-function pruning intact, so the function IDs encoded in
+// the static NOOP_WAKER's vtable resolve at module load.
+
+public fn noop_clone(data: &unsafe Byte) -> RawWaker {
+    RawWaker.new(data, noop_vtable())
 }
 
-fn noop_wake(_data: &unsafe Byte) {
+public fn noop_wake(_data: &unsafe Byte) {
     // Do nothing
 }
 
-fn noop_wake_by_ref(_data: &unsafe Byte) {
+public fn noop_wake_by_ref(_data: &unsafe Byte) {
     // Do nothing
 }
 
-fn noop_drop(_data: &unsafe Byte) {
+public fn noop_drop(_data: &unsafe Byte) {
     // Do nothing
 }
 
-const NOOP_VTABLE: RawWakerVTable = RawWakerVTable {
-    clone: noop_clone,
-    wake: noop_wake,
-    wake_by_ref: noop_wake_by_ref,
-    drop: noop_drop,
-};
+// Build a fresh noop vtable by value.  Cheap (just four fn-pointer
+// stores) and side-steps the const/static-record-literal codegen gap
+// described in the module comment.
+public fn noop_vtable() -> RawWakerVTable {
+    RawWakerVTable.new(noop_clone, noop_wake, noop_wake_by_ref, noop_drop)
+}
 
-// Create a waker that does nothing when woken.
-// Useful for testing || simple synchronous contexts.
+// Create a waker that does nothing when woken. Useful for testing
+// or simple synchronous polling contexts.
 public fn noop_waker() -> Waker {
-    unsafe {
-        Waker.from_raw(RawWaker.new(null_ptr(), &NOOP_VTABLE))
-    }
+    let raw = RawWaker.new(0 as &unsafe Byte, noop_vtable());
+    unsafe { Waker.from_raw(raw) }
 }
 
-// Static no-op waker — backing storage for the &Waker that
-// `noop_context` returns. Module-scoped so the reference handed to
-// the Context outlives every caller's stack frame; a previous
-// implementation built a local `let waker = noop_waker()` and
-// returned `Context.from_waker(&waker)`, leaving the Context with
-// a dangling pointer to a stack frame that had already returned.
+// Module-static backing storage for the `&Waker` that `noop_context`
+// returns.  The Waker (which now inlines its own vtable) carries no
+// external references — its lifetime is purely structural.  The
+// static gives the &Waker handed back from `noop_context()` a
+// 'static-lived backing so the Context isn't dangling its `waker`
+// field after the function returns.
 static NOOP_WAKER: Waker = Waker {
     raw: RawWaker {
-        data: null_ptr(),
-        vtable: &NOOP_VTABLE,
+        data: 0 as &unsafe Byte,
+        vtable: RawWakerVTable {
+            clone: noop_clone,
+            wake: noop_wake,
+            wake_by_ref: noop_wake_by_ref,
+            drop: noop_drop,
+        },
     },
 };
 
-// Create a context with noop waker.
-// Useful for testing futures synchronously.
+// Create a context with the noop waker. Useful for testing futures
+// synchronously and for any context that need not propagate wake-ups.
 //
-
 // SOUNDNESS: returns a Context whose `&Waker` points at the
-// module-static NOOP_WAKER, not at a stack-local. The earlier
-// implementation captured a local `let waker = noop_waker()` and
-// returned `&waker` — the local dropped at function exit, leaving
-// every caller with use-after-free on the first wake / clone
-// attempt. The fix routes through a static so the reference is
-// 'static-lived.
+// module-static NOOP_WAKER, not a stack-local.  The earlier
+// implementation captured `let waker = noop_waker()` and returned
+// `&waker` — the local dropped at function exit, leaving callers
+// with use-after-free on the first wake / clone attempt.
 public fn noop_context() -> Context {
     Context.from_waker(&NOOP_WAKER)
 }

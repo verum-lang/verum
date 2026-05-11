@@ -1,0 +1,190 @@
+// =============================================================================
+// core-tests/async/waker/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions surfaced while building the `core.async.waker`
+// conformance suite. Each test reproduces a specific language /
+// stdlib defect in the minimum form possible — kept here forever as
+// a guardrail against re-regression.
+// =============================================================================
+
+mount core.async.waker.{Waker, Context, noop_waker, noop_context};
+
+// =============================================================================
+// §A  `&RawWakerVTable` reference fields + module-static or stack-
+//     local backing produced NULL deref / use-after-free in noop_waker
+//
+//   The original `waker.vr` had:
+//     public type RawWaker is { ..., vtable: &RawWakerVTable };
+//     const NOOP_VTABLE: RawWakerVTable = RawWakerVTable { ... };
+//     static NOOP_WAKER: Waker = Waker { raw: RawWaker { ...,
+//       vtable: &NOOP_VTABLE } };
+//
+//   The VBC interpreter's static-record-literal lowering left the
+//   `&NOOP_VTABLE` field null on heap, so every noop_waker() user
+//   panicked with `NullPointerAt opcode 0x62` (GetF on the .vtable
+//   slot) on the first wake / wake_by_ref / clone / drop attempt.
+//
+//   The `core.async.intrinsics` module then carried a DUPLICATE
+//   noop_waker that worked around it by building the vtable as a
+//   stack-local and storing `&vtable` in the returned Waker — a
+//   textbook use-after-free that exhibited the same null-deref
+//   symptom from a different angle.
+//
+//   CLOSED 2026-05-11 — fundamental redesign in waker.vr:
+//     1. RawWaker now inlines `vtable: RawWakerVTable` BY VALUE
+//        (no reference, no separate allocation, no static-init
+//        dependency).
+//     2. `RawWaker.new(data, vtable)` takes the vtable by value.
+//     3. `noop_vtable()` builds a fresh inline vtable on demand;
+//        `noop_waker()` calls it once per construction.
+//     4. The module-static NOOP_WAKER's literal carries the vtable
+//        record inline, side-stepping the `&const_record` codegen
+//        gap entirely.
+//     5. The duplicate noop_waker in `core.async.intrinsics` was
+//        deleted; the canonical definition lives in
+//        `core.async.waker` and `intrinsics.vr` mounts it via
+//        `mount super.waker.{..., noop_waker}`.
+//
+//   The guardrails below confirm the redesign holds for the
+//   construct + Drop round-trip:
+// =============================================================================
+
+@test
+fn regression_waker_noop_construct_round_trip_does_not_null_deref() {
+    {
+        let _w = noop_waker();
+        // Implicit Drop at scope-exit runs vtable.drop(data). If the
+        // vtable slot were null (the pre-fix state), this would
+        // crash with `NullPointerAt opcode 0x62`.
+    }
+}
+
+// =============================================================================
+// §B  Self-aliased method dispatch `w.will_wake(&w)` null-derefs the
+//     receiver
+//
+//   When a `&self` method is invoked with an explicit argument that
+//   references the SAME stack-local as the auto-borrowed receiver
+//   (`w.method(&w)`), the interpreter's two-reference borrow-passing
+//   path produces a null self pointer.  Distinct-receiver dispatch
+//   (`a.will_wake(&b)` on independent wakers) works correctly.
+//
+//   Pinned by the `regression_waker_aliased_self_will_wake_panics`
+//   test below; the same shape reproduces for any `&self` method
+//   that takes a `&Self` argument and is called with the receiver
+//   itself.  Tracking task: "Interpreter: aliased-self method
+//   dispatch null-derefs receiver when arg-ref aliases self-ref".
+// =============================================================================
+
+@ignore
+@test
+fn regression_waker_aliased_self_will_wake_returns_true() {
+    let w = noop_waker();
+    // Currently null-derefs; expected: true (reflexive identity).
+    assert(w.will_wake(&w));
+}
+
+// =============================================================================
+// §C  `Waker.clone()` null-derefs the vtable.clone fn-pointer slot
+//
+//   Calling `(self.raw.vtable.clone)(self.raw.data)` from inside the
+//   Clone impl crashes at `NullPointerAt opcode 0x62`.  The vtable
+//   IS correctly populated (direct field reads from outside the
+//   method succeed — see
+//   `core-tests/async/waker/unit_test.vr::test_waker_noop_constructs`
+//   plus the manual-field-read test in the diag suite), so the
+//   defect is in how the interpreter invokes a fn-pointer stored
+//   in a nested record field on `&self`.
+//
+//   Tracking task: "Interpreter: indirect call through
+//   `(self.f1.f2.fn_field)(args)` null-derefs when the fn slot is
+//   reached via `&self` chained field access".
+// =============================================================================
+
+@ignore
+@test
+fn regression_waker_clone_via_vtable_does_not_null_deref() {
+    let w = noop_waker();
+    // Currently null-derefs at `(self.raw.vtable.clone)(self.raw.data)`.
+    let _c = w.clone();
+}
+
+@ignore
+@test
+fn regression_waker_wake_by_ref_via_vtable_does_not_null_deref() {
+    let w = noop_waker();
+    // Currently null-derefs at `(self.raw.vtable.wake_by_ref)(self.raw.data)`.
+    w.wake_by_ref();
+}
+
+// =============================================================================
+// §B′ Same-vtable-but-distinct-Wakers comparison via fn-pointer slot
+//     identity returns false
+//
+//   The `will_wake` body compares
+//     `(self.raw.vtable.wake as Int) == (other.raw.vtable.wake as Int)`
+//   to detect "two wakers wake the same task".  Two independently-
+//   constructed `noop_waker()` instances each materialise their
+//   own RawWakerVTable record (by value) populated with the same
+//   four `noop_*` fn references.  Casting the fn slot `as Int` —
+//   the cross-platform way to obtain the fn-pointer address — should
+//   yield the same Int for both, since both reference the same
+//   function ID in the module's function table.
+//
+//   In the current interpreter, `fn_ref as Int` produces a value
+//   that varies per-load, so two independently-built noop wakers
+//   compare unequal under the wake-fn-identity test.  Distinct
+//   wakers in the same scope (built back-to-back) reproduce the
+//   defect deterministically.
+//
+//   Tracking task: "Interpreter: `fn_ref as Int` cast must yield a
+//   stable per-function identity so two values capturing the same
+//   function reference compare equal across construction sites".
+// =============================================================================
+
+@ignore
+@test
+fn regression_waker_will_wake_two_independent_noops_compare_equal() {
+    let a = noop_waker();
+    let b = noop_waker();
+    // Both wake the same noop task — `will_wake` must return true.
+    // Currently returns false because `fn_ref as Int` produces a
+    // non-stable identity.
+    assert(a.will_wake(&b));
+}
+
+// =============================================================================
+// §D  Auto-derived Debug for record types wins over user-defined
+//     `implement Debug` impl
+//
+//   `core/async/waker.vr` declares
+//     `implement Debug for Waker { fn fmt_debug(&self, f) {
+//       f.write_str("Waker { .. }") } }`
+//   yet `f"{w:?}"` renders the auto-derived field-listing form
+//   (something like `{2}` or a structural placeholder), not the
+//   explicit `"Waker { .. }"` string the user-defined impl writes.
+//
+//   Same architectural shape as the §1 / §A defect in the
+//   `core-tests/async/poll` suite — that closure ended via the
+//   variant-emission TypeId fix for Sum types; the Record-Debug
+//   precedence is a sibling defect on the record-impl side.
+//
+//   Tracking task: "Interpreter / Codegen: user-defined Debug impl
+//   for record types should win over auto-derived structural-fmt
+//   fallback".
+// =============================================================================
+
+@ignore
+@test
+fn regression_waker_debug_uses_user_defined_impl() {
+    let w = noop_waker();
+    // Currently renders the auto-derived structural form.
+    assert_eq(f"{w:?}", "Waker { .. }");
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
