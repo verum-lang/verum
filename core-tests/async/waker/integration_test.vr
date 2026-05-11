@@ -1,0 +1,44 @@
+// =============================================================================
+// core-tests/async/waker/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.async.waker`'s working surface.
+// Will_wake / clone / wake_by_ref interop is pinned at regression
+// §B/§B'/§C until those interpreter defects close.
+// =============================================================================
+
+mount core.async.waker.{Waker, noop_waker};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section A: List<Waker> bulk container
+//
+//   Real executors hold a List<Waker> per task — the noop waker is
+//   the canonical placeholder for that container during testing.
+//   Build a sized list, drop, ensure clean teardown.
+// =============================================================================
+
+@test
+fn integration_waker_list_of_noops_constructs_and_drops_cleanly() {
+    let mut wakers: List<Waker> = [];
+    let mut i: Int = 0;
+    while i < 5 {
+        wakers.push(noop_waker());
+        i = i + 1;
+    }
+    assert_eq(wakers.len(), 5);
+    // Implicit Drop at scope-exit walks every element's vtable.drop.
+    // If any slot were null the runtime would panic.
+}
+
+@test
+fn integration_waker_noop_survives_function_boundary_move() {
+    fn make_waker() -> Waker {
+        noop_waker()
+    }
+    let _w = make_waker();
+    // Move-by-value across function-call boundary doesn't corrupt
+    // the inline vtable — Drop at scope-exit fires cleanly.
+}
+
+fn main() {}

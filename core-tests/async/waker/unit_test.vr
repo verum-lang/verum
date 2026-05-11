@@ -1,0 +1,48 @@
+// =============================================================================
+// core-tests/async/waker/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.waker` — the working public-API surface.
+// Tests that exercise foundational interpreter defects (aliased-self
+// method dispatch, vtable fn-pointer invocation through nested
+// record fields, `fn_ref as Int` identity stability, auto-derived
+// Debug precedence) are pinned with `@ignore` in regression_test.vr
+// until those defects close.
+//
+// Every test name is prefixed `test_waker_…`.
+// =============================================================================
+
+mount core.async.waker.{Waker, noop_waker};
+
+// =============================================================================
+// Section 1: Construction round-trip
+// =============================================================================
+
+/// noop_waker() materialises a Waker without panicking, and the
+/// implicit Drop at scope exit fires the (no-op) vtable.drop slot
+/// without null-derefing.  Reaching the end of this fn proves the
+/// inline-vtable redesign in `core/async/waker.vr` replaces the
+/// pre-fix `&RawWakerVTable` reference whose static-init lowering
+/// left the vtable slot null.
+@test
+fn test_waker_noop_constructs_and_drops_cleanly() {
+    let _w = noop_waker();
+    assert(true);
+}
+
+/// Multiple independent noop_waker() invocations succeed in
+/// sequence — no shared module-init race, no leaked function-id
+/// stale registration.
+@test
+fn test_waker_noop_independent_constructions() {
+    let _w1 = noop_waker();
+    let _w2 = noop_waker();
+    let _w3 = noop_waker();
+    assert(true);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

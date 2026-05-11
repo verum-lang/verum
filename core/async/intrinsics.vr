@@ -25,7 +25,7 @@ module intrinsics;
 
 mount core.*;
 mount super.poll.Poll;
-mount super.waker.{Waker, Context, RawWaker, RawWakerVTable};
+mount super.waker.{Waker, Context, RawWaker, RawWakerVTable, noop_waker};
 mount super.future.Future;
 mount super.task.{Task, JoinHandle};
 
@@ -159,37 +159,16 @@ public mount core.intrinsics.runtime.async_ops.{
 // =============================================================================
 // Waker Utilities
 // =============================================================================
-
-/// Create a no-op waker that does nothing when woken.
-///
-
-/// Useful for:
-/// - Synchronous polling (future_poll_sync)
-/// - Testing
-/// - Simple executors that poll all tasks each tick
-public fn noop_waker() -> Waker {
-    let vtable = RawWakerVTable {
-        clone: noop_clone,
-        wake: noop_wake,
-        wake_by_ref: noop_wake_by_ref,
-        drop: noop_drop,
-    };
-    let raw = RawWaker.new(0 as &unsafe Byte, &vtable);
-    unsafe { Waker.from_raw(raw) }
-}
-
-fn noop_clone(data: &unsafe Byte) -> RawWaker {
-    RawWaker.new(data, &RawWakerVTable {
-        clone: noop_clone,
-        wake: noop_wake,
-        wake_by_ref: noop_wake_by_ref,
-        drop: noop_drop,
-    })
-}
-
-fn noop_wake(_data: &unsafe Byte) {}
-fn noop_wake_by_ref(_data: &unsafe Byte) {}
-fn noop_drop(_data: &unsafe Byte) {}
+//
+// `noop_waker()` lives in `core.async.waker` — the canonical home of
+// the Waker type and its noop construction.  The previous duplicate
+// definition here built the vtable as a stack-local
+// `let vtable = RawWakerVTable { ... }` and stored `&vtable` in the
+// returned Waker — a textbook use-after-free that produced
+// null-deref panics on the first `wake_by_ref` / `clone`.  The
+// canonical definition in `waker.vr` inlines the vtable BY VALUE,
+// eliminating the dangling-reference hazard entirely.  `mount`
+// `core.async.waker.noop_waker` at consumer sites to reach it.
 
 // =============================================================================
 // Yield Intrinsic
