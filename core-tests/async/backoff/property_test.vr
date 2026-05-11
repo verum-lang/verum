@@ -1,0 +1,80 @@
+// =============================================================================
+// core-tests/async/backoff/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.async.backoff.BackoffStrategy`.  The
+// strategy enum is a 4-valued total ordering of retry policies;
+// every law below is proved exhaustively over the 4-element domain.
+//
+// Tests that require constructing a live `Backoff` are pinned in
+// regression_test.vr §A until the upstream CSPRNG-intrinsic gap
+// closes.
+// =============================================================================
+
+mount core.async.backoff.{BackoffStrategy};
+mount core.collections.list.List;
+
+fn strategy_domain() -> List<BackoffStrategy> {
+    [
+        BackoffStrategy.ExponentialNoJitter,
+        BackoffStrategy.ExponentialFullJitter,
+        BackoffStrategy.ExponentialDecorrelated,
+        BackoffStrategy.FibonacciFullJitter,
+    ]
+}
+
+// =============================================================================
+// Section A: Variant identity — `is` predicate is mutually exclusive
+//
+//   For every variant v in the domain, exactly one of the four `is`
+//   checks returns true.
+// =============================================================================
+
+@test
+fn property_backoff_strategy_is_pattern_exclusive_exhaustive() {
+    fn flag_count(s: BackoffStrategy) -> Int {
+        let mut n: Int = 0;
+        if s is BackoffStrategy.ExponentialNoJitter { n = n + 1; }
+        if s is BackoffStrategy.ExponentialFullJitter { n = n + 1; }
+        if s is BackoffStrategy.ExponentialDecorrelated { n = n + 1; }
+        if s is BackoffStrategy.FibonacciFullJitter { n = n + 1; }
+        n
+    }
+    for s in strategy_domain().iter() {
+        assert_eq(flag_count(*s), 1);
+    }
+}
+
+// =============================================================================
+// Section B: Match-arm coverage — every variant maps to a distinct
+//   tag string and the strings are pairwise distinct.
+// =============================================================================
+
+@test
+fn property_backoff_strategy_match_yields_distinct_tags() {
+    fn tag(s: BackoffStrategy) -> Text {
+        match s {
+            BackoffStrategy.ExponentialNoJitter      => "no-jitter",
+            BackoffStrategy.ExponentialFullJitter    => "full-jitter",
+            BackoffStrategy.ExponentialDecorrelated  => "decorrelated",
+            BackoffStrategy.FibonacciFullJitter      => "fibonacci",
+        }
+    }
+    let dom = strategy_domain();
+    // Every (i, j) pair with i != j must produce distinct tags.
+    let mut i: Int = 0;
+    while i < dom.len() {
+        let mut j: Int = i + 1;
+        while j < dom.len() {
+            assert(tag(dom[i]) != tag(dom[j]));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

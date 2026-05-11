@@ -1,0 +1,74 @@
+// =============================================================================
+// core-tests/async/backoff/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.async.backoff.BackoffStrategy`.
+// Surface that requires live `Backoff` construction is pinned in
+// regression_test.vr §A until the CSPRNG intrinsic gap closes.
+// =============================================================================
+
+mount core.async.backoff.{BackoffStrategy};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section A: List<BackoffStrategy> — policy registry
+//
+//   Real services often register a list of retry policies (one per
+//   class of operation) and select one at runtime.  Exercise that
+//   pattern: build a list, traverse, count occurrences per kind.
+// =============================================================================
+
+@test
+fn integration_backoff_strategy_list_traversal() {
+    let policies: List<BackoffStrategy> = [
+        BackoffStrategy.ExponentialNoJitter,
+        BackoffStrategy.ExponentialFullJitter,
+        BackoffStrategy.ExponentialNoJitter,
+        BackoffStrategy.FibonacciFullJitter,
+        BackoffStrategy.ExponentialFullJitter,
+    ];
+    let mut no_jitter_count: Int = 0;
+    let mut full_jitter_count: Int = 0;
+    let mut fib_count: Int = 0;
+    for p in policies.iter() {
+        if (*p) is BackoffStrategy.ExponentialNoJitter {
+            no_jitter_count = no_jitter_count + 1;
+        }
+        if (*p) is BackoffStrategy.ExponentialFullJitter {
+            full_jitter_count = full_jitter_count + 1;
+        }
+        if (*p) is BackoffStrategy.FibonacciFullJitter {
+            fib_count = fib_count + 1;
+        }
+    }
+    assert_eq(no_jitter_count, 2);
+    assert_eq(full_jitter_count, 2);
+    assert_eq(fib_count, 1);
+}
+
+@test
+fn integration_backoff_strategy_filter_via_match() {
+    // Select a sub-list of "deterministic" strategies (only NoJitter).
+    let all: List<BackoffStrategy> = [
+        BackoffStrategy.ExponentialNoJitter,
+        BackoffStrategy.ExponentialFullJitter,
+        BackoffStrategy.ExponentialDecorrelated,
+        BackoffStrategy.FibonacciFullJitter,
+        BackoffStrategy.ExponentialNoJitter,
+    ];
+    fn is_deterministic(s: BackoffStrategy) -> Bool {
+        match s {
+            BackoffStrategy.ExponentialNoJitter => true,
+            _ => false,
+        }
+    }
+    let mut det_count: Int = 0;
+    for p in all.iter() {
+        if is_deterministic(*p) {
+            det_count = det_count + 1;
+        }
+    }
+    assert_eq(det_count, 2);
+}
+
+fn main() {}
