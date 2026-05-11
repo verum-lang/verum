@@ -5729,17 +5729,55 @@ impl VbcCodegen {
                 // The typechecker already canonicalised the dispatch
                 // to a single qualified name; codegen does ONE
                 // O(1) `lookup_function` instead of the legacy
-                // cascade.  When the function isn't in the registry
-                // (typechecker/codegen drift, e.g. lenient compile
-                // mode), surface a clear UndefinedFunction so the
-                // mismatch is visible at the call site.
-                let info = self
-                    .ctx
-                    .lookup_function(qualified_name.as_str())
-                    .cloned()
-                    .ok_or_else(|| {
-                        CodegenError::undefined_function(qualified_name.to_string())
-                    })?;
+                // cascade.
+                //
+                // **Cross-module fallback**: when the pre-resolved
+                // name MISSES in the codegen registry (typechecker
+                // and codegen-registry drift — e.g. cross-module
+                // method call where the typechecker sees the inherent
+                // method on `Maybe<T>` and stamps `Maybe.is_some` /
+                // `Result.is_ok` / `Text.contains`, but the user-side
+                // codegen ctx didn't auto-import that qualified name
+                // for the path through which the receiver was
+                // produced), fall through to the legacy method-call
+                // cascade by re-entering `compile_method_call` with
+                // `resolved_target = None`.
+                //
+                // Rationale: the legacy cascade has additional
+                // suffix-search, generic-erasure, and built-in-opcode
+                // intercepts that the pre-resolved fast path skips
+                // entirely.  Returning `UndefinedFunction` here would
+                // short-circuit the cascade and force the leniency
+                // layer to auto-stub the CALLER, which then panics at
+                // runtime with the same message verbatim — cosmetic
+                // only, no recovery.
+                //
+                // Contained surface: only fires when (a) the lookup
+                // ACTUALLY missed, AND (b) we have a syntactic
+                // receiver to re-dispatch through (instance-method
+                // call sites only).  UFCS-style `Maybe.is_none(b)`
+                // sites have `receiver = None` so they fall through
+                // to the `UndefinedFunction` surface as before.
+                //
+                // Cluster impact: unblocks the user-side
+                // "undefined function: Maybe.is_some / Result.is_ok
+                // / Result.is_err / Text.contains / Text.clone /
+                // Text.parse_int / List.iter" test failures whose
+                // typechecker resolution stamps qualified names
+                // whose codegen-registry shape didn't survive
+                // cross-module import.
+                let info_opt = self.ctx.lookup_function(qualified_name.as_str()).cloned();
+                let info = match info_opt {
+                    Some(info) => info,
+                    None => {
+                        if let Some(recv) = receiver {
+                            return self.compile_method_call(recv, method, args, None);
+                        }
+                        return Err(CodegenError::undefined_function(
+                            qualified_name.to_string(),
+                        ));
+                    }
+                };
                 // For instance-method dispatch (`recv.method(args)`)
                 // the typechecker resolves to a static fn whose first
                 // formal is `self` — the call-site `args` list does NOT
