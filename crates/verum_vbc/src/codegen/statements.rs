@@ -251,22 +251,37 @@ impl VbcCodegen {
             use crate::codegen::context::VarTypeKind;
             use verum_ast::ty::TypeKind;
 
-            // First, check the explicit type annotation (e.g., `let x: Byte = 255`)
+            // First, check the explicit type annotation (e.g., `let x: Byte = 255`).
+            //
+            // The VarTypeKind variants are narrower than the full
+            // primitive set: only `Byte` (8-bit unsigned), `Int32`
+            // (32-bit signed), and `UInt64` (64-bit unsigned) carry
+            // distinct width-specific dispatch flavor; every other
+            // integer width folds into the generic `Int` slot. The
+            // explicit width arms below preserve those three flavors
+            // across every alias spelling (canonical Verum / legacy
+            // uppercase-short / Rust-style lowercase); the fallback
+            // delegates to `type_kind_to_var_type` so unsigned-pointer-
+            // width (`USize` / `UIntSize` / `Usize` / `usize`) routes
+            // through `UInt64` semantics, signed-pointer-width
+            // (`ISize` / `IntSize` / `Isize` / `isize`) through `Int`,
+            // and the remaining widths (Int8..Int128 / UInt8..UInt128
+            // not enumerated above, `Bool` / `Char` / `Text` / `Unit`)
+            // through their canonical VarTypeKind slot.
             let annotation_type = ty.and_then(|t| match &t.kind {
                 TypeKind::Path(path) => {
                     if let Some(ident) = path.as_ident() {
                         match ident.name.as_str() {
-                            "Byte" | "UInt8" | "u8" => Some(VarTypeKind::Byte),
-                            "Int32" | "i32" => Some(VarTypeKind::Int32),
-                            "UInt64" | "u64" => Some(VarTypeKind::UInt64),
-                            "Float" | "Float64" | "f64" | "Float32" | "f32" => {
-                                Some(VarTypeKind::Float)
+                            "Byte" | "UInt8" | "U8" | "u8" => Some(VarTypeKind::Byte),
+                            "Int32" | "I32" | "i32" => Some(VarTypeKind::Int32),
+                            // Every 64-bit unsigned width-tag, plus
+                            // pointer-width unsigned aliases — they all
+                            // dispatch as UInt64.
+                            "UInt" | "UInt64" | "U64" | "u64"
+                            | "USize" | "UIntSize" | "Usize" | "usize" => {
+                                Some(VarTypeKind::UInt64)
                             }
-                            "Int" | "Int64" | "i64" => Some(VarTypeKind::Int),
-                            "Bool" => Some(VarTypeKind::Bool),
-                            "Char" => Some(VarTypeKind::Char),
-                            "Text" => Some(VarTypeKind::Text),
-                            _ => None,
+                            _ => Some(self.type_kind_to_var_type(&t.kind)),
                         }
                     } else {
                         None
@@ -856,24 +871,17 @@ impl VbcCodegen {
                 TypeKind::Path(path) => {
                     if let Some(PathSegment::Name(ident)) = path.segments.last() {
                         let name = ident.as_str();
-                        match name {
-                            // 1-byte types (handled by detect_byte_array_type)
-                            "Byte" | "U8" | "u8" | "Int8" | "I8" | "i8" => None,
-
-                            // 2-byte types
-                            "Int16" | "I16" | "i16" | "UInt16" | "U16" | "u16" => Some(2),
-
-                            // 4-byte types
-                            "Int32" | "I32" | "i32" | "UInt32" | "U32" | "u32" | "Float32"
-                            | "F32" | "f32" => Some(4),
-
-                            // 8-byte types
-                            "Int64" | "I64" | "i64" | "UInt64" | "U64" | "u64" | "Int" | "UInt"
-                            | "Float64" | "F64" | "f64" | "Float" => Some(8),
-
-                            // Unknown type - don't track as typed array
-                            _ => None,
-                        }
+                        // Route through the canonical
+                        // `primitive_size_by_name` registry so every
+                        // primitive alias (canonical Verum + legacy
+                        // uppercase-short + Rust-style lowercase)
+                        // resolves to the right byte width. 1-byte
+                        // arrays (Byte / I8 / U8) take a different
+                        // codegen path via `detect_byte_array_type`,
+                        // so they return None here. Compound types
+                        // and unknown names also return None.
+                        verum_common::layout::primitive_size_by_name(name)
+                            .and_then(|sz| if sz == 1 { None } else { Some(sz as usize) })
                     } else {
                         None
                     }

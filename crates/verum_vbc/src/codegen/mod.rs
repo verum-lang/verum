@@ -1067,31 +1067,68 @@ impl VbcCodegen {
             type_name_to_id: {
                 let mut m = std::collections::HashMap::new();
                 use crate::types::TypeId;
-                // Primitives and their aliases
+                // Primitives — full alias matrix from
+                // `NUMERIC_ALIAS_MATRIX` (canonical Verum + width-tagged
+                // + legacy uppercase-short + Rust-style lowercase). Drift
+                // between this table and the canonical registry causes
+                // `looking up T from a name expression` to return
+                // `None` for any un-mapped alias, surfacing as
+                // `TypeId(0)` defaults at instruction emission (every
+                // arithmetic op on the un-mapped alias falls through to
+                // generic `Int` semantics regardless of source width).
+                // Bare `Int` / `UInt` / `Float` map to the canonical
+                // pointer-width TypeIds; width-tagged forms map to
+                // their dedicated TypeIds.
                 m.insert("Int".to_string(), TypeId::INT);
                 m.insert("Int64".to_string(), TypeId::INT);
+                m.insert("I64".to_string(), TypeId::INT);
                 m.insert("i64".to_string(), TypeId::INT);
                 m.insert("Int32".to_string(), TypeId::I32);
+                m.insert("I32".to_string(), TypeId::I32);
                 m.insert("i32".to_string(), TypeId::I32);
                 m.insert("Int16".to_string(), TypeId::I16);
+                m.insert("I16".to_string(), TypeId::I16);
                 m.insert("i16".to_string(), TypeId::I16);
                 m.insert("Int8".to_string(), TypeId::I8);
+                m.insert("I8".to_string(), TypeId::I8);
                 m.insert("i8".to_string(), TypeId::I8);
+                m.insert("UInt".to_string(), TypeId::U64);
                 m.insert("UInt64".to_string(), TypeId::U64);
+                m.insert("U64".to_string(), TypeId::U64);
                 m.insert("u64".to_string(), TypeId::U64);
                 m.insert("UInt32".to_string(), TypeId::U32);
+                m.insert("U32".to_string(), TypeId::U32);
                 m.insert("u32".to_string(), TypeId::U32);
                 m.insert("UInt16".to_string(), TypeId::U16);
+                m.insert("U16".to_string(), TypeId::U16);
                 m.insert("u16".to_string(), TypeId::U16);
                 m.insert("UInt8".to_string(), TypeId::U8);
+                m.insert("U8".to_string(), TypeId::U8);
                 m.insert("u8".to_string(), TypeId::U8);
                 m.insert("Byte".to_string(), TypeId::U8);
+                // Pointer-width integers — every alias spelling
+                // resolves to TypeId(14) (USIZE/ISIZE are the same
+                // sentinel; the runtime distinguishes signedness at
+                // the operation site, not the TypeId).
+                m.insert("USize".to_string(), TypeId::USIZE);
+                m.insert("UIntSize".to_string(), TypeId::USIZE);
+                m.insert("Usize".to_string(), TypeId::USIZE);
+                m.insert("usize".to_string(), TypeId::USIZE);
+                m.insert("ISize".to_string(), TypeId::ISIZE);
+                m.insert("IntSize".to_string(), TypeId::ISIZE);
+                m.insert("Isize".to_string(), TypeId::ISIZE);
+                m.insert("isize".to_string(), TypeId::ISIZE);
                 m.insert("Float".to_string(), TypeId::FLOAT);
                 m.insert("Float64".to_string(), TypeId::FLOAT);
+                m.insert("F64".to_string(), TypeId::FLOAT);
                 m.insert("f64".to_string(), TypeId::FLOAT);
                 m.insert("Float32".to_string(), TypeId::F32);
+                m.insert("F32".to_string(), TypeId::F32);
                 m.insert("f32".to_string(), TypeId::F32);
                 m.insert("Bool".to_string(), TypeId::BOOL);
+                m.insert("bool".to_string(), TypeId::BOOL);
+                m.insert("Char".to_string(), TypeId::CHAR);
+                m.insert("char".to_string(), TypeId::CHAR);
                 m.insert("Text".to_string(), TypeId::TEXT);
                 // Collection types
                 m.insert("List".to_string(), TypeId::LIST);
@@ -8062,26 +8099,49 @@ impl VbcCodegen {
                         }
 
                         match name.as_str() {
-                            // Signed integers: both Verum semantic names and compat names
-                            "Int" | "Int64" | "i64" => CType::I64,
-                            "Int32" | "i32" => CType::I32,
-                            "Int16" | "i16" => CType::I16,
-                            "Int8" | "i8" => CType::I8,
-                            // Unsigned integers: both Verum semantic names and compat names
-                            "UInt64" | "u64" => CType::U64,
-                            "UInt32" | "u32" => CType::U32,
-                            "UInt16" | "u16" => CType::U16,
-                            "UInt8" | "u8" | "Byte" => CType::U8,
-                            // Pointer-sized integers
-                            "ISize" | "isize" => CType::Ssize,
-                            "USize" | "usize" => CType::Size,
-                            // Floating point: both Verum semantic names and compat names
-                            "Float" | "Float64" | "f64" => CType::F64,
-                            "Float32" | "f32" => CType::F32,
+                            // Signed integers — canonical Verum +
+                            // width-tagged + legacy uppercase-short +
+                            // Rust-style lowercase aliases. Drift
+                            // between this FFI C-type table and the
+                            // canonical `NUMERIC_ALIAS_MATRIX` in
+                            // verum_common would silently route an
+                            // un-mapped alias to `CType::Ptr`,
+                            // producing wrong FFI argument codegen
+                            // (e.g. a `USize` argument passed as a
+                            // pointer when the C ABI expects a 64-bit
+                            // unsigned register).
+                            "Int" | "Int64" | "I64" | "i64" => CType::I64,
+                            "Int32" | "I32" | "i32" => CType::I32,
+                            "Int16" | "I16" | "i16" => CType::I16,
+                            "Int8" | "I8" | "i8" => CType::I8,
+                            // Unsigned integers
+                            "UInt" | "UInt64" | "U64" | "u64" => CType::U64,
+                            "UInt32" | "U32" | "u32" => CType::U32,
+                            "UInt16" | "U16" | "u16" => CType::U16,
+                            "UInt8" | "U8" | "u8" | "Byte" => CType::U8,
+                            // Pointer-sized integers (canonical Verum
+                            // capitalisations + legacy uppercase-short
+                            // + Rust-style lowercase + the
+                            // `IntSize`/`UIntSize` prior canonical
+                            // spellings — all alias to the same
+                            // 64-bit width on every supported target).
+                            "ISize" | "IntSize" | "Isize" | "isize" => CType::Ssize,
+                            "USize" | "UIntSize" | "Usize" | "usize" => CType::Size,
+                            // Floating point
+                            "Float" | "Float64" | "F64" | "f64" => CType::F64,
+                            "Float32" | "F32" | "f32" => CType::F32,
                             // Boolean
                             "Bool" | "bool" => CType::Bool,
+                            // Character — Verum's Char is a 32-bit
+                            // Unicode codepoint, ABI-equivalent to a
+                            // `wchar_t` / `uint32_t` slot at the FFI
+                            // boundary (most C ABIs treat `char`
+                            // arguments as int-promoted; the wider
+                            // Char→u32 mapping preserves the bit
+                            // pattern without sign extension).
+                            "Char" | "char" => CType::U32,
                             // Unit type
-                            "()" => CType::Void,
+                            "()" | "Unit" => CType::Void,
                             _ => CType::Ptr, // Unknown types become pointers
                         }
                     }
