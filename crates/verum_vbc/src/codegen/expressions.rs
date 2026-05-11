@@ -8158,7 +8158,34 @@ impl VbcCodegen {
         let method_name_str = inner_method.name.as_str();
         let outer_method_str = outer_method_name.name.as_str();
 
-        // Check for known method return types
+        // Receiver-type-aware inference takes priority over the hardcoded
+        // method-name lists below.  The lists are a last-resort guess for
+        // sites that lack any receiver type information; using them when
+        // the receiver IS typed produces structurally wrong dispatch.
+        //
+        // Concrete failure that motivated the reordering: a method name
+        // (e.g. `map`) is shared between `Maybe<T>` and `Poll<T>` (and
+        // every other `Functor`-shaped type). For `poll_value.map(...)`
+        // followed by another method, the deep-chain inference walks
+        // `Poll.Ready(0).map(|x| x+1)` → `Poll<Int>` → `Poll.map(|x| x*2)`,
+        // which is the correct dispatch. The earlier hardcode-first order
+        // returned `Maybe.<outer>` and the runtime panicked with
+        // `method 'Maybe.map' not found on receiver` because the actual
+        // receiver kind was Poll, not Maybe.  Generalises to every
+        // user-defined Functor / Monad-shape that shares method names
+        // with the canonical stdlib carriers.
+        //
+        // Per crates/verum_types/src/CLAUDE.md — "NEVER hardcode
+        // stdlib/core type knowledge in the compiler" — the lists below
+        // remain only as a soft last-resort for receivers whose type
+        // we cannot infer (typecheck-skipped paths, leniency).
+
+        // Numeric coercion-style return shapes (UInt64 / Int32 / Byte)
+        // remain receiver-agnostic because they're type-specific method
+        // names that only the listed primitive accessors carry; no other
+        // type defines `to_bits` / `as_nanos` / `first_byte`, so the
+        // hardcode is a pinning of a single source of truth rather than
+        // a guess across multiple competing types.
         if UINT64_METHODS.contains(&method_name_str) {
             return format!("uint64${}", outer_method_name.name);
         }
@@ -8167,14 +8194,6 @@ impl VbcCodegen {
         }
         if BYTE_METHODS.contains(&method_name_str) {
             return format!("byte${}", outer_method_name.name);
-        }
-
-        // Check if inner method returns Maybe and outer method is a Maybe method
-        // This handles patterns like: result.ok().unwrap(), iter.next().map(...)
-        if MAYBE_RETURNING_METHODS.contains(&method_name_str)
-            && MAYBE_METHODS.contains(&outer_method_str)
-        {
-            return format!("Maybe.{}", outer_method_name.name);
         }
 
         // Try to determine receiver type and look up method return type
@@ -8259,6 +8278,21 @@ impl VbcCodegen {
                     return format!("{}.{}", ret_base, outer_method_name.name);
                 }
             }
+        }
+
+        // Last-resort fallback for receivers whose actual type the
+        // codegen could not infer (deep chain, missing FunctionInfo,
+        // typecheck-skipped lenient mode). Use the hardcoded
+        // Maybe-returning name list ONLY at this fallback position —
+        // running it ahead of the type-aware logic above structurally
+        // mis-dispatches every Functor/Monad-shaped user sum that
+        // shares method names with Maybe (Poll, Result, custom carriers).
+        // See the "NEVER hardcode stdlib/core type knowledge in the
+        // compiler" rule in `crates/verum_types/src/CLAUDE.md`.
+        if MAYBE_RETURNING_METHODS.contains(&method_name_str)
+            && MAYBE_METHODS.contains(&outer_method_str)
+        {
+            return format!("Maybe.{}", outer_method_name.name);
         }
 
         // Default: no prefix

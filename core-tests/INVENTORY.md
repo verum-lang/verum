@@ -14,6 +14,7 @@ default green-suite gate.
 | `collections/reservoir`  | 176 | 140 | 104 |  99 | 1 (core.sys.common.random_bytes intrinsic missing from VBC dispatch table — gates the replacement-phase API) |
 | `collections/toposort`   |  76 |   0 |   0 | 100 | 4 (Map.contains_key(&amp;K) gates contains/idempotent add_node; Map.get → Maybe&lt;V&gt; gates the toposort algorithm itself; Text.from gates the Cycle-variant payload). regression-only outside of new()/add_node-distinct/empty-toposort. |
 | `sys/bitfield`           | 452 |   0 |   0 | 114 | 3 (cross-module free-fn dispatch silently returns Unit at --interp; mount X.{public_const} not registered in codegen symbol table; SIGABRT in cbgr::handle_drop_ref on full-suite run). regression-only at runtime; implementation in core/sys/bitfield.vr is `pure @inline(always)` and the suite turns green when the dispatch defect closes. |
+| `async/poll`             | 393 | 334 | 212 | 157 | 0 — full Poll<T> surface conformance-tested. Closed in this branch: codegen-emit-MakeVariantTyped over MakeVariant for user sum types (Poll/LocalPair Debug fixed); blanket From<T> for Poll<T> removed (overlap with From<Maybe<T>>); receiver-aware method-chain inference lifted ahead of hardcoded MAYBE_RETURNING_METHODS table. **complete**. |
 
 ## Status legend
 

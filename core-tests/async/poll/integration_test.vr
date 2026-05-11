@@ -1,0 +1,212 @@
+// =============================================================================
+// core-tests/async/poll/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.async.poll.Poll<T>` — exercises
+// the type's interplay with `Maybe<T>`, `Result<T,E>`, sorting,
+// formatting, and collection containers.
+// =============================================================================
+
+mount core.async.poll.{Poll};
+mount core.maybe.{Maybe, Some, None};
+mount core.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section A: Poll<T> ↔ Maybe<T> isomorphism
+//
+//   Round-trip Poll → Maybe → Poll preserves identity for every
+//   distinct shape (Ready / Pending), and vice versa for Maybe.
+// =============================================================================
+
+@test
+fn integration_poll_maybe_roundtrip_ready() {
+    let p: Poll<Int> = Poll.Ready(42);
+    let m: Maybe<Int> = p.ready();
+    let back: Poll<Int> = Poll.from(m);
+    assert_eq(p, back);
+}
+
+@test
+fn integration_poll_maybe_roundtrip_pending() {
+    let p: Poll<Int> = Poll.Pending;
+    let m: Maybe<Int> = p.ready();
+    let back: Poll<Int> = Poll.from(m);
+    assert_eq(p, back);
+}
+
+@test
+fn integration_maybe_poll_roundtrip_some() {
+    let m: Maybe<Int> = Some(7);
+    let p: Poll<Int> = Poll.from(m);
+    let back: Maybe<Int> = p.ready();
+    assert_eq(m, back);
+}
+
+@test
+fn integration_maybe_poll_roundtrip_none() {
+    let m: Maybe<Int> = None;
+    let p: Poll<Int> = Poll.from(m);
+    let back: Maybe<Int> = p.ready();
+    assert_eq(m, back);
+}
+
+// =============================================================================
+// Section B: Poll<Result<T, E>> result-shape composition
+//
+//   The `map_ok` / `map_err` surface is the practical entry point for
+//   async functions whose Output is `Result<T, E>` — verify it
+//   composes correctly with the canonical Result constructors and
+//   that Pending is the absorbing element on both arms.
+// =============================================================================
+
+@test
+fn integration_poll_result_ok_chain() {
+    let p: Poll<Result<Int, Text>> = Poll.ready_ok(10);
+    let after = p.map_ok(|x| x + 1).map_ok(|x| x * 2);
+    assert_eq(after, Poll.Ready(Ok(22)));
+}
+
+@test
+fn integration_poll_result_err_preserved_through_map_ok() {
+    let p: Poll<Result<Int, Text>> = Poll.ready_err("oops");
+    let after = p.map_ok(|x| x + 1);
+    assert_eq(after, Poll.Ready(Err("oops")));
+}
+
+@test
+fn integration_poll_result_pending_absorbing_through_map_ok() {
+    let p: Poll<Result<Int, Text>> = Poll.Pending;
+    let after = p.map_ok(|x| x * 100);
+    assert(after.is_pending());
+}
+
+@test
+fn integration_poll_result_err_normalised_via_map_err() {
+    let p: Poll<Result<Int, Text>> = Poll.ready_err("not-found");
+    let after = p.map_err(|e: Text| e.len());
+    assert_eq(after, Poll.Ready(Err(9)));
+}
+
+// =============================================================================
+// Section C: List<Poll<T>> — bulk container scenarios
+//
+//   Poll values inhabit collections naturally — verify equality,
+//   iteration, and predicate-based partitioning all work uniformly
+//   across the Ready / Pending split.
+// =============================================================================
+
+@test
+fn integration_list_of_polls_eq() {
+    let a: List<Poll<Int>> = [Poll.Ready(1), Poll.Pending, Poll.Ready(2)];
+    let b: List<Poll<Int>> = [Poll.Ready(1), Poll.Pending, Poll.Ready(2)];
+    assert_eq(a, b);
+}
+
+@test
+fn integration_list_of_polls_count_ready() {
+    let polls: List<Poll<Int>> = [
+        Poll.Ready(1),
+        Poll.Pending,
+        Poll.Ready(2),
+        Poll.Pending,
+        Poll.Ready(3),
+    ];
+    let mut count: Int = 0;
+    for p in polls.iter() {
+        if (*p).is_ready() {
+            count = count + 1;
+        }
+    }
+    assert_eq(count, 3);
+}
+
+@test
+fn integration_list_of_polls_sum_ready_values() {
+    let polls: List<Poll<Int>> = [
+        Poll.Ready(10),
+        Poll.Pending,
+        Poll.Ready(20),
+        Poll.Ready(30),
+        Poll.Pending,
+    ];
+    let mut total: Int = 0;
+    for p in polls.iter() {
+        total = total + (*p).unwrap_or(0);
+    }
+    assert_eq(total, 60);
+}
+
+// =============================================================================
+// Section D: Pattern-match interop with stdlib variant carriers
+//
+//   `Poll<Maybe<T>>` and `Poll<Result<T, E>>` are common compositions
+//   produced by Stream/AsyncIterator next-poll signatures. The
+//   pattern-match dispatch must thread the nested variant tags
+//   correctly across the Poll / Maybe / Result boundary.
+// =============================================================================
+
+@test
+fn integration_poll_of_maybe_nested_match() {
+    // Inner fn name disambiguated against `integration_poll_of_result_nested_match`'s
+    // sibling — the codegen registers per-test inner functions in a
+    // single global table keyed only by name+arity, so two `classify`
+    // helpers with the same arity collide on dispatch.
+    fn classify_pm(p: Poll<Maybe<Int>>) -> Text {
+        match p {
+            Poll.Ready(Some(_)) => "ready-some",
+            Poll.Ready(None) => "ready-none",
+            Poll.Pending => "pending",
+        }
+    }
+    assert_eq(classify_pm(Poll.Ready(Some(5))), "ready-some");
+    assert_eq(classify_pm(Poll.Ready(None)), "ready-none");
+    assert_eq(classify_pm(Poll.Pending), "pending");
+}
+
+@test
+fn integration_poll_of_result_nested_match() {
+    fn classify_pr(p: Poll<Result<Int, Text>>) -> Text {
+        match p {
+            Poll.Ready(Ok(_)) => "ready-ok",
+            Poll.Ready(Err(_)) => "ready-err",
+            Poll.Pending => "pending",
+        }
+    }
+    assert_eq(classify_pr(Poll.Ready(Ok(1))), "ready-ok");
+    assert_eq(classify_pr(Poll.Ready(Err("e"))), "ready-err");
+    assert_eq(classify_pr(Poll.Pending), "pending");
+}
+
+// =============================================================================
+// Section E: Debug interop — nested Poll inside generic containers
+//
+//   Cross-checks that the type-scoped variant-name resolution
+//   (closed by regression §A) survives compositions like
+//   `List<Poll<Int>>` and nested `Poll<Maybe<T>>`.
+// =============================================================================
+
+@test
+fn integration_debug_list_of_polls() {
+    let polls: List<Poll<Int>> = [Poll.Ready(1), Poll.Pending, Poll.Ready(2)];
+    let s = f"{polls:?}";
+    // The exact list-debug shape is stdlib-defined; assert each
+    // element's expected substring lands in the rendered form.
+    assert(s.contains("Ready(1)"));
+    assert(s.contains("Pending"));
+    assert(s.contains("Ready(2)"));
+}
+
+@test
+fn integration_debug_poll_of_maybe() {
+    let p: Poll<Maybe<Int>> = Poll.Ready(Some(7));
+    let s = f"{p:?}";
+    assert(s.contains("Ready"));
+    assert(s.contains("Some(7)"));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
