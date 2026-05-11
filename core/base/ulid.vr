@@ -177,6 +177,23 @@ implement Ulid {
         pack(timestamp_ms, rand)
     }
 
+    /// Convenience constructor for tests: builds a ULID with the
+    /// given timestamp and a deterministic 10-byte random payload
+    /// derived from `rand_seed`. `rand_seed = 0` produces all-zero
+    /// bytes; otherwise the seed's little-endian bytes fill the first
+    /// 8 bytes of the random payload (final 2 bytes stay zero).
+    public fn from_parts_seeded(timestamp_ms: UInt64, rand_seed: UInt64) -> Ulid {
+        let mut rand: [Byte; 10] = [0_u8; 10];
+        let mut s = rand_seed;
+        let mut i: Int = 0;
+        while i < 10 {
+            rand[i] = (s & 0xFF_u64) as Byte;
+            s = s >> 8_u64;
+            i = i + 1;
+        }
+        pack(timestamp_ms, &rand)
+    }
+
     /// Extract the 48-bit unix-ms timestamp.
     public fn timestamp_ms(&self) -> UInt64 {
         self.high >> 16_u64
@@ -211,6 +228,17 @@ implement Ulid {
         }
         Text.from_utf8_unchecked(out.as_slice())
     }
+}
+
+/// Free-function alias for `Ulid.from_parts_seeded` — the
+/// `mount core.base.ulid.{from_parts}` import style at call sites
+/// prefers free functions, and the `(Int, Int)` argument shape
+/// matches the convention in `core-tests/base/ulid/integration_test.vr`
+/// (`from_parts(0, 0)` for an all-zero ULID).
+public fn from_parts(timestamp_ms: Int, rand_seed: Int) -> Ulid {
+    let ts = if timestamp_ms < 0 { 0_u64 } else { timestamp_ms as UInt64 };
+    let seed = if rand_seed < 0 { 0_u64 } else { rand_seed as UInt64 };
+    Ulid.from_parts_seeded(ts, seed)
 }
 
 /// Parse a 26-char Crockford-Base32 ULID.

@@ -120,6 +120,12 @@ public fn generate_len(n: Int) -> Text {
     generate_with_alphabet(&NANOID_ALPHABET[..], n)
 }
 
+/// Alias for `generate_len(n)` under the more verbose name used by
+/// call sites that prefer reading the intent at the call site.
+public fn generate_with_length(n: Int) -> Text {
+    generate_len(n)
+}
+
 public fn generate_with_alphabet(alphabet: &[Byte], n: Int) -> Text {
     let alpha_size = alphabet.len();
     if alpha_size == 0 || n <= 0 { return Text.from(""); }
