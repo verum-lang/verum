@@ -3396,9 +3396,22 @@ impl VbcCodegen {
                 // garbage at every callsite. Live failure: bitfield's
                 // `insert_bits(0xABCD, 0xEF, 0, 8)` returned `0xEF`
                 // instead of `0xABEF`.
+                // Type detection — use BOTH `extract_expr_type_name`
+                // (good for Path/Record receivers, returns the nominal
+                // type name) AND `infer_expr_type_kind` (handles
+                // Binary/Cast/Unary/Paren compound expressions that
+                // extract_expr_type_name doesn't dive into). The
+                // pre-fix code consulted only `extract_expr_type_name`,
+                // so `!((1 as USize) << n)` — a Binary-wrapped USize —
+                // resolved as None → fell back to the default
+                // `Instruction::Not` (logical), reintroducing the
+                // bitfield-clearing bug at every Binary-form bitwise
+                // expression in stdlib (clear_bit, field_mask, etc.).
                 let type_name = self.extract_expr_type_name(inner);
-                let is_bool = matches!(type_name.as_deref(), Some("Bool"));
-                let is_integer = matches!(
+                let type_kind = self.infer_expr_type_kind(inner);
+                let is_bool = matches!(type_name.as_deref(), Some("Bool"))
+                    || matches!(type_kind, Some(verum_ast::ty::TypeKind::Bool));
+                let is_integer_name = matches!(
                     type_name.as_deref(),
                     Some("Int")
                         | Some("Int8")
@@ -3416,7 +3429,13 @@ impl VbcCodegen {
                         | Some("USize")
                         | Some("Byte")
                 );
-                let is_builtin_not = is_bool || is_integer || type_name.is_none();
+                let is_integer_kind = matches!(
+                    type_kind,
+                    Some(verum_ast::ty::TypeKind::Int) | Some(verum_ast::ty::TypeKind::Char)
+                );
+                let is_integer = is_integer_name || (is_integer_kind && !is_bool);
+                let is_builtin_not =
+                    is_bool || is_integer || (type_name.is_none() && type_kind.is_none());
                 let has_not_method = !is_builtin_not
                     && type_name.as_ref().is_some_and(|name| {
                         let qualified = format!("{}.not", name);
@@ -5653,7 +5672,22 @@ impl VbcCodegen {
                 // `Maybe.is_none(b)` syntax) already supply self in
                 // `args` — those go through `compile_resolved_call_target`
                 // (no receiver) and skip this prepending.
-                if let Some(recv) = receiver {
+                //
+                // CRITICAL: when the receiver is a TYPE-NAME path
+                // (`Text.from("alpha")`, `Maybe.None`, `Result.Ok(x)`),
+                // the "receiver" syntactically present at the call site
+                // is the *type prefix*, NOT a `self` value.  Prepending
+                // it would over-shoot the arity (e.g. `Text.from(s)`
+                // takes 1 param but would receive `[Text, "alpha"]`).
+                // The disambiguator is the function's `param_count`:
+                // if `args.len() == info.param_count`, the call site
+                // already carries the right argument count and the
+                // receiver is a type prefix to be dropped.  Only
+                // prepend when `args.len() + 1 == info.param_count`,
+                // which is the canonical instance-method shape.
+                if let Some(recv) = receiver
+                    && args.len() + 1 == info.param_count
+                {
                     let mut prepended: Vec<Expr> = Vec::with_capacity(args.len() + 1);
                     prepended.push((*recv).clone());
                     for a in args.iter() {
