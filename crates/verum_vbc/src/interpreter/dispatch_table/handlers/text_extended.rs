@@ -246,27 +246,61 @@ pub(in super::super) fn handle_text_extended(
                 let header = unsafe { &*(base as *const heap::ObjectHeader) };
                 if header.type_id == TypeId::TEXT || header.type_id == TypeId(0x0001) {
                     // Two coexisting Text layouts under the same TypeId:
-                    //  builder `{ptr, len, cap}` (24-byte object, NaN-boxed fields)
-                    //  — field 0 = Value(ptr), field 1 = Value(len), field 2 = Value(cap)
-                    //  heap string `[ObjectHeader][len:u64][bytes…]`
-                    // The same size disambiguation used by `handle_array_len`
-                    // applies here: a 24-byte object whose field 0 is a pointer
-                    // and field 1 is an Int is the builder.
+                    //
+                    //   * **builder** `{ptr, len, cap}` — 24-byte payload object,
+                    //     field 0 = ptr (Value::from_ptr OR raw `*mut u8` —
+                    //     depends on how the struct-literal codegen handed off
+                    //     the `&unsafe Byte` field; both layouts coexist at
+                    //     present), field 1 = Value::from_i64(len),
+                    //     field 2 = Value::from_i64(cap).
+                    //   * **heap string** `[ObjectHeader][len:u64][bytes…]` —
+                    //     `header.size = 8 + N` where N is the byte count.
+                    //
+                    // Disambiguation: at `header.size == 24` the layouts can
+                    // collide with a 16-byte heap-string.  The primary
+                    // disambiguator is `field1` — a builder ALWAYS has the
+                    // canonical `Value::from_i64(len)` in slot 1, whereas a
+                    // 16-byte heap-string's "field1" is the second 8 bytes of
+                    // its raw payload (rarely a valid NaN-box Int tag).
+                    //
+                    // Field 0 is then treated representation-agnostically:
+                    // accept either a NaN-boxed `Value::from_ptr(...)` (the
+                    // typed-store path) or a raw `*mut u8` (the historical
+                    // path that bypasses the NaN-box for `&unsafe Byte`
+                    // fields).  Reading the same 8 bytes as both — first as
+                    // `Value` to query the NaN tag, then as `u64` to recover
+                    // the raw pointer when the NaN tag is absent — keeps the
+                    // handler correct under either codegen choice without
+                    // forcing a parallel struct-literal-store rewrite.
                     let data_ptr = unsafe { base.add(heap::OBJECT_HEADER_SIZE) };
                     let header_size = header.size as usize;
                     if header_size == 24 {
                         let field0 = unsafe { *(data_ptr as *const Value) };
                         let field1 = unsafe { *(data_ptr as *const Value).add(1) };
-                        if (field0.is_ptr() || field0.is_nil()) && field1.is_int() {
+                        if field1.is_int() {
+                            // Builder layout — len lives in field1 either way.
+                            let builder_len = field1.as_i64() as u64;
                             let builder_ptr = if field0.is_nil() {
                                 std::ptr::null_mut()
-                            } else {
+                            } else if field0.is_ptr() {
+                                // NaN-boxed pointer.
                                 field0.as_ptr::<u8>()
+                            } else {
+                                // Raw `*mut u8` stored without NaN-box.  The
+                                // first 8 bytes ARE the address bits; cast
+                                // directly.  This is the path
+                                // `Text.from_utf8_unchecked` exercises since
+                                // its `let ptr = alloc(...)` produces a raw
+                                // pointer that the struct-literal codegen
+                                // stores byte-for-byte into field 0.
+                                let raw = unsafe { *(data_ptr as *const u64) };
+                                raw as *mut u8
                             };
-                            let builder_len = field1.as_i64() as u64;
                             (builder_ptr, builder_len)
                         } else {
-                            // Fall back to heap-string layout.
+                            // Heap-string with exactly 16 payload bytes — the
+                            // ambiguity collapses by field1's failure to
+                            // classify as Int.
                             let len_ptr = data_ptr as *const u64;
                             let len = unsafe { *len_ptr };
                             let bytes_ptr = unsafe { data_ptr.add(8) };
