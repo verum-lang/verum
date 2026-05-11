@@ -36,8 +36,17 @@ public module init;
 // Export unified I/O engine interface
 public module io_engine;
 
-// Export raw syscall intrinsics (platform-independent bridge)
-public module raw;          // Raw OS intrinsic declarations
+// Raw syscall intrinsics live under core/intrinsics/runtime/* (post-migration
+// home); the historical `public module raw;` forward-declaration here pointed
+// at a `core/sys/raw.vr` file that no longer exists.  The stale forward
+// declaration surfaced as `W_MODULE_HEADER_FORWARD_DECL_NO_SOURCE: module
+// 'raw' is forward-declared but no source file exists` on every user-side
+// script that mounted `core.*` (transitively pulled in `core.sys.*`).
+//
+// Removed in favour of the canonical location at `core/intrinsics/runtime/os.vr`.
+// Downstream comments in time_ops/context_ops/process_ops/net_ops/tcp.vr
+// referencing "sys/raw" are stale post-migration documentation only — no
+// active code mounts `sys.raw.*`.
 public module file_ops;     // File operations (pure Verum)
 public module time_ops;     // Time operations (pure Verum)
 public module net_ops;      // TCP/UDP operations (pure Verum)
