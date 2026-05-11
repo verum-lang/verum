@@ -1,0 +1,69 @@
+// =============================================================================
+// core-tests/async/spawn_config/integration_test.vr
+// =============================================================================
+
+mount core.async.spawn_config.{RestartPolicy, IsolationLevel, Priority};
+mount core.collections.list.List;
+
+// =============================================================================
+// Priority ordered comparison via rank function
+// =============================================================================
+
+@test
+fn integration_spawn_config_priority_ordering() {
+    fn rank(p: Priority) -> Int {
+        match p {
+            Priority.Low => 0,
+            Priority.Normal => 1,
+            Priority.High => 2,
+            Priority.Critical => 3,
+        }
+    }
+    assert(rank(Priority.Critical) > rank(Priority.High));
+    assert(rank(Priority.High) > rank(Priority.Normal));
+    assert(rank(Priority.Normal) > rank(Priority.Low));
+}
+
+// =============================================================================
+// IsolationLevel List bookkeeping
+// =============================================================================
+
+@test
+fn integration_spawn_config_isolation_list_strict_count() {
+    let levels: List<IsolationLevel> = [
+        IsolationLevel.Shared,
+        IsolationLevel.Full,
+        IsolationLevel.SendOnly,
+        IsolationLevel.Full,
+        IsolationLevel.Shared,
+    ];
+    let mut strict_n: Int = 0;
+    for l in levels.iter() {
+        match *l {
+            IsolationLevel.Full => strict_n = strict_n + 1,
+            IsolationLevel.SendOnly => strict_n = strict_n + 1,
+            IsolationLevel.Shared => {},
+        }
+    }
+    assert_eq(strict_n, 3);
+}
+
+// =============================================================================
+// RestartPolicy classification
+// =============================================================================
+
+@test
+fn integration_spawn_config_restart_will_restart() {
+    fn will_restart(p: RestartPolicy) -> Bool {
+        match p {
+            RestartPolicy.Permanent => true,
+            RestartPolicy.Transient => true,
+            RestartPolicy.Temporary => false,
+        }
+    }
+    assert(will_restart(RestartPolicy.Permanent));
+    assert(will_restart(RestartPolicy.Transient));
+    assert(!will_restart(RestartPolicy.Temporary));
+}
+
+fn main() {}

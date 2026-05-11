@@ -1,0 +1,76 @@
+// =============================================================================
+// core-tests/async/spawn_with/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.spawn_with`'s variant-algebra surface
+// (CircuitState).  Live CircuitBreaker + execute_with_retry need
+// runtime executor; regression_test.vr.
+// =============================================================================
+
+mount core.async.spawn_with.{CircuitState};
+
+// =============================================================================
+// Section 1: CircuitState — 3-variant breaker lifecycle
+// =============================================================================
+
+@test
+fn test_spawn_with_state_closed() {
+    let s: CircuitState = CircuitState.Closed;
+    assert(s is CircuitState.Closed);
+}
+
+@test
+fn test_spawn_with_state_open() {
+    let s: CircuitState = CircuitState.Open;
+    assert(s is CircuitState.Open);
+}
+
+@test
+fn test_spawn_with_state_half_open() {
+    let s: CircuitState = CircuitState.HalfOpen;
+    assert(s is CircuitState.HalfOpen);
+}
+
+@test
+fn test_spawn_with_state_pairwise_distinct() {
+    let closed: CircuitState = CircuitState.Closed;
+    let open: CircuitState = CircuitState.Open;
+    let half: CircuitState = CircuitState.HalfOpen;
+    assert(!(closed is CircuitState.Open));
+    assert(!(closed is CircuitState.HalfOpen));
+    assert(!(open is CircuitState.Closed));
+    assert(!(open is CircuitState.HalfOpen));
+    assert(!(half is CircuitState.Closed));
+    assert(!(half is CircuitState.Open));
+}
+
+@test
+fn test_spawn_with_state_match_exhaustive() {
+    fn description(s: CircuitState) -> Text {
+        match s {
+            CircuitState.Closed => "normal",
+            CircuitState.Open => "tripped",
+            CircuitState.HalfOpen => "trialing",
+        }
+    }
+    assert_eq(description(CircuitState.Closed), "normal");
+    assert_eq(description(CircuitState.Open), "tripped");
+    assert_eq(description(CircuitState.HalfOpen), "trialing");
+}
+
+@test
+fn test_spawn_with_state_transition_pattern() {
+    // Verify the canonical Closed → Open → HalfOpen → Closed cycle.
+    fn next_state(s: CircuitState) -> CircuitState {
+        match s {
+            CircuitState.Closed => CircuitState.Open,
+            CircuitState.Open => CircuitState.HalfOpen,
+            CircuitState.HalfOpen => CircuitState.Closed,
+        }
+    }
+    assert(next_state(CircuitState.Closed) is CircuitState.Open);
+    assert(next_state(CircuitState.Open) is CircuitState.HalfOpen);
+    assert(next_state(CircuitState.HalfOpen) is CircuitState.Closed);
+}
+
+fn main() {}

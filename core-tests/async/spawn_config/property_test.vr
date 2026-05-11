@@ -1,0 +1,63 @@
+// =============================================================================
+// core-tests/async/spawn_config/property_test.vr
+// =============================================================================
+
+mount core.async.spawn_config.{RestartPolicy, IsolationLevel, Priority};
+
+// =============================================================================
+// 3-arm partition: RestartPolicy
+// =============================================================================
+
+@test
+fn property_spawn_config_restart_policy_partition() {
+    fn flag_count(p: RestartPolicy) -> Int {
+        let mut n: Int = 0;
+        if p is RestartPolicy.Permanent { n = n + 1; }
+        if p is RestartPolicy.Transient { n = n + 1; }
+        if p is RestartPolicy.Temporary { n = n + 1; }
+        n
+    }
+    assert_eq(flag_count(RestartPolicy.Permanent), 1);
+    assert_eq(flag_count(RestartPolicy.Transient), 1);
+    assert_eq(flag_count(RestartPolicy.Temporary), 1);
+}
+
+// =============================================================================
+// 3-arm partition: IsolationLevel
+// =============================================================================
+
+@test
+fn property_spawn_config_isolation_level_partition() {
+    fn flag_count(l: IsolationLevel) -> Int {
+        let mut n: Int = 0;
+        if l is IsolationLevel.Shared { n = n + 1; }
+        if l is IsolationLevel.SendOnly { n = n + 1; }
+        if l is IsolationLevel.Full { n = n + 1; }
+        n
+    }
+    assert_eq(flag_count(IsolationLevel.Shared), 1);
+    assert_eq(flag_count(IsolationLevel.SendOnly), 1);
+    assert_eq(flag_count(IsolationLevel.Full), 1);
+}
+
+// =============================================================================
+// 4-arm partition: Priority
+// =============================================================================
+
+@test
+fn property_spawn_config_priority_partition() {
+    fn flag_count(p: Priority) -> Int {
+        let mut n: Int = 0;
+        if p is Priority.Low { n = n + 1; }
+        if p is Priority.Normal { n = n + 1; }
+        if p is Priority.High { n = n + 1; }
+        if p is Priority.Critical { n = n + 1; }
+        n
+    }
+    assert_eq(flag_count(Priority.Low), 1);
+    assert_eq(flag_count(Priority.Normal), 1);
+    assert_eq(flag_count(Priority.High), 1);
+    assert_eq(flag_count(Priority.Critical), 1);
+}
+
+fn main() {}

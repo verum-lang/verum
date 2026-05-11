@@ -1,0 +1,62 @@
+// =============================================================================
+// core-tests/async/nursery/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.nursery`'s variant-algebra surface
+// (NurseryErrorBehavior).  Live Nursery + spawn surface needs the
+// runtime executor; their tests live in regression_test.vr.
+// =============================================================================
+
+mount core.async.nursery.{NurseryErrorBehavior};
+
+// =============================================================================
+// Section 1: NurseryErrorBehavior — 3-variant policy enum
+// =============================================================================
+
+@test
+fn test_nursery_cancel_all_construction() {
+    let p: NurseryErrorBehavior = NurseryErrorBehavior.CancelAll;
+    assert(p is NurseryErrorBehavior.CancelAll);
+}
+
+@test
+fn test_nursery_wait_all_construction() {
+    let p: NurseryErrorBehavior = NurseryErrorBehavior.WaitAll;
+    assert(p is NurseryErrorBehavior.WaitAll);
+}
+
+@test
+fn test_nursery_fail_fast_construction() {
+    let p: NurseryErrorBehavior = NurseryErrorBehavior.FailFast;
+    assert(p is NurseryErrorBehavior.FailFast);
+}
+
+@test
+fn test_nursery_error_behavior_pairwise_distinct() {
+    let cancel: NurseryErrorBehavior = NurseryErrorBehavior.CancelAll;
+    let wait: NurseryErrorBehavior = NurseryErrorBehavior.WaitAll;
+    let fast: NurseryErrorBehavior = NurseryErrorBehavior.FailFast;
+
+    assert(!(cancel is NurseryErrorBehavior.WaitAll));
+    assert(!(cancel is NurseryErrorBehavior.FailFast));
+    assert(!(wait is NurseryErrorBehavior.CancelAll));
+    assert(!(wait is NurseryErrorBehavior.FailFast));
+    assert(!(fast is NurseryErrorBehavior.CancelAll));
+    assert(!(fast is NurseryErrorBehavior.WaitAll));
+}
+
+@test
+fn test_nursery_error_behavior_match_exhaustive() {
+    fn describe(p: NurseryErrorBehavior) -> Text {
+        match p {
+            NurseryErrorBehavior.CancelAll => "cancel-all",
+            NurseryErrorBehavior.WaitAll => "wait-all",
+            NurseryErrorBehavior.FailFast => "fail-fast",
+        }
+    }
+    assert_eq(describe(NurseryErrorBehavior.CancelAll), "cancel-all");
+    assert_eq(describe(NurseryErrorBehavior.WaitAll), "wait-all");
+    assert_eq(describe(NurseryErrorBehavior.FailFast), "fail-fast");
+}
+
+fn main() {}

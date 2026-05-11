@@ -1,0 +1,158 @@
+// =============================================================================
+// core-tests/async/spawn_config/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.spawn_config`'s variant-algebra surface
+// (RestartPolicy, IsolationLevel, Priority).  Live SpawnConfig +
+// task-spawning need runtime executor; regression_test.vr.
+// =============================================================================
+
+mount core.async.spawn_config.{RestartPolicy, IsolationLevel, Priority};
+
+// =============================================================================
+// Section 1: RestartPolicy — 3-variant
+// =============================================================================
+
+@test
+fn test_spawn_config_restart_permanent() {
+    let p: RestartPolicy = RestartPolicy.Permanent;
+    assert(p is RestartPolicy.Permanent);
+}
+
+@test
+fn test_spawn_config_restart_transient() {
+    let p: RestartPolicy = RestartPolicy.Transient;
+    assert(p is RestartPolicy.Transient);
+}
+
+@test
+fn test_spawn_config_restart_temporary() {
+    let p: RestartPolicy = RestartPolicy.Temporary;
+    assert(p is RestartPolicy.Temporary);
+}
+
+@test
+fn test_spawn_config_restart_pairwise_distinct() {
+    let perm: RestartPolicy = RestartPolicy.Permanent;
+    let trans: RestartPolicy = RestartPolicy.Transient;
+    let temp: RestartPolicy = RestartPolicy.Temporary;
+    assert(!(perm is RestartPolicy.Transient));
+    assert(!(perm is RestartPolicy.Temporary));
+    assert(!(trans is RestartPolicy.Permanent));
+    assert(!(temp is RestartPolicy.Transient));
+}
+
+// `test_spawn_config_restart_match_exhaustive` removed: stdlib's
+// Text inner-Eq dispatch through the match-arm result hits task #11.
+// Replaced with the variant-identity check below.
+
+@test
+fn test_spawn_config_restart_match_returns_distinct_variants() {
+    fn next_state(p: RestartPolicy) -> RestartPolicy {
+        match p {
+            RestartPolicy.Permanent => RestartPolicy.Transient,
+            RestartPolicy.Transient => RestartPolicy.Temporary,
+            RestartPolicy.Temporary => RestartPolicy.Permanent,
+        }
+    }
+    assert(next_state(RestartPolicy.Permanent) is RestartPolicy.Transient);
+    assert(next_state(RestartPolicy.Transient) is RestartPolicy.Temporary);
+    assert(next_state(RestartPolicy.Temporary) is RestartPolicy.Permanent);
+}
+
+// =============================================================================
+// Section 2: IsolationLevel — 3-variant
+// =============================================================================
+
+@test
+fn test_spawn_config_isolation_shared() {
+    let l: IsolationLevel = IsolationLevel.Shared;
+    assert(l is IsolationLevel.Shared);
+}
+
+@test
+fn test_spawn_config_isolation_send_only() {
+    let l: IsolationLevel = IsolationLevel.SendOnly;
+    assert(l is IsolationLevel.SendOnly);
+}
+
+@test
+fn test_spawn_config_isolation_full() {
+    let l: IsolationLevel = IsolationLevel.Full;
+    assert(l is IsolationLevel.Full);
+}
+
+@test
+fn test_spawn_config_isolation_match_exhaustive() {
+    fn tag(l: IsolationLevel) -> Text {
+        match l {
+            IsolationLevel.Shared => "shared",
+            IsolationLevel.SendOnly => "send",
+            IsolationLevel.Full => "full",
+        }
+    }
+    assert_eq(tag(IsolationLevel.Shared), "shared");
+    assert_eq(tag(IsolationLevel.SendOnly), "send");
+    assert_eq(tag(IsolationLevel.Full), "full");
+}
+
+// =============================================================================
+// Section 3: Priority — 4-variant ordered scheduler hint
+// =============================================================================
+
+@test
+fn test_spawn_config_priority_low() {
+    let p: Priority = Priority.Low;
+    assert(p is Priority.Low);
+}
+
+@test
+fn test_spawn_config_priority_normal() {
+    let p: Priority = Priority.Normal;
+    assert(p is Priority.Normal);
+}
+
+@test
+fn test_spawn_config_priority_high() {
+    let p: Priority = Priority.High;
+    assert(p is Priority.High);
+}
+
+@test
+fn test_spawn_config_priority_critical() {
+    let p: Priority = Priority.Critical;
+    assert(p is Priority.Critical);
+}
+
+@test
+fn test_spawn_config_priority_pairwise_distinct() {
+    let low: Priority = Priority.Low;
+    let norm: Priority = Priority.Normal;
+    let high: Priority = Priority.High;
+    let crit: Priority = Priority.Critical;
+    assert(!(low is Priority.Normal));
+    assert(!(low is Priority.High));
+    assert(!(low is Priority.Critical));
+    assert(!(norm is Priority.Low));
+    assert(!(norm is Priority.High));
+    assert(!(high is Priority.Critical));
+    assert(!(crit is Priority.Normal));
+}
+
+@test
+fn test_spawn_config_priority_match_to_int_order() {
+    fn rank(p: Priority) -> Int {
+        match p {
+            Priority.Low => 0,
+            Priority.Normal => 1,
+            Priority.High => 2,
+            Priority.Critical => 3,
+        }
+    }
+    assert_eq(rank(Priority.Low), 0);
+    assert_eq(rank(Priority.Normal), 1);
+    assert_eq(rank(Priority.High), 2);
+    assert_eq(rank(Priority.Critical), 3);
+}
+
+fn main() {}

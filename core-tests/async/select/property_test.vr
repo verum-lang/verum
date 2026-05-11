@@ -1,0 +1,46 @@
+// =============================================================================
+// core-tests/async/select/property_test.vr
+// =============================================================================
+
+mount core.async.select.{Either, SelectError};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section A: Either<A, B> partition
+// =============================================================================
+
+@test
+fn property_select_either_partition_int_text() {
+    fn flag_count(r: Either<Int, Text>) -> Int {
+        let mut n: Int = 0;
+        if r is Either.Left { n = n + 1; }
+        if r is Either.Right { n = n + 1; }
+        n
+    }
+    assert_eq(flag_count(Either.Left(0)), 1);
+    assert_eq(flag_count(Either.Right("")), 1);
+}
+
+@test
+fn property_select_either_left_payload_round_trip() {
+    let dom: List<Int> = [-1_000_000, -1, 0, 1, 999];
+    for v in dom.iter() {
+        let r: Either<Int, Text> = Either.Left(*v);
+        match r {
+            Either.Left(p) => assert_eq(p, *v),
+            Either.Right(_) => assert(false),
+        }
+    }
+}
+
+// =============================================================================
+// Section B: SelectError — single-variant
+// =============================================================================
+
+@test
+fn property_select_error_only_variant_is_empty_input() {
+    let e: SelectError = SelectError.EmptyInput;
+    assert(e is SelectError.EmptyInput);
+}
+
+fn main() {}

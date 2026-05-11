@@ -1,0 +1,62 @@
+// =============================================================================
+// core-tests/async/spawn_with/integration_test.vr
+// =============================================================================
+
+mount core.async.spawn_with.{CircuitState};
+mount core.collections.list.List;
+
+// =============================================================================
+// CircuitState canonical lifecycle (Closed → Open → HalfOpen → Closed)
+// =============================================================================
+
+@test
+fn integration_spawn_with_breaker_lifecycle_cycle() {
+    fn next_state(s: CircuitState) -> CircuitState {
+        match s {
+            CircuitState.Closed => CircuitState.Open,
+            CircuitState.Open => CircuitState.HalfOpen,
+            CircuitState.HalfOpen => CircuitState.Closed,
+        }
+    }
+    let s0 = CircuitState.Closed;
+    let s1 = next_state(s0);
+    let s2 = next_state(s1);
+    let s3 = next_state(s2);
+    assert(s1 is CircuitState.Open);
+    assert(s2 is CircuitState.HalfOpen);
+    assert(s3 is CircuitState.Closed);
+}
+
+@test
+fn integration_spawn_with_can_attempt_call() {
+    fn can_attempt(s: CircuitState) -> Bool {
+        match s {
+            CircuitState.Closed => true,
+            CircuitState.HalfOpen => true,  // trial calls allowed
+            CircuitState.Open => false,
+        }
+    }
+    assert(can_attempt(CircuitState.Closed));
+    assert(can_attempt(CircuitState.HalfOpen));
+    assert(!can_attempt(CircuitState.Open));
+}
+
+@test
+fn integration_spawn_with_breaker_state_history() {
+    let history: List<CircuitState> = [
+        CircuitState.Closed,
+        CircuitState.Closed,
+        CircuitState.Open,
+        CircuitState.HalfOpen,
+        CircuitState.Closed,
+    ];
+    let mut open_count: Int = 0;
+    for s in history.iter() {
+        if (*s) is CircuitState.Open {
+            open_count = open_count + 1;
+        }
+    }
+    assert_eq(open_count, 1);
+}
+
+fn main() {}

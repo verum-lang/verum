@@ -1,0 +1,88 @@
+// =============================================================================
+// core-tests/async/select/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.select`'s variant-algebra surface
+// (Either<A,B>, SelectError).  Live select / race / try_first need
+// the runtime executor; their tests live in regression_test.vr.
+// =============================================================================
+
+mount core.async.select.{Either, SelectError};
+
+// =============================================================================
+// Section 1: Either<A, B> — 2-variant
+// =============================================================================
+
+@test
+fn test_select_either_left_construction() {
+    let r: Either<Int, Text> = Either.Left(42);
+    assert(r is Either.Left);
+    assert(!(r is Either.Right));
+}
+
+@test
+fn test_select_either_right_construction() {
+    let r: Either<Int, Text> = Either.Right("hello");
+    assert(r is Either.Right);
+    assert(!(r is Either.Left));
+}
+
+@test
+fn test_select_either_left_payload_round_trip() {
+    fn extract_left(r: Either<Int, Text>) -> Int {
+        match r {
+            Either.Left(v) => v,
+            Either.Right(_) => -1,
+        }
+    }
+    assert_eq(extract_left(Either.Left(7)), 7);
+    assert_eq(extract_left(Either.Left(0)), 0);
+    assert_eq(extract_left(Either.Right("nope")), -1);
+}
+
+@test
+fn test_select_either_right_payload_round_trip() {
+    fn extract_right(r: Either<Int, Text>) -> Text {
+        match r {
+            Either.Left(_) => "<left>",
+            Either.Right(v) => v,
+        }
+    }
+    assert_eq(extract_right(Either.Right("hello")), "hello");
+    assert_eq(extract_right(Either.Right("")), "");
+    assert_eq(extract_right(Either.Left(1)), "<left>");
+}
+
+@test
+fn test_select_either_match_exhaustive() {
+    fn classify(r: Either<Int, Int>) -> Text {
+        match r {
+            Either.Left(_) => "left",
+            Either.Right(_) => "right",
+        }
+    }
+    assert_eq(classify(Either.Left(1)), "left");
+    assert_eq(classify(Either.Right(2)), "right");
+}
+
+// =============================================================================
+// Section 2: SelectError — 1-variant (EmptyInput)
+// =============================================================================
+
+@test
+fn test_select_error_empty_input_construction() {
+    let e: SelectError = SelectError.EmptyInput;
+    assert(e is SelectError.EmptyInput);
+}
+
+@test
+fn test_select_error_match_dispatches() {
+    fn describe(e: SelectError) -> Text {
+        match e {
+            SelectError.EmptyInput => "no futures",
+        }
+    }
+    assert_eq(describe(SelectError.EmptyInput), "no futures");
+}
+
+fn main() {}
