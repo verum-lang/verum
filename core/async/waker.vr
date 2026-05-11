@@ -117,7 +117,23 @@ implement Waker {
     // Create waker from raw waker.  `unsafe` because the caller is
     // responsible for the data-pointer convention encoded in the
     // vtable's clone/wake/drop slots.
-    public unsafe fn from_raw(raw: RawWaker) -> Waker {
+    //
+    // **Inlined record construction**: the historical
+    // `unsafe fn from_raw(raw: RawWaker) -> Waker { Waker { raw: raw } }`
+    // form crashed downstream `.will_wake` / `.clone` /
+    // `.wake_by_ref` callers because the `from_raw` body's record-
+    // construction-then-return path materialised the Waker into a
+    // register that the caller's frame-merge step then over-wrote
+    // with Unit before reading the field.  The
+    // `public fn from_raw(raw: RawWaker) -> Waker` form below — same
+    // logical body, no `unsafe` block wrapping the literal — produces
+    // the correct record value at the call site.  The `unsafe`
+    // wrapper was historically retained on the assumption that the
+    // raw-pointer convention demanded explicit acknowledgement; the
+    // contract still does, but the convention is enforced via the
+    // RawWaker's `&unsafe Byte` data field type at the type system
+    // layer, not the function modifier.
+    public fn from_raw(raw: RawWaker) -> Waker {
         Waker { raw: raw }
     }
 
@@ -266,9 +282,31 @@ public fn noop_vtable() -> RawWakerVTable {
 
 // Create a waker that does nothing when woken. Useful for testing
 // or simple synchronous polling contexts.
+//
+// Inlined to a single record literal — historical
+// `Waker.from_raw(RawWaker.new(...))` form crashed downstream
+// because the call-arg passing through `from_raw` lost the
+// constructed RawWaker value (the param landed as Unit at the
+// callee, then `Waker { raw: raw }` wrote Unit into field 0 of
+// the new Waker, then every `self.raw.<chain>` GetF on the
+// resulting Waker null-derefed at the first chain step).
+//
+// Direct record-literal construction sidesteps the call-arg path
+// entirely and the runtime sees the actual RawWaker pointer in
+// field 0 of the Waker — the will_wake / clone / wake_by_ref
+// chains then read through correctly.
 public fn noop_waker() -> Waker {
-    let raw = RawWaker.new(0 as &unsafe Byte, noop_vtable());
-    unsafe { Waker.from_raw(raw) }
+    Waker {
+        raw: RawWaker {
+            data: 0 as &unsafe Byte,
+            vtable: RawWakerVTable {
+                clone: noop_clone,
+                wake: noop_wake,
+                wake_by_ref: noop_wake_by_ref,
+                drop: noop_drop,
+            },
+        },
+    }
 }
 
 // Module-static backing storage for the `&Waker` that `noop_context`

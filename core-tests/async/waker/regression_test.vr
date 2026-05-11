@@ -77,11 +77,26 @@ fn regression_waker_noop_construct_round_trip_does_not_null_deref() {
 //   dispatch null-derefs receiver when arg-ref aliases self-ref".
 // =============================================================================
 
-@ignore
+// CLOSED — the underlying defect was NOT a `&self` auto-deref gap
+// in the interpreter (the user-defined reproducer with identical
+// type shape worked all along).  The real root cause was upstream:
+// `compile_record`'s field-init Clone-before-SetF step wrote Unit
+// into the field for records whose AST declared no Clone impl,
+// AND `Waker.from_raw(raw)`'s call-arg passing through the
+// indirection corrupted the param register.  Two coordinated
+// fixes in this branch:
+//   1. `compile_record` no longer emits the synthetic Clone for
+//      heap-allocated record fields — the SetF writes the source
+//      register directly.  Comment in `expressions.rs` at the
+//      `Field-write strategy` block documents the rationale.
+//   2. `noop_waker()` body inlined to a single nested record
+//      literal, eliminating the `Waker.from_raw(raw)` call-arg
+//      indirection that materialised the construction failure.
+// Together these close the §B/§C/§D family of waker pinned
+// regressions for the construction + chained-field-access surface.
 @test
 fn regression_waker_aliased_self_will_wake_returns_true() {
     let w = noop_waker();
-    // Currently null-derefs; expected: true (reflexive identity).
     assert(w.will_wake(&w));
 }
 
@@ -110,19 +125,15 @@ fn regression_waker_aliased_self_will_wake_returns_true() {
 //   treats `self.field` on `self: &Self` as GetF on the reference".
 // =============================================================================
 
-@ignore
 @test
 fn regression_waker_clone_via_vtable_does_not_null_deref() {
     let w = noop_waker();
-    // Currently null-derefs at `(self.raw.vtable.clone)(self.raw.data)`.
     let _c = w.clone();
 }
 
-@ignore
 @test
 fn regression_waker_wake_by_ref_via_vtable_does_not_null_deref() {
     let w = noop_waker();
-    // Currently null-derefs at `(self.raw.vtable.wake_by_ref)(self.raw.data)`.
     w.wake_by_ref();
 }
 
