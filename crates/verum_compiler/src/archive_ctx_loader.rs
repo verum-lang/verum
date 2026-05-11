@@ -40,13 +40,14 @@
 //!   the type registry's `protocols` field staying intact via the
 //!   linker-merge step.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::OnceLock;
 
 use verum_vbc::archive::VbcArchive;
 use verum_vbc::codegen::{CodegenContext, FunctionInfo};
+use verum_vbc::instruction::Instruction;
 use verum_vbc::module::VbcModule;
-use verum_vbc::types::{TypeId, TypeRef, VariantKind};
+use verum_vbc::types::{StringId, TypeId, TypeRef, VariantKind};
 
 /// Errors raised while loading the archive into codegen ctx.  Best-
 /// effort: the loader skips per-entry failures with a `tracing::warn!`
@@ -637,11 +638,268 @@ fn build_wanted_module_prefixes(
     prefixes
 }
 
+/// Cross-module dependency graph derived from archive bytecode.
+///
+/// Built **once** per archive (cached on `ArchiveCtxCache`) by decoding
+/// every module and harvesting `Call`/`TailCall` (local) +
+/// `CallM` (cross-module) call edges. Reachability BFS from user-source
+/// seeds replaces the prior architecture's hardcoded force-load table
+/// + 5 heuristic filter arms in `register_module_filtered`: every
+/// reachable function is registered; non-reachable stays unloaded.
+///
+/// # Why upfront full decode is acceptable
+///
+/// * Cost: ~250ms first call on a 12 MB archive (rayon-parallel decode).
+/// * Amortised across the process via `OnceLock` — second+ compilations
+///   in the same process pay zero.
+/// * Correctness vs. cost tradeoff: the prior heuristic filter
+///   periodically dropped legitimate cross-module dependencies (tasks
+///   #23 / #24 / #26) producing silent runtime `nil`s — the architectural
+///   loss outweighs the cold-start cost.
+pub(crate) struct SymbolGraph {
+    /// Descriptor name (e.g. `Text.new`, `Maybe.is_some`,
+    /// `sys.bitfield.USIZE_BITS`) → archive entry index that defines it.
+    /// First-defining-module wins on collisions to match
+    /// `register_function`'s first-wins discipline.
+    qualified_to_module: HashMap<String, u32>,
+    /// Simple leaf name → all qualified names sharing that leaf.
+    /// Used when a seed is a bare leaf (`PAGE_SIZE`) and we need to
+    /// fan out to every qualified name ending in `.PAGE_SIZE`.
+    leaf_to_qualified: HashMap<String, Vec<String>>,
+    /// Type-prefix (first segment) → all qualified names with that
+    /// prefix. Used when a seed is a bare type name (`Text`, `Maybe`)
+    /// and we need to reach every `Text.*` / `Maybe.*` method.
+    prefix_to_qualified: HashMap<String, Vec<String>>,
+    /// Per-module function call edges: outer key = archive entry idx,
+    /// inner key = function descriptor name in that module, inner value
+    /// = list of callee descriptor names (qualified or bare) emitted
+    /// by this function's bytecode.
+    edges: HashMap<u32, HashMap<String, Vec<String>>>,
+}
+
+impl SymbolGraph {
+    /// Build the global graph by decoding every archive module in
+    /// parallel and scanning each function's bytecode. Pure CPU work
+    /// over immutable archive bytes — perfectly parallelisable.
+    fn build(archive: &VbcArchive) -> Self {
+        use rayon::prelude::*;
+
+        let per_module: Vec<(u32, ModuleSymbolView)> = (0..archive.index.len())
+            .into_par_iter()
+            .filter_map(|idx| {
+                let module = archive.load_module_by_index(idx).ok()?;
+                let view = scan_module_symbols(&module);
+                Some((idx as u32, view))
+            })
+            .collect();
+
+        let mut qualified_to_module: HashMap<String, u32> = HashMap::new();
+        let mut leaf_to_qualified: HashMap<String, Vec<String>> = HashMap::new();
+        let mut prefix_to_qualified: HashMap<String, Vec<String>> = HashMap::new();
+        let mut edges: HashMap<u32, HashMap<String, Vec<String>>> = HashMap::new();
+        for (idx, view) in per_module {
+            let mut module_edges: HashMap<String, Vec<String>> = HashMap::new();
+            for ModuleFunction { name, callees } in view.functions {
+                qualified_to_module.entry(name.clone()).or_insert(idx);
+                if let Some(leaf) = name.rsplit('.').next() {
+                    if leaf != name {
+                        leaf_to_qualified
+                            .entry(leaf.to_string())
+                            .or_default()
+                            .push(name.clone());
+                    }
+                }
+                if let Some(prefix) = name.split('.').next() {
+                    if prefix != name {
+                        prefix_to_qualified
+                            .entry(prefix.to_string())
+                            .or_default()
+                            .push(name.clone());
+                    }
+                }
+                module_edges.insert(name, callees);
+            }
+            edges.insert(idx, module_edges);
+        }
+        Self {
+            qualified_to_module,
+            leaf_to_qualified,
+            prefix_to_qualified,
+            edges,
+        }
+    }
+
+    /// BFS from seed names. Returns:
+    /// * `reached_qualified`: every qualified function name reachable
+    ///   from the seeds via the call graph.
+    /// * `reached_modules`: archive entry indices containing at least
+    ///   one reached qualified function. Drives module-level decoding.
+    pub(crate) fn reachable(
+        &self,
+        seeds: &HashSet<String>,
+    ) -> (HashSet<String>, HashSet<u32>) {
+        let mut reached: HashSet<String> = HashSet::new();
+        let mut modules: HashSet<u32> = HashSet::new();
+        let mut queue: VecDeque<String> = VecDeque::new();
+
+        let mut enqueue = |name: &str,
+                           reached: &mut HashSet<String>,
+                           queue: &mut VecDeque<String>| {
+            if reached.insert(name.to_string()) {
+                queue.push_back(name.to_string());
+            }
+        };
+
+        // Seed expansion: a seed can be (1) an exact qualified
+        // descriptor name, (2) a bare leaf shared by multiple
+        // qualifieds, or (3) a bare type prefix. Walk all three.
+        for seed in seeds {
+            if self.qualified_to_module.contains_key(seed) {
+                enqueue(seed, &mut reached, &mut queue);
+            }
+            if let Some(matches) = self.leaf_to_qualified.get(seed) {
+                for q in matches {
+                    enqueue(q, &mut reached, &mut queue);
+                }
+            }
+            if let Some(matches) = self.prefix_to_qualified.get(seed) {
+                for q in matches {
+                    enqueue(q, &mut reached, &mut queue);
+                }
+            }
+        }
+
+        while let Some(name) = queue.pop_front() {
+            if let Some(idx) = self.qualified_to_module.get(&name) {
+                modules.insert(*idx);
+                if let Some(module_edges) = self.edges.get(idx) {
+                    if let Some(callees) = module_edges.get(&name) {
+                        for callee in callees {
+                            // Direct qualified resolution.
+                            if self.qualified_to_module.contains_key(callee) {
+                                enqueue(callee, &mut reached, &mut queue);
+                            }
+                            // CallM frequently emits `Type.method`-form
+                            // strings whose receiver type prefix isn't
+                            // a module path — `Text.from_utf8_unchecked`
+                            // resolves via the leaf_to_qualified index.
+                            if let Some(matches) =
+                                self.leaf_to_qualified.get(callee.as_str())
+                            {
+                                for q in matches {
+                                    enqueue(q, &mut reached, &mut queue);
+                                }
+                            }
+                            // For descriptor-name-promoted forms like
+                            // `sys.bitfield.test_bit` whose leaf is
+                            // `test_bit`, also try matching the full
+                            // callee against `Type.method` forms
+                            // ending in this string by stripping the
+                            // type prefix.
+                            if let Some(dot_pos) = callee.find('.') {
+                                let after_type = &callee[dot_pos + 1..];
+                                if let Some(matches) =
+                                    self.leaf_to_qualified.get(after_type)
+                                {
+                                    for q in matches {
+                                        enqueue(q, &mut reached, &mut queue);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        (reached, modules)
+    }
+
+    /// Returns the archive entry name that defines `qualified_name`,
+    /// if any. Used by the type-import side to find the canonical
+    /// type-bearing module.
+    #[allow(dead_code)]
+    pub(crate) fn defining_entry<'a>(
+        &self,
+        qualified_name: &str,
+        archive: &'a VbcArchive,
+    ) -> Option<&'a str> {
+        let idx = *self.qualified_to_module.get(qualified_name)? as usize;
+        archive.index.get(idx).map(|e| e.name.as_str())
+    }
+}
+
+/// Per-function summary for graph construction.
+struct ModuleFunction {
+    name: String,
+    callees: Vec<String>,
+}
+
+struct ModuleSymbolView {
+    functions: Vec<ModuleFunction>,
+}
+
+/// Decode each function's bytecode and harvest its call edges.
+///
+/// `Call`/`TailCall` resolve via the module's local function table
+/// (those edges stay intra-module — once we register a module's
+/// functions wholesale, the local edge is a no-op for reachability).
+/// `CallM` resolves via the module's string table; the resulting
+/// method-name string is the cross-module dispatch key.
+fn scan_module_symbols(module: &VbcModule) -> ModuleSymbolView {
+    let name_by_id: HashMap<StringId, String> = module
+        .strings
+        .iter()
+        .map(|(s, id)| (id, s.to_string()))
+        .collect();
+    let local_id_to_name: HashMap<u32, String> = module
+        .functions
+        .iter()
+        .filter_map(|f| name_by_id.get(&f.name).map(|n| (f.id.0, n.clone())))
+        .collect();
+    let mut functions = Vec::with_capacity(module.functions.len());
+    for fn_desc in &module.functions {
+        let name = match name_by_id.get(&fn_desc.name) {
+            Some(n) => n.clone(),
+            None => continue,
+        };
+        let mut callees: Vec<String> = Vec::new();
+        let body_start = fn_desc.bytecode_offset as usize;
+        let body_end = body_start.saturating_add(fn_desc.bytecode_length as usize);
+        if body_end <= module.bytecode.len() && body_end > body_start {
+            let body = &module.bytecode[body_start..body_end];
+            if let Ok(instructions) = verum_vbc::bytecode::decode_instructions(body) {
+                for instr in &instructions {
+                    match instr {
+                        Instruction::Call { func_id, .. }
+                        | Instruction::TailCall { func_id, .. } => {
+                            if let Some(callee) = local_id_to_name.get(func_id) {
+                                callees.push(callee.clone());
+                            }
+                        }
+                        Instruction::CallM { method_id, .. } => {
+                            if let Some(callee) = name_by_id.get(&StringId(*method_id)) {
+                                callees.push(callee.clone());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        functions.push(ModuleFunction { name, callees });
+    }
+    ModuleSymbolView { functions }
+}
+
 pub struct ArchiveCtxCache {
     /// One-shot lazily-built table: qualified name → FunctionInfo.
     /// Holds both qualified (`module.simple`) and simple-name keys
     /// after first build.
     table: OnceLock<HashMap<String, FunctionInfo>>,
+    /// Archive-wide call-graph index. Built lazily on first
+    /// `apply_lazy_with_types` call; subsequent compilations within
+    /// the process reuse the cached graph (~free).
+    graph: OnceLock<SymbolGraph>,
 }
 
 impl ArchiveCtxCache {
@@ -649,7 +907,16 @@ impl ArchiveCtxCache {
     pub const fn new() -> Self {
         Self {
             table: OnceLock::new(),
+            graph: OnceLock::new(),
         }
+    }
+
+    /// Lazily build the per-archive symbol graph (reachability index
+    /// from `CallM` / `Call` / `TailCall` edges). Cached for the
+    /// process lifetime — first call pays the full archive decode
+    /// (~250ms on a 12 MB archive), every later call is free.
+    pub(crate) fn graph(&self, archive: &VbcArchive) -> &SymbolGraph {
+        self.graph.get_or_init(|| SymbolGraph::build(archive))
     }
 
     /// Lazily build the cache from `archive` (idempotent — first call
@@ -996,35 +1263,38 @@ impl ArchiveCtxCache {
         for name in to_add {
             wanted.insert(name.to_string());
         }
-        // **Primitive-impl transitive force-load (task #23).** Every
-        // stdlib function body that uses a primitive operator
-        // (`a != b`, `a + b`, `a < b`, …) on a USize/Int/Bool/Char/
-        // Text value emits either a direct VBC opcode (Bitwise, Cmp,
-        // Arith) OR a `CallM { method_id }` pointing to the
-        // primitive's protocol-impl method (USize.ne, Int.add, …)
-        // depending on the optimisation pass. The CallM path needs
-        // the receiver's type-method-table to carry the impl entry
-        // — which only happens when the carrier module's archive
-        // entry loads.
+        // **Transitive-closure reachability** (replaces the prior
+        // architecture's 5 hardcoded force-loads for tasks #23 / #24 /
+        // #26). Build the archive-wide symbol graph once (cached on
+        // `self.graph` for the process lifetime), BFS from user
+        // seeds following every `Call` / `TailCall` / `CallM` edge
+        // observed in archive bytecode, and union the resulting
+        // qualified-name set into `wanted` + the defining-module set
+        // into `wanted_module_prefixes`. Every cross-module dependency
+        // surfaces by construction — no hardcoded entries.
+        let graph = self.graph(archive);
+        let (reached_qualified, reached_module_idxs) = graph.reachable(&wanted);
+        for idx in &reached_module_idxs {
+            if let Some(entry) = archive.index.get(*idx as usize) {
+                wanted_module_prefixes.insert(entry.name.clone());
+            }
+        }
+        // Adding reached names to `wanted` makes the
+        // per-function filter in `register_module_filtered`
+        // accept them via the literal-simple-name branch — no
+        // need for a separate acceptance arm. Auxiliary fanouts
+        // keyed on `wanted` (canonical-`Type.method` registration,
+        // alias-leaf fanout) automatically pick up these entries.
         //
-        // Without this force-load, user code that mounts a stdlib
-        // submodule whose function bodies CallM-dispatch primitive
-        // operators ends up with a method-table miss at runtime:
-        // the call silently returns Unit (`bitfield.test_bit(v, n)`
-        // returning `nil` instead of `Bool` — task #23).
-        //
-        // Architecturally cleaner long-term fix: a transitive-closure
-        // pass that walks every loaded function's bytecode for
-        // `CallM` method_id strings, derives the carrier-type from
-        // the receiver's type-table, and loads each impl method.
-        // For now, force-load the primitive-impl modules
-        // unconditionally — cold-start cost is ~5 additional archive
-        // entries decoded, vs. the alternative (silent Unit at
-        // runtime in any user code that mounts an operator-using
-        // stdlib submodule without also mounting the primitives).
-        wanted_module_prefixes.insert("core.base.primitives".to_string());
-        wanted_module_prefixes.insert("core.base.protocols".to_string());
-        wanted_module_prefixes.insert("core.base".to_string());
+        // Filter to dotted names only so the unqualified-wanted Pass 2
+        // below doesn't see bare descriptor names (like `main`,
+        // `start`) that would trigger a full-archive string-table
+        // scan for nothing useful.
+        for name in reached_qualified {
+            if name.contains('.') {
+                wanted.insert(name);
+            }
+        }
         let mut fn_modules = 0usize;
         let mut type_modules = 0usize;
         // **Cold-start optimisation**: parallelise the decode step.
@@ -1337,6 +1607,121 @@ mod tests {
                 println!("ctx key: {}", k);
             }
         }
+    }
+
+    /// End-to-end: simulate the `verum run /tmp/text_no_prelude.vr`
+    /// path. Build SymbolGraph, BFS from a `Text` seed, verify the
+    /// defining module gets loaded and `Text.new` lands in the
+    /// codegen ctx under the bare `Text.new` key (NOT just the
+    /// module-qualified form).
+    #[test]
+    fn end_to_end_text_new_registered_under_bare_key() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return,
+        };
+        // Mirror the seed set the harvester would produce for
+        // `let buffer = Text.new()` (MethodCall shape).
+        let mut wanted: HashSet<String> = HashSet::new();
+        wanted.insert("Text".to_string());
+        wanted.insert("Text.new".to_string());
+        wanted.insert("print".to_string());
+
+        let cache = ArchiveCtxCache::new();
+        let graph = cache.graph(archive);
+
+        // Step 1: graph must have Text.new in qualified_to_module.
+        let text_new_module_idx = *graph
+            .qualified_to_module
+            .get("Text.new")
+            .expect("graph must index Text.new in qualified_to_module");
+        let text_new_entry = &archive.index[text_new_module_idx as usize];
+        eprintln!(
+            "Text.new is defined in archive entry: {} (idx {})",
+            text_new_entry.name, text_new_module_idx
+        );
+
+        // Step 2: reachability from `wanted` must include Text.new.
+        let (reached, reached_modules) = graph.reachable(&wanted);
+        assert!(
+            reached.contains("Text.new"),
+            "BFS from Text/Text.new MUST reach Text.new"
+        );
+        assert!(
+            reached_modules.contains(&text_new_module_idx),
+            "BFS modules MUST include the Text.new defining entry ({})",
+            text_new_entry.name
+        );
+
+        // Step 3: simulate register_module_filtered — load the entry,
+        // then verify Text.new gets registered.
+        let module = archive
+            .load_module_by_index(text_new_module_idx as usize)
+            .expect("entry must decode");
+        let mut ctx = CodegenContext::new();
+        let mut next_id: u32 = 0;
+        let _remap = register_module_filtered(
+            &module,
+            &text_new_entry.name,
+            &mut ctx,
+            &wanted,
+            &mut next_id,
+        );
+
+        // Step 4: bare `Text.new` MUST be in ctx.functions for
+        // user-side static-method dispatch.
+        let registered_keys: Vec<String> = ctx
+            .functions
+            .keys()
+            .filter(|k| k.contains("Text.new") || k.ends_with(".new"))
+            .cloned()
+            .collect();
+        assert!(
+            ctx.lookup_function("Text.new").is_some(),
+            "ctx must register `Text.new` under bare key for user-side \
+             static dispatch. Registered Text.new-related keys: {:?}",
+            registered_keys
+        );
+    }
+
+    /// Drift-pin: the archive-wide symbol graph must surface every
+    /// archive-defined `Text.new` / `Maybe.is_some` / `Map.contains_key`
+    /// callee from a seed walk that names just the bare type. This is
+    /// the contract that lets `register_module_filtered` accept the
+    /// function via the literal-simple-name match without falling back
+    /// to the heuristic filter arms.
+    #[test]
+    fn graph_reaches_canonical_stdlib_methods_from_type_seeds() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return, // bootstrap-phase build, no archive
+        };
+        let cache = ArchiveCtxCache::new();
+        let graph = cache.graph(archive);
+        // Quick sanity: graph indexes some functions.
+        assert!(
+            !graph.qualified_to_module.is_empty(),
+            "graph qualified-to-module index empty — graph build broken"
+        );
+        // Seed `Text` should reach `Text.new` (and other Text methods)
+        // via the prefix index.
+        let mut seeds = HashSet::new();
+        seeds.insert("Text".to_string());
+        let (reached, _modules) = graph.reachable(&seeds);
+        assert!(
+            reached.contains("Text.new"),
+            "graph reachability from seed `Text` MUST reach `Text.new`; \
+             qualified_to_module has Text.new = {}, prefix_to_qualified[Text].len() = {}",
+            graph.qualified_to_module.contains_key("Text.new"),
+            graph.prefix_to_qualified.get("Text").map(|v| v.len()).unwrap_or(0),
+        );
+        assert!(
+            reached.contains("Maybe.is_some") || reached.contains("Map.contains_key"),
+            "transitive reachability MUST reach at least one of \
+             Maybe.is_some / Map.contains_key (transitively called from \
+             Text impl methods); reached={} entries",
+            reached.len(),
+        );
     }
 
     /// Cache layer round-trip: first call builds, second clones.
@@ -2080,10 +2465,33 @@ fn register_module_filtered(
         let is_method_of_wanted_type = {
             let first_dot = simple_name_str.find('.').map(|i| &simple_name_str[..i]);
             let last_dot = simple_name_str.rfind('.').map(|i| &simple_name_str[..i]);
+            // Second-to-last segment — handles deep-nested promoted
+            // names like `core.text.text.Text.new` where the carrier
+            // type `Text` is the SECOND-to-last segment, and wanted
+            // contains `Text` as a bare type-name. Without this arm
+            // `Text.new` fails to register because neither the
+            // first-dot ancestor (`core`) nor the last-dot ancestor
+            // (`core.text.text.Text`) is in wanted (which has just
+            // the bare `Text`).
+            let second_to_last = {
+                let leaf_pos = simple_name_str.rfind('.');
+                leaf_pos.and_then(|leaf_idx| {
+                    let prefix = &simple_name_str[..leaf_idx];
+                    let parent_pos = prefix.rfind('.');
+                    Some(match parent_pos {
+                        Some(p) => &prefix[p + 1..],
+                        None => prefix,
+                    })
+                })
+            };
             first_dot.map(|p| wanted.contains(p)).unwrap_or(false)
                 || last_dot
                     .filter(|p| Some(*p) != first_dot)
                     .map(|p| wanted.contains(p))
+                    .unwrap_or(false)
+                || second_to_last
+                    .filter(|s| !s.is_empty())
+                    .map(|s| wanted.contains(s))
                     .unwrap_or(false)
         };
         // Module-form mount surface: `mount core.sys.bitfield;` adds
@@ -2257,13 +2665,36 @@ fn register_module_filtered(
         // whose source-module-qualified descriptor.name ends in `.name`,
         // register the function under the user's wanted form too.
         let simple_leaf = simple_name.rsplit('.').next().unwrap_or(simple_name.as_str());
+        let simple_prefix = simple_name.split('.').next().unwrap_or(simple_name.as_str());
         for w in wanted.iter() {
             if w == &qualified {
                 continue;
             }
             let w_leaf = w.rsplit('.').next().unwrap_or(w.as_str());
+            // **Cross-pollination guard** (root cause of task #26):
+            // when both `w` and `simple_name` are qualified `Type.method`
+            // forms with the SAME leaf but DIFFERENT type prefixes,
+            // registering this function's info under `w` mis-binds:
+            // e.g. when processing `Utf8Error.new` (arity 1), wanted
+            // contains `Text.new` (leaf `new` matches), the bare check
+            // would register Utf8Error's info under `Text.new`. Later
+            // Text.new (arity 0) processing finds `lookup_function`
+            // already returns Some — the canonical fanout skips, and
+            // user-side static-method dispatch sees an arity-1 entry
+            // for `Text.new()` (arity-0 call), falls through every
+            // resolution arm, surfaces as `UndefinedFunction("Text.new")`.
+            //
+            // Fix: when w is qualified, only fan out when its type
+            // prefix matches simple_name's. Bare-name w (alias / mount
+            // form without `.`) keeps the original behaviour — that's
+            // the intended use case (mount-form → leaf-renaming).
+            let w_prefix = w.split('.').next().unwrap_or(w.as_str());
+            let prefixes_compatible = !w.contains('.')
+                || !simple_name.contains('.')
+                || w_prefix == simple_prefix;
             if w_leaf == simple_leaf
                 && w != simple_name.as_str()
+                && prefixes_compatible
                 && ctx.lookup_function(w).is_none()
             {
                 ctx.register_function(w.clone(), info.clone());
