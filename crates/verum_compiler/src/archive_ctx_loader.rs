@@ -2076,10 +2076,35 @@ fn register_module_filtered(
         // dropping wholesale-module mounts on the floor before this
         // commit.
         let is_wholesale_module_mount = wanted.contains(module_name);
+        // Last-segment-matches-wanted-bare-name: when the user writes
+        // `mount core.sys.{PAGE_SIZE};`, wanted carries the bare
+        // `PAGE_SIZE` plus `core.sys.PAGE_SIZE` + (cog-stripped) `sys.PAGE_SIZE`.
+        // The const lives in `core/sys/common.vr` (declares
+        // `module sys.common;`), so its archive descriptor.name is
+        // `sys.common.PAGE_SIZE` (after the precompiler's descriptor-
+        // name-promotion).  None of the wanted forms match — the
+        // user's wanted bare-name `PAGE_SIZE` is two segments shy of
+        // the descriptor's `sys.common.PAGE_SIZE`.  This last arm
+        // closes that gap: if `simple_name`'s LAST segment matches a
+        // wanted bare name AND simple_name has 2+ segments (so we
+        // don't redundantly match on already-bare names that pass the
+        // first arm), accept.
+        //
+        // Safety: bare-name registration is first-wins
+        // (`register_function`'s `prefer_existing_functions=true` flow
+        // at line ~1910), so this can't clobber an earlier-claimed
+        // bare name.  Aliased duplicates land in qualified-only slots.
+        let last_segment_matches_wanted = simple_name_str
+            .rsplit('.')
+            .next()
+            .filter(|leaf| simple_name_str.len() > leaf.len()) // 2+ segments
+            .map(|leaf| wanted.contains(leaf))
+            .unwrap_or(false);
         if !wanted.contains(simple_name_str)
             && !wanted.contains(&qualified_borrowed)
             && !is_method_of_wanted_type
             && !is_wholesale_module_mount
+            && !last_segment_matches_wanted
         {
             continue;
         }
@@ -2192,16 +2217,42 @@ fn register_module_filtered(
         // picks the bare name as the descriptor, and runtime
         // intercepts that key on a deeper qualifier (e.g.
         // `func_name.contains("script.args")`) miss.
+        // Compare wanted-W's leaf against simple_name's leaf — NOT against
+        // the whole simple_name string. The precompiler's descriptor-name
+        // promotion (commit 53c7d5448) turned simple_name from a bare leaf
+        // (`args`) into a fully-qualified path (`script.args` for `script.vr`
+        // declaring `module script;` under `core.shell`); the prior
+        // `Some(simple_name.as_str())` literal-string comparison broke for
+        // every promoted descriptor.  Leaf-to-leaf matching restores the
+        // original intent: when the user's `mount X.{name}` wants a symbol
+        // whose source-module-qualified descriptor.name ends in `.name`,
+        // register the function under the user's wanted form too.
+        let simple_leaf = simple_name.rsplit('.').next().unwrap_or(simple_name.as_str());
         for w in wanted.iter() {
             if w == &qualified {
                 continue;
             }
-            if w.contains('.')
-                && w.rsplit('.').next() == Some(simple_name.as_str())
+            let w_leaf = w.rsplit('.').next().unwrap_or(w.as_str());
+            if w_leaf == simple_leaf
+                && w != simple_name.as_str()
                 && ctx.lookup_function(w).is_none()
             {
                 ctx.register_function(w.clone(), info.clone());
             }
+        }
+        // Additional: register under the BARE leaf as well when the
+        // wanted set contains it (i.e. the user mounted `{leaf}` directly,
+        // expecting bare-name dispatch). The fanout above handles the
+        // dotted forms; this bare-form arm closes the gap for
+        // `mount core.sys.{PAGE_SIZE}` where wanted has the bare
+        // `PAGE_SIZE` and the descriptor is `sys.common.PAGE_SIZE` —
+        // without this, user-side `PAGE_SIZE` references the bare-name
+        // slot which never gets the archive-loaded value, defaulting to 0.
+        if simple_leaf != simple_name.as_str()
+            && wanted.contains(simple_leaf)
+            && ctx.lookup_function(simple_leaf).is_none()
+        {
+            ctx.register_function(simple_leaf.to_string(), info.clone());
         }
         // **Arity-disambiguation contract.** Always go through
         // `register_function` for the simple-name registration so its
@@ -2219,7 +2270,28 @@ fn register_module_filtered(
         // the prior gate's behaviour); different-arity → store under
         // `name#arity` so `lookup_function_with_arity` can pick the
         // right one.
-        ctx.register_function(simple_name, info);
+        //
+        // **Descriptor-name-promotion compatibility:** when `simple_name`
+        // is a multi-dotted descriptor path (e.g. `sys.bitfield.USIZE_BITS`
+        // post-promotion in commit 53c7d5448), the dotted form duplicates
+        // the `qualified` key emitted above for suffix-match purposes —
+        // a `find_function_by_suffix(".bitfield.USIZE_BITS")` then hits
+        // BOTH `core.sys.sys.bitfield.USIZE_BITS` AND
+        // `sys.bitfield.USIZE_BITS`, returns `None` on ambiguity, and
+        // user code falls through to `UndefinedVariable`. Strip to the
+        // leaf in that case — the bare-leaf form is what the arity-
+        // disambiguation contract needs, and the qualified form is
+        // already covered by `qualified` + the fanout above.
+        let simple_for_registration = if simple_name.contains('.') {
+            simple_name
+                .rsplit('.')
+                .next()
+                .unwrap_or(simple_name.as_str())
+                .to_string()
+        } else {
+            simple_name
+        };
+        ctx.register_function(simple_for_registration, info);
     }
 
     // Pass 4: register every sum-type's variant constructors from
