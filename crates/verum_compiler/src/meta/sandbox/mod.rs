@@ -374,43 +374,24 @@ impl Default for MetaSandbox {
 // Size and Alignment Computation (moved from original sandbox.rs)
 // ============================================================================
 
-/// Compute the size in bytes for a type or value
+/// Compute the size in bytes for a type or value.
+///
+/// Primitive sizes delegate to `verum_common::layout::primitive_size_by_name`
+/// (the canonical drift-pinned size oracle); compound stdlib types
+/// (collections, wrappers, smart pointers) keep their own arms here.
 fn compute_size_of(arg: &ConstValue) -> Result<i64, SandboxError> {
     match arg {
         ConstValue::Text(type_name) => {
-            match type_name.as_str() {
-                // Signed integers
-                "Int8" | "i8" => Ok(1),
-                "Int16" | "i16" => Ok(2),
-                "Int32" | "i32" => Ok(4),
-                "Int64" | "i64" => Ok(8),
-                "Int128" | "i128" => Ok(16),
-                "Int" => Ok(8),
-                "ISize" | "isize" => Ok(8),
-
-                // Unsigned integers
-                "UInt8" | "u8" | "Byte" => Ok(1),
-                "UInt16" | "u16" => Ok(2),
-                "UInt32" | "u32" => Ok(4),
-                "UInt64" | "u64" | "UInt" => Ok(8),
-                "UInt128" | "u128" => Ok(16),
-                "USize" | "usize" => Ok(8),
-
-                // Floating point
-                "Float32" | "f32" => Ok(4),
-                "Float64" | "Float" | "f64" => Ok(8),
-
-                // Boolean and character
-                "Bool" | "bool" => Ok(1),
-                "Char" | "char" => Ok(4),
-
-                // Unit type
-                "Unit" | "()" => Ok(0),
-
-                // Pointer types
+            let name = type_name.as_str();
+            // Canonical size for every primitive alias
+            if let Some(bytes) = verum_common::layout::primitive_size_by_name(name) {
+                return Ok(bytes as i64);
+            }
+            match name {
+                // Pointer types — 8 bytes on every supported target
                 "ptr" | "Ptr" | "&" | "*const" | "*mut" => Ok(8),
 
-                // Collection types
+                // Collection types (stdlib-specific layout)
                 "List" | "Array" => Ok(24),
                 "Text" | "String" => Ok(24),
                 "Map" | "HashMap" => Ok(8),
@@ -429,7 +410,7 @@ fn compute_size_of(arg: &ConstValue) -> Result<i64, SandboxError> {
 
                 _ => Err(SandboxError::UnsafeOperation {
                     operation: Text::from("size_of"),
-                    reason: Text::from(format!("Unknown type: {}", type_name.as_str())),
+                    reason: Text::from(format!("Unknown type: {}", name)),
                 }),
             }
         }
@@ -463,33 +444,22 @@ fn compute_size_of(arg: &ConstValue) -> Result<i64, SandboxError> {
 fn compute_align_of(arg: &ConstValue) -> Result<i64, SandboxError> {
     match arg {
         ConstValue::Text(type_name) => {
-            match type_name.as_str() {
-                // 1-byte alignment
-                "Int8" | "i8" | "UInt8" | "u8" | "Byte" => Ok(1),
-                "Bool" | "bool" => Ok(1),
-                "Unit" | "()" => Ok(1),
-
-                // 2-byte alignment
-                "Int16" | "i16" | "UInt16" | "u16" => Ok(2),
-
-                // 4-byte alignment
-                "Int32" | "i32" | "UInt32" | "u32" => Ok(4),
-                "Float32" | "f32" => Ok(4),
-                "Char" | "char" => Ok(4),
-
-                // 8-byte alignment
-                "Int64" | "i64" | "UInt64" | "u64" => Ok(8),
-                "Int" | "UInt" => Ok(8),
-                "ISize" | "isize" | "USize" | "usize" => Ok(8),
-                "Float64" | "Float" | "f64" => Ok(8),
+            let name = type_name.as_str();
+            // Primitives: natural alignment equals size on every
+            // supported target. Single source of truth via the
+            // canonical `primitive_size_by_name` registry; compound
+            // stdlib types keep their explicit pointer-width arms.
+            if let Some(bytes) = verum_common::layout::primitive_size_by_name(name) {
+                // Unit aligns to 1 in the source registry (size=0); align
+                // semantics expect a non-zero alignment so coerce.
+                return Ok(if bytes == 0 { 1 } else { bytes as i64 });
+            }
+            match name {
                 "ptr" | "Ptr" | "&" | "*const" | "*mut" | "fn" | "Fn" => Ok(8),
                 "List" | "Array" | "Text" | "String" => Ok(8),
                 "Map" | "HashMap" | "Set" | "HashSet" => Ok(8),
                 "Maybe" | "Option" | "Result" => Ok(8),
                 "Heap" | "Box" | "Shared" | "Rc" | "Arc" => Ok(8),
-
-                // 16-byte alignment
-                "Int128" | "i128" | "UInt128" | "u128" => Ok(16),
 
                 _ => Err(SandboxError::UnsafeOperation {
                     operation: Text::from("align_of"),
