@@ -1110,12 +1110,11 @@ impl<'a> IntrinsicCodegen<'a> {
             // path defers to the runtime extern call.
             InlineSequenceId::PermissionStatsRead => None,
             InlineSequenceId::PermissionStatsClear => None,
-            // `TextAsBytes` exposes the byte-buffer view of a Text
-            // value; the conversion happens via a runtime helper
-            // at call time rather than as an inline VBC opcode
-            // sequence.  MLIR codegen defers to the extern call,
-            // matching the Permission* siblings above.
-            InlineSequenceId::TextAsBytes => None,
+            // `TextAsBytes` arm lives next to `TextByteLen` above (line
+            // 694) — both lower to a `TextExtended` instruction with the
+            // appropriate `TextSubOpcode`.  A duplicate arm here was
+            // unreachable and removed to keep the match's single source
+            // of truth at the Text-intrinsic block.
         }
     }
 
