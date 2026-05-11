@@ -458,6 +458,39 @@ impl<'s> CompilationPipeline<'s> {
         self.pre_register_canonical_static_methods(&all_parsed_modules)?;
 
         // ====================================================================
+        // STEP 3.6: Pre-register every stdlib variant constructor globally
+        //          (task #16 stage-2 — AdMysql / AdPostgres / IoError /
+        //           CkTable / RNull / NotInitialized / SrsMismatch /
+        //           InvalidPublicKey / VerificationFailed cluster)
+        // ====================================================================
+        //
+        // Same architectural class as stage-1 but for SUM-TYPE variant
+        // constructors instead of inherent-impl methods.  When module
+        // A defines `type ErrorKind is AdMysql | AdPostgres | IoError;`
+        // and module B (compiled later in topological order) references
+        // `AdMysql` value-position, the per-module codegen at STEP 4
+        // can't find it in `global_function_registry` and emits
+        // `[lenient] SKIP X.Y: undefined variable: AdMysql` (~131
+        // skips at the May-11 baseline across AdMysql, AdPostgres,
+        // IoError, CkTable, RNull, NotInitialized, SrsMismatch,
+        // InvalidPublicKey, VerificationFailed and their downstream
+        // dependents).
+        //
+        // The typechecker side ALREADY populates
+        // `variant_constructor_parents` via Pass 2's
+        // `register_type_declaration` (decls.rs:953+ `entry().or_default().push()`),
+        // but the codegen's flat function-lookup table runs in a
+        // separate per-module context with first-wins simple-name
+        // resolution at `verum_vbc::codegen::mod.rs:8542`.  Pre-
+        // registering each variant constructor under both qualified
+        // (`<Parent>.<Variant>`) and simple (`<Variant>`, first-wins
+        // discipline preserved) keys bridges the gap.
+        if config.verbose {
+            eprintln!("Phase 2.6: Pre-registering stdlib variant constructors globally...");
+        }
+        self.pre_register_canonical_variant_constructors(&all_parsed_modules)?;
+
+        // ====================================================================
         // STEP 4: Compile each module to VBC
         // ====================================================================
         if config.verbose {
@@ -791,6 +824,167 @@ impl<'s> CompilationPipeline<'s> {
             eprintln!(
                 "[task #16 stage-1] pre-registered {} canonical-stdlib static-method stubs",
                 stubs_registered
+            );
+        }
+        Ok(())
+    }
+
+    /// Task #16 stage-2: pre-register every stdlib variant
+    /// constructor as a stub `FunctionInfo` in
+    /// `global_function_registry` BEFORE per-module compilation.
+    ///
+    /// Closes the AdMysql / AdPostgres / IoError / CkTable / RNull /
+    /// NotInitialized / SrsMismatch / InvalidPublicKey /
+    /// VerificationFailed (~131 lenient-skips) cluster caused by
+    /// per-module codegen running before the producing module's
+    /// variant constructors have been registered globally.
+    ///
+    /// For every `type X is A | B | C(T) | D { f: F };` declaration,
+    /// registers each variant under:
+    ///   * qualified `<X>.<Variant>` — unconditional, every variant
+    ///     gets its own qualified slot for unambiguous receiver-type
+    ///     resolution.
+    ///   * simple `<Variant>` — first-wins discipline preserved.
+    ///     Same-named variants from different parent types (Ok/Err in
+    ///     Result vs CheckedResult, None in Maybe vs other stdlib
+    ///     types) compete for the simple slot; the first registered
+    ///     wins.  Call sites resolve via arity/expected-type fallback
+    ///     elsewhere — same discipline as the existing
+    ///     `variant_collisions` machinery in
+    ///     `verum_vbc::codegen::mod.rs:8542`.
+    ///
+    /// Stub `FunctionInfo` carries `variant_tag = Some(<tag>)` so
+    /// the codegen's variant-constructor dispatch fires when the
+    /// stub is consulted before the real body lands.  Parent name
+    /// is preserved in `parent_type_name` for receiver-type
+    /// fallback.
+    fn pre_register_canonical_variant_constructors(
+        &mut self,
+        all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
+    ) -> Result<()> {
+        use verum_ast::decl::TypeDeclBody;
+        use verum_ast::ItemKind;
+        use verum_vbc::codegen::FunctionInfo;
+        use verum_vbc::module::FunctionId;
+
+        let mut variants_registered: usize = 0;
+        // Track which simple-name slots are already taken so we
+        // preserve first-wins discipline across the entire pre-pass.
+        // (We DON'T short-circuit on the global_function_registry
+        // because that table also holds non-variant registrations
+        // from stage-1 stubs.)
+        let mut simple_name_taken: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for (_module_name, ast_modules) in all_modules {
+            for (_file_path, ast_module) in ast_modules {
+                for item in ast_module.items.iter() {
+                    let type_decl = match &item.kind {
+                        ItemKind::Type(td) => td,
+                        _ => continue,
+                    };
+                    let variants = match &type_decl.body {
+                        TypeDeclBody::Variant(v) => v,
+                        _ => continue,
+                    };
+                    let parent_name = type_decl.name.name.to_string();
+                    for (tag, variant) in variants.iter().enumerate() {
+                        let variant_name = variant.name.name.to_string();
+                        let qualified = format!("{}.{}", parent_name, variant_name);
+                        if self.global_function_registry.contains_key(&qualified) {
+                            continue;
+                        }
+                        // Recover variant arity from its payload shape.
+                        let (arity, payload_type_names) = match &variant.data {
+                            verum_common::Maybe::None => (0usize, Vec::<String>::new()),
+                            verum_common::Maybe::Some(
+                                verum_ast::decl::VariantData::Tuple(types),
+                            ) => {
+                                let n = types.len();
+                                let names: Vec<String> = types
+                                    .iter()
+                                    .filter_map(|ty| {
+                                        if let verum_ast::ty::TypeKind::Path(p) = &ty.kind {
+                                            p.as_ident().map(|i| i.name.to_string())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect();
+                                (n, names)
+                            }
+                            verum_common::Maybe::Some(
+                                verum_ast::decl::VariantData::Record(fields),
+                            ) => {
+                                let n = fields.len();
+                                let names: Vec<String> = fields
+                                    .iter()
+                                    .filter_map(|f| {
+                                        if let verum_ast::ty::TypeKind::Path(p) = &f.ty.kind {
+                                            p.as_ident().map(|i| i.name.to_string())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect();
+                                (n, names)
+                            }
+                        };
+                        // Fresh sentinel id in a distinct range
+                        // (`u32::MAX - 0xC0_0000..`) so it doesn't
+                        // collide with stage-1's stub range
+                        // (`u32::MAX - 0x40_0000..`) OR the existing
+                        // variant-tag sentinel descent
+                        // (`u32::MAX - tag`).
+                        let stub_id =
+                            FunctionId(u32::MAX - 0xC0_0000 - variants_registered as u32);
+                        let param_names: Vec<String> = (0..arity)
+                            .map(|i| format!("_arg{}", i))
+                            .collect();
+                        let info = FunctionInfo {
+                            id: stub_id,
+                            param_count: arity,
+                            param_names,
+                            param_type_names: payload_type_names.clone(),
+                            is_async: false,
+                            is_generator: false,
+                            contexts: vec![],
+                            return_type: None,
+                            yield_type: None,
+                            intrinsic_name: None,
+                            variant_tag: Some(tag as u32),
+                            parent_type_name: Some(parent_name.clone()),
+                            variant_payload_types: if payload_type_names.is_empty() {
+                                None
+                            } else {
+                                Some(payload_type_names)
+                            },
+                            is_partial_pattern: false,
+                            takes_self_mut_ref: false,
+                            return_type_name: Some(parent_name.clone()),
+                            return_type_inner: None,
+                            is_const: false,
+                            is_transparent_wrapper: false,
+                        };
+                        self.global_function_registry
+                            .insert(qualified, info.clone());
+                        // Simple-name slot: first-wins.
+                        if simple_name_taken.insert(variant_name.clone())
+                            && !self
+                                .global_function_registry
+                                .contains_key(&variant_name)
+                        {
+                            self.global_function_registry
+                                .insert(variant_name, info);
+                        }
+                        variants_registered += 1;
+                    }
+                }
+            }
+        }
+        if std::env::var("VERUM_TRACE_STUB").is_ok() {
+            eprintln!(
+                "[task #16 stage-2] pre-registered {} canonical-stdlib variant-constructor stubs",
+                variants_registered
             );
         }
         Ok(())
