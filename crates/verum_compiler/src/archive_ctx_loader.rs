@@ -1884,6 +1884,27 @@ fn collect_mount_names(
                 }
             }
             out.insert(full.join("."));
+            // Cog-prefix-stripped form: when the user writes
+            // `mount core.sys.bitfield;`, the precompiler stores
+            // function descriptor names in the `module sys.bitfield;`-
+            // declared form (`sys.bitfield.USIZE_BITS`), which has
+            // NO `core.` prefix because `core` is the cog name and
+            // the file's `module` declaration scopes within the cog.
+            // The archive's `register_module_filtered` then checks
+            // `wanted.contains(simple_name_str)` — without the
+            // stripped form here, the wholesale-mount + method-of-
+            // wanted-type gates miss the grandparent-bundled case
+            // (every `.vr` file under `core/sys/` folded into
+            // archive entry `core.sys`, each with its own
+            // `module sys.<X>;` declaration). Stripping the leading
+            // cog segment (`core` in stdlib, the project cog name
+            // for user code) lets the filter recognise these.
+            if full.len() >= 2 {
+                let stripped = full[1..].join(".");
+                if !stripped.is_empty() {
+                    out.insert(stripped);
+                }
+            }
         }
         MountTreeKind::Nested {
             prefix: nested_prefix,
@@ -2010,13 +2031,32 @@ fn register_module_filtered(
         // `compile_method_call` falls through to the regular
         // method-call path which evaluates `Path` as a value
         // expression.
-        let is_method_of_wanted_type = simple_name_str
-            .find('.')
-            .map(|dot_idx| {
-                let parent = &simple_name_str[..dot_idx];
-                wanted.contains(parent)
-            })
-            .unwrap_or(false);
+        // Two-arm parent check:
+        //
+        //  (i)  *First-dot* parent — the classic `<Type>.<method>`
+        //       shape where simple_name encodes a single-segment
+        //       carrier type (`Path.new` for a `mount core.io.path.Path`
+        //       declaration). Wanted contains the carrier name `Path`.
+        //
+        //  (ii) *Last-dot* parent — the precompiler's descriptor-name-
+        //       promoted shape where simple_name is fully module-
+        //       qualified (`sys.bitfield.USIZE_BITS` for a function
+        //       declared in a file whose `module sys.bitfield;` header
+        //       brings the bitfield submodule into the `core.sys`
+        //       archive entry). Wanted must contain `sys.bitfield`
+        //       (the cog-stripped form added by `collect_mount_names`)
+        //       OR `core.sys.bitfield` (the literal mount path —
+        //       checked via `module_name.<simple>.starts_with(W)`
+        //       for completeness).
+        let is_method_of_wanted_type = {
+            let first_dot = simple_name_str.find('.').map(|i| &simple_name_str[..i]);
+            let last_dot = simple_name_str.rfind('.').map(|i| &simple_name_str[..i]);
+            first_dot.map(|p| wanted.contains(p)).unwrap_or(false)
+                || last_dot
+                    .filter(|p| Some(*p) != first_dot)
+                    .map(|p| wanted.contains(p))
+                    .unwrap_or(false)
+        };
         // Module-form mount surface: `mount core.sys.bitfield;` adds
         // the literal qualified module name `core.sys.bitfield` to
         // `wanted` (via `collect_mount_names`'s `full.join(".")`

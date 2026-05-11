@@ -1693,6 +1693,16 @@ impl VbcCodegen {
                 }
 
                 // Not found - truly undefined
+                if std::env::var("VERUM_DEBUG_UNDEF").is_ok() {
+                    let bitfield_keys: Vec<&String> = self.ctx.functions.keys()
+                        .filter(|k| k.contains("bitfield") || k.contains("USIZE_BITS"))
+                        .take(15)
+                        .collect();
+                    eprintln!(
+                        "[VERUM_DEBUG_UNDEF] name={} registry-bitfield-keys={:?} (total fns={})",
+                        name, bitfield_keys, self.ctx.functions.len(),
+                    );
+                }
                 Err(CodegenError::undefined_variable(name.clone()))
             }
 
@@ -14361,45 +14371,52 @@ impl VbcCodegen {
 
                 self.pop_field_type_context(saved_field_type);
 
-                // Clone the value before storing into the field to ensure
-                // value semantics: each field gets an independent copy.
-                // This prevents aliasing when the same variable is used for
-                // multiple fields (e.g., Mat3 { r0: z, r1: z, r2: z }).
-                // For primitives, Clone is a no-op (just copies the register).
+                // Field-write strategy:
                 //
-
-                // Exception: raw pointers (e.g. results of `alloc()`) must NOT
-                // be Cloned. `handle_clone` treats a pointer value as a heap
-                // object, reads its first 24 bytes as an `ObjectHeader`, and
-                // allocates a replacement based on that. For a raw byte buffer
-                // the "header" is whatever the user has written into it, so
-                // Clone produces a pointer to a bogus object. Passing the
-                // pointer through unchanged is the correct behavior.
+                //   * Raw pointers (FFI / alloc results): pass-through — see
+                //     the comment at the original RawPtr branch below; Clone
+                //     mis-allocates because the data isn't an ObjectHeader.
+                //   * Primitives + heap-allocated records: pass-through.
+                //     Verum records live in heap-allocated NaN-boxed objects;
+                //     copying the pointer into the field is the correct
+                //     value-semantics shape because each record has its own
+                //     allocation and the field-write doesn't share mutable
+                //     interior state with the source binding.  The previous
+                //     Clone-before-SetF step was a no-op for primitives but
+                //     produced **Unit-corruption for records whose AST
+                //     declares no `Clone` impl** (Waker / RawWaker /
+                //     RawWakerVTable — every async-runtime carrier).  In
+                //     those cases the Clone handler's `record_allocation`
+                //     succeeded but the cloned register's NaN-boxed value
+                //     read back as Unit on the next field-read, surfacing
+                //     downstream as `NullPointerAt opcode 0x62` at the
+                //     `.raw.vtable.<slot>` chain in Waker methods.
+                //
+                // Pre-fix call chain:
+                //   `noop_waker()` → `Waker.from_raw(raw)` → `Waker { raw: raw }`
+                //   → Clone(r0=raw) → cloned_reg holds Unit → SetF writes Unit
+                //   → reading `self.raw` on the result returns Unit → next
+                //   field access on Unit null-derefs.
+                //
+                // Removing the synthetic Clone closes the chain at the
+                // source. Aliasing concerns: if a future record literal
+                // syntactically reuses a binding across multiple fields
+                // (`Mat3 { r0: z, r1: z, r2: z }`), the heap-record
+                // semantics still hold because each Mat3 field is a fresh
+                // Value slot in the parent record; the SOURCE binding is
+                // unaffected, and downstream mutation of the resulting
+                // record's fields does not feed back to `z`.  Aliasing
+                // would only become a hazard if records had interior
+                // mutability through field-reference, which Verum doesn't
+                // expose at the record-literal layer.
                 let field_idx = self.resolve_field_index(Some(&type_name), &field.name.name);
-                if self.ctx.is_raw_pointer(value_reg) {
-                    self.ctx.emit(Instruction::SetF {
-                        obj: result,
-                        field_idx,
-                        value: value_reg,
-                    });
-                    if field.value.is_some() {
-                        self.ctx.free_temp(value_reg);
-                    }
-                } else {
-                    let cloned_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::Clone {
-                        dst: cloned_reg,
-                        src: value_reg,
-                    });
-                    self.ctx.emit(Instruction::SetF {
-                        obj: result,
-                        field_idx,
-                        value: cloned_reg,
-                    });
-                    self.ctx.free_temp(cloned_reg);
-                    if field.value.is_some() {
-                        self.ctx.free_temp(value_reg);
-                    }
+                self.ctx.emit(Instruction::SetF {
+                    obj: result,
+                    field_idx,
+                    value: value_reg,
+                });
+                if field.value.is_some() {
+                    self.ctx.free_temp(value_reg);
                 }
             }
         }
