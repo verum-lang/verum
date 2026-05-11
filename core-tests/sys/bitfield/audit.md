@@ -1,6 +1,6 @@
 # `core.sys.bitfield` — implementation audit
 
-## Status: **dispatch closed** (suite executes end-to-end as of task #121)
+## Status: **complete** (dispatch closed + parallel runner SIGABRT-free)
 
 * Bit-manipulation primitives are landed in `core/sys/bitfield.vr`
   (free functions, USize-typed, `@inline(always) + pure`).
@@ -9,6 +9,9 @@
   Both the `bitfield.fn(args)` method-form and the `bitfield.CONST`
   field-form route through `core.sys.bitfield` correctly at typecheck +
   codegen + interpreter tiers.
+* Interpreter SIGABRT defect (§3.3 below) is **closed** by task #14
+  (canonical alignment-safe `ObjectHeader` accessors covering all 86
+  cast sites across the Tier-0 dispatch handlers).
 * Conformance suite (`unit_test.vr`, `regression_test.vr`) executes
   cleanly via the `bitfield.<name>(...)` qualified-path form; verified
   by `/tmp/bitfield_regr_main.vr` driver (3 regression assertions pass).
@@ -107,19 +110,33 @@ No other Rust-side hardcodes for the new free functions surfaced.
 
 ### 3.3 `verum test --interp` (no filter) crashes with SIGABRT
 
-* **Symptom**: the full-suite invocation aborts inside
+* **Symptom (pre-fix)**: the full-suite invocation aborted inside
   `verum_vbc::interpreter::dispatch_table::handlers::cbgr::handle_drop_ref`
-  via `panic_misaligned_pointer_dereference`. Crash report at
-  `~/.verum/crashes/verum-2026-05-10T19-55-53-...log`.
-* **Diagnosis**: `handle_drop_ref` casts `val.as_ptr::<u8>()` to
-  `*const heap::ObjectHeader` and dereferences `(*header).type_id` (line
-  513-516 of `crates/verum_vbc/src/interpreter/dispatch_table/handlers/cbgr.rs`).
-  When the value pointed at is not aligned to
-  `align_of::<ObjectHeader>()` the dereference traps at the
-  Rust-runtime level. Independent of this suite — pre-existing — but
-  surfaces every time the parallel test runner happens to schedule a
-  CBGR-allocated object next to the bitfield tests.
-* **Tracked in**: task **#14**.
+  via `panic_misaligned_pointer_dereference`.
+* **Diagnosis**: `handle_drop_ref` (and 85 other interpreter sites) cast
+  `val.as_ptr::<u8>()` to `*const heap::ObjectHeader` and dereferenced
+  it without alignment checks.  When the value pointed at wasn't
+  aligned to `align_of::<ObjectHeader>()` (8 bytes — the struct is
+  `#[repr(C, align(8))]`), the dereference tripped Rust's runtime UB
+  alignment check and aborted the whole interpreter through SIGABRT —
+  losing every parallel test in the same invocation.  Misaligned
+  pointers reach the dispatch through `Text.as_bytes()`-style byte-FatRefs,
+  `slice_from_raw_parts` intrinsics, and any `&unsafe` cast in user code.
+* **Status**: **closed** by the task #14 fix.  Three canonical
+  alignment-safe accessors on `ObjectHeader`:
+  - `try_from_ptr(ptr) -> Option<&Self>` — Option discipline for
+    validation boundaries.
+  - `try_type_id(ptr) -> Option<TypeId>` — one-shot type_id reads.
+  - `ref_or_stub(ptr) -> &'a Self` — `&'static` all-zero sentinel
+    header on misalignment (TypeId(0) routes every dispatch-time
+    `header.type_id == X` check through its else-branch).
+
+  86 cast sites across 14 handler files rewritten to consume the
+  helpers.  6 drift-pin tests in `interpreter::heap::tests` lock the
+  soundness invariant (null + every 1..7 misalignment offset +
+  sentinel stub aliasing).  1205/1205 verum_vbc lib tests pass.
+
+* **Pinned by**: `interpreter::heap::tests::object_header_*` (6 tests).
 
 ## Action items
 
@@ -152,15 +169,21 @@ No other Rust-side hardcodes for the new free functions surfaced.
   within the same archive-entry directory keep distinct module-path
   prefixes (`sys.bitfield.test_bit` vs `sys.io.test_bit`).
 
+### Landed in task #14 (alignment-safety primitives)
+
+* **86 unguarded `*const heap::ObjectHeader` dereferences** across the
+  Tier-0 interpreter rewritten to route through three canonical
+  alignment-safe accessors (`try_from_ptr` / `try_type_id` /
+  `ref_or_stub`).  `verum test --interp` no longer SIGABRTs on
+  parallel-scheduled CBGR allocations adjacent to bitfield tests.
+
 ### Deferred
 
 * **#15 — selective `mount X.{CONST};` const-import** still falls through
   to the simple-name codegen path. The bare-mount `mount X.Y.Z;` +
   `Z.CONST` form is the working path today.
-* **#14 — `handle_drop_ref` alignment fix**: required for the
-  parallel test runner to complete a full-suite run without aborting.
-  Independent of bitfield testing; tracked separately.
 * **`property_test.vr` and `integration_test.vr`** for bitfield: ready to
-  land now that #13 is closed; integration-suite seed work remains.
+  land now that #13 and #14 are closed; integration-suite seed work
+  remains.
 * **Migrate `core.database.sqlite.native.{vdbe_register_model,cursor_hint_codes}.flag.set_bit/clear_bit`**
   to delegate to `core.sys.bitfield` — unblocked by task #121.
