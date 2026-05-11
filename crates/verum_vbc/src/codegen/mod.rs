@@ -378,7 +378,22 @@ pub struct VbcCodegen {
     /// Pending constants that need bytecode compilation.
     /// These are constants whose values couldn't be inlined (e.g., struct literals).
     /// Stored as (function_name, expression_clone) for compilation in compile_function_bodies.
-    pending_constants: Vec<(String, verum_ast::Expr)>,
+    /// Pending constants queued for body-compilation.  Each tuple is
+    /// `(name, expr, source_module_at_push_time)` — the third element
+    /// captures `current_source_module` AT THE TIME the const is
+    /// queued, so when `compile_pending_constants` eventually flushes
+    /// the queue (potentially during a later file's compile pass
+    /// inside the shared stdlib-bootstrap codegen instance), the
+    /// archive descriptor.name promotion can use the const's *own*
+    /// source-module-declared path rather than whichever file's
+    /// `compile_items_into_state` happens to be on the stack.
+    /// Without this capture, a `public const X: USize = X.bits;` from
+    /// `core/sys/bitfield.vr` (`module sys.bitfield;`) would inherit
+    /// the directory-derived umbrella module name `core.sys` from the
+    /// FIRST file's `compile_pending_constants` call that drains it,
+    /// landing as `core.sys.X` in the archive instead of the file's
+    /// own `sys.bitfield.X` — task #121 archive-side regression.
+    pending_constants: Vec<(String, verum_ast::Expr, Option<String>)>,
 
     /// Map from type name to TypeId for user-defined types.
     /// Used to emit correct type_id in New instructions for proper Drop dispatch.
@@ -1412,17 +1427,28 @@ impl VbcCodegen {
                     }
                 }
 
-                // Register protocol info even if no default methods - needed for inheritance tracking
-                if !default_methods.is_empty() || !super_protocols.is_empty() {
-                    self.protocol_registry.insert(
-                        protocol_name.clone(),
-                        ProtocolInfo {
-                            name: protocol_name,
-                            default_methods,
-                            super_protocols,
-                        },
-                    );
-                }
+                // Always register the protocol — even when it has no
+                // default methods AND no super-protocols.  The blanket-
+                // impl monomorphization walk in
+                // `generate_default_protocol_methods` consults
+                // `protocol_registry` for EVERY protocol mentioned in
+                // `protocols_to_check` (including the directly-implemented
+                // protocol and any derived ones enqueued from
+                // `blanket_impls`); if a method-spec-only protocol like
+                // `Future` is absent from the registry, the walk's
+                // `protocol_registry.get(&proto_name)` returns None and
+                // the implementor's pending_derivations from that base
+                // protocol never get materialised.  Pre-fix the guard
+                // here silently dropped `Future`-shaped protocols whose
+                // only purpose IS providing a blanket-impl target.
+                self.protocol_registry.insert(
+                    protocol_name.clone(),
+                    ProtocolInfo {
+                        name: protocol_name,
+                        default_methods,
+                        super_protocols,
+                    },
+                );
             }
 
             // Context declarations also need TypeDescriptors for dyn: dispatch.
@@ -4637,6 +4663,84 @@ impl VbcCodegen {
                 }
             }
         }
+
+        // Pre-pass: register blanket impls (`implement<G: Base> Derived
+        // for G {}`) BEFORE any concrete-type impls.  Without this
+        // order, a concrete-type impl appearing earlier in the file
+        // (`implement Future for ReadyFuture`) runs
+        // `generate_default_protocol_methods("Future", "ReadyFuture")`
+        // BEFORE the blanket `implement<F: Future> FutureExt for F`
+        // is observed.  The blanket-impl-derivation walk in
+        // `generate_default_protocol_methods` consults
+        // `self.blanket_impls` synchronously, so the inherited
+        // protocol's default methods (FutureExt.block / map / and_then)
+        // never get monomorphised onto ReadyFuture — every downstream
+        // `ready(v).block()` panics with "method 'ReadyFuture.block'
+        // not found".
+        //
+        // The pre-pass walks the module once and processes ONLY blanket
+        // impls (detected via the same `for_type_generic_param_name`
+        // helper as `collect_declarations`'s Impl arm).  Concrete-type
+        // impls and other items are skipped here; the regular pass
+        // below handles them.
+        for item in module.items.iter() {
+            if !self.should_compile_item(item) {
+                continue;
+            }
+            if let ItemKind::Impl(impl_decl) = &item.kind
+                && let verum_ast::decl::ImplKind::Protocol {
+                    protocol, for_type, ..
+                } = &impl_decl.kind
+                && let Some(derived_name) = protocol.segments.last().and_then(|s| match s {
+                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                    _ => None,
+                })
+                && let Some(param_name) = Self::for_type_generic_param_name(for_type)
+            {
+                for g in impl_decl.generics.iter() {
+                    if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } = &g.kind
+                        && name.name.as_str() == param_name
+                    {
+                        for b in bounds.iter() {
+                            if let Some(base_name) = Self::type_bound_protocol_name(b) {
+                                let explicit_methods: std::collections::HashSet<String> =
+                                    impl_decl
+                                        .items
+                                        .iter()
+                                        .filter_map(|item| {
+                                            if let verum_ast::decl::ImplItemKind::Function(f) =
+                                                &item.kind
+                                            {
+                                                Some(f.name.name.to_string())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect();
+                                // Deduplicate: if a (base, derived) pair
+                                // was already registered (e.g. via
+                                // multi-file collection), skip the
+                                // re-insert so a same-content blanket
+                                // doesn't fan out into N copies during
+                                // `pending_derivations`'s linear scan.
+                                let already_present = self.blanket_impls.iter().any(|b| {
+                                    b.base_protocol == base_name
+                                        && b.derived_protocol == derived_name
+                                });
+                                if !already_present {
+                                    self.blanket_impls.push(BlanketImpl {
+                                        base_protocol: base_name,
+                                        derived_protocol: derived_name.clone(),
+                                        explicit_methods,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         for item in module.items.iter() {
             if self.should_compile_item(item) {
                 self.collect_declarations(item)?;
@@ -5496,11 +5600,23 @@ impl VbcCodegen {
                                                     }
                                                 })
                                                 .collect();
-                                        self.blanket_impls.push(BlanketImpl {
-                                            base_protocol: base_name,
-                                            derived_protocol: derived_name.clone(),
-                                            explicit_methods,
+                                        // Skip if `collect_all_declarations`'s
+                                        // blanket-impl pre-pass already
+                                        // registered this (base, derived)
+                                        // pair — keeps the linear-scan
+                                        // walks O(unique blanket impls)
+                                        // instead of O(file occurrences).
+                                        let already_present = self.blanket_impls.iter().any(|b| {
+                                            b.base_protocol == base_name
+                                                && b.derived_protocol == derived_name
                                         });
+                                        if !already_present {
+                                            self.blanket_impls.push(BlanketImpl {
+                                                base_protocol: base_name,
+                                                derived_protocol: derived_name.clone(),
+                                                explicit_methods,
+                                            });
+                                        }
                                     }
                                 }
                             }
@@ -9626,8 +9742,15 @@ impl VbcCodegen {
         // This handles struct literals like `MemProt { read: false, write: false, exec: false }`.
         let needs_compilation = intrinsic_name.is_none() && value_expr.is_some();
         if needs_compilation && let Some(expr) = value_expr {
+            // Capture the CURRENT source-module at queue time so the
+            // descriptor.name promotion in `compile_pending_constants`
+            // uses the const's own declared module (`sys.bitfield` for
+            // `core/sys/bitfield.vr::USIZE_BITS`) instead of whichever
+            // file's `compile_items_into_state` is on the stack when
+            // the queue is eventually drained (task #121).
+            let source_module = self.ctx.current_source_module.clone();
             self.pending_constants
-                .push((name.to_string(), expr.clone()));
+                .push((name.to_string(), expr.clone(), source_module));
         }
 
         // Extract return type name from constant type if present
@@ -9783,7 +9906,7 @@ impl VbcCodegen {
         // Take pending constants to avoid borrow issues
         let constants = std::mem::take(&mut self.pending_constants);
 
-        for (name, expr) in constants {
+        for (name, expr, queued_source_module) in constants {
             // Get the pre-registered function info
             let func_info = match self.ctx.lookup_function(&name) {
                 Some(info) => info.clone(),
@@ -9808,8 +9931,43 @@ impl VbcCodegen {
             // End the function and collect instructions
             let (instructions, register_count) = self.ctx.end_function();
 
-            // Create function descriptor
-            let name_id = StringId(self.intern_string(&name));
+            // Mirror the source-module-qualified descriptor.name
+            // promotion in `compile_function` and the inlinable-const
+            // stub above (task #121): the body-compiled-const branch
+            // also serializes a `FunctionDescriptor` into the archive,
+            // and that descriptor's `name` is what the archive-load
+            // path uses as the qualified registry key.  Without this
+            // promotion, `public const USIZE_BITS: USize = USize.bits;`
+            // (whose value is a method call so `extract_const_literal_value`
+            // returns None and the const flows through the
+            // `pending_constants` path here, not the inlinable stub
+            // above) lands in the archive as the bare name `USIZE_BITS`
+            // instead of `sys.bitfield.USIZE_BITS`.  Cross-module
+            // bare-mount qualified access (`mount core.sys.bitfield;
+            // ... bitfield.USIZE_BITS`) then can't find it in the
+            // user-side function registry.
+            //
+            // Prefer the `queued_source_module` captured at queue
+            // time — `current_source_module` reflects whichever
+            // `compile_items_into_state` call happens to be on the
+            // stack when the queue drains (the shared stdlib-bootstrap
+            // codegen instance processes multiple files in sequence;
+            // a const queued by an earlier file gets drained by a
+            // later file's flush call).
+            let const_effective_module = queued_source_module
+                .as_deref()
+                .or_else(|| self.ctx.current_source_module.as_deref())
+                .unwrap_or(&self.config.module_name);
+            let const_descriptor_name = if !const_effective_module.is_empty()
+                && const_effective_module != "main"
+                && !name.contains('.')
+                && !name.contains("::")
+            {
+                format!("{}.{}", const_effective_module, name)
+            } else {
+                name.to_string()
+            };
+            let name_id = StringId(self.intern_string(&const_descriptor_name));
             let mut descriptor = FunctionDescriptor::new(name_id);
             descriptor.id = func_info.id;
             descriptor.register_count = register_count;

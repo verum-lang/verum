@@ -627,6 +627,68 @@ impl TypeChecker {
             let _ = result;
         }
 
+        // Bare-mount module-alias registration.
+        //
+        // `mount X.Y.Z;` (Path form, no `as <alias>`) makes `Z` usable
+        // as a module-namespace receiver in subsequent expressions:
+        // `Z.fn(args)` dispatches through `<full-path>.fn` qualified
+        // lookup, `Z.CONST` reads `<full-path>.CONST`.  The
+        // typechecker's `module_aliases` map already drives that
+        // dispatch for the explicit `mount X.Y.Z as W;` case (line
+        // ~17914 of this file); this branch wires the implicit-alias
+        // form so user code doesn't need a redundant `as Z` clause.
+        //
+        // The implicit alias is registered **only when no explicit
+        // value-position binding** for that name already exists in
+        // env, so a `mount` of a module whose leaf collides with a
+        // local symbol stays a no-op and the user-defined value wins.
+        // The module-alias check in the dispatch path is gated on
+        // `Path([alias])` receivers, so it can't false-fire on
+        // expressions that happen to start with the same name in a
+        // value position.
+        //
+        // Closes audit task #121 (`core-tests/sys/bitfield/audit.md`
+        // §3.1 / §3.2) — the typechecker-side half of the bare-mount
+        // dispatch.  The archive-side qualified-descriptor.name half
+        // and the codegen-side suffix-match fallback are wired
+        // separately in `verum_vbc/src/codegen/{mod,expressions}.rs`
+        // and `verum_compiler/src/archive_ctx_loader.rs`.
+        match &import.tree.kind {
+            verum_ast::MountTreeKind::Path(path) if !matches!(import.alias, Maybe::Some(_))
+                && !matches!(import.tree.alias, Maybe::Some(_))
+                && path.segments.len() >= 2 =>
+            {
+                let segments: Vec<&str> = path
+                    .segments
+                    .iter()
+                    .filter_map(|seg| {
+                        if let verum_ast::ty::PathSegment::Name(ident) = seg {
+                            Some(ident.name.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if segments.len() >= 2 {
+                    let leaf = segments.last().copied().unwrap_or_default();
+                    if !leaf.is_empty() {
+                        let alias_text: Text = leaf.into();
+                        // Only register when the env doesn't already
+                        // resolve the leaf to a value-position
+                        // binding (a same-named local var, function,
+                        // or imported symbol takes precedence).
+                        if self.ctx.env.lookup(alias_text.as_str()).is_none() {
+                            // Store the full dotted path; downstream
+                            // `module_aliases` consumers split on '.'.
+                            let full_path: Text = segments.join(".").into();
+                            self.module_aliases.insert(alias_text, full_path);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 
