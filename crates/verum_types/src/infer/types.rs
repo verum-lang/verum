@@ -3243,10 +3243,12 @@ impl TypeChecker {
             "UInt16" | "u16" => Some((0, 65535)),
             "Int32" | "i32" => Some((-2147483648, 2147483647)),
             "UInt32" | "u32" => Some((0, 4294967295)),
-            "Int64" | "i64" | "IntSize" | "ISize" | "isize" => {
+            "Int" | "Int64" | "i64" | "IntSize" | "ISize" | "Isize" | "isize" => {
                 Some((i64::MIN as i128, i64::MAX as i128))
             }
-            "UInt64" | "u64" | "UIntSize" | "USize" | "usize" => Some((0, u64::MAX as i128)),
+            "UInt" | "UInt64" | "u64" | "UIntSize" | "USize" | "Usize" | "usize" => {
+                Some((0, u64::MAX as i128))
+            }
             "Int128" | "i128" => Some((i128::MIN, i128::MAX)),
             "UInt128" | "u128" => Some((0, i128::MAX)),
             _ => None,

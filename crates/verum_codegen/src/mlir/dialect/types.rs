@@ -702,28 +702,53 @@ impl<'c> TypeTranslator<'c> {
     }
 
     /// Translate a named type (Int, Float, Bool, Text, etc.).
+    ///
+    /// Recognised primitive aliases follow the canonical registry in
+    /// `verum_common::well_known_types::NUMERIC_ALIAS_MATRIX` — every
+    /// alias spelling (canonical Verum / legacy uppercase-short /
+    /// Rust-style lowercase) maps to its width-tagged MLIR primitive.
+    /// Drift between this site and the canonical registry surfaces as
+    /// `VerumType::Opaque` MLIR lowering instead of the correct
+    /// integer width, which produces wrong native code at every
+    /// arithmetic operation on the un-mapped alias.
     fn translate_named_type(&self, name: &str) -> Result<VerumType> {
         match name {
-            "Int" | "i64" => Ok(VerumType::i64()),
-            "i8" => Ok(VerumType::int(8, true)),
-            "i16" => Ok(VerumType::int(16, true)),
-            "i32" => Ok(VerumType::int(32, true)),
-            "i128" => Ok(VerumType::int(128, true)),
+            // 64-bit signed (canonical bare + width-tagged + Rust-style)
+            "Int" | "Int64" | "I64" | "i64" => Ok(VerumType::i64()),
+            // 8-bit signed
+            "Int8" | "I8" | "i8" => Ok(VerumType::int(8, true)),
+            // 16-bit signed
+            "Int16" | "I16" | "i16" => Ok(VerumType::int(16, true)),
+            // 32-bit signed
+            "Int32" | "I32" | "i32" => Ok(VerumType::int(32, true)),
+            // 128-bit signed
+            "Int128" | "I128" | "i128" => Ok(VerumType::int(128, true)),
+            // Pointer-width signed (64-bit on every supported target)
+            "IntSize" | "ISize" | "Isize" | "isize" => Ok(VerumType::int(64, true)),
 
-            "u8" => Ok(VerumType::int(8, false)),
-            "u16" => Ok(VerumType::int(16, false)),
-            "u32" => Ok(VerumType::int(32, false)),
-            "u64" => Ok(VerumType::int(64, false)),
-            "u128" => Ok(VerumType::int(128, false)),
+            // 64-bit unsigned (canonical bare + width-tagged + Rust-style)
+            "UInt" | "UInt64" | "U64" | "u64" => Ok(VerumType::int(64, false)),
+            // 8-bit unsigned (Byte is the canonical alias)
+            "UInt8" | "Byte" | "U8" | "u8" => Ok(VerumType::int(8, false)),
+            // 16-bit unsigned
+            "UInt16" | "U16" | "u16" => Ok(VerumType::int(16, false)),
+            // 32-bit unsigned
+            "UInt32" | "U32" | "u32" => Ok(VerumType::int(32, false)),
+            // 128-bit unsigned
+            "UInt128" | "U128" | "u128" => Ok(VerumType::int(128, false)),
+            // Pointer-width unsigned
+            "USize" | "UIntSize" | "Usize" | "usize" => Ok(VerumType::int(64, false)),
 
-            "Float" | "f64" => Ok(VerumType::f64()),
-            "f32" => Ok(VerumType::Float { bits: 32 }),
+            // 64-bit float (canonical bare + width-tagged + Rust-style)
+            "Float" | "Float64" | "F64" | "f64" => Ok(VerumType::f64()),
+            // 32-bit float
+            "Float32" | "F32" | "f32" => Ok(VerumType::Float { bits: 32 }),
 
-            "Bool" => Ok(VerumType::Bool),
+            "Bool" | "bool" => Ok(VerumType::Bool),
 
             "Text" => Ok(VerumType::Text(TextType::new())),
 
-            "Char" => Ok(VerumType::Char),
+            "Char" | "char" => Ok(VerumType::Char),
 
             "()" | "Unit" => Ok(VerumType::Unit),
 

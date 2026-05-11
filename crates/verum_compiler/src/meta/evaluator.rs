@@ -1621,8 +1621,19 @@ impl MetaContext {
                     })
                     .unwrap_or("");
 
-                match type_name {
-                    "Int" | "i64" | "i32" | "i16" | "i8" => match value {
+                // Const-evaluation primitive cast: route every signed-
+                // integer alias / unsigned-integer alias / float alias
+                // through the canonical
+                // `verum_common::well_known_types::type_names`
+                // predicates so the recognised alias set stays in
+                // lock-step with the rest of the compiler. Previously
+                // the matches!() lists here only covered a partial
+                // alias set (e.g. `"Int" | "i64" | "i32" | "i16" |
+                // "i8"` missed `Int8`/`Int16`/`Int32`/`Int64`/`Int128`/
+                // `IntSize`/`ISize`/`Isize`/`isize`/`I8`..`I128`).
+                use verum_common::well_known_types::type_names;
+                if type_names::is_signed_integer_type(type_name) {
+                    return match value {
                         ConstValue::Int(i) => Ok(ConstValue::Int(i)),
                         ConstValue::UInt(u) => Ok(ConstValue::Int(u as i128)),
                         ConstValue::Float(f) => Ok(ConstValue::Int(f as i128)),
@@ -1631,8 +1642,10 @@ impl MetaContext {
                             "Cannot cast {} to Int",
                             value.type_name()
                         )))),
-                    },
-                    "UInt" | "u64" | "u32" | "u16" | "u8" => match value {
+                    };
+                }
+                if type_names::is_unsigned_integer_type(type_name) {
+                    return match value {
                         ConstValue::Int(i) => Ok(ConstValue::UInt(i as u128)),
                         ConstValue::UInt(u) => Ok(ConstValue::UInt(u)),
                         ConstValue::Float(f) => Ok(ConstValue::UInt(f as u128)),
@@ -1641,8 +1654,10 @@ impl MetaContext {
                             "Cannot cast {} to UInt",
                             value.type_name()
                         )))),
-                    },
-                    "Float" | "f64" | "f32" => match value {
+                    };
+                }
+                match type_name {
+                    "Float" | "f64" | "f32" | "Float32" | "Float64" | "F32" | "F64" => match value {
                         ConstValue::Int(i) => Ok(ConstValue::Float(i as f64)),
                         ConstValue::UInt(u) => Ok(ConstValue::Float(u as f64)),
                         ConstValue::Float(f) => Ok(ConstValue::Float(f)),

@@ -159,16 +159,17 @@ impl Unifier {
         // Only language-level primitive integer types are hardcoded here.
         // Stdlib types (Duration, Path, etc.) are registered dynamically
         // via register_int_coercible_type() during type checking.
-        let int_coercible_named_types: std::collections::HashSet<Text> = [
-            // Sized integer types — these are language primitives, not stdlib
-            "UInt", "UInt8", "UInt16", "UInt32", "UInt64", "UInt128", "Int8", "Int16", "Int32",
-            "Int64", "Int128", "U8", "U16", "U32", "U64", "I8", "I16", "I32", "I64", "u8", "u16",
-            "u32", "u64", "i8", "i16", "i32", "i64", "Byte", "usize", "isize", "UIntSize", "USize",
-            "IntSize", "ISize",
-        ]
-        .iter()
-        .map(|s| Text::from(*s))
-        .collect();
+        // Primitive integer aliases are NOT seeded here — `is_int_coercible_named`
+        // delegates the primitive-classification arm to
+        // `verum_common::well_known_types::type_names::is_integer_type`, the
+        // canonical drift-pinned registry. Only stdlib `implement` blocks
+        // (e.g. `implement IntCoercible for Duration {}` in
+        // `core/time/duration.vr`) feed names into this HashSet via
+        // `register_int_coercible_type`; the seed is intentionally empty so
+        // a stdlib that opts no type in still gets correct primitive
+        // classification through the predicate.
+        let int_coercible_named_types: std::collections::HashSet<Text> =
+            std::collections::HashSet::new();
 
         // Collection types that support integer indexing —
         // populated dynamically via `register_indexable_type` from
@@ -188,15 +189,14 @@ impl Unifier {
         // These are arguably language-level (not stdlib), but centralized here.
         // Sized numeric types — language primitives only, no stdlib types.
         // Additional types can be registered via register_sized_numeric_type().
-        let sized_numeric_types: std::collections::HashSet<Text> = [
-            "UInt", "UInt8", "UInt16", "UInt32", "UInt64", "UInt128", "Int8", "Int16", "Int32",
-            "Int64", "Int128", "U8", "U16", "U32", "U64", "I8", "I16", "I32", "I64", "u8", "u16",
-            "u32", "u64", "i8", "i16", "i32", "i64", "Byte", "usize", "isize", "UIntSize", "USize",
-            "IntSize", "ISize", "Float32", "Float64", "f32", "f64",
-        ]
-        .iter()
-        .map(|s| Text::from(*s))
-        .collect();
+        // Same delegation pattern as `int_coercible_named_types` above:
+        // the primitive sized-numeric alias set lives in the canonical
+        // `verum_common::well_known_types::type_names::is_numeric_type`
+        // registry. Only stdlib types that opt in via
+        // `register_sized_numeric_type` (typically `implement
+        // SizedNumeric for Duration {}` style) populate this HashSet.
+        let sized_numeric_types: std::collections::HashSet<Text> =
+            std::collections::HashSet::new();
 
         // BytewiseFfi types — packed C-struct byte mirrors of
         // libsystem ABI types.  Populated dynamically via
@@ -380,8 +380,23 @@ impl Unifier {
 
     /// Check whether a Named type name coerces bidirectionally
     /// with `Int` (alias-aware).
+    ///
+    /// Two-arm classification:
+    /// 1. **Primitive integer aliases** (`Int8`..`Int128`, `UInt`..`UInt128`,
+    ///    `USize`/`ISize`/`IntSize`/`UIntSize`, `Byte`, plus all
+    ///    legacy uppercase-short and Rust-style lowercase aliases) are
+    ///    classified through the canonical
+    ///    `verum_common::well_known_types::type_names::is_integer_type`
+    ///    registry — drift-pinned by `NUMERIC_ALIAS_MATRIX`. The seed
+    ///    HashSet doesn't carry them.
+    /// 2. **Stdlib types with `implement IntCoercible for X {}` blocks**
+    ///    (Duration, Instant, etc.) feed names into the HashSet via
+    ///    `register_int_coercible_type`. Those are queried through
+    ///    `family_contains` (alias-aware via the family normalisation
+    ///    layer).
     fn is_int_coercible_named(&self, name: &str) -> bool {
-        self.family_contains(&self.int_coercible_named_types, name)
+        verum_common::well_known_types::type_names::is_integer_type(name)
+            || self.family_contains(&self.int_coercible_named_types, name)
     }
 
     /// Register a type as indexable (supports integer indexing).
@@ -417,8 +432,17 @@ impl Unifier {
 
     /// Check whether a Named type is a sized numeric that
     /// cross-coerces with other sized numerics (alias-aware).
+    ///
+    /// Primitive numerics (every Int / UInt / Float / Byte width)
+    /// flow through `verum_common::well_known_types::type_names::is_numeric_type`
+    /// — the canonical registry — and stdlib opt-ins
+    /// (Duration, Instant, etc.) flow through the dynamically-populated
+    /// HashSet. Drift between the two layers is structurally impossible
+    /// since each name is classified by exactly one mechanism (predicate
+    /// or registered set), and the predicate is alias-matrix-pinned.
     fn is_sized_numeric(&self, name: &str) -> bool {
-        self.family_contains(&self.sized_numeric_types, name)
+        verum_common::well_known_types::type_names::is_numeric_type(name)
+            || self.family_contains(&self.sized_numeric_types, name)
     }
 
     /// Register a type as bytewise-FFI compatible — its in-memory
@@ -2596,12 +2620,19 @@ impl Unifier {
             }
 
             // POINTER ↔ INTEGER COERCION (FFI)
-            // Raw pointers and UIntSize/IntSize are interchangeable in FFI contexts.
-            // This enables `ptr as usize` and `usize as *mut T` patterns.
+            // Raw pointers and pointer-width integer types are
+            // interchangeable in FFI contexts. This enables
+            // `ptr as usize` and `usize as *mut T` patterns. The
+            // recognised alias set (`USize`, `ISize`, `IntSize`,
+            // `UIntSize`, `usize`, `isize`, `Usize`, `Isize`) lives in
+            // `verum_common::well_known_types::type_names::is_pointer_width_integer_type`
+            // — the canonical drift-pinned registry. Previously this
+            // matches!() listed only `UIntSize`/`IntSize`/`usize`/`isize`,
+            // silently rejecting the canonical Verum capitalisations
+            // `USize` and `ISize`.
             (Pointer { .. }, Named { path, .. }) | (Named { path, .. }, Pointer { .. })
-                if matches!(
+                if verum_common::well_known_types::type_names::is_pointer_width_integer_type(
                     path.last_segment_name(),
-                    "UIntSize" | "IntSize" | "usize" | "isize"
                 ) =>
             {
                 Ok(Substitution::new())

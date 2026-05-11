@@ -1555,6 +1555,38 @@ pub mod type_names {
         )
     }
 
+    /// Returns true if `name` is a pointer-width integer type — i.e.
+    /// an integer alias whose width equals the target's pointer
+    /// width (64-bit on every currently-supported host).
+    ///
+    /// Recognises all spellings of the size-tagged integer aliases:
+    /// canonical Verum (`USize`, `ISize`, `IntSize`, `UIntSize`),
+    /// legacy uppercase-short (`Usize`, `Isize`), and Rust-style
+    /// lowercase (`usize`, `isize`). Drift-pinned through the same
+    /// `NUMERIC_ALIAS_MATRIX` that covers `is_signed_integer_type`
+    /// and `is_unsigned_integer_type`; the canonical pointer-width
+    /// names are exactly the (canonical, alias) rows in the matrix
+    /// whose `bit_width` field equals 64 and whose canonical name
+    /// is one of {USize, IntSize}.
+    ///
+    /// Consumers: pointer ↔ integer FFI coercion in
+    /// `verum_types::unify`; the layout module's
+    /// `primitive_size_by_name` resolves these to
+    /// `POINTER_SIZE` (the matching size oracle).
+    pub fn is_pointer_width_integer_type(name: &str) -> bool {
+        matches!(
+            name,
+            // Canonical Verum signed pointer-width
+            "IntSize" | "ISize"
+            // Canonical Verum unsigned pointer-width
+            | "USize" | "UIntSize"
+            // Legacy uppercase-short
+            | "Isize" | "Usize"
+            // Rust-style lowercase
+            | "isize" | "usize"
+        )
+    }
+
     /// Returns true if `name` is any float type variant.
     ///
     /// Recognises canonical Verum (`Float`, `Float32`, `Float64`),

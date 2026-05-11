@@ -2485,21 +2485,28 @@ impl Type {
     /// `specialization::types_compatible`) stay coherent with any
     /// future extension of the numeric set.
     pub fn canonical_primitive(name: &str) -> &str {
+        // Canonical-name set lives in
+        // `verum_common::well_known_types::NUMERIC_ALIAS_MATRIX`; this
+        // function normalises every legacy uppercase-short and Rust-
+        // style lowercase alias to the canonical Verum form. Drift
+        // between the registry and this normaliser surfaces as type-
+        // dispatch misses (e.g. `Usize` not matching `USize` impl
+        // because the normaliser left it as-is).
         match name {
-            "i8" => "Int8",
-            "i16" => "Int16",
-            "i32" => "Int32",
-            "i64" => "Int64",
-            "i128" => "Int128",
-            "isize" => "IntSize",
-            "u8" | "UInt8" => "Byte",
-            "u16" => "UInt16",
-            "u32" => "UInt32",
-            "u64" => "UInt64",
-            "u128" => "UInt128",
-            "usize" => "UIntSize",
-            "f32" => "Float32",
-            "f64" => "Float64",
+            "i8" | "I8" => "Int8",
+            "i16" | "I16" => "Int16",
+            "i32" | "I32" => "Int32",
+            "i64" | "I64" => "Int64",
+            "i128" | "I128" => "Int128",
+            "isize" | "Isize" | "ISize" => "IntSize",
+            "u8" | "U8" | "UInt8" => "Byte",
+            "u16" | "U16" => "UInt16",
+            "u32" | "U32" => "UInt32",
+            "u64" | "U64" => "UInt64",
+            "u128" | "U128" => "UInt128",
+            "usize" | "Usize" | "USize" => "UIntSize",
+            "f32" | "F32" => "Float32",
+            "f64" | "F64" => "Float64",
             other => other,
         }
     }
