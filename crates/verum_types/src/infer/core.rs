@@ -590,8 +590,52 @@ impl TypeChecker {
         // hold an `Arc` from the pipeline's lazy embedded sidecar)
         // hand off the metadata in O(1) — no 15ms 3MB deep clone.
         let mut checker = Self::with_minimal_context();
+        checker.register_coercion_markers_from_metadata(&metadata);
         checker.core_metadata = Maybe::Some(metadata);
         checker
+    }
+
+    /// One-shot scan of `metadata.implementations` that mirrors
+    /// `verum_compiler::stdlib_coercion_registry::scan_protocol_implementations`
+    /// — but for the USER-SIDE typecheck path that doesn't re-walk
+    /// stdlib AST.  Without this, the unifier's coercion-marker
+    /// registries (ArrayCoercible / IntCoercible / TensorLike /
+    /// Indexable / RangeLike / BytewiseFfi / SizedNumeric) stay
+    /// empty in `verum run` / `verum build`, and every
+    /// `let bs: List<Byte> = [1, 2, 3]` style coercion fails with
+    /// `expected 'List<Byte>', found '[Byte; 3]'` because
+    /// `is_array_coercible("List")` returns false.
+    ///
+    /// Closes the user-side gap left by the stdlib-bootstrap-only
+    /// scan path: the bootstrap populates the unifier built INSIDE
+    /// the stdlib precompile process, but `verum run` constructs a
+    /// fresh unifier and the registries default to empty.
+    ///
+    /// Idempotent — every `register_*` is a HashSet insert.
+    fn register_coercion_markers_from_metadata(
+        &mut self,
+        metadata: &crate::core_metadata::CoreMetadata,
+    ) {
+        for impl_desc in metadata.implementations.iter() {
+            let proto = impl_desc.protocol.as_str();
+            let target = impl_desc.target_type.clone();
+            if target.as_str().is_empty() {
+                continue;
+            }
+            match proto {
+                "IntCoercible" => self.unifier.register_int_coercible_type(target),
+                "TensorLike" => self.unifier.register_tensor_family_type(target),
+                "Indexable" => self.unifier.register_indexable_type(target),
+                "RangeLike" => self.unifier.register_range_like_type(target),
+                "BytewiseFfi" => self.unifier.register_bytewise_ffi_type(target),
+                "SizedNumeric" => self.unifier.register_sized_numeric_type(target),
+                "ArrayCoercible" => {
+                    self.unifier.register_array_coercible_type(target.clone());
+                    crate::subtype::register_global_array_coercible(target);
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Hand stdlib metadata to a TypeChecker constructed via a
@@ -613,6 +657,7 @@ impl TypeChecker {
         &mut self,
         metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
     ) {
+        self.register_coercion_markers_from_metadata(&metadata);
         self.core_metadata = Maybe::Some(metadata);
     }
 
