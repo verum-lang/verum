@@ -18,8 +18,8 @@
 // =============================================================================
 
 mount core.async.poll.{Poll};
-mount core.maybe.{Maybe, Some, None};
-mount core.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
 // Section 1: Variant construction

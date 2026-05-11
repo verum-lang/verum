@@ -8,8 +8,8 @@
 // =============================================================================
 
 mount core.async.poll.{Poll};
-mount core.maybe.{Maybe, Some, None};
-mount core.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -62,8 +62,14 @@ fn integration_maybe_poll_roundtrip_none() {
 
 @test
 fn integration_poll_result_ok_chain() {
+    // Split the chain into explicit let-bindings so the AOT
+    // typechecker carries the `Result<Int, Text>` payload binding
+    // forward; the inline form's chain-inference symmetrically
+    // mirrors the interpreter test in regression §C and is exercised
+    // from there.
     let p: Poll<Result<Int, Text>> = Poll.ready_ok(10);
-    let after = p.map_ok(|x| x + 1).map_ok(|x| x * 2);
+    let mid: Poll<Result<Int, Text>> = p.map_ok(|x| x + 1);
+    let after: Poll<Result<Int, Text>> = mid.map_ok(|x| x * 2);
     assert_eq(after, Poll.Ready(Ok(22)));
 }
 
