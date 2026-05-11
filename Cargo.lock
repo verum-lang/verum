@@ -5584,6 +5584,8 @@ name = "verum_stdlib_precompiler"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "tracing",
+ "tracing-subscriber",
  "verum_compiler",
 ]
 
