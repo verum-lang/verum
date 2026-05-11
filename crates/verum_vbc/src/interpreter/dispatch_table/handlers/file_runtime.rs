@@ -649,14 +649,11 @@ fn value_is_text(v: &Value) -> bool {
         return false;
     }
     let ptr = v.as_ptr::<u8>();
-    if ptr.is_null() {
-        return false;
+    match unsafe { heap::ObjectHeader::try_type_id(ptr) } {
+        Some(TypeId::TEXT) => true,
+        Some(t) if t == TypeId(0x0001) => true,
+        _ => false,
     }
-    if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
-        return false;
-    }
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
-    header.type_id == TypeId::TEXT || header.type_id == TypeId(0x0001)
 }
 
 // ============================================================================
@@ -717,34 +714,27 @@ fn extract_path_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> Str
     // about a path like `<ptr@0x600003a8c000>` which never exists.
     if unwrapped.is_ptr() && !unwrapped.is_nil() {
         let ptr = unwrapped.as_ptr::<u8>();
-        if !ptr.is_null()
-            && (ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+        if let Some(header) = unsafe { heap::ObjectHeader::try_from_ptr(ptr) }
+            && (header.size as usize) >= std::mem::size_of::<Value>()
         {
-            let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
-            if (header.size as usize) >= std::mem::size_of::<Value>() {
-                let field0 = unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
-                if value_is_text(&field0) {
-                    return extract_string(&field0, state);
-                }
-                // Second level (PathBuf-shaped): if field0 is itself a
-                // 1-field record whose own field 0 is a Text, return
-                // that Text.
-                if field0.is_ptr() && !field0.is_nil() {
-                    let inner_ptr = field0.as_ptr::<u8>();
-                    if !inner_ptr.is_null()
-                        && (inner_ptr as usize)
-                            .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
-                    {
-                        let inner_header =
-                            unsafe { &*(inner_ptr as *const heap::ObjectHeader) };
-                        if (inner_header.size as usize) >= std::mem::size_of::<Value>() {
-                            let inner_field0 = unsafe {
-                                *(inner_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value)
-                            };
-                            if value_is_text(&inner_field0) {
-                                return extract_string(&inner_field0, state);
-                            }
-                        }
+            let field0 = unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
+            if value_is_text(&field0) {
+                return extract_string(&field0, state);
+            }
+            // Second level (PathBuf-shaped): if field0 is itself a
+            // 1-field record whose own field 0 is a Text, return
+            // that Text.
+            if field0.is_ptr() && !field0.is_nil() {
+                let inner_ptr = field0.as_ptr::<u8>();
+                if let Some(inner_header) =
+                    unsafe { heap::ObjectHeader::try_from_ptr(inner_ptr) }
+                    && (inner_header.size as usize) >= std::mem::size_of::<Value>()
+                {
+                    let inner_field0 = unsafe {
+                        *(inner_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value)
+                    };
+                    if value_is_text(&inner_field0) {
+                        return extract_string(&inner_field0, state);
                     }
                 }
             }
@@ -777,7 +767,10 @@ fn extract_byte_list_arg(state: &InterpreterState, reg: u16, caller_base: u32) -
         return Vec::new();
     }
     unsafe {
-        let header = &*(base as *const heap::ObjectHeader);
+        let header = match heap::ObjectHeader::try_from_ptr(base) {
+            Some(h) => h,
+            None => return Vec::new(),
+        };
         if header.type_id != TypeId::LIST {
             return Vec::new();
         }

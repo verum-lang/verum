@@ -438,7 +438,7 @@ fn extract_path_or_text(state: &InterpreterState, reg: u16, caller_base: u32) ->
     if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
         return extract_string(&unwrapped, state);
     }
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     if (header.size as usize) < std::mem::size_of::<Value>() {
         return extract_string(&unwrapped, state);
     }
@@ -459,8 +459,7 @@ fn extract_path_or_text(state: &InterpreterState, reg: u16, caller_base: u32) ->
             && (inner_ptr as usize)
                 .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
         {
-            let inner_header =
-                unsafe { &*(inner_ptr as *const heap::ObjectHeader) };
+            let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
             if inner_header.type_id == TypeId::TEXT
                 || inner_header.type_id == TypeId(0x0001)
             {
@@ -476,15 +475,11 @@ fn extract_path_or_text(state: &InterpreterState, reg: u16, caller_base: u32) ->
                 }
                 if inner_field0.is_ptr() && !inner_field0.is_nil() {
                     let deeper_ptr = inner_field0.as_ptr::<u8>();
-                    if !deeper_ptr.is_null() {
-                        let deeper_header = unsafe {
-                            &*(deeper_ptr as *const heap::ObjectHeader)
-                        };
-                        if deeper_header.type_id == TypeId::TEXT
-                            || deeper_header.type_id == TypeId(0x0001)
-                        {
-                            return extract_string(&inner_field0, state);
-                        }
+                    let deeper_header = unsafe { heap::ObjectHeader::ref_or_stub(deeper_ptr) };
+                    if deeper_header.type_id == TypeId::TEXT
+                        || deeper_header.type_id == TypeId(0x0001)
+                    {
+                        return extract_string(&inner_field0, state);
                     }
                 }
             }

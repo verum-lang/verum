@@ -426,6 +426,122 @@ impl ObjectHeader {
         self.capabilities = caps;
     }
 
+    /// Bare alignment of the `ObjectHeader` struct (`#[repr(C, align(8))]`).
+    pub const ALIGN: usize = std::mem::align_of::<Self>();
+
+    /// Returns `true` iff `ptr` is non-null AND aligned to the header's
+    /// canonical 8-byte alignment.  Pre-condition that every code path
+    /// dereferencing a `*const ObjectHeader` MUST satisfy — Rust's
+    /// `panic_misaligned_pointer_dereference` runtime check aborts the
+    /// whole interpreter on violation, so this is a soundness gate, not
+    /// an optimisation.
+    #[inline(always)]
+    pub fn ptr_is_aligned(ptr: *const u8) -> bool {
+        !ptr.is_null() && (ptr as usize) % Self::ALIGN == 0
+    }
+
+    /// Safely read the `ObjectHeader` at `ptr`.
+    ///
+    /// Returns `None` when `ptr` is null OR misaligned for `ObjectHeader`
+    /// (`#[repr(C, align(8))]`).  Use this at every site that casts a
+    /// raw `*const u8` to `*const ObjectHeader` and dereferences — the
+    /// `Option` discipline forces the caller to handle the
+    /// "this-isn't-actually-a-header" case instead of aborting the
+    /// interpreter through Rust's UB-level alignment check.
+    ///
+    /// **Safety:** when `Some` is returned, the caller still relies on
+    /// the pointer pointing at a valid `ObjectHeader` — alignment
+    /// alone doesn't prove that.  This helper closes only the
+    /// alignment hole; the rest of the soundness boundary (`ptr` must
+    /// originate from a `handle_new` / CBGR allocation that wrote a
+    /// header at that address) is preserved by the calling
+    /// invariants.
+    ///
+    /// # Safety
+    /// The caller MUST guarantee that `ptr`, if aligned and non-null,
+    /// points to a valid `ObjectHeader` whose backing allocation is
+    /// still live for the duration of the returned reference.
+    #[inline(always)]
+    pub unsafe fn try_from_ptr<'a>(ptr: *const u8) -> Option<&'a Self> {
+        if Self::ptr_is_aligned(ptr) {
+            // SAFETY: alignment proven above; lifetime is caller's
+            // responsibility as documented in the trait-level Safety
+            // section.
+            unsafe { Some(&*(ptr as *const Self)) }
+        } else {
+            None
+        }
+    }
+
+    /// Read just the `type_id` field at `ptr`, without retaining a
+    /// reference to the header (avoids borrow-conflict patterns where
+    /// the surrounding code wants to mutate adjacent state).  Returns
+    /// `None` on misalignment / null — see [`Self::try_from_ptr`].
+    ///
+    /// # Safety
+    /// Same as [`Self::try_from_ptr`].
+    #[inline(always)]
+    pub unsafe fn try_type_id(ptr: *const u8) -> Option<TypeId> {
+        // SAFETY: try_from_ptr discharges the alignment gate; lifetime
+        // is scoped to this fn so the caller's borrow tracker can't
+        // observe the borrow.
+        unsafe { Self::try_from_ptr(ptr).map(|h| h.type_id) }
+    }
+
+    /// Alignment-safe variant of `&*(ptr as *const ObjectHeader)` that
+    /// returns a reference to a static all-zero stub when `ptr` is
+    /// null or misaligned for `ObjectHeader`.
+    ///
+    /// The stub's `type_id` is `TypeId(0)` (not equal to any legitimate
+    /// `FIRST_USER+` or canonical-builtin TypeId), so every `if header.type_id == X`
+    /// dispatch on it deterministically falls through to its else-
+    /// branch — yielding the same semantics callers would have got
+    /// from a `if let Some(h) = try_from_ptr(ptr)` pattern, without
+    /// the structural rewrite at every call site.
+    ///
+    /// **When to prefer `try_from_ptr` instead**: when the caller can
+    /// usefully act on the *fact* that a pointer is misaligned (e.g.
+    /// error out with a typed `InterpreterError` rather than silently
+    /// returning a default).  `ref_or_stub` is the right primitive at
+    /// dispatch-time discrimination sites; `try_from_ptr` is the
+    /// right primitive at validation boundaries.
+    ///
+    /// # Safety
+    /// When `ptr` is aligned and non-null, the caller MUST guarantee
+    /// it points to a valid `ObjectHeader` whose backing allocation
+    /// is still live for the duration of the returned reference.
+    #[inline(always)]
+    pub unsafe fn ref_or_stub<'a>(ptr: *const u8) -> &'a Self {
+        // SAFETY: contract documented above; alignment-positive case
+        // is correct by construction.
+        match unsafe { Self::try_from_ptr(ptr) } {
+            Some(h) => h,
+            None => Self::stub_reference(),
+        }
+    }
+
+    /// Static all-zero `ObjectHeader` used as a sentinel return value
+    /// by [`Self::ref_or_stub`].  Its `type_id` is `TypeId(0)`, which
+    /// no live allocation ever takes (`TypeId::FIRST_USER` starts well
+    /// above 0 and every canonical builtin TypeId is also non-zero),
+    /// so dispatch-time `header.type_id == X` checks deterministically
+    /// route through their else-branches.
+    fn stub_reference() -> &'static Self {
+        // `align(8)` is satisfied by `'static` storage of a
+        // `#[repr(C, align(8))]` struct.
+        static STUB: ObjectHeader = ObjectHeader {
+            type_id: TypeId(0),
+            generation: 0,
+            flags: ObjectFlags::empty(),
+            refcount: 0,
+            size: 0,
+            epoch: 0,
+            capabilities: 0,
+            _padding: 0,
+        };
+        &STUB
+    }
+
     /// Attenuate capabilities (can only remove, not add).
     pub fn attenuate_capabilities(&mut self, mask: u16) {
         self.capabilities &= mask;
@@ -1233,5 +1349,93 @@ mod tests {
         let obj = heap.alloc_array(TypeId::INT, 100).unwrap();
         let expected_size = 100 * std::mem::size_of::<Value>();
         assert_eq!(obj.size() as usize, expected_size);
+    }
+
+    // ====================================================================
+    // ObjectHeader alignment-safety primitives
+    // — Task #14 SIGABRT closure: every cast of `*const u8 → *const
+    // ObjectHeader` followed by a dereference now routes through
+    // `try_from_ptr` / `try_type_id` / `ref_or_stub`.  The helpers
+    // discharge Rust's UB-level alignment check, replacing
+    // panic_misaligned_pointer_dereference (which aborts the whole
+    // interpreter via SIGABRT) with deterministic Option / sentinel
+    // semantics.  These tests pin the soundness invariant.
+    // ====================================================================
+
+    #[test]
+    fn object_header_try_from_ptr_rejects_null() {
+        assert!(unsafe { ObjectHeader::try_from_ptr(std::ptr::null()).is_none() });
+    }
+
+    #[test]
+    fn object_header_try_from_ptr_rejects_misaligned() {
+        // Allocate an 8-byte buffer aligned to 8, then offset by 1
+        // to construct a guaranteed-misaligned pointer.  Any value
+        // 1..7 works; 1 is the most adversarial.
+        let buf: [u8; 16] = [0; 16];
+        let base = buf.as_ptr();
+        for offset in 1..ObjectHeader::ALIGN {
+            let misaligned = unsafe { base.add(offset) };
+            assert_eq!(
+                (misaligned as usize) % ObjectHeader::ALIGN,
+                offset,
+                "offset {} is genuinely misaligned",
+                offset
+            );
+            assert!(
+                unsafe { ObjectHeader::try_from_ptr(misaligned).is_none() },
+                "try_from_ptr({:p}) at offset {} must return None instead of panic-aborting",
+                misaligned,
+                offset
+            );
+        }
+    }
+
+    #[test]
+    fn object_header_try_type_id_returns_none_on_misalignment() {
+        let buf: [u8; 16] = [0; 16];
+        let misaligned = unsafe { buf.as_ptr().add(3) };
+        assert!(unsafe { ObjectHeader::try_type_id(misaligned).is_none() });
+    }
+
+    #[test]
+    fn object_header_ref_or_stub_returns_zero_typeid_stub_on_misalignment() {
+        let buf: [u8; 16] = [0; 16];
+        let misaligned = unsafe { buf.as_ptr().add(3) };
+        let stub = unsafe { ObjectHeader::ref_or_stub(misaligned) };
+        // Stub MUST not collide with any live TypeId — `TypeId(0)`
+        // is the canonical "no allocation has this ID" sentinel.
+        assert_eq!(stub.type_id, TypeId(0));
+        assert_eq!(stub.size, 0);
+        assert_eq!(stub.refcount, 0);
+    }
+
+    #[test]
+    fn object_header_ref_or_stub_reads_real_header_when_aligned() {
+        let mut heap = Heap::new();
+        let obj = heap.alloc(TypeId::TEXT, 32).unwrap();
+        let ptr = obj.as_ptr() as *const u8;
+        let header = unsafe { ObjectHeader::ref_or_stub(ptr) };
+        assert_eq!(
+            header.type_id,
+            TypeId::TEXT,
+            "aligned heap pointer must read its real type_id, not the stub"
+        );
+    }
+
+    #[test]
+    fn object_header_stub_reference_is_repeatable() {
+        // `ref_or_stub` returns a reference to a `'static` stub — two
+        // calls with the same misaligned input must produce the same
+        // reference (no per-call allocation).
+        let buf: [u8; 16] = [0; 16];
+        let p1 = unsafe { buf.as_ptr().add(1) };
+        let p2 = unsafe { buf.as_ptr().add(3) };
+        let s1 = unsafe { ObjectHeader::ref_or_stub(p1) } as *const _;
+        let s2 = unsafe { ObjectHeader::ref_or_stub(p2) } as *const _;
+        assert_eq!(
+            s1, s2,
+            "all misaligned inputs must alias to the same static stub"
+        );
     }
 }

@@ -259,7 +259,13 @@ pub(in super::super) fn handle_text_extended(
                 }
             } else if text.is_ptr() && !text.is_nil() {
                 let base = text.as_ptr::<u8>();
-                let header = unsafe { &*(base as *const heap::ObjectHeader) };
+                let header = match unsafe { heap::ObjectHeader::try_from_ptr(base) } {
+                    Some(h) => h,
+                    // Misaligned / null base means we can't read the
+                    // Text shape — fall through to the as_bytes_arg
+                    // empty-byte-slice failure path.
+                    None => return Ok(DispatchResult::Continue),
+                };
                 if header.type_id == TypeId::TEXT || header.type_id == TypeId(0x0001) {
                     // Two coexisting Text layouts under the same TypeId:
                     //

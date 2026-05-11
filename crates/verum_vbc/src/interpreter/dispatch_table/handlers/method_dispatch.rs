@@ -610,7 +610,7 @@ pub(in super::super) fn handle_call_method(
     if receiver.is_ptr() && !receiver.is_nil() {
         let ptr = receiver.as_ptr::<u8>();
         // Check if this is a Shared object by reading the type_id from ObjectHeader
-        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
         if header.type_id == TypeId::SHARED {
             // Shared layout: [ObjectHeader][refcount: i64][value: Value]
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
@@ -693,8 +693,7 @@ pub(in super::super) fn handle_call_method(
                         {
                             // SAFETY: alignment verified; heap
                             // objects begin with an ObjectHeader.
-                            let inner_header =
-                                unsafe { &*(inner_ptr as *const heap::ObjectHeader) };
+                            let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
                             if let Some(td) = state.module.get_type(inner_header.type_id)
                                 && let Some(inner_type_name) = state.module.strings.get(td.name)
                                 && !inner_type_name.is_empty()
@@ -866,7 +865,7 @@ pub(in super::super) fn handle_call_method(
                 if p.is_null() {
                     false
                 } else {
-                    let header = unsafe { &*(p as *const heap::ObjectHeader) };
+                    let header = unsafe { heap::ObjectHeader::ref_or_stub(p) };
                     header.type_id == TypeId::TEXT || header.type_id == TypeId(0x0001)
                 }
             }
@@ -1076,7 +1075,7 @@ pub(in super::super) fn handle_call_method(
         let bytes_ptr = bytes_val.as_ptr::<u8>();
         if !bytes_ptr.is_null() {
             let data = unsafe { bytes_ptr.add(heap::OBJECT_HEADER_SIZE) };
-            let header = unsafe { &*(bytes_ptr as *const heap::ObjectHeader) };
+            let header = unsafe { heap::ObjectHeader::ref_or_stub(bytes_ptr) };
             let byte_count = header.size as usize;
             let mut buf = [0u8; 8];
             let n = byte_count.min(8);
@@ -1156,7 +1155,7 @@ pub(in super::super) fn handle_call_method(
             || (receiver.is_ptr() && !receiver.is_nil() && {
                 let ptr = receiver.as_ptr::<u8>();
                 if !ptr.is_null() {
-                    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+                    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
                     header.type_id == crate::types::TypeId::TEXT || header.type_id.0 == 0x0001
                 } else {
                     false
@@ -1199,7 +1198,7 @@ pub(in super::super) fn handle_call_method(
     // dispatch_receiver already has CBGR refs dereffed.
     let is_builtin_collection = if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
         let ptr = dispatch_receiver.as_ptr::<u8>();
-        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
         header.type_id == TypeId::MAP
             || header.type_id == TypeId::SET
             || header.type_id == TypeId::LIST
@@ -1252,7 +1251,7 @@ pub(in super::super) fn handle_call_method(
         {
             // SAFETY: pointer alignment verified; every heap object begins with
             // an ObjectHeader, read-only.
-            unsafe { (*(ptr as *const heap::ObjectHeader)).type_id.0 }
+            unsafe { heap::ObjectHeader::try_type_id(ptr).map(|t| t.0).unwrap_or(0) }
         } else {
             0
         }
@@ -1332,7 +1331,7 @@ pub(in super::super) fn handle_call_method(
                 {
                     // SAFETY: alignment verified; every heap object
                     // begins with an ObjectHeader.
-                    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+                    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
                     state
                         .module
                         .get_type(header.type_id)
@@ -1395,7 +1394,7 @@ pub(in super::super) fn handle_call_method(
                     {
                         // SAFETY: alignment verified; every heap object
                         // begins with an ObjectHeader.
-                        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+                        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
                         state
                             .module
                             .get_type(header.type_id)
@@ -1588,7 +1587,7 @@ pub(in super::super) fn handle_call_method(
         {
             // SAFETY: alignment verified; every heap object begins
             // with an ObjectHeader.
-            let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+            let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
             let recv_type_id = header.type_id;
             if let Some(td) = state.module.get_type(recv_type_id) {
                 // Snapshot protocol ids first to release the borrow on
@@ -1849,7 +1848,7 @@ pub(in super::super) fn handle_call_method(
     //      methods are.
     if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() && !method_name.contains('.') {
         let ptr = dispatch_receiver.as_ptr::<u8>();
-        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
         let recv_type_id = header.type_id;
         // Strategy 1: TypeId-aware exact qualified lookup.
         let mut found: Option<crate::module::FunctionId> = state
@@ -1911,7 +1910,7 @@ pub(in super::super) fn handle_call_method(
             }
             // SAFETY: alignment verified; every heap object begins
             // with an ObjectHeader.
-            let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+            let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
             let recv_tid = header.type_id;
             if seen_ids.contains(&recv_tid.0) {
                 // Cyclic Deref chain — bail.
@@ -1961,7 +1960,7 @@ pub(in super::super) fn handle_call_method(
                     .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
             {
                 // SAFETY: alignment verified just above.
-                let inner_header = unsafe { &*(inner_ptr as *const heap::ObjectHeader) };
+                let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
                 let inner_tid = inner_header.type_id;
                 if let Some(found) =
                     state.module.find_method_by_receiver_type(inner_tid, &bare_method_name)
@@ -2077,7 +2076,7 @@ pub(super) fn dispatch_primitive_method(
     let receiver_is_actually_builtin = receiver.is_ptr() && !receiver.is_nil() && {
         let ptr = receiver.as_ptr::<u8>();
         if !ptr.is_null() {
-            let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+            let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
             // Builtin collection types always use builtin dispatch regardless of static prefix.
             let is_builtin_collection = header.type_id == TypeId::MAP
                 || header.type_id == TypeId::SET
@@ -2673,7 +2672,7 @@ pub(super) fn dispatch_primitive_method(
                 // Static-style: Int.from_le_bytes(bytes_list)
                 let list_val = state.get_reg(Reg(args.start.0));
                 let list_ptr = list_val.as_ptr::<u8>();
-                let list_header = unsafe { &*(list_ptr as *const heap::ObjectHeader) };
+                let list_header = unsafe { heap::ObjectHeader::ref_or_stub(list_ptr) };
                 let mut byte_arr = [0u8; 8];
                 for (i, byte) in byte_arr.iter_mut().enumerate() {
                     let elem = get_array_element(list_ptr, list_header, i)?;
@@ -2751,7 +2750,7 @@ pub(super) fn dispatch_primitive_method(
             "int32$from_le_bytes" | "int32$from_be_bytes" => {
                 let list_val = state.get_reg(Reg(args.start.0));
                 let list_ptr = list_val.as_ptr::<u8>();
-                let list_header = unsafe { &*(list_ptr as *const heap::ObjectHeader) };
+                let list_header = unsafe { heap::ObjectHeader::ref_or_stub(list_ptr) };
                 let mut byte_arr = [0u8; 4];
                 for (i, byte) in byte_arr.iter_mut().enumerate() {
                     let elem = get_array_element(list_ptr, list_header, i)?;
@@ -2824,7 +2823,7 @@ pub(super) fn dispatch_primitive_method(
             "uint64$from_le_bytes" | "uint64$from_be_bytes" => {
                 let list_val = state.get_reg(Reg(args.start.0));
                 let list_ptr = list_val.as_ptr::<u8>();
-                let list_header = unsafe { &*(list_ptr as *const heap::ObjectHeader) };
+                let list_header = unsafe { heap::ObjectHeader::ref_or_stub(list_ptr) };
                 let mut byte_arr = [0u8; 8];
                 for (i, byte) in byte_arr.iter_mut().enumerate() {
                     let elem = get_array_element(list_ptr, list_header, i)?;
@@ -2851,7 +2850,7 @@ pub(super) fn dispatch_primitive_method(
             "uint32$from_le_bytes" | "uint32$from_be_bytes" => {
                 let list_val = state.get_reg(Reg(args.start.0));
                 let list_ptr = list_val.as_ptr::<u8>();
-                let list_header = unsafe { &*(list_ptr as *const heap::ObjectHeader) };
+                let list_header = unsafe { heap::ObjectHeader::ref_or_stub(list_ptr) };
                 let mut byte_arr = [0u8; 4];
                 for (i, byte) in byte_arr.iter_mut().enumerate() {
                     let elem = get_array_element(list_ptr, list_header, i)?;
@@ -2878,7 +2877,7 @@ pub(super) fn dispatch_primitive_method(
             "uint16$from_le_bytes" | "uint16$from_be_bytes" => {
                 let list_val = state.get_reg(Reg(args.start.0));
                 let list_ptr = list_val.as_ptr::<u8>();
-                let list_header = unsafe { &*(list_ptr as *const heap::ObjectHeader) };
+                let list_header = unsafe { heap::ObjectHeader::ref_or_stub(list_ptr) };
                 let mut byte_arr = [0u8; 2];
                 for (i, byte) in byte_arr.iter_mut().enumerate() {
                     let elem = get_array_element(list_ptr, list_header, i)?;
@@ -3099,7 +3098,7 @@ pub(super) fn dispatch_primitive_method(
             "from_le_bytes" | "from_be_bytes" => {
                 let list_val = state.get_reg(Reg(args.start.0));
                 let list_ptr = list_val.as_ptr::<u8>();
-                let list_header = unsafe { &*(list_ptr as *const heap::ObjectHeader) };
+                let list_header = unsafe { heap::ObjectHeader::ref_or_stub(list_ptr) };
                 let mut byte_arr = [0u8; 8];
                 for (i, byte) in byte_arr.iter_mut().enumerate() {
                     let elem = get_array_element(list_ptr, list_header, i)?;
@@ -3210,7 +3209,7 @@ pub(super) fn dispatch_primitive_method(
         // These are simple non-closure array methods handled here.
         // Higher-order methods (map, filter, fold) are in dispatch_array_method.
         let ptr = receiver.as_ptr::<u8>();
-        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
 
         // Check for heap string (Text) type - these have special layout: [len: u64][bytes...]
         let is_heap_string = header.type_id == crate::types::TypeId::TEXT
@@ -3387,7 +3386,7 @@ pub(super) fn dispatch_primitive_method(
                         // and `implement<K, V> Iterator for MapIter<K, V> { type Item = (K, V); … }`.
                         if iter_type == ITER_TYPE_MAP {
                             let source_is_set = {
-                                let header = unsafe { &*(source_ptr as *const heap::ObjectHeader) };
+                                let header = unsafe { heap::ObjectHeader::ref_or_stub(source_ptr) };
                                 header.type_id == TypeId::SET
                             };
                             let map_header =
@@ -6608,7 +6607,7 @@ pub(super) fn list_push(
     new_val: Value,
 ) -> InterpreterResult<()> {
     let list_ptr = list_val.as_ptr::<u8>();
-    let header = unsafe { &*(list_ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(list_ptr) };
     let is_byte_list = header.type_id == TypeId::BYTE_LIST;
     let elem_size = if is_byte_list {
         std::mem::size_of::<u8>()
@@ -6712,7 +6711,7 @@ pub(super) fn dispatch_variant_method(
     // the record-fallback sentinel (`0xA000`) bounds the variant range
     // so a record with the synthetic `0x9000` id doesn't false-trigger
     // variant-method dispatch.
-    let header = unsafe { &*(base_ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(base_ptr) };
     let type_id_val = header.type_id.0;
     if !verum_common::layout::is_synthetic_variant_type_id(type_id_val)
         || type_id_val >= 0xA000
@@ -6977,7 +6976,7 @@ pub(super) fn dispatch_array_method(
     if ptr.is_null() || ((ptr as usize) & (std::mem::align_of::<heap::ObjectHeader>() - 1)) != 0 {
         return Ok(None);
     }
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
 
     // Handle pointer extraction methods for ALL array types (including byte arrays)
     if method == "as_mut_ptr" || method == "as_ptr" {
@@ -7352,7 +7351,7 @@ pub(super) fn dispatch_array_method(
             }
             // Re-read pointers since closure calls may have triggered GC
             let ptr = receiver.as_ptr::<u8>();
-            let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+            let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
             if header.type_id == TypeId::LIST {
                 let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                 let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
@@ -7459,7 +7458,7 @@ pub(super) fn dispatch_array_method(
                 // Read the inner list's elements
                 let inner_ptr = inner_list.as_ptr::<u8>();
                 if !inner_ptr.is_null() {
-                    let inner_header = unsafe { &*(inner_ptr as *const heap::ObjectHeader) };
+                    let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
                     let inner_len = get_array_length(inner_ptr, inner_header)?;
                     for j in 0..inner_len {
                         let inner_elem = get_array_element(inner_ptr, inner_header, j)?;
@@ -7478,7 +7477,7 @@ pub(super) fn dispatch_array_method(
                 if inner_list.is_ptr() && !inner_list.is_nil() {
                     let inner_ptr = inner_list.as_ptr::<u8>();
                     if !inner_ptr.is_null() {
-                        let inner_header = unsafe { &*(inner_ptr as *const heap::ObjectHeader) };
+                        let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
                         let inner_len = get_array_length(inner_ptr, inner_header)?;
                         for j in 0..inner_len {
                             let inner_elem = get_array_element(inner_ptr, inner_header, j)?;
@@ -7608,7 +7607,7 @@ pub(super) fn dispatch_array_method(
             if other_ptr.is_null() {
                 return Ok(Some(Value::unit()));
             }
-            let other_header = unsafe { &*(other_ptr as *const heap::ObjectHeader) };
+            let other_header = unsafe { heap::ObjectHeader::ref_or_stub(other_ptr) };
             let other_len = get_array_length(other_ptr, other_header)?;
             // Collect elements from the other list first
             let mut other_elems = Vec::with_capacity(other_len);
@@ -7714,7 +7713,7 @@ pub(super) fn dispatch_array_method(
                 let result_val = alloc_list_from_values(state, Vec::new())?;
                 return Ok(Some(result_val));
             }
-            let other_header = unsafe { &*(other_ptr as *const heap::ObjectHeader) };
+            let other_header = unsafe { heap::ObjectHeader::ref_or_stub(other_ptr) };
             let other_len = get_array_length(other_ptr, other_header)?;
             let zip_len = len.min(other_len);
             // Collect elements from both lists first

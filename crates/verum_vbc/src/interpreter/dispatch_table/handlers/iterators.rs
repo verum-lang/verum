@@ -93,7 +93,7 @@ pub(in super::super) fn handle_iter_new(
         if !src_ptr.is_null()
             && (src_ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
         {
-            let src_header = unsafe { &*(src_ptr as *const heap::ObjectHeader) };
+            let src_header = unsafe { heap::ObjectHeader::ref_or_stub(src_ptr) };
             if src_header.type_id == TypeId::UNIT
                 && src_header.size as usize == 4 * std::mem::size_of::<Value>()
             {
@@ -124,7 +124,7 @@ pub(in super::super) fn handle_iter_new(
         let source_ptr = source.as_ptr::<u8>();
         if !source_ptr.is_null() {
             // Read object header to get type_id
-            let header = unsafe { &*(source_ptr as *const heap::ObjectHeader) };
+            let header = unsafe { heap::ObjectHeader::ref_or_stub(source_ptr) };
             match header.type_id {
                 TypeId::MAP | TypeId::SET => ITER_TYPE_MAP,
                 TypeId::ARRAY => ITER_TYPE_ARRAY,
@@ -383,7 +383,7 @@ pub(in super::super) fn handle_iter_next(
             // Everything else (historical builtins piping through
             // TypeId::UNIT) defaults to the MAP pair shape.
             let source_is_set = {
-                let header = unsafe { &*(source_ptr as *const heap::ObjectHeader) };
+                let header = unsafe { heap::ObjectHeader::ref_or_stub(source_ptr) };
                 header.type_id == TypeId::SET
             };
 

@@ -245,7 +245,7 @@ pub(in super::super) fn handle_get_field(
     // SAFETY: Pointer alignment was verified immediately above, and `ptr`
     // is non-null. All VBC heap objects start with an ObjectHeader, so the
     // cast is layout-compatible. The reference is short-lived.
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
 
     // **#338: Shared<T> auto-deref for field access**
     //
@@ -293,7 +293,7 @@ pub(in super::super) fn handle_get_field(
     // auto-deref above; alignment was re-verified inside the Shared
     // arm.
     {
-        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
         if header.type_id.0 >= 0x8000 {
             // This is a variant (e.g., Heap wrapper). Extract payload[0] as the inner object.
             let payload_offset = heap::OBJECT_HEADER_SIZE + 8; // skip tag + padding
@@ -328,7 +328,7 @@ pub(in super::super) fn handle_get_field(
     // SAFETY: Final ptr alignment verified immediately above; `ptr`
     // is non-null (every auto-deref arm checks).  All VBC heap
     // objects begin with an ObjectHeader.
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
 
     // Read field at offset — with bounds check against object data size.
     let field_offset = field_idx
@@ -424,7 +424,7 @@ pub(in super::super) fn handle_set_field(
     }
     // SAFETY: See handle_get_field — alignment verified above, `ptr` is a
     // live heap object, and all objects begin with ObjectHeader.
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     if header.type_id.0 >= 0x8000 {
         let payload_offset = heap::OBJECT_HEADER_SIZE + 8;
         // SAFETY: See handle_get_field — variant payload layout applies.
@@ -634,7 +634,7 @@ pub(in super::super) fn handle_get_index(
     }
 
     // Check if this is a List (3 Values = len, cap, backing_ptr), byte array, or Value array
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     let header_size = header.size as usize;
     // eprintln!("[DEBUG GetE] ptr={:p}, type_id={:?}, size={}", ptr, header.type_id, header_size);
 
@@ -672,7 +672,7 @@ pub(in super::super) fn handle_get_index(
         let is_range = idx_val.is_ptr() && {
             let idx_ptr = idx_val.as_ptr::<u8>();
             !idx_ptr.is_null() && {
-                let idx_header = unsafe { &*(idx_ptr as *const heap::ObjectHeader) };
+                let idx_header = unsafe { heap::ObjectHeader::ref_or_stub(idx_ptr) };
                 idx_header.type_id == TypeId::RANGE
             }
         };
@@ -954,7 +954,7 @@ pub(in super::super) fn handle_set_index(
     let value = state.get_reg(val);
 
     // Check if this is a List (3 Values = len, cap, backing_ptr), byte array, or Value array
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     let header_size = header.size as usize;
 
     // Check for Map first (index may not be an integer)
@@ -1187,7 +1187,7 @@ pub(in super::super) fn handle_array_len(
         return Err(InterpreterError::NullPointer);
     }
 
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     let header_size = header.size as usize;
 
     // Heuristic: If the type_id is very large or the size is unreasonable,
@@ -1203,7 +1203,7 @@ pub(in super::super) fn handle_array_len(
         } else if inner_val.is_ptr() && !inner_val.is_nil() {
             // Recursively get length from the inner value
             let inner_ptr = inner_val.as_ptr::<u8>();
-            let inner_header = unsafe { &*(inner_ptr as *const heap::ObjectHeader) };
+            let inner_header = unsafe { heap::ObjectHeader::ref_or_stub(inner_ptr) };
             if inner_header.type_id == crate::types::TypeId::TEXT
                 || inner_header.type_id == crate::types::TypeId(0x0001)
             {
@@ -1322,10 +1322,6 @@ pub(in super::super) fn handle_new_list(
         .heap
         .alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
     state.record_allocation();
-    // eprintln!("[DEBUG NewList] created obj at {:p}, TypeId::LIST={:?}", obj.as_ptr(), TypeId::LIST);
-    let _verify_header = unsafe { &*(obj.as_ptr() as *const heap::ObjectHeader) };
-    // eprintln!("[DEBUG NewList] verify header type_id={:?}", verify_header.type_id);
-
     let data_ptr = unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
     // Allocate backing array
@@ -1365,7 +1361,7 @@ pub(in super::super) fn handle_list_push(
     // Distinguish canonical LIST from packed BYTE_LIST so the
     // backing-array stride is right.  Both layouts share the same
     // 3-Value header `[len, cap, backing_ptr]`.
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     let is_byte_list = header.type_id == TypeId::BYTE_LIST;
     let elem_size = if is_byte_list {
         std::mem::size_of::<u8>()
@@ -1446,7 +1442,7 @@ pub(in super::super) fn handle_list_pop(
         return Err(InterpreterError::NullPointer);
     }
 
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     let is_byte_list = header.type_id == TypeId::BYTE_LIST;
 
     // Read list header
@@ -1498,7 +1494,7 @@ pub(crate) fn value_hash(v: Value) -> usize {
     if super::string_helpers::is_heap_string(&v) {
         let ptr = v.as_ptr::<u8>();
         let data_offset = heap::OBJECT_HEADER_SIZE;
-        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
         let (bytes_ptr, len): (*const u8, usize) = if header.size as usize == 24 {
             let field0 = unsafe { *(ptr.add(data_offset) as *const Value) };
             let field1 = unsafe { *((ptr.add(data_offset) as *const Value).add(1)) };
@@ -1603,7 +1599,7 @@ fn text_value_bytes_and_len(v: &Value) -> (*const u8, usize) {
     if ptr.is_null() {
         return (std::ptr::null(), 0);
     }
-    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     if header.size as usize == 24 {
         let f0 = unsafe { *(ptr.add(data_offset) as *const Value) };
         let f1 = unsafe { *((ptr.add(data_offset) as *const Value).add(1)) };
@@ -1911,7 +1907,7 @@ pub(in super::super) fn handle_clone(
             // SAFETY: `contains` verified `src_ptr` is the head of a
             // tracked heap object whose first `OBJECT_HEADER_SIZE` bytes
             // are a real `ObjectHeader`.
-            let header = unsafe { &*(src_ptr as *const heap::ObjectHeader) };
+            let header = unsafe { heap::ObjectHeader::ref_or_stub(src_ptr) };
             let type_id = header.type_id;
             let data_size = header.size as usize;
 

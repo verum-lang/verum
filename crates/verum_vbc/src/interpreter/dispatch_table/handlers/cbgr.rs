@@ -509,35 +509,31 @@ pub(in super::super) fn handle_drop_ref(
             // (see handle_new which stores obj.as_ptr() - the header pointer)
             let header_ptr = obj_ptr;
 
-            // Alignment guard: `ObjectHeader` is `#[repr(C, align(8))]` so every
-            // legitimate header is 8-byte aligned (see `heap::ObjectHeader`).
-            // Pre-fix the dereference assumed the alignment unconditionally,
-            // and any value that classified `is_regular_ptr() == true` but
-            // pointed at a non-header location (e.g. an interior pointer
-            // produced by ad-hoc casts in the test suite) would trip
-            // `panic_misaligned_pointer_dereference` and abort the whole
-            // interpreter via SIGABRT — losing every parallel test in the
-            // same `verum test --interp` invocation.  The aligned-or-skip
-            // path is the architecturally honest answer: a misaligned
-            // pointer cannot be a valid ObjectHeader, so there is no Drop
-            // impl to invoke; fall through to the existing CBGR cleanup
-            // path which operates on the raw bits independent of header
+            // Alignment-checked header read.  `ObjectHeader` is
+            // `#[repr(C, align(8))]`, so every legitimate header is 8-
+            // byte aligned.  Any value classified `is_regular_ptr() ==
+            // true` but pointing at a non-header location (e.g. an
+            // interior pointer produced by ad-hoc casts in user code
+            // or `&arr[i]` constructs) would trip
+            // `panic_misaligned_pointer_dereference` and abort the
+            // whole interpreter via SIGABRT, losing every parallel
+            // test in the same `verum test --interp` invocation.  The
+            // aligned-or-skip path is the architecturally honest
+            // answer: a misaligned pointer cannot be a valid
+            // ObjectHeader, so there is no Drop impl to invoke; fall
+            // through to the existing CBGR cleanup path which
+            // operates on the raw bits independent of header
             // structure.
-            const HEADER_ALIGN: usize = std::mem::align_of::<heap::ObjectHeader>();
-            if (header_ptr as usize) % HEADER_ALIGN != 0 {
-                tracing::trace!(
-                    "[drop_ref] skipping Drop check on misaligned ptr {:p} \
-                     (align={}); value will still go through CBGR cleanup",
-                    header_ptr,
-                    HEADER_ALIGN
-                );
-                return Ok(DispatchResult::Continue);
-            }
-
-            // Read type_id from ObjectHeader
-            let type_id = unsafe {
-                let header = header_ptr as *const heap::ObjectHeader;
-                (*header).type_id
+            let type_id = match unsafe { heap::ObjectHeader::try_type_id(header_ptr) } {
+                Some(tid) => tid,
+                None => {
+                    tracing::trace!(
+                        "[drop_ref] skipping Drop check on misaligned/null ptr {:p}; \
+                         value still goes through CBGR cleanup",
+                        header_ptr
+                    );
+                    return Ok(DispatchResult::Continue);
+                }
             };
 
             // Debug: show what type we're dropping
@@ -668,46 +664,32 @@ pub(in super::super) fn handle_drop_ref(
             .cbgr_allocations
             .contains(&(obj_ptr as usize).wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize));
 
-        // Same alignment guard as the user-defined-Drop branch above —
-        // ObjectHeader requires 8-byte alignment, and a misaligned
-        // pointer cannot be a valid header (so it cannot be a TUPLE
-        // either).  Skipping cleanly avoids SIGABRT under the parallel
-        // test runner.
-        const HEADER_ALIGN: usize = std::mem::align_of::<heap::ObjectHeader>();
-        if !is_cbgr_alloc && (obj_ptr as usize) % HEADER_ALIGN != 0 {
-            return Ok(DispatchResult::Continue);
-        }
+        if !is_cbgr_alloc
+            && let Some(header) = unsafe { heap::ObjectHeader::try_from_ptr(obj_ptr) }
+            && header.type_id == TypeId::TUPLE
+        {
+            // Tuple branch entered only when the pointer is aligned
+            // and points at a TUPLE header — same alignment-gated
+            // discipline as the user-defined-Drop branch above.  Tuple
+            // layout: [ObjectHeader][elem0][elem1][elem2]…
+            let elem_count = header.size as usize / std::mem::size_of::<Value>();
+            let data_ptr = unsafe { obj_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
-        if !is_cbgr_alloc {
-            let header = unsafe { &*(obj_ptr as *const heap::ObjectHeader) };
-            if header.type_id == TypeId::TUPLE {
-                // Tuple layout: [ObjectHeader][elem0][elem1][elem2]...
-                // Size is in bytes, elements are sizeof(Value) each
-                let elem_count = header.size as usize / std::mem::size_of::<Value>();
-                let data_ptr = unsafe { obj_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-
-                // DEBUG: eprintln!("[DEBUG DropRef] Dropping TUPLE with {} elements", elem_count);
-
-                // Queue elements in REVERSE order so that after LIFO processing,
-                // they're dropped in forward order (element 0 first, then 1, etc.)
-                for i in (0..elem_count).rev() {
-                    let elem = unsafe { *data_ptr.add(i) };
-                    if elem.is_ptr() && !elem.is_nil() {
-                        // DEBUG: eprintln!("[DEBUG DropRef] Queueing tuple element {} for drop: {:?}", i, elem);
-                        state.pending_drops.push(elem);
-                    }
+            // Queue elements in REVERSE order so that after LIFO processing,
+            // they're dropped in forward order (element 0 first, then 1, etc.)
+            for i in (0..elem_count).rev() {
+                let elem = unsafe { *data_ptr.add(i) };
+                if elem.is_ptr() && !elem.is_nil() {
+                    state.pending_drops.push(elem);
                 }
+            }
 
-                // If we queued any pending drops, process them
-                if !state.pending_drops.is_empty() {
-                    // Clear the source register
-                    state.set_reg(src, Value::unit());
-
-                    // Re-run DropRef to process the pending drops
-                    let current_pc = state.pc();
-                    state.set_pc(current_pc.saturating_sub(2));
-                    return Ok(DispatchResult::Continue);
-                }
+            // If we queued any pending drops, process them
+            if !state.pending_drops.is_empty() {
+                state.set_reg(src, Value::unit());
+                let current_pc = state.pc();
+                state.set_pc(current_pc.saturating_sub(2));
+                return Ok(DispatchResult::Continue);
             }
         }
     }
@@ -814,9 +796,17 @@ pub(in super::super) fn handle_cbgr_extended(
                 return Err(InterpreterError::NullPointer);
             }
 
-            // Layout: base → ObjectHeader → [len:Value, cap:Value, backing_ptr:Value]
+            // Layout: base → ObjectHeader → [len:Value, cap:Value, backing_ptr:Value].
             // The first element is at `backing_ptr + OBJECT_HEADER_SIZE`.
-            let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+            // Alignment-checked header read: a misaligned pointer
+            // cannot be a valid header, so it cannot describe a LIST
+            // or inline array.  Return a typed error instead of
+            // aborting the interpreter through the Rust runtime's UB
+            // alignment check.
+            let header = match unsafe { heap::ObjectHeader::try_from_ptr(ptr) } {
+                Some(h) => h,
+                None => return Err(InterpreterError::NullPointer),
+            };
 
             let elem_ptr = if header.type_id == TypeId::LIST {
                 let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
@@ -929,39 +919,27 @@ pub(in super::super) fn handle_cbgr_extended(
                 std::ptr::null_mut()
             };
 
-            // If base_ptr is a List object, follow backing_ptr to get actual data
-            if !base_ptr.is_null() {
-                let header = unsafe { &*(base_ptr as *const heap::ObjectHeader) };
-                // eprintln!("[DEBUG RefSlice] base_ptr={:p}, type_id={:?}", base_ptr, header.type_id);
+            // If base_ptr is a List object, follow backing_ptr to get actual data.
+            // Alignment-checked: a misaligned base_ptr can't be a
+            // header, so the LIST / typed-array discrimination
+            // collapses to "treat as opaque bytes" — caller's
+            // downstream offsetting still works since `base_ptr.add(start * elem_size)`
+            // is alignment-agnostic for bytewise reads.
+            if let Some(header) = unsafe { heap::ObjectHeader::try_from_ptr(base_ptr) } {
                 if header.type_id == TypeId::LIST {
                     // List layout: [ObjectHeader][len: Value][cap: Value][backing_ptr: Value]
                     // backing_ptr points to another array object with the actual elements
-                    let _len_val =
-                        unsafe { *(base_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
-                    // eprintln!("[DEBUG RefSlice] list len_val={:?}", len_val);
                     let backing_ptr_val =
                         unsafe { *(base_ptr.add(heap::OBJECT_HEADER_SIZE + 16) as *const Value) };
-                    // eprintln!("[DEBUG RefSlice] backing_ptr_val={:?}, is_ptr={}", backing_ptr_val, backing_ptr_val.is_ptr());
                     if backing_ptr_val.is_ptr() && !backing_ptr_val.is_nil() {
                         let backing_array = backing_ptr_val.as_ptr::<u8>();
-                        // eprintln!("[DEBUG RefSlice] backing_array={:p}", backing_array);
                         // The backing array also has an ObjectHeader, skip it to get elements
                         base_ptr = unsafe { backing_array.add(heap::OBJECT_HEADER_SIZE) };
-                        // eprintln!("[DEBUG RefSlice] new base_ptr (after skipping header)={:p}", base_ptr);
-                        // Debug: print first element
-                        let _first_elem = unsafe { *(base_ptr as *const Value) };
-                        // eprintln!("[DEBUG RefSlice] first element at data start: {:?}", first_elem);
                     }
                 } else {
-                    // Non-LIST typed arrays (e.g., [Int; 3] allocated with TypeId::U64)
-                    // These have layout: [ObjectHeader][data...]
-                    // We need to skip past the header to get to the data
-                    // eprintln!("[DEBUG RefSlice] non-LIST array, skipping header");
+                    // Non-LIST typed arrays (e.g., [Int; 3] allocated with TypeId::U64).
+                    // Layout: [ObjectHeader][data...] — skip past the header.
                     base_ptr = unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE) };
-                    // eprintln!("[DEBUG RefSlice] new base_ptr (after skipping header)={:p}", base_ptr);
-                    // Debug: print first element as raw i64
-                    let _first_elem = unsafe { *(base_ptr as *const i64) };
-                    // eprintln!("[DEBUG RefSlice] first element at data start (raw i64): {}", first_elem);
                 }
             }
 
@@ -972,17 +950,15 @@ pub(in super::super) fn handle_cbgr_extended(
                 0 // Default to Value
             } else {
                 let src_ptr = src.as_ptr::<u8>();
-                if src_ptr.is_null() {
-                    0
-                } else {
-                    let src_header = unsafe { &*(src_ptr as *const heap::ObjectHeader) };
-                    match src_header.type_id {
-                        TypeId::U8 => 1,
-                        TypeId::U16 => 2,
-                        TypeId::U32 => 4,
-                        TypeId::U64 => 8,
-                        _ => 0, // LIST, UNIT, etc. use NaN-boxed Values
-                    }
+                // Alignment-checked header read: misaligned src means
+                // "treat as NaN-boxed Values" (the default), since
+                // there's no valid type_id to consult.
+                match unsafe { heap::ObjectHeader::try_type_id(src_ptr) } {
+                    Some(TypeId::U8) => 1,
+                    Some(TypeId::U16) => 2,
+                    Some(TypeId::U32) => 4,
+                    Some(TypeId::U64) => 8,
+                    _ => 0, // LIST, UNIT, misaligned, or null → NaN-boxed Values
                 }
             };
             // eprintln!("[DEBUG RefSlice] elem_size={}", elem_size);
