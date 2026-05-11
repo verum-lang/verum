@@ -1,0 +1,127 @@
+// =============================================================================
+// core-tests/sys/common/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.common` — cross-platform system primitives
+// (publicly re-exported via `core/sys/mod.vr`'s `public mount .common.{...}`
+// block). Focused on observable constants that don't require FFI setup;
+// OS-dependent functions (pread/pwrite/fsync/os_alloc/thread_id/…) are
+// exercised in integration tests where the per-platform plumbing is
+// appropriate.
+//
+// Mount form: bare-name `mount core.sys.{NAME};` — the form that's
+// confirmed-working post-task #18 (commit ba5acac70 + the
+// type-aware bare-name resolver in compile_call). The
+// grand-parent-bundled qualified `bitfield.NAME` form remains
+// blocked behind task #19 stage 2 (parallel `pending_constants`
+// source-module-capture work in flight).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.{
+    PAGE_SIZE,
+    MAX_CONTEXT_SLOTS,
+    CONTEXT_STACK_DEPTH,
+};
+
+// =============================================================================
+// Page-size constant pin + invariants
+// =============================================================================
+
+@test
+fn test_page_size_canonical() {
+    // POSIX/macOS/Linux/Windows aarch64 + x86_64 all converge on 4 KiB
+    // as the conventional page-size constant exposed at source level.
+    // Bigger physical pages (16 KiB on macOS, 2 MiB / 1 GiB huge pages)
+    // are queried via the `page_size()` runtime call — pinned here only
+    // for the source-level constant that the precompiler emits.
+    assert_eq(PAGE_SIZE, 4096 as USize);
+}
+
+@test
+fn test_page_size_is_power_of_two() {
+    // Hardware-aligned page sizes are always powers of two so that
+    // `addr & -(PAGE_SIZE-1)` cleanly rounds an address down to a
+    // page boundary in O(1). The `n & (n-1) == 0` identity pins this.
+    let mask: USize = PAGE_SIZE - (1 as USize);
+    assert_eq(PAGE_SIZE & mask, 0 as USize);
+}
+
+@test
+fn test_page_size_arithmetic_invariants() {
+    // Page boundaries: every multiple of PAGE_SIZE is page-aligned;
+    // every non-multiple isn't. The relationship is observable through
+    // modulo arithmetic against PAGE_SIZE itself without needing the
+    // FFI-adjacent `page_align_up` / `page_align_down` helpers.
+    let three_pages: USize = (3 as USize) * PAGE_SIZE;
+    let mid_of_fourth_page: USize = three_pages + (1024 as USize);
+    assert_eq(three_pages % PAGE_SIZE, 0 as USize);
+    assert(mid_of_fourth_page % PAGE_SIZE != (0 as USize));
+}
+
+@test
+fn test_page_size_strictly_positive() {
+    // Defensive: PAGE_SIZE = 0 would crash every page-arithmetic site
+    // (division-by-zero or infinite loop in alignment up/down).
+    assert(PAGE_SIZE > (0 as USize));
+}
+
+// =============================================================================
+// V-LLSI context-system capacity invariants
+// =============================================================================
+
+@test
+fn test_max_context_slots_canonical() {
+    // V-LLSI: 256 per-thread context slots is the documented per-thread
+    // arena ceiling. Cross-platform impls (darwin/linux/windows) all
+    // link against this single source-of-truth.
+    assert_eq(MAX_CONTEXT_SLOTS, 256 as Int);
+}
+
+@test
+fn test_context_stack_depth_canonical() {
+    // V-LLSI: 8 stack frames per context slot — bounded so the
+    // per-slot stack array can be inlined into a fixed-size table.
+    assert_eq(CONTEXT_STACK_DEPTH, 8 as Int);
+}
+
+@test
+fn test_context_capacity_strictly_positive() {
+    // Both capacity caps must be > 0 — a zero-sized arena would
+    // surface as immediate context-stack overflow on the first ctx_get.
+    assert(MAX_CONTEXT_SLOTS > 0);
+    assert(CONTEXT_STACK_DEPTH > 0);
+}
+
+@test
+fn test_max_context_slots_is_power_of_two() {
+    // Power-of-two MAX_CONTEXT_SLOTS lets the runtime mask the slot
+    // index with `index & (cap - 1)` instead of `index % cap`,
+    // saving the modulo on every ctx_get / ctx_set call. Pin the
+    // structural property so a future capacity bump preserves it.
+    let n: USize = MAX_CONTEXT_SLOTS as USize;
+    assert_eq(n & (n - (1 as USize)), 0 as USize);
+}
+
+@test
+fn test_context_stack_depth_is_power_of_two() {
+    // Same rationale as `MAX_CONTEXT_SLOTS` — the per-slot
+    // stack-frame indexer uses bitwise-AND masking for O(1)
+    // wrap-around on push/pop.
+    let n: USize = CONTEXT_STACK_DEPTH as USize;
+    assert_eq(n & (n - (1 as USize)), 0 as USize);
+}
+
+@test
+fn test_context_total_capacity_fits_in_u32() {
+    // Total context-stack entries = MAX_CONTEXT_SLOTS *
+    // CONTEXT_STACK_DEPTH = 2048 — well under any UInt32 cap, so the
+    // runtime can index every entry with a single u32 without overflow.
+    // Pin the structural budget so a future capacity bump that would
+    // exceed u32 surfaces here.
+    let total: USize = (MAX_CONTEXT_SLOTS as USize) * (CONTEXT_STACK_DEPTH as USize);
+    assert_eq(total, 2048 as USize);
+    assert(total < (4_294_967_296 as USize));
+}
+
+fn main() {}
