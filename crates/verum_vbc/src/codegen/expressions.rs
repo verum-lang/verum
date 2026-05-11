@@ -1770,6 +1770,40 @@ impl VbcCodegen {
             }
         }
 
+        // Suffix-match fallback — covers the bare-mount module-qualified
+        // case where the user writes `Z.X` (parsed by the fast-parser as
+        // a multi-segment Path rather than Field) after a top-level
+        // `mount X.Y.Z;` declaration.  The function registry stores the
+        // exported constant / function under the source file's
+        // `module sys.Z;`-declaration qualified name (e.g.
+        // `sys.bitfield.USIZE_BITS` for `core/sys/bitfield.vr` which
+        // declares `module sys.bitfield;`), so a literal lookup of the
+        // receiver-side qualified form (`bitfield.USIZE_BITS`) misses.
+        // Probe the registry for any key whose suffix is the full
+        // dotted/colon-colon path; `find_function_by_suffix` returns
+        // `None` on ambiguity, so multi-match falls through.
+        //
+        // Same direction as the equivalent suffix probes added in
+        // `compile_field_access` and `compile_method_call` (task #121).
+        if parts.len() >= 2 {
+            let qualified_verum = parts.join(".");
+            let suffix_verum = format!(".{}", qualified_verum);
+            let suffix_rust = format!("::{}", qualified_name);
+            let matched_id = self
+                .ctx
+                .find_function_by_suffix(&suffix_verum)
+                .or_else(|| self.ctx.find_function_by_suffix(&suffix_rust))
+                .map(|f| f.id);
+            if let Some(func_id) = matched_id {
+                let dest = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: func_id.0 as i64,
+                });
+                return Ok(Some(dest));
+            }
+        }
+
         // If we can't resolve, return an error with the qualified name
         Err(CodegenError::internal(format!(
             "unresolved qualified path: {}",
@@ -6607,6 +6641,43 @@ impl VbcCodegen {
                     return self.compile_variant_constructor_with_tag(tag, args);
                 }
                 return self.compile_static_method_call(&func_info, args);
+            }
+
+            // Suffix-match fallback — covers the bare-mount module-
+            // qualified case where the user writes `Z.method(args)`
+            // after a top-level `mount X.Y.Z;` declaration.  The
+            // function registry stores the function under its full
+            // source-module-declaration qualified name (e.g.
+            // `sys.bitfield.test_bit`), which doesn't match the
+            // receiver-side `bitfield.test_bit` qualified lookup
+            // above.  Probe the registry for any key whose suffix is
+            // `.Z.method`; if exactly one matches (with the right
+            // arity), dispatch through it.  `find_function_by_suffix`
+            // returns `None` on ambiguity, so multi-match falls
+            // through cleanly.
+            //
+            // Gated on `parts.len() >= 2` (single-segment paths can't
+            // be module-qualified) and a non-rooted receiver path
+            // (`super`/`cog`/`.` already have absolute resolution).
+            //
+            // Same direction as the equivalent suffix probes in
+            // `compile_field_access` and `compile_qualified_path`
+            // (task #121).
+            if parts.len() >= 2 && !self.path_was_rooted_module_path(receiver) {
+                let suffix_verum = format!(".{}", qualified_verum);
+                let suffix_rust = format!("::{}", qualified_rust);
+                let matched = self
+                    .ctx
+                    .find_function_by_suffix(&suffix_verum)
+                    .or_else(|| self.ctx.find_function_by_suffix(&suffix_rust))
+                    .filter(|info| info.param_count == args.len())
+                    .cloned();
+                if let Some(func_info) = matched {
+                    if let Some(tag) = func_info.variant_tag {
+                        return self.compile_variant_constructor_with_tag(tag, args);
+                    }
+                    return self.compile_static_method_call(&func_info, args);
+                }
             }
 
             // Try just the function name (it may have been imported).
@@ -13304,6 +13375,74 @@ impl VbcCodegen {
                 return Ok(Some(dest));
             }
 
+            // Suffix-match fallback — covers the bare-mount module-
+            // qualified case where the user writes `Z.X` after a
+            // top-level `mount X.Y.Z;` declaration.  The function
+            // registry stores the exported constant under the source
+            // file's `module sys.Z;`-declaration qualified name (e.g.
+            // `sys.bitfield.USIZE_BITS` because `core/sys/bitfield.vr`
+            // declares `module sys.bitfield;`), so the receiver-side
+            // qualified lookup (`bitfield.USIZE_BITS`) above misses.
+            // Probe the registry for any function key whose name ends
+            // with the receiver-suffix; `find_function_by_suffix`
+            // returns `None` on ambiguity, so multi-match falls
+            // through with no false hit.  Gated on `parts.len() >= 2`
+            // and a non-rooted receiver path so single-segment paths
+            // and `super`/`cog`/`.` resolutions aren't disturbed.
+            //
+            // Same direction as the equivalent suffix probes in
+            // `compile_method_call` and `compile_qualified_path`
+            // (task #121).
+            if parts.len() >= 2 && !self.path_was_rooted_module_path(base) {
+                let suffix_verum = format!(".{}", qualified_verum);
+                let suffix_rust = format!("::{}", qualified_rust);
+                let matched = self
+                    .ctx
+                    .find_function_by_suffix(&suffix_verum)
+                    .or_else(|| self.ctx.find_function_by_suffix(&suffix_rust))
+                    .cloned();
+                if let Some(func_info) = matched {
+                    if let Some(tag) = func_info.variant_tag {
+                        let parent_name = if parts.len() >= 2 {
+                            Some(parts[parts.len() - 2].as_str())
+                        } else {
+                            None
+                        };
+                        return self.compile_variant_constructor_with_tag_named_and_parent(
+                            Some(field),
+                            tag,
+                            &verum_common::List::new(),
+                            parent_name,
+                        );
+                    }
+                    let dest = self.ctx.alloc_temp();
+                    if func_info.param_count == 0
+                        && !func_info.is_async
+                        && !func_info.is_generator
+                    {
+                        if let Some(ref iname) = func_info.intrinsic_name
+                            && let Some(val_str) = iname.strip_prefix("__const_val_")
+                        {
+                            let value: i64 = val_str.parse().unwrap_or(0);
+                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                            return Ok(Some(dest));
+                        }
+                        self.ctx.emit(Instruction::Call {
+                            dst: dest,
+                            func_id: func_info.id.0,
+                            args: crate::instruction::RegRange::new(Reg(0), 0),
+                        });
+                    } else {
+                        self.ctx.emit(Instruction::NewClosure {
+                            dst: dest,
+                            func_id: func_info.id.0,
+                            captures: vec![],
+                        });
+                    }
+                    return Ok(Some(dest));
+                }
+            }
+
             // If this looks like a qualified module path (`super.x.y.f` or
             // `cog.a.b.f`) and we couldn't resolve it above, do NOT fall
             // back to a simple-name `lookup_function(field)` lookup — that
@@ -14688,21 +14827,9 @@ impl VbcCodegen {
         // Determine target type, normalizing path-based aliases to canonical TypeKind
         let target_kind = &ty.kind;
         let normalized_target = match target_kind {
-            TypeKind::Path(path) => {
-                if let Some(ident) = path.as_ident() {
-                    match ident.name.as_str() {
-                        "Float" | "Float64" | "f64" | "Float32" | "f32" => Some(TypeKind::Float),
-                        "Int" | "Int64" | "i64" | "Int32" | "i32" | "UInt8" | "u8" | "Byte"
-                        | "UInt16" | "u16" | "UInt32" | "u32" | "UInt64" | "u64" | "UInt128"
-                        | "u128" | "UIntSize" | "usize" => Some(TypeKind::Int),
-                        "Bool" => Some(TypeKind::Bool),
-                        "Char" => Some(TypeKind::Char),
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            }
+            TypeKind::Path(path) => path
+                .as_ident()
+                .and_then(|ident| Self::primitive_path_ident_to_typekind(&ident.name)),
             _ => None,
         };
         let target_kind = normalized_target.as_ref().unwrap_or(target_kind);
@@ -14711,15 +14838,7 @@ impl VbcCodegen {
         let src_kind = src_kind.map(|sk| {
             if let TypeKind::Path(path) = &sk {
                 if let Some(ident) = path.as_ident() {
-                    match ident.name.as_str() {
-                        "Float" | "Float64" | "f64" | "Float32" | "f32" => TypeKind::Float,
-                        "Int" | "Int64" | "i64" | "Int32" | "i32" | "UInt8" | "u8" | "Byte"
-                        | "UInt16" | "u16" | "UInt32" | "u32" | "UInt64" | "u64" | "UInt128"
-                        | "u128" | "UIntSize" | "usize" => TypeKind::Int,
-                        "Bool" => TypeKind::Bool,
-                        "Char" => TypeKind::Char,
-                        _ => sk,
-                    }
+                    Self::primitive_path_ident_to_typekind(&ident.name).unwrap_or(sk)
                 } else {
                     sk
                 }
@@ -16082,6 +16201,40 @@ impl VbcCodegen {
         }
     }
 
+    /// Single source of truth: maps a path-ident type name to its canonical
+    /// `TypeKind` if it is one of the built-in primitive aliases (Int / Float /
+    /// Bool / Char). Returns `None` for anything else (user types, generics,
+    /// non-primitive paths). Used by `infer_expr_type_kind` and the cast-
+    /// normalization logic in `compile_cast` so they cannot drift on which
+    /// width/signed names are recognized.
+    ///
+    /// Recognized integer aliases include both canonical Verum names
+    /// (`Int`, `Int8`, `UInt`, `USize`, `ISize`, `IntSize`, …) and
+    /// lowercase Rust-style aliases (`i64`, `u32`, `usize`, …). The Byte
+    /// type is folded into Int by representation. Drift between any of the
+    /// three call sites previously caused `(1 as USize) << n` to escape
+    /// integer classification — `!` then emitted logical-NOT via
+    /// `Instruction::Not` instead of `Instruction::Bitwise{Not}`, silently
+    /// turning `value & !mask` into `value & 0 = 0` at every bitfield
+    /// callsite.
+    pub(crate) fn primitive_path_ident_to_typekind(
+        name: &str,
+    ) -> Option<verum_ast::ty::TypeKind> {
+        use verum_ast::ty::TypeKind;
+        match name {
+            "Float" | "Float64" | "f64" | "Float32" | "f32" => Some(TypeKind::Float),
+            "Int" | "Int8" | "i8" | "Int16" | "i16" | "Int32" | "i32" | "Int64" | "i64"
+            | "Int128" | "i128" | "ISize" | "IntSize" | "isize" | "UInt" | "UInt8" | "u8"
+            | "Byte" | "UInt16" | "u16" | "UInt32" | "u32" | "UInt64" | "u64" | "UInt128"
+            | "u128" | "USize" | "UIntSize" | "usize" => Some(TypeKind::Int),
+            "Bool" => Some(TypeKind::Bool),
+            "Char" => Some(TypeKind::Char),
+            "Text" => Some(TypeKind::Text),
+            "()" | "Unit" => Some(TypeKind::Unit),
+            _ => None,
+        }
+    }
+
     /// Infers the TypeKind of an expression based on its structure.
     /// Returns None if type cannot be determined statically.
     ///
@@ -16186,27 +16339,16 @@ impl VbcCodegen {
                 None
             }
             ExprKind::Cast { ty, .. } => {
-                // Normalize path-based type aliases to canonical TypeKind
+                // Normalize path-based type aliases to canonical TypeKind via
+                // the shared `primitive_path_ident_to_typekind` helper so the
+                // recognized integer/float aliases stay in sync with the
+                // cast-normalization site in `compile_cast`. Unknown user
+                // types fall through to the raw `ty.kind`.
                 match &ty.kind {
-                    TypeKind::Path(path) => {
-                        if let Some(ident) = path.as_ident() {
-                            match ident.name.as_str() {
-                                "Float" | "Float64" | "f64" | "Float32" | "f32" => {
-                                    Some(TypeKind::Float)
-                                }
-                                "Int" | "Int64" | "i64" | "Int32" | "i32" | "UInt8" | "u8"
-                                | "Byte" | "UInt16" | "u16" | "UInt32" | "u32" | "UInt64"
-                                | "u64" | "UInt128" | "u128" | "UIntSize" | "usize" => {
-                                    Some(TypeKind::Int)
-                                }
-                                "Bool" => Some(TypeKind::Bool),
-                                "Char" => Some(TypeKind::Char),
-                                _ => Some(ty.kind.clone()),
-                            }
-                        } else {
-                            Some(ty.kind.clone())
-                        }
-                    }
+                    TypeKind::Path(path) => path
+                        .as_ident()
+                        .and_then(|ident| Self::primitive_path_ident_to_typekind(&ident.name))
+                        .or_else(|| Some(ty.kind.clone())),
                     _ => Some(ty.kind.clone()),
                 }
             }
