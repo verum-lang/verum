@@ -1813,6 +1813,115 @@ pub(in super::super) fn handle_call_method(
         }
     }
 
+    // Deref-protocol auto-dereferencing.
+    //
+    // When method dispatch fails on a heap receiver, check if the
+    // receiver's TypeDescriptor implements `Deref` (or `DerefMut`).
+    // If yes, walk the Deref chain (bounded depth) calling `deref()`
+    // at each layer to unwrap the inner value, then retry dispatch
+    // by qualified name `<InnerTypeName>.<bare>`.
+    //
+    // This is the runtime-side mirror of the Rust auto-deref semantic
+    // — without it, smart-pointer wrappers `Ref<T>` / `RefMut<T>` /
+    // `Pin<T>` / `Cow<T>` etc. would force every method on `T` to be
+    // explicitly forwarded (impossible for generic T).
+    //
+    // Guarded by:
+    //   * `MAX_DEREF_DEPTH` cap (4 levels) — even if Deref were
+    //     pathologically cyclic, the loop terminates.
+    //   * Same-id check: refuses to deref a type onto itself
+    //     (defense against `implement Deref for T { fn deref { self }}`
+    //     pathologies).
+    //   * Method-name resolution at the inner level uses ONLY exact
+    //     `<InnerName>.<bare>` or bare-suffix match — no protocol
+    //     fallback (that's already covered by
+    //     `find_method_by_receiver_type`).
+    const MAX_DEREF_DEPTH: usize = 4;
+    if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
+        let mut current = dispatch_receiver;
+        let mut seen_ids: smallvec::SmallVec<[u32; 4]> = smallvec::SmallVec::new();
+        let mut deref_func_id: Option<crate::module::FunctionId>;
+        for _ in 0..MAX_DEREF_DEPTH {
+            let ptr = current.as_ptr::<u8>();
+            if ptr.is_null()
+                || !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+            {
+                break;
+            }
+            // SAFETY: alignment verified; every heap object begins
+            // with an ObjectHeader.
+            let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+            let recv_tid = header.type_id;
+            if seen_ids.contains(&recv_tid.0) {
+                // Cyclic Deref chain — bail.
+                break;
+            }
+            seen_ids.push(recv_tid.0);
+            // Find a Deref `deref` method on the receiver's
+            // TypeDescriptor. The codegen-side `import_archive_type`
+            // (#135) stores protocol impls; we walk them looking for
+            // a function whose simple name is `deref`.
+            let td = match state.module.get_type(recv_tid) {
+                Some(td) => td,
+                None => break,
+            };
+            deref_func_id = None;
+            for pi in td.protocols.iter() {
+                for &raw_fid in pi.methods.iter() {
+                    if let Some(fdesc) = state.module.functions.get(raw_fid as usize)
+                        && let Some(fname) = state.module.strings.get(fdesc.name)
+                        && (fname == "deref" || fname.ends_with(".deref"))
+                    {
+                        deref_func_id = Some(crate::module::FunctionId(raw_fid));
+                        break;
+                    }
+                }
+                if deref_func_id.is_some() {
+                    break;
+                }
+            }
+            let deref_fid = match deref_func_id {
+                Some(f) => f,
+                None => break,
+            };
+            // Call `deref(&current)` to get the inner value.
+            let inner = call_function_sync(state, deref_fid, &[current])?;
+            if !inner.is_ptr() || inner.is_nil() {
+                // Inner is a primitive — try dispatch on it (no
+                // recursion; the primitive paths above already
+                // covered most). Otherwise break.
+                break;
+            }
+            current = inner;
+            // Try qualified lookup on the inner type.
+            let inner_ptr = current.as_ptr::<u8>();
+            if !inner_ptr.is_null()
+                && (inner_ptr as usize)
+                    .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+            {
+                // SAFETY: alignment verified just above.
+                let inner_header = unsafe { &*(inner_ptr as *const heap::ObjectHeader) };
+                let inner_tid = inner_header.type_id;
+                if let Some(found) =
+                    state.module.find_method_by_receiver_type(inner_tid, &bare_method_name)
+                {
+                    let caller_base = state.reg_base();
+                    let mut call_args: Vec<Value> =
+                        Vec::with_capacity(args.count as usize + 1);
+                    call_args.push(current);
+                    for i in 0..args.count {
+                        call_args.push(
+                            state.registers.get(caller_base, Reg(args.start.0 + i as u16)),
+                        );
+                    }
+                    let result = call_function_sync(state, found, &call_args)?;
+                    state.set_reg(dst, result);
+                    return Ok(DispatchResult::Continue);
+                }
+            }
+        }
+    }
+
     // Method not found anywhere — emit a diagnostic that pins down the
     // *runtime* shape of the receiver and, when the receiver carries
     // an object-tag, lists the methods that DO exist on it. The
