@@ -2283,6 +2283,34 @@ fn register_module_filtered(
         {
             ctx.register_function(simple_leaf.to_string(), info.clone());
         }
+        // **Canonical `<Type>.<method>` form**: when simple_name has
+        // the shape `<Type>.<method>` AND `<Type>` is in `wanted` (the
+        // carrier-type mount, e.g. `mount core.time.duration.{Duration}`
+        // adds `Duration` to wanted), register the function under the
+        // bare `<Type>.<method>` form too.  Without this, the
+        // typechecker's pre-resolved `ResolvedCallTarget::StaticCall {
+        // qualified_name: "Duration.zero" }` misses in ctx.functions
+        // because the registered key is module-qualified
+        // (`core.time.duration.Duration.zero`); the missing canonical
+        // form was the cause of every `Duration.<method>` /
+        // `Instant.<method>` undefined-function regression after
+        // mounting `core.time.<file>.{Type}`.
+        //
+        // Safety: `is_method_of_wanted_type` at line ~2080 already
+        // gates whether we register at all — this site only fires for
+        // functions whose simple_name's first-dot prefix matches a
+        // wanted entry, so the `Type.method` form is guaranteed to
+        // correspond to a wanted type.  The `lookup_function(...).is_none()`
+        // gate preserves first-wins for cross-module name collisions.
+        if let Some(first_dot_idx) = simple_name_str.find('.') {
+            let type_prefix = &simple_name_str[..first_dot_idx];
+            if wanted.contains(type_prefix)
+                && simple_name_str != qualified.as_str()
+                && ctx.lookup_function(simple_name_str).is_none()
+            {
+                ctx.register_function(simple_name_str.to_string(), info.clone());
+            }
+        }
         // **Arity-disambiguation contract.** Always go through
         // `register_function` for the simple-name registration so its
         // `name#arity` collision branch fires when this is the second-
