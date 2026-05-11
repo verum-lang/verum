@@ -1447,43 +1447,10 @@ impl<'s> CompilationPipeline<'s> {
             .map_err(|e| anyhow::anyhow!("finalize stdlib module {}: {}", module.name, e))?;
         let total_func_count = merged_vbc.functions.len();
 
-        // Export newly registered functions and protocols to global registries.
-        //
-        // Task #16 stage-1/2 stub-overwrite: pre-registered stubs from
-        // `pre_register_canonical_static_methods` /
-        // `pre_register_canonical_variant_constructors` live in the
-        // sentinel ID ranges `u32::MAX - 0x40_0000..` (Stage 1) and
-        // `u32::MAX - 0xC0_0000..` (Stage 2).  These were inserted
-        // BEFORE any module compiled so caller-modules see the names
-        // immediately; the per-module compile that owns the REAL body
-        // must then OVERWRITE the stub with the real FunctionInfo
-        // (real FunctionId, full param_type_names, real return_type,
-        // etc.).
-        //
-        // Without this overwrite, `entry().or_insert()`'s first-wins
-        // discipline preserved the stub forever — every caller saw
-        // the stub's sentinel ID, dispatch emitted `Call { func_id =
-        // sentinel }`, and the runtime panicked with `Function N not
-        // found` because the sentinel id isn't a real function in
-        // the archive.  Pre-fix this regressed pass-rate from 80/146
-        // to 63/151 — the stubs blocked every real body.
-        const STAGE1_STUB_RANGE_BASE: u32 = u32::MAX - 0x40_0000;
-        const STAGE2_STUB_RANGE_BASE: u32 = u32::MAX - 0xC0_0000;
+        // Export newly registered functions and protocols to global registries
         let new_functions = codegen.export_functions();
         for (name, info) in new_functions {
-            // Always overwrite if existing entry is a stage-1/2 stub
-            // — stubs have IDs in the sentinel ranges above.  For
-            // every other existing entry, preserve first-wins.
-            let is_stub = matches!(
-                self.global_function_registry.get(&name),
-                Some(existing) if existing.id.0 >= STAGE2_STUB_RANGE_BASE
-                    && existing.id.0 <= STAGE1_STUB_RANGE_BASE
-            );
-            if is_stub {
-                self.global_function_registry.insert(name, info);
-            } else {
-                self.global_function_registry.entry(name).or_insert(info);
-            }
+            self.global_function_registry.entry(name).or_insert(info);
         }
 
         let new_protocols = codegen.export_protocols();
