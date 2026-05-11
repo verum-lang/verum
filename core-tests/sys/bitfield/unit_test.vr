@@ -6,40 +6,26 @@
 //
 // API surface tested here:
 //
-//   USIZE_BITS                                — bit-width constant
-//   test_bit / set_bit / clear_bit / toggle_bit  — single-bit operations
-//   set_bits / clear_bits                     — mask-driven mutation
-//   field_mask                                — width-by-offset mask builder
-//   extract_bits / insert_bits                — packed-field read / write
-//
-// All call sites use the fully-qualified `bitfield.X(...)` form. Two
-// language-level limitations are pinned in `regression_test.vr` and
-// surface here as the reason for that style:
-//
-//   1. `public const` items declared in another module are not yet resolved
-//      through the named-mount form (`mount X.{CONST}`). The fully-qualified
-//      path is the only form the codegen currently honours.
-//   2. Free functions imported via `mount X.{fn_name, ...}` are silently
-//      dropped from the codegen symbol table when more than four items are
-//      listed, OR when the imported name collides with a method on any
-//      type elsewhere in the workspace (`set_bits`/`clear_bits` collide
-//      with `Register::set_bits`/`Register::clear_bits` in
-//      `core.sys.mmio`).
-//
-// Both workarounds compile to identical bytecode under `--interp` and AOT;
-// they only affect surface ergonomics. Until the compiler-side fix lands,
-// the fully-qualified path is the production-grade choice for any module
-// importing free functions.
+//   USIZE_BITS                                  — bit-width constant
+//   test_bit / set_bit / clear_bit / toggle_bit — single-bit operations
+//   set_bits / clear_bits                       — mask-driven mutation
+//   field_mask                                  — width-by-offset mask builder
+//   extract_bits / insert_bits                  — packed-field read / write
 //
 // Companion files:
 //   property_test.vr     — algebraic laws over USize-typed bit ops
 //   integration_test.vr  — BitfieldElement protocol round-trips
-//   regression_test.vr   — pinned compiler-side defects
+//   regression_test.vr   — pinned compiler-side defects (closed via #16)
 //   audit.md             — implementation audit & action items
 // =============================================================================
 
 mount core.prelude.*;
-mount core.sys.bitfield;
+mount core.sys.{
+    USIZE_BITS,
+    test_bit, set_bit, clear_bit, toggle_bit,
+    set_bits, clear_bits,
+    field_mask, extract_bits, insert_bits,
+};
 
 // =============================================================================
 // Section 1: USIZE_BITS bit-width constant
@@ -49,20 +35,20 @@ mount core.sys.bitfield;
 fn test_usize_bits_matches_type_property() {
     // The exposed constant must equal `USize.bits` exactly — its sole job
     // is to centralise the cast-free access at the bitfield-API site.
-    assert_eq(bitfield.USIZE_BITS, USize.bits);
+    assert_eq(USIZE_BITS, USize.bits);
 }
 
 @test
 fn test_usize_bits_is_byte_aligned() {
     // On every platform Verum currently supports, USize is a multiple of 8 bits
     // (no nibble-addressed targets). The constant must reflect that.
-    assert_eq(bitfield.USIZE_BITS % (8 as USize), 0 as USize);
+    assert_eq(USIZE_BITS % (8 as USize), 0 as USize);
 }
 
 @test
 fn test_usize_bits_at_least_32() {
     // Verum's minimum supported pointer width — embedded targets go down to 32.
-    assert(bitfield.USIZE_BITS >= (32 as USize));
+    assert(USIZE_BITS >= (32 as USize));
 }
 
 // =============================================================================
@@ -72,37 +58,37 @@ fn test_usize_bits_at_least_32() {
 @test
 fn test_test_bit_zero_value_all_bits_false() {
     // The zero word has no bits set; every probe returns false.
-    assert(!bitfield.test_bit(0 as USize, 0 as USize));
-    assert(!bitfield.test_bit(0 as USize, 7 as USize));
-    assert(!bitfield.test_bit(0 as USize, 31 as USize));
+    assert(!test_bit(0 as USize, 0 as USize));
+    assert(!test_bit(0 as USize, 7 as USize));
+    assert(!test_bit(0 as USize, 31 as USize));
 }
 
 @test
 fn test_test_bit_lowest_bit() {
-    assert(bitfield.test_bit(1 as USize, 0 as USize));
-    assert(!bitfield.test_bit(1 as USize, 1 as USize));
+    assert(test_bit(1 as USize, 0 as USize));
+    assert(!test_bit(1 as USize, 1 as USize));
 }
 
 @test
 fn test_test_bit_highest_set_bit() {
-    let n = bitfield.USIZE_BITS - (1 as USize);
+    let n = USIZE_BITS - (1 as USize);
     let v: USize = (1 as USize) << n;
-    assert(bitfield.test_bit(v, n));
-    assert(!bitfield.test_bit(v, 0 as USize));
+    assert(test_bit(v, n));
+    assert(!test_bit(v, 0 as USize));
 }
 
 @test
 fn test_test_bit_specific_byte_pattern() {
     // 0xA5 = 1010_0101 — bits 0, 2, 5, 7 set.
     let v: USize = 0xA5 as USize;
-    assert(bitfield.test_bit(v, 0 as USize));
-    assert(!bitfield.test_bit(v, 1 as USize));
-    assert(bitfield.test_bit(v, 2 as USize));
-    assert(!bitfield.test_bit(v, 3 as USize));
-    assert(!bitfield.test_bit(v, 4 as USize));
-    assert(bitfield.test_bit(v, 5 as USize));
-    assert(!bitfield.test_bit(v, 6 as USize));
-    assert(bitfield.test_bit(v, 7 as USize));
+    assert(test_bit(v, 0 as USize));
+    assert(!test_bit(v, 1 as USize));
+    assert(test_bit(v, 2 as USize));
+    assert(!test_bit(v, 3 as USize));
+    assert(!test_bit(v, 4 as USize));
+    assert(test_bit(v, 5 as USize));
+    assert(!test_bit(v, 6 as USize));
+    assert(test_bit(v, 7 as USize));
 }
 
 // =============================================================================
@@ -111,30 +97,30 @@ fn test_test_bit_specific_byte_pattern() {
 
 @test
 fn test_set_bit_on_zero_yields_single_bit() {
-    assert_eq(bitfield.set_bit(0 as USize, 0 as USize), 1 as USize);
-    assert_eq(bitfield.set_bit(0 as USize, 1 as USize), 2 as USize);
-    assert_eq(bitfield.set_bit(0 as USize, 7 as USize), 0x80 as USize);
+    assert_eq(set_bit(0 as USize, 0 as USize), 1 as USize);
+    assert_eq(set_bit(0 as USize, 1 as USize), 2 as USize);
+    assert_eq(set_bit(0 as USize, 7 as USize), 0x80 as USize);
 }
 
 @test
 fn test_set_bit_idempotent() {
-    let once  = bitfield.set_bit(0 as USize, 5 as USize);
-    let twice = bitfield.set_bit(once, 5 as USize);
+    let once  = set_bit(0 as USize, 5 as USize);
+    let twice = set_bit(once, 5 as USize);
     assert_eq(once, twice);
 }
 
 @test
 fn test_set_bit_preserves_other_bits() {
     // Setting bit 4 on 0x0F must not touch bits 0..3 or any high bit.
-    let v = bitfield.set_bit(0x0F as USize, 4 as USize);
+    let v = set_bit(0x0F as USize, 4 as USize);
     assert_eq(v, 0x1F as USize);
 }
 
 @test
 fn test_set_bit_high_position() {
-    let n = bitfield.USIZE_BITS - (1 as USize);
-    let v = bitfield.set_bit(0 as USize, n);
-    assert(bitfield.test_bit(v, n));
+    let n = USIZE_BITS - (1 as USize);
+    let v = set_bit(0 as USize, n);
+    assert(test_bit(v, n));
 }
 
 // =============================================================================
@@ -143,27 +129,27 @@ fn test_set_bit_high_position() {
 
 @test
 fn test_clear_bit_of_unset_is_no_op() {
-    assert_eq(bitfield.clear_bit(0 as USize, 0 as USize), 0 as USize);
-    assert_eq(bitfield.clear_bit(0 as USize, 7 as USize), 0 as USize);
+    assert_eq(clear_bit(0 as USize, 0 as USize), 0 as USize);
+    assert_eq(clear_bit(0 as USize, 7 as USize), 0 as USize);
 }
 
 @test
 fn test_clear_bit_clears_only_target() {
     // 0xFF & !(1 << 3) = 0xF7
-    assert_eq(bitfield.clear_bit(0xFF as USize, 3 as USize), 0xF7 as USize);
+    assert_eq(clear_bit(0xFF as USize, 3 as USize), 0xF7 as USize);
 }
 
 @test
 fn test_clear_bit_idempotent() {
-    let once  = bitfield.clear_bit(0xFF as USize, 4 as USize);
-    let twice = bitfield.clear_bit(once, 4 as USize);
+    let once  = clear_bit(0xFF as USize, 4 as USize);
+    let twice = clear_bit(once, 4 as USize);
     assert_eq(once, twice);
 }
 
 @test
 fn test_clear_bit_set_inverse() {
     // For a bit that is initially clear, set then clear restores zero.
-    let v = bitfield.clear_bit(bitfield.set_bit(0 as USize, 5 as USize), 5 as USize);
+    let v = clear_bit(set_bit(0 as USize, 5 as USize), 5 as USize);
     assert_eq(v, 0 as USize);
 }
 
@@ -173,25 +159,25 @@ fn test_clear_bit_set_inverse() {
 
 @test
 fn test_toggle_bit_on_unset_sets() {
-    assert_eq(bitfield.toggle_bit(0 as USize, 0 as USize), 1 as USize);
+    assert_eq(toggle_bit(0 as USize, 0 as USize), 1 as USize);
 }
 
 @test
 fn test_toggle_bit_on_set_clears() {
-    assert_eq(bitfield.toggle_bit(1 as USize, 0 as USize), 0 as USize);
+    assert_eq(toggle_bit(1 as USize, 0 as USize), 0 as USize);
 }
 
 @test
 fn test_toggle_bit_self_inverse() {
     let v = 0xCAFE as USize;
-    let twice = bitfield.toggle_bit(bitfield.toggle_bit(v, 7 as USize), 7 as USize);
+    let twice = toggle_bit(toggle_bit(v, 7 as USize), 7 as USize);
     assert_eq(v, twice);
 }
 
 @test
 fn test_toggle_bit_preserves_other_bits() {
     // Flip bit 3 of 0xF7 (which has bit 3 unset) → 0xFF.
-    assert_eq(bitfield.toggle_bit(0xF7 as USize, 3 as USize), 0xFF as USize);
+    assert_eq(toggle_bit(0xF7 as USize, 3 as USize), 0xFF as USize);
 }
 
 // =============================================================================
@@ -201,26 +187,26 @@ fn test_toggle_bit_preserves_other_bits() {
 @test
 fn test_set_bits_zero_mask_is_identity() {
     let v = 0xDEAD as USize;
-    assert_eq(bitfield.set_bits(v, 0 as USize), v);
+    assert_eq(set_bits(v, 0 as USize), v);
 }
 
 @test
 fn test_set_bits_full_mask_yields_all_ones() {
     let all_ones: USize = !(0 as USize);
-    assert_eq(bitfield.set_bits(0 as USize, all_ones), all_ones);
+    assert_eq(set_bits(0 as USize, all_ones), all_ones);
 }
 
 @test
 fn test_set_bits_combines_disjoint_masks() {
     // 0xF0 | 0x0F = 0xFF
-    assert_eq(bitfield.set_bits(0xF0 as USize, 0x0F as USize), 0xFF as USize);
+    assert_eq(set_bits(0xF0 as USize, 0x0F as USize), 0xFF as USize);
 }
 
 @test
 fn test_set_bits_idempotent_in_mask() {
     let m = 0x55 as USize;
-    let once  = bitfield.set_bits(0xAA as USize, m);
-    let twice = bitfield.set_bits(once, m);
+    let once  = set_bits(0xAA as USize, m);
+    let twice = set_bits(once, m);
     assert_eq(once, twice);
 }
 
@@ -231,26 +217,26 @@ fn test_set_bits_idempotent_in_mask() {
 @test
 fn test_clear_bits_zero_mask_is_identity() {
     let v = 0xBEEF as USize;
-    assert_eq(bitfield.clear_bits(v, 0 as USize), v);
+    assert_eq(clear_bits(v, 0 as USize), v);
 }
 
 @test
 fn test_clear_bits_full_mask_yields_zero() {
     let all_ones: USize = !(0 as USize);
-    assert_eq(bitfield.clear_bits(0xCAFE as USize, all_ones), 0 as USize);
+    assert_eq(clear_bits(0xCAFE as USize, all_ones), 0 as USize);
 }
 
 @test
 fn test_clear_bits_clears_only_masked() {
     // 0xFF & !0x0F = 0xF0
-    assert_eq(bitfield.clear_bits(0xFF as USize, 0x0F as USize), 0xF0 as USize);
+    assert_eq(clear_bits(0xFF as USize, 0x0F as USize), 0xF0 as USize);
 }
 
 @test
 fn test_clear_bits_idempotent_in_mask() {
     let m = 0xAA as USize;
-    let once  = bitfield.clear_bits(0xFF as USize, m);
-    let twice = bitfield.clear_bits(once, m);
+    let once  = clear_bits(0xFF as USize, m);
+    let twice = clear_bits(once, m);
     assert_eq(once, twice);
 }
 
@@ -261,44 +247,44 @@ fn test_clear_bits_idempotent_in_mask() {
 @test
 fn test_field_mask_zero_width() {
     // No field, no bits.
-    assert_eq(bitfield.field_mask(0 as USize, 0 as USize),  0 as USize);
-    assert_eq(bitfield.field_mask(7 as USize, 0 as USize),  0 as USize);
-    assert_eq(bitfield.field_mask(63 as USize, 0 as USize), 0 as USize);
+    assert_eq(field_mask(0 as USize, 0 as USize),  0 as USize);
+    assert_eq(field_mask(7 as USize, 0 as USize),  0 as USize);
+    assert_eq(field_mask(63 as USize, 0 as USize), 0 as USize);
 }
 
 @test
 fn test_field_mask_single_bit_at_offset() {
     // width=1 places one bit at offset.
-    assert_eq(bitfield.field_mask(0 as USize, 1 as USize), 1 as USize);
-    assert_eq(bitfield.field_mask(3 as USize, 1 as USize), 0x08 as USize);
-    assert_eq(bitfield.field_mask(7 as USize, 1 as USize), 0x80 as USize);
+    assert_eq(field_mask(0 as USize, 1 as USize), 1 as USize);
+    assert_eq(field_mask(3 as USize, 1 as USize), 0x08 as USize);
+    assert_eq(field_mask(7 as USize, 1 as USize), 0x80 as USize);
 }
 
 @test
 fn test_field_mask_byte_at_offset() {
     // width=8 starting at offset 4 → 0xFF0
-    assert_eq(bitfield.field_mask(4 as USize, 8 as USize), 0xFF0 as USize);
+    assert_eq(field_mask(4 as USize, 8 as USize), 0xFF0 as USize);
 }
 
 @test
 fn test_field_mask_full_width_is_all_ones() {
     let all_ones: USize = !(0 as USize);
-    assert_eq(bitfield.field_mask(0 as USize, bitfield.USIZE_BITS), all_ones);
+    assert_eq(field_mask(0 as USize, USIZE_BITS), all_ones);
 }
 
 @test
 fn test_field_mask_disjoint_union() {
     // field_mask(0, 4) | field_mask(4, 4) == field_mask(0, 8)
-    let a = bitfield.field_mask(0 as USize, 4 as USize);
-    let b = bitfield.field_mask(4 as USize, 4 as USize);
-    let c = bitfield.field_mask(0 as USize, 8 as USize);
+    let a = field_mask(0 as USize, 4 as USize);
+    let b = field_mask(4 as USize, 4 as USize);
+    let c = field_mask(0 as USize, 8 as USize);
     assert_eq(a | b, c);
 }
 
 @test
 fn test_field_mask_disjoint_no_overlap() {
-    let a = bitfield.field_mask(0 as USize, 4 as USize);
-    let b = bitfield.field_mask(4 as USize, 4 as USize);
+    let a = field_mask(0 as USize, 4 as USize);
+    let b = field_mask(4 as USize, 4 as USize);
     // Non-overlapping fields share no bits.
     assert_eq(a & b, 0 as USize);
 }
@@ -310,37 +296,37 @@ fn test_field_mask_disjoint_no_overlap() {
 @test
 fn test_extract_bits_zero_width_is_zero() {
     let v = 0xDEADBEEF as USize;
-    assert_eq(bitfield.extract_bits(v, 0 as USize, 0 as USize),  0 as USize);
-    assert_eq(bitfield.extract_bits(v, 16 as USize, 0 as USize), 0 as USize);
+    assert_eq(extract_bits(v, 0 as USize, 0 as USize),  0 as USize);
+    assert_eq(extract_bits(v, 16 as USize, 0 as USize), 0 as USize);
 }
 
 @test
 fn test_extract_bits_full_width_returns_value() {
     let v = 0xCAFEBABE as USize;
-    assert_eq(bitfield.extract_bits(v, 0 as USize, bitfield.USIZE_BITS), v);
+    assert_eq(extract_bits(v, 0 as USize, USIZE_BITS), v);
 }
 
 @test
 fn test_extract_bits_single_bit() {
     // Bit 3 of 0x08 = 1
-    assert_eq(bitfield.extract_bits(0x08 as USize, 3 as USize, 1 as USize), 1 as USize);
+    assert_eq(extract_bits(0x08 as USize, 3 as USize, 1 as USize), 1 as USize);
     // Bit 3 of 0xF7 (= 1111_0111) = 0
-    assert_eq(bitfield.extract_bits(0xF7 as USize, 3 as USize, 1 as USize), 0 as USize);
+    assert_eq(extract_bits(0xF7 as USize, 3 as USize, 1 as USize), 0 as USize);
 }
 
 @test
 fn test_extract_bits_nibble() {
     // Extract low nibble of 0xAB = 0xB
-    assert_eq(bitfield.extract_bits(0xAB as USize, 0 as USize, 4 as USize), 0xB as USize);
+    assert_eq(extract_bits(0xAB as USize, 0 as USize, 4 as USize), 0xB as USize);
     // Extract high nibble of 0xAB (offset 4, width 4) = 0xA
-    assert_eq(bitfield.extract_bits(0xAB as USize, 4 as USize, 4 as USize), 0xA as USize);
+    assert_eq(extract_bits(0xAB as USize, 4 as USize, 4 as USize), 0xA as USize);
 }
 
 @test
 fn test_extract_bits_byte_at_offset() {
     // 0xABCD: bits [0..8] = 0xCD; bits [8..16] = 0xAB.
-    assert_eq(bitfield.extract_bits(0xABCD as USize, 0 as USize, 8 as USize), 0xCD as USize);
-    assert_eq(bitfield.extract_bits(0xABCD as USize, 8 as USize, 8 as USize), 0xAB as USize);
+    assert_eq(extract_bits(0xABCD as USize, 0 as USize, 8 as USize), 0xCD as USize);
+    assert_eq(extract_bits(0xABCD as USize, 8 as USize, 8 as USize), 0xAB as USize);
 }
 
 @test
@@ -350,7 +336,7 @@ fn test_extract_bits_through_field_mask_equivalence() {
     let v: USize = 0x1234 as USize;
     let o: USize = 4 as USize;
     let w: USize = 8 as USize;
-    assert_eq(bitfield.extract_bits(v, o, w), (v & bitfield.field_mask(o, w)) >> o);
+    assert_eq(extract_bits(v, o, w), (v & field_mask(o, w)) >> o);
 }
 
 // =============================================================================
@@ -360,28 +346,28 @@ fn test_extract_bits_through_field_mask_equivalence() {
 @test
 fn test_insert_bits_zero_width_is_identity() {
     let v = 0xDEAD as USize;
-    assert_eq(bitfield.insert_bits(v, 0xFF as USize, 0 as USize, 0 as USize), v);
-    assert_eq(bitfield.insert_bits(v, 0xFF as USize, 8 as USize, 0 as USize), v);
+    assert_eq(insert_bits(v, 0xFF as USize, 0 as USize, 0 as USize), v);
+    assert_eq(insert_bits(v, 0xFF as USize, 8 as USize, 0 as USize), v);
 }
 
 @test
 fn test_insert_bits_full_width_overwrites() {
     let v = 0xDEAD as USize;
     let bits = 0xBEEF as USize;
-    assert_eq(bitfield.insert_bits(v, bits, 0 as USize, bitfield.USIZE_BITS), bits);
+    assert_eq(insert_bits(v, bits, 0 as USize, USIZE_BITS), bits);
 }
 
 @test
 fn test_insert_bits_into_zero() {
     // insert 0xAB at offset 4 with width 8 into 0 → 0xAB0
-    assert_eq(bitfield.insert_bits(0 as USize, 0xAB as USize, 4 as USize, 8 as USize), 0xAB0 as USize);
+    assert_eq(insert_bits(0 as USize, 0xAB as USize, 4 as USize, 8 as USize), 0xAB0 as USize);
 }
 
 @test
 fn test_insert_bits_overwrites_existing_field() {
     // Replace low byte of 0xABCD with 0xEF → 0xABEF
     assert_eq(
-        bitfield.insert_bits(0xABCD as USize, 0xEF as USize, 0 as USize, 8 as USize),
+        insert_bits(0xABCD as USize, 0xEF as USize, 0 as USize, 8 as USize),
         0xABEF as USize
     );
 }
@@ -391,7 +377,7 @@ fn test_insert_bits_masks_bits_above_width() {
     // bits = 0x1FF has 9 bits; width = 8 silently masks to 0xFF.
     // Insert at offset 0 into 0 → 0xFF (NOT 0x1FF).
     assert_eq(
-        bitfield.insert_bits(0 as USize, 0x1FF as USize, 0 as USize, 8 as USize),
+        insert_bits(0 as USize, 0x1FF as USize, 0 as USize, 8 as USize),
         0xFF as USize
     );
 }
@@ -400,7 +386,7 @@ fn test_insert_bits_masks_bits_above_width() {
 fn test_insert_bits_preserves_adjacent_fields() {
     // Insert into bits [4..8] of 0xFFFF must preserve bits [0..4] and bits [8..16].
     let v: USize = 0xFFFF as USize;
-    let updated = bitfield.insert_bits(v, 0x0 as USize, 4 as USize, 4 as USize);
+    let updated = insert_bits(v, 0x0 as USize, 4 as USize, 4 as USize);
     // bits [0..4] = 0xF, bits [4..8] = 0x0, bits [8..16] = 0xFF → 0xFF0F.
     assert_eq(updated, 0xFF0F as USize);
 }
@@ -412,8 +398,8 @@ fn test_insert_then_extract_roundtrip() {
     let b: USize = 0xA5 as USize;
     let o: USize = 8 as USize;
     let w: USize = 8 as USize;
-    let stored    = bitfield.insert_bits(v, b, o, w);
-    let recovered = bitfield.extract_bits(stored, o, w);
+    let stored    = insert_bits(v, b, o, w);
+    let recovered = extract_bits(stored, o, w);
     assert_eq(recovered, b);
 }
 
@@ -427,14 +413,14 @@ fn test_set_bit_equivalent_to_set_bits_one() {
     // mask-form specialised to a unit mask.
     let v = 0x10 as USize;
     let n = 3 as USize;
-    assert_eq(bitfield.set_bit(v, n), bitfield.set_bits(v, (1 as USize) << n));
+    assert_eq(set_bit(v, n), set_bits(v, (1 as USize) << n));
 }
 
 @test
 fn test_clear_bit_equivalent_to_clear_bits_one() {
     let v = 0xFF as USize;
     let n = 3 as USize;
-    assert_eq(bitfield.clear_bit(v, n), bitfield.clear_bits(v, (1 as USize) << n));
+    assert_eq(clear_bit(v, n), clear_bits(v, (1 as USize) << n));
 }
 
 @test
@@ -443,8 +429,8 @@ fn test_test_bit_equivalent_to_extract_one_bit() {
     // bit-as-USize. The two predicates must agree for every bit.
     let v: USize = 0xA5 as USize;
     for n in 0..8 {
-        let bit_set = bitfield.test_bit(v, n as USize);
-        let bit_val = bitfield.extract_bits(v, n as USize, 1 as USize);
+        let bit_set = test_bit(v, n as USize);
+        let bit_val = extract_bits(v, n as USize, 1 as USize);
         assert_eq(bit_set, bit_val == (1 as USize));
     }
 }

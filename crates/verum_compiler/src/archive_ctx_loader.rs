@@ -243,6 +243,18 @@ fn register_module(
                     .unwrap_or_else(|| format!("_arg{}", i))
             })
             .collect();
+        // Param TYPE names — required for type-aware bare-name
+        // disambiguation in the call-site resolver; without this
+        // the resolver can't tell which sibling stdlib function
+        // (sharing a simple name across multiple modules) the call's
+        // inferred argument types match. See the matching change in
+        // `register_module_filtered` and the type-aware lookup in
+        // `compile_call`.
+        let param_type_names: Vec<String> = fn_desc
+            .params
+            .iter()
+            .map(|p| type_ref_simple_name(&p.type_ref, module).unwrap_or_default())
+            .collect();
 
         // Return-type base name + inner generics drive the variant
         // disambiguator (closes out the same code path #300 fixed
@@ -268,7 +280,7 @@ fn register_module(
             id: new_id,
             param_count: fn_desc.params.len(),
             param_names,
-            param_type_names: vec![],
+            param_type_names,
             is_async: fn_desc
                 .properties
                 .contains(verum_vbc::types::PropertySet::ASYNC),
@@ -353,7 +365,10 @@ fn register_module(
                 id: FunctionId(u32::MAX - variant.tag),
                 param_count: arity,
                 param_names,
-                param_type_names: vec![],
+                // Variant constructor params take payload field types so
+                // type-aware bare-name disambiguation works for variant
+                // ctor calls too.
+                param_type_names: payload_field_types.clone(),
                 is_async: false,
                 is_generator: false,
                 contexts: vec![],
@@ -411,20 +426,72 @@ struct VariantHit {
 /// (those don't drive the variant disambiguator).
 fn type_ref_simple_name(ty: &TypeRef, module: &VbcModule) -> Option<String> {
     match ty {
-        TypeRef::Concrete(tid) => module
-            .types
-            .iter()
-            .find(|t| t.id == *tid)
-            .and_then(|t| module.strings.get(t.name).map(|s| s.to_string())),
-        TypeRef::Instantiated { base, .. } => module
-            .types
-            .iter()
-            .find(|t| t.id == *base)
-            .and_then(|t| module.strings.get(t.name).map(|s| s.to_string())),
-        TypeRef::Generic(_) | TypeRef::Function { .. } | TypeRef::Reference { .. } => None,
+        TypeRef::Concrete(tid) => {
+            // Primitive types are NOT in `module.types` (which only carries
+            // user-defined records / sum types). Their TypeIds are reserved
+            // in `verum_vbc::types::TypeId` constants and the canonical Verum
+            // name is fixed — look it up by id first, then fall through to
+            // the user-type scan.
+            if let Some(name) = primitive_typeid_name(*tid) {
+                return Some(name.to_string());
+            }
+            module
+                .types
+                .iter()
+                .find(|t| t.id == *tid)
+                .and_then(|t| module.strings.get(t.name).map(|s| s.to_string()))
+        }
+        TypeRef::Instantiated { base, .. } => {
+            if let Some(name) = primitive_typeid_name(*base) {
+                return Some(name.to_string());
+            }
+            module
+                .types
+                .iter()
+                .find(|t| t.id == *base)
+                .and_then(|t| module.strings.get(t.name).map(|s| s.to_string()))
+        }
+        // Reference TypeRef carries an `inner` type — recover the inner's
+        // simple name so `&Bucket` reads as `Bucket` for the disambiguator
+        // (matches the codegen-side `extract_type_name_from_ast` shape).
+        TypeRef::Reference { inner, .. } => type_ref_simple_name(inner, module),
+        TypeRef::Generic(_) | TypeRef::Function { .. } => None,
         // Other variants (Tuple, Pointer, etc.) — no nominal base.
         _ => None,
     }
+}
+
+/// Resolve well-known primitive TypeIds to their canonical Verum
+/// type name. Returns None for user TypeIds (>= FIRST_USER) or
+/// unrecognised reserved slots.
+///
+/// Source of truth: `verum_vbc::types::TypeId` constants. Aliases
+/// that share a numeric id (`PTR = USIZE = ISIZE = TypeId(14)`,
+/// `I64 = INT = TypeId(2)`, `BYTE = U8 = TypeId(6)`, `F64 = FLOAT
+/// = TypeId(3)`) deliberately resolve to ONE canonical name — the
+/// type-aware disambiguator at the call site uses the same
+/// canonical name when extracting the cast target, so the equality
+/// check holds.
+fn primitive_typeid_name(tid: TypeId) -> Option<&'static str> {
+    Some(match tid {
+        TypeId::UNIT => "()",
+        TypeId::BOOL => "Bool",
+        TypeId::INT => "Int",
+        TypeId::FLOAT => "Float",
+        TypeId::TEXT => "Text",
+        TypeId::NEVER => "Never",
+        TypeId::U8 => "UInt8",
+        TypeId::U16 => "UInt16",
+        TypeId::U32 => "UInt32",
+        TypeId::U64 => "UInt64",
+        TypeId::I8 => "Int8",
+        TypeId::I16 => "Int16",
+        TypeId::I32 => "Int32",
+        TypeId::F32 => "Float32",
+        TypeId::PTR => "USize",
+        TypeId::CHAR => "Char",
+        _ => return None,
+    })
 }
 
 /// Pull the inner generic args of a [`TypeRef::Instantiated`] back to
@@ -1926,6 +1993,25 @@ fn register_module_filtered(
                     .unwrap_or_else(|| format!("_arg{}", i))
             })
             .collect();
+        // Restore param type names from the archive's TypeRef so the
+        // codegen's type-aware bare-name disambiguation has the data it
+        // needs to pick between sibling stdlib functions sharing a
+        // simple name (e.g. `core.sys.test_bit(USize, USize)` vs
+        // `core.net.tls13.handshake.test_bit(&Bucket, Int)`). Without
+        // this, `lookup_function_with_arity` would race on bare-name
+        // first-wins archive load order and dispatch to whichever
+        // archive entry loaded first — surfacing at runtime as a
+        // wrong-body call (Unit return for the USize overload, null
+        // pointer for the &Bucket overload, etc.). The empty-vec
+        // sentinel that previously lived here is the original cause
+        // of the cross-module dispatch defect tracked under #16.
+        let param_type_names: Vec<String> = fn_desc
+            .params
+            .iter()
+            .map(|p| {
+                type_ref_simple_name(&p.type_ref, module).unwrap_or_default()
+            })
+            .collect();
         let return_type_name = type_ref_simple_name(&fn_desc.return_type, module);
         let return_type_inner = type_ref_inner_generics(&fn_desc.return_type, module);
         // #87 — restore the intrinsic-name marker that was serialised
@@ -1940,7 +2026,7 @@ fn register_module_filtered(
             id: new_id,
             param_count: fn_desc.params.len(),
             param_names,
-            param_type_names: vec![],
+            param_type_names,
             is_async: fn_desc
                 .properties
                 .contains(verum_vbc::types::PropertySet::ASYNC),
@@ -2108,7 +2194,10 @@ fn register_module_filtered(
                 id: FunctionId(u32::MAX - variant.tag),
                 param_count: arity,
                 param_names,
-                param_type_names: vec![],
+                // Variant constructor params take payload field types so
+                // type-aware bare-name disambiguation works for variant
+                // ctor calls too.
+                param_type_names: payload_field_types.clone(),
                 is_async: false,
                 is_generator: false,
                 contexts: vec![],

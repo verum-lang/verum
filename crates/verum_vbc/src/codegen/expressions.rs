@@ -3781,8 +3781,92 @@ impl VbcCodegen {
             }
         };
 
+        // **Type-aware bare-name disambiguation.** When the call site
+        // is a bare unqualified name (`func_name` has no `::` separator)
+        // AND multiple qualified entries in `ctx.functions` end with
+        // `.<func_name>` (i.e. the same simple name is exported by more
+        // than one module), prefer the candidate whose recorded
+        // `param_type_names` match the inferred argument-type names at
+        // the call site. The previous behaviour took whichever
+        // qualified registration won the bare-name slot first under
+        // first-wins archive load order — non-deterministic, and
+        // surfaced at runtime as the wrong function body executing
+        // (Unit-returning stub for `core.sys.test_bit(USize, USize)`
+        // when `core.net.tls13.handshake.test_bit(&Bucket, Int)` had
+        // claimed the bare slot during archive load).  The fix is
+        // non-destructive: if zero or more-than-one candidate matches
+        // the inferred arg types, fall through to the existing
+        // resolution chain unchanged.
+        let type_aware_lookup: Option<(String, FunctionInfo)> = if !func_name.contains("::")
+            && !is_qualified_module_path
+            && !args.is_empty()
+        {
+            let suffix_dot = format!(".{}", func_name);
+            let suffix_colon = format!("::{}", func_name);
+            let mut qualified_keys: Vec<String> = self
+                .ctx
+                .functions
+                .keys()
+                .filter(|k| k.ends_with(&suffix_dot) || k.ends_with(&suffix_colon))
+                .cloned()
+                .collect();
+            qualified_keys.sort();
+            qualified_keys.dedup();
+            // Filter to arity matches.
+            let arity_matches: Vec<(String, FunctionInfo)> = qualified_keys
+                .iter()
+                .filter_map(|k| {
+                    self.ctx
+                        .lookup_function_with_arity(k, args.len())
+                        .map(|info| (k.clone(), info.clone()))
+                })
+                .collect();
+            if arity_matches.len() <= 1 {
+                None // 0 → no help; 1 → bare lookup gives the same answer
+            } else {
+                // Multiple candidates — try to pick by argument type.
+                // For Cast expressions (`expr as Type`), the cast target
+                // is the type the param will see, so use it directly;
+                // otherwise fall back to extract_expr_type_name's
+                // path/record/variant detection.
+                let arg_type_names: Vec<Option<String>> = args
+                    .iter()
+                    .map(|a| match &a.kind {
+                        verum_ast::expr::ExprKind::Cast { ty, .. } => Some(
+                            VbcCodegen::extract_type_name_from_ast(ty),
+                        ),
+                        _ => self.extract_expr_type_name(a),
+                    })
+                    .collect();
+                let type_matched: Vec<&(String, FunctionInfo)> = arity_matches
+                    .iter()
+                    .filter(|(_, info)| {
+                        if info.param_type_names.is_empty() {
+                            return false;
+                        }
+                        info.param_type_names
+                            .iter()
+                            .zip(arg_type_names.iter())
+                            .all(|(declared, inferred)| match inferred {
+                                Some(t) => t == declared,
+                                None => true, // unknown arg type — don't reject
+                            })
+                    })
+                    .collect();
+                if type_matched.len() == 1 {
+                    let (name, info) = type_matched[0];
+                    Some((name.clone(), info.clone()))
+                } else {
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         // Look up function - use arity-based disambiguation when available
         let (resolved_name, func_info) = match module_qualified_lookup
+            .or_else(|| type_aware_lookup)
             .or_else(|| {
                 self.ctx
                     .lookup_function_with_arity(&func_name, args.len())
