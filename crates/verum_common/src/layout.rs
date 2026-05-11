@@ -507,7 +507,7 @@ pub fn primitive_size_by_name(name: &str) -> Option<u64> {
         "Char" | "char" => Some(CHAR_SIZE),
 
         // Default-width numerics (target-pointer-width)
-        "Int" | "Float" => Some(INT_SIZE),
+        "Int" | "UInt" | "Float" => Some(INT_SIZE),
 
         // Width-tagged 1-byte
         "Int8" | "UInt8" | "Byte" | "I8" | "U8" | "i8" | "u8" => Some(1),
@@ -519,8 +519,11 @@ pub fn primitive_size_by_name(name: &str) -> Option<u64> {
         "Int32" | "UInt32" | "Float32" | "I32" | "U32" | "F32" | "i32" | "u32" | "f32" => Some(4),
 
         // Width-tagged 8-byte (incl. canonical Int64/UInt64/Float64,
-        // pointer-sized Int/UInt aliases, and lowercase forms)
-        "Int64" | "UInt64" | "Float64" | "IntSize" | "USize" | "UIntSize"
+        // pointer-sized Int/UInt aliases, and lowercase forms).
+        // `ISize` is the canonical capitalised-S signed pointer-width
+        // form mirroring `USize`; `IntSize` is the prior canonical
+        // spelling (both alias the same underlying width).
+        "Int64" | "UInt64" | "Float64" | "IntSize" | "ISize" | "USize" | "UIntSize"
         | "I64" | "U64" | "F64" | "Usize" | "Isize"
         | "i64" | "u64" | "f64" | "isize" | "usize" => Some(POINTER_SIZE),
 
