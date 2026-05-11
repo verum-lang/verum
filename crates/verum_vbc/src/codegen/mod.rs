@@ -9766,18 +9766,50 @@ impl VbcCodegen {
             // PI / MAX / MIN / MIN_POSITIVE / EPSILON, all of
             // `core/base/primitives.vr::implement Float`) AND every
             // struct-literal const (MemProt's read/write/exec triples,
-            // anything carrying composite initialisers).  User-side
-            // typecheck for `Float.NAN` / `Float.INFINITY` then surfaced
-            // `Associated constant X not found on type Float` despite
-            // the descriptor sitting in the archive — the consumer-side
-            // `is_const` gate was looking at the wrong field copy.
-            //
-            // Mirroring `is_const = true` here matches the inlinable
-            // path (the `register_constant_with_value` body that
-            // pushes its own stub VbcFunction; the inlinable case
-            // never created two diverging archive entries).  Closes
-            // task #18.
+            // anything carrying composite initialisers).
             descriptor.is_const = true;
+
+            // Propagate the const's TYPE into the archive descriptor.
+            // `FunctionDescriptor::new` defaults `return_type` to
+            // `TypeRef::Concrete(TypeId::UNIT)`, which the archive
+            // metadata builder serialises as the literal text "Unit".
+            // Downstream `register_stdlib_consts_from_metadata` then
+            // builds a `Type::Unit` TypeScheme — user code's
+            // `let n: Float = Float.NAN` fails unification with
+            // `expected 'Float', found 'Unit'`.  Recover the
+            // canonical type from the codegen-local
+            // `constant_types: HashMap<String, VarTypeKind>` map
+            // populated by `register_constant_type` (mod.rs:9654).
+            // Mapping VarTypeKind → TypeId is exhaustive for the
+            // primitive-typed const surface (Int / Float / Bool /
+            // Byte / Char / Text / Int32 / UInt64); composite-typed
+            // consts (Maybe<T>, struct literals, …) keep the Unit
+            // fallback because their type wasn't a simple primitive
+            // — those load through the codegen-side
+            // `func_info.return_type_name` path on the user-archive
+            // consumer side anyway.
+            use crate::codegen::context::VarTypeKind;
+            use crate::types::TypeId as VbcTypeId;
+            use crate::types::TypeRef as VbcTypeRef;
+            let var_ty_kind = self.ctx.get_constant_type(&name);
+            let tid = match var_ty_kind {
+                VarTypeKind::Int => Some(VbcTypeId::INT),
+                VarTypeKind::Float => Some(VbcTypeId::FLOAT),
+                VarTypeKind::Bool => Some(VbcTypeId::BOOL),
+                VarTypeKind::Byte => Some(VbcTypeId::U8),
+                VarTypeKind::Char => Some(VbcTypeId::CHAR),
+                VarTypeKind::Text => Some(VbcTypeId::TEXT),
+                VarTypeKind::Int32 => Some(VbcTypeId::I32),
+                VarTypeKind::UInt64 => Some(VbcTypeId::U64),
+                _ => None,
+            };
+            if let Some(tid) = tid {
+                descriptor.return_type = VbcTypeRef::Concrete(tid);
+            }
+            // Closes task #18: Float.NAN / INFINITY / PI / MAX / MIN /
+            // EPSILON etc. now land in the archive with `is_const=true`
+            // AND `return_type=Float`, so the typechecker's lazy-load
+            // path reads the correct TypeScheme.
 
             // Create VbcFunction and add it (dedupe via push_function_dedup
             // so blanket-impl replays don't produce same-id duplicates).
