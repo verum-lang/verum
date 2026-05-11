@@ -996,6 +996,35 @@ impl ArchiveCtxCache {
         for name in to_add {
             wanted.insert(name.to_string());
         }
+        // **Primitive-impl transitive force-load (task #23).** Every
+        // stdlib function body that uses a primitive operator
+        // (`a != b`, `a + b`, `a < b`, …) on a USize/Int/Bool/Char/
+        // Text value emits either a direct VBC opcode (Bitwise, Cmp,
+        // Arith) OR a `CallM { method_id }` pointing to the
+        // primitive's protocol-impl method (USize.ne, Int.add, …)
+        // depending on the optimisation pass. The CallM path needs
+        // the receiver's type-method-table to carry the impl entry
+        // — which only happens when the carrier module's archive
+        // entry loads.
+        //
+        // Without this force-load, user code that mounts a stdlib
+        // submodule whose function bodies CallM-dispatch primitive
+        // operators ends up with a method-table miss at runtime:
+        // the call silently returns Unit (`bitfield.test_bit(v, n)`
+        // returning `nil` instead of `Bool` — task #23).
+        //
+        // Architecturally cleaner long-term fix: a transitive-closure
+        // pass that walks every loaded function's bytecode for
+        // `CallM` method_id strings, derives the carrier-type from
+        // the receiver's type-table, and loads each impl method.
+        // For now, force-load the primitive-impl modules
+        // unconditionally — cold-start cost is ~5 additional archive
+        // entries decoded, vs. the alternative (silent Unit at
+        // runtime in any user code that mounts an operator-using
+        // stdlib submodule without also mounting the primitives).
+        wanted_module_prefixes.insert("core.base.primitives".to_string());
+        wanted_module_prefixes.insert("core.base.protocols".to_string());
+        wanted_module_prefixes.insert("core.base".to_string());
         let mut fn_modules = 0usize;
         let mut type_modules = 0usize;
         // **Cold-start optimisation**: parallelise the decode step.
