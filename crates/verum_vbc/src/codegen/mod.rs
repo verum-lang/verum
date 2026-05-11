@@ -6198,7 +6198,45 @@ impl VbcCodegen {
 
         let (instructions, register_count) = self.ctx.end_function();
 
-        let name_id = StringId(self.intern_string(&name));
+        // Promote the descriptor's stored name to the FULL source-
+        // module-qualified form (`sys.bitfield.USIZE_BITS` rather
+        // than just `USIZE_BITS`) so the archive-load path's
+        // qualified-key registration (`archive_ctx_loader::register_module`
+        // line ~314: `format!("{}.{}", module_name, simple_name)`)
+        // doesn't collapse multiple sibling files in the same
+        // directory onto the same archive-entry module-name.
+        //
+        // Without this promotion every `.vr` file under e.g. `core/sys/`
+        // gets folded into a single archive entry named `core.sys` —
+        // so `sys/bitfield.vr`'s `module sys.bitfield;`-declared
+        // exports land in the user-side function registry as
+        // `core.sys.USIZE_BITS` instead of the file-declared
+        // `sys.bitfield.USIZE_BITS`, and cross-module bare-mount
+        // qualified access (`mount core.sys.bitfield; ...
+        // bitfield.USIZE_BITS`) misses the registry entirely.
+        //
+        // The simple-name HashMap key in `ctx.functions` is kept for
+        // local lookups; this change only affects what gets serialised
+        // into the `.vbca` archive.  Impl methods (`type_name.method`,
+        // already qualified through `lookup_name`) and nested-function
+        // names (with `$` separators) are left alone — the prefix is
+        // only added when the basic `lookup_name` carries no `.` or
+        // `$`.  Closes audit task #121 archive-side gap.
+        let effective_module = self
+            .ctx
+            .current_source_module
+            .as_deref()
+            .unwrap_or(&self.config.module_name);
+        let descriptor_name = if !effective_module.is_empty()
+            && effective_module != "main"
+            && !name.contains('.')
+            && !name.contains('$')
+        {
+            format!("{}.{}", effective_module, name)
+        } else {
+            name.clone()
+        };
+        let name_id = StringId(self.intern_string(&descriptor_name));
         let mut descriptor = FunctionDescriptor::new(name_id);
         descriptor.id = func_info.id;
         descriptor.register_count = register_count;
@@ -9579,11 +9617,20 @@ impl VbcCodegen {
         // (it lands under `core.USIZE_BITS` instead). The matching
         // change in `register_function` is at line ~5996 — keep these
         // two paths in step.
-        let effective_module = self
+        // Bind to an owned String so the immutable borrow of
+        // `self.ctx.current_source_module` (via `.as_deref()`) drops
+        // before the subsequent `self.ctx.register_function(...)` /
+        // `self.ctx.register_constant_type(...)` mutable-borrow calls
+        // and the later `if info.intrinsic_name.is_some()` block that
+        // reads `effective_module` again for the descriptor-name
+        // promotion.  Without the clone the borrow stays alive across
+        // the function body and rejects the mutable-borrow calls.
+        let effective_module: String = self
             .ctx
             .current_source_module
             .as_deref()
-            .unwrap_or(&self.config.module_name);
+            .unwrap_or(&self.config.module_name)
+            .to_string();
         if !effective_module.is_empty()
             && effective_module != "main"
             && !name.contains('.')
@@ -9622,7 +9669,23 @@ impl VbcCodegen {
         // which already pushes a real body to `self.functions`, so
         // the stub is gated on `intrinsic_name.is_some()`.
         if info.intrinsic_name.is_some() {
-            let name_id = StringId(self.intern_string(name));
+            // Mirror the source-module-qualified descriptor.name
+            // promotion in `compile_function` (task #121): when the
+            // current source module is known, emit the descriptor's
+            // stored name in fully qualified form so the archive-side
+            // load path sees `sys.bitfield.USIZE_BITS` rather than
+            // a bare `USIZE_BITS` that collides with same-named consts
+            // in sibling files of the same archive entry directory.
+            let const_qualified_name = if !effective_module.is_empty()
+                && effective_module != "main"
+                && !name.contains('.')
+                && !name.contains("::")
+            {
+                format!("{}.{}", effective_module, name)
+            } else {
+                name.to_string()
+            };
+            let name_id = StringId(self.intern_string(&const_qualified_name));
             let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
             descriptor.id = info.id;
             descriptor.is_const = true;
@@ -9691,6 +9754,30 @@ impl VbcCodegen {
             descriptor.id = func_info.id;
             descriptor.register_count = register_count;
             descriptor.locals_count = 0;
+            // #97 — propagate the const-storage marker into the
+            // archive descriptor.  Without this, body-compiled
+            // (non-inlinable) consts — Float-valued constants like
+            // `public const NAN: Float = 0.0 / 0.0;`, struct-literal
+            // initialisers, anything that fails `extract_const_literal_value`
+            // — get archived with `is_const = false`, even though their
+            // `FunctionInfo` correctly carries `is_const = true`.
+            // The asymmetry made `register_stdlib_consts_from_metadata`
+            // skip every Float-valued const (NAN / INFINITY / NEG_INFINITY /
+            // PI / MAX / MIN / MIN_POSITIVE / EPSILON, all of
+            // `core/base/primitives.vr::implement Float`) AND every
+            // struct-literal const (MemProt's read/write/exec triples,
+            // anything carrying composite initialisers).  User-side
+            // typecheck for `Float.NAN` / `Float.INFINITY` then surfaced
+            // `Associated constant X not found on type Float` despite
+            // the descriptor sitting in the archive — the consumer-side
+            // `is_const` gate was looking at the wrong field copy.
+            //
+            // Mirroring `is_const = true` here matches the inlinable
+            // path (the `register_constant_with_value` body that
+            // pushes its own stub VbcFunction; the inlinable case
+            // never created two diverging archive entries).  Closes
+            // task #18.
+            descriptor.is_const = true;
 
             // Create VbcFunction and add it (dedupe via push_function_dedup
             // so blanket-impl replays don't produce same-id duplicates).
