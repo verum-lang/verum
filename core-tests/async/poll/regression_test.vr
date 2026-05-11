@@ -151,6 +151,71 @@ fn regression_poll_chained_map_pending_absorbs() {
 }
 
 // =============================================================================
+// §D  Iterator-deref binding loses parametric `T` through chained
+//     method dispatch
+//
+//   `for p in list_of_polls.iter() { let q = (*p).map(|x| x+1)
+//   .map(|x| x*2); }` — the second `.map`'s receiver type couldn't
+//   be recovered because:
+//
+//   (i)  `compile_for`'s element-type propagation only fired for
+//        iter-shaped paths whose AST was the container itself
+//        (`for x in container`), not for the by-far-most-common
+//        `.iter()`-method-call form (`for x in container.iter()`).
+//        For the latter the binding `p` ended up unregistered in
+//        `variable_type_names`.
+//   (ii) `extract_expr_type_name`'s MethodCall fallback carried a
+//        hardcoded `MAYBE_RETURNING_METHODS` list that returned
+//        `"Maybe"` for ~50 stdlib method names, mis-classifying
+//        every user Functor/Monad-shape sharing those names
+//        (Poll.map, Stream.next, custom .pop, …) as Maybe-shaped.
+//   (iii) `determine_method_return_type_prefix` lacked a fallback
+//        branch for inner_receiver shapes that are neither
+//        `Path(single-segment)` nor `MethodCall` — `Unary{Deref}`
+//        for `(*p)` fell through to the synthetic-method-name
+//        fallback that the runtime then mis-dispatched.
+//
+//   CLOSED 2026-05-11 — three coordinated fixes:
+//     (i)   `compile_for` now detects `.iter()` / `.iter_mut()` /
+//           `.into_iter()` MethodCall iter-expressions and propagates
+//           the container's element type to the binder.
+//     (ii)  `extract_expr_type_name`'s hardcoded MAYBE list replaced
+//           with a type-honest function-registry walk by short name —
+//           if exactly one declared `*.<method>` has a known
+//           return type, use it; otherwise return None (let the
+//           caller's fallback kick in) rather than mis-categorising.
+//     (iii) `determine_method_return_type_prefix` extended with a
+//           structural fallback that hands inner_receiver to
+//           `extract_expr_type_name` for Unary/Paren/Field/Block
+//           shapes, closing the iterator-deref chain inference.
+// =============================================================================
+
+mount core.collections.list.List;
+
+fn regression_poll_int_domain() -> List<Poll<Int>> {
+    let mut out: List<Poll<Int>> = [];
+    out.push(Poll.Ready(5));
+    out
+}
+
+@test
+fn regression_poll_iter_deref_inline_chain() {
+    for p in regression_poll_int_domain().iter() {
+        let q = (*p).map(|x| x + 1).map(|x| x * 2);
+        assert_eq(q, Poll.Ready(12));
+    }
+}
+
+@test
+fn regression_poll_iter_deref_let_then_chain() {
+    for p in regression_poll_int_domain().iter() {
+        let mid = (*p).map(|x| x + 1);
+        let q = mid.map(|x| x * 2);
+        assert_eq(q, Poll.Ready(12));
+    }
+}
+
+// =============================================================================
 // Entry point
 // =============================================================================
 

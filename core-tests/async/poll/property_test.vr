@@ -80,29 +80,11 @@ fn property_poll_map_identity_exhaustive() {
 
 @test
 fn property_poll_map_composition_exhaustive() {
-    // Explicit enumeration over the int payload domain rather than an
-    // iterator-deref-then-method chain.  Iterator-derived references
-    // currently lose the parametric `T` binding through a deref-then-
-    // method-call expression (each `(*iter_item).method(args)` is two
-    // codegen ops, and the second method's receiver type cannot
-    // recover `T` from the deref slot), so a chained
-    // `(*iter_item).map(...).map(...)` mis-dispatches the outer `.map`
-    // by losing `Poll<Int>` → `Poll<T>` parametric link. Tested
-    // directly on stack-bound `Poll<Int>` values, the chain is
-    // type-coherent.
-    fn check(p: Poll<Int>) {
-        let lhs = p.map(|x| x + 1).map(|x| x * 2);
-        let rhs = p.map(|x| (x + 1) * 2);
+    for p in poll_int_domain().iter() {
+        let lhs = (*p).map(|x| x + 1).map(|x| x * 2);
+        let rhs = (*p).map(|x| (x + 1) * 2);
         assert_eq(lhs, rhs);
     }
-
-    check(Poll.Pending);
-    check(Poll.Ready(-1_000_000));
-    check(Poll.Ready(-1));
-    check(Poll.Ready(0));
-    check(Poll.Ready(1));
-    check(Poll.Ready(42));
-    check(Poll.Ready(1_000_000));
 }
 
 @test
@@ -208,13 +190,15 @@ fn property_poll_eq_transitive_exhaustive() {
 fn property_poll_pending_eq_pending() {
     let p1: Poll<Int> = Poll.Pending;
     let p2: Poll<Int> = Poll.Pending;
-    let p3: Poll<Int> = (Poll.Ready(5)).map(|x| x).map(|_x| panic("unreachable")).map(|x| x);
-    // p3's construction is never reached because Pending absorbs; we
-    // never call the `panic` closure on a Pending input. The point
-    // here: any pair of Pending values must be equal regardless of
-    // construction history.
-    let _ = p3;
+    // Construct a Pending via map-on-Pending — Pending is the
+    // absorbing element under the Functor map, so the closure is
+    // never invoked.  Asserts the absorbing property and that any
+    // pair of Pending values is equal regardless of construction
+    // history.
+    let p3: Poll<Int> = (Poll.Pending).map(|_x| panic("absorbing-element law violated"));
     assert(p1 == p2);
+    assert(p2 == p3);
+    assert(p1 == p3);
 }
 
 // =============================================================================
