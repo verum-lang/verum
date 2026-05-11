@@ -15,6 +15,18 @@ default green-suite gate.
 | `collections/toposort`   |  76 |   0 |   0 | 100 | 4 (Map.contains_key(&amp;K) gates contains/idempotent add_node; Map.get → Maybe&lt;V&gt; gates the toposort algorithm itself; Text.from gates the Cycle-variant payload). regression-only outside of new()/add_node-distinct/empty-toposort. |
 | `sys/bitfield`           | 452 |   0 |   0 | 114 | 1 (mount X.{public_const} not registered in codegen symbol table — tracked as #15). Cross-module dispatch closed in task #121; interpreter SIGABRT closed in task #14. Implementation in core/sys/bitfield.vr is `pure @inline(always)`. **complete** outside the remaining selective-mount const-import deferral. |
 | `async/poll`             | 393 | 334 | 212 | 157 | 0 — full Poll<T> surface conformance-tested. Closed in this branch: codegen-emit-MakeVariantTyped over MakeVariant for user sum types (Poll/LocalPair Debug fixed); blanket From<T> for Poll<T> removed (overlap with From<Maybe<T>>); receiver-aware method-chain inference lifted ahead of hardcoded MAYBE_RETURNING_METHODS table. **complete**. |
+| `async/waker`            |  ~80|   ~50|   ~80|    ~80| 2 — fn_ref-as-Int identity stability; Debug auto-derive precedence. Closed §B/§C in this branch via record-literal Clone-Unit-corruption fix + Waker construction inlining. **partial**. |
+| `async/future`           | ~150|  ~150|  ~150|     0| 14 — FutureExt blanket-impl-derived methods (block/map/and_then) not dispatched onto ReadyFuture; gated by task #11 (protocol-default-method dispatch needs per-call-site resolution). **partial**. |
+| `async/backoff`          |  ~120|   ~30|   ~30|     0| 7 — Backoff.<ctor> blocked by upstream CSPRNG intrinsic gap shared with reservoir. **partial**. |
+| `async/task`             |  ~70|   ~40|   ~50|     0| 2 — TaskId.new atomic counter + JoinError Debug; both gated by upstream defects. **partial**. |
+| `async/diagnostics`      |  ~90|   ~30|   ~30|     0| 0 — TaskLifecycleState 6-variant + TaskInfo. Pure data-type module. **partial** (carries no runtime tests). |
+| `async/cancellation`     |  ~60|   ~20|   ~30|     0| 0 — CancelReason 4-variant + Aborted(Text) payload + List bookkeeping. Timeout{deadline} arm deferred. **partial**. |
+| `async/channel`          |  ~60|   ~30|   ~30|     0| 0 — TrySendError + TryRecvError variant algebra. **partial**. |
+| `async/broadcast`        |  ~110|   ~40|   ~20|     0| 0 — BroadcastRecvError + TryRecvResult<T> + LagPolicy. **partial**. |
+| `async/select`           |  ~70|   ~30|   ~20|     0| 0 — Either<A,B> + SelectError + race-outcome. **partial**. |
+| `async/nursery`          |  ~60|   ~10|   ~20|     0| 0 — NurseryErrorBehavior 3-policy. **partial**. |
+| `async/spawn_config`     | ~150|   ~30|   ~30|     0| 0 — RestartPolicy + IsolationLevel + Priority 4-rank. **partial**. |
+| `async/spawn_with`       |  ~60|   ~10|   ~30|     0| 0 — CircuitState 3-variant breaker lifecycle. **partial**. |
 
 ## Status legend
 
