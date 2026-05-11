@@ -73,7 +73,34 @@ pub(in super::super) fn handle_call(
         func_id.0 <= STAGE1_STUB_BASE && func_id.0 >= STAGE1_STUB_BASE - STUB_RANGE_WIDTH;
     let in_stage2 =
         func_id.0 <= STAGE2_STUB_BASE && func_id.0 >= STAGE2_STUB_BASE - STUB_RANGE_WIDTH;
-    if in_stage1 || in_stage2 {
+
+    // Get function descriptor — extract needed fields to release borrow.
+    // For sentinel-range IDs, we check lookup AND body before panicking:
+    // a real overlaid body (`bytecode_length > 0`) is the SUCCESS case
+    // for a future stages-1+2 reland and dispatches normally.  Only
+    // stubs that never got resolved (lookup miss OR empty body) emit
+    // the lenient panic.
+    let func = match state.module.get_function(func_id) {
+        Some(f) => f,
+        None => {
+            if in_stage1 || in_stage2 {
+                let stage = if in_stage1 { "1" } else { "2" };
+                let stub_class = if in_stage1 {
+                    "canonical-type static method"
+                } else {
+                    "stdlib variant constructor"
+                };
+                return Err(InterpreterError::Panic {
+                    message: format!(
+                        "[lenient] task#16 stage-{} {} stub never resolved (func_id={}); the producing stdlib module failed precompile — check stderr for `[lenient] SKIP <Type>.<method>` warnings during the build",
+                        stage, stub_class, func_id.0
+                    ),
+                });
+            }
+            return Err(InterpreterError::FunctionNotFound(func_id));
+        }
+    };
+    if (in_stage1 || in_stage2) && func.bytecode_length == 0 {
         let stage = if in_stage1 { "1" } else { "2" };
         let stub_class = if in_stage1 {
             "canonical-type static method"
@@ -82,17 +109,11 @@ pub(in super::super) fn handle_call(
         };
         return Err(InterpreterError::Panic {
             message: format!(
-                "[lenient] task#16 stage-{} {} stub never resolved (func_id={}); the producing stdlib module failed precompile — check stderr for `[lenient] SKIP <Type>.<method>` warnings during the build",
+                "[lenient] task#16 stage-{} {} stub never overlaid (func_id={}); descriptor present but bytecode_length=0 — the producing stdlib module failed to emit a body. Check stderr for `[lenient] SKIP <Type>.<method>` warnings during the build",
                 stage, stub_class, func_id.0
             ),
         });
     }
-
-    // Get function descriptor — extract needed fields to release borrow
-    let func = state
-        .module
-        .get_function(func_id)
-        .ok_or(InterpreterError::FunctionNotFound(func_id))?;
     let bytecode_length = func.bytecode_length;
     let func_name_id = func.name;
     let reg_count = func.register_count;
