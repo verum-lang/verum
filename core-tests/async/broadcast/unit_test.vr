@@ -1,0 +1,126 @@
+// =============================================================================
+// core-tests/async/broadcast/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.broadcast`'s variant algebra surface
+// (BroadcastRecvError, TryRecvResult<T>, LagPolicy).  Live
+// BroadcastSender/Receiver are gated by the runtime executor; their
+// tests live in regression_test.vr.
+// =============================================================================
+
+mount core.async.broadcast.{BroadcastRecvError, TryRecvResult, LagPolicy};
+
+// =============================================================================
+// Section 1: BroadcastRecvError — 2-variant
+// =============================================================================
+
+@test
+fn test_broadcast_recv_error_closed_construction() {
+    let e: BroadcastRecvError = BroadcastRecvError.Closed;
+    assert(e is BroadcastRecvError.Closed);
+    assert(!(e is BroadcastRecvError.Lagged));
+}
+
+@test
+fn test_broadcast_recv_error_lagged_with_payload() {
+    let e: BroadcastRecvError = BroadcastRecvError.Lagged(42);
+    assert(e is BroadcastRecvError.Lagged);
+    assert(!(e is BroadcastRecvError.Closed));
+}
+
+@test
+fn test_broadcast_recv_error_lagged_payload_round_trip() {
+    fn extract(e: BroadcastRecvError) -> Int {
+        match e {
+            BroadcastRecvError.Lagged(n) => n,
+            BroadcastRecvError.Closed => -1,
+        }
+    }
+    assert_eq(extract(BroadcastRecvError.Lagged(7)), 7);
+    assert_eq(extract(BroadcastRecvError.Lagged(0)), 0);
+    assert_eq(extract(BroadcastRecvError.Closed), -1);
+}
+
+// =============================================================================
+// Section 2: TryRecvResult<T> — 4-variant outcome
+// =============================================================================
+
+@test
+fn test_broadcast_try_recv_value_construction() {
+    let r: TryRecvResult<Int> = TryRecvResult.Value(42);
+    assert(r is TryRecvResult.Value);
+}
+
+@test
+fn test_broadcast_try_recv_empty_construction() {
+    let r: TryRecvResult<Int> = TryRecvResult.Empty;
+    assert(r is TryRecvResult.Empty);
+}
+
+@test
+fn test_broadcast_try_recv_closed_construction() {
+    let r: TryRecvResult<Int> = TryRecvResult.Closed;
+    assert(r is TryRecvResult.Closed);
+}
+
+@test
+fn test_broadcast_try_recv_lagged_construction() {
+    let r: TryRecvResult<Int> = TryRecvResult.Lagged(3);
+    assert(r is TryRecvResult.Lagged);
+}
+
+@test
+fn test_broadcast_try_recv_pairwise_distinct() {
+    let value: TryRecvResult<Int> = TryRecvResult.Value(1);
+    let empty: TryRecvResult<Int> = TryRecvResult.Empty;
+    let closed: TryRecvResult<Int> = TryRecvResult.Closed;
+    let lagged: TryRecvResult<Int> = TryRecvResult.Lagged(2);
+
+    assert(!(value is TryRecvResult.Empty));
+    assert(!(value is TryRecvResult.Closed));
+    assert(!(value is TryRecvResult.Lagged));
+    assert(!(empty is TryRecvResult.Value));
+    assert(!(empty is TryRecvResult.Lagged));
+    assert(!(closed is TryRecvResult.Empty));
+    assert(!(closed is TryRecvResult.Lagged));
+    assert(!(lagged is TryRecvResult.Value));
+    assert(!(lagged is TryRecvResult.Empty));
+}
+
+// =============================================================================
+// Section 3: LagPolicy — 3-variant
+// =============================================================================
+
+@test
+fn test_broadcast_lag_tolerant_construction() {
+    let p: LagPolicy = LagPolicy.LagTolerant;
+    assert(p is LagPolicy.LagTolerant);
+}
+
+@test
+fn test_broadcast_drop_oldest_construction() {
+    let p: LagPolicy = LagPolicy.DropOldest;
+    assert(p is LagPolicy.DropOldest);
+}
+
+@test
+fn test_broadcast_drop_slow_receiver_construction() {
+    let p: LagPolicy = LagPolicy.DropSlowReceiver;
+    assert(p is LagPolicy.DropSlowReceiver);
+}
+
+@test
+fn test_broadcast_lag_policy_match_exhaustive() {
+    fn describe(p: LagPolicy) -> Text {
+        match p {
+            LagPolicy.LagTolerant => "tolerant",
+            LagPolicy.DropOldest => "drop-oldest",
+            LagPolicy.DropSlowReceiver => "drop-receiver",
+        }
+    }
+    assert_eq(describe(LagPolicy.LagTolerant), "tolerant");
+    assert_eq(describe(LagPolicy.DropOldest), "drop-oldest");
+    assert_eq(describe(LagPolicy.DropSlowReceiver), "drop-receiver");
+}
+
+fn main() {}

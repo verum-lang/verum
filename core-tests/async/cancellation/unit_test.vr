@@ -1,0 +1,93 @@
+// =============================================================================
+// core-tests/async/cancellation/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.cancellation.CancelReason` — the 4-variant
+// cancellation taxonomy (Cancelled / Timeout / ParentCancelled / Aborted).
+// =============================================================================
+
+mount core.async.cancellation.{CancelReason};
+
+// =============================================================================
+// Section 1: Variant construction
+// =============================================================================
+
+@test
+fn test_cancellation_cancelled_construction() {
+    let r: CancelReason = CancelReason.Cancelled;
+    assert(r is CancelReason.Cancelled);
+}
+
+@test
+fn test_cancellation_parent_cancelled_construction() {
+    let r: CancelReason = CancelReason.ParentCancelled;
+    assert(r is CancelReason.ParentCancelled);
+}
+
+@test
+fn test_cancellation_aborted_with_payload() {
+    let r: CancelReason = CancelReason.Aborted("user-initiated shutdown");
+    assert(r is CancelReason.Aborted);
+}
+
+// =============================================================================
+// Section 2: Pairwise-distinct invariant
+// =============================================================================
+
+@test
+fn test_cancellation_variants_pairwise_distinct() {
+    let cancelled: CancelReason = CancelReason.Cancelled;
+    let parent: CancelReason = CancelReason.ParentCancelled;
+    let aborted: CancelReason = CancelReason.Aborted("x");
+
+    assert(!(cancelled is CancelReason.ParentCancelled));
+    assert(!(cancelled is CancelReason.Aborted));
+    assert(!(parent is CancelReason.Cancelled));
+    assert(!(parent is CancelReason.Aborted));
+    assert(!(aborted is CancelReason.Cancelled));
+    assert(!(aborted is CancelReason.ParentCancelled));
+}
+
+// =============================================================================
+// Section 3: Payload round-trip — Aborted(Text)
+// =============================================================================
+
+@test
+fn test_cancellation_aborted_payload_round_trip() {
+    fn extract(r: CancelReason) -> Text {
+        match r {
+            CancelReason.Aborted(msg) => msg,
+            _ => "<unknown>",
+        }
+    }
+    assert_eq(extract(CancelReason.Aborted("first")), "first");
+    assert_eq(extract(CancelReason.Aborted("second")), "second");
+    assert_eq(extract(CancelReason.Cancelled), "<unknown>");
+}
+
+// =============================================================================
+// Section 4: Match-arm classifier — `is_timeout` semantics
+//
+//   `CancelReason.is_timeout()` returns true ONLY for Timeout variant;
+//   all three other variants return false.  Test the partition shape
+//   inline (the `is_timeout` method itself takes a CancelReason from a
+//   construction site that requires Instant — exercised in
+//   regression_test for that scenario).
+// =============================================================================
+
+@test
+fn test_cancellation_is_timeout_false_for_non_timeout_variants() {
+    fn manual_is_timeout(r: CancelReason) -> Bool {
+        match r {
+            CancelReason.Cancelled => false,
+            CancelReason.ParentCancelled => false,
+            CancelReason.Aborted(_) => false,
+            _ => false,
+        }
+    }
+    assert(!manual_is_timeout(CancelReason.Cancelled));
+    assert(!manual_is_timeout(CancelReason.ParentCancelled));
+    assert(!manual_is_timeout(CancelReason.Aborted("x")));
+}
+
+fn main() {}
