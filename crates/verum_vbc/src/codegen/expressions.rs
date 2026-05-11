@@ -1693,16 +1693,6 @@ impl VbcCodegen {
                 }
 
                 // Not found - truly undefined
-                if std::env::var("VERUM_DEBUG_UNDEF").is_ok() {
-                    let bitfield_keys: Vec<&String> = self.ctx.functions.keys()
-                        .filter(|k| k.contains("bitfield") || k.contains("USIZE_BITS"))
-                        .take(15)
-                        .collect();
-                    eprintln!(
-                        "[VERUM_DEBUG_UNDEF] name={} registry-bitfield-keys={:?} (total fns={})",
-                        name, bitfield_keys, self.ctx.functions.len(),
-                    );
-                }
                 Err(CodegenError::undefined_variable(name.clone()))
             }
 
