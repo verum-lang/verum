@@ -6466,28 +6466,26 @@ impl VbcCodegen {
     /// any push site that bypasses this helper (audit aid).
     fn push_function_dedup(&mut self, vbc_func: VbcFunction) {
         let new_id = vbc_func.descriptor.id.0;
-        // Task #16 reland blocker #2: filter stage-1/2 stub FunctionIds
-        // at the codegen-emission boundary so they never enter
+        // Task #16 reland blocker #2: filter EMPTY stage-1/2 stubs at
+        // the codegen-emission boundary so they never enter
         // `self.functions` (the per-module compiled bytecode set).
-        // Stubs are codegen-context entries only; they should NEVER
-        // appear as compiled VBC functions.
         //
-        // Sentinel ranges match the codegen-side stub-overwrite
-        // gate at `stdlib_bootstrap.rs:1453`, the archive-metadata
-        // Pass 2 filter at `archive_metadata.rs::register_module_metadata`
+        // Sentinel ranges match the codegen-side stub-overwrite gate
+        // at `stdlib_bootstrap.rs:1453`, the archive-metadata Pass 2
+        // filter at `archive_metadata.rs::register_module_metadata`
         // (commit `fdda6ee22`), AND the runtime sentinel handler at
         // `verum_vbc::interpreter::handle_call` (commit `b5f5462d4`).
-        // All four sites use identical sentinel math, so the gating
-        // is consistent across codegen / archive-metadata / runtime
-        // layers.
         //
-        // Without this gate, blanket-impl replay paths or
-        // `compile_pending_constants` flushes could leak stubs into
-        // `module.functions`, where downstream archive emission then
-        // exposes them to the typechecker's lazy-load via
-        // `metadata.functions`.  The archive-metadata filter (#3)
-        // catches the leak downstream as defence in depth; THIS gate
-        // catches it at source.
+        // **Empty-body gate**: filter ONLY when `instructions.is_empty()`.
+        // The first reland's `Int.checked_add` + `Text.from_utf8_unchecked`
+        // regression (revert `f98f7ea49`) came from this filter blanket-
+        // rejecting EVERY function with a sentinel-range ID — including
+        // legitimate real bodies that get assigned those IDs when the
+        // producing module's compile path looks up the pre-registered
+        // stub in `global_function_registry` and reuses its ID for the
+        // overlay (the stub-overwrite-gate-intended path).  Real bodies
+        // with sentinel IDs are the SUCCESS case for a future stages-1+2
+        // reland; only true stubs (no instructions) should be dropped.
         const STAGE1_STUB_BASE: u32 = u32::MAX - 0x40_0000;
         const STAGE2_STUB_BASE: u32 = u32::MAX - 0xC0_0000;
         const STUB_RANGE_WIDTH: u32 = 0x10_0000;
@@ -6495,7 +6493,7 @@ impl VbcCodegen {
             new_id <= STAGE1_STUB_BASE && new_id >= STAGE1_STUB_BASE - STUB_RANGE_WIDTH;
         let in_stage2 =
             new_id <= STAGE2_STUB_BASE && new_id >= STAGE2_STUB_BASE - STUB_RANGE_WIDTH;
-        if in_stage1 || in_stage2 {
+        if (in_stage1 || in_stage2) && vbc_func.instructions.is_empty() {
             return;
         }
         if let Some(existing_idx) = self.functions.iter().position(|f| f.descriptor.id.0 == new_id)

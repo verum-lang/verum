@@ -514,6 +514,13 @@ fn register_module_metadata(
     // boundary so they never reach the typechecker's lazy-load
     // path either.  Both gates together make stage-1+2 reland
     // safe.
+    // Filter STUBS only — `bytecode_length == 0` AND sentinel-range
+    // ID together identify unresolved stage-1/2 stubs.  Real bodies
+    // assigned a sentinel ID by the stub-overwrite-gate overlay path
+    // have `bytecode_length > 0` and pass through.  See the matching
+    // empty-body gate in `verum_vbc::codegen::push_function_dedup`
+    // (commit history under task #16) for the rationale that closed
+    // the `f98f7ea49` revert's `Int.checked_add` regression.
     const STAGE1_STUB_BASE: u32 = u32::MAX - 0x40_0000;
     const STAGE2_STUB_BASE: u32 = u32::MAX - 0xC0_0000;
     const STUB_RANGE_WIDTH: u32 = 0x10_0000;
@@ -523,7 +530,7 @@ fn register_module_metadata(
         in_stage1 || in_stage2
     };
     for fn_desc in &module.functions {
-        if is_stub_id(fn_desc.id.0) {
+        if is_stub_id(fn_desc.id.0) && fn_desc.bytecode_length == 0 {
             continue;
         }
         let simple_name = match module.strings.get(fn_desc.name) {
