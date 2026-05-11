@@ -86,20 +86,28 @@ fn regression_waker_aliased_self_will_wake_returns_true() {
 }
 
 // =============================================================================
-// §C  `Waker.clone()` null-derefs the vtable.clone fn-pointer slot
+// §C  Method-body chained-field access on `&self` null-derefs even
+//     when the test-scope equivalent let-binding form succeeds
 //
-//   Calling `(self.raw.vtable.clone)(self.raw.data)` from inside the
-//   Clone impl crashes at `NullPointerAt opcode 0x62`.  The vtable
-//   IS correctly populated (direct field reads from outside the
-//   method succeed — see
-//   `core-tests/async/waker/unit_test.vr::test_waker_noop_constructs`
-//   plus the manual-field-read test in the diag suite), so the
-//   defect is in how the interpreter invokes a fn-pointer stored
-//   in a nested record field on `&self`.
+//   Calling `w.wake_by_ref()` / `w.clone()` / `w.drop()` crashes at
+//   `NullPointerAt opcode 0x62` (GetF on a nested record field).
+//   The waker.vr methods have been refactored to the explicit
+//   typed-let-binding form:
 //
-//   Tracking task: "Interpreter: indirect call through
-//   `(self.f1.f2.fn_field)(args)` null-derefs when the fn slot is
-//   reached via `&self` chained field access".
+//     let raw: RawWaker = self.raw;
+//     let vtable: RawWakerVTable = raw.vtable;
+//     let f = vtable.wake_by_ref;
+//     f(raw.data);
+//
+//   The SAME pattern outside method body (at test scope, see
+//   `diag_let_chain_call_fn` in the diag suite) succeeds.  Inside
+//   the method body, the first `self.raw` GetF panics — the
+//   interpreter doesn't auto-deref `&self` before the field
+//   access, so it GetF's on the reference itself.
+//
+//   Tracking task: "Interpreter: `&self` receiver in method bodies
+//   must auto-deref before field-access GetF; current behaviour
+//   treats `self.field` on `self: &Self` as GetF on the reference".
 // =============================================================================
 
 @ignore

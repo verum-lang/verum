@@ -122,17 +122,32 @@ implement Waker {
     }
 
     // Wake the task associated with this waker. Consumes the waker.
+    //
+    // The let-binding split is deliberate: chained field access of
+    // shape `self.raw.vtable.wake` through three nested user-defined
+    // record types cannot be resolved field-by-field by the
+    // codegen's chain inference; each intermediate value's type
+    // must be carried in `variable_type_names` for the per-step
+    // field-index lookup to consult the correct layout.  The
+    // alternative — inline chained access — falls into the
+    // resolve_field_index global-scan fallback and computes
+    // out-of-bounds offsets that the runtime panics on.
     public fn wake(self) {
-        let wake_fn = self.raw.vtable.wake;
-        let data = self.raw.data;
-        // Don't run drop since wake consumes
+        let raw: RawWaker = self.raw;
+        let vtable: RawWakerVTable = raw.vtable;
+        let wake_fn = vtable.wake;
+        let data = raw.data;
+        // Don't run drop since wake consumes.
         forget(self);
         wake_fn(data);
     }
 
     // Wake by reference without consuming.
     public fn wake_by_ref(&self) {
-        (self.raw.vtable.wake_by_ref)(self.raw.data);
+        let raw: RawWaker = self.raw;
+        let vtable: RawWakerVTable = raw.vtable;
+        let f = vtable.wake_by_ref;
+        f(raw.data);
     }
 
     // Check if two wakers will wake the same task.
@@ -147,26 +162,38 @@ implement Waker {
     // is the strongest semantic identity available: same wake
     // behaviour ⇒ same wake target.
     public fn will_wake(&self, other: &Waker) -> Bool {
-        self.raw.data as Int == other.raw.data as Int
-            && (self.raw.vtable.wake as Int) == (other.raw.vtable.wake as Int)
-            && (self.raw.vtable.wake_by_ref as Int) == (other.raw.vtable.wake_by_ref as Int)
+        let self_raw: RawWaker = self.raw;
+        let other_raw: RawWaker = other.raw;
+        let self_vt: RawWakerVTable = self_raw.vtable;
+        let other_vt: RawWakerVTable = other_raw.vtable;
+        let same_data = (self_raw.data as Int) == (other_raw.data as Int);
+        let same_wake = (self_vt.wake as Int) == (other_vt.wake as Int);
+        let same_wake_by_ref =
+            (self_vt.wake_by_ref as Int) == (other_vt.wake_by_ref as Int);
+        same_data && same_wake && same_wake_by_ref
     }
 }
 
 implement Clone for Waker {
     fn clone(&self) -> Waker {
-        // The vtable's `clone` function decides what data + vtable
-        // the clone gets.  For the canonical noop case the clone
-        // returns a fresh RawWaker carrying the same noop_* fn slots,
-        // so will_wake against the source returns true.
-        let raw = (self.raw.vtable.clone)(self.raw.data);
-        Waker { raw: raw }
+        // Same let-binding split as in `Waker.wake` etc — the
+        // codegen's chain-field-access can't recover intermediate
+        // types across `&self → RawWaker → RawWakerVTable → fn`,
+        // so each step is bound to a typed local.
+        let raw: RawWaker = self.raw;
+        let vtable: RawWakerVTable = raw.vtable;
+        let clone_fn = vtable.clone;
+        let new_raw = clone_fn(raw.data);
+        Waker { raw: new_raw }
     }
 }
 
 implement Drop for Waker {
     fn drop(&mut self) {
-        (self.raw.vtable.drop)(self.raw.data);
+        let raw: RawWaker = self.raw;
+        let vtable: RawWakerVTable = raw.vtable;
+        let drop_fn = vtable.drop;
+        drop_fn(raw.data);
     }
 }
 
