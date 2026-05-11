@@ -9911,8 +9911,16 @@ impl VbcCodegen {
 
     /// Converts a TypeKind to VarTypeKind for instruction selection.
     ///
-
-    /// This is crucial for generating correct float vs integer operations.
+    /// Path-based aliases (`USize`, `i64`, `Byte`, …) are normalized through
+    /// the shared `primitive_path_ident_to_typekind` helper so the recognized
+    /// integer/float/bool/char/text/unit names cannot drift from the cast-
+    /// normalization or `infer_expr_type_kind` sites — drift previously
+    /// caused canonical Verum names like `USize` to fall to
+    /// `VarTypeKind::Unknown`, which propagated into `infer_expr_type_kind`
+    /// returning `None` for `n: USize` parameters and the bitwise-NOT path
+    /// emitting `Instruction::Not` (logical, via is_truthy) instead of
+    /// `Instruction::Bitwise{Not}` for `!mask` expressions in stdlib
+    /// bitfield primitives.
     fn type_kind_to_var_type(&self, type_kind: &verum_ast::ty::TypeKind) -> context::VarTypeKind {
         use verum_ast::ty::TypeKind;
         match type_kind {
@@ -9922,48 +9930,25 @@ impl VbcCodegen {
             TypeKind::Char => context::VarTypeKind::Char,
             TypeKind::Text => context::VarTypeKind::Text,
             TypeKind::Unit => context::VarTypeKind::Unit,
-            // Handle type aliases represented as Path types
-            TypeKind::Path(path) => {
-                if let Some(ident) = path.as_ident() {
-                    match ident.name.as_str() {
-                        "Float" | "Float64" | "f64" | "Float32" | "f32" => {
-                            context::VarTypeKind::Float
-                        }
-                        "Int" | "Int64" | "i64" | "Int32" | "i32" | "UInt8" | "u8" | "Byte"
-                        | "UInt16" | "u16" | "UInt32" | "u32" | "UInt64" | "u64" | "Int8"
-                        | "i8" | "Int16" | "i16" | "UInt128" | "u128" | "Int128" | "i128"
-                        | "UIntSize" | "usize" | "IntSize" | "isize" => context::VarTypeKind::Int,
-                        "Bool" => context::VarTypeKind::Bool,
-                        "Char" => context::VarTypeKind::Char,
-                        "Text" => context::VarTypeKind::Text,
-                        _ => context::VarTypeKind::Unknown,
-                    }
-                } else {
-                    context::VarTypeKind::Unknown
-                }
-            }
-            // For complex types, we return Unknown and let runtime handle them
+            TypeKind::Path(path) => path
+                .as_ident()
+                .and_then(|ident| Self::primitive_path_ident_to_typekind(&ident.name))
+                .map(|tk| self.type_kind_to_var_type(&tk))
+                .unwrap_or(context::VarTypeKind::Unknown),
             _ => context::VarTypeKind::Unknown,
         }
     }
 
     /// Converts a type name string to VarTypeKind for instruction selection.
     ///
-
-    /// Used when we have type information as a string (e.g., from variant payload types).
+    /// Used when we have type information as a string (e.g., from variant
+    /// payload types). Routes through `primitive_path_ident_to_typekind` so
+    /// the recognized name set stays consistent with `type_kind_to_var_type`
+    /// and the cast/infer sites in `expressions.rs`.
     fn type_name_to_var_type(&self, type_name: &str) -> context::VarTypeKind {
-        match type_name {
-            "Float" | "Float64" | "f64" | "Float32" | "f32" => context::VarTypeKind::Float,
-            "Int" | "Int64" | "i64" | "Int32" | "i32" | "UInt8" | "u8" | "Byte" | "UInt16"
-            | "u16" | "UInt32" | "u32" | "UInt64" | "u64" | "Int8" | "i8" | "Int16" | "i16"
-            | "UInt128" | "u128" | "Int128" | "i128" | "UIntSize" | "usize" | "IntSize"
-            | "isize" => context::VarTypeKind::Int,
-            "Bool" => context::VarTypeKind::Bool,
-            "Char" => context::VarTypeKind::Char,
-            "Text" => context::VarTypeKind::Text,
-            "()" => context::VarTypeKind::Unit,
-            _ => context::VarTypeKind::Unknown,
-        }
+        Self::primitive_path_ident_to_typekind(type_name)
+            .map(|tk| self.type_kind_to_var_type(&tk))
+            .unwrap_or(context::VarTypeKind::Unknown)
     }
 
     /// Extracts inner type parameters from a generic type name string.
