@@ -587,6 +587,124 @@ fn register_module_metadata(
             meta.functions.insert(simple_name, descriptor);
         }
     }
+
+    // Pass 2.5: synthesize TypeDescriptors for built-in primitive types
+    // referenced by `Parent.method`-shaped function names that are
+    // absent from `module.types`.
+    //
+    // Background: primitives like `Int`, `Byte`, `USize`, `ISize`,
+    // `UInt8..128`, `Int8..128`, `Float`, `Float32`, `Float64`,
+    // `Bool`, `Char` are BUILT-IN — their `TypeId` is recognised by
+    // the runtime / VBC model but the stdlib's `implement <Primitive>
+    // { … }` block doesn't emit a `module.types` entry for them (the
+    // type ALREADY exists at the VM layer).  As a side-effect the
+    // builder's `type_id_to_name` map — assembled from `module.types`
+    // — has NO entry for the primitive's TypeId, so
+    // `fn_desc.parent_type` (`Option<TypeId>`) resolves to `None` in
+    // Pass 2 above even though the impl method's VBC-stored function
+    // name is `"Int.checked_add"`.  Aliased TypeIds compound this:
+    // TypeId(14) maps to all of USize / ISize / Ptr; TypeId(6) to
+    // Byte / U8 / UInt8; the lossy `TypeId → name` direction can't
+    // recover the canonical name.
+    //
+    // The typechecker's lazy-load path
+    // (`ensure_stdlib_type_loaded`) consults `metadata.types[Int]`
+    // and bails when it isn't there, so the inherent_methods bucket
+    // for Int stays empty — every `n.checked_add(m)` /
+    // `n.wrapping_sub(k)` user-side call site fails with `no method
+    // named X found for type Int` despite the method descriptor
+    // sitting in `metadata.functions` keyed under the simple name.
+    //
+    // **Fix**: parse the function-name STRING for the canonical
+    // `Type.method` shape and use that prefix as the parent name.
+    // This preserves the stdlib's `implement <Name> { … }` choice of
+    // user-visible name regardless of the lossy TypeId.  Then
+    // synthesize an empty stub TypeDescriptor for each unique parent
+    // name and push the simple method names into its `methods` list.
+    //
+    // The stub carries no fields / variants / generics — primitives
+    // are opaque at the source layer, and the typechecker's
+    // `register_builtins` (the canonical primitive registrar) has
+    // already populated the actual `Type` entries; this stub serves
+    // ONLY as a method-name catalogue the lazy loader can iterate.
+    //
+    // Closes task #15.  Unblocks every inherent-method call on a
+    // built-in primitive whose `implement <Primitive> { … }` block
+    // lives in `core/base/primitives.vr`.  Touches core-tests/base/
+    // primitives/* (8 files) + every user-code site that calls
+    // `checked_*`, `wrapping_*`, `saturating_*`, `rotate_*`,
+    // `count_ones`, `leading_zeros`, `to_le_bytes`, etc. on any
+    // primitive integer / float / Bool / Char type.
+    //
+    // The synthesized descriptor is intentionally minimal so the
+    // typechecker's `ensure_stdlib_type_loaded` short-circuits the
+    // "already in ctx" branch (because `register_builtins` registered
+    // the primitive's Type entry), proceeds to
+    // `register_inherent_methods_from_metadata`, and enumerates the
+    // `methods` list we just populated.
+    //
+    // The list of canonical primitive type names is fixed by the
+    // language model: integer / float / boolean / character / byte /
+    // pointer-sized.  We accept ANY uppercase-leading dotted-prefix
+    // as a candidate but only synthesize for the closed set —
+    // user-defined types with the same shape are filtered by
+    // `is_canonical_primitive_name` below to keep the metadata layer
+    // strictly bounded to primitives we know to be runtime-built-in.
+    fn is_canonical_primitive_name(name: &str) -> bool {
+        matches!(
+            name,
+            "Int" | "Float" | "Bool" | "Char" | "Byte" | "USize" | "ISize"
+                | "Int8" | "Int16" | "Int32" | "Int64" | "Int128"
+                | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128"
+                | "Float32" | "Float64"
+        )
+    }
+    let mut synthesized_primitives: HashMap<Text, List<Text>> = HashMap::new();
+    for (key, _fn_desc) in meta.functions.iter() {
+        let dot = match key.as_str().find('.') {
+            Some(d) => d,
+            None => continue,
+        };
+        let parent_str = &key.as_str()[..dot];
+        if !is_canonical_primitive_name(parent_str) {
+            continue;
+        }
+        let parent = Text::from(parent_str);
+        if meta.types.contains_key(&parent) {
+            continue;
+        }
+        let method_simple = Text::from(&key.as_str()[dot + 1..]);
+        let bucket = synthesized_primitives
+            .entry(parent)
+            .or_default();
+        if !bucket.iter().any(|m| m == &method_simple) {
+            bucket.push(method_simple);
+        }
+    }
+    for (parent_name, methods) in synthesized_primitives {
+        if meta.types.contains_key(&parent_name) {
+            continue;
+        }
+        let descriptor = TypeDescriptor {
+            name: parent_name.clone(),
+            module_path: Text::from(""),
+            generic_params: List::new(),
+            // `Record` with no fields is the canonical "opaque
+            // primitive" stub — the typechecker's
+            // `type_descriptor_to_type` path treats this as a no-op
+            // when the type is already registered as a primitive in
+            // ctx, so the stub doesn't shadow the actual primitive's
+            // Type entry.
+            kind: TypeDescriptorKind::Record { fields: List::new() },
+            size: Maybe::None,
+            alignment: Maybe::None,
+            methods,
+            implements: List::new(),
+            decl_span: Maybe::None,
+        };
+        meta.types.insert(parent_name.clone(), descriptor);
+        meta.type_declaration_order.push(parent_name);
+    }
 }
 
 fn convert_generic_params(

@@ -200,19 +200,37 @@ impl TypeChecker {
             if !fd.is_const {
                 continue;
             }
+            let const_type =
+                crate::infer::helpers::parse_descriptor_type_string(fd.return_type.as_str());
             // Bare-name registration so user code writing
             // `let s = SSO_CAPACITY;` resolves directly through
-            // `env.lookup`.  Qualified-name registration is reachable
-            // through the codegen-side `archive_ctx_loader` which
-            // already keys both forms.
+            // `env.lookup`.
             let simple_name = qualified_name
                 .as_str()
                 .rsplit_once('.')
                 .map(|(_, s)| s)
                 .unwrap_or_else(|| qualified_name.as_str());
-            let const_type =
-                crate::infer::helpers::parse_descriptor_type_string(fd.return_type.as_str());
-            self.ctx.env.insert_mono(simple_name, const_type);
+            self.ctx
+                .env
+                .insert_mono(simple_name, const_type.clone());
+
+            // ALSO register under the qualified `Type.CONST` form so
+            // associated-constant lookup at `infer/expr.rs:6934`
+            // (`env.lookup("Float.NAN")`) hits.  Pre-fix only the
+            // bare name was registered — `Float.NAN`, `Int.MAX`,
+            // `Float.INFINITY`, etc. all failed at user-code call
+            // sites with `Associated constant X not found on type Y`
+            // even though the descriptor sat in `metadata.functions`
+            // keyed under both shapes.  qualified_name keys can be
+            // `Type.CONST` (from inherent-impl `const` decls) OR
+            // `module.path.CONST` (from free-fn `const` decls); we
+            // re-register the original key verbatim so both forms
+            // land in env.
+            if qualified_name.as_str() != simple_name {
+                self.ctx
+                    .env
+                    .insert_mono(qualified_name.as_str(), const_type);
+            }
         }
     }
 
