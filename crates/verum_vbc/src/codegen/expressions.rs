@@ -6211,6 +6211,84 @@ impl VbcCodegen {
             );
         }
 
+        // ──────────────────────────────────────────────────────────
+        // Phase 0.5: Target-type-aware `.into()` rewrite (task #123).
+        // ──────────────────────────────────────────────────────────
+        //
+        // `let x: TargetType = expr.into();` should dispatch to
+        // `<TargetType as From<E>>::from(expr)` where E is `expr`'s
+        // type. Without this, the runtime's identity-fallback at
+        // `dispatch_user_method` returns `expr` unchanged — `42.into()`
+        // becomes `42` regardless of the annotated `Maybe<Int>` target.
+        //
+        // The let-binding compiler at `statements.rs::compile_let`
+        // already stashes the annotated base type name in
+        // `current_return_type_name` before compiling the RHS, so the
+        // hint reaches here on a clean channel.
+        //
+        // Rewrite shape: emit `Call` to `<TargetType>.from(receiver)`
+        // exactly the same way a user-written `TargetType.from(expr)`
+        // would compile.
+        //
+        // Gates:
+        //   * Method must be exactly `into` with zero args.
+        //   * `current_return_type_name` must name a known type that
+        //     has a `<Name>.from` registered in the function table.
+        //   * Target must NOT be a generic-param-shaped identifier
+        //     (avoids dispatching to a typevar's `from`).
+        if method.name.as_str() == "into"
+            && args.is_empty()
+            && let Some(target_name) = self.ctx.current_return_type_name.clone()
+            && !target_name.is_empty()
+            && target_name
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_uppercase())
+            && !verum_common::well_known_types::looks_like_type_param(&target_name)
+        {
+            // Strip generic args from the target name if any
+            // (`Maybe<Int>` → `Maybe`). The `From::from` function is
+            // monomorphised per concrete instantiation but registered
+            // under the base name in the function table.
+            let base = match target_name.find('<') {
+                Some(idx) => target_name[..idx].to_string(),
+                None => target_name.clone(),
+            };
+            let from_qualified = format!("{}.from", base);
+            // Check the function table BEFORE committing to the
+            // rewrite — if `<Base>.from` doesn't exist, fall through
+            // to the existing identity-fallback path so we don't
+            // regress reflexive `T.into() == T` cases that work today.
+            if self.ctx.lookup_function(&from_qualified).is_some() {
+                // Compile the receiver as the single argument.
+                let arg_reg = self
+                    .compile_expr(receiver)?
+                    .or_internal("into() rewrite: receiver has no value")?;
+                let dst = self.ctx.alloc_temp();
+                // Allocate a contiguous reg range for the call.
+                let args_start = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Mov {
+                    dst: args_start,
+                    src: arg_reg,
+                });
+                let info = self
+                    .ctx
+                    .lookup_function(&from_qualified)
+                    .expect("function exists per check above");
+                self.ctx.emit(Instruction::Call {
+                    dst,
+                    func_id: info.id.0,
+                    args: crate::instruction::RegRange {
+                        start: args_start,
+                        count: 1,
+                    },
+                });
+                self.ctx.free_temp(args_start);
+                self.ctx.free_temp(arg_reg);
+                return Ok(Some(dst));
+            }
+        }
+
         // Resolve the receiver as a static type name when the user wrote either
         // `Foo.method(...)` (bare path) or `Foo<T>.method(...)` (TypeExpr emitted
         // by the parser because of explicit type arguments). Both forms designate
@@ -16221,17 +16299,38 @@ impl VbcCodegen {
         name: &str,
     ) -> Option<verum_ast::ty::TypeKind> {
         use verum_ast::ty::TypeKind;
-        match name {
-            "Float" | "Float64" | "f64" | "Float32" | "f32" => Some(TypeKind::Float),
-            "Int" | "Int8" | "i8" | "Int16" | "i16" | "Int32" | "i32" | "Int64" | "i64"
-            | "Int128" | "i128" | "ISize" | "IntSize" | "isize" | "UInt" | "UInt8" | "u8"
-            | "Byte" | "UInt16" | "u16" | "UInt32" | "u32" | "UInt64" | "u64" | "UInt128"
-            | "u128" | "USize" | "UIntSize" | "usize" => Some(TypeKind::Int),
-            "Bool" => Some(TypeKind::Bool),
-            "Char" => Some(TypeKind::Char),
-            "Text" => Some(TypeKind::Text),
-            "()" | "Unit" => Some(TypeKind::Unit),
-            _ => None,
+        use verum_common::well_known_types::type_names;
+        // Single source of truth — delegate primitive name recognition
+        // to `verum_common::well_known_types::type_names`, the canonical
+        // registry that's drift-pin-tested by `NUMERIC_ALIAS_MATRIX`
+        // against every known canonical / legacy-uppercase / Rust-style
+        // alias spelling. Keeping the alias set duplicated here was the
+        // root cause of the `!((1 as USize) << n)` bug — the canonical
+        // Verum names `USize` / `UInt` / `ISize` were missing from the
+        // local list, the cast-target inference returned the raw
+        // `TypeKind::Path(USize)` instead of `TypeKind::Int`, and the
+        // `UnOp::Not` peel-to-int classifier fell through to logical
+        // NOT for every bitfield primitive.
+        //
+        // The mapping below is structural — `Float` / `Int` / `Bool` /
+        // `Char` are the only canonical TypeKind variants the codegen
+        // selects on for instruction-emission decisions; `Text` and
+        // `Unit` are layered on top as additional structural variants
+        // recognised by Verum.
+        if type_names::is_float_type(name) {
+            Some(TypeKind::Float)
+        } else if type_names::is_integer_type(name) {
+            Some(TypeKind::Int)
+        } else if matches!(name, "Bool" | "bool") {
+            Some(TypeKind::Bool)
+        } else if matches!(name, "Char" | "char") {
+            Some(TypeKind::Char)
+        } else if name == "Text" {
+            Some(TypeKind::Text)
+        } else if matches!(name, "Unit" | "()") {
+            Some(TypeKind::Unit)
+        } else {
+            None
         }
     }
 
