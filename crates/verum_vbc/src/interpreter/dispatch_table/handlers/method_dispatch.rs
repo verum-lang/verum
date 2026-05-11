@@ -1476,6 +1476,101 @@ pub(in super::super) fn handle_call_method(
         }
     }
 
+    // Protocol-default-method fallback for qualified call sites
+    // (gated tightly to avoid wrong-dispatch under polymorphic aliases).
+    //
+    // When `range.collect()` codegens to `CallM("Range.collect")` and
+    // the function table has no `*.Range.collect` entry, walk the
+    // receiver's `TypeDescriptor.protocols` and try `<Protocol>.collect`
+    // for each implemented protocol. Pairs with codegen-side stub-Protocol
+    // registration in `VbcCodegen::import_archive_module_types` (which
+    // pushes a name-only Protocol descriptor + remaps each
+    // `ProtocolImpl.protocol` ref to a codegen-local id) so the
+    // `self.types.iter().find(|t| t.id.0 == pi.protocol.0)` walk lands
+    // on a real descriptor with the protocol's name.
+    //
+    // Safety gates that prevent the wrong-dispatch loop seen in earlier
+    // attempts (data suite hang, May 2026):
+    //   1. ONLY fires when no other pass found a candidate
+    //   2. ONLY fires for qualified method names (the unqualified path
+    //      already has the receiver-aware bare lookup at ~L1694)
+    //   3. ONLY fires when the receiver has a real heap-object header
+    //      whose TypeId resolves in `state.module.types`
+    //   4. Resolved function must end EXACTLY in `.<bare>` — no
+    //      catch-all suffix matches
+    // Operator-protocol method names — Eq/Ord/Hash/Clone/Copy bodies
+    // are NEVER protocol defaults (the protocol declaration is
+    // abstract — every implementer provides its own body). Skipping
+    // the fallback for these prevents the protocol-stub path from
+    // resolving e.g. `Duration.eq` to a placeholder Eq.eq body in
+    // the function table that returns false unconditionally.
+    fn is_abstract_operator_method(bare: &str) -> bool {
+        matches!(
+            bare,
+            "eq" | "ne"
+                | "cmp" | "partial_cmp"
+                | "lt" | "le" | "gt" | "ge"
+                | "hash"
+                | "clone"
+        )
+    }
+    if found_func_id.is_none()
+        && is_already_qualified
+        && dispatch_receiver.is_ptr()
+        && !dispatch_receiver.is_nil()
+        && let Some(bare_method) = method_name.rsplit('.').next()
+        && !is_abstract_operator_method(bare_method)
+    {
+        let ptr = dispatch_receiver.as_ptr::<u8>();
+        if !ptr.is_null()
+            && (ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+        {
+            // SAFETY: alignment verified; every heap object begins
+            // with an ObjectHeader.
+            let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+            let recv_type_id = header.type_id;
+            if let Some(td) = state.module.get_type(recv_type_id) {
+                // Snapshot protocol ids first to release the borrow on
+                // state.module before the function lookup runs.
+                let protocol_ids: Vec<u32> =
+                    td.protocols.iter().map(|pi| pi.protocol.0).collect();
+                for proto_id in protocol_ids {
+                    let proto_name_opt = state
+                        .module
+                        .types
+                        .iter()
+                        .find(|t| t.id.0 == proto_id)
+                        .and_then(|t| state.module.strings.get(t.name))
+                        .map(|s| s.to_string());
+                    let proto_name = match proto_name_opt {
+                        Some(n) => n,
+                        None => continue,
+                    };
+                    let qualified = format!("{}.{}", proto_name, bare_method);
+                    let dotted_qualified = format!(".{}", qualified);
+                    if let Some(id) = state.module.find_function_by_name(&qualified) {
+                        // Tight match: function name MUST be the exact
+                        // protocol-qualified form, or end with
+                        // `.<Protocol>.<bare>` (the canonical bundled
+                        // form `core.base.iterator.Iterator.collect`).
+                        // The looser `ends_with(.bare)` form is rejected
+                        // because it lets unrelated qualifiers slip
+                        // through (e.g. `Duration.eq` resolves through
+                        // Eq's protocol fallback to the wrong eq when
+                        // any function in the table ends with `.eq`).
+                        if let Some(f) = state.module.get_function(id)
+                            && let Some(fname) = state.module.strings.get(f.name)
+                            && (fname == qualified || fname.ends_with(&dotted_qualified))
+                        {
+                            found_func_id = Some(id);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if let Some(target_func_id) = found_func_id {
         // Store in method dispatch cache keyed by (method_id, receiver_type_id)
         // so distinct receiver types preserve distinct resolutions.
