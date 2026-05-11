@@ -2152,6 +2152,7 @@ impl VbcCodegen {
                 return_type_name: None,
                 return_type_inner: None,
                 is_const: false,
+                is_transparent_wrapper: false,
             };
             self.ctx.register_function(name.to_string(), info);
         }
@@ -2695,6 +2696,7 @@ impl VbcCodegen {
                 return_type_name: None,
                 return_type_inner: None,
                 is_const: false,
+                is_transparent_wrapper: false,
             };
             self.ctx.register_function(name.to_string(), info);
         }
@@ -5295,6 +5297,7 @@ impl VbcCodegen {
                 return_type_name: Some((*type_name).to_string()),
                 return_type_inner: None,
                 is_const: false,
+                is_transparent_wrapper: false,
             };
             // Always register qualified name.
             self.ctx.register_function(qualified, info.clone());
@@ -5390,6 +5393,7 @@ impl VbcCodegen {
                 return_type_name: None,
                 return_type_inner: None,
                 is_const: false,
+                is_transparent_wrapper: false,
             };
             self.ctx.register_function(name.to_string(), info);
         }
@@ -5935,6 +5939,7 @@ impl VbcCodegen {
             return_type_name,
             return_type_inner: None,
             is_const: false,
+                is_transparent_wrapper: false,
         };
 
         // #201 diagnostic — env-var-gated trace of every register_function
@@ -6083,6 +6088,7 @@ impl VbcCodegen {
             },
             return_type_inner: None,
             is_const: false,
+                is_transparent_wrapper: false,
         };
 
         self.ctx.register_function(name, info);
@@ -6334,6 +6340,7 @@ impl VbcCodegen {
             return_type_name,
             return_type_inner: None,
             is_const: false,
+                is_transparent_wrapper: false,
         };
 
         self.ctx.register_function(name, info);
@@ -6395,6 +6402,10 @@ impl VbcCodegen {
 
                 if full_path.is_empty() {
                     return Ok(());
+                }
+
+                if std::env::var("VERUM_DEBUG_MOUNT").is_ok() {
+                    eprintln!("[MOUNT-ENTRY] full_path={:?}", full_path);
                 }
 
                 // The last segment is the function/item name
@@ -6583,6 +6594,95 @@ impl VbcCodegen {
                         }
                     }
                     return Ok(());
+                }
+
+                // Bare-mount module-alias registration.
+                //
+                // If `full_path = [X, Y, Z]` (i.e. at least one parent
+                // segment) and the function registry already holds
+                // functions under the qualified prefix `X.Y.Z.` (or
+                // `X::Y::Z::`), the user-written `mount X.Y.Z;` is
+                // a module-import — not a function-import. Register
+                // the rightmost segment as a module alias so a later
+                // use site `Z.fn(args)` / `Z.CONST` expands to the
+                // full path before qualified-function lookup.
+                //
+                // The prefix check is the necessary signal: only land
+                // an alias when there's something under that prefix
+                // to dispatch to. Without the check we'd populate
+                // aliases for typos / forward-declared modules and
+                // shadow legitimate single-name bindings.
+                //
+                // Honours the same `core.` ↔ bare prefix asymmetry as
+                // every other branch in `process_import_tree`: stdlib
+                // modules declare themselves with `module sys.X;`
+                // (no leading `core.`), so the registry key for an
+                // export of `mount core.sys.bitfield.USIZE_BITS` is
+                // `sys.bitfield.USIZE_BITS`. The receiver-side flatten
+                // matches against the FULL path the user wrote
+                // (`["core", "sys", "bitfield"]`), so the alias must
+                // also carry that form — the qualified-lookup chain
+                // at the use site already tries the `core.`-stripped
+                // shape as a fallback. The module-alias's job is to
+                // *prove* that the path is a module, not to fix the
+                // qualified-name registration shape.
+                if full_path.len() >= 2 {
+                    let prefix_verum = format!("{}.", full_path.join("."));
+                    let prefix_rust = format!("{}::", full_path.join("::"));
+                    let mut module_has_exports = self.ctx.functions.keys().any(|k| {
+                        k.starts_with(&prefix_verum) || k.starts_with(&prefix_rust)
+                    });
+                    // Try the `core.`-stripped prefix as a secondary
+                    // probe — covers the common stdlib case where
+                    // `mount core.sys.bitfield;` points at exports
+                    // registered under `sys.bitfield.*` (because the
+                    // source file declared `module sys.bitfield;`).
+                    if !module_has_exports
+                        && full_path.first().map(|s| s.as_str()) == Some("core")
+                        && full_path.len() >= 3
+                    {
+                        let stripped_verum = format!("{}.", full_path[1..].join("."));
+                        let stripped_rust = format!("{}::", full_path[1..].join("::"));
+                        module_has_exports = self.ctx.functions.keys().any(|k| {
+                            k.starts_with(&stripped_verum) || k.starts_with(&stripped_rust)
+                        });
+                    }
+                    if std::env::var("VERUM_DEBUG_MOUNT").is_ok() {
+                        eprintln!(
+                            "[MOUNT] full_path={:?} prefix_verum={:?} module_has_exports={} fn_count={}",
+                            full_path,
+                            prefix_verum,
+                            module_has_exports,
+                            self.ctx.functions.len()
+                        );
+                        let sample: Vec<&String> = self
+                            .ctx
+                            .functions
+                            .keys()
+                            .filter(|k| k.contains("bitfield") || k.contains("USIZE_BITS"))
+                            .take(10)
+                            .collect();
+                        eprintln!("[MOUNT] sample bitfield/USIZE keys: {:?}", sample);
+                    }
+                    if module_has_exports {
+                        let module_leaf = full_path.last().cloned().unwrap_or_default();
+                        // Honour the alias precedence — if the user wrote
+                        // `mount X.Y.Z as W;`, the module is accessible
+                        // under `W`, not `Z`. Otherwise the leaf name.
+                        let module_alias_name = match &tree.alias {
+                            verum_common::Maybe::Some(a) => a.name.to_string(),
+                            verum_common::Maybe::None => match outer_alias {
+                                Some(ident) => ident.name.to_string(),
+                                None => module_leaf,
+                            },
+                        };
+                        if !module_alias_name.is_empty() {
+                            self.ctx
+                                .module_aliases
+                                .insert(module_alias_name, full_path.clone());
+                        }
+                        return Ok(());
+                    }
                 }
 
                 // Function not found - store for deferred resolution
@@ -6801,6 +6901,39 @@ impl VbcCodegen {
                 continue;
             }
 
+            // Deferred bare-mount module-alias check.  Mirror of the
+            // synchronous branch in `process_import_tree` — by the time
+            // this fires the archive has finished loading, so if a
+            // `mount X.Y.Z;` couldn't resolve as a function/type/const
+            // during the first pass, it may still be a *module* with
+            // exported items registered under the `X.Y.Z.` prefix that
+            // landed between the two passes.
+            if full_path.len() >= 2 {
+                let prefix_verum = format!("{}.", full_path.join("."));
+                let prefix_rust = format!("{}::", full_path.join("::"));
+                let mut module_has_exports = self
+                    .ctx
+                    .functions
+                    .keys()
+                    .any(|k| k.starts_with(&prefix_verum) || k.starts_with(&prefix_rust));
+                if !module_has_exports
+                    && full_path.first().map(|s| s.as_str()) == Some("core")
+                    && full_path.len() >= 3
+                {
+                    let stripped_verum = format!("{}.", full_path[1..].join("."));
+                    let stripped_rust = format!("{}::", full_path[1..].join("::"));
+                    module_has_exports = self.ctx.functions.keys().any(|k| {
+                        k.starts_with(&stripped_verum) || k.starts_with(&stripped_rust)
+                    });
+                }
+                if module_has_exports && !alias_name.is_empty() {
+                    self.ctx
+                        .module_aliases
+                        .insert(alias_name, full_path.clone());
+                    continue;
+                }
+            }
+
             // Still not found - this is OK, the stub mechanism will handle it at call time
             // This can happen for functions defined in other modules not yet compiled
         }
@@ -6980,6 +7113,7 @@ impl VbcCodegen {
             return_type_name,
             return_type_inner: None,
             is_const: false,
+                is_transparent_wrapper: false,
         };
 
         self.ctx.register_function(qualified_name, info);
@@ -7084,6 +7218,7 @@ impl VbcCodegen {
                 return_type_name,
                 return_type_inner: None,
                 is_const: false,
+                is_transparent_wrapper: false,
             };
 
             self.ctx.register_function(name.clone(), info);
@@ -7575,6 +7710,7 @@ impl VbcCodegen {
                     return_type_name: None, // Bitfield getters return primitive types
                     return_type_inner: None,
                     is_const: false,
+                is_transparent_wrapper: false,
                 };
                 self.ctx.register_function(getter_name, getter_info);
 
@@ -7605,6 +7741,7 @@ impl VbcCodegen {
                     return_type_name: None, // Setters return unit
                     return_type_inner: None,
                     is_const: false,
+                is_transparent_wrapper: false,
                 };
                 self.ctx.register_function(setter_name, setter_info);
             }
@@ -8344,6 +8481,7 @@ impl VbcCodegen {
                         return_type_name: Some(type_name.clone()),
                         return_type_inner: None,
                         is_const: false,
+                is_transparent_wrapper: false,
                     };
 
                     // 1. Always register with qualified name (TypeName::VariantName)
@@ -8760,6 +8898,7 @@ impl VbcCodegen {
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
                     is_const: false,
+                is_transparent_wrapper: false,
                 };
 
                 self.ctx.register_function(type_name, info);
@@ -9114,6 +9253,12 @@ impl VbcCodegen {
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
                     is_const: false,
+                    // Newtype constructors are pure transparent
+                    // wrappers — `type X is T;` makes `X(t)` an
+                    // identity Mov.  This flag is the canonical
+                    // discriminator that the codegen passthrough
+                    // arms gate on.
+                    is_transparent_wrapper: true,
                 };
 
                 self.ctx.register_function(type_name.clone(), info);
@@ -9177,6 +9322,13 @@ impl VbcCodegen {
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
                     is_const: false,
+                    // Single-element tuple `type FileDesc is (Int)` IS
+                    // a transparent wrapper (zero-cost — the value is
+                    // the inner value at runtime).  Multi-element
+                    // tuples are boxed records — pass-through would
+                    // drop the other elements, so the flag stays
+                    // false there.
+                    is_transparent_wrapper: is_transparent,
                 };
 
                 self.ctx.register_function(type_name, info);
@@ -9205,6 +9357,7 @@ impl VbcCodegen {
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
                     is_const: false,
+                is_transparent_wrapper: false,
                 };
 
                 self.ctx.register_function(type_name, info);
@@ -9236,6 +9389,7 @@ impl VbcCodegen {
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
                     is_const: false,
+                is_transparent_wrapper: false,
                 };
 
                 self.ctx.register_function(type_name, info);
@@ -9288,6 +9442,7 @@ impl VbcCodegen {
                     return_type_name: Some(type_name.clone()),
                     return_type_inner: None,
                     is_const: false,
+                is_transparent_wrapper: false,
                 };
                 let of_qualified = format!("{}.of", type_name);
                 self.ctx.register_function(of_qualified, of_info);
@@ -9316,6 +9471,7 @@ impl VbcCodegen {
                     },
                     return_type_inner: None,
                     is_const: false,
+                is_transparent_wrapper: false,
                 };
                 let rep_qualified = format!("{}.rep", type_name);
                 self.ctx.register_function(rep_qualified, rep_info);
@@ -9423,6 +9579,7 @@ impl VbcCodegen {
             // `pending_constants` for body compilation) carry this
             // marker so the typechecker treats them as values.
             is_const: true,
+            is_transparent_wrapper: false,
         };
 
         // Register with simple name for local access
@@ -12698,10 +12855,42 @@ impl VbcCodegen {
     ///
     /// `archive_strings` is the source module's string table — every
     /// StringId in `ty` indexes into this slice, NOT the user codegen.
+    /// Shim that forwards to `import_archive_type_with_protocol_remap`
+    /// with an empty remap. Existing callers that don't have access to
+    /// the source module's full type table (and therefore can't build
+    /// a meaningful remap) get the legacy clone-as-is behaviour —
+    /// protocol-default-method dispatch will only succeed for types
+    /// imported via the bulk `import_archive_module_types` entry
+    /// point, which builds the remap first.
     pub fn import_archive_type(
         &mut self,
         ty: &crate::types::TypeDescriptor,
         archive_strings: &crate::module::StringTable,
+    ) {
+        let empty: std::collections::HashMap<
+            crate::types::TypeId,
+            crate::types::TypeId,
+        > = std::collections::HashMap::new();
+        self.import_archive_type_with_protocol_remap(ty, archive_strings, &empty);
+    }
+
+    /// As [`import_archive_type`], but additionally remaps each
+    /// `ProtocolImpl.protocol` from its archive-local TypeId to the
+    /// codegen-local TypeId allocated by the FIRST PASS of
+    /// `import_archive_module_types`. Without the remap, the imported
+    /// descriptor's `protocols` list points at archive ids that don't
+    /// resolve in `self.types` — and the runtime's
+    /// `Module::find_method_by_receiver_type` protocol-default-method
+    /// fallback then fails to translate `Iterator.collect` from
+    /// `Range`'s `ProtocolImpl` list back to a real protocol name.
+    pub fn import_archive_type_with_protocol_remap(
+        &mut self,
+        ty: &crate::types::TypeDescriptor,
+        archive_strings: &crate::module::StringTable,
+        protocol_id_remap: &std::collections::HashMap<
+            crate::types::TypeId,
+            crate::types::TypeId,
+        >,
     ) {
         let intern = |this: &mut Self, sid: crate::types::StringId| -> crate::types::StringId {
             let name = match archive_strings.get(sid) {
@@ -12820,6 +13009,27 @@ impl VbcCodegen {
             });
         }
 
+        // ProtocolImpl remap. ProtocolId is "index into type table"
+        // (types.rs L317), so archive-local protocol references need
+        // to be translated to codegen-local ids — otherwise the
+        // runtime's `find_method_by_receiver_type` protocol-default-
+        // method fallback can't reach `Iterator.collect` from
+        // `Range`'s `protocols` list.
+        let new_protocols: smallvec::SmallVec<[crate::types::ProtocolImpl; 2]> = ty
+            .protocols
+            .iter()
+            .map(|pi| {
+                let new_protocol = protocol_id_remap
+                    .get(&crate::types::TypeId(pi.protocol.0))
+                    .map(|tid| crate::types::ProtocolId(tid.0))
+                    .unwrap_or(pi.protocol);
+                crate::types::ProtocolImpl {
+                    protocol: new_protocol,
+                    methods: pi.methods.clone(),
+                }
+            })
+            .collect();
+
         let imported = crate::types::TypeDescriptor {
             id: new_id,
             name: new_name_id,
@@ -12831,7 +13041,7 @@ impl VbcCodegen {
             alignment: ty.alignment,
             drop_fn: ty.drop_fn,
             clone_fn: ty.clone_fn,
-            protocols: ty.protocols.clone(),
+            protocols: new_protocols,
             visibility: ty.visibility,
             alias_target: ty.alias_target.clone(),
             is_transparent_wrapper: ty.is_transparent_wrapper,
@@ -12943,18 +13153,99 @@ impl VbcCodegen {
     /// `format_variant_for_print_depth` resolves variant names
     /// type-scoped instead of globally guessing.
     ///
-    /// Protocol-kind descriptors are deliberately excluded — their
-    /// `variants` field stores method-name vtable entries (used by
-    /// the dyn: dispatch lowering, not for variant pattern-match
-    /// rendering) and including them would pollute the type-scoped
-    /// variant scan that `format_variant_for_print_depth` uses as the
-    /// primary lookup path.
+    /// **Protocol descriptors**: their full bodies stay out of
+    /// `self.types` (their `variants` field stores method-name vtable
+    /// entries used by the dyn: dispatch lowering, not for variant
+    /// pattern-match rendering — including them would pollute the
+    /// type-scoped variant scan that `format_variant_for_print_depth`
+    /// uses as the primary lookup path). But the protocol-NAME → ID
+    /// mapping IS registered (`self.type_name_to_id`) so the runtime's
+    /// `find_method_by_receiver_type` can resolve
+    /// `<ProtocolName>.<method>` fallbacks for default-method dispatch
+    /// (e.g. `range.collect()` ↦ `Iterator.collect`).
+    ///
+    /// **Pre-pass for protocol-id remap**: archive `ProtocolImpl`
+    /// entries reference protocols by their archive-local TypeId. The
+    /// import path re-allocates codegen-local TypeIds, so those
+    /// references become stale. Build a `archive_id → codegen_id` map
+    /// FIRST (covers both Protocol and non-Protocol types), then pass
+    /// it down to `import_archive_type` for in-place remap of each
+    /// type's `protocols` list.
     pub fn import_archive_module_types(&mut self, module: &crate::module::VbcModule) {
+        // FIRST PASS — protocol stub registration. For each Protocol
+        // type in the archive, allocate (or reuse) a codegen-local
+        // TypeId AND push a name-only stub `TypeDescriptor` into
+        // `self.types` with cleared `variants` (so the variant-scan
+        // consumer `format_variant_for_print_depth` doesn't see the
+        // method-name vtable entries as fake variants).  The stub
+        // makes the runtime's `Module::find_method_by_receiver_type`
+        // protocol-default-method fallback succeed — it walks
+        // `self.types.iter().find(|t| t.id.0 == pi.protocol.0)` to
+        // recover the protocol's name from a `ProtocolImpl.protocol`
+        // ref, then composes `<ProtocolName>.<method>` for a second
+        // lookup against the function table.
+        //
+        // Both passes feed the same `protocol_id_remap` so the
+        // non-Protocol import pass below can fix up each
+        // `ProtocolImpl.protocol` ref from archive-local to
+        // codegen-local ids.
+        let mut protocol_id_remap: std::collections::HashMap<
+            crate::types::TypeId,
+            crate::types::TypeId,
+        > = std::collections::HashMap::new();
+        for ty in module.types.iter() {
+            if !matches!(ty.kind, crate::types::TypeKind::Protocol) {
+                continue;
+            }
+            let proto_name = match module.strings.get(ty.name) {
+                Some(s) => s.to_string(),
+                None => continue,
+            };
+            let codegen_id = match self.type_name_to_id.get(&proto_name).copied() {
+                Some(existing) => existing,
+                None => {
+                    let id = self.alloc_user_type_id();
+                    self.type_name_to_id.insert(proto_name.clone(), id);
+                    id
+                }
+            };
+            protocol_id_remap.insert(ty.id, codegen_id);
+            // Push the stub IF no descriptor for this id has been
+            // pushed yet (first-wins, mirrors `import_archive_type`'s
+            // existing discipline).
+            if !self.types.iter().any(|t| t.id == codegen_id) {
+                let stub_name_id = crate::types::StringId(
+                    self.ctx.intern_string_raw(&proto_name),
+                );
+                self.types.push(crate::types::TypeDescriptor {
+                    id: codegen_id,
+                    name: stub_name_id,
+                    kind: crate::types::TypeKind::Protocol,
+                    type_params: smallvec::SmallVec::new(),
+                    fields: smallvec::SmallVec::new(),
+                    // CLEARED — see comment block above.
+                    variants: smallvec::SmallVec::new(),
+                    size: 0,
+                    alignment: 0,
+                    drop_fn: None,
+                    clone_fn: None,
+                    protocols: smallvec::SmallVec::new(),
+                    visibility: ty.visibility,
+                    alias_target: None,
+                    is_transparent_wrapper: false,
+                });
+            }
+        }
+        // SECOND PASS — non-Protocol imports with protocol-id remap.
         for ty in module.types.iter() {
             if matches!(ty.kind, crate::types::TypeKind::Protocol) {
                 continue;
             }
-            self.import_archive_type(ty, &module.strings);
+            self.import_archive_type_with_protocol_remap(
+                ty,
+                &module.strings,
+                &protocol_id_remap,
+            );
         }
         // SECOND PASS — populate `type_aliases` for every imported
         // `TypeKind::Alias` descriptor by resolving its `alias_target`
