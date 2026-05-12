@@ -1776,6 +1776,26 @@ impl VbcCodegen {
     /// Called during body compilation phase after all declarations have been collected.
     /// This ensures that functions referenced by default methods (like `range` in Iterator.advance_by)
     /// are available when the default method bodies are compiled.
+    /// Returns the number of monomorphisations currently queued in
+    /// `pending_default_methods`.  Diagnostic helper for callers that
+    /// want to surface the queue size before draining (e.g. the
+    /// stdlib-bootstrap "draining N pending" warn-level log).
+    pub fn pending_default_methods_count(&self) -> usize {
+        self.pending_default_methods.len()
+    }
+
+    /// Drain `pending_default_methods` and compile each queued body.
+    ///
+    /// Called once between declaration collection and main body compile —
+    /// see `vbc_codegen.rs::compile_ast_to_vbc` and the matching site in
+    /// `stdlib_bootstrap.rs::compile_core_module_from_ast`.  The queue is
+    /// populated by `generate_default_protocol_methods` when a concrete
+    /// `implement Base for Concrete` triggers materialisation of the
+    /// inherited protocol's default-method bodies onto `Concrete.<method>`.
+    /// Per-item compile failure surfaces as a `tracing::warn!` and the
+    /// rest of the queue continues — some default methods reference
+    /// external symbols (FFI, intrinsics not yet available in VBC) that
+    /// can't compile in every load context.
     pub fn compile_pending_default_methods(&mut self) -> CodegenResult<()> {
         // Take ownership of pending methods to avoid borrow conflicts
         let pending = std::mem::take(&mut self.pending_default_methods);
