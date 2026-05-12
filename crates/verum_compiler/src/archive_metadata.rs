@@ -731,7 +731,23 @@ fn register_module_metadata(
         }
     }
     for (parent_name, methods) in synthesized_primitives {
-        if meta.types.contains_key(&parent_name) {
+        // **Merge-or-synthesize**: when the primitive is already in
+        // `meta.types` (from some prior Pass 1/2 registration via
+        // source-declared impl block), MERGE the discovered methods
+        // into its existing methods list instead of skipping.  Pre-fix
+        // the gate at this site short-circuited on the
+        // `contains_key` check, so primitives with empty methods lists
+        // (Pass 2 couldn't resolve fn_desc.parent_type → name because
+        // the primitive's TypeId isn't in the producing module's
+        // local type_id_to_name map) stayed empty forever and every
+        // `let a: UInt8 = 200; a.wrapping_add(b)` call failed with
+        // `no method named 'wrapping_add' found for type 'UInt8'`.
+        if let Some(existing) = meta.types.get_mut(&parent_name) {
+            for m in methods.iter() {
+                if !existing.methods.iter().any(|em| em == m) {
+                    existing.methods.push(m.clone());
+                }
+            }
             continue;
         }
         let descriptor = TypeDescriptor {
