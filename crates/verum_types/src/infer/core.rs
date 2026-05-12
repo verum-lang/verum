@@ -591,6 +591,14 @@ impl TypeChecker {
         // hand off the metadata in O(1) — no 15ms 3MB deep clone.
         let mut checker = Self::with_minimal_context();
         checker.register_coercion_markers_from_metadata(&metadata);
+        // Eagerly register `<Type>.<method>` static fns into env so
+        // multi-mount field-access paths (`Map.new()` when both
+        // `mount core.collections.map.Map` and a sibling collection
+        // mount put `Map` into module_aliases instead of env) resolve
+        // via env.lookup("Map.new").  Sister call to
+        // `register_stdlib_consts_from_metadata` — both are bounded by
+        // the metadata size and run in single-millisecond range.
+        checker.register_stdlib_static_methods_from_metadata(&metadata);
         checker.core_metadata = Maybe::Some(metadata);
         checker
     }
@@ -726,6 +734,13 @@ impl TypeChecker {
         // (`let s = SSO_CAPACITY;`) resolve via env.lookup.  Cheap to
         // do eagerly; ~3000 inserts run in sub-millisecond.
         self.register_stdlib_consts_from_metadata(&metadata);
+        // Register stdlib `<Type>.<method>` static fns under bare
+        // canonical form so `Map.new` / `List.new` / etc. resolve
+        // through env.lookup at the field-access fallback in
+        // expr.rs::infer_expr_field (line ~6618).  Closes the
+        // multi-mount typechecker/codegen registry-key drift
+        // documented in MEMORY.md (session 2026-05-12 wrap).
+        self.register_stdlib_static_methods_from_metadata(&metadata);
 
         // Unconditionally register every type alias from metadata
         // into the unifier's alias registry.  Aliases are cheap
