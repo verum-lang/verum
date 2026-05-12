@@ -841,10 +841,18 @@ impl TypeChecker {
             if let crate::core_metadata::TypeDescriptorKind::Alias { target } =
                 &type_desc.kind
             {
-                let target_ty = Type::Named {
-                    path: Self::text_to_path(target),
-                    args: List::new(),
-                };
+                // Parse the target via `parse_descriptor_type_string`
+                // so generic-instantiated aliases (`Bytes = List<Byte>`,
+                // `IoResult<T> = Result<T, IoError>`) produce the right
+                // structural shape — `Type::Generic { name, args }` —
+                // instead of a malformed `Type::Named { path:
+                // "List<Byte>", args: [] }`.  Pre-fix the unifier's
+                // `resolve_aliased_head_name` couldn't walk the Generic
+                // head of these aliases (Bytes never resolved to "List"),
+                // so the alias-aware method-bucket lookup at
+                // `infer_method_call_inner_impl` missed.  Mirrors the
+                // eager loader's parse path at line ~696.
+                let target_ty = parse_descriptor_type_string(target.as_str());
                 self.ctx.define_alias(name.clone(), target_ty.clone());
                 self.unifier
                     .register_type_alias(name.clone(), target_ty);

@@ -13683,14 +13683,31 @@ impl TypeChecker {
             let early_type_name: Option<verum_common::Text> = if is_type_param {
                 None
             } else {
-                match &recv_ty {
+                let direct = match &recv_ty {
                     Type::Text => Some(verum_common::Text::from(WKT::Text.as_str())),
                     Type::Generic { name, .. } => Some(name.clone()),
                     Type::Named { path, .. } => path
                         .as_ident()
                         .map(|id| verum_common::Text::from(id.name.as_str())),
                     _ => None,
-                }
+                };
+                // **Alias-aware bucket key**: when the receiver type is an
+                // alias (`Bytes = List<Byte>`), the inherent_methods bucket
+                // is keyed under the alias TARGET ("List"), not the alias
+                // name ("Bytes").  Expand via the unifier's alias-aware head
+                // resolver so `bs.len()` on `Bytes` finds List's `len`
+                // method.  Closes the Bytes.len cluster (+3 tests) and the
+                // sibling pattern for any future stdlib alias like
+                // `IoResult<T> = Result<T, IoError>`.
+                //
+                // Falls back to direct on alias-resolution miss, so
+                // non-aliased types are unaffected.
+                direct.map(|name| {
+                    self.unifier
+                        .resolve_aliased_head_text(name.as_str())
+                        .map(verum_common::Text::from)
+                        .unwrap_or(name)
+                })
             };
 
             if let Some(type_name_text) = early_type_name {
