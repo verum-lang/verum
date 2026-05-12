@@ -307,6 +307,10 @@ impl Unifier {
     /// alias-aware lookup eliminates them entirely — the literal
     /// alias name is checked first, and only falls through to
     /// the resolved head when the direct lookup misses.
+    pub fn resolve_aliased_head_text(&self, name: &str) -> Option<String> {
+        self.resolve_aliased_head_name(name)
+    }
+
     fn resolve_aliased_head_name(&self, name: &str) -> Option<String> {
         let mut current = Text::from(name);
         let mut step = false;
