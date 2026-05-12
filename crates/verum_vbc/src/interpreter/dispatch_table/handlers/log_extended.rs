@@ -277,36 +277,70 @@ pub(in super::super) fn handle_mem_extended(
         }
 
         // Swap: [a, b]
+        //
+        // The args are `&mut T` references which materialise as CBGR
+        // register-refs (negative-i64-encoded `(abs_index, generation)`
+        // pairs) — NOT raw pointers.  Pre-fix `as_ptr::<u64>()` on a
+        // CBGR ref dereferenced the negative integer as a pointer and
+        // SIGSEGV'd at runtime.  Resolve through `cbgr_helpers` so the
+        // swap operates on the abs-register slots in the Value world,
+        // not raw memory addresses.
         0x04 => {
+            use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-
-            // Get pointers from the registers
-            let a_ptr = state.get_reg(a_reg).as_ptr::<u64>();
-            let b_ptr = state.get_reg(b_reg).as_ptr::<u64>();
-
-            // Swap the values at those pointers
-            unsafe {
-                core::ptr::swap(a_ptr, b_ptr);
+            let a_val = state.get_reg(a_reg);
+            let b_val = state.get_reg(b_reg);
+            if is_cbgr_ref(&a_val) && is_cbgr_ref(&b_val) {
+                let (a_abs, _) = decode_cbgr_ref(a_val.as_i64());
+                let (b_abs, _) = decode_cbgr_ref(b_val.as_i64());
+                let tmp = state.registers.get_absolute(a_abs);
+                let b_inner = state.registers.get_absolute(b_abs);
+                state.registers.set_absolute(a_abs, b_inner);
+                state.registers.set_absolute(b_abs, tmp);
+            } else {
+                // Raw-pointer fallback (preserves the legacy path for
+                // direct-pointer call sites that bypass CBGR encoding).
+                let a_ptr = a_val.as_ptr::<u64>();
+                let b_ptr = b_val.as_ptr::<u64>();
+                if !a_ptr.is_null() && !b_ptr.is_null() {
+                    unsafe { core::ptr::swap(a_ptr, b_ptr); }
+                }
             }
-
             Ok(DispatchResult::Continue)
         }
 
         // Replace: [dst, dest, src]
+        //
+        // Same CBGR-ref handling as Swap above — `&mut T` materialises
+        // as a CBGR register-ref, not a raw pointer.  Read the current
+        // value out of the abs-register slot, store the new value, and
+        // return the old value in `dst`.
         0x05 => {
+            use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
             let dst = read_reg(state)?;
             let dest_reg = read_reg(state)?;
             let src_reg = read_reg(state)?;
-
-            let dest_ptr = state.get_reg(dest_reg).as_ptr::<u64>();
-            let new_val = state.get_reg(src_reg).as_i64() as u64;
-
-            // Read old value and write new value
-            let old_val = unsafe { *dest_ptr };
-            unsafe { *dest_ptr = new_val };
-
-            state.set_reg(dst, Value::from_i64(old_val as i64));
+            let dest_val = state.get_reg(dest_reg);
+            let src_val = state.get_reg(src_reg);
+            if is_cbgr_ref(&dest_val) {
+                let (abs, _) = decode_cbgr_ref(dest_val.as_i64());
+                let old = state.registers.get_absolute(abs);
+                state.registers.set_absolute(abs, src_val);
+                state.set_reg(dst, old);
+            } else {
+                // Raw-pointer fallback (legacy).
+                let dest_ptr = dest_val.as_ptr::<u64>();
+                if dest_ptr.is_null() {
+                    return Err(InterpreterError::Panic {
+                        message: "replace: null destination pointer".into(),
+                    });
+                }
+                let new_val_u64 = src_val.as_i64() as u64;
+                let old_val = unsafe { *dest_ptr };
+                unsafe { *dest_ptr = new_val_u64 };
+                state.set_reg(dst, Value::from_i64(old_val as i64));
+            }
             Ok(DispatchResult::Continue)
         }
 
