@@ -131,6 +131,24 @@ public type PartialOrd is protocol extends PartialEq {
     }
 };
 
+/// Blanket: every total-order type is also a partial-order type
+/// — `partial_cmp` always returns `Some(cmp)` since totals never
+/// produce `Maybe::None`.  Lets primitives (Int / Byte / Char /
+/// UInt8..128 / Int8..128 / USize / ISize / Bool) and any user
+/// type that implements `Ord` automatically satisfy `PartialOrd`
+/// without 16+ repetitive `implement PartialOrd for X` blocks.
+///
+/// Mirrors Rust's `impl<T: Ord> PartialOrd for T` discipline.
+/// `Float` / `Float32` / `Float64` retain their explicit
+/// `PartialOrd` impls because they're NOT `Ord` (NaN breaks
+/// totality) and need bespoke `partial_cmp` that returns
+/// `Maybe::None` on NaN.
+implement<T: Ord> PartialOrd for T {
+    fn partial_cmp(&self, other: &T) -> Maybe<Ordering> {
+        Some(self.cmp(other))
+    }
+};
+
 // =============================================================================
 // Hashing Protocol
 // =============================================================================
