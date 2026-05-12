@@ -4096,6 +4096,12 @@ impl VbcCodegen {
             None
         };
 
+        if std::env::var("VERUM_TRACE_MOUNT").is_ok() {
+            eprintln!(
+                "[compile_call] enter func_name={} args.len={}",
+                func_name, args.len()
+            );
+        }
         // Look up function - use arity-based disambiguation when available
         let (resolved_name, func_info) = match module_qualified_lookup
             .or_else(|| type_aware_lookup)
@@ -5903,6 +5909,13 @@ impl VbcCodegen {
                     return Ok(redirect);
                 }
 
+                if std::env::var("VERUM_TRACE_MOUNT").is_ok() {
+                    eprintln!(
+                        "[static-call] resolved name={} method={}",
+                        qualified_name.as_str(),
+                        method.name.as_str()
+                    );
+                }
                 // The typechecker already canonicalised the dispatch
                 // to a single qualified name; codegen does ONE
                 // O(1) `lookup_function` instead of the legacy
@@ -7096,6 +7109,83 @@ impl VbcCodegen {
                     count: 1,
                 },
             });
+            return Ok(Some(result));
+        }
+
+        // Raw-pointer arithmetic methods (`offset` / `add` / `sub`) —
+        // route directly to the `ptr_offset` intrinsic.  Without this
+        // intercept `self.entries.offset(idx)` on a `&unsafe Slot<K,V>`
+        // receiver dispatches as CallM "offset" against the runtime
+        // primitive arm, which has no `offset` handler for raw
+        // pointers — surfaces as
+        // "method 'offset' not found on receiver of runtime kind Int"
+        // (raw pointers are i64-encoded under NaN-boxing) and aborts
+        // `Map.insert` / every other hash-table body the moment it
+        // touches `self.entries`.
+        //
+        // `add(n)` and `sub(n)` map to `ptr_offset(p, n)` and
+        // `ptr_offset(p, -n)` respectively — same intrinsic, sign on
+        // the second arg.  The intrinsic is element-scaled (i.e. it
+        // multiplies the count by `sizeof(elem_type)` internally per
+        // the `PtrOffset` inline-sequence handler in
+        // `verum_vbc::intrinsics::codegen`), so user code passing
+        // element-counts gets correct byte-scaled arithmetic at the
+        // Tier-0 dispatcher.
+        if args.len() == 1
+            && self.ctx.is_raw_pointer(receiver_reg)
+            && matches!(method.name.as_str(), "offset" | "add" | "sub")
+            && let Some(func_info) = self.ctx.lookup_function("ptr_offset").cloned()
+        {
+            // Compile the count argument.
+            let count_reg = self
+                .compile_expr(&args[0])?
+                .or_internal("ptr offset count has no value")?;
+            // For `sub`, negate the count via UnaryI{Neg} through a
+            // temp.  `add` and `offset` use the count unchanged.
+            let final_count_reg = if method.name == "sub" {
+                let neg_reg = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::UnaryI {
+                    op: crate::instruction::UnaryIntOp::Neg,
+                    dst: neg_reg,
+                    src: count_reg,
+                });
+                self.ctx.free_temp(count_reg);
+                neg_reg
+            } else {
+                count_reg
+            };
+
+            // ptr_offset expects (ptr, count) in a contiguous reg
+            // range starting at `args.start`.  Allocate two fresh
+            // consecutive regs, Mov the receiver and count into
+            // them, then emit Call.
+            let arg0 = self.ctx.registers.alloc_fresh();
+            let arg1 = self.ctx.registers.alloc_fresh();
+            self.ctx.emit(Instruction::Mov {
+                dst: arg0,
+                src: receiver_reg,
+            });
+            self.ctx.mark_raw_pointer(arg0);
+            self.ctx.emit(Instruction::Mov {
+                dst: arg1,
+                src: final_count_reg,
+            });
+            self.ctx.free_temp(receiver_reg);
+            self.ctx.free_temp(final_count_reg);
+
+            let result = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::Call {
+                dst: result,
+                func_id: func_info.id.0,
+                args: crate::instruction::RegRange {
+                    start: arg0,
+                    count: 2,
+                },
+            });
+            // The result is itself a raw pointer — propagate the flag
+            // so downstream `.offset()` / `.is_null()` calls on the
+            // chain stay on the intercept path.
+            self.ctx.mark_raw_pointer(result);
             return Ok(Some(result));
         }
 
