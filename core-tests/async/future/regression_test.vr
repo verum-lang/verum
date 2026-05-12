@@ -163,14 +163,12 @@ fn regression_future_select_yields_right_when_second_ready() {
 //   leaves the field-type map stale".
 // =============================================================================
 
-@ignore
 @test
 fn regression_future_ready_value_field_resolves_under_list_mount() {
     let f: ReadyFuture<Int> = ready(0);
     assert(f.value is Maybe.Some);
 }
 
-@ignore
 @test
 fn regression_future_join_result_fields_resolve_under_list_mount() {
     let f1 = ready(1);
@@ -182,7 +180,6 @@ fn regression_future_join_result_fields_resolve_under_list_mount() {
     assert(j.fut2 is Maybe.Some);
 }
 
-@ignore
 @test
 fn regression_future_select_fut_fields_resolve_under_list_mount() {
     let f1 = ready(1);
@@ -192,7 +189,6 @@ fn regression_future_select_fut_fields_resolve_under_list_mount() {
     assert(s.fut2 is Maybe.Some);
 }
 
-@ignore
 @test
 fn regression_future_lazy_f_field_resolves_under_list_mount() {
     let l = lazy(|| 7);
