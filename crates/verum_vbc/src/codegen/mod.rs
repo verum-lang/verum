@@ -1721,13 +1721,30 @@ impl VbcCodegen {
                     }
 
                     let full_method_name = format!("{}.{}", type_name, method_name);
+                    let is_diag_target = type_name.contains("Hasher")
+                        || type_name.contains("Formatter")
+                        || (method_name == "write_int" || method_name == "write_byte");
                     if self.ctx.lookup_function(&full_method_name).is_some() {
+                        if is_diag_target {
+                            tracing::warn!(
+                                target: "default_method_gen_diag",
+                                "SKIP queue type={} method={} (already in ctx.functions)",
+                                type_name, method_name,
+                            );
+                        }
                         continue;
                     }
 
                     self.register_impl_function(default_func, type_name)?;
                     self.pending_default_methods
                         .push((default_func.clone(), type_name.to_string()));
+                    if is_diag_target {
+                        tracing::warn!(
+                            target: "default_method_gen_diag",
+                            "QUEUED type={} method={} (from protocol {})",
+                            type_name, method_name, proto_name,
+                        );
+                    }
                 }
             }
         }
@@ -3961,12 +3978,141 @@ impl VbcCodegen {
                         .unwrap_or_default()
                 })
                 .collect();
+            // **Type-name map unconditional population** (closes task #9
+            // cross-mount race for archive-loaded types).
+            //
+            // `register_record_fields` (mod.rs:12407 — the user-phase
+            // path) unconditionally populates `type_field_type_names`
+            // even when `type_field_layouts` is first-wins-guarded;
+            // commit `ab768e5d8` established this invariant for the
+            // user phase to keep the type-map fresh under repeated
+            // forward-reference re-registration.  The archive-side
+            // path here previously only populated `type_field_layouts`
+            // and left `type_field_type_names` empty — so when an
+            // archive-loaded record type was queried at a field-access
+            // call site (`f.value` field-type lookup driving
+            // raw-pointer marker propagation, list-mount tracing, …),
+            // the missing entry caused `field_type_name` to return
+            // `None`.  Downstream `resolve_field_index` then fell
+            // through to the "pick the type with the most fields"
+            // global-scan heuristic and silently routed field writes
+            // to wrong offsets — pinned 5 tests at
+            // `core-tests/async/future/regression_test.vr §C`
+            // (ReadyFuture/Join2/Select2/Lazy `.value`/`.f`/`.fut1`
+            // field-access under `List` mount).
+            //
+            // Resolve each field's `TypeRef` to its canonical type
+            // name via `type_ref_to_field_name` (an inline mirror of
+            // `extract_type_name_from_ast`'s prefix preservation:
+            // bare references flatten, `&unsafe`/`*const`/`*mut`
+            // preserve their prefix so the raw-pointer marker at
+            // `compile_field_access` line 14372 still fires).  When
+            // the type-ref doesn't resolve to a nominal name (free
+            // generic param, function type, structural shape), skip
+            // that field — populating with `""` would shadow a future
+            // genuine registration via first-wins.
+            for (fname, fdesc) in names.iter().zip(ty.fields.iter()) {
+                if let Some(ty_name) = self.type_ref_to_field_name(&fdesc.type_ref) {
+                    self.type_field_type_names.insert(
+                        (simple_name.clone(), fname.clone()),
+                        ty_name,
+                    );
+                }
+            }
             // Archive-sourced field names live in archive's string
             // pool, not in codegen's. Pull them through the
             // descriptor → simple-name map keyed by simple type name.
-            self.type_field_layouts.entry(simple_name).or_insert(names);
+            self.type_field_layouts
+                .entry(simple_name)
+                .or_insert(names);
         }
         self.push_type_dedupe(ty);
+    }
+
+    /// Resolve a [`TypeRef`] to its canonical AST-style field-type
+    /// name, mirroring `extract_type_name_from_ast`'s prefix-preservation
+    /// invariants so archive-side and user-side `type_field_type_names`
+    /// entries stay byte-identical.  See `register_archive_type` for
+    /// rationale and consumer surface.
+    fn type_ref_to_field_name(&self, ty: &crate::types::TypeRef) -> Option<String> {
+        use crate::types::{CbgrTier, TypeRef};
+        match ty {
+            TypeRef::Concrete(tid) => {
+                if let Some(prim) = self.primitive_type_id_to_name(*tid) {
+                    return Some(prim.to_string());
+                }
+                self.types
+                    .iter()
+                    .find(|t| t.id == *tid)
+                    .and_then(|t| self.ctx.strings.get(t.name.0 as usize).cloned())
+            }
+            TypeRef::Instantiated { base, args } => {
+                let base_name = self
+                    .primitive_type_id_to_name(*base)
+                    .map(|s| s.to_string())
+                    .or_else(|| {
+                        self.types
+                            .iter()
+                            .find(|t| t.id == *base)
+                            .and_then(|t| self.ctx.strings.get(t.name.0 as usize).cloned())
+                    })?;
+                if args.is_empty() {
+                    Some(base_name)
+                } else {
+                    let arg_names: Vec<String> = args
+                        .iter()
+                        .map(|a| self.type_ref_to_field_name(a).unwrap_or_else(|| "_".into()))
+                        .collect();
+                    Some(format!("{}<{}>", base_name, arg_names.join(", ")))
+                }
+            }
+            // Mirror `extract_type_name_from_ast`'s
+            // reference-handling: bare `&T` / `&checked T` (Tier0 /
+            // Tier1) flatten to the inner name — the raw-pointer
+            // marker is keyed on the `&unsafe ` / `*const ` / `*mut `
+            // prefix only.  Tier2 (`&unsafe T`) preserves the prefix.
+            TypeRef::Reference { inner, tier, .. } => match tier {
+                CbgrTier::Tier2 => self
+                    .type_ref_to_field_name(inner)
+                    .map(|n| format!("&unsafe {}", n)),
+                _ => self.type_ref_to_field_name(inner),
+            },
+            TypeRef::Slice(inner) => {
+                self.type_ref_to_field_name(inner).map(|n| format!("[{}]", n))
+            }
+            // Function / Rank2Function / Generic / Tuple / Array do
+            // not produce a nominal field-type name that downstream
+            // consumers (raw-pointer prefix check, name-equality for
+            // mount-trace) compare against.  Returning None here
+            // mirrors `register_record_fields`'s behaviour at
+            // `extract_type_name_from_ast`'s structural-shape return
+            // (which produces a name like `(Int, Int)` for tuples —
+            // not a registry key) by simply omitting the entry.
+            _ => None,
+        }
+    }
+
+    /// Resolve a built-in [`TypeId`] to its canonical Verum name.
+    /// Source-of-truth mirrors the dispatch in `type_ref_to_name`
+    /// (codegen-side) and `primitive_typeid_name` (archive_ctx_loader),
+    /// keeping all three sites pinned to a single name discipline.
+    fn primitive_type_id_to_name(
+        &self,
+        tid: crate::types::TypeId,
+    ) -> Option<&'static str> {
+        use crate::types::TypeId;
+        Some(match tid {
+            TypeId::UNIT => "()",
+            TypeId::INT => "Int",
+            TypeId::FLOAT => "Float",
+            TypeId::BOOL => "Bool",
+            TypeId::TEXT => "Text",
+            TypeId::CHAR => "Char",
+            TypeId::U8 => "Byte",
+            TypeId::I32 => "Int32",
+            TypeId::U64 => "UInt64",
+            _ => return None,
+        })
     }
 
     /// Pre-populate the codegen registry from an embedded
