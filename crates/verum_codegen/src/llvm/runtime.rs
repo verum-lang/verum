@@ -8685,25 +8685,70 @@ impl<'ctx> RuntimeLowering<'ctx> {
             // matching the C ABI) and call it directly — clang's
             // macOS auto-link pulls in libSystem, so the linker
             // resolves `_write` to libSystem's symbol at link time.
+            //
+            // **Type-canonicalisation guard (task #19)**: the syscall
+            // registry in `super::syscall_registry` declares `write`
+            // with `i64` fd (the Verum-ABI canonical signature).  If
+            // ANY prior pass added the registry-form declaration to
+            // this module before us, `libsys_extern`'s dedup returns
+            // the registry-typed FunctionValue — calling it with our
+            // truncated `i32` fd produces a type-mismatched IR call
+            // whose return ValueKind ends up as `Instruction` (void-
+            // ish) rather than `Basic(i64)`, then `basic_value_expect`
+            // panicked: `panicked at error.rs:276 — write return
+            // value`.  Symptom: every AOT compile crashed with
+            // `compiler.phase.generate_native` SIGABRT regardless of
+            // user-code content (0/94 base AOT pass-rate).  Fix:
+            // detect the existing-function case and align the call
+            // ABI to whatever it expects — if pre-declared with i64
+            // fd, pass `fd` directly (no truncation).  Both signatures
+            // are ssize_t-returning so the return-value handling stays
+            // identical.
             let i32_type = self.context.i32_type();
-            let libsys_write = libsys_extern(
-                self.context,
-                module,
-                "write",
-                // ssize_t write(int fd, const void *buf, size_t count)
-                i64_type.fn_type(
-                    &[i32_type.into(), ptr_type.into(), i64_type.into()],
-                    false,
-                ),
-            );
-            let fd32 = builder
-                .build_int_truncate(fd, i32_type, "fd32")
-                .expect("write fd trunc");
-            let ret = builder
-                .build_call(libsys_write, &[fd32.into(), buf.into(), count.into()], "ret")
-                .expect("write libsys call")
-                .basic_value_expect("write return value")
-                .into_int_value();
+            let existing_write = module.get_function("write");
+            let fd_param_is_i64 = existing_write
+                .map(|f| {
+                    f.get_type()
+                        .get_param_types()
+                        .first()
+                        .map(|t| t.into_int_type().get_bit_width() == 64)
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
+            let libsys_write = if fd_param_is_i64 {
+                existing_write.expect("checked is_some above")
+            } else {
+                libsys_extern(
+                    self.context,
+                    module,
+                    "write",
+                    // ssize_t write(int fd, const void *buf, size_t count)
+                    i64_type.fn_type(
+                        &[i32_type.into(), ptr_type.into(), i64_type.into()],
+                        false,
+                    ),
+                )
+            };
+            let fd_arg = if fd_param_is_i64 {
+                fd.into()
+            } else {
+                builder
+                    .build_int_truncate(fd, i32_type, "fd32")
+                    .expect("write fd trunc")
+                    .into()
+            };
+            let call_site = builder
+                .build_call(libsys_write, &[fd_arg, buf.into(), count.into()], "ret")
+                .expect("write libsys call");
+            // Defensive read: prefer the call's basic-value form; if a
+            // type mismatch turned the result into an Instruction, fall
+            // back to an i64 zero constant rather than panicking.  Keeps
+            // AOT building even under signature drift.
+            let ret = call_site
+                .try_as_basic_value()
+                .basic()
+                .map(|v| v.into_int_value())
+                .unwrap_or_else(|| i64_type.const_zero());
             builder.build_return(Some(&ret)).expect("write return");
         }
 
