@@ -17,6 +17,27 @@ pub(super) fn extract_string(value: &Value, _state: &InterpreterState) -> String
 
     if value.is_small_string() {
         value.as_small_string().as_str().to_string()
+    } else if value.is_fat_ref() {
+        // **FatRef Text canonical form** (task #4): `Text.from_utf8_unchecked`
+        // produces a FatRef { ptr, metadata=byte_len } pointing at the
+        // byte payload directly — same shape as the AsBytes handler at
+        // `text_extended.rs:240` returns.  Without this branch, equality /
+        // comparison / hash via the Text-method intercepts at
+        // `method_dispatch.rs:6401+` fell into the trailing
+        // `<value:N>` debug-format fallback and `"hello" ==
+        // Text.from_utf8_unchecked("hello".as_bytes())` returned false
+        // despite both having identical bytes.
+        let fr = value.as_fat_ref();
+        let p = fr.ptr();
+        let len = fr.len() as usize;
+        if p.is_null() || len == 0 {
+            return String::new();
+        }
+        if len > 1_000_000 {
+            return String::new();
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(p, len) };
+        String::from_utf8_lossy(bytes).to_string()
     } else if value.is_ptr() {
         let ptr = value.as_ptr::<u8>();
         if ptr.is_null() {
@@ -110,6 +131,20 @@ pub(super) fn is_heap_string(v: &Value) -> bool {
     if v.is_small_string() {
         return false;
     }
+    // FatRef-encoded Text — `Text.from_utf8_unchecked` and every
+    // struct-literal Text-builder path produce a `FatRef { ptr, metadata
+    // = byte_len }` directly (no ObjectHeader, no TEXT TypeId).  Without
+    // recognising this shape as string-like, `deep_value_eq` would fall
+    // into the "type mismatch: one is string, other is not" branch and
+    // return false for `a == c` where `a = "hello"` (small_string) and
+    // `c = Text.from_utf8_unchecked("hello".as_bytes())` (FatRef Text).
+    // Closes task #4 — Text literal != Text.from(literal) equality
+    // defect.  Pairs with the `is_fat_ref` branch in `extract_string`
+    // and `resolve_string_value` so all three sites agree.
+    if v.is_fat_ref() {
+        let fr = v.as_fat_ref();
+        return !fr.ptr().is_null() && fr.len() <= 1_000_000;
+    }
     if !v.is_ptr() || v.is_nil() || v.is_boxed_int() {
         return false;
     }
@@ -144,6 +179,20 @@ pub(super) fn is_string_id(v: &Value, state: &InterpreterState) -> bool {
 pub(super) fn resolve_string_value(v: &Value, state: &InterpreterState) -> String {
     if v.is_small_string() {
         return v.as_small_string().as_str().to_string();
+    }
+    // FatRef Text — same shape as the `is_heap_string` FatRef branch
+    // above.  Required for cross-representation equality to find the
+    // bytes when `Text.from_utf8_unchecked` produces FatRef-encoded
+    // Text values.
+    if v.is_fat_ref() {
+        let fr = v.as_fat_ref();
+        let p = fr.ptr();
+        let len = fr.len() as usize;
+        if p.is_null() || len == 0 || len > 1_000_000 {
+            return String::new();
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(p, len) };
+        return String::from_utf8_lossy(bytes).to_string();
     }
     if v.is_ptr() && !v.is_nil() && !v.is_boxed_int() {
         let ptr = v.as_ptr::<u8>();
