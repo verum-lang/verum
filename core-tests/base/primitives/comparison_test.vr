@@ -1055,3 +1055,5 @@ fn test_comparison_in_conditional_assignment() {
     assert(passed);
     assert(!honors);
 }
+
+fn main() {}

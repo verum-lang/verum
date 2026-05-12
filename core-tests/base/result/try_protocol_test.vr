@@ -303,3 +303,5 @@ fn test_try_block_error_propagation() {
         Err(e) => assert_eq(e, "failed"),
     }
 }
+
+fn main() {}

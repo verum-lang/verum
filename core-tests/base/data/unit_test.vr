@@ -1709,3 +1709,5 @@ fn test_typical_json_response_pattern() {
 
     assert_eq(name, "John");
 }
+
+fn main() {}

@@ -340,3 +340,5 @@ fn test_question_in_function_arg() {
 // 5. Unifies error types appropriately
 // 6. Is resolved via Try protocol, not hardcoded type names
 // =============================================================================
+
+fn main() {}
