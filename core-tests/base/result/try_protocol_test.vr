@@ -1,8 +1,8 @@
 
 
-mount core.primitives.*;
+mount core.base.primitives.*;
 mount core.base.maybe.{Maybe, Some, None};
-mount core.result.{Result, Ok, Err};
+mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
 
 // =============================================================================
