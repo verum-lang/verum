@@ -35,14 +35,12 @@ mount core.collections.list.List;
 //   Sibling pin: core-tests/async/waker/regression_test.vr §C.
 // =============================================================================
 
-@ignore
 @test
 fn regression_future_ready_block_returns_value() {
     let r = ready(42);
     assert_eq(r.block(), 42);
 }
 
-@ignore
 @test
 fn regression_future_ready_block_payload_round_trip() {
     let domain: List<Int> = [-1_000_000, -1, 0, 1, 42, 1_000_000];
@@ -52,7 +50,6 @@ fn regression_future_ready_block_payload_round_trip() {
     }
 }
 
-@ignore
 @test
 fn regression_future_lazy_invokes_closure_on_block() {
     let mut invoked: Int = 0;
@@ -61,26 +58,41 @@ fn regression_future_lazy_invokes_closure_on_block() {
     assert_eq(invoked, 1);
 }
 
-@ignore
 @test
 fn regression_future_map_transforms_output() {
     let m = ready(3).map(|x| x * 2);
     assert_eq(m.block(), 6);
 }
 
-@ignore
 @test
 fn regression_future_map_composes_with_ready() {
     let m = ready(10).map(|x| x + 1).map(|x| x * 2);
     assert_eq(m.block(), 22);
 }
 
-@ignore
 @test
 fn regression_future_and_then_chains() {
     let a = ready(3).and_then(|x| ready(x * 2));
     assert_eq(a.block(), 6);
 }
+
+// =============================================================================
+// §B — Combinator-receiver dispatch (task #25)
+//
+//   `.block()` on `Join2 / Join3 / Select2` receivers still fails — the
+//   default body is materialised correctly under `Join2.block` etc., but
+//   the body's call chain (`self.poll(cx)` → `Join2.poll` → `self.fut1.poll(cx)`
+//   → `ReadyFuture.poll`) triggers a separate dispatch defect when
+//   crossing nested generic combinators.  The poll body internally
+//   destructures `if let Poll.Ready(v) = fut.poll(cx)` — the generic-
+//   Future receiver `fut` is bound via `if let Some(ref mut fut) = self.fut1`
+//   to a `&mut Fut1` which the runtime then mis-dispatches into
+//   `Deque.pop_front` (manifests at runtime as
+//   `method 'Deque.pop_front' not found on receiver of runtime kind Int`).
+//   Surface confined to Join2/Join3/Select2 — flat receivers
+//   (ReadyFuture, PendingFuture, Lazy, MapFuture, AndThenFuture) all
+//   round-trip cleanly through .block() above.
+// =============================================================================
 
 @ignore
 @test
