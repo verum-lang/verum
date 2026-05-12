@@ -192,6 +192,105 @@ impl TypeChecker {
     /// and matches the semantics of the source-driven Pass 6 in
     /// `core_pipeline::register_all_global_passes`, where every const
     /// in every loaded `.vr` AST is registered up-front.
+    /// Register every stdlib `<Type>.<method>` static fn from
+    /// CoreMetadata as a polymorphic scheme in env under the bare
+    /// `<Type>.<method>` canonical key.  This bridges the
+    /// typechecker-side env to the codegen-side ctx.functions form
+    /// registered by archive_ctx_loader's Type.method canonical-form
+    /// path (commit `74312ed4e`).  Without this, the field-access
+    /// resolver at `expr.rs::infer_expr_field`'s module-alias branch
+    /// probes `env.lookup("Map.new")` and misses — even though
+    /// `metadata.functions["Map.new"]` IS populated by
+    /// `archive_metadata::register_module_metadata`'s Pass 2
+    /// (line ~613).
+    ///
+    /// Heuristic: a metadata.functions key with shape `<Type>.<method>`
+    /// where `<Type>` is a WKT or is in `metadata.types` AND the fn
+    /// is NOT a const is a candidate.  Inserts both the bare
+    /// `<Type>.<method>` key + the `$static$<method>` key under the
+    /// inherent_methods bucket so both field-access and instance-method
+    /// dispatch paths find it.
+    ///
+    /// Idempotent — first-wins insert via `insert_mono`.
+    pub(super) fn register_stdlib_static_methods_from_metadata(
+        &mut self,
+        metadata: &crate::core_metadata::CoreMetadata,
+    ) {
+        for (qualified_name, fd) in metadata.functions.iter() {
+            if fd.is_const {
+                continue;
+            }
+            // Filter: must have shape `<Type>.<method>` — i.e. exactly
+            // one dot at the right place — AND the prefix must be a
+            // known stdlib type (either in metadata.types or a
+            // primitive WKT).  This avoids over-registering free fns
+            // like `core.shell.exec.run`.
+            let Some(dot_idx) = qualified_name.as_str().rfind('.') else {
+                continue;
+            };
+            let type_part = &qualified_name.as_str()[..dot_idx];
+            // Reject if there are MORE dots in type_part (free fn
+            // module-qualified form like "core.shell.exec.run").
+            if type_part.contains('.') {
+                continue;
+            }
+            // Only proceed if type_part is a known carrier — checked
+            // against metadata.types (covers user-defined types) +
+            // WKT (covers primitives that live in the VM model).
+            let is_carrier = metadata
+                .types
+                .contains_key(&verum_common::Text::from(type_part))
+                || verum_common::well_known_types::WellKnownType::from_name(type_part)
+                    .is_some();
+            if !is_carrier {
+                continue;
+            }
+            // Skip if already registered (first-wins for cross-type
+            // method name collisions handled at instance dispatch via
+            // the inherent_methods bucket separately).
+            if self.ctx.env.lookup(qualified_name.as_str()).is_some() {
+                continue;
+            }
+            // Build function type from descriptor params + return.
+            // Skip `self` receiver when present.
+            let to_type =
+                |s: &verum_common::Text| -> crate::ty::Type {
+                    crate::infer::helpers::parse_descriptor_type_string(s.as_str())
+                };
+            let params: verum_common::List<crate::ty::Type> = fd
+                .params
+                .iter()
+                .enumerate()
+                .filter_map(|(i, p)| {
+                    if i == 0 && p.name.as_str() == "self" {
+                        None
+                    } else {
+                        Some(to_type(&p.ty))
+                    }
+                })
+                .collect();
+            let return_ty = to_type(&fd.return_type);
+            let fn_ty = crate::ty::Type::function(params, return_ty);
+            // Wrap in poly scheme so generic params get fresh
+            // instantiation at each call site (same rationale as
+            // inherent_methods registration).
+            let scheme = {
+                use crate::dependent_helpers::collect_type_vars;
+                let vars = collect_type_vars(&fn_ty);
+                if vars.is_empty() {
+                    crate::context::TypeScheme::mono(fn_ty)
+                } else {
+                    let var_list: verum_common::List<crate::ty::TypeVar> =
+                        vars.iter().copied().collect();
+                    crate::context::TypeScheme::poly(var_list, fn_ty)
+                }
+            };
+            self.ctx
+                .env
+                .insert(verum_common::Text::from(qualified_name.as_str()), scheme);
+        }
+    }
+
     pub(super) fn register_stdlib_consts_from_metadata(
         &mut self,
         metadata: &crate::core_metadata::CoreMetadata,
