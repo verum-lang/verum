@@ -374,3 +374,5 @@ fn test_chain() {
 // 5. Supports break/continue in for loops
 // 6. Is resolved via protocol, not hardcoded type names
 // =============================================================================
+
+fn main() {}

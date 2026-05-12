@@ -948,3 +948,5 @@ fn test_assert_combination() {
     let v = validate_result(Ok(42));
     assert_eq(v, 42);
 }
+
+fn main() {}

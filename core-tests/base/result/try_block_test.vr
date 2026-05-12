@@ -496,3 +496,5 @@ fn test_try_block_with_conditionals() {
         Err(_) => assert(false),
     }
 }
+
+fn main() {}

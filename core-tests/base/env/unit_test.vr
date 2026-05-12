@@ -915,3 +915,5 @@ fn test_arg_boundary_values() {
     assert(arg(count + 1).is_none());
     assert(arg(Int.MAX).is_none());
 }
+
+fn main() {}
