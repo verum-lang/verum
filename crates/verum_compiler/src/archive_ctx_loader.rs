@@ -1286,14 +1286,18 @@ impl ArchiveCtxCache {
         // keyed on `wanted` (canonical-`Type.method` registration,
         // alias-leaf fanout) automatically pick up these entries.
         //
-        // Filter to dotted names only so the unqualified-wanted Pass 2
-        // below doesn't see bare descriptor names (like `main`,
-        // `start`) that would trigger a full-archive string-table
-        // scan for nothing useful.
+        // Important: include bare-named functions too (e.g. `memcpy`,
+        // `alloc`, `panic`). These are the cross-module Call/CallM
+        // callees that stdlib bodies depend on transitively — without
+        // them, `Text.push_str`'s body's `Call` to `memcpy` resolves
+        // to a remap miss → `Function N not found` at runtime.
+        // The unqualified-wanted Pass 2's filter
+        // (`looks_like_type_name` + `lookup_function(name).is_none()`)
+        // already gates the full-archive scan, so bare reached names
+        // that ARE registered through Pass 1 don't trigger redundant
+        // module decoding.
         for name in reached_qualified {
-            if name.contains('.') {
-                wanted.insert(name);
-            }
+            wanted.insert(name);
         }
         let mut fn_modules = 0usize;
         let mut type_modules = 0usize;
