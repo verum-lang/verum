@@ -1801,9 +1801,23 @@ impl VbcCodegen {
             // Compile the function body
             self.ctx.generic_type_params.clear();
             self.ctx.const_generic_params.clear();
-            if let Err(_e) = self.compile_function(&default_func, Some(&type_name)) {
+            if let Err(e) = self.compile_function(&default_func, Some(&type_name)) {
                 // Skip - some default methods may have unresolvable dependencies
-                // (e.g., FFI functions, external symbols not available in VBC)
+                // (e.g., FFI functions, external symbols not available in VBC).
+                // Surface via warn-level so silent body-compile failures of
+                // user-callable protocol-default methods show up in the precompile
+                // log; otherwise the only sign is a "method not found on receiver"
+                // runtime panic with no diagnostic trail.  Mirror the
+                // `compile_item_lenient` warn convention.
+                let class = e.skip_class();
+                tracing::warn!(
+                    "[lenient] SKIP default-body {}.{} ({}): {} — runtime calls \
+                     will panic with 'method not found' via auto-stub",
+                    type_name,
+                    default_func.name.name.as_str(),
+                    class.label(),
+                    e
+                );
             }
         }
 
@@ -4673,19 +4687,94 @@ impl VbcCodegen {
             }
         }
 
-        // Original single-pass collection.  Pre-pass attempts to
-        // prime `blanket_impls` BEFORE concrete-type impls (so
-        // `generate_default_protocol_methods`'s blanket-derivation
-        // walk picks up the inherited protocol's default methods)
-        // regressed the Poll suite — 5 tests including
-        // test_poll_default_is_pending depend on the ORIGINAL
-        // collection order where concrete Default-for-Poll<T> impls
-        // run before any blanket-impl scan.  The protocol-default-
-        // method dispatch via blanket impl (task #11) needs a
-        // different architecture — likely scoping blanket-impls
-        // per-call-site rather than baking them into the global
-        // collection order — and is deferred until that design
-        // lands.
+        // **Blanket-impl pre-pass** (closes task #11).
+        //
+        // Stdlib declaration order in `core/async/future.vr` puts
+        // `implement<F: Future> FutureExt for F {}` at line 257 — AFTER
+        // every concrete `implement Future for ReadyFuture / PendingFuture
+        // / Lazy / MapFuture / AndThenFuture` at lines 65-169.  Single-
+        // pass collection means concrete impls call
+        // `generate_default_protocol_methods("Future", "ReadyFuture", …)`
+        // with `self.blanket_impls = [Future→IntoFuture]` (line 47's
+        // blanket is observable), MISSING `Future→FutureExt` (line 257
+        // not yet visited).  Result: FutureExt's default-method bodies
+        // (`block` / `map` / `and_then`) never monomorphise onto
+        // ReadyFuture and runtime `ready(v).block()` panics with
+        // "method 'ReadyFuture.block' not found".
+        //
+        // Pre-pass populates `self.blanket_impls` from a single linear
+        // scan over `module.items`, identifying blanket impls (those
+        // where `for_type` IS a generic param of the impl) and recording
+        // their `(base_protocol, derived_protocol, explicit_methods)`
+        // tuple.  Subsequent `collect_declarations` walk's blanket-impl
+        // observation at mod.rs:5593 short-circuits via the
+        // `already_present` check, so per-blanket-impl bookkeeping
+        // remains O(unique blanket impls), not O(occurrences).
+        //
+        // The pre-pass NEVER calls `generate_default_protocol_methods`
+        // itself — it only seeds `self.blanket_impls`.  This is the
+        // critical invariant that avoids the Poll-suite regression of
+        // the prior reverted attempt: the protocol-registry guard at
+        // line 1455 (skip empty `default_methods` AND `super_protocols`
+        // entries) stays intact; default-method materialisation runs
+        // exactly once per (concrete impl × derived protocol) pair
+        // during the main pass.  Poll-implementers' Default-for-Poll<T>
+        // impls (poll.vr line 168) are NOT blanket — `for_type = Poll<T>`
+        // is a generic type, not a bare param — so `for_type_generic_param_name`
+        // returns `None` and the pre-pass skips them, preserving the
+        // original collection order for the Poll dispatch path.
+        for item in module.items.iter() {
+            if !self.should_compile_item(item) {
+                continue;
+            }
+            if let ItemKind::Impl(impl_decl) = &item.kind
+                && let verum_ast::decl::ImplKind::Protocol {
+                    protocol, for_type, ..
+                } = &impl_decl.kind
+                && let Some(derived_name) = protocol.segments.last().and_then(|s| match s {
+                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                    _ => None,
+                })
+                && let Some(param_name) = Self::for_type_generic_param_name(for_type)
+            {
+                for g in impl_decl.generics.iter() {
+                    if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } = &g.kind
+                        && name.name.as_str() == param_name
+                    {
+                        for b in bounds.iter() {
+                            if let Some(base_name) = Self::type_bound_protocol_name(b) {
+                                let explicit_methods: std::collections::HashSet<String> =
+                                    impl_decl
+                                        .items
+                                        .iter()
+                                        .filter_map(|item| {
+                                            if let verum_ast::decl::ImplItemKind::Function(f) =
+                                                &item.kind
+                                            {
+                                                Some(f.name.name.to_string())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect();
+                                let already_present = self.blanket_impls.iter().any(|b| {
+                                    b.base_protocol == base_name
+                                        && b.derived_protocol == derived_name
+                                });
+                                if !already_present {
+                                    self.blanket_impls.push(BlanketImpl {
+                                        base_protocol: base_name,
+                                        derived_protocol: derived_name.clone(),
+                                        explicit_methods,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         for item in module.items.iter() {
             if self.should_compile_item(item) {
                 self.collect_declarations(item)?;
@@ -5659,9 +5748,32 @@ impl VbcCodegen {
                     }
                 }
 
-                // Generate default protocol methods for protocol impls
+                // Generate default protocol methods for protocol impls.
+                //
+                // **Blanket-impl skip** (closes task #11 spurious-F.block
+                // class): when `for_type` IS a generic parameter (e.g.
+                // `implement<F: Future> FutureExt for F {}`), do NOT
+                // materialise default methods under the generic-param's
+                // bare name (`F.block` / `F.map` / `F.and_then`).  The
+                // blanket impl is metadata — it records the
+                // (base → derived) relationship in `self.blanket_impls`
+                // (already done by the pre-pass + the inline-detection
+                // arm above).  Concrete `implement Base for Concrete`
+                // declarations are what trigger materialisation onto
+                // the concrete type.  Without this skip, the spurious
+                // `F.<method>` entries pollute the function table,
+                // leak phantom FunctionIds via cross-pollination, and
+                // shadow legitimate concrete-type bindings (the
+                // mechanism that made `j.block()` on Join2 dispatch
+                // through the wrong body).
+                let for_type_is_generic_param = matches!(
+                    &impl_decl.kind,
+                    verum_ast::decl::ImplKind::Protocol { for_type, .. }
+                        if Self::for_type_generic_param_name(for_type).is_some()
+                );
                 if let verum_ast::decl::ImplKind::Protocol { protocol, .. } = &impl_decl.kind
                     && let Some(ref ty_name) = type_name
+                    && !for_type_is_generic_param
                 {
                     // Get the last segment of the protocol path (e.g., "Hasher" from "core.protocols.Hasher")
                     let protocol_name = protocol.segments.last().and_then(|s| match s {
