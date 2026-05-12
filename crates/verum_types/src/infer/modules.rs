@@ -410,6 +410,19 @@ impl TypeChecker {
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Import Resolution
     fn check_import(&mut self, import: &verum_ast::MountDecl) -> Result<()> {
         use verum_ast::MountTreeKind;
+        if std::env::var("VERUM_TRACE_TASK20").is_ok() {
+            let dbg = match &import.tree.kind {
+                MountTreeKind::Path(p) => format!("Path({:?})", p.segments.len()),
+                MountTreeKind::Nested { prefix, trees } => format!(
+                    "Nested(prefix={} trees={})",
+                    prefix.segments.iter().filter_map(|s| if let verum_ast::ty::PathSegment::Name(i) = s { Some(i.name.as_str()) } else { None }).collect::<Vec<_>>().join("."),
+                    trees.len(),
+                ),
+                MountTreeKind::Glob(_) => "Glob".to_string(),
+                MountTreeKind::File { .. } => "File".to_string(),
+            };
+            eprintln!("[task20] check_import: tree={}", dbg);
+        }
 
         // Extract path based on import tree kind
         let process_path = |path: &verum_ast::ty::Path| -> Text {
@@ -726,6 +739,9 @@ impl TypeChecker {
         path_str: &str,
         has_crate_prefix: bool,
     ) -> Option<(String, String)> {
+        if std::env::var("VERUM_TRACE_TASK20").is_ok() {
+            eprintln!("[task20] find_inline_module: path='{}' has_crate={}", path_str, has_crate_prefix);
+        }
         // Try splitting at each dot from right to left to find the longest matching module
         let dots: Vec<usize> = path_str.match_indices('.').map(|(i, _)| i).collect();
         // Module resolution debug trace
@@ -1269,6 +1285,20 @@ impl TypeChecker {
         registry: &verum_modules::ModuleRegistry,
     ) -> Result<()> {
         use verum_ast::MountTreeKind;
+        if std::env::var("VERUM_TRACE_TASK20").is_ok() {
+            let dbg = match &import.tree.kind {
+                MountTreeKind::Path(p) => format!("Path({:?})",
+                    p.segments.iter().map(|s| format!("{:?}", s)).collect::<Vec<_>>().join(".")),
+                MountTreeKind::Nested { prefix, trees } => format!(
+                    "Nested(prefix={} trees={})",
+                    prefix.segments.iter().filter_map(|s| if let verum_ast::ty::PathSegment::Name(i) = s { Some(i.name.as_str()) } else { None }).collect::<Vec<_>>().join("."),
+                    trees.len(),
+                ),
+                MountTreeKind::Glob(_) => "Glob".to_string(),
+                MountTreeKind::File { .. } => "File".to_string(),
+            };
+            eprintln!("[task20] process_import: from='{}' tree={}", current_module_path, dbg);
+        }
 
         let current = ModulePath::from_str(current_module_path);
 
@@ -2103,6 +2133,9 @@ impl TypeChecker {
         register_name: &str,
     ) -> Result<()> {
         use verum_modules::ExportKind;
+        if std::env::var("VERUM_TRACE_TASK20").is_ok() {
+            eprintln!("[task20] body entry: mod='{}' item='{}'", module_path.as_str(), item_name);
+        }
         let _ = (local_name, register_name); // shadow for body
 
         // Look up the source module in the registry.
@@ -2193,16 +2226,16 @@ impl TypeChecker {
                         if let Some((func_type, type_vars)) =
                             self.extract_function_type_from_module(&module_info.ast, item_name)
                         {
-                            // #[cfg(debug_assertions)]
-                            // eprintln!("[DEBUG] Extracted function type for '{}' successfully", item_name);
+                            if std::env::var("VERUM_TRACE_TASK20").is_ok() {
+                                eprintln!("[task20] AST direct: mod='{}' item='{}' type={:?}",
+                                    resolved_module_path.as_str(), item_name, func_type);
+                            }
                             let scheme = if type_vars.is_empty() {
                                 TypeScheme::mono(func_type)
                             } else {
                                 TypeScheme::poly(type_vars, func_type)
                             };
                             self.ctx.env.insert(register_name, scheme);
-                            // #[cfg(debug_assertions)]
-                            // eprintln!("[DEBUG] Inserted '{}' into env, returning from import_item_from_module_impl", item_name);
                         } else if let Some((func_type, type_vars, _source_path)) = self
                             .find_function_with_source_module(
                                 &module_info.ast,
@@ -2211,11 +2244,42 @@ impl TypeChecker {
                                 registry,
                             )
                         {
+                            if std::env::var("VERUM_TRACE_TASK20").is_ok() {
+                                eprintln!("[task20] AST reexport: mod='{}' item='{}' type={:?}",
+                                    resolved_module_path.as_str(), item_name, func_type);
+                            }
                             let scheme = if type_vars.is_empty() {
                                 TypeScheme::mono(func_type)
                             } else {
                                 TypeScheme::poly(type_vars, func_type)
                             };
+                            self.ctx.env.insert(register_name, scheme);
+                        } else if let Some(scheme) = {
+                            let s = self.resolve_function_via_metadata_reexports(
+                                resolved_module_path.as_str(),
+                                item_name,
+                            );
+                            if std::env::var("VERUM_TRACE_TASK20").is_ok() {
+                                eprintln!(
+                                    "[task20] fallback fire: mod='{}' item='{}' hit={}",
+                                    resolved_module_path.as_str(),
+                                    item_name,
+                                    s.is_some()
+                                );
+                            }
+                            s
+                        } {
+                            // Task #20 — archive-driven stdlib path.  The
+                            // synthetic AST built by
+                            // `load_stdlib_from_embedded` has no
+                            // ItemKind::Function / ItemKind::Mount items,
+                            // so the AST walkers above both miss.
+                            // `metadata.module_reexports[module]` carries
+                            // the `(item_name, source_module)` chain
+                            // captured at precompile; combined with
+                            // `metadata.functions` (keyed by the source
+                            // module's qualified name) it surfaces the
+                            // descriptor without any source-walk.
                             self.ctx.env.insert(register_name, scheme);
                         }
                     }
@@ -5558,6 +5622,123 @@ impl TypeChecker {
     /// this will find the variant type definition and extract the constructor type.
     /// Find a function and its source module, following re-export chains.
     /// Returns (Type, List<TypeVar>, Text) where:
+    /// Task #20 — resolve a `mount X.{item}` re-export through
+    /// `metadata.module_reexports` when the AST-based walkers in
+    /// [`Self::extract_function_type_from_module`] /
+    /// [`Self::find_function_with_source_module`] miss.
+    ///
+    /// The archive-driven `load_stdlib_from_embedded` path builds
+    /// every stdlib `ModuleInfo` from a *synthetic empty AST* — the
+    /// type info lives in `metadata.functions` and the re-export
+    /// chains live in `metadata.module_reexports`, both populated at
+    /// precompile time.  Without this fallback, `mount core.base.{var}`
+    /// successfully resolves `var` in `core.base.exports` (Task #20
+    /// loading.rs change) but the typechecker has no way to extract
+    /// `var`'s function type because the source AST is empty.
+    ///
+    /// Algorithm:
+    ///   1. Probe `metadata.functions` under `<module_path>.<item_name>`
+    ///      for the direct-declaring case
+    ///      (`mount core.base.memory.{replace}` — `replace` is declared
+    ///      in `core.base.memory`).  The synthetic empty AST has no
+    ///      `ItemKind::Function` to walk, so the AST-based extractors
+    ///      both miss; the descriptor still lives in
+    ///      `metadata.functions` under the canonical qualified key
+    ///      emitted by `archive_metadata::register_module_metadata`.
+    ///   2. Otherwise look up `metadata.module_reexports[module_path]`
+    ///      for the `(item_name, source_module_path)` pair captured at
+    ///      precompile (`mount core.base.{replace}` — `replace` is
+    ///      re-exported from `core.base.memory` via `core/base/mod.vr`'s
+    ///      `public mount .memory.{replace}`).
+    ///   3. Convert `FunctionDescriptor.params` / `return_type` from
+    ///      their string-encoded form into [`Type`] via the same
+    ///      `parse_descriptor_type_string` helper used by
+    ///      [`Self::register_stdlib_static_methods_from_metadata`].
+    ///   4. Wrap in a [`TypeScheme`] — `poly` when generic vars are
+    ///      present, `mono` otherwise.
+    fn resolve_function_via_metadata_reexports(
+        &self,
+        module_path: &str,
+        item_name: &str,
+    ) -> Option<TypeScheme> {
+        let metadata = match &self.core_metadata {
+            Maybe::Some(m) => m,
+            Maybe::None => return None,
+        };
+
+        let item_text = Text::from(item_name);
+
+        // Step 1 — direct-declaring lookup.  Build the canonical key
+        // `<module_path>.<item_name>` and probe `metadata.functions`.
+        // Covers `mount core.base.memory.{replace}` (replace declared
+        // in core.base.memory).
+        let direct_key = format!("{}.{}", module_path, item_name);
+        let direct_fd = metadata
+            .functions
+            .get(&Text::from(direct_key.as_str()));
+
+        // Step 2 — re-export chain lookup.  Covers
+        // `mount core.base.{replace}` (replace re-exported from
+        // core.base.memory through core/base/mod.vr).
+        let reexport_fd = if direct_fd.is_some() {
+            None
+        } else {
+            metadata
+                .module_reexports
+                .get(&Text::from(module_path))
+                .and_then(|leaves| {
+                    leaves
+                        .iter()
+                        .find(|(local, _)| local == &item_text)
+                        .map(|(_, src)| src.clone())
+                })
+                .and_then(|source_module| {
+                    let qualified = format!("{}.{}", source_module.as_str(), item_name);
+                    metadata
+                        .functions
+                        .get(&Text::from(qualified.as_str()))
+                        .or_else(|| metadata.functions.get(&item_text))
+                })
+        };
+
+        let fd = direct_fd.or(reexport_fd)?;
+
+        if fd.is_const {
+            // Const re-exports flow through the Const arm; refuse to
+            // synthesize a callable scheme here.
+            return None;
+        }
+
+        let to_type =
+            |s: &Text| -> Type { crate::infer::helpers::parse_descriptor_type_string(s.as_str()) };
+        let params: List<Type> = fd
+            .params
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| {
+                if i == 0 && p.name.as_str() == "self" {
+                    None
+                } else {
+                    Some(to_type(&p.ty))
+                }
+            })
+            .collect();
+        let return_ty = to_type(&fd.return_type);
+        let fn_ty = Type::function(params, return_ty);
+
+        let scheme = {
+            use crate::dependent_helpers::collect_type_vars;
+            let vars = collect_type_vars(&fn_ty);
+            if vars.is_empty() {
+                TypeScheme::mono(fn_ty)
+            } else {
+                let var_list: List<TypeVar> = vars.iter().copied().collect();
+                TypeScheme::poly(var_list, fn_ty)
+            }
+        };
+        Some(scheme)
+    }
+
     /// - Type: the function type
     /// - List<TypeVar>: quantified type variables (for generic functions)
     /// - Text: the source module path
@@ -12333,10 +12514,39 @@ impl TypeChecker {
         // never from a hardcoded list of stdlib param names.
         let mut tv_subst: indexmap::IndexMap<verum_common::Text, Type> =
             indexmap::IndexMap::new();
+        // Persistent-TypeVar → fresh-Type substitution map.  Closes
+        // the cross-function type-leak that surfaces as
+        // "Result<(), Text> = Ok(())" failing with `expected Int,
+        // found Unit` when a previous function bound the persistent
+        // TypeVar to Int.
+        //
+        // **Root cause**: `register_type_declaration` (decls.rs:911) stores
+        // every inductive constructor's `args` with `Type::Var(persistent_X)`
+        // — the same persistent variable across ALL call sites.  When
+        // the first `Ok(10)` call unifies persistent_X with Int, the
+        // unifier's substitution table binds persistent_X → Int.  The
+        // next `Ok(())` call's params still reference persistent_X,
+        // which `unifier.apply` resolves to Int — causing the "expected
+        // Int, found Unit" failure on the SECOND constructor use even
+        // though the call has fresh `Type::Var(fresh_*)` for the parent
+        // generics.
+        //
+        // **Fix**: when ctor.type_params has Type::Var entries (the
+        // user-declared-type path), record `persistent_var.id() →
+        // fresh_arg` in a parallel substitution map and substitute
+        // Type::Var occurrences too.  The Named-T placeholder path
+        // (`register_stdlib_constructors_from_metadata` in env.rs) is
+        // unaffected: those entries register Type::Named{T} args, and
+        // the original named-name substitution still handles them.
+        let mut var_subst: indexmap::IndexMap<crate::ty::TypeVar, Type> =
+            indexmap::IndexMap::new();
         if !ctor.type_params.is_empty() {
-            for (i, (param_name, _)) in ctor.type_params.iter().enumerate() {
+            for (i, (param_name, persistent_ty)) in ctor.type_params.iter().enumerate() {
                 if let Some(fresh_arg) = fresh_args.get(i) {
                     tv_subst.insert(param_name.clone(), fresh_arg.clone());
+                    if let Type::Var(persistent_tv) = persistent_ty.as_ref() {
+                        var_subst.insert(*persistent_tv, fresh_arg.clone());
+                    }
                 }
             }
         } else {
@@ -12361,7 +12571,8 @@ impl TypeChecker {
             }
         }
         let subst_named_params = |ty: &Type| -> Type {
-            Self::substitute_named_params_in_type(ty, &tv_subst)
+            let named_substituted = Self::substitute_named_params_in_type(ty, &tv_subst);
+            Self::substitute_typevars_in_type(&named_substituted, &var_subst)
         };
         let params: List<Type> = ctor
             .args
@@ -12474,6 +12685,116 @@ impl TypeChecker {
                 fields
                     .iter()
                     .map(|(k, v)| (k.clone(), Self::substitute_named_params_in_type(v, subst)))
+                    .collect(),
+            ),
+            _ => ty.clone(),
+        }
+    }
+
+    /// Replace every `Type::Var(persistent_tv)` whose `persistent_tv`
+    /// is a key in `subst` with the corresponding substitution type.
+    /// Parallel to [`Self::substitute_named_params_in_type`] but keyed
+    /// by [`crate::ty::TypeVar`] identity rather than by name.
+    ///
+    /// **Architectural role.** User-declared inductive types
+    /// (`type Result<T,E> is Ok(T) | Err(E)`) store their constructor
+    /// arg lists with `Type::Var(persistent)` placeholders (see
+    /// `register_type_declaration` in decls.rs:911 where
+    /// `ctor_args = ast_to_type(payload)` resolves named generic
+    /// parameters through `generic_type_params` to persistent
+    /// `Type::Var`s).  Without per-call-site substitution, the
+    /// SAME persistent variable appears in every caller's resolved
+    /// constructor type — so the first unification (e.g. `Ok(10)`
+    /// binding it to `Int`) sticks via the unifier's substitution
+    /// table, and every subsequent call (`Ok(())`) fails to unify
+    /// with a different argument type.
+    ///
+    /// This helper, composed with `substitute_named_params_in_type`,
+    /// handles BOTH storage shapes:
+    /// * `register_stdlib_constructors_from_metadata` (env.rs) uses
+    ///   `Type::Named{path:T}` → covered by the named-substitution
+    ///   helper.
+    /// * `register_type_declaration` (decls.rs) uses
+    ///   `Type::Var(persistent_X)` → covered by THIS helper.
+    fn substitute_typevars_in_type(
+        ty: &Type,
+        subst: &indexmap::IndexMap<crate::ty::TypeVar, Type>,
+    ) -> Type {
+        if subst.is_empty() {
+            return ty.clone();
+        }
+        match ty {
+            Type::Var(tv) => {
+                if let Some(replacement) = subst.get(tv) {
+                    return replacement.clone();
+                }
+                ty.clone()
+            }
+            Type::Generic { name, args } => Type::Generic {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|a| Self::substitute_typevars_in_type(a, subst))
+                    .collect(),
+            },
+            Type::Named { path, args } => Type::Named {
+                path: path.clone(),
+                args: args
+                    .iter()
+                    .map(|a| Self::substitute_typevars_in_type(a, subst))
+                    .collect(),
+            },
+            Type::Tuple(parts) => Type::Tuple(
+                parts
+                    .iter()
+                    .map(|p| Self::substitute_typevars_in_type(p, subst))
+                    .collect(),
+            ),
+            Type::Function {
+                params,
+                return_type,
+                type_params,
+                contexts,
+                properties,
+            } => Type::Function {
+                params: params
+                    .iter()
+                    .map(|p| Self::substitute_typevars_in_type(p, subst))
+                    .collect(),
+                return_type: Box::new(Self::substitute_typevars_in_type(return_type, subst)),
+                type_params: type_params.clone(),
+                contexts: contexts.clone(),
+                properties: properties.clone(),
+            },
+            Type::Reference { mutable, inner } => Type::Reference {
+                mutable: *mutable,
+                inner: Box::new(Self::substitute_typevars_in_type(inner, subst)),
+            },
+            Type::CheckedReference { mutable, inner } => Type::CheckedReference {
+                mutable: *mutable,
+                inner: Box::new(Self::substitute_typevars_in_type(inner, subst)),
+            },
+            Type::UnsafeReference { mutable, inner } => Type::UnsafeReference {
+                mutable: *mutable,
+                inner: Box::new(Self::substitute_typevars_in_type(inner, subst)),
+            },
+            Type::Array { element, size } => Type::Array {
+                element: Box::new(Self::substitute_typevars_in_type(element, subst)),
+                size: *size,
+            },
+            Type::Slice { element } => Type::Slice {
+                element: Box::new(Self::substitute_typevars_in_type(element, subst)),
+            },
+            Type::Variant(variants) => Type::Variant(
+                variants
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Self::substitute_typevars_in_type(v, subst)))
+                    .collect(),
+            ),
+            Type::Record(fields) => Type::Record(
+                fields
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Self::substitute_typevars_in_type(v, subst)))
                     .collect(),
             ),
             _ => ty.clone(),
@@ -13757,13 +14078,33 @@ impl TypeChecker {
                 }
                 let early_method_info = {
                     let methods_guard = self.inherent_methods.read();
-                    methods_guard.get(&type_name_text).and_then(|methods| {
-                        methods.get(&method_name_text).cloned().map(|scheme| {
-                            let impl_vc = scheme.impl_var_count;
-                            let (ty, fresh_vars, type_bounds) =
-                                scheme.instantiate_with_type_bounds();
-                            ((ty, fresh_vars, impl_vc), type_bounds)
-                        })
+                    // Two-phase lookup: direct bucket key first;
+                    // ONLY on miss try the unifier's alias-resolved head.
+                    // Avoids regressions where non-alias types have
+                    // `type_aliases` entries that resolve unexpectedly —
+                    // direct lookup wins when the type owns its bucket;
+                    // the alias-resolved retry only fires when the
+                    // alias-typed receiver has no bucket of its own
+                    // (`Bytes` → `List`, `IoResult<T>` → `Result`).
+                    let scheme_opt = methods_guard
+                        .get(&type_name_text)
+                        .and_then(|methods| methods.get(&method_name_text).cloned())
+                        .or_else(|| {
+                            self.unifier
+                                .resolve_aliased_head_text(type_name_text.as_str())
+                                .and_then(|resolved| {
+                                    let resolved_text =
+                                        verum_common::Text::from(resolved.as_str());
+                                    methods_guard.get(&resolved_text).and_then(|methods| {
+                                        methods.get(&method_name_text).cloned()
+                                    })
+                                })
+                        });
+                    scheme_opt.map(|scheme| {
+                        let impl_vc = scheme.impl_var_count;
+                        let (ty, fresh_vars, type_bounds) =
+                            scheme.instantiate_with_type_bounds();
+                        ((ty, fresh_vars, impl_vc), type_bounds)
                     })
                 };
 
