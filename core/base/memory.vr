@@ -37,29 +37,56 @@ mount core.intrinsics.atomic.{
     ORDERING_ACQ_REL, ORDERING_SEQ_CST,
 };
 
-// Import typed intrinsics from stdlib.intrinsics
-mount core.intrinsics.{
-    ptr_read as intrinsic_ptr_read,
-    ptr_write as intrinsic_ptr_write,
-    ptr_offset as intrinsic_ptr_offset,
-    drop_in_place as intrinsic_drop_in_place,
-    forget as intrinsic_forget,
-    ptr_is_null as intrinsic_ptr_is_null,
-    null_ptr as intrinsic_null_ptr,
-    slice_from_raw_parts as intrinsic_slice_from_raw_parts,
-    slice_from_raw_parts_mut as intrinsic_slice_from_raw_parts_mut,
-    memcpy as intrinsic_memcpy,
-    memmove as intrinsic_memmove,
-    memset as intrinsic_memset,
-    memcmp as intrinsic_memcmp,
-    uninit as intrinsic_uninit,
-    zeroed as intrinsic_zeroed,
+// Atomic intrinsics — used by Heap/Shared CBGR generation machinery.
+mount core.intrinsics.atomic.{
     atomic_load_u32,
     atomic_store_u32,
     atomic_fetch_add_u32,
     atomic_fetch_sub_u32,
     atomic_cas_u32,
     atomic_fence,
+};
+
+// Re-export memory intrinsics under `core.base.memory.*` so external
+// callers (e.g. `core/net/weft/bufpool.vr` mounting
+// `core.base.memory.{ptr_offset}`) keep working.  Internal callers in
+// this file (Heap/Shared/MaybeUninit body sites) use the bare names
+// directly — they resolve to the mounted intrinsics, which emit the
+// `DirectOpcode` strategies from `verum_vbc::intrinsics::registry`
+// inline.
+//
+// History: the previous design declared `public fn ptr_read<T>(...) {
+// intrinsic_ptr_read<T>(...) }` wrappers that delegated to a renamed
+// mount-alias.  The alias resolved back to the LOCAL wrapper because
+// the bare simple name `ptr_read` was pre-registered by
+// `register_stdlib_intrinsics` (verum_vbc/src/codegen/mod.rs:2243)
+// and then shadowed by this file's wrapper declaration — calling
+// `intrinsic_ptr_read<T>(...)` from inside the wrapper collapsed
+// onto the bare-name leaf fallback in `compile_call`
+// (verum_vbc/src/codegen/expressions.rs:4116) and resolved to the
+// LOCAL wrapper, causing an infinite-recursion StackOverflow inside
+// `MaybeUninit.write` / `Heap.new` and every other site that wrote
+// through a pointer.  Removing the wrappers and re-exporting the
+// intrinsics directly eliminates the bare-name collision; bare
+// `ptr_read(...)` in this file now resolves unambiguously to the
+// archive-loaded `core.intrinsics.memory.ptr_read` whose body is
+// `@intrinsic("ptr_read", ptr)` — emitting `Opcode::Deref` inline.
+public mount core.intrinsics.memory.{
+    ptr_read,
+    ptr_write,
+    ptr_offset,
+    drop_in_place,
+    forget,
+    ptr_is_null,
+    null_ptr,
+    slice_from_raw_parts,
+    slice_from_raw_parts_mut,
+    memcpy,
+    memmove,
+    memset,
+    memcmp,
+    uninit,
+    zeroed,
 };
 
 // =============================================================================
@@ -69,42 +96,6 @@ mount core.intrinsics.{
 // Example: let size = Int.size; // 8 bytes
 //  let align = MyStruct<T>.alignment;
 // =============================================================================
-
-/// Read value from pointer without ownership transfer.
-///
-
-/// Delegates to stdlib.intrinsics.ptr_read for typed intrinsic handling.
-@inline(always)
-public unsafe fn ptr_read<T>(ptr: &unsafe T) -> T {
-    intrinsic_ptr_read<T>(ptr as *const T)
-}
-
-/// Write value to pointer without dropping existing value.
-///
-
-/// Delegates to stdlib.intrinsics.ptr_write for typed intrinsic handling.
-@inline(always)
-public unsafe fn ptr_write<T>(ptr: &unsafe T, value: T) {
-    intrinsic_ptr_write<T>(ptr as *mut T, value)
-}
-
-/// Run destructor for value at pointer.
-///
-
-/// Delegates to stdlib.intrinsics.drop_in_place for typed intrinsic handling.
-@inline(always)
-public unsafe fn drop_in_place<T>(ptr: &mut T) {
-    intrinsic_drop_in_place<T>(ptr as *mut T)
-}
-
-/// Prevent value from being dropped.
-///
-
-/// Delegates to stdlib.intrinsics.forget for typed intrinsic handling.
-@inline(always)
-public fn forget<T>(value: T) {
-    intrinsic_forget<T>(value)
-}
 
 /// Explicitly drop a value, running its destructor.
 ///
@@ -127,31 +118,13 @@ public fn drop<T>(value: T) {
     // The compiler will automatically call the Drop implementation if present.
 }
 
-/// Check if pointer is null.
-///
-
-/// Delegates to stdlib.intrinsics.ptr_is_null for typed intrinsic handling.
+/// Compatibility alias: the previous file exported `is_null<T>` (no
+/// `ptr_` prefix) as a public wrapper around `ptr_is_null`.  Replace
+/// it with a thin alias-style re-export so external callers
+/// (`mount core.base.memory.{is_null}`) keep compiling.
 @inline(always)
 public fn is_null<T>(ptr: &unsafe T) -> Bool {
-    intrinsic_ptr_is_null<T>(ptr as *const T)
-}
-
-/// Get null pointer.
-///
-
-/// Delegates to stdlib.intrinsics.null_ptr for typed intrinsic handling.
-@inline(always)
-public fn null_ptr<T>() -> &unsafe T {
-    intrinsic_null_ptr<T>() as &unsafe T
-}
-
-/// Pointer offset.
-///
-
-/// Delegates to stdlib.intrinsics.ptr_offset for typed intrinsic handling.
-@inline(always)
-public unsafe fn ptr_offset<T>(ptr: &unsafe T, count: Int) -> &unsafe T {
-    intrinsic_ptr_offset<T>(ptr as *const T, count) as &unsafe T
+    ptr_is_null<T>(ptr as *const T)
 }
 
 // =============================================================================
@@ -1043,7 +1016,7 @@ implement<T> Hash for Weak<T> {
 /// The pointer must be valid for reading `len` elements of type T.
 @inline(always)
 public unsafe fn slice_from_raw_parts<T>(ptr: &unsafe T, len: Int) -> &[T] {
-    intrinsic_slice_from_raw_parts<T>(ptr as *const T, len)
+    core.intrinsics.memory.slice_from_raw_parts<T>(ptr as *const T, len)
 }
 
 /// Create a mutable slice from raw parts.
@@ -1058,7 +1031,7 @@ public unsafe fn slice_from_raw_parts<T>(ptr: &unsafe T, len: Int) -> &[T] {
 /// The pointer must be valid for reading and writing `len` elements of type T.
 @inline(always)
 public unsafe fn slice_from_raw_parts_mut<T>(ptr: &unsafe T, len: Int) -> &mut [T] {
-    intrinsic_slice_from_raw_parts_mut<T>(ptr as *mut T, len)
+    core.intrinsics.memory.slice_from_raw_parts_mut<T>(ptr as *mut T, len)
 }
 
 // =============================================================================
@@ -1078,7 +1051,7 @@ public unsafe fn slice_from_raw_parts_mut<T>(ptr: &unsafe T, len: Int) -> &mut [
 @inline(always)
 public unsafe fn copy_nonoverlapping<T>(src: &T, dst: &mut T, count: Int) {
     let size = T.size * count;
-    intrinsic_memcpy(dst as *mut Byte, src as *const Byte, size);
+    core.intrinsics.memory.memcpy(dst as *mut Byte, src as *const Byte, size);
 }
 
 /// Copy memory that may overlap.
@@ -1091,7 +1064,7 @@ public unsafe fn copy_nonoverlapping<T>(src: &T, dst: &mut T, count: Int) {
 @inline(always)
 public unsafe fn copy<T>(src: &T, dst: &mut T, count: Int) {
     let size = T.size * count;
-    intrinsic_memmove(dst as *mut Byte, src as *const Byte, size);
+    core.intrinsics.memory.memmove(dst as *mut Byte, src as *const Byte, size);
 }
 
 /// Fill memory with a byte value.
@@ -1101,7 +1074,7 @@ public unsafe fn copy<T>(src: &T, dst: &mut T, count: Int) {
 @inline(always)
 public unsafe fn fill<T>(ptr: &mut T, val: Byte, count: Int) {
     let size = T.size * count;
-    intrinsic_memset(ptr as *mut Byte, val, size);
+    core.intrinsics.memory.memset(ptr as *mut Byte, val, size);
 }
 
 /// Zero memory.
@@ -1149,7 +1122,7 @@ public fn take<T: Default>(dest: &mut T) -> T {
 @inline(always)
 public fn memcmp<T>(a: &T, b: &T, count: Int) -> Int {
     let size = T.size * count;
-    intrinsic_memcmp(a as *const Byte, b as *const Byte, size)
+    core.intrinsics.memory.memcmp(a as *const Byte, b as *const Byte, size)
 }
 
 // =============================================================================
@@ -1266,7 +1239,7 @@ implement<T> MaybeUninit<T> {
 
     /// The memory contents are undefined. Reading before initialization is UB.
     public fn uninit() -> MaybeUninit<T> {
-        unsafe { intrinsic_uninit<MaybeUninit<T>>() }
+        unsafe { core.intrinsics.memory.uninit<MaybeUninit<T>>() }
     }
 
     /// Create zeroed memory.
@@ -1274,7 +1247,7 @@ implement<T> MaybeUninit<T> {
 
     /// All bytes are set to zero. This may or may not be a valid value for T.
     public fn zeroed() -> MaybeUninit<T> {
-        unsafe { intrinsic_zeroed<MaybeUninit<T>>() }
+        unsafe { core.intrinsics.memory.zeroed<MaybeUninit<T>>() }
     }
 
     /// Create from an initialized value.
@@ -1751,7 +1724,7 @@ public fn realloc(ptr: &unsafe Byte, old_size: Int, new_size: Int, align: Int) -
             if !is_null(ptr) && old_size > 0 {
                 let copy_size = if old_size < new_size { old_size } else { new_size };
                 unsafe {
-                    intrinsic_memcpy(new_ptr as *mut Byte, ptr as *const Byte, copy_size);
+                    core.intrinsics.memory.memcpy(new_ptr as *mut Byte, ptr as *const Byte, copy_size);
                 }
                 dealloc(ptr, old_size, align);
             }
@@ -1797,7 +1770,7 @@ public fn try_realloc(
                     if !is_null(ptr) && old_size > 0 {
                         let copy_size = if old_size < new_size { old_size } else { new_size };
                         unsafe {
-                            intrinsic_memcpy(new_ptr as *mut Byte, ptr as *const Byte, copy_size);
+                            core.intrinsics.memory.memcpy(new_ptr as *mut Byte, ptr as *const Byte, copy_size);
                         }
                         dealloc(ptr, old_size, align);
                     }
@@ -1815,7 +1788,7 @@ public fn try_realloc(
 /// Delegates to stdlib.intrinsics.memcpy for typed intrinsic handling.
 @inline(always)
 public unsafe fn memcpy(dst: &unsafe Byte, src: &unsafe Byte, len: Int) {
-    intrinsic_memcpy(dst as *mut Byte, src as *const Byte, len);
+    core.intrinsics.memory.memcpy(dst as *mut Byte, src as *const Byte, len);
 }
 
 /// Copy memory that may overlap (raw bytes version).
@@ -1824,7 +1797,7 @@ public unsafe fn memcpy(dst: &unsafe Byte, src: &unsafe Byte, len: Int) {
 /// Delegates to stdlib.intrinsics.memmove for typed intrinsic handling.
 @inline(always)
 public unsafe fn memmove(dst: &unsafe Byte, src: &unsafe Byte, len: Int) {
-    intrinsic_memmove(dst as *mut Byte, src as *const Byte, len);
+    core.intrinsics.memory.memmove(dst as *mut Byte, src as *const Byte, len);
 }
 
 /// Compare memory regions (raw bytes version).
@@ -1836,7 +1809,7 @@ public unsafe fn memmove(dst: &unsafe Byte, src: &unsafe Byte, len: Int) {
 /// Returns 0 if equal, negative if a < b, positive if a > b.
 @inline(always)
 public fn memcmp_bytes(a: &unsafe Byte, b: &unsafe Byte, len: Int) -> Int {
-    intrinsic_memcmp(a as *const Byte, b as *const Byte, len)
+    core.intrinsics.memory.memcmp(a as *const Byte, b as *const Byte, len)
 }
 
 /// Fill memory with a byte value (raw bytes version).
@@ -1845,5 +1818,5 @@ public fn memcmp_bytes(a: &unsafe Byte, b: &unsafe Byte, len: Int) -> Int {
 /// Delegates to stdlib.intrinsics.memset for typed intrinsic handling.
 @inline(always)
 public unsafe fn memset(dst: &unsafe Byte, val: Byte, len: Int) {
-    intrinsic_memset(dst as *mut Byte, val, len);
+    core.intrinsics.memory.memset(dst as *mut Byte, val, len);
 }
