@@ -1341,6 +1341,28 @@ impl<'s> CompilationPipeline<'s> {
 
         let mut codegen = VbcCodegen::with_config(codegen_config);
 
+        // Register compiler intrinsics into the per-module codegen
+        // context.  Mirrors the user-side `vbc_codegen.rs:337-339` path —
+        // without this, stdlib modules whose bodies use raw-pointer
+        // intrinsics (`ptr_offset` / `ptr_read` / `ptr_write` /
+        // `null_ptr` / `alloc` / `dealloc` / …) compile with those
+        // names absent from `ctx.functions`, so codegen-time
+        // dispatch-shortcuts that key on `lookup_function("ptr_offset")`
+        // (e.g. the raw-pointer offset/add/sub intercept in
+        // `compile_method_call`) fall through and emit CallM with
+        // dangling method-name strings.  At runtime the dispatcher
+        // then surfaces "method '&unsafe Slot.offset' not found on
+        // receiver of runtime kind `Int`" — aborting every hash-table
+        // body that touches its backing pointer-array.
+        //
+        // Built-in variant carriers (Maybe/Result/Ordering) +
+        // canonical stdlib constants + intrinsic registrations +
+        // runtime I/O dispatch entries are ALL prerequisites for any
+        // codegen that compiles real stdlib bodies; calling
+        // `initialize()` consolidates the four into one site so
+        // future drift is structurally impossible.
+        codegen.initialize();
+
         // Import functions and protocols from previously compiled modules
         codegen.import_functions(&self.global_function_registry);
         codegen.import_protocols(&self.global_protocol_registry);
