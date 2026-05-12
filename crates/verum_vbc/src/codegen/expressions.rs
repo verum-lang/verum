@@ -4096,12 +4096,6 @@ impl VbcCodegen {
             None
         };
 
-        if std::env::var("VERUM_TRACE_MOUNT").is_ok() {
-            eprintln!(
-                "[compile_call] enter func_name={} args.len={}",
-                func_name, args.len()
-            );
-        }
         // Look up function - use arity-based disambiguation when available
         let (resolved_name, func_info) = match module_qualified_lookup
             .or_else(|| type_aware_lookup)
@@ -4302,6 +4296,12 @@ impl VbcCodegen {
             if is_transparent && args.len() == 1 {
                 // Transparent wrapper: zero-cost pass-through.  The
                 // value IS the inner value at runtime; no boxing.
+                if std::env::var("VERUM_TRACE_TRANSPARENT").is_ok() {
+                    eprintln!(
+                        "[newtype-passthrough] func_name={} sentinel-id arg-len=1",
+                        func_name
+                    );
+                }
                 return self.compile_expr(&args[0]);
             }
             // Named-field record constructor (single OR multi-field).
@@ -5909,13 +5909,6 @@ impl VbcCodegen {
                     return Ok(redirect);
                 }
 
-                if std::env::var("VERUM_TRACE_MOUNT").is_ok() {
-                    eprintln!(
-                        "[static-call] resolved name={} method={}",
-                        qualified_name.as_str(),
-                        method.name.as_str()
-                    );
-                }
                 // The typechecker already canonicalised the dispatch
                 // to a single qualified name; codegen does ONE
                 // O(1) `lookup_function` instead of the legacy
@@ -9104,6 +9097,15 @@ impl VbcCodegen {
             // Transparent wrapper (newtype / single-element tuple /
             // quotient `of`): zero-cost passthrough.  The value IS
             // the inner value at runtime — no boxing, no Call.
+            if std::env::var("VERUM_TRACE_TRANSPARENT").is_ok() {
+                eprintln!(
+                    "[transparent-wrapper] passthrough func_id={} param_count={} parent_type={:?} return_type_name={:?}",
+                    func_info.id.0,
+                    func_info.param_count,
+                    func_info.parent_type_name,
+                    func_info.return_type_name
+                );
+            }
             return self.compile_expr(&args[0]);
         }
         if func_info.id.0 == u32::MAX / 2 && args.is_empty() {
@@ -14171,6 +14173,50 @@ impl VbcCodegen {
             obj: base_reg,
             field_idx,
         });
+
+        // Raw-pointer-flag propagation through field access.
+        //
+        // When the field's declared type is a raw pointer (`&unsafe T`,
+        // `*const T`, `*mut T`), tag the result register so subsequent
+        // method calls (`p.offset(i)`, `p.is_null()`) route through the
+        // raw-pointer intercept in `compile_method_call` instead of
+        // CallM'ing into a non-existent `<InnerType>.offset` user
+        // method.  Without this, every stdlib hash-table body that
+        // reads `self.entries.offset(idx)` aborted with "method 'X.offset'
+        // not found on Int" — raw pointers are i64-encoded in NaN-boxing,
+        // and the dispatcher routed the qualified CallM through the
+        // primitive Int arm which has no offset handler.
+        //
+        // Field-type lookup mirrors `extract_expr_type_name`'s Field
+        // arm shape: try the exact `(base_type, field)` key, then the
+        // generic-stripped form (`(Map, entries)` when the receiver
+        // is `Map<K, V>`).
+        if let Some(ref bt) = base_type {
+            let field_name = field.to_string();
+            let field_type = self
+                .type_field_type_names
+                .get(&(bt.clone(), field_name.clone()))
+                .cloned()
+                .or_else(|| {
+                    let stripped = VbcCodegen::strip_generic_args(bt).to_string();
+                    if &stripped != bt {
+                        self.type_field_type_names
+                            .get(&(stripped, field_name))
+                            .cloned()
+                    } else {
+                        None
+                    }
+                });
+            if let Some(ft) = field_type {
+                let ft_trimmed = ft.trim_start();
+                if ft_trimmed.starts_with("&unsafe")
+                    || ft_trimmed.starts_with("*const")
+                    || ft_trimmed.starts_with("*mut")
+                {
+                    self.ctx.mark_raw_pointer(result);
+                }
+            }
+        }
 
         self.ctx.free_temp(base_reg);
         Ok(Some(result))
