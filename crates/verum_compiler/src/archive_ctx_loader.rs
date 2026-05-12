@@ -92,6 +92,78 @@ pub struct LoadStats {
     pub modules_skipped: usize,
 }
 
+/// Merge an archive entry's `module_name` with a function's
+/// precompiler-assigned `simple_name` into the function's canonical
+/// fully-qualified codegen key.
+///
+/// The precompiler stores `simple_name` in one of three shapes
+/// depending on the source file's `module X.Y;` declaration:
+///
+///   * **Bare leaf** (no dot). Example: descriptor `new` for
+///     `core/text/text.vr`. Canonical = `<module_name>.<simple_name>`.
+///   * **Relative submodule** (leading segments overlap module_name's
+///     trailing tail). Example: descriptor `sys.bitfield.test_bit`
+///     for archive entry `core.sys`. Canonical drops the overlap →
+///     `core.sys.bitfield.test_bit`.
+///   * **Fully-rooted submodule** (descriptor starts with the cog
+///     prefix). Example: descriptor `core.async.future.ready` for
+///     archive entry `core.async`. Canonical = descriptor verbatim.
+///
+/// Algorithm: find the longest suffix of `module_name`'s segments
+/// that matches a prefix of `simple_name`'s segments; the canonical
+/// key is `module_name[..non_overlap]` followed by all of
+/// `simple_name`. Bare leaves degenerate cleanly because their
+/// segment count is 1 and overlap-with-anything-longer is `0`.
+///
+/// **Drift contract**: any registration site that synthesises a
+/// qualified codegen key from `(module_name, simple_name)` MUST
+/// route through this function. The user-side codegen lookup probes
+/// the canonical form (`cog.entry.submodule.method`), so any
+/// asymmetry between registration and lookup surfaces as a silent
+/// runtime dispatch miss — e.g. `core.sys.bitfield.test_bit`
+/// dispatching to `core.net.tls13.handshake.zero_rtt_antireplay.test_bit`
+/// because bitfield's canonical key was missing and the bare-name
+/// fallback claimed the first registered `test_bit`.
+fn merge_module_and_simple_name(module_name: &str, simple_name: &str) -> String {
+    if !simple_name.contains('.') {
+        // Bare leaf — the precompiler did no module promotion.
+        // Prepend module_name unconditionally.
+        return format!("{}.{}", module_name, simple_name);
+    }
+    let module_segs: Vec<&str> = module_name.split('.').collect();
+    let simple_segs: Vec<&str> = simple_name.split('.').collect();
+    // Longest overlap: try `module_segs[k..]` against `simple_segs[..len-k]`
+    // for k decreasing from |module_segs|.min(|simple_segs|) down to 1.
+    // First match wins (longest). k=0 (no overlap) falls through to
+    // the prepend branch at the bottom.
+    let max_overlap = module_segs.len().min(simple_segs.len());
+    for overlap_len in (1..=max_overlap).rev() {
+        let module_suffix = &module_segs[module_segs.len() - overlap_len..];
+        let simple_prefix = &simple_segs[..overlap_len];
+        if module_suffix == simple_prefix {
+            // Emit non-overlapping module_name prefix + full simple_name.
+            let prefix_len = module_segs.len() - overlap_len;
+            if prefix_len == 0 {
+                return simple_name.to_string();
+            }
+            let mut out = String::with_capacity(module_name.len() + simple_name.len() + 1);
+            for (i, seg) in module_segs[..prefix_len].iter().enumerate() {
+                if i > 0 {
+                    out.push('.');
+                }
+                out.push_str(seg);
+            }
+            out.push('.');
+            out.push_str(simple_name);
+            return out;
+        }
+    }
+    // No overlap — descriptor's leading segment is unrelated to
+    // module_name (e.g. tls13's `tls13.handshake....` under
+    // `core.net`). Prepend module_name verbatim.
+    format!("{}.{}", module_name, simple_name)
+}
+
 /// Walk every module in the archive and register its functions and
 /// variant-constructor metadata into the supplied [`CodegenContext`].
 ///
@@ -313,21 +385,13 @@ fn register_module(
         // Always register qualified — `module.path.simple` —
         // unconditionally.  Cross-module dispatch path keys on this.
         //
-        // The descriptor.name carrier now stores the FULL source-
-        // module-qualified form (e.g. `sys.bitfield.USIZE_BITS`)
-        // when codegen had a non-empty `current_source_module`, so
-        // sibling files inside the same archive-entry directory keep
-        // their distinct module-path prefixes — see the matching
-        // promotion in `verum_vbc/src/codegen/mod.rs::compile_function`
-        // (task #121).  Detect the qualified form by presence of `.`
-        // in `simple_name`; if already qualified, use it directly
-        // without re-prepending `module_name`.  Otherwise prepend
-        // the archive-entry module path the way the legacy path did.
-        let qualified = if simple_name.contains('.') {
-            simple_name.clone()
-        } else {
-            format!("{}.{}", module_name, simple_name)
-        };
+        // Routes through `merge_module_and_simple_name` (the shared
+        // canonical-name synthesiser) so the registration form
+        // matches the codegen lookup form for all three precompiler-
+        // assigned descriptor shapes (bare leaf, relative submodule,
+        // fully-rooted submodule).  See the function-level docstring
+        // for the per-shape canonical forms.
+        let qualified = merge_module_and_simple_name(module_name, &simple_name);
         ctx.register_function(qualified, info.clone());
         stats.functions_registered += 1;
 
@@ -1515,6 +1579,75 @@ impl ArchiveCtxCache {
 mod tests {
     use super::*;
 
+    /// **Drift-pin**: every canonical-name shape produced by the
+    /// precompiler must round-trip through `merge_module_and_simple_name`
+    /// to the form the user-side codegen looks up.  Drift between
+    /// registration (this fn) and lookup (`lookup_qualified_function`
+    /// in codegen) is invisible — the function is "registered" but
+    /// nobody can find it — and surfaces as runtime mis-dispatch when
+    /// a same-named sibling in another module claims the bare-name
+    /// fallback (e.g. `core.sys.bitfield.test_bit` silently dispatching
+    /// to `core.net.tls13.handshake.zero_rtt_antireplay.test_bit`).
+    #[test]
+    fn merge_canonical_name_synthesis() {
+        // (1) Bare leaf — no submodule directive in source. Prepend
+        // module_name verbatim.
+        assert_eq!(
+            merge_module_and_simple_name("core.text", "new"),
+            "core.text.new",
+        );
+        assert_eq!(
+            merge_module_and_simple_name("core.io", "write"),
+            "core.io.write",
+        );
+        // (2) Relative submodule — descriptor's leading segment is
+        // also module_name's trailing segment. Skip the overlap.
+        assert_eq!(
+            merge_module_and_simple_name("core.sys", "sys.bitfield.test_bit"),
+            "core.sys.bitfield.test_bit",
+        );
+        assert_eq!(
+            merge_module_and_simple_name("core.collections", "collections.map.Map.new"),
+            "core.collections.map.Map.new",
+        );
+        // (3) Fully-rooted submodule — descriptor already starts with
+        // the cog + entry prefix. Drop module_name entirely.
+        assert_eq!(
+            merge_module_and_simple_name("core.async", "core.async.future.ready"),
+            "core.async.future.ready",
+        );
+        // (4) No overlap — descriptor's leading segments are unrelated
+        // to module_name's tail (e.g. `tls13.handshake....` under
+        // archive entry `core.net`). Prepend module_name verbatim.
+        assert_eq!(
+            merge_module_and_simple_name(
+                "core.net",
+                "tls13.handshake.zero_rtt_antireplay.test_bit"
+            ),
+            "core.net.tls13.handshake.zero_rtt_antireplay.test_bit",
+        );
+        // (5) Longest-overlap discipline: when the descriptor and
+        // module_name share both `sys` AND `sys.bitfield` as possible
+        // prefixes, the algorithm picks the LONGER match. (Synthetic
+        // case to pin the longest-wins rule.)
+        assert_eq!(
+            merge_module_and_simple_name("a.b.sys.bitfield", "sys.bitfield.test_bit"),
+            "a.b.sys.bitfield.test_bit",
+        );
+        // (6) Full overlap of module_name with the descriptor's
+        // prefix — module_name drops entirely.
+        assert_eq!(
+            merge_module_and_simple_name("core.sys.bitfield", "core.sys.bitfield.test_bit"),
+            "core.sys.bitfield.test_bit",
+        );
+        // (7) Type-qualified bare descriptor — `Type.method` where
+        // module_name doesn't overlap. (Static methods land here.)
+        assert_eq!(
+            merge_module_and_simple_name("core.time.duration", "Duration.zero"),
+            "core.time.duration.Duration.zero",
+        );
+    }
+
     /// Smoke test: when the compiler binary embeds the precompiled
     /// stdlib archive, `populate_ctx_from_archive` registers a
     /// non-trivial number of functions and recovers variant-ctor
@@ -2435,7 +2568,53 @@ fn register_module_filtered(
             Some(s) => s,
             None => continue,
         };
-        let qualified_borrowed: String = format!("{}.{}", module_name, simple_name_str);
+        // Canonical-name synthesis (closes the path-doubling family of
+        // bugs, including task #21 "free-fn name collision in mount
+        // resolution" and the bitfield/tls13 test_bit collision):
+        //
+        // The descriptor name is whatever the precompiler stored — which
+        // depends on whether the source file declared a `module X.Y;`
+        // header AND on whether that header was rooted (`module
+        // core.async.future;` → fully qualified) or relative (`module
+        // sys.bitfield;` → relative to the archive entry).  The user's
+        // codegen invariably looks the function up under its CANONICAL
+        // form: cog-prefix + entry-path + per-file-submodule + leaf.
+        //
+        // Three shapes need to round-trip to the same canonical key:
+        //
+        //   1. Bare leaf, no submodule header. Example:
+        //        archive entry: `core.text`,
+        //        descriptor   : `new` (for `core/text/text.vr` declaring
+        //                       no submodule directive but with a `Text`
+        //                       impl block adding a `new` method).
+        //        canonical    : `core.text.new`
+        //        (just `<module_name>.<simple_name>`)
+        //
+        //   2. Relative submodule descriptor. Example:
+        //        archive entry: `core.sys`,
+        //        descriptor   : `sys.bitfield.test_bit` (file declares
+        //                       `module sys.bitfield;`),
+        //        canonical    : `core.sys.bitfield.test_bit`
+        //        (overlap-merge: descriptor's leading `sys` is the same
+        //         as `module_name`'s trailing `sys` — skip the overlap)
+        //
+        //   3. Fully-rooted submodule descriptor. Example:
+        //        archive entry: `core.async`,
+        //        descriptor   : `core.async.future.ready` (file declares
+        //                       `module core.async.future;`),
+        //        canonical    : `core.async.future.ready`
+        //        (overlap-merge: descriptor's leading `core.async`
+        //         matches all of `module_name` — full overlap, drop
+        //         `module_name` entirely)
+        //
+        // Unified rule: find the longest suffix of `module_name`'s
+        // segments that matches a prefix of `simple_name_str`'s
+        // segments; emit `module_name[..non_overlap] + simple_name`.
+        // When the descriptor is a bare leaf (no dots), no overlap is
+        // possible — falls through to the simple `module_name.simple`
+        // form, identical to case (1).
+        let qualified_borrowed: String =
+            merge_module_and_simple_name(module_name, simple_name_str);
         // Filter: register if (a) simple OR qualified is wanted,
         // OR (b) the function is a static/inherent method of a
         // wanted TYPE — i.e. simple_name has the form
@@ -2541,6 +2720,32 @@ fn register_module_filtered(
             .filter(|leaf| simple_name_str.len() > leaf.len()) // 2+ segments
             .map(|leaf| wanted.contains(leaf))
             .unwrap_or(false);
+        // **Always allocate codegen-local id + insert into
+        // `func_id_remap`** (regardless of whether the per-function
+        // metadata-registration filter below accepts the function).
+        //
+        // Rationale: per-module bytecode has `Call { func_id }`
+        // instructions whose `func_id` references the SAME module's
+        // function table. If we skip id allocation for filter-rejected
+        // entries, every body that references those entries via Call
+        // would have its archive-local `func_id` identity-fall-back
+        // through `ArchiveBodyRemap::map_function`'s
+        // `unwrap_or(src)` — landing on whatever codegen-local id
+        // happens to live at that slot (observed in the wild:
+        // `Text.push_str` Calls landing on `Conv1d.parameters` /
+        // `tensor_sqrt` / similar unrelated math/tensor functions).
+        //
+        // Allocating the id + inserting it into `func_id_remap`
+        // BEFORE the filter ensures the remap is total over every
+        // archive-local id this module emits. Filter-rejected
+        // functions still don't get a `FunctionInfo` registered into
+        // `ctx.functions`, so they remain invisible to user-side
+        // name-resolution; the finalize-time stub-emitter will
+        // synthesise a `RetV` placeholder for the unregistered slot
+        // — strictly more diagnosable than a wrong-target dispatch.
+        let new_id = verum_vbc::module::FunctionId(*next_id);
+        *next_id = next_id.saturating_add(1);
+        func_id_remap.insert(fn_desc.id.0, new_id);
         if !wanted.contains(simple_name_str)
             && !wanted.contains(&qualified_borrowed)
             && !is_method_of_wanted_type
@@ -2551,15 +2756,6 @@ fn register_module_filtered(
         }
         let simple_name = simple_name_str.to_string();
         let qualified = qualified_borrowed;
-        // Allocate a fresh globally-unique id so emit_missing_stub_descriptors
-        // produces a one-to-one stub at this slot.  Without remapping,
-        // multiple archive modules' local id=0 collide on the same
-        // ctx.functions slot, the longest-dotted name wins, and Call
-        // sites that intended a different function dispatch through the
-        // wrong intercept (or fall through to a Unit-returning stub).
-        let new_id = verum_vbc::module::FunctionId(*next_id);
-        *next_id = next_id.saturating_add(1);
-        func_id_remap.insert(fn_desc.id.0, new_id);
         let variant_hit = variant_index
             .get(&simple_name)
             .filter(|hit| hit.arity == fn_desc.params.len());
@@ -2675,27 +2871,56 @@ fn register_module_filtered(
                 continue;
             }
             let w_leaf = w.rsplit('.').next().unwrap_or(w.as_str());
-            // **Cross-pollination guard** (root cause of task #26):
-            // when both `w` and `simple_name` are qualified `Type.method`
-            // forms with the SAME leaf but DIFFERENT type prefixes,
-            // registering this function's info under `w` mis-binds:
-            // e.g. when processing `Utf8Error.new` (arity 1), wanted
-            // contains `Text.new` (leaf `new` matches), the bare check
-            // would register Utf8Error's info under `Text.new`. Later
-            // Text.new (arity 0) processing finds `lookup_function`
-            // already returns Some — the canonical fanout skips, and
-            // user-side static-method dispatch sees an arity-1 entry
-            // for `Text.new()` (arity-0 call), falls through every
-            // resolution arm, surfaces as `UndefinedFunction("Text.new")`.
+            // **Cross-pollination guard** (root cause of tasks #21 + #26):
             //
-            // Fix: when w is qualified, only fan out when its type
-            // prefix matches simple_name's. Bare-name w (alias / mount
-            // form without `.`) keeps the original behaviour — that's
-            // the intended use case (mount-form → leaf-renaming).
-            let w_prefix = w.split('.').next().unwrap_or(w.as_str());
-            let prefixes_compatible = !w.contains('.')
-                || !simple_name.contains('.')
-                || w_prefix == simple_prefix;
+            // When both `w` and `simple_name` are qualified paths sharing
+            // the same leaf (`select`, `join`, `new`, …) but rooted at
+            // DIFFERENT modules, registering this function's `info` under
+            // `w` is structurally wrong: it makes the qualified key
+            // `w` resolve to a function whose FunctionId belongs to a
+            // DIFFERENT module's body.  Cross-callers that look up `w`
+            // get an info pointing at the wrong dispatch target.
+            //
+            // Original guard (`w.split('.').next() == simple.split('.').next()`)
+            // matched on just the first segment — that's `core` for
+            // every stdlib path, so `core.async.future.select` and
+            // `core.shell.interactive.select` both passed the gate and
+            // collapsed onto the same FunctionId.  Manifested as #21:
+            // explicit `mount core.async.future.{select}` dispatched to
+            // `core.shell.interactive.select`'s body at runtime because
+            // the cross-fanout overwrote `core.async.future.select` →
+            // `info(id_of_shell_select)`, and the user-side
+            // authoritative-override then picked that polluted info.
+            //
+            // The architectural rule: cross-fanout is sound only when
+            // the *whole path-to-leaf* matches — i.e. `w` and
+            // `simple_name` describe the same module's same-named
+            // export, registered redundantly under multiple keys
+            // (e.g. legacy alias form vs canonical form for the same
+            // function).  Bare-name `w` (no dot) keeps the original
+            // leaf-renaming behaviour because there's no prefix to
+            // compare; the bare-name slot is conceptually a global
+            // alias the user explicitly asked for via `mount X.Y.{w}`.
+            //
+            // Fix: when w is qualified AND simple_name is qualified,
+            // require the FULL path-before-leaf to match.  When either
+            // is bare, fall back to the legacy first-segment check
+            // (same liberality as before for the renaming case).
+            fn path_to_leaf(s: &str) -> &str {
+                match s.rfind('.') {
+                    Some(idx) => &s[..idx],
+                    None => "",
+                }
+            }
+            let prefixes_compatible = match (w.contains('.'), simple_name.contains('.')) {
+                (true, true) => path_to_leaf(w) == path_to_leaf(simple_name.as_str()),
+                _ => {
+                    let w_prefix = w.split('.').next().unwrap_or(w.as_str());
+                    !w.contains('.')
+                        || !simple_name.contains('.')
+                        || w_prefix == simple_prefix
+                }
+            };
             if w_leaf == simple_leaf
                 && w != simple_name.as_str()
                 && prefixes_compatible

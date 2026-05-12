@@ -4673,79 +4673,19 @@ impl VbcCodegen {
             }
         }
 
-        // Narrow pre-pass for BLANKET-impl REGISTRATION only.
-        //
-        // Walks the module once and identifies `implement<G: Base>
-        // Derived for G {}` impl blocks (the canonical blanket-impl
-        // shape).  Appends `BlanketImpl` records to
-        // `self.blanket_impls` WITHOUT running the full
-        // collect_declarations handling for those items.
-        //
-        // This minimal pre-pass primes `self.blanket_impls` BEFORE any
-        // concrete-type `implement Future for ReadyFuture` triggers
-        // `generate_default_protocol_methods`'s walk of
-        // pending_derivations.  Routing the full collect_declarations
-        // for blankets here regresses the Poll suite (5 tests including
-        // test_poll_default_is_pending) because the blanket's
-        // `generate_default_protocol_methods` step runs with
-        // type_name="<generic param>" and double-registers the
-        // wrong-target default methods.  This narrow pre-pass avoids
-        // that side effect — only the `blanket_impls` table is
-        // primed.  Concrete-type impl-blocks below pick up the
-        // primed table when they run their own
-        // `generate_default_protocol_methods`.
-        for item in module.items.iter() {
-            if !self.should_compile_item(item) {
-                continue;
-            }
-            if let ItemKind::Impl(impl_decl) = &item.kind
-                && let verum_ast::decl::ImplKind::Protocol {
-                    protocol, for_type, ..
-                } = &impl_decl.kind
-                && let Some(derived_name) = protocol.segments.last().and_then(|s| match s {
-                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
-                    _ => None,
-                })
-                && let Some(param_name) = Self::for_type_generic_param_name(for_type)
-            {
-                for g in impl_decl.generics.iter() {
-                    if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } = &g.kind
-                        && name.name.as_str() == param_name
-                    {
-                        for b in bounds.iter() {
-                            if let Some(base_name) = Self::type_bound_protocol_name(b) {
-                                let explicit_methods: std::collections::HashSet<String> =
-                                    impl_decl
-                                        .items
-                                        .iter()
-                                        .filter_map(|item| {
-                                            if let verum_ast::decl::ImplItemKind::Function(f) =
-                                                &item.kind
-                                            {
-                                                Some(f.name.name.to_string())
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .collect();
-                                let already_present = self.blanket_impls.iter().any(|b| {
-                                    b.base_protocol == base_name
-                                        && b.derived_protocol == derived_name
-                                });
-                                if !already_present {
-                                    self.blanket_impls.push(BlanketImpl {
-                                        base_protocol: base_name,
-                                        derived_protocol: derived_name.clone(),
-                                        explicit_methods,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
+        // Original single-pass collection.  Pre-pass attempts to
+        // prime `blanket_impls` BEFORE concrete-type impls (so
+        // `generate_default_protocol_methods`'s blanket-derivation
+        // walk picks up the inherited protocol's default methods)
+        // regressed the Poll suite — 5 tests including
+        // test_poll_default_is_pending depend on the ORIGINAL
+        // collection order where concrete Default-for-Poll<T> impls
+        // run before any blanket-impl scan.  The protocol-default-
+        // method dispatch via blanket impl (task #11) needs a
+        // different architecture — likely scoping blanket-impls
+        // per-call-site rather than baking them into the global
+        // collection order — and is deferred until that design
+        // lands.
         for item in module.items.iter() {
             if self.should_compile_item(item) {
                 self.collect_declarations(item)?;
@@ -6677,65 +6617,36 @@ impl VbcCodegen {
                 let qualified_verum = full_path.join(".");
                 let qualified_rust = full_path.join("::");
 
-                // Helper to check if we should register the alias.
-                //
                 // Architectural rule: an explicit `mount X.Y.{name}` /
                 // `mount X.Y.name as alias` is an authoritative binding —
                 // the user named the function they want, so it MUST win
                 // over any passive archive-load that previously registered
-                // the same simple name. The pre-fix arity check
-                // (`new_info.param_count >= existing.param_count`) was a
-                // defence against accidental safe-wrapper-shadows-FFI-raw
-                // registration ordering, but it gave the WRONG answer for
-                // explicit user mounts: when a workspace has multiple
-                // free functions of the same simple name (e.g.
-                // `core.sys.test_bit` (USize) vs
-                // `core.net.tls13.handshake.test_bit` (&Bucket)), the
-                // bare-name slot was claimed by whichever passive load
-                // ran first, and the user's `mount core.sys.{test_bit}`
-                // could not override — the bare-name call dispatched to
-                // the wrong implementation, surfacing at runtime as
-                // Unit/nil from the non-matching argument types.
-                //
-                // The fix:
-                //   * `Path` mounts (caller of this closure) always pass
-                //     `force_override = true` — the user wrote the name
-                //     explicitly, that's the binding they want.
-                //   * `Glob` mounts (`mount X.*`) keep first-wins
-                //     semantics so they can't accidentally clobber
-                //     FFI-raw registrations.
-                let should_register = |alias: &str,
-                                       new_info: &FunctionInfo,
-                                       force_override: bool|
-                 -> bool {
-                    if force_override {
-                        return true;
-                    }
-                    match self.ctx.lookup_function(alias) {
-                        Some(existing) => {
-                            // Passive-load preserve-FFI rule.
-                            new_info.param_count >= existing.param_count
-                        }
-                        None => true,
-                    }
-                };
-                // Path-form mounts (the only branch reachable here in
-                // the explicit-import case) are authoritative.
-                let force_override = true;
+                // the same simple name.  The pre-fix `should_register`
+                // gate plumbed `force_override = true` but then routed
+                // through `register_function`, which under
+                // `prefer_existing_functions = true` is first-wins via
+                // `entry().or_insert(_)` — passive loads still owned the
+                // bare-name slot, and arity-different user mounts ended
+                // up at `name#arity` instead of `name` (so the call
+                // site's bare-name lookup picked the passively-loaded
+                // wrong function).  The architectural fix lifts that
+                // collision class via `register_function_authoritative`,
+                // which unconditionally overwrites both `name` and
+                // `name#arity` for the user's chosen binding.  Glob
+                // mounts (`mount X.*`) deliberately keep first-wins to
+                // preserve the FFI-raw / safe-wrapper precedence rule.
 
                 // First try Verum-style qualified name
                 if let Some(func_info) = self.ctx.lookup_function(&qualified_verum).cloned() {
-                    if should_register(&alias_name, &func_info, force_override) {
-                        self.ctx.register_function(alias_name.clone(), func_info);
-                    }
+                    self.ctx
+                        .register_function_authoritative(alias_name.clone(), func_info);
                     return Ok(());
                 }
 
                 // Try Rust-style qualified name
                 if let Some(func_info) = self.ctx.lookup_function(&qualified_rust).cloned() {
-                    if should_register(&alias_name, &func_info, force_override) {
-                        self.ctx.register_function(alias_name.clone(), func_info);
-                    }
+                    self.ctx
+                        .register_function_authoritative(alias_name.clone(), func_info);
                     return Ok(());
                 }
 
@@ -6748,9 +6659,8 @@ impl VbcCodegen {
                     if let Some(func_info) =
                         self.ctx.lookup_function(&simplified_qualified).cloned()
                     {
-                        if should_register(&alias_name, &func_info, force_override) {
-                            self.ctx.register_function(alias_name.clone(), func_info);
-                        }
+                        self.ctx
+                            .register_function_authoritative(alias_name.clone(), func_info);
                         return Ok(());
                     }
                 }
@@ -6771,9 +6681,8 @@ impl VbcCodegen {
                     if let Some(func_info) =
                         self.ctx.lookup_function(&stripped_qualified).cloned()
                     {
-                        if should_register(&alias_name, &func_info, force_override) {
-                            self.ctx.register_function(alias_name.clone(), func_info);
-                        }
+                        self.ctx
+                            .register_function_authoritative(alias_name.clone(), func_info);
                         return Ok(());
                     }
                 }
@@ -6791,18 +6700,16 @@ impl VbcCodegen {
                     }
                     let core_qualified = core_path.join(".");
                     if let Some(func_info) = self.ctx.lookup_function(&core_qualified).cloned() {
-                        if should_register(&alias_name, &func_info, force_override) {
-                            self.ctx.register_function(alias_name.clone(), func_info);
-                        }
+                        self.ctx
+                            .register_function_authoritative(alias_name.clone(), func_info);
                         return Ok(());
                     }
                     // Also try without the file component: core.sys.linux.futex_wait → core.sys.futex_wait
                     if core_path.len() >= 3 {
                         let simplified = format!("core.{}.{}", core_path[1], func_name);
                         if let Some(func_info) = self.ctx.lookup_function(&simplified).cloned() {
-                            if should_register(&alias_name, &func_info, force_override) {
-                                self.ctx.register_function(alias_name.clone(), func_info);
-                            }
+                            self.ctx
+                                .register_function_authoritative(alias_name.clone(), func_info);
                             return Ok(());
                         }
                     }
@@ -6810,9 +6717,8 @@ impl VbcCodegen {
 
                 // Try just the function name (it might be already registered without qualification)
                 if let Some(func_info) = self.ctx.lookup_function(&func_name).cloned() {
-                    if should_register(&alias_name, &func_info, force_override) {
-                        self.ctx.register_function(alias_name, func_info);
-                    }
+                    self.ctx
+                        .register_function_authoritative(alias_name, func_info);
                     return Ok(());
                 }
 
@@ -12260,10 +12166,44 @@ impl VbcCodegen {
                     format!("{}<{}>", base_name, arg_strs.join(", "))
                 }
             }
+            // **Reference / pointer name preservation.**
+            //
+            // Default reference (`&T`) and checked-reference (`&checked T`)
+            // flatten to the inner type name — both share the same
+            // value-receiver dispatch semantics as `T` itself, so callers
+            // querying `type_field_type_names` for `(Map, len)` correctly
+            // get `Int` regardless of whether `len` is declared `Int` or
+            // `&Int`.
+            //
+            // Unsafe reference (`&unsafe T`) and raw pointer
+            // (`*const T` / `*mut T`) MUST preserve their `&unsafe ` /
+            // `*const ` / `*mut ` prefix in the carrier name.  The
+            // codegen's raw-pointer-flag propagation (see
+            // `compile_field_access`'s post-GetF marking and
+            // `compile_method_call`'s `offset` / `add` / `sub` /
+            // `is_null` intercepts) keys on this prefix to decide
+            // whether to route a method call through `ptr_offset` and
+            // friends instead of CallM-dispatching against a non-
+            // existent `<InnerType>.<method>` user method.  Stripping
+            // the prefix here turns `self.entries.offset(idx)` into
+            // a CallM against a phantom `Slot.offset`, which the
+            // runtime then routes through the Int-receiver primitive
+            // dispatch (raw pointers are i64-encoded under NaN-
+            // boxing) — surfaces as "method 'Slot.offset' not found
+            // on receiver of runtime kind Int" and aborts every
+            // hash-table body the moment it touches its backing
+            // pointer-array.
             TypeKind::Reference { inner, .. }
-            | TypeKind::CheckedReference { inner, .. }
-            | TypeKind::UnsafeReference { inner, .. }
-            | TypeKind::Pointer { inner, .. } => Self::extract_type_name_from_ast(inner),
+            | TypeKind::CheckedReference { inner, .. } => {
+                Self::extract_type_name_from_ast(inner)
+            }
+            TypeKind::UnsafeReference { inner, .. } => {
+                format!("&unsafe {}", Self::extract_type_name_from_ast(inner))
+            }
+            TypeKind::Pointer { inner, mutable, .. } => {
+                let prefix = if *mutable { "*mut " } else { "*const " };
+                format!("{}{}", prefix, Self::extract_type_name_from_ast(inner))
+            }
             TypeKind::Slice(inner) => {
                 format!("[{}]", Self::extract_type_name_from_ast(inner))
             }

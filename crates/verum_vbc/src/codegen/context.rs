@@ -1914,6 +1914,47 @@ impl CodegenContext {
         }
     }
 
+    /// Authoritatively register `info` under `name`, replacing any prior
+    /// binding regardless of `prefer_existing_functions` and regardless of
+    /// arity collision.
+    ///
+    /// Use this for explicit user bindings — `mount X.Y.{name}` and
+    /// `mount X.Y.fn as alias` — where the user has named the function
+    /// they want and that binding MUST win over any passive archive-load
+    /// or stdlib-bootstrap registration of the same simple name.  Passive
+    /// loads (intrinsic registration, archive ingestion, stdlib bootstrap)
+    /// keep using `register_function` — its first-wins protects the
+    /// FFI-raw / safe-wrapper precedence rule that callers rely on.
+    ///
+    /// Architectural rationale: an explicit mount establishes a per-file
+    /// authoritative binding for the simple name in scope.  When the
+    /// stdlib has 7+ free-function definitions sharing the same simple
+    /// name (`select`, `join`, `len`, `from`, `read`, …) — the user's
+    /// mount path is the disambiguating signal.  Routing arity collisions
+    /// to `name#arity` for an explicit mount silently dropped the user's
+    /// chosen function into a shadow slot while the bare name still
+    /// resolved to whichever passive load happened to be first — the
+    /// runtime then dispatched to a different module's function with the
+    /// matching simple name (e.g. `core.shell.interactive.select`
+    /// instead of `core.async.future.select`).  Authoritative
+    /// registration breaks that collision class by making the user's
+    /// binding the unconditional simple-name owner.
+    ///
+    /// Returns the previously-registered `FunctionInfo`, if any.
+    pub fn register_function_authoritative(
+        &mut self,
+        name: String,
+        info: FunctionInfo,
+    ) -> Option<FunctionInfo> {
+        // Mirror the `name#arity` shadow slot so callers that resolve via
+        // `lookup_function_with_arity` still find the chosen variant —
+        // the authoritative binding owns BOTH `name` AND `name#arity`
+        // (the only key the arity-aware lookup probes).
+        let alt_key = format!("{}#{}", name, info.param_count);
+        self.functions.insert(alt_key, info.clone());
+        self.functions.insert(name, info)
+    }
+
     /// Sets the intrinsic_name for an existing function.
     /// Returns true if the function was found and updated, false otherwise.
     pub fn set_function_intrinsic(&mut self, name: &str, intrinsic_name: String) -> bool {
