@@ -16,8 +16,8 @@
 
 mount core.async.future.{
     Future, ReadyFuture, PendingFuture, Lazy,
-    Join2, Select2, SelectResult,
-    ready, pending, lazy, join, select, join3,
+    Join2, Select2, Join3, SelectResult,
+    ready, pending, lazy,
 };
 mount core.base.maybe.{Maybe, Some, None};
 
@@ -75,34 +75,60 @@ fn test_future_lazy_constructs_without_invoking_closure() {
 
 // =============================================================================
 // Section 4: Join combinator construction
+//
+//   Constructed via direct record literals (rather than the
+//   `join`/`join3` wrapper functions) because the free-function name
+//   `join` is multi-defined across the stdlib (10+ overloads) and
+//   `mount core.async.future.{join}` does not always disambiguate
+//   path-qualified — pinned as task #21 in regression_test.vr §C.
+//   The record-literal form exercises the same combinator type while
+//   bypassing the free-function dispatch path.
 // =============================================================================
 
 @test
 fn test_future_join_constructs() {
-    let f1 = ready(1);
-    let f2 = ready(2);
-    let _joined = join(f1, f2);
+    let f1: ReadyFuture<Int> = ready(1);
+    let f2: ReadyFuture<Int> = ready(2);
+    let _joined: Join2<ReadyFuture<Int>, ReadyFuture<Int>> = Join2 {
+        fut1: Some(f1),
+        fut2: Some(f2),
+        result1: None,
+        result2: None,
+    };
     assert(true);
 }
 
 @test
 fn test_future_join3_constructs() {
-    let f1 = ready(1);
-    let f2 = ready(2);
-    let f3 = ready(3);
-    let _joined = join3(f1, f2, f3);
+    let f1: ReadyFuture<Int> = ready(1);
+    let f2: ReadyFuture<Int> = ready(2);
+    let f3: ReadyFuture<Int> = ready(3);
+    let _joined: Join3<ReadyFuture<Int>, ReadyFuture<Int>, ReadyFuture<Int>> = Join3 {
+        fut1: Some(f1),
+        fut2: Some(f2),
+        fut3: Some(f3),
+        result1: None,
+        result2: None,
+        result3: None,
+    };
     assert(true);
 }
 
 // =============================================================================
 // Section 5: Select combinator construction
+//
+//   Same record-literal rationale as §4: free-function `select`
+//   collides with 7+ stdlib definitions of the same simple name.
 // =============================================================================
 
 @test
-fn test_future_select_constructs() {
-    let f1 = ready(1);
+fn test_future_race_constructs() {
+    let f1: ReadyFuture<Int> = ready(1);
     let f2: PendingFuture<Int> = pending();
-    let _sel = select(f1, f2);
+    let _sel: Select2<ReadyFuture<Int>, PendingFuture<Int>> = Select2 {
+        fut1: Some(f1),
+        fut2: Some(f2),
+    };
     assert(true);
 }
 
@@ -114,21 +140,21 @@ fn test_future_select_constructs() {
 // =============================================================================
 
 @test
-fn test_future_select_result_left_is_left() {
+fn test_future_race_result_left_is_left() {
     let r: SelectResult<Int, Text> = SelectResult.Left(7);
     assert(r is SelectResult.Left);
     assert(!(r is SelectResult.Right));
 }
 
 @test
-fn test_future_select_result_right_is_right() {
+fn test_future_race_result_right_is_right() {
     let r: SelectResult<Int, Text> = SelectResult.Right("won");
     assert(r is SelectResult.Right);
     assert(!(r is SelectResult.Left));
 }
 
 @test
-fn test_future_select_result_match_exhaustive() {
+fn test_future_race_result_match_exhaustive() {
     fn describe(r: SelectResult<Int, Text>) -> Text {
         match r {
             SelectResult.Left(_) => "left",
