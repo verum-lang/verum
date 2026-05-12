@@ -6,7 +6,7 @@
 // cancellation taxonomy (Cancelled / Timeout / ParentCancelled / Aborted).
 // =============================================================================
 
-mount core.async.cancellation.{CancelReason};
+mount core.async.cancellation.{CancelReason, CancellationError};
 
 // =============================================================================
 // Section 1: Variant construction
@@ -88,6 +88,25 @@ fn test_cancellation_is_timeout_false_for_non_timeout_variants() {
     assert(!manual_is_timeout(CancelReason.Cancelled));
     assert(!manual_is_timeout(CancelReason.ParentCancelled));
     assert(!manual_is_timeout(CancelReason.Aborted("x")));
+}
+
+// =============================================================================
+// Section 5: CancellationError record — wraps CancelReason
+// =============================================================================
+
+@test
+fn test_cancellation_error_record_literal_construction() {
+    let e = CancellationError { reason: CancelReason.Cancelled };
+    assert(e.reason is CancelReason.Cancelled);
+}
+
+@test
+fn test_cancellation_error_aborted_round_trip() {
+    let e = CancellationError { reason: CancelReason.Aborted("test-abort") };
+    match e.reason {
+        CancelReason.Aborted(msg) => assert_eq(msg, "test-abort"),
+        _ => assert(false),
+    }
 }
 
 fn main() {}

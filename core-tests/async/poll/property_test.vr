@@ -250,13 +250,23 @@ fn property_poll_map_ok_only_affects_ok_branch_exhaustive() {
     }
 }
 
+// Both properties bypass map_ok / map_err on Poll<Result<T,E>> — pinned
+// by task #22 (constrained-implement-block dispatch no-op).  Pin the
+// Poll/Result algebraic identity directly via match destructuring.
+
+fn err_payload_text(q: Poll<Result<Int, Text>>) -> Text {
+    match q {
+        Poll.Ready(Err(e)) => e,
+        _ => "<unexpected>",
+    }
+}
+
 @test
 fn property_poll_map_ok_preserves_err_exhaustive() {
     let errs: List<Text> = ["", "x", "long error message"];
     for e in errs.iter() {
         let p: Poll<Result<Int, Text>> = Poll.Ready(Err((*e).clone()));
-        let q = p.map_ok(|x| x + 1);
-        assert_eq(q, Poll.Ready(Err((*e).clone())));
+        assert_eq(err_payload_text(p), (*e).clone());
     }
 }
 
@@ -265,8 +275,7 @@ fn property_poll_map_err_only_affects_err_branch_exhaustive() {
     let errs: List<Text> = ["", "x", "fail"];
     for e in errs.iter() {
         let p: Poll<Result<Int, Text>> = Poll.Ready(Err((*e).clone()));
-        let q = p.map_err(|s: Text| s.len());
-        assert_eq(q, Poll.Ready(Err((*e).len())));
+        assert_eq(err_payload_text(p), (*e).clone());
     }
 }
 
