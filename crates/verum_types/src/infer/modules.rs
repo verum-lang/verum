@@ -18005,6 +18005,20 @@ impl TypeChecker {
                 .strip_prefix("core.")
                 .map(|rest| format!("{}.{}", rest, method_name).into());
 
+            // Bare `<Type>.<method>` canonical form: when
+            // `mount core.collections.map.Map` registers `Map` in
+            // module_aliases pointing to `core.collections.map.Map`,
+            // the function is registered under the bare `Map.new` form
+            // by `register_stdlib_static_methods_from_metadata` (env
+            // side) and `archive_ctx_loader::register_module` Type.method
+            // canonical form (codegen side, commit `74312ed4e`).  The
+            // full qualified probes above miss because the module_path
+            // here ends in the TYPE name, not a real module path.
+            let type_method_form: Option<Text> = {
+                let last_seg = module_path.as_str().rsplit('.').next();
+                last_seg.map(|t| format!("{}.{}", t, method_name).into())
+            };
+
             // Fast path: the function may already have been imported into
             // the type env under its qualified-module form by
             // `import_all_from_module` when the mount was processed.
@@ -18014,6 +18028,11 @@ impl TypeChecker {
                 .lookup(&qualified)
                 .cloned()
                 .or_else(|| stripped.as_ref().and_then(|s| self.ctx.env.lookup(s).cloned()))
+                .or_else(|| {
+                    type_method_form
+                        .as_ref()
+                        .and_then(|s| self.ctx.env.lookup(s).cloned())
+                })
                 .or_else(|| {
                     if let Maybe::Some(s) =
                         self.lookup_function_in_module(qualified.as_str())
@@ -18025,6 +18044,15 @@ impl TypeChecker {
                 })
                 .or_else(|| {
                     stripped.as_ref().and_then(|s| {
+                        if let Maybe::Some(scheme) = self.lookup_function_in_module(s.as_str()) {
+                            Some(scheme)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .or_else(|| {
+                    type_method_form.as_ref().and_then(|s| {
                         if let Maybe::Some(scheme) = self.lookup_function_in_module(s.as_str()) {
                             Some(scheme)
                         } else {
