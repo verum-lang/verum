@@ -80,11 +80,21 @@ pub fn rewrite_instruction_ids(instr: &mut Instruction, remap: &dyn IdRemap) {
         | Instruction::GenCreate { func_id, .. } => {
             *func_id = remap.map_function(FunctionId(*func_id)).0;
         }
-        Instruction::CallM { method_id, .. } => {
-            // Method table is a slice of the function table; method_id
-            // is a flat function-id under the hood.
-            *method_id = remap.map_function(FunctionId(*method_id)).0;
-        }
+        // `CallM.method_id` is a STRING id (interned method name —
+        // used by the interpreter's `dispatch_user_method` to resolve
+        // the receiver-type-qualified function name at dispatch time).
+        // It is NOT a function-id and MUST NOT be passed through
+        // `func_id_remap` — doing so silently corrupts the StringId
+        // into a stale FunctionId that the runtime then interprets
+        // as a StringId pointing to arbitrary strings in the module's
+        // string table (observed at runtime as bogus method names
+        // like `addr_len`, `XACK unexpected:`, `)\n`, …).
+        //
+        // The string-id remap pass that runs BEFORE this function
+        // (`remap_archive_string_operands` in `codegen/mod.rs`)
+        // already converts the archive's `method_id` to a codegen-
+        // local StringId; this pass should leave it alone.
+        Instruction::CallM { .. } => {}
         // --- Type table index ---
         Instruction::New { type_id, .. }
         | Instruction::NewG { type_id, .. }
@@ -179,8 +189,18 @@ mod tests {
         }
     }
 
+    /// **Drift-pin**: `CallM.method_id` is a STRING id (interned
+    /// method name), NOT a function id.  The function-id remap
+    /// pass MUST leave it untouched — string-id remap is the
+    /// separate `remap_archive_string_operands` pre-pass in
+    /// `codegen/mod.rs`.  Without this invariant, the second pass
+    /// silently corrupts every cross-module `CallM` by treating its
+    /// `method_id` as a function id, producing runtime panics like
+    /// `method 'addr_len' not found on Int` and
+    /// `method 'XACK unexpected:' not found on Int` (the corrupted
+    /// id points to arbitrary strings in the module's string table).
     #[test]
-    fn function_remap_covers_callm() {
+    fn function_remap_leaves_callm_method_id_untouched() {
         let mut instr = Instruction::CallM {
             dst: Reg(0),
             receiver: Reg(0),
@@ -192,7 +212,10 @@ mod tests {
         };
         rewrite_instruction_ids(&mut instr, &FunctionShift { delta: 100 });
         match instr {
-            Instruction::CallM { method_id, .. } => assert_eq!(method_id, 107),
+            Instruction::CallM { method_id, .. } => assert_eq!(
+                method_id, 7,
+                "CallM.method_id is a StringId; func-id remap must leave it alone"
+            ),
             _ => unreachable!(),
         }
     }
