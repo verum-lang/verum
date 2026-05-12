@@ -1004,35 +1004,17 @@ implement<T> Hash for Weak<T> {
 // Slice utilities
 // =============================================================================
 
-/// Create a slice from raw parts.
-///
-
-/// Delegates to stdlib.intrinsics.slice_from_raw_parts for typed intrinsic handling.
-///
-
-/// # Safety
-///
-
-/// The pointer must be valid for reading `len` elements of type T.
-@inline(always)
-public unsafe fn slice_from_raw_parts<T>(ptr: &unsafe T, len: Int) -> &[T] {
-    core.intrinsics.memory.slice_from_raw_parts<T>(ptr as *const T, len)
-}
-
-/// Create a mutable slice from raw parts.
-///
-
-/// Delegates to stdlib.intrinsics.slice_from_raw_parts_mut for typed intrinsic handling.
-///
-
-/// # Safety
-///
-
-/// The pointer must be valid for reading and writing `len` elements of type T.
-@inline(always)
-public unsafe fn slice_from_raw_parts_mut<T>(ptr: &unsafe T, len: Int) -> &mut [T] {
-    core.intrinsics.memory.slice_from_raw_parts_mut<T>(ptr as *mut T, len)
-}
+// `slice_from_raw_parts` + `slice_from_raw_parts_mut` are mounted
+// directly from `core.intrinsics.memory.{...}` further down in this
+// file.  The previous wrapper-fn design collided with the mount —
+// BOTH register the same simple name in this module's namespace, and
+// the export extractor refused to surface ANY symbol from base.memory
+// because of the variant-vs-type clash diagnostic, cascading to every
+// downstream user of `mount core.base.{replace, swap, ptr_read, ...}`
+// or `mount core.prelude.*` failing with `unbound variable: <name>`.
+// History note: the same pattern existed for `ptr_read` / `ptr_write`
+// and was removed earlier (see "History" comment block near the
+// intrinsics-mount declaration).  This is the missed remnant.
 
 // =============================================================================
 // Memory manipulation functions
