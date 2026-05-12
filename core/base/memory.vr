@@ -1094,18 +1094,12 @@ public fn take<T: Default>(dest: &mut T) -> T {
     replace(dest, T.default())
 }
 
-/// Compare memory regions.
-///
-
-/// Delegates to stdlib.intrinsics.memcmp for typed intrinsic handling.
-///
-
-/// Returns 0 if equal, negative if a < b, positive if a > b.
-@inline(always)
-public fn memcmp<T>(a: &T, b: &T, count: Int) -> Int {
-    let size = T.size * count;
-    core.intrinsics.memory.memcmp(a as *const Byte, b as *const Byte, size)
-}
+// `memcmp` is mounted directly from `core.intrinsics.memory.{...}`
+// further down in this file.  Previously this site declared a
+// typed `public fn memcmp<T>(...)` wrapper that collided with the
+// mount at the simple-name level, breaking base.memory's export
+// extraction.  See the matching commit-history note in the file
+// header for `slice_from_raw_parts*`/`memcpy`/`memmove`/`memset`.
 
 // =============================================================================
 // ManuallyDrop<T> - Prevent automatic drop
@@ -1778,23 +1772,14 @@ public fn try_realloc(
     }
 }
 
-/// Copy memory between non-overlapping regions (raw bytes version).
-///
-
-/// Delegates to stdlib.intrinsics.memcpy for typed intrinsic handling.
-@inline(always)
-public unsafe fn memcpy(dst: &unsafe Byte, src: &unsafe Byte, len: Int) {
-    core.intrinsics.memory.memcpy(dst as *mut Byte, src as *const Byte, len);
-}
-
-/// Copy memory that may overlap (raw bytes version).
-///
-
-/// Delegates to stdlib.intrinsics.memmove for typed intrinsic handling.
-@inline(always)
-public unsafe fn memmove(dst: &unsafe Byte, src: &unsafe Byte, len: Int) {
-    core.intrinsics.memory.memmove(dst as *mut Byte, src as *const Byte, len);
-}
+// `memcpy` / `memmove` / `memset` are mounted directly from
+// `core.intrinsics.memory.{...}` further up in this file.  The
+// raw-bytes wrappers below previously collided at the simple-name
+// level — same export-extraction failure pattern as `slice_from_raw_parts`.
+// Removed.  Users who need the raw-bytes calling shape (`&unsafe Byte`
+// vs the intrinsic's `*const Byte` / `*mut Byte`) call the intrinsic
+// directly with `as *mut Byte` / `as *const Byte` at the call site,
+// matching the established pattern for `ptr_read` / `ptr_write`.
 
 /// Compare memory regions (raw bytes version).
 ///
@@ -1806,13 +1791,4 @@ public unsafe fn memmove(dst: &unsafe Byte, src: &unsafe Byte, len: Int) {
 @inline(always)
 public fn memcmp_bytes(a: &unsafe Byte, b: &unsafe Byte, len: Int) -> Int {
     core.intrinsics.memory.memcmp(a as *const Byte, b as *const Byte, len)
-}
-
-/// Fill memory with a byte value (raw bytes version).
-///
-
-/// Delegates to stdlib.intrinsics.memset for typed intrinsic handling.
-@inline(always)
-public unsafe fn memset(dst: &unsafe Byte, val: Byte, len: Int) {
-    core.intrinsics.memory.memset(dst as *mut Byte, val, len);
 }
