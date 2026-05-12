@@ -4296,12 +4296,6 @@ impl VbcCodegen {
             if is_transparent && args.len() == 1 {
                 // Transparent wrapper: zero-cost pass-through.  The
                 // value IS the inner value at runtime; no boxing.
-                if std::env::var("VERUM_TRACE_TRANSPARENT").is_ok() {
-                    eprintln!(
-                        "[newtype-passthrough] func_name={} sentinel-id arg-len=1",
-                        func_name
-                    );
-                }
                 return self.compile_expr(&args[0]);
             }
             // Named-field record constructor (single OR multi-field).
@@ -5868,6 +5862,79 @@ impl VbcCodegen {
         use verum_ast::expr::ResolvedCallTarget;
         match target {
             ResolvedCallTarget::StaticCall { qualified_name } => {
+                // Raw-pointer arithmetic intercept (pre-resolved
+                // path): the typechecker stamps
+                // `self.entries.offset(idx)` on a `&unsafe Slot<K,V>`
+                // receiver as `StaticCall { qualified_name:
+                // "&unsafe Slot.offset" }`. No matching stdlib body
+                // is registered under that name — `lookup_function`
+                // misses, the fallback re-enters `compile_method_call`
+                // which emits CallM `&unsafe Slot.offset` against
+                // the Int runtime arm (raw pointers NaN-box as Int),
+                // and the dispatcher panics with
+                // `method '&unsafe Slot.offset' not found on
+                // receiver of runtime kind Int`. This abortion takes
+                // down `Map.insert` / every hash-table body the
+                // moment it touches a raw-pointer entry table.
+                //
+                // Detect via the `&unsafe ` prefix on the qualified
+                // name + `offset`/`add`/`sub` method + 1 arg + a
+                // syntactic receiver, and emit the inline ptr_offset
+                // arithmetic directly (mirrors
+                // `verum_vbc::intrinsics::codegen::emit_ptr_offset`:
+                // LoadI(8) + BinaryI{Mul} + BinaryI{Add}). VBC
+                // type-erases to 64-bit values so the element stride
+                // is always 8 bytes.
+                if let Some(recv) = receiver
+                    && args.len() == 1
+                    && matches!(method.name.as_str(), "offset" | "add" | "sub")
+                    && qualified_name.as_str().starts_with("&unsafe ")
+                {
+                    let receiver_reg = self
+                        .compile_expr(recv)?
+                        .or_internal("raw-pointer receiver has no value")?;
+                    let count_reg = self
+                        .compile_expr(&args[0])?
+                        .or_internal("ptr offset count has no value")?;
+                    let final_count_reg = if method.name.as_str() == "sub" {
+                        let neg_reg = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::UnaryI {
+                            op: crate::instruction::UnaryIntOp::Neg,
+                            dst: neg_reg,
+                            src: count_reg,
+                        });
+                        self.ctx.free_temp(count_reg);
+                        neg_reg
+                    } else {
+                        count_reg
+                    };
+                    let stride_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: stride_reg,
+                        value: 8,
+                    });
+                    let byte_offset_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: crate::instruction::BinaryIntOp::Mul,
+                        dst: byte_offset_reg,
+                        a: final_count_reg,
+                        b: stride_reg,
+                    });
+                    let result = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: crate::instruction::BinaryIntOp::Add,
+                        dst: result,
+                        a: receiver_reg,
+                        b: byte_offset_reg,
+                    });
+                    self.ctx.free_temp(stride_reg);
+                    self.ctx.free_temp(byte_offset_reg);
+                    self.ctx.free_temp(final_count_reg);
+                    self.ctx.free_temp(receiver_reg);
+                    self.ctx.mark_raw_pointer(result);
+                    return Ok(Some(result));
+                }
+
                 // Builtin-collection method override: the typechecker
                 // stamps `<Builtin>.<method>` as a static call to the
                 // compiled stdlib body, but those bodies use record
@@ -6870,6 +6937,66 @@ impl VbcCodegen {
                 return self.compile_static_method_call(&func_info, args);
             }
 
+            // **Type-alias resolution** (closes a lenient-skip cluster).
+            //
+            // When `parts[0]` is a Verum type alias (`type IoError is
+            // StreamError;`, `type Bytes is List<Byte>;` …), the variant
+            // constructors and inherent methods are registered under the
+            // CANONICAL type's name (`StreamError.Other`, `List.iter`),
+            // NOT under the alias.  Pre-fix the lookup chain above
+            // missed every aliased `Alias.method(...)` call site —
+            // surfaced at precompile as "undefined variable: IoError /
+            // Bytes / IoResult / …" lenient skip.
+            //
+            // Resolve the first segment through the alias chain (idempotent
+            // when no alias exists — see `resolve_type_alias` at
+            // mod.rs:895) and retry both qualified forms.  Idempotence
+            // is critical: many concrete types (Result, Maybe, …) also
+            // have an entry pointing at themselves; the alias resolver's
+            // canonical fallthrough keeps the existing path correct
+            // when no alias replacement was needed.
+            if let Some(first) = parts.first().cloned() {
+                let resolved = self.resolve_type_alias(&first);
+                if resolved != first {
+                    let mut aliased = parts.clone();
+                    aliased[0] = resolved;
+                    let qualified_verum_alias = aliased.join(".");
+                    let qualified_rust_alias = aliased.join("::");
+                    if let Some(func_info) = self
+                        .ctx
+                        .lookup_qualified_function(&qualified_verum_alias)
+                        .cloned()
+                        && func_info.param_count == args.len()
+                    {
+                        if let Some(tag) = func_info.variant_tag {
+                            return self.compile_variant_constructor_with_tag_named_and_parent(
+                                Some(method.name.as_str()),
+                                tag,
+                                args,
+                                aliased.first().map(|s| s.as_str()),
+                            );
+                        }
+                        return self.compile_static_method_call(&func_info, args);
+                    }
+                    if let Some(func_info) = self
+                        .ctx
+                        .lookup_qualified_function(&qualified_rust_alias)
+                        .cloned()
+                        && func_info.param_count == args.len()
+                    {
+                        if let Some(tag) = func_info.variant_tag {
+                            return self.compile_variant_constructor_with_tag_named_and_parent(
+                                Some(method.name.as_str()),
+                                tag,
+                                args,
+                                aliased.first().map(|s| s.as_str()),
+                            );
+                        }
+                        return self.compile_static_method_call(&func_info, args);
+                    }
+                }
+            }
+
             // Suffix-match fallback — covers the bare-mount module-
             // qualified case where the user writes `Z.method(args)`
             // after a top-level `mount X.Y.Z;` declaration.  The
@@ -6955,7 +7082,13 @@ impl VbcCodegen {
                         && self.ctx.get_var_reg(first).is_err()
                         && !is_type_name(first));
                 // Also treat uppercase names as type namespaces if they have qualified
-                // functions registered (e.g., IoError.WouldBlock, IoError.from_errno)
+                // functions registered (e.g., IoError.WouldBlock, IoError.from_errno).
+                // Resolve type aliases first so `type IoError is StreamError;` callers
+                // recognise `IoError.X` as a type-namespace even when the variants are
+                // registered under the canonical `StreamError.X` form — without alias
+                // resolution every aliased-type variant call surfaced as
+                // "undefined variable: IoError" lenient skip.
+                let resolved_first = self.resolve_type_alias(first);
                 let is_type_ns = !is_module_ns
                     && first
                         .chars()
@@ -6963,7 +7096,11 @@ impl VbcCodegen {
                         .map(|c| c.is_uppercase())
                         .unwrap_or(false)
                     && self.ctx.get_var_reg(first).is_err()
-                    && self.ctx.has_functions_with_prefix(&format!("{}.", first));
+                    && (self.ctx.has_functions_with_prefix(&format!("{}.", first))
+                        || (resolved_first != *first
+                            && self
+                                .ctx
+                                .has_functions_with_prefix(&format!("{}.", resolved_first))));
                 if is_module_ns || is_type_ns {
                     let result = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::LoadNil { dst: result });
@@ -7127,7 +7264,6 @@ impl VbcCodegen {
         if args.len() == 1
             && self.ctx.is_raw_pointer(receiver_reg)
             && matches!(method.name.as_str(), "offset" | "add" | "sub")
-            && let Some(func_info) = self.ctx.lookup_function("ptr_offset").cloned()
         {
             // Compile the count argument.
             let count_reg = self
@@ -7148,33 +7284,42 @@ impl VbcCodegen {
                 count_reg
             };
 
-            // ptr_offset expects (ptr, count) in a contiguous reg
-            // range starting at `args.start`.  Allocate two fresh
-            // consecutive regs, Mov the receiver and count into
-            // them, then emit Call.
-            let arg0 = self.ctx.registers.alloc_fresh();
-            let arg1 = self.ctx.registers.alloc_fresh();
-            self.ctx.emit(Instruction::Mov {
-                dst: arg0,
-                src: receiver_reg,
+            // Emit the ptr_offset arithmetic INLINE — do NOT route
+            // through a Call to a registered `ptr_offset` function.
+            // The stdlib precompile path does not register
+            // `ptr_offset` per-module under every consumer mount,
+            // so a lookup-gated intercept would silently fall
+            // through to CallM "&unsafe Slot.offset" against the
+            // Int runtime arm and panic with
+            // "method '&unsafe Slot.offset' not found on Int".
+            // VBC type-erases to 64-bit values; element stride is
+            // always 8 bytes (mirrors the InlineSequenceId::PtrOffset
+            // implementation in
+            // `verum_vbc::intrinsics::codegen::emit_ptr_offset`).
+            let stride_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadI {
+                dst: stride_reg,
+                value: 8,
             });
-            self.ctx.mark_raw_pointer(arg0);
-            self.ctx.emit(Instruction::Mov {
-                dst: arg1,
-                src: final_count_reg,
+            let byte_offset_reg = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::BinaryI {
+                op: crate::instruction::BinaryIntOp::Mul,
+                dst: byte_offset_reg,
+                a: final_count_reg,
+                b: stride_reg,
             });
-            self.ctx.free_temp(receiver_reg);
-            self.ctx.free_temp(final_count_reg);
-
             let result = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::Call {
+            self.ctx.emit(Instruction::BinaryI {
+                op: crate::instruction::BinaryIntOp::Add,
                 dst: result,
-                func_id: func_info.id.0,
-                args: crate::instruction::RegRange {
-                    start: arg0,
-                    count: 2,
-                },
+                a: receiver_reg,
+                b: byte_offset_reg,
             });
+            self.ctx.free_temp(stride_reg);
+            self.ctx.free_temp(byte_offset_reg);
+            self.ctx.free_temp(final_count_reg);
+            self.ctx.free_temp(receiver_reg);
+
             // The result is itself a raw pointer — propagate the flag
             // so downstream `.offset()` / `.is_null()` calls on the
             // chain stay on the intercept path.
@@ -7803,7 +7948,33 @@ impl VbcCodegen {
                         let bare_name = VbcCodegen::strip_generic_args(type_name);
                         let resolved_type = self.resolve_type_alias(bare_name);
                         let base_type = VbcCodegen::strip_generic_args(&resolved_type);
-                        format!("{}.{}", base_type, method.name)
+                        // Generic type parameter for `self` — typical
+                        // shape in a blanket `implement<T: Bound> Trait
+                        // for T { fn method(&self, ...) { self.other(...) } }`:
+                        // inside the body, `self.other(...)` has static
+                        // receiver type `T` which the codegen must NOT
+                        // burn into the CallM method_id (every concrete
+                        // receiver at the call site has its own
+                        // type-qualified method table; emitting `T.other`
+                        // sends runtime dispatch looking for a literal
+                        // `T.other` entry that doesn't exist).  The
+                        // bare-method-name form lets the runtime's
+                        // method-name lookup route by the receiver's
+                        // ACTUAL type at dispatch time.
+                        //
+                        // Same `is_type_param` classifier as Case 1a
+                        // (named bare-variable receiver) so both arms
+                        // agree on what counts as a generic type
+                        // parameter — drift would re-introduce the
+                        // `T.cmp not found on receiver of runtime kind
+                        // 'Int'` class of bugs that surfaces from
+                        // `implement<T: Ord> PartialOrd for T { fn
+                        // partial_cmp(&self, other) { Some(self.cmp(other)) } }`.
+                        if verum_common::well_known_types::looks_like_type_param(&base_type) {
+                            method.name.to_string()
+                        } else {
+                            format!("{}.{}", base_type, method.name)
+                        }
                     } else {
                         method.name.to_string()
                     }
@@ -9097,15 +9268,6 @@ impl VbcCodegen {
             // Transparent wrapper (newtype / single-element tuple /
             // quotient `of`): zero-cost passthrough.  The value IS
             // the inner value at runtime — no boxing, no Call.
-            if std::env::var("VERUM_TRACE_TRANSPARENT").is_ok() {
-                eprintln!(
-                    "[transparent-wrapper] passthrough func_id={} param_count={} parent_type={:?} return_type_name={:?}",
-                    func_info.id.0,
-                    func_info.param_count,
-                    func_info.parent_type_name,
-                    func_info.return_type_name
-                );
-            }
             return self.compile_expr(&args[0]);
         }
         if func_info.id.0 == u32::MAX / 2 && args.is_empty() {
