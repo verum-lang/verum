@@ -1264,24 +1264,41 @@ pub(in super::super) fn handle_call_method(
     // functions because the interpreter has its own optimized handlers with
     // correct memory layout. The is_already_qualified flag is irrelevant for
     // builtin collections.
-    if !is_builtin_collection && let Some(&cached_fid) = state.method_cache.get(&cache_key) {
+    // Method-dispatch cache is consulted for every receiver — builtin
+    // and user. The dispatch_primitive_method run above (line 554)
+    // already handled cases where the receiver is a builtin collection
+    // AND the method is a recognised builtin operation; if we're past
+    // that, we either have a non-builtin receiver or an unrecognised
+    // method whose user-compiled body has been registered.
+    if let Some(&cached_fid) = state.method_cache.get(&cache_key) {
         // Verify the cached function still exists (should always be true within a module)
         if state.module.get_function(cached_fid).is_some() {
             found_func_id = Some(cached_fid);
         }
     }
 
-    // Skip user-defined method lookup for builtin collections (Map, Set, List).
-    // The interpreter has optimized builtin handlers for these types with correct
-    // memory layout. Using compiled stdlib functions would fail because they expect
-    // different internal representations (e.g., `self.inner.insert(…)` on a
-    // stdlib `Set<T>` assumes a struct `{ inner: Map<T,()> }` layout, but
-    // `Set.new()` returns the builtin `[count, capacity, entries_ptr]`
-    // layout — dereferencing a non-existent field panics with
-    // "field access out of bounds"). New collection methods belong as
-    // builtin handlers alongside the existing `insert` / `contains` / …
-    // dispatchers above (see the `"filter" if is_set` arm below).
-    if found_func_id.is_none() && !is_builtin_collection {
+    // **User-method fallback for builtin collections.**
+    //
+    // The interpreter's builtin handlers in `dispatch_primitive_method`
+    // cover the common Map/Set/List/Deque/Channel operations with the
+    // builtin `[count, capacity, entries_ptr]` layout (and run BEFORE
+    // this site at the line-554 call). Anything the builtin handler
+    // doesn't recognise — e.g., the private `Map.make_hash_val`
+    // helper called from user-compiled `Map.insert`, or methods added
+    // to user-side `core/collections/*.vr` impl blocks — has to fall
+    // back to a user-method lookup; otherwise CallM panics with
+    // `method '…' not found on receiver of runtime kind Object` even
+    // when the function IS registered in `state.module`.
+    //
+    // Safety: layout-mismatch methods (`self.inner.insert(...)` on
+    // builtin Map) would still surface as `field access out of bounds`
+    // at runtime, but that's strictly more diagnosable than the
+    // generic "method not found" panic — and the precompiled stdlib
+    // doesn't currently emit such methods for the builtin variants
+    // (the stdlib `Map.insert` body is shadowed by the builtin handler
+    // at line 4029, so its `self.entries.insert(…)` slot-write never
+    // executes on a builtin Map).
+    if found_func_id.is_none() {
         // First try the old approach: treat method_id as function_id for backwards compatibility
         let func_id = FunctionId(method_id);
         if let Some(func) = state.module.get_function(func_id) {
