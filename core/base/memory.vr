@@ -1346,6 +1346,20 @@ implement<T> MaybeUninit<T> {
 public type Cow<T> is Borrowed(&T) | Owned(T);
 
 implement<T: Clone> Cow<T> {
+    /// Constructor: wrap a borrowed reference as a `Cow.Borrowed`.
+    /// Ergonomic lowercase alias for the variant constructor so user
+    /// code can write `Cow.borrowed(&val)` without importing the
+    /// `Borrowed` variant name into scope.
+    public fn borrowed(r: &T) -> Cow<T> {
+        Borrowed(r)
+    }
+
+    /// Constructor: wrap an owned value as a `Cow.Owned`.
+    /// Sister to `borrowed`; same ergonomics.
+    public fn owned(v: T) -> Cow<T> {
+        Owned(v)
+    }
+
     /// Returns true if this is a borrowed value.
     public fn is_borrowed(&self) -> Bool {
         match self {
