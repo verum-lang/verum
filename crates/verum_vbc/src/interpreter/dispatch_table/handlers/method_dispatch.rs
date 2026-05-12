@@ -2054,6 +2054,41 @@ pub(in super::super) fn handle_call_method(
     })
 }
 
+/// Canonical FxHash mix step from `core/base/protocols.vr`'s
+/// `DefaultHasher` impl.  Mirrors:
+///
+/// ```verum
+/// for byte in bytes {
+///     let rotated = self.state.rotate_left(5);
+///     let mixed   = rotated ^ (*byte as Int);
+///     self.state  = mixed.wrapping_mul(0x517cc1b727220a95);
+/// }
+/// ```
+///
+/// Used to materialise primitive `hash_value()` results at the Tier-0
+/// dispatcher without round-tripping through a Verum-side
+/// `DefaultHasher` allocation — bit-equivalent to what the protocol
+/// default body in `Hash.hash_value` would produce for the same input.
+#[inline]
+pub(super) fn fxhash_bytes(seed: i64, bytes: &[u8]) -> i64 {
+    let mut state: i64 = seed;
+    for &byte in bytes {
+        let rotated = state.rotate_left(5);
+        let mixed = rotated ^ (byte as i64);
+        state = mixed.wrapping_mul(0x517cc1b727220a95_u64 as i64);
+    }
+    state
+}
+
+/// Compute `Int.hash_value()` for an i64 receiver.  Mirrors the
+/// `Hash.hash_value` protocol default body monomorphised onto Int:
+/// `let mut h = DefaultHasher.new(); h.write_int(v); h.finish()`,
+/// which expands to `fxhash_bytes(0, &int_to_bytes(v))`.
+#[inline]
+pub(super) fn hash_value_i64(v: i64) -> i64 {
+    fxhash_bytes(0, &v.to_le_bytes())
+}
+
 /// Returns monotonic nanosecond timestamp using a shared thread-local epoch.
 /// All time operations in the interpreter MUST use this to ensure consistency
 /// between FfiExtended sub-opcodes and method dispatch.
@@ -2379,6 +2414,23 @@ pub(super) fn dispatch_primitive_method(
     if receiver.is_int() {
         let v = receiver.as_i64();
         let result = match method {
+            // Hash protocol — direct materialisation of the protocol's
+            // default `hash_value()` body monomorphised onto Int, plus
+            // `hash(&self, h: &mut Hasher)` which feeds the int's
+            // little-endian bytes into the supplied hasher.
+            //
+            // Routing this here closes the `key.hash_value()` dispatch
+            // gap that crashed every `Map<Int, V>.insert/get/...` body
+            // with "method 'hash_value' not found on Int" — the
+            // precompiler doesn't monomorphise `Int.hash_value` into
+            // the archive because the cross-module load order doesn't
+            // guarantee Hash protocol declaration is registered before
+            // primitives.vr's `implement Hash for Int` triggers
+            // `generate_default_protocol_methods`.  Mirroring the
+            // default body directly at the dispatcher tier is bit-
+            // equivalent to the Verum-side path and skips the
+            // Hasher heap allocation entirely.
+            "hash_value" => Value::from_i64(hash_value_i64(v)),
             "abs" => Value::from_i64(v.abs()),
             "signum" => Value::from_i64(v.signum()),
             "is_positive" => Value::from_bool(v > 0),
@@ -3019,6 +3071,12 @@ pub(super) fn dispatch_primitive_method(
     // Float methods (including NaN which is stored with TAG_NAN)
     if let Some(v) = receiver.try_as_f64() {
         let result = match method {
+            // Hash protocol — mirror `implement Hash for Float`'s
+            // `hasher.write(f.to_le_bytes())` then DefaultHasher
+            // FxHash mix.  Same architectural rationale as Int —
+            // see `hash_value_i64` for the precompile-order gap that
+            // necessitates direct dispatcher-tier monomorphisation.
+            "hash_value" => Value::from_i64(fxhash_bytes(0, &v.to_le_bytes())),
             "abs" => Value::from_f64(v.abs()),
             "ceil" => Value::from_f64(v.ceil()),
             "floor" => Value::from_f64(v.floor()),
@@ -6113,6 +6171,17 @@ pub(super) fn dispatch_primitive_method(
     if receiver.is_small_string() || is_heap_string(receiver) {
         let text = extract_string(receiver, state);
         match method {
+            // Hash protocol — mirror `implement Hash for Text`
+            // (write the UTF-8 bytes into the hasher) composed with
+            // the `Hash.hash_value` protocol default body's
+            // DefaultHasher seed-and-finish.  Same architectural
+            // closure as the Int / Float / Bool arms — see
+            // `hash_value_i64`.  Critical for `Map<Text, V>` whose
+            // make_hash_val path runs the receiver's hash_value()
+            // first thing on every insert / get.
+            "hash_value" => {
+                return Ok(Some(Value::from_i64(fxhash_bytes(0, text.as_bytes()))));
+            }
             "len" => {
                 return Ok(Some(Value::from_i64(text.len() as i64)));
             }
@@ -6368,6 +6437,13 @@ pub(super) fn dispatch_primitive_method(
     if receiver.is_bool() {
         let v = receiver.as_bool();
         let result = match method {
+            // Hash protocol — mirror `implement Hash for Bool`
+            // (write_byte(0/1)) composed with the default
+            // `Hash.hash_value` body.  See `hash_value_i64` for the
+            // architectural rationale; the analogous defect existed
+            // for every primitive that the precompiler failed to
+            // monomorphise.
+            "hash_value" => Value::from_i64(fxhash_bytes(0, &[if v { 1u8 } else { 0u8 }])),
             "and_then" => {
                 // Eager AND: true.and_then(x) = x, false.and_then(x) = false
                 if v {
@@ -7956,4 +8032,55 @@ pub(super) fn make_ordering(
 ) -> InterpreterResult<Value> {
     let tag = verum_common::well_known_types::ordering_tag_for_std(ord);
     alloc_unit_variant(state, tag)
+}
+
+#[cfg(test)]
+mod hash_value_pin_tests {
+    use super::{fxhash_bytes, hash_value_i64};
+
+    /// `fxhash_bytes(0, &[])` is the identity for the FxHash mix
+    /// (no bytes → no mix step) — the seed passes through unchanged.
+    /// Pins the boundary case so a future "always run at least one
+    /// mix step" refactor doesn't silently change the contract.
+    #[test]
+    fn fxhash_empty_byte_slice_is_seed_identity() {
+        assert_eq!(fxhash_bytes(0, &[]), 0);
+        assert_eq!(fxhash_bytes(42, &[]), 42);
+        assert_eq!(fxhash_bytes(-1, &[]), -1);
+    }
+
+    /// Same input → same hash, regardless of call order.  The
+    /// determinism contract `Map.make_hash_val` relies on.
+    #[test]
+    fn hash_value_i64_is_deterministic() {
+        for v in [0_i64, 1, -1, 42, i64::MAX, i64::MIN, 0x517cc1b727220a95_u64 as i64] {
+            assert_eq!(hash_value_i64(v), hash_value_i64(v));
+        }
+    }
+
+    /// Distinct inputs typically produce distinct hashes (avalanche
+    /// property of the FxHash mix step over 8 bytes).  Not a
+    /// cryptographic claim — just enough collision-resistance for
+    /// the test to fail if someone replaces the mix step with a
+    /// no-op (`hash_value_i64(v) = v`).
+    #[test]
+    fn hash_value_i64_spreads_neighbours() {
+        let h0 = hash_value_i64(0);
+        let h1 = hash_value_i64(1);
+        let h2 = hash_value_i64(2);
+        assert_ne!(h0, h1, "0 and 1 must hash differently");
+        assert_ne!(h1, h2, "1 and 2 must hash differently");
+        assert_ne!(h0, h2, "0 and 2 must hash differently");
+    }
+
+    /// `hash_value_i64` is exactly `fxhash_bytes(0, &v.to_le_bytes())`.
+    /// Pins the relationship so a future "use big-endian bytes"
+    /// drive-by doesn't silently desync this from the Verum-side
+    /// `DefaultHasher.write_int` contract.
+    #[test]
+    fn hash_value_i64_mirrors_fxhash_over_le_bytes() {
+        for v in [0_i64, 1, -1, 42, i64::MAX, i64::MIN] {
+            assert_eq!(hash_value_i64(v), fxhash_bytes(0, &v.to_le_bytes()));
+        }
+    }
 }
