@@ -14601,60 +14601,106 @@ impl VbcCodegen {
         // hazard where user-reordered field literals would silently
         // permute payload slots.
         let mut descriptor_match: Option<(String, Vec<String>)> = None;
-        let variant_tag = self
-            .ctx
-            .lookup_function(&variant_name)
-            .and_then(|info| info.variant_tag)
-            .or_else(|| {
-                self.ctx
-                    .lookup_function(&dot_name)
-                    .and_then(|info| info.variant_tag)
-            })
-            .or_else(|| {
-                // Try simple name (last segment)
-                variant_name
-                    .rsplit("::")
-                    .next()
-                    .and_then(|simple| self.ctx.lookup_function(simple))
-                    .and_then(|info| info.variant_tag)
-            })
-            .or_else(|| {
-                // Simple name not found (likely in collision set).
-                // Try to disambiguate using field count.
-                let simple = variant_name.rsplit("::").next().unwrap_or(&variant_name);
-                self.ctx
-                    .find_variant_by_suffix_and_args(simple, fields.len())
-            })
-            .or_else(|| {
-                // Final fallback: scan the codegen's `TypeDescriptor`
-                // table.  Cross-module stdlib sum types
-                // (e.g. `core.shell.result.ShellError`) reach codegen
-                // via metadata import — their `TypeDescriptor.variants`
-                // are populated, but `register_type_constructors` (which
-                // pushes variant ctors into `ctx.functions`) only runs
-                // for types whose `compile_type_decl` was invoked. The
-                // type-table scan covers exactly that gap.
-                //
-                // Without this branch, qualified variant literals like
-                // `ShellError.SpawnFailed { command, reason }` fell
-                // through to the plain-record path below, allocated a
-                // type=0 New, and resolved field indices via the
-                // global interned-name id table — which produced
-                // out-of-bounds SetField at runtime (field index = the
-                // interned name id, not the variant's positional slot).
-                let last_dot_or_colon = dot_name.rfind('.');
-                if let Some(idx) = last_dot_or_colon {
-                    let parent_path = &dot_name[..idx];
-                    let last = &dot_name[idx + 1..];
-                    if let Some((tag, parent_canonical, decl_field_names)) =
-                        self.find_variant_in_type_descriptors(parent_path, last)
-                    {
-                        descriptor_match = Some((parent_canonical, decl_field_names));
-                        return Some(tag);
-                    }
-                }
-                None
+        // **Record-vs-variant disambiguation by FIELD-NAME SET**.
+        //
+        // Pre-fix: the literal `Cell { value: v }` (where Cell is
+        // `core.base.cell.Cell`, a Record with field `value`) was
+        // miscompiled as `Expr.Cell { … }` (variant from
+        // `core.security.zk.stark.air` with fields `column, offset`)
+        // because both register under simple name `Cell` and the
+        // first-wins collision gave the variant ctor the simple-name
+        // slot in `ctx.functions`.  The variant_tag chain below
+        // accepted the colliding variant unconditionally, emitted
+        // MakeVariant tag=1, and produced a heap object with type_id
+        // 0x8001 — every subsequent `.value` field access hit the
+        // variant auto-deref at `handle_get_field:297`, reading
+        // payload[0] instead of the record's value field.
+        //
+        // Fundamental fix: when the literal's path is a bare simple
+        // name (single segment) AND the simple name is ALSO a known
+        // record type whose declared fields are a SUPERSET of the
+        // literal's field names, the literal IS that record — not the
+        // colliding variant.  The check is positive (must match the
+        // literal's fields) so it's safe for both shapes:
+        //   * `Cell { value: v }` against record `Cell { value: T }`
+        //     and variant `Expr.Cell { column, offset }`: record fields
+        //     {value} ⊇ {value} ✓, variant fields {column, offset} ⊉
+        //     {value} ✗ → record wins.
+        //   * `Cell { column: 0, offset: 0 }` in air.vr against the
+        //     same pair: record fields {value} ⊉ {column, offset} ✗,
+        //     variant fields {column, offset} ⊇ {column, offset} ✓
+        //     → variant wins (the existing chain handles this case
+        //     because the record-fields check fails here).
+        //
+        // The disambiguator only fires when the path is single-
+        // segment AND collides — qualified `Parent.Variant` literals
+        // and non-colliding bare ctors keep their existing resolution.
+        let path_is_qualified = variant_name.contains("::") || variant_name.contains('.');
+        let literal_field_names: std::collections::HashSet<&str> = fields
+            .iter()
+            .map(|f| f.name.name.as_str())
+            .collect();
+        let simple_resolves_to_record = !path_is_qualified
+            && self.type_field_layouts.get(variant_name.as_str()).is_some_and(|decl| {
+                literal_field_names.iter().all(|n| decl.iter().any(|d| d == n))
             });
+        let variant_tag = if simple_resolves_to_record {
+            None
+        } else {
+            self.ctx
+                .lookup_function(&variant_name)
+                .and_then(|info| info.variant_tag)
+                .or_else(|| {
+                    self.ctx
+                        .lookup_function(&dot_name)
+                        .and_then(|info| info.variant_tag)
+                })
+                .or_else(|| {
+                    // Try simple name (last segment)
+                    variant_name
+                        .rsplit("::")
+                        .next()
+                        .and_then(|simple| self.ctx.lookup_function(simple))
+                        .and_then(|info| info.variant_tag)
+                })
+                .or_else(|| {
+                    // Simple name not found (likely in collision set).
+                    // Try to disambiguate using field count.
+                    let simple = variant_name.rsplit("::").next().unwrap_or(&variant_name);
+                    self.ctx
+                        .find_variant_by_suffix_and_args(simple, fields.len())
+                })
+                .or_else(|| {
+                    // Final fallback: scan the codegen's `TypeDescriptor`
+                    // table.  Cross-module stdlib sum types
+                    // (e.g. `core.shell.result.ShellError`) reach codegen
+                    // via metadata import — their `TypeDescriptor.variants`
+                    // are populated, but `register_type_constructors` (which
+                    // pushes variant ctors into `ctx.functions`) only runs
+                    // for types whose `compile_type_decl` was invoked. The
+                    // type-table scan covers exactly that gap.
+                    //
+                    // Without this branch, qualified variant literals like
+                    // `ShellError.SpawnFailed { command, reason }` fell
+                    // through to the plain-record path below, allocated a
+                    // type=0 New, and resolved field indices via the
+                    // global interned-name id table — which produced
+                    // out-of-bounds SetField at runtime (field index = the
+                    // interned name id, not the variant's positional slot).
+                    let last_dot_or_colon = dot_name.rfind('.');
+                    if let Some(idx) = last_dot_or_colon {
+                        let parent_path = &dot_name[..idx];
+                        let last = &dot_name[idx + 1..];
+                        if let Some((tag, parent_canonical, decl_field_names)) =
+                            self.find_variant_in_type_descriptors(parent_path, last)
+                        {
+                            descriptor_match = Some((parent_canonical, decl_field_names));
+                            return Some(tag);
+                        }
+                    }
+                    None
+                })
+        };
 
         if let Some(tag) = variant_tag {
             // Record variant: prefer the path-derived parent type
