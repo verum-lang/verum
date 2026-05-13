@@ -413,6 +413,78 @@ pub(in super::super) fn handle_call_method(
         receiver
     };
 
+    // **Text `&mut self` shrink intercepts** — `truncate`, `clear`,
+    // `pop`. The user-side bodies write `self.len = boundary` via
+    // SetF on the small/static-Text shape (`{ptr, len, cap}`); when
+    // `&mut self` is a literal small-string Text (e.g.
+    // `let mut s: Text = "hello"`), the small-string is NaN-boxed in
+    // the register itself — there's no heap object with `.len` to
+    // SetF. Pre-fix the SetF panicked with `NullPointerAt opcode 0x63
+    // site Text.truncate`. (Audit §E — closes 4 NULL_PTR tests:
+    // truncate_shortens / truncate_to_zero / clear_empties /
+    // pop_returns_last_char.)
+    //
+    // The fix: intercept these methods at the dispatcher level, do
+    // the shrink in Rust against the canonical Text representation,
+    // and write the new value back through the same CBGR-ref-or-
+    // direct-register path the existing push intercepts use.
+    if (bare_method_name == "truncate"
+        || bare_method_name == "clear"
+        || bare_method_name == "pop")
+        && (dispatch_receiver.is_small_string() || is_heap_string(&dispatch_receiver))
+    {
+        let mut current_text = extract_string(&dispatch_receiver, state);
+        let caller_base = state.reg_base();
+        let popped_char: Option<char> = match bare_method_name.as_str() {
+            "truncate" => {
+                let new_len = if args.count >= 1 {
+                    state.get_reg(Reg(args.start.0)).as_i64()
+                } else {
+                    0
+                };
+                let n = new_len.max(0) as usize;
+                if n < current_text.len() {
+                    // Find prior char boundary at-or-before n.
+                    let mut boundary = n;
+                    while boundary > 0 && !current_text.is_char_boundary(boundary) {
+                        boundary -= 1;
+                    }
+                    current_text.truncate(boundary);
+                }
+                None
+            }
+            "clear" => {
+                current_text.clear();
+                None
+            }
+            "pop" => {
+                let last = current_text.pop();
+                last
+            }
+            _ => unreachable!(),
+        };
+        let new_value = alloc_string_value(state, &current_text)?;
+        if is_cbgr_ref(&receiver) {
+            let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
+            state.registers.set_absolute(abs_index, new_value);
+        } else {
+            state.registers.set(caller_base, receiver_reg, new_value);
+        }
+        // Return value depends on method:
+        //   * truncate / clear → Unit
+        //   * pop → Maybe<Char>
+        let result = if bare_method_name == "pop" {
+            match popped_char {
+                Some(c) => make_some_value(state, Value::from_i64(c as u32 as i64))?,
+                None => make_none_value(state)?,
+            }
+        } else {
+            Value::unit()
+        };
+        state.set_reg(dst, result);
+        return Ok(DispatchResult::Continue);
+    }
+
     // Text mutation intercepts (push, push_str, push_char) — these
     // mutate &mut self in the user's stdlib body via raw-pointer
     // memcpy/memset, an FFI-style intrinsic that the interpreter
