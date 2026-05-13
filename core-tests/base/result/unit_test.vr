@@ -37,13 +37,16 @@ mount core.base.result.{
     Result, Ok, Err,
     ResultIter,
     Error,
-    RetryBackoff,
-    RetryOptions,
     ResultContextError,
     Exit, Success, Failure, Defect, DefectInfo,
     Cause, Fail, Die, Then, Both, Empty,
     Validated, Valid, Invalid,
 };
+// RetryOptions / RetryBackoff live in core.base.retry (extracted module
+// per the foundation-clean discipline documented at core/base/retry.vr:7
+// "keeps core/base/result.vr foundation-clean"). Mount explicitly from
+// there.
+mount core.base.retry.{RetryBackoff, RetryOptions};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.collections.list.{List};
