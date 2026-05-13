@@ -6318,12 +6318,57 @@ impl VbcCodegen {
             context_type.as_deref(),
         );
 
-        // If there are arguments, set the variant data
+        // If there are arguments, set the variant data.
+        //
+        // **Per-arg payload-type propagation** (closes nested
+        // construction half of task #22): when we know the variant's
+        // declared payload types (`FunctionInfo.variant_payload_types`),
+        // stash the i-th element into `current_return_type_name`
+        // before recursing into `compile_expr(arg)`.  This lets
+        // nested variant constructors (`Poll.Ready(Err(7))` — inner
+        // `Err(7)` runs with the outer `Poll.Ready`'s payload type
+        // `Result<Int,Int>` as its `context_type`) consult the right
+        // type's variant table for tag resolution.  Mirrors the
+        // destructure-side propagation at `compile_pattern_test` line
+        // ~10832 (commit `90b94e68b`).  Save/restore around each arg
+        // so siblings start from the same outer return-type context.
         if !args.is_empty() {
+            let payload_types: Option<Vec<String>> = self
+                .ctx
+                .lookup_function(name)
+                .and_then(|info| info.variant_payload_types.clone())
+                .or_else(|| {
+                    // When the bare lookup picked a different type's
+                    // same-named variant (first-wins race), prefer the
+                    // canonical payload-types via the context_type
+                    // table.  Match by `(context_type, simple_name)`
+                    // through the variant index.
+                    if let Some(ref ctx) = context_type {
+                        let simple = name.rsplit('.').next().unwrap_or(name);
+                        self.ctx
+                            .find_variant_payload_types_by_type_and_name(ctx, simple)
+                    } else {
+                        None
+                    }
+                });
+
             // Compile the first argument (most variants have 0 or 1 args)
+            let saved_first = if let Some(ref pts) = payload_types
+                && let Some(payload_ty) = pts.first()
+                && !payload_ty.is_empty()
+            {
+                let prev = self.ctx.current_return_type_name.take();
+                self.ctx.current_return_type_name = Some(payload_ty.clone());
+                Some(prev)
+            } else {
+                None
+            };
             let data_val = self
                 .compile_expr(&args[0])?
                 .or_internal("variant constructor arg has no value")?;
+            if let Some(prev) = saved_first {
+                self.ctx.current_return_type_name = prev;
+            }
 
             self.ctx.emit(Instruction::SetVariantData {
                 variant: result,
@@ -6335,9 +6380,22 @@ impl VbcCodegen {
 
             // Handle additional arguments for record variants
             for (i, arg) in args.iter().skip(1).enumerate() {
+                let saved_n = if let Some(ref pts) = payload_types
+                    && let Some(payload_ty) = pts.get(i + 1)
+                    && !payload_ty.is_empty()
+                {
+                    let prev = self.ctx.current_return_type_name.take();
+                    self.ctx.current_return_type_name = Some(payload_ty.clone());
+                    Some(prev)
+                } else {
+                    None
+                };
                 let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
                     CodegenError::internal("variant constructor arg has no value")
                 })?;
+                if let Some(prev) = saved_n {
+                    self.ctx.current_return_type_name = prev;
+                }
 
                 self.ctx.emit(Instruction::SetVariantData {
                     variant: result,

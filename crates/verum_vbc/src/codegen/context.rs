@@ -2246,6 +2246,28 @@ impl CodegenContext {
             .and_then(|info| info.variant_tag)
     }
 
+    /// Find the declared payload types for a variant looked up by
+    /// `(type_name, variant_name)` — used by the construction-side
+    /// payload-type propagation at
+    /// `compile_variant_constructor_hinted` to push the per-arg
+    /// `current_return_type_name` context into nested
+    /// `compile_expr` calls (closes nested case of task #22).
+    ///
+    /// Returns `None` when the qualified `<type>.<variant>` entry
+    /// doesn't exist or has no payload-types vector — the caller
+    /// then proceeds without per-arg context, identical to pre-fix
+    /// behaviour.
+    pub fn find_variant_payload_types_by_type_and_name(
+        &self,
+        type_name: &str,
+        variant_name: &str,
+    ) -> Option<Vec<String>> {
+        let qualified = format!("{}.{}", type_name, variant_name);
+        self.functions
+            .get(&qualified)
+            .and_then(|info| info.variant_payload_types.clone())
+    }
+
     /// Find the parent type of a variant by searching "*.variant_name" entries
     /// filtered by param_count. Returns the parent_type_name if exactly one match.
     /// Used to resolve variant → parent type when simple name is collided.
@@ -2548,6 +2570,19 @@ impl CodegenContext {
             .get(name)
             .cloned()
             .unwrap_or_else(|| name.to_string())
+    }
+
+    /// Resolve `type Foo is Bar;` alias to its canonical target.
+    ///
+    /// The codegen-side type-alias registry isn't populated yet;
+    /// returning the input verbatim is a no-op fallback that keeps
+    /// callers like `expressions.rs::is_type_ns` correct (`resolved
+    /// != *first` evaluates false → alias-arm of the OR doesn't
+    /// fire, primary `has_functions_with_prefix` still works).
+    /// When the codegen alias map is wired in a future commit this
+    /// method becomes the canonical resolver.
+    pub fn resolve_type_alias(&self, name: &str) -> String {
+        name.to_string()
     }
 
     /// Clears the required contexts and aliases.
