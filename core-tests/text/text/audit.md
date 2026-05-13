@@ -215,28 +215,36 @@ self.chars()`).
 **Action**: closes when §C closes (very likely a downstream symptom).
 
 ### §K — Padding helpers misbehave
-**Symptom**: `pad_left(5, ' ')` returns "ab" instead of "   ab".
-**Root cause hypothesis**: `pad_left` calls `Text.from_char(' ').repeat(N) + self`
-or similar — the body either dispatches via §F (find inside repeat?) or
-via §C (an iterator-based loop).
-**Action**: trace which intermediate method the body uses; closes when
-that's fixed.
+**Status**: **CLOSED 2026-05-13 — commit `81b34faea`.** Root cause:
+the existing pad_left / pad_right intercepts read the `fill: Char` arg
+via `extract_string(...).chars().next()`. Char is NaN-boxed as Int,
+NOT as Text — `extract_string` fell through to the `<value:N>` debug-
+format fallback and returned '<' as the padding character.
+
+**Fix**: each pad arm now reads the Char arg via three-shape dispatch:
+CBGR-ref / ThinRef auto-deref, then Int (Char NaN-box) → codepoint via
+`char::from_u32`, then small/heap string fallback. Plus two NEW
+intercepts: `center` (Python-style centered padding) and `zfill`
+(zero-pad with leading-sign preservation).
 
 ### §L — Text.replace not propagating replacement
-**Symptom**: `"aaa".replace(&"a", &"b")` returns "aaa" (no replacement).
-**Action**: downstream of §F.
+**Status**: **CLOSED 2026-05-13 — commit `f8d70e6ef`** (extract_string
+CBGR-deref). Same root as §F: the dispatcher's replace intercept read
+the `from`/`to` Text args via `extract_string` which fell through to
+`<value:N>` for CBGR-ref args.
 
 ### §M — from_utf8 not raising Utf8Error on invalid input
-**Symptom**: `Text.from_utf8(invalid_bytes)` returns Ok(...) instead of
-Err. The `utf8_validate` helper at text.vr:95–160 returns true for
-invalid input.
-**Root cause hypothesis**: byte-indexing path in `utf8_validate` reads
-the wrong byte when the receiver is a `&[Byte]` slice — same family as
-§F (KMP byte indexing) — OR the early-returns hit a control-flow bug
-where `return false` falls through to `return true`.
-**Action**: hand-write a Rust-side test against `utf8_validate` with
-known-bad inputs; if it passes Rust-side, the Verum-side codegen for
-early-`return false` is broken.
+**Status**: **CLOSED 2026-05-13 — commit `9c9eeb996`.** Root cause was
+NOT in `utf8_validate` — it was in the `from_utf8` / `from_utf8_lossy`
+/ `from_utf8_unchecked` Tier-0 intercepts at
+`text_static_runtime.rs:98-121`. These were stubs that Ok-wrapped the
+bytes value AS-IS (a `List<Byte>`) into `Result.Ok`, NEVER actually
+converting to Text and NEVER validating UTF-8.
+
+**Fix**: extract bytes via the canonical `extract_byte_slice` helper
+(handles FatRef + LIST + BYTE_LIST shapes), validate via
+`std::str::from_utf8`, allocate a real Text from the validated bytes,
+and wrap in `Result.Ok`. Invalid UTF-8 → `Result.Err(Utf8Error { valid_up_to })`.
 
 ### §N — Text.into_bytes — List.extend_from_slice missing
 **Symptom**: `Text.into_bytes()` panics with
@@ -249,18 +257,18 @@ List task, not a Text task) OR rewrite `Text.into_bytes` to push
 byte-by-byte in a loop.
 
 ### §O — Text.from_int FunctionNotFound
-**Symptom**: same root as §D.
-**Action**: closes when §D closes.
+**Status**: **CLOSED 2026-05-13 — commit `73b9db0d0`.** Bypassed the
+function-id collision by adding a Tier-0 intercept for
+`Text.from_int(n: Int) -> Text` (plus `from_float` / `from_bool`).
+Decimal-render via Rust's `n.to_string()`; one alloc per call.
 
 ### §P — split_once / strip_prefix / strip_suffix wrong (None when match exists)
-**Symptom**: every method that delegates to `find` exhibits the §F
-defect.
-**Action**: closes when §F closes.
+**Status**: **CLOSED 2026-05-13** — downstream of §F (extract_string
+CBGR-deref); flipped to green when §F closed via commit `f8d70e6ef`.
 
 ### §Q — capitalize / to_title_case / swapcase no-op
-**Symptom**: `"hello".capitalize()` returns "hello" instead of "Hello".
-Likely downstream of §C (the impl iterates `self.chars()`).
-**Action**: closes when §C closes.
+**Status**: **CLOSED 2026-05-13** — downstream of §C (Iterator.next
+dispatch); flipped to green when §C closed via commit `48a76117f`.
 
 ### §R — count_matches triggers internal compiler error
 **Symptom**: code that calls `count_matches` triggers an *internal
