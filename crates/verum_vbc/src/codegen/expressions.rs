@@ -12414,6 +12414,19 @@ impl VbcCodegen {
                 // 1. If we have a match scrutinee type, try qualified lookup (e.g., IpAddr.V6)
                 // 2. Fall back to simple name lookup (e.g., V6)
                 // 3. Search for any qualified variant ending with .VariantName
+                //
+                // Task #25 fix — scrutinee-aware lookup MUST strip generic args
+                // from `match_scrutinee_type` ("Result<Int, Int>" → "Result")
+                // before constructing the qualified key, because the function
+                // table stores variant constructors under their *parent type
+                // base* ("Result.Err"), never the instantiated form. Without
+                // this strip the qualified probe always misses, falls through
+                // to the bare-name `lookup_function("Err")` which returns
+                // whichever sibling stdlib type (`WebSocketDecodeError`,
+                // `IoError`, `JoinError`, …) registered first — so `e` in
+                // `match r { Err(e) => e + 1 }` over `Result<Int, Int>` bound
+                // to the wrong-parent's payload type (e.g. Text-shaped),
+                // surfacing as `+` routing to Text concat at codegen time.
                 let payload_types: Option<Vec<String>> = {
                     // Extract simple variant name (e.g., "Num" from "Val::Num")
                     let simple_variant = variant_name.rsplit("::").next().unwrap_or(&variant_name);
@@ -12426,11 +12439,23 @@ impl VbcCodegen {
                             .match_scrutinee_type
                             .as_ref()
                             .and_then(|parent_type| {
+                                // Strip generic args so "Result<Int, Int>" →
+                                // "Result" before composing the qualified key.
+                                let base = crate::codegen::VbcCodegen::strip_generic_args(parent_type);
                                 // Try "ParentType.SimpleVariant" (e.g., "Val.Num")
-                                let qualified_name = format!("{}.{}", parent_type, simple_variant);
+                                let qualified_name = format!("{}.{}", base, simple_variant);
                                 self.ctx
                                     .lookup_function(&qualified_name)
                                     .and_then(|info| info.variant_payload_types.clone())
+                                    .or_else(|| {
+                                        // Also try without strip — when the
+                                        // scrutinee_type was already a bare
+                                        // parent name (no `<...>`).
+                                        let qualified_name = format!("{}.{}", parent_type, simple_variant);
+                                        self.ctx
+                                            .lookup_function(&qualified_name)
+                                            .and_then(|info| info.variant_payload_types.clone())
+                                    })
                             });
 
                     qualified_lookup
@@ -12515,7 +12540,31 @@ impl VbcCodegen {
                                             .and_then(|types| types.get(i))
                                             .filter(|t| !is_generic_param(t));
 
-                                        if let Some(type_name) = concrete_payload {
+                                        // Task #25 — when the scrutinee carries concrete generic
+                                        // args (e.g. `Result<Int, Int>`), the scrutinee-extracted
+                                        // inner types are the AUTHORITATIVE source.  Step-1's
+                                        // `payload_types` came from `lookup_function(qualified)`
+                                        // which can return a collision-polluted entry for a
+                                        // sibling stdlib type whose variant shares the same
+                                        // simple name (`Result.Err` vs `WebSocketDecodeError.Err`,
+                                        // `Maybe.None` vs `RecoveryStrategy.None`, etc.) — when
+                                        // the archive_ctx_loader's variant_index first-wins
+                                        // resolved to the wrong parent.  Prefer the scrutinee's
+                                        // concrete generic args over the (possibly polluted)
+                                        // payload_types whenever the scrutinee provides them.
+                                        let scrutinee_concrete_args: Option<Vec<String>> = self
+                                            .ctx
+                                            .match_scrutinee_type
+                                            .as_ref()
+                                            .map(|st| self.extract_inner_types(st))
+                                            .filter(|inner| {
+                                                !inner.is_empty()
+                                                    && inner.iter().all(|t| !is_generic_param(t))
+                                            });
+
+                                        if let Some(type_name) = concrete_payload
+                                            .filter(|_| scrutinee_concrete_args.is_none())
+                                        {
                                             Some(type_name.clone())
                                         } else {
                                             // Fall back to extracting inner types from scrutinee type.
@@ -12524,14 +12573,22 @@ impl VbcCodegen {
                                             self.ctx.match_scrutinee_type.as_ref().and_then(|scrutinee_type| {
                                                 let inner_types = self.extract_inner_types(scrutinee_type);
                                                 // Look up the variant's field position from its definition.
-                                                // For a variant with tag N in a type with K inner types,
-                                                // use the variant's declared position in the type's parameter list.
-                                                if let Some(info) = self.ctx.lookup_function(&variant_name)
-                                                    .or_else(|| {
-                                                        // Try qualified lookup: ParentType::VariantName
-                                                        let base = crate::codegen::VbcCodegen::strip_generic_args(scrutinee_type);
-                                                        self.ctx.lookup_function(&format!("{}::{}", base, variant_name))
-                                                    })
+                                                // Task #25 — PRIORITIZE scrutinee-aware lookup over
+                                                // bare-name lookup. `lookup_function("Err")` returns
+                                                // whichever stdlib type (Result, WebSocketDecodeError,
+                                                // IoError, JoinError, …) registered first; for a match
+                                                // over `Result<Int, Int>` we MUST consult
+                                                // `Result.Err` / `Result::Err` to get the right
+                                                // `variant_tag` and `param_count` — otherwise the
+                                                // bound variable `e` lands with the wrong parent's
+                                                // payload type and downstream `+` dispatch routes to
+                                                // Text concat instead of Int Add.
+                                                let base = crate::codegen::VbcCodegen::strip_generic_args(scrutinee_type);
+                                                let scrutinee_aware_info = self.ctx
+                                                    .lookup_function(&format!("{}.{}", base, variant_name))
+                                                    .or_else(|| self.ctx.lookup_function(&format!("{}::{}", base, variant_name)));
+                                                if let Some(info) = scrutinee_aware_info
+                                                    .or_else(|| self.ctx.lookup_function(&variant_name))
                                                 {
                                                     // Pick the declared payload type if it's concrete;
                                                     // otherwise fall through to the same generic-substitution
