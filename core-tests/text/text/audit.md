@@ -160,20 +160,29 @@ core/text/text.vr:~2463.
 text.vr:3387.
 
 ### §F — Text.find returns wrong byte index
-**Symptom**: `"hello".find(&"ell")` returns None instead of Some(1).
-Every active `find` call site is affected: `find_present`, `find_at_start`,
-`find_empty_needle_is_zero`. Downstream: contains, index_of,
-split_once, strip_prefix, strip_suffix, replace, replacen, count,
-count_matches.
-**Root cause hypothesis**: the `kmp_failure_table` /  `kmp_find` pair
-at text.vr:212–275 returns wrong results. The fallback path on empty
-needle (`return start`) is correct (test_find_empty_needle_is_zero
-returns None — so even the trivial path fails). This points to the
-KMP subroutines being lenient-skipped or the body's `pattern[i]`
-indexing returning wrong bytes.
-**Action**: write a unit test in `crates/verum_vbc/src/intrinsics/`
-that calls `kmp_find` with hand-built `Text` values (avoiding the
-stdlib intrinsics) and pinpoint which subroutine returns wrong.
+**Status**: **CLOSED 2026-05-13 — commit f8d70e6ef.** The root was NOT
+the user-side KMP body. The Text intercept's `extract_string` helper
+fell through to the `<value:N>` debug-format fallback when given a
+`&Text` argument (a CBGR register-ref or ThinRef). The trailing
+fallback returned the bit-pattern of the ref instead of the
+underlying Text bytes. `text.find("<value:N>")` then returned None
+(or the wrong index) because the garbage needle wasn't anywhere in
+the haystack.
+
+The fix mirrors the receiver normalisation done at
+`method_dispatch.rs:394-414`: auto-deref CBGR-ref → absolute register,
+ThinRef → pointee Value, BEFORE classifying via small_string /
+fat_ref / ptr branches. ~10 lines of fix; ~25 downstream test
+failures closed.
+
+**Knock-on closures**: §A (rfind), §G (contains), §H (index_of /
+find_char), §L (replace / replacen), §P (split_once / strip_prefix /
+strip_suffix), and the eq_ignore_case / starts_with / ends_with
+intercepts ALL share the same root and ALL close together.
+
+**Validation**: 13 / 15 targeted re-runs PASS. The 2 remaining
+failures are pre-existing typechecker ICEs (audit §R count_matches
+family — "Expected pointer, got Some(N)").
 
 ### §G — Text.contains returns wrong Bool
 **Symptom**: `"hello".contains(&"ell")` returns false. Downstream of §F.
