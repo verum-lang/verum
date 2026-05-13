@@ -18203,6 +18203,61 @@ impl TypeChecker {
                     }
                 }
             }
+
+            // **Inductive-constructor registry fallback** (task #139).
+            //
+            // Variant types registered through
+            // `register_stdlib_constructors_from_metadata` populate
+            // `inductive_constructors` but DON'T push a per-variant
+            // `<TypeName>.<VariantName>` entry into `env.bindings`.  So
+            // `VarError.NotUnicode(bytes)` falls past the
+            // `env.lookup(qualified_name)` branch above and surfaces
+            // as `no method named 'NotUnicode' found for type
+            // 'VarError'` in AOT, despite the interpreter happily
+            // dispatching the same call via its constructor registry.
+            //
+            // Mirror the pattern-side fallback I added at
+            // `patterns.rs:902-960`: look up the receiver type's
+            // inductive constructors, find the one whose name matches
+            // the method, type-check the call against its `args`,
+            // and return the constructor's `return_type`.
+            let type_name_text = verum_common::Text::from(type_name.as_str());
+            let method_name_for_ctor = verum_common::Text::from(method_name);
+            if let verum_common::Maybe::Some(constructors) =
+                self.ctx.get_constructors(&type_name_text)
+            {
+                let constructors = constructors.clone();
+                if let Some(ctor) = constructors
+                    .iter()
+                    .find(|c| c.name == method_name_for_ctor)
+                {
+                    // ±1 tolerance for self-param counting (matches
+                    // the env-lookup arm above).
+                    if ctor.args.len().abs_diff(args.len()) > 1 {
+                        return Err(TypeError::WrongArgCount {
+                            method: method_name.to_text(),
+                            expected: ctor.args.len(),
+                            actual: args.len(),
+                            span,
+                        });
+                    }
+                    // Type-check each argument against the
+                    // constructor's declared payload types.
+                    for (arg, param_ty_boxed) in
+                        args.iter().zip(ctor.args.iter())
+                    {
+                        let resolved_param =
+                            self.unifier.apply(param_ty_boxed.as_ref());
+                        self.check_expr(arg, &resolved_param)?;
+                    }
+                    // Return the constructor's result type
+                    // (the parent inductive type — already
+                    // generic-instantiated by the registry).
+                    let resolved_return =
+                        self.unifier.apply(ctor.return_type.as_ref());
+                    return Ok(Some(InferResult::new(resolved_return)));
+                }
+            }
         }
 
         if let Some(r) = self.try_resolve_path_static_call(
@@ -19036,6 +19091,51 @@ impl TypeChecker {
                                 return Ok(Some(InferResult::new(resolved_return)));
                             }
                             // Args not compatible — fall through to protocol_checker
+                        }
+                    }
+
+                    // **Inductive-constructor registry fallback** (task #139).
+                    //
+                    // For `TypeName.VariantName(args)` where the env.lookup
+                    // and inherent_methods both miss, fall back to the
+                    // `inductive_constructors` registry — stdlib variant
+                    // types like `VarError`, `IoError` populate this
+                    // registry but never push per-variant entries into
+                    // env.bindings.  Without this fallback,
+                    // `VarError.NotUnicode(bytes)` surfaces as "no method
+                    // named NotUnicode found for type VarError" despite
+                    // the interpreter happily dispatching the same call
+                    // via its constructor registry.  Mirrors the
+                    // pattern-side fix at `patterns.rs:902+` and the
+                    // TypeExpr-side fix at line ~18206.
+                    let ctor_method_name = verum_common::Text::from(method_name);
+                    if let verum_common::Maybe::Some(constructors) =
+                        self.ctx.get_constructors(&type_name_text)
+                    {
+                        let constructors = constructors.clone();
+                        if let Some(ctor) = constructors
+                            .iter()
+                            .find(|c| c.name == ctor_method_name)
+                        {
+                            // ±1 tolerance for self-param counting.
+                            if ctor.args.len().abs_diff(args.len()) > 1 {
+                                return Err(TypeError::WrongArgCount {
+                                    method: method_name.to_text(),
+                                    expected: ctor.args.len(),
+                                    actual: args.len(),
+                                    span,
+                                });
+                            }
+                            for (arg, param_ty_boxed) in
+                                args.iter().zip(ctor.args.iter())
+                            {
+                                let resolved_param =
+                                    self.unifier.apply(param_ty_boxed.as_ref());
+                                self.check_expr(arg, &resolved_param)?;
+                            }
+                            let resolved_return =
+                                self.unifier.apply(ctor.return_type.as_ref());
+                            return Ok(Some(InferResult::new(resolved_return)));
                         }
                     }
 
