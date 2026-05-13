@@ -27,6 +27,18 @@ default green-suite gate.
 | `async/nursery`          |  ~60|   ~10|   ~20|     0| 0 — NurseryErrorBehavior 3-policy. **partial**. |
 | `async/spawn_config`     | ~150|   ~30|   ~30|     0| 0 — RestartPolicy + IsolationLevel + Priority 4-rank. **partial**. |
 | `async/spawn_with`       |  ~60|   ~10|   ~30|     0| 0 — CircuitState 3-variant breaker lifecycle. **partial**. |
+| `text/text`              | 1014|  348|  235|  290| 18 (§A rfind dispatch / §B Char.encode_utf8 receiver-kind / §C Iterator.next on Chars/Lines/ByteIter / §D function-id collision / §E truncate NullPointer / §F KMP find byte-indexing / §G–§Q downstream / §R count_matches typechecker ICE). 121 / 218 unit (55%); algebraic-law surface largely deferred behind §C/§F. **regression-only**. |
+| `text/char`              |  410|  292|  220|  220| 5 (§A &mut Char deref-assign no-op / §B eq_ignore_ascii_case false-negative downstream of §A / §C from_digit hex offset / §D general_category misroute (task #22 root) / §E AnyChar.matches Iterator.next). 75 / 86 unit (87%). **partial**. |
+| `text/case_fold`         |  220|  240|  150|  120| 1 (§A fold_text_ascii eq vs literal — downstream of text/text §I Text.eq). 25 / 30 unit (83%). Module is **complete** outside the deferred Text.eq cascade. |
+| `text/builder`           |  238|  217|  185|  136| 1 (§A Int.BAnd / Int.BNeq dispatch — gates every push). 4 / 23 unit (17%). **regression-only** outside constructor surface. |
+| `text/format`            |  280|  221|  170|  140| 1 (§A format_display / format_debug closure-dispatch). 39 / 41 unit (95%). **partial**. |
+| `text/regex`             |  310|  170|  170|  155| 5 (§A is_match wrong-Bool on \d/anchors / §B find_all NullPointerAt SetIdx / §C split same root as §B / §D find Maybe<Text> shape mismatch / §E replace_all). 8 / 31 unit (26%). **regression-only**. |
+| `text/tagged_literals`   |  170|  150|  100|   85| 1 (§A/§B CallM register-slot read — surfaces random Text values as method names). 1 / 29 unit (3.4%). **regression-only** outside validate_uri. |
+| `text/numeric/decimal`   |  390|  260|    0|  170| 2 (§A Int.neg dispatch / §B function-id collision; §C arithmetic semantic cascade). 27 / 45 unit (60%). **partial**. |
+| `text/numeric/bigint`    |  300|    0|    0|    0| inherits text/text §C/§D + Char §A. **partial** (per-test sweep deferred). |
+| `text/numeric/bigdecimal`|   85|    0|    0|    0| inherits bigint. **partial**. |
+| `text/numeric/rational`  |   75|    0|    0|    0| inherits bigint. **partial**. |
+| `text/numeric/modular`   |  120|    0|    0|    0| inherits bigint. **partial**. |
 
 ## Status legend
 
