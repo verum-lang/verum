@@ -10829,6 +10829,63 @@ impl VbcCodegen {
                                     }
                                 });
 
+                                // Per-sub-pattern scrutinee-type propagation
+                                // (closes task #22).
+                                //
+                                // When recursing into a nested variant
+                                // sub-pattern (`Poll.Ready(Err(_))` —
+                                // inner `Err(_)` runs against the payload
+                                // of the outer `Poll.Ready` match), the
+                                // inner pattern-test consults
+                                // `match_scrutinee_type` to disambiguate
+                                // its variant tag via
+                                // `find_variant_by_type_and_name(scrutinee_type, "Err")`.
+                                // Pre-fix the outer scrutinee type
+                                // (`Poll<Result<Int, Int>>`) leaked into
+                                // the inner tag lookup — `Poll` has no
+                                // `Err` variant, the lookup missed, and
+                                // tag resolution fell through to the
+                                // hash-of-name fallback at
+                                // `pattern_test` line ~10772.  The
+                                // hashed tag almost never matched
+                                // `Result.Err`'s actual tag, so every
+                                // `Poll.Ready(Err(_))` / similar nested-
+                                // variant destructure silently
+                                // mis-classified — pinned by
+                                // `core-tests/async/poll/{unit,property,
+                                // integration}_test.vr` map_err / map_ok
+                                // suites which work around via direct
+                                // match-destructure projection.
+                                //
+                                // Fix: look up the outer variant's
+                                // `variant_payload_types` (the AST-style
+                                // per-position type list FunctionInfo
+                                // already carries from
+                                // `register_type_constructors` /
+                                // `archive_ctx_loader` Pass 4) and stash
+                                // the i-th element into
+                                // `match_scrutinee_type` BEFORE
+                                // recursing.  Save/restore around each
+                                // sub-pattern so siblings start from the
+                                // same outer context.
+                                let payload_types: Option<Vec<String>> = self
+                                    .ctx
+                                    .lookup_function(&variant_name)
+                                    .or_else(|| self.ctx.lookup_function(&dot_name))
+                                    .or_else(|| {
+                                        variant_name
+                                            .rsplit("::")
+                                            .next()
+                                            .and_then(|s| self.ctx.lookup_function(s))
+                                    })
+                                    .or_else(|| {
+                                        variant_name
+                                            .rsplit('.')
+                                            .next()
+                                            .and_then(|s| self.ctx.lookup_function(s))
+                                    })
+                                    .and_then(|info| info.variant_payload_types.clone());
+
                                 // Tag matched — now check sub-patterns
                                 for (i, sub_pat) in sub_patterns.iter().enumerate() {
                                     if matches!(sub_pat.kind, PatternKind::Wildcard)
@@ -10843,7 +10900,17 @@ impl VbcCodegen {
                                         field: i as u32,
                                     });
                                     let sub_result = self.ctx.alloc_temp();
+                                    let prev_scrutinee_type =
+                                        self.ctx.match_scrutinee_type.clone();
+                                    if let Some(ref pts) = payload_types
+                                        && let Some(payload_ty) = pts.get(i)
+                                        && !payload_ty.is_empty()
+                                    {
+                                        self.ctx.match_scrutinee_type =
+                                            Some(payload_ty.clone());
+                                    }
                                     self.compile_pattern_test(sub_pat, field_reg, sub_result)?;
+                                    self.ctx.match_scrutinee_type = prev_scrutinee_type;
                                     self.ctx.emit(Instruction::Mov {
                                         dst: result,
                                         src: sub_result,
