@@ -485,6 +485,24 @@ pub struct ImplementationDescriptor {
 
     /// Method implementations
     pub methods: List<Text>,
+
+    /// Task #23 — protocol type arguments captured from source.
+    ///
+    /// For `implement<T, E> FromResidual<Result<Never, E>> for Maybe<T> { ... }`
+    /// this list is `["Result<Never, E>"]`.  Without these arguments,
+    /// `ProtocolChecker::can_convert_residual` cannot match a
+    /// `FromResidual<Result<T, E>>` impl at a `?` use site — the impl
+    /// loads with `protocol_args: List::new()` and the residual-type
+    /// check at `protocol.rs::can_convert_residual` line ~8508 returns
+    /// `impl_.protocol_args.first()` → `None` and the search continues
+    /// past every otherwise-matching impl.
+    ///
+    /// Populated by `precompile::scan_implementation_protocol_args`
+    /// during stdlib precompile (single source-walk over `.vr` files);
+    /// `#[serde(default)]` ensures empty when the metadata was
+    /// produced by an older precompile.
+    #[serde(default)]
+    pub protocol_args: List<Text>,
 }
 
 /// Pre-monomorphized type

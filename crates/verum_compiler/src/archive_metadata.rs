@@ -544,12 +544,51 @@ fn register_module_metadata(
         };
         let simple_already_registered = meta.functions.contains_key(&simple_name);
 
-        let parent_type = match fn_desc.parent_type {
-            Some(tid) => match type_id_to_name.get(&tid.0) {
+        // Task #21 — name-prefix takes precedence over TypeId map.
+        //
+        // TypeId aliasing problem: `type Byte is UInt8;` (declared in
+        // core/base/mod.vr) and `implement UInt8 { … }` plus
+        // `implement Byte { … }` BOTH allocate `TypeId(6)`.  The VBC
+        // codegen stores inherent methods with their qualified NAME
+        // (`"UInt8.wrapping_add"` and `"Byte.wrapping_add"` are two
+        // SEPARATE function descriptors), but the receiver / param /
+        // return TypeRefs all resolve to the SAME `TypeId(6)`.
+        // `type_id_to_name` maps each TypeId to the FIRST name it
+        // saw — which is whichever was registered first in the
+        // module's type table (typically `Byte`).
+        //
+        // Pre-fix every `UInt8.wrapping_add` descriptor got
+        // `parent_type = "Byte"` (and params/return rendered as
+        // "Byte"), so:
+        //  * `Byte.wrapping_add` qualified_key got registered first
+        //    via line ~612.
+        //  * `UInt8.wrapping_add` qualified_key construction said
+        //    `parent_name = "Byte"` → re-registered the same key
+        //    (no-op via the `contains_key` guard).
+        //  * `meta.types["UInt8"].methods` never got
+        //    "wrapping_add" pushed (parent_name = "Byte" → pushed to
+        //    `meta.types["Byte"]`).
+        //  * Pass 2.5's `synthesized_primitives` saw the
+        //    `UInt8.wrapping_add` simple-name slot from line ~637
+        //    but the methods list was already populated with the
+        //    canonical UInt8 set (BIT_WIDTH / from_bits / …) and the
+        //    existing methods didn't include `wrapping_add`.
+        //
+        // The fix: the NAME prefix is the authoritative source of
+        // truth for the user-visible parent type.  Use it whenever
+        // it matches a canonical primitive, regardless of whether
+        // `type_id_to_name` also offers a (potentially-aliased)
+        // mapping.
+        let prefix_recovered = recover_primitive_parent_from_name(
+            module.strings.get(fn_desc.name).unwrap_or(""),
+        );
+        let parent_type = match (&prefix_recovered, fn_desc.parent_type) {
+            (Maybe::Some(_), _) => prefix_recovered.clone(),
+            (Maybe::None, Some(tid)) => match type_id_to_name.get(&tid.0) {
                 Some(name) => Maybe::Some(Text::from(name.as_str())),
                 None => Maybe::None,
             },
-            None => Maybe::None,
+            (Maybe::None, None) => Maybe::None,
         };
 
         let params: List<ParamDescriptor> = fn_desc
@@ -568,6 +607,72 @@ fn register_module_metadata(
             &fn_desc.return_type,
             &type_id_to_name,
         ));
+
+        // Task #21 — disambiguate aliased-TypeId types in param /
+        // return rendering using the (just-resolved) parent_type as
+        // the user-visible context.  For `UInt8.wrapping_add`, the
+        // `Byte` rendered text gets rewritten to `UInt8` so the
+        // typechecker's `register_inherent_methods_from_metadata`
+        // builds the function signature with the correct
+        // user-visible types and the call-site `v: UInt8;
+        // v.wrapping_add(b: UInt8)` unifies.
+        //
+        // The rewrite is bidirectional: a `Byte.<m>` method's
+        // `UInt8` references get rewritten to `Byte`.  Other
+        // aliased pairs (e.g. USize / ISize / Ptr share TypeId(14)
+        // but live in distinct user-facing namespaces) are NOT
+        // rewritten because the spec separates them — only Byte
+        // and UInt8 are spec-aliased via `public type Byte is
+        // UInt8;` in `core/base/mod.vr`.
+        let rewrite_aliased_typeid = |s: &Text, target: &str, alias: &str| -> Text {
+            if !s.as_str().contains(alias) {
+                return s.clone();
+            }
+            // Word-bounded replace: only swap "Byte" tokens, not
+            // "Bytes" (List<Byte>) or "ByteCount" or similar.
+            let mut out = String::with_capacity(s.as_str().len());
+            let bytes = s.as_str().as_bytes();
+            let mut i = 0;
+            while i < bytes.len() {
+                if bytes[i..].starts_with(alias.as_bytes()) {
+                    let end = i + alias.len();
+                    let before_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_';
+                    let after_ok = end == bytes.len()
+                        || !bytes[end].is_ascii_alphanumeric() && bytes[end] != b'_';
+                    if before_ok && after_ok {
+                        out.push_str(target);
+                        i = end;
+                        continue;
+                    }
+                }
+                out.push(bytes[i] as char);
+                i += 1;
+            }
+            Text::from(out.as_str())
+        };
+        let (params, return_type) = if let Maybe::Some(parent_name) = &parent_type {
+            let (target, alias) = match parent_name.as_str() {
+                "UInt8" => Some(("UInt8", "Byte")),
+                "Byte" => Some(("Byte", "UInt8")),
+                _ => None,
+            }
+            .unwrap_or(("", ""));
+            if !target.is_empty() {
+                let params: List<ParamDescriptor> = params
+                    .into_iter()
+                    .map(|p| ParamDescriptor {
+                        name: p.name.clone(),
+                        ty: rewrite_aliased_typeid(&p.ty, target, alias),
+                    })
+                    .collect();
+                let return_type = rewrite_aliased_typeid(&return_type, target, alias);
+                (params, return_type)
+            } else {
+                (params, return_type)
+            }
+        } else {
+            (params, return_type)
+        };
 
         let descriptor = FunctionDescriptor {
             name: simple_name.clone(),
@@ -777,6 +882,50 @@ fn register_module_metadata(
     }
 }
 
+/// Task #21 — primitive parent-type recovery from a VBC-stored
+/// function name.
+///
+/// Returns `Maybe::Some(parent)` when `name` is of shape
+/// `<CanonicalPrimitive>.<method>` (e.g. `"UInt8.wrapping_add"`)
+/// — the prefix is the inherent method's parent type when the
+/// VBC TypeId can't be resolved via the module's local
+/// `type_id_to_name` map.
+///
+/// Lossy TypeId aliasing makes the codegen-time prefix the
+/// authoritative source of truth for primitive method parents:
+/// TypeId(6) is shared by Byte / U8 / UInt8; TypeId(14) by
+/// USize / ISize / Ptr; the typechecker dispatches by NAME so
+/// the qualified form must carry the user-visible parent.
+fn recover_primitive_parent_from_name(name: &str) -> Maybe<Text> {
+    let dot = match name.find('.') {
+        Some(d) => d,
+        None => return Maybe::None,
+    };
+    let prefix = &name[..dot];
+    let tail = &name[dot + 1..];
+    // Tail must be a single segment — a `<Module>.<fn>` free
+    // function (e.g. `core.shell.exec.run`) has further dots
+    // and isn't an inherent method.
+    if tail.contains('.') {
+        return Maybe::None;
+    }
+    // Closed set of compiler-built-in primitive types; mirrored
+    // from `is_canonical_primitive_name` in Pass 2.5 so the two
+    // gates stay in sync.
+    let is_primitive = matches!(
+        prefix,
+        "Int" | "Float" | "Bool" | "Char" | "Byte" | "USize" | "ISize"
+            | "Int8" | "Int16" | "Int32" | "Int64" | "Int128"
+            | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128"
+            | "Float32" | "Float64"
+    );
+    if is_primitive {
+        Maybe::Some(Text::from(prefix))
+    } else {
+        Maybe::None
+    }
+}
+
 fn convert_generic_params(
     src: &[verum_vbc::types::TypeParamDescriptor],
     module: &VbcModule,
@@ -831,6 +980,10 @@ fn collect_type_impls(
                         .and_then(|f| module.strings.get(f.name).map(Text::from))
                 })
                 .collect(),
+            // Task #23 — populated post-archive in
+            // `precompile::scan_implementation_protocol_args` via a
+            // source-walk; archive itself has no protocol-arg fidelity.
+            protocol_args: List::new(),
         };
         impls.push(descriptor);
     }

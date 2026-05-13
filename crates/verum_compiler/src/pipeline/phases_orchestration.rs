@@ -175,6 +175,18 @@ impl<'s> CompilationPipeline<'s> {
         // typecheck from 3.8s to ~50ms.
         if self.stdlib_metadata.is_some() {
             checker.register_stdlib_types_for_module(module);
+
+            // **Audit-driven fundamental fix** — seed blanket
+            // protocol impls from `core/base/protocols.vr` so
+            // primitive method dispatch on `partial_cmp` / `ne` /
+            // `lt` / `le` / `gt` / `ge` / etc. resolves through the
+            // `implement<T: Ord> PartialOrd for T` blanket.  The
+            // archive-driven stdlib loader builds a synthetic empty
+            // AST, so `register_module_blanket_impls`'s walker has
+            // no impl items to register.  Mirrors the codegen-side
+            // `seed_protocol_registry_from_embedded_stdlib` at
+            // `pipeline/vbc_codegen.rs:830`.
+            seed_typechecker_blanket_impls(&mut checker);
         }
 
         // Apply `[protocols].coherence` from manifest. Closes the
@@ -1629,3 +1641,55 @@ impl<'s> CompilationPipeline<'s> {
         Ok(())
     }
 }
+
+/// Seed user-side typechecker with blanket protocol impls from the
+/// embedded stdlib `core/base/protocols.vr` source.  The archive-
+/// driven path builds a synthetic empty AST, so the typechecker's
+/// `register_module_blanket_impls` AST walker sees no impls.  Mirrors
+/// codegen-side `seed_protocol_registry_from_embedded_stdlib`.
+///
+/// Idempotent — `register_module_blanket_impls` short-circuits via
+/// `blanket_impls_registered_modules`.
+fn seed_typechecker_blanket_impls(checker: &mut TypeChecker) {
+    use std::sync::OnceLock;
+    use verum_ast::Module as AstModule;
+
+    const SEED_PATHS: &[&str] = &["base/protocols.vr"];
+
+    static SEED_MODULES: OnceLock<Vec<AstModule>> = OnceLock::new();
+    let modules = SEED_MODULES.get_or_init(|| {
+        let stdlib = match crate::embedded_stdlib::get_embedded_stdlib() {
+            Some(s) if s.file_count() > 0 => s,
+            _ => return Vec::new(),
+        };
+        SEED_PATHS
+            .iter()
+            .filter_map(|rel| {
+                let src = stdlib.get_file(rel)?;
+                let mut parser = verum_fast_parser::Parser::new(src);
+                match parser.parse_module() {
+                    Ok(m) => Some(m),
+                    Err(e) => {
+                        tracing::warn!(
+                            target: "phases_orchestration",
+                            "blanket-impl seed failed to parse `{}`: {:?}",
+                            rel, e,
+                        );
+                        None
+                    }
+                }
+            })
+            .collect()
+    });
+
+    for ast_module in modules {
+        // Register protocol type definitions FIRST so their default
+        // methods (e.g. `PartialEq.ne(&self, other) -> Bool { !self.eq(other) }`)
+        // are in the protocol_checker.method_registry before any
+        // dispatch site queries it.  Without this, `v1.ne(&v2)` on a
+        // user PartialEq impl fails MethodNotFound despite the impl.
+        checker.register_module_protocols(ast_module, "core.base.protocols");
+        checker.register_module_blanket_impls(ast_module, "core.base.protocols");
+    }
+}
+

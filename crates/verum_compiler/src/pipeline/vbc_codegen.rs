@@ -233,6 +233,33 @@ impl<'s> CompilationPipeline<'s> {
             codegen.import_protocols(&self.global_protocol_registry);
         }
 
+        // **Protocol-default-method AST seed** (closes the user-side
+        // tail of #34).  On the precompiled-archive path (the canonical
+        // production flow), `stdlib_bootstrap::compile_core_module_from_ast`
+        // never runs — the stdlib comes in pre-baked via the embedded
+        // VBC archive.  `global_protocol_registry` therefore stays
+        // empty AND `codegen.protocol_registry` lacks every stdlib
+        // protocol's `default_methods: HashMap<String, FunctionDecl>`.
+        // When the user later writes `implement Hash for Wrap { fn
+        // hash(...) }`, the `generate_default_protocol_methods("Hash",
+        // "Wrap", {"hash"})` call at `codegen/mod.rs:5805` walks an
+        // EMPTY `default_methods` and queues nothing — `Wrap.hash_value`
+        // is never emitted, runtime dispatch of `w.hash_value()`
+        // panics with "method 'Wrap.hash_value' not found on receiver
+        // of runtime kind 'Object'".
+        //
+        // Fix: when the codegen's `protocol_registry` is missing rich
+        // entries (no `default_methods` populated), parse the
+        // canonical protocol-defining stdlib files from the embedded
+        // source bundle ONCE and call `collect_protocol_definitions`
+        // on the resulting AST modules.  This reuses the existing
+        // pipeline (the same `collect_protocol_definitions` that
+        // stdlib_bootstrap uses) — no new code paths, no duplicated
+        // AST extraction.  The parsed AST modules are cached in a
+        // process-wide `OnceLock` so the cold-start cost is paid only
+        // once per process.
+        seed_protocol_registry_from_embedded_stdlib(&mut codegen);
+
         // Run CBGR tier analysis: escape analysis → tier determination
         // → RefChecked/RefUnsafe emission. Promotes non-escaping refs
         // from Tier 0 (~15ns) to Tier 1 (0ns).
@@ -770,5 +797,116 @@ impl<'s> CompilationPipeline<'s> {
             total_before,
             user_mount_prefixes.len()
         );
+    }
+}
+
+/// Seed the codegen's `protocol_registry` with stdlib protocol
+/// definitions parsed from the embedded source bundle.
+///
+/// On the canonical precompiled-archive path,
+/// `stdlib_bootstrap::compile_core_module_from_ast` is bypassed and
+/// `global_protocol_registry` arrives empty.  But user code that
+/// implements a stdlib protocol (e.g. `implement Hash for Wrap`)
+/// requires the protocol's AST default-method bodies to be
+/// monomorphisable into `<UserType>.<method>` entries.  Without
+/// that AST, `generate_default_protocol_methods` finds an empty
+/// `default_methods` map and queues nothing — every user impl of a
+/// stdlib protocol with default methods (Hash.hash_value,
+/// Hasher.write_int/write_byte, PartialEq.ne via blanket
+/// `impl<T: Ord>`, the Iterator combinator family, Display/Debug
+/// forwarders, every operator-protocol reverse direction) ends up
+/// with the default method missing from its method-table.
+///
+/// Process-wide `OnceLock` caches the parsed AST modules so the
+/// per-compilation cost is one shallow `HashMap` walk through
+/// `collect_protocol_definitions` (microseconds), not a fresh
+/// parse of the protocol-defining stdlib files.
+///
+/// **Scope**: parses every embedded stdlib file whose path declares
+/// at least one `public type … is protocol { … }` body, scoped to
+/// the load-bearing files in `core/base/`.  Adding more protocol-
+/// defining files to this list when the stdlib grows is the only
+/// follow-up — the seed mechanism itself is generic.
+fn seed_protocol_registry_from_embedded_stdlib(
+    codegen: &mut VbcCodegen,
+) {
+    use std::sync::OnceLock;
+    use verum_ast::Module as AstModule;
+
+    /// Canonical protocol-defining stdlib files.  Listed by their
+    /// path relative to `core/` as stored in the embedded archive
+    /// (matches `StdlibArchive::file_paths()` keys).
+    ///
+    /// **Maintenance**: when a new top-level protocol is added to a
+    /// `core/<area>/<file>.vr`, append its relative path here.  The
+    /// drift-pin test `archive_carries_protocol_default_method_monomorphisations`
+    /// catches missing default-method bodies in the archive build
+    /// pass; a parallel user-side gap surfaces as runtime
+    /// `<UserType>.<default_method> not found` panics.
+    const SEED_PATHS: &[&str] = &[
+        "base/protocols.vr",
+    ];
+
+    static SEED_MODULES: OnceLock<Vec<AstModule>> = OnceLock::new();
+    let modules = SEED_MODULES.get_or_init(|| {
+        let stdlib = match crate::embedded_stdlib::get_embedded_stdlib() {
+            Some(s) if s.file_count() > 0 => s,
+            // No embedded source: nothing to seed.  Best-effort —
+            // typical when running tests built without
+            // `embed-stdlib-source`.  The user-side
+            // `protocol_registry` falls through to whatever
+            // `import_protocols` provided.
+            _ => return Vec::new(),
+        };
+        SEED_PATHS
+            .iter()
+            .filter_map(|rel| {
+                let src = stdlib.get_file(rel)?;
+                let mut parser = verum_fast_parser::Parser::new(src);
+                match parser.parse_module() {
+                    Ok(mut m) => {
+                        // Strip non-protocol items so
+                        // `collect_protocol_definitions` only sees
+                        // the protocol-body ASTs (which carry the
+                        // load-bearing `default_methods` map).
+                        // Impl blocks, free functions, and records
+                        // are already in the precompiled archive
+                        // and re-collecting them would double-
+                        // register the function-name slots.
+                        //
+                        // Generic-type-param method-dispatch in
+                        // default bodies (`self.cmp(other)` inside
+                        // `PartialOrd<T: Ord>`'s blanket) routes
+                        // correctly at call time via the bare-
+                        // method-name dispatch fallback at
+                        // `expressions.rs::SelfValue` arm — no
+                        // protocol allowlist needed.
+                        m.items.retain(|item| {
+                            use verum_ast::decl::TypeDeclBody;
+                            use verum_ast::ItemKind;
+                            matches!(
+                                &item.kind,
+                                ItemKind::Type(td) if matches!(
+                                    td.body, TypeDeclBody::Protocol(_)
+                                )
+                            )
+                        });
+                        Some(m)
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            target: "vbc_codegen",
+                            "protocol-registry seed failed to parse `{}`: {:?}",
+                            rel, e,
+                        );
+                        None
+                    }
+                }
+            })
+            .collect()
+    });
+
+    for ast_module in modules {
+        codegen.collect_protocol_definitions(ast_module);
     }
 }

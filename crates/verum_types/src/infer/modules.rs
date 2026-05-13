@@ -6367,7 +6367,7 @@ impl TypeChecker {
 
     /// This ensures protocol definitions like `type Into<T> is protocol { fn into(self) -> T; }`
     /// are available for method lookup when blanket impls reference them.
-    fn register_module_protocols(&mut self, ast: &verum_ast::Module, module_path: &str) {
+    pub fn register_module_protocols(&mut self, ast: &verum_ast::Module, module_path: &str) {
         use verum_ast::ItemKind;
         use verum_ast::decl::TypeDeclBody;
 
@@ -6687,7 +6687,7 @@ impl TypeChecker {
     /// generic impls like `implement<T> Iterator for DequeIter<T>` were never
     /// registered unless explicitly imported. This caused `iter.next()` to fail
     /// with "no method named `next` found" for iterator types.
-    fn register_module_blanket_impls(&mut self, ast: &verum_ast::Module, module_path: &str) {
+    pub fn register_module_blanket_impls(&mut self, ast: &verum_ast::Module, module_path: &str) {
         use verum_ast::ItemKind;
         use verum_ast::decl::ImplKind;
 

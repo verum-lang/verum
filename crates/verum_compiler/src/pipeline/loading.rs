@@ -1199,6 +1199,58 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
+        // Task #20 — fold every captured `public mount X.{...}` chain
+        // into the function-export shard of the re-exporting module
+        // BEFORE we materialise ExportTables.  `module_reexports` is
+        // keyed by the re-exporting module's dotted path; values are
+        // `(local_name, source_module_path)` pairs.  This lets the
+        // user-side resolver find `core.base.replace` even though the
+        // function itself lives in `core.base.memory`.
+        //
+        // Task #26 — also fold variant-constructor sub-exports when
+        // the re-exported leaf is a sum type.  Pre-fix,
+        // `mount core.base.{VarError}` exposed `VarError` itself in
+        // `core.base.exports` but `VarError.NotUnicode` and the
+        // pattern `match e { VarError.NotUnicode => ... }` failed
+        // because the constructor names (`NotPresent`, `NotUnicode`)
+        // were only present in the *declaring* module's
+        // (`core.base.env`) exports — not propagated through
+        // `core.base`'s re-export chain.  We probe
+        // `metadata.types[local_name]` (which carries the variant
+        // case list) and append every constructor name to the
+        // re-exporting module's Type shard so pattern matching
+        // resolves at the use site.
+        //
+        // Spurious Type-named entries in the Function shard are
+        // harmless because resolution still goes through
+        // `metadata.functions.get(name)` for codegen.
+        for (reexporting_mp_text, leaves) in metadata.module_reexports.iter() {
+            let reexporting_mp = reexporting_mp_text.as_str();
+            let shard = module_map.entry(reexporting_mp.to_string()).or_default();
+            for (local_name, _source_module) in leaves.iter() {
+                shard.2.push(local_name.as_str().to_string());
+                // Variant-constructor propagation: when the leaf is a
+                // declared sum type, expose every case name on the
+                // re-exporting module as well.  Looking up by simple
+                // name matches the existing convention at
+                // `metadata.types.iter()` above (the type's
+                // module_path lives on the descriptor).
+                if let Some(td) = metadata.types.get(local_name)
+                    && let verum_types::core_metadata::TypeDescriptorKind::Variant { cases } =
+                        &td.kind
+                {
+                    // Add the type itself to the re-exporting module's
+                    // Type shard (not just Function).  The
+                    // pattern-resolver consults the Type shard for
+                    // `match e { T.Variant => ... }` style patterns.
+                    shard.0.push(local_name.as_str().to_string());
+                    for case in cases.iter() {
+                        shard.0.push(case.name.as_str().to_string());
+                    }
+                }
+            }
+        }
+
         let mut registered = 0usize;
         let module_registry = self.session.module_registry();
 
