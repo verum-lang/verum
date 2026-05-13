@@ -1,0 +1,113 @@
+// =============================================================================
+// core-tests/text/format/regression_test.vr
+// =============================================================================
+//
+// Defects pinned for `core/text/format.vr`. The format module is largely
+// healthy — 39 / 41 unit tests pass. The two failures concentrate in
+// the `format_display` and `format_debug` free functions, which take a
+// generic-typed argument and route through a closure dispatch path.
+//
+// Defect classes:
+//   §A  format_display<T: Display> / format_debug<T: Debug> trigger
+//       "TypeMismatch: expected closure, got non-pointer"
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.format.{
+    WriteError, WriteErrorKind,
+    TextAlignment, Sign, FormatSpec,
+    format_debug, format_display,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// §A — format_display / format_debug TypeMismatch on closure dispatch
+// REGRESSION: `format_display(&n)` for `n: Int` triggers
+// `TypeMismatch { expected: "closure", got: "non-pointer", operation:
+// "call_closure" }`. The function is generic over `<T: Display>` and
+// internally constructs a TextFormatter, then calls
+// `T.fmt(formatter)`. The dispatch site appears to interpret the
+// fn-pointer as a generic callable; same family as the receiver-kind
+// classification issue in char/§A and text/text/§B.
+// =============================================================================
+
+@ignore
+@test
+fn regression_a_format_display_int_pinned() {
+    let n: Int = 5;
+    let s = format_display(&n);
+    assert_eq(s, "5");
+}
+
+@ignore
+@test
+fn regression_a_format_debug_int_pinned() {
+    let n: Int = 5;
+    let s = format_debug(&n);
+    assert_eq(s, "5");
+}
+
+// =============================================================================
+// Active PASS-GUARDs — the data-shaping and format-string surface is healthy.
+// =============================================================================
+
+@test
+fn guard_alignment_default_left() {
+    let a: TextAlignment = TextAlignment.default();
+    assert(a is TextAlignment.Left);
+}
+
+@test
+fn guard_sign_default_minus() {
+    let s: Sign = Sign.default();
+    assert(s is Sign.Minus);
+}
+
+@test
+fn guard_write_error_kind_eq_self() {
+    assert(WriteErrorKind.Io == WriteErrorKind.Io);
+    assert(WriteErrorKind.BufferFull == WriteErrorKind.BufferFull);
+    assert(WriteErrorKind.Encoding == WriteErrorKind.Encoding);
+}
+
+@test
+fn guard_write_error_factories() {
+    assert(WriteError.io().kind is WriteErrorKind.Io);
+    assert(WriteError.buffer_full().kind is WriteErrorKind.BufferFull);
+}
+
+@test
+fn guard_format_spec_default_invariants() {
+    let s: FormatSpec = FormatSpec.default();
+    assert_eq(s.fill, ' ');
+    assert(!s.alternate);
+    assert(s.align is TextAlignment.Left);
+    assert(s.sign is Sign.Minus);
+    assert(s.width is None);
+    assert(s.precision is None);
+}
+
+@test
+fn guard_format_string_int_display() {
+    let n: Int = 42;
+    assert_eq(f"{n}", "42");
+}
+
+@test
+fn guard_format_string_text_display() {
+    let s: Text = "hello";
+    assert_eq(f"{s}", "hello");
+}
+
+@test
+fn guard_format_string_bool_display() {
+    assert_eq(f"{true}", "true");
+    assert_eq(f"{false}", "false");
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
