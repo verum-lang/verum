@@ -6244,7 +6244,41 @@ impl VbcCodegen {
             };
             if parent_ok { info.variant_tag } else { None }
         });
+        // **Context-type-aware tag lookup** (closes construction-side
+        // half of task #22 variant-tag drift).
+        //
+        // When the context type is known (`current_return_type_name` /
+        // `match_scrutinee_type` / explicit_parent), the type's variant
+        // table is the AUTHORITATIVE source for the simple-name's tag.
+        // `direct_tag` above gates `lookup_function(name)` on
+        // `parent_type_name == context_type`, but rejects (yielding
+        // None) when:
+        //   * The parent of `lookup_function(name)`'s hit doesn't match
+        //   * OR the FunctionInfo's parent is None
+        // The pre-fix chain then fell through to
+        // `find_variant_by_suffix_and_args` (which is parent-agnostic
+        // simple-name+arity matching) and finally to a parent-
+        // ignoring `lookup_function(name)` retry — both can return a
+        // tag from the WRONG type's variant with the same simple
+        // name, surfacing as silent tag-drift at MakeVariant emission
+        // (Result.Err's tag confused with another type's Err's tag).
+        //
+        // Insert a context-aware tier between `direct_tag` and the
+        // parent-agnostic fallbacks:
+        // `find_variant_by_type_and_name(context_type, name)` consults
+        // `self.types` directly, returning the tag from `context_type`'s
+        // declared variant list.  This matches the destructure-side
+        // discipline (compile_pattern_test at expressions.rs:10671's
+        // scrutinee-first ordering) — keeping construction and
+        // destructure agreed on a single name→tag binding for the
+        // surrounding context type.
+        let context_aware_tag: Option<u32> = if let Some(ref ctx) = context_type {
+            self.ctx.find_variant_by_type_and_name(ctx, name)
+        } else {
+            None
+        };
         let tag = direct_tag
+            .or(context_aware_tag)
             .or_else(|| self.ctx.find_variant_by_suffix_and_args(name, args.len()))
             .or_else(|| {
                 // Last-resort: re-try the direct lookup ignoring parent
@@ -10666,12 +10700,71 @@ impl VbcCodegen {
                         self.ctx.free_temp(const_reg);
                     } else {
                         // Regular variant — check tag
-                        // Try multiple name forms: original (may use "::"), dot-separated,
-                        // and simple (last segment only) for unqualified variants
-                        let tag = self
-                            .ctx
-                            .lookup_function(&variant_name)
-                            .and_then(|info| info.variant_tag)
+                        //
+                        // **Scrutinee-aware-first** ordering (closes task #22
+                        // flat-variant tag drift):
+                        //
+                        // When `variant_name` is a simple unqualified form
+                        // (no `::` / no `.`) AND the surrounding match's
+                        // scrutinee type is known, prefer the
+                        // scrutinee-type-disambiguated lookup BEFORE the
+                        // bare-name `lookup_function(variant_name)` cascade.
+                        // Multiple stdlib types declare same-named
+                        // variants (`Ok` / `Err` across Result + IoError +
+                        // every fallible-effect carrier; `Some` / `None`
+                        // across Maybe + various option-shaped types; etc.).
+                        // The bare-name slot is first-wins under
+                        // `prefer_existing_functions` archive load, and the
+                        // FIRST-registered variant's tag may differ from
+                        // the scrutinee's parent type's tag for the same
+                        // simple name (Result.Err = 1 but if some other
+                        // type's Err with tag = 0 won the race, bare
+                        // lookup returns tag = 0, IsVar mis-fires).
+                        //
+                        // The pre-fix cascade tried bare lookup FIRST and
+                        // only consulted `match_scrutinee_type` as a
+                        // fallback when the bare lookup missed — a hit
+                        // (even on the wrong type's variant) short-
+                        // circuited the chain and committed to the wrong
+                        // tag.  Reordering means: if we know the
+                        // scrutinee type, that type's variant table is
+                        // authoritative for the variant name; only fall
+                        // through to bare lookup when scrutinee-aware
+                        // resolution has no answer.
+                        //
+                        // Mirrors the architectural pattern established
+                        // by task #21's `register_function_authoritative`
+                        // (user-bound binding wins over passive
+                        // archive-load) — here the scrutinee context is
+                        // the user-bound binding, the bare-name slot is
+                        // the passive race.
+                        let is_simple = !variant_name.contains("::") && !variant_name.contains('.');
+                        let scrutinee_first_tag: Option<u32> = if is_simple {
+                            if let Some(ref scrutinee_type) = self.ctx.match_scrutinee_type {
+                                let base_type =
+                                    scrutinee_type.split('<').next().unwrap_or(scrutinee_type);
+                                self.ctx
+                                    .find_variant_by_type_and_name(base_type, &variant_name)
+                                    .or_else(|| {
+                                        let parent =
+                                            self.ctx.find_variant_parent_type(base_type);
+                                        parent.and_then(|p| {
+                                            self.ctx
+                                                .find_variant_by_type_and_name(&p, &variant_name)
+                                        })
+                                    })
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+                        let tag = scrutinee_first_tag
+                            .or_else(|| {
+                                self.ctx
+                                    .lookup_function(&variant_name)
+                                    .and_then(|info| info.variant_tag)
+                            })
                             .or_else(|| {
                                 self.ctx
                                     .lookup_function(&dot_name)
