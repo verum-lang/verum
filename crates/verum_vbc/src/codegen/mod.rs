@@ -5641,6 +5641,23 @@ impl VbcCodegen {
         // with a Verum body — the bulk of cross-module dispatch
         // defects close via this path WITHOUT requiring stub
         // synthesis.
+        //
+        // **Safe prep passes** (added 2026-05-14): the only prep pass
+        // that explodes is `emit_missing_stub_descriptors`. The other
+        // two — `compile_pending_constants` + `compile_pending_tls_inits`
+        // — emit bodies ONLY for items already queued during module
+        // walk, so their output is bounded by the actual user-declared
+        // const / TLS init count (typically dozens per stdlib module,
+        // not the 7000+ imported-function fanout that blew up the
+        // stub pass). Without these, public `const` declarations
+        // whose value expressions are non-literal (method calls, like
+        // `public const USIZE_BITS: USize = USize.bits;`) NEVER get a
+        // body in the archive — user-side `mount core.sys.bitfield;
+        // … bitfield.USIZE_BITS` then resolves to a body-less stub
+        // and any read of the constant returns Unit. Same hazard for
+        // `@thread_local static` inits with non-trivial initialisers.
+        self.compile_pending_constants()?;
+        self.compile_pending_tls_inits()?;
         self.build_module()
     }
 

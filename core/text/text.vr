@@ -342,6 +342,21 @@ implement Text {
         Ok(Text.from_utf8_unchecked(bytes))
     }
 
+    /// Compatibility alias for `from_utf8` — the canonical
+    /// byte-slice-to-Text conversion. The SQLite subsystem
+    /// (`core/database/sqlite/...`, ~72 call sites) and other modules
+    /// were written against an earlier API revision that exposed
+    /// `Text.from_bytes`; the rename to `from_utf8` (matching Rust's
+    /// `String::from_utf8` for semantic honesty) left those call sites
+    /// referencing a removed name. Pre-fix, every reference was
+    /// lenient-skipped at precompile-stub time, and any runtime call
+    /// would panic-stub through `[lenient] SKIP top-level fn braille_char`.
+    /// Restoring the alias closes the 72-site cascade without
+    /// requiring a sweep through every consumer.
+    public fn from_bytes(bytes: &[Byte]) -> Result<Text, Utf8Error> {
+        Text.from_utf8(bytes)
+    }
+
     /// Create text from a byte slice, replacing any invalid UTF-8
     /// sequences with the Unicode replacement character (U+FFFD).
     /// Mirrors Rust's `String::from_utf8_lossy` semantics: well-formed
