@@ -6604,6 +6604,83 @@ pub(super) fn dispatch_primitive_method(
             // Each parser bypasses the user-side body and uses Rust's
             // canonical parser. Returns `Result<T, ParseError>` matching
             // the source signature.
+            //
+            // **String mutation/trim/strip intercepts** — closes the
+            // StackOverflow cluster (audit: trim_*_matches, strip_suffix,
+            // remove_suffix, remove_first_char). User-side bodies dispatch
+            // via long chains (`self.ends_with → self.slice → ...`) that
+            // pre-fix recursed through wrong-dispatch routing. Tier-0
+            // intercepts deliver the same observable semantics with one
+            // Rust call.
+            "strip_prefix" => {
+                let arg = deref_cbgr_for_string(state, state.get_reg(Reg(args.start.0)));
+                let prefix = extract_string(&arg, state);
+                if let Some(rest) = text.strip_prefix(&*prefix) {
+                    let v = alloc_string_value(state, rest)?;
+                    return Ok(Some(make_some_value(state, v)?));
+                }
+                return Ok(Some(make_none_value(state)?));
+            }
+            "strip_suffix" => {
+                let arg = deref_cbgr_for_string(state, state.get_reg(Reg(args.start.0)));
+                let suffix = extract_string(&arg, state);
+                if let Some(rest) = text.strip_suffix(&*suffix) {
+                    let v = alloc_string_value(state, rest)?;
+                    return Ok(Some(make_some_value(state, v)?));
+                }
+                return Ok(Some(make_none_value(state)?));
+            }
+            "remove_prefix" => {
+                let arg = deref_cbgr_for_string(state, state.get_reg(Reg(args.start.0)));
+                let prefix = extract_string(&arg, state);
+                let result = text.strip_prefix(&*prefix).unwrap_or(&text);
+                return Ok(Some(alloc_string_value(state, result)?));
+            }
+            "remove_suffix" => {
+                let arg = deref_cbgr_for_string(state, state.get_reg(Reg(args.start.0)));
+                let suffix = extract_string(&arg, state);
+                let result = text.strip_suffix(&*suffix).unwrap_or(&text);
+                return Ok(Some(alloc_string_value(state, result)?));
+            }
+            "trim_start_matches" => {
+                let arg = deref_cbgr_for_string(state, state.get_reg(Reg(args.start.0)));
+                let pattern = extract_string(&arg, state);
+                if pattern.is_empty() {
+                    return Ok(Some(alloc_string_value(state, &text)?));
+                }
+                let mut s: &str = &text;
+                while let Some(rest) = s.strip_prefix(&*pattern) {
+                    s = rest;
+                }
+                return Ok(Some(alloc_string_value(state, s)?));
+            }
+            "trim_end_matches" => {
+                let arg = deref_cbgr_for_string(state, state.get_reg(Reg(args.start.0)));
+                let pattern = extract_string(&arg, state);
+                if pattern.is_empty() {
+                    return Ok(Some(alloc_string_value(state, &text)?));
+                }
+                let mut s: &str = &text;
+                while let Some(rest) = s.strip_suffix(&*pattern) {
+                    s = rest;
+                }
+                return Ok(Some(alloc_string_value(state, s)?));
+            }
+            "trim_matches" => {
+                let arg = deref_cbgr_for_string(state, state.get_reg(Reg(args.start.0)));
+                let pattern = extract_string(&arg, state);
+                if pattern.is_empty() {
+                    return Ok(Some(alloc_string_value(state, &text)?));
+                }
+                let mut s: &str = &text;
+                while let Some(rest) = s.strip_prefix(&*pattern) {
+                    s = rest;
+                }
+                while let Some(rest) = s.strip_suffix(&*pattern) {
+                    s = rest;
+                }
+                return Ok(Some(alloc_string_value(state, s)?));
+            }
             "parse_int" => {
                 use super::heap_helpers::wrap_in_variant;
                 match text.parse::<i64>() {
