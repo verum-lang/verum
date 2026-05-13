@@ -30,7 +30,7 @@
 
 use super::super::super::error::InterpreterResult;
 use super::super::super::state::InterpreterState;
-use super::heap_helpers::wrap_in_variant;
+use super::heap_helpers::{extract_byte_slice, wrap_in_variant};
 use super::string_helpers::alloc_string_value;
 use crate::instruction::Reg;
 use crate::value::Value;
@@ -96,28 +96,53 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             Ok(Some(wrap_in_variant(state, "Result", 0, &[v])?))
         }
         "from_utf8" if arg_count == 1 => {
-            // `Result<Text, Utf8Error>` — at the interpreter
-            // layer the byte-slice argument has already been
-            // checked at construction.  Ok-wrap whatever was
-            // passed.
-            let v = read_arg(state, args_start_reg, 0, caller_base)
-                .unwrap_or_else(empty_text);
-            Ok(Some(wrap_in_variant(state, "Result", 0, &[v])?))
+            // `Text.from_utf8(bytes: &[Byte]) -> Result<Text, Utf8Error>`.
+            //
+            // **Pre-fix**: this intercept Ok-wrapped the bytes value AS-IS,
+            // returning `Result<List<Byte>>` — NOT `Result<Text>`. Tests
+            // that asserted `t == "Hi"` failed because the unwrapped value
+            // was a List<Byte>, not a Text. UTF-8 validation never ran.
+            //
+            // **Fix**: extract bytes via the canonical `extract_byte_slice`
+            // helper (handles FatRef + LIST + BYTE_LIST shapes), validate
+            // UTF-8 with Rust's std::str::from_utf8, allocate a real Text
+            // from the validated bytes, and wrap in `Result.Ok`. Invalid
+            // UTF-8 → `Result.Err(Utf8Error { valid_up_to })`.
+            let bytes = extract_byte_slice(state, args_start_reg, caller_base);
+            match std::str::from_utf8(&bytes) {
+                Ok(s) => {
+                    let text = alloc_string_value(state, s)?;
+                    Ok(Some(wrap_in_variant(state, "Result", 0, &[text])?))
+                }
+                Err(e) => {
+                    let valid_up_to = Value::from_i64(e.valid_up_to() as i64);
+                    let utf8_err = wrap_in_variant(state, "Utf8Error", 0, &[valid_up_to])?;
+                    Ok(Some(wrap_in_variant(state, "Result", 1, &[utf8_err])?))
+                }
+            }
         }
         "from_utf8_lossy" if arg_count == 1 => {
-            // Returns `Text` directly — pass through.
-            match read_arg(state, args_start_reg, 0, caller_base) {
-                Some(v) => Ok(Some(v)),
-                None => Ok(Some(empty_text())),
-            }
+            // `Text.from_utf8_lossy(bytes: &[Byte]) -> Text`.
+            //
+            // Returns a Text where invalid UTF-8 sequences are replaced
+            // with U+FFFD. Pre-fix this returned the raw bytes value; now
+            // properly converts via `String::from_utf8_lossy`.
+            let bytes = extract_byte_slice(state, args_start_reg, caller_base);
+            let lossy = String::from_utf8_lossy(&bytes);
+            Ok(Some(alloc_string_value(state, &lossy)?))
         }
         "from_utf8_unchecked" if arg_count == 1 => {
-            // Unsafe wrapper at the source level; same identity
-            // semantics here.
-            match read_arg(state, args_start_reg, 0, caller_base) {
-                Some(v) => Ok(Some(v)),
-                None => Ok(Some(empty_text())),
-            }
+            // `unsafe Text.from_utf8_unchecked(bytes: &[Byte]) -> Text`.
+            //
+            // Caller asserts the bytes are already valid UTF-8. Convert
+            // without validation — but DO convert the bytes to an actual
+            // Text rather than passing through the List value (the
+            // pre-fix behaviour). Use lossy decoding at runtime to
+            // maintain memory-safety even when the caller contract is
+            // violated.
+            let bytes = extract_byte_slice(state, args_start_reg, caller_base);
+            let s = String::from_utf8_lossy(&bytes);
+            Ok(Some(alloc_string_value(state, &s)?))
         }
         "from_char" if arg_count == 1 => {
             // Verum Char is a 32-bit Unicode scalar, NaN-boxed as
@@ -147,6 +172,10 @@ pub(in super::super) fn try_intercept_text_static_runtime(
 fn empty_text() -> Value {
     Value::from_small_string("").unwrap_or(Value::nil())
 }
+
+// `extract_byte_slice` lives in `heap_helpers` — it's the canonical
+// helper used by every `&[Byte]` consumer (regex / file / shell /
+// network / Text intercepts). Reused here rather than duplicated.
 
 fn read_arg(
     state: &InterpreterState,
