@@ -1,0 +1,260 @@
+// =============================================================================
+// core-tests/text/case_fold/property_test.vr
+// =============================================================================
+//
+// Algebraic / mathematical laws for ASCII case folding. Each `@test` here is
+// a theorem over the ASCII subset of Char / Byte / Text.
+//
+// Laws verified:
+//   §1  fold_char_ascii is idempotent: fold(fold(c)) = fold(c)
+//   §2  fold_byte_ascii is idempotent
+//   §3  fold_text_ascii is idempotent
+//   §4  fold preserves byte identity for non-uppercase-letter bytes
+//   §5  compare_ascii_nocase is reflexive: cmp(s, s) = Equal
+//   §6  compare_ascii_nocase is anti-symmetric: cmp(a, b) = cmp(b, a).reverse()
+//   §7  equal_ascii_nocase is reflexive
+//   §8  equal_ascii_nocase is symmetric
+//   §9  equal_ascii_nocase ⇔ compare_ascii_nocase = Equal
+//   §10 fold_byte_ascii agrees with Char.to_ascii_lowercase on ASCII range
+//   §11 NOCASE policy: only A-Z is folded; bytes >= 0x80 pass through
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.case_fold.{
+    fold_char_ascii, fold_byte_ascii, fold_text_ascii,
+    compare_ascii_nocase, equal_ascii_nocase,
+};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.collections.list.List;
+
+// -----------------------------------------------------------------------------
+// Domain helpers
+// -----------------------------------------------------------------------------
+
+fn ascii_text_domain() -> List<Text> {
+    ["", "a", "Z", "Hello", "WORLD", "MixedCase", "abc123", "abc!XYZ.", "  pad  "]
+}
+
+fn ascii_pair_domain() -> List<(Text, Text)> {
+    [
+        ("a", "A"),
+        ("hello", "HELLO"),
+        ("apple", "BANANA"),
+        ("a", "b"),
+        ("", ""),
+        ("abc", "abcd"),
+        ("xyz", "xyz"),
+    ]
+}
+
+// =============================================================================
+// §1 fold_char_ascii idempotence
+// =============================================================================
+
+@test
+fn property_fold_char_idempotent_letters() {
+    let cs: List<Char> = ['a', 'A', 'z', 'Z', 'm', 'M'];
+    for c in cs.iter() {
+        let once = fold_char_ascii(*c);
+        let twice = fold_char_ascii(once);
+        assert_eq(once, twice);
+    }
+}
+
+@test
+fn property_fold_char_idempotent_others() {
+    let cs: List<Char> = ['0', '5', '9', ' ', '\t', '.', '!', '?'];
+    for c in cs.iter() {
+        let once = fold_char_ascii(*c);
+        let twice = fold_char_ascii(once);
+        assert_eq(once, twice);
+    }
+}
+
+// =============================================================================
+// §2 fold_byte_ascii idempotence
+// =============================================================================
+
+@test
+fn property_fold_byte_idempotent_uppercase_range() {
+    let mut b: Int = 0x41;  // 'A'
+    while b <= 0x5A {       // 'Z'
+        let byte = b as Byte;
+        let once = fold_byte_ascii(byte);
+        let twice = fold_byte_ascii(once);
+        assert_eq(once, twice);
+        b = b + 1;
+    }
+}
+
+@test
+fn property_fold_byte_idempotent_lowercase_range() {
+    let mut b: Int = 0x61;
+    while b <= 0x7A {
+        let byte = b as Byte;
+        let once = fold_byte_ascii(byte);
+        let twice = fold_byte_ascii(once);
+        assert_eq(once, twice);
+        b = b + 1;
+    }
+}
+
+@test
+fn property_fold_byte_idempotent_digits() {
+    let mut b: Int = 0x30;
+    while b <= 0x39 {
+        let byte = b as Byte;
+        let once = fold_byte_ascii(byte);
+        let twice = fold_byte_ascii(once);
+        assert_eq(once, twice);
+        b = b + 1;
+    }
+}
+
+// =============================================================================
+// §3 fold_text_ascii idempotence
+// =============================================================================
+
+@test
+fn property_fold_text_idempotent() {
+    for s in ascii_text_domain().iter() {
+        let once = fold_text_ascii(s);
+        let twice = fold_text_ascii(&once);
+        assert_eq(once, twice);
+    }
+}
+
+// =============================================================================
+// §4 fold preserves byte identity for non-uppercase letters
+// =============================================================================
+
+@test
+fn property_fold_byte_identity_for_lowercase() {
+    let mut b: Int = 0x61;  // 'a'
+    while b <= 0x7A {
+        let byte = b as Byte;
+        assert_eq(fold_byte_ascii(byte), byte);
+        b = b + 1;
+    }
+}
+
+@test
+fn property_fold_byte_identity_for_digits() {
+    let mut b: Int = 0x30;
+    while b <= 0x39 {
+        let byte = b as Byte;
+        assert_eq(fold_byte_ascii(byte), byte);
+        b = b + 1;
+    }
+}
+
+// =============================================================================
+// §5 compare reflexivity
+// =============================================================================
+
+@test
+fn property_compare_reflexive() {
+    for s in ascii_text_domain().iter() {
+        assert_eq(compare_ascii_nocase(s, s), Equal);
+    }
+}
+
+// =============================================================================
+// §6 compare anti-symmetry: cmp(a, b) = cmp(b, a).reverse()
+// =============================================================================
+
+@test
+fn property_compare_anti_symmetric() {
+    for p in ascii_pair_domain().iter() {
+        let ab = compare_ascii_nocase(&(*p).0, &(*p).1);
+        let ba = compare_ascii_nocase(&(*p).1, &(*p).0);
+        assert_eq(ab, ba.reverse());
+    }
+}
+
+// =============================================================================
+// §7 equal reflexivity
+// =============================================================================
+
+@test
+fn property_equal_reflexive() {
+    for s in ascii_text_domain().iter() {
+        assert(equal_ascii_nocase(s, s));
+    }
+}
+
+// =============================================================================
+// §8 equal symmetry
+// =============================================================================
+
+@test
+fn property_equal_symmetric() {
+    for p in ascii_pair_domain().iter() {
+        let ab = equal_ascii_nocase(&(*p).0, &(*p).1);
+        let ba = equal_ascii_nocase(&(*p).1, &(*p).0);
+        assert_eq(ab, ba);
+    }
+}
+
+// =============================================================================
+// §9 equal_ascii_nocase ⇔ compare_ascii_nocase = Equal
+// =============================================================================
+
+@test
+fn property_equal_iff_compare_equal() {
+    for p in ascii_pair_domain().iter() {
+        let eq = equal_ascii_nocase(&(*p).0, &(*p).1);
+        let cmp = compare_ascii_nocase(&(*p).0, &(*p).1);
+        assert_eq(eq, cmp == Equal);
+    }
+}
+
+// =============================================================================
+// §10 fold_byte_ascii agrees with Char.to_ascii_lowercase on ASCII range
+// =============================================================================
+
+@test
+fn property_fold_byte_agrees_with_char_lowercase() {
+    let mut b: Int = 0x21;  // skip control chars
+    while b <= 0x7E {
+        let byte = b as Byte;
+        let folded_byte = fold_byte_ascii(byte);
+        let ch = b as Char;
+        let folded_char = ch.to_ascii_lowercase();
+        assert_eq(folded_byte as Int, folded_char as Int);
+        b = b + 1;
+    }
+}
+
+// =============================================================================
+// §11 NOCASE policy: only 0x41–0x5A is folded; bytes >= 0x80 pass through
+// =============================================================================
+
+@test
+fn property_fold_byte_high_range_pass_through() {
+    let mut b: Int = 0x80;
+    while b <= 0xFF {
+        let byte = b as Byte;
+        assert_eq(fold_byte_ascii(byte), byte);
+        b = b + 1;
+    }
+}
+
+// =============================================================================
+// §12 fold_text equals fold_text(reverse).reverse() up to byte order
+//     (length-preserving fold property — fold doesn't change byte count)
+// =============================================================================
+
+@test
+fn property_fold_text_preserves_byte_length() {
+    for s in ascii_text_domain().iter() {
+        let folded = fold_text_ascii(s);
+        assert_eq(folded.len(), (*s).len());
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

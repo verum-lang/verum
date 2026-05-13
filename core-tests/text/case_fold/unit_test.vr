@@ -1,0 +1,249 @@
+// =============================================================================
+// core-tests/text/case_fold/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core/text/case_fold.vr` — the ASCII-subset case folding
+// primitives that power SQLite's `NOCASE` collation.
+//
+// API surface (5 free functions):
+//   fold_char_ascii(c: Char) -> Char
+//   fold_byte_ascii(b: Byte) -> Byte
+//   fold_text_ascii(s: &Text) -> Text
+//   compare_ascii_nocase(a: &Text, b: &Text) -> Ordering
+//   equal_ascii_nocase(a: &Text, b: &Text) -> Bool
+//
+// Companion files: property_test.vr, integration_test.vr, regression_test.vr,
+// audit.md.
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.case_fold.{
+    fold_char_ascii, fold_byte_ascii, fold_text_ascii,
+    compare_ascii_nocase, equal_ascii_nocase,
+};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+
+// =============================================================================
+// Section 1: fold_char_ascii
+// =============================================================================
+
+@test
+fn test_fold_char_uppercase_to_lowercase() {
+    assert_eq(fold_char_ascii('A'), 'a');
+    assert_eq(fold_char_ascii('Z'), 'z');
+    assert_eq(fold_char_ascii('M'), 'm');
+}
+
+@test
+fn test_fold_char_already_lowercase_identity() {
+    assert_eq(fold_char_ascii('a'), 'a');
+    assert_eq(fold_char_ascii('z'), 'z');
+}
+
+@test
+fn test_fold_char_digit_identity() {
+    assert_eq(fold_char_ascii('0'), '0');
+    assert_eq(fold_char_ascii('9'), '9');
+}
+
+@test
+fn test_fold_char_punctuation_identity() {
+    assert_eq(fold_char_ascii('.'), '.');
+    assert_eq(fold_char_ascii('!'), '!');
+    assert_eq(fold_char_ascii(','), ',');
+}
+
+@test
+fn test_fold_char_space_identity() {
+    assert_eq(fold_char_ascii(' '), ' ');
+    assert_eq(fold_char_ascii('\t'), '\t');
+}
+
+// =============================================================================
+// Section 2: fold_byte_ascii
+// =============================================================================
+
+@test
+fn test_fold_byte_uppercase_letter() {
+    let upper_a: Byte = 0x41 as Byte;
+    let lower_a: Byte = 0x61 as Byte;
+    assert_eq(fold_byte_ascii(upper_a), lower_a);
+}
+
+@test
+fn test_fold_byte_lowercase_identity() {
+    let a: Byte = 0x61 as Byte;
+    assert_eq(fold_byte_ascii(a), a);
+}
+
+@test
+fn test_fold_byte_digit_identity() {
+    let zero: Byte = 0x30 as Byte;  // '0'
+    assert_eq(fold_byte_ascii(zero), zero);
+}
+
+@test
+fn test_fold_byte_punctuation_identity() {
+    let dot: Byte = 0x2E as Byte;
+    assert_eq(fold_byte_ascii(dot), dot);
+}
+
+@test
+fn test_fold_byte_high_bit_passes_through() {
+    // SQLite NOCASE: bytes with high bit set are NOT folded.
+    let hi: Byte = 0xC3 as Byte;  // continuation lead
+    assert_eq(fold_byte_ascii(hi), hi);
+}
+
+@test
+fn test_fold_byte_z_to_z_lower() {
+    let upper_z: Byte = 0x5A as Byte;
+    let lower_z: Byte = 0x7A as Byte;
+    assert_eq(fold_byte_ascii(upper_z), lower_z);
+}
+
+// =============================================================================
+// Section 3: fold_text_ascii
+// =============================================================================
+
+@test
+fn test_fold_text_uppercase_word() {
+    let s: Text = "HELLO";
+    assert_eq(fold_text_ascii(&s), "hello");
+}
+
+@test
+fn test_fold_text_mixed() {
+    let s: Text = "Hello, World!";
+    assert_eq(fold_text_ascii(&s), "hello, world!");
+}
+
+@test
+fn test_fold_text_already_lowercase() {
+    let s: Text = "hello";
+    assert_eq(fold_text_ascii(&s), "hello");
+}
+
+@test
+fn test_fold_text_empty() {
+    let s: Text = "";
+    assert_eq(fold_text_ascii(&s), "");
+}
+
+@test
+fn test_fold_text_digits_pass_through() {
+    let s: Text = "12345";
+    assert_eq(fold_text_ascii(&s), "12345");
+}
+
+// =============================================================================
+// Section 4: compare_ascii_nocase
+// =============================================================================
+
+@test
+fn test_compare_nocase_equal_same_case() {
+    let a: Text = "hello";
+    let b: Text = "hello";
+    assert_eq(compare_ascii_nocase(&a, &b), Equal);
+}
+
+@test
+fn test_compare_nocase_equal_different_case() {
+    let a: Text = "Hello";
+    let b: Text = "hello";
+    assert_eq(compare_ascii_nocase(&a, &b), Equal);
+}
+
+@test
+fn test_compare_nocase_less() {
+    let a: Text = "apple";
+    let b: Text = "BANANA";
+    assert_eq(compare_ascii_nocase(&a, &b), Less);
+}
+
+@test
+fn test_compare_nocase_greater() {
+    let a: Text = "ZEBRA";
+    let b: Text = "apple";
+    assert_eq(compare_ascii_nocase(&a, &b), Greater);
+}
+
+@test
+fn test_compare_nocase_shorter_is_less() {
+    let a: Text = "abc";
+    let b: Text = "abcd";
+    assert_eq(compare_ascii_nocase(&a, &b), Less);
+}
+
+@test
+fn test_compare_nocase_longer_is_greater() {
+    let a: Text = "abcd";
+    let b: Text = "abc";
+    assert_eq(compare_ascii_nocase(&a, &b), Greater);
+}
+
+@test
+fn test_compare_nocase_empty_strings() {
+    let a: Text = "";
+    let b: Text = "";
+    assert_eq(compare_ascii_nocase(&a, &b), Equal);
+}
+
+@test
+fn test_compare_nocase_empty_vs_nonempty() {
+    let a: Text = "";
+    let b: Text = "x";
+    assert_eq(compare_ascii_nocase(&a, &b), Less);
+}
+
+// =============================================================================
+// Section 5: equal_ascii_nocase
+// =============================================================================
+
+@test
+fn test_equal_nocase_same() {
+    let a: Text = "hello";
+    let b: Text = "hello";
+    assert(equal_ascii_nocase(&a, &b));
+}
+
+@test
+fn test_equal_nocase_different_case() {
+    let a: Text = "Hello";
+    let b: Text = "HELLO";
+    assert(equal_ascii_nocase(&a, &b));
+}
+
+@test
+fn test_equal_nocase_different_strings() {
+    let a: Text = "hello";
+    let b: Text = "world";
+    assert(!equal_ascii_nocase(&a, &b));
+}
+
+@test
+fn test_equal_nocase_different_lengths() {
+    let a: Text = "abc";
+    let b: Text = "abcd";
+    assert(!equal_ascii_nocase(&a, &b));
+}
+
+@test
+fn test_equal_nocase_empty() {
+    let a: Text = "";
+    let b: Text = "";
+    assert(equal_ascii_nocase(&a, &b));
+}
+
+@test
+fn test_equal_nocase_punctuation_diff() {
+    let a: Text = "hi.";
+    let b: Text = "hi!";
+    assert(!equal_ascii_nocase(&a, &b));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
