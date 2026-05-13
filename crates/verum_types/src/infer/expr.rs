@@ -5537,10 +5537,22 @@ impl TypeChecker {
                 &func.kind,
                 ExprKind::Path(p) if p.segments.len() == 1
             );
+            // **Audit-driven fundamental fix** — gate WAS
+            // `parents.len() > 1` (multi-parent arity disambiguation
+            // only). Single-parent variants then fell through to
+            // value-position resolution: `synth_expr` returned the
+            // parent Type::Variant which is NOT a Function, then the
+            // Call handler emitted `not a function: Some`.  Affects
+            // every bare `Some(x)` / `None` / `Ok(v)` / `Err(e)` use
+            // site whose simple name has a unique parent in the
+            // currently-loaded type registry (the common stdlib
+            // case after lazy load only registered Maybe/Result).
+            // Resolution: ALWAYS take the constructor path when the
+            // simple name is registered as a variant constructor —
+            // arity disambiguation still kicks in if multiple
+            // parents are registered.
             if is_bare_path
-                && let Some(parents) =
-                    self.variant_constructor_parents.get(name)
-                && parents.len() > 1
+                && self.variant_constructor_parents.get(name).is_some()
                 && let Some(ctor_ty) = self
                     .try_resolve_variant_constructor_with_arity(
                         name.as_str(),

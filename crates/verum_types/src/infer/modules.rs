@@ -7580,6 +7580,47 @@ impl TypeChecker {
         module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
     ) -> Result<()> {
+        // **Audit-driven fundamental fix** — metadata-driven nested
+        // glob re-export propagation.  `metadata.module_reexports[X]`
+        // captures every `(local_name, source_module)` chain from X's
+        // declared mount tree at PRECOMPILE time, recursively through
+        // nested `public mount super.Y.*` chains.  For X = `core.prelude`
+        // this contains all 530 leaves (Some/None/Maybe/set_var/range/
+        // count_from/replace/…) — but the typechecker's prior glob
+        // handler ONLY walked the synthetic registry AST (empty for
+        // stdlib) OR the user-side `inline_modules` map (lacks stdlib
+        // inline mods like `core.prelude`).  Pre-fix every
+        // `mount core.prelude.*` failed `unbound variable: <name>` at
+        // each use site.
+        //
+        // Resolution: iterate `metadata.module_reexports[module_path]`
+        // and `import_item_from_module(source, local_name)` for each
+        // leaf.  Idempotent (`import_item_from_module` handles
+        // already-registered names).  Errors logged (any single leaf
+        // can fail without aborting the glob, mirroring the existing
+        // discipline at lines 7660-7677).
+        if let Maybe::Some(metadata) = &self.core_metadata.clone() {
+            if let Some(leaves) = metadata.module_reexports.get(module_path) {
+                for (local_name, source_module) in leaves.iter() {
+                    let local_name = local_name.clone();
+                    let source_module = source_module.clone();
+                    if let Err(e) = self.import_item_from_module(
+                        &source_module,
+                        local_name.as_str(),
+                        registry,
+                    ) {
+                        tracing::debug!(
+                            "import_all_from_module: metadata-driven re-export {}.{} (source {}) failed: {:?}",
+                            module_path.as_str(),
+                            local_name.as_str(),
+                            source_module.as_str(),
+                            e
+                        );
+                    }
+                }
+            }
+        }
+
         // Look up the source module in the registry
         if let Some(module_info) = registry.get_by_path(module_path.as_str()) {
             // Pre-register all function signatures to enable forward references

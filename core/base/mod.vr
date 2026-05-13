@@ -310,6 +310,7 @@ public mount .panic.{
 // From env
 public mount .env.{
     args,
+    arg,
     args_count,
     args_os,
     Args,
