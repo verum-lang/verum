@@ -355,6 +355,60 @@ fn regression_r_count_matches_compile_pinned() {
 // They lock in fixes already landed earlier in the branch.
 // =============================================================================
 
+// PASS-GUARD: extract_string CBGR-ref auto-deref (commit f8d70e6ef).
+// Pre-fix every &Text arg to a Text intercept fell through to the
+// `<value:N>` debug-format fallback. find / contains / replace / split /
+// strip_prefix / strip_suffix / rfind / index_of / find_char /
+// split_once / rsplit_once / eq_ignore_case / starts_with / ends_with
+// were all silently broken. ~25 downstream tests pinned this defect.
+@test
+fn guard_find_via_borrowed_needle() {
+    match "hello".find(&"ell") {
+        Some(i) => assert_eq(i, 1),
+        None => panic("extract_string CBGR-deref regression — find(&\"ell\") in \"hello\" must be Some(1)"),
+    }
+}
+
+@test
+fn guard_replace_via_borrowed_args() {
+    let r = "aaa".replace(&"a", &"b");
+    assert_eq(r, "bbb");
+}
+
+@test
+fn guard_contains_starts_ends_with_via_borrowed_needle() {
+    assert("hello".contains(&"ell"));
+    assert("hello".starts_with(&"he"));
+    assert("hello".ends_with(&"lo"));
+}
+
+@test
+fn guard_split_once_via_borrowed_separator() {
+    match "key=value".split_once(&"=") {
+        Some(pair) => {
+            assert_eq(pair.0, "key");
+            assert_eq(pair.1, "value");
+        }
+        None => panic("split_once must find '='"),
+    }
+}
+
+// PASS-GUARD: utf8_decode_char 2-arg fix (commit 5d04b98e7).
+// Pre-fix the runtime handler read 1 register treating it as a code
+// point. After fix it reads bytes + idx and decodes UTF-8 properly.
+@test
+fn guard_utf8_decode_char_proper_codepoint() {
+    let s: Text = "abc";
+    let mut out: List<Char> = [];
+    for c in s.chars() {
+        out.push(c);
+    }
+    assert_eq(out.len(), 3);
+    assert_eq(out[0], 'a');
+    assert_eq(out[1], 'b');
+    assert_eq(out[2], 'c');
+}
+
 // PASS-GUARD: `Text.new()` must be empty.
 @test
 fn guard_new_is_empty() {
