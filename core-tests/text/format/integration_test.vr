@@ -1,0 +1,144 @@
+// =============================================================================
+// core-tests/text/format/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib scenarios for the format layer. Touches Text, Maybe, Result,
+// List, format strings.
+//
+// Coverage:
+//   §1 Format string with multiple types
+//   §2 format_display / format_debug for primitives
+//   §3 Format inside an iteration loop
+//   §4 WriteError carrying through Result<T, WriteError>
+//   §5 FormatSpec used as configuration value
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.format.{
+    WriteError, WriteErrorKind,
+    TextAlignment, Sign, FormatSpec,
+    format_debug, format_display,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 Format string with multiple types
+// =============================================================================
+
+@test
+fn integration_format_int_text_bool() {
+    let n: Int = 42;
+    let s: Text = "hello";
+    let b: Bool = true;
+    let out = f"n={n}, s={s}, b={b}";
+    assert_eq(out, "n=42, s=hello, b=true");
+}
+
+// =============================================================================
+// §2 format_display / format_debug for primitives
+// =============================================================================
+
+@test
+fn integration_format_display_for_int_list() {
+    let xs: List<Int> = [1, 2, 3];
+    let mut joined = Text.new();
+    let mut first: Bool = true;
+    for x in xs.iter() {
+        if !first { joined.push_str(&","); }
+        joined.push_str(&format_display(x));
+        first = false;
+    }
+    assert_eq(joined, "1,2,3");
+}
+
+// =============================================================================
+// §3 Format inside iteration
+// =============================================================================
+
+@test
+fn integration_format_inside_loop() {
+    let mut acc = Text.new();
+    let xs: List<Int> = [10, 20, 30];
+    for x in xs.iter() {
+        let line = f"value={*x};";
+        acc.push_str(&line);
+    }
+    assert_eq(acc, "value=10;value=20;value=30;");
+}
+
+// =============================================================================
+// §4 WriteError carrying through Result
+// =============================================================================
+
+@test
+fn integration_write_error_in_result_ok() {
+    let r: Result<Int, WriteError> = Ok(42);
+    match r {
+        Ok(n) => assert_eq(n, 42),
+        Err(_) => panic("Ok branch"),
+    }
+}
+
+@test
+fn integration_write_error_in_result_err() {
+    let r: Result<Int, WriteError> = Err(WriteError.io());
+    match r {
+        Ok(_) => panic("Err branch"),
+        Err(e) => assert(e.kind is WriteErrorKind.Io),
+    }
+}
+
+// =============================================================================
+// §5 FormatSpec as a config value
+// =============================================================================
+
+@test
+fn integration_format_spec_round_trip_via_default() {
+    let s1: FormatSpec = FormatSpec.default();
+    let s2: FormatSpec = FormatSpec.default();
+    // Both should be observably equal — same defaults, no random state
+    assert_eq(s1.fill, s2.fill);
+    assert_eq(s1.alternate, s2.alternate);
+    assert(s1.width is None);
+    assert(s2.width is None);
+}
+
+// =============================================================================
+// §6 Sign and TextAlignment in match expressions
+// =============================================================================
+
+@test
+fn integration_alignment_in_match() {
+    fn alignment_label(a: TextAlignment) -> Text {
+        match a {
+            TextAlignment.Left => "left",
+            TextAlignment.Center => "center",
+            TextAlignment.Right => "right",
+        }
+    }
+    assert_eq(alignment_label(TextAlignment.Left), "left");
+    assert_eq(alignment_label(TextAlignment.Center), "center");
+    assert_eq(alignment_label(TextAlignment.Right), "right");
+}
+
+@test
+fn integration_sign_in_match() {
+    fn sign_symbol(s: Sign) -> Text {
+        match s {
+            Sign.Minus => "-",
+            Sign.Plus => "+",
+            Sign.Space => " ",
+        }
+    }
+    assert_eq(sign_symbol(Sign.Minus), "-");
+    assert_eq(sign_symbol(Sign.Plus), "+");
+    assert_eq(sign_symbol(Sign.Space), " ");
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

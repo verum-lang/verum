@@ -1,0 +1,221 @@
+// =============================================================================
+// core-tests/text/format/property_test.vr
+// =============================================================================
+//
+// Algebraic / mathematical laws for the formatting layer.
+//
+// Laws:
+//   §1  TextAlignment / Sign / WriteErrorKind variant pairwise distinctness
+//       (each variant is itself, not the others)
+//   §2  Default invariants:
+//        - TextAlignment.default() = Left
+//        - Sign.default()          = Minus
+//        - FormatSpec.default()    = (' ', Left, Minus, None, None, false, None)
+//   §3  WriteErrorKind Eq is an equivalence relation
+//   §4  FormatSpec builder methods compose: with_width then with_precision
+//   §5  Display(format_display(x)) = f"{x}" for x : Int
+//   §6  Debug(format_debug(x))    = f"{x:?}" for x : Int
+//   §7  f"" interpolation preserves byte-equality with computed text
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.format.{
+    WriteError, WriteErrorKind,
+    TextAlignment, Sign, FormatSpec,
+    format_debug, format_display,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 Variant pairwise distinctness
+// =============================================================================
+
+@test
+fn property_alignment_variants_pairwise_distinct() {
+    let l: TextAlignment = TextAlignment.Left;
+    let c: TextAlignment = TextAlignment.Center;
+    let r: TextAlignment = TextAlignment.Right;
+
+    assert(l is TextAlignment.Left);
+    assert(c is TextAlignment.Center);
+    assert(r is TextAlignment.Right);
+
+    assert(!(l is TextAlignment.Center));
+    assert(!(l is TextAlignment.Right));
+    assert(!(c is TextAlignment.Left));
+    assert(!(c is TextAlignment.Right));
+    assert(!(r is TextAlignment.Left));
+    assert(!(r is TextAlignment.Center));
+}
+
+@test
+fn property_sign_variants_pairwise_distinct() {
+    let m: Sign = Sign.Minus;
+    let p: Sign = Sign.Plus;
+    let s: Sign = Sign.Space;
+    assert(m is Sign.Minus);
+    assert(p is Sign.Plus);
+    assert(s is Sign.Space);
+    assert(!(m is Sign.Plus));
+    assert(!(m is Sign.Space));
+    assert(!(p is Sign.Minus));
+    assert(!(p is Sign.Space));
+    assert(!(s is Sign.Minus));
+    assert(!(s is Sign.Plus));
+}
+
+@test
+fn property_write_error_kind_variants_pairwise_distinct() {
+    let i: WriteErrorKind = WriteErrorKind.Io;
+    let b: WriteErrorKind = WriteErrorKind.BufferFull;
+    let e: WriteErrorKind = WriteErrorKind.Encoding;
+    assert(i is WriteErrorKind.Io);
+    assert(b is WriteErrorKind.BufferFull);
+    assert(e is WriteErrorKind.Encoding);
+    assert(!(i is WriteErrorKind.BufferFull));
+    assert(!(i is WriteErrorKind.Encoding));
+    assert(!(b is WriteErrorKind.Io));
+    assert(!(b is WriteErrorKind.Encoding));
+    assert(!(e is WriteErrorKind.Io));
+    assert(!(e is WriteErrorKind.BufferFull));
+}
+
+// =============================================================================
+// §2 Default invariants
+// =============================================================================
+
+@test
+fn property_alignment_default_is_left() {
+    let d: TextAlignment = TextAlignment.default();
+    assert(d is TextAlignment.Left);
+}
+
+@test
+fn property_sign_default_is_minus() {
+    let d: Sign = Sign.default();
+    assert(d is Sign.Minus);
+}
+
+@test
+fn property_format_spec_default_is_zero_pad_none() {
+    let d: FormatSpec = FormatSpec.default();
+    assert_eq(d.fill, ' ');
+    assert(d.align is TextAlignment.Left);
+    assert(d.sign is Sign.Minus);
+    assert(d.width is None);
+    assert(d.precision is None);
+    assert(!d.alternate);
+}
+
+// =============================================================================
+// §3 WriteErrorKind Eq equivalence relation
+// =============================================================================
+
+@test
+fn property_write_error_kind_reflexive() {
+    let kinds: List<WriteErrorKind> = [
+        WriteErrorKind.Io, WriteErrorKind.BufferFull, WriteErrorKind.Encoding
+    ];
+    for k in kinds.iter() {
+        assert(*k == *k);
+    }
+}
+
+@test
+fn property_write_error_kind_symmetric() {
+    let kinds: List<WriteErrorKind> = [
+        WriteErrorKind.Io, WriteErrorKind.BufferFull, WriteErrorKind.Encoding
+    ];
+    for a in kinds.iter() {
+        for b in kinds.iter() {
+            assert_eq(*a == *b, *b == *a);
+        }
+    }
+}
+
+@test
+fn property_write_error_kind_transitive() {
+    let kinds: List<WriteErrorKind> = [
+        WriteErrorKind.Io, WriteErrorKind.BufferFull, WriteErrorKind.Encoding
+    ];
+    for a in kinds.iter() {
+        for b in kinds.iter() {
+            for c in kinds.iter() {
+                if (*a == *b) && (*b == *c) {
+                    assert(*a == *c);
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// §4 FormatSpec builder composition
+// =============================================================================
+
+@test
+fn property_format_spec_with_width_and_precision_compose() {
+    let s = FormatSpec.default().with_width(10).with_precision(3);
+    match s.width {
+        Some(w) => assert_eq(w, 10),
+        None => panic("width should be 10"),
+    }
+    match s.precision {
+        Some(p) => assert_eq(p, 3),
+        None => panic("precision should be 3"),
+    }
+}
+
+@test
+fn property_format_spec_with_align_then_fill() {
+    let s = FormatSpec.default().with_align(TextAlignment.Right).with_fill('*');
+    assert(s.align is TextAlignment.Right);
+    assert_eq(s.fill, '*');
+}
+
+// =============================================================================
+// §5 format_display agrees with f"{x}" on Int
+// =============================================================================
+
+@test
+fn property_format_display_matches_format_string_int() {
+    let xs: List<Int> = [0, 1, -1, 42, -42, 100, -100];
+    for n in xs.iter() {
+        let direct = format_display(n);
+        let interp = f"{*n}";
+        assert_eq(direct, interp);
+    }
+}
+
+// =============================================================================
+// §6 format_debug agrees with f"{x:?}" on Int
+// =============================================================================
+
+@test
+fn property_format_debug_matches_format_string_int() {
+    let xs: List<Int> = [0, 1, -1, 42, -42];
+    for n in xs.iter() {
+        let direct = format_debug(n);
+        let interp = f"{*n:?}";
+        assert_eq(direct, interp);
+    }
+}
+
+// =============================================================================
+// §7 Format string + concatenation equivalence
+// =============================================================================
+
+@test
+fn property_format_concat_equivalence() {
+    let n: Int = 42;
+    let from_format = f"value={n}";
+    let from_concat = "value=".concat(&Text.from_int(n));
+    assert_eq(from_format, from_concat);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

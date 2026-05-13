@@ -1,0 +1,331 @@
+// =============================================================================
+// core-tests/text/format/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core/text/format.vr` — the formatting machinery:
+// `Write`, `WriteError`, `WriteErrorKind`, `TextAlignment`, `Sign`,
+// `FormatSpec`, `Formatter`/`TextFormatter`, debug helpers
+// (`DebugStruct`, `DebugTuple`, `DebugList`, `DebugMap`), print
+// functions (`print`, `println`, `eprint`, `eprintln`, `dbg`),
+// `format_debug`, `format_display`.
+//
+// We deliberately do not exercise IO-context functions in tests
+// (print/println would need [IO] capability); coverage focuses on the
+// pure data-shaping layer plus the f"…" format-string surface.
+//
+// Companion files: property_test.vr, integration_test.vr, regression_test.vr,
+// audit.md.
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.format.{
+    WriteError, WriteErrorKind,
+    TextAlignment, Sign, FormatSpec,
+    format_debug, format_display,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: TextAlignment variants and Default
+// =============================================================================
+
+@test
+fn test_alignment_left_construct() {
+    let a: TextAlignment = TextAlignment.Left;
+    assert(a is TextAlignment.Left);
+}
+
+@test
+fn test_alignment_center_construct() {
+    let a: TextAlignment = TextAlignment.Center;
+    assert(a is TextAlignment.Center);
+}
+
+@test
+fn test_alignment_right_construct() {
+    let a: TextAlignment = TextAlignment.Right;
+    assert(a is TextAlignment.Right);
+}
+
+@test
+fn test_alignment_default_is_left() {
+    let a: TextAlignment = TextAlignment.default();
+    assert(a is TextAlignment.Left);
+}
+
+@test
+fn test_alignment_three_distinct() {
+    let l: TextAlignment = TextAlignment.Left;
+    assert(l is TextAlignment.Left);
+    assert(!(l is TextAlignment.Center));
+    assert(!(l is TextAlignment.Right));
+}
+
+// =============================================================================
+// Section 2: Sign variants and Default
+// =============================================================================
+
+@test
+fn test_sign_minus_construct() {
+    let s: Sign = Sign.Minus;
+    assert(s is Sign.Minus);
+}
+
+@test
+fn test_sign_plus_construct() {
+    let s: Sign = Sign.Plus;
+    assert(s is Sign.Plus);
+}
+
+@test
+fn test_sign_space_construct() {
+    let s: Sign = Sign.Space;
+    assert(s is Sign.Space);
+}
+
+@test
+fn test_sign_default_is_minus() {
+    let s: Sign = Sign.default();
+    assert(s is Sign.Minus);
+}
+
+// =============================================================================
+// Section 3: WriteErrorKind variants
+// =============================================================================
+
+@test
+fn test_write_error_kind_io() {
+    let k: WriteErrorKind = WriteErrorKind.Io;
+    assert(k is WriteErrorKind.Io);
+}
+
+@test
+fn test_write_error_kind_buffer_full() {
+    let k: WriteErrorKind = WriteErrorKind.BufferFull;
+    assert(k is WriteErrorKind.BufferFull);
+}
+
+@test
+fn test_write_error_kind_encoding() {
+    let k: WriteErrorKind = WriteErrorKind.Encoding;
+    assert(k is WriteErrorKind.Encoding);
+}
+
+@test
+fn test_write_error_kind_eq_self() {
+    assert(WriteErrorKind.Io == WriteErrorKind.Io);
+    assert(WriteErrorKind.BufferFull == WriteErrorKind.BufferFull);
+    assert(WriteErrorKind.Encoding == WriteErrorKind.Encoding);
+}
+
+@test
+fn test_write_error_kind_ne_different() {
+    assert(WriteErrorKind.Io != WriteErrorKind.BufferFull);
+    assert(WriteErrorKind.BufferFull != WriteErrorKind.Encoding);
+    assert(WriteErrorKind.Io != WriteErrorKind.Encoding);
+}
+
+// =============================================================================
+// Section 4: WriteError factory functions
+// =============================================================================
+
+@test
+fn test_write_error_io_factory() {
+    let e = WriteError.io();
+    assert(e.kind is WriteErrorKind.Io);
+}
+
+@test
+fn test_write_error_buffer_full_factory() {
+    let e = WriteError.buffer_full();
+    assert(e.kind is WriteErrorKind.BufferFull);
+}
+
+@test
+fn test_write_error_eq_same_kind() {
+    let a = WriteError.io();
+    let b = WriteError.io();
+    assert(a == b);
+}
+
+@test
+fn test_write_error_ne_different_kind() {
+    let a = WriteError.io();
+    let b = WriteError.buffer_full();
+    assert(a != b);
+}
+
+// =============================================================================
+// Section 5: FormatSpec construction
+// =============================================================================
+
+@test
+fn test_format_spec_default_fill_is_space() {
+    let s: FormatSpec = FormatSpec.default();
+    assert_eq(s.fill, ' ');
+}
+
+@test
+fn test_format_spec_default_alternate_false() {
+    let s: FormatSpec = FormatSpec.default();
+    assert(!s.alternate);
+}
+
+@test
+fn test_format_spec_default_align_left() {
+    let s: FormatSpec = FormatSpec.default();
+    assert(s.align is TextAlignment.Left);
+}
+
+@test
+fn test_format_spec_default_sign_minus() {
+    let s: FormatSpec = FormatSpec.default();
+    assert(s.sign is Sign.Minus);
+}
+
+@test
+fn test_format_spec_default_width_none() {
+    let s: FormatSpec = FormatSpec.default();
+    assert(s.width is None);
+}
+
+@test
+fn test_format_spec_default_precision_none() {
+    let s: FormatSpec = FormatSpec.default();
+    assert(s.precision is None);
+}
+
+// =============================================================================
+// Section 6: FormatSpec builder methods
+// =============================================================================
+
+@test
+fn test_format_spec_with_width() {
+    let s = FormatSpec.default().with_width(20);
+    match s.width {
+        Some(w) => assert_eq(w, 20),
+        None => panic("width should be Some(20)"),
+    }
+}
+
+@test
+fn test_format_spec_with_precision() {
+    let s = FormatSpec.default().with_precision(3);
+    match s.precision {
+        Some(p) => assert_eq(p, 3),
+        None => panic("precision should be Some(3)"),
+    }
+}
+
+@test
+fn test_format_spec_with_align_right() {
+    let s = FormatSpec.default().with_align(TextAlignment.Right);
+    assert(s.align is TextAlignment.Right);
+}
+
+@test
+fn test_format_spec_with_fill() {
+    let s = FormatSpec.default().with_fill('*');
+    assert_eq(s.fill, '*');
+}
+
+// =============================================================================
+// Section 7: f"…" format strings — Display path
+// =============================================================================
+
+@test
+fn test_format_int_basic() {
+    let n: Int = 42;
+    assert_eq(f"{n}", "42");
+}
+
+@test
+fn test_format_int_negative() {
+    let n: Int = -7;
+    assert_eq(f"{n}", "-7");
+}
+
+@test
+fn test_format_int_zero() {
+    let n: Int = 0;
+    assert_eq(f"{n}", "0");
+}
+
+@test
+fn test_format_text() {
+    let s: Text = "hello";
+    assert_eq(f"{s}", "hello");
+}
+
+@test
+fn test_format_bool_true() {
+    let b: Bool = true;
+    assert_eq(f"{b}", "true");
+}
+
+@test
+fn test_format_bool_false() {
+    let b: Bool = false;
+    assert_eq(f"{b}", "false");
+}
+
+@test
+fn test_format_inline_arithmetic() {
+    let a: Int = 5;
+    let b: Int = 3;
+    assert_eq(f"{a + b}", "8");
+}
+
+@test
+fn test_format_two_interpolations() {
+    let x: Int = 1;
+    let y: Int = 2;
+    assert_eq(f"x={x}, y={y}", "x=1, y=2");
+}
+
+@test
+fn test_format_with_static_around() {
+    let n: Int = 5;
+    assert_eq(f"prefix-{n}-suffix", "prefix-5-suffix");
+}
+
+// =============================================================================
+// Section 8: f"…" with Debug specifier
+// =============================================================================
+
+@test
+fn test_format_debug_int() {
+    let n: Int = 42;
+    assert_eq(f"{n:?}", "42");
+}
+
+@test
+fn test_format_debug_bool() {
+    let b: Bool = true;
+    assert_eq(f"{b:?}", "true");
+}
+
+// =============================================================================
+// Section 9: format_debug and format_display free functions
+// =============================================================================
+
+@test
+fn test_format_display_int() {
+    let n: Int = 5;
+    let s = format_display(&n);
+    assert_eq(s, "5");
+}
+
+@test
+fn test_format_debug_int_function() {
+    let n: Int = 5;
+    let s = format_debug(&n);
+    assert_eq(s, "5");
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
