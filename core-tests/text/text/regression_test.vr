@@ -1,0 +1,404 @@
+// =============================================================================
+// core-tests/text/text/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect (or current defect class) in `core/text/text.vr`
+// and the supporting language plumbing it relies on. Each test names the
+// defect, points to its audit.md row, and either *pins the symptom* (with
+// `@ignore` while the defect is open) or *guards the fix* (active, must
+// stay green forever).
+//
+// The taxonomy:
+//   §A  rfind dispatch / "Text.rfind not found on Object"
+//   §B  Char.encode_utf8 dispatch / "not found on receiver of Int"
+//   §C  Iterator.next dispatch on Chars / Lines / ByteIter / CharIndices
+//   §D  Function-id collision (FunctionId(12039) etc.)
+//   §E  Text.truncate NullPointer on small / empty Text
+//   §F  Text.find returning wrong byte index (semantic)
+//   §G  Text.contains returning wrong Bool (semantic)
+//   §H  Text.find_char / index_of returning wrong index
+//   §I  Text.cmp returning wrong Ordering on lexicographic input
+//   §J  Debug-format escape sequences (\\n, \\t, \\\\, \\")
+//   §K  Text padding/center/zfill — width/fill not applied
+//   §L  Text.replace / replacen — replacement not propagated
+//   §M  Text.from_utf8 / from_utf8_lossy — Utf8Error not raised on invalid input
+//   §N  Text.into_bytes — List.extend_from_slice missing
+//   §O  Text.from_int / parse_int round-trip — function-id collision symptom
+//   §P  Text.split_once / strip_prefix / strip_suffix — None when match exists
+//   §Q  Text.capitalize / to_title_case / swapcase — case helpers no-op or wrong
+//   §R  count_matches — interpreter panic "Expected int, got Some(3)"
+//
+// Convention: a regression test is `@ignore`d while the defect is open
+// AND has a pin in audit.md. When a fix lands, remove `@ignore` and let the
+// test become a green guard against re-regression.
+// =============================================================================
+
+mount core.text.{Text, Utf8Error, ParseError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — Text.rfind dispatch broken (audit.md §A)
+// REGRESSION: `Text.rfind` reports "method not found on receiver of runtime
+// kind `Object`". Affects rfind directly + every method that calls rfind:
+// rsplit, rsplitn, rsplit_once, contains_any, index_of_any, AND apparently
+// to_ascii_uppercase / to_ascii_lowercase indirectly. Likely cause: stdlib
+// lenient-skip OR archive-load function-id remap loses rfind binding.
+// =============================================================================
+
+@ignore
+@test
+fn regression_a_rfind_basic_pinned() {
+    match "ababab".rfind(&"ab") {
+        Some(i) => assert_eq(i, 4),
+        None => panic("rfind('ab') in 'ababab' must be Some(4)"),
+    }
+}
+
+// =============================================================================
+// §B — Char.encode_utf8 dispatched on Int receiver (audit.md §B)
+// REGRESSION: `Text.insert(idx, ch)` calls `ch.encode_utf8(&mut buf)` and the
+// runtime dispatch routes to receiver kind `Int` instead of `Char`. Same
+// class as the SelfValue is_type_param fix (commit 90b94e68b context) — but
+// here it's the receiver-kind classification at the dispatch site, not the
+// is_type_param gate.
+// =============================================================================
+
+@ignore
+@test
+fn regression_b_text_insert_uses_encode_utf8_pinned() {
+    let mut s: Text = "ac";
+    s.insert(1, 'b');
+    assert_eq(s, "abc");
+}
+
+// =============================================================================
+// §C — Iterator.next dispatch broken on Chars / Lines / ByteIter (audit.md §C)
+// REGRESSION: for-loops over `Text.chars()` and other Text iterators panic
+// with "method 'next' not found on receiver of runtime kind `Object`". This
+// breaks every loop that uses `for ch in s.chars()` and is the single most
+// impactful defect in this audit.
+// =============================================================================
+
+@ignore
+@test
+fn regression_c_chars_iterator_next_pinned() {
+    let s: Text = "abc";
+    let mut count: Int = 0;
+    for _c in s.chars() {
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// §D — Function-id collision / FunctionNotFound(FunctionId(N)) (audit.md §D)
+// REGRESSION: cross-module function-id resolution drops bindings for
+// `Text.from_int` / `Text.concat` / `Text.push_byte` / `Text.reserve` /
+// `Text.make_ascii_uppercase`. Same defect class as the
+// `stdlib_bootstrap.initialize()` revert in MEMORY (per-module
+// next_func_id namespaces colliding at archive load).
+// =============================================================================
+
+@ignore
+@test
+fn regression_d_text_from_int_function_id_pinned() {
+    assert_eq(Text.from_int(42), "42");
+}
+
+// =============================================================================
+// §E — Text.truncate NullPointer on small/empty Text (audit.md §E)
+// REGRESSION: `Text.truncate(n)` panics with `NullPointerAt opcode 0x63`
+// when invoked on a Text whose `cap == 0` (static / SSO inline). Expected:
+// truncate is a no-op or shrinks `len`; null write must be guarded behind
+// `cap > 0 && !is_null(ptr)` (mirrors Drop's invariant at line 3387).
+// =============================================================================
+
+@ignore
+@test
+fn regression_e_truncate_static_text_pinned() {
+    let mut s: Text = "hello";   // static, cap == 0
+    s.truncate(2);
+    assert_eq(s, "he");
+}
+
+// Indirect surface — `pop` and `clear` both invoke `truncate`.
+@ignore
+@test
+fn regression_e_pop_static_text_pinned() {
+    let mut s: Text = "abc";
+    let _ = s.pop();
+    assert_eq(s, "ab");
+}
+
+@ignore
+@test
+fn regression_e_clear_static_text_pinned() {
+    let mut s: Text = "hello";
+    s.clear();
+    assert(s.is_empty());
+}
+
+// =============================================================================
+// §F — Text.find returns wrong byte index (audit.md §F)
+// REGRESSION: `find(&"ell")` in `"hello"` should return Some(1). Empirically
+// returns None or a wrong index. The KMP failure-table preprocessing likely
+// returns wrong results — `kmp_failure_table` / `kmp_find` interaction.
+// =============================================================================
+
+@ignore
+@test
+fn regression_f_find_returns_correct_index_pinned() {
+    match "hello".find(&"ell") {
+        Some(i) => assert_eq(i, 1),
+        None => panic("find('ell') in 'hello' must be Some(1)"),
+    }
+}
+
+// =============================================================================
+// §G — Text.contains returns wrong Bool (audit.md §G)
+// REGRESSION: `"hello".contains(&"ell")` returns false. Downstream of §F
+// since `contains` likely delegates to `find(...).is_some()`.
+// =============================================================================
+
+@ignore
+@test
+fn regression_g_contains_present_pinned() {
+    assert("hello".contains(&"ell"));
+}
+
+// =============================================================================
+// §H — index_of / find_char wrong index (audit.md §H)
+// REGRESSION: aliases of find that exhibit the same defect class as §F.
+// =============================================================================
+
+@ignore
+@test
+fn regression_h_index_of_alias_pinned() {
+    match "hello".index_of(&"ll") {
+        Some(i) => assert_eq(i, 2),
+        None => panic("index_of('ll') in 'hello' must be Some(2)"),
+    }
+}
+
+// =============================================================================
+// §I — Text.cmp wrong Ordering result (audit.md §I)
+// REGRESSION: `"abc".cmp(&"abd")` returns wrong variant. Suspect: byte-wise
+// comparison loop range/index off-by-one or wrong Ordering variant
+// constructor at the codegen level (see MEMORY §22 — variant tag stability).
+// =============================================================================
+
+@ignore
+@test
+fn regression_i_cmp_lex_less_pinned() {
+    let a: Text = "abc";
+    let b: Text = "abd";
+    assert_eq(a.cmp(&b), Less);
+}
+
+@ignore
+@test
+fn regression_i_cmp_shorter_less_pinned() {
+    let a: Text = "ab";
+    let b: Text = "abc";
+    assert_eq(a.cmp(&b), Less);
+}
+
+// =============================================================================
+// §J — Debug format escape sequences (audit.md §J)
+// REGRESSION: `f"{s:?}"` does not produce the expected escaped form. The
+// `Debug for Text` impl matches each control char and writes a sequence
+// like `\\n` — but the produced output diverges, suggesting either the
+// match arms misroute or the format-spec router does not dispatch
+// `fmt_debug` for the `?` type-hint when the inner type is `Text`.
+// =============================================================================
+
+@ignore
+@test
+fn regression_j_debug_format_quotes_pinned() {
+    let s: Text = "hi";
+    assert_eq(f"{s:?}", "\"hi\"");
+}
+
+@ignore
+@test
+fn regression_j_debug_format_newline_escape_pinned() {
+    let s: Text = "a\nb";
+    assert_eq(f"{s:?}", "\"a\\nb\"");
+}
+
+// =============================================================================
+// §K — Padding helpers misbehave (audit.md §K)
+// REGRESSION: `pad_left(5, ' ')` does not pad. Width / fill arguments either
+// are dropped at the codegen level (variant constructor mis-routing again?)
+// or the helper bodies were lenient-skipped at stdlib bootstrap.
+// =============================================================================
+
+@ignore
+@test
+fn regression_k_pad_left_pinned() {
+    assert_eq("ab".pad_left(5, ' '), "   ab");
+}
+
+// =============================================================================
+// §L — Text.replace not propagating replacement (audit.md §L)
+// REGRESSION: `replace(&"a", &"b")` returns a Text that is not the expected
+// substituted form. May be downstream of §F (KMP search) or §A (rfind
+// resolution) depending on which path the body takes.
+// =============================================================================
+
+@ignore
+@test
+fn regression_l_replace_pinned() {
+    assert_eq("aaa".replace(&"a", &"b"), "bbb");
+}
+
+// =============================================================================
+// §M — from_utf8 not raising Utf8Error on invalid input (audit.md §M)
+// REGRESSION: `Text.from_utf8(invalid_bytes)` returns `Ok(...)` instead of
+// `Err(Utf8Error)`. The `utf8_validate` helper at the top of text.vr returns
+// the wrong Bool, OR the Result wiring at the call site swallows the Err.
+// =============================================================================
+
+@ignore
+@test
+fn regression_m_from_utf8_invalid_returns_err_pinned() {
+    let bytes: List<Byte> = [0xC0 as Byte, 0x20 as Byte];
+    match Text.from_utf8(&bytes) {
+        Ok(_) => panic("invalid UTF-8 must be Err"),
+        Err(_) => {},
+    }
+}
+
+// =============================================================================
+// §N — Text.into_bytes missing dependency on List.extend_from_slice (audit.md §N)
+// REGRESSION: `Text.into_bytes()` panics with "List.extend_from_slice not
+// found". The List API is missing this method (or it was lenient-skipped).
+// =============================================================================
+
+@ignore
+@test
+fn regression_n_into_bytes_pinned() {
+    let s: Text = "AB";
+    let bs = s.into_bytes();
+    assert_eq(bs.len(), 2);
+}
+
+// =============================================================================
+// §O — Text.from_int FunctionNotFound (audit.md §O)
+// REGRESSION: `Text.from_int(0)` panics with `FunctionNotFound(FunctionId(N))`.
+// Same root as §D (function-id collision). Pinned separately because
+// from_int is the load-bearing API surface for f"{n}" and most format-string
+// integer interpolations.
+// =============================================================================
+
+@ignore
+@test
+fn regression_o_from_int_pinned() {
+    assert_eq(Text.from_int(0), "0");
+}
+
+// =============================================================================
+// §P — split_once / strip_prefix / strip_suffix return None when match exists
+//      (audit.md §P)
+// REGRESSION: `"key=value".split_once(&"=")` returns None. Same root as §F
+// (find returns wrong index) since split_once delegates to find.
+// =============================================================================
+
+@ignore
+@test
+fn regression_p_split_once_pinned() {
+    match "key=value".split_once(&"=") {
+        Some(pair) => {
+            assert_eq(pair.0, "key");
+            assert_eq(pair.1, "value");
+        }
+        None => panic("split_once('=') must be Some on 'key=value'"),
+    }
+}
+
+// =============================================================================
+// §Q — capitalize / to_title_case / swapcase no-op or wrong (audit.md §Q)
+// REGRESSION: `"hello".capitalize()` returns "hello" instead of "Hello".
+// =============================================================================
+
+@ignore
+@test
+fn regression_q_capitalize_pinned() {
+    assert_eq("hello".capitalize(), "Hello");
+}
+
+// =============================================================================
+// §R — count_matches triggers internal compiler error (audit.md §R)
+// REGRESSION: `count_matches` triggers an *internal compiler error*
+// ("Expected int, got Some(3)") at compile time. This is a type-inference
+// regression in the typechecker, not a stdlib defect — code that mentions
+// `count_matches` cannot even compile.
+// =============================================================================
+
+@ignore
+@test
+fn regression_r_count_matches_compile_pinned() {
+    let n = "aaaa".count_matches(&"aa");
+    assert_eq(n, 2);
+}
+
+// =============================================================================
+// Active regression guards — these tests pass today and must keep passing.
+// They lock in fixes already landed earlier in the branch.
+// =============================================================================
+
+// PASS-GUARD: `Text.new()` must be empty.
+@test
+fn guard_new_is_empty() {
+    let s = Text.new();
+    assert(s.is_empty());
+    assert_eq(s.len(), 0);
+}
+
+// PASS-GUARD: literal Text equality is structural.
+@test
+fn guard_literal_eq() {
+    assert("hello" == "hello");
+    assert("a" != "b");
+}
+
+// PASS-GUARD: `as_bytes` returns ASCII byte values for ASCII literals.
+@test
+fn guard_as_bytes_ascii() {
+    let s: Text = "AB";
+    let b = s.as_bytes();
+    assert_eq(b.len(), 2);
+    assert_eq(b[0] as Int, 65);
+    assert_eq(b[1] as Int, 66);
+}
+
+// PASS-GUARD: `len` matches byte length for ASCII.
+@test
+fn guard_len_ascii() {
+    assert_eq("hello".len(), 5);
+    assert_eq("".len(), 0);
+}
+
+// PASS-GUARD: `starts_with(empty)` is true.
+@test
+fn guard_starts_with_empty_is_true() {
+    assert("hello".starts_with(&""));
+}
+
+// PASS-GUARD: `to_int` from a positive integer literal text round-trips.
+@test
+fn guard_to_int_roundtrip() {
+    let n = "42".to_int();
+    assert_eq(n, 42);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}
