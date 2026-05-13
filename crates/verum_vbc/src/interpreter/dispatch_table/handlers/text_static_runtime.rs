@@ -198,6 +198,90 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             };
             Ok(Some(alloc_string_value(state, &f.to_string())?))
         }
+        "join" if arg_count == 2 => {
+            // `Text.join(parts: &[Text], sep: &Text) -> Text`.
+            //
+            // Static method that concatenates `parts` separated by `sep`.
+            // The user-side body iterates parts with for-loop + indexing
+            // and chains push_str — works in principle now that the
+            // push_str / iterator fixes have landed, but susceptible to
+            // List<Text> ↔ &[Text] dispatch quirks. The Tier-0 intercept
+            // bypasses every intermediate step: extract each Text element,
+            // collect into a Rust Vec<String>, run `Vec.join(&sep)`,
+            // alloc the result.
+            use super::super::super::heap;
+            use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
+
+            let parts_val_raw = read_arg(state, args_start_reg, 0, caller_base)
+                .unwrap_or_else(empty_text);
+            let sep_val_raw = read_arg(state, args_start_reg, 1, caller_base)
+                .unwrap_or_else(empty_text);
+
+            // Auto-deref CBGR-ref / ThinRef (parts is `&[Text]` /
+            // `&List<Text>`; sep is `&Text`).
+            let unwrap = |mut v: Value| -> Value {
+                if is_cbgr_ref(&v) {
+                    let (abs_index, _) = decode_cbgr_ref(v.as_i64());
+                    v = state.registers.get_absolute(abs_index);
+                }
+                if v.is_thin_ref() {
+                    let tr = v.as_thin_ref();
+                    if !tr.ptr.is_null() {
+                        v = unsafe { *(tr.ptr as *const Value) };
+                    }
+                }
+                v
+            };
+            let parts_val = unwrap(parts_val_raw);
+            let sep_val = unwrap(sep_val_raw);
+
+            let sep_str = super::string_helpers::extract_string(&sep_val, state);
+
+            // Recover the parts: List<Text> heap layout
+            // `[ObjectHeader][len:i64][cap:i64][data_ptr]` where
+            // data_ptr points to backing array of Text-shaped Values.
+            let mut texts: Vec<String> = Vec::new();
+            if parts_val.is_fat_ref() {
+                let fr = parts_val.as_fat_ref();
+                let p = fr.ptr();
+                let len = fr.len() as usize;
+                if !p.is_null() && len > 0 && len <= 1_000_000 {
+                    for i in 0..len {
+                        let elem = unsafe { *(p as *const Value).add(i) };
+                        texts.push(super::string_helpers::extract_string(&elem, state));
+                    }
+                }
+            } else if parts_val.is_ptr() && !parts_val.is_nil() {
+                let base = parts_val.as_ptr::<u8>();
+                if !base.is_null()
+                    && (base as usize)
+                        .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+                {
+                    let after_header = unsafe {
+                        base.add(std::mem::size_of::<heap::ObjectHeader>())
+                    };
+                    let len = unsafe { *(after_header as *const i64) };
+                    if (0..=1_000_000).contains(&len) {
+                        let len = len as usize;
+                        if len > 0 {
+                            let data_ptr = unsafe {
+                                *(after_header.add(16) as *const *const Value)
+                            };
+                            if !data_ptr.is_null() {
+                                for i in 0..len {
+                                    let elem = unsafe { *data_ptr.add(i) };
+                                    texts.push(super::string_helpers::extract_string(
+                                        &elem, state,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let joined = texts.join(&sep_str);
+            Ok(Some(alloc_string_value(state, &joined)?))
+        }
         "from_bool" if arg_count == 1 => {
             // `Text.from_bool(b: Bool) -> Text`. Returns "true" /
             // "false". Pure data-shape conversion; no allocation
