@@ -1,0 +1,148 @@
+// =============================================================================
+// core-tests/text/case_fold/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib scenarios for `core.text.case_fold` — exercises the SQLite
+// NOCASE collation surface against List, Maybe, and the rest of Text.
+//
+// Coverage:
+//   §1 NOCASE-equality lookup against a List<Text>
+//   §2 NOCASE-sorted list via compare_ascii_nocase
+//   §3 NOCASE deduplication
+//   §4 NOCASE prefix matching
+//   §5 NOCASE comparison preserves total order with Less / Equal / Greater
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.case_fold.{
+    fold_text_ascii, compare_ascii_nocase, equal_ascii_nocase,
+};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 NOCASE-equality lookup
+// =============================================================================
+
+@test
+fn integration_nocase_lookup_in_list() {
+    let names: List<Text> = ["Alice", "Bob", "Charlie"];
+    let target: Text = "ALICE";
+    let mut found: Bool = false;
+    for n in names.iter() {
+        if equal_ascii_nocase(n, &target) {
+            found = true;
+        }
+    }
+    assert(found);
+}
+
+@test
+fn integration_nocase_lookup_miss() {
+    let names: List<Text> = ["Alice", "Bob", "Charlie"];
+    let target: Text = "DAVID";
+    let mut found: Bool = false;
+    for n in names.iter() {
+        if equal_ascii_nocase(n, &target) {
+            found = true;
+        }
+    }
+    assert(!found);
+}
+
+// =============================================================================
+// §2 NOCASE-sorted list (manual bubble sort with compare_ascii_nocase)
+// =============================================================================
+
+@test
+fn integration_sort_via_compare_nocase() {
+    let mut words: List<Text> = ["DELTA", "alpha", "Beta", "CHARLIE"];
+    let n = words.len();
+    let mut i: Int = 0;
+    while i < n {
+        let mut j: Int = i + 1;
+        while j < n {
+            if compare_ascii_nocase(&words[j], &words[i]) == Less {
+                let tmp = words[i].clone();
+                words[i] = words[j].clone();
+                words[j] = tmp;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    // Expected order (case-insensitive): alpha, Beta, CHARLIE, DELTA
+    assert_eq(words[0], "alpha");
+    assert_eq(words[1], "Beta");
+    assert_eq(words[2], "CHARLIE");
+    assert_eq(words[3], "DELTA");
+}
+
+// =============================================================================
+// §3 NOCASE deduplication
+// =============================================================================
+
+@test
+fn integration_dedup_via_equal_nocase() {
+    let raw: List<Text> = ["foo", "FOO", "Foo", "bar", "BAR", "baz"];
+    let mut deduped: List<Text> = [];
+    for r in raw.iter() {
+        let mut already: Bool = false;
+        for d in deduped.iter() {
+            if equal_ascii_nocase(r, d) {
+                already = true;
+            }
+        }
+        if !already {
+            deduped.push((*r).clone());
+        }
+    }
+    assert_eq(deduped.len(), 3);
+}
+
+// =============================================================================
+// §4 NOCASE-equivalence with fold_text_ascii pre-pass
+// =============================================================================
+
+@test
+fn integration_fold_then_equal_matches_equal_nocase() {
+    let pairs: List<(Text, Text)> = [
+        ("Hello", "HELLO"),
+        ("WORLD", "world"),
+        ("MIxED", "mixed"),
+        ("abc", "ABC"),
+    ];
+    for p in pairs.iter() {
+        let af = fold_text_ascii(&(*p).0);
+        let bf = fold_text_ascii(&(*p).1);
+        assert(af == bf);
+        assert(equal_ascii_nocase(&(*p).0, &(*p).1));
+    }
+}
+
+// =============================================================================
+// §5 Ordering totality across NOCASE
+// =============================================================================
+
+@test
+fn integration_compare_nocase_totality() {
+    let xs: List<Text> = ["", "A", "a", "Ba", "bA", "BB", "BBB"];
+    for a in xs.iter() {
+        for b in xs.iter() {
+            let cmp = compare_ascii_nocase(a, b);
+            // Exactly one of {Less, Equal, Greater}
+            let count =
+                (if cmp is Less { 1 } else { 0 }) +
+                (if cmp is Equal { 1 } else { 0 }) +
+                (if cmp is Greater { 1 } else { 0 });
+            assert_eq(count, 1);
+        }
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

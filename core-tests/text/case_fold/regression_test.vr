@@ -1,0 +1,114 @@
+// =============================================================================
+// core-tests/text/case_fold/regression_test.vr
+// =============================================================================
+//
+// Defects pinned for `core/text/case_fold.vr`. The module itself is small
+// (5 free functions) and works correctly at the algorithmic level —
+// every failure here is downstream of a broken cross-stdlib primitive
+// (Text equality, Text.words dispatch).
+//
+// Defect classes:
+//   §A  fold_text_ascii result equality vs literal Text fails
+//       (downstream of text/text §I — Text.eq broken on ASCII)
+//   §B  unrelated Text.words dispatch failure leaks into the same test binary
+//       (testing infrastructure hygiene)
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.case_fold.{
+    fold_char_ascii, fold_byte_ascii, fold_text_ascii,
+    compare_ascii_nocase, equal_ascii_nocase,
+};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+
+// =============================================================================
+// §A — fold_text_ascii returns the right text but `==` against a Text literal
+//      fails because `Text.eq` is broken in this branch (text/text §I).
+// =============================================================================
+
+@ignore
+@test
+fn regression_a_fold_text_eq_literal_pinned() {
+    let s: Text = "HELLO";
+    assert_eq(fold_text_ascii(&s), "hello");
+}
+
+@ignore
+@test
+fn regression_a_fold_text_empty_eq_literal_pinned() {
+    let s: Text = "";
+    assert_eq(fold_text_ascii(&s), "");
+}
+
+@ignore
+@test
+fn regression_a_fold_text_digits_eq_literal_pinned() {
+    let s: Text = "12345";
+    assert_eq(fold_text_ascii(&s), "12345");
+}
+
+// =============================================================================
+// Active PASS-GUARDs — the case_fold internals work; only Text.eq is the
+// defect. We exercise the byte/char level here so regressions in
+// fold_byte_ascii / fold_char_ascii / compare_ascii_nocase / equal_ascii_nocase
+// get caught.
+// =============================================================================
+
+@test
+fn guard_fold_byte_uppercase_lowered() {
+    let upper_a: Byte = 0x41 as Byte;
+    let lower_a: Byte = 0x61 as Byte;
+    assert_eq(fold_byte_ascii(upper_a), lower_a);
+}
+
+@test
+fn guard_fold_byte_lowercase_identity() {
+    let lower_a: Byte = 0x61 as Byte;
+    assert_eq(fold_byte_ascii(lower_a), lower_a);
+}
+
+@test
+fn guard_fold_byte_high_bit_passthrough() {
+    let hi: Byte = 0xC3 as Byte;
+    assert_eq(fold_byte_ascii(hi), hi);
+}
+
+@test
+fn guard_fold_char_uppercase_lowered() {
+    assert_eq(fold_char_ascii('A'), 'a');
+    assert_eq(fold_char_ascii('Z'), 'z');
+}
+
+@test
+fn guard_compare_nocase_equal_same_case() {
+    let a: Text = "hello";
+    let b: Text = "hello";
+    assert_eq(compare_ascii_nocase(&a, &b), Equal);
+}
+
+@test
+fn guard_compare_nocase_equal_different_case() {
+    let a: Text = "Hello";
+    let b: Text = "HELLO";
+    assert_eq(compare_ascii_nocase(&a, &b), Equal);
+}
+
+@test
+fn guard_equal_nocase_cross_case_letters() {
+    let a: Text = "Hello";
+    let b: Text = "HELLO";
+    assert(equal_ascii_nocase(&a, &b));
+}
+
+@test
+fn guard_equal_nocase_distinct() {
+    let a: Text = "hello";
+    let b: Text = "world";
+    assert(!equal_ascii_nocase(&a, &b));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
