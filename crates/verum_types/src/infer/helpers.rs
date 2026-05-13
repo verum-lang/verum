@@ -1555,6 +1555,26 @@ pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
         };
     }
     // Generic instantiation: "Base<arg1, arg2, ...>".
+    //
+    // Task #25 — canonical form is `Type::Named { path, args }`, NOT
+    // `Type::Generic { name, args }`.  The source-driven path
+    // (`ast_to_generic_type`) emits Named when the base resolves to
+    // a named stdlib type (Maybe / Result / List / Map / …); the
+    // method-dispatch carrier extraction and the inherent_methods
+    // bucket lookup both probe Named-form first.  Emitting Generic
+    // here means `metadata.functions["arg"]` returns `fn(Int) ->
+    // Type::Generic{Maybe, [Text]}` while the call site is checked
+    // against `Type::Named{Maybe, [Text]}`, so `Maybe.is_none()`
+    // dispatch fails with "no method named is_none found for type
+    // Text" (the unifier unwraps the wrong way and reports the
+    // generic-arg type at the failure site).
+    //
+    // `Type::Generic` remains the right form for HKT-style
+    // projections (`::Item`, `::F`) where the "name" isn't a path
+    // segment.  Those never round-trip through
+    // `parse_descriptor_type_string` because they're synthesized
+    // by the typechecker, never serialised as text by
+    // `archive_metadata::type_ref_to_text`.
     if let Some(open) = trimmed.find('<') {
         if trimmed.ends_with('>') {
             let base = &trimmed[..open];
@@ -1563,8 +1583,8 @@ pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
                 .into_iter()
                 .map(|s| parse_descriptor_type_string(s.trim()))
                 .collect();
-            return Type::Generic {
-                name: Text::from(base),
+            return Type::Named {
+                path: TypeChecker::text_to_path(&Text::from(base)),
                 args,
             };
         }
@@ -1675,15 +1695,33 @@ pub(crate) fn register_variant_signature_for_lazy(
         .iter()
         .map(|gp| (gp.name.clone(), TypeVar::fresh()))
         .collect();
+    // Task #41 — payload type strings like "List<Byte>" / "Maybe<Text>"
+    // / "Result<T, E>" MUST go through the structural parser so the
+    // generic head and args land in `Type::Named { path, args }` shape
+    // (not a single Ident with the whole generic name).  Generic
+    // parameter names ("T", "E", …) still get replaced by the parent's
+    // fresh TypeVars via `param_to_var`, but the parser path handles
+    // nested generics where the name appears INSIDE another type.
+    //
+    // For a bare param name (`Box<T>` → "T"), we still bypass the parser
+    // and substitute directly so the persistent-TypeVar discipline
+    // (variant types share one TypeVar for the parent's generic) holds.
     let resolve_payload_name = |t: &Text| -> Type {
         if let Some(tv) = param_to_var.get(t) {
-            Type::Var(*tv)
-        } else {
-            Type::Named {
-                path: TypeChecker::text_to_path(t),
-                args: List::new(),
-            }
+            return Type::Var(*tv);
         }
+        let parsed = parse_descriptor_type_string(t.as_str());
+        // Substitute any remaining bare param names that appear inside
+        // a parsed generic head (e.g. "List<T>" → Named { List, [Named { T }] }
+        // → Named { List, [Var(T_fresh)] }).
+        if param_to_var.is_empty() {
+            return parsed;
+        }
+        let subst: indexmap::IndexMap<Text, Type> = param_to_var
+            .iter()
+            .map(|(name, tv)| (name.clone(), Type::Var(*tv)))
+            .collect();
+        TypeChecker::substitute_named_params_in_type(&parsed, &subst)
     };
 
     let mut variant_map: IndexMap<Text, Type> = IndexMap::new();
@@ -1768,4 +1806,35 @@ pub(crate) fn register_variant_signature_for_lazy(
     // (`list.len()`, `maybe.unwrap_or(0)`, …) because the
     // constructor's typed shape interfered with the type-method
     // resolution path.
+    //
+    // Task #26 — overwrite the rigid `Type::Variant` that
+    // `type_descriptor_to_type` (called earlier in
+    // `ensure_stdlib_type_loaded`) stored with the polymorphic
+    // form built here (payloads carry `Type::Var(fresh)` instead
+    // of rigid `Type::Named { "T" }`).  Register the parent's
+    // generic-param TypeVars under `__type_var_order_<name>` so
+    // `ast_to_generic_type::Type::Variant` substitution at use
+    // sites (line ~1573 of types.rs) can recover the declaration-
+    // order var list and substitute `Result<Int, Int>`'s args
+    // positionally into the variant payloads.
+    //
+    // Pre-fix `let r: Result<Int, Int> = Err(7)` failed typecheck
+    // with `expected 'E', found 'Int'` because the stored
+    // variant kept the rigid `Type::Named { "E" }` payload — the
+    // substitution loop at types.rs:1573 found no `Type::Var`s
+    // (the fallback `collect_type_vars_ordered` only finds vars,
+    // not rigid named placeholders), so `subst_map` stayed empty
+    // and the literal `7` was checked against rigid `"E"`.
+    if !param_to_var.is_empty() {
+        checker.ctx.define_type(name.clone(), variant_type.clone());
+        let var_order_key: Text = format!("__type_var_order_{}", name).into();
+        let tvars_in_order: List<Type> = type_desc
+            .generic_params
+            .iter()
+            .filter_map(|gp| param_to_var.get(&gp.name).map(|tv| Type::Var(*tv)))
+            .collect();
+        checker
+            .ctx
+            .define_type(var_order_key, Type::Tuple(tvars_in_order));
+    }
 }
