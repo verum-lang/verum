@@ -2767,12 +2767,83 @@ impl VbcCodegen {
                     .compile_expr(ref_expr)?
                     .or_internal("deref target has no value")?;
 
+                // **User DerefMut-protocol dispatch** (closes task #119
+                // RefCell.borrow_mut + *r = v cluster).
+                //
+                // `*r = value` where `r: RefMut<T>` / `Pin<T>` / any
+                // user type with `implement DerefMut for X { fn
+                // deref_mut(&mut self) -> &mut T }` must call that
+                // method to obtain the inner `&mut T`, then write
+                // through it.  Pre-fix the codegen emitted
+                // `DerefMut(ref_reg, value)` directly against `r` —
+                // the runtime then wrote `value` at wherever `r`
+                // pointed (the wrapper struct's first field), instead
+                // of routing through the user's deref_mut to reach
+                // the inner T.
+                //
+                // Mirrors the read-side dispatch at line ~3752+ (user
+                // Deref-protocol dispatch for `*r`).  Excludes
+                // primitives, Heap<T>/Shared<T> (transparent
+                // wrappers — already handled by the existing path)
+                // and bare `&T` (the canonical ref class that
+                // DerefMut natively understands).
+                let inner_type = self.infer_expr_type_name(ref_expr);
+                let inner_ref_reg = if let Some(ty_name) = inner_type.as_deref() {
+                    let base = ty_name
+                        .split('<')
+                        .next()
+                        .unwrap_or(ty_name)
+                        .trim()
+                        .to_string();
+                    let skip = base.is_empty()
+                        || base == "Heap"
+                        || base == "Shared"
+                        || base == "Int"
+                        || base == "Float"
+                        || base == "Bool"
+                        || base == "Char"
+                        || base == "Byte"
+                        || base == "Text"
+                        || base.starts_with('&');
+                    if !skip {
+                        let qualified = format!("{}.deref_mut", base);
+                        if self
+                            .ctx
+                            .lookup_function(&qualified)
+                            .filter(|f| f.param_count == 1)
+                            .is_some()
+                        {
+                            let inner_dst = self.ctx.alloc_temp();
+                            let method_id_str =
+                                self.ctx.intern_string_raw("deref_mut");
+                            self.ctx.emit(Instruction::CallM {
+                                dst: inner_dst,
+                                receiver: ref_reg,
+                                method_id: method_id_str,
+                                args: crate::instruction::RegRange {
+                                    start: ref_reg,
+                                    count: 0,
+                                },
+                            });
+                            Some(inner_dst)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let final_ref_reg = inner_ref_reg.unwrap_or(ref_reg);
+
                 // Check if this is a raw FFI pointer
-                if self.ctx.is_raw_pointer(ref_reg) {
+                if self.ctx.is_raw_pointer(final_ref_reg) {
                     // Emit DerefMutRaw for raw FFI pointers - bypasses CBGR validation
                     // Format: ptr:reg, value:reg, size:u8 (8 = 64-bit)
                     let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, ref_reg.0);
+                    Self::write_reg(&mut operands, final_ref_reg.0);
                     Self::write_reg(&mut operands, value_reg.0);
                     operands.push(8); // Default to 8-byte write
 
@@ -2784,16 +2855,21 @@ impl VbcCodegen {
                     // For Tier 0, validate before write
                     let tier = self.get_deref_tier_for_expr(ref_expr);
                     if tier == CbgrTier::Tier0 {
-                        self.ctx.emit(Instruction::ChkRef { ref_reg });
+                        self.ctx.emit(Instruction::ChkRef {
+                            ref_reg: final_ref_reg,
+                        });
                     }
 
                     // Write through mutable reference using DerefMut
                     self.ctx.emit(Instruction::DerefMut {
-                        ref_reg,
+                        ref_reg: final_ref_reg,
                         value: value_reg,
                     });
                 }
 
+                if let Some(inner) = inner_ref_reg {
+                    self.ctx.free_temp(inner);
+                }
                 self.ctx.free_temp(ref_reg);
                 self.ctx.free_temp(value_reg);
 
