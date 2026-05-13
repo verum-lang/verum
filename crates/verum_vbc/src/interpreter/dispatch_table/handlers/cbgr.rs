@@ -697,7 +697,31 @@ pub(in super::super) fn handle_drop_ref(
     // For CBGR heap allocations (pointer to data after AllocationHeader),
     // bump the generation in the header to invalidate references.
     // Layout: [size:4][align:4][generation:4][epoch:2][caps:2][type_id:4][flags:4][reserved:8]
-    if val.is_ptr() && !val.is_nil() {
+    //
+    // **Owned-vs-borrowed discrimination** (closes task #121 `&Text`
+    // return-ref class).  Pre-fix this branch gated on `val.is_ptr()`,
+    // which returns `true` for ANY TAG_POINTER value — including
+    // ThinRef and FatRef (CBGR borrowed references that encode the
+    // referent's address in the 48-bit payload, NOT a real heap
+    // address).  When DropRef ran on a borrowed-ref register at
+    // method return (e.g. `self: &PanicInfo` going out of scope at
+    // the end of `PanicInfo.message()`), `val.as_ptr::<u8>() - 32`
+    // happened to map to the underlying allocation's header — the
+    // bump fired, the caller's `msg = info.message()` ref recorded
+    // gen N, the next deref saw gen N+1, and the runtime panicked
+    // with "CBGR use-after-free detected: expected generation N,
+    // found N+1" on legitimate borrow lifetimes.
+    //
+    // The fundamental rule: only OWNED values bump the generation
+    // when dropped.  Borrowed refs (ThinRef / FatRef) have their
+    // own register-slot generation counter (bumped at line ~725
+    // below via `registers.bump_generation`) — they MUST NOT touch
+    // the AllocationHeader's generation, which belongs to the
+    // owning value.  `is_regular_ptr` is the canonical predicate
+    // for "owned heap pointer, not a special-tagged ref" — bit 47
+    // distinguishes the two ranges per the NaN-box layout
+    // documented at `value.rs:1000-1008`.
+    if val.is_regular_ptr() {
         let data_ptr = val.as_ptr::<u8>() as usize;
         let header_addr =
             data_ptr.wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
