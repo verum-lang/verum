@@ -14342,12 +14342,66 @@ impl VbcCodegen {
             const_id_remap.insert(archive_cid, codegen_cid.0);
         }
 
+        // Build archive-local id → function name index, for the
+        // name-based fallback in `ArchiveBodyRemap::map_function`.
+        //
+        // **Why this exists**: per-module `func_id_remap` only covers
+        // archive functions whose body lives in *this* archive module.
+        // But Tier-0 stdlib bodies frequently emit raw `Call { func_id }`
+        // pointing at cross-module functions (e.g. `Text.grow` calling
+        // `alloc` from `core.base.memory`). When the precompile's
+        // `emit_missing_stub_descriptors` does NOT synthesise an
+        // extern-stub descriptor for the callee in this archive module
+        // (the descriptor synthesis pass has filter conditions that can
+        // miss cross-module calls under certain `ctx.functions`
+        // populations), the cross-module `func_id` arrives at user
+        // merge with no entry in `func_id_remap`. The identity-fallback
+        // (`unwrap_or(src)`) then dispatches the call to whichever
+        // user-side function happens to live at that raw id — observed
+        // in the wild as `Text.grow → alloc` landing on `Unfold.fuse`
+        // (id 8088), the next `is_null` landing on `RepeatWith.windows`
+        // (id 7909), and a subsequent assertion-pc-12 crash.
+        //
+        // The name-table here lets `map_function` look up the archive
+        // id's name and re-resolve to the user-side function with the
+        // same name via `self.ctx.functions`, recovering the correct
+        // dispatch target without requiring a precompile rebuild.
+        let mut archive_id_to_name: HashMap<u32, String> = HashMap::with_capacity(archive_module.functions.len());
+        for fn_desc in archive_module.functions.iter() {
+            if let Some(name) = archive_module.strings.get(fn_desc.name) {
+                archive_id_to_name.insert(fn_desc.id.0, name.to_string());
+            }
+        }
+        if std::env::var("VERUM_TRACE_ARCHIVE_FUNCS").is_ok() && archive_module.name.contains("text") {
+            eprintln!(
+                "[archive-funcs] module='{}' n_funcs={} archive_id_to_name.len={} sample_ids={:?}",
+                archive_module.name,
+                archive_module.functions.len(),
+                archive_id_to_name.len(),
+                archive_id_to_name.iter().take(10).map(|(k, v)| (k, v.as_str())).collect::<Vec<_>>(),
+            );
+            // Sample max id
+            let max_id = archive_module.functions.iter().map(|f| f.id.0).max().unwrap_or(0);
+            eprintln!("[archive-funcs] max_archive_id={}", max_id);
+        }
+        // Build user-side name → FunctionId index ONCE per merge call.
+        // Cloning the (name, id) pairs is cheap relative to the cost
+        // of allocating a HashMap-per-instruction fallback path.
+        let ctx_func_by_name: HashMap<String, crate::module::FunctionId> = self
+            .ctx
+            .functions
+            .iter()
+            .map(|(name, info)| (name.clone(), info.id))
+            .collect();
+
         // ----- Walk archive functions and copy bodies -----
 
         let remap = ArchiveBodyRemap {
             funcs: func_id_remap,
             types: &type_id_remap,
             consts: &const_id_remap,
+            archive_id_to_name: &archive_id_to_name,
+            ctx_func_by_name: &ctx_func_by_name,
         };
 
         let mut copied = 0usize;
@@ -14533,11 +14587,53 @@ struct ArchiveBodyRemap<'a> {
     funcs: &'a std::collections::HashMap<u32, crate::module::FunctionId>,
     types: &'a std::collections::HashMap<u32, u32>,
     consts: &'a std::collections::HashMap<u32, u32>,
+    /// Archive-local function id → function name (interned from
+    /// `archive_module.strings`). Populated for every entry in the
+    /// archive module's `functions` table. Used by `map_function`'s
+    /// name-based fallback when the per-module remap misses.
+    archive_id_to_name: &'a std::collections::HashMap<u32, String>,
+    /// User-codegen `ctx.functions` projected to name → FunctionId.
+    /// Used by `map_function` to recover a cross-module Call target
+    /// when the archive id isn't covered by the per-module remap.
+    ctx_func_by_name: &'a std::collections::HashMap<String, crate::module::FunctionId>,
 }
 
 impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
     fn map_function(&self, src: crate::module::FunctionId) -> crate::module::FunctionId {
-        self.funcs.get(&src.0).copied().unwrap_or(src)
+        // Tier 1: per-module remap (archive function ids whose body
+        // lives in *this* archive module).
+        if let Some(&fid) = self.funcs.get(&src.0) {
+            return fid;
+        }
+        // Tier 2: name-based fallback for cross-module calls. If the
+        // archive id corresponds to a known extern descriptor in this
+        // archive module, look its name up in the user codegen's
+        // `ctx.functions` table — that's where stdlib functions from
+        // sibling modules (e.g. `alloc` in `core.base.memory` called
+        // from `core.text.text::Text.grow`) live after archive load.
+        // Without this fallback, the identity-fallback below would
+        // land the Call on whatever unrelated function happens to
+        // occupy the raw archive id at user-side (live failure mode:
+        // `Text.grow → alloc` dispatching to `Unfold.fuse`).
+        if let Some(name) = self.archive_id_to_name.get(&src.0) {
+            if let Some(&fid) = self.ctx_func_by_name.get(name) {
+                if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
+                    eprintln!("[remap-fallback] tier2 OK archive_id={} → name={:?} → user_fid={}", src.0, name, fid.0);
+                }
+                return fid;
+            }
+            if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
+                eprintln!("[remap-fallback] tier2 MISS archive_id={} archive_name={:?} not in ctx_func_by_name", src.0, name);
+            }
+        } else if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
+            eprintln!("[remap-fallback] tier3 IDENTITY archive_id={} not in archive_id_to_name (Tier1 misses too)", src.0);
+        }
+        // Tier 3: identity fallback. Reserved for ids the archive
+        // serialiser intentionally leaves opaque (kernel intrinsic
+        // dispatch tags, FFI sentinels). A miss here surfaces at
+        // runtime as `FunctionNotFound` rather than silent
+        // miscompile.
+        src
     }
     fn map_type_id(&self, src: crate::types::TypeId) -> crate::types::TypeId {
         self.types
