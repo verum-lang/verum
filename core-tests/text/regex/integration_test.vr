@@ -1,0 +1,129 @@
+// =============================================================================
+// core-tests/text/regex/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib scenarios for `Regex` — used together with Text, List, Maybe.
+//
+// Coverage:
+//   §1 Filter a List<Text> by Regex match
+//   §2 Extract numeric tokens via captures
+//   §3 Tokenise a CSV-like input via Regex.split
+//   §4 Validate a structured field (email-shape)
+//   §5 Replace_all chained
+// =============================================================================
+
+mount core.text.{Text, Regex};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 Filter List<Text> by Regex match
+// =============================================================================
+
+@test
+fn integration_filter_list_by_regex_match() {
+    let words: List<Text> = ["alpha", "beta42", "gamma", "delta99"];
+    let r = Regex.new("\\d+").unwrap();
+    let mut hits: List<Text> = [];
+    for w in words.iter() {
+        if r.is_match((*w).clone()) {
+            hits.push((*w).clone());
+        }
+    }
+    assert_eq(hits.len(), 2);
+    assert_eq(hits[0], "beta42");
+    assert_eq(hits[1], "delta99");
+}
+
+// =============================================================================
+// §2 Extract numeric tokens via find_all
+// =============================================================================
+
+@test
+fn integration_extract_numbers_from_log_line() {
+    let line: Text = "2026-05-13 12:34:56 user 42 read 1024 bytes";
+    let r = Regex.new("\\d+").unwrap();
+    let nums = r.find_all(line);
+    assert(nums.len() >= 6);
+    assert_eq(nums[0], "2026");
+    assert_eq(nums[1], "05");
+    assert_eq(nums[2], "13");
+}
+
+// =============================================================================
+// §3 Tokenise via Regex.split
+// =============================================================================
+
+@test
+fn integration_split_csv_like() {
+    let input: Text = "alpha; beta;gamma ;delta";
+    let r = Regex.new("\\s*;\\s*").unwrap();
+    let parts = r.split(input);
+    assert_eq(parts.len(), 4);
+    assert_eq(parts[0], "alpha");
+    assert_eq(parts[1], "beta");
+    assert_eq(parts[2], "gamma");
+    assert_eq(parts[3], "delta");
+}
+
+// =============================================================================
+// §4 Email-shape validation (loose)
+// =============================================================================
+
+@test
+fn integration_email_shape_match() {
+    let r = Regex.new("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$").unwrap();
+    assert(r.is_match("alice@example.com"));
+    assert(r.is_match("bob.smith@dept.example.org"));
+    assert(!r.is_match("not an email"));
+    assert(!r.is_match("missing@dot"));
+}
+
+// =============================================================================
+// §5 replace_all chained
+// =============================================================================
+
+@test
+fn integration_replace_all_chain() {
+    let r1 = Regex.new("ab").unwrap();
+    let r2 = Regex.new("cd").unwrap();
+    let s: Text = "abcdabcd";
+    let after_r1 = r1.replace_all(s, "XX");
+    let after_r2 = r2.replace_all(after_r1, "YY");
+    assert_eq(after_r2, "XXYYXXYY");
+}
+
+// =============================================================================
+// §6 captures + Maybe match
+// =============================================================================
+
+@test
+fn integration_captures_extract_named_value() {
+    let r = Regex.new("user=(\\w+)").unwrap();
+    match r.captures("auth: user=alice; role=admin") {
+        Some(groups) => {
+            assert(groups.len() >= 2);
+            assert_eq(groups[1], "alice");
+        }
+        None => panic("user= present"),
+    }
+}
+
+// =============================================================================
+// §7 Regex round-trip via as_str then re-construct
+// =============================================================================
+
+@test
+fn integration_regex_pattern_round_trip() {
+    let pat: Text = "hello\\s+world";
+    let r1 = Regex.new(pat.clone()).unwrap();
+    let recovered = r1.as_str();
+    let r2 = Regex.new(recovered).unwrap();
+    assert(r2.is_match("hello   world"));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

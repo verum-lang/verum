@@ -1,0 +1,179 @@
+// =============================================================================
+// core-tests/text/regex/property_test.vr
+// =============================================================================
+//
+// Algebraic / mathematical laws for the Regex engine.
+//
+// Laws verified:
+//   §1  Regex.new round-trip: as_str ∘ new = identity
+//   §2  is_match ⇔ find returns Some
+//   §3  find_all empty iff !is_match
+//   §4  replace_all is idempotent when replacement does not contain pattern
+//   §5  split + concat with separator round-trip on a non-empty separator
+//   §6  captures returns whole-match at index 0
+//   §7  replace_all with same pattern as replacement is identity
+//   §8  find_all length matches the count obtained by manual scan
+//   §9  Regex with literal pattern matches Text.contains
+//   §10 captures includes the whole match plus N capture groups
+// =============================================================================
+
+mount core.text.{Text, Regex};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 as_str round-trip
+// =============================================================================
+
+@test
+fn property_as_str_round_trip() {
+    let patterns: List<Text> = ["abc", "\\d+", "(group)", "^anchor$", ""];
+    for p in patterns.iter() {
+        let r = Regex.new((*p).clone()).unwrap();
+        assert_eq(r.as_str(), *p);
+    }
+}
+
+// =============================================================================
+// §2 is_match ⇔ find Some
+// =============================================================================
+
+@test
+fn property_is_match_iff_find_some() {
+    let cases: List<(Text, Text)> = [
+        ("hello", "ll"),
+        ("hello", "xyz"),
+        ("abc123", "\\d+"),
+        ("plain text", "PLAIN"),
+        ("", "anything"),
+    ];
+    for c in cases.iter() {
+        let r = Regex.new((*c).1.clone()).unwrap();
+        let im = r.is_match((*c).0.clone());
+        let f = r.find((*c).0.clone());
+        match f {
+            Some(_) => assert(im),
+            None => assert(!im),
+        }
+    }
+}
+
+// =============================================================================
+// §3 find_all empty iff !is_match
+// =============================================================================
+
+@test
+fn property_find_all_empty_iff_no_match() {
+    let cases: List<(Text, Text)> = [
+        ("hello", "ll"),
+        ("hello", "xyz"),
+        ("abc abc abc", "abc"),
+        ("", "x"),
+    ];
+    for c in cases.iter() {
+        let r = Regex.new((*c).1.clone()).unwrap();
+        let all = r.find_all((*c).0.clone());
+        let im = r.is_match((*c).0.clone());
+        if all.len() == 0 {
+            assert(!im);
+        } else {
+            assert(im);
+        }
+    }
+}
+
+// =============================================================================
+// §4 replace_all idempotence — replacement contains no pattern matches
+// =============================================================================
+
+@test
+fn property_replace_all_idempotent_when_replacement_disjoint() {
+    let r = Regex.new("ab").unwrap();
+    let s: Text = "ab cd ab ef";
+    let once = r.replace_all(s.clone(), "ZZ");
+    let twice = r.replace_all(once.clone(), "ZZ");
+    assert_eq(once, twice);
+}
+
+// =============================================================================
+// §5 split + join round-trip with simple separator
+// =============================================================================
+
+@test
+fn property_split_then_join_round_trip() {
+    let r = Regex.new(",").unwrap();
+    let cases: List<Text> = ["a,b,c", "single", "a,,b", "a,b,"];
+    for s in cases.iter() {
+        let parts = r.split((*s).clone());
+        let rebuilt = Text.join(&parts, &",");
+        assert_eq(rebuilt, *s);
+    }
+}
+
+// =============================================================================
+// §7 replace_all with same pattern→pattern is identity
+// =============================================================================
+
+@test
+fn property_replace_all_self_is_identity() {
+    let r = Regex.new("ab").unwrap();
+    let cases: List<Text> = ["", "a", "ab", "ab cd ab", "abab"];
+    for s in cases.iter() {
+        assert_eq(r.replace_all((*s).clone(), "ab"), *s);
+    }
+}
+
+// =============================================================================
+// §8 find_all match count via manual scan
+// =============================================================================
+
+@test
+fn property_find_all_matches_count_via_count() {
+    let r = Regex.new("ab").unwrap();
+    let s: Text = "ab cd ab ef ab gh ab";
+    let all = r.find_all(s.clone());
+    let count = s.count(&"ab");
+    assert_eq(all.len(), count);
+}
+
+// =============================================================================
+// §9 Literal Regex.is_match agrees with Text.contains for non-anchor patterns
+// =============================================================================
+
+@test
+fn property_literal_is_match_iff_text_contains() {
+    let cases: List<(Text, Text)> = [
+        ("hello", "ll"),
+        ("hello", "xy"),
+        ("abc", "ab"),
+        ("abc", "bc"),
+    ];
+    for c in cases.iter() {
+        let r = Regex.new((*c).1.clone()).unwrap();
+        let regex_im = r.is_match((*c).0.clone());
+        let text_contains = (*c).0.contains(&(*c).1);
+        assert_eq(regex_im, text_contains);
+    }
+}
+
+// =============================================================================
+// §10 captures whole-match at index 0
+// =============================================================================
+
+@test
+fn property_captures_whole_match_at_zero() {
+    let r = Regex.new("(\\w+)").unwrap();
+    match r.captures("hello world") {
+        Some(g) => {
+            assert(g.len() >= 1);
+            assert_eq(g[0], "hello");
+        }
+        None => panic("word captured"),
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

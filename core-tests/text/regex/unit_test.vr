@@ -1,0 +1,313 @@
+// =============================================================================
+// core-tests/text/regex/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core/text/regex.vr` — the `Regex` engine surface.
+//
+// API surface (8 public methods + Regex.new + RegexError):
+//   Regex.new(pattern: Text) -> Result<Regex, RegexError>
+//   .is_match(text: Text) -> Bool
+//   .find(text: Text) -> Maybe<Text>
+//   .find_all(text: Text) -> List<Text>
+//   .replace(text: Text, replacement: Text) -> Text
+//   .replace_all(text: Text, replacement: Text) -> Text
+//   .split(text: Text) -> List<Text>
+//   .captures(text: Text) -> Maybe<List<Text>>
+//   .as_str(&self) -> Text
+//
+// Companion files: property_test.vr, integration_test.vr, regression_test.vr,
+// audit.md.
+// =============================================================================
+
+mount core.text.{Text, Regex};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Construction
+// =============================================================================
+
+@test
+fn test_new_returns_ok() {
+    match Regex.new("abc") {
+        Ok(_) => {},
+        Err(_) => panic("Regex.new('abc') should be Ok"),
+    }
+}
+
+@test
+fn test_new_empty_pattern_returns_ok() {
+    match Regex.new("") {
+        Ok(_) => {},
+        Err(_) => panic("Regex.new('') should be Ok"),
+    }
+}
+
+@test
+fn test_new_complex_pattern_returns_ok() {
+    match Regex.new("[a-z]+\\d{2,5}") {
+        Ok(_) => {},
+        Err(_) => panic("complex pattern should compile"),
+    }
+}
+
+// =============================================================================
+// Section 2: as_str
+// =============================================================================
+
+@test
+fn test_as_str_round_trip() {
+    let pat: Text = "hello";
+    let r = Regex.new(pat).unwrap();
+    assert_eq(r.as_str(), pat);
+}
+
+@test
+fn test_as_str_complex_pattern() {
+    let pat: Text = "\\d+";
+    let r = Regex.new(pat).unwrap();
+    assert_eq(r.as_str(), pat);
+}
+
+// =============================================================================
+// Section 3: is_match
+// =============================================================================
+
+@test
+fn test_is_match_present() {
+    let r = Regex.new("hello").unwrap();
+    assert(r.is_match("hello world"));
+}
+
+@test
+fn test_is_match_absent() {
+    let r = Regex.new("xyz").unwrap();
+    assert(!r.is_match("hello world"));
+}
+
+@test
+fn test_is_match_at_start() {
+    let r = Regex.new("hello").unwrap();
+    assert(r.is_match("hello"));
+}
+
+@test
+fn test_is_match_at_end() {
+    let r = Regex.new("world").unwrap();
+    assert(r.is_match("hello world"));
+}
+
+@test
+fn test_is_match_anchor_start() {
+    let r = Regex.new("^hello").unwrap();
+    assert(r.is_match("hello world"));
+    assert(!r.is_match("say hello"));
+}
+
+@test
+fn test_is_match_anchor_end() {
+    let r = Regex.new("world$").unwrap();
+    assert(r.is_match("hello world"));
+    assert(!r.is_match("world peace"));
+}
+
+@test
+fn test_is_match_class_digit() {
+    let r = Regex.new("\\d+").unwrap();
+    assert(r.is_match("abc123"));
+    assert(!r.is_match("abcdef"));
+}
+
+// =============================================================================
+// Section 4: find (single match)
+// =============================================================================
+
+@test
+fn test_find_present() {
+    let r = Regex.new("ll").unwrap();
+    match r.find("hello") {
+        Some(m) => assert_eq(m, "ll"),
+        None => panic("'ll' present"),
+    }
+}
+
+@test
+fn test_find_absent() {
+    let r = Regex.new("xyz").unwrap();
+    match r.find("hello") {
+        Some(_) => panic("'xyz' absent"),
+        None => {},
+    }
+}
+
+@test
+fn test_find_first_only() {
+    let r = Regex.new("ab").unwrap();
+    match r.find("ab cd ab") {
+        Some(m) => assert_eq(m, "ab"),
+        None => panic("present"),
+    }
+}
+
+@test
+fn test_find_digits() {
+    let r = Regex.new("\\d+").unwrap();
+    match r.find("abc 42 def 99") {
+        Some(m) => assert_eq(m, "42"),
+        None => panic("digits present"),
+    }
+}
+
+// =============================================================================
+// Section 5: find_all
+// =============================================================================
+
+@test
+fn test_find_all_returns_each_match() {
+    let r = Regex.new("ab").unwrap();
+    let matches = r.find_all("ab cd ab ef ab");
+    assert_eq(matches.len(), 3);
+    assert_eq(matches[0], "ab");
+    assert_eq(matches[1], "ab");
+    assert_eq(matches[2], "ab");
+}
+
+@test
+fn test_find_all_no_match_returns_empty() {
+    let r = Regex.new("xyz").unwrap();
+    let matches = r.find_all("hello world");
+    assert_eq(matches.len(), 0);
+}
+
+@test
+fn test_find_all_digits() {
+    let r = Regex.new("\\d+").unwrap();
+    let matches = r.find_all("abc 1 de 22 fg 333");
+    assert_eq(matches.len(), 3);
+    assert_eq(matches[0], "1");
+    assert_eq(matches[1], "22");
+    assert_eq(matches[2], "333");
+}
+
+// =============================================================================
+// Section 6: replace (first match only)
+// =============================================================================
+
+@test
+fn test_replace_first_only() {
+    let r = Regex.new("ab").unwrap();
+    assert_eq(r.replace("ab cd ab", "XX"), "XX cd ab");
+}
+
+@test
+fn test_replace_no_match_is_identity() {
+    let r = Regex.new("xyz").unwrap();
+    assert_eq(r.replace("hello", "X"), "hello");
+}
+
+@test
+fn test_replace_with_empty_replacement() {
+    let r = Regex.new("X").unwrap();
+    assert_eq(r.replace("aXb", ""), "ab");
+}
+
+// =============================================================================
+// Section 7: replace_all
+// =============================================================================
+
+@test
+fn test_replace_all_every_match() {
+    let r = Regex.new("ab").unwrap();
+    assert_eq(r.replace_all("ab cd ab", "XX"), "XX cd XX");
+}
+
+@test
+fn test_replace_all_no_match_is_identity() {
+    let r = Regex.new("xyz").unwrap();
+    assert_eq(r.replace_all("hello", "X"), "hello");
+}
+
+@test
+fn test_replace_all_digits() {
+    let r = Regex.new("\\d+").unwrap();
+    assert_eq(r.replace_all("a1 b2 c3", "N"), "aN bN cN");
+}
+
+// =============================================================================
+// Section 8: split
+// =============================================================================
+
+@test
+fn test_split_simple() {
+    let r = Regex.new(",").unwrap();
+    let parts = r.split("a,b,c");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "a");
+    assert_eq(parts[1], "b");
+    assert_eq(parts[2], "c");
+}
+
+@test
+fn test_split_no_match_returns_self() {
+    let r = Regex.new("xyz").unwrap();
+    let parts = r.split("hello");
+    assert_eq(parts.len(), 1);
+    assert_eq(parts[0], "hello");
+}
+
+@test
+fn test_split_whitespace_pattern() {
+    let r = Regex.new("\\s+").unwrap();
+    let parts = r.split("hello   world   foo");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "hello");
+    assert_eq(parts[1], "world");
+    assert_eq(parts[2], "foo");
+}
+
+// =============================================================================
+// Section 9: captures
+// =============================================================================
+
+@test
+fn test_captures_one_group() {
+    let r = Regex.new("(\\d+)").unwrap();
+    match r.captures("abc 42 def") {
+        Some(groups) => {
+            assert(groups.len() >= 2);
+            assert_eq(groups[0], "42");  // whole match
+            assert_eq(groups[1], "42");  // first group
+        }
+        None => panic("digits captured"),
+    }
+}
+
+@test
+fn test_captures_two_groups() {
+    let r = Regex.new("(\\w+)-(\\d+)").unwrap();
+    match r.captures("test-123 ignored") {
+        Some(groups) => {
+            assert(groups.len() >= 3);
+            assert_eq(groups[0], "test-123");
+            assert_eq(groups[1], "test");
+            assert_eq(groups[2], "123");
+        }
+        None => panic("name-num captured"),
+    }
+}
+
+@test
+fn test_captures_no_match_is_none() {
+    let r = Regex.new("(xyz)").unwrap();
+    match r.captures("hello") {
+        Some(_) => panic("no match"),
+        None => {},
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
