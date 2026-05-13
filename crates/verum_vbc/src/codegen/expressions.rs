@@ -3882,9 +3882,24 @@ impl VbcCodegen {
                     // Using CallM (not Call) so the method-dispatcher's
                     // existing receiver-aware passes get a chance to
                     // find the body even if its qualified form differs.
+                    //
+                    // **`*x` requires a second deref through the
+                    // returned `&T`** — the user `Deref::deref(&self)
+                    // -> &T` returns a reference, but the `*` operator
+                    // semantics yield `T`.  Mirrors Rust's
+                    // deref-coercion: `*x = *(x.deref())`.  Without
+                    // this step, `*r` where `r: Ref<Int>` returns the
+                    // heap-anchored ref (a `Value::from_ptr` produced
+                    // by `RefField`) instead of the inner Int — every
+                    // subsequent use that expected `Int` (`assert_eq`,
+                    // format-string, arithmetic) sees a pointer and
+                    // either compares wrong or prints garbage.
+                    // Closes the read-side cell-suite regression
+                    // class (test_refcell_borrow_returns_value etc.).
+                    let user_deref_result = self.ctx.alloc_temp();
                     let method_id_str = self.ctx.intern_string_raw("deref");
                     self.ctx.emit(Instruction::CallM {
-                        dst: dest,
+                        dst: user_deref_result,
                         receiver: inner_reg,
                         method_id: method_id_str,
                         args: crate::instruction::RegRange {
@@ -3892,6 +3907,17 @@ impl VbcCodegen {
                             count: 0,
                         },
                     });
+                    // Second deref through the returned `&T` to land
+                    // on the inner `T` value.  Goes through the
+                    // generic `Deref` instruction whose handler
+                    // auto-derefs `cbgr_mutable_ptrs` entries (so
+                    // heap-anchored RefField pointers load the slot's
+                    // Value) and ThinRef / FatRef / direct ptr.
+                    self.ctx.emit(Instruction::Deref {
+                        dst: dest,
+                        ref_reg: user_deref_result,
+                    });
+                    self.ctx.free_temp(user_deref_result);
                     // `deref_method_id` is intentionally unused here —
                     // the runtime dispatch resolves the actual function
                     // id via the receiver-type-aware lookup. Holding
@@ -4382,6 +4408,16 @@ impl VbcCodegen {
         // Check if this function is an intrinsic (declared with @intrinsic("name"))
         // This is the primary intrinsic resolution path - intrinsic identity is established
         // at declaration time via @intrinsic attribute, not at call-site via name matching.
+        if std::env::var("VERUM_TRACE_INTRINSIC_CALL").is_ok()
+            && (func_name.contains("alloc") || func_name.contains("cbgr") || func_name.contains("dealloc"))
+        {
+            eprintln!(
+                "[intrinsic-call] func_name='{}' func_info.intrinsic_name={:?} lookup_intrinsic_some={}",
+                func_name,
+                func_info.intrinsic_name,
+                func_info.intrinsic_name.as_ref().and_then(|n| lookup_intrinsic(n)).is_some(),
+            );
+        }
         if let Some(intrinsic_name) = &func_info.intrinsic_name
             && let Some(intrinsic_info) = lookup_intrinsic(intrinsic_name)
         {
