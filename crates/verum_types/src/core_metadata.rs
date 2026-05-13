@@ -91,6 +91,28 @@ pub struct CoreMetadata {
     /// source spans.
     #[serde(default)]
     pub context_decl_nodes: OrderedMap<Text, verum_ast::decl::ContextDecl>,
+
+    /// Re-export chains captured at precompile time, indexed by the
+    /// **enclosing** module path. Each entry is a list of
+    /// `(local_name, source_module_path)` pairs that describe items
+    /// the module re-exports via `public mount .other.{name}` or
+    /// `public mount .other.*`.
+    ///
+    /// Consumed by `infer::modules::resolve_function_via_metadata_reexports`
+    /// to traverse re-export chains during type resolution when the
+    /// AST-based walker can't see them (archive-driven stdlib loads
+    /// only carry a synthetic empty AST — the type info lives in
+    /// `functions` and the re-export chains live HERE).
+    ///
+    /// Layout example for `core/base/mod.vr`'s
+    /// `public mount .memory.{replace};`:
+    ///   `"core.base" → [("replace", "core.base.memory")]`
+    ///
+    /// `serde(default)` so older sidecars without this field continue
+    /// to deserialise; the typechecker's re-export resolver degrades
+    /// to a no-op when the map is empty.
+    #[serde(default)]
+    pub module_reexports: OrderedMap<Text, List<(Text, Text)>>,
 }
 
 /// Descriptor for a type definition in stdlib
