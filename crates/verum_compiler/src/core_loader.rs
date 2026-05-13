@@ -610,6 +610,10 @@ fn convert_protocol_impl(
         where_clause: List::new(),
         associated_types: OrderedMap::new(),
         methods,
+        // Task #23 — VBC carries protocol but not its type-args;
+        // `precompile::scan_implementation_protocol_args` fills
+        // this in via a source-walk during stdlib precompile.
+        protocol_args: List::new(),
     })
 }
 
