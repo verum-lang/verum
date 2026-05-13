@@ -1,12 +1,15 @@
 # `core.text.text` — audit
 
-> Status: **regression-only**. The Text type's surface compiles and the
-> stdlib bootstraps it, but ~45% of its public API panics at runtime when
-> exercised through the VBC interpreter on this branch (sweep
-> 2026-05-13: 121 / 218 unit tests pass). The defects span four
-> architectural layers: stdlib lenient-skip, function-id collision under
-> archive remap, runtime method dispatch on Char/Iterator receivers, and
-> low-level NullPointer in Text.truncate.
+> Status: **partial** — recently advanced from regression-only by closing
+> §C (Iterator.next dispatch on Chars/ByteIter/CharIndices/Lines) on
+> 2026-05-13 in commit 48a76117f. The Text type's surface compiles and
+> the stdlib bootstraps it, but a meaningful fraction of its public API
+> still panics at runtime when exercised through the VBC interpreter
+> (pre-fix sweep: 121/218 unit tests pass; post-fix sweep ~150–170
+> projected based on the 8 iterator tests that flipped + the cascading
+> §J/§Q closures). The remaining defects span: stdlib lenient-skip,
+> function-id collision under archive remap, runtime method dispatch on
+> Char receivers (§B), and low-level NullPointer in Text.truncate (§E).
 >
 > `regression_test.vr` pins each defect class with an `@ignore`d test —
 > remove the `@ignore` when the defect closes.
@@ -89,19 +92,42 @@ not at receiver-kind classification.
 calls `encode_utf8` through CallM dispatch.
 
 ### §C — Iterator `next` not found on `Object` for Chars/ByteIter/CharIndices/Lines
-**Symptom**: 3 tests fail with
-`method 'next' not found on receiver of runtime kind 'Object'`.
-`for c in s.chars()` panics. Massively impactful — every iteration over
-a Text is broken.
-**Root cause hypothesis**: the Chars iterator is a struct with `Text`
-+ `Int` fields; `implement Iterator for Chars` provides `next`. The
-runtime can't find `next` because the iterator's monomorphised type
-loses its method-table entry — same shape as task #9's field-layout
-race, but for method tables instead of field offsets.
-**Action**: pin the four iterator-kind drift surfaces by name in
-`crates/verum_compiler/src/precompile.rs::TEXT_ITERATOR_DRIFT_PIN`
-(probe the archive for `Chars.next` / `ByteIter.next` / `CharIndices.next`
-/ `Lines.next` post-load).
+**Status**: **CLOSED 2026-05-13 — commit 48a76117f.** Three architectural
+fixes in `crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs`:
+1. **Removed the broken `chars` intercept** at line ~6616 that returned
+   `List<Text>` (each element a single-char Text) instead of the
+   source-level `Text.chars() -> Chars` iterator. The for-loop then
+   called `.next()` on the List and panicked.
+2. **Tightened the func-id-as-method-id heuristic** at line ~1341 with
+   a `parent_type`-vs-receiver compatibility gate
+   (`func_id_parent_compatible_with_receiver`). The previous loose
+   `func_name.ends_with(&method_suffix)` accept routed
+   `intern_string("next")` to whichever sibling iterator's `*.next`
+   happened to occupy that slot — typically `Rev.next` /
+   `MappedIter.next` whose `self.iter.next()` recursed and overflowed
+   the stack.
+3. **Tightened the second-pass bare-suffix scan** for heap receivers
+   with `heap_receiver_parent_compatible`: accepts methods whose
+   `parent_type` is the receiver's TypeId OR a protocol the receiver
+   implements OR `None`. Closes the documented hole the previous
+   "accept any match" comment deferred.
+
+**Validation**: 8 iterator tests now PASS:
+`test_bytes_iterator_count`, `test_chars_empty_yields_nothing`,
+`test_lines_single_line`, `test_lines_multi`, `test_char_indices_pairs`,
+`test_chars_returns_chars_iterator`, `test_lines_returns_lines_iterator`,
+`test_char_indices_iterator`. The §C regression pin in
+`regression_test.vr` is now an active green guard.
+
+**Diagnostic enrichment**: the "method not found" panic now includes the
+receiver's recovered type name (`(`Chars` (Object))` vs the previous
+flat `Object`) and lists up to 8 candidate `*.<bare>` functions in the
+table with arity. Eliminates the "all stdlib bug-class-skips look
+identical" diagnostic flatness.
+
+**Knock-on**: closing §C is expected to also close downstream §J
+(Debug format escapes — uses `for ch in self.chars()`) and §Q
+(capitalize / to_title_case / swapcase — same iteration shape).
 
 ### §D — Function-id collision (FunctionId(12039) / 14897 / 11859)
 **Symptom**: 9 tests fail with `FunctionNotFound(FunctionId(N))` for
