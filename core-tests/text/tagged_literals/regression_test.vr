@@ -1,0 +1,84 @@
+// =============================================================================
+// core-tests/text/tagged_literals/regression_test.vr
+// =============================================================================
+//
+// Defects pinned for `core/text/tagged_literals.vr`. The validators are
+// trivial wrappers around Text.starts_with / Text.contains / Text.byte_at,
+// but those primitives currently panic with what look like *random Text
+// strings used as method names* — `WARN`, `DEBUG`, `glob: empty character
+// class`. The runtime dispatcher is reading some other Text value as the
+// CallM key.
+//
+// Defect classes:
+//   §A  Text.starts_with via to_upper.starts_with — panics with
+//       "method 'WARN' / 'DEBUG' not found on receiver of runtime kind `Object`"
+//   §B  validate_json's Text.byte_at + ==-comparison fails with
+//       "method 'glob: empty character class' not found"
+//
+// Both classes share a single root cause: the runtime dispatcher resolves
+// CallM keys by reading from a stale or wrong-typed Text register. The
+// diagnostic message displays whatever string happens to be at that
+// register's slot — log-level constants ("WARN", "DEBUG") or error
+// messages from the regex engine ("glob: empty character class").
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.tagged_literals.{validate_json, validate_sql, validate_uri};
+
+// =============================================================================
+// §A — validate_sql panics with "WARN/DEBUG not found"
+// REGRESSION: every validate_sql call panics with random log-level text
+// surfacing as a missing method name.
+// =============================================================================
+
+@ignore
+@test
+fn regression_a_sql_select_pinned() {
+    assert(validate_sql("SELECT * FROM t"));
+}
+
+@ignore
+@test
+fn regression_a_sql_insert_pinned() {
+    assert(validate_sql("INSERT INTO t VALUES (1)"));
+}
+
+@ignore
+@test
+fn regression_a_sql_garbage_pinned() {
+    assert(!validate_sql("not a query"));
+}
+
+// =============================================================================
+// §B — validate_json panics with "glob: empty character class not found"
+// REGRESSION: validate_json's byte_at + arithmetic comparison panics
+// with random regex-engine error text surfacing as a method name.
+// =============================================================================
+
+@ignore
+@test
+fn regression_b_json_object_pinned() {
+    assert(validate_json("{}"));
+}
+
+@ignore
+@test
+fn regression_b_json_array_pinned() {
+    assert(validate_json("[1, 2]"));
+}
+
+// =============================================================================
+// Active PASS-GUARDs — the only thing that consistently works:
+// validate_uri, which only uses Text.contains.
+// =============================================================================
+
+@test
+fn guard_uri_https_passes() {
+    assert(validate_uri("https://example.com"));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

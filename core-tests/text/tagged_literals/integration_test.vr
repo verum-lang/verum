@@ -1,0 +1,100 @@
+// =============================================================================
+// core-tests/text/tagged_literals/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib scenarios for the tagged-literal validators. Touches Text +
+// List + Maybe + Result.
+//
+// Coverage:
+//   §1 Filter a List<Text> by validate_json
+//   §2 Filter a List<Text> by validate_sql
+//   §3 Filter a List<Text> by validate_uri
+//   §4 Pre-validate before passing to a downstream API
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.tagged_literals.{validate_json, validate_sql, validate_uri};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 Filter by validate_json
+// =============================================================================
+
+@test
+fn integration_filter_by_validate_json() {
+    let xs: List<Text> = ["{}", "not json", "[1]", "garbage", "\"str\""];
+    let mut ok: List<Text> = [];
+    for x in xs.iter() {
+        if validate_json((*x).clone()) {
+            ok.push((*x).clone());
+        }
+    }
+    assert_eq(ok.len(), 3);
+}
+
+// =============================================================================
+// §2 Filter by validate_sql
+// =============================================================================
+
+@test
+fn integration_filter_by_validate_sql() {
+    let qs: List<Text> = [
+        "SELECT 1",
+        "garbage",
+        "DELETE FROM t WHERE id=1",
+        "not a query",
+        "WITH x AS (SELECT 1) SELECT * FROM x",
+    ];
+    let mut ok: List<Text> = [];
+    for q in qs.iter() {
+        if validate_sql((*q).clone()) {
+            ok.push((*q).clone());
+        }
+    }
+    assert_eq(ok.len(), 3);
+}
+
+// =============================================================================
+// §3 Filter by validate_uri
+// =============================================================================
+
+@test
+fn integration_filter_by_validate_uri() {
+    let us: List<Text> = [
+        "https://a.com", "no-scheme", "ftp://b.com",
+        "/path", "scheme://host",
+    ];
+    let mut ok: List<Text> = [];
+    for u in us.iter() {
+        if validate_uri((*u).clone()) {
+            ok.push((*u).clone());
+        }
+    }
+    assert_eq(ok.len(), 3);
+}
+
+// =============================================================================
+// §4 Pre-validate then route
+// =============================================================================
+
+@test
+fn integration_pre_validate_then_match_route() {
+    fn classify(s: &Text) -> Text {
+        if validate_json((*s).clone()) { "json" }
+        else if validate_uri((*s).clone()) { "uri" }
+        else if validate_sql((*s).clone()) { "sql" }
+        else { "unknown" }
+    }
+    assert_eq(classify(&"{}"), "json");
+    assert_eq(classify(&"https://example.com"), "uri");
+    assert_eq(classify(&"SELECT 1"), "sql");
+    assert_eq(classify(&"garbage"), "unknown");
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
