@@ -350,12 +350,108 @@ pub(in super::super) fn handle_char_extended(
         }
 
         Some(CharSubOpcode::DecodeUtf8) => {
-            // Decode UTF-8 bytes to character
+            // Decode UTF-8 character at `bytes[byte_idx]`.
+            //
+            // Source intrinsic signature (core/intrinsics/runtime/text.vr:100):
+            //   `fn utf8_decode_char(bytes: &[Byte], byte_idx: Int) -> Char`
+            //
+            // The handler MUST read TWO arg registers: the byte slice (a
+            // FatRef carrying ptr+len, materialised by `Text.as_bytes()` /
+            // every `&[Byte]` call site) and the byte index (Int). Pre-fix
+            // the handler read ONE register and treated it as a code point
+            // value — the `// For now, treat src as a code point value`
+            // comment was a stub never finished. The first arg is actually
+            // the bytes-slice value; casting it `as u32` truncated a
+            // pointer/handle and `char::from_u32(garbage)` returned a
+            // wrong character. `for c in s.chars()` then yielded random
+            // chars and downstream `assert_eq(c, 'a')` failed.
+            //
+            // The fix: read both args, walk the byte slice properly,
+            // decode the UTF-8 leading byte at `byte_idx` (1–4 bytes per
+            // codepoint), assemble the codepoint and return as Char.
             let dst = read_reg(state)?;
-            let src_reg = read_reg(state)?;
-            // For now, treat src as a code point value
-            let v = state.get_reg(src_reg).as_i64() as u32;
-            let c = char::from_u32(v).unwrap_or('\u{FFFD}');
+            let bytes_reg = read_reg(state)?;
+            let idx_reg = read_reg(state)?;
+
+            let bytes_val = state.get_reg(bytes_reg);
+            let idx = state.get_reg(idx_reg).as_i64();
+
+            // Recover the byte slice. Three cases:
+            //   1. FatRef: ptr + len (canonical `&[Byte]` from
+            //      `Text.as_bytes`).
+            //   2. List heap object: `[ObjectHeader][len:i64][cap:i64][data:ptr-or-inline]`.
+            //   3. Anything else: bail out as U+FFFD.
+            let (ptr, slice_len): (*const u8, u64) = if bytes_val.is_fat_ref() {
+                let fr = bytes_val.as_fat_ref();
+                (fr.ptr() as *const u8, fr.len())
+            } else if bytes_val.is_ptr() && !bytes_val.is_nil() {
+                let base = bytes_val.as_ptr::<u8>();
+                if base.is_null() {
+                    state.set_reg(dst, Value::from_char('\u{FFFD}'));
+                    return Ok(DispatchResult::Continue);
+                }
+                // List heap layout: skip ObjectHeader, then len + cap + data_ptr.
+                use super::super::super::heap;
+                let header = match unsafe { heap::ObjectHeader::try_from_ptr(base) } {
+                    Some(h) => h,
+                    None => {
+                        state.set_reg(dst, Value::from_char('\u{FFFD}'));
+                        return Ok(DispatchResult::Continue);
+                    }
+                };
+                let _ = header; // verified alignment
+                // Layout immediately after the header for List/Vec-shaped
+                // values: i64 len, i64 cap, ptr to backing data.
+                let after_header = unsafe {
+                    base.add(std::mem::size_of::<heap::ObjectHeader>())
+                };
+                let len = unsafe { *(after_header as *const i64) } as u64;
+                let data_ptr = unsafe { *(after_header.add(16) as *const *const u8) };
+                if data_ptr.is_null() || len == 0 {
+                    state.set_reg(dst, Value::from_char('\u{FFFD}'));
+                    return Ok(DispatchResult::Continue);
+                }
+                (data_ptr, len)
+            } else {
+                state.set_reg(dst, Value::from_char('\u{FFFD}'));
+                return Ok(DispatchResult::Continue);
+            };
+
+            // Decode the UTF-8 codepoint at the given byte offset.
+            // 1-byte (0xxxxxxx)   → ASCII
+            // 2-byte (110xxxxx 10xxxxxx)
+            // 3-byte (1110xxxx 10xxxxxx 10xxxxxx)
+            // 4-byte (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
+            // Out-of-range or invalid leader → U+FFFD.
+            if idx < 0 || (idx as u64) >= slice_len {
+                state.set_reg(dst, Value::from_char('\u{FFFD}'));
+                return Ok(DispatchResult::Continue);
+            }
+            let i = idx as usize;
+            let b0 = unsafe { *ptr.add(i) };
+            let cp: u32 = if b0 & 0x80 == 0 {
+                b0 as u32
+            } else if b0 & 0xE0 == 0xC0 && (i + 1) < slice_len as usize {
+                let b1 = unsafe { *ptr.add(i + 1) };
+                ((b0 as u32 & 0x1F) << 6) | (b1 as u32 & 0x3F)
+            } else if b0 & 0xF0 == 0xE0 && (i + 2) < slice_len as usize {
+                let b1 = unsafe { *ptr.add(i + 1) };
+                let b2 = unsafe { *ptr.add(i + 2) };
+                ((b0 as u32 & 0x0F) << 12)
+                    | ((b1 as u32 & 0x3F) << 6)
+                    | (b2 as u32 & 0x3F)
+            } else if b0 & 0xF8 == 0xF0 && (i + 3) < slice_len as usize {
+                let b1 = unsafe { *ptr.add(i + 1) };
+                let b2 = unsafe { *ptr.add(i + 2) };
+                let b3 = unsafe { *ptr.add(i + 3) };
+                ((b0 as u32 & 0x07) << 18)
+                    | ((b1 as u32 & 0x3F) << 12)
+                    | ((b2 as u32 & 0x3F) << 6)
+                    | (b3 as u32 & 0x3F)
+            } else {
+                0xFFFD
+            };
+            let c = char::from_u32(cp).unwrap_or('\u{FFFD}');
             state.set_reg(dst, Value::from_char(c));
             Ok(DispatchResult::Continue)
         }
