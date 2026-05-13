@@ -1721,30 +1721,13 @@ impl VbcCodegen {
                     }
 
                     let full_method_name = format!("{}.{}", type_name, method_name);
-                    let is_diag_target = type_name.contains("Hasher")
-                        || type_name.contains("Formatter")
-                        || (method_name == "write_int" || method_name == "write_byte");
                     if self.ctx.lookup_function(&full_method_name).is_some() {
-                        if is_diag_target {
-                            tracing::warn!(
-                                target: "default_method_gen_diag",
-                                "SKIP queue type={} method={} (already in ctx.functions)",
-                                type_name, method_name,
-                            );
-                        }
                         continue;
                     }
 
                     self.register_impl_function(default_func, type_name)?;
                     self.pending_default_methods
                         .push((default_func.clone(), type_name.to_string()));
-                    if is_diag_target {
-                        tracing::warn!(
-                            target: "default_method_gen_diag",
-                            "QUEUED type={} method={} (from protocol {})",
-                            type_name, method_name, proto_name,
-                        );
-                    }
                 }
             }
         }
@@ -4161,6 +4144,56 @@ impl VbcCodegen {
                 registered += 1;
             }
         }
+        // **Field-type-name reconciliation pass**.  `register_archive_type`
+        // populates `type_field_type_names` from each field's TypeRef by
+        // resolving the inner TypeId back to a name via `self.types` —
+        // but at the time RefCell is registered, BorrowState may not yet
+        // be in `self.types` (declaration order within a module is
+        // ARBITRARY at archive load time).  The resolution silently
+        // returns None, leaving the entry missing.  Downstream
+        // `extract_expr_type_name` for `rc.borrow_state` then can't find
+        // the field's type name, `let bs = rc.borrow_state` doesn't
+        // record a type for `bs`, and `bs.count` falls through to the
+        // global intern_field_name index (non-zero for `count` because
+        // `value` was interned first) — surfaces at runtime as "field
+        // access out of bounds: field index 1 ... exceeds object data
+        // size 8" when reading slot 1 of a 1-slot BorrowState.
+        //
+        // The reconciliation walks every registered type AFTER all are
+        // loaded, repopulating field-type entries with the now-complete
+        // type table.  Insertion stays first-wins via the
+        // `or_insert`-equivalent in `register_archive_type`'s populator
+        // — we use the same pattern here so any user-side
+        // `register_record_fields` registration already in place keeps
+        // its slot.
+        let pending_field_types: Vec<((String, String), String)> = {
+            let mut out: Vec<((String, String), String)> = Vec::new();
+            for ty in &self.types {
+                let simple_name = match self.ctx.strings.get(ty.name.0 as usize) {
+                    Some(s) => s.clone(),
+                    None => continue,
+                };
+                for fdesc in ty.fields.iter() {
+                    let fname = match self.ctx.strings.get(fdesc.name.0 as usize) {
+                        Some(s) => s.clone(),
+                        None => continue,
+                    };
+                    if self
+                        .type_field_type_names
+                        .contains_key(&(simple_name.clone(), fname.clone()))
+                    {
+                        continue;
+                    }
+                    if let Some(ty_name) = self.type_ref_to_field_name(&fdesc.type_ref) {
+                        out.push(((simple_name.clone(), fname), ty_name));
+                    }
+                }
+            }
+            out
+        };
+        for (key, value) in pending_field_types {
+            self.type_field_type_names.entry(key).or_insert(value);
+        }
         registered
     }
 
@@ -5932,11 +5965,41 @@ impl VbcCodegen {
                 // shadow legitimate concrete-type bindings (the
                 // mechanism that made `j.block()` on Join2 dispatch
                 // through the wrong body).
-                let for_type_is_generic_param = matches!(
-                    &impl_decl.kind,
-                    verum_ast::decl::ImplKind::Protocol { for_type, .. }
-                        if Self::for_type_generic_param_name(for_type).is_some()
-                );
+                // Strict generic-param classification: a `for_type` is a
+                // generic param IFF (a) it's a bare single-segment path
+                // AND (b) the bare name is declared in the impl's
+                // `<...>` generics clause.  Without (b), every concrete
+                // bare-path receiver (`implement Hasher for DefaultHasher`,
+                // `implement Display for Formatter`, …) is misclassified
+                // as a generic-param blanket — gating below at
+                // `!for_type_is_generic_param` then suppresses
+                // `generate_default_protocol_methods` for legitimate
+                // concrete impls, so `<Type>.<default_method>`
+                // monomorphisations (DefaultHasher.write_int /
+                // .write_byte, Formatter.* forwarders, every concrete
+                // Iterator impl's default combinators) never reach the
+                // queue.  This is the architectural defect that made
+                // 582 out of 584 stdlib modules drain `0 pending`
+                // default-method monomorphisations.
+                let for_type_is_generic_param = if let verum_ast::decl::ImplKind::Protocol {
+                    for_type,
+                    ..
+                } = &impl_decl.kind
+                {
+                    Self::for_type_generic_param_name(for_type)
+                        .map(|bare| {
+                            impl_decl.generics.iter().any(|g| {
+                                matches!(
+                                    &g.kind,
+                                    verum_ast::ty::GenericParamKind::Type { name, .. }
+                                        if name.name.as_str() == bare.as_str()
+                                )
+                            })
+                        })
+                        .unwrap_or(false)
+                } else {
+                    false
+                };
                 if let verum_ast::decl::ImplKind::Protocol { protocol, .. } = &impl_decl.kind
                     && let Some(ref ty_name) = type_name
                     && !for_type_is_generic_param
@@ -13754,7 +13817,54 @@ impl VbcCodegen {
                 .collect();
             self.type_field_layouts
                 .entry(name_str.clone())
-                .or_insert(names);
+                .or_insert(names.clone());
+
+            // **Field-type-name population — mirrors `register_archive_type`
+            // at codegen/mod.rs:3997.**
+            //
+            // Pre-fix `import_archive_type_with_protocol_remap` populated
+            // ONLY `type_field_layouts` for the imported descriptor;
+            // `type_field_type_names` was left empty.  Downstream
+            // `extract_expr_type_name`'s Field arm
+            // (expressions.rs:16089) consults
+            // `type_field_type_names[(type_name, field_name)]` to recover
+            // the field's declared type — when missing, the recovery
+            // returns None, the enclosing `let bs = rc.borrow_state`
+            // doesn't record a type for `bs`, and subsequent
+            // `bs.count` in `compile_field_access` falls through to the
+            // global-intern-name path which produces a non-zero field
+            // index for `count` (because `value` was interned first).
+            // The runtime then reads slot N>0 of a 1-slot BorrowState
+            // allocation — surfaces as "field access out of bounds:
+            // field index 1 (offset 8+8 = 16) exceeds object data size
+            // 8" for `let bs = rc.borrow_state; bs.count`.
+            //
+            // The population mirrors `register_archive_type`'s
+            // discipline: walk each field's `TypeRef`, resolve to a
+            // canonical name via `type_ref_to_field_name`, and insert
+            // the entry first-wins.  When the inner type isn't yet in
+            // `self.types` (declaration-order race within the same
+            // archive module — common because BorrowState appears AFTER
+            // RefCell in `core/base/cell.vr`), `type_ref_to_field_name`
+            // returns None and we skip the entry.  The
+            // `apply_lazy_with_types` caller invokes
+            // `import_archive_module_types` once per module — at the
+            // end of that walk, every type in the module IS loaded, so
+            // a second-pass repopulation can fill any deferred entries.
+            for (fname, fdesc) in names.iter().zip(imported.fields.iter()) {
+                if self
+                    .type_field_type_names
+                    .contains_key(&(name_str.clone(), fname.clone()))
+                {
+                    continue;
+                }
+                if let Some(ty_name) = self.type_ref_to_field_name(&fdesc.type_ref) {
+                    self.type_field_type_names.insert(
+                        (name_str.clone(), fname.clone()),
+                        ty_name,
+                    );
+                }
+            }
         }
         // Variant-record layouts: each record-style variant's field
         // names register under the variant's simple name so
@@ -13973,6 +14083,52 @@ impl VbcCodegen {
             if let Some(name) = target_name {
                 self.type_aliases.insert(alias_name, name);
             }
+        }
+        // **Field-type-name deferred-resolution pass**.
+        //
+        // The per-type loop above populates `type_field_type_names`
+        // eagerly (via `import_archive_type_with_protocol_remap`), but
+        // when a field's TypeRef references a type that hasn't been
+        // loaded YET (declaration order within the module is arbitrary
+        // — e.g. `RefCell` appears before `BorrowState` in
+        // `core/base/cell.vr`), `type_ref_to_field_name` returns None
+        // and the entry is skipped.  By the end of this method every
+        // type in the module IS loaded — re-walk fields and repopulate
+        // any missing entries.
+        //
+        // The pass is first-wins (`.entry(...).or_insert(...)`) so
+        // entries already populated by the eager path keep their slot;
+        // only deferred ones get filled.
+        let pending: Vec<((String, String), String)> = {
+            let mut out: Vec<((String, String), String)> = Vec::new();
+            for ty in &self.types {
+                if ty.fields.is_empty() {
+                    continue;
+                }
+                let simple_name = match self.ctx.strings.get(ty.name.0 as usize) {
+                    Some(s) => s.clone(),
+                    None => continue,
+                };
+                for fdesc in ty.fields.iter() {
+                    let fname = match self.ctx.strings.get(fdesc.name.0 as usize) {
+                        Some(s) => s.clone(),
+                        None => continue,
+                    };
+                    if self
+                        .type_field_type_names
+                        .contains_key(&(simple_name.clone(), fname.clone()))
+                    {
+                        continue;
+                    }
+                    if let Some(ty_name) = self.type_ref_to_field_name(&fdesc.type_ref) {
+                        out.push(((simple_name.clone(), fname), ty_name));
+                    }
+                }
+            }
+            out
+        };
+        for (key, value) in pending {
+            self.type_field_type_names.entry(key).or_insert(value);
         }
     }
 
