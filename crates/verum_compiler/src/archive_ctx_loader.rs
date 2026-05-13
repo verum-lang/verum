@@ -238,7 +238,28 @@ fn register_module(
     // matches the stdlib-load discipline — first parent wins for the
     // bare lookup; downstream resolution falls through to the
     // qualified form via #300's inner-generic disambiguator.
+    // Task #25 — index by QUALIFIED name `<parent>.<variant>` instead
+    // of bare variant name.  Bare-keyed first-wins indexing was the
+    // architectural defect: when two stdlib types declare a variant
+    // sharing a simple name (canonical example: `Result.Err(E)` and
+    // `WebSocketDecodeError.Err(Text)`, but also `Maybe.None` shared
+    // with every other type's unit `None`), the per-function-descriptor
+    // lookup `variant_index.get("Err")` would non-deterministically
+    // return whichever parent's entry registered first.  The chosen
+    // hit's `payload_field_types` then leaked into the wrong
+    // function descriptor — `Result.Err` got registered with
+    // WebSocketDecodeError's `["Text"]` payload, so destructure-bound
+    // `e` carried type Text and the downstream `e + 1` codegen
+    // routed `+` to Text concat → "7" + "1" = "71" instead of 8.
+    //
+    // Key by qualified name so each parent owns its own hit
+    // unambiguously; the lookup at the function-descriptor pass
+    // composes `<fn_desc.parent_type_name>.<simple_name>` for
+    // exact resolution.  The bare lookup is preserved as a
+    // fallback for the (rare) variant constructor whose
+    // descriptor predates `parent_type` population.
     let mut variant_index: HashMap<String, VariantHit> = HashMap::new();
+    let mut variant_index_qualified: HashMap<String, VariantHit> = HashMap::new();
     for ty in &module.types {
         let parent_name = match lookup(ty.name) {
             Some(s) => s.to_string(),
@@ -254,16 +275,19 @@ fn register_module(
                 .iter()
                 .map(|f| type_ref_simple_name(&f.type_ref, module).unwrap_or_default())
                 .collect();
-            // First-wins: preserve the first-registered variant for
-            // each simple name, matching codegen's first-wins
-            // collision rule.
-            variant_index.entry(vname).or_insert(VariantHit {
+            let hit = VariantHit {
                 parent_type_name: parent_name.clone(),
                 tag: variant.tag,
                 kind: variant.kind,
                 payload_field_types,
                 arity: variant.arity as usize,
-            });
+            };
+            // Qualified: always insert (no collision possible since
+            // every `<parent>.<variant>` pair is unique by construction).
+            let qualified_key = format!("{}.{}", parent_name, vname);
+            variant_index_qualified.insert(qualified_key, hit.clone());
+            // Simple-name: first-wins fallback for orphan descriptors.
+            variant_index.entry(vname).or_insert(hit);
         }
     }
 
@@ -275,10 +299,20 @@ fn register_module(
             None => continue,
         };
 
-        // Variant ctor lookup — only when arity matches the variant's
-        // declared arity (rules out same-named regular functions).
-        let variant_hit = variant_index
-            .get(&simple_name)
+        // Variant ctor lookup — prefer the qualified `<parent>.<variant>`
+        // index when the function descriptor records its parent type.
+        // Only fall back to the simple-name index when no parent is
+        // attached (defensive — shouldn't happen for variant ctors
+        // emitted by the codegen).
+        let parent_hint: Option<String> = fn_desc
+            .parent_type
+            .and_then(|tid| type_id_to_name.get(&tid).cloned());
+        let variant_hit = parent_hint
+            .as_ref()
+            .and_then(|parent| {
+                variant_index_qualified.get(&format!("{}.{}", parent, simple_name))
+            })
+            .or_else(|| variant_index.get(&simple_name))
             .filter(|hit| hit.arity == fn_desc.params.len());
 
         let (variant_tag, parent_type_name, variant_payload_types) = match variant_hit {
@@ -349,6 +383,14 @@ fn register_module(
         let intrinsic_name = fn_desc
             .intrinsic_name
             .and_then(|sid| lookup(sid).map(|s| s.to_string()));
+        if std::env::var("VERUM_TRACE_INTRINSIC_LOAD").is_ok()
+            && simple_name.contains("cbgr_alloc")
+        {
+            eprintln!(
+                "[intrinsic-load:populate] simple='{}' intrinsic_name={:?} fn_desc.intrinsic_name_sid={:?} bytecode_len={}",
+                simple_name, intrinsic_name, fn_desc.intrinsic_name, fn_desc.bytecode_length,
+            );
+        }
         let info = FunctionInfo {
             id: new_id,
             param_count: fn_desc.params.len(),
@@ -506,6 +548,7 @@ fn register_module(
 }
 
 /// Per-variant index entry.
+#[derive(Clone)]
 struct VariantHit {
     parent_type_name: String,
     tag: u32,
@@ -904,9 +947,22 @@ struct ModuleSymbolView {
 
 /// Decode each function's bytecode and harvest its call edges.
 ///
-/// `Call`/`TailCall` resolve via the module's local function table
-/// (those edges stay intra-module — once we register a module's
-/// functions wholesale, the local edge is a no-op for reachability).
+/// `Call`/`TailCall` resolve via two id tables — the module's local
+/// function table (intra-module calls, renamed to contiguous 0..N at
+/// archive build time) AND the cross-module `external_function_names`
+/// side table (cross-module calls, preserved at their precompile-time
+/// codegen-global ids). Without the cross-module table, transitive
+/// reachability from user seeds stopped at module boundaries — e.g.
+/// the user mentioning `Text.push_byte` would never pull in
+/// `core.base.memory.alloc` (called from `Text.grow`'s body), the
+/// loader would not load `core.base.memory`, and `alloc` would not
+/// appear in the user codegen's `ctx_func_by_name`. The live failure
+/// mode: `ArchiveBodyRemap::map_function`'s Tier-2 name fallback
+/// fires for `core.base.memory.alloc`, looks it up in `ctx_func_by_name`,
+/// misses, falls to Tier-3 identity → user bytecode keeps the bogus
+/// precompile-time id → runtime dispatch routes to whatever lives
+/// at that index (originally `Successors.next` until the post-merge
+/// rebuild rotated the slot to `Text.char_count`).
 /// `CallM` resolves via the module's string table; the resulting
 /// method-name string is the cross-module dispatch key.
 fn scan_module_symbols(module: &VbcModule) -> ModuleSymbolView {
@@ -915,11 +971,25 @@ fn scan_module_symbols(module: &VbcModule) -> ModuleSymbolView {
         .iter()
         .map(|(s, id)| (id, s.to_string()))
         .collect();
-    let local_id_to_name: HashMap<u32, String> = module
+    // Union of local function ids and cross-module external ids,
+    // mapped to qualified callee names. Local entries win on key
+    // collision (impossible in practice — local ids are contiguous
+    // 0..N while external ids retain their precompile-time sparse
+    // values well above N — but the explicit precedence pins
+    // intent).
+    let mut id_to_name: HashMap<u32, String> = module
         .functions
         .iter()
         .filter_map(|f| name_by_id.get(&f.name).map(|n| (f.id.0, n.clone())))
         .collect();
+    for (fid, sid) in module.external_function_names.iter() {
+        id_to_name.entry(fid.0).or_insert_with(|| {
+            name_by_id
+                .get(sid)
+                .cloned()
+                .unwrap_or_default()
+        });
+    }
     let mut functions = Vec::with_capacity(module.functions.len());
     for fn_desc in &module.functions {
         let name = match name_by_id.get(&fn_desc.name) {
@@ -936,7 +1006,7 @@ fn scan_module_symbols(module: &VbcModule) -> ModuleSymbolView {
                     match instr {
                         Instruction::Call { func_id, .. }
                         | Instruction::TailCall { func_id, .. } => {
-                            if let Some(callee) = local_id_to_name.get(func_id) {
+                            if let Some(callee) = id_to_name.get(func_id) {
                                 callees.push(callee.clone());
                             }
                         }
@@ -1703,6 +1773,393 @@ mod tests {
             canonical_qualified > 100,
             "expected >100 canonical `core.*` qualified entries"
         );
+    }
+
+    /// **Drift-pin**: every public type in `core/base/protocols.vr`
+    /// MUST be carried into the precompiled archive.  The whole file
+    /// is at structural risk because a single stray top-level token
+    /// (e.g. `implement Foo for Bar { ... };` with an erroneous
+    /// trailing `;`) makes `stdlib_bootstrap` parse-fail the entire
+    /// file under the lenient-skip discipline, silently dropping
+    /// every type declared after the bad token.  When that happens,
+    /// downstream user code's `DefaultHasher.new()` evaluates to
+    /// `Unit` (its impl wasn't compiled), `hasher.write_int(n)`
+    /// panics with `method 'DefaultHasher.write_int' not found on
+    /// receiver of runtime kind '()'`, and every `Formatter { ... }`
+    /// record literal allocates with `type_id=0` then SetF
+    /// out-of-bounds.  Test surface covers the most-load-bearing
+    /// names in the file:
+    ///
+    ///   * `Hasher` — protocol consulted by Hash impls; missing →
+    ///     `Int.hash(hasher)` dispatches `Hasher.write_int` to a
+    ///     non-existent receiver.
+    ///   * `DefaultHasher` — concrete Hasher used by the protocol's
+    ///     default `hash_value` body; missing → `DefaultHasher.new()`
+    ///     returns Unit.
+    ///   * `Formatter` — buffer-writing record used by every Display
+    ///     impl; missing → `Formatter { buffer: &mut buf }` writes
+    ///     SetF at the wrong field index because
+    ///     `type_field_layouts` has no entry.
+    ///   * `FormatError`, `FmtResult` — referenced by every fallible
+    ///     formatter method's return type.
+    ///
+    /// Each entry also asserts the field count surviving the
+    /// precompile round-trip — empty `fields` on the descriptor
+    /// makes `import_archive_type_with_protocol_remap` skip the
+    /// `type_field_layouts` registration which is structurally
+    /// equivalent to dropping the type.
+    #[test]
+    fn archive_default_hasher_carries_state_field() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return, // bootstrap build without archive — skip
+        };
+        // DefaultHasher is declared in core/base/protocols.vr (module
+        // core.base.protocols).  Walk archive modules to find the
+        // descriptor.
+        let mut found: Option<(String, Vec<String>)> = None;
+        let mut function_hits: Vec<(String, String)> = Vec::new();
+        let mut type_names_in_protocols_module: Vec<String> = Vec::new();
+        for entry in &archive.index {
+            let module = match archive.load_module(&entry.name) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            for ty in &module.types {
+                let name = match module.strings.get(ty.name) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                if entry.name == "core.base"
+                    || entry.name.contains("protocols")
+                    || entry.name == "core.base.protocols"
+                {
+                    type_names_in_protocols_module.push(format!(
+                        "{}:{}({}f)",
+                        entry.name,
+                        name,
+                        ty.fields.len()
+                    ));
+                }
+                if name == "DefaultHasher" {
+                    let field_names: Vec<String> = ty
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            module
+                                .strings
+                                .get(f.name)
+                                .map(|s| s.to_string())
+                                .unwrap_or_default()
+                        })
+                        .collect();
+                    found = Some((entry.name.clone(), field_names));
+                    break;
+                }
+            }
+            for fn_desc in &module.functions {
+                let fname = match module.strings.get(fn_desc.name) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                if fname.contains("DefaultHasher") || fname == "new" && entry.name.contains("protocols") {
+                    function_hits.push((entry.name.clone(), fname.to_string()));
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        let (entry_name, fields) = found.unwrap_or_else(|| {
+            panic!(
+                "DefaultHasher descriptor MUST be in the precompiled archive — \
+                 missing entry means stdlib precompiler dropped the type.\n\
+                 function_hits (DefaultHasher.* or new in protocols entries):\n  {}\n\
+                 type_names in protocols-containing entries (first 30):\n  {}",
+                function_hits.iter().take(30).map(|(e, f)| format!("{}::{}", e, f)).collect::<Vec<_>>().join("\n  "),
+                type_names_in_protocols_module.iter().take(30).cloned().collect::<Vec<_>>().join("\n  "),
+            )
+        });
+        assert_eq!(
+            fields,
+            vec!["state".to_string()],
+            "DefaultHasher (archive entry `{}`) must carry exactly one \
+             field `state`; precompiler dropped it (fields={:?})",
+            entry_name,
+            fields,
+        );
+
+        // Probe the broader public surface of core/base/protocols.vr.
+        // Any of these missing means the whole file got
+        // lenient-SKIPped at parse time and downstream stdlib code is
+        // architecturally broken.  Test names use the canonical
+        // simple-type-name form because the archive is searched
+        // module-by-module (descriptor name only).
+        let mut probe = |type_name: &str, expected_field_count: Option<usize>| {
+            let mut found_arity: Option<usize> = None;
+            for entry in &archive.index {
+                let module = match archive.load_module(&entry.name) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                for ty in &module.types {
+                    let name = match module.strings.get(ty.name) {
+                        Some(s) => s,
+                        None => continue,
+                    };
+                    if name == type_name {
+                        found_arity = Some(ty.fields.len());
+                        break;
+                    }
+                }
+                if found_arity.is_some() {
+                    break;
+                }
+            }
+            let arity = found_arity.unwrap_or_else(|| {
+                panic!(
+                    "type `{}` (declared in core/base/protocols.vr) MUST be in \
+                     the precompiled archive.  Missing entry means the whole \
+                     file was lenient-SKIPped at parse time — check for a \
+                     stray `;` after an `implement` block, an unmatched brace, \
+                     or any other top-level syntax defect.",
+                    type_name
+                )
+            });
+            if let Some(expected) = expected_field_count {
+                assert_eq!(
+                    arity, expected,
+                    "type `{}` must have {} field(s) in the archive (got {}) — \
+                     the precompiler may have stripped fields during the \
+                     stripped-bytecode optimisation, OR the type was rebuilt \
+                     without its declared body.",
+                    type_name, expected, arity,
+                );
+            }
+        };
+        // Records — must carry their declared field counts.
+        probe("Formatter", Some(1));
+        probe("FormatError", Some(0));
+        // Protocol types — no `fields` (their methods live on the
+        // monomorphised impl side); just assert presence.
+        probe("Hasher", None);
+        probe("Hash", None);
+        probe("PartialEq", None);
+        probe("Eq", None);
+        probe("Ord", None);
+        probe("PartialOrd", None);
+        probe("Clone", None);
+        probe("Default", None);
+        probe("Debug", None);
+        probe("Display", None);
+    }
+
+    /// **Drift-pin**: every protocol-default-method monomorphisation
+    /// MUST ship in the precompiled archive with a real
+    /// (non-zero-length) bytecode body.  When `stdlib_bootstrap`
+    /// processes `implement Hasher for DefaultHasher`,
+    /// `generate_default_protocol_methods` queues `DefaultHasher.write_int`
+    /// and `DefaultHasher.write_byte` (default bodies on the Hasher
+    /// protocol that DefaultHasher does NOT override) into
+    /// `pending_default_methods`.  `compile_pending_default_methods`
+    /// MUST then run before module finalisation so each queued
+    /// `<Type>.<method>` gets a real archive body.
+    ///
+    /// Without this pin, `hasher.write_int(42)` (where `hasher` is a
+    /// concrete DefaultHasher) panics at runtime with
+    /// `method 'DefaultHasher.write_int' not found on receiver of
+    /// runtime kind 'Object'`, because the runtime's method-table
+    /// lookup misses the unmonomorphised default body.  Affected
+    /// classes include every protocol with default methods: Hasher
+    /// (write_int / write_byte), Hash (hash_value), PartialEq (ne via
+    /// blanket impl<T: Ord>), Display / Debug forwarders, and every
+    /// Iterator combinator default (map, filter, fold, …).
+    #[test]
+    fn archive_carries_protocol_default_method_monomorphisations() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return,
+        };
+        // Each tuple: (qualified_function_name, "rationale").
+        // Pick representative samples whose default body lives on a
+        // protocol but whose receiver-type implements only a subset
+        // of the protocol's API.
+        let required = [
+            (
+                "DefaultHasher.write_int",
+                "Hasher.write_int default — DefaultHasher overrides only `write`",
+            ),
+            (
+                "DefaultHasher.write_byte",
+                "Hasher.write_byte default — DefaultHasher overrides only `write`",
+            ),
+        ];
+        let mut missing: Vec<&'static str> = Vec::new();
+        let mut empty_body: Vec<&'static str> = Vec::new();
+        let mut all_default_hasher_fns: Vec<(String, String, u32)> = Vec::new();
+        for entry in &archive.index {
+            let module = match archive.load_module(&entry.name) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            for fn_desc in &module.functions {
+                let name = match module.strings.get(fn_desc.name) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                if name.contains("DefaultHasher") || name.contains("Hasher.write") {
+                    all_default_hasher_fns.push((
+                        entry.name.clone(),
+                        name.to_string(),
+                        fn_desc.bytecode_length,
+                    ));
+                }
+            }
+        }
+        for (qualified, _why) in &required {
+            let mut found_with_body = false;
+            let mut found_at_all = false;
+            'outer: for entry in &archive.index {
+                let module = match archive.load_module(&entry.name) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                for fn_desc in &module.functions {
+                    let name = match module.strings.get(fn_desc.name) {
+                        Some(s) => s,
+                        None => continue,
+                    };
+                    // Match either bare `DefaultHasher.write_int` or
+                    // any qualified form ending with `.<qualified>`.
+                    if name == *qualified
+                        || name.ends_with(&format!(".{}", qualified))
+                    {
+                        found_at_all = true;
+                        if fn_desc.bytecode_length > 0 {
+                            found_with_body = true;
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+            if !found_at_all {
+                missing.push(qualified);
+            } else if !found_with_body {
+                empty_body.push(qualified);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "protocol-default-method monomorphisation(s) MISSING from \
+             archive: {:?}. This indicates stdlib_bootstrap's \
+             `compile_core_module_from_ast` skipped \
+             `compile_pending_default_methods()` between \
+             `resolve_pending_imports` and the body-compilation pass.\n\
+             All DefaultHasher/Hasher.write functions in archive (first 40):\n  {}",
+            missing,
+            all_default_hasher_fns.iter().take(40)
+                .map(|(e, n, l)| format!("{}::{} (body={}B)", e, n, l))
+                .collect::<Vec<_>>().join("\n  "),
+        );
+        assert!(
+            empty_body.is_empty(),
+            "protocol-default-method monomorphisation(s) present but with \
+             zero-length body: {:?}. The queue ran but the body emit was \
+             skipped — likely a `[lenient] SKIP` of the default body's \
+             AST.",
+            empty_body,
+        );
+    }
+
+    /// **Diagnostic**: decode Formatter.write_str's bytecode to see
+    /// whether the body actually calls push_str or just returns Ok.
+    /// A 33-byte body for a 2-instruction logical body (call +
+    /// wrap-result + ret) might mean the call was lenient-SKIPped.
+    #[test]
+    #[ignore = "diagnostic only — Formatter.write_str bytecode disassembly"]
+    fn diag_decode_formatter_write_str() {
+        use verum_vbc::bytecode::decode_instructions;
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return,
+        };
+        for entry in &archive.index {
+            let module = match archive.load_module(&entry.name) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            for fn_desc in &module.functions {
+                let name = match module.strings.get(fn_desc.name) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                if name == "Formatter.write_str" {
+                    let off = fn_desc.bytecode_offset as usize;
+                    let len = fn_desc.bytecode_length as usize;
+                    if off + len > module.bytecode.len() {
+                        eprintln!("{}::{} body out-of-range", entry.name, name);
+                        continue;
+                    }
+                    let region = &module.bytecode[off..off + len];
+                    eprintln!("Found {}::{} (params={}, body={}B):",
+                        entry.name, name, fn_desc.params.len(), len);
+                    eprintln!("  raw bytes: {:02x?}", region);
+                    match decode_instructions(region) {
+                        Ok(instrs) => {
+                            for (i, instr) in instrs.iter().enumerate() {
+                                eprintln!("  [{}] {:?}", i, instr);
+                            }
+                        }
+                        Err(e) => eprintln!("  decode error: {:?}", e),
+                    }
+                    return;
+                }
+            }
+        }
+        eprintln!("Formatter.write_str NOT FOUND");
+    }
+
+    /// **Diagnostic**: dump every archive function whose simple
+    /// name is `write_str` to reveal name collisions across stdlib
+    /// modules.  Each collision is a potential method-dispatch
+    /// hazard — when user code calls `receiver.write_str(...)` on a
+    /// type whose impl has its own `write_str`, codegen's
+    /// `lookup_function_with_arity` must pick the receiver-type-
+    /// qualified entry; if name-collision dispatch picks a free
+    /// function with the same simple name, the call lands on the
+    /// wrong body and the user's `&mut self` mutation never happens.
+    #[test]
+    #[ignore = "diagnostic only — surfaces write_str name collisions"]
+    fn diag_dump_write_str_entries() {
+        let archive = match crate::embedded_stdlib_vbc::get_runtime_archive() {
+            Some(a) => a,
+            None => return,
+        };
+        let mut all: Vec<(String, String, usize, u32)> = Vec::new();
+        for entry in &archive.index {
+            let module = match archive.load_module(&entry.name) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            for fn_desc in &module.functions {
+                let name = match module.strings.get(fn_desc.name) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                if name.ends_with(".write_str") || name == "write_str" {
+                    all.push((
+                        entry.name.clone(),
+                        name.to_string(),
+                        fn_desc.params.len(),
+                        fn_desc.bytecode_length,
+                    ));
+                }
+            }
+        }
+        eprintln!("write_str entries in archive: {}", all.len());
+        for (entry, name, params, body) in &all {
+            eprintln!("  {}::{} (params={}, body={}B)", entry, name, params, body);
+        }
     }
 
     /// Diagnostic: dump current_dir-related entries to verify
@@ -2513,7 +2970,10 @@ fn register_module_filtered(
             type_id_to_name.insert(ty.id, name.to_string());
         }
     }
+    // Task #25 — qualified `<parent>.<variant>` indexing, mirror of
+    // the apply_lazy_with_types loader site above.
     let mut variant_index: HashMap<String, VariantHit> = HashMap::new();
+    let mut variant_index_qualified: HashMap<String, VariantHit> = HashMap::new();
     for ty in &module.types {
         let parent_name = match lookup(ty.name) {
             Some(s) => s.to_string(),
@@ -2531,13 +2991,16 @@ fn register_module_filtered(
                     type_ref_simple_name(&f.type_ref, module).unwrap_or_default()
                 })
                 .collect();
-            variant_index.entry(vname).or_insert(VariantHit {
+            let hit = VariantHit {
                 parent_type_name: parent_name.clone(),
                 tag: variant.tag,
                 kind: variant.kind,
                 payload_field_types,
                 arity: variant.arity as usize,
-            });
+            };
+            let qualified_key = format!("{}.{}", parent_name, vname);
+            variant_index_qualified.insert(qualified_key, hit.clone());
+            variant_index.entry(vname).or_insert(hit);
         }
     }
     // Per-module ID remap.  Each archive function gets a globally-
@@ -2756,8 +3219,19 @@ fn register_module_filtered(
         }
         let simple_name = simple_name_str.to_string();
         let qualified = qualified_borrowed;
-        let variant_hit = variant_index
-            .get(&simple_name)
+        // Task #25 — prefer qualified `<parent>.<variant>` lookup
+        // when the function descriptor has a parent type recorded.
+        // Falls back to simple-name first-wins index only when no
+        // parent is attached.
+        let parent_hint: Option<String> = fn_desc
+            .parent_type
+            .and_then(|tid| type_id_to_name.get(&tid).cloned());
+        let variant_hit = parent_hint
+            .as_ref()
+            .and_then(|parent| {
+                variant_index_qualified.get(&format!("{}.{}", parent, simple_name))
+            })
+            .or_else(|| variant_index.get(&simple_name))
             .filter(|hit| hit.arity == fn_desc.params.len());
         let (variant_tag, parent_type_name, variant_payload_types) = match variant_hit {
             Some(hit) => (
@@ -2815,6 +3289,14 @@ fn register_module_filtered(
         let intrinsic_name = fn_desc
             .intrinsic_name
             .and_then(|sid| lookup(sid).map(|s| s.to_string()));
+        if std::env::var("VERUM_TRACE_INTRINSIC_LOAD").is_ok()
+            && simple_name.contains("cbgr_alloc")
+        {
+            eprintln!(
+                "[intrinsic-load:filtered] simple='{}' qualified='{}' intrinsic_name={:?} fn_desc.intrinsic_name_sid={:?} bytecode_len={}",
+                simple_name, qualified, intrinsic_name, fn_desc.intrinsic_name, fn_desc.bytecode_length,
+            );
+        }
         let info = FunctionInfo {
             id: new_id,
             param_count: fn_desc.params.len(),
