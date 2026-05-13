@@ -1,0 +1,263 @@
+// =============================================================================
+// core-tests/text/builder/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core/text/builder.vr` — the `TextBuilder` incremental
+// string builder.
+//
+// API surface (10 public methods):
+//   TextBuilder.new() -> TextBuilder
+//   TextBuilder.with_capacity(cap: Int) -> TextBuilder
+//   .push(&mut self, text: &Text)
+//   .push_char(&mut self, ch: Char)
+//   .push_line(&mut self, text: &Text)
+//   .build(&self) -> Text
+//   .into_text(self) -> Text
+//   .len(&self) -> Int
+//   .is_empty(&self) -> Bool
+//   .clear(&mut self)
+//
+// Plus protocol impls: Debug, Display, Clone, Default, Length.
+//
+// Companion files: property_test.vr, integration_test.vr, regression_test.vr,
+// audit.md.
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.builder.{TextBuilder};
+
+// =============================================================================
+// Section 1: Construction
+// =============================================================================
+
+@test
+fn test_new_is_empty() {
+    let b = TextBuilder.new();
+    assert(b.is_empty());
+    assert_eq(b.len(), 0);
+}
+
+@test
+fn test_with_capacity_zero_is_empty() {
+    let b = TextBuilder.with_capacity(0);
+    assert(b.is_empty());
+    assert_eq(b.len(), 0);
+}
+
+@test
+fn test_with_capacity_positive_is_empty() {
+    let b = TextBuilder.with_capacity(64);
+    assert(b.is_empty());
+    assert_eq(b.len(), 0);
+}
+
+@test
+fn test_default_is_empty() {
+    let b: TextBuilder = TextBuilder.default();
+    assert(b.is_empty());
+}
+
+// =============================================================================
+// Section 2: Push (Text)
+// =============================================================================
+
+@test
+fn test_push_single_text() {
+    let mut b = TextBuilder.new();
+    b.push(&"hello");
+    assert_eq(b.len(), 5);
+    assert_eq(b.build(), "hello");
+}
+
+@test
+fn test_push_multiple_texts_concatenates() {
+    let mut b = TextBuilder.new();
+    b.push(&"Hello");
+    b.push(&", ");
+    b.push(&"world");
+    b.push(&"!");
+    assert_eq(b.build(), "Hello, world!");
+    assert_eq(b.len(), 13);
+}
+
+@test
+fn test_push_empty_text_is_no_op() {
+    let mut b = TextBuilder.new();
+    b.push(&"abc");
+    b.push(&"");
+    b.push(&"def");
+    assert_eq(b.build(), "abcdef");
+}
+
+@test
+fn test_push_to_empty_builder() {
+    let mut b = TextBuilder.new();
+    b.push(&"first");
+    assert_eq(b.build(), "first");
+}
+
+// =============================================================================
+// Section 3: Push (Char)
+// =============================================================================
+
+@test
+fn test_push_char_ascii() {
+    let mut b = TextBuilder.new();
+    b.push_char('a');
+    assert_eq(b.len(), 1);
+    assert_eq(b.build(), "a");
+}
+
+@test
+fn test_push_multiple_chars() {
+    let mut b = TextBuilder.new();
+    b.push_char('a');
+    b.push_char('b');
+    b.push_char('c');
+    assert_eq(b.build(), "abc");
+}
+
+@test
+fn test_push_char_then_text_chains() {
+    let mut b = TextBuilder.new();
+    b.push_char('>');
+    b.push(&" hello");
+    assert_eq(b.build(), "> hello");
+}
+
+@test
+fn test_push_text_then_char_chains() {
+    let mut b = TextBuilder.new();
+    b.push(&"hello");
+    b.push_char('!');
+    assert_eq(b.build(), "hello!");
+}
+
+// =============================================================================
+// Section 4: Push (Line)
+// =============================================================================
+
+@test
+fn test_push_line_appends_newline() {
+    let mut b = TextBuilder.new();
+    b.push_line(&"line one");
+    let out = b.build();
+    assert_eq(out.len(), "line one".len() + 1);
+}
+
+@test
+fn test_push_multiple_lines() {
+    let mut b = TextBuilder.new();
+    b.push_line(&"a");
+    b.push_line(&"b");
+    b.push_line(&"c");
+    let out = b.build();
+    // 3 chars + 3 newlines = 6 bytes
+    assert_eq(out.len(), 6);
+}
+
+// =============================================================================
+// Section 5: Build & into_text
+// =============================================================================
+
+@test
+fn test_build_clones_underlying_buffer() {
+    let mut b = TextBuilder.new();
+    b.push(&"hello");
+    let t1 = b.build();
+    b.push(&", world");
+    let t2 = b.build();
+    // First build was a clone; second push didn't mutate the snapshot
+    assert_eq(t1, "hello");
+    assert_eq(t2, "hello, world");
+}
+
+@test
+fn test_into_text_consumes() {
+    let mut b = TextBuilder.new();
+    b.push(&"final");
+    let out = b.into_text();
+    assert_eq(out, "final");
+}
+
+// =============================================================================
+// Section 6: Length
+// =============================================================================
+
+@test
+fn test_len_after_pushes() {
+    let mut b = TextBuilder.new();
+    assert_eq(b.len(), 0);
+    b.push(&"abc");
+    assert_eq(b.len(), 3);
+    b.push(&"defg");
+    assert_eq(b.len(), 7);
+}
+
+@test
+fn test_len_with_chars() {
+    let mut b = TextBuilder.new();
+    b.push_char('a');
+    b.push_char('b');
+    assert_eq(b.len(), 2);
+}
+
+@test
+fn test_is_empty_after_clear() {
+    let mut b = TextBuilder.new();
+    b.push(&"hello");
+    assert(!b.is_empty());
+    b.clear();
+    assert(b.is_empty());
+    assert_eq(b.len(), 0);
+}
+
+// =============================================================================
+// Section 7: Clear
+// =============================================================================
+
+@test
+fn test_clear_then_push_resets_content() {
+    let mut b = TextBuilder.new();
+    b.push(&"old");
+    b.clear();
+    b.push(&"new");
+    assert_eq(b.build(), "new");
+}
+
+// =============================================================================
+// Section 8: Protocol Impls
+// =============================================================================
+
+@test
+fn test_clone_produces_equal() {
+    let mut b = TextBuilder.new();
+    b.push(&"hello");
+    let cloned = b.clone();
+    assert_eq(cloned.build(), "hello");
+    assert_eq(cloned.len(), 5);
+}
+
+@test
+fn test_clone_independent_after_mutation() {
+    let mut b = TextBuilder.new();
+    b.push(&"shared");
+    let cloned = b.clone();
+    b.push(&" extra");
+    assert_eq(cloned.build(), "shared");
+    assert_eq(b.build(), "shared extra");
+}
+
+@test
+fn test_display_renders_buffer() {
+    let mut b = TextBuilder.new();
+    b.push(&"display me");
+    let s = f"{b}";
+    assert_eq(s, "display me");
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

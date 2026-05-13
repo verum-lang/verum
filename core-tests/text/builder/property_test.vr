@@ -1,0 +1,205 @@
+// =============================================================================
+// core-tests/text/builder/property_test.vr
+// =============================================================================
+//
+// Algebraic / mathematical laws for `TextBuilder`.
+//
+// Laws verified:
+//   §1  new().build() = ""
+//   §2  Builder.push is monoidal: pushing a, then b, gives a + b
+//   §3  push and push_char compose: pushing 'X' equals push("X")
+//   §4  build is idempotent: building twice with no mutation gives equal Texts
+//   §5  len = total bytes of all pushes
+//   §6  clear restores to empty
+//   §7  Builder mirrors Text.concat over a list of pushes
+//   §8  with_capacity(n) yields the same content as new() under equal pushes
+//   §9  push_line increases length by |text| + 1
+//   §10 push of empty Text is identity
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.builder.{TextBuilder};
+mount core.collections.list.List;
+
+fn ascii_chunks() -> List<Text> {
+    ["", "a", "ab", "abc", "Hello", "world", "12345", "punct.!"]
+}
+
+// =============================================================================
+// §1 new().build() = ""
+// =============================================================================
+
+@test
+fn property_new_then_build_is_empty() {
+    let b = TextBuilder.new();
+    assert_eq(b.build(), "");
+}
+
+// =============================================================================
+// §2 push is monoidal: a + b
+// =============================================================================
+
+@test
+fn property_push_concat_two_chunks() {
+    let chunks: List<Text> = ["alpha", "beta"];
+    for a in chunks.iter() {
+        for b in chunks.iter() {
+            let mut builder = TextBuilder.new();
+            builder.push(a);
+            builder.push(b);
+            assert_eq(builder.build(), (*a).concat(b));
+        }
+    }
+}
+
+@test
+fn property_push_concat_chain() {
+    let mut builder = TextBuilder.new();
+    let chunks: List<Text> = ["one", " ", "two", " ", "three"];
+    let mut expected = Text.new();
+    for c in chunks.iter() {
+        builder.push(c);
+        expected = expected.concat(c);
+    }
+    assert_eq(builder.build(), expected);
+}
+
+// =============================================================================
+// §3 push_char ≡ push(Text.from_char(c))
+// =============================================================================
+
+@test
+fn property_push_char_equals_push_text_from_char() {
+    let chars: List<Char> = ['a', 'X', '5', ' ', '!'];
+    for c in chars.iter() {
+        let mut a = TextBuilder.new();
+        a.push_char(*c);
+        let mut b = TextBuilder.new();
+        let s = Text.from_char(*c);
+        b.push(&s);
+        assert_eq(a.build(), b.build());
+    }
+}
+
+// =============================================================================
+// §4 build is idempotent — repeating gives equal Texts
+// =============================================================================
+
+@test
+fn property_build_idempotent_no_mutation() {
+    let mut builder = TextBuilder.new();
+    builder.push(&"stable");
+    let t1 = builder.build();
+    let t2 = builder.build();
+    assert_eq(t1, t2);
+}
+
+// =============================================================================
+// §5 len = total bytes of all pushes
+// =============================================================================
+
+@test
+fn property_len_equals_sum_of_chunk_lens() {
+    let mut builder = TextBuilder.new();
+    let mut total: Int = 0;
+    for c in ascii_chunks().iter() {
+        builder.push(c);
+        total = total + (*c).len();
+        assert_eq(builder.len(), total);
+    }
+}
+
+// =============================================================================
+// §6 clear restores to empty
+// =============================================================================
+
+@test
+fn property_clear_restores_to_empty() {
+    for c in ascii_chunks().iter() {
+        let mut builder = TextBuilder.new();
+        builder.push(c);
+        builder.clear();
+        assert(builder.is_empty());
+        assert_eq(builder.len(), 0);
+        assert_eq(builder.build(), "");
+    }
+}
+
+// =============================================================================
+// §7 builder.build() == Text.concat(chunk1, chunk2, ...) over the same list
+// =============================================================================
+
+@test
+fn property_builder_mirrors_text_concat() {
+    let chunks: List<Text> = ["a", "bc", "d", "ef"];
+    let mut builder = TextBuilder.new();
+    let mut expected = Text.new();
+    for c in chunks.iter() {
+        builder.push(c);
+        expected = expected.concat(c);
+    }
+    assert_eq(builder.build(), expected);
+}
+
+// =============================================================================
+// §8 with_capacity yields same content as new under equal pushes
+// =============================================================================
+
+@test
+fn property_with_capacity_observably_equal_to_new() {
+    let mut a = TextBuilder.new();
+    let mut b = TextBuilder.with_capacity(64);
+    a.push(&"capacity-doesn't-affect-content");
+    b.push(&"capacity-doesn't-affect-content");
+    assert_eq(a.build(), b.build());
+    assert_eq(a.len(), b.len());
+}
+
+// =============================================================================
+// §9 push_line increases length by |text| + 1
+// =============================================================================
+
+@test
+fn property_push_line_adds_one_byte_for_newline() {
+    for c in ascii_chunks().iter() {
+        let mut builder = TextBuilder.new();
+        let pre_len = builder.len();
+        builder.push_line(c);
+        let post_len = builder.len();
+        assert_eq(post_len, pre_len + (*c).len() + 1);
+    }
+}
+
+// =============================================================================
+// §10 push of empty Text is identity (for both build() and len())
+// =============================================================================
+
+@test
+fn property_push_empty_is_identity() {
+    let mut builder = TextBuilder.new();
+    builder.push(&"abc");
+    let pre_build = builder.build();
+    let pre_len = builder.len();
+    builder.push(&"");
+    assert_eq(builder.build(), pre_build);
+    assert_eq(builder.len(), pre_len);
+}
+
+// =============================================================================
+// §11 Clone preserves content + length
+// =============================================================================
+
+@test
+fn property_clone_preserves_content_and_len() {
+    let mut builder = TextBuilder.new();
+    builder.push(&"clone me");
+    let cloned = builder.clone();
+    assert_eq(cloned.build(), builder.build());
+    assert_eq(cloned.len(), builder.len());
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
