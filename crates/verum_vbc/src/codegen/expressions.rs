@@ -6735,10 +6735,30 @@ impl VbcCodegen {
             }
         }
 
-        // Intercept collection .new() calls FIRST — must emit builtin opcodes so the
-        // interpreter creates proper heap objects with TypeId::LIST/MAP/SET headers.
-        // The stdlib compiled .new() functions return flat structs with raw pointers
-        // incompatible with the interpreter's builtin methods (push, get, insert, len).
+        // Legacy WKT `.new()` interception removed for Map (#123 fix):
+        // emitting `NewMap` here produced a 3-field canonical-layout
+        // object `[count, capacity, entries_ptr]` (24 bytes) that
+        // diverges from the Verum stdlib's 4-field `Map<K,V>` record
+        // (entries, len, cap, tombstones) declared in
+        // `core/collections/map.vr`.  The stdlib's `Map.capacity` /
+        // `Map.insert` / `Map.entries` bodies emit GetF/SetF against
+        // the 4-field shape; intercepting `.new()` here bypassed them
+        // and produced silent corruption — `m.capacity()` returned
+        // the entries_ptr pointer NaN-boxed as Unit (`{}`), and
+        // `m.insert(...)` SIGBUSed reading past slot 2 of the 3-slot
+        // canonical object.  Letting the dispatch fall through to
+        // `compile_static_method_call` routes to the stdlib body
+        // which constructs the 4-field record correctly under the
+        // same TypeId(513) reservation.
+        //
+        // List / Set / Deque retain the legacy intercept for now —
+        // their stdlib bodies have additional unresolved defects
+        // (LoadNil instead of LoadI(0) for null_ptr() field init,
+        // raw-pointer Slot.offset arithmetic) that would surface as
+        // runtime panics on push/get/iter.  Removing the Map
+        // intercept first is the minimal blast-radius fix that
+        // closes task #123 without coupling to the orthogonal
+        // List/Set/Deque defects.
         if method.name == "new"
             && args.is_empty()
             && let Some(ref tn) = static_receiver_type
@@ -6766,11 +6786,6 @@ impl VbcCodegen {
                 } else {
                     self.ctx.emit(Instruction::NewList { dst: dest , capacity_hint: 0 });
                 }
-                return Ok(Some(dest));
-            }
-            if tn == type_names::MAP {
-                let dest = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::NewMap { dst: dest , capacity_hint: 0 });
                 return Ok(Some(dest));
             }
             if tn == type_names::SET {
@@ -6820,10 +6835,14 @@ impl VbcCodegen {
                 self.ctx.free_temp(cap_reg);
                 return Ok(Some(dest));
             }
+            // Map intentionally omitted from this intercept — see the
+            // matching note at the `.new()` intercept above.  Map's
+            // stdlib `with_capacity` body constructs the 4-field
+            // record AND seeds the entries-table allocation; the
+            // legacy `NewMap` path produces an incompatible 3-field
+            // canonical layout.
             let opcode = if tn == type_names::LIST {
                 Some(Instruction::NewList { dst: Reg(0) , capacity_hint: 0 })
-            } else if tn == type_names::MAP {
-                Some(Instruction::NewMap { dst: Reg(0) , capacity_hint: 0 })
             } else if tn == type_names::SET {
                 Some(Instruction::NewSet { dst: Reg(0) , capacity_hint: 0 })
             } else if tn == type_names::DEQUE {
@@ -6841,7 +6860,6 @@ impl VbcCodegen {
                 let dest = self.ctx.alloc_temp();
                 let instr = match template {
                     Instruction::NewList { .. } => Instruction::NewList { dst: dest , capacity_hint: 0 },
-                    Instruction::NewMap { .. } => Instruction::NewMap { dst: dest , capacity_hint: 0 },
                     Instruction::NewSet { .. } => Instruction::NewSet { dst: dest , capacity_hint: 0 },
                     Instruction::NewDeque { .. } => Instruction::NewDeque { dst: dest , capacity_hint: 0 },
                     other => other,
@@ -20759,6 +20777,25 @@ impl VbcCodegen {
                 }
                 // DerefMut is a store — no meaningful return, but emit nil for dest
                 self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
+
+            // LoadI — emit a literal 0 in the destination.  This is
+            // the canonical strategy used by the `null_ptr` /
+            // `null_ptr_mut` / `intrinsic_null_ptr` intrinsics in the
+            // registry (`DirectOpcode(Opcode::LoadI)` with the
+            // implicit "load 0" comment).  Without an arm here the
+            // default fallback below emitted `LoadNil`, producing a
+            // Unit-tagged value where the Verum stdlib `Map.new()` /
+            // `List.new()` field-init logic expected Int 0 — the
+            // resulting `self.entries: &unsafe Slot<K,V>` was Nil
+            // instead of a null raw pointer, and downstream
+            // `self.entries.offset(idx)` panicked at runtime with a
+            // SIGBUS dereferencing the Nil bit pattern.
+            Opcode::LoadI => {
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: 0,
+                });
             }
 
             // Default fallback
