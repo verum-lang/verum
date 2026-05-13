@@ -5599,6 +5599,42 @@ impl VbcCodegen {
     /// have run for every file in the module — one finalize pass
     /// replaces the per-file `build_module + merge` chain.
     pub fn finalize_module_from_state(&mut self) -> CodegenResult<VbcModule> {
+        // **Architectural symmetry with `finalize_module`.**
+        //
+        // Pre-fix this path went directly to `build_module`, skipping
+        // the four prep passes that `finalize_module` runs (pending
+        // constant compilation, pending TLS-init compilation, missing-
+        // stub descriptor synthesis, type-layout verification). The
+        // stdlib precompile bootstrap uses `finalize_module_from_state`
+        // (one shared codegen pool across all source files in a
+        // module, with `build_module` running ONCE at the end), so the
+        // missing prep passes silently degraded stdlib archives.
+        //
+        // **The load-bearing miss**: `emit_missing_stub_descriptors`.
+        // Without it, every cross-module `Call { func_id }` in a
+        // stdlib body (e.g. `Text.grow` calling `alloc` from
+        // `core.base.memory`) survived into the archive bytecode
+        // pointing at the precompile-time codegen-global id with NO
+        // descriptor in this archive module's `functions` table to
+        // remap it at user-side merge time. The user-side per-module
+        // remap then identity-fell-back through `ArchiveBodyRemap::
+        // map_function`'s `unwrap_or(src)` — landing the call on
+        // whatever unrelated function happened to occupy that raw id
+        // in the user codegen's global function table (live failure
+        // mode: `Text.grow → alloc` dispatching to `Unfold.fuse` /
+        // `RepeatWith.windows` / `StatefulTransducedIter.zip_longest`
+        // depending on iteration-order shifts between runs).
+        //
+        // The fix: run the same prep sequence as `finalize_module`,
+        // so stdlib and user archives share invariants. Particularly
+        // `emit_missing_stub_descriptors` synthesises an extern-stub
+        // descriptor for every referenced FunctionId that doesn't
+        // have a body in this module — making the archive function
+        // table self-contained over its own bytecode's Call operands.
+        self.compile_pending_constants()?;
+        self.compile_pending_tls_inits()?;
+        self.emit_missing_stub_descriptors();
+        self.verify_type_layout_invariants()?;
         self.build_module()
     }
 
@@ -11957,6 +11993,38 @@ impl VbcCodegen {
         // Set async property if applicable
         if func_info.is_async {
             descriptor.properties |= crate::types::PropertySet::ASYNC;
+        }
+
+        // **Architectural propagation**: carry `@intrinsic("name")` marker
+        // through the precompile → archive → user-side round-trip.
+        //
+        // `compile_function` is the path that handles regular function
+        // declarations with bodies — including `@intrinsic` declarations
+        // whose Verum body is the semantic specification (typechecker-
+        // facing) but whose Tier-0 / AOT dispatch goes through the
+        // intrinsic registry's emit strategy (FfiExtended / InlineSequence /
+        // DirectOpcode / etc.).
+        //
+        // **Pre-fix defect**: this assignment was missing — every `@intrinsic`
+        // function body was compiled and serialised into the archive WITHOUT
+        // descriptor.intrinsic_name. User-side archive_ctx_loader then read
+        // `fn_desc.intrinsic_name = None`, registered FunctionInfo with
+        // `intrinsic_name = None`, and compile_call's intercept at
+        // expressions.rs:4385 skipped the intrinsic dispatch — falling
+        // through to a raw `Call` to the body. For `cbgr_alloc` (the load-
+        // bearing CBGR allocator) this routed every allocation through the
+        // Verum body's `get_local_heap().alloc()` chain, which recursively
+        // calls `cbgr_alloc` to allocate its own TLS state — infinite
+        // recursion and `unwrap() on None` panics. Every `Text` / `List` /
+        // `Map` / `Set` / `Heap` / `Shared` allocation in Tier 0 went
+        // through this broken path.
+        //
+        // Mirrors the parallel propagation in `emit_missing_stub_descriptors`
+        // (line ~13022) and `register_constant_with_value` (line ~10313) —
+        // every site that materialises a FunctionDescriptor from a
+        // FunctionInfo MUST copy `intrinsic_name`.
+        if let Some(ref iname) = func_info.intrinsic_name {
+            descriptor.intrinsic_name = Some(StringId(self.intern_string(iname)));
         }
 
         // Set test flag if function has @test attribute (only for user code)
