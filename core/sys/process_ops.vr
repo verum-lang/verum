@@ -109,8 +109,14 @@ public fn args() -> List<Text> {
     result
 }
 
-/// Get a specific command-line argument.
-public fn arg(index: Int) -> Text {
+/// Get a specific command-line argument without bounds checking.
+///
+/// **Internal**: callers MUST verify `0 <= index < args_count()` —
+/// out-of-range access yields undefined behaviour at the OS layer.
+/// User code should call `core.base.env.arg(index) -> Maybe<Text>`,
+/// which performs the bounds check.  Renamed from `arg` to break
+/// the simple-name collision with the safe variant (Task #42).
+public fn arg_unchecked(index: Int) -> Text {
     __arg_raw(index)
 }
 

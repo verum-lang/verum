@@ -114,37 +114,38 @@ impl TypeChecker {
                         }
                     };
 
+                    // Task #41 — Parse payload type strings via the
+                    // structural parser so "List<Byte>" / "Result<T, E>"
+                    // / "Maybe<Text>" round-trip as proper
+                    // `Type::Named { path, args }` rather than a single
+                    // path segment with the whole generic in the ident
+                    // name.  Without parsing, downstream unification
+                    // sees `Named { path: "List<Byte>" }` (one Ident)
+                    // and fails to unify against any List instantiation
+                    // — `VarError.NotUnicode(bytes)` then surfaces as
+                    // "no method named NotUnicode for type VarError"
+                    // because the variant-constructor dispatch arm's
+                    // arg type-check throws `expected 'List<Byte>',
+                    // found 'List<Byte>'` (rigid string mismatch).
+                    let parse = crate::infer::helpers::parse_descriptor_type_string;
                     let constructor = match &case.payload {
                         verum_common::Maybe::None => {
                             InductiveConstructor::unit(case.name.clone(), result_type)
                         }
                         verum_common::Maybe::Some(VariantPayload::Tuple(types)) => {
-                            let args: verum_common::List<Type> = types
-                                .iter()
-                                .map(|t| Type::Named {
-                                    path: Self::text_to_path(t),
-                                    args: verum_common::List::new(),
-                                })
-                                .collect();
+                            let args: verum_common::List<Type> =
+                                types.iter().map(|t| parse(t.as_str())).collect();
                             InductiveConstructor::with_args(case.name.clone(), args, result_type)
                         }
                         verum_common::Maybe::Some(VariantPayload::Record(fields)) => {
-                            let args: verum_common::List<Type> = fields
-                                .iter()
-                                .map(|f| Type::Named {
-                                    path: Self::text_to_path(&f.ty),
-                                    args: verum_common::List::new(),
-                                })
-                                .collect();
+                            let args: verum_common::List<Type> =
+                                fields.iter().map(|f| parse(f.ty.as_str())).collect();
                             // Register variant record fields as __struct_fields_<VariantName>
                             // so pattern matching `Rect { w, h }` can resolve field types.
                             let struct_key = format!("__struct_fields_{}", case.name);
                             let mut field_map = indexmap::IndexMap::new();
                             for f in fields.iter() {
-                                let field_ty = Type::Named {
-                                    path: Self::text_to_path(&f.ty),
-                                    args: verum_common::List::new(),
-                                };
+                                let field_ty = parse(f.ty.as_str());
                                 field_map
                                     .insert(verum_common::Text::from(f.name.as_str()), field_ty);
                             }
@@ -158,6 +159,30 @@ impl TypeChecker {
 
                 self.ctx
                     .register_inductive_type(type_name.clone(), constructors);
+
+                // **Fundamental fix (Task #43 audit)** — also populate
+                // `variant_constructor_parents` so the Call expression's
+                // bare-name variant-constructor dispatch arm
+                // (`infer_expr_call` at expr.rs:5557) can find the
+                // parent for every stdlib variant constructor.  Pre-fix
+                // only the lazy `register_variant_signature_for_lazy`
+                // path populated parents — when the eager pre-load was
+                // used by `register_stdlib_types_for_module`'s drain
+                // loop, this map stayed empty for stdlib variants.
+                // Every bare `Some(5)` / `Ok(v)` / `Err(e)` call site
+                // then fell through to value-position lookup
+                // (Type::Variant) and surfaced as
+                // `not a function: Some`.  Mirror the eager
+                // source-driven discipline at `infer/core.rs:1860-1869`.
+                for case in cases.iter() {
+                    let parents = self
+                        .variant_constructor_parents
+                        .entry(case.name.clone())
+                        .or_default();
+                    if !parents.iter().any(|p| p == type_name) {
+                        parents.push(type_name.clone());
+                    }
+                }
             }
         }
 
