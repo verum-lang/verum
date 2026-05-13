@@ -207,6 +207,49 @@ impl VbcCodegen {
                         // compile_nested_functions pass in mod.rs should
                         // NOT recompile it.
                     }
+                    verum_ast::ItemKind::Impl(_) => {
+                        // **Save/restore parent function compilation
+                        // context across nested `implement` block.**
+                        //
+                        // An `implement Trait for Type { ... }` inside
+                        // a function body compiles each method via
+                        // `compile_function`, which calls
+                        // `begin_function`/`end_function` and clears
+                        // the outer function's `in_function` /
+                        // `instructions` / `registers` state.
+                        //
+                        // Without save/restore, the outer function's
+                        // subsequent `return ...;` statements emit
+                        // with `in_function == false` → codegen error
+                        // "return statement outside of function".
+                        // Live repro: `core-tests/base/protocols/unit_test.vr`'s
+                        // `test_eq_custom_type` /
+                        // `test_eq_default_ne` /
+                        // `test_eq_reflexivity` /
+                        // `test_eq_symmetry` /
+                        // `test_eq_transitivity` — every test that
+                        // declares a `type` + `implement Eq for ...`
+                        // inline.
+                        //
+                        // Mirrors the save/restore pattern used for
+                        // nested Function items above (lines 189-204)
+                        // and for closures (see expressions.rs).
+                        let saved_function = self.ctx.current_function.clone();
+                        let saved_instructions = std::mem::take(&mut self.ctx.instructions);
+                        let saved_registers = self.ctx.registers.snapshot();
+                        let saved_in_function = self.ctx.in_function;
+                        let saved_return_type = self.ctx.return_type.clone();
+                        let saved_closure_ctx = self.ctx.save_closure_context();
+
+                        self.compile_item(item)?;
+
+                        self.ctx.current_function = saved_function;
+                        self.ctx.instructions = saved_instructions;
+                        self.ctx.registers.restore_reg(&saved_registers);
+                        self.ctx.in_function = saved_in_function;
+                        self.ctx.return_type = saved_return_type;
+                        self.ctx.restore_closure_context(saved_closure_ctx);
+                    }
                     _ => {
                         self.compile_item(item)?;
                     }
