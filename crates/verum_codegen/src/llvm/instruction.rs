@@ -18365,8 +18365,23 @@ fn lower_cbgr_extended<'ctx>(
             let len = ctx.get_register(op_reg(operands, 3))?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
-            // Compute offset: base_ptr + start * 8 (i64 elements)
-            let start_i = start.into_int_value();
+            // Task #23 — `start` and `len` registers may hold either
+            // an IntValue (raw `load i64`) or a PointerValue when the
+            // VBC frontend emitted a generic `load ptr` for a
+            // dynamically-typed slot (e.g. NaN-boxed slot whose
+            // codegen punted on the cast).  Match `src`'s existing
+            // dual-shape guard at line 18382 — coerce via ptrtoint
+            // when needed instead of panicking on `into_int_value`.
+            // Inline coercion helper closures don't lifetime-cleanly close
+            // over `ctx`'s builder when their return type needs a
+            // borrow; spell the two coercions out instead.
+            let start_i = if start.is_int_value() {
+                start.into_int_value()
+            } else {
+                ctx.builder()
+                    .build_ptr_to_int(start.into_pointer_value(), i64_ty, "start_i")
+                    .or_llvm_err()?
+            };
             let offset = ctx
                 .builder()
                 .build_int_mul(start_i, i64_ty.const_int(8, false), "slice_off")
@@ -18411,8 +18426,15 @@ fn lower_cbgr_extended<'ctx>(
                     .build_in_bounds_gep(i64_ty, fat_ref, &[i64_ty.const_int(1, false)], "len_ptr")
                     .or_llvm_err()?
             };
+            let len_i = if len.is_int_value() {
+                len.into_int_value()
+            } else {
+                ctx.builder()
+                    .build_ptr_to_int(len.into_pointer_value(), i64_ty, "len_i")
+                    .or_llvm_err()?
+            };
             ctx.builder()
-                .build_store(len_ptr, len.into_int_value())
+                .build_store(len_ptr, len_i)
                 .or_llvm_err()?;
             ctx.set_register(dst, fat_ref.into());
             Ok(())
@@ -23425,10 +23447,23 @@ fn lower_ffi_extended<'ctx>(
                 let base_ptr = as_ptr(ctx, ctx.get_register(op_reg(operands, 1))?, "ta_base")?;
                 let index = ctx.get_register(op_reg(operands, 2))?;
                 let i64_ty = ctx.types().i64_type();
+                // Task #23 — coerce `index` through `ptr_to_int` when
+                // the VBC frontend handed us a generic-typed pointer
+                // slot (NaN-boxed dynamic dispatch).  Without this
+                // guard `into_int_value()` panics for every async
+                // / Poll-using callee whose poll-indices land in a
+                // `load ptr` slot.
+                let index_i = if index.is_int_value() {
+                    index.into_int_value()
+                } else {
+                    ctx.builder()
+                        .build_ptr_to_int(index.into_pointer_value(), i64_ty, "ta_idx_i")
+                        .or_llvm_err()?
+                };
                 // SAFETY: GEP into a typed array at the given index to compute the element address; bounds checking is caller's responsibility
                 let elem_ptr = unsafe {
                     ctx.builder()
-                        .build_gep(i64_ty, base_ptr, &[index.into_int_value()], "ta_elem_ptr")
+                        .build_gep(i64_ty, base_ptr, &[index_i], "ta_elem_ptr")
                         .or_llvm_err()?
                 };
                 ctx.set_register(dst_reg, elem_ptr.into());
