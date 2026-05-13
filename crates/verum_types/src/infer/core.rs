@@ -1154,9 +1154,27 @@ impl TypeChecker {
                 }
             };
 
+            // Task #23 — parse precompile-captured protocol-arg
+            // text-renders into `Type`s so that
+            // `ProtocolChecker::can_convert_residual` (and every
+            // other arg-aware impl probe) sees the actual
+            // protocol-argument shape instead of an empty list.
+            //
+            // The text comes from
+            // `precompile::scan_implementation_protocol_args`, which
+            // ran `pretty::format_type` over each
+            // `ImplKind::Protocol.protocol_args` entry.  Re-parse
+            // through the structural reader so the result is a
+            // `Type` that round-trips through unification.
+            let protocol_args: List<Type> = impl_desc
+                .protocol_args
+                .iter()
+                .map(|s| crate::infer::helpers::parse_descriptor_type_string(s.as_str()))
+                .collect();
+
             let protocol_impl = ProtocolImpl {
                 protocol: Self::text_to_path(&impl_desc.protocol),
-                protocol_args: List::new(),
+                protocol_args,
                 for_type,
                 where_clauses: List::new(),
                 methods,
@@ -1776,6 +1794,38 @@ impl TypeChecker {
                 .env
                 .insert(name.clone(), TypeScheme::mono(ty.clone()));
 
+            // Task #26 — for generic variant types, defer to
+            // `register_variant_signature_for_lazy` which performs
+            // the fresh-TypeVar substitution for payload positions
+            // and registers `__type_var_order_<name>` so subsequent
+            // `Result<Int, Int>` / `Maybe<Int>` use sites can
+            // substitute through the variant payloads correctly.
+            // Without this, the inline variant-building code below
+            // produced rigid `Type::Named { "T" }` / `Type::Named
+            // { "E" }` payloads — every `let r: Result<Int,Int> =
+            // Err(7)` then failed typecheck with `expected 'E',
+            // found 'Int'` because `ast_to_generic_type::Type::Variant`
+            // substitution (types.rs:1573) couldn't find any
+            // `Type::Var`s to map.
+            if let TypeDescriptorKind::Variant { cases } = &type_desc.kind {
+                if !type_desc.generic_params.is_empty() {
+                    let mut pending_payload_deps: Vec<verum_common::Text> = Vec::new();
+                    crate::infer::helpers::register_variant_signature_for_lazy(
+                        self, name, type_desc, cases, &mut pending_payload_deps,
+                    );
+                    // Eager loader handles dep ordering globally — the
+                    // pending list is per-call diagnostic only.
+                    drop(pending_payload_deps);
+                    // Skip the inline registration that would overwrite
+                    // with rigid Named payloads.
+                    if !type_desc.generic_params.is_empty() {
+                        self.type_generics_count
+                            .insert(name.clone(), type_desc.generic_params.len());
+                    }
+                    continue;
+                }
+            }
+
             // CRITICAL FIX: Register variant type signatures for method lookup
             // This enables methods defined on Maybe<T> to be found when the type
             // has been normalized to its variant form (None | Some(T))
@@ -2103,8 +2153,62 @@ impl TypeChecker {
 
     /// Convert a core_metadata::TypeDescriptor to a Type.
     fn type_descriptor_to_type(&self, desc: &crate::core_metadata::TypeDescriptor) -> Type {
-        use crate::core_metadata::TypeDescriptorKind;
+        use crate::core_metadata::{TypeDescriptorKind, VariantPayload};
         use crate::ty::Type;
+        use verum_common::Text;
+
+        // Task #39 — Variant descriptors must produce a real
+        // `Type::Variant(case_payload_map)`, not a bare `Type::Named`.
+        // The record-literal typechecker at `infer_expr_record`
+        // (line ~7773) probes `ctx.lookup_type` and expects
+        // `Type::Variant(variants)` form to validate
+        // `RetryBackoff.Jittered { base_ms: …, max_ms: … }`
+        // record-payload constructor.  Pre-fix every stdlib variant
+        // type lazy-loaded via metadata appeared as `Type::Named`,
+        // so the variant-case detection skipped to the single-
+        // segment-variant fallback which mis-types the constructor's
+        // result as the qualified case path (`RetryBackoff.Jittered`)
+        // instead of the parent variant type (`RetryBackoff`).
+        // Downstream method dispatch then fails with
+        // `no method named delay_for_attempt for type
+        // RetryBackoff.Jittered`.
+        // Task #41 — parse payload types via the structural parser so
+        // generic instantiations like "List<Byte>" / "Maybe<Text>" /
+        // "Result<T, E>" become proper `Type::Named { path, args }`,
+        // not a single Ident with the whole generic name baked in.
+        let parse = crate::infer::helpers::parse_descriptor_type_string;
+        let build_variant_payloads = |cases: &verum_common::List<
+            crate::core_metadata::VariantCase,
+        >|
+         -> indexmap::IndexMap<Text, Type> {
+            let mut map: indexmap::IndexMap<Text, Type> = indexmap::IndexMap::new();
+            for case in cases.iter() {
+                let payload_ty = match &case.payload {
+                    verum_common::Maybe::None => Type::Unit,
+                    verum_common::Maybe::Some(VariantPayload::Tuple(types)) => {
+                        if types.len() == 1 {
+                            parse(types[0].as_str())
+                        } else {
+                            // Multi-arg tuple payload — wrap in Tuple.
+                            let inner: verum_common::List<Type> =
+                                types.iter().map(|t| parse(t.as_str())).collect();
+                            Type::Tuple(inner)
+                        }
+                    }
+                    verum_common::Maybe::Some(VariantPayload::Record(fields)) => {
+                        let mut field_map: indexmap::IndexMap<Text, Type> =
+                            indexmap::IndexMap::new();
+                        for f in fields.iter() {
+                            field_map
+                                .insert(Text::from(f.name.as_str()), parse(f.ty.as_str()));
+                        }
+                        Type::Record(field_map)
+                    }
+                };
+                map.insert(case.name.clone(), payload_ty);
+            }
+            map
+        };
 
         if desc.generic_params.is_empty() {
             // Concrete type
@@ -2113,10 +2217,9 @@ impl TypeChecker {
                     path: Self::text_to_path(&desc.name),
                     args: verum_common::List::new(),
                 },
-                TypeDescriptorKind::Variant { .. } => Type::Named {
-                    path: Self::text_to_path(&desc.name),
-                    args: verum_common::List::new(),
-                },
+                TypeDescriptorKind::Variant { cases } => {
+                    Type::Variant(build_variant_payloads(cases))
+                }
                 TypeDescriptorKind::Protocol { .. } => Type::Named {
                     path: Self::text_to_path(&desc.name),
                     args: verum_common::List::new(),
@@ -2131,17 +2234,26 @@ impl TypeChecker {
                 },
             }
         } else {
-            // Generic type - create a type constructor
-            Type::Generic {
-                name: desc.name.clone(),
-                args: desc
-                    .generic_params
-                    .iter()
-                    .map(|_| {
-                        // Use fresh type variables for generic parameters
-                        Type::Var(crate::ty::TypeVar::fresh())
-                    })
-                    .collect(),
+            // Generic type — for variants we still want the
+            // Type::Variant form so record-payload literals
+            // typecheck; the generic params surface via fresh
+            // TypeVars inside each case payload.  Tuple/Record
+            // payload types that reference the generic params get
+            // their fresh-var substitution in the
+            // `try_resolve_variant_constructor` path; this
+            // descriptor returns the structural shape only.
+            match &desc.kind {
+                TypeDescriptorKind::Variant { cases } => {
+                    Type::Variant(build_variant_payloads(cases))
+                }
+                _ => Type::Generic {
+                    name: desc.name.clone(),
+                    args: desc
+                        .generic_params
+                        .iter()
+                        .map(|_| Type::Var(crate::ty::TypeVar::fresh()))
+                        .collect(),
+                },
             }
         }
     }

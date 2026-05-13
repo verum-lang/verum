@@ -12597,7 +12597,7 @@ impl TypeChecker {
     /// payload-substitution path in `register_variant_signature_for_lazy`)
     /// to swap rigid named-T type-parameter placeholders for fresh
     /// per-call-site TypeVars.
-    fn substitute_named_params_in_type(
+    pub(crate) fn substitute_named_params_in_type(
         ty: &Type,
         subst: &indexmap::IndexMap<verum_common::Text, Type>,
     ) -> Type {
