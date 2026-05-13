@@ -204,6 +204,21 @@ pub struct VbcModule {
     /// the kernel rule that produced it.
     #[serde(default)]
     pub discharge_receipts: Vec<DischargeReceipt>,
+    /// Cross-module call name table: maps every `FunctionId` that this
+    /// module's bytecode references via `Call` / `CallG` / `TailCall` /
+    /// `NewClosure` / `Spawn` / `GenCreate` but whose body lives in
+    /// *another* archive module, to its qualified function name. The
+    /// archive loader (`crates/verum_compiler/src/archive_ctx_loader.rs`)
+    /// merges this table into `archive_id_to_name` so the per-module
+    /// remap's Tier-2 name-based fallback resolves cross-module callees
+    /// without each external reference paying the cost of a full
+    /// FunctionDescriptor stub.
+    ///
+    /// Carries `(precompile-time-global FunctionId, qualified-name StringId)`.
+    /// Empty when the module has no cross-module references (e.g. tiny
+    /// user scripts that import nothing).
+    #[serde(default)]
+    pub external_function_names: Vec<(FunctionId, StringId)>,
 }
 
 impl Default for VbcModule {
@@ -261,6 +276,7 @@ impl VbcModule {
             theorems: Vec::new(),
             framework_provenance: FrameworkProvenance::default(),
             discharge_receipts: Vec::new(),
+            external_function_names: Vec::new(),
         }
     }
 

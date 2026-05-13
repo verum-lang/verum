@@ -688,6 +688,7 @@ impl Serializer {
     ///  - 0x10: mlir_hints (optimization hints)
     ///  - 0x20: ffi_tables (libraries, symbols, layouts)
     ///  - 0x40: dependencies (module dependencies)
+    ///  - 0x80: external_function_names (cross-module Call name table)
     /// - For each present section: u32 length + bincode data
     fn serialize_extensions(&mut self, module: &VbcModule) -> VbcResult<(u32, u32, VbcFlags)> {
         // Check if any tensor metadata is present
@@ -700,6 +701,7 @@ impl Serializer {
             || !module.ffi_symbols.is_empty()
             || !module.ffi_layouts.is_empty();
         let has_dependencies = !module.dependencies.is_empty();
+        let has_external_funcs = !module.external_function_names.is_empty();
 
         if !has_shapes
             && !has_device_hints
@@ -708,6 +710,7 @@ impl Serializer {
             && !has_mlir_hints
             && !has_ffi
             && !has_dependencies
+            && !has_external_funcs
         {
             // No extensions, return zeros
             return Ok((0, 0, VbcFlags::empty()));
@@ -742,6 +745,9 @@ impl Serializer {
         }
         if has_dependencies {
             section_mask |= 0x40;
+        }
+        if has_external_funcs {
+            section_mask |= 0x80;
         }
         self.output.push(section_mask);
 
@@ -803,6 +809,23 @@ impl Serializer {
         if has_dependencies {
             let data = bincode::serialize(&module.dependencies).map_err(|e| {
                 crate::error::VbcError::Serialization(format!("dependencies: {}", e))
+            })?;
+            encode_u32(data.len() as u32, &mut self.output);
+            self.output.extend_from_slice(&data);
+        }
+
+        // Cross-module call name table — populated at codegen finalize
+        // (`build_module`'s tail in `crates/verum_vbc/src/codegen/mod.rs`)
+        // and consumed by the archive loader to satisfy
+        // `ArchiveBodyRemap::map_function`'s Tier-2 name fallback for
+        // cross-module Call ids without each external reference paying
+        // the cost of a full FunctionDescriptor stub.
+        if has_external_funcs {
+            let data = bincode::serialize(&module.external_function_names).map_err(|e| {
+                crate::error::VbcError::Serialization(format!(
+                    "external_function_names: {}",
+                    e
+                ))
             })?;
             encode_u32(data.len() as u32, &mut self.output);
             self.output.extend_from_slice(&data);
