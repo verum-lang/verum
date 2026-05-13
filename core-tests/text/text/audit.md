@@ -147,17 +147,17 @@ emits `Call { func_id }` for known intra-stdlib targets to skip
 string interning.
 
 ### §E — Text.truncate NullPointer on small/empty Text
-**Symptom**: `s.truncate(2)` on a `let mut s: Text = "hello"` panics
-with `NullPointerAt opcode 0x63 site Text.truncate`. Affects clear()
-and pop() (both call truncate). Static `Text` has `cap == 0` and
-`ptr == null_ptr()` until first growth — the truncate body writes a
-null terminator unconditionally (`memset(ptr_offset(self.ptr,
-new_len), 0, 1)`) without first checking `cap > 0`.
-**Root cause**: missing null-ptr guard in `Text.truncate` at
-core/text/text.vr:~2463.
-**Action**: source-level fix — gate the null-terminator memset behind
-`if !is_null(self.ptr) { ... }`. Same pattern as `Drop for Text` at
-text.vr:3387.
+**Status**: **CLOSED 2026-05-13 — commit `9136055a6`.** Root cause:
+the SetF panic at opcode 0x63 was on `self.len = boundary` inside
+`Text.truncate`'s user-side body. Small-string Text values are
+NaN-boxed in the register itself — there's no heap object with a
+`.len` field to SetF.
+
+**Fix**: added a Tier-0 intercept for `truncate` / `clear` / `pop` on
+small/heap-string Text receivers. Extract the canonical String,
+perform the shrink in Rust, reallocate the new value, and write back
+through the same CBGR-ref-or-direct-register path the existing push
+intercepts use. 6/6 tests PASS.
 
 ### §F — Text.find returns wrong byte index
 **Status**: **CLOSED 2026-05-13 — commit f8d70e6ef.** The root was NOT
