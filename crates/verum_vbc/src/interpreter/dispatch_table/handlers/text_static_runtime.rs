@@ -299,6 +299,98 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             };
             Ok(Some(alloc_string_value(state, if b { "true" } else { "false" })?))
         }
+        // Instance-method intercept: `Text.push_byte(&mut self, b: Byte)`.
+        //
+        // **Why this can't go through the stdlib body**: at Tier-0,
+        // `Text.new()` returns a small-string Value (NaN-boxed inline,
+        // 6-byte payload). The stdlib `Text.push_byte` body assumes
+        // self is a heap-allocated 3-field record `{ ptr, len, cap }`,
+        // calls `self.grow()` which does `self.ptr = alloc(...)` via
+        // SetF on field 0. SetF on a small-string Value null-derefs.
+        //
+        // Codegen lowers `s.push_byte(b)` to `Call(push_byte_fid)` with
+        // args [self_cbgr_ref, byte]. We intercept here BEFORE the
+        // body executes: extract the current text (small or heap),
+        // append the byte, alloc a new value, write back to the
+        // receiver register via the CBGR ref. Same writeback discipline
+        // as the `push_str` / `push` / `push_char` intercept in
+        // `method_dispatch.rs::handle_call_method` (line ~531) — except
+        // those fire from CallM dispatch while push_byte arrives via
+        // Call dispatch with self as arg[0].
+        "push_byte" | "push_str" | "push" | "push_char" if arg_count == 2 => {
+            use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
+            use super::string_helpers::extract_string;
+            let self_raw = state
+                .registers
+                .get(caller_base, Reg(args_start_reg));
+            let arg_raw = state
+                .registers
+                .get(caller_base, Reg(args_start_reg + 1));
+            // Auto-deref CBGR ref / ThinRef for both receiver and arg.
+            let deref = |v: Value, st: &InterpreterState| -> Value {
+                if is_cbgr_ref(&v) {
+                    let (abs_index, _) = decode_cbgr_ref(v.as_i64());
+                    st.registers.get_absolute(abs_index)
+                } else if v.is_thin_ref() {
+                    let tr = v.as_thin_ref();
+                    if !tr.ptr.is_null() {
+                        unsafe { *(tr.ptr as *const Value) }
+                    } else {
+                        v
+                    }
+                } else {
+                    v
+                }
+            };
+            let self_val = deref(self_raw, state);
+            let arg_val = deref(arg_raw, state);
+            let mut current_text = extract_string(&self_val, state);
+            match method {
+                "push_byte" => {
+                    if !arg_val.is_int() {
+                        return Ok(None);
+                    }
+                    let byte = (arg_val.as_i64() as u32 & 0xFF) as u8;
+                    // SAFETY: caller-responsible UTF-8 validity (mirrors
+                    // stdlib `Text.push_byte` contract).
+                    unsafe { current_text.as_mut_vec().push(byte); }
+                }
+                "push_str" => {
+                    let s = extract_string(&arg_val, state);
+                    current_text.push_str(&s);
+                }
+                "push" | "push_char" => {
+                    if arg_val.is_int() {
+                        if let Some(ch) = char::from_u32(arg_val.as_i64() as u32) {
+                            current_text.push(ch);
+                        } else {
+                            return Ok(None);
+                        }
+                    } else if arg_val.is_small_string() {
+                        // Single-char Text arg → append as substring.
+                        let s = extract_string(&arg_val, state);
+                        current_text.push_str(&s);
+                    } else {
+                        return Ok(None);
+                    }
+                }
+                _ => unreachable!(),
+            }
+            let new_value = alloc_string_value(state, &current_text)?;
+            // Writeback via CBGR ref to the caller-frame slot — same
+            // discipline as `handle_call_method`'s push_str intercept.
+            // Without this, the mutation is local to the intercept and
+            // the caller's variable retains the pre-call value.
+            if is_cbgr_ref(&self_raw) {
+                let (abs_index, _) = decode_cbgr_ref(self_raw.as_i64());
+                state.registers.set_absolute(abs_index, new_value);
+            } else {
+                state
+                    .registers
+                    .set(caller_base, Reg(args_start_reg), new_value);
+            }
+            Ok(Some(Value::unit()))
+        }
         _ => Ok(None),
     }
 }
