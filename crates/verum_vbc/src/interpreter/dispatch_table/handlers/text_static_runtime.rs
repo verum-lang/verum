@@ -164,6 +164,57 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             let s = ch.encode_utf8(&mut buf);
             Ok(Some(alloc_string_value(state, s)?))
         }
+        "from_int" if arg_count == 1 => {
+            // `Text.from_int(n: Int) -> Text`. Decimal-render an Int.
+            // Bypasses the `int_to_text` intrinsic / user-side body
+            // (which can suffer function-id collision under archive
+            // remap). Idempotent under round-trip with `parse_int`.
+            let arg = match read_arg(state, args_start_reg, 0, caller_base) {
+                Some(v) => v,
+                None => return Ok(None),
+            };
+            if !arg.is_int() {
+                return Ok(None);
+            }
+            let n = arg.as_i64();
+            Ok(Some(alloc_string_value(state, &n.to_string())?))
+        }
+        "from_float" if arg_count == 1 => {
+            // `Text.from_float(f: Float) -> Text`. Render a Float in
+            // its canonical form (matches Rust's `f64::to_string` —
+            // shortest round-trippable). Pre-fix the user-side body
+            // depended on the `float_to_text` intrinsic which had its
+            // own dispatch issues.
+            let arg = match read_arg(state, args_start_reg, 0, caller_base) {
+                Some(v) => v,
+                None => return Ok(None),
+            };
+            let f = if arg.is_float() {
+                arg.as_f64()
+            } else if arg.is_int() {
+                arg.as_i64() as f64
+            } else {
+                return Ok(None);
+            };
+            Ok(Some(alloc_string_value(state, &f.to_string())?))
+        }
+        "from_bool" if arg_count == 1 => {
+            // `Text.from_bool(b: Bool) -> Text`. Returns "true" /
+            // "false". Pure data-shape conversion; no allocation
+            // beyond the small-string for either literal.
+            let arg = match read_arg(state, args_start_reg, 0, caller_base) {
+                Some(v) => v,
+                None => return Ok(None),
+            };
+            let b = if arg.is_bool() {
+                arg.as_bool()
+            } else if arg.is_int() {
+                arg.as_i64() != 0
+            } else {
+                return Ok(None);
+            };
+            Ok(Some(alloc_string_value(state, if b { "true" } else { "false" })?))
+        }
         _ => Ok(None),
     }
 }
