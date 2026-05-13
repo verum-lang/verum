@@ -530,7 +530,8 @@ pub(in super::super) fn handle_call_method(
     }
     if (bare_method_name == "push_str"
         || bare_method_name == "push"
-        || bare_method_name == "push_char")
+        || bare_method_name == "push_char"
+        || bare_method_name == "push_byte")
         && (dispatch_receiver.is_small_string() || is_heap_string(&dispatch_receiver))
     {
         let mut current_text = extract_string(&dispatch_receiver, state);
@@ -565,6 +566,31 @@ pub(in super::super) fn handle_call_method(
                 } else if arg_val.is_small_string() || is_heap_string(&arg_val) {
                     let s = extract_string(&arg_val, state);
                     current_text.push_str(&s);
+                }
+            }
+            "push_byte" => {
+                // `Text.push_byte(b: Byte)` — appends a single byte to
+                // the underlying UTF-8 byte buffer. Stdlib `Text.grow`
+                // assumes self is a heap-allocated 3-field record
+                // (`{ ptr, len, cap }`), but the Tier-0 representation
+                // is `Text<small>` (NaN-boxed 6-byte inline) for empty/
+                // short values produced by `Text.new()` /
+                // `Text.with_capacity()`. The body's
+                // `self.ptr = new_ptr` then SetF-null-derefs through
+                // the inline representation. Intercept here so the
+                // append happens against the Rust-side String the
+                // intercept layer already uses, then write back via
+                // the CBGR-ref writeback path below. Bytes outside
+                // ASCII are appended verbatim — caller is responsible
+                // for UTF-8 validity (mirrors the stdlib contract).
+                if arg_val.is_int() {
+                    let byte = (arg_val.as_i64() as i32) as u8;
+                    // SAFETY: We accept the byte as-is; the caller's
+                    // contract is that the resulting byte sequence
+                    // remains valid UTF-8 (same as stdlib push_byte).
+                    unsafe {
+                        current_text.as_mut_vec().push(byte);
+                    }
                 }
             }
             _ => unreachable!(),
