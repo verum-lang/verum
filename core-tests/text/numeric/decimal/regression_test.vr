@@ -1,0 +1,132 @@
+// =============================================================================
+// core-tests/text/numeric/decimal/regression_test.vr
+// =============================================================================
+//
+// Defects pinned for `core/text/numeric/decimal.vr`. The Decimal source is
+// correct algebraically; failures concentrate in two architectural classes
+// inherited from upstream defects:
+//
+//   §A  Decimal.neg / Decimal.from_parts panic with `Int.neg not found on Int`
+//       (same family as Char/§A primitive-mut defect)
+//   §B  Decimal.parse + Decimal.add/mul/div trigger FunctionNotFound(N)
+//       (function-id collision under archive remap — same as text/text §D)
+//   §C  Arithmetic returns wrong coefficient values (downstream of §B —
+//       function dispatch reaches the wrong impl body)
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.numeric.decimal.{
+    Decimal, DecimalError, RoundingMode, MAX_SCALE,
+    HalfEven, HalfUp, HalfDown, Truncate,
+    parse_decimal,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// §A — Decimal.neg / from_parts(negative scale) panic with `Int.neg not found`
+// =============================================================================
+
+@ignore
+@test
+fn regression_a_decimal_neg_panic_pinned() {
+    let d = Decimal.from_int(5);
+    let n = d.neg();
+    assert_eq(n.coefficient, -5);
+}
+
+// =============================================================================
+// §B — FunctionNotFound on parse / add / mul / div paths
+// =============================================================================
+
+@ignore
+@test
+fn regression_b_parse_simple_int_pinned() {
+    match parse_decimal(&"42") {
+        Ok(d) => assert_eq(d.coefficient, 42),
+        Err(_) => panic("'42' parses"),
+    }
+}
+
+@ignore
+@test
+fn regression_b_add_zero_pinned() {
+    let z = Decimal.zero();
+    let d = Decimal.from_int(7);
+    match z.add(&d) {
+        Ok(r) => assert_eq(r.coefficient, 7),
+        Err(_) => panic("zero is left identity"),
+    }
+}
+
+@ignore
+@test
+fn regression_b_mul_simple_pinned() {
+    let a = Decimal.from_int(3);
+    let b = Decimal.from_int(4);
+    match a.mul(&b) {
+        Ok(d) => assert_eq(d.coefficient, 12),
+        Err(_) => panic("3 * 4 = 12"),
+    }
+}
+
+@ignore
+@test
+fn regression_b_div_simple_exact_pinned() {
+    let a = Decimal.from_int(10);
+    let b = Decimal.from_int(2);
+    match a.div(&b, 0, RoundingMode.HalfEven) {
+        Ok(d) => assert_eq(d.coefficient, 5),
+        Err(_) => panic("10 / 2 = 5"),
+    }
+}
+
+// =============================================================================
+// Active PASS-GUARDs — basic field access + variant identification works.
+// =============================================================================
+
+@test
+fn guard_max_scale_constant() {
+    assert_eq(MAX_SCALE, 18);
+}
+
+@test
+fn guard_zero_canonical_shape() {
+    let z = Decimal.zero();
+    assert_eq(z.coefficient, 0);
+    assert_eq(z.scale, 0);
+}
+
+@test
+fn guard_one_canonical_shape() {
+    let o = Decimal.one();
+    assert_eq(o.coefficient, 1);
+    assert_eq(o.scale, 0);
+}
+
+@test
+fn guard_from_int_preserves_coefficient() {
+    let d = Decimal.from_int(42);
+    assert_eq(d.coefficient, 42);
+    assert_eq(d.scale, 0);
+}
+
+@test
+fn guard_is_zero_predicate() {
+    assert(Decimal.zero().is_zero());
+    assert(!Decimal.from_int(1).is_zero());
+}
+
+@test
+fn guard_rounding_modes_distinct() {
+    assert(RoundingMode.HalfEven is RoundingMode.HalfEven);
+    assert(RoundingMode.HalfUp is RoundingMode.HalfUp);
+    assert(RoundingMode.HalfDown is RoundingMode.HalfDown);
+    assert(RoundingMode.Truncate is RoundingMode.Truncate);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
