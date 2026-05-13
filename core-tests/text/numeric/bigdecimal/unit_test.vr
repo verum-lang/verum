@@ -1,0 +1,83 @@
+// =============================================================================
+// core-tests/text/numeric/bigdecimal/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core/text/numeric/bigdecimal.vr` — arbitrary-precision
+// decimal (`BigDecimal { coefficient: BigInt, scale: Int }`).
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.numeric.bigdecimal.{
+    BigDecimal, BigDecimalError, MAX_SCALE_BIG, parse_bigdecimal,
+};
+mount core.text.numeric.bigint.{BigInt};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Constants
+// =============================================================================
+
+@test
+fn test_max_scale_big_is_1024() {
+    assert_eq(MAX_SCALE_BIG, 1024);
+}
+
+// =============================================================================
+// Section 2: Parsing
+// =============================================================================
+
+@test
+fn test_parse_simple_int() {
+    match parse_bigdecimal(&"42") {
+        Ok(_) => {},
+        Err(_) => panic("'42' parses"),
+    }
+}
+
+@test
+fn test_parse_decimal_point() {
+    match parse_bigdecimal(&"3.14") {
+        Ok(_) => {},
+        Err(_) => panic("'3.14' parses"),
+    }
+}
+
+@test
+fn test_parse_negative() {
+    match parse_bigdecimal(&"-1.5") {
+        Ok(_) => {},
+        Err(_) => panic("'-1.5' parses"),
+    }
+}
+
+@test
+fn test_parse_high_precision_text() {
+    // BigDecimal can absorb scale > 18 (the Decimal limit)
+    match parse_bigdecimal(&"0.000000000000000000123") {
+        Ok(_) => {},
+        Err(_) => panic("'0.000000000000000000123' parses (BigDecimal)"),
+    }
+}
+
+@test
+fn test_parse_empty_returns_err() {
+    match parse_bigdecimal(&"") {
+        Ok(_) => panic("empty must Err"),
+        Err(_) => {},
+    }
+}
+
+@test
+fn test_parse_garbage_returns_err() {
+    match parse_bigdecimal(&"abc") {
+        Ok(_) => panic("garbage must Err"),
+        Err(_) => {},
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

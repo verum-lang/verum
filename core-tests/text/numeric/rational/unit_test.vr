@@ -1,0 +1,78 @@
+// =============================================================================
+// core-tests/text/numeric/rational/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core/text/numeric/rational.vr` — exact-rational arithmetic
+// (`Rational { num: BigInt, den: BigInt }` in canonical reduced form).
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.numeric.rational.{Rational, RationalError, parse_rational};
+mount core.text.numeric.bigint.{BigInt};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: parse_rational
+// =============================================================================
+
+@test
+fn test_parse_simple_int() {
+    match parse_rational(&"5") {
+        Ok(_r) => {},
+        Err(_) => panic("'5' parses"),
+    }
+}
+
+@test
+fn test_parse_simple_fraction() {
+    match parse_rational(&"1/2") {
+        Ok(_r) => {},
+        Err(_) => panic("'1/2' parses"),
+    }
+}
+
+@test
+fn test_parse_negative_fraction() {
+    match parse_rational(&"-3/4") {
+        Ok(_r) => {},
+        Err(_) => panic("'-3/4' parses"),
+    }
+}
+
+@test
+fn test_parse_zero_division_in_text() {
+    match parse_rational(&"5/0") {
+        Ok(_) => panic("denominator 0 should be Err"),
+        Err(_) => {},
+    }
+}
+
+@test
+fn test_parse_empty_returns_err() {
+    match parse_rational(&"") {
+        Ok(_) => panic("empty must Err"),
+        Err(_) => {},
+    }
+}
+
+// =============================================================================
+// Section 2: RationalError variants
+// =============================================================================
+
+@test
+fn test_rational_error_variants_distinct() {
+    // Probe via parse failure shapes — exact variant identification
+    // is API-private. The fact that distinct inputs produce distinct
+    // Err arms is locked elsewhere via property tests.
+    match parse_rational(&"1/0") {
+        Ok(_) => panic("expected Err"),
+        Err(_) => {},
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

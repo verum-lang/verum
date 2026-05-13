@@ -1,0 +1,338 @@
+// =============================================================================
+// core-tests/text/numeric/bigint/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core/text/numeric/bigint.vr` — arbitrary-precision signed
+// integer (`BigInt { sign: Bool, digits: List<Int> }` with base 10^9
+// little-endian chunks).
+//
+// API surface (selected):
+//   BigInt.zero / one / from_int
+//   .is_zero / .is_negative / .is_positive / .is_even / .is_odd
+//   .abs / .neg / .add / .sub / .mul / .div_rem
+//   parse_bigint(text)
+//   const BIGINT_BASE = 10^9, BIGINT_DIGITS_PER_CHUNK = 9
+//
+// Companion: regression_test.vr, audit.md.
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.numeric.bigint.{
+    BigInt, BigIntError, BIGINT_BASE, BIGINT_DIGITS_PER_CHUNK,
+    parse_bigint,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+
+// =============================================================================
+// Section 1: Constants
+// =============================================================================
+
+@test
+fn test_bigint_base_is_one_billion() {
+    assert_eq(BIGINT_BASE, 1_000_000_000);
+}
+
+@test
+fn test_digits_per_chunk_is_nine() {
+    assert_eq(BIGINT_DIGITS_PER_CHUNK, 9);
+}
+
+// =============================================================================
+// Section 2: Construction
+// =============================================================================
+
+@test
+fn test_zero_is_empty_digits() {
+    let z = BigInt.zero();
+    assert(!z.sign);
+    assert_eq(z.digits.len(), 0);
+}
+
+@test
+fn test_one_has_single_digit() {
+    let o = BigInt.one();
+    assert(!o.sign);
+    assert_eq(o.digits.len(), 1);
+    assert_eq(o.digits[0], 1);
+}
+
+@test
+fn test_from_int_zero_is_zero_form() {
+    let b = BigInt.from_int(0);
+    assert(!b.sign);
+    assert_eq(b.digits.len(), 0);
+}
+
+@test
+fn test_from_int_positive_single_chunk() {
+    let b = BigInt.from_int(42);
+    assert(!b.sign);
+    assert_eq(b.digits.len(), 1);
+    assert_eq(b.digits[0], 42);
+}
+
+@test
+fn test_from_int_negative_single_chunk() {
+    let b = BigInt.from_int(-42);
+    assert(b.sign);
+    assert_eq(b.digits.len(), 1);
+    assert_eq(b.digits[0], 42);
+}
+
+@test
+fn test_from_int_above_base_two_chunks() {
+    // 2_000_000_000 > BIGINT_BASE (1_000_000_000) → 2 chunks
+    let b = BigInt.from_int(2_000_000_000);
+    assert(!b.sign);
+    assert_eq(b.digits.len(), 2);
+    assert_eq(b.digits[0], 0);
+    assert_eq(b.digits[1], 2);
+}
+
+// =============================================================================
+// Section 3: Predicates
+// =============================================================================
+
+@test
+fn test_is_zero_for_zero() { assert(BigInt.zero().is_zero()); }
+
+@test
+fn test_is_zero_false_for_one() { assert(!BigInt.one().is_zero()); }
+
+@test
+fn test_is_negative_one() { assert(BigInt.from_int(-1).is_negative()); }
+
+@test
+fn test_is_negative_false_for_positive() { assert(!BigInt.from_int(1).is_negative()); }
+
+@test
+fn test_is_negative_false_for_zero() { assert(!BigInt.zero().is_negative()); }
+
+@test
+fn test_is_positive_one() { assert(BigInt.from_int(1).is_positive()); }
+
+@test
+fn test_is_positive_false_for_negative() { assert(!BigInt.from_int(-1).is_positive()); }
+
+@test
+fn test_is_positive_false_for_zero() { assert(!BigInt.zero().is_positive()); }
+
+@test
+fn test_is_even_zero() { assert(BigInt.zero().is_even()); }
+
+@test
+fn test_is_even_two() { assert(BigInt.from_int(2).is_even()); }
+
+@test
+fn test_is_even_false_for_one() { assert(!BigInt.from_int(1).is_even()); }
+
+@test
+fn test_is_odd_one() { assert(BigInt.from_int(1).is_odd()); }
+
+@test
+fn test_is_odd_false_for_zero() { assert(!BigInt.zero().is_odd()); }
+
+// =============================================================================
+// Section 4: abs and neg
+// =============================================================================
+
+@test
+fn test_abs_negative() {
+    let b = BigInt.from_int(-7);
+    let a = b.abs();
+    assert(!a.sign);
+    assert_eq(a.digits[0], 7);
+}
+
+@test
+fn test_abs_positive_identity() {
+    let b = BigInt.from_int(7);
+    let a = b.abs();
+    assert(!a.sign);
+    assert_eq(a.digits[0], 7);
+}
+
+@test
+fn test_abs_zero_is_zero() {
+    let z = BigInt.zero();
+    let a = z.abs();
+    assert(a.is_zero());
+}
+
+@test
+fn test_neg_positive() {
+    let b = BigInt.from_int(5);
+    let n = b.neg();
+    assert(n.sign);
+}
+
+@test
+fn test_neg_negative() {
+    let b = BigInt.from_int(-5);
+    let n = b.neg();
+    assert(!n.sign);
+}
+
+@test
+fn test_neg_zero_is_zero() {
+    let z = BigInt.zero();
+    let n = z.neg();
+    assert(n.is_zero());
+}
+
+// =============================================================================
+// Section 5: Arithmetic
+// =============================================================================
+
+@test
+fn test_add_zero_left_identity() {
+    let z = BigInt.zero();
+    let b = BigInt.from_int(7);
+    let r = z.add(&b);
+    assert(!r.sign);
+    assert_eq(r.digits[0], 7);
+}
+
+@test
+fn test_add_simple_positives() {
+    let a = BigInt.from_int(2);
+    let b = BigInt.from_int(3);
+    let r = a.add(&b);
+    assert_eq(r.digits[0], 5);
+}
+
+@test
+fn test_add_negatives_yields_neg_sum() {
+    let a = BigInt.from_int(-2);
+    let b = BigInt.from_int(-3);
+    let r = a.add(&b);
+    assert(r.sign);
+    assert_eq(r.digits[0], 5);
+}
+
+@test
+fn test_sub_self_is_zero() {
+    let b = BigInt.from_int(7);
+    let r = b.sub(&b);
+    assert(r.is_zero());
+}
+
+@test
+fn test_mul_by_zero_is_zero() {
+    let b = BigInt.from_int(7);
+    let z = BigInt.zero();
+    let r = b.mul(&z);
+    assert(r.is_zero());
+}
+
+@test
+fn test_mul_simple() {
+    let a = BigInt.from_int(3);
+    let b = BigInt.from_int(4);
+    let r = a.mul(&b);
+    assert_eq(r.digits[0], 12);
+}
+
+@test
+fn test_mul_negatives_yields_positive() {
+    let a = BigInt.from_int(-2);
+    let b = BigInt.from_int(-3);
+    let r = a.mul(&b);
+    assert(!r.sign);
+    assert_eq(r.digits[0], 6);
+}
+
+// =============================================================================
+// Section 6: Division
+// =============================================================================
+
+@test
+fn test_div_rem_by_zero_returns_err() {
+    let a = BigInt.from_int(10);
+    let z = BigInt.zero();
+    match a.div_rem(&z) {
+        Ok(_) => panic("div by zero must Err"),
+        Err(e) => assert(e is BigIntError.DivByZero),
+    }
+}
+
+@test
+fn test_div_rem_simple_exact() {
+    let a = BigInt.from_int(10);
+    let b = BigInt.from_int(2);
+    match a.div_rem(&b) {
+        Ok(pair) => {
+            assert_eq(pair.0.digits[0], 5);
+            assert(pair.1.is_zero());
+        }
+        Err(_) => panic("10 / 2 = (5, 0)"),
+    }
+}
+
+@test
+fn test_div_rem_with_remainder() {
+    let a = BigInt.from_int(7);
+    let b = BigInt.from_int(3);
+    match a.div_rem(&b) {
+        Ok(pair) => {
+            assert_eq(pair.0.digits[0], 2);
+            assert_eq(pair.1.digits[0], 1);
+        }
+        Err(_) => panic("7 / 3 = (2, 1)"),
+    }
+}
+
+// =============================================================================
+// Section 7: Parsing
+// =============================================================================
+
+@test
+fn test_parse_simple_int() {
+    match parse_bigint(&"42") {
+        Ok(b) => assert_eq(b.digits[0], 42),
+        Err(_) => panic("'42' parses"),
+    }
+}
+
+@test
+fn test_parse_negative() {
+    match parse_bigint(&"-7") {
+        Ok(b) => {
+            assert(b.sign);
+            assert_eq(b.digits[0], 7);
+        }
+        Err(_) => panic("'-7' parses"),
+    }
+}
+
+@test
+fn test_parse_zero() {
+    match parse_bigint(&"0") {
+        Ok(b) => assert(b.is_zero()),
+        Err(_) => panic("'0' parses"),
+    }
+}
+
+@test
+fn test_parse_empty_returns_err() {
+    match parse_bigint(&"") {
+        Ok(_) => panic("empty must Err"),
+        Err(e) => assert(e is BigIntError.ParseEmpty),
+    }
+}
+
+@test
+fn test_parse_garbage_returns_err() {
+    match parse_bigint(&"abc") {
+        Ok(_) => panic("garbage must Err"),
+        Err(_) => {},
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
