@@ -929,6 +929,101 @@ impl VbcCodegen {
         }
     }
 
+    /// Substitute a generic-param-shaped payload type (`"T"` / `"E"` /
+    /// generic name) with the concrete arg from `receiver_type`'s
+    /// `<...>` syntax, consulting the TypeDescriptor for parent type's
+    /// declared type-params.  Closes the 4th defect class of task #22
+    /// (variant-tag drift in nested generic constructors).
+    ///
+    /// Receiver-type-driven substitution: when the variant's declared
+    /// payload type is a bare generic-param name (`"T"` for
+    /// `Poll<T>::Ready(T)`), and the outer context's runtime
+    /// instantiation is known (`receiver_type = "Poll<Result<Int,Int>>"`),
+    /// resolve to the concrete `Result<Int,Int>` so downstream
+    /// nested-variant lookup consults the right type's variant table.
+    ///
+    /// Returns `None` when:
+    ///   * `payload_ty` is not a generic-param shape (concrete type
+    ///     names like `"Result<T, E>"` pass through unchanged at the
+    ///     caller — this helper only fires for bare-name cases).
+    ///   * `receiver_type` has no `<...>` syntax.
+    ///   * The base type's TypeDescriptor has no matching type-param.
+    ///   * The generic arg list is shorter than the param index.
+    ///
+    /// Bare-name detection mirrors `looks_like_type_param` from
+    /// `verum_common::well_known_types` (single ASCII-uppercase chars
+    /// or short caps-only names).  Concrete types like `"Result"`,
+    /// `"Int"`, `"Maybe<T>"` are rejected by this gate and pass
+    /// through to the caller's fallback path.
+    pub fn substitute_payload_generic(
+        &self,
+        payload_ty: &str,
+        receiver_type: &str,
+    ) -> Option<String> {
+        // Only fire for bare generic-param shapes (`T`, `K`, `V`, `E`,
+        // `Self`).  Mixed concrete-name payload types (`Maybe<T>`,
+        // `Result<Ok, Err>`) carry enough info already — passing them
+        // through unchanged is correct.
+        if !verum_common::well_known_types::looks_like_type_param(payload_ty)
+            && payload_ty != "Self"
+        {
+            return None;
+        }
+        // Extract base type of receiver (strip `<...>`).
+        let base_type = Self::strip_generic_args(receiver_type);
+        if base_type.is_empty() || base_type == receiver_type {
+            return None;
+        }
+        // Look up TypeDescriptor for base_type to get its declared
+        // type-params (in declaration order).  Uses the codegen's
+        // `self.types` directly — populated for both user-phase and
+        // archive-phase types, so no cross-mount race.
+        let type_id = self.type_name_to_id.get(base_type).copied()?;
+        let desc = self.types.iter().find(|t| t.id == type_id)?;
+        if desc.type_params.is_empty() {
+            return None;
+        }
+        // `Self` in a variant's payload type denotes the parent type
+        // itself (e.g., `type Tree<T> is Leaf(T) | Node { left: Self,
+        // right: Self }` — `Self` = `Tree<T>`).  Return the original
+        // `receiver_type` (the concrete instantiation) for `Self`.
+        if payload_ty == "Self" {
+            return Some(receiver_type.to_string());
+        }
+        // Find param index by name in the TypeDescriptor's type-params.
+        let param_idx = desc
+            .type_params
+            .iter()
+            .position(|p| {
+                self.ctx
+                    .strings
+                    .get(p.name.0 as usize)
+                    .map(|s| s == payload_ty)
+                    .unwrap_or(false)
+            })?;
+        // Parse generic args from `receiver_type<arg1, arg2, ...>`
+        // honouring nested-`<...>` depth.
+        let start = receiver_type.find('<')?;
+        let end = receiver_type.rfind('>')?;
+        let inner = &receiver_type[start + 1..end];
+        let mut args = Vec::new();
+        let mut depth = 0i32;
+        let mut arg_start = 0;
+        for (i, c) in inner.char_indices() {
+            match c {
+                '<' => depth += 1,
+                '>' => depth -= 1,
+                ',' if depth == 0 => {
+                    args.push(inner[arg_start..i].trim().to_string());
+                    arg_start = i + c.len_utf8();
+                }
+                _ => {}
+            }
+        }
+        args.push(inner[arg_start..].trim().to_string());
+        args.get(param_idx).cloned().filter(|s| !s.is_empty())
+    }
+
     /// Resolves a generic return type name (e.g., "V", "K", "T") to a concrete type
     /// by extracting the corresponding type arg from a parameterized receiver type.
     /// E.g., receiver="Map<Int, Node>", base="Map", ret="V" → Some("Node")

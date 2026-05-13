@@ -3385,6 +3385,58 @@ impl VbcCodegen {
             return Ok(Some(dest));
         }
 
+        // `&record.field` / `&mut record.field` (task #121):
+        //
+        // The generic path below compiles `record.field` to a `GetF`
+        // that copies the field's `Value` into a fresh register, then
+        // wraps that register in a CBGR register-ref encoding the
+        // method-frame's stack-slot abs_index.  When the method
+        // returns and `pop_frame` bumps slot generations, every such
+        // ref invalidates — even though the underlying heap object
+        // is alive in the caller, the ref's generation stamp no
+        // longer matches.  Symptom: `info.message()` (which body is
+        // `&self.message`) returns a borrow that the caller's `*msg`
+        // detects as "expected generation N, found N+1" → CBGR
+        // use-after-free panic.
+        //
+        // Fix: emit `RefField`, which computes the field's pointer
+        // inside the heap object (mirroring GetF's auto-deref chain)
+        // and stores it as a heap-anchored `Value::from_ptr` marked
+        // in `cbgr_mutable_ptrs`.  The resulting ref survives
+        // function boundaries because it doesn't reference any stack
+        // slot — the generic Deref/DerefMut handlers read and write
+        // through it directly into the heap.
+        //
+        // Only applies to Tier-0 `Ref`/`RefMut` — Tier-1 RefChecked /
+        // Tier-2 RefUnsafe variants opt out of generation tracking
+        // entirely, so the legacy register-ref path is fine for them.
+        if matches!(op, UnOp::Ref | UnOp::RefMut)
+            && let ExprKind::Field {
+                expr: receiver,
+                field,
+            } = &inner.kind
+        {
+            let receiver_type = self.infer_expr_type_name(receiver);
+            let field_idx =
+                self.resolve_field_index(receiver_type.as_deref(), &field.name);
+            let base_reg = self
+                .compile_expr(receiver)?
+                .or_internal("field-ref base has no value")?;
+            let dest = self.ctx.alloc_temp();
+
+            let mut operands = Vec::<u8>::with_capacity(6);
+            Self::write_reg(&mut operands, dest.0);
+            Self::write_reg(&mut operands, base_reg.0);
+            crate::encoding::encode_varint(field_idx as u64, &mut operands);
+            self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: crate::instruction::CbgrSubOpcode::RefField as u8,
+                operands,
+            });
+
+            self.ctx.free_temp(base_reg);
+            return Ok(Some(dest));
+        }
+
         let inner_reg = self
             .compile_expr(inner)?
             .or_internal("unary operand has no value")?;
@@ -6352,13 +6404,50 @@ impl VbcCodegen {
                     }
                 });
 
+            // **Generic-param substitution** (closes 4th defect class
+            // of task #22).  When `payload_ty` is a bare generic-param
+            // name (`"T"` / `"E"` / `"Self"`), substitute the i-th
+            // generic arg from the outer's runtime instantiation
+            // before stashing into `current_return_type_name`.
+            //
+            // For `Poll<T>::Ready(T)` with outer
+            // `current_return_type_name = "Poll<Result<Int,Int>>"`,
+            // the variant's declared payload type is `"T"` — the
+            // unsubstituted generic-param name.  Stashing `"T"`
+            // verbatim makes inner `Err(7)` resolve against type
+            // `"T"` (no such type) and miss every scrutinee-aware
+            // tag lookup.  Substitute `T → Result<Int,Int>` via the
+            // TypeDescriptor's type-params index, then inner
+            // resolution consults Result's variant table directly.
+            //
+            // Idempotent for concrete payload types — the helper
+            // returns None when `payload_ty` doesn't match a
+            // generic-param shape, falling through to the raw
+            // payload_ty.
+            let outer_receiver_type = self
+                .ctx
+                .current_return_type_name
+                .clone()
+                .or_else(|| self.ctx.match_scrutinee_type.clone());
+            let substitute_payload = |this: &VbcCodegen, payload_ty: &str| -> String {
+                if let Some(ref outer) = outer_receiver_type
+                    && let Some(concrete) =
+                        this.substitute_payload_generic(payload_ty, outer)
+                {
+                    concrete
+                } else {
+                    payload_ty.to_string()
+                }
+            };
+
             // Compile the first argument (most variants have 0 or 1 args)
             let saved_first = if let Some(ref pts) = payload_types
                 && let Some(payload_ty) = pts.first()
                 && !payload_ty.is_empty()
             {
+                let substituted = substitute_payload(self, payload_ty);
                 let prev = self.ctx.current_return_type_name.take();
-                self.ctx.current_return_type_name = Some(payload_ty.clone());
+                self.ctx.current_return_type_name = Some(substituted);
                 Some(prev)
             } else {
                 None
@@ -6384,8 +6473,9 @@ impl VbcCodegen {
                     && let Some(payload_ty) = pts.get(i + 1)
                     && !payload_ty.is_empty()
                 {
+                    let substituted = substitute_payload(self, payload_ty);
                     let prev = self.ctx.current_return_type_name.take();
-                    self.ctx.current_return_type_name = Some(payload_ty.clone());
+                    self.ctx.current_return_type_name = Some(substituted);
                     Some(prev)
                 } else {
                     None
@@ -11057,8 +11147,37 @@ impl VbcCodegen {
                                         && let Some(payload_ty) = pts.get(i)
                                         && !payload_ty.is_empty()
                                     {
-                                        self.ctx.match_scrutinee_type =
-                                            Some(payload_ty.clone());
+                                        // **Generic-param substitution** (4th
+                                        // defect class of task #22): when the
+                                        // outer variant's declared payload type
+                                        // is a bare generic-param name (`"T"`,
+                                        // `"E"`, `"Self"`), substitute the
+                                        // corresponding concrete type from the
+                                        // outer scrutinee's `<...>`
+                                        // instantiation.  Mirrors the
+                                        // construction-side substitution at
+                                        // `compile_variant_constructor_hinted`.
+                                        // For `Poll.Ready(Err(_))` with outer
+                                        // scrutinee `Poll<Result<Int,Int>>`:
+                                        // `Poll.Ready`'s payload_types = ["T"];
+                                        // substitute T → Result<Int,Int> using
+                                        // Poll's TypeDescriptor type-params
+                                        // index — inner `Err` lookup then
+                                        // resolves against Result's variant
+                                        // table (tag 1) instead of missing on
+                                        // "T" and falling through to the
+                                        // hash-of-name fallback.
+                                        let substituted = self
+                                            .ctx
+                                            .match_scrutinee_type
+                                            .as_ref()
+                                            .and_then(|outer| {
+                                                self.substitute_payload_generic(
+                                                    payload_ty, outer,
+                                                )
+                                            })
+                                            .unwrap_or_else(|| payload_ty.clone());
+                                        self.ctx.match_scrutinee_type = Some(substituted);
                                     }
                                     self.compile_pattern_test(sub_pat, field_reg, sub_result)?;
                                     self.ctx.match_scrutinee_type = prev_scrutinee_type;
