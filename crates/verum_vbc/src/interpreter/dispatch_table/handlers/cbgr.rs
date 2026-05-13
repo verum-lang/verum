@@ -868,6 +868,189 @@ pub(in super::super) fn handle_cbgr_extended(
             Ok(DispatchResult::Continue)
         }
 
+        Some(CbgrSubOpcode::RefField) => {
+            // Create interior reference to a record field by field-index,
+            // producing a `Value::from_ptr(field_ptr)` anchored directly
+            // in the heap object's data area.
+            //
+            // Closes task #121: the generic `Ref` path encodes the
+            // method-frame stack-slot abs_index, which `pop_frame`'s
+            // generation bump invalidates even when the heap object is
+            // still alive in the caller.  `RefField` produces a
+            // heap-anchored pointer that survives frame teardown.
+            //
+            // Format: dst:reg, base:reg, field_idx:varint
+            let dst = read_reg(state)?;
+            let base_reg = read_reg(state)?;
+            let field_idx = read_varint(state)? as usize;
+
+            let base_val = state.get_reg(base_reg);
+
+            // Auto-deref CBGR register reference / thin-ref / fat-ref
+            // (same chain GetF runs before computing the field offset).
+            let base_val = if is_cbgr_ref(&base_val) {
+                let (abs_index, _gen) = decode_cbgr_ref(base_val.as_i64());
+                state.registers.get_absolute(abs_index)
+            } else if base_val.is_thin_ref() {
+                let thin_ref = base_val.as_thin_ref();
+                if thin_ref.ptr.is_null() {
+                    return Err(InterpreterError::NullPointer);
+                }
+                unsafe { *(thin_ref.ptr as *const Value) }
+            } else if base_val.is_fat_ref() {
+                Value::from_ptr(base_val.as_fat_ref().ptr())
+            } else {
+                base_val
+            };
+
+            if !base_val.is_ptr() || base_val.is_nil() {
+                return Err(InterpreterError::NullPointer);
+            }
+            let mut ptr = base_val.as_ptr::<u8>();
+            if ptr.is_null() {
+                return Err(InterpreterError::NullPointer);
+            }
+
+            // Mirror the GetF auto-deref chain for receivers that wrap
+            // the actual record (Heap<T>, mutable interior ptr,
+            // Shared<T> refcount slot, variant payload).  Without this
+            // mirror, `&self.field` taken on a `Heap<T>` or `Shared<T>`
+            // carrier would compute an offset into the wrapper instead
+            // of the inner record.
+
+            // CBGR Heap<T> allocation: data area is preceded by a
+            // 32-byte AllocationHeader; payload[0] is a pointer to the
+            // inner record.
+            {
+                let header_addr = (ptr as usize).wrapping_sub(32);
+                if state.cbgr_allocations.contains(&header_addr) {
+                    let inner = unsafe { *(ptr as *const Value) };
+                    if inner.is_ptr() && !inner.is_nil() {
+                        ptr = inner.as_ptr::<u8>();
+                        if ptr.is_null() {
+                            return Err(InterpreterError::NullPointer);
+                        }
+                    }
+                }
+            }
+
+            // Interior-pointer auto-deref (mirror of GetF lines 217-230):
+            // when the base is itself a tracked mutable interior pointer
+            // (produced by an earlier RefField/RefListElement), the slot
+            // it addresses holds a `Value`.  Load that Value and, if it
+            // points to a heap object, follow the pointer so the field
+            // resolves on the addressed record rather than on the wrapper.
+            if state.cbgr_mutable_ptrs.contains(&(ptr as usize))
+                && (ptr as usize).is_multiple_of(std::mem::align_of::<Value>())
+            {
+                let inner = unsafe { *(ptr as *const Value) };
+                if inner.is_ptr() && !inner.is_nil() {
+                    ptr = inner.as_ptr::<u8>();
+                    if ptr.is_null() {
+                        return Err(InterpreterError::NullPointer);
+                    }
+                }
+            }
+
+            // Object-header alignment + Shared<T> / variant unwrap.
+            if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
+                return Err(InterpreterError::Panic {
+                    message: format!(
+                        "misaligned pointer {:p} for RefField (requires {}-byte alignment)",
+                        ptr,
+                        std::mem::align_of::<heap::ObjectHeader>()
+                    ),
+                });
+            }
+            // SAFETY: alignment + non-null verified above; every VBC
+            // heap object starts with an ObjectHeader.
+            let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+
+            if header.type_id == TypeId::SHARED {
+                // Skip refcount slot to reach the inner Value.
+                let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                let inner = unsafe { *data_ptr.add(1) };
+                if inner.is_ptr() && !inner.is_nil() {
+                    ptr = inner.as_ptr::<u8>();
+                    if ptr.is_null() {
+                        return Err(InterpreterError::NullPointer);
+                    }
+                }
+            }
+
+            // Variant wrapper unwrap (type_id >= 0x8000): payload[0]
+            // holds the inner record pointer.
+            {
+                if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
+                    return Err(InterpreterError::Panic {
+                        message: format!(
+                            "misaligned pointer {:p} after Shared deref in RefField",
+                            ptr,
+                        ),
+                    });
+                }
+                let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+                if header.type_id.0 >= 0x8000 {
+                    let payload_offset = heap::OBJECT_HEADER_SIZE + 8;
+                    let inner = unsafe { *(ptr.add(payload_offset) as *const Value) };
+                    if inner.is_ptr() && !inner.is_nil() {
+                        ptr = inner.as_ptr::<u8>();
+                        if ptr.is_null() {
+                            return Err(InterpreterError::NullPointer);
+                        }
+                    }
+                }
+            }
+
+            // Final alignment + bounds check on the unwrapped record.
+            if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
+                return Err(InterpreterError::Panic {
+                    message: format!(
+                        "misaligned final pointer {:p} in RefField after auto-deref chain",
+                        ptr,
+                    ),
+                });
+            }
+            // SAFETY: alignment + non-null verified; object has a
+            // header.
+            let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+
+            let field_offset = field_idx
+                .checked_mul(std::mem::size_of::<Value>())
+                .ok_or_else(|| InterpreterError::Panic {
+                    message: "RefField: field offset overflow".into(),
+                })?;
+            let field_end = field_offset
+                .checked_add(std::mem::size_of::<Value>())
+                .ok_or_else(|| InterpreterError::Panic {
+                    message: "RefField: field end offset overflow".into(),
+                })?;
+            if field_end > header.size as usize {
+                return Err(InterpreterError::Panic {
+                    message: format!(
+                        "RefField: field {} (offset {}+{}={}) exceeds object data size {}",
+                        field_idx,
+                        field_offset,
+                        std::mem::size_of::<Value>(),
+                        field_end,
+                        header.size
+                    ),
+                });
+            }
+            // SAFETY: field bounds validated above; data area starts
+            // at OBJECT_HEADER_SIZE and contains an initialized Value
+            // at field_offset.
+            let field_ptr =
+                unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + field_offset) };
+
+            // Mark the field pointer as a tracked mutable interior ref
+            // so the generic Deref / DerefMut handlers read and write
+            // through it instead of treating it as an opaque pointer.
+            state.cbgr_mutable_ptrs.insert(field_ptr as usize);
+            state.set_reg(dst, Value::from_ptr(field_ptr));
+            Ok(DispatchResult::Continue)
+        }
+
         Some(CbgrSubOpcode::RefSliceRaw) => {
             // Create a FatRef directly from a raw pointer + length, with
             // elem_size=1 (byte slice). Used to lower the generic
