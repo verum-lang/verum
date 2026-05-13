@@ -899,10 +899,79 @@ impl TypeChecker {
                 // If the pattern is explicitly qualified and the qualifier
                 // resolves to a known variant type in scope, prefer the
                 // qualifier's variant set.
+                //
+                // Two fallback paths after direct lookup_type fails (task
+                // #139 AOT divergence): (1) the qualifier may live in
+                // `inductive_constructors` registry only (populated for
+                // stdlib variant types like VarError, IoError, … by
+                // `register_stdlib_constructors_from_metadata` but NOT
+                // pushed into `type_defs` for non-Type-table variants);
+                // (2) the qualifier may be a type alias that resolves
+                // to a Named that itself unpacks to a Variant.  Without
+                // these, `match res { Err(VarError.NotPresent) => … }`
+                // would surface `Pattern expects a variant type, but
+                // scrutinee has type E` because the outer Result<T,E>
+                // binds `payload_ty = E` (unsubstituted generic param)
+                // and the inner pattern's qualifier never gets a
+                // chance to override.
                 if let Some(q) = qualifier_name {
-                    if let Option::Some(def_ty) = self.ctx.lookup_type(q) {
-                        if let Type::Variant(variants) = def_ty.clone() {
-                            expanded_ty = Type::Variant(variants);
+                    // Direct path: lookup_type returns Variant directly.
+                    let direct: Option<Type> = self
+                        .ctx
+                        .lookup_type(q)
+                        .and_then(|def_ty| match def_ty.clone() {
+                            Type::Variant(variants) => Some(Type::Variant(variants)),
+                            _ => None,
+                        });
+                    if let Some(variant_ty) = direct {
+                        expanded_ty = variant_ty;
+                    } else {
+                        // Fallback: `get_constructors` registry for
+                        // stdlib types whose Variant payload lives in
+                        // `inductive_constructors` (populated by
+                        // `register_stdlib_constructors_from_metadata`)
+                        // but never gets pushed into `type_defs` as a
+                        // standalone Type::Variant.  Without this
+                        // fallback, the AOT typechecker fails on
+                        // `match res { Err(VarError.NotPresent) => … }`
+                        // with "Pattern expects a variant type, but
+                        // scrutinee has type E" — the outer
+                        // Result<T,E>'s Err arm binds the inner
+                        // pattern against the unsubstituted generic
+                        // param `E`, and without resolving the
+                        // qualifier `VarError` through the
+                        // constructor registry, the inner pattern's
+                        // qualifier never gets a chance to override.
+                        let q_text = verum_common::Text::from(q);
+                        if let Maybe::Some(constructors) =
+                            self.ctx.get_constructors(&q_text)
+                        {
+                            let constructors = constructors.clone();
+                            let mut variants: indexmap::IndexMap<
+                                verum_common::Text,
+                                Type,
+                            > = indexmap::IndexMap::new();
+                            for ctor in constructors.iter() {
+                                let payload_ty = if ctor.args.is_empty() {
+                                    Type::Unit
+                                } else if ctor.args.len() == 1 {
+                                    ctor.args
+                                        .first()
+                                        .map(|a| a.as_ref().clone())
+                                        .unwrap_or(Type::Unit)
+                                } else {
+                                    Type::Tuple(
+                                        ctor.args
+                                            .iter()
+                                            .map(|a| a.as_ref().clone())
+                                            .collect(),
+                                    )
+                                };
+                                variants.insert(ctor.name.clone(), payload_ty);
+                            }
+                            if !variants.is_empty() {
+                                expanded_ty = Type::Variant(variants);
+                            }
                         }
                     }
                 }
