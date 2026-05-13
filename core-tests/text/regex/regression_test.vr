@@ -1,0 +1,160 @@
+// =============================================================================
+// core-tests/text/regex/regression_test.vr
+// =============================================================================
+//
+// Defects pinned for `core/text/regex.vr` and the underlying regex
+// intrinsic dispatch chain.
+//
+// Defect classes:
+//   §A  is_match returns wrong Bool on `\d+`, anchors `^…$`, and absent matches
+//   §B  find_all triggers NullPointerAt opcode 0x66 (List iteration / SetIdx)
+//   §C  split triggers NullPointerAt opcode 0x66 (same root as §B)
+//   §D  find returns wrong shape — "Expected pointer, got Some(3)" when
+//       inspecting Maybe<Text>
+//   §E  replace_all returns wrong content (substitution not applied)
+// =============================================================================
+
+mount core.text.{Text, Regex};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — Regex.is_match wrong Bool on common patterns (audit.md §A)
+// REGRESSION: every regex feature beyond literal matching falls through
+// the regex_is_match intrinsic with wrong results — anchors `^/$`,
+// character classes `\d`, `\w`, `\s`, alternation, and repetition all
+// return the wrong Bool. Underlying intrinsic
+// `regex_is_match` is wired to the `regex` crate but the input encoding
+// or output decoding is mis-aligned.
+// =============================================================================
+
+@ignore
+@test
+fn regression_a_is_match_class_digit_pinned() {
+    let r = Regex.new("\\d+").unwrap();
+    assert(r.is_match("abc123"));
+}
+
+@ignore
+@test
+fn regression_a_is_match_anchor_start_pinned() {
+    let r = Regex.new("^hello").unwrap();
+    assert(r.is_match("hello world"));
+}
+
+@ignore
+@test
+fn regression_a_is_match_absent_pinned() {
+    let r = Regex.new("xyz").unwrap();
+    assert(!r.is_match("hello world"));
+}
+
+// =============================================================================
+// §B — find_all NullPointerAt opcode 0x66 (audit.md §B)
+// REGRESSION: every find_all panics with NullPointerAt opcode 0x66.
+// Opcode 0x66 is `SetIdx` (set list index) — likely the runtime's
+// `List::push` is writing through a null pointer when the regex
+// intrinsic returns its result list.
+// =============================================================================
+
+@ignore
+@test
+fn regression_b_find_all_returns_each_pinned() {
+    let r = Regex.new("ab").unwrap();
+    let matches = r.find_all("ab cd ab");
+    assert_eq(matches.len(), 2);
+}
+
+@ignore
+@test
+fn regression_b_find_all_empty_pinned() {
+    let r = Regex.new("xyz").unwrap();
+    let matches = r.find_all("hello");
+    assert_eq(matches.len(), 0);
+}
+
+// =============================================================================
+// §C — split NullPointerAt opcode 0x66 (audit.md §C)
+// REGRESSION: same SetIdx defect as §B; regex_split's intrinsic
+// returns a List<Text> that triggers a null write when populating.
+// =============================================================================
+
+@ignore
+@test
+fn regression_c_split_simple_pinned() {
+    let r = Regex.new(",").unwrap();
+    let parts = r.split("a,b,c");
+    assert_eq(parts.len(), 3);
+}
+
+// =============================================================================
+// §D — find returns wrong Maybe<Text> shape (audit.md §D)
+// REGRESSION: the panic "Expected pointer, got Some(3)" indicates the
+// match-decoding path is interpreting a Some(N) value as a raw pointer
+// — same family as the typechecker error in text/text §R
+// (count_matches "Expected int, got Some(3)").
+// =============================================================================
+
+@ignore
+@test
+fn regression_d_find_present_pinned() {
+    let r = Regex.new("ll").unwrap();
+    match r.find("hello") {
+        Some(m) => assert_eq(m, "ll"),
+        None => panic("'ll' present"),
+    }
+}
+
+@ignore
+@test
+fn regression_d_find_absent_pinned() {
+    let r = Regex.new("xyz").unwrap();
+    match r.find("hello") {
+        Some(_) => panic("expected None"),
+        None => {},
+    }
+}
+
+// =============================================================================
+// §E — replace_all returns wrong content (audit.md §E)
+// REGRESSION: `replace_all("ab", "XX")` on `"ab cd ab"` returns the
+// input unchanged or with only some matches replaced.
+// =============================================================================
+
+@ignore
+@test
+fn regression_e_replace_all_every_match_pinned() {
+    let r = Regex.new("ab").unwrap();
+    assert_eq(r.replace_all("ab cd ab", "XX"), "XX cd XX");
+}
+
+// =============================================================================
+// Active PASS-GUARDs — Regex construction + as_str + simple is_match work.
+// =============================================================================
+
+@test
+fn guard_new_returns_ok() {
+    match Regex.new("abc") {
+        Ok(_) => {},
+        Err(_) => panic("Regex.new('abc') must be Ok"),
+    }
+}
+
+@test
+fn guard_as_str_round_trip() {
+    let r = Regex.new("hello").unwrap();
+    assert_eq(r.as_str(), "hello");
+}
+
+@test
+fn guard_is_match_literal_present() {
+    let r = Regex.new("hello").unwrap();
+    assert(r.is_match("hello world"));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
