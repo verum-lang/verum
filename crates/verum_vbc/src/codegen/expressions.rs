@@ -10274,6 +10274,22 @@ impl VbcCodegen {
 
         // Try to infer the type name
         if let Some(type_name) = self.infer_expr_type_name(iter) {
+            // **Slice / array shape detection**: types like `&[Byte]`,
+            // `&mut [Byte]`, `[Int]`, `[T; N]` are storage-layout-
+            // equivalent to `List<T>` at runtime (the interpreter
+            // boxes them as TypeId::LIST). `IterNew` recognises this
+            // and yields elements directly. Pre-fix, slice types fell
+            // into the custom-iterator path which emits
+            // `CallM { method: "next" }` — but `[T]` types have no
+            // `next` method (the iterator wrapper does), so dispatch
+            // panicked at runtime with
+            // `method 'next' not found on receiver of runtime kind 'List' (Int)`.
+            // The repro: `DefaultHasher.write(bytes: &[Byte])`'s
+            // `for byte in bytes` body in `core/base/protocols.vr`.
+            let is_slice_shape = type_name.contains("[") && type_name.contains("]");
+            if is_slice_shape {
+                return false;
+            }
             // Strip generic args: "List<Int>" → "List", "Map<K, V>" → "Map"
             let base = type_name.split('<').next().unwrap_or(&type_name);
             // Builtin collection iterator wrappers — the interpreter

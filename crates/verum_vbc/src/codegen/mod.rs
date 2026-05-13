@@ -5599,49 +5599,48 @@ impl VbcCodegen {
     /// have run for every file in the module — one finalize pass
     /// replaces the per-file `build_module + merge` chain.
     pub fn finalize_module_from_state(&mut self) -> CodegenResult<VbcModule> {
-        // Stdlib precompile finalize.
+        // Stdlib precompile finalize — MINIMAL path.
         //
-        // **History**: A previous version of this path ran the four
-        // prep passes (`compile_pending_constants`,
-        // `compile_pending_tls_inits`, `emit_missing_stub_descriptors`,
-        // `verify_type_layout_invariants`) for symmetry with
-        // `finalize_module`. The goal was to address dangling cross-
-        // module `Call { func_id }` references in stdlib bodies by
-        // synthesising extern-stub descriptors so user-side merge could
-        // remap them.
+        // **History**: two earlier attempts to add prep passes for
+        // cross-module Call resolution failed:
         //
-        // **Why reverted**: the stub synthesis blew up archive size
-        // 12.9 MB → 110 MB (8x) and user-side first-compile time from
-        // <1 s → 85 s, with verum processes peaking at 10 GB resident.
-        // The stub set was over-eager: every module-local `ctx.functions`
-        // entry transitively referenced via Call/CallM in *any* body
-        // got a stub, including the ~7000 stdlib functions imported
-        // via `import_functions(global_function_registry)` at compile
-        // start. Per-module duplication × ~100 stdlib modules → ~1M
-        // total stubs, each carrying name + params + RetV body bytes.
+        //  * Full prep passes (commit b409d23f2 hunk, then reverted):
+        //    archive 12.9 MB → 110+ MB, first-compile 1 s → 85 s.
+        //    Source: `emit_missing_stub_descriptors`'s CallM pass
+        //    (~1M stubs across all stdlib modules).
         //
-        // **The companion descriptor.intrinsic_name propagation fix
-        // in `compile_function` (commit 698795e39) carries most of
-        // the architectural value**: every `@intrinsic` function now
-        // round-trips its marker through the archive, so user-side
-        // `compile_call`'s intercept at `expressions.rs:4385` fires
-        // for cbgr_alloc / cbgr_alloc_zeroed / cbgr_dealloc /
-        // cbgr_realloc / every other CBGR allocator + every other
-        // `@intrinsic` declaration with a Verum body. That eliminates
-        // the bulk of the cross-module dispatch defects without
-        // requiring stub synthesis at all.
+        //  * Surgical (Call-id pass only, this commit's predecessor):
+        //    archive 12.9 MB → 134 MB. Source: Call-id pass at stdlib
+        //    scale still produces ~800K stubs (each stdlib module has
+        //    100s of bodies, each referencing ~100 cross-module
+        //    functions).
         //
-        // **Residual gap**: stdlib bodies with raw `Call { func_id }`
-        // to NON-`@intrinsic` cross-module functions still rely on
-        // the user-side per-module remap → name-based fallback chain
-        // in `ArchiveBodyRemap::map_function`. The remaining miss
-        // surface is small (most cross-module calls go through
-        // intrinsics or through CallM method dispatch which uses
-        // string-name lookup). When the residual misses get isolated
-        // and tracked, the right fix is a focused stub synthesis pass
-        // that emits stubs ONLY for actually-cross-module Calls (not
-        // every import_functions entry) — issue #46 captures the
-        // optimisation target.
+        // **Conclusion**: cross-module dispatch resolution at archive-
+        // load time cannot rely on per-module extern-stub synthesis
+        // without explosion at stdlib scale. The right architectural
+        // fix is a bytecode-format change: encode cross-module function
+        // references as STRING IDs (function names) instead of raw
+        // func_ids, with a single string interning per module. The
+        // user-side merge then resolves by name once per Call site,
+        // not once per (module × imported-function) pair.
+        //
+        // Tracked as #47 with the format-change scope acknowledged.
+        // Until that lands, stdlib bodies with raw `Call { func_id }`
+        // to NON-`@intrinsic` cross-module functions rely on the
+        // ArchiveBodyRemap Tier 2 name-fallback (which covers the
+        // subset where the calling module's archive has the dangling
+        // id in its function table — works for SAME-MODULE-but-
+        // unemitted cases, not for truly cross-module).
+        //
+        // **Architectural value preserved**: the `compile_function`
+        // descriptor.intrinsic_name propagation fix (commit
+        // 698795e39) round-trips every `@intrinsic` declaration's
+        // marker through the archive. User-side compile_call's
+        // intercept at `expressions.rs:4385` fires for cbgr_alloc /
+        // every other CBGR allocator + every `@intrinsic` declaration
+        // with a Verum body — the bulk of cross-module dispatch
+        // defects close via this path WITHOUT requiring stub
+        // synthesis.
         self.build_module()
     }
 
@@ -12848,6 +12847,39 @@ impl VbcCodegen {
     /// (`try_intercept_shell_runtime` / `file_runtime` / `env_runtime`
     /// /… in dispatch_table).  No new module dependencies.
     fn emit_missing_stub_descriptors(&mut self) {
+        self.emit_missing_stub_descriptors_with_callm(true);
+    }
+
+    /// Surgical variant of `emit_missing_stub_descriptors`.
+    ///
+    /// When `include_callm = false`, runs ONLY the Call-id-driven pass
+    /// (synthesises stubs for each unique `Call.func_id` in emitted
+    /// bytecode that lacks a corresponding `VbcFunction` in
+    /// `self.functions` but appears in `ctx.functions`). The CallM-by-
+    /// method-name pass is SKIPPED.
+    ///
+    /// **Why this exists**: the CallM pass iterates `ctx.functions`
+    /// entries whose trailing dotted segment matches each unique
+    /// CallM `method_id` string. For BARE method names like `hash` /
+    /// `next` / `iter` / `clone`, the suffix-index bucket contains
+    /// hundreds of entries (every type that implements the method).
+    /// The pass then pushes one stub per match — at stdlib precompile
+    /// time, with 100+ modules each calling 100+ bare CallM methods,
+    /// this produces ~1M stubs and grows `runtime.vbca` 12.9 MB →
+    /// 110-132 MB, with user-side load times blowing up from <1 s to
+    /// 85 s and verum process memory hitting 10 GB.
+    ///
+    /// At STDLIB PRECOMPILE time we want ONLY the Call-id pass — it's
+    /// targeted (one stub per actually-referenced cross-module
+    /// `Call.func_id`) and sufficient for the cross-module dispatch
+    /// case (`Text.grow → alloc`-style raw Calls). The CallM pass is
+    /// for USER-MODULE compile time where stub synthesis covers
+    /// downstream-method dispatch via the runtime intercept layer.
+    ///
+    /// **Pin**: `finalize_module_from_state` (stdlib bootstrap) calls
+    /// this with `include_callm=false`; `finalize_module` (user
+    /// compile) calls the unconditional variant via the alias above.
+    fn emit_missing_stub_descriptors_with_callm(&mut self, include_callm: bool) {
         use std::collections::{HashMap, HashSet};
         // 1. Collect referenced FunctionIds from emitted bytecode.
         let mut referenced: HashSet<u32> = HashSet::new();
@@ -13078,6 +13110,15 @@ impl VbcCodegen {
                 vec![Instruction::RetV],
             );
             self.functions.push(vbc_func);
+        }
+        // CallM stubs are gated — stdlib precompile path
+        // (`finalize_module_from_state`) passes `include_callm=false`
+        // to avoid the 1M-stub explosion documented in the docstring
+        // above. User-side compile keeps `include_callm=true` because
+        // its scale is per-cog (not per-stdlib-module) and the
+        // intercept layer needs the descriptor metadata for dispatch.
+        if !include_callm {
+            return;
         }
         // CallM stubs.  `method_id` is a STRING id, not a FunctionId,
         // so the FunctionId-driven loop above never sees these.  Without
@@ -13431,6 +13472,83 @@ impl VbcCodegen {
             module.add_type(remapped_ty);
         }
 
+        // Cross-module call name table collection.
+        //
+        // **Why this exists**: stdlib precompile uses a shared
+        // codegen-global FunctionId namespace across all source
+        // modules. When `build_module` finalises one archive
+        // module's entry, `func_id_remap` covers only this module's
+        // own functions (the entries pushed into `self.functions`),
+        // mapping their sparse codegen-time ids to contiguous
+        // 0..N indices. The remap leaves cross-module Call operands
+        // unchanged — `func_id_remap.get(other_module_global_id)` is
+        // `None`, so the rewrite below preserves the original sparse
+        // id. The archive bytecode therefore carries call targets in
+        // TWO id spaces: in-module 0..N (resolved by Tier-1 of
+        // `ArchiveBodyRemap`) and cross-module precompile-globals
+        // (need name-based Tier-2 resolution at user-side load).
+        //
+        // Tier-2's `archive_id_to_name` is populated from
+        // `module.functions` (this module's own descriptors), so
+        // cross-module ids miss → Tier-3 identity fallback → user
+        // bytecode keeps the bogus sparse id → runtime dispatch
+        // routes through whatever happens to live at that index in
+        // the user codegen's contiguous function table. The live
+        // failure mode pinned in the repro: `Text.push_byte →
+        // Text.grow → alloc` dispatching to `Successors.next` and
+        // null-dereferencing at pc=0.
+        //
+        // **The fix**: capture (cross_module_global_id, qualified-name)
+        // pairs at this point — where `func_id_remap` is in scope so
+        // we can decide "in-module vs cross-module" unambiguously
+        // (`func_id_remap.contains_key(fid)` is the authoritative
+        // gate; the post-remap `fid < N` test is unreliable because
+        // earlier-registered modules' global ids can fall inside
+        // this module's [0, N) range). Stored in
+        // `module.external_function_names` and consumed by
+        // `merge_archive_function_bodies` to enrich
+        // `archive_id_to_name` for Tier-2 resolution.
+        //
+        // **Size budget**: bounded by the count of UNIQUE cross-
+        // module ids actually called from this module's bodies —
+        // typically tens per module (alloc, dealloc, panic, memcpy,
+        // realloc, plus a handful of cross-module helpers). Each
+        // entry is (FunctionId=4B, StringId=4B) + the qualified name
+        // interned once into `module.strings` (avg ~30 bytes).
+        // Total stdlib impact: ~few hundred KB instead of the 100+ MB
+        // blowup seen with the full-stub approach (commit a36f164af
+        // reverted that path).
+        let mut external_seen: std::collections::HashSet<u32> =
+            std::collections::HashSet::new();
+        let mut external_pending: Vec<u32> = Vec::new();
+        const EXTERN_SENTINEL_THRESHOLD: u32 = u32::MAX / 4;
+        for func in &self.functions {
+            for instr in &func.instructions {
+                let fid = match instr {
+                    Instruction::Call { func_id, .. }
+                    | Instruction::CallG { func_id, .. }
+                    | Instruction::TailCall { func_id, .. }
+                    | Instruction::NewClosure { func_id, .. }
+                    | Instruction::Spawn { func_id, .. }
+                    | Instruction::GenCreate { func_id, .. } => *func_id,
+                    _ => continue,
+                };
+                if fid >= EXTERN_SENTINEL_THRESHOLD {
+                    // FFI extern, variant-ctor tag, newtype-ctor —
+                    // dispatched out-of-band; runtime calls.rs handles
+                    // the stage-1/stage-2 stub-not-resolved panic.
+                    continue;
+                }
+                if func_id_remap.contains_key(&fid) {
+                    // In-module — Tier-1 of `ArchiveBodyRemap` covers it.
+                    continue;
+                }
+                if external_seen.insert(fid) {
+                    external_pending.push(fid);
+                }
+            }
+        }
+
         // Encode functions and their bytecode, remapping name_id and func_id references
         for func in &self.functions {
             // Remap string IDs and func_ids in instructions
@@ -13709,6 +13827,56 @@ impl VbcCodegen {
         module.header.type_table_count = module.types.len() as u32;
         module.header.function_table_count = module.functions.len() as u32;
         module.header.constant_pool_count = module.constants.len() as u32;
+
+        // Materialise the cross-module call name table (collected
+        // above into `external_pending` while `func_id_remap` was in
+        // scope). Look up each external fid's qualified name in
+        // `self.ctx.functions` and intern it into `module.strings`.
+        // See the rationale block at the collection site above for
+        // why this is needed and the size budget it lives within.
+        if !external_pending.is_empty() {
+            let mut ctx_id_to_name: std::collections::HashMap<u32, String> =
+                std::collections::HashMap::with_capacity(external_pending.len());
+            for (name, info) in self.ctx.functions.iter() {
+                if !external_seen.contains(&info.id.0) {
+                    continue;
+                }
+                ctx_id_to_name
+                    .entry(info.id.0)
+                    .and_modify(|existing| {
+                        // Prefer the longest dotted (qualified) name —
+                        // canonical form for cross-module lookup at
+                        // user-side merge. Mirrors
+                        // `emit_missing_stub_descriptors`'s longest-wins
+                        // tie-break.
+                        let existing_dots = existing.matches('.').count();
+                        let new_dots = name.matches('.').count();
+                        if new_dots > existing_dots {
+                            *existing = name.clone();
+                        }
+                    })
+                    .or_insert_with(|| name.clone());
+            }
+            let mut external_list: Vec<(FunctionId, StringId)> =
+                Vec::with_capacity(external_pending.len());
+            for fid in external_pending {
+                if let Some(name) = ctx_id_to_name.get(&fid) {
+                    // Clone the name out so the borrow on
+                    // `ctx_id_to_name` (and transitively on `self.ctx`)
+                    // is released before `module.intern_string`.
+                    let owned = name.clone();
+                    let sid = module.intern_string(&owned);
+                    external_list.push((FunctionId(fid), sid));
+                }
+            }
+            tracing::debug!(
+                target: "verum_vbc::codegen::external_funcs",
+                "module='{}' external_function_names: {} entries",
+                self.config.module_name,
+                external_list.len(),
+            );
+            module.external_function_names = external_list;
+        }
 
         Ok(module)
     }
@@ -14441,11 +14609,40 @@ impl VbcCodegen {
         // id's name and re-resolve to the user-side function with the
         // same name via `self.ctx.functions`, recovering the correct
         // dispatch target without requiring a precompile rebuild.
-        let mut archive_id_to_name: HashMap<u32, String> = HashMap::with_capacity(archive_module.functions.len());
+        let mut archive_id_to_name: HashMap<u32, String> = HashMap::with_capacity(
+            archive_module.functions.len() + archive_module.external_function_names.len(),
+        );
         for fn_desc in archive_module.functions.iter() {
             if let Some(name) = archive_module.strings.get(fn_desc.name) {
                 archive_id_to_name.insert(fn_desc.id.0, name.to_string());
             }
+        }
+        // Merge the cross-module call name table (populated at
+        // precompile finalize, see `build_module`'s tail in
+        // `crates/verum_vbc/src/codegen/mod.rs`). Each entry maps an
+        // archive bytecode `func_id` whose body lives in a sibling
+        // archive module to its qualified name. Without this merge,
+        // `ArchiveBodyRemap::map_function`'s Tier-2 name fallback
+        // misses for every cross-module Call (the in-module
+        // `archive_module.functions` table only carries this module's
+        // own functions) and the identity-fallback (Tier-3) routes
+        // the call to whatever unrelated user-side function happens
+        // to live at the raw codegen-time id — observed in the wild
+        // as `Text.push_byte → Text.grow → alloc` dispatching to
+        // `Successors.next` and crashing with a null-pointer deref
+        // at pc=0. **Per-module entries (`archive_module.functions`)
+        // win on conflict**: if a cross-module name happens to also
+        // refer to a function defined in this module, the local
+        // definition takes precedence so the Tier-1 per-module remap
+        // still routes the call to the correct local body.
+        for (fid, sid) in archive_module.external_function_names.iter() {
+            archive_id_to_name.entry(fid.0).or_insert_with(|| {
+                archive_module
+                    .strings
+                    .get(*sid)
+                    .map(|s| s.to_string())
+                    .unwrap_or_default()
+            });
         }
         if std::env::var("VERUM_TRACE_ARCHIVE_FUNCS").is_ok() && archive_module.name.contains("text") {
             eprintln!(
