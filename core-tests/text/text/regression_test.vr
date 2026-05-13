@@ -75,14 +75,19 @@ fn regression_b_text_insert_uses_encode_utf8_pinned() {
 }
 
 // =============================================================================
-// §C — Iterator.next dispatch broken on Chars / Lines / ByteIter (audit.md §C)
-// REGRESSION: for-loops over `Text.chars()` and other Text iterators panic
-// with "method 'next' not found on receiver of runtime kind `Object`". This
-// breaks every loop that uses `for ch in s.chars()` and is the single most
-// impactful defect in this audit.
+// §C — Iterator.next dispatch on Chars / Lines / ByteIter / CharIndices
+// CLOSED 2026-05-13 by commit 48a76117f (vbc/dispatch). Three architectural
+// fixes in `crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs`:
+//   1. Removed the wrong `chars` intercept that returned `List<Text>` instead
+//      of the source-level `Chars` iterator.
+//   2. Tightened the func-id-as-method-id heuristic with a parent_type-vs-
+//      receiver compatibility gate (`func_id_parent_compatible_with_receiver`).
+//   3. Tightened the second-pass bare-suffix scan with the same compatibility
+//      check for heap receivers (`heap_receiver_parent_compatible`).
+// The active guard test below now passes — keep it green forever as the
+// re-regression detector.
 // =============================================================================
 
-@ignore
 @test
 fn regression_c_chars_iterator_next_pinned() {
     let s: Text = "abc";
