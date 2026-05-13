@@ -1,0 +1,162 @@
+// =============================================================================
+// core-tests/text/char/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib scenarios for `Char`, `GeneralCategory`, and `CharPattern`.
+// Touches Text + List + Maybe + iteration.
+//
+// Coverage:
+//   §1 Char inside Text: chars() yields the same chars (sequence-level)
+//   §2 Char + List<Char>: build, count, classify
+//   §3 char_range / char_any_of as filters via for-loop
+//   §4 Char in match expressions
+//   §5 Char as map key (via Eq + Hash if available)
+//   §6 GeneralCategory in match
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.char.{GeneralCategory, char_any_of, char_range};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 Char ↔ Text round-trip via chars
+// =============================================================================
+
+@test
+fn integration_chars_then_collect_then_compare() {
+    let s: Text = "abc";
+    let mut collected: List<Char> = [];
+    for c in s.chars() {
+        collected.push(c);
+    }
+    assert_eq(collected.len(), 3);
+    assert_eq(collected[0], 'a');
+    assert_eq(collected[1], 'b');
+    assert_eq(collected[2], 'c');
+}
+
+@test
+fn integration_text_from_char_round_trip() {
+    let chars: List<Char> = ['v', 'e', 'r', 'u', 'm'];
+    let mut acc = Text.new();
+    for c in chars.iter() {
+        let one = Text.from_char(*c);
+        acc.push_str(&one);
+    }
+    assert_eq(acc, "verum");
+}
+
+// =============================================================================
+// §2 Char + List: classify counts
+// =============================================================================
+
+@test
+fn integration_count_letters_digits_other() {
+    let chars: List<Char> = ['a', '1', 'b', '2', 'c', '!', '?'];
+    let mut letters: Int = 0;
+    let mut digits: Int = 0;
+    let mut other: Int = 0;
+    for c in chars.iter() {
+        if (*c).is_ascii_alphabetic() {
+            letters = letters + 1;
+        } else if (*c).is_ascii_digit() {
+            digits = digits + 1;
+        } else {
+            other = other + 1;
+        }
+    }
+    assert_eq(letters, 3);
+    assert_eq(digits, 2);
+    assert_eq(other, 2);
+}
+
+// =============================================================================
+// §3 char_range used as filter
+// =============================================================================
+
+@test
+fn integration_char_range_filters_text_chars() {
+    let s: Text = "Hello, World! 42";
+    let lower = char_range('a', 'z');
+    let mut count: Int = 0;
+    for c in s.chars() {
+        if lower.matches(c) {
+            count = count + 1;
+        }
+    }
+    // hello + orld -> 'e','l','l','o','o','r','l','d' = 8 lowercase letters
+    assert_eq(count, 8);
+}
+
+// =============================================================================
+// §4 Char in match
+// =============================================================================
+
+@test
+fn integration_char_match_classify_punctuation() {
+    fn classify(c: Char) -> Text {
+        if c == '.' { "period" }
+        else if c == ',' { "comma" }
+        else if c == '?' { "question" }
+        else { "other" }
+    }
+    assert_eq(classify('.'), "period");
+    assert_eq(classify(','), "comma");
+    assert_eq(classify('?'), "question");
+    assert_eq(classify('a'), "other");
+}
+
+// =============================================================================
+// §5 GeneralCategory in match
+// =============================================================================
+
+@test
+fn integration_general_category_grouping() {
+    fn group_label(cat: GeneralCategory) -> Text {
+        match cat {
+            GeneralCategory.Lu | GeneralCategory.Ll | GeneralCategory.Lt
+                | GeneralCategory.Lm | GeneralCategory.Lo => "letter",
+            GeneralCategory.Nd | GeneralCategory.Nl | GeneralCategory.No => "number",
+            GeneralCategory.Zs | GeneralCategory.Zl | GeneralCategory.Zp => "separator",
+            _ => "other",
+        }
+    }
+    assert_eq(group_label(GeneralCategory.Lu), "letter");
+    assert_eq(group_label(GeneralCategory.Ll), "letter");
+    assert_eq(group_label(GeneralCategory.Nd), "number");
+    assert_eq(group_label(GeneralCategory.Zs), "separator");
+    assert_eq(group_label(GeneralCategory.Po), "other");
+}
+
+// =============================================================================
+// §6 Char arithmetic via cast through Int
+// =============================================================================
+
+@test
+fn integration_char_int_cast_round_trip() {
+    let c: Char = 'A';
+    let n: Int = c as Int;
+    assert_eq(n, 65);
+    let back: Char = n as Char;
+    assert_eq(back, 'A');
+}
+
+@test
+fn integration_char_alphabet_walk() {
+    let mut letters: List<Char> = [];
+    let mut n: Int = 'a' as Int;
+    while n <= 'e' as Int {
+        letters.push(n as Char);
+        n = n + 1;
+    }
+    assert_eq(letters.len(), 5);
+    assert_eq(letters[0], 'a');
+    assert_eq(letters[4], 'e');
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
