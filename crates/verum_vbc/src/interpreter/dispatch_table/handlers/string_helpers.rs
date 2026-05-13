@@ -12,8 +12,47 @@ use crate::value::Value;
 // ============================================================================
 
 /// Extracts a string from a Value (small string or heap string).
-pub(super) fn extract_string(value: &Value, _state: &InterpreterState) -> String {
+///
+/// **Auto-deref of CBGR-ref / ThinRef** is essential for any caller that
+/// passes a `&Text` argument. Pre-fix, calls like `s.find(&needle)` (where
+/// `needle: Text`) saw the arg as a CBGR-ref to a register slot — none of
+/// the small_string / fat_ref / ptr branches matched and the function fell
+/// through to the trailing `<value:N>` debug-format fallback, returning
+/// the bit-pattern of the ref instead of the underlying Text. Every Text
+/// intercept that consumed the result (`find`, `rfind`, `contains`,
+/// `starts_with`, `ends_with`, `replace`, `split`, `find_char`,
+/// `index_of`, `split_once`, `rsplit_once`, `strip_prefix`,
+/// `strip_suffix`, `eq_ignore_case`, …) silently misbehaved — `find`
+/// returned None because the garbage needle wasn't in the haystack;
+/// `replace` returned the haystack unchanged; `split` returned a
+/// single-element list, etc. This was the root of audit §A / §F / §G /
+/// §H / §L / §P (the entire `find`-derived defect cluster, ~25
+/// downstream test failures).
+///
+/// Auto-deref mirrors the Text-receiver normalisation done at
+/// `method_dispatch.rs:394-414` for the receiver itself: CBGR-ref →
+/// follow to absolute register, ThinRef → follow to pointee Value.
+/// After deref the unwrapped Value goes through the existing branches.
+pub(super) fn extract_string(value: &Value, state: &InterpreterState) -> String {
     use heap::OBJECT_HEADER_SIZE;
+
+    // Auto-deref CBGR register-refs and ThinRefs before classification.
+    // This MUST run first — otherwise the small_string / fat_ref / ptr
+    // checks below all return false and the function falls through to
+    // the `<value:N>` fallback, silently corrupting every Text intercept
+    // that takes a `&Text` argument.
+    let mut v = *value;
+    if is_cbgr_ref(&v) {
+        let (abs_index, _gen) = decode_cbgr_ref(v.as_i64());
+        v = state.registers.get_absolute(abs_index);
+    }
+    if v.is_thin_ref() {
+        let tr = v.as_thin_ref();
+        if !tr.ptr.is_null() {
+            v = unsafe { *(tr.ptr as *const Value) };
+        }
+    }
+    let value = &v;
 
     if value.is_small_string() {
         value.as_small_string().as_str().to_string()
