@@ -1,0 +1,173 @@
+// =============================================================================
+// core-tests/text/char/regression_test.vr
+// =============================================================================
+//
+// One @test per defect surfaced by `core/text/char.vr`. Each test names the
+// defect, points to its audit.md row, and is `@ignore`d while the defect
+// is open.
+//
+// Defect classes:
+//   §A  &mut Char mutation in make_ascii_{upper,lower}case
+//   §B  eq_ignore_ascii_case false-negative on cross-case pair
+//   §C  from_digit returns wrong Char for hex values >= 10
+//   §D  general_category misroutes Lu/Ll/Nd/Zs
+//   §E  AnyChar / char_any_of: Iterator.next on inner chars list
+// =============================================================================
+
+mount core.text.char.{GeneralCategory, AnyChar, char_any_of, char_range};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — `Char.make_ascii_uppercase` (and lowercase) does not mutate (audit.md §A)
+// REGRESSION: `let mut c: Char = 'a'; c.make_ascii_uppercase();` leaves c == 'a'.
+// The mutation `*self = self.to_ascii_uppercase();` inside the impl does not
+// commit at the runtime level — `&mut Char` deref-assign is broken.
+// =============================================================================
+
+@ignore
+@test
+fn regression_a_make_ascii_uppercase_pinned() {
+    let mut c: Char = 'a';
+    c.make_ascii_uppercase();
+    assert_eq(c, 'A');
+}
+
+@ignore
+@test
+fn regression_a_make_ascii_lowercase_pinned() {
+    let mut c: Char = 'Z';
+    c.make_ascii_lowercase();
+    assert_eq(c, 'z');
+}
+
+// =============================================================================
+// §B — eq_ignore_ascii_case false negative on letter pair (audit.md §B)
+// REGRESSION: `'A'.eq_ignore_ascii_case(&'a')` returns false. The body
+// downcases both sides and compares — but the equality returns wrong.
+// Likely downstream of §A (the underlying to_ascii_lowercase mutates a
+// local copy that's then compared incorrectly).
+// =============================================================================
+
+@ignore
+@test
+fn regression_b_eq_ignore_ascii_case_pinned() {
+    let a: Char = 'A';
+    let b: Char = 'a';
+    assert(a.eq_ignore_ascii_case(&b));
+}
+
+// =============================================================================
+// §C — Char.from_digit hex returns wrong char (audit.md §C)
+// REGRESSION: `Char.from_digit(10, 16)` should return Some('a') — observed
+// to return a different char.
+// =============================================================================
+
+@ignore
+@test
+fn regression_c_from_digit_hex_pinned() {
+    match Char.from_digit(10, 16) {
+        Some(c) => assert_eq(c, 'a'),
+        None => panic("from_digit(10, 16) should be Some('a')"),
+    }
+}
+
+// =============================================================================
+// §D — Char.general_category misroutes (audit.md §D)
+// REGRESSION: `'a'.general_category()` does not return `Lu`/`Ll`/`Nd`/`Zs`
+// for the obvious inputs.
+// =============================================================================
+
+@ignore
+@test
+fn regression_d_general_category_lower_letter_pinned() {
+    let cat = 'a'.general_category();
+    assert(cat is GeneralCategory.Ll);
+}
+
+@ignore
+@test
+fn regression_d_general_category_upper_letter_pinned() {
+    let cat = 'A'.general_category();
+    assert(cat is GeneralCategory.Lu);
+}
+
+@ignore
+@test
+fn regression_d_general_category_decimal_digit_pinned() {
+    let cat = '5'.general_category();
+    assert(cat is GeneralCategory.Nd);
+}
+
+@ignore
+@test
+fn regression_d_general_category_space_separator_pinned() {
+    let cat = ' '.general_category();
+    assert(cat is GeneralCategory.Zs);
+}
+
+// =============================================================================
+// §E — AnyChar.matches via internal iteration (audit.md §E)
+// REGRESSION: `char_any_of(&['a','b','c']).matches('a')` panics with
+// "method 'next' not found on receiver of runtime kind `Int`". Same root as
+// the text/text §C iterator dispatch defect — AnyChar.matches uses
+// `chars.iter().any(...)` internally.
+// =============================================================================
+
+@ignore
+@test
+fn regression_e_any_of_matches_pinned() {
+    let p = char_any_of(&['a', 'e', 'i']);
+    assert(p.matches('a'));
+    assert(!p.matches('z'));
+}
+
+// =============================================================================
+// Active PASS-GUARDs — locks in already-green Char API surface
+// =============================================================================
+
+@test
+fn guard_ascii_classify() {
+    assert('a'.is_ascii_alphabetic());
+    assert('A'.is_ascii_alphabetic());
+    assert('5'.is_ascii_digit());
+    assert('!'.is_ascii_punctuation());
+    assert(' '.is_ascii_whitespace());
+}
+
+@test
+fn guard_ascii_case_pure_conversion() {
+    assert_eq('a'.to_ascii_uppercase(), 'A');
+    assert_eq('A'.to_ascii_lowercase(), 'a');
+    assert_eq('5'.to_ascii_uppercase(), '5');  // identity on non-letters
+    assert_eq('5'.to_ascii_lowercase(), '5');
+}
+
+@test
+fn guard_to_digit_decimal() {
+    match '7'.to_digit(10) {
+        Some(n) => assert_eq(n, 7),
+        None => panic("'7' is a digit"),
+    }
+}
+
+@test
+fn guard_len_utf8_ascii_is_one() {
+    assert_eq('a'.len_utf8(), 1);
+    assert_eq('Z'.len_utf8(), 1);
+    assert_eq('0'.len_utf8(), 1);
+    assert_eq(' '.len_utf8(), 1);
+}
+
+@test
+fn guard_char_range_match() {
+    let r = char_range('0', '9');
+    assert(r.matches('5'));
+    assert(!r.matches('a'));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

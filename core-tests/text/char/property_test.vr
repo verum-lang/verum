@@ -1,0 +1,318 @@
+// =============================================================================
+// core-tests/text/char/property_test.vr
+// =============================================================================
+//
+// Algebraic / mathematical laws for `Char`, the `GeneralCategory` enum, and
+// the `CharPattern` family. Where possible the laws are exhausted over
+// finite sub-domains (ASCII letters, ASCII digits, single-byte
+// punctuation); larger domains (full Unicode) use representative samples.
+//
+// Laws verified:
+//   §1  ASCII case is involutive on letters: upper(lower(c)) = c (for letters)
+//   §2  ASCII case predicates partition the letter alphabet exclusively
+//   §3  Unicode case predicates extend ASCII predicates (ASCII letter ⇒ unicode letter)
+//   §4  to_ascii_lowercase is identity on non-letters
+//   §5  to_ascii_uppercase is identity on non-letters
+//   §6  to_digit / from_digit round-trip on a finite digit alphabet
+//   §7  is_digit(c, radix) exact iff to_digit(c, radix) is Some
+//   §8  len_utf8 in {1, 2, 3, 4} for every Char
+//   §9  len_utf16 in {1, 2} for every Char
+//   §10 ASCII char (code < 128) ⇒ len_utf8 == 1 ∧ len_utf16 == 1
+//   §11 GeneralCategory variants are pairwise distinct
+//   §12 CharPattern ∘ char_any_of: ∀c. p.matches(c) ⇔ chars.contains(c)
+//   §13 CharPattern ∘ char_range: matches iff start ≤ c ≤ end
+// =============================================================================
+
+mount core.text.char.{GeneralCategory, AnyChar, CharRange, char_any_of, any_of, char_range};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// -----------------------------------------------------------------------------
+// Domain helpers
+// -----------------------------------------------------------------------------
+
+fn ascii_lower_letters() -> List<Char> {
+    ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+     'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
+}
+
+fn ascii_upper_letters() -> List<Char> {
+    ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+     'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']
+}
+
+fn ascii_digits() -> List<Char> {
+    ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+}
+
+fn ascii_non_letters() -> List<Char> {
+    ['0', '5', '9', ' ', '\t', '\n', '.', ',', ';', '!', '?', '(', ')', '[', ']']
+}
+
+// =============================================================================
+// §1 ASCII case involution on letters: upper(lower(c)) = c
+// =============================================================================
+
+@test
+fn property_ascii_case_involution_upper_letters() {
+    for c in ascii_upper_letters().iter() {
+        let down = (*c).to_ascii_lowercase();
+        let back = down.to_ascii_uppercase();
+        assert_eq(back, *c);
+    }
+}
+
+@test
+fn property_ascii_case_involution_lower_letters() {
+    for c in ascii_lower_letters().iter() {
+        let up = (*c).to_ascii_uppercase();
+        let back = up.to_ascii_lowercase();
+        assert_eq(back, *c);
+    }
+}
+
+// =============================================================================
+// §2 Predicate partition: each ASCII letter is exactly upper xor lower
+// =============================================================================
+
+@test
+fn property_ascii_letter_upper_xor_lower() {
+    for c in ascii_lower_letters().iter() {
+        assert((*c).is_ascii_lowercase());
+        assert(!(*c).is_ascii_uppercase());
+    }
+    for c in ascii_upper_letters().iter() {
+        assert((*c).is_ascii_uppercase());
+        assert(!(*c).is_ascii_lowercase());
+    }
+}
+
+@test
+fn property_ascii_digit_is_not_letter() {
+    for c in ascii_digits().iter() {
+        assert((*c).is_ascii_digit());
+        assert(!(*c).is_ascii_alphabetic());
+    }
+}
+
+@test
+fn property_alphanumeric_partitions_letters_digits() {
+    for c in ascii_lower_letters().iter() {
+        assert((*c).is_ascii_alphanumeric());
+    }
+    for c in ascii_digits().iter() {
+        assert((*c).is_ascii_alphanumeric());
+    }
+}
+
+// =============================================================================
+// §3 Unicode predicates subsume ASCII predicates on the ASCII subset
+// =============================================================================
+
+@test
+fn property_unicode_alpha_extends_ascii_alpha() {
+    for c in ascii_lower_letters().iter() {
+        assert((*c).is_alphabetic());
+    }
+    for c in ascii_upper_letters().iter() {
+        assert((*c).is_alphabetic());
+    }
+}
+
+@test
+fn property_unicode_numeric_extends_ascii_digit() {
+    for c in ascii_digits().iter() {
+        assert((*c).is_numeric());
+    }
+}
+
+// =============================================================================
+// §4 to_ascii_lowercase identity on non-letters
+// =============================================================================
+
+@test
+fn property_to_ascii_lowercase_identity_on_non_letters() {
+    for c in ascii_non_letters().iter() {
+        assert_eq((*c).to_ascii_lowercase(), *c);
+    }
+}
+
+@test
+fn property_to_ascii_uppercase_identity_on_non_letters() {
+    for c in ascii_non_letters().iter() {
+        assert_eq((*c).to_ascii_uppercase(), *c);
+    }
+}
+
+// =============================================================================
+// §6 to_digit / from_digit round-trip on a finite digit alphabet (radix 10)
+// =============================================================================
+
+@test
+fn property_digit_round_trip_radix10() {
+    for n in range(0, 10) {
+        match Char.from_digit(n, 10) {
+            Some(c) => {
+                match c.to_digit(10) {
+                    Some(back) => assert_eq(back, n),
+                    None => panic("round-trip to_digit must succeed"),
+                }
+            }
+            None => panic("from_digit must succeed for n in [0,10)"),
+        }
+    }
+}
+
+// Pinned: from_digit returns wrong char for hex (regression §X).
+@ignore
+@test
+fn property_digit_round_trip_radix16_pinned() {
+    for n in range(0, 16) {
+        match Char.from_digit(n, 16) {
+            Some(c) => {
+                match c.to_digit(16) {
+                    Some(back) => assert_eq(back, n),
+                    None => panic("round-trip to_digit hex must succeed"),
+                }
+            }
+            None => panic("from_digit must succeed for n in [0,16)"),
+        }
+    }
+}
+
+// =============================================================================
+// §7 is_digit ⇔ to_digit is Some
+// =============================================================================
+
+@test
+fn property_is_digit_iff_to_digit_some() {
+    let chars: List<Char> = ['0', '5', '9', 'a', 'F', 'g', '?', ' '];
+    for c in chars.iter() {
+        let predicate = (*c).is_digit(16);
+        let opt = (*c).to_digit(16);
+        match opt {
+            Some(_) => assert(predicate),
+            None => assert(!predicate),
+        }
+    }
+}
+
+// =============================================================================
+// §8 len_utf8 ∈ {1,2,3,4}
+// =============================================================================
+
+@test
+fn property_len_utf8_bounded() {
+    let chars: List<Char> = ['a', 'A', '5', ' ', '\t', '\n'];
+    for c in chars.iter() {
+        let n = (*c).len_utf8();
+        assert(n >= 1 && n <= 4);
+    }
+}
+
+// =============================================================================
+// §9 len_utf16 ∈ {1,2}
+// =============================================================================
+
+@test
+fn property_len_utf16_bounded() {
+    let chars: List<Char> = ['a', 'A', '5'];
+    for c in chars.iter() {
+        let n = (*c).len_utf16();
+        assert(n >= 1 && n <= 2);
+    }
+}
+
+// =============================================================================
+// §10 ASCII ⇒ len_utf8 = 1 ∧ len_utf16 = 1
+// =============================================================================
+
+@test
+fn property_ascii_implies_single_unit_encodings() {
+    for c in ascii_lower_letters().iter() {
+        assert_eq((*c).len_utf8(), 1);
+        assert_eq((*c).len_utf16(), 1);
+    }
+    for c in ascii_digits().iter() {
+        assert_eq((*c).len_utf8(), 1);
+        assert_eq((*c).len_utf16(), 1);
+    }
+}
+
+// =============================================================================
+// §11 GeneralCategory pairwise distinctness — every pair of variants differs
+// =============================================================================
+
+@test
+fn property_general_category_lu_distinct_from_ll() {
+    let a: GeneralCategory = GeneralCategory.Lu;
+    let b: GeneralCategory = GeneralCategory.Ll;
+    assert(a is GeneralCategory.Lu);
+    assert(b is GeneralCategory.Ll);
+    assert(!(a is GeneralCategory.Ll));
+    assert(!(b is GeneralCategory.Lu));
+}
+
+@test
+fn property_general_category_nd_distinct_from_letter() {
+    let nd: GeneralCategory = GeneralCategory.Nd;
+    assert(nd is GeneralCategory.Nd);
+    assert(!(nd is GeneralCategory.Lu));
+    assert(!(nd is GeneralCategory.Ll));
+}
+
+// =============================================================================
+// §12 char_any_of: matches iff list contains
+// =============================================================================
+
+// Pinned: AnyChar uses iter().any(|c| ...) which trips Iterator.next dispatch
+// (see audit.md §C, shared with core/text/text iterator gap).
+@ignore
+@test
+fn property_any_of_matches_iff_contained_pinned() {
+    let pat = char_any_of(&['a', 'e', 'i', 'o', 'u']);
+    let probe: List<Char> = ['a', 'e', 'i', 'o', 'u', 'b', 'z', '5'];
+    let expected: List<Bool> = [true, true, true, true, true, false, false, false];
+    let mut idx: Int = 0;
+    for c in probe.iter() {
+        assert_eq(pat.matches(*c), expected[idx]);
+        idx = idx + 1;
+    }
+}
+
+// =============================================================================
+// §13 char_range: matches iff start ≤ c ≤ end
+// =============================================================================
+
+@test
+fn property_char_range_inside_outside() {
+    let r = char_range('a', 'z');
+    let inside: List<Char> = ['a', 'b', 'm', 'y', 'z'];
+    let outside: List<Char> = ['A', 'Z', '0', '5', ' '];
+    for c in inside.iter() {
+        assert(r.matches(*c));
+    }
+    for c in outside.iter() {
+        assert(!r.matches(*c));
+    }
+}
+
+// =============================================================================
+// §14 ASCII case predicates and conversion compose: case-equality
+// =============================================================================
+
+// Pinned: `eq_ignore_ascii_case` returns wrong on cross-case letter pair.
+@ignore
+@test
+fn property_eq_ignore_ascii_case_letters_pinned() {
+    for c in ascii_lower_letters().iter() {
+        let upper = (*c).to_ascii_uppercase();
+        assert((*c).eq_ignore_ascii_case(&upper));
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

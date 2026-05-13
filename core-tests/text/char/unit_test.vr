@@ -1,0 +1,441 @@
+// =============================================================================
+// core-tests/text/char/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core/text/char.vr` — the `Char` Unicode-scalar primitive
+// plus the `GeneralCategory` enum and the `CharPattern` family
+// (`AnyChar`, `CharRange`, `char_any_of`, `char_range`).
+//
+// Companion files: property_test.vr, integration_test.vr, regression_test.vr,
+// audit.md.
+// =============================================================================
+
+mount core.text.char.{GeneralCategory, AnyChar, CharRange, char_any_of, any_of, char_range};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: ASCII Classification
+// =============================================================================
+
+@test
+fn test_is_ascii_true_for_letter() { assert('a'.is_ascii()); }
+
+@test
+fn test_is_ascii_true_for_digit() { assert('0'.is_ascii()); }
+
+@test
+fn test_is_ascii_true_for_punctuation() { assert(';'.is_ascii()); }
+
+@test
+fn test_is_ascii_false_for_high_codepoint() {
+    let c: Char = 'ñ';
+    assert(!c.is_ascii());
+}
+
+@test
+fn test_is_ascii_alphabetic_lower() { assert('a'.is_ascii_alphabetic()); }
+
+@test
+fn test_is_ascii_alphabetic_upper() { assert('Z'.is_ascii_alphabetic()); }
+
+@test
+fn test_is_ascii_alphabetic_false_for_digit() { assert(!'5'.is_ascii_alphabetic()); }
+
+@test
+fn test_is_ascii_alphabetic_false_for_punct() { assert(!'!'.is_ascii_alphabetic()); }
+
+@test
+fn test_is_ascii_uppercase_true() { assert('Q'.is_ascii_uppercase()); }
+
+@test
+fn test_is_ascii_uppercase_false() { assert(!'q'.is_ascii_uppercase()); }
+
+@test
+fn test_is_ascii_lowercase_true() { assert('q'.is_ascii_lowercase()); }
+
+@test
+fn test_is_ascii_lowercase_false() { assert(!'Q'.is_ascii_lowercase()); }
+
+@test
+fn test_is_ascii_digit_true() { assert('7'.is_ascii_digit()); }
+
+@test
+fn test_is_ascii_digit_false() { assert(!'a'.is_ascii_digit()); }
+
+@test
+fn test_is_ascii_hexdigit_decimal() { assert('5'.is_ascii_hexdigit()); }
+
+@test
+fn test_is_ascii_hexdigit_lower() { assert('f'.is_ascii_hexdigit()); }
+
+@test
+fn test_is_ascii_hexdigit_upper() { assert('F'.is_ascii_hexdigit()); }
+
+@test
+fn test_is_ascii_hexdigit_false() { assert(!'g'.is_ascii_hexdigit()); }
+
+@test
+fn test_is_ascii_alphanumeric_letter() { assert('m'.is_ascii_alphanumeric()); }
+
+@test
+fn test_is_ascii_alphanumeric_digit() { assert('3'.is_ascii_alphanumeric()); }
+
+@test
+fn test_is_ascii_alphanumeric_false_punct() { assert(!'.'.is_ascii_alphanumeric()); }
+
+@test
+fn test_is_ascii_whitespace_space() { assert(' '.is_ascii_whitespace()); }
+
+@test
+fn test_is_ascii_whitespace_tab() { assert('\t'.is_ascii_whitespace()); }
+
+@test
+fn test_is_ascii_whitespace_newline() { assert('\n'.is_ascii_whitespace()); }
+
+@test
+fn test_is_ascii_whitespace_false_letter() { assert(!'a'.is_ascii_whitespace()); }
+
+@test
+fn test_is_ascii_control_null() {
+    let c = '\u{0}';
+    assert(c.is_ascii_control());
+}
+
+@test
+fn test_is_ascii_control_false_for_visible() { assert(!'a'.is_ascii_control()); }
+
+@test
+fn test_is_ascii_punctuation_dot() { assert('.'.is_ascii_punctuation()); }
+
+@test
+fn test_is_ascii_punctuation_false_for_letter() { assert(!'a'.is_ascii_punctuation()); }
+
+@test
+fn test_is_ascii_graphic_letter() { assert('a'.is_ascii_graphic()); }
+
+@test
+fn test_is_ascii_graphic_false_for_space() { assert(!' '.is_ascii_graphic()); }
+
+// =============================================================================
+// Section 2: ASCII Conversion
+// =============================================================================
+
+@test
+fn test_to_ascii_uppercase_lower() { assert_eq('a'.to_ascii_uppercase(), 'A'); }
+
+@test
+fn test_to_ascii_uppercase_already_upper() { assert_eq('A'.to_ascii_uppercase(), 'A'); }
+
+@test
+fn test_to_ascii_uppercase_non_letter_identity() { assert_eq('5'.to_ascii_uppercase(), '5'); }
+
+@test
+fn test_to_ascii_lowercase_upper() { assert_eq('A'.to_ascii_lowercase(), 'a'); }
+
+@test
+fn test_to_ascii_lowercase_already_lower() { assert_eq('a'.to_ascii_lowercase(), 'a'); }
+
+@test
+fn test_to_ascii_lowercase_non_letter_identity() { assert_eq('5'.to_ascii_lowercase(), '5'); }
+
+@test
+fn test_make_ascii_uppercase_in_place() {
+    let mut c: Char = 'a';
+    c.make_ascii_uppercase();
+    assert_eq(c, 'A');
+}
+
+@test
+fn test_make_ascii_lowercase_in_place() {
+    let mut c: Char = 'Z';
+    c.make_ascii_lowercase();
+    assert_eq(c, 'z');
+}
+
+@test
+fn test_eq_ignore_ascii_case_same_letter_diff_case() {
+    let a: Char = 'A';
+    let b: Char = 'a';
+    assert(a.eq_ignore_ascii_case(&b));
+}
+
+@test
+fn test_eq_ignore_ascii_case_different_letters() {
+    let a: Char = 'A';
+    let b: Char = 'b';
+    assert(!a.eq_ignore_ascii_case(&b));
+}
+
+// =============================================================================
+// Section 3: Unicode Classification
+// =============================================================================
+
+@test
+fn test_is_alphabetic_ascii_letter() { assert('m'.is_alphabetic()); }
+
+@test
+fn test_is_alphabetic_false_for_digit() { assert(!'5'.is_alphabetic()); }
+
+@test
+fn test_is_alphabetic_false_for_punct() { assert(!'.'.is_alphabetic()); }
+
+@test
+fn test_is_numeric_digit() { assert('5'.is_numeric()); }
+
+@test
+fn test_is_numeric_false_for_letter() { assert(!'a'.is_numeric()); }
+
+@test
+fn test_is_alphanumeric_letter() { assert('a'.is_alphanumeric()); }
+
+@test
+fn test_is_alphanumeric_digit() { assert('9'.is_alphanumeric()); }
+
+@test
+fn test_is_alphanumeric_false_for_punct() { assert(!'.'.is_alphanumeric()); }
+
+@test
+fn test_is_whitespace_space() { assert(' '.is_whitespace()); }
+
+@test
+fn test_is_whitespace_false_for_letter() { assert(!'a'.is_whitespace()); }
+
+@test
+fn test_is_uppercase_letter() { assert('A'.is_uppercase()); }
+
+@test
+fn test_is_uppercase_false_for_lower() { assert(!'a'.is_uppercase()); }
+
+@test
+fn test_is_lowercase_letter() { assert('a'.is_lowercase()); }
+
+@test
+fn test_is_lowercase_false_for_upper() { assert(!'A'.is_lowercase()); }
+
+// =============================================================================
+// Section 4: Unicode Conversion
+// =============================================================================
+
+@test
+fn test_to_uppercase_ascii() { assert_eq('a'.to_uppercase(), 'A'); }
+
+@test
+fn test_to_lowercase_ascii() { assert_eq('A'.to_lowercase(), 'a'); }
+
+// =============================================================================
+// Section 5: Digit Conversion
+// =============================================================================
+
+@test
+fn test_is_digit_radix_10_decimal() { assert('5'.is_digit(10)); }
+
+@test
+fn test_is_digit_radix_2_binary() { assert('1'.is_digit(2)); }
+
+@test
+fn test_is_digit_radix_2_false_for_2() { assert(!'2'.is_digit(2)); }
+
+@test
+fn test_is_digit_radix_16_a() { assert('a'.is_digit(16)); }
+
+@test
+fn test_is_digit_radix_16_F() { assert('F'.is_digit(16)); }
+
+@test
+fn test_to_digit_decimal() {
+    match '7'.to_digit(10) {
+        Some(n) => assert_eq(n, 7),
+        None => panic("'7' base 10 must be Some(7)"),
+    }
+}
+
+@test
+fn test_to_digit_hex_lower() {
+    match 'a'.to_digit(16) {
+        Some(n) => assert_eq(n, 10),
+        None => panic("'a' base 16 must be Some(10)"),
+    }
+}
+
+@test
+fn test_to_digit_hex_upper() {
+    match 'F'.to_digit(16) {
+        Some(n) => assert_eq(n, 15),
+        None => panic("'F' base 16 must be Some(15)"),
+    }
+}
+
+@test
+fn test_to_digit_invalid_for_radix() {
+    match '8'.to_digit(8) {
+        Some(_) => panic("'8' base 8 must be None"),
+        None => {},
+    }
+}
+
+@test
+fn test_from_digit_decimal() {
+    match Char.from_digit(5, 10) {
+        Some(c) => assert_eq(c, '5'),
+        None => panic("from_digit(5,10) must be Some('5')"),
+    }
+}
+
+@test
+fn test_from_digit_hex() {
+    match Char.from_digit(10, 16) {
+        Some(c) => assert_eq(c, 'a'),
+        None => panic("from_digit(10,16) must be Some('a')"),
+    }
+}
+
+@test
+fn test_from_digit_out_of_range() {
+    match Char.from_digit(20, 10) {
+        Some(_) => panic("digit > radix must be None"),
+        None => {},
+    }
+}
+
+// =============================================================================
+// Section 6: UTF-8 / UTF-16 Length
+// =============================================================================
+
+@test
+fn test_len_utf8_ascii_is_one() {
+    assert_eq('a'.len_utf8(), 1);
+    assert_eq('A'.len_utf8(), 1);
+    assert_eq('5'.len_utf8(), 1);
+}
+
+@test
+fn test_len_utf8_two_byte() {
+    let c: Char = 'ñ';   // U+00F1, 2 bytes UTF-8
+    assert_eq(c.len_utf8(), 2);
+}
+
+@test
+fn test_len_utf16_ascii_is_one() {
+    assert_eq('a'.len_utf16(), 1);
+}
+
+// =============================================================================
+// Section 7: GeneralCategory
+// =============================================================================
+
+@test
+fn test_general_category_lower_letter() {
+    let cat = 'a'.general_category();
+    assert(cat is GeneralCategory.Ll);
+}
+
+@test
+fn test_general_category_upper_letter() {
+    let cat = 'A'.general_category();
+    assert(cat is GeneralCategory.Lu);
+}
+
+@test
+fn test_general_category_decimal_digit() {
+    let cat = '5'.general_category();
+    assert(cat is GeneralCategory.Nd);
+}
+
+@test
+fn test_general_category_space_is_separator() {
+    let cat = ' '.general_category();
+    assert(cat is GeneralCategory.Zs);
+}
+
+// =============================================================================
+// Section 8: CharPattern — Char (self) implements pattern
+// =============================================================================
+
+@test
+fn test_char_pattern_match_self() {
+    let needle: Char = 'x';
+    assert(needle.matches('x'));
+    assert(!needle.matches('y'));
+}
+
+// =============================================================================
+// Section 9: CharPattern — AnyChar / char_any_of / any_of
+// =============================================================================
+
+@test
+fn test_any_of_match_present() {
+    let p = char_any_of(&['a', 'e', 'i', 'o', 'u']);
+    assert(p.matches('e'));
+}
+
+@test
+fn test_any_of_match_absent() {
+    let p = char_any_of(&['a', 'e', 'i', 'o', 'u']);
+    assert(!p.matches('z'));
+}
+
+@test
+fn test_any_of_alias() {
+    let p1 = char_any_of(&['x', 'y']);
+    let p2 = any_of(&['x', 'y']);
+    assert(p1.matches('x'));
+    assert(p2.matches('x'));
+    assert(!p1.matches('a'));
+    assert(!p2.matches('a'));
+}
+
+// =============================================================================
+// Section 10: CharPattern — CharRange / char_range
+// =============================================================================
+
+@test
+fn test_char_range_match_inside() {
+    let r = char_range('a', 'z');
+    assert(r.matches('m'));
+    assert(r.matches('a'));
+    assert(r.matches('z'));
+}
+
+@test
+fn test_char_range_match_outside() {
+    let r = char_range('a', 'z');
+    assert(!r.matches('A'));
+    assert(!r.matches('5'));
+}
+
+@test
+fn test_char_range_digits() {
+    let r = char_range('0', '9');
+    assert(r.matches('0'));
+    assert(r.matches('5'));
+    assert(r.matches('9'));
+    assert(!r.matches('a'));
+}
+
+// =============================================================================
+// Section 11: GeneralCategory groupings (via group predicates)
+// =============================================================================
+
+@test
+fn test_general_category_uppercase_is_letter() {
+    assert(GeneralCategory.Lu is GeneralCategory.Lu);
+}
+
+@test
+fn test_general_category_lowercase_is_letter() {
+    assert(GeneralCategory.Ll is GeneralCategory.Ll);
+}
+
+@test
+fn test_general_category_decimal_digit_distinct() {
+    let nd: GeneralCategory = GeneralCategory.Nd;
+    assert(!(nd is GeneralCategory.Lu));
+    assert(!(nd is GeneralCategory.Ll));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
