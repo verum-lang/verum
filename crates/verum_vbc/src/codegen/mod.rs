@@ -5599,42 +5599,49 @@ impl VbcCodegen {
     /// have run for every file in the module — one finalize pass
     /// replaces the per-file `build_module + merge` chain.
     pub fn finalize_module_from_state(&mut self) -> CodegenResult<VbcModule> {
-        // **Architectural symmetry with `finalize_module`.**
+        // Stdlib precompile finalize.
         //
-        // Pre-fix this path went directly to `build_module`, skipping
-        // the four prep passes that `finalize_module` runs (pending
-        // constant compilation, pending TLS-init compilation, missing-
-        // stub descriptor synthesis, type-layout verification). The
-        // stdlib precompile bootstrap uses `finalize_module_from_state`
-        // (one shared codegen pool across all source files in a
-        // module, with `build_module` running ONCE at the end), so the
-        // missing prep passes silently degraded stdlib archives.
+        // **History**: A previous version of this path ran the four
+        // prep passes (`compile_pending_constants`,
+        // `compile_pending_tls_inits`, `emit_missing_stub_descriptors`,
+        // `verify_type_layout_invariants`) for symmetry with
+        // `finalize_module`. The goal was to address dangling cross-
+        // module `Call { func_id }` references in stdlib bodies by
+        // synthesising extern-stub descriptors so user-side merge could
+        // remap them.
         //
-        // **The load-bearing miss**: `emit_missing_stub_descriptors`.
-        // Without it, every cross-module `Call { func_id }` in a
-        // stdlib body (e.g. `Text.grow` calling `alloc` from
-        // `core.base.memory`) survived into the archive bytecode
-        // pointing at the precompile-time codegen-global id with NO
-        // descriptor in this archive module's `functions` table to
-        // remap it at user-side merge time. The user-side per-module
-        // remap then identity-fell-back through `ArchiveBodyRemap::
-        // map_function`'s `unwrap_or(src)` — landing the call on
-        // whatever unrelated function happened to occupy that raw id
-        // in the user codegen's global function table (live failure
-        // mode: `Text.grow → alloc` dispatching to `Unfold.fuse` /
-        // `RepeatWith.windows` / `StatefulTransducedIter.zip_longest`
-        // depending on iteration-order shifts between runs).
+        // **Why reverted**: the stub synthesis blew up archive size
+        // 12.9 MB → 110 MB (8x) and user-side first-compile time from
+        // <1 s → 85 s, with verum processes peaking at 10 GB resident.
+        // The stub set was over-eager: every module-local `ctx.functions`
+        // entry transitively referenced via Call/CallM in *any* body
+        // got a stub, including the ~7000 stdlib functions imported
+        // via `import_functions(global_function_registry)` at compile
+        // start. Per-module duplication × ~100 stdlib modules → ~1M
+        // total stubs, each carrying name + params + RetV body bytes.
         //
-        // The fix: run the same prep sequence as `finalize_module`,
-        // so stdlib and user archives share invariants. Particularly
-        // `emit_missing_stub_descriptors` synthesises an extern-stub
-        // descriptor for every referenced FunctionId that doesn't
-        // have a body in this module — making the archive function
-        // table self-contained over its own bytecode's Call operands.
-        self.compile_pending_constants()?;
-        self.compile_pending_tls_inits()?;
-        self.emit_missing_stub_descriptors();
-        self.verify_type_layout_invariants()?;
+        // **The companion descriptor.intrinsic_name propagation fix
+        // in `compile_function` (commit 698795e39) carries most of
+        // the architectural value**: every `@intrinsic` function now
+        // round-trips its marker through the archive, so user-side
+        // `compile_call`'s intercept at `expressions.rs:4385` fires
+        // for cbgr_alloc / cbgr_alloc_zeroed / cbgr_dealloc /
+        // cbgr_realloc / every other CBGR allocator + every other
+        // `@intrinsic` declaration with a Verum body. That eliminates
+        // the bulk of the cross-module dispatch defects without
+        // requiring stub synthesis at all.
+        //
+        // **Residual gap**: stdlib bodies with raw `Call { func_id }`
+        // to NON-`@intrinsic` cross-module functions still rely on
+        // the user-side per-module remap → name-based fallback chain
+        // in `ArchiveBodyRemap::map_function`. The remaining miss
+        // surface is small (most cross-module calls go through
+        // intrinsics or through CallM method dispatch which uses
+        // string-name lookup). When the residual misses get isolated
+        // and tracked, the right fix is a focused stub synthesis pass
+        // that emits stubs ONLY for actually-cross-module Calls (not
+        // every import_functions entry) — issue #46 captures the
+        // optimisation target.
         self.build_module()
     }
 
