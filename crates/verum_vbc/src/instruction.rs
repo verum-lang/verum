@@ -8663,6 +8663,28 @@ pub enum CbgrSubOpcode {
     /// Format: `dst:reg, list:reg, index:reg`
     RefListElement = 0x0B,
 
+    /// Create interior reference to a record field by field-index, with
+    /// heap-anchored pointer semantics.
+    ///
+    /// Unlike `RefInterior` (which takes a pre-computed byte offset and
+    /// only handles bare raw-pointer bases), `RefField` accepts any
+    /// pointer-bearing receiver — raw `Value::from_ptr`, CBGR register
+    /// reference, `ThinRef`, `FatRef` — and routes through the same
+    /// auto-deref chain as `GetF` (CBGR allocation header, Heap<T>
+    /// wrapper, mutable interior ptr, Shared<T> refcount slot, variant
+    /// wrapper).  The resulting `Value::from_ptr(field_ptr)` is
+    /// inserted into `cbgr_mutable_ptrs` so the generic `Deref` /
+    /// `DerefMut` handlers read and write through it.
+    ///
+    /// Closes the `&self.field` return-ref defect (task #121): the
+    /// generic `Ref` path encoded the method-frame's stack-slot
+    /// abs_index, which `pop_frame`'s generation bump invalidated even
+    /// when the heap object was alive in the caller.  This opcode
+    /// produces a heap-anchored pointer that survives frame teardown.
+    ///
+    /// Format: `dst:reg, base:reg, field_idx:varint`
+    RefField = 0x0C,
+
     // ========================================================================
     // Capability Operations (0x10-0x1F)
     // ========================================================================
@@ -9006,6 +9028,7 @@ impl CbgrSubOpcode {
             0x09 => Some(Self::SliceSplitAt),
             0x0A => Some(Self::RefSliceRaw),
             0x0B => Some(Self::RefListElement),
+            0x0C => Some(Self::RefField),
             // Capability Operations
             0x10 => Some(Self::CapAttenuate),
             0x11 => Some(Self::CapTransfer),
@@ -9101,6 +9124,7 @@ impl CbgrSubOpcode {
             Self::SliceSplitAt       => m!("CBGR_SLICE_SPLIT_AT",    SliceInteriorReferences, cref=true,  mcaps=false, val=false),
             Self::RefSliceRaw        => m!("CBGR_REF_SLICE_RAW",     SliceInteriorReferences, cref=true,  mcaps=false, val=false),
             Self::RefListElement     => m!("CBGR_REF_LIST_ELEM",     SliceInteriorReferences, cref=true,  mcaps=false, val=false),
+            Self::RefField           => m!("CBGR_REF_FIELD",         SliceInteriorReferences, cref=true,  mcaps=false, val=false),
 
             // ===== Capability Operations (0x10-0x1F) =====
             Self::CapAttenuate       => m!("CBGR_CAP_ATTENUATE",     CapabilityOperations,    cref=false, mcaps=true,  val=false),
@@ -10105,6 +10129,8 @@ pub enum TextCategory {
 }
 
 impl TextCategory {
+    /// Returns the display string for this category — used by Debug
+    /// formatting and category-grouped intrinsic-registry reports.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Construction   => "Construction",
@@ -17000,11 +17026,11 @@ mod tests {
     }
 
     #[test]
-    fn cbgr_meta_count_pinned_at_forty_three() {
+    fn cbgr_meta_count_pinned_at_forty_four() {
         let mut count = 0;
         for_every_cbgr_sub_opcode(|_| count += 1);
-        assert_eq!(count, 43,
-            "CbgrSubOpcode variant count drift: expected 43, got {}", count);
+        assert_eq!(count, 44,
+            "CbgrSubOpcode variant count drift: expected 44, got {}", count);
     }
 
     #[test]
@@ -17029,16 +17055,16 @@ mod tests {
 
     #[test]
     fn cbgr_meta_creates_reference_set_pinned() {
-        // The set of reference-creating variants — 14 total after
-        // closing the legacy 11/14 undercount.
-        // Pinning the count + named regression assertions guards
-        // against future drift.
+        // The set of reference-creating variants — 15 total after
+        // adding `RefField` (task #121) and closing the legacy 11/14
+        // undercount.  Pinning the count + named regression
+        // assertions guards against future drift.
         let mut count = 0;
         for_every_cbgr_sub_opcode(|op| {
             if op.creates_reference() { count += 1; }
         });
-        assert_eq!(count, 14,
-            "creates_reference count drift: expected 14 (was 11 pre-fix)");
+        assert_eq!(count, 15,
+            "creates_reference count drift: expected 15 (added RefField for task #121)");
         // Named regression assertions for the closed gaps:
         assert!(CbgrSubOpcode::SliceSubslice.creates_reference(),
             "SliceSubslice produces a new FatRef per its format docs");
