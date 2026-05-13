@@ -6787,11 +6787,28 @@ pub(super) fn dispatch_primitive_method(
             // `bytes` / `lines` / `char_indices` are not currently
             // intercepted (verified) so their stdlib bodies run cleanly.
             "pad_left" | "pad_start" => {
+                // `Text.pad_left(&self, width: Int, fill: Char) -> Text`.
+                //
+                // pad_char arg is a Char (NaN-boxed as Int) — read it
+                // via `as_i64` → `char::from_u32`, NOT via
+                // `extract_string` which fell through to `<value:N>` and
+                // returned '<' as the pad char.
                 let width = state.get_reg(Reg(args.start.0)).as_i64() as usize;
                 let pad_char = if args.count > 1 {
                     let pad_arg = state.get_reg(Reg(args.start.0 + 1));
-                    let pad_str = extract_string(&pad_arg, state);
-                    pad_str.chars().next().unwrap_or(' ')
+                    let arg = if is_cbgr_ref(&pad_arg) {
+                        let (abs_index, _) = decode_cbgr_ref(pad_arg.as_i64());
+                        state.registers.get_absolute(abs_index)
+                    } else {
+                        pad_arg
+                    };
+                    if arg.is_int() {
+                        char::from_u32(arg.as_i64() as u32).unwrap_or(' ')
+                    } else if arg.is_small_string() || is_heap_string(&arg) {
+                        extract_string(&arg, state).chars().next().unwrap_or(' ')
+                    } else {
+                        ' '
+                    }
                 } else {
                     ' '
                 };
@@ -6809,8 +6826,19 @@ pub(super) fn dispatch_primitive_method(
                 let width = state.get_reg(Reg(args.start.0)).as_i64() as usize;
                 let pad_char = if args.count > 1 {
                     let pad_arg = state.get_reg(Reg(args.start.0 + 1));
-                    let pad_str = extract_string(&pad_arg, state);
-                    pad_str.chars().next().unwrap_or(' ')
+                    let arg = if is_cbgr_ref(&pad_arg) {
+                        let (abs_index, _) = decode_cbgr_ref(pad_arg.as_i64());
+                        state.registers.get_absolute(abs_index)
+                    } else {
+                        pad_arg
+                    };
+                    if arg.is_int() {
+                        char::from_u32(arg.as_i64() as u32).unwrap_or(' ')
+                    } else if arg.is_small_string() || is_heap_string(&arg) {
+                        extract_string(&arg, state).chars().next().unwrap_or(' ')
+                    } else {
+                        ' '
+                    }
                 } else {
                     ' '
                 };
@@ -6823,6 +6851,60 @@ pub(super) fn dispatch_primitive_method(
                     let padded = format!("{}{}", text, padding);
                     return Ok(Some(alloc_string_value(state, &padded)?));
                 }
+            }
+            "center" => {
+                // `Text.center(&self, width: Int, fill: Char) -> Text`.
+                // Pads on both sides; extra char (when imbalance) goes
+                // to the right side (matches Python `str.center`).
+                let width = state.get_reg(Reg(args.start.0)).as_i64() as usize;
+                let pad_char = if args.count > 1 {
+                    let pad_arg = state.get_reg(Reg(args.start.0 + 1));
+                    let arg = if is_cbgr_ref(&pad_arg) {
+                        let (abs_index, _) = decode_cbgr_ref(pad_arg.as_i64());
+                        state.registers.get_absolute(abs_index)
+                    } else {
+                        pad_arg
+                    };
+                    if arg.is_int() {
+                        char::from_u32(arg.as_i64() as u32).unwrap_or(' ')
+                    } else if arg.is_small_string() || is_heap_string(&arg) {
+                        extract_string(&arg, state).chars().next().unwrap_or(' ')
+                    } else {
+                        ' '
+                    }
+                } else {
+                    ' '
+                };
+                let char_count = text.chars().count();
+                if char_count >= width {
+                    return Ok(Some(alloc_string_value(state, &text)?));
+                }
+                let total = width - char_count;
+                let left = total / 2;
+                let right = total - left;
+                let left_pad: String = std::iter::repeat_n(pad_char, left).collect();
+                let right_pad: String = std::iter::repeat_n(pad_char, right).collect();
+                let centered = format!("{}{}{}", left_pad, text, right_pad);
+                return Ok(Some(alloc_string_value(state, &centered)?));
+            }
+            "zfill" => {
+                // `Text.zfill(&self, width: Int) -> Text`. Pads with '0'
+                // on the left, preserving leading sign character.
+                let width = state.get_reg(Reg(args.start.0)).as_i64() as usize;
+                let char_count = text.chars().count();
+                if char_count >= width {
+                    return Ok(Some(alloc_string_value(state, &text)?));
+                }
+                let pad_len = width - char_count;
+                let (sign, rest) = match text.chars().next() {
+                    Some(c) if c == '+' || c == '-' => {
+                        (c.to_string(), text[c.len_utf8()..].to_string())
+                    }
+                    _ => (String::new(), text.clone()),
+                };
+                let zeros: String = std::iter::repeat_n('0', pad_len).collect();
+                let padded = format!("{}{}{}", sign, zeros, rest);
+                return Ok(Some(alloc_string_value(state, &padded)?));
             }
             // Pre-existing `to_int` / `to_float` arms removed: they
             // wrapped in Maybe<T> but the source signature is bare
