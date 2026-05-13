@@ -395,7 +395,36 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
     //
     // We unwrap into LOCAL copies so the rest of the comparison logic
     // operates on the dereferenced values uniformly.
-    let va_unwrapped = if is_cbgr_ref(va) {
+    // Auto-deref tracked mutable interior pointers (`cbgr_mutable_ptrs`).
+    // These are heap-anchored field/element references produced by
+    // `RefField` (task #121) and `RefListElement` — the pointer
+    // addresses a `Value`-aligned slot inside a heap object, not a
+    // standalone heap object header.  Without this unwrap,
+    // `assert_eq(info.message(), &"literal")` compared the raw
+    // field pointer's first 4 bytes against the literal Text's
+    // ObjectHeader, producing a spurious type-id mismatch — the
+    // heap-anchored ref unique to task #121's fix landed in
+    // type-id-mismatch territory because `deep_value_eq` treated
+    // it as a regular object pointer.  Closes task #141.
+    let unwrap_mut_ptr = |v: &Value| -> Option<Value> {
+        if v.is_regular_ptr()
+            && !v.is_nil()
+            && state.cbgr_mutable_ptrs.contains(&(v.as_ptr::<u8>() as usize))
+            && (v.as_ptr::<u8>() as usize).is_multiple_of(std::mem::align_of::<Value>())
+        {
+            // SAFETY: `cbgr_mutable_ptrs` is inserted only by
+            // `RefField` / `RefListElement` / pattern-matching field
+            // refs, all of which guarantee a `Value`-aligned slot in
+            // a live heap object.  Alignment verified above.
+            Some(unsafe { *(v.as_ptr::<u8>() as *const Value) })
+        } else {
+            None
+        }
+    };
+
+    let va_unwrapped = if let Some(inner) = unwrap_mut_ptr(va) {
+        Some(inner)
+    } else if is_cbgr_ref(va) {
         let (abs_idx, _gen) = decode_cbgr_ref(va.as_i64());
         Some(state.registers.get_absolute(abs_idx))
     } else if va.is_thin_ref() {
@@ -408,7 +437,9 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
     } else {
         None
     };
-    let vb_unwrapped = if is_cbgr_ref(vb) {
+    let vb_unwrapped = if let Some(inner) = unwrap_mut_ptr(vb) {
+        Some(inner)
+    } else if is_cbgr_ref(vb) {
         let (abs_idx, _gen) = decode_cbgr_ref(vb.as_i64());
         Some(state.registers.get_absolute(abs_idx))
     } else if vb.is_thin_ref() {
@@ -433,8 +464,20 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
         let b = vb_unwrapped.unwrap();
         return deep_value_eq_depth(va, &b, state, depth + 1);
     }
-    // (Both-ref and neither-ref cases fall through to the existing
-    // type-specific branches.)
+    // Both unwrapped — heap-anchored RefField pointer can sit on
+    // either side, mixed with CBGR-ref / ThinRef.  Recurse only
+    // when at least one side is a mutable-interior ptr — the
+    // existing both-thin / both-CBGR / thin↔CBGR branches handle
+    // the legacy ref classes correctly.
+    if let (Some(a), Some(b)) = (va_unwrapped, vb_unwrapped) {
+        let either_is_mut_ptr =
+            unwrap_mut_ptr(va).is_some() || unwrap_mut_ptr(vb).is_some();
+        if either_is_mut_ptr {
+            return deep_value_eq_depth(&a, &b, state, depth + 1);
+        }
+    }
+    // (Remaining both-ref and neither-ref cases fall through to
+    // the existing type-specific branches.)
 
     // Handle ThinRef values - compare dereferenced values
     if va.is_thin_ref() && vb.is_thin_ref() {
