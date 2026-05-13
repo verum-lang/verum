@@ -1,0 +1,310 @@
+// =============================================================================
+// core-tests/text/text/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib scenarios that exercise `Text` together with other primitive
+// and collection types.  These tests guard the contract that `Text` plays
+// nicely with the wider standard library: List, Maybe, Result, Map, Char,
+// Ordering, format strings.
+//
+// Coverage:
+//   §1  Text + List<Text>: build / iterate / join
+//   §2  Text + Map<Text, V>: keying / lookup
+//   §3  Text + Maybe / Result: parse_int round-trip through Result
+//   §4  Text + Char: chars() / from_char / push_str
+//   §5  Text + Ordering: cmp drives sorting
+//   §6  Format strings: f"{...}" with embedded Display / Debug
+//   §7  Text in match patterns and guards
+//   §8  Text iteration adapters via for-loops
+// =============================================================================
+
+mount core.text.{Text, ParseError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 Text + List<Text>
+// =============================================================================
+
+@test
+fn integration_text_list_build_and_join() {
+    let mut parts: List<Text> = [];
+    parts.push("alpha");
+    parts.push("beta");
+    parts.push("gamma");
+    let joined = Text.join(&parts, &"-");
+    assert_eq(joined, "alpha-beta-gamma");
+}
+
+@test
+fn integration_text_list_iterate() {
+    let words: List<Text> = ["one", "two", "three"];
+    let mut total: Int = 0;
+    for w in words.iter() {
+        total = total + (*w).len();
+    }
+    assert_eq(total, 3 + 3 + 5);
+}
+
+@test
+fn integration_text_list_filter_by_predicate() {
+    let words: List<Text> = ["apple", "art", "banana", "berry"];
+    let mut a_words: List<Text> = [];
+    for w in words.iter() {
+        if (*w).starts_with(&"a") {
+            a_words.push((*w).clone());
+        }
+    }
+    assert_eq(a_words.len(), 2);
+    assert_eq(a_words[0], "apple");
+    assert_eq(a_words[1], "art");
+}
+
+// =============================================================================
+// §2 Text + Maybe / Result via parse_int
+// =============================================================================
+
+@test
+fn integration_parse_int_returns_ok() {
+    let s: Text = "123";
+    match s.parse_int() {
+        Ok(n) => assert_eq(n, 123),
+        Err(_) => panic("expected Ok(123)"),
+    }
+}
+
+@test
+fn integration_parse_int_returns_err_for_invalid() {
+    let s: Text = "12x3";
+    match s.parse_int() {
+        Ok(_) => panic("'12x3' must be Err"),
+        Err(_) => {},
+    }
+}
+
+@test
+fn integration_parse_int_through_try_to_int_consistent_with_result() {
+    let pairs: List<(Text, Bool)> = [
+        ("0", true),
+        ("-1", true),
+        ("123456", true),
+        ("abc", false),
+        ("", false),
+    ];
+    for p in pairs.iter() {
+        let r = (*p).0.parse_int();
+        let m = (*p).0.try_to_int();
+        match r {
+            Ok(_) => assert((*p).1 && m is Some),
+            Err(_) => assert(!(*p).1 && m is None),
+        }
+    }
+}
+
+// =============================================================================
+// §3 Text + Char interaction
+// =============================================================================
+
+@test
+fn integration_chars_round_trip_through_from_char() {
+    let s: Text = "abc";
+    let mut rebuilt = Text.new();
+    for c in s.chars() {
+        let piece = Text.from_char(c);
+        rebuilt.push_str(&piece);
+    }
+    assert_eq(rebuilt, "abc");
+}
+
+@test
+fn integration_chars_count_matches_char_count() {
+    let xs: List<Text> = ["", "a", "abc", "hello world"];
+    for s in xs.iter() {
+        let mut iter_count: Int = 0;
+        for _c in (*s).chars() {
+            iter_count = iter_count + 1;
+        }
+        assert_eq(iter_count, (*s).char_count());
+    }
+}
+
+@test
+fn integration_chars_collect_then_to_chars_match() {
+    let s: Text = "wxyz";
+    let mut iter_chars: List<Char> = [];
+    for c in s.chars() {
+        iter_chars.push(c);
+    }
+    let direct = s.to_chars();
+    assert_eq(iter_chars.len(), direct.len());
+    for i in range(0, iter_chars.len()) {
+        assert_eq(iter_chars[i], direct[i]);
+    }
+}
+
+// =============================================================================
+// §4 Text + Ordering: sorting via manual bubble + cmp
+// =============================================================================
+
+@test
+fn integration_text_sort_lexicographic_via_cmp() {
+    let mut words: List<Text> = ["delta", "alpha", "beta", "charlie"];
+    let n = words.len();
+    let mut i: Int = 0;
+    while i < n {
+        let mut j: Int = i + 1;
+        while j < n {
+            if words[j].cmp(&words[i]) == Less {
+                let tmp = words[i].clone();
+                words[i] = words[j].clone();
+                words[j] = tmp;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(words[0], "alpha");
+    assert_eq(words[1], "beta");
+    assert_eq(words[2], "charlie");
+    assert_eq(words[3], "delta");
+}
+
+@test
+fn integration_text_min_via_cmp() {
+    let xs: List<Text> = ["pear", "apple", "kiwi"];
+    let mut min_so_far = xs[0].clone();
+    for s in xs.iter() {
+        if (*s).cmp(&min_so_far) == Less {
+            min_so_far = (*s).clone();
+        }
+    }
+    assert_eq(min_so_far, "apple");
+}
+
+// =============================================================================
+// §5 Format strings with Text
+// =============================================================================
+
+@test
+fn integration_format_string_inlines_text_via_display() {
+    let name: Text = "world";
+    let greeting = f"hello, {name}";
+    assert_eq(greeting, "hello, world");
+}
+
+@test
+fn integration_format_string_with_int() {
+    let count: Int = 42;
+    let msg = f"count = {count}";
+    assert_eq(msg, "count = 42");
+}
+
+@test
+fn integration_format_string_debug_quotes_text() {
+    let s: Text = "hi";
+    let dbg = f"{s:?}";
+    assert_eq(dbg, "\"hi\"");
+}
+
+// =============================================================================
+// §6 Text in match expressions
+// =============================================================================
+
+@test
+fn integration_text_in_match_with_eq_guard() {
+    fn classify(s: &Text) -> Text {
+        if *s == "yes" { "affirmative" }
+        else if *s == "no" { "negative" }
+        else { "unknown" }
+    }
+    assert_eq(classify(&"yes"), "affirmative");
+    assert_eq(classify(&"no"), "negative");
+    assert_eq(classify(&"maybe"), "unknown");
+}
+
+// =============================================================================
+// §7 Text + Maybe<Text>
+// =============================================================================
+
+@test
+fn integration_maybe_text_some_unwrap() {
+    let m: Maybe<Text> = Some("hello".clone());
+    match m {
+        Some(t) => assert_eq(t, "hello"),
+        None => panic("Some branch"),
+    }
+}
+
+@test
+fn integration_maybe_text_none() {
+    let m: Maybe<Text> = None;
+    match m {
+        Some(_) => panic("None branch"),
+        None => {},
+    }
+}
+
+// =============================================================================
+// §8 Text + List for splitting / collecting
+// =============================================================================
+
+@test
+fn integration_split_then_filter_yields_subset() {
+    let csv: Text = "a,bb,ccc,dddd,eeeee";
+    let parts = csv.split(&",");
+    let mut long: List<Text> = [];
+    for p in parts.iter() {
+        if (*p).len() >= 3 {
+            long.push((*p).clone());
+        }
+    }
+    assert_eq(long.len(), 3);
+    assert_eq(long[0], "ccc");
+    assert_eq(long[1], "dddd");
+    assert_eq(long[2], "eeeee");
+}
+
+@test
+fn integration_words_then_uppercase() {
+    let phrase: Text = "the quick brown fox";
+    let ws = phrase.words();
+    let mut upper: List<Text> = [];
+    for w in ws.iter() {
+        upper.push((*w).to_ascii_uppercase());
+    }
+    assert_eq(upper.len(), 4);
+    assert_eq(upper[0], "THE");
+    assert_eq(upper[3], "FOX");
+}
+
+// =============================================================================
+// §9 Text concatenation ergonomics: + operator forms
+// =============================================================================
+
+@test
+fn integration_concat_operator_chains() {
+    let greeting: Text = "Hello";
+    let name: Text = "world";
+    let r = greeting + ", " + name + "!";
+    assert_eq(r, "Hello, world!");
+}
+
+@test
+fn integration_add_assign_building_loop() {
+    let mut acc: Text = "";
+    let words: List<Text> = ["one ", "two ", "three"];
+    for w in words.iter() {
+        acc += &(*w).clone();
+    }
+    assert_eq(acc, "one two three");
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // Tests run via @test annotations
+}

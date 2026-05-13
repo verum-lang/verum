@@ -1,0 +1,1488 @@
+// =============================================================================
+// core-tests/text/text/unit_test.vr
+// =============================================================================
+//
+// Unit tests for core/text/text.vr — the UTF-8 `Text` primitive.
+//
+// One @test per public method; sectioned by the source-file groupings:
+// construction, length/capacity, indexing, iteration, slicing, predicates,
+// searching, splitting, trimming, case, replacement, mutation, padding,
+// repetition/reversal, parsing, formatting, conversion, error variants,
+// protocol implementations.
+//
+// Companion files in this directory:
+//   property_test.vr     — algebraic laws (round-trips, idempotence, …)
+//   integration_test.vr  — cross-stdlib scenarios (List / Map / Maybe / Char)
+//   regression_test.vr   — pinned past defects + drift surfaces
+//   audit.md             — implementation audit findings & action items
+// =============================================================================
+
+mount core.text.{Text, Utf8Error, Utf16Error, ParseError};
+mount core.text.{Chars, ByteIter, CharIndices, Lines};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Construction
+// =============================================================================
+
+@test
+fn test_new_creates_empty() {
+    let s = Text.new();
+    assert_eq(s.len(), 0);
+    assert(s.is_empty());
+}
+
+@test
+fn test_new_equals_literal_empty() {
+    let s = Text.new();
+    let e: Text = "";
+    assert_eq(s, e);
+}
+
+@test
+fn test_with_capacity_zero_is_empty() {
+    let s = Text.with_capacity(0);
+    assert_eq(s.len(), 0);
+    assert(s.is_empty());
+}
+
+@test
+fn test_with_capacity_positive_is_empty_but_reserves() {
+    let s = Text.with_capacity(64);
+    assert_eq(s.len(), 0);
+    assert(s.is_empty());
+    // Capacity is an implementation hint; len must remain 0
+}
+
+@test
+fn test_with_capacity_negative_treated_as_empty() {
+    let s = Text.with_capacity(-1);
+    assert_eq(s.len(), 0);
+    assert(s.is_empty());
+}
+
+@test
+fn test_from_char_ascii() {
+    let s = Text.from_char('A');
+    assert_eq(s.len(), 1);
+    assert_eq(s, "A");
+}
+
+@test
+fn test_from_char_zero() {
+    let s = Text.from_char('0');
+    assert_eq(s, "0");
+}
+
+@test
+fn test_from_utf8_valid_ascii() {
+    let bytes: List<Byte> = [72 as Byte, 105 as Byte];  // "Hi"
+    let r = Text.from_utf8(&bytes);
+    match r {
+        Ok(t) => assert_eq(t, "Hi"),
+        Err(_) => panic("expected valid UTF-8"),
+    }
+}
+
+@test
+fn test_from_utf8_empty_bytes() {
+    let bytes: List<Byte> = [];
+    let r = Text.from_utf8(&bytes);
+    match r {
+        Ok(t) => assert(t.is_empty()),
+        Err(_) => panic("empty bytes are valid UTF-8"),
+    }
+}
+
+@test
+fn test_from_utf8_invalid_continuation() {
+    // 0xC0 = 2-byte leader without continuation -> invalid
+    let bytes: List<Byte> = [0xC0 as Byte, 0x20 as Byte];
+    let r = Text.from_utf8(&bytes);
+    match r {
+        Ok(_) => panic("expected Utf8Error"),
+        Err(_) => {},
+    }
+}
+
+@test
+fn test_from_utf8_lossy_replaces_invalid() {
+    // Lone continuation byte -> replaced with U+FFFD
+    let bytes: List<Byte> = [0x80 as Byte];
+    let s = Text.from_utf8_lossy(&bytes);
+    // U+FFFD is 3 bytes in UTF-8 (EF BF BD); raw `len` reports byte length.
+    assert(s.len() >= 1);
+}
+
+@test
+fn test_from_utf8_lossy_passes_valid() {
+    let bytes: List<Byte> = [0x68 as Byte, 0x69 as Byte];
+    assert_eq(Text.from_utf8_lossy(&bytes), "hi");
+}
+
+// =============================================================================
+// Section 2: Length & Capacity
+// =============================================================================
+
+@test
+fn test_len_empty() { assert_eq(Text.new().len(), 0); }
+
+@test
+fn test_len_ascii() { assert_eq("hello".len(), 5); }
+
+@test
+fn test_len_byte_count_not_char_count() {
+    // "ñ" is 2 bytes in UTF-8 (C3 B1)
+    let s: Text = "ñ";
+    assert_eq(s.len(), 2);
+}
+
+@test
+fn test_is_empty_true() { assert(Text.new().is_empty()); }
+
+@test
+fn test_is_empty_false() { assert(!"x".is_empty()); }
+
+@test
+fn test_capacity_is_non_negative() {
+    let s = Text.with_capacity(16);
+    assert(s.capacity() >= 0);
+}
+
+@test
+fn test_as_str_returns_self_view() {
+    let s: Text = "abc";
+    let v = s.as_str();
+    assert_eq(v.len(), 3);
+}
+
+@test
+fn test_as_bytes_round_trip_ascii() {
+    let s: Text = "ABC";
+    let b = s.as_bytes();
+    assert_eq(b.len(), 3);
+    assert_eq(b[0] as Int, 65);
+    assert_eq(b[1] as Int, 66);
+    assert_eq(b[2] as Int, 67);
+}
+
+@test
+fn test_as_bytes_empty() {
+    let s: Text = "";
+    let b = s.as_bytes();
+    assert_eq(b.len(), 0);
+}
+
+@test
+fn test_char_count_ascii() {
+    assert_eq("hello".char_count(), 5);
+}
+
+@test
+fn test_char_count_empty() {
+    assert_eq("".char_count(), 0);
+}
+
+// =============================================================================
+// Section 3: Indexing
+// =============================================================================
+
+@test
+fn test_byte_at_in_range() {
+    let s: Text = "AB";
+    match s.byte_at(0) {
+        Some(b) => assert_eq(b as Int, 65),
+        None => panic("byte_at(0) should be Some('A')"),
+    }
+    match s.byte_at(1) {
+        Some(b) => assert_eq(b as Int, 66),
+        None => panic("byte_at(1) should be Some('B')"),
+    }
+}
+
+@test
+fn test_byte_at_out_of_range_is_none() {
+    let s: Text = "A";
+    match s.byte_at(5) {
+        Some(_) => panic("byte_at(5) should be None"),
+        None => {},
+    }
+}
+
+@test
+fn test_char_at_in_range() {
+    let s: Text = "hi";
+    match s.char_at(0) {
+        Some(c) => assert_eq(c, 'h'),
+        None => panic("char_at(0) should be Some('h')"),
+    }
+}
+
+@test
+fn test_char_at_out_of_range() {
+    let s: Text = "hi";
+    match s.char_at(99) {
+        Some(_) => panic("char_at out of range should be None"),
+        None => {},
+    }
+}
+
+@test
+fn test_nth_char_first() {
+    let s: Text = "abc";
+    match s.nth_char(0) {
+        Some(c) => assert_eq(c, 'a'),
+        None => panic("nth_char(0) should be Some('a')"),
+    }
+}
+
+@test
+fn test_nth_char_past_end() {
+    let s: Text = "ab";
+    match s.nth_char(10) {
+        Some(_) => panic("nth_char past end should be None"),
+        None => {},
+    }
+}
+
+// =============================================================================
+// Section 4: Iteration
+// =============================================================================
+
+@test
+fn test_chars_iterator_collects_to_list() {
+    let s: Text = "abc";
+    let mut out: List<Char> = [];
+    for c in s.chars() {
+        out.push(c);
+    }
+    assert_eq(out.len(), 3);
+    assert_eq(out[0], 'a');
+    assert_eq(out[1], 'b');
+    assert_eq(out[2], 'c');
+}
+
+@test
+fn test_chars_empty_yields_nothing() {
+    let s: Text = "";
+    let mut count: Int = 0;
+    for _c in s.chars() {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_to_chars_returns_list() {
+    let s: Text = "xy";
+    let chars = s.to_chars();
+    assert_eq(chars.len(), 2);
+    assert_eq(chars[0], 'x');
+    assert_eq(chars[1], 'y');
+}
+
+@test
+fn test_bytes_iterator_count() {
+    let s: Text = "ABC";
+    let mut count: Int = 0;
+    for _b in s.bytes() {
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+}
+
+@test
+fn test_lines_single_line() {
+    let s: Text = "hello";
+    let mut count: Int = 0;
+    for _l in s.lines() {
+        count = count + 1;
+    }
+    assert_eq(count, 1);
+}
+
+@test
+fn test_lines_multi() {
+    let s: Text = "a\nb\nc";
+    let mut count: Int = 0;
+    for _l in s.lines() {
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+}
+
+@test
+fn test_char_indices_pairs() {
+    let s: Text = "ab";
+    let mut count: Int = 0;
+    let mut sum_idx: Int = 0;
+    for pair in s.char_indices() {
+        count = count + 1;
+        sum_idx = sum_idx + pair.0;
+    }
+    assert_eq(count, 2);
+    assert_eq(sum_idx, 0 + 1);
+}
+
+// =============================================================================
+// Section 5: Slicing
+// =============================================================================
+
+@test
+fn test_slice_inner() {
+    let s: Text = "hello";
+    assert_eq(s.slice(1, 4), "ell");
+}
+
+@test
+fn test_slice_full_range() {
+    let s: Text = "abc";
+    assert_eq(s.slice(0, 3), "abc");
+}
+
+@test
+fn test_slice_empty_range() {
+    let s: Text = "abc";
+    assert_eq(s.slice(1, 1), "");
+}
+
+@test
+fn test_substring_first_two() {
+    let s: Text = "abcde";
+    assert_eq(s.substring(0, 2), "ab");
+}
+
+@test
+fn test_split_at_byte() {
+    let s: Text = "hello";
+    let pair = s.split_at(2);
+    assert_eq(pair.0, "he");
+    assert_eq(pair.1, "llo");
+}
+
+@test
+fn test_split_at_zero() {
+    let s: Text = "abc";
+    let pair = s.split_at(0);
+    assert(pair.0.is_empty());
+    assert_eq(pair.1, "abc");
+}
+
+@test
+fn test_split_at_end() {
+    let s: Text = "abc";
+    let pair = s.split_at(3);
+    assert_eq(pair.0, "abc");
+    assert(pair.1.is_empty());
+}
+
+// =============================================================================
+// Section 6: Predicates
+// =============================================================================
+
+@test
+fn test_starts_with_true() { assert("hello".starts_with(&"he")); }
+
+@test
+fn test_starts_with_false() { assert(!"hello".starts_with(&"lo")); }
+
+@test
+fn test_starts_with_empty_prefix() { assert("hello".starts_with(&"")); }
+
+@test
+fn test_starts_with_self() { assert("hello".starts_with(&"hello")); }
+
+@test
+fn test_starts_with_longer_than_self() { assert(!"hi".starts_with(&"hello")); }
+
+@test
+fn test_ends_with_true() { assert("hello".ends_with(&"lo")); }
+
+@test
+fn test_ends_with_false() { assert(!"hello".ends_with(&"he")); }
+
+@test
+fn test_ends_with_empty_suffix() { assert("hello".ends_with(&"")); }
+
+@test
+fn test_ends_with_self() { assert("abc".ends_with(&"abc")); }
+
+@test
+fn test_contains_true() { assert("hello".contains(&"ell")); }
+
+@test
+fn test_contains_false() { assert(!"hello".contains(&"xyz")); }
+
+@test
+fn test_contains_empty_needle_is_true() { assert("hello".contains(&"")); }
+
+@test
+fn test_contains_at_start() { assert("hello".contains(&"he")); }
+
+@test
+fn test_contains_at_end() { assert("hello".contains(&"lo")); }
+
+@test
+fn test_is_ascii_true() { assert("hello".is_ascii()); }
+
+@test
+fn test_is_ascii_false() {
+    let s: Text = "ñ";
+    assert(!s.is_ascii());
+}
+
+@test
+fn test_is_ascii_empty_is_true() { assert("".is_ascii()); }
+
+// =============================================================================
+// Section 7: Searching
+// =============================================================================
+
+@test
+fn test_find_present() {
+    match "hello".find(&"ell") {
+        Some(i) => assert_eq(i, 1),
+        None => panic("expected match at index 1"),
+    }
+}
+
+@test
+fn test_find_absent() {
+    match "hello".find(&"xyz") {
+        Some(_) => panic("expected None"),
+        None => {},
+    }
+}
+
+@test
+fn test_find_at_start() {
+    match "hello".find(&"he") {
+        Some(i) => assert_eq(i, 0),
+        None => panic("expected match at 0"),
+    }
+}
+
+@test
+fn test_find_empty_needle_is_zero() {
+    match "abc".find(&"") {
+        Some(i) => assert_eq(i, 0),
+        None => panic("empty needle convention is Some(0)"),
+    }
+}
+
+@test
+fn test_rfind_returns_last_occurrence() {
+    match "ababab".rfind(&"ab") {
+        Some(i) => assert_eq(i, 4),
+        None => panic("expected match at index 4"),
+    }
+}
+
+@test
+fn test_rfind_absent() {
+    match "abc".rfind(&"xyz") {
+        Some(_) => panic("expected None"),
+        None => {},
+    }
+}
+
+@test
+fn test_find_char_present() {
+    match "hello".find_char('l') {
+        Some(i) => assert_eq(i, 2),
+        None => panic("'l' is at index 2"),
+    }
+}
+
+@test
+fn test_find_char_absent() {
+    match "hello".find_char('z') {
+        Some(_) => panic("'z' not in 'hello'"),
+        None => {},
+    }
+}
+
+@test
+fn test_index_of_alias() {
+    // index_of mirrors find
+    match "hello".index_of(&"ll") {
+        Some(i) => assert_eq(i, 2),
+        None => panic("'ll' is at 2"),
+    }
+}
+
+@test
+fn test_count_matches_no_overlap() {
+    assert_eq("aaaa".count_matches(&"aa"), 2);
+}
+
+@test
+fn test_count_zero() {
+    assert_eq("hello".count(&"x"), 0);
+}
+
+@test
+fn test_count_present() {
+    assert_eq("banana".count(&"a"), 3);
+}
+
+@test
+fn test_contains_any_present() {
+    let chars: List<Char> = ['x', 'y', 'l'];
+    assert("hello".contains_any(&chars));
+}
+
+@test
+fn test_contains_any_absent() {
+    let chars: List<Char> = ['x', 'y', 'z'];
+    assert(!"abc".contains_any(&chars));
+}
+
+@test
+fn test_index_of_any_present() {
+    let chars: List<Char> = ['x', 'l'];
+    match "hello".index_of_any(&chars) {
+        Some(i) => assert_eq(i, 2),
+        None => panic("'l' present at 2"),
+    }
+}
+
+@test
+fn test_is_char_boundary_zero() {
+    assert("hello".is_char_boundary(0));
+}
+
+@test
+fn test_is_char_boundary_end() {
+    assert("hello".is_char_boundary(5));
+}
+
+// =============================================================================
+// Section 8: Splitting
+// =============================================================================
+
+@test
+fn test_split_simple() {
+    let parts = "a,b,c".split(&",");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "a");
+    assert_eq(parts[1], "b");
+    assert_eq(parts[2], "c");
+}
+
+@test
+fn test_split_no_match_returns_self() {
+    let parts = "abc".split(&",");
+    assert_eq(parts.len(), 1);
+    assert_eq(parts[0], "abc");
+}
+
+@test
+fn test_split_trailing_separator_yields_empty() {
+    let parts = "a,b,".split(&",");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[2], "");
+}
+
+@test
+fn test_split_consecutive_separators() {
+    let parts = "a,,b".split(&",");
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[1], "");
+}
+
+@test
+fn test_splitn_limits_count() {
+    let parts = "a,b,c,d".splitn(2, &",");
+    assert_eq(parts.len(), 2);
+    assert_eq(parts[0], "a");
+    assert_eq(parts[1], "b,c,d");
+}
+
+@test
+fn test_rsplit_simple() {
+    let parts = "a,b,c".rsplit(&",");
+    assert_eq(parts.len(), 3);
+    // rsplit yields the rightmost piece first
+    assert_eq(parts[0], "c");
+    assert_eq(parts[2], "a");
+}
+
+@test
+fn test_rsplitn_limits() {
+    let parts = "a,b,c,d".rsplitn(2, &",");
+    assert_eq(parts.len(), 2);
+    assert_eq(parts[0], "d");
+    assert_eq(parts[1], "a,b,c");
+}
+
+@test
+fn test_split_whitespace() {
+    let parts = "  hello   world  ".split_whitespace();
+    assert_eq(parts.len(), 2);
+    assert_eq(parts[0], "hello");
+    assert_eq(parts[1], "world");
+}
+
+@test
+fn test_split_ascii_whitespace() {
+    let parts = "a\tb\nc".split_ascii_whitespace();
+    assert_eq(parts.len(), 3);
+    assert_eq(parts[0], "a");
+    assert_eq(parts[1], "b");
+    assert_eq(parts[2], "c");
+}
+
+@test
+fn test_split_inclusive() {
+    let parts = "a,b,c".split_inclusive(&",");
+    // Variants by impl: typically each piece keeps its trailing separator
+    assert(parts.len() >= 2);
+}
+
+@test
+fn test_split_once_present() {
+    match "key=value".split_once(&"=") {
+        Some(pair) => {
+            assert_eq(pair.0, "key");
+            assert_eq(pair.1, "value");
+        }
+        None => panic("'=' present"),
+    }
+}
+
+@test
+fn test_split_once_absent() {
+    match "no separator".split_once(&"=") {
+        Some(_) => panic("expected None"),
+        None => {},
+    }
+}
+
+@test
+fn test_rsplit_once_present() {
+    match "a/b/c".rsplit_once(&"/") {
+        Some(pair) => {
+            assert_eq(pair.0, "a/b");
+            assert_eq(pair.1, "c");
+        }
+        None => panic("'/' present"),
+    }
+}
+
+@test
+fn test_words_basic() {
+    let ws = "the quick brown".words();
+    assert_eq(ws.len(), 3);
+    assert_eq(ws[0], "the");
+    assert_eq(ws[1], "quick");
+    assert_eq(ws[2], "brown");
+}
+
+// =============================================================================
+// Section 9: Trimming & Stripping
+// =============================================================================
+
+@test
+fn test_trim_both_sides() { assert_eq("  hi  ".trim(), "hi"); }
+
+@test
+fn test_trim_no_whitespace() { assert_eq("hi".trim(), "hi"); }
+
+@test
+fn test_trim_all_whitespace_yields_empty() { assert_eq("   ".trim(), ""); }
+
+@test
+fn test_trim_start_only() { assert_eq("  hi".trim_start(), "hi"); }
+
+@test
+fn test_trim_start_no_op() { assert_eq("hi  ".trim_start(), "hi  "); }
+
+@test
+fn test_trim_end_only() { assert_eq("hi  ".trim_end(), "hi"); }
+
+@test
+fn test_trim_end_no_op() { assert_eq("  hi".trim_end(), "  hi"); }
+
+@test
+fn test_trim_start_matches_pattern() {
+    assert_eq("xxxhello".trim_start_matches(&"x"), "hello");
+}
+
+@test
+fn test_trim_end_matches_pattern() {
+    assert_eq("helloxxx".trim_end_matches(&"x"), "hello");
+}
+
+@test
+fn test_trim_matches_both_sides() {
+    assert_eq("xxxhelloxxx".trim_matches(&"x"), "hello");
+}
+
+@test
+fn test_strip_prefix_present() {
+    match "abcdef".strip_prefix(&"abc") {
+        Some(rest) => assert_eq(rest, "def"),
+        None => panic("prefix matches"),
+    }
+}
+
+@test
+fn test_strip_prefix_absent() {
+    match "abcdef".strip_prefix(&"xyz") {
+        Some(_) => panic("expected None"),
+        None => {},
+    }
+}
+
+@test
+fn test_strip_suffix_present() {
+    match "abcdef".strip_suffix(&"def") {
+        Some(rest) => assert_eq(rest, "abc"),
+        None => panic("suffix matches"),
+    }
+}
+
+@test
+fn test_strip_suffix_absent() {
+    match "abcdef".strip_suffix(&"xyz") {
+        Some(_) => panic("expected None"),
+        None => {},
+    }
+}
+
+@test
+fn test_remove_prefix_present() {
+    assert_eq("abcdef".remove_prefix(&"abc"), "def");
+}
+
+@test
+fn test_remove_prefix_absent_is_identity() {
+    assert_eq("abcdef".remove_prefix(&"xyz"), "abcdef");
+}
+
+@test
+fn test_remove_suffix_present() {
+    assert_eq("abcdef".remove_suffix(&"def"), "abc");
+}
+
+@test
+fn test_remove_suffix_absent_is_identity() {
+    assert_eq("abcdef".remove_suffix(&"xyz"), "abcdef");
+}
+
+// =============================================================================
+// Section 10: Case Conversion
+// =============================================================================
+
+@test
+fn test_to_ascii_uppercase() { assert_eq("hello".to_ascii_uppercase(), "HELLO"); }
+
+@test
+fn test_to_ascii_uppercase_mixed() { assert_eq("Hi5".to_ascii_uppercase(), "HI5"); }
+
+@test
+fn test_to_ascii_lowercase() { assert_eq("HELLO".to_ascii_lowercase(), "hello"); }
+
+@test
+fn test_to_uppercase() { assert_eq("hello".to_uppercase(), "HELLO"); }
+
+@test
+fn test_to_lowercase() { assert_eq("HELLO".to_lowercase(), "hello"); }
+
+@test
+fn test_to_upper_alias() { assert_eq("a".to_upper(), "A"); }
+
+@test
+fn test_to_lower_alias() { assert_eq("A".to_lower(), "a"); }
+
+@test
+fn test_capitalize_lowercase_input() { assert_eq("hello".capitalize(), "Hello"); }
+
+@test
+fn test_capitalize_already_capitalized() { assert_eq("Hello".capitalize(), "Hello"); }
+
+@test
+fn test_capitalize_empty() { assert_eq("".capitalize(), ""); }
+
+@test
+fn test_to_title_case_words() {
+    assert_eq("hello world".to_title_case(), "Hello World");
+}
+
+@test
+fn test_swapcase_round_trip() {
+    let s: Text = "Hello World";
+    let swapped = s.swapcase();
+    let back = swapped.swapcase();
+    assert_eq(back, s);
+}
+
+@test
+fn test_eq_ignore_case_true() {
+    assert("Hello".eq_ignore_case(&"hello"));
+}
+
+@test
+fn test_eq_ignore_case_false() {
+    assert(!"hello".eq_ignore_case(&"world"));
+}
+
+@test
+fn test_make_ascii_uppercase_in_place() {
+    let mut s: Text = "abc";
+    s.make_ascii_uppercase();
+    assert_eq(s, "ABC");
+}
+
+@test
+fn test_make_ascii_lowercase_in_place() {
+    let mut s: Text = "XYZ";
+    s.make_ascii_lowercase();
+    assert_eq(s, "xyz");
+}
+
+// =============================================================================
+// Section 11: Replacement
+// =============================================================================
+
+@test
+fn test_replace_all() {
+    assert_eq("aaa".replace(&"a", &"b"), "bbb");
+}
+
+@test
+fn test_replace_no_match_is_identity() {
+    assert_eq("hello".replace(&"x", &"y"), "hello");
+}
+
+@test
+fn test_replace_with_longer_pattern() {
+    assert_eq("hello hello".replace(&"hello", &"hi"), "hi hi");
+}
+
+@test
+fn test_replace_with_empty_replacement() {
+    assert_eq("hello".replace(&"l", &""), "heo");
+}
+
+@test
+fn test_replacen_first_only() {
+    assert_eq("aaaa".replacen(&"a", &"b", 1), "baaa");
+}
+
+@test
+fn test_replacen_zero_is_identity() {
+    assert_eq("aaaa".replacen(&"a", &"b", 0), "aaaa");
+}
+
+// =============================================================================
+// Section 12: Mutation
+// =============================================================================
+
+@test
+fn test_push_appends_char() {
+    let mut s: Text = "hi";
+    s.push('!');
+    assert_eq(s, "hi!");
+}
+
+@test
+fn test_push_to_empty() {
+    let mut s = Text.new();
+    s.push('a');
+    assert_eq(s, "a");
+}
+
+@test
+fn test_push_str_appends() {
+    let mut s: Text = "hello";
+    s.push_str(&", world");
+    assert_eq(s, "hello, world");
+}
+
+@test
+fn test_push_byte_ascii() {
+    let mut s: Text = "A";
+    s.push_byte(66 as Byte);
+    assert_eq(s, "AB");
+}
+
+@test
+fn test_clear_empties() {
+    let mut s: Text = "hello";
+    s.clear();
+    assert(s.is_empty());
+    assert_eq(s.len(), 0);
+}
+
+@test
+fn test_truncate_shortens() {
+    let mut s: Text = "hello";
+    s.truncate(2);
+    assert_eq(s, "he");
+}
+
+@test
+fn test_truncate_no_op_when_longer() {
+    let mut s: Text = "hello";
+    s.truncate(99);
+    assert_eq(s, "hello");
+}
+
+@test
+fn test_truncate_to_zero() {
+    let mut s: Text = "abc";
+    s.truncate(0);
+    assert(s.is_empty());
+}
+
+@test
+fn test_insert_at_start() {
+    let mut s: Text = "bc";
+    s.insert(0, 'a');
+    assert_eq(s, "abc");
+}
+
+@test
+fn test_insert_at_end() {
+    let mut s: Text = "ab";
+    s.insert(2, 'c');
+    assert_eq(s, "abc");
+}
+
+@test
+fn test_insert_str_in_middle() {
+    let mut s: Text = "hello";
+    s.insert_str(2, &"XX");
+    assert_eq(s, "heXXllo");
+}
+
+@test
+fn test_pop_returns_last_char() {
+    let mut s: Text = "abc";
+    match s.pop() {
+        Some(c) => assert_eq(c, 'c'),
+        None => panic("non-empty pop must return Some"),
+    }
+    assert_eq(s, "ab");
+}
+
+@test
+fn test_pop_empty_returns_none() {
+    let mut s = Text.new();
+    match s.pop() {
+        Some(_) => panic("empty pop should be None"),
+        None => {},
+    }
+}
+
+@test
+fn test_remove_first_char() {
+    let mut s: Text = "abc";
+    let c = s.remove(0);
+    assert_eq(c, 'a');
+    assert_eq(s, "bc");
+}
+
+@test
+fn test_replace_range_inner() {
+    let mut s: Text = "hello";
+    s.replace_range(1, 4, &"XYZ");
+    assert_eq(s, "hXYZo");
+}
+
+@test
+fn test_remove_matches_all() {
+    let mut s: Text = "aXbXc";
+    s.remove_matches(&"X");
+    assert_eq(s, "abc");
+}
+
+@test
+fn test_reserve_does_not_change_len() {
+    let mut s: Text = "hi";
+    s.reserve(64);
+    assert_eq(s.len(), 2);
+    assert_eq(s, "hi");
+}
+
+@test
+fn test_shrink_to_fit_keeps_content() {
+    let mut s = Text.with_capacity(64);
+    s.push_str(&"abc");
+    s.shrink_to_fit();
+    assert_eq(s, "abc");
+}
+
+// =============================================================================
+// Section 13: Padding & Centering
+// =============================================================================
+
+@test
+fn test_pad_left_widens() { assert_eq("ab".pad_left(5, ' '), "   ab"); }
+
+@test
+fn test_pad_left_no_op_when_wider() { assert_eq("hello".pad_left(3, ' '), "hello"); }
+
+@test
+fn test_pad_right_widens() { assert_eq("ab".pad_right(5, ' '), "ab   "); }
+
+@test
+fn test_pad_start_alias() { assert_eq("x".pad_start(3, '0'), "00x"); }
+
+@test
+fn test_pad_end_alias() { assert_eq("x".pad_end(3, '0'), "x00"); }
+
+@test
+fn test_center_balances() {
+    let c = "ab".center(6, '*');
+    assert_eq(c.len(), 6);
+}
+
+@test
+fn test_zfill_zero_pads_int_string() { assert_eq("42".zfill(5), "00042"); }
+
+// =============================================================================
+// Section 14: Concat / Join / Repeat / Reverse
+// =============================================================================
+
+@test
+fn test_concat_two() { assert_eq("ab".concat(&"cd"), "abcd"); }
+
+@test
+fn test_concat_with_empty_lhs() { assert_eq("".concat(&"abc"), "abc"); }
+
+@test
+fn test_concat_with_empty_rhs() { assert_eq("abc".concat(&""), "abc"); }
+
+@test
+fn test_join_with_separator() {
+    let parts: List<Text> = ["a", "b", "c"];
+    assert_eq(Text.join(&parts, &","), "a,b,c");
+}
+
+@test
+fn test_join_single_element() {
+    let parts: List<Text> = ["only"];
+    assert_eq(Text.join(&parts, &","), "only");
+}
+
+@test
+fn test_join_empty_list() {
+    let parts: List<Text> = [];
+    assert_eq(Text.join(&parts, &","), "");
+}
+
+@test
+fn test_repeat_three_times() { assert_eq("ab".repeat(3), "ababab"); }
+
+@test
+fn test_repeat_zero_yields_empty() { assert_eq("ab".repeat(0), ""); }
+
+@test
+fn test_repeat_one_is_clone() { assert_eq("x".repeat(1), "x"); }
+
+@test
+fn test_reverse_ascii() { assert_eq("abc".reverse(), "cba"); }
+
+@test
+fn test_reverse_empty() { assert_eq("".reverse(), ""); }
+
+@test
+fn test_reverse_palindrome_is_self() { assert_eq("aba".reverse(), "aba"); }
+
+// =============================================================================
+// Section 15: Parsing
+// =============================================================================
+
+@test
+fn test_parse_int_positive() {
+    match "42".parse_int() {
+        Ok(n) => assert_eq(n, 42),
+        Err(_) => panic("'42' is a valid Int"),
+    }
+}
+
+@test
+fn test_parse_int_negative() {
+    match "-7".parse_int() {
+        Ok(n) => assert_eq(n, -7),
+        Err(_) => panic("'-7' is valid"),
+    }
+}
+
+@test
+fn test_parse_int_invalid_returns_err() {
+    match "abc".parse_int() {
+        Ok(_) => panic("'abc' is not an Int"),
+        Err(_) => {},
+    }
+}
+
+@test
+fn test_parse_int_empty_returns_err() {
+    match "".parse_int() {
+        Ok(_) => panic("'' is not an Int"),
+        Err(_) => {},
+    }
+}
+
+@test
+fn test_parse_float_positive() {
+    match "3.14".parse_float() {
+        Ok(f) => {
+            assert(f > 3.13 && f < 3.15);
+        }
+        Err(_) => panic("'3.14' is valid"),
+    }
+}
+
+@test
+fn test_parse_float_invalid() {
+    match "xyz".parse_float() {
+        Ok(_) => panic("'xyz' is not a Float"),
+        Err(_) => {},
+    }
+}
+
+@test
+fn test_parse_bool_true() {
+    match "true".parse_bool() {
+        Ok(b) => assert(b),
+        Err(_) => panic("'true' is valid"),
+    }
+}
+
+@test
+fn test_parse_bool_false() {
+    match "false".parse_bool() {
+        Ok(b) => assert(!b),
+        Err(_) => panic("'false' is valid"),
+    }
+}
+
+@test
+fn test_parse_bool_invalid() {
+    match "yes".parse_bool() {
+        Ok(_) => panic("'yes' is not Bool literal"),
+        Err(_) => {},
+    }
+}
+
+@test
+fn test_parse_int_radix_hex() {
+    match "ff".parse_int_radix(16) {
+        Ok(n) => assert_eq(n, 255),
+        Err(_) => panic("'ff' base 16"),
+    }
+}
+
+@test
+fn test_parse_int_radix_binary() {
+    match "1010".parse_int_radix(2) {
+        Ok(n) => assert_eq(n, 10),
+        Err(_) => panic("'1010' base 2"),
+    }
+}
+
+@test
+fn test_try_to_int_some() {
+    match "123".try_to_int() {
+        Some(n) => assert_eq(n, 123),
+        None => panic("valid int"),
+    }
+}
+
+@test
+fn test_try_to_int_none() {
+    match "abc".try_to_int() {
+        Some(_) => panic("invalid"),
+        None => {},
+    }
+}
+
+// =============================================================================
+// Section 16: Formatting (from primitives)
+// =============================================================================
+
+@test
+fn test_from_int_positive() { assert_eq(Text.from_int(42), "42"); }
+
+@test
+fn test_from_int_negative() { assert_eq(Text.from_int(-7), "-7"); }
+
+@test
+fn test_from_int_zero() { assert_eq(Text.from_int(0), "0"); }
+
+@test
+fn test_from_bool_true() { assert_eq(Text.from_bool(true), "true"); }
+
+@test
+fn test_from_bool_false() { assert_eq(Text.from_bool(false), "false"); }
+
+@test
+fn test_from_float_zero() {
+    let s = Text.from_float(0.0);
+    // Allow either "0" or "0.0" depending on impl; both must round-trip
+    assert(s == "0" || s == "0.0");
+}
+
+// =============================================================================
+// Section 17: Conversion
+// =============================================================================
+
+@test
+fn test_into_bytes_ascii() {
+    let s: Text = "AB";
+    let bs = s.into_bytes();
+    assert_eq(bs.len(), 2);
+    assert_eq(bs[0] as Int, 65);
+    assert_eq(bs[1] as Int, 66);
+}
+
+@test
+fn test_encode_utf16_ascii() {
+    let s: Text = "AB";
+    let units = s.encode_utf16();
+    assert_eq(units.len(), 2);
+    assert_eq(units[0], 65);
+    assert_eq(units[1], 66);
+}
+
+// =============================================================================
+// Section 18: Error Types
+// =============================================================================
+
+@test
+fn test_utf8_error_carries_index() {
+    let bytes: List<Byte> = [0xC0 as Byte, 0x20 as Byte];
+    match Text.from_utf8(&bytes) {
+        Ok(_) => panic("expected error"),
+        Err(e) => assert(e.valid_up_to >= 0),
+    }
+}
+
+@test
+fn test_utf8_error_eq_reflexive() {
+    let e = Utf8Error { valid_up_to: 5 };
+    assert(e == e);
+}
+
+@test
+fn test_parse_error_eq_message() {
+    let a = ParseError { message: "x" };
+    let b = ParseError { message: "x" };
+    assert(a == b);
+}
+
+// =============================================================================
+// Section 19: Protocol Implementations
+// =============================================================================
+
+@test
+fn test_eq_same_strings() { assert("abc" == "abc"); }
+
+@test
+fn test_eq_different_strings() { assert(!("abc" == "xyz")); }
+
+@test
+fn test_eq_empty() { assert("" == ""); }
+
+@test
+fn test_ne_works() { assert("a" != "b"); }
+
+@test
+fn test_ord_lex_less() {
+    let a: Text = "abc";
+    let b: Text = "abd";
+    assert_eq(a.cmp(&b), Less);
+}
+
+@test
+fn test_ord_lex_greater() {
+    let a: Text = "abd";
+    let b: Text = "abc";
+    assert_eq(a.cmp(&b), Greater);
+}
+
+@test
+fn test_ord_lex_equal() {
+    let a: Text = "abc";
+    let b: Text = "abc";
+    assert_eq(a.cmp(&b), Equal);
+}
+
+@test
+fn test_ord_shorter_is_less() {
+    let a: Text = "ab";
+    let b: Text = "abc";
+    assert_eq(a.cmp(&b), Less);
+}
+
+@test
+fn test_clone_produces_equal() {
+    let s: Text = "hello";
+    let c = s.clone();
+    assert_eq(c, s);
+}
+
+@test
+fn test_clone_independent_after_mutation() {
+    let s: Text = "hi";
+    let c = s.clone();
+    let mut owned = s.clone();
+    owned.push_str(&"!");
+    assert_eq(c, "hi");        // original clone unchanged
+    assert_eq(owned, "hi!");   // mutated copy advances
+}
+
+@test
+fn test_default_is_empty() {
+    let s: Text = Text.default();
+    assert(s.is_empty());
+}
+
+@test
+fn test_add_concat() {
+    let a: Text = "hello, ";
+    let b: Text = "world";
+    let r = a + b;
+    assert_eq(r, "hello, world");
+}
+
+@test
+fn test_add_assign_appends() {
+    let mut s: Text = "hi";
+    s += ", world";
+    assert_eq(s, "hi, world");
+}
+
+@test
+fn test_display_format() {
+    let s: Text = "hello";
+    let out = f"{s}";
+    assert_eq(out, "hello");
+}
+
+@test
+fn test_debug_format_quotes() {
+    let s: Text = "hi";
+    let out = f"{s:?}";
+    // Debug for Text wraps in quotes
+    assert_eq(out, "\"hi\"");
+}
+
+@test
+fn test_debug_format_escapes_newline() {
+    let s: Text = "a\nb";
+    let out = f"{s:?}";
+    assert_eq(out, "\"a\\nb\"");
+}
+
+@test
+fn test_debug_format_escapes_tab() {
+    let s: Text = "a\tb";
+    let out = f"{s:?}";
+    assert_eq(out, "\"a\\tb\"");
+}
+
+@test
+fn test_debug_format_escapes_backslash() {
+    let s: Text = "a\\b";
+    let out = f"{s:?}";
+    assert_eq(out, "\"a\\\\b\"");
+}
+
+@test
+fn test_debug_format_escapes_quote() {
+    let s: Text = "a\"b";
+    let out = f"{s:?}";
+    assert_eq(out, "\"a\\\"b\"");
+}
+
+@test
+fn test_as_ref_byte_slice() {
+    let s: Text = "AB";
+    let r: &[Byte] = s.as_ref();
+    assert_eq(r.len(), 2);
+}
+
+@test
+fn test_from_str_int() {
+    let s: Text = "42";
+    let parsed = Int.from_str(&s);
+    match parsed {
+        Ok(n) => assert_eq(n, 42),
+        Err(_) => panic("Int.from_str of '42' should be Ok"),
+    }
+}
+
+@test
+fn test_from_str_bool() {
+    let s: Text = "true";
+    let parsed = Bool.from_str(&s);
+    match parsed {
+        Ok(b) => assert(b),
+        Err(_) => panic("Bool.from_str of 'true' should be Ok"),
+    }
+}
+
+// =============================================================================
+// Section 20: Iterator Type Identity
+// =============================================================================
+
+@test
+fn test_chars_returns_chars_iterator() {
+    let s: Text = "abc";
+    let it: Chars = s.chars();
+    let mut c: Int = 0;
+    for _x in it {
+        c = c + 1;
+    }
+    assert_eq(c, 3);
+}
+
+@test
+fn test_lines_returns_lines_iterator() {
+    let s: Text = "x\ny";
+    let it: Lines = s.lines();
+    let mut c: Int = 0;
+    for _l in it {
+        c = c + 1;
+    }
+    assert_eq(c, 2);
+}
+
+@test
+fn test_char_indices_iterator() {
+    let s: Text = "ab";
+    let it: CharIndices = s.char_indices();
+    let mut c: Int = 0;
+    for _p in it {
+        c = c + 1;
+    }
+    assert_eq(c, 2);
+}
+
+@test
+fn test_bytes_iterator() {
+    let s: Text = "AB";
+    let it: ByteIter = s.bytes();
+    let mut c: Int = 0;
+    for _b in it {
+        c = c + 1;
+    }
+    assert_eq(c, 2);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // verum test synthesises a per-test main; this stays for direct runs.
+}
