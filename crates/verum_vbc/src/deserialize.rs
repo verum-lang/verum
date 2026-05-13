@@ -51,6 +51,11 @@ struct ExtensionsData {
  ffi_symbols: Vec<FfiSymbol>,
  ffi_layouts: Vec<FfiStructLayout>,
  dependencies: Vec<ModuleDependency>,
+ /// Cross-module call name table (section bit 0x80). See
+ /// `VbcModule::external_function_names` for the contract; mirrored
+ /// here so the deserializer can carry it from the legacy `.vbc`
+ /// format into the runtime `VbcModule`.
+ external_function_names: Vec<(FunctionId, StringId)>,
 }
 
 /// Deserializes a VBC module from binary data.
@@ -448,6 +453,7 @@ impl<'a> Deserializer<'a> {
  theorems: Vec::new(),
  framework_provenance: crate::module::FrameworkProvenance::default(),
  discharge_receipts: Vec::new(),
+ external_function_names: extensions.external_function_names,
  })
  }
 
@@ -1463,6 +1469,26 @@ impl<'a> Deserializer<'a> {
  }
  result.dependencies = bincode::deserialize(&self.data[self.offset..self.offset + len])
  .map_err(|e| VbcError::Deserialization(format!("dependencies: {}", e)))?;
+ self.offset += len;
+ }
+
+ // Cross-module call name table (bit 0x80). Mirrors
+ // `VbcModule::external_function_names`. See the producer in
+ // `crates/verum_vbc/src/codegen/mod.rs::build_module` for the
+ // contract — entries map an externally-referenced `FunctionId` to
+ // the qualified name `StringId` that the archive loader's
+ // `archive_id_to_name` merge consults during cross-module Call
+ // resolution.
+ if section_mask & 0x80 != 0 {
+ let len = decode_u32(self.data, &mut self.offset)? as usize;
+ if self.offset + len > self.data.len() {
+ return Err(VbcError::eof(self.offset, len));
+ }
+ result.external_function_names =
+ bincode::deserialize(&self.data[self.offset..self.offset + len])
+ .map_err(|e| {
+ VbcError::Deserialization(format!("external_function_names: {}", e))
+ })?;
  self.offset += len;
  }
 
