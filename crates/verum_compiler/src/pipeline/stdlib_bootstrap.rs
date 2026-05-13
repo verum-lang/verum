@@ -1345,6 +1345,25 @@ impl<'s> CompilationPipeline<'s> {
         codegen.import_functions(&self.global_function_registry);
         codegen.import_protocols(&self.global_protocol_registry);
 
+        // Register stdlib intrinsic shortcuts so callers in this module's
+        // bodies emit InlineSequence opcodes instead of Calls to the body
+        // wrappers. Without this, e.g. `Text.grow`'s `alloc(new_cap+1, 1)`
+        // call resolves to the stdlib `alloc()` body in core/base/memory.vr
+        // (which wraps cbgr_alloc in a `match Ok((ptr, _, _)) => ptr` —
+        // the destructure binds the wrong tuple slot through the precompiled
+        // bytecode and returns null). The intercept at
+        // `expressions.rs::compile_call`'s line ~4385 only fires when
+        // `func_info.intrinsic_name` is set; that field is populated by
+        // `register_stdlib_intrinsics` for every well-known stdlib symbol
+        // (alloc / dealloc / memcpy / ptr_offset / etc.). Mirrors the
+        // user-side `codegen.initialize()` ordering at
+        // `pipeline/vbc_codegen.rs:357`. The intercept also fires for
+        // intrinsics with bodies — `cbgr_alloc` is the canonical example;
+        // its body becomes inert because every caller hits the intercept
+        // first.
+        codegen.register_stdlib_intrinsics();
+        codegen.register_runtime_io_functions();
+
         // Three-pass compilation within the module (cross-file two-phase collection)
         // Pass 1a: Collect ALL protocol definitions from ALL files first
         // This ensures protocols like Eq, Ord are available when processing
@@ -1374,6 +1393,53 @@ impl<'s> CompilationPipeline<'s> {
         // After all declarations collected, resolve pending imports
         // This handles cross-file imports within the same module
         codegen.resolve_pending_imports();
+
+        // Pass 1c: Compile protocol-default-method monomorphisations
+        // queued by `generate_default_protocol_methods`.
+        //
+        // When `collect_non_protocol_declarations` processed each
+        // `implement P for T { ... }`, it called
+        // `generate_default_protocol_methods(P, T, implemented_methods)`
+        // which pushed every default body of P that T did NOT override
+        // into `codegen.pending_default_methods`.  Without this pass,
+        // the queue is left full at finalize time and the
+        // `<Type>.<method>` bodies are NEVER emitted into the archive —
+        // the user-side codegen then sees `DefaultHasher.new` (override
+        // body, real) but `DefaultHasher.write_int` (Hasher protocol's
+        // default body) missing.  At runtime, dispatch of
+        // `hasher.write_int(42)` panics with `method
+        // 'DefaultHasher.write_int' not found on receiver of runtime
+        // kind 'Object'`.
+        //
+        // Mirrors the user-side ordering at
+        // `pipeline/vbc_codegen.rs` — collect → resolve → default
+        // methods → bodies — so stdlib and user code agree on the
+        // protocol-default-method lifecycle.  Without this symmetry,
+        // every protocol with a default method (Hasher.write_int /
+        // .write_byte, Hash.hash_value forwarders, every Iterator
+        // combinator default, Display/Debug forwarders) silently
+        // loses its archive body.
+        //
+        // **Drift contract**: `archive_carries_protocol_default_method_monomorphisations`
+        // in `archive_ctx_loader::tests` pins this — removing the
+        // call below fails the drift-pin.
+        if let Err(e) = codegen.compile_pending_default_methods() {
+            let diag = lint_diagnostics.codegen_warning(
+                &module.name,
+                &format!("default-method monomorphisation: {}", e),
+                None,
+            );
+            let level = self
+                .session
+                .options()
+                .lint_config
+                .level_for(IntrinsicLint::MissingImplementation);
+            if level.is_error() {
+                self.stdlib_errors.push(diag);
+            } else if level.should_emit() {
+                self.stdlib_warnings.push(diag);
+            }
+        }
 
         // Pass 2: Compile all function bodies into ONE shared codegen
         // state, then emit a SINGLE coherent `VbcModule` at the end.
