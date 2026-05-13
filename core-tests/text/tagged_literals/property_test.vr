@@ -1,0 +1,134 @@
+// =============================================================================
+// core-tests/text/tagged_literals/property_test.vr
+// =============================================================================
+//
+// Properties for the tagged-literal validators.
+//
+// Laws verified:
+//   §1  validate_json: every empty string is invalid
+//   §2  validate_json: pairing { …  } and [ … ] is structural-valid
+//   §3  validate_sql: every leading SQL keyword is accepted
+//       (SELECT/INSERT/UPDATE/DELETE/CREATE/DROP/ALTER/WITH × case)
+//   §4  validate_sql: empty string is invalid
+//   §5  validate_uri: presence of "://" is necessary AND sufficient (per spec)
+//   §6  validate_uri: empty string is invalid
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.tagged_literals.{validate_json, validate_sql, validate_uri};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 validate_json: empty string is invalid
+// =============================================================================
+
+@test
+fn property_json_empty_string_is_invalid() {
+    assert(!validate_json(""));
+}
+
+// =============================================================================
+// §2 validate_json structural pairs
+// =============================================================================
+
+@test
+fn property_json_object_pair_valid() {
+    assert(validate_json("{}"));
+    assert(validate_json("{\"k\":\"v\"}"));
+    assert(validate_json("{ }"));
+}
+
+@test
+fn property_json_array_pair_valid() {
+    assert(validate_json("[]"));
+    assert(validate_json("[1]"));
+    assert(validate_json("[ 1, 2, 3 ]"));
+}
+
+@test
+fn property_json_string_double_quote_pair_valid() {
+    assert(validate_json("\"\""));
+    assert(validate_json("\"abc\""));
+}
+
+// =============================================================================
+// §3 validate_sql: every leading SQL keyword is accepted
+// =============================================================================
+
+@test
+fn property_sql_keyword_uppercase_accepted() {
+    let keywords: List<Text> = [
+        "SELECT 1", "INSERT INTO t VALUES (1)", "UPDATE t SET x=1",
+        "DELETE FROM t", "CREATE TABLE t (a INT)", "DROP TABLE t",
+        "ALTER TABLE t ADD COLUMN b INT", "WITH x AS (SELECT 1) SELECT * FROM x",
+    ];
+    for q in keywords.iter() {
+        assert(validate_sql((*q).clone()));
+    }
+}
+
+@test
+fn property_sql_keyword_lowercase_accepted_via_to_upper() {
+    let keywords: List<Text> = [
+        "select 1", "insert into t values (1)", "update t set x=1",
+        "delete from t", "create table t (a int)", "drop table t",
+        "alter table t", "with x as (select 1) select * from x",
+    ];
+    for q in keywords.iter() {
+        assert(validate_sql((*q).clone()));
+    }
+}
+
+@test
+fn property_sql_garbage_rejected() {
+    let garbage: List<Text> = [
+        "", "not a query", "12345", "// comment", "\nSELECT 1",
+    ];
+    for g in garbage.iter() {
+        assert(!validate_sql((*g).clone()));
+    }
+}
+
+// =============================================================================
+// §5 validate_uri: presence of "://" is necessary AND sufficient
+// =============================================================================
+
+@test
+fn property_uri_scheme_required() {
+    let no_scheme: List<Text> = [
+        "example.com", "/path/to/resource", "user@host", "12345",
+    ];
+    for u in no_scheme.iter() {
+        assert(!validate_uri((*u).clone()));
+    }
+}
+
+@test
+fn property_uri_scheme_sufficient() {
+    let with_scheme: List<Text> = [
+        "http://example.com",
+        "https://x",
+        "ftp://files.example.com",
+        "anything://here",
+    ];
+    for u in with_scheme.iter() {
+        assert(validate_uri((*u).clone()));
+    }
+}
+
+// =============================================================================
+// §6 Empty string is invalid for every validator
+// =============================================================================
+
+@test
+fn property_all_validators_reject_empty() {
+    assert(!validate_json(""));
+    assert(!validate_sql(""));
+    assert(!validate_uri(""));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
