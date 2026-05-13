@@ -426,6 +426,36 @@ pub(in super::super) fn handle_call_method(
     // reference if present).  Small-string in-place mutation isn't
     // possible (NaN-boxed values aren't heap-allocated), so we always
     // promote to a heap Text on first mutation.
+    if std::env::var("VERUM_TRACE_PUSH_STR").is_ok() {
+        eprintln!(
+            "[CallM trace] method_name='{}' bare='{}' receiver_kind={}",
+            method_name,
+            bare_method_name,
+            if receiver.is_int() { "int" }
+            else if receiver.is_ptr() { "ptr" }
+            else if receiver.is_small_string() { "smallstr" }
+            else { "other" },
+        );
+    }
+    if std::env::var("VERUM_TRACE_PUSH_STR_X").is_ok()
+        && (bare_method_name == "push_str" || bare_method_name == "push")
+    {
+        eprintln!(
+            "[push_str trace] bare={} receiver_kind={} dispatch_recv_kind={} is_cbgr_ref(receiver)={} caller_base={}",
+            bare_method_name,
+            if receiver.is_int() { "int" }
+            else if receiver.is_ptr() { "ptr" }
+            else if receiver.is_small_string() { "smallstr" }
+            else { "other" },
+            if dispatch_receiver.is_int() { "int" }
+            else if dispatch_receiver.is_ptr() { "ptr" }
+            else if dispatch_receiver.is_small_string() { "smallstr" }
+            else if is_heap_string(&dispatch_receiver) { "heap_string" }
+            else { "other" },
+            is_cbgr_ref(&receiver),
+            state.reg_base(),
+        );
+    }
     if (bare_method_name == "push_str"
         || bare_method_name == "push"
         || bare_method_name == "push_char")
@@ -433,6 +463,12 @@ pub(in super::super) fn handle_call_method(
     {
         let mut current_text = extract_string(&dispatch_receiver, state);
         let caller_base = state.reg_base();
+        if std::env::var("VERUM_TRACE_PUSH_STR").is_ok() {
+            eprintln!(
+                "[push_str trace] INTERCEPT FIRED, current_text.len = {}",
+                current_text.len(),
+            );
+        }
         let arg_val_raw = state.registers.get(caller_base, Reg(args.start.0));
         // Deref CBGR ref for arg if present (covers `out.push_str(&body)`).
         let arg_val = if is_cbgr_ref(&arg_val_raw) {
@@ -466,8 +502,23 @@ pub(in super::super) fn handle_call_method(
         // caller's frame slot if present.
         if is_cbgr_ref(&receiver) {
             let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
+            if std::env::var("VERUM_TRACE_PUSH_STR").is_ok() {
+                eprintln!(
+                    "[push_str trace] WRITEBACK via CBGR ref, abs_index={}, new_text.len={}",
+                    abs_index,
+                    current_text.len(),
+                );
+            }
             state.registers.set_absolute(abs_index, new_value);
         } else {
+            if std::env::var("VERUM_TRACE_PUSH_STR").is_ok() {
+                eprintln!(
+                    "[push_str trace] WRITEBACK via caller_base+receiver_reg, base={} reg={} new_text.len={}",
+                    caller_base,
+                    receiver_reg.0,
+                    current_text.len(),
+                );
+            }
             state.registers.set(caller_base, receiver_reg, new_value);
         }
         state.set_reg(dst, Value::unit());
@@ -1299,7 +1350,30 @@ pub(in super::super) fn handle_call_method(
     // at line 4029, so its `self.entries.insert(…)` slot-write never
     // executes on a builtin Map).
     if found_func_id.is_none() {
-        // First try the old approach: treat method_id as function_id for backwards compatibility
+        // First try the old approach: treat method_id as function_id for backwards compatibility.
+        //
+        // **Receiver-type tightening (closes text/text §C iterator dispatch).**
+        // `method_id` in `CallM` is universally a STRING-table index in
+        // modern codegen — every emit site in expressions.rs uses
+        // `intern_string("foo")` (verified). When the string-id of a
+        // common method name (`next`, `clone`, `eq`) coincides with a
+        // function-table index whose name ends with `.<method>`, the
+        // loose `ends_with(&method_suffix)` accept below silently routed
+        // dispatch to whichever function happened to occupy that slot —
+        // typically a sibling iterator's `next` body whose `self.iter.next()`
+        // recurses on the wrong receiver and stack-overflows. Specifically,
+        // `for c in s.chars()` panicked because `intern_string("next")`
+        // landed on `Rev.next` / `MappedIter.next` / similar instead of
+        // `Chars.next`, and the picked body's `self.iter.next()` looped.
+        //
+        // Tighten the accept-rule: when not already qualified, the
+        // func-id pick is accepted ONLY if the function's `parent_type`
+        // matches the receiver's runtime type (or the receiver is a
+        // primitive and the function is parent-less / primitive-bound).
+        // This converts the func-id heuristic from a coin-flip into a
+        // correctness-preserving fast-path: when the coincidence
+        // happens to land on the right receiver-type, take it; otherwise
+        // fall through to the receiver-aware lookup below.
         let func_id = FunctionId(method_id);
         if let Some(func) = state.module.get_function(func_id) {
             // Verify the function name actually ends with the expected method suffix
@@ -1310,7 +1384,20 @@ pub(in super::super) fn handle_call_method(
                 if func_name == method_name {
                     found_func_id = Some(func_id);
                 }
-            } else if func_name.ends_with(&method_suffix) {
+            } else if func_name == method_name {
+                // Exact bare-name match — the function's name is literally
+                // the method name (no qualifier). This is the legitimate
+                // legacy path: a free fn registered under the bare method
+                // name. Safe regardless of receiver type.
+                found_func_id = Some(func_id);
+            } else if func_name.ends_with(&method_suffix)
+                && func_id_parent_compatible_with_receiver(state, func, &dispatch_receiver)
+            {
+                // Suffix match — only accept when the function's
+                // parent_type matches the receiver's runtime type, so
+                // the string-id-vs-function-id namespace collision
+                // can't route a `Chars.next` call to a sibling
+                // iterator's `next`.
                 found_func_id = Some(func_id);
             }
         }
@@ -1530,14 +1617,36 @@ pub(in super::super) fn handle_call_method(
                         } else {
                             // Heap receiver: the first-pass receiver-type
                             // dispatch above already tried the exact-match.
-                            // Here we accept any match — covers protocol-
-                            // default / inherited-impl call sites where
-                            // the receiver's own type doesn't declare the
-                            // method. (Future tightening: walk the
-                            // receiver's protocol implementations and
-                            // accept only methods whose parent_type is in
-                            // that set.)
-                            true
+                            // Tightened (closes text/text §C iterator
+                            // dispatch): accept ONLY when the function's
+                            // `parent_type` is structurally compatible
+                            // with the receiver's runtime type.
+                            //
+                            // Compatibility set for a receiver of type T:
+                            //   - func.parent_type == None (free fn)
+                            //   - func.parent_type == T (own method)
+                            //   - func.parent_type ∈ T.protocols (default
+                            //     method on a protocol T implements)
+                            //   - T's TypeId is not registered (anonymous
+                            //     synthetic type — preserve historic
+                            //     permissive behaviour)
+                            //
+                            // Pre-fix the heap branch returned `true`
+                            // unconditionally, so when the first-pass
+                            // exact-match missed (because the function
+                            // was registered under a slightly different
+                            // qualified form than the receiver-type
+                            // recovery produced), the second pass picked
+                            // ANY `*.<method>` — typically a sibling
+                            // iterator's `next` whose `self.iter.next()`
+                            // recursed on the wrong receiver and
+                            // stack-overflowed. With the gate in place,
+                            // the dispatch chain falls through to the
+                            // receiver-aware lookup at line ~1873
+                            // (`find_method_by_receiver_type`) instead,
+                            // which correctly binds protocol-default
+                            // methods.
+                            heap_receiver_parent_compatible(state, func, &dispatch_receiver)
                         };
                         if !parent_compatible {
                             continue;
@@ -2037,9 +2146,81 @@ pub(in super::super) fn handle_call_method(
     } else {
         "<unknown-tag>"
     };
+
+    // Recover the receiver's actual heap-object type name (when present).
+    // The first-pass receiver-type lookup at line ~1340 already does this
+    // work for the dispatch search; mirror it here so the panic message
+    // names the type the runtime actually saw — distinguishing a
+    // `Chars`-receiver missing-method from a `BTreeMap`-receiver
+    // missing-method when both surface the same `Object` runtime kind.
+    let receiver_type_name: Option<String> =
+        if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
+            let ptr = dispatch_receiver.as_ptr::<u8>();
+            if !ptr.is_null()
+                && (ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+            {
+                // SAFETY: alignment verified; every heap object begins
+                // with an ObjectHeader.
+                let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+                state
+                    .module
+                    .get_type(header.type_id)
+                    .and_then(|td| state.module.strings.get(td.name))
+                    .map(|s| s.to_string())
+                    .filter(|s| !s.is_empty())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+    // Collect up to 8 functions whose names end with `.<bare_method>` —
+    // they're the most-relevant candidates the dispatcher considered and
+    // rejected (typically due to receiver-type mismatch or arity drift).
+    let bare = method_name.rsplit('.').next().unwrap_or(&method_name).to_string();
+    let suffix_candidates: Vec<(String, usize)> = {
+        let dotted_bare = format!(".{}", bare);
+        state
+            .module
+            .functions
+            .iter()
+            .filter_map(|f| {
+                let name = state.module.strings.get(f.name).unwrap_or("");
+                if name.ends_with(&dotted_bare) || name == bare {
+                    Some((name.to_string(), f.params.len()))
+                } else {
+                    None
+                }
+            })
+            .take(8)
+            .collect()
+    };
+
+    let receiver_pretty = match &receiver_type_name {
+        Some(t) => format!("`{}` ({})", t, receiver_kind),
+        None => format!("`{}`", receiver_kind),
+    };
+
+    let candidates_str = if suffix_candidates.is_empty() {
+        String::from(" No registered function ends with the bare method name.")
+    } else {
+        let arity = (args.count as usize) + 1;
+        let mut s = format!(
+            " {} candidate(s) end with `.{}` (caller passed {} args incl. self):",
+            suffix_candidates.len(),
+            bare,
+            arity,
+        );
+        for (n, p) in &suffix_candidates {
+            s.push_str(&format!("\n   - {} (arity {})", n, p));
+        }
+        s
+    };
+
     Err(InterpreterError::Panic {
         message: format!(
-            "method '{}' not found on receiver of runtime kind `{}`. \
+            "method '{}' not found on receiver of runtime kind {}. \
              This typically indicates one of three architectural gaps: \
              (1) the stdlib function defining `{}` was lenient-skipped \
              at compile time (look for `[lenient] SKIP ... bug-class` \
@@ -2048,8 +2229,8 @@ pub(in super::super) fn handle_call_method(
              (open a verum-vbc report); (3) the call site dispatched \
              to the wrong protocol implementation. Run with \
              `RUST_BACKTRACE=1 RUST_LOG=verum_vbc=debug` for the \
-             dispatch trace.",
-            method_name, receiver_kind, method_name
+             dispatch trace.{}",
+            method_name, receiver_pretty, method_name, candidates_str
         ),
     })
 }
@@ -2069,6 +2250,139 @@ pub(in super::super) fn handle_call_method(
 /// dispatcher without round-tripping through a Verum-side
 /// `DefaultHasher` allocation — bit-equivalent to what the protocol
 /// default body in `Hash.hash_value` would produce for the same input.
+///
+/// Receiver-aware accept-rule for the `func-id == method_id` dispatch
+/// fast-path. Returns `true` when `func`'s `parent_type` is structurally
+/// compatible with the runtime receiver — i.e. when calling it is safe
+/// from the receiver-shape perspective.
+///
+/// Rules:
+/// * **Heap-pointer receiver** with a recoverable TypeId in the module's
+///   type table: accept ONLY if the function's parent_type matches the
+///   receiver's TypeId exactly. This prevents a `Chars` receiver from
+///   binding to a `Rev.next` / `MappedIter.next` that happens to occupy
+///   the function-table slot equal to `intern_string("next")`.
+/// * **Heap-pointer receiver** whose TypeId has no descriptor (e.g.
+///   anonymous synthetic types from runtime intercepts): preserve the
+///   historic behaviour — accept any match. The dispatcher's later
+///   passes refine if needed.
+/// * **Non-pointer receiver** (Int / Bool / Float / Char / Byte / nil):
+///   accept iff the function is parent-less (free-fn shaped) OR its
+///   parent type is a primitive name. Mirrors the same decision the
+///   second-pass receiver-bounds gate at line ~1500 makes.
+/// Heap-receiver-aware parent-type compatibility check used by the
+/// second-pass bare-suffix scan. Returns `true` when `func` is a
+/// legitimate dispatch target for a heap-pointer receiver — the
+/// function is either parent-less, or its `parent_type` matches the
+/// receiver's runtime TypeId, or the receiver's type implements a
+/// protocol whose `parent_type` matches.
+///
+/// The receiver's TypeId not being registered in `state.module.types`
+/// (anonymous synthetic types from runtime intercepts) returns `true`
+/// to preserve the historic permissive behaviour for that pathway.
+///
+/// Caller MUST have already verified `dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil()`.
+fn heap_receiver_parent_compatible(
+    state: &InterpreterState,
+    func: &crate::module::FunctionDescriptor,
+    dispatch_receiver: &Value,
+) -> bool {
+    // Parent-less function — accept (free-fn shaped or primitive-bound;
+    // the surrounding call site already excluded primitive receivers).
+    let func_parent = match func.parent_type {
+        None => return true,
+        Some(tid) => tid,
+    };
+
+    let ptr = dispatch_receiver.as_ptr::<u8>();
+    if ptr.is_null()
+        || !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+    {
+        return true;
+    }
+    // SAFETY: alignment verified just above; every heap object begins
+    // with an ObjectHeader.
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+    let recv_tid = header.type_id;
+
+    let recv_descriptor = match state.module.get_type(recv_tid) {
+        Some(d) => d,
+        // Receiver TypeId not registered — anonymous synthetic type;
+        // preserve historic behaviour.
+        None => return true,
+    };
+
+    // Direct own-type match.
+    if func_parent == recv_tid {
+        return true;
+    }
+
+    // Protocol-default-method match: the function lives on a protocol
+    // the receiver's type implements.
+    for pi in recv_descriptor.protocols.iter() {
+        if pi.protocol.0 == func_parent.0 {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn func_id_parent_compatible_with_receiver(
+    state: &InterpreterState,
+    func: &crate::module::FunctionDescriptor,
+    dispatch_receiver: &Value,
+) -> bool {
+    if !dispatch_receiver.is_ptr() || dispatch_receiver.is_nil() {
+        // Non-pointer receiver — accept parent-less or primitive-bound
+        // parents only.
+        return match func.parent_type {
+            None => true,
+            Some(tid) => match state.module.get_type(tid) {
+                Some(td) => match state.module.strings.get(td.name) {
+                    Some(name) => matches!(
+                        name,
+                        "Int" | "Bool" | "Float"
+                            | "Float32" | "Float64"
+                            | "Byte" | "Char" | "UInt8"
+                            | "UInt16" | "UInt32" | "UInt64"
+                            | "Int8" | "Int16" | "Int32" | "Int64"
+                            | "Text" | "Unit"
+                    ),
+                    None => true,
+                },
+                None => true,
+            },
+        };
+    }
+
+    // Heap pointer receiver — recover the runtime TypeId from the heap
+    // header and require an exact match against the function's
+    // parent_type. Bypass the gate when the receiver's TypeId has no
+    // descriptor (anonymous synthetic types) — preserve historic
+    // permissive behaviour for that pathway.
+    let ptr = dispatch_receiver.as_ptr::<u8>();
+    if ptr.is_null()
+        || !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+    {
+        return true;
+    }
+    // SAFETY: alignment verified just above; every heap object begins
+    // with an ObjectHeader.
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+    let recv_tid = header.type_id;
+    if state.module.get_type(recv_tid).is_none() {
+        // Receiver TypeId not registered — anonymous synthetic type.
+        return true;
+    }
+    match func.parent_type {
+        // Parent-less function with a heap receiver: accept (free-fn
+        // shaped or primitive-bound; later passes refine).
+        None => true,
+        Some(tid) => tid == recv_tid,
+    }
+}
+
 #[inline]
 pub(super) fn fxhash_bytes(seed: i64, bytes: &[u8]) -> i64 {
     let mut state: i64 = seed;
@@ -6310,15 +6624,29 @@ pub(super) fn dispatch_primitive_method(
                 let repeated = text.repeat(n.max(0) as usize);
                 return Ok(Some(alloc_string_value(state, &repeated)?));
             }
-            "chars" => {
-                let mut values = Vec::with_capacity(text.len());
-                for ch in text.chars() {
-                    let mut buf = [0u8; 4];
-                    let s = ch.encode_utf8(&mut buf);
-                    values.push(alloc_string_value(state, s)?);
-                }
-                return Ok(Some(alloc_list_from_values(state, values)?));
-            }
+            // **`chars` intercept REMOVED — closes text/text §C iterator
+            // dispatch (the highest-leverage defect across the text audit).**
+            //
+            // The previous intercept returned `List<Text>` (each element a
+            // single-char Text) instead of the source-level
+            // `Text.chars() -> Chars` iterator. The for-loop in
+            // `compile_for_custom_iterator` then emitted `CallM next` on
+            // the result expecting an Iterator-shaped receiver, but the
+            // intercept's List value has no `next` method — the dispatch
+            // panicked with "method 'next' not found on receiver of
+            // runtime kind `List`".
+            //
+            // Falling through to user-compiled dispatch picks up the real
+            // `Text.chars()` body in `core/text/text.vr:617` which returns
+            // `Chars { bytes: self.as_bytes(), pos: 0 }` — a proper
+            // record with field-shape that `Chars.next` can step.
+            // For-loops over `s.chars()` then iterate one Char at a time
+            // as the language spec promises.
+            //
+            // The same architectural smell exists for any intercept that
+            // shadows a stdlib method WITH A DIFFERENT RETURN TYPE.
+            // `bytes` / `lines` / `char_indices` are not currently
+            // intercepted (verified) so their stdlib bodies run cleanly.
             "pad_left" | "pad_start" => {
                 let width = state.get_reg(Reg(args.start.0)).as_i64() as usize;
                 let pad_char = if args.count > 1 {
@@ -8084,3 +8412,4 @@ mod hash_value_pin_tests {
         }
     }
 }
+
