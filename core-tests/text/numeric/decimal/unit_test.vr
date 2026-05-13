@@ -1,0 +1,411 @@
+// =============================================================================
+// core-tests/text/numeric/decimal/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core/text/numeric/decimal.vr` — fixed-precision decimal
+// (`Decimal { coefficient: Int, scale: Int }`).
+//
+// API surface (selected; see source for complete list):
+//   Decimal.zero / one / from_int / from_parts
+//   .is_zero / .is_negative / .is_positive / .abs / .neg
+//   .add / .sub / .mul / .div(other, precision, RoundingMode)
+//   parse_decimal(text)
+//   RoundingMode { HalfEven, HalfUp, HalfDown, Truncate }
+//   DecimalError { ParseEmpty, ParseInvalidChar, ParseInvalidShape,
+//                  ScaleOutOfRange, Overflow, DivByZero }
+//   const MAX_SCALE = 18
+//
+// Companion files: property_test.vr, regression_test.vr, audit.md.
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.numeric.decimal.{
+    Decimal, DecimalError, RoundingMode, MAX_SCALE,
+    HalfEven, HalfUp, HalfDown, Truncate,
+    parse_decimal,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Constants
+// =============================================================================
+
+@test
+fn test_max_scale_is_18() {
+    assert_eq(MAX_SCALE, 18);
+}
+
+// =============================================================================
+// Section 2: Construction
+// =============================================================================
+
+@test
+fn test_zero_canonical() {
+    let z = Decimal.zero();
+    assert_eq(z.coefficient, 0);
+    assert_eq(z.scale, 0);
+}
+
+@test
+fn test_one_canonical() {
+    let o = Decimal.one();
+    assert_eq(o.coefficient, 1);
+    assert_eq(o.scale, 0);
+}
+
+@test
+fn test_from_int_positive() {
+    let d = Decimal.from_int(42);
+    assert_eq(d.coefficient, 42);
+    assert_eq(d.scale, 0);
+}
+
+@test
+fn test_from_int_negative() {
+    let d = Decimal.from_int(-7);
+    assert_eq(d.coefficient, -7);
+    assert_eq(d.scale, 0);
+}
+
+@test
+fn test_from_int_zero() {
+    let d = Decimal.from_int(0);
+    assert_eq(d.coefficient, 0);
+    assert_eq(d.scale, 0);
+}
+
+@test
+fn test_from_parts_valid() {
+    match Decimal.from_parts(123, 2) {
+        Ok(d) => {
+            assert_eq(d.coefficient, 123);
+            assert_eq(d.scale, 2);
+        }
+        Err(_) => panic("scale 2 must be valid"),
+    }
+}
+
+@test
+fn test_from_parts_max_scale() {
+    match Decimal.from_parts(0, MAX_SCALE) {
+        Ok(d) => assert_eq(d.scale, MAX_SCALE),
+        Err(_) => panic("MAX_SCALE must be valid"),
+    }
+}
+
+@test
+fn test_from_parts_negative_scale_rejected() {
+    match Decimal.from_parts(0, -1) {
+        Ok(_) => panic("negative scale must be Err"),
+        Err(e) => assert(e is DecimalError.ScaleOutOfRange),
+    }
+}
+
+@test
+fn test_from_parts_above_max_rejected() {
+    match Decimal.from_parts(0, MAX_SCALE + 1) {
+        Ok(_) => panic("scale > MAX_SCALE must be Err"),
+        Err(e) => assert(e is DecimalError.ScaleOutOfRange),
+    }
+}
+
+// =============================================================================
+// Section 3: Predicates
+// =============================================================================
+
+@test
+fn test_is_zero_true() { assert(Decimal.zero().is_zero()); }
+
+@test
+fn test_is_zero_false() { assert(!Decimal.from_int(5).is_zero()); }
+
+@test
+fn test_is_negative_true() { assert(Decimal.from_int(-1).is_negative()); }
+
+@test
+fn test_is_negative_false_for_positive() { assert(!Decimal.from_int(1).is_negative()); }
+
+@test
+fn test_is_negative_false_for_zero() { assert(!Decimal.zero().is_negative()); }
+
+@test
+fn test_is_positive_true() { assert(Decimal.from_int(1).is_positive()); }
+
+@test
+fn test_is_positive_false_for_negative() { assert(!Decimal.from_int(-1).is_positive()); }
+
+@test
+fn test_is_positive_false_for_zero() { assert(!Decimal.zero().is_positive()); }
+
+// =============================================================================
+// Section 4: abs & neg
+// =============================================================================
+
+@test
+fn test_abs_negative() {
+    let d = Decimal.from_int(-7);
+    let a = d.abs();
+    assert_eq(a.coefficient, 7);
+}
+
+@test
+fn test_abs_positive_identity() {
+    let d = Decimal.from_int(7);
+    let a = d.abs();
+    assert_eq(a.coefficient, 7);
+}
+
+@test
+fn test_abs_zero_zero() {
+    let z = Decimal.zero();
+    let a = z.abs();
+    assert_eq(a.coefficient, 0);
+}
+
+@test
+fn test_neg_positive() {
+    let d = Decimal.from_int(5);
+    let n = d.neg();
+    assert_eq(n.coefficient, -5);
+}
+
+@test
+fn test_neg_negative() {
+    let d = Decimal.from_int(-5);
+    let n = d.neg();
+    assert_eq(n.coefficient, 5);
+}
+
+@test
+fn test_neg_zero() {
+    let z = Decimal.zero();
+    let n = z.neg();
+    assert_eq(n.coefficient, 0);
+}
+
+// =============================================================================
+// Section 5: Arithmetic — add
+// =============================================================================
+
+@test
+fn test_add_same_scale() {
+    let a = Decimal.from_int(2);
+    let b = Decimal.from_int(3);
+    match a.add(&b) {
+        Ok(d) => {
+            assert_eq(d.coefficient, 5);
+            assert_eq(d.scale, 0);
+        }
+        Err(_) => panic("simple add must succeed"),
+    }
+}
+
+@test
+fn test_add_zero_left_identity() {
+    let z = Decimal.zero();
+    let d = Decimal.from_int(7);
+    match z.add(&d) {
+        Ok(r) => assert_eq(r.coefficient, 7),
+        Err(_) => panic("zero is left identity"),
+    }
+}
+
+@test
+fn test_add_negative_to_positive() {
+    let a = Decimal.from_int(5);
+    let b = Decimal.from_int(-3);
+    match a.add(&b) {
+        Ok(r) => assert_eq(r.coefficient, 2),
+        Err(_) => panic("5 + -3 = 2"),
+    }
+}
+
+// =============================================================================
+// Section 6: Arithmetic — sub
+// =============================================================================
+
+@test
+fn test_sub_same_scale() {
+    let a = Decimal.from_int(7);
+    let b = Decimal.from_int(3);
+    match a.sub(&b) {
+        Ok(d) => assert_eq(d.coefficient, 4),
+        Err(_) => panic("7 - 3 = 4"),
+    }
+}
+
+@test
+fn test_sub_self_yields_zero_coef() {
+    let a = Decimal.from_int(5);
+    match a.sub(&a) {
+        Ok(d) => assert_eq(d.coefficient, 0),
+        Err(_) => panic("5 - 5 = 0"),
+    }
+}
+
+// =============================================================================
+// Section 7: Arithmetic — mul
+// =============================================================================
+
+@test
+fn test_mul_simple() {
+    let a = Decimal.from_int(3);
+    let b = Decimal.from_int(4);
+    match a.mul(&b) {
+        Ok(d) => {
+            assert_eq(d.coefficient, 12);
+            assert_eq(d.scale, 0);
+        }
+        Err(_) => panic("3 * 4 = 12"),
+    }
+}
+
+@test
+fn test_mul_by_zero_yields_zero() {
+    let a = Decimal.from_int(7);
+    let z = Decimal.zero();
+    match a.mul(&z) {
+        Ok(d) => assert_eq(d.coefficient, 0),
+        Err(_) => panic("x * 0 = 0"),
+    }
+}
+
+@test
+fn test_mul_by_one_identity() {
+    let a = Decimal.from_int(7);
+    let o = Decimal.one();
+    match a.mul(&o) {
+        Ok(d) => assert_eq(d.coefficient, 7),
+        Err(_) => panic("x * 1 = x"),
+    }
+}
+
+// =============================================================================
+// Section 8: Arithmetic — div
+// =============================================================================
+
+@test
+fn test_div_by_zero_returns_div_by_zero() {
+    let a = Decimal.from_int(5);
+    let z = Decimal.zero();
+    match a.div(&z, 2, RoundingMode.HalfEven) {
+        Ok(_) => panic("div by zero must Err"),
+        Err(e) => assert(e is DecimalError.DivByZero),
+    }
+}
+
+@test
+fn test_div_simple_exact() {
+    let a = Decimal.from_int(10);
+    let b = Decimal.from_int(2);
+    match a.div(&b, 0, RoundingMode.HalfEven) {
+        Ok(d) => assert_eq(d.coefficient, 5),
+        Err(_) => panic("10 / 2 = 5"),
+    }
+}
+
+@test
+fn test_div_negative_precision_rejected() {
+    let a = Decimal.from_int(1);
+    let b = Decimal.from_int(2);
+    match a.div(&b, -1, RoundingMode.HalfEven) {
+        Ok(_) => panic("negative precision must Err"),
+        Err(e) => assert(e is DecimalError.ScaleOutOfRange),
+    }
+}
+
+// =============================================================================
+// Section 9: parse_decimal
+// =============================================================================
+
+@test
+fn test_parse_simple_int() {
+    match parse_decimal(&"42") {
+        Ok(d) => {
+            assert_eq(d.coefficient, 42);
+            assert_eq(d.scale, 0);
+        }
+        Err(_) => panic("'42' parses"),
+    }
+}
+
+@test
+fn test_parse_decimal_point() {
+    match parse_decimal(&"3.14") {
+        Ok(d) => {
+            assert_eq(d.coefficient, 314);
+            assert_eq(d.scale, 2);
+        }
+        Err(_) => panic("'3.14' parses"),
+    }
+}
+
+@test
+fn test_parse_negative() {
+    match parse_decimal(&"-1.5") {
+        Ok(d) => {
+            assert_eq(d.coefficient, -15);
+            assert_eq(d.scale, 1);
+        }
+        Err(_) => panic("'-1.5' parses"),
+    }
+}
+
+@test
+fn test_parse_empty_returns_err() {
+    match parse_decimal(&"") {
+        Ok(_) => panic("empty must Err"),
+        Err(e) => assert(e is DecimalError.ParseEmpty),
+    }
+}
+
+@test
+fn test_parse_garbage_returns_err() {
+    match parse_decimal(&"abc") {
+        Ok(_) => panic("garbage must Err"),
+        Err(_) => {},
+    }
+}
+
+// =============================================================================
+// Section 10: RoundingMode variants
+// =============================================================================
+
+@test
+fn test_rounding_half_even_distinct() {
+    let m: RoundingMode = RoundingMode.HalfEven;
+    assert(m is RoundingMode.HalfEven);
+}
+
+@test
+fn test_rounding_half_up_distinct() {
+    let m: RoundingMode = RoundingMode.HalfUp;
+    assert(m is RoundingMode.HalfUp);
+}
+
+@test
+fn test_rounding_half_down_distinct() {
+    let m: RoundingMode = RoundingMode.HalfDown;
+    assert(m is RoundingMode.HalfDown);
+}
+
+@test
+fn test_rounding_truncate_distinct() {
+    let m: RoundingMode = RoundingMode.Truncate;
+    assert(m is RoundingMode.Truncate);
+}
+
+@test
+fn test_rounding_modes_pairwise_disjoint() {
+    let he: RoundingMode = RoundingMode.HalfEven;
+    assert(!(he is RoundingMode.HalfUp));
+    assert(!(he is RoundingMode.HalfDown));
+    assert(!(he is RoundingMode.Truncate));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

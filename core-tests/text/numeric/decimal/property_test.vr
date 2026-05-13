@@ -1,0 +1,256 @@
+// =============================================================================
+// core-tests/text/numeric/decimal/property_test.vr
+// =============================================================================
+//
+// Properties for fixed-precision Decimal.
+//
+// Laws:
+//   §1  Construction invariants: zero/one/from_int/from_parts produce
+//       the documented (coefficient, scale) shape
+//   §2  Predicates partition the value space:
+//        is_zero ⊕ is_negative ⊕ is_positive (exactly one)
+//   §3  abs is idempotent and non-negative
+//   §4  neg is involutive
+//   §5  add zero-identity
+//   §6  add commutativity (mod overflow)
+//   §7  mul one-identity
+//   §8  mul by zero yields zero coefficient
+//   §9  scale invariant: from_parts(c, s) preserves both
+//   §10 RoundingMode 4-variant pairwise distinct
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.numeric.decimal.{
+    Decimal, DecimalError, RoundingMode, MAX_SCALE, parse_decimal,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 Construction invariants
+// =============================================================================
+
+@test
+fn property_zero_canonical_shape() {
+    let z = Decimal.zero();
+    assert_eq(z.coefficient, 0);
+    assert_eq(z.scale, 0);
+}
+
+@test
+fn property_one_canonical_shape() {
+    let o = Decimal.one();
+    assert_eq(o.coefficient, 1);
+    assert_eq(o.scale, 0);
+}
+
+@test
+fn property_from_int_preserves_value() {
+    let xs: List<Int> = [0, 1, -1, 42, -42, 1000000];
+    for n in xs.iter() {
+        let d = Decimal.from_int(*n);
+        assert_eq(d.coefficient, *n);
+        assert_eq(d.scale, 0);
+    }
+}
+
+// =============================================================================
+// §2 Predicate partition: is_zero ⊕ is_negative ⊕ is_positive
+// =============================================================================
+
+@test
+fn property_predicate_partition() {
+    let xs: List<Decimal> = [
+        Decimal.zero(), Decimal.from_int(1), Decimal.from_int(-1),
+        Decimal.from_int(100), Decimal.from_int(-100),
+    ];
+    for d in xs.iter() {
+        let count =
+            (if (*d).is_zero() { 1 } else { 0 }) +
+            (if (*d).is_negative() { 1 } else { 0 }) +
+            (if (*d).is_positive() { 1 } else { 0 });
+        assert_eq(count, 1);
+    }
+}
+
+// =============================================================================
+// §3 abs idempotence + non-negativity
+// =============================================================================
+
+@test
+fn property_abs_idempotent() {
+    let xs: List<Int> = [-5, -1, 0, 1, 5];
+    for n in xs.iter() {
+        let d = Decimal.from_int(*n);
+        let once = d.abs();
+        let twice = once.abs();
+        assert_eq(once.coefficient, twice.coefficient);
+    }
+}
+
+@test
+fn property_abs_non_negative() {
+    let xs: List<Int> = [-1000, -1, 0, 1, 1000];
+    for n in xs.iter() {
+        let d = Decimal.from_int(*n);
+        let a = d.abs();
+        assert(a.coefficient >= 0);
+    }
+}
+
+// =============================================================================
+// §4 neg involution
+// =============================================================================
+
+@test
+fn property_neg_involution() {
+    let xs: List<Int> = [-7, -1, 0, 1, 7];
+    for n in xs.iter() {
+        let d = Decimal.from_int(*n);
+        let twice = d.neg().neg();
+        assert_eq(twice.coefficient, d.coefficient);
+    }
+}
+
+// =============================================================================
+// §5 add zero-identity
+// =============================================================================
+
+@test
+fn property_add_zero_left_identity() {
+    let z = Decimal.zero();
+    let xs: List<Int> = [0, 1, -1, 42, -42];
+    for n in xs.iter() {
+        let d = Decimal.from_int(*n);
+        match z.add(&d) {
+            Ok(r) => assert_eq(r.coefficient, *n),
+            Err(_) => panic("zero is left identity"),
+        }
+    }
+}
+
+// =============================================================================
+// §6 add commutativity (mod overflow)
+// =============================================================================
+
+@test
+fn property_add_commutative_small() {
+    let xs: List<Int> = [-3, -1, 0, 1, 3];
+    for a in xs.iter() {
+        for b in xs.iter() {
+            let da = Decimal.from_int(*a);
+            let db = Decimal.from_int(*b);
+            let r1 = da.add(&db);
+            let r2 = db.add(&da);
+            match (r1, r2) {
+                (Ok(x), Ok(y)) => assert_eq(x.coefficient, y.coefficient),
+                _ => {},
+            }
+        }
+    }
+}
+
+// =============================================================================
+// §7 mul one-identity
+// =============================================================================
+
+@test
+fn property_mul_one_left_identity() {
+    let o = Decimal.one();
+    let xs: List<Int> = [0, 1, -1, 7, -7];
+    for n in xs.iter() {
+        let d = Decimal.from_int(*n);
+        match o.mul(&d) {
+            Ok(r) => assert_eq(r.coefficient, *n),
+            Err(_) => panic("one is left identity"),
+        }
+    }
+}
+
+// =============================================================================
+// §8 mul by zero yields zero coefficient
+// =============================================================================
+
+@test
+fn property_mul_by_zero_is_zero() {
+    let z = Decimal.zero();
+    let xs: List<Int> = [-5, -1, 0, 1, 5];
+    for n in xs.iter() {
+        let d = Decimal.from_int(*n);
+        match d.mul(&z) {
+            Ok(r) => assert_eq(r.coefficient, 0),
+            Err(_) => panic("x * 0 = 0"),
+        }
+    }
+}
+
+// =============================================================================
+// §9 from_parts preserves coefficient and scale
+// =============================================================================
+
+@test
+fn property_from_parts_preserves_fields() {
+    let cases: List<(Int, Int)> = [(0, 0), (1, 0), (-1, 0), (314, 2), (-314, 2)];
+    for c in cases.iter() {
+        match Decimal.from_parts((*c).0, (*c).1) {
+            Ok(d) => {
+                assert_eq(d.coefficient, (*c).0);
+                assert_eq(d.scale, (*c).1);
+            }
+            Err(_) => panic("valid (coefficient, scale) must succeed"),
+        }
+    }
+}
+
+// =============================================================================
+// §10 RoundingMode 4-variant pairwise distinct
+// =============================================================================
+
+@test
+fn property_rounding_modes_pairwise_distinct() {
+    let he: RoundingMode = RoundingMode.HalfEven;
+    let hu: RoundingMode = RoundingMode.HalfUp;
+    let hd: RoundingMode = RoundingMode.HalfDown;
+    let tr: RoundingMode = RoundingMode.Truncate;
+
+    assert(he is RoundingMode.HalfEven);
+    assert(hu is RoundingMode.HalfUp);
+    assert(hd is RoundingMode.HalfDown);
+    assert(tr is RoundingMode.Truncate);
+
+    assert(!(he is RoundingMode.HalfUp));
+    assert(!(hu is RoundingMode.HalfDown));
+    assert(!(hd is RoundingMode.Truncate));
+    assert(!(tr is RoundingMode.HalfEven));
+}
+
+// =============================================================================
+// §11 abs(neg(d)) == abs(d)
+// =============================================================================
+
+@test
+fn property_abs_neg_equiv_abs() {
+    let xs: List<Int> = [-7, -1, 0, 1, 7];
+    for n in xs.iter() {
+        let d = Decimal.from_int(*n);
+        let lhs = d.neg().abs();
+        let rhs = d.abs();
+        assert_eq(lhs.coefficient, rhs.coefficient);
+    }
+}
+
+// =============================================================================
+// §12 MAX_SCALE invariant
+// =============================================================================
+
+@test
+fn property_max_scale_18() {
+    assert_eq(MAX_SCALE, 18);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
