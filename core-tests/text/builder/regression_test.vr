@@ -1,0 +1,108 @@
+// =============================================================================
+// core-tests/text/builder/regression_test.vr
+// =============================================================================
+//
+// Defects pinned for `core/text/builder.vr`. The TextBuilder module is a thin
+// wrapper around `Text.push_str`, `Text.push_byte`, and `Text.clone`/`new`/
+// `with_capacity`. Every defect surfaced here is downstream of a primitive-
+// level defect:
+//
+//   §A  Int.BAnd / Int.BNeq dispatch broken
+//       (push_str + push_byte + grow path use bitwise operators on size /
+//       capacity calculations)
+//   §B  TextBuilder.build returns wrong content
+//       (downstream of Text.clone / Text.eq cascade in text/text §I)
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.builder.{TextBuilder};
+
+// =============================================================================
+// §A — `Int.BAnd` / `Int.BNeq` not found on receiver kind `Int` (audit.md §A)
+// REGRESSION: every TextBuilder operation that touches the underlying
+// Text.push_str path panics with "method 'BAnd' not found" or
+// "method 'BNeq' not found" on Int. These are bitwise operators
+// (BAnd = &, BNeq = !=, etc.) used in the Text grow / capacity-doubling
+// path. The dispatch table expects them on Int but the runtime can't
+// resolve them — same family as text/text §C iterator-dispatch defect.
+// =============================================================================
+
+@ignore
+@test
+fn regression_a_push_text_pinned() {
+    let mut b = TextBuilder.new();
+    b.push(&"hello");
+    assert_eq(b.build(), "hello");
+}
+
+@ignore
+@test
+fn regression_a_push_char_pinned() {
+    let mut b = TextBuilder.new();
+    b.push_char('a');
+    assert_eq(b.build(), "a");
+}
+
+@ignore
+@test
+fn regression_a_push_line_pinned() {
+    let mut b = TextBuilder.new();
+    b.push_line(&"line");
+    let out = b.build();
+    assert_eq(out.len(), 5);  // "line" + '\n'
+}
+
+@ignore
+@test
+fn regression_a_clear_pinned() {
+    let mut b = TextBuilder.new();
+    b.push(&"hello");
+    b.clear();
+    assert(b.is_empty());
+}
+
+@ignore
+@test
+fn regression_a_clone_pinned() {
+    let mut b = TextBuilder.new();
+    b.push(&"hello");
+    let c = b.clone();
+    assert_eq(c.build(), "hello");
+}
+
+// =============================================================================
+// Active PASS-GUARDs — the constructors work without ever invoking push.
+// =============================================================================
+
+@test
+fn guard_new_is_empty() {
+    let b = TextBuilder.new();
+    assert(b.is_empty());
+    assert_eq(b.len(), 0);
+}
+
+@test
+fn guard_with_capacity_zero_is_empty() {
+    let b = TextBuilder.with_capacity(0);
+    assert(b.is_empty());
+    assert_eq(b.len(), 0);
+}
+
+@test
+fn guard_with_capacity_positive_is_empty() {
+    let b = TextBuilder.with_capacity(64);
+    assert(b.is_empty());
+    assert_eq(b.len(), 0);
+}
+
+@test
+fn guard_default_is_empty() {
+    let b: TextBuilder = TextBuilder.default();
+    assert(b.is_empty());
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}

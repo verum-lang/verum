@@ -1,0 +1,159 @@
+// =============================================================================
+// core-tests/text/builder/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib scenarios for `TextBuilder` — exercises building a Text out of
+// pieces sourced from List, Maybe, format strings, and Iterator output.
+//
+// Coverage:
+//   §1 Build a CSV row from List<Text>
+//   §2 Build a key-value table
+//   §3 Build a stack trace from List + push_line
+//   §4 Builder + format strings
+//   §5 Build then parse round-trip with Text.parse_int
+// =============================================================================
+
+mount core.text.{Text};
+mount core.text.builder.{TextBuilder};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 CSV row from a List<Text>
+// =============================================================================
+
+@test
+fn integration_build_csv_row() {
+    let cols: List<Text> = ["alice", "30", "engineer"];
+    let mut b = TextBuilder.new();
+    let mut first: Bool = true;
+    for c in cols.iter() {
+        if !first {
+            b.push(&",");
+        }
+        b.push(c);
+        first = false;
+    }
+    assert_eq(b.build(), "alice,30,engineer");
+}
+
+// =============================================================================
+// §2 Key-value table
+// =============================================================================
+
+@test
+fn integration_build_key_value_table() {
+    let kvs: List<(Text, Text)> = [("name", "alice"), ("age", "30"), ("role", "engineer")];
+    let mut b = TextBuilder.new();
+    for kv in kvs.iter() {
+        b.push(&(*kv).0);
+        b.push(&"=");
+        b.push(&(*kv).1);
+        b.push(&";");
+    }
+    assert_eq(b.build(), "name=alice;age=30;role=engineer;");
+}
+
+// =============================================================================
+// §3 Build a multi-line block (push_line)
+// =============================================================================
+
+@test
+fn integration_build_multiline_via_push_line() {
+    let lines: List<Text> = ["line one", "line two", "line three"];
+    let mut b = TextBuilder.new();
+    for l in lines.iter() {
+        b.push_line(l);
+    }
+    let out = b.build();
+    // 3 line texts + 3 newlines
+    let expected_len = "line one".len() + 1 +
+                       "line two".len() + 1 +
+                       "line three".len() + 1;
+    assert_eq(out.len(), expected_len);
+}
+
+// =============================================================================
+// §4 Builder content used in format strings
+// =============================================================================
+
+@test
+fn integration_builder_into_format_string() {
+    let mut b = TextBuilder.new();
+    b.push(&"value");
+    let s = b.build();
+    let msg = f"got {s}";
+    assert_eq(msg, "got value");
+}
+
+// =============================================================================
+// §5 Build digits, parse back to Int
+// =============================================================================
+
+@test
+fn integration_build_digit_sequence_parse_int() {
+    let mut b = TextBuilder.new();
+    b.push(&"4");
+    b.push(&"2");
+    let s = b.build();
+    match s.parse_int() {
+        Ok(n) => assert_eq(n, 42),
+        Err(_) => panic("digit-built '42' must parse to 42"),
+    }
+}
+
+// =============================================================================
+// §6 Sequence of operations: into_text consumes builder; subsequent use
+//    must use a fresh builder (the language enforces ownership).
+// =============================================================================
+
+@test
+fn integration_into_text_then_new_builder() {
+    let mut b1 = TextBuilder.new();
+    b1.push(&"first");
+    let t1 = b1.into_text();
+    assert_eq(t1, "first");
+
+    let mut b2 = TextBuilder.new();
+    b2.push(&"second");
+    let t2 = b2.into_text();
+    assert_eq(t2, "second");
+}
+
+// =============================================================================
+// §7 char-by-char build with chars() — drives both Text.chars() iteration
+//    and TextBuilder.push_char.
+// =============================================================================
+
+@test
+fn integration_rebuild_text_via_chars_and_push_char() {
+    let original: Text = "hello";
+    let mut b = TextBuilder.new();
+    for c in original.chars() {
+        b.push_char(c);
+    }
+    assert_eq(b.build(), original);
+}
+
+// =============================================================================
+// §8 Builder + Clone — fork two builders from a shared prefix
+// =============================================================================
+
+@test
+fn integration_clone_for_two_outputs() {
+    let mut prefix = TextBuilder.new();
+    prefix.push(&"prefix-");
+    let mut a = prefix.clone();
+    let mut b = prefix.clone();
+    a.push(&"alpha");
+    b.push(&"beta");
+    assert_eq(a.build(), "prefix-alpha");
+    assert_eq(b.build(), "prefix-beta");
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
