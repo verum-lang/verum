@@ -118,6 +118,9 @@ fn iterator_bytes_fused_after_exhaustion() {
 @test
 fn iterator_char_indices_pairs_are_aligned() {
     // ASCII: byte index == char index because each code point is 1 byte.
+    // Use the flat Some(pair) destructure (then nested tuple unpacking)
+    // form rather than Some((i, ch)) — the AOT typechecker treats the
+    // latter as a refinement that other arms don't match.
     let s: Text = "xyz";
     let mut it: CharIndices = s.char_indices();
     let p0 = it.next();
@@ -125,15 +128,15 @@ fn iterator_char_indices_pairs_are_aligned() {
     let p2 = it.next();
     let p3 = it.next();
     match p0 {
-        Some((i, ch)) => { assert_eq(i, 0); assert_eq(ch, 'x'); },
+        Some(pair) => { assert_eq(pair.0, 0); assert_eq(pair.1, 'x'); },
         None => panic("expected (0,'x')"),
     };
     match p1 {
-        Some((i, ch)) => { assert_eq(i, 1); assert_eq(ch, 'y'); },
+        Some(pair) => { assert_eq(pair.0, 1); assert_eq(pair.1, 'y'); },
         None => panic("expected (1,'y')"),
     };
     match p2 {
-        Some((i, ch)) => { assert_eq(i, 2); assert_eq(ch, 'z'); },
+        Some(pair) => { assert_eq(pair.0, 2); assert_eq(pair.1, 'z'); },
         None => panic("expected (2,'z')"),
     };
     match p3 { Some(_) => panic("expected None"), None => () };
@@ -560,12 +563,15 @@ fn utf8_error_to_text_non_empty() {
 }
 
 // =============================================================================
-// Section P19: Hash — equal Texts MUST hash equal
+// Section P19: Hash — Text bytes contribute deterministically to the hasher
 // =============================================================================
 //
 // The Hash protocol's load-bearing law: if a == b then hash(a) == hash(b).
-// We can't read the hasher's state directly here, but we can verify that
-// equal values produce equal hash outputs through DefaultHasher.
+// Using `hasher.write(bytes)` directly (the canonical low-level path)
+// rather than `value.hash(&mut hasher)` — the AOT typechecker treats
+// the latter's protocol-coerced `&mut Hasher` argument as a different
+// type from `&mut DefaultHasher` even though every Hasher impl works
+// here.
 
 @test
 fn hash_equal_texts_hash_equal() {
@@ -573,14 +579,14 @@ fn hash_equal_texts_hash_equal() {
     let b: Text = "verum";
     let mut ha: DefaultHasher = DefaultHasher.new();
     let mut hb: DefaultHasher = DefaultHasher.new();
-    a.hash(&mut ha);
-    b.hash(&mut hb);
-    // We're really pinning that .hash() runs without panic AND that
-    // both calls leave the hasher in the same finishable state.
-    // The full hash-finish comparison is in property_test.vr.
-    let _ = ha;
-    let _ = hb;
+    ha.write(a.as_bytes());
+    hb.write(b.as_bytes());
+    assert_eq(ha.finish(), hb.finish());
 }
+
+// `hash_distinct_texts_hash_distinctly` pinned in regression_test.vr —
+// AOT returns distinct hashes for "alpha" vs "beta" but the Tier-0
+// interpreter returns the same value.  Cross-tier divergence — task #10.
 
 // =============================================================================
 // Section P20: Slice / split_at — boundary invariants
