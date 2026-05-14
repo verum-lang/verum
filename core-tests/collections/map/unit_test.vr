@@ -192,4 +192,55 @@ fn test_map_len_zero_after_full_remove() {
     assert_eq(m.len(), 0);
 }
 
+// =============================================================================
+// Section 9: get — return Maybe<V> (post-layout-fix + CBGR-ref auto-deref)
+//
+//   Map.get(&key) lowers `&key` as a CBGR ThinRef pointing at the
+//   caller's stack slot. Pre-fix the intercept compared the ref-encoded
+//   bits against entry-key bits and reported every present key as
+//   absent. The auto-deref in the intercept (mirror of contains/union
+//   pattern) restores correct lookup semantics.
+// =============================================================================
+
+@test
+fn test_map_get_returns_some_for_present_key() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 100);
+    let _ = m.insert(2, 200);
+    let _ = m.insert(3, 300);
+    assert_eq(m.get(&1), Some(100));
+    assert_eq(m.get(&2), Some(200));
+    assert_eq(m.get(&3), Some(300));
+}
+
+@test
+fn test_map_get_returns_none_for_absent_key() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 100);
+    assert_eq(m.get(&99), None);
+}
+
+@test
+fn test_map_get_on_empty_returns_none() {
+    let m: Map<Int, Int> = Map.new();
+    assert_eq(m.get(&0), None);
+}
+
+@test
+fn test_map_get_after_remove_returns_none() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(7, 70);
+    assert_eq(m.get(&7), Some(70));
+    let _ = m.remove(7);
+    assert_eq(m.get(&7), None);
+}
+
+@test
+fn test_map_get_after_overwrite_returns_new_value() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    let _ = m.insert(1, 99);
+    assert_eq(m.get(&1), Some(99));
+}
+
 fn main() {}
