@@ -7406,7 +7406,51 @@ impl VbcCodegen {
                             && self
                                 .ctx
                                 .has_functions_with_prefix(&format!("{}.", resolved_first))));
-                if is_module_ns || is_type_ns {
+                // FUNDAMENTAL #4 — protect the chained `<Type>.<CONST>.<method>()`
+                // pattern from being collapsed to `LoadNil`.
+                //
+                // The LoadNil stub below is the "type-namespace unknown
+                // method" graceful-degrade path: when the user writes
+                // `<TypeName>.<unknown_method>(args)`, the codegen emits
+                // a nil instead of a hard compile error so the rest of the
+                // module still compiles.
+                //
+                // But for a chained `<TypeName>.<CONST>.<method>()` —
+                // where `<TypeName>.<CONST>` IS a registered value (impl-
+                // block const, e.g. `FileDesc.INVALID = FileDesc(-1)`),
+                // the call IS valid: it's invoking `<method>` on the
+                // const's value.  The stub mis-fires because `parts =
+                // ["FileDesc", "INVALID"]` and `first = "FileDesc"` is a
+                // type namespace, so `is_type_ns = true`.  Pre-fix this
+                // collapsed every `FileDesc.STDIN.as_raw() / .is_valid()
+                // / .as_int() / …` site to `nil`, breaking method
+                // dispatch on every transparent-wrapper newtype's
+                // impl-block constants.
+                //
+                // Gate the stub: only emit LoadNil when the *receiver
+                // path alone* — `parts` minus the trailing `method.name`
+                // segment that was appended at line 7216 above — is NOT
+                // itself a registered 0-arity function.  When it IS,
+                // the receiver is a real const value (impl-block
+                // `const X` or module-level `public const X`), so the
+                // call should fall through to the receiver-compile +
+                // CallM path below, NOT collapse to nil.
+                let receiver_path_len = parts.len().saturating_sub(1);
+                let receiver_is_known_value = if receiver_path_len >= 1 {
+                    let receiver_parts = &parts[..receiver_path_len];
+                    let receiver_qualified_verum = receiver_parts.join(".");
+                    let receiver_qualified_rust = receiver_parts.join("::");
+                    self.ctx
+                        .lookup_qualified_function(&receiver_qualified_verum)
+                        .or_else(|| {
+                            self.ctx.lookup_qualified_function(&receiver_qualified_rust)
+                        })
+                        .map(|fi| fi.param_count == 0 && fi.variant_tag.is_none())
+                        .unwrap_or(false)
+                } else {
+                    false
+                };
+                if (is_module_ns || is_type_ns) && !receiver_is_known_value {
                     let result = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::LoadNil { dst: result });
                     return Ok(Some(result));
