@@ -1,0 +1,99 @@
+// =============================================================================
+// core-tests/async/parallel/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.async.parallel`.  These tests
+// exercise the parallel ops in concert with `List`, `Maybe`,
+// arithmetic, and the `core.base.iterator` chain — the same shapes
+// real callers (data-pipeline-style code) write.
+// =============================================================================
+
+mount core.async.parallel.{
+    parallel_map, parallel_filter_map, parallel_for_each,
+    parallel_reduce, parallel_scan_exclusive,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — pipeline: map → filter_map → reduce
+// =============================================================================
+
+@test
+fn integration_parallel_map_filter_reduce_pipeline() {
+    let xs: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let squared   = parallel_map(xs, 4, |x| x * x);
+    let evens_only = parallel_filter_map((squared).clone(), 4, |y| {
+        if y % 2 == 0 { Some(y) } else { None }
+    });
+    let total = parallel_reduce(evens_only, 4, |a, b| a + b);
+    // sum of squares of even inputs: 4 + 16 + 36 + 64 + 100 = 220
+    match total {
+        Some(s) => assert_eq(s, 220),
+        None => assert(false),
+    }
+}
+
+// =============================================================================
+// §B — for_each driving a List push (parallel side-effect sink)
+// =============================================================================
+
+@test
+fn integration_parallel_for_each_appends_to_external_list() {
+    let xs: List<Int> = [10, 20, 30];
+    let mut collected: List<Int> = [];
+    parallel_for_each(xs, 4, |x| { collected.push(x); });
+    assert_eq(collected.len(), 3);
+    // We don't pin the *order* — collected is a sequential fallback today
+    // but parallel scheduling may reorder.  The contract is "every input
+    // appears exactly once".  Verify by summing.
+    let mut sum: Int = 0;
+    for v in collected.iter() { sum = sum + *v; }
+    assert_eq(sum, 60);
+}
+
+// =============================================================================
+// §C — scan_exclusive feeding running-prefix into a downstream map
+// =============================================================================
+
+@test
+fn integration_parallel_scan_to_running_total_messages() {
+    let amounts: List<Int> = [10, 20, 30, 40];
+    let running_balance = parallel_scan_exclusive(amounts, 100, |a, b| a + b);
+    // The running balance starts at 100, then after each item is
+    // 100 + sum_of_previous.  Expected: [100, 110, 130, 160]
+    assert_eq(running_balance.len(), 4);
+    assert_eq(running_balance[0], 100);
+    assert_eq(running_balance[1], 110);
+    assert_eq(running_balance[2], 130);
+    assert_eq(running_balance[3], 160);
+}
+
+// =============================================================================
+// §D — empty-input is *idempotent* across all combinators
+// =============================================================================
+
+@test
+fn integration_parallel_empty_input_is_idempotent() {
+    let xs: List<Int> = [];
+
+    let mapped = parallel_map((xs).clone(), 4, |x| x + 1);
+    assert_eq(mapped.len(), 0);
+
+    let filtered = parallel_filter_map((xs).clone(), 4, |x| Some(x));
+    assert_eq(filtered.len(), 0);
+
+    let mut visited: Int = 0;
+    parallel_for_each((xs).clone(), 4, |_x| { visited = visited + 1; });
+    assert_eq(visited, 0);
+
+    match parallel_reduce((xs).clone(), 4, |a, b| a + b) {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+
+    let scanned = parallel_scan_exclusive((xs).clone(), 0, |a, b| a + b);
+    assert_eq(scanned.len(), 0);
+}
+
+fn main() {}

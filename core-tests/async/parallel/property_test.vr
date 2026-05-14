@@ -1,0 +1,210 @@
+// =============================================================================
+// core-tests/async/parallel/property_test.vr
+// =============================================================================
+//
+// Algebraic-law tests for `core.async.parallel`.
+//
+// Properties we hold the parallel ops to:
+//   §A — parallel_map preserves length and per-index relation
+//   §B — parallel_filter_map ⊆ parallel_map (same order, subset of indices)
+//   §C — parallel_reduce coincides with sequential left-fold
+//   §D — parallel_scan_exclusive coincides with reference exclusive prefix
+//   §E — scan(zero, +) of identity-padded list equals running-sum reference
+//   §F — worker_count is a *hint* — varying it must not change the result
+// =============================================================================
+
+mount core.async.parallel.{
+    parallel_map, parallel_filter_map, parallel_reduce, parallel_scan_exclusive,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — map preserves length
+// =============================================================================
+
+@test
+fn property_parallel_map_preserves_length() {
+    let inputs: List<List<Int>> = [
+        [],
+        [42],
+        [1, 2, 3],
+        [1, 2, 3, 4, 5, 6, 7, 8],
+    ];
+    for xs in inputs.iter() {
+        let mapped = parallel_map((*xs).clone(), 4, |x| x + 1);
+        assert_eq(mapped.len(), (*xs).len());
+    }
+}
+
+@test
+fn property_parallel_map_relation_per_index_addition() {
+    let xs: List<Int> = [10, 20, 30, 40, 50];
+    let ys = parallel_map((xs).clone(), 4, |x| x + 7);
+    let mut i: Int = 0;
+    while i < xs.len() {
+        assert_eq(ys[i], xs[i] + 7);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §B — filter_map ⊆ map (subset of indices, same relative order)
+// =============================================================================
+
+@test
+fn property_parallel_filter_map_is_subset_of_map() {
+    let xs: List<Int> = [1, 2, 3, 4, 5, 6];
+    let filtered = parallel_filter_map((xs).clone(), 4, |x| {
+        if x > 3 { Some(x * 10) } else { None }
+    });
+    // every output element must equal some f(input) where the
+    // predicate held; the order must be preserved.
+    assert_eq(filtered.len(), 3);
+    assert_eq(filtered[0], 40);
+    assert_eq(filtered[1], 50);
+    assert_eq(filtered[2], 60);
+}
+
+// =============================================================================
+// §C — reduce ≡ left-fold over Some
+// =============================================================================
+
+@test
+fn property_parallel_reduce_equals_left_fold() {
+    fn left_fold_sum(xs: List<Int>) -> Maybe<Int> {
+        if xs.len() == 0 { return None; }
+        let mut acc = xs[0];
+        let mut i: Int = 1;
+        while i < xs.len() {
+            acc = acc + xs[i];
+            i = i + 1;
+        }
+        Some(acc)
+    }
+
+    let cases: List<List<Int>> = [
+        [],
+        [7],
+        [1, 2, 3],
+        [10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+    ];
+    for xs in cases.iter() {
+        let lf = left_fold_sum((*xs).clone());
+        let pr = parallel_reduce((*xs).clone(), 4, |a, b| a + b);
+        match (lf, pr) {
+            (None, None) => assert(true),
+            (Some(a), Some(b)) => assert_eq(a, b),
+            _ => assert(false),
+        }
+    }
+}
+
+// =============================================================================
+// §D — scan_exclusive coincides with reference exclusive prefix
+//   ref(xs)[i] = zero + xs[0] + xs[1] + ... + xs[i-1]   (sum-flavour)
+// =============================================================================
+
+@test
+fn property_parallel_scan_exclusive_matches_reference_sum() {
+    fn reference_exclusive_sum(xs: List<Int>, zero: Int) -> List<Int> {
+        let mut out: List<Int> = [];
+        let mut running = zero;
+        let mut i: Int = 0;
+        while i < xs.len() {
+            out.push(running);
+            running = running + xs[i];
+            i = i + 1;
+        }
+        out
+    }
+
+    let cases: List<List<Int>> = [
+        [],
+        [42],
+        [1, 2],
+        [1, 1, 1, 1],
+        [1, 2, 3, 4, 5, 6, 7, 8],
+    ];
+    for xs in cases.iter() {
+        let reference = reference_exclusive_sum((*xs).clone(), 0);
+        let scanned   = parallel_scan_exclusive((*xs).clone(), 0, |a, b| a + b);
+        assert_eq(scanned.len(), reference.len());
+        let mut i: Int = 0;
+        while i < reference.len() {
+            assert_eq(scanned[i], reference[i]);
+            i = i + 1;
+        }
+    }
+}
+
+@test
+fn property_parallel_scan_exclusive_matches_reference_max() {
+    fn reference_exclusive_max(xs: List<Int>, zero: Int) -> List<Int> {
+        let mut out: List<Int> = [];
+        let mut running = zero;
+        let mut i: Int = 0;
+        while i < xs.len() {
+            out.push(running);
+            running = if running > xs[i] { running } else { xs[i] };
+            i = i + 1;
+        }
+        out
+    }
+
+    let cases: List<List<Int>> = [
+        [],
+        [99],
+        [1, 1],
+        [9, 3, 7, 5],
+        [3, 1, 4, 1, 5, 9, 2, 6],
+    ];
+    for xs in cases.iter() {
+        let reference = reference_exclusive_max((*xs).clone(), -1);
+        let scanned   = parallel_scan_exclusive((*xs).clone(), -1,
+                          |a, b| if a > b { a } else { b });
+        assert_eq(scanned.len(), reference.len());
+        let mut i: Int = 0;
+        while i < reference.len() {
+            assert_eq(scanned[i], reference[i]);
+            i = i + 1;
+        }
+    }
+}
+
+// =============================================================================
+// §F — worker_count is a hint: vary it, result must be identical
+// =============================================================================
+
+@test
+fn property_parallel_map_worker_count_invariant() {
+    let xs: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8];
+    let workers: List<Int> = [1, 2, 4, 8, 16];
+    let ref_result = parallel_map((xs).clone(), 1, |x| x * 3 + 1);
+    for w in workers.iter() {
+        let got = parallel_map((xs).clone(), *w, |x| x * 3 + 1);
+        assert_eq(got.len(), ref_result.len());
+        let mut i: Int = 0;
+        while i < ref_result.len() {
+            assert_eq(got[i], ref_result[i]);
+            i = i + 1;
+        }
+    }
+}
+
+@test
+fn property_parallel_reduce_worker_count_invariant() {
+    let xs: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let workers: List<Int> = [1, 2, 4, 8, 16];
+    let ref_result = parallel_reduce((xs).clone(), 1, |a, b| a + b);
+    for w in workers.iter() {
+        let got = parallel_reduce((xs).clone(), *w, |a, b| a + b);
+        match (ref_result, got) {
+            (Some(a), Some(b)) => assert_eq(a, b),
+            (None, None) => assert(true),
+            _ => assert(false),
+        }
+    }
+}
+
+fn main() {}

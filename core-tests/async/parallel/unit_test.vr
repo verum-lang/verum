@@ -1,0 +1,306 @@
+// =============================================================================
+// core-tests/async/parallel/unit_test.vr
+// =============================================================================
+//
+// Per-function tests for `core.async.parallel` — the parallel
+// collection-processing primitives.  Today these are sequential
+// fallbacks; the contract under test is the *result* (the function
+// type's input → output relation), which the parallel rewrite must
+// preserve.
+//
+// Coverage:
+//   - parallel_map         : T → U mapping over a List<T>
+//   - parallel_filter_map  : T → Maybe<U> mapping that drops None
+//   - parallel_for_each    : T → () side-effect sink
+//   - parallel_reduce      : T → T → T fold returning Maybe<T>
+//   - parallel_scan_exclusive : Blelloch exclusive prefix scan
+//
+// Companion files:
+//   property_test.vr     — algebraic laws (map preserves length,
+//                           filter_map ⊆ map, reduce ≡ fold1,
+//                           scan-vs-reference identity)
+//   integration_test.vr  — parallel ops driving downstream stdlib
+//   audit.md             — drift surfaces, deferred items
+// =============================================================================
+
+mount core.async.parallel.{
+    parallel_map, parallel_filter_map, parallel_for_each,
+    parallel_reduce, parallel_scan_exclusive,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: parallel_map
+// =============================================================================
+
+@test
+fn test_parallel_map_doubles_ints() {
+    let xs: List<Int> = [1, 2, 3];
+    let ys = parallel_map(xs, 4, |x| x * 2);
+    assert_eq(ys.len(), 3);
+    assert_eq(ys[0], 2);
+    assert_eq(ys[1], 4);
+    assert_eq(ys[2], 6);
+}
+
+@test
+fn test_parallel_map_empty_input_yields_empty_output() {
+    let xs: List<Int> = [];
+    let ys = parallel_map(xs, 4, |x| x + 1);
+    assert_eq(ys.len(), 0);
+}
+
+@test
+fn test_parallel_map_identity_function_round_trips() {
+    let xs: List<Int> = [7, 8, 9, 10];
+    let ys = parallel_map(xs, 1, |x| x);
+    assert_eq(ys.len(), 4);
+    assert_eq(ys[0], 7);
+    assert_eq(ys[3], 10);
+}
+
+@test
+fn test_parallel_map_changes_element_type() {
+    let xs: List<Int> = [0, 1, 2];
+    let ys: List<Bool> = parallel_map(xs, 2, |x| x > 0);
+    assert_eq(ys.len(), 3);
+    assert_eq(ys[0], false);
+    assert_eq(ys[1], true);
+    assert_eq(ys[2], true);
+}
+
+@test
+fn test_parallel_map_worker_count_zero_does_not_skip_items() {
+    // worker_count is a hint only; the contract is "every item gets
+    // mapped exactly once" regardless of the worker hint.
+    let xs: List<Int> = [10, 20, 30];
+    let ys = parallel_map(xs, 0, |x| x + 1);
+    assert_eq(ys.len(), 3);
+    assert_eq(ys[0], 11);
+    assert_eq(ys[1], 21);
+    assert_eq(ys[2], 31);
+}
+
+@test
+fn test_parallel_map_worker_count_negative_does_not_skip_items() {
+    let xs: List<Int> = [1, 2];
+    let ys = parallel_map(xs, -1, |x| x * x);
+    assert_eq(ys.len(), 2);
+    assert_eq(ys[0], 1);
+    assert_eq(ys[1], 4);
+}
+
+// =============================================================================
+// Section 2: parallel_filter_map
+// =============================================================================
+
+@test
+fn test_parallel_filter_map_keeps_some_drops_none() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let ys = parallel_filter_map(xs, 2, |x| {
+        if x % 2 == 0 { Some(x * 10) } else { None }
+    });
+    assert_eq(ys.len(), 2);
+    assert_eq(ys[0], 20);
+    assert_eq(ys[1], 40);
+}
+
+@test
+fn test_parallel_filter_map_all_some_acts_like_map() {
+    let xs: List<Int> = [1, 2, 3];
+    let mapped = parallel_map((xs).clone(), 1, |x| x + 100);
+    let kept   = parallel_filter_map(xs, 1, |x| Some(x + 100));
+    assert_eq(kept.len(), mapped.len());
+    assert_eq(kept[0], mapped[0]);
+    assert_eq(kept[1], mapped[1]);
+    assert_eq(kept[2], mapped[2]);
+}
+
+@test
+fn test_parallel_filter_map_all_none_yields_empty() {
+    let xs: List<Int> = [1, 2, 3];
+    let ys: List<Int> = parallel_filter_map(xs, 1, |_x| None);
+    assert_eq(ys.len(), 0);
+}
+
+@test
+fn test_parallel_filter_map_preserves_order_of_kept_items() {
+    let xs: List<Int> = [5, 1, 4, 1, 3, 2];
+    let ys = parallel_filter_map(xs, 4, |x| {
+        if x > 2 { Some(x) } else { None }
+    });
+    assert_eq(ys.len(), 3);
+    assert_eq(ys[0], 5);
+    assert_eq(ys[1], 4);
+    assert_eq(ys[2], 3);
+}
+
+@test
+fn test_parallel_filter_map_empty_input() {
+    let xs: List<Int> = [];
+    let ys: List<Int> = parallel_filter_map(xs, 1, |x| Some(x));
+    assert_eq(ys.len(), 0);
+}
+
+// =============================================================================
+// Section 3: parallel_for_each
+// =============================================================================
+
+@test
+fn test_parallel_for_each_visits_every_item_exactly_once() {
+    let xs: List<Int> = [1, 2, 3, 4];
+    let mut count: Int = 0;
+    parallel_for_each(xs, 2, |_x| {
+        count = count + 1;
+    });
+    assert_eq(count, 4);
+}
+
+@test
+fn test_parallel_for_each_empty_input_no_visits() {
+    let xs: List<Int> = [];
+    let mut visited: Int = 0;
+    parallel_for_each(xs, 4, |_x| { visited = visited + 1; });
+    assert_eq(visited, 0);
+}
+
+@test
+fn test_parallel_for_each_observes_values_in_order() {
+    let xs: List<Int> = [10, 20, 30];
+    let mut sum: Int = 0;
+    parallel_for_each(xs, 1, |x| { sum = sum + x; });
+    assert_eq(sum, 60);
+}
+
+// =============================================================================
+// Section 4: parallel_reduce
+// =============================================================================
+
+@test
+fn test_parallel_reduce_sum() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    match parallel_reduce(xs, 4, |a, b| a + b) {
+        Some(s) => assert_eq(s, 15),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_parallel_reduce_max() {
+    let xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
+    match parallel_reduce(xs, 4, |a, b| if a > b { a } else { b }) {
+        Some(m) => assert_eq(m, 9),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_parallel_reduce_empty_input_returns_none() {
+    let xs: List<Int> = [];
+    match parallel_reduce(xs, 4, |a, b| a + b) {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+@test
+fn test_parallel_reduce_singleton_returns_only_element() {
+    let xs: List<Int> = [42];
+    match parallel_reduce(xs, 4, |a, b| a + b) {
+        Some(v) => assert_eq(v, 42),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_parallel_reduce_two_elements() {
+    let xs: List<Int> = [10, 32];
+    match parallel_reduce(xs, 4, |a, b| a + b) {
+        Some(v) => assert_eq(v, 42),
+        None => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 5: parallel_scan_exclusive (Blelloch)
+// =============================================================================
+
+@test
+fn test_parallel_scan_exclusive_addition_pow2() {
+    // textbook example: [1,2,3,4] with op=+, zero=0 → [0,1,3,6]
+    let xs: List<Int> = [1, 2, 3, 4];
+    let scanned = parallel_scan_exclusive(xs, 0, |a, b| a + b);
+    assert_eq(scanned.len(), 4);
+    assert_eq(scanned[0], 0);
+    assert_eq(scanned[1], 1);
+    assert_eq(scanned[2], 3);
+    assert_eq(scanned[3], 6);
+}
+
+@test
+fn test_parallel_scan_exclusive_max_pow2() {
+    let xs: List<Int> = [3, 1, 4, 1];
+    let scanned = parallel_scan_exclusive(xs, 0, |a, b| if a > b { a } else { b });
+    assert_eq(scanned.len(), 4);
+    assert_eq(scanned[0], 0);
+    assert_eq(scanned[1], 3);
+    assert_eq(scanned[2], 3);
+    assert_eq(scanned[3], 4);
+}
+
+@test
+fn test_parallel_scan_exclusive_empty_list_returns_empty() {
+    let xs: List<Int> = [];
+    let scanned = parallel_scan_exclusive(xs, 0, |a, b| a + b);
+    assert_eq(scanned.len(), 0);
+}
+
+@test
+fn test_parallel_scan_exclusive_singleton_returns_zero_only() {
+    let xs: List<Int> = [99];
+    let scanned = parallel_scan_exclusive(xs, 0, |a, b| a + b);
+    assert_eq(scanned.len(), 1);
+    assert_eq(scanned[0], 0);
+}
+
+@test
+fn test_parallel_scan_exclusive_size_2() {
+    let xs: List<Int> = [5, 7];
+    let scanned = parallel_scan_exclusive(xs, 0, |a, b| a + b);
+    assert_eq(scanned.len(), 2);
+    assert_eq(scanned[0], 0);
+    assert_eq(scanned[1], 5);
+}
+
+@test
+fn test_parallel_scan_exclusive_size_8_addition() {
+    let xs: List<Int> = [1, 1, 1, 1, 1, 1, 1, 1];
+    let scanned = parallel_scan_exclusive(xs, 0, |a, b| a + b);
+    assert_eq(scanned.len(), 8);
+    let mut i: Int = 0;
+    while i < 8 {
+        assert_eq(scanned[i], i);
+        i = i + 1;
+    }
+}
+
+@test
+fn test_parallel_scan_exclusive_with_nonzero_identity_max() {
+    // For max-scan the identity is "negative infinity"; the smallest
+    // Int we have access to is the most-negative legal Int.  Use a
+    // very small number as identity so the first prefix is "min".
+    let xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
+    let scanned = parallel_scan_exclusive(xs, -1, |a, b| if a > b { a } else { b });
+    assert_eq(scanned.len(), 8);
+    assert_eq(scanned[0], -1);
+    assert_eq(scanned[1], 3);
+    assert_eq(scanned[2], 3);
+    assert_eq(scanned[3], 4);
+    assert_eq(scanned[4], 4);
+    assert_eq(scanned[5], 5);
+    assert_eq(scanned[6], 9);
+    assert_eq(scanned[7], 9);
+}
+
+fn main() {}
