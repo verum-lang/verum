@@ -1,0 +1,209 @@
+// =============================================================================
+// core-tests/async/timer/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.timer` — async time-based primitives.
+// Today the runtime poll path requires a live executor; the surface
+// we can test under the synchronous interpreter is:
+//
+//   §1 Sleep / SleepUntil construction + factory functions
+//   §2 TimerInterval construction (new + immediate variants),
+//      period getter, reset
+//   §3 Timeout<F> / Delay<F> construction
+//   §4 TimeoutError unit-type Eq + Debug
+//   §5 Debounce + Throttle state-machine surface
+// =============================================================================
+
+mount core.async.timer.{
+    Sleep, SleepUntil, TimerInterval, Delay, Timeout, TimeoutError,
+    Debounce, Throttle,
+    sleep_secs, sleep_until, delay,
+};
+mount core.async.future.{ready, ReadyFuture};
+mount core.time.{Duration};
+mount core.time.instant.{Instant};
+
+// =============================================================================
+// Section 1: Sleep / SleepUntil construction
+// =============================================================================
+
+@test
+fn test_timer_sleep_new_with_duration_constructs() {
+    // `Duration.from_millis` currently routes from_nanos to an Int
+    // receiver (task #15) — work around via from_secs which doesn't
+    // multiply through the nanos conversion.
+    let s = Sleep.new(Duration.from_secs(1));
+    // deadline is None until first poll; duration field is preserved.
+    assert(s.deadline.is_none());
+}
+
+// `sleep(Duration.from_secs(1))` triggers the same Duration.from_nanos
+// dispatch panic from task #15 — even with the inline factory.  Pinned
+// in regression_test.vr §A.
+
+@test
+fn test_timer_sleep_secs_factory_function() {
+    let s = sleep_secs(1);
+    assert(s.deadline.is_none());
+}
+
+// `sleep_ms(N)` internally calls `Duration.from_millis(N)` which is
+// blocked by task #15 (Duration.from_millis routes from_nanos to
+// an Int receiver).  Pinned in regression_test.vr §A.
+
+@test
+fn test_timer_sleep_until_constructs() {
+    let now = Instant.now();
+    let _su = SleepUntil.new(now);
+    assert(true);
+}
+
+@test
+fn test_timer_sleep_until_factory_function() {
+    let now = Instant.now();
+    let _su = sleep_until(now);
+    assert(true);
+}
+
+// =============================================================================
+// Section 2: TimerInterval construction + introspection
+// =============================================================================
+
+@test
+fn test_timer_interval_new_first_tick_deferred() {
+    let it = TimerInterval.new(Duration.from_secs(1));
+    // The first tick happens after `period` from creation, so the
+    // next_tick is None at construction.
+    assert(it.next_tick.is_none());
+}
+
+@test
+fn test_timer_interval_immediate_first_tick_scheduled_now() {
+    let it = TimerInterval.immediate(Duration.from_secs(1));
+    // immediate() schedules the first tick at Instant.now() at
+    // construction, so next_tick is Some.
+    assert(it.next_tick.is_some());
+}
+
+// Note: `TimerInterval.period()` (the getter method) currently
+// stack-overflows because the field shadowing the method name causes
+// `self.period` inside the method body to dispatch recursively.
+// Pinned in regression_test.vr §B (task #17).
+//
+// We pin field-direct access here as the working alternative —
+// `it.period` (the field) returns the Duration unambiguously.
+
+@test
+fn test_timer_interval_period_field_round_trip() {
+    let p = Duration.from_secs(1);
+    let it = TimerInterval.new(p);
+    assert(it.period.eq(&p));
+}
+
+@test
+fn test_timer_interval_reset_sets_next_tick_to_some() {
+    let mut it = TimerInterval.new(Duration.from_secs(1));
+    assert(it.next_tick.is_none());
+    it.reset();
+    // reset() seeds next_tick from Instant.now() + period.
+    assert(it.next_tick.is_some());
+}
+
+// =============================================================================
+// Section 3: Delay<F> + Timeout<F> construction
+// =============================================================================
+
+@test
+fn test_timer_delay_constructs_with_duration_and_future() {
+    let _d = Delay.new(Duration.from_secs(1), ready(42));
+    assert(true);
+}
+
+@test
+fn test_timer_delay_factory_function() {
+    let _d = delay(Duration.from_secs(1), ready(7));
+    assert(true);
+}
+
+// `Timeout.new` and `timeout()` factory panic with field-write out
+// of bounds at field index 5 (the struct has 3 fields).  Tracked
+// as task #16; tests pinned in regression_test.vr §C.
+
+// Note: `timeout_ms` symbol-resolution collides with same-named
+// symbols in core.net.dns, core.runtime.supervisor, and
+// core.meta.contexts.  Even an explicit selective mount routes to
+// the wrong overload.  Coverage pinned in regression_test.vr §C
+// pending task #14.
+
+// =============================================================================
+// Section 4: TimeoutError unit-type
+// =============================================================================
+
+@test
+fn test_timer_timeout_error_construction() {
+    let _e: TimeoutError = TimeoutError {};
+    assert(true);
+}
+
+@test
+fn test_timer_timeout_error_eq_to_itself() {
+    let a: TimeoutError = TimeoutError {};
+    let b: TimeoutError = TimeoutError {};
+    assert(a.eq(&b));
+}
+
+// =============================================================================
+// Section 5: Debounce + Throttle state-machine surface
+// =============================================================================
+
+@test
+fn test_timer_debounce_new_initial_state_settled() {
+    let d = Debounce.new(Duration.from_secs(1));
+    // Before any trigger, the debounce is considered settled.
+    assert(d.is_settled());
+}
+
+@test
+fn test_timer_debounce_trigger_sets_deadline() {
+    let mut d = Debounce.new(Duration.from_secs(1));
+    d.trigger();
+    // After trigger the deadline is set, so `is_settled` depends on
+    // wall-clock progress.  Don't pin the boolean — pin that the
+    // deadline field flipped from None to Some.
+    assert(d.deadline.is_some());
+}
+
+@test
+fn test_timer_debounce_reset_clears_deadline() {
+    let mut d = Debounce.new(Duration.from_secs(1));
+    d.trigger();
+    d.reset();
+    assert(d.deadline.is_none());
+    assert(d.is_settled());
+}
+
+@test
+fn test_timer_throttle_new_first_try_acquire_succeeds() {
+    let mut t = Throttle.new(Duration.from_secs(1));
+    assert(t.try_acquire());
+}
+
+@test
+fn test_timer_throttle_second_try_acquire_immediately_fails() {
+    let mut t = Throttle.new(Duration.from_secs(1));
+    let _first  = t.try_acquire();
+    let second = t.try_acquire();
+    // The second call within the throttle window must be refused.
+    assert(!second);
+}
+
+@test
+fn test_timer_throttle_reset_returns_to_initial_state() {
+    let mut t = Throttle.new(Duration.from_secs(1));
+    let _ = t.try_acquire();
+    t.reset();
+    // After reset, try_acquire succeeds again.
+    assert(t.try_acquire());
+}
+
+fn main() {}

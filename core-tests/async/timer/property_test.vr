@@ -1,0 +1,97 @@
+// =============================================================================
+// core-tests/async/timer/property_test.vr
+// =============================================================================
+//
+// Algebraic properties for `core.async.timer`.
+//
+//   §A — TimeoutError Eq is reflexive (and there is only one inhabitant).
+//   §B — Sleep / SleepUntil construction is non-stateful — the deadline
+//        field is preserved across record-literal reconstruction.
+//   §C — TimerInterval.new vs TimerInterval.immediate partition the
+//        next_tick.is_none() invariant.
+//   §D — Throttle.try_acquire is monotonic in the first call within
+//        a window: first→true, second→false (without time passage).
+// =============================================================================
+
+mount core.async.timer.{
+    Sleep, SleepUntil, TimerInterval, Delay, Timeout, TimeoutError,
+    Debounce, Throttle,
+    sleep_secs, sleep_until, delay,
+};
+mount core.async.future.{ready, ReadyFuture};
+mount core.time.{Duration};
+mount core.time.instant.{Instant};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — TimeoutError Eq reflexive over multiple inhabitants
+// =============================================================================
+
+@test
+fn property_timer_timeout_error_eq_reflexive() {
+    let xs: List<TimeoutError> = [
+        TimeoutError {},
+        TimeoutError {},
+        TimeoutError {},
+    ];
+    for e in xs.iter() {
+        assert((*e).eq(*e));
+    }
+}
+
+// =============================================================================
+// §B — Sleep deadline-field invariant across construction
+// =============================================================================
+
+@test
+fn property_timer_sleep_deadline_is_none_at_construction_exhaustive() {
+    let periods: List<Int> = [1, 2, 60, 3600];
+    for s in periods.iter() {
+        let sl = Sleep.new(Duration.from_secs(*s));
+        assert(sl.deadline.is_none());
+    }
+}
+
+// =============================================================================
+// §C — TimerInterval new/immediate partition
+// =============================================================================
+
+@test
+fn property_timer_interval_new_vs_immediate_next_tick_partition() {
+    let d = Duration.from_secs(1);
+
+    let deferred = TimerInterval.new(d);
+    let eager    = TimerInterval.immediate(d);
+
+    assert(deferred.next_tick.is_none());
+    assert(eager.next_tick.is_some());
+}
+
+// =============================================================================
+// §D — Throttle monotonic refusal within window
+// =============================================================================
+
+@test
+fn property_timer_throttle_second_immediate_call_refused() {
+    let trials: List<Int> = [1, 2, 5, 60];
+    for s in trials.iter() {
+        let mut t = Throttle.new(Duration.from_secs(*s));
+        let first  = t.try_acquire();
+        let second = t.try_acquire();
+        assert(first);
+        assert(!second);
+    }
+}
+
+@test
+fn property_timer_throttle_reset_then_try_acquire_succeeds() {
+    let trials: List<Int> = [1, 2, 5, 60];
+    for s in trials.iter() {
+        let mut t = Throttle.new(Duration.from_secs(*s));
+        let _ = t.try_acquire();
+        t.reset();
+        assert(t.try_acquire());
+    }
+}
+
+fn main() {}

@@ -1,0 +1,117 @@
+// =============================================================================
+// core-tests/async/timer/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.async.timer`.
+//
+//   §A — Sleep, SleepUntil, Delay, TimerInterval all consume Duration
+//        and Instant from core.time — exercise the cross-module
+//        construction surface.
+//   §B — TimeoutError inside Result + Maybe wrapping patterns.
+//   §C — Debounce + Throttle state machines through manual transitions
+//        (no real async time progression).
+// =============================================================================
+
+mount core.async.timer.{
+    Sleep, SleepUntil, TimerInterval, Delay, Timeout, TimeoutError,
+    Debounce, Throttle,
+    sleep_secs, sleep_until, delay,
+};
+mount core.async.future.{ready, ReadyFuture};
+mount core.time.{Duration};
+mount core.time.instant.{Instant};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — cross-module construction surface
+// =============================================================================
+
+@test
+fn integration_timer_sleep_and_sleep_until_co_construct() {
+    let d  = Duration.from_secs(1);
+    let _s = Sleep.new(d);
+    let now = Instant.now();
+    let _su = SleepUntil.new(now);
+    assert(true);
+}
+
+@test
+fn integration_timer_delay_wraps_future() {
+    // The Delay wrapper composes with any Future — verify the
+    // outer construction does not throw.
+    let d = Delay.new(Duration.from_secs(1), ready("hello"));
+    // Field access on the inner future-typed slot:
+    assert(d.sleep_done == false);
+}
+
+// =============================================================================
+// §B — TimeoutError + Result + Maybe wrapping
+// =============================================================================
+
+@test
+fn integration_timer_timeout_error_inside_result_classification() {
+    fn tag(r: Result<Int, TimeoutError>) -> Text {
+        match r {
+            Ok(_) => "ok",
+            Err(_) => "timed_out",
+        }
+    }
+    assert_eq(tag(Ok(42)), "ok");
+    assert_eq(tag(Err(TimeoutError {})), "timed_out");
+}
+
+@test
+fn integration_timer_timeout_error_to_maybe() {
+    fn to_maybe(r: Result<Int, TimeoutError>) -> Maybe<Int> {
+        match r {
+            Ok(v) => Some(v),
+            Err(_) => None,
+        }
+    }
+    assert_eq(to_maybe(Ok(99)), Some(99));
+    let none = to_maybe(Err(TimeoutError {}));
+    assert(none.is_none());
+}
+
+// =============================================================================
+// §C — Debounce/Throttle state transitions
+// =============================================================================
+
+@test
+fn integration_timer_debounce_trigger_then_reset_round_trip() {
+    let mut d = Debounce.new(Duration.from_secs(1));
+    // initial state: settled, deadline None
+    assert(d.is_settled());
+    assert(d.deadline.is_none());
+
+    // trigger: deadline becomes Some
+    d.trigger();
+    assert(d.deadline.is_some());
+
+    // reset: deadline back to None and settled true
+    d.reset();
+    assert(d.deadline.is_none());
+    assert(d.is_settled());
+}
+
+@test
+fn integration_timer_throttle_full_state_walk() {
+    let mut t = Throttle.new(Duration.from_secs(60));
+
+    // Initial state: try_acquire succeeds and records last_allowed.
+    assert(t.try_acquire());
+    assert(t.last_allowed.is_some());
+
+    // Second try within the window: refused.
+    assert(!t.try_acquire());
+
+    // Reset clears last_allowed back to None.
+    t.reset();
+    assert(t.last_allowed.is_none());
+
+    // Acquire again after reset.
+    assert(t.try_acquire());
+}
+
+fn main() {}
