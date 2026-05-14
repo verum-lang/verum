@@ -7568,14 +7568,27 @@ impl VbcCodegen {
             // through to CallM "&unsafe Slot.offset" against the
             // Int runtime arm and panic with
             // "method '&unsafe Slot.offset' not found on Int".
-            // VBC type-erases to 64-bit values; element stride is
-            // always 8 bytes (mirrors the InlineSequenceId::PtrOffset
-            // implementation in
-            // `verum_vbc::intrinsics::codegen::emit_ptr_offset`).
+            //
+            // **Element-size scaling** (closes Map/Set/Slot stride
+            // defect, task #27): pre-fix the stride was hardcoded to
+            // 8 bytes (Value width) for every `&unsafe T` raw pointer.
+            // For `&unsafe Byte` (Text.grow's `memset(ptr_offset(ptr,
+            // len), …)`) this overshoots by 8x — every byte-offset
+            // jumps 8 bytes. For `&unsafe Slot<K, V>` (Map.insert's
+            // `entries.offset(idx)`) it undershoots by 4x — Slot is
+            // a 4-field record (32 bytes), so `offset(idx)` should
+            // step `idx * 32` bytes, not `idx * 8`. Both surfaced as
+            // wrong-pointer reads downstream (Text.grow's last byte
+            // memset hit unrelated heap, Map.insert's entry GetF
+            // null-derefed at pc=57). The fix derives the actual
+            // pointee stride from the receiver's static type via
+            // `compute_pointee_stride`.
+            let receiver_type = self.extract_expr_type_name(receiver);
+            let stride_bytes = self.compute_pointee_stride(receiver_type.as_deref());
             let stride_reg = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::LoadI {
                 dst: stride_reg,
-                value: 8,
+                value: stride_bytes,
             });
             let byte_offset_reg = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::BinaryI {
@@ -16424,6 +16437,79 @@ impl VbcCodegen {
 
     /// associated constant access (`MapFlags.PRIVATE_ANON`).
     /// Used by `compile_let` to populate `variable_type_names` for Eq protocol dispatch.
+    /// Compute the byte stride of a `&unsafe T` raw pointer's pointee.
+    ///
+    /// Used by the `offset` / `add` / `sub` raw-pointer arithmetic
+    /// intercept (line ~7521) so `entries.offset(idx)` lowers to
+    /// `entries + idx * sizeof(T)`, NOT `entries + idx * 8` (the
+    /// pre-fix hardcode that under/overshoots for non-Value-width
+    /// pointees — task #27).
+    ///
+    /// **Type-name parsing**: strips raw-pointer prefixes (`&unsafe `,
+    /// `*const `, `*mut `), strips generic-arg suffix (`Slot<K, V>`
+    /// → `Slot`), then resolves:
+    ///
+    ///   * Numeric primitives (`Int`, `Int32`, `Float`, `Byte`, …) via
+    ///     `verum_common::well_known_types::type_names::numeric_bit_width`.
+    ///     `Bool`/`Char` are handled inline (Bool=8 NaN-boxed, Char=8
+    ///     NaN-boxed Unicode-scalar Int).
+    ///   * `Byte` / `UInt8` / `Int8` → 1 byte (byte-pointer arithmetic).
+    ///   * User-defined records → field count × 8 (each field is a
+    ///     Value-wide slot under VBC's NaN-boxing).
+    ///   * Unknown types fall back to 8 (the legacy default — preserves
+    ///     pre-fix behaviour for untyped raw-pointer arithmetic).
+    pub fn compute_pointee_stride(&self, ptr_type_name: Option<&str>) -> i64 {
+        let Some(name) = ptr_type_name else { return 8; };
+        // Strip raw-pointer prefix.
+        let inner = name
+            .strip_prefix("&unsafe ")
+            .or_else(|| name.strip_prefix("*const "))
+            .or_else(|| name.strip_prefix("*mut "))
+            .unwrap_or(name);
+        // Strip generic args: `Slot<K, V>` → `Slot`.
+        let inner_base = match inner.find('<') {
+            Some(lt) => &inner[..lt],
+            None => inner,
+        }
+        .trim();
+        // Byte-shaped pointees: 1-byte stride. Without this,
+        // `Text.grow`'s `memset(ptr_offset(self.ptr, self.len), …)`
+        // overshoots its target by 8x and writes past the allocation.
+        if matches!(inner_base, "Byte" | "UInt8" | "Int8") {
+            return 1;
+        }
+        // 2-byte / 4-byte primitives.
+        if matches!(inner_base, "UInt16" | "Int16") {
+            return 2;
+        }
+        if matches!(inner_base, "UInt32" | "Int32" | "Float32") {
+            return 4;
+        }
+        // Numeric primitives via the canonical registry. Bits/8 = bytes;
+        // 8-byte ceiling matches VBC's NaN-boxed Value width.
+        if let Some(bits) = verum_common::well_known_types::type_names::numeric_bit_width(inner_base) {
+            return ((bits as i64) / 8).max(1);
+        }
+        // User-defined record types — look up the descriptor and
+        // multiply field count by Value width. Covers `Slot<K, V>`
+        // (4 fields × 8 = 32 bytes), `Text` itself when treated as a
+        // pointer (3 fields × 8 = 24 bytes — though Text raw-pointer
+        // arithmetic is rare), every user record.
+        if let Some(&type_id) = self.type_name_to_id.get(inner_base) {
+            if let Some(desc) = self.types.iter().find(|t| t.id == type_id) {
+                let field_count = desc.fields.len() as i64;
+                if field_count > 0 {
+                    return field_count * 8;
+                }
+            }
+        }
+        // Unknown / generic-param pointee — fall back to 8 (the
+        // legacy default). Generic raw-pointer arithmetic is rare in
+        // stdlib and the fallback matches the pre-fix behaviour for
+        // any not-yet-classified case.
+        8
+    }
+
     pub fn extract_expr_type_name(&self, expr: &Expr) -> Option<String> {
         use verum_ast::expr::ExprKind;
         use verum_ast::ty::PathSegment;
