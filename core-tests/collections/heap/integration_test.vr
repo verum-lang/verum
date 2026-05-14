@@ -1,0 +1,94 @@
+// =============================================================================
+// core-tests/collections/heap/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.collections.heap`. Heap is the
+// canonical priority queue — these tests exercise it in scheduler /
+// top-k / sorted-stream interaction shapes.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.heap.BinaryHeap;
+
+// =============================================================================
+// §1  Top-K extraction from a stream
+// =============================================================================
+
+@test
+fn integration_heap_top_3_of_stream() {
+    let stream: List<Int> = [5, 1, 8, 3, 9, 2, 7, 4, 6];
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let mut i = 0;
+    while i < stream.len() {
+        match stream.get(i) {
+            Some(v) => h.push(v),
+            None => {},
+        }
+        i = i + 1;
+    }
+    // Extract top 3 — pop yields max each time.
+    assert_eq(h.pop(), Some(9));
+    assert_eq(h.pop(), Some(8));
+    assert_eq(h.pop(), Some(7));
+}
+
+// =============================================================================
+// §2  Priority scheduler — higher priority Int wins
+// =============================================================================
+
+@test
+fn integration_heap_as_priority_scheduler() {
+    let mut tasks: BinaryHeap<Int> = BinaryHeap.new();
+    // Push tasks with priority values (higher = more important).
+    tasks.push(10);  // low priority
+    tasks.push(99);  // critical
+    tasks.push(50);  // medium
+    tasks.push(20);  // low-medium
+    // Drain by priority: critical first.
+    assert_eq(tasks.pop(), Some(99));
+    assert_eq(tasks.pop(), Some(50));
+    assert_eq(tasks.pop(), Some(20));
+    assert_eq(tasks.pop(), Some(10));
+}
+
+// =============================================================================
+// §3  Heap-sort via into_sorted_list
+// =============================================================================
+
+@test
+fn integration_heap_sort_via_into_sorted_list() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let input: List<Int> = [9, 3, 7, 1, 4, 8, 2, 5, 6];
+    let mut i = 0;
+    while i < input.len() {
+        match input.get(i) {
+            Some(v) => h.push(v),
+            None => {},
+        }
+        i = i + 1;
+    }
+    let sorted = h.into_sorted_list();
+    // Sorted output is [1, 2, 3, 4, 5, 6, 7, 8, 9].
+    assert_eq(sorted.len(), 9);
+    assert_eq(sorted.get(0), Some(1));
+    assert_eq(sorted.get(8), Some(9));
+}
+
+// =============================================================================
+// §4  Two independent heaps don't share state
+// =============================================================================
+
+@test
+fn integration_two_heaps_are_independent() {
+    let mut a: BinaryHeap<Int> = BinaryHeap.new();
+    let mut b: BinaryHeap<Int> = BinaryHeap.new();
+    a.push(1);
+    a.push(2);
+    b.push(99);
+    assert_eq(a.len(), 2);
+    assert_eq(b.len(), 1);
+    assert_eq(a.peek(), Some(2));
+    assert_eq(b.peek(), Some(99));
+}
+
+fn main() {}
