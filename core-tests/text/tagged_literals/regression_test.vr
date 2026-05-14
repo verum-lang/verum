@@ -31,19 +31,16 @@ mount core.text.tagged_literals.{validate_json, validate_sql, validate_uri};
 // surfacing as a missing method name.
 // =============================================================================
 
-@ignore
 @test
 fn regression_a_sql_select_pinned() {
     assert(validate_sql("SELECT * FROM t"));
 }
 
-@ignore
 @test
 fn regression_a_sql_insert_pinned() {
     assert(validate_sql("INSERT INTO t VALUES (1)"));
 }
 
-@ignore
 @test
 fn regression_a_sql_garbage_pinned() {
     assert(!validate_sql("not a query"));

@@ -29,14 +29,12 @@ mount core.collections.list.List;
 // or output decoding is mis-aligned.
 // =============================================================================
 
-@ignore
 @test
 fn regression_a_is_match_class_digit_pinned() {
     let r = Regex.new("\\d+").unwrap();
     assert(r.is_match("abc123"));
 }
 
-@ignore
 @test
 fn regression_a_is_match_anchor_start_pinned() {
     let r = Regex.new("^hello").unwrap();
@@ -106,7 +104,6 @@ fn regression_d_find_present_pinned() {
     }
 }
 
-@ignore
 @test
 fn regression_d_find_absent_pinned() {
     let r = Regex.new("xyz").unwrap();
