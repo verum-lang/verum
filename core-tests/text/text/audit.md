@@ -289,9 +289,30 @@ defect surfaced by this audit.
 
 ### Landed in this branch
 - **Test infrastructure**: `core-tests/text/text/{unit_test, property_test,
-  integration_test, regression_test}.vr` + this `audit.md`. 218 unit
-  tests + 28 property tests + 22 integration tests + 27 regression
-  guards/pins.
+  integration_test, regression_test, protocol_test}.vr` + this
+  `audit.md`. 218 unit tests + 28 property tests + 22 integration tests
+  + 27 regression guards/pins + 67 protocol-conformance tests (new in
+  this branch — Iterator on Chars/ByteIter/CharIndices/Lines,
+  IntoIterator, Default, Length, Eq, Clone, From, AddAssign, Add,
+  AsRef, FromStr for Int/Bool/Text, try_with_capacity, byte_index_of_char,
+  encode_utf16 + from_utf16 round-trip, Utf8Error Eq/to_text, Hash,
+  split_at).  64/67 pass on interpreter 2026-05-14.
+- **§T close — Text.capacity returns the cap field**, not byte length
+  (commit `d28517c10`).  Three-part architectural fix:
+  (1) `core/text/text.vr::capacity()` body keeps `text_byte_len` as a
+  conservative lower bound + `@no_inline` so the call survives to the
+  dispatcher; (2) `text_static_runtime.rs::with_capacity` /
+  `try_with_capacity` allocate a builder-layout 24-byte heap object
+  `[hdr]{ptr,len,cap}` via new helpers (the cap field now survives
+  to subsequent method calls); (3) `method_dispatch.rs::
+  dispatch_primitive_method` Text intercept gains a `"capacity"` arm
+  that dispatches by representation (small-string / FatRef / flat
+  heap-string → byte_len; builder layout → field2).  Pinned by
+  `core-tests/text/text/regression_test.vr::regression_*_reports_capacity`.
+  Critical architectural finding: `t.capacity()` dispatches as **CallM**,
+  not Call — every method-name intercept that should fire on
+  `obj.method()` MUST live in `dispatch_primitive_method`, NOT
+  `try_intercept_text_static_runtime`.
 
 ### Deferred — ranked by leverage
 | # | Item | Estimated effort | Tests unblocked |
