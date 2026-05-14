@@ -32,7 +32,8 @@ mount core.base.result.{Result, Ok, Err};
 // classification issue in char/§A and text/text/§B.
 // =============================================================================
 
-@ignore
+// §A closed 2026-05-15: transitively closed via the cumulative
+// primitive method dispatch fixes earlier this session.
 @test
 fn regression_a_format_display_int_pinned() {
     let n: Int = 5;
@@ -40,7 +41,8 @@ fn regression_a_format_display_int_pinned() {
     assert_eq(s, "5");
 }
 
-@ignore
+// §A closed 2026-05-15: transitively closed via the cumulative
+// primitive method dispatch fixes earlier this session.
 @test
 fn regression_a_format_debug_int_pinned() {
     let n: Int = 5;
