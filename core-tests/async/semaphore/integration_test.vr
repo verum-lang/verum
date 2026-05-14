@@ -1,0 +1,54 @@
+// =============================================================================
+// core-tests/async/semaphore/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.async.semaphore`.  Today only
+// the variant-algebra surface is exercised; full AsyncSemaphore
+// lifecycle integration is pinned in regression_test.vr §A pending
+// task #12.
+// =============================================================================
+
+mount core.async.semaphore.{SemaphoreError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — SemaphoreError + Result wrapping pattern
+// =============================================================================
+
+@test
+fn integration_semaphore_error_inside_result_ok_err_classification() {
+    fn tag(r: Result<Int, SemaphoreError>) -> Text {
+        match r {
+            Ok(_) => "ok",
+            Err(SemaphoreError.Closed) => "closed",
+        }
+    }
+    assert_eq(tag(Ok(42)), "ok");
+    assert_eq(tag(Err(SemaphoreError.Closed)), "closed");
+}
+
+// =============================================================================
+// §B — SemaphoreError → Maybe<()> conversion
+// =============================================================================
+
+@test
+fn integration_semaphore_error_to_maybe_unit() {
+    fn ok_or_closed(b: Bool) -> Result<(), SemaphoreError> {
+        if b { Ok(()) } else { Err(SemaphoreError.Closed) }
+    }
+    let ok_result = ok_or_closed(true);
+    let err_result = ok_or_closed(false);
+    let ok_as_maybe: Maybe<()> = match ok_result {
+        Ok(()) => Some(()),
+        Err(_) => None,
+    };
+    let err_as_maybe: Maybe<()> = match err_result {
+        Ok(()) => Some(()),
+        Err(_) => None,
+    };
+    assert(ok_as_maybe.is_some());
+    assert(err_as_maybe.is_none());
+}
+
+fn main() {}

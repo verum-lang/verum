@@ -1,0 +1,43 @@
+// =============================================================================
+// core-tests/async/semaphore/property_test.vr
+// =============================================================================
+//
+// Properties for `core.async.semaphore` that exercise the
+// variant-algebra surface only.  Construction-side properties live
+// pinned in regression_test.vr §A pending task #12.
+// =============================================================================
+
+mount core.async.semaphore.{SemaphoreError};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — SemaphoreError partition: Closed is the unique variant
+// =============================================================================
+
+@test
+fn property_semaphore_error_is_closed_partition() {
+    // SemaphoreError today has exactly one variant, `Closed`.  Pin
+    // the partition so that future additions are forced to update
+    // this test and the public-API audit.  Uses match-arm
+    // classification (the `is`-operator path is broken on
+    // single-variant sums — task #13).
+    fn is_closed(e: SemaphoreError) -> Bool {
+        match e {
+            SemaphoreError.Closed => true,
+        }
+    }
+    let xs: List<SemaphoreError> = [
+        SemaphoreError.Closed,
+    ];
+    for e in xs.iter() {
+        assert(is_closed(*e));
+    }
+}
+
+@test
+fn property_semaphore_error_closed_eq_reflexive() {
+    let a: SemaphoreError = SemaphoreError.Closed;
+    assert(a.eq(&a));
+}
+
+fn main() {}

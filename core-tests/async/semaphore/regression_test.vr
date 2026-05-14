@@ -1,0 +1,115 @@
+// =============================================================================
+// core-tests/async/semaphore/regression_test.vr
+// =============================================================================
+//
+// Defect pins for `core.async.semaphore`.
+//
+// §A — task #12 — `AsyncSemaphore.new(N)` panics with
+// `NullPointerAt { op: "opcode 0xe5", site: "AtomicInt.swap", pc: 34 }`
+// for every N.  Construction chain: AsyncSemaphore.new →
+// Shared.new(Mutex.new(SemaphoreInner{...})) → AtomicBool.new(false)
+// → AtomicInt.swap NULL.  Until #12 is closed, no test that
+// constructs an AsyncSemaphore can run.
+// =============================================================================
+
+mount core.async.semaphore.{AsyncSemaphore, SemaphoreError};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// §A — task #12 — AsyncSemaphore.new null-derefs through AtomicInt.swap
+// =============================================================================
+
+// §B — task #13 — `is`-operator returns false for the only variant of
+// a single-variant sum type.  Construction works (`SemaphoreError.Closed`
+// returns a valid value), match arms work, Eq.eq works — but
+// `e is SemaphoreError.Closed` returns false.
+
+@test
+@ignore
+fn regression_semaphore_error_is_closed_single_variant() {
+    let e: SemaphoreError = SemaphoreError.Closed;
+    assert(e is SemaphoreError.Closed);
+}
+
+// =============================================================================
+
+@test
+@ignore
+fn regression_semaphore_new_zero_permits_does_not_panic() {
+    // Today: panics with AtomicInt.swap NULL during Mutex init.
+    let s = AsyncSemaphore.new(0);
+    assert_eq(s.available_permits(), 0);
+}
+
+@test
+@ignore
+fn regression_semaphore_new_positive_permits_does_not_panic() {
+    let s = AsyncSemaphore.new(5);
+    assert_eq(s.available_permits(), 5);
+}
+
+@test
+@ignore
+fn regression_semaphore_new_negative_clamps_to_zero() {
+    let s = AsyncSemaphore.new(-3);
+    assert_eq(s.available_permits(), 0);
+}
+
+@test
+@ignore
+fn regression_semaphore_try_acquire_when_available_returns_some() {
+    let s = AsyncSemaphore.new(1);
+    match s.try_acquire() {
+        Some(_) => assert(true),
+        None => assert(false),
+    }
+}
+
+@test
+@ignore
+fn regression_semaphore_try_acquire_when_saturated_returns_none() {
+    let s = AsyncSemaphore.new(0);
+    match s.try_acquire() {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+@test
+@ignore
+fn regression_semaphore_add_permits_widens_capacity() {
+    let s = AsyncSemaphore.new(1);
+    s.add_permits(4);
+    assert_eq(s.available_permits(), 5);
+}
+
+@test
+@ignore
+fn regression_semaphore_add_permits_zero_is_noop() {
+    let s = AsyncSemaphore.new(3);
+    s.add_permits(0);
+    assert_eq(s.available_permits(), 3);
+}
+
+@test
+@ignore
+fn regression_semaphore_close_makes_try_acquire_return_none() {
+    let s = AsyncSemaphore.new(10);
+    s.close();
+    match s.try_acquire() {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+@test
+@ignore
+fn regression_semaphore_close_is_idempotent() {
+    let s = AsyncSemaphore.new(2);
+    s.close();
+    s.close();
+    s.close();
+    assert(s.try_acquire().is_none());
+}
+
+fn main() {}
