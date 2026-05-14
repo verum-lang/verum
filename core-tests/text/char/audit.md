@@ -40,7 +40,35 @@
 
 ## 3. Language-implementation gaps surfaced by this folder
 
-### §A — `Char.make_ascii_{upper,lower}case` does not mutate — **PARTIAL CLOSE 2026-05-14 (task #13)**
+### §A — `Char.make_ascii_{upper,lower}case` does not mutate — **CLOSED 2026-05-14 (task #14, commit `1126298c9`)**
+
+The user-side surface was closed by task #13 (`df8e76037`) — primitive
+receiver method names now emit qualified `Char.method` so the
+takes_self_mut_ref + RefMut wrapping fires.
+
+The stdlib body branch was closed by adding a Tier-0
+`char_runtime::try_intercept_char_mutator` intercept that operates
+directly on the caller's Char slot (same architectural pattern as
+`hasher_runtime` for the SetF-on-slice-arg defect class).  Wired
+into both the Call (static-call path) and CallM (CallM path) dispatch
+entry points.
+
+Both regression tests pass:
+- `regression_a_make_ascii_uppercase_pinned`
+- `regression_a_make_ascii_lowercase_pinned`
+
+**Architectural note**: every primitive `&mut self` method whose
+body needs `*self = X` writeback semantics MUST either be intercepted
+at Tier-0 (the canonical fix) OR have its body re-compiled with the
+correct DerefMut emit at precompile time.  The body-side codegen
+defect (precompile emits Mov instead of DerefMut for `*self = X`)
+remains open as a separate quality-of-implementation task — every
+primitive mutator added in the future will need an intercept until
+that defect closes.
+
+---
+
+### §A.history — original symptom + bisection (for the record)
 **Symptom**: `let mut c: Char = 'a'; c.make_ascii_uppercase()` leaves
 `c == 'a'`. Body is `*self = self.to_ascii_uppercase();`.
 
