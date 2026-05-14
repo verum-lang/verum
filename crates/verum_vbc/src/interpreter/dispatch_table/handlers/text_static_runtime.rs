@@ -354,8 +354,17 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             let sep_str = super::string_helpers::extract_string(&sep_val, state);
 
             // Recover the parts: List<Text> heap layout
-            // `[ObjectHeader][len:i64][cap:i64][data_ptr]` where
-            // data_ptr points to backing array of Text-shaped Values.
+            // `[ObjectHeader][len: Value(i64)][cap: Value(i64)][backing: Value(ptr)]`
+            // where `backing` is a Value holding a pointer to an
+            // ObjectHeader-prefixed array of Text-shaped Values.
+            // Element data starts at `backing_ptr + OBJECT_HEADER_SIZE`.
+            // See `method_dispatch.rs::list_push` for the canonical
+            // layout reference.
+            //
+            // Pre-fix the intercept read field 0 as a raw `i64` (skipping
+            // the NaN-box unwrap) and field 2 as a direct element-data
+            // pointer (skipping the backing-array's ObjectHeader),
+            // causing every non-empty join to return empty.
             let mut texts: Vec<String> = Vec::new();
             if parts_val.is_fat_ref() {
                 let fr = parts_val.as_fat_ref();
@@ -373,22 +382,34 @@ pub(in super::super) fn try_intercept_text_static_runtime(
                     && (base as usize)
                         .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
                 {
-                    let after_header = unsafe {
-                        base.add(std::mem::size_of::<heap::ObjectHeader>())
+                    let data_ptr = unsafe {
+                        base.add(heap::OBJECT_HEADER_SIZE) as *const Value
                     };
-                    let len = unsafe { *(after_header as *const i64) };
-                    if (0..=1_000_000).contains(&len) {
-                        let len = len as usize;
-                        if len > 0 {
-                            let data_ptr = unsafe {
-                                *(after_header.add(16) as *const *const Value)
-                            };
-                            if !data_ptr.is_null() {
-                                for i in 0..len {
-                                    let elem = unsafe { *data_ptr.add(i) };
-                                    texts.push(super::string_helpers::extract_string(
-                                        &elem, state,
-                                    ));
+                    // Field 0: len (NaN-boxed Value, not raw i64).
+                    let len_val = unsafe { *data_ptr };
+                    if len_val.is_int() {
+                        let len = len_val.as_i64();
+                        if (0..=1_000_000).contains(&len) {
+                            let len = len as usize;
+                            // Field 2: backing-array pointer (Value).
+                            let backing_val = unsafe { *data_ptr.add(2) };
+                            if backing_val.is_ptr() && !backing_val.is_nil() && len > 0 {
+                                let backing_ptr = backing_val.as_ptr::<u8>();
+                                if !backing_ptr.is_null() {
+                                    // Element data starts after the
+                                    // backing-array's own ObjectHeader.
+                                    let elem_data = unsafe {
+                                        backing_ptr.add(heap::OBJECT_HEADER_SIZE)
+                                            as *const Value
+                                    };
+                                    for i in 0..len {
+                                        let elem = unsafe { *elem_data.add(i) };
+                                        texts.push(
+                                            super::string_helpers::extract_string(
+                                                &elem, state,
+                                            ),
+                                        );
+                                    }
                                 }
                             }
                         }

@@ -921,10 +921,30 @@ fn join_empty_list_yields_empty() {
     assert_eq(Text.join(&parts, &","), "");
 }
 
-// `join_single_part_returns_part` is pinned in regression_test.vr —
-// the Tier-0 join intercept's non-empty-path returns empty instead
-// of the single part.  Same layout-mismatch root as the deferred
-// two-element case.  See task #8.
+@test
+fn join_single_part_returns_part() {
+    let parts: List<Text> = ["only"];
+    assert_eq(Text.join(&parts, &","), "only");
+}
+
+@test
+fn join_two_parts_with_separator() {
+    let parts: List<Text> = ["a", "b"];
+    let sep: Text = ",";
+    assert_eq(Text.join(&parts, &sep), "a,b");
+}
+
+@test
+fn join_three_parts_with_separator() {
+    let parts: List<Text> = ["x", "y", "z"];
+    assert_eq(Text.join(&parts, &"-"), "x-y-z");
+}
+
+@test
+fn join_empty_separator_concatenates() {
+    let parts: List<Text> = ["a", "b", "c"];
+    assert_eq(Text.join(&parts, &""), "abc");
+}
 
 // =============================================================================
 // Section P29: Padding family — center / pad_left / pad_right / zfill
