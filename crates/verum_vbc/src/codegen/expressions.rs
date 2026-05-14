@@ -7540,6 +7540,52 @@ impl VbcCodegen {
             return Ok(result);
         }
 
+        // **Field-receiver writeback target capture** (closes task #11
+        // for the chained `b.inner.<&mut-self method>()` case).
+        //
+        // When the call's receiver is a field-access expression
+        // (`b.inner.take()` lowers to GetF tmp + call), the mutation
+        // performed inside an `&mut self` method via
+        // `*self = value` writes through the CBGR ref created by the
+        // `RefMut` instruction below — but that ref points at the
+        // *temporary* register holding the extracted field value, NOT
+        // at the field slot in the parent record.  Without a
+        // post-call writeback, `b.inner.take()` correctly returns
+        // `Some(x)` but leaves `b.inner` unchanged (the "leaves None
+        // in its place" Maybe.take invariant silently fails).
+        //
+        // The fix captures `(base_reg, field_idx)` upfront so we can
+        // commit the post-call receiver_reg back via `SetF` after the
+        // method body returns.  Only fires when the method actually
+        // takes `&mut self` (decided below alongside the existing
+        // RefMut emission) — for `&self` / value methods, no
+        // mutation can have happened and the writeback is skipped.
+        let field_writeback_target: Option<(Reg, u32)> = match &receiver.kind {
+            ExprKind::Field { expr: base, field } => {
+                // Resolve the base's type to find the canonical field
+                // index.  Falls back to None when the type can't be
+                // resolved (e.g. generic receivers, opaque pointers),
+                // in which case the writeback is skipped and the
+                // existing value-semantics behaviour is preserved.
+                let base_type = self.infer_expr_type_name(base);
+                let field_idx = self.resolve_field_index(
+                    base_type.as_deref(),
+                    field.name.as_str(),
+                );
+                // resolve_field_index returns `u32::MAX` when the
+                // field isn't found — treat that as "no writeback".
+                if field_idx == u32::MAX {
+                    None
+                } else {
+                    let base_reg = self
+                        .compile_expr(base)?
+                        .or_internal("field-receiver base has no value")?;
+                    Some((base_reg, field_idx))
+                }
+            }
+            _ => None,
+        };
+
         // Compile receiver as value
         let receiver_reg = self
             .compile_expr(receiver)?
@@ -8881,6 +8927,36 @@ impl VbcCodegen {
                     }
                 }
             }
+        }
+
+        // **Field-receiver writeback emission** (closes task #11
+        // chained-field case — see the matching capture-side comment
+        // before `compile_expr(receiver)` above).
+        //
+        // The post-call receiver_reg holds whatever value the method
+        // body wrote through `*self = …` (via the CBGR ref the
+        // `RefMut` instruction created), OR the unchanged extracted
+        // field value if the body didn't mutate.  Either way, the
+        // SetF below makes the parent-record-field invariant
+        // truthful again: `b.inner.<&mut self method>()` now leaves
+        // `b.inner` reflecting whatever the method's body decided.
+        //
+        // Only fires when (a) the receiver was actually a field
+        // expression (captured upfront) AND (b) the method actually
+        // takes `&mut self` (so a RefMut was emitted, so the body
+        // could have mutated the temp).  For value-receiver methods
+        // (`&self`, owned `self`) the writeback is skipped — they
+        // can't have mutated the temp.
+        if let Some((base_reg, field_idx)) = field_writeback_target {
+            let did_refmut = actual_receiver != receiver_reg;
+            if did_refmut {
+                self.ctx.emit(Instruction::SetF {
+                    obj: base_reg,
+                    field_idx,
+                    value: receiver_reg,
+                });
+            }
+            self.ctx.free_temp(base_reg);
         }
 
         // Free the temporary registers
@@ -10686,6 +10762,9 @@ impl VbcCodegen {
         scrutinee: &Expr,
         arms: &verum_common::List<verum_ast::MatchArm>,
     ) -> CodegenResult<Option<Reg>> {
+        if std::env::var("VERUM_TRACE_PAT").is_ok() {
+            eprintln!("[compile_match ENTER]");
+        }
         // Evaluate scrutinee
         let scrutinee_reg = self
             .compile_expr(scrutinee)?
@@ -10694,6 +10773,19 @@ impl VbcCodegen {
         // Try to determine the type of the scrutinee for variant pattern resolution.
         // Uses extract_expr_type_name which handles variables, field access, method calls etc.
         let scrutinee_type = self.extract_expr_type_name(scrutinee);
+        if std::env::var("VERUM_TRACE_PAT").is_ok() {
+            eprintln!(
+                "[match-scrutinee] type={:?} scrutinee_kind={}",
+                scrutinee_type,
+                match &scrutinee.kind {
+                    verum_ast::expr::ExprKind::Call { .. } => "Call",
+                    verum_ast::expr::ExprKind::Path(_) => "Path",
+                    verum_ast::expr::ExprKind::MethodCall { .. } => "MethodCall",
+                    verum_ast::expr::ExprKind::Field { .. } => "Field",
+                    _ => "Other",
+                }
+            );
+        }
 
         // Store the scrutinee type for pattern binding to use
         let prev_scrutinee_type = self.ctx.match_scrutinee_type.take();
@@ -12412,6 +12504,24 @@ impl VbcCodegen {
         scrutinee: Reg,
     ) -> CodegenResult<()> {
         use verum_ast::PatternKind;
+        if std::env::var("VERUM_TRACE_PAT").is_ok() {
+            eprintln!(
+                "[pat-bind-enter] pattern_kind={} scrutinee_type={:?}",
+                match &pattern.kind {
+                    PatternKind::Wildcard => "Wildcard",
+                    PatternKind::Ident { .. } => "Ident",
+                    PatternKind::Tuple(_) => "Tuple",
+                    PatternKind::Variant { .. } => "Variant",
+                    PatternKind::Record { .. } => "Record",
+                    PatternKind::Or(_) => "Or",
+                    PatternKind::Reference { .. } => "Reference",
+                    PatternKind::Literal(_) => "Literal",
+                    PatternKind::Paren(_) => "Paren",
+                    _ => "Other",
+                },
+                self.ctx.match_scrutinee_type
+            );
+        }
 
         match &pattern.kind {
             PatternKind::Wildcard => {
@@ -12710,12 +12820,25 @@ impl VbcCodegen {
                                     if let Some(type_name) = field_type
                                         && let PatternKind::Ident { name, .. } = &pat.kind
                                     {
+                                        if std::env::var("VERUM_TRACE_PAT").is_ok() {
+                                            eprintln!(
+                                                "[pat-bind] var={} type={} variant={}",
+                                                name.name, type_name, variant_name
+                                            );
+                                        }
                                         self.ctx
                                             .variable_type_names
                                             .insert(name.name.to_string(), type_name.clone());
                                         // Also register VarTypeKind for type-aware codegen
                                         let var_type = self.type_name_to_var_type(&type_name);
                                         self.ctx.register_variable_type(&name.name, var_type);
+                                    } else if std::env::var("VERUM_TRACE_PAT").is_ok() {
+                                        if let PatternKind::Ident { name, .. } = &pat.kind {
+                                            eprintln!(
+                                                "[pat-bind] var={} NO TYPE variant={} scrutinee={:?}",
+                                                name.name, variant_name, self.ctx.match_scrutinee_type
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -16955,12 +17078,34 @@ impl VbcCodegen {
             }
             // Function call: check return type for Result/Maybe, or tuple-style constructor
             ExprKind::Call { func, args, .. } => {
+                if std::env::var("VERUM_TRACE_PAT").is_ok() {
+                    eprintln!(
+                        "[call-arm] func_kind={} args_len={}",
+                        match &func.kind {
+                            ExprKind::Path(p) => format!("Path({} segs)", p.segments.len()),
+                            ExprKind::Field { .. } => "Field".to_string(),
+                            ExprKind::MethodCall { .. } => "MethodCall".to_string(),
+                            _ => "Other".to_string(),
+                        },
+                        args.len()
+                    );
+                }
                 if let ExprKind::Path(path) = &func.kind {
                     if path.segments.len() == 1
                         && let PathSegment::Name(ident) = &path.segments[0]
                     {
                         let name = &ident.name;
                         // Look up the function to check return type
+                        if std::env::var("VERUM_TRACE_PAT").is_ok() {
+                            eprintln!(
+                                "[call-type] name={} lookup={} return_type_name={:?}",
+                                name,
+                                self.ctx.lookup_function(name).is_some(),
+                                self.ctx
+                                    .lookup_function(name)
+                                    .and_then(|fi| fi.return_type_name.clone())
+                            );
+                        }
                         if let Some(func_info) = self.ctx.lookup_function(name) {
                             // For variant constructors (Some, Ok, Err), try to infer
                             // generic args from constructor arguments BEFORE falling back

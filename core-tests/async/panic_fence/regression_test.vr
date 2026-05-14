@@ -21,20 +21,54 @@ mount core.async.waker.{Context, noop_waker};
 mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
-// §A — task #11 — Maybe.take() does not mutate caller's generic field
+// §A — task #11 CLOSED — Maybe.take() mutation through &mut self
+//                       now flows back to caller's field
 // =============================================================================
+//
+// CLOSED 2026-05-14 by three layered architectural fixes:
+//
+//   (1) Precompiler-side self-shape encoding (`compile_function` in
+//   `crates/verum_vbc/src/codegen/mod.rs`).  Pre-fix every non-
+//   `Regular` `FunctionParamKind` (the entire `SelfValue` / `SelfRef`
+//   / `SelfRefMut` / checked / unsafe / own family) was serialised
+//   into the archive as `TypeRef::Concrete(TypeId::UNIT)` — the
+//   reference + mutability + tier taxonomy was erased at the
+//   serialisation boundary.  Now each variant encodes as
+//   `Concrete(parent_tid)` (value receivers) or
+//   `Reference { inner: parent_tid, mutability, tier }` (`&` / `&mut`
+//   / `&checked` / `&unsafe`).  The same encoding applies to the
+//   panic-stub descriptor builder.
+//
+//   (2) Archive-loader self-shape decoding (`fn_takes_self_mut_ref` in
+//   `crates/verum_compiler/src/archive_ctx_loader.rs`).  The previous
+//   archive→FunctionInfo conversion hardcoded
+//   `takes_self_mut_ref: false` at every site.  Now the loader
+//   inspects the first param's TypeRef: if it's `Reference {
+//   mutability: Mutable, .. }` with name `self`, the flag is set true.
+//
+//   (3) Field-receiver writeback in `compile_method_call`
+//   (`crates/verum_vbc/src/codegen/expressions.rs`).  Even with (1)+(2)
+//   correctly wired, `b.inner.take()` still failed because the
+//   `RefMut` instruction creates a CBGR ref to the *temporary*
+//   register holding the extracted field value — not to the field
+//   slot in the parent record.  The fix captures `(base_reg,
+//   field_idx)` upfront when the receiver is a `Field` expression
+//   and emits a `SetF` after the method body returns, committing the
+//   (potentially mutated) receiver_reg back to the field.  Only
+//   fires when the method actually takes `&mut self` (so RefMut was
+//   emitted) — value-receiver methods skip the writeback as a no-op.
+//
+// Blast radius: every `&mut self` stdlib method now mutates
+// correctly through user code — Maybe.take / Maybe.replace /
+// Maybe.insert / Maybe.get_or_insert / Text.push_str / List.push /
+// every Drop/Hash/Eq mutator.  Architectural rule pinned: the
+// `FunctionParamKind` self-shape taxonomy MUST round-trip through
+// the archive losslessly; the user-side dispatch MUST honour the
+// `takes_self_mut_ref` flag with both the `RefMut` and the
+// field-writeback `SetF` for chained-field receivers.
 
 @test
-@ignore
 fn regression_panic_fence_inner_is_none_after_ready_poll() {
-    // Pinned defect: this assertion currently fails because the
-    // `*self = None` deref-assign inside `Maybe.take()` does not
-    // flow back through `PanicFence<F>::poll`'s `self.inner.take()`
-    // call.  The fence's lifecycle invariant ("inner is None after
-    // Ready") is therefore observably broken.
-    //
-    // When fixed: drop the @ignore and watch this go green; that
-    // also unblocks the strict-lifecycle test in unit_test.vr §3.
     let mut fence = panic_safe(ready(1));
     let waker = noop_waker();
     let mut cx = Context.from_waker(&waker);

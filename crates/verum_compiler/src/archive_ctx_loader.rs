@@ -124,6 +124,64 @@ pub struct LoadStats {
 /// dispatching to `core.net.tls13.handshake.zero_rtt_antireplay.test_bit`
 /// because bitfield's canonical key was missing and the bare-name
 /// fallback claimed the first registered `test_bit`.
+/// Detect whether the first parameter of a function descriptor is
+/// `&mut self` — i.e. the receiver is passed by mutable CBGR
+/// reference, so the method body's `*self = value` writeback MUST
+/// flow back to the caller's binding via the user-side codegen's
+/// `RefMut`-then-pass-as-receiver dispatch (`compile_method_call`
+/// at `crates/verum_vbc/src/codegen/expressions.rs:~8641`).
+///
+/// **Architectural rule** (closes task #11): every `FunctionInfo`
+/// constructed from an archived `FunctionDescriptor` MUST set
+/// `takes_self_mut_ref` to the result of this predicate.  Pre-fix,
+/// every archive-side `FunctionInfo` literal hardcoded
+/// `takes_self_mut_ref: false`, so every `&mut self` stdlib
+/// method (Maybe.take / Maybe.replace / Maybe.insert /
+/// Maybe.get_or_insert / Text.push_str / List.push / …) was
+/// dispatched with the receiver passed BY VALUE — the
+/// `*self = value` inside the body wrote into a stack slot the
+/// caller would never re-read.  Symptom: `m.take()` returned
+/// `Some(x)` but `m` stayed `Some(x)` (the take's "leaves None
+/// in its place" invariant silently failed).
+///
+/// The predicate inspects `param.type_ref`: if it's
+/// `Reference { mutability: Mutable, inner: T }` AND the
+/// param name is `self`, the receiver is `&mut self`.
+fn param_is_mut_self_ref(
+    param: &verum_vbc::module::ParamDescriptor,
+    module: &verum_vbc::module::VbcModule,
+) -> bool {
+    // `module.strings.iter()` yields `(&str, StringId)` — the `&str`
+    // binding is used directly (avoids the unstable
+    // `str_as_str`/`String::as_str` reborrow path).
+    let is_self = module
+        .strings
+        .iter()
+        .any(|(s, id)| id == param.name && s == "self");
+    if !is_self {
+        return false;
+    }
+    matches!(
+        &param.type_ref,
+        verum_vbc::types::TypeRef::Reference {
+            mutability: verum_vbc::types::Mutability::Mutable,
+            ..
+        }
+    )
+}
+
+/// Convenience wrapper: returns `takes_self_mut_ref` for a function
+/// descriptor.  Inspects the first parameter via [`param_is_mut_self_ref`].
+fn fn_takes_self_mut_ref(
+    fn_desc: &verum_vbc::module::FunctionDescriptor,
+    module: &verum_vbc::module::VbcModule,
+) -> bool {
+    fn_desc
+        .params
+        .first()
+        .is_some_and(|p| param_is_mut_self_ref(p, module))
+}
+
 fn merge_module_and_simple_name(module_name: &str, simple_name: &str) -> String {
     if !simple_name.contains('.') {
         // Bare leaf — the precompiler did no module promotion.
@@ -408,7 +466,18 @@ fn register_module(
             parent_type_name,
             variant_payload_types,
             is_partial_pattern: false,
-            takes_self_mut_ref: false,
+            // **Task #11 fix** — propagate the `&mut self` receiver
+            // marker from the archived ParamDescriptor.  Pre-fix this
+            // was hardcoded `false`, so the user-side
+            // `compile_method_call` dispatch path at
+            // `crates/verum_vbc/src/codegen/expressions.rs:~8641`
+            // did NOT emit a `RefMut` to wrap the receiver — passing
+            // it by VALUE — and the method body's `*self = value`
+            // writeback was lost.  Universal `Maybe.take()` /
+            // `Maybe.replace()` / `Maybe.insert()` / any `&mut self`
+            // stdlib method had silent-no-mutation semantics through
+            // every user call site.
+            takes_self_mut_ref: fn_takes_self_mut_ref(fn_desc, module),
             return_type_name,
             return_type_inner,
             // #97 — restore the const-storage marker so user-side
@@ -3424,7 +3493,12 @@ fn register_module_filtered(
             parent_type_name,
             variant_payload_types,
             is_partial_pattern: false,
-            takes_self_mut_ref: false,
+            // **Task #11 fix** — see `populate_ctx_from_archive` site
+            // for the architectural rationale.  Mirror invariant:
+            // every `FunctionInfo` constructed from an archived
+            // `FunctionDescriptor` MUST set `takes_self_mut_ref`
+            // from the first param's TypeRef.
+            takes_self_mut_ref: fn_takes_self_mut_ref(fn_desc, module),
             return_type_name,
             return_type_inner,
             // #97 — see populate_ctx_from_archive for the rationale.
