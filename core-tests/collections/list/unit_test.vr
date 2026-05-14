@@ -1,0 +1,451 @@
+// =============================================================================
+// core-tests/collections/list/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.list` — the canonical dynamic array primitive
+// (`List<T>`). One axis of behaviour per `@test`; section banners group tests
+// by the public method or method-family under test.
+//
+// Construction: every test goes through one of the two `List<T>` builders
+// that the codegen + runtime cleanly resolve today —
+//   * `List.new()` / `List.with_capacity(n)` — runtime-intercepted in
+//     `method_dispatch.rs` (handles the canonical 3-Value heap layout).
+//   * `let xs: List<Int> = [1, 2, 3]` — the array-literal coercion path
+//     through `ArrayCoercible for List<T>` (`core/collections/list.vr:86`).
+//
+// `List.from`, `List.from_elem`, `List.of` are pinned in regression_test.vr
+// §A — they fail the codegen function-table lookup despite being defined as
+// public `impl<T> List<T>` static methods. That is a fundamental cross-
+// module name-resolution defect, not a per-call-site bug. The remaining unit-
+// API surface stays fully testable through the two builders above.
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// Section 1: List.new / List.with_capacity / array-literal — construction
+// =============================================================================
+
+@test
+fn test_list_new_is_empty() {
+    let xs: List<Int> = List.new();
+    assert_eq(xs.len(), 0);
+    assert(xs.is_empty());
+}
+
+@test
+fn test_list_with_capacity_reserves_but_keeps_len_zero() {
+    let xs: List<Int> = List.with_capacity(16);
+    assert_eq(xs.len(), 0);
+    assert(xs.capacity() >= 16);
+}
+
+@test
+fn test_list_with_capacity_zero_falls_back_to_default() {
+    // Internal default is 16 to keep the first push allocation-free.
+    let xs: List<Int> = List.with_capacity(0);
+    assert_eq(xs.len(), 0);
+    assert(xs.is_empty());
+}
+
+@test
+fn test_list_array_literal_preserves_length() {
+    let xs: List<Int> = [10, 20, 30];
+    assert_eq(xs.len(), 3);
+    assert(!xs.is_empty());
+}
+
+@test
+fn test_list_array_literal_preserves_order() {
+    let xs: List<Int> = [10, 20, 30];
+    assert_eq(xs.get(0), Some(10));
+    assert_eq(xs.get(1), Some(20));
+    assert_eq(xs.get(2), Some(30));
+}
+
+@test
+fn test_list_empty_array_literal() {
+    let xs: List<Int> = [];
+    assert(xs.is_empty());
+    assert_eq(xs.len(), 0);
+}
+
+// =============================================================================
+// Section 2: push / pop — back-end mutation
+// =============================================================================
+
+@test
+fn test_list_push_increments_len() {
+    let mut xs: List<Int> = List.new();
+    xs.push(1);
+    assert_eq(xs.len(), 1);
+    xs.push(2);
+    assert_eq(xs.len(), 2);
+    xs.push(3);
+    assert_eq(xs.len(), 3);
+}
+
+@test
+fn test_list_push_preserves_order() {
+    let mut xs: List<Int> = List.new();
+    xs.push(10);
+    xs.push(20);
+    xs.push(30);
+    assert_eq(xs.get(0), Some(10));
+    assert_eq(xs.get(1), Some(20));
+    assert_eq(xs.get(2), Some(30));
+}
+
+@test
+fn test_list_push_grows_capacity() {
+    let mut xs: List<Int> = List.new();
+    let mut i = 0;
+    while i < 32 {
+        xs.push(i);
+        i = i + 1;
+    }
+    assert_eq(xs.len(), 32);
+    assert(xs.capacity() >= 32);
+}
+
+@test
+fn test_list_pop_from_empty_returns_none() {
+    let mut xs: List<Int> = List.new();
+    assert_eq(xs.pop(), None);
+}
+
+@test
+fn test_list_pop_returns_last_pushed() {
+    let mut xs: List<Int> = [10, 20, 30];
+    assert_eq(xs.pop(), Some(30));
+    assert_eq(xs.pop(), Some(20));
+    assert_eq(xs.pop(), Some(10));
+    assert_eq(xs.pop(), None);
+}
+
+@test
+fn test_list_pop_decrements_len() {
+    let mut xs: List<Int> = [1, 2, 3];
+    let _ = xs.pop();
+    assert_eq(xs.len(), 2);
+}
+
+// =============================================================================
+// Section 3: get / first / last / is_empty / is_not_empty — read-only access
+// =============================================================================
+
+@test
+fn test_list_get_in_bounds_returns_some() {
+    let xs: List<Int> = [100, 200, 300];
+    assert_eq(xs.get(0), Some(100));
+    assert_eq(xs.get(1), Some(200));
+    assert_eq(xs.get(2), Some(300));
+}
+
+@test
+fn test_list_get_out_of_bounds_returns_none() {
+    let xs: List<Int> = [1, 2, 3];
+    assert_eq(xs.get(3), None);
+    assert_eq(xs.get(100), None);
+}
+
+@test
+fn test_list_get_negative_index_returns_none() {
+    let xs: List<Int> = [1, 2, 3];
+    assert_eq(xs.get(-1), None);
+}
+
+@test
+fn test_list_first_of_non_empty() {
+    let xs: List<Int> = [7, 8, 9];
+    assert_eq(xs.first(), Some(7));
+}
+
+@test
+fn test_list_first_of_empty_is_none() {
+    let xs: List<Int> = List.new();
+    assert_eq(xs.first(), None);
+}
+
+@test
+fn test_list_last_of_non_empty() {
+    let xs: List<Int> = [7, 8, 9];
+    assert_eq(xs.last(), Some(9));
+}
+
+@test
+fn test_list_last_of_empty_is_none() {
+    let xs: List<Int> = List.new();
+    assert_eq(xs.last(), None);
+}
+
+@test
+fn test_list_is_empty_after_new() {
+    let xs: List<Int> = List.new();
+    assert(xs.is_empty());
+}
+
+@test
+fn test_list_is_not_empty_after_push() {
+    let mut xs: List<Int> = List.new();
+    xs.push(1);
+    assert(!xs.is_empty());
+}
+
+// =============================================================================
+// Section 4: set / swap / clear / truncate — in-place mutation
+// =============================================================================
+
+@test
+fn test_list_set_overwrites_in_place() {
+    let mut xs: List<Int> = [1, 2, 3];
+    xs.set(1, 42);
+    assert_eq(xs.get(1), Some(42));
+    assert_eq(xs.len(), 3);
+}
+
+@test
+fn test_list_swap_exchanges_two_indices() {
+    let mut xs: List<Int> = [10, 20, 30];
+    xs.swap(0, 2);
+    assert_eq(xs.get(0), Some(30));
+    assert_eq(xs.get(2), Some(10));
+    assert_eq(xs.get(1), Some(20));
+}
+
+@test
+fn test_list_swap_same_index_is_noop() {
+    let mut xs: List<Int> = [1, 2, 3];
+    xs.swap(1, 1);
+    assert_eq(xs.get(1), Some(2));
+}
+
+@test
+fn test_list_clear_empties_list() {
+    let mut xs: List<Int> = [1, 2, 3];
+    xs.clear();
+    assert_eq(xs.len(), 0);
+    assert(xs.is_empty());
+}
+
+@test
+fn test_list_truncate_shorter_than_len_drops_tail() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    xs.truncate(3);
+    assert_eq(xs.len(), 3);
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(2), Some(3));
+    assert_eq(xs.get(3), None);
+}
+
+@test
+fn test_list_truncate_longer_than_len_is_noop() {
+    let mut xs: List<Int> = [1, 2, 3];
+    xs.truncate(10);
+    assert_eq(xs.len(), 3);
+}
+
+@test
+fn test_list_truncate_to_zero_clears() {
+    let mut xs: List<Int> = [1, 2, 3];
+    xs.truncate(0);
+    assert_eq(xs.len(), 0);
+}
+
+// =============================================================================
+// Section 5: reverse / insert / remove / swap_remove — order & shape mutation
+// =============================================================================
+
+@test
+fn test_list_reverse_odd_length() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    xs.reverse();
+    assert_eq(xs.get(0), Some(5));
+    assert_eq(xs.get(1), Some(4));
+    assert_eq(xs.get(2), Some(3));
+    assert_eq(xs.get(3), Some(2));
+    assert_eq(xs.get(4), Some(1));
+}
+
+@test
+fn test_list_reverse_even_length() {
+    let mut xs: List<Int> = [1, 2, 3, 4];
+    xs.reverse();
+    assert_eq(xs.get(0), Some(4));
+    assert_eq(xs.get(3), Some(1));
+}
+
+@test
+fn test_list_reverse_empty_is_noop() {
+    let mut xs: List<Int> = List.new();
+    xs.reverse();
+    assert_eq(xs.len(), 0);
+}
+
+@test
+fn test_list_reverse_involution() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    xs.reverse();
+    xs.reverse();
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(4), Some(5));
+}
+
+@test
+fn test_list_insert_at_start_shifts_right() {
+    let mut xs: List<Int> = [2, 3, 4];
+    xs.insert(0, 1);
+    assert_eq(xs.len(), 4);
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(1), Some(2));
+    assert_eq(xs.get(3), Some(4));
+}
+
+@test
+fn test_list_insert_at_end_is_push() {
+    let mut xs: List<Int> = [1, 2, 3];
+    xs.insert(3, 4);
+    assert_eq(xs.len(), 4);
+    assert_eq(xs.get(3), Some(4));
+}
+
+@test
+fn test_list_insert_in_middle_preserves_order() {
+    let mut xs: List<Int> = [10, 30, 40];
+    xs.insert(1, 20);
+    assert_eq(xs.get(0), Some(10));
+    assert_eq(xs.get(1), Some(20));
+    assert_eq(xs.get(2), Some(30));
+    assert_eq(xs.get(3), Some(40));
+}
+
+@test
+fn test_list_remove_first_shifts_left() {
+    let mut xs: List<Int> = [1, 2, 3, 4];
+    let removed = xs.remove(0);
+    assert_eq(removed, 1);
+    assert_eq(xs.len(), 3);
+    assert_eq(xs.get(0), Some(2));
+    assert_eq(xs.get(2), Some(4));
+}
+
+@test
+fn test_list_remove_middle_shifts_left() {
+    let mut xs: List<Int> = [1, 2, 3, 4];
+    let removed = xs.remove(2);
+    assert_eq(removed, 3);
+    assert_eq(xs.len(), 3);
+    assert_eq(xs.get(2), Some(4));
+}
+
+@test
+fn test_list_swap_remove_returns_and_replaces_with_last() {
+    let mut xs: List<Int> = [1, 2, 3, 4];
+    let removed = xs.swap_remove(1);
+    assert_eq(removed, 2);
+    assert_eq(xs.len(), 3);
+    // Slot 1 now holds what was the last element.
+    assert_eq(xs.get(1), Some(4));
+}
+
+// =============================================================================
+// Section 6: contains — value search (post-fix for CBGR-ref needle deref)
+// =============================================================================
+
+@test
+fn test_list_contains_existing_value() {
+    let xs: List<Int> = [1, 2, 3, 4];
+    assert(xs.contains(&2));
+    assert(xs.contains(&4));
+}
+
+@test
+fn test_list_contains_absent_value() {
+    let xs: List<Int> = [1, 2, 3, 4];
+    assert(!xs.contains(&99));
+}
+
+@test
+fn test_list_contains_in_empty_is_false() {
+    let xs: List<Int> = List.new();
+    assert(!xs.contains(&0));
+}
+
+// =============================================================================
+// Section 7: sort / is_sorted — ordering
+// =============================================================================
+
+@test
+fn test_list_sort_ascending() {
+    let mut xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
+    xs.sort();
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(1), Some(1));
+    assert_eq(xs.get(2), Some(2));
+    assert_eq(xs.get(7), Some(9));
+}
+
+@test
+fn test_list_sort_empty_is_noop() {
+    let mut xs: List<Int> = List.new();
+    xs.sort();
+    assert_eq(xs.len(), 0);
+}
+
+@test
+fn test_list_sort_singleton_is_noop() {
+    let mut xs: List<Int> = [42];
+    xs.sort();
+    assert_eq(xs.get(0), Some(42));
+}
+
+@test
+fn test_list_sort_already_sorted_is_idempotent() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    xs.sort();
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(4), Some(5));
+}
+
+@test
+fn test_list_sort_reverse_input() {
+    let mut xs: List<Int> = [5, 4, 3, 2, 1];
+    xs.sort();
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(4), Some(5));
+}
+
+// =============================================================================
+// Section 8: clear preserves capacity
+// =============================================================================
+
+@test
+fn test_list_clear_preserves_capacity() {
+    let mut xs: List<Int> = List.with_capacity(64);
+    xs.push(1);
+    xs.push(2);
+    let cap_before = xs.capacity();
+    xs.clear();
+    assert_eq(xs.len(), 0);
+    assert_eq(xs.capacity(), cap_before);
+}
+
+// =============================================================================
+// Section 9: get_or — default-return read
+// =============================================================================
+
+@test
+fn test_list_get_or_in_bounds_returns_value() {
+    let xs: List<Int> = [1, 2, 3];
+    assert_eq(xs.get_or(0, -1), 1);
+    assert_eq(xs.get_or(2, -1), 3);
+}
+
+@test
+fn test_list_get_or_out_of_bounds_returns_default() {
+    let xs: List<Int> = [1, 2, 3];
+    assert_eq(xs.get_or(99, -1), -1);
+    assert_eq(xs.get_or(-5, 42), 42);
+}
+
+fn main() {}

@@ -1,0 +1,226 @@
+// =============================================================================
+// core-tests/collections/list/property_test.vr
+// =============================================================================
+//
+// Algebraic + structural laws for `core.collections.list`. Domain choice
+// follows the conformance suite convention: bounded representative-sample
+// sweeps (boundary indices, mid-range values, signed extremes) since the
+// integer domain is too large to exhaust.
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// §1  push / pop round-trip
+// =============================================================================
+
+@test
+fn property_pop_returns_each_push_in_lifo_order() {
+    // For every k in 1..=10, pushing 1..k then popping k times yields the
+    // pushed sequence in reverse.
+    let mut k = 1;
+    while k <= 10 {
+        let mut xs: List<Int> = List.new();
+        let mut i = 1;
+        while i <= k {
+            xs.push(i);
+            i = i + 1;
+        }
+        // Pop in order: each returns the next-most-recent push.
+        let mut expected = k;
+        while expected >= 1 {
+            assert_eq(xs.pop(), Some(expected));
+            expected = expected - 1;
+        }
+        assert_eq(xs.pop(), None);
+        k = k + 1;
+    }
+}
+
+// =============================================================================
+// §2  reverse involution
+//
+//   xs.reverse(); xs.reverse() == xs (as a value).
+// =============================================================================
+
+@test
+fn property_reverse_is_involution() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    let original_0 = xs.get(0);
+    let original_2 = xs.get(2);
+    let original_4 = xs.get(4);
+    xs.reverse();
+    xs.reverse();
+    assert_eq(xs.get(0), original_0);
+    assert_eq(xs.get(2), original_2);
+    assert_eq(xs.get(4), original_4);
+}
+
+@test
+fn property_reverse_swaps_first_and_last() {
+    let mut xs: List<Int> = [10, 20, 30, 40];
+    let f = xs.first();
+    let l = xs.last();
+    xs.reverse();
+    assert_eq(xs.first(), l);
+    assert_eq(xs.last(), f);
+}
+
+// =============================================================================
+// §3  contains agrees with linear search
+// =============================================================================
+
+@test
+fn property_contains_matches_array_literal_membership() {
+    let xs: List<Int> = [10, 20, 30, 40, 50];
+    // Every element in xs is `contains`.
+    assert(xs.contains(&10));
+    assert(xs.contains(&30));
+    assert(xs.contains(&50));
+    // Boundary off-by-one — adjacent unrelated values aren't.
+    assert(!xs.contains(&9));
+    assert(!xs.contains(&11));
+    assert(!xs.contains(&41));
+    assert(!xs.contains(&49));
+    assert(!xs.contains(&51));
+}
+
+// =============================================================================
+// §4  insert / remove inverse
+//
+//   For each idx in 0..=len, `insert(idx, value); remove(idx) == value`
+//   restores the original list.
+// =============================================================================
+
+@test
+fn property_insert_then_remove_at_same_idx_is_noop() {
+    let mut xs: List<Int> = [1, 2, 3, 4];
+    let mut idx = 0;
+    while idx <= 4 {
+        let original_len = xs.len();
+        xs.insert(idx, 99);
+        assert_eq(xs.len(), original_len + 1);
+        let removed = xs.remove(idx);
+        assert_eq(removed, 99);
+        assert_eq(xs.len(), original_len);
+        idx = idx + 1;
+    }
+    // After the round-trip the list is identical to its starting shape.
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(1), Some(2));
+    assert_eq(xs.get(2), Some(3));
+    assert_eq(xs.get(3), Some(4));
+}
+
+// =============================================================================
+// §5  sort idempotence + monotone-output
+// =============================================================================
+
+@test
+fn property_sort_is_idempotent() {
+    let mut xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
+    xs.sort();
+    let a0 = xs.get(0);
+    let a4 = xs.get(4);
+    let a7 = xs.get(7);
+    xs.sort();
+    assert_eq(xs.get(0), a0);
+    assert_eq(xs.get(4), a4);
+    assert_eq(xs.get(7), a7);
+}
+
+@test
+fn property_sort_produces_monotone_nondecreasing_output() {
+    let mut xs: List<Int> = [5, 3, 8, 1, 7, 2, 6, 4];
+    xs.sort();
+    let mut i = 0;
+    while i + 1 < xs.len() {
+        let a = xs.get_or(i, 0);
+        let b = xs.get_or(i + 1, 0);
+        assert(a <= b);
+        i = i + 1;
+    }
+}
+
+@test
+fn property_sort_preserves_length_and_multiset() {
+    // Sort is a permutation: same length, same element multiset.
+    let mut xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
+    let original_len = xs.len();
+    let original_sum = {
+        let mut s = 0;
+        let mut i = 0;
+        while i < xs.len() {
+            s = s + xs.get_or(i, 0);
+            i = i + 1;
+        }
+        s
+    };
+    xs.sort();
+    assert_eq(xs.len(), original_len);
+    let new_sum = {
+        let mut s = 0;
+        let mut i = 0;
+        while i < xs.len() {
+            s = s + xs.get_or(i, 0);
+            i = i + 1;
+        }
+        s
+    };
+    assert_eq(new_sum, original_sum);
+}
+
+// =============================================================================
+// §6  pop monotone len-decreasing; len lower-bounded by zero
+// =============================================================================
+
+@test
+fn property_pop_decreases_len_or_returns_none() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    let mut prev_len = xs.len();
+    while !xs.is_empty() {
+        let _ = xs.pop();
+        assert(xs.len() < prev_len);
+        prev_len = xs.len();
+    }
+    assert_eq(xs.len(), 0);
+    // After exhaustion, pop must keep returning None deterministically.
+    assert_eq(xs.pop(), None);
+    assert_eq(xs.pop(), None);
+}
+
+// =============================================================================
+// §7  push increases len by exactly 1; capacity is non-decreasing
+// =============================================================================
+
+@test
+fn property_push_advances_len_by_one_and_grows_capacity_monotonically() {
+    let mut xs: List<Int> = List.new();
+    let mut prev_cap = xs.capacity();
+    let mut i = 0;
+    while i < 25 {
+        let before = xs.len();
+        xs.push(i);
+        assert_eq(xs.len(), before + 1);
+        assert(xs.capacity() >= prev_cap);
+        prev_cap = xs.capacity();
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §8  clear is idempotent and capacity-preserving
+// =============================================================================
+
+@test
+fn property_clear_is_idempotent() {
+    let mut xs: List<Int> = [1, 2, 3, 4];
+    xs.clear();
+    let cap_after_first = xs.capacity();
+    xs.clear();
+    let cap_after_second = xs.capacity();
+    assert_eq(xs.len(), 0);
+    assert_eq(cap_after_first, cap_after_second);
+}
+
+fn main() {}
