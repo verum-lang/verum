@@ -92,21 +92,74 @@ consumes `other: &T` MUST funnel the raw register read through
 `method_dispatch.rs` — every match outside `resolve_arg_value`
 itself is a bug.
 
-### §3.3 Other defects unrelated to ordering
+### §3.3 Format-literal Display dispatch — CLOSED 2026-05-14
 
-None remaining for the `Ordering` API surface itself. Three failing
-integration tests landed pre-§3.2:
-* `integration_sort_via_cmp_ordering` — closed by §3.2.
-* `integration_display_ordering_shows_operator_glyph` — gated by
-  Ordering Display impl returning a garbage Text on `f"{ord}"`;
-  the `Ordering` Display body itself looks correct in
-  `core/base/ordering.vr` — needs a separate audit pass to confirm
-  whether Display goes through the same intercept defect or whether
-  this is a fresh Display-dispatch shape. Tracked in INVENTORY.
-* `test_ordering_across_units` — lives in
-  `core-tests/time/duration/integration_test.vr` and exercises
-  Duration's `Ordering`-returning `cmp`; bisected dependency on
-  §3.2 — re-evaluate post-fix.
+**Defect class** — `f"{x}"` interpolation and `print(x)` both lowered
+unconditionally to the runtime `ToString` opcode (`expressions.rs::
+compile_interpolated_string` at the legacy `else` branch).
+`ToString` calls `format_value_for_print` (a Debug-style runtime
+formatter) which prints variant NAMES (`Less` / `Equal` / `Greater`)
+instead of dispatching to the user-defined
+`implement Display for <T> { fn fmt(&self, f: &mut Formatter) … }`
+body.  Every Display impl across `core/` (Ordering, Maybe, Result,
+domain errors, every glyph or operator-style render) was silently
+bypassed by f-strings.
+
+**Live repro** — `f"{Less}"` produced `Less` instead of `<`.
+Workaround was manual Formatter wiring at every call site:
+```verum
+let mut buf: Text = "";
+let mut f = Formatter.new(&mut buf);
+let _ = value.fmt(&mut f);
+print(buf);
+```
+
+**Fundamental fix** — new codegen helper
+`try_emit_display_dispatch` in
+`crates/verum_vbc/src/codegen/expressions.rs` (~150 LOC) emits the
+canonical Formatter wiring inline at every f-string placeholder:
+
+```text
+buf       := ""
+formatter := Formatter.new(&mut buf)
+_         := value.fmt(&mut formatter)    # CallM
+str_reg   := buf
+```
+
+**Detection signals** — the dispatch fires only when the receiver
+type has a Display impl, gated by EITHER:
+* `lookup_function(<TypeName>.fmt)` finds the impl in the local
+  function table (user-defined or eagerly mounted), OR
+* The codegen's type-descriptor table for `<TypeName>` lists a
+  `Display`-family protocol impl (`type_desc.protocols`) —
+  surfaces stdlib Display impls that the user-side module never
+  references directly.
+
+The actual call is emitted as `CallM` (dynamic dispatch by method
+name + receiver), not static `Call`, so the runtime resolves the
+fmt body even when the local function table doesn't contain
+`<TypeName>.fmt` — necessary because stdlib Display impls are
+lazily linked into user modules.
+
+**Primitives bypass** — Int / Float / Bool / Byte / Char / Int32 /
+UInt64 / Float32 / Float64 / Int{8,16}/ UInt{8,16,32} / USize /
+ISize keep the inline `ToString` fast path.  Their runtime
+formatter matches the stdlib `implement Display for <Primitive>`
+bit-for-bit, and routing through the protocol-dispatch chain
+would inflate each interpolation from one opcode to ~9 opcodes
+for zero semantic gain.
+
+**Architectural rule** — every f-string placeholder + every
+`print(value)` site that wants protocol-aware formatting MUST
+funnel through `try_emit_display_dispatch`.  Emitting `ToString`
+directly is a regression on user Display impls.
+
+### §3.4 Other defects unrelated to ordering
+
+`test_ordering_across_units` (lives in
+`core-tests/time/duration/integration_test.vr` and exercises
+Duration's `Ordering`-returning `cmp`) — closed transitively by
+§3.2's primitive-intercept fix.
 
 ## Action items landed in this branch
 
@@ -115,13 +168,16 @@ integration tests landed pre-§3.2:
 * Replaced 24 buggy `is_cbgr_ref / else` sites in
   `method_dispatch.rs` with one-line `resolve_arg_value` calls
   (–~140 LOC, +24 LOC).
-* Pinned 4 fresh regression tests in
-  `core-tests/base/ordering/regression_test.vr`.
+* Added `try_emit_display_dispatch` codegen helper in
+  `expressions.rs` (+150 LOC) — routes f-strings through user
+  Display impls when one exists.
+* Pinned 8 fresh regression tests in
+  `core-tests/base/ordering/regression_test.vr` (4 for §3.2 +
+  4 for §3.3).
 * Updated INVENTORY row with `base/ordering` status.
+* Documentation updates in `internal/website/docs/stdlib/base.md`.
 
 ## Action items deferred
 
 * §3.1 iterator-item method resolution (type-inference ordering) —
   pre-existing defect, separate task.
-* Display(Ordering) → garbage Text path — needs Display-dispatch
-  audit similar to §3.2.

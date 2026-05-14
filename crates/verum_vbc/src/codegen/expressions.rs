@@ -8678,7 +8678,14 @@ impl VbcCodegen {
         // handles arbitrary receiver expressions.
         let effective_method_name =
             if !effective_method_name.contains('.') && !effective_method_name.contains('$') {
-                if let Some(inferred_type) = self.infer_expr_type_name(receiver) {
+                let inferred = self.infer_expr_type_name(receiver);
+                if std::env::var("VERUM_TRACE_MUTSELF").is_ok() {
+                    eprintln!(
+                        "[mutself-codegen] bare-name retry: method='{}' inferred_type={:?}",
+                        effective_method_name, inferred
+                    );
+                }
+                if let Some(inferred_type) = inferred {
                     let base_type = VbcCodegen::strip_generic_args(&inferred_type);
                     let resolved = self.resolve_type_alias(base_type);
                     let final_base = VbcCodegen::strip_generic_args(&resolved);
@@ -8728,6 +8735,12 @@ impl VbcCodegen {
         // method to write back to the caller's variable.
         let actual_receiver =
             if let Some(func_info) = self.ctx.lookup_function(&effective_method_name) {
+                if std::env::var("VERUM_TRACE_MUTSELF").is_ok() {
+                    eprintln!(
+                        "[mutself-codegen] effective='{}' takes_self_mut_ref={} param_count={}",
+                        effective_method_name, func_info.takes_self_mut_ref, func_info.param_count
+                    );
+                }
                 if func_info.takes_self_mut_ref {
                     // Create a mutable reference to the receiver
                     let ref_reg = self.ctx.alloc_temp();
@@ -8741,6 +8754,12 @@ impl VbcCodegen {
                     receiver_reg
                 }
             } else {
+                if std::env::var("VERUM_TRACE_MUTSELF").is_ok() {
+                    eprintln!(
+                        "[mutself-codegen] effective='{}' NOT FOUND in function table",
+                        effective_method_name
+                    );
+                }
                 receiver_reg
             };
 
@@ -28389,14 +28408,34 @@ impl VbcCodegen {
         expr_reg: Reg,
         str_reg: Reg,
     ) -> CodegenResult<bool> {
+        // Optional codegen-time tracing, off by default.  Set
+        // `VERUM_TRACE_DISPLAY_DISPATCH=1` to print the type
+        // inference + table lookup chain for every f-string
+        // placeholder — used to bisect why a Display impl wasn't
+        // routed through (typical cause: stdlib impl never
+        // materialised in the local function table; see the
+        // function-table scan below for the supported lookup
+        // shapes).
+        let trace = std::env::var("VERUM_TRACE_DISPLAY_DISPATCH").is_ok();
         // Step 1: infer the expression's static type.  Strip generic
         // args because the codegen registers Display impls under the
         // unparameterised base name (`Result.fmt`, not `Result<T,E>.fmt`).
         let type_name = match self.infer_expr_type_name(expr) {
             Some(t) => t,
-            None => return Ok(false),
+            None => {
+                if trace {
+                    eprintln!("[display-dispatch] no inferred type name for expr — fallback");
+                }
+                return Ok(false);
+            }
         };
         let base = type_name.split('<').next().unwrap_or(&type_name).to_string();
+        if trace {
+            eprintln!(
+                "[display-dispatch] type='{}' base='{}'",
+                type_name, base
+            );
+        }
         // Bare generic-param-shaped names (`T`, `U`, `E`) are never
         // valid Display targets — they only exist as placeholders in
         // generic bodies.  Routing through them would emit a Call to
@@ -28435,17 +28474,101 @@ impl VbcCodegen {
             return Ok(false);
         }
 
+        // Gate detection: confirm the type implements Display by
+        // consulting either (a) the local function table for
+        // `<Type>.fmt` — the cheapest signal, surfaces user-defined
+        // impls and any stdlib impl already pulled in via mount /
+        // explicit `.fmt()` call site — OR (b) the archive
+        // type-descriptor's `protocols` list, which lists every
+        // `implement` block the type carries regardless of whether
+        // local user code references it.  The (b) channel matters
+        // because stdlib Display impls (Ordering, Maybe, Result, …)
+        // are lazily linked: the user-side function table contains
+        // them only when the user's module references the impl
+        // body.  Without (b), `f"{Less}"` in a module that never
+        // calls `.fmt()` directly would fall through to the
+        // legacy `ToString` opcode.
         let fmt_qualified = format!("{}.fmt", base);
-        let fmt_info = match self.ctx.lookup_function(&fmt_qualified).cloned() {
-            Some(info) => info,
-            None => return Ok(false),
-        };
-        // The Display protocol requires `fn fmt(&self, f: &mut Formatter)`.
-        // Reject candidates whose registered arity doesn't match — they
-        // belong to a different method called `fmt` (e.g. format-builder
-        // entrypoints) and routing through them would corrupt the call
-        // boundary.
-        if fmt_info.param_count != 2 || fmt_info.id.0 == u32::MAX {
+        let mut display_signal = self
+            .ctx
+            .lookup_function(&fmt_qualified)
+            .filter(|info| info.param_count == 2 && info.id.0 != u32::MAX)
+            .is_some();
+        if trace {
+            eprintln!(
+                "[display-dispatch] lookup_function('{}') => {}",
+                fmt_qualified, display_signal
+            );
+        }
+        // Cross-module signal: stdlib Display impls land in the
+        // function table under their fully-qualified module path
+        // (`core.base.primitives.Ordering.fmt` / `core.base.maybe.
+        // Maybe.fmt` / …) rather than the bare `<Type>.fmt` key,
+        // because the precompile pass keys functions by their
+        // canonical module-rooted name.  The exact-key
+        // `lookup_function` above therefore misses every impl that
+        // wasn't materialised in the local module.  Walk the
+        // function table once for any entry whose `parent_type_name`
+        // matches `base` (after stripping generics) AND whose simple
+        // method name is `fmt` — same shape that
+        // `find_function_by_suffix(".fmt")` would use, but pinned
+        // to the desired parent.
+        let parent_suffix_a = format!(".{}.fmt", base);
+        if !display_signal {
+            for (key, info) in self.ctx.functions.iter() {
+                if info.param_count != 2 || info.id.0 == u32::MAX {
+                    continue;
+                }
+                let matches_parent = info
+                    .parent_type_name
+                    .as_deref()
+                    .map(|p| p == base.as_str())
+                    .unwrap_or(false)
+                    && key.ends_with(".fmt");
+                let matches_key_suffix = key.ends_with(parent_suffix_a.as_str());
+                if matches_parent || matches_key_suffix {
+                    display_signal = true;
+                    if trace {
+                        eprintln!(
+                            "[display-dispatch] function-table scan matched key='{}' (parent={:?})",
+                            key, info.parent_type_name
+                        );
+                    }
+                    break;
+                }
+            }
+        }
+        if !display_signal {
+            // Archive type-descriptor probe: scan the codegen's
+            // type table for an entry matching `base` (or `base<...>`)
+            // and verify its protocol list contains a `Display`-
+            // family impl.  We accept any protocol-name suffix
+            // ending in `.Display` to handle module prefixes
+            // (`core.base.protocols.Display`).
+            for ty in self.types.iter() {
+                let name_opt = self.ctx.strings.get(ty.name.0 as usize);
+                if let Some(name) = name_opt
+                    && (name.as_str() == base.as_str()
+                        || name.starts_with(&format!("{}<", base)))
+                    && ty.protocols.iter().any(|p| {
+                        let pname_opt = self.ctx.strings.get(p.protocol.0 as usize);
+                        pname_opt
+                            .map(|n| n.as_str() == "Display" || n.ends_with(".Display"))
+                            .unwrap_or(false)
+                    })
+                {
+                    display_signal = true;
+                    break;
+                }
+            }
+        }
+        if trace {
+            eprintln!(
+                "[display-dispatch] final display_signal for '{}' = {}",
+                base, display_signal
+            );
+        }
+        if !display_signal {
             return Ok(false);
         }
         let formatter_new_info = match self
@@ -28454,8 +28577,21 @@ impl VbcCodegen {
             .cloned()
         {
             Some(info) if info.param_count == 1 && info.id.0 != u32::MAX => info,
-            _ => return Ok(false),
+            _ => {
+                if trace {
+                    eprintln!(
+                        "[display-dispatch] Formatter.new not registered — fallback"
+                    );
+                }
+                return Ok(false);
+            }
         };
+        if trace {
+            eprintln!(
+                "[display-dispatch] EMITTING for '{}', Formatter.new id={}",
+                base, formatter_new_info.id.0
+            );
+        }
 
         // Step 2: allocate `buf` = "" (empty small-string).  The
         // user-side `Formatter.write_str` mutates this buffer via
@@ -28487,28 +28623,30 @@ impl VbcCodegen {
             },
         });
 
-        // Step 4: _ = <Type>.fmt(expr, &mut formatter).  Static Call
-        // expects `[receiver, args...]` in a contiguous block; we
-        // copy `expr_reg` (the value) into slot 0 and a fresh
-        // `&mut formatter` CBGR ref into slot 1.  `expr_reg` itself
-        // stays live for the surrounding interpolation loop.
-        let fmt_args_start = self.ctx.registers.alloc_fresh();
-        let _fmt_args_slot1 = self.ctx.registers.alloc_fresh();
-        self.ctx.emit(Instruction::Mov {
-            dst: fmt_args_start,
-            src: expr_reg,
-        });
+        // Step 4: _ = value.fmt(&mut formatter).  Emit `CallM` (dynamic
+        // dispatch by method name) rather than a static `Call`: the
+        // stdlib Display impls (Ordering / Maybe / Result / …) are
+        // linked lazily, and `<Type>.fmt` is often absent from the
+        // module's local function table at the f-string call site.
+        // `CallM` walks the canonical function table by name suffix
+        // (`runtime_dispatch_call_method` at `method_dispatch.rs`)
+        // and finds the impl regardless of whether codegen pre-pulled
+        // it.  The `receiver: expr_reg` argument carries the value;
+        // `args = [&mut formatter]` carries the writer.
+        let fmt_arg_reg = self.ctx.registers.alloc_fresh();
         self.ctx.emit(Instruction::RefMut {
-            dst: Reg(fmt_args_start.0 + 1),
+            dst: fmt_arg_reg,
             src: formatter_reg,
         });
         let fmt_result_reg = self.ctx.alloc_temp();
-        self.ctx.emit(Instruction::Call {
+        let fmt_method_id = self.intern_string("fmt");
+        self.ctx.emit(Instruction::CallM {
             dst: fmt_result_reg,
-            func_id: fmt_info.id.0,
+            receiver: expr_reg,
+            method_id: fmt_method_id,
             args: crate::instruction::RegRange {
-                start: fmt_args_start,
-                count: 2,
+                start: fmt_arg_reg,
+                count: 1,
             },
         });
 
