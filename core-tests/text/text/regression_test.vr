@@ -503,30 +503,34 @@ fn regression_reserve_grows_reported_capacity() {
 }
 
 // =============================================================================
-// REGRESSION (open): Text.join intercept loses every element on non-empty
-//                    List<Text>
+// REGRESSION (closed): Text.join intercept reads List<Text> backing layout
 // =============================================================================
 //
-// `Text.join(&parts, &sep)` returns empty for any non-empty
-// `parts: List<Text>`.  The Tier-0 intercept at
+// Pre-fix, `Text.join(&parts, &sep)` returned empty for any non-empty
+// `parts: List<Text>`.  Two bugs in the Tier-0 intercept at
 // `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
-// text_static_runtime.rs::"join"` (line 317) walks the List<Text>
-// backing array via the assumed layout
-// `[ObjectHeader][len:i64][cap:i64][data_ptr]`, but the Tier-0
-// runtime representation doesn't match — likely the data_ptr
-// offset / stride is wrong, OR the list value isn't `is_ptr()` and
-// the branches skip it entirely.
+// text_static_runtime.rs::"join"`:
 //
-// Tracked by task #8.
+// 1. The len field was read as a raw `i64` instead of through
+//    `Value::as_i64()` — skipping the NaN-box unwrap.
+// 2. The element data pointer was read at `after_header + 16` as a
+//    direct element-data pointer, but the canonical List layout
+//    stores the backing-array OBJECT pointer in field 2, and the
+//    element data begins at `backing_ptr + OBJECT_HEADER_SIZE`.
+//
+// Fix: align with the canonical List<T> heap layout used by
+// `method_dispatch.rs::list_push` —
+//   `[ObjectHeader][len: Value(i64)][cap: Value(i64)][backing: Value(ptr)]`
+//   where `backing` points to an ObjectHeader-prefixed element array.
+//
+// Closed by task #8.
 
-@ignore
 @test
 fn regression_join_single_part_returns_part() {
     let parts: List<Text> = ["only"];
     assert_eq(Text.join(&parts, &","), "only");
 }
 
-@ignore
 @test
 fn regression_join_two_parts_with_separator() {
     let parts: List<Text> = ["a", "b"];
