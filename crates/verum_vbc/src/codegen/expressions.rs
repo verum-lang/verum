@@ -16752,6 +16752,14 @@ impl VbcCodegen {
         8
     }
 
+    /// Conservative variant of [`infer_expr_type_name`](Self::infer_expr_type_name)
+    /// that only resolves the simple shapes the codegen call-sites
+    /// actually need (Path → variable, Record literal, Call → return type,
+    /// MethodCall → method's return type, Field → field type lookup).
+    /// Used by sites that want a quick type hint without paying for the
+    /// full expression-tree walk inference performs, e.g.
+    /// `compile_record`'s field-type-context push and the
+    /// raw-pointer-marker propagation gate in `compile_field_access`.
     pub fn extract_expr_type_name(&self, expr: &Expr) -> Option<String> {
         use verum_ast::expr::ExprKind;
         use verum_ast::ty::PathSegment;
