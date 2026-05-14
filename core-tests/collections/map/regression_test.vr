@@ -1,0 +1,102 @@
+// =============================================================================
+// core-tests/collections/map/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions surfaced while building the map conformance suite.
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// §A  Static-constructor name resolution.
+//
+//   Same defect class as List.from / List.of / Deque.with_capacity /
+//   Set.from: `Map.from(pairs)` and `Map.with_capacity(n)` are real
+//   stdlib static methods but their function IDs don't propagate to
+//   user-side bytecode.
+// =============================================================================
+
+@ignore
+@test
+fn regression_map_from_undefined_function() {
+    let m: Map<Int, Int> = Map.from([(1, 10), (2, 20)]);
+    assert_eq(m.len(), 2);
+}
+
+@ignore
+@test
+fn regression_map_with_capacity_undefined_function() {
+    let m: Map<Int, Int> = Map.with_capacity(16);
+    assert_eq(m.len(), 0);
+    assert(m.capacity() >= 16);
+}
+
+// =============================================================================
+// §B  Map.get → Maybe<V> dispatch defect.
+//
+//   `Map.get(&key)` is in the stdlib but the user-side call site doesn't
+//   route through the runtime intercept correctly. Some shapes return
+//   the inner value directly instead of `Maybe<V>`; some shapes return
+//   `Maybe<&V>` (a CBGR ref to value) which the call site can't pattern-
+//   match against. Pinned in core-tests/collections/union_find /
+//   toposort audits too; this is a cross-collection defect.
+// =============================================================================
+
+@ignore
+@test
+fn regression_map_get_returns_some_for_existing_key() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 100);
+    let _ = m.insert(2, 200);
+    // Expected: m.get(&1) == Some(100).
+    let v = m.get(&1);
+    assert_eq(v, Some(100));
+}
+
+@ignore
+@test
+fn regression_map_get_returns_none_for_absent_key() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 100);
+    assert_eq(m.get(&99), None);
+}
+
+// =============================================================================
+// §C  Wrapper-shape vs runtime direct-shape drift.
+//
+//   Stdlib type decl: `Map<K, V> is { entries, len, cap, tombstones }`
+//   (4 fields, ptr first).
+//   Runtime intercept: `[count, capacity, entries_ptr]` (3 slots,
+//   count first).
+//   The drift breaks every non-intercepted method that reads
+//   `self.<field>`: `self.entries` reads count, `self.len` reads
+//   capacity, `self.cap` reads entries_ptr — all garbage.
+//
+//   The set of intercepted methods (new/insert/contains_key/remove/
+//   clear/len/iter) covers the basic API. Anything that touches
+//   `self.tombstones` (the 4th field — not represented in the runtime
+//   layout at all) is structurally broken.
+//
+//   Pinned exemplar: `Map.keys()` / `Map.values()` / `Map.entries()`
+//   go through the iter intercept and work because they read the
+//   entries pointer via slot 2 (count goes first). But every stdlib-
+//   body method reading `self.tombstones` (resize accounting, etc.)
+//   misroutes.
+// =============================================================================
+
+@ignore
+@test
+fn regression_map_iter_via_stdlib_body() {
+    // Expected: iter() returns a working iterator over key-value pairs.
+    // Actual: depends on whether the dispatch falls through to stdlib.
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    let _ = m.insert(2, 20);
+    let mut count = 0;
+    for _ in m.iter() {
+        count = count + 1;
+    }
+    assert_eq(count, 2);
+}
+
+fn main() {}
