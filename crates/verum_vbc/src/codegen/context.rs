@@ -1897,7 +1897,45 @@ impl CodegenContext {
         if let Some(existing) = self.functions.get(&name)
             && existing.param_count != info.param_count
         {
+            // FUNDAMENTAL #6 — arity-collision richness promotion.
+            //
+            // The bare-name slot in `self.functions` was, pre-fix,
+            // monopolised by whichever registration ran first.  When
+            // an early stub-shaped registration (no `return_type_name`,
+            // no body) arrived before the real fn, the real fn — with
+            // proper signature info — got shoved to the `<name>#<arity>`
+            // alt-key and the bare slot kept the stub.  Every
+            // bare-keyed `lookup_function(name)` then returned the
+            // info-less stub, breaking type inference at call sites
+            // (FUNDAMENTAL #5 patched one symptom in
+            // `extract_expr_type_name`; this fix closes the root).
+            //
+            // Discipline: when the incoming `info` is strictly RICHER
+            // than the existing entry — has a concrete `return_type_name`
+            // where existing has None — promote the new entry to the
+            // bare slot and demote the existing entry to its OWN
+            // `<name>#<existing_arity>` alt-key.  Both arities remain
+            // arity-aware-lookup-addressable; the bare slot now holds
+            // the registration with usable type info.
+            //
+            // Preserves the FFI-raw / safe-wrapper precedence the
+            // original first-wins discipline guarded: when both new
+            // AND existing have `return_type_name` (or both lack it),
+            // first-wins still applies.  Only the stub-vs-real
+            // asymmetric case promotes.
+            let new_is_richer =
+                info.return_type_name.is_some() && existing.return_type_name.is_none();
             let alt_key = format!("{}#{}", name, info.param_count);
+            if new_is_richer {
+                let existing_alt = format!("{}#{}", name, existing.param_count);
+                if let Some(existing_info) = self.functions.remove(&name) {
+                    self.functions
+                        .entry(existing_alt)
+                        .or_insert(existing_info);
+                }
+                self.functions.insert(name, info);
+                return;
+            }
             // Same alternative-arity precedence as the simple name:
             // first-wins under prefer_existing, last-wins otherwise.
             if self.prefer_existing_functions {
