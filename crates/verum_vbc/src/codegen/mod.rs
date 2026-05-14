@@ -10733,6 +10733,24 @@ impl VbcCodegen {
                 .and_then(|ident| Self::primitive_path_ident_to_typekind(&ident.name))
                 .map(|tk| self.type_kind_to_var_type(&tk))
                 .unwrap_or(context::VarTypeKind::Unknown),
+            // **Audit-driven fundamental fix** — unwrap reference
+            // types so `const VERSION: &Text = "..."` classifies as
+            // Text (the canonical inner type).  Pre-fix the
+            // `Reference { inner }` arm fell through to Unknown,
+            // which the const-archive-descriptor propagation at
+            // `compile_inlinable_const` (line ~10470) then mapped to
+            // `None` → descriptor.return_type defaulted to Unit.
+            // Downstream `register_stdlib_consts_from_metadata` then
+            // registered `VERSION: Unit` in the typechecker, and
+            // every `VERSION.len()` / `parse(VERSION)` call site
+            // surfaced as `expected 'Text', found 'Unit'`.  Mutable
+            // refs / checked refs / unsafe refs all defer to the
+            // same inner-type classification.
+            TypeKind::Reference { inner, .. }
+            | TypeKind::CheckedReference { inner, .. }
+            | TypeKind::UnsafeReference { inner, .. } => {
+                self.type_kind_to_var_type(&inner.kind)
+            }
             _ => context::VarTypeKind::Unknown,
         }
     }
