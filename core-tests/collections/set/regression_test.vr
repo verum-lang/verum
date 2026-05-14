@@ -8,37 +8,44 @@
 mount core.prelude.*;
 
 // =============================================================================
-// §A  Stdlib wrapper-record vs runtime direct-shape divergence.
+// §A  Stdlib wrapper-record vs runtime direct-shape divergence — CLOSED.
 //
-//   The stdlib type decl `Set<T> is { inner: Map<T, ()> }` is a 1-field
-//   record. The VBC runtime intercept at
-//   `crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs`
-//   1060-1085 allocates Set as `[count@0, capacity@1, entries_ptr@2]`
-//   directly with TypeId::SET (no inner Map wrapper).
+//   Pre-fix history: the stdlib type decl `Set<T> is { inner: Map<T, ()> }`
+//   is a 1-field record. The VBC runtime intercept allocates Set with
+//   `TypeId::SET` AND the same 4-slot Map-shape header
+//   `[len@0, cap@1, entries_ptr@2, tombstones@3]` directly (no inner
+//   pointer indirection).
 //
-//   Methods with explicit runtime intercepts (insert, contains, remove,
-//   clear, union, intersection, len, is_empty) work because the intercept
-//   reads from the canonical 3-slot layout. Methods without intercepts
-//   (any predicate-taking method that goes through the stdlib body's
-//   `self.inner.<method>`) misroute — `self.inner` reads slot 0 (= count)
-//   as a Map record, then dispatches `.contains/.insert/...` on an Int.
+//   The defect surface: every Set method that took `other: &Set<T>` (or
+//   any heap-allocated argument) and read it via `other_val.as_ptr()`
+//   without first dereferencing the CBGR ref SIGSEGV'd at every user
+//   call site. The argument is a CBGR ThinRef pointing at the caller's
+//   stack slot — interpreting the ref-encoded bits as a heap pointer
+//   then dereferencing produced the crash.
 //
-//   The fundamental fix is to either (a) drop the wrapper from the stdlib
-//   type decl (`type Set<T> is { count, capacity, entries_ptr }` raw),
-//   (b) extend the runtime intercept to allocate a wrapper record, or
-//   (c) intercept every Set method that touches `self.inner`.
+//   Defect chain (closed in this branch via canonical `resolve_arg_value`
+//   helper auto-deref applied uniformly):
+//     * `Set.union(&other)`                       — SIGSEGV before fix
+//     * `Set.intersection(&other)`                — SIGSEGV before fix
+//     * `Set.difference(&other)`                  — SIGSEGV before fix
+//     * `Set.symmetric_difference(&other)`        — SIGSEGV before fix
+//     * `Set.is_subset(&other)`                   — SIGSEGV before fix
+//     * `Set.is_superset(&other)`                 — SIGSEGV before fix
+//     * `Set.is_disjoint(&other)`                 — SIGSEGV before fix
 //
-//   This is the Map-wrapper equivalent of the List layout-drift defect
-//   (`core-tests/collections/list/regression_test.vr` §B). All ignored
-//   tests below pin the surface and re-enable once the fix lands.
+//   All seven now route through the canonical
+//   `cbgr_helpers::resolve_arg_value` which handles every Verum ref
+//   shape (CBGR register-ref, mutable raw-pointer-ref, ThinRef).
+//
+//   The non-intercepted methods that still touch `self.inner` in the
+//   stdlib body (extract_if, pop_entry, replace via take) are tracked
+//   separately — see §C below.
 // =============================================================================
 
-@ignore
 @test
-fn regression_set_to_list_wrapper_shape_drift() {
-    // Expected: to_list() collects elements into a List<T>.
-    // Actual: stdlib body delegates via self.inner; the wrapper-shape
-    // drift makes the call misroute.
+fn regression_set_to_list_returns_owned_list() {
+    // Pre-fix: SIGSEGV. Post-fix: to_list intercept reads slots 1-2
+    // directly and returns a freshly-allocated List<T>.
     let mut s: Set<Int> = Set.new();
     let _ = s.insert(1);
     let _ = s.insert(2);
@@ -46,10 +53,8 @@ fn regression_set_to_list_wrapper_shape_drift() {
     assert_eq(xs.len(), 2);
 }
 
-@ignore
 @test
-fn regression_set_is_subset_wrapper_shape_drift() {
-    // Expected: is_subset returns true when every elem of self is in other.
+fn regression_set_is_subset_via_other_ref() {
     let mut a: Set<Int> = Set.new();
     let _ = a.insert(1);
     let _ = a.insert(2);
@@ -60,10 +65,19 @@ fn regression_set_is_subset_wrapper_shape_drift() {
     assert(a.is_subset(&b));
 }
 
-@ignore
 @test
-fn regression_set_difference_wrapper_shape_drift() {
-    // Expected: difference produces elements in self but not in other.
+fn regression_set_is_subset_negative_via_other_ref() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(99);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(1);
+    let _ = b.insert(2);
+    assert(!a.is_subset(&b));
+}
+
+@test
+fn regression_set_difference_via_other_ref() {
     let mut a: Set<Int> = Set.new();
     let _ = a.insert(1);
     let _ = a.insert(2);
@@ -76,13 +90,110 @@ fn regression_set_difference_wrapper_shape_drift() {
     assert(diff.contains(3));
 }
 
+@test
+fn regression_set_symmetric_difference_via_other_ref() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let _ = a.insert(3);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(2);
+    let _ = b.insert(3);
+    let _ = b.insert(4);
+    let sd = a.symmetric_difference(&b);
+    assert_eq(sd.len(), 2);
+    assert(sd.contains(1));
+    assert(sd.contains(4));
+}
+
+@test
+fn regression_set_is_disjoint_via_other_ref() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(3);
+    let _ = b.insert(4);
+    assert(a.is_disjoint(&b));
+    let _ = b.insert(2);
+    assert(!a.is_disjoint(&b));
+}
+
+@test
+fn regression_set_is_superset_via_other_ref() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let _ = a.insert(3);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(1);
+    let _ = b.insert(2);
+    assert(a.is_superset(&b));
+    assert(!b.is_superset(&a));
+}
+
+// =============================================================================
+// §B  Static-constructor name resolution.
+//
+//   `Set.from(values)` is a real stdlib static method but its function
+//   ID doesn't propagate to user-side bytecode. Same defect class as
+//   List.from / List.of / List.from_elem / Deque.with_capacity /
+//   Map.from / Map.with_capacity / BinaryHeap.with_capacity /
+//   BinaryHeap.from_list — cross-module function-name table omits
+//   non-intercepted constructors at user-side precompile.
+// =============================================================================
+
 @ignore
 @test
 fn regression_set_from_array_literal_undefined_function() {
-    // Same defect class as List.from: cross-module function-name table
-    // omits stdlib static methods that aren't runtime-intercepted.
     let s: Set<Int> = Set.from([1, 2, 3]);
     assert_eq(s.len(), 3);
+}
+
+// =============================================================================
+// §C  Residual non-intercepted Set body methods that read `self.inner`.
+//
+//   `extract_if`, `pop_entry`, `take`, `replace`, `get`, `into_list`,
+//   `reserve`/`try_reserve`/`shrink_to_fit`/`shrink_to` all delegate
+//   through `self.inner.<method>`. In Tier-0 interpreter mode they
+//   misroute because `self.inner` reads slot 0 = `len` (Int) instead
+//   of the inner Map pointer — the Set heap object IS its inner Map.
+//
+//   Two paths to close:
+//     1. Collapse `type Set<T> is { inner: Map<T, ()> }` to a flat
+//        4-field decl `{ len, cap, entries, tombstones }` matching
+//        the runtime layout, then rewrite these body methods to use
+//        direct field manipulation or self-method calls (which the
+//        intercepts handle).
+//     2. Add Tier-0 intercepts for each of these methods.
+//
+//   Pinned exemplars below; closed once option (1) or (2) lands.
+// =============================================================================
+
+@ignore
+@test
+fn regression_set_into_list_consumes_to_list() {
+    // Expected: into_list takes ownership and returns elements as List.
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(1);
+    let _ = s.insert(2);
+    let _ = s.insert(3);
+    let xs = s.into_list();
+    assert_eq(xs.len(), 3);
+}
+
+@ignore
+@test
+fn regression_set_extract_if_returns_removed() {
+    // Expected: extract_if returns the removed elements as a List.
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(1);
+    let _ = s.insert(2);
+    let _ = s.insert(3);
+    let _ = s.insert(4);
+    let evens = s.extract_if(|v| *v % 2 == 0);
+    assert_eq(evens.len(), 2);
+    assert_eq(s.len(), 2);
 }
 
 fn main() {}

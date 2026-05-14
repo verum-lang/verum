@@ -6,12 +6,31 @@ as `[count, capacity, entries_ptr]` with TypeId::SET at runtime).
 
 ## Status
 
-**partial** — Unit / property / integration coverage targets the API
-surface with explicit runtime intercepts (new, insert, contains, remove,
-clear, union, intersection, len, is_empty). Methods that go through the
-stdlib body's `self.inner.<method>` are pinned in regression_test.vr §A
-because the wrapper-record stdlib decl `{ inner: Map }` doesn't match
-the direct `[count, capacity, entries_ptr]` runtime allocation shape.
+**partial** — Unit / property / integration coverage now spans the full
+intercepted query/set-algebra API surface: new, insert, contains, remove,
+clear, union, intersection, **difference, symmetric_difference,
+is_subset, is_superset, is_disjoint**, len, is_empty, to_list. The
+formerly-pinned wrapper-shape defects in §A are CLOSED via a fundamental
+fix in this branch.
+
+**Architectural fix landed in this branch**: every Set instance method
+that takes `other: &Set<T>` (or any heap-allocated `&T` argument) now
+routes the argument through the canonical
+`cbgr_helpers::resolve_arg_value` helper before dereferencing. Pre-fix
+the intercepts called `other_val.as_ptr::<u8>()` directly on a CBGR
+ThinRef encoding, producing a wild pointer that SIGSEGV'd on the next
+heap dereference. The helper handles all three Verum ref shapes (CBGR
+register-ref, mutable raw-pointer-ref, ThinRef) uniformly. Applied
+across 7 Set intercepts: union, intersection, difference,
+symmetric_difference, is_subset, is_superset, is_disjoint. Same
+canonicalisation also replaces 7 sites of bespoke manual deref in the
+Map/Set/List instance-method intercepts (Map.get / Map.contains_key /
+Map.remove / Set.contains / Set.remove / List.contains needle / various
+List index-arg intercepts) for code-consistency.
+
+The remaining residual defects (extract_if / into_list / take / replace /
+get → Maybe<&T>) are pinned in §C and require the wrapper-record to
+flat-layout collapse OR per-method intercepts.
 
 ## 1. Cross-stdlib usage
 
