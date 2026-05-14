@@ -22632,33 +22632,59 @@ fn lower_ffi_extended<'ctx>(
             let calling_convention =
                 ffi_subop_to_calling_convention(sub_opcode.or_internal("missing FFI sub-opcode")?);
 
-            // Build LLVM function type from FFI signature
+            // Build LLVM function type. For well-known POSIX syscalls
+            // (socket / bind / listen / accept / read / write / close /
+            // …), the canonical signature lives in
+            // `syscall_registry::POSIX_SYSCALLS` and supersedes whatever
+            // shape the VBC-side FFI declaration carries — the registry
+            // IS Verum's i64-everywhere AOT ABI source of truth. This
+            // fixes the class of defects where a precompiled-stdlib
+            // FFI declaration's `return_type` (e.g. for `listen`) lost
+            // its concrete type during ctype-to-LLVM lowering and fell
+            // through to `void`, producing a `void (i64, i64) listen`
+            // declaration that later `call_native_i64` invocations
+            // tripped over with "callee returns void".
             let llvm_ctx = ctx.llvm_context();
-            let ret_type = ctype_to_llvm_type(llvm_ctx, ffi_symbol.signature.return_type);
-            let param_types: Vec<BasicMetadataTypeEnum> = ffi_symbol
-                .signature
-                .param_types
-                .iter()
-                .filter_map(|ct| ctype_to_llvm_type(llvm_ctx, *ct))
-                .map(|ty| ty.into())
-                .collect();
-
-            let fn_type = match ret_type {
-                Some(ret) => ret.fn_type(&param_types, ffi_symbol.signature.is_variadic),
-                None => llvm_ctx
-                    .void_type()
-                    .fn_type(&param_types, ffi_symbol.signature.is_variadic),
-            };
-
-            // Declare external function if not already declared
             let llvm_module = ctx.get_module();
-            let llvm_fn = if let Some(existing) = llvm_module.get_function(symbol_name) {
-                existing
+            let (fn_type, llvm_fn) = if let Some(canonical) =
+                super::syscall_registry::get_or_declare(llvm_module, llvm_ctx, symbol_name)
+            {
+                (canonical.get_type(), canonical)
             } else {
-                let func = llvm_module.add_function(symbol_name, fn_type, None);
-                func.set_call_conventions(calling_convention);
-                func
+                let ret_type = ctype_to_llvm_type(llvm_ctx, ffi_symbol.signature.return_type);
+                let param_types: Vec<BasicMetadataTypeEnum> = ffi_symbol
+                    .signature
+                    .param_types
+                    .iter()
+                    .filter_map(|ct| ctype_to_llvm_type(llvm_ctx, *ct))
+                    .map(|ty| ty.into())
+                    .collect();
+
+                let ft = match ret_type {
+                    Some(ret) => ret.fn_type(&param_types, ffi_symbol.signature.is_variadic),
+                    None => llvm_ctx
+                        .void_type()
+                        .fn_type(&param_types, ffi_symbol.signature.is_variadic),
+                };
+
+                // Declare external function if not already declared.
+                let f = if let Some(existing) = llvm_module.get_function(symbol_name) {
+                    if existing.get_type() != ft {
+                        super::error::record_signature_mismatch_public(
+                            symbol_name,
+                            format!("{:?}", existing.get_type()),
+                            format!("{:?} (from FFI signature)", ft),
+                        );
+                    }
+                    existing
+                } else {
+                    let f = llvm_module.add_function(symbol_name, ft, None);
+                    f.set_call_conventions(calling_convention);
+                    f
+                };
+                (ft, f)
             };
+            let _ = fn_type; // reserved for diagnostics; primary path uses llvm_fn.get_type()
 
             // Gather arguments from registers, coercing VBC i64 values to match
             // the declared FFI function parameter types (ptr, i8, i16, i32, etc.)

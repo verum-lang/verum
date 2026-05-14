@@ -346,15 +346,160 @@ impl LlvmLoweringError {
 /// surface, and the verum runtime symbols.  Centralises the lookup so
 /// future audits (e.g. validating the intrinsic name against
 /// `verum_llvm`'s intrinsic registry) have a single attachment point.
+///
+/// **Architectural invariant — signature reconciliation**: if `name`
+/// already exists in `module` with a *different* `fn_type` than the
+/// caller is requesting, this is a programming error in codegen: two
+/// emit paths disagree on the ABI of the same symbol, and silently
+/// returning either declaration produces an LLVM verifier failure or
+/// — worse — a "callee returns void" / "param type mismatch" error
+/// thousands of instructions later. The helper now records the
+/// mismatch into a process-global `SIGNATURE_MISMATCH_REGISTRY` so a
+/// follow-up `take_signature_mismatches()` can lift every divergence
+/// observed during the lowering pass into the caller's `Result<…>`
+/// chain. The existing function value is still returned (preserving
+/// API-compat with the 240+ existing call sites that consume a plain
+/// `FunctionValue`) — the registry is the side-channel that turns the
+/// silent overlap into a diagnosable defect.
 #[inline]
 pub fn get_or_declare_function<'ctx>(
     module: &verum_llvm::module::Module<'ctx>,
     name: &str,
     fn_type: verum_llvm::types::FunctionType<'ctx>,
 ) -> verum_llvm::values::FunctionValue<'ctx> {
-    module
-        .get_function(name)
-        .unwrap_or_else(|| module.add_function(name, fn_type, None))
+    if let Some(existing) = module.get_function(name) {
+        let existing_ty = existing.get_type();
+        if existing_ty != fn_type {
+            record_signature_mismatch(
+                name,
+                format!("{:?}", existing_ty),
+                format!("{:?}", fn_type),
+            );
+        }
+        return existing;
+    }
+    module.add_function(name, fn_type, None)
+}
+
+// =============================================================================
+// Signature-mismatch registry — process-global side channel for codegen
+// =============================================================================
+//
+// Codegen has 240+ `get_or_declare_function` call sites and ~70 raw
+// `module.add_function` sites declaring native FFI and runtime symbols.
+// Pre-fix the helper silently returned the *first* declaration when the
+// same name was requested with conflicting signatures (e.g. `listen`
+// declared once as `i32(i32, i32)` by `get_or_declare_listen_libc` and
+// once as `i64(i64, i64)` by `emit_libc_free_socket_wrapper`). The
+// second caller's `fn_type` was dropped on the floor, so later code
+// that consumed the returned `FunctionValue` (via `call_native_i64` /
+// `build_libc_call`) observed an unexpected ABI shape — surfaced as
+// cryptic "callee returns void" / "callee parameter type does not
+// match" / wrong-arity errors thousands of instructions later.
+//
+// The registry decouples mismatch *detection* (now inline in
+// `get_or_declare_function`) from mismatch *reporting* (caller pulls
+// the accumulated diagnostics out of the registry and folds them into
+// the lowering pipeline's `Result<…>` chain). This avoids changing the
+// signature of every existing call site while still surfacing the
+// architectural defect as a hard diagnostic.
+
+use std::sync::Mutex;
+use std::sync::OnceLock;
+
+/// One observed signature collision.
+#[derive(Debug, Clone)]
+pub struct SignatureMismatch {
+    /// LLVM symbol name (e.g. `"listen"`).
+    pub function_name: String,
+    /// Existing function type formatted via `{:?}`.
+    pub existing_signature: String,
+    /// Requested function type formatted via `{:?}`.
+    pub requested_signature: String,
+}
+
+fn signature_mismatch_registry() -> &'static Mutex<Vec<SignatureMismatch>> {
+    static REGISTRY: OnceLock<Mutex<Vec<SignatureMismatch>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn record_signature_mismatch(name: &str, existing: String, requested: String) {
+    if let Ok(mut g) = signature_mismatch_registry().lock() {
+        g.push(SignatureMismatch {
+            function_name: name.to_string(),
+            existing_signature: existing,
+            requested_signature: requested,
+        });
+    }
+}
+
+/// Public surface for `syscall_registry::get_or_declare` and other
+/// non-`error`-module declaration sites to report mismatches into the
+/// process-global registry. Forwards to the private
+/// `record_signature_mismatch`.
+pub fn record_signature_mismatch_public(name: &str, existing: String, requested: String) {
+    record_signature_mismatch(name, existing, requested);
+}
+
+/// Drain the signature-mismatch registry. Returns the accumulated
+/// mismatches since the last `take_signature_mismatches()` call (or
+/// process start). Call this once per lowering pass; if the returned
+/// vec is non-empty, fold it into the caller's diagnostic stream.
+pub fn take_signature_mismatches() -> Vec<SignatureMismatch> {
+    if let Ok(mut g) = signature_mismatch_registry().lock() {
+        std::mem::take(&mut *g)
+    } else {
+        Vec::new()
+    }
+}
+
+/// Convenience: drain the registry, format the accumulated mismatches
+/// into a single human-readable message, and surface them.
+///
+/// **Default mode** (warning): writes the diagnostic to stderr and
+/// returns `Ok(())`. The 42+ pre-existing architectural mismatches
+/// (`pthread_*` family, `verum_list_*` return type drift, `sched_yield`
+/// width inconsistency, `verum_raw_open3` / `verum_tcp_connect` param
+/// width drift, …) silently produced wrong IR until the registry was
+/// added; surfacing them as warnings makes them visible without
+/// breaking the existing build cycle.
+///
+/// **Strict mode** (`VERUM_STRICT_SIGNATURES=1`): elevates the warning
+/// into a hard `LlvmLoweringError::Internal`. Use this when fixing the
+/// drift surfaces — the strict gate enforces zero-mismatch as the
+/// project drives the count to zero.
+pub fn check_no_signature_mismatches() -> Result<()> {
+    let mismatches = take_signature_mismatches();
+    if mismatches.is_empty() {
+        return Ok(());
+    }
+    let mut lines: Vec<String> = Vec::with_capacity(mismatches.len() + 2);
+    lines.push(format!(
+        "{} signature mismatch(es) detected during LLVM lowering — \
+         two emit paths declared the same symbol with different fn_type:",
+        mismatches.len()
+    ));
+    for m in &mismatches {
+        lines.push(format!(
+            "  `{}`:\n    existing:  {}\n    requested: {}",
+            m.function_name, m.existing_signature, m.requested_signature
+        ));
+    }
+    lines.push(
+        "fix: pick one source-of-truth ABI for each symbol and route every \
+         declaration site through it; the canonical helper for libc/POSIX \
+         symbols is `get_or_declare_<symbol>` in `verum_codegen/llvm/runtime.rs`. \
+         Set VERUM_STRICT_SIGNATURES=1 to elevate this to a hard error \
+         once a clean baseline is reached."
+            .to_string(),
+    );
+    let message = lines.join("\n");
+    if std::env::var_os("VERUM_STRICT_SIGNATURES").is_some() {
+        Err(LlvmLoweringError::Internal(message.into()))
+    } else {
+        eprintln!("[codegen-warn] {}", message);
+        Ok(())
+    }
 }
 
 /// Get-or-declare a `__verum_libsys_*` shim and tag it with the

@@ -155,6 +155,91 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
         args: &[AbiTy::Ptr],
         ret: AbiTy::I64,
     },
+    // ── sockets ─────────────────────────────────────────────────
+    // Each socket syscall is declared exactly once here under
+    // Verum's i64-everywhere ABI. Multiple emit paths
+    // (`platform_ir::emit_libc_free_socket_wrapper`,
+    // `platform_ir::emit_tcp_listen` / `emit_tcp_accept` etc.,
+    // `runtime::get_or_declare_listen_libc` and friends) previously
+    // each declared these symbols on their own — when they raced,
+    // the loser's wrapper body had wrong-arity / wrong-return-type
+    // calls. Routing every site through this single source-of-truth
+    // eliminates the divergence at the root.
+    // C: int socket(int domain, int type, int protocol)
+    SyscallSig {
+        name: "socket",
+        args: &[AbiTy::I64, AbiTy::I64, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+    // C: int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
+    SyscallSig {
+        name: "bind",
+        args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+    // C: int listen(int sockfd, int backlog)
+    SyscallSig {
+        name: "listen",
+        args: &[AbiTy::I64, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+    // C: int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
+    SyscallSig {
+        name: "accept",
+        args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::Ptr],
+        ret: AbiTy::I64,
+    },
+    // C: int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
+    SyscallSig {
+        name: "connect",
+        args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+    // C: ssize_t send(int sockfd, const void *buf, size_t len, int flags)
+    SyscallSig {
+        name: "send",
+        args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+    // C: ssize_t recv(int sockfd, void *buf, size_t len, int flags)
+    SyscallSig {
+        name: "recv",
+        args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+    // C: ssize_t sendto(int, const void *, size_t, int, const struct sockaddr *, socklen_t)
+    SyscallSig {
+        name: "sendto",
+        args: &[
+            AbiTy::I64, AbiTy::Ptr, AbiTy::I64,
+            AbiTy::I64, AbiTy::Ptr, AbiTy::I64,
+        ],
+        ret: AbiTy::I64,
+    },
+    // C: ssize_t recvfrom(int, void *, size_t, int, struct sockaddr *, socklen_t *)
+    SyscallSig {
+        name: "recvfrom",
+        args: &[
+            AbiTy::I64, AbiTy::Ptr, AbiTy::I64,
+            AbiTy::I64, AbiTy::Ptr, AbiTy::Ptr,
+        ],
+        ret: AbiTy::I64,
+    },
+    // C: int setsockopt(int, int, int, const void *, socklen_t)
+    SyscallSig {
+        name: "setsockopt",
+        args: &[
+            AbiTy::I64, AbiTy::I64, AbiTy::I64,
+            AbiTy::Ptr, AbiTy::I64,
+        ],
+        ret: AbiTy::I64,
+    },
+    // C: pid_t waitpid(pid_t pid, int *wstatus, int options)
+    SyscallSig {
+        name: "waitpid",
+        args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
 ];
 
 /// Look up a syscall's canonical Verum-ABI signature. `None` for names
@@ -169,10 +254,11 @@ fn lookup(name: &str) -> Option<&'static SyscallSig> {
 ///
 /// First-call semantics: if `name` is not yet declared in `module`,
 /// add it with the registry's signature. Subsequent calls return the
-/// existing declaration without reasserting the signature — first
-/// declaration wins by LLVM's `module.get_function` discipline. The
-/// registry exists precisely so the first declaration is always the
-/// canonical one regardless of which emit path arrives first.
+/// existing declaration. When the pre-existing declaration disagrees
+/// with the registry's canonical signature, the mismatch is recorded
+/// into the codegen-global signature-mismatch registry so the lowering
+/// pipeline's final `check_no_signature_mismatches()` gate lifts it
+/// into a hard `LlvmLoweringError::Internal`.
 ///
 /// Panics in debug builds if `name` is not in [`POSIX_SYSCALLS`]; in
 /// release builds returns `None` so callers can defensively fall back
@@ -183,12 +269,32 @@ pub fn get_or_declare<'ctx>(
     ctx: &'ctx Context,
     name: &str,
 ) -> Option<FunctionValue<'ctx>> {
+    let sig = lookup(name)?;
+    let canonical_ty = AbiTy::fn_type(ctx, sig.args, sig.ret);
     if let Some(existing) = module.get_function(name) {
+        if existing.get_type() != canonical_ty {
+            super::error::record_signature_mismatch_public(
+                name,
+                format!("{:?}", existing.get_type()),
+                format!("{:?} (canonical from POSIX_SYSCALLS registry)", canonical_ty),
+            );
+        }
         return Some(existing);
     }
-    let sig = lookup(name)?;
-    let fn_ty = AbiTy::fn_type(ctx, sig.args, sig.ret);
-    Some(module.add_function(name, fn_ty, None))
+    Some(module.add_function(name, canonical_ty, None))
+}
+
+/// Pre-declare every entry in [`POSIX_SYSCALLS`] into `module`. Call
+/// this **before** any other emit path can race to declare a syscall
+/// with the wrong signature. The canonical declarations land first,
+/// and any subsequent `module.get_function(name)` lookup throughout
+/// VBC lowering returns the canonical FunctionValue with the right
+/// fn_type. This eliminates the entire "first declaration wins"
+/// defect class for POSIX syscalls at codegen time.
+pub fn predeclare_all<'ctx>(module: &Module<'ctx>, ctx: &'ctx Context) {
+    for sig in POSIX_SYSCALLS {
+        let _ = get_or_declare(module, ctx, sig.name);
+    }
 }
 
 /// Pre-declare a curated set of POSIX syscalls into `module`. Used by
