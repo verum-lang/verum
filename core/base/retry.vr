@@ -143,11 +143,15 @@ public fn retry_with_strategy<T, E: Clone, F: fn() -> Result<T, E>>(
 }
 
 /// Retry an operation with exponential backoff.
+///
+/// Defaults: `initial_delay_ms = 100`, `max_delay_ms = 5000` —
+/// sensible for most network / IO retry shapes; override when
+/// the operation has known tighter / looser bounds.
 public fn retry<T, E: Clone, F: fn() -> Result<T, E>>(
     max_attempts: Int,
-    initial_delay_ms: Int,
-    max_delay_ms: Int,
     operation: F,
+    initial_delay_ms: Int = 100,
+    max_delay_ms: Int = 5000,
 ) -> Result<T, E> {
     retry_with_strategy(
         operation,
