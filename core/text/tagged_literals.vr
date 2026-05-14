@@ -24,14 +24,27 @@ mount core.*;
 // =============================================================================
 
 /// Validate JSON string at runtime (basic structural check).
+///
+/// Pre-fix, the body compared `first == 123` where `first: Maybe<Byte>`,
+/// relying on a cross-type Maybe<Byte> == Int PartialEq that silently
+/// returns false at Tier-0 (no implicit Maybe-unwrap in `==`).  Unwrap
+/// the Maybe via `match` so the comparison happens on the unwrapped
+/// `Byte` against the literal `Int` — the canonical Byte == Int
+/// comparison works correctly.  Closes audit tagged_literals §B.
 public fn validate_json(s: Text) -> Bool {
     if s.len() == 0 { return false; }
-    let first = s.byte_at(0);
-    let last = s.byte_at(s.len() - 1);
-    // Must start with { or [ and end with matching bracket
-    (first == 123 && last == 125) ||  // { }
-    (first == 91 && last == 93) ||    // [ ]
-    (first == 34 && last == 34)       // " " (string literal)
+    let first: Int = match s.byte_at(0) {
+        Some(b) => b as Int,
+        None => return false,
+    };
+    let last: Int = match s.byte_at(s.len() - 1) {
+        Some(b) => b as Int,
+        None => return false,
+    };
+    // Must start with { or [ and end with matching bracket / quote.
+    (first == 123 && last == 125) ||  // `{ }`
+    (first == 91  && last == 93)  ||  // `[ ]`
+    (first == 34  && last == 34)      // `" "` (string literal)
 }
 
 // =============================================================================
