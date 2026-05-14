@@ -25,7 +25,6 @@ mount core.collections.list.List;
 // (`mount super.raw.*` propagation defect) closes. The pure-
 // arithmetic Duration scenarios still run live.
 
-@ignore
 @test
 fn integration_sleep_ms_lower_bound() {
     // sleep_ms(2) should give at least 1 ms of elapsed monotonic time.
@@ -35,7 +34,6 @@ fn integration_sleep_ms_lower_bound() {
     assert(d.as_nanos() >= 1_000_000);
 }
 
-@ignore
 @test
 fn integration_three_sequential_sleeps_compose() {
     // sleep_ms(1) × 3 ≈ at least 1.5 ms total elapsed.
@@ -51,7 +49,6 @@ fn integration_three_sequential_sleeps_compose() {
 // §2  wall_clock_ms vs SysTimeOpsInstant — both clocks observable
 // -----------------------------------------------------------------------------
 
-@ignore
 @test
 fn integration_wall_clock_and_monotonic_both_advance() {
     let w0 = wall_clock_ms();
@@ -67,7 +64,6 @@ fn integration_wall_clock_and_monotonic_both_advance() {
 // §3  List<SysTimeOpsInstant> — collections of timestamps
 // -----------------------------------------------------------------------------
 
-@ignore
 @test
 fn integration_list_of_instants_collected() {
     let mut xs: List<SysTimeOpsInstant> = List.new();

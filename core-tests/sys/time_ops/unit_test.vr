@@ -109,7 +109,6 @@ fn test_duration_as_nanos_is_identity() {
 // tests below are gated `@ignore` until that defect closes.
 // =============================================================================
 
-@ignore
 @test
 fn test_instant_now_returns_nonnegative_nanos() {
     // Monotonic clock is non-negative by contract (epoch + delta).
@@ -117,7 +116,6 @@ fn test_instant_now_returns_nonnegative_nanos() {
     assert(t.nanos >= 0);
 }
 
-@ignore
 @test
 fn test_instant_now_advances_monotonically() {
     let t1: SysTimeOpsInstant = SysTimeOpsInstant.now();
@@ -129,7 +127,6 @@ fn test_instant_now_advances_monotonically() {
 // Section 4: SysTimeOpsInstant.elapsed() / .duration_since()
 // =============================================================================
 
-@ignore
 @test
 fn test_instant_elapsed_returns_nonnegative_duration() {
     let t: SysTimeOpsInstant = SysTimeOpsInstant.now();
@@ -137,7 +134,6 @@ fn test_instant_elapsed_returns_nonnegative_duration() {
     assert(d.as_nanos() >= 0);
 }
 
-@ignore
 @test
 fn test_instant_duration_since_self_is_zero() {
     let t: SysTimeOpsInstant = SysTimeOpsInstant.now();
@@ -145,7 +141,6 @@ fn test_instant_duration_since_self_is_zero() {
     assert_eq(d.as_nanos(), 0);
 }
 
-@ignore
 @test
 fn test_instant_duration_since_earlier_is_nonnegative() {
     let earlier: SysTimeOpsInstant = SysTimeOpsInstant.now();
@@ -158,14 +153,12 @@ fn test_instant_duration_since_earlier_is_nonnegative() {
 // Section 5: wall_clock_ms — calendar time
 // =============================================================================
 
-@ignore
 @test
 fn test_wall_clock_ms_is_positive_in_modern_era() {
     let ms = wall_clock_ms();
     assert(ms > 946_684_800_000);
 }
 
-@ignore
 @test
 fn test_wall_clock_ms_monotonic_within_call() {
     let a = wall_clock_ms();
@@ -177,7 +170,6 @@ fn test_wall_clock_ms_monotonic_within_call() {
 // Section 6: sleep family — observable as elapsed >= requested
 // =============================================================================
 
-@ignore
 @test
 fn test_sleep_zero_returns_quickly() {
     let t = SysTimeOpsInstant.now();
@@ -186,7 +178,6 @@ fn test_sleep_zero_returns_quickly() {
     assert(d.as_nanos() >= 0);
 }
 
-@ignore
 @test
 fn test_sleep_ms_one_elapses_at_least_one_ms() {
     let t = SysTimeOpsInstant.now();
@@ -195,7 +186,6 @@ fn test_sleep_ms_one_elapses_at_least_one_ms() {
     assert(d.as_nanos() >= 500_000);
 }
 
-@ignore
 @test
 fn test_sleep_via_duration_one_ms_elapses() {
     let t = SysTimeOpsInstant.now();
