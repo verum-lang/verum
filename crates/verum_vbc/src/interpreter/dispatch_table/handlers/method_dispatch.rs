@@ -4461,6 +4461,16 @@ pub(super) fn dispatch_primitive_method(
 
                     let hash = value_hash(val);
                     let mut idx = hash % capacity;
+                    // Track whether the insert observed a brand-new slot
+                    // (true) or merged with an existing entry (false). The
+                    // stdlib's `Set.insert(value: T) -> Bool` contract
+                    // returns true for "newly added" and false for "already
+                    // present" so the caller can branch on uniqueness
+                    // (e.g. union, deduplication, "saw new node" checks
+                    // in DFS / BFS frontiers). Previously this intercept
+                    // returned `Value::unit()` regardless, breaking every
+                    // call-site that consumed the Bool.
+                    let inserted: bool;
                     loop {
                         let entry_key = unsafe { *entries_data.add(idx * 2) };
                         if entry_key.is_unit() {
@@ -4473,14 +4483,16 @@ pub(super) fn dispatch_primitive_method(
                             unsafe {
                                 *header_ptr = Value::from_i64(count as i64);
                             }
+                            inserted = true;
                             break;
                         }
                         if value_eq(entry_key, val) {
+                            inserted = false;
                             break; // duplicate
                         }
                         idx = (idx + 1) % capacity;
                     }
-                    return Ok(Some(Value::unit()));
+                    return Ok(Some(Value::from_bool(inserted)));
                 }
                 "contains" if is_set => {
                     let caller_base = state.reg_base();

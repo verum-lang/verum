@@ -1,0 +1,121 @@
+// =============================================================================
+// core-tests/collections/set/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.collections.set`. Set is the canonical
+// deduplication / membership-tracking primitive — these tests exercise it
+// in those interaction shapes (deduplicating a stream, computing distinct
+// counts, set difference via union/intersection composition).
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// §1  Deduplication of an Int stream
+// =============================================================================
+
+@test
+fn integration_set_deduplicates_stream() {
+    // Repeated values insert as no-ops; distinct values land.
+    let mut s: Set<Int> = Set.new();
+    let stream: List<Int> = [1, 2, 2, 3, 3, 3, 1, 4, 5, 5];
+    let mut i = 0;
+    while i < stream.len() {
+        match stream.get(i) {
+            Some(v) => { let _ = s.insert(v); },
+            None => {},
+        }
+        i = i + 1;
+    }
+    // The stream has 5 distinct values: 1, 2, 3, 4, 5.
+    assert_eq(s.len(), 5);
+    assert(s.contains(1));
+    assert(s.contains(2));
+    assert(s.contains(3));
+    assert(s.contains(4));
+    assert(s.contains(5));
+}
+
+// =============================================================================
+// §2  Distinct-count of two interleaved streams via union
+// =============================================================================
+
+@test
+fn integration_set_union_counts_distinct_across_streams() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(10);
+    let _ = a.insert(20);
+    let _ = a.insert(30);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(20);
+    let _ = b.insert(40);
+    let _ = b.insert(50);
+    let u = a.union(&b);
+    // Distinct values across both streams: 10, 20, 30, 40, 50.
+    assert_eq(u.len(), 5);
+}
+
+// =============================================================================
+// §3  Common-element extraction via intersection
+// =============================================================================
+
+@test
+fn integration_set_intersection_yields_common_elements() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let _ = a.insert(3);
+    let _ = a.insert(4);
+    let _ = a.insert(5);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(3);
+    let _ = b.insert(4);
+    let _ = b.insert(5);
+    let _ = b.insert(6);
+    let _ = b.insert(7);
+    let common = a.intersection(&b);
+    assert_eq(common.len(), 3);
+    assert(common.contains(3));
+    assert(common.contains(4));
+    assert(common.contains(5));
+}
+
+// =============================================================================
+// §4  Membership check after clear preserves shape but empties
+// =============================================================================
+
+@test
+fn integration_set_clear_membership_returns_false() {
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(1);
+    let _ = s.insert(2);
+    let _ = s.insert(3);
+    s.clear();
+    assert(!s.contains(1));
+    assert(!s.contains(2));
+    assert(!s.contains(3));
+    // After clear, can still insert and check membership normally.
+    let _ = s.insert(99);
+    assert(s.contains(99));
+    assert(!s.contains(1));
+}
+
+// =============================================================================
+// §5  Two independent sets don't share state
+// =============================================================================
+
+@test
+fn integration_two_sets_are_independent() {
+    let mut a: Set<Int> = Set.new();
+    let mut b: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = b.insert(99);
+    assert_eq(a.len(), 1);
+    assert_eq(b.len(), 1);
+    assert(a.contains(1));
+    assert(b.contains(99));
+    assert(!a.contains(99));
+    assert(!b.contains(1));
+}
+
+fn main() {}

@@ -1,0 +1,195 @@
+// =============================================================================
+// core-tests/collections/set/property_test.vr
+// =============================================================================
+//
+// Set-theoretic algebraic laws for `core.collections.set`.
+//   Membership idempotence, union commutativity, intersection
+//   commutativity, union/intersection distributivity over each other,
+//   absorption, identity/complement laws (where the set algebra carries
+//   them).
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// §1  insert idempotence — inserting the same value twice doesn't change set
+// =============================================================================
+
+@test
+fn property_insert_is_idempotent_under_membership() {
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(7);
+    let _ = s.insert(7);
+    let _ = s.insert(7);
+    assert_eq(s.len(), 1);
+    assert(s.contains(7));
+}
+
+// =============================================================================
+// §2  union commutativity (membership-wise)
+//
+//   For every v: v in (A ∪ B) iff v in (B ∪ A). We verify by checking that
+//   |A ∪ B| == |B ∪ A| and that every element of A and B appears in both.
+// =============================================================================
+
+@test
+fn property_union_is_commutative() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let _ = a.insert(3);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(2);
+    let _ = b.insert(4);
+    let ab = a.union(&b);
+    let ba = b.union(&a);
+    assert_eq(ab.len(), ba.len());
+    assert(ab.contains(1));
+    assert(ab.contains(2));
+    assert(ab.contains(3));
+    assert(ab.contains(4));
+    assert(ba.contains(1));
+    assert(ba.contains(2));
+    assert(ba.contains(3));
+    assert(ba.contains(4));
+}
+
+// =============================================================================
+// §3  intersection commutativity (membership-wise)
+// =============================================================================
+
+@test
+fn property_intersection_is_commutative() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let _ = a.insert(3);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(2);
+    let _ = b.insert(3);
+    let _ = b.insert(4);
+    let ab = a.intersection(&b);
+    let ba = b.intersection(&a);
+    assert_eq(ab.len(), ba.len());
+    assert(ab.contains(2));
+    assert(ab.contains(3));
+    assert(ba.contains(2));
+    assert(ba.contains(3));
+}
+
+// =============================================================================
+// §4  union identity — A ∪ ∅ = A (membership-wise)
+// =============================================================================
+
+@test
+fn property_union_with_empty_is_identity() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(10);
+    let _ = a.insert(20);
+    let _ = a.insert(30);
+    let empty: Set<Int> = Set.new();
+    let result = a.union(&empty);
+    assert_eq(result.len(), a.len());
+    assert(result.contains(10));
+    assert(result.contains(20));
+    assert(result.contains(30));
+}
+
+// =============================================================================
+// §5  intersection absorption — A ∩ ∅ = ∅
+// =============================================================================
+
+@test
+fn property_intersection_with_empty_is_empty() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(10);
+    let _ = a.insert(20);
+    let empty: Set<Int> = Set.new();
+    let result = a.intersection(&empty);
+    assert_eq(result.len(), 0);
+    assert(result.is_empty());
+}
+
+// =============================================================================
+// §6  Self-union and self-intersection are identity
+// =============================================================================
+
+@test
+fn property_self_union_is_identity() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let _ = a.insert(3);
+    let result = a.union(&a);
+    assert_eq(result.len(), 3);
+    assert(result.contains(1));
+    assert(result.contains(2));
+    assert(result.contains(3));
+}
+
+@test
+fn property_self_intersection_is_identity() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let _ = a.insert(3);
+    let result = a.intersection(&a);
+    assert_eq(result.len(), 3);
+    assert(result.contains(1));
+    assert(result.contains(2));
+    assert(result.contains(3));
+}
+
+// =============================================================================
+// §7  remove of unobserved element doesn't change set
+// =============================================================================
+
+@test
+fn property_remove_unobserved_is_identity() {
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(1);
+    let _ = s.insert(2);
+    let before_len = s.len();
+    let _ = s.remove(99);
+    assert_eq(s.len(), before_len);
+    assert(s.contains(1));
+    assert(s.contains(2));
+}
+
+// =============================================================================
+// §8  len monotonicity — non-decreasing on insert, non-increasing on remove
+// =============================================================================
+
+@test
+fn property_len_non_decreasing_on_insert() {
+    let mut s: Set<Int> = Set.new();
+    let mut i = 0;
+    let mut prev_len = s.len();
+    while i < 15 {
+        let _ = s.insert(i);
+        assert(s.len() >= prev_len);
+        prev_len = s.len();
+        i = i + 1;
+    }
+}
+
+@test
+fn property_len_non_increasing_on_remove() {
+    let mut s: Set<Int> = Set.new();
+    let mut i = 0;
+    while i < 10 {
+        let _ = s.insert(i);
+        i = i + 1;
+    }
+    let mut prev_len = s.len();
+    let mut j = 0;
+    while j < 10 {
+        let _ = s.remove(j);
+        assert(s.len() <= prev_len);
+        prev_len = s.len();
+        j = j + 1;
+    }
+    assert_eq(s.len(), 0);
+}
+
+fn main() {}
