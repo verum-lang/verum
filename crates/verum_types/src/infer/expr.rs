@@ -8473,14 +8473,36 @@ impl TypeChecker {
                     let newtype_inner_key = format!("__newtype_inner_{}", type_name);
                     let newtype_simple_key = format!("__newtype_inner_{}", simple_name);
 
-                    let found_inner = self
+                    // FUNDAMENTAL #3 — lookup-on-miss bridge to the
+                    // lazy stdlib loader.  See the matching block in
+                    // `infer/env.rs:1991-2020` for the full rationale.
+                    let mut found_inner = self
                         .ctx
                         .lookup_type(newtype_inner_key.as_str())
-                        .or_else(|| self.ctx.lookup_type(newtype_simple_key.as_str()));
+                        .or_else(|| self.ctx.lookup_type(newtype_simple_key.as_str()))
+                        .cloned();
+                    if found_inner.is_none() {
+                        let mut pending: Vec<verum_common::Text> = Vec::new();
+                        self.ensure_stdlib_type_loaded(
+                            &verum_common::Text::from(simple_name),
+                            &mut pending,
+                        );
+                        if simple_name != type_name {
+                            self.ensure_stdlib_type_loaded(
+                                &verum_common::Text::from(type_name.as_str()),
+                                &mut pending,
+                            );
+                        }
+                        found_inner = self
+                            .ctx
+                            .lookup_type(newtype_inner_key.as_str())
+                            .or_else(|| self.ctx.lookup_type(newtype_simple_key.as_str()))
+                            .cloned();
+                    }
 
-                    if let Option::Some(inner_ty) = found_inner {
+                    if let Some(inner_ty) = found_inner {
                         if idx == 0 {
-                            Ok(InferResult::new(inner_ty.clone()))
+                            Ok(InferResult::new(inner_ty))
                         } else {
                             Err(TypeError::Other(verum_common::Text::from(format!(
                                 "Newtype {} only has index 0, not {}",

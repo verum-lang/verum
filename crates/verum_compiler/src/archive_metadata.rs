@@ -480,6 +480,14 @@ fn register_module_metadata(
             implements,
             // #101 — span population deferred to source-walk pass.
             decl_span: Maybe::None,
+            // FUNDAMENTAL #3 — propagate the transparent-wrapper flag
+            // from the VBC type descriptor.  Downstream typechecker
+            // lazy loader keys `__newtype_inner_X` registration on this
+            // bit; without the propagation, archive-loaded `type
+            // FileDesc is (Int);` lost its newtype identity at the
+            // typechecker boundary and every `FileDesc.STDIN.0` site
+            // failed with `cannot index type 'FileDesc'`.
+            is_transparent_wrapper: ty.is_transparent_wrapper,
         };
         meta.types.insert(type_name.clone(), descriptor);
         meta.type_declaration_order.push(type_name);
@@ -876,6 +884,10 @@ fn register_module_metadata(
             methods,
             implements: List::new(),
             decl_span: Maybe::None,
+            // Primitive method-table stubs are never transparent
+            // wrappers — they're synthetic carriers for the inherent
+            // method table only.
+            is_transparent_wrapper: false,
         };
         meta.types.insert(parent_name.clone(), descriptor);
         meta.type_declaration_order.push(parent_name);

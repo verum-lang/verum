@@ -324,6 +324,10 @@ fn convert_type_descriptor(
             .collect(),
         // #101 — span population deferred to source-walk pass.
         decl_span: Maybe::None,
+        // FUNDAMENTAL #3 — mirror the VBC TypeDescriptor's transparent
+        // wrapper flag into the typechecker-side metadata so the lazy
+        // loader's `__newtype_inner_X` registration fires.
+        is_transparent_wrapper: vbc_type.is_transparent_wrapper,
     })
 }
 

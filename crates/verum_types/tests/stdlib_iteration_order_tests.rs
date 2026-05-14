@@ -53,6 +53,7 @@ fn variant_type_with_ok_err(name: &str) -> TypeDescriptor {
         methods: List::new(),
         implements: List::new(),
         decl_span: Maybe::None,
+        is_transparent_wrapper: false,
     }
 }
 
