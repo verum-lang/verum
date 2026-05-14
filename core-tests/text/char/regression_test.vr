@@ -25,7 +25,10 @@ mount core.collections.list.List;
 // commit at the runtime level — `&mut Char` deref-assign is broken.
 // =============================================================================
 
-@ignore
+// §A closed 2026-05-14 via a Tier-0 `char_runtime` intercept that
+// operates directly on the caller's Char slot via the CBGR-ref
+// writeback discipline.  Same architectural pattern as hasher_runtime
+// (closes the precompiled-stdlib-body DerefMut-emit defect).
 @test
 fn regression_a_make_ascii_uppercase_pinned() {
     let mut c: Char = 'a';
@@ -33,7 +36,6 @@ fn regression_a_make_ascii_uppercase_pinned() {
     assert_eq(c, 'A');
 }
 
-@ignore
 @test
 fn regression_a_make_ascii_lowercase_pinned() {
     let mut c: Char = 'Z';

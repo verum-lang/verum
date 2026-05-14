@@ -90,6 +90,15 @@ pub(super) mod text_static_runtime;
 // fix lands.  See `hasher_runtime` doc comment for rationale.
 pub(super) mod hasher_runtime;
 
+// High-level Rust intercepts for `core.text.char.Char` `&mut self`
+// mutators.  Closes the precompiled stdlib body's DerefMut-emit
+// defect (task #14) — `*self = self.to_ascii_uppercase()` inside the
+// `&mut self` method body emits Mov instead of DerefMut at precompile
+// time, losing the mutation.  The intercept operates directly on the
+// caller's slot via the CBGR-ref writeback discipline (same pattern
+// as hasher_runtime).  See `char_runtime` doc comment for rationale.
+pub(super) mod char_runtime;
+
 // High-level Rust intercepts for process spawning
 // (spawn_child_with_output for `Command.output()` / `.status()`).
 // Sibling to shell_runtime; bypasses libSystem fork/execve/pipe via
