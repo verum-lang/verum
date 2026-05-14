@@ -1095,6 +1095,43 @@ fn rfind_absent_returns_none() {
 }
 
 // =============================================================================
+// Section P33: `&mut Primitive` deref-assignment persists to caller
+// =============================================================================
+//
+// Pre-fix, `let mut n: Int = 7; n.method()` where the method body does
+// `*self = X` (or `self.field = X`) lost the mutation — the caller's
+// `n` stayed unchanged.  Root cause (task #13): the call-site codegen
+// for primitive receivers built the dispatch key as the bare
+// `method.name` instead of the qualified `Int.method` / `Char.method`,
+// so `lookup_function` missed the user-defined entry and the
+// `takes_self_mut_ref → RefMut(ref_reg, receiver_reg)` wrapping was
+// skipped.  Closed by emitting the qualified prefix directly from the
+// VarTypeKind slot at `expressions.rs:8307+` for Int / Float / Bool /
+// Char / Text — no longer depends on the `variable_type_names` map
+// being populated.
+
+implement Int {
+    pub fn _test_double_in_place(&mut self) {
+        *self = *self * 2;
+    }
+}
+
+@test
+fn deref_mut_int_persists_single() {
+    let mut n: Int = 7;
+    n._test_double_in_place();
+    assert_eq(n, 14);
+}
+
+@test
+fn deref_mut_int_persists_chain() {
+    let mut n: Int = 5;
+    n._test_double_in_place();
+    n._test_double_in_place();
+    assert_eq(n, 20);
+}
+
+// =============================================================================
 // Section P29: Padding family — center / pad_left / pad_right / zfill
 // =============================================================================
 

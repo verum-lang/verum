@@ -8308,6 +8308,25 @@ impl VbcCodegen {
                         VarTypeKind::Byte => format!("byte${}", method.name),
                         VarTypeKind::Int32 => format!("int32${}", method.name),
                         VarTypeKind::UInt64 => format!("uint64${}", method.name),
+                        // Canonical primitive types — emit the qualified
+                        // `Type.method` name directly from the VarTypeKind
+                        // slot so the call-site `takes_self_mut_ref` check
+                        // (a few hundred lines below) can find the
+                        // user-defined `implement Int { fn …(&mut self) }`
+                        // entry in the function table.  Pre-fix this
+                        // depended on `variable_type_names.get(&var_name)`
+                        // returning `"Int"` etc., but for some let-binding
+                        // shapes that map is not populated in time — the
+                        // fallback then returned the bare `method.name`,
+                        // which lookup-misses, skips the `RefMut`, and
+                        // every `*self = X` write-back is lost.
+                        // Closes task #13 (audit char §A; same shape on
+                        // every primitive `&mut self` method body).
+                        VarTypeKind::Int => format!("Int.{}", method.name),
+                        VarTypeKind::Float => format!("Float.{}", method.name),
+                        VarTypeKind::Bool => format!("Bool.{}", method.name),
+                        VarTypeKind::Char => format!("Char.{}", method.name),
+                        VarTypeKind::Text => format!("Text.{}", method.name),
                         _ => {
                             // For unknown primitive types, check if we have a named struct type
                             // This enables correct method dispatch for user-defined struct types
@@ -8678,14 +8697,7 @@ impl VbcCodegen {
         // handles arbitrary receiver expressions.
         let effective_method_name =
             if !effective_method_name.contains('.') && !effective_method_name.contains('$') {
-                let inferred = self.infer_expr_type_name(receiver);
-                if std::env::var("VERUM_TRACE_MUTSELF").is_ok() {
-                    eprintln!(
-                        "[mutself-codegen] bare-name retry: method='{}' inferred_type={:?}",
-                        effective_method_name, inferred
-                    );
-                }
-                if let Some(inferred_type) = inferred {
+                if let Some(inferred_type) = self.infer_expr_type_name(receiver) {
                     let base_type = VbcCodegen::strip_generic_args(&inferred_type);
                     let resolved = self.resolve_type_alias(base_type);
                     let final_base = VbcCodegen::strip_generic_args(&resolved);
@@ -8735,12 +8747,6 @@ impl VbcCodegen {
         // method to write back to the caller's variable.
         let actual_receiver =
             if let Some(func_info) = self.ctx.lookup_function(&effective_method_name) {
-                if std::env::var("VERUM_TRACE_MUTSELF").is_ok() {
-                    eprintln!(
-                        "[mutself-codegen] effective='{}' takes_self_mut_ref={} param_count={}",
-                        effective_method_name, func_info.takes_self_mut_ref, func_info.param_count
-                    );
-                }
                 if func_info.takes_self_mut_ref {
                     // Create a mutable reference to the receiver
                     let ref_reg = self.ctx.alloc_temp();
@@ -8754,12 +8760,6 @@ impl VbcCodegen {
                     receiver_reg
                 }
             } else {
-                if std::env::var("VERUM_TRACE_MUTSELF").is_ok() {
-                    eprintln!(
-                        "[mutself-codegen] effective='{}' NOT FOUND in function table",
-                        effective_method_name
-                    );
-                }
                 receiver_reg
             };
 
@@ -15484,6 +15484,15 @@ impl VbcCodegen {
                     .type_field_count(&type_name)
                     .unwrap_or(fields.len() as u32);
 
+                if std::env::var("VERUM_TRACE_RECORD_ALLOC").is_ok()
+                    && (type_name == "Timeout" || type_name == "Delay")
+                {
+                    let layout = self.type_field_layouts.get(&type_name);
+                    eprintln!(
+                        "[record-alloc] type='{}' type_id={} alloc_slots={} literal_fields={} layout={:?}",
+                        type_name, type_id, alloc_slots, fields.len(), layout
+                    );
+                }
                 self.ctx.emit(Instruction::New {
                     dst: result,
                     type_id,
