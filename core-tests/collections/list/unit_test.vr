@@ -448,4 +448,109 @@ fn test_list_get_or_out_of_bounds_returns_default() {
     assert_eq(xs.get_or(-5, 42), 42);
 }
 
+// =============================================================================
+// Section 10: retain / resize / rotate_left / dedup — methods that go
+// through the stdlib body's `self.ptr.offset(idx)` direct-pointer access.
+//
+// Before the layout-alignment fix in the stdlib `type List<T> is { len,
+// cap, ptr }` decl, every one of these SIGSEGV'd because `self.ptr`
+// resolved to the runtime intercept's `len` slot and was dereferenced
+// as a pointer. The reorder makes `self.ptr` resolve to slot 2 — the
+// actual backing pointer — and the stdlib-body fast paths now run
+// correctly.
+// =============================================================================
+
+@test
+fn test_list_retain_drops_non_matching() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    xs.retain(|x| *x % 2 == 0);
+    assert_eq(xs.len(), 2);
+    assert_eq(xs.get(0), Some(2));
+    assert_eq(xs.get(1), Some(4));
+}
+
+@test
+fn test_list_retain_all_matching_is_noop() {
+    let mut xs: List<Int> = [2, 4, 6];
+    xs.retain(|x| *x % 2 == 0);
+    assert_eq(xs.len(), 3);
+}
+
+@test
+fn test_list_retain_none_matching_drops_all() {
+    let mut xs: List<Int> = [1, 3, 5];
+    xs.retain(|x| *x % 2 == 0);
+    assert_eq(xs.len(), 0);
+}
+
+@test
+fn test_list_resize_grow_pads_with_value() {
+    let mut xs: List<Int> = [1, 2];
+    xs.resize(5, 0);
+    assert_eq(xs.len(), 5);
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(2), Some(0));
+    assert_eq(xs.get(4), Some(0));
+}
+
+@test
+fn test_list_resize_shrink_truncates() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    xs.resize(2, 0);
+    assert_eq(xs.len(), 2);
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(1), Some(2));
+}
+
+@test
+fn test_list_resize_same_len_is_noop() {
+    let mut xs: List<Int> = [1, 2, 3];
+    xs.resize(3, 0);
+    assert_eq(xs.len(), 3);
+    assert_eq(xs.get(2), Some(3));
+}
+
+@test
+fn test_list_rotate_left_basic() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    xs.rotate_left(2);
+    assert_eq(xs.get(0), Some(3));
+    assert_eq(xs.get(4), Some(2));
+}
+
+@test
+fn test_list_rotate_left_zero_is_noop() {
+    let mut xs: List<Int> = [1, 2, 3];
+    xs.rotate_left(0);
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(2), Some(3));
+}
+
+@test
+fn test_list_dedup_consecutive_duplicates() {
+    let mut xs: List<Int> = [1, 1, 2, 2, 2, 3, 1, 1];
+    xs.dedup();
+    // Dedup keeps the first of each consecutive run.
+    assert_eq(xs.len(), 4);
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(1), Some(2));
+    assert_eq(xs.get(2), Some(3));
+    assert_eq(xs.get(3), Some(1));
+}
+
+@test
+fn test_list_dedup_no_duplicates_is_noop() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    xs.dedup();
+    assert_eq(xs.len(), 5);
+}
+
+@test
+fn test_list_dedup_all_same_collapses_to_one() {
+    let mut xs: List<Int> = [7, 7, 7, 7, 7];
+    xs.dedup();
+    assert_eq(xs.len(), 1);
+    assert_eq(xs.get(0), Some(7));
+}
+
 fn main() {}

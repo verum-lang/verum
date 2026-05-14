@@ -68,65 +68,86 @@ fn regression_list_from_elem_undefined_function() {
 
 // =============================================================================
 // §B  Runtime memory-layout drift between stdlib type decl and runtime
-//     intercept allocation shape.
+//     intercept allocation shape — CLOSED.
 //
-//   The runtime `List.new()` / `List.with_capacity()` intercepts at
-//   `crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs`
-//   allocate the canonical heap object as `[len@0, cap@1, backing_ptr@2]`
-//   after the heap header. The stdlib declares
-//   `type List<T> is { ptr: &unsafe T, len: Int, cap: Int }` — ptr at
-//   slot 0 in the type decl order, but at slot 2 in the runtime
-//   intercept order.
+//   Pre-fix history: the runtime `List.new()` / `List.with_capacity()`
+//   intercepts at `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
+//   method_dispatch.rs` allocate the canonical heap object as
+//   `[len@0, cap@1, backing_ptr@2]` after the heap header. The stdlib
+//   declared `type List<T> is { ptr, len, cap }` — ptr at slot 0 in the
+//   type decl order, but at slot 2 in the runtime intercept order.
 //
-//   Codegen resolves `self.<field>` via the type declaration's field
-//   order, so when an unintercepted stdlib method falls through to its
-//   body (e.g. `swap_remove`, `truncate`, `retain`, `fill`, every
-//   `&mut self` family method without an explicit intercept), the body's
-//   `self.ptr` reads slot 0 (= the runtime's `len` Int) and the body's
-//   `self.len` reads slot 1 (= the runtime's `cap`).
+//   Codegen resolved `self.<field>` via the type-declaration field
+//   order, so every unintercepted stdlib method that read internal
+//   fields misrouted (retain SIGSEGV, fill silent no-op, resize
+//   undefined data, sort_by reference corruption, …).
 //
-//   Consequence:
-//     * `self.ptr.offset(idx)` reads from a bogus address derived from
-//       an Int reinterpreted as a pointer — SIGSEGV (e.g. truncate-
-//       internal pop chain, retain, fill).
-//     * `while self.len > new_len { self.pop() }` reads `cap` instead
-//       of `len` — infinite loop.
-//     * `let val = ptr_read(self.ptr.offset(idx))` returns the wrong
-//       bit pattern — silent data corruption.
+//   Fundamental fix in this branch: reorder the stdlib type decl to
+//   `{ len, cap, ptr }` so codegen field-index = runtime slot index.
+//   Re-aligned methods are now covered in unit_test.vr §10 (retain /
+//   resize / rotate_left / dedup) — they ALL pass through the stdlib
+//   body now, no Rust-side intercept required.
 //
-//   The fundamental fix is one of:
-//     1. Re-declare the stdlib type as `{ len, cap, ptr }` so the
-//        type-decl field order matches the runtime intercept layout.
-//     2. Add a Rust-side runtime intercept for every `&mut self` /
-//        `&self` method that reads internal fields.
-//     3. Lift the runtime intercept allocation into a stdlib code path
-//        that uses the same field-init constructor (`List { ptr, len,
-//        cap }`) — the codegen would then assign field offsets in the
-//        same order as the type decl.
+//   The Rust-side intercepts for `set`, `get_or`, `swap_remove`,
+//   `truncate` remain as defense-in-depth (cheaper than crossing into
+//   the stdlib body) and as a guarantee that the runtime is independent
+//   of any stdlib regression.
 //
-//   Methods landed as intercepts in this branch to unblock unit tests
-//   without a full re-layout: set, get_or, swap_remove, truncate.
+//   The guardrail tests below stay non-`@ignore`d so any future re-drift
+//   of the type-decl field order fails CI immediately.
+// =============================================================================
+
+@test
+fn regression_list_retain_through_stdlib_body() {
+    // Pre-fix: SIGSEGV. Post-fix: stdlib body's self.ptr.offset(i)
+    // correctly reads from slot 2 (the backing pointer).
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    xs.retain(|x| *x % 2 == 0);
+    assert_eq(xs.len(), 2);
+    assert_eq(xs.get(0), Some(2));
+    assert_eq(xs.get(1), Some(4));
+}
+
+@test
+fn regression_list_resize_through_stdlib_body() {
+    // Pre-fix: silent data corruption. Post-fix: tail extension works.
+    let mut xs: List<Int> = [1, 2];
+    xs.resize(5, 0);
+    assert_eq(xs.len(), 5);
+    assert_eq(xs.get(4), Some(0));
+}
+
+@test
+fn regression_list_dedup_through_stdlib_body() {
+    let mut xs: List<Int> = [1, 1, 2, 2, 3, 3, 3];
+    xs.dedup();
+    assert_eq(xs.len(), 3);
+}
+
+@test
+fn regression_list_rotate_left_through_stdlib_body() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    xs.rotate_left(2);
+    assert_eq(xs.get(0), Some(3));
+    assert_eq(xs.get(4), Some(2));
+}
+
+// =============================================================================
+// §D  Residual cross-class defects exposed AFTER the layout fix landed
+//     (the fix unblocked the code path to reach them).
 //
-//   Tracking: audit.md §2. Remaining unblocked-by-intercept methods
-//   pinned below.
+//   These are NOT layout-drift defects — they live in adjacent layers
+//   (Clone-dispatch, ref-deref equality) that the now-reachable code
+//   paths exercise. Tracked separately.
 // =============================================================================
 
 @ignore
 @test
-fn regression_list_retain_layout_drift() {
-    // Expected: retain(|x| *x % 2 == 0) leaves evens.
-    // Actual: pre-intercept, retain falls through to stdlib body which
-    // reads self.ptr (slot 0 = len in runtime) as a pointer and SIGSEGVs.
-    let mut xs: List<Int> = [1, 2, 3, 4, 5];
-    xs.retain(|x| *x % 2 == 0);
-    assert_eq(xs.len(), 2);
-}
-
-@ignore
-@test
-fn regression_list_fill_layout_drift() {
-    // Expected: fill(value) overwrites every slot with `value`.
-    // Actual: writes go through ptr_write on a misaligned address.
+fn regression_list_fill_value_clone_dispatch() {
+    // Expected: fill(0) writes 0 into every slot.
+    // Actual: `value.clone()` dispatch for Int returns a wrong NaN-
+    // boxed Value — the resulting writes are uniform but not equal to
+    // the source value. Not a layout issue.
     let mut xs: List<Int> = [1, 2, 3, 4];
     xs.fill(0);
     assert_eq(xs.get(0), Some(0));
@@ -135,23 +156,21 @@ fn regression_list_fill_layout_drift() {
 
 @ignore
 @test
-fn regression_list_resize_layout_drift() {
-    // Expected: resize(5, 0) extends [1, 2] to [1, 2, 0, 0, 0].
-    // Actual: stdlib body uses self.ptr / self.len arithmetic against
-    // wrong slots; outcome is undefined data and/or len corruption.
-    let mut xs: List<Int> = [1, 2];
-    xs.resize(5, 0);
-    assert_eq(xs.len(), 5);
-    assert_eq(xs.get(4), Some(0));
+fn regression_list_is_sorted_ref_deref_compare() {
+    // Expected: is_sorted on a sorted List<Int> returns true.
+    // Actual: stdlib uses `&*self.ptr.offset(i)` then compares `a > b`
+    // — comparing references-to-Int rather than the Int values
+    // themselves. Not a layout issue (the deref reaches the right
+    // pointer); the comparison operator picks address-comparison.
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    assert(xs.is_sorted());
 }
 
 @ignore
 @test
-fn regression_list_sort_via_user_callback() {
-    // Expected: sort_by(custom_cmp) sorts via the callback.
-    // Actual: closure dispatch on List elements goes through a path
-    // that hits the layout drift; pinned for parity with sort default
-    // (which is intercepted and works).
+fn regression_list_sort_by_closure_via_deref_compare() {
+    // Same defect class as is_sorted — the closure is invoked with
+    // `&T` references that compare addresses, not values.
     let mut xs: List<Int> = [3, 1, 2];
     xs.sort_by(|a, b| (*b).cmp(a));
     assert_eq(xs.get(0), Some(3));
