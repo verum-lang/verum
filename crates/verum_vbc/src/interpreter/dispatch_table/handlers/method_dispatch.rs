@@ -8039,6 +8039,81 @@ pub(super) fn dispatch_array_method(
             }
             Ok(Some(Value::unit()))
         }
+        // `xs.set(idx, value)` — write-in-place. Without this intercept the
+        // call falls through to the stdlib body which reads `self.ptr` from
+        // field 0, but the runtime List layout puts `len` at field 0 and the
+        // backing pointer at field 2 (see `List.new()` / `List.with_capacity()`
+        // intercepts above). The result is a silent no-op write to a stack
+        // slot derived from the encoded `len` value — set never sticks.
+        "set" => {
+            if header.type_id != TypeId::LIST {
+                return Ok(None);
+            }
+            let idx_raw = state.registers.get(caller_base, Reg(args.start.0));
+            let idx = if is_cbgr_ref(&idx_raw) {
+                let (abs_index, _) = decode_cbgr_ref(idx_raw.as_i64());
+                state.registers.get_absolute(abs_index).as_i64() as usize
+            } else {
+                idx_raw.as_i64() as usize
+            };
+            let value_raw = state.registers.get(caller_base, Reg(args.start.0 + 1));
+            let value = if is_cbgr_ref(&value_raw) {
+                let (abs_index, _) = decode_cbgr_ref(value_raw.as_i64());
+                state.registers.get_absolute(abs_index)
+            } else {
+                value_raw
+            };
+            let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+            let current_len = unsafe { (*data_ptr).as_i64() } as usize;
+            if idx >= current_len {
+                return Err(InterpreterError::TypeMismatch {
+                    expected: "valid index",
+                    got: "out of bounds",
+                    operation: "List.set",
+                });
+            }
+            let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+            let backing_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+            unsafe {
+                *backing_data.add(idx) = value;
+            }
+            Ok(Some(Value::unit()))
+        }
+        // `xs.get_or(idx, default)` — bounded read with fallback. Without
+        // this intercept the call falls through to the stdlib body which
+        // reads `self.ptr.offset(idx)` against the runtime's `len`-at-slot-0
+        // layout — that resolves to an Int reinterpreted as a pointer and
+        // dereferenced. Crash class observed: SIGSEGV during diagnostic
+        // probe of `[1,2,3].get_or(0, -1)`.
+        "get_or" => {
+            if header.type_id != TypeId::LIST {
+                return Ok(None);
+            }
+            let idx_raw = state.registers.get(caller_base, Reg(args.start.0));
+            let idx = if is_cbgr_ref(&idx_raw) {
+                let (abs_index, _) = decode_cbgr_ref(idx_raw.as_i64());
+                state.registers.get_absolute(abs_index).as_i64()
+            } else {
+                idx_raw.as_i64()
+            };
+            let default_raw = state.registers.get(caller_base, Reg(args.start.0 + 1));
+            let default = if is_cbgr_ref(&default_raw) {
+                let (abs_index, _) = decode_cbgr_ref(default_raw.as_i64());
+                state.registers.get_absolute(abs_index)
+            } else {
+                default_raw
+            };
+            let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+            let current_len = unsafe { (*data_ptr).as_i64() };
+            if idx < 0 || idx >= current_len {
+                return Ok(Some(default));
+            }
+            let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+            let backing_data =
+                unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+            let elem = unsafe { *backing_data.add(idx as usize) };
+            Ok(Some(elem))
+        }
         "swap" => {
             let idx_a = state.registers.get(caller_base, Reg(args.start.0)).as_i64() as usize;
             let idx_b = state
