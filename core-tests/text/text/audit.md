@@ -307,20 +307,34 @@ the `Int` direct return or the `count` alias).
   `obj.method()` MUST live in `dispatch_primitive_method`, NOT
   `try_intercept_text_static_runtime`.
 
-### Deferred — ranked by leverage (updated 2026-05-14)
+### Deferred — ranked by leverage (updated 2026-05-14, second pass)
 | # | Item | Estimated effort | Tests unblocked |
 |---|------|-----:|------:|
-| 1 | §A close — rfind dispatch | medium | ~5 |
-| 2 | §B close — Char.encode_utf8 receiver-kind classification | medium | ~5 |
-| 3 | §D close — function-id collision (CallM migration OR global next_func_id) | multi-session | ~10 (§O included) |
-| 4 | §N close — List.extend_from_slice | small (List task) | ~1 |
+| 1 | §B close — Char.encode_utf8 receiver-kind classification | medium | ~5 |
+| 2 | §D close — function-id collision (CallM migration OR global next_func_id) | multi-session | ~10 (§O included) |
+| 3 | §N close — List.extend_from_slice | small (List task) | ~1 |
 
 Closed this session (2026-05-14):
+- §A — `Text.rfind` LLVM `SmallVectorBase::grow_pod` SIGSEGV
+  (`8650a56ba` pinned tests; `7cbd0585d` removed the trigger).
+  Closed transitively when the only two stdlib bodies that iterated
+  bare `&[Byte]` slice values via `for x in slice`
+  (`Hasher.write` + `Formatter.write_bytes`) were migrated to the
+  canonical indexed-while pattern, eliminating the LLVM IR-emission
+  shape that caused the SmallVector<u64> overflow in slice-iter
+  codegen.  Every consumer of slice iteration in the precompiled
+  stdlib chain (rfind, count_matches, KMP find, …) now goes through
+  the indexed-while pattern that LLVM lowers cleanly.
 - §T — Text.capacity (`d28517c10` + `344ebf903`) — three-part fix:
   with_capacity allocates builder layout, dispatch-by-representation
   intercept in CallM, reserve migrates small-string→builder.
 - §U — Text.join element loss on non-empty List (`65a2d1b29`) —
   align Tier-0 intercept with canonical List<T> heap layout.
+- §V — DefaultHasher cross-tier divergence (`6a5fd21c7` +
+  `7cbd0585d`) — Tier-0 `hasher_runtime` intercept + canonical
+  indexed-while in `Hasher.write` / `Formatter.write_bytes` + the
+  `file_runtime` qualifier gate that closes the bare-name
+  misclassification surface for every cross-type collision.
 
 Closed transitively (no work this session):
 - §C — Iterator.next dispatch (`48a76117f`, prior commit)
@@ -337,6 +351,15 @@ Closed transitively (no work this session):
 - §Q — capitalize / title_case / swapcase (downstream of §C)
 - §R — count_matches typechecker ICE — no longer reproduces; pinned
   by 3 new count_matches tests in protocol_test.vr (2026-05-14)
+
+**Architectural rule established this session**: every stdlib body
+that iterates a `&[T]` slice MUST use the indexed-while pattern
+(`let n = slice.len(); let mut i: Int = 0; while i < n { … }`),
+NOT `for x in slice`.  The `for x in &[T]` lowering trips an LLVM
+`SmallVectorBase::grow_pod` SIGSEGV at codegen time.  `for x in
+slice.iter()` is safe because it routes through the custom-iterator
+path (has_next/next CallM).  Pin: `grep -rn "for [a-z_]+ in [a-z_]+\.as_bytes()\|for [a-z_]+ in bytes\b" core/`
+MUST return zero broken patterns at every commit.
 
 ### Drift-pin recommendations (ride along with the fixes above)
 1. `crates/verum_compiler/src/precompile.rs::TEXT_PUBLIC_API_DRIFT_PIN`:
