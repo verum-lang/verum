@@ -539,6 +539,25 @@ fn regression_join_two_parts_with_separator() {
 }
 
 // =============================================================================
+// REGRESSION (open): DefaultHasher cross-tier divergence
+// =============================================================================
+//
+// `DefaultHasher.write(bytes).finish()` returns the SAME u64 for
+// distinct inputs on the Tier-0 interpreter, but different values on
+// the AOT path.  Suspected: the Tier-0 Hasher.write / Hasher.finish
+// intercepts don't accumulate byte state properly.  Tracked by task #10.
+
+@ignore
+@test
+fn regression_default_hasher_distinguishes_inputs() {
+    let mut ha: DefaultHasher = DefaultHasher.new();
+    let mut hb: DefaultHasher = DefaultHasher.new();
+    ha.write("alpha".as_bytes());
+    hb.write("beta".as_bytes());
+    assert(ha.finish() != hb.finish());
+}
+
+// =============================================================================
 // Entry point
 // =============================================================================
 
