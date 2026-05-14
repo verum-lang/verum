@@ -83,6 +83,13 @@ pub(super) mod path_ops_runtime;
 // returns the canonical empty-or-built Text value.
 pub(super) mod text_static_runtime;
 
+// High-level Rust intercepts for `core.base.protocols.DefaultHasher`.
+// Closes the precompiled-stdlib-body SetF-loss defect (task #11) by
+// running the canonical FxHash 64-bit step directly on the heap
+// record, bypassing the broken user-side body until the codegen-level
+// fix lands.  See `hasher_runtime` doc comment for rationale.
+pub(super) mod hasher_runtime;
+
 // High-level Rust intercepts for process spawning
 // (spawn_child_with_output for `Command.output()` / `.status()`).
 // Sibling to shell_runtime; bypasses libSystem fork/execve/pipe via

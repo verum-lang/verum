@@ -97,13 +97,27 @@ pub(in super::super) fn try_intercept_file_runtime(
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
     let bare = func_name.rsplit('.').next().unwrap_or(func_name);
-    // No qualifier check on the bare names — stdlib calls reach the
-    // interpreter via `Call` dispatch only when mount-resolved (the
-    // bare-name builtin path is reserved for `print`/`println`/
-    // `panic`/`assert` and friends, which use `DebugPrint` /
-    // `Panic` / `Assert` opcodes at codegen). Every bare-name match
-    // below is uniquely-stdlib-flavored: there is no protocol method
-    // or user-defined function the qualifier disambiguates against.
+    // Qualifier gate — the bare names match too aggressively
+    // (`write` / `read` / `len` / `exists` / etc. are widely used
+    // method names that surface on `DefaultHasher`, `TextBuilder`,
+    // `Channel`, and other unrelated types).  Match only when the
+    // bare name is preceded by a known io.fs / io.file qualifier so
+    // the intercept fires exclusively on canonical filesystem call
+    // sites.  Pre-fix, every `DefaultHasher.write` call landed at
+    // the FS `intercept_write_dispatch` and returned garbage —
+    // closes task #11 + the hasher cross-tier defect.
+    let qualifier_ok = func_name == bare
+        || func_name.starts_with("File.")
+        || func_name.starts_with("Path.")
+        || func_name.starts_with("PathBuf.")
+        || func_name.contains(".io.file.")
+        || func_name.contains(".io.fs.")
+        || func_name.contains(".File.")
+        || func_name.contains(".Path.")
+        || func_name.contains(".PathBuf.");
+    if !qualifier_ok {
+        return Ok(None);
+    }
     match bare {
         // Reads — both io.file (Text) and io.fs (Path) flavours.
         "read_to_string" if arg_count == 1 => {

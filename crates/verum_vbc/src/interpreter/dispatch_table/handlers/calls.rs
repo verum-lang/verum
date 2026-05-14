@@ -149,6 +149,28 @@ pub(in super::super) fn handle_call(
             .map(|s| s.to_string())
             .unwrap_or_default();
         if !func_name.is_empty() {
+            // `DefaultHasher.*` intercept MUST fire before
+            // `file_runtime` — `try_intercept_file_runtime` strips
+            // qualifiers and matches on bare names, so it consumes
+            // any function named `write` / `write_byte` / etc. with
+            // matching arg_count regardless of the actual type
+            // qualifier.  Without this ordering, `DefaultHasher.write`
+            // gets routed to the FS write intercept and returns
+            // garbage.  Same architectural pattern as text_static_runtime
+            // having precedence over the more permissive intercepts —
+            // qualified names dispatch first.
+            if let Some(result) =
+                super::hasher_runtime::try_intercept_default_hasher(
+                    state,
+                    &func_name,
+                    args.start.0,
+                    args.count,
+                    caller_base,
+                )?
+            {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
             if let Some(result) = super::shell_runtime::try_intercept_shell_runtime(
                 state,
                 &func_name,
