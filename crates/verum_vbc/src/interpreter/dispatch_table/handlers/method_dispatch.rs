@@ -3226,17 +3226,20 @@ pub(super) fn dispatch_primitive_method(
                 return Ok(Some(make_maybe_int(state, digit_opt)?));
             }
             "from_digit" => {
-                // Char.from_digit(digit, radix) — static-style, receiver ignored
+                // Char.from_digit(digit, radix) — static-style, receiver ignored.
+                // Returns lowercase letters for hex digits 10..=35
+                // (`a`..=`z`), matching the standard convention shared
+                // with Rust / Swift / Python.  Pre-fix this intercept
+                // forced uppercase via `to_ascii_uppercase`, diverging
+                // from `char::from_digit`'s own behaviour and from
+                // every other language's `from_digit`.  Callers that
+                // need uppercase output should call
+                // `.to_ascii_uppercase()` on the result.
+                // Pinned by `core-tests/text/char/regression_test.vr::
+                // regression_c_from_digit_hex_pinned`.
                 let digit = state.get_reg(Reg(args.start.0)).as_i64() as u32;
                 let radix = state.get_reg(Reg(args.start.0 + 1)).as_i64() as u32;
-                let ch_opt = char::from_digit(digit, radix).map(|c| {
-                    // Verum convention: hex digits are uppercase (A-F, not a-f)
-                    if c.is_ascii_lowercase() {
-                        c.to_ascii_uppercase() as i64
-                    } else {
-                        c as i64
-                    }
-                });
+                let ch_opt = char::from_digit(digit, radix).map(|c| c as i64);
                 return Ok(Some(make_maybe_int(state, ch_opt)?));
             }
             "len_utf8" => {
