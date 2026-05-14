@@ -242,6 +242,73 @@ impl WellKnownType {
         Self::from_name(name).is_some()
     }
 
+    /// Returns true if this type's `.new()` (and other constructor entry
+    /// points) is intercepted by the interpreter's built-in handler instead
+    /// of dispatching to the user-compiled stdlib body.  Routing these
+    /// through the constructor intercept produces heap objects with the
+    /// canonical built-in TypeId and memory layout so subsequent built-in
+    /// method dispatch (insert/get/len/iter/...) finds them.
+    ///
+    /// Single source of truth for the codegen-side
+    /// `is_builtin_ctor_collection` predicate — the previous HashSet
+    /// duplicate at `verum_vbc/src/codegen/mod.rs::CodegenContext::new`
+    /// was a CLAUDE.md violation (hardcoded stdlib type list inside
+    /// the compiler).
+    pub const fn has_builtin_constructor_intercept(self) -> bool {
+        matches!(
+            self,
+            Self::List | Self::Map | Self::Set | Self::Deque | Self::Channel
+        )
+    }
+
+    /// Name-form helper for `has_builtin_constructor_intercept` — `true`
+    /// iff `name` resolves to a WKT whose `.new()` is interpreter-
+    /// intercepted.  Idiomatic call site replacement for hardcoded
+    /// `matches!(name, "List" | "Map" | ...)`.
+    pub fn name_has_builtin_constructor_intercept(name: &str) -> bool {
+        Self::from_name(name).is_some_and(|w| w.has_builtin_constructor_intercept())
+    }
+
+    /// Returns true when codegen MUST skip devirtualisation (static
+    /// `Call`) and emit `CallM` for method dispatch on this type — the
+    /// interpreter's dispatcher has Strategy 0 inline-opcode handling
+    /// (or a hand-tuned intercept) that the user-compiled body bypasses.
+    ///
+    /// Covers every WKT with inline dispatch (collections, wrappers,
+    /// concurrency primitives, ref-tier types, time types) plus the
+    /// builtin primitive numeric types (`Int`, `Float`, `Bool`, `Char`,
+    /// `Text`) and their sized aliases (`Int8..Int64`, `UInt8..UInt64`,
+    /// `Float32`/`Float64`, `Byte`).
+    ///
+    /// Single source of truth for the codegen-side
+    /// `type_prefix_intercepted_by_runtime` predicate — the previous
+    /// inline hardcoded `matches!(...)` block at
+    /// `verum_vbc/src/codegen/expressions.rs` was a CLAUDE.md
+    /// violation.
+    pub fn has_runtime_inline_dispatch(name: &str) -> bool {
+        if Self::from_name(name).is_some() {
+            return true;
+        }
+        // Primitive numeric types not in the WKT enum (they're
+        // language-level primitives, not stdlib types) but still have
+        // inline runtime dispatch via the `byte$` / `int32$` / `uint64$`
+        // method-prefix family.  Pinned by the matching prefix arms in
+        // `compile_method_call`'s `effective_method_name` computation.
+        if matches!(
+            name,
+            "Int8" | "Int16" | "Int32" | "Int64"
+                | "UInt8" | "UInt16" | "UInt32" | "UInt64"
+                | "Float32" | "Float64" | "USize" | "ISize"
+                | "Byte" | "Slice"
+        ) {
+            return true;
+        }
+        // CBGR reference tier types — handled by the runtime's
+        // ref-deref / ref-write intercept path, not by user-side
+        // stdlib bodies.
+        matches!(name, "FatRef" | "ThinRef")
+    }
+
     /// Auto-derived protocols for primitive-like types.
     ///
     /// Single source of truth for the
