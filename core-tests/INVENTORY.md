@@ -45,6 +45,10 @@ default green-suite gate.
 | `text/numeric/bigdecimal`|   85|    0|    0|    0| inherits bigint. **partial**. |
 | `text/numeric/rational`  |   75|    0|    0|    0| inherits bigint. **partial**. |
 | `text/numeric/modular`   |  120|    0|    0|    0| inherits bigint. **partial**. |
+| `sys/common`             |  503|  379|  335|  150| 2 (Result `?` propagation on `Result<T, OSError>` + List.get OSError shape — pre-existing edge cases). PAGE_SIZE / page_align_* / OSError / FileDesc / MemProt / MapFlags / SysContextError / FcntlLockKind / ACCESS_* surface — 50+ tests green under `--interp`. Mount re-export defect closed by #FUNDAMENTAL fix in commit `01cd38133` (parent-prefix scan in `process_import_tree`). FileDesc.STDIN/INVALID/STDOUT/STDERR constant access deferred (typechecker __newtype_inner_X gap for archive-loaded transparent-wrapper records). **partial**. |
+| `sys/cabi`               |  176|  127|    0|   62| 0 — every newtype-alias round-trip + CFD_* sentinels green. Closed by #FUNDAMENTAL-2 transparent-wrapper constructor registration in commit `01cd38133`. **complete**. |
+| `sys/mmio`               |  235|    0|  160|  100| 1 (MemoryFlags const + MemoryRegion.contains-with-MemoryFlags helper — same `TypeName.CONST.0` typechecker gap as FileDesc). BarrierKind 5-variant + compiler_barrier/dmb green. **partial**. |
+| `sys/signal`             |  280|  192|  170|  120| Many — most are pre-existing stdlib gaps in Signal (variant-tag drift on @cfg-aware match arms, `atomic_load`/`atomic_store` intrinsic registration missing). 14/52 green. Architectural — drift caused by stdlib Signal implementation, not test infrastructure. **regression-only**. |
 
 ## Status legend
 
