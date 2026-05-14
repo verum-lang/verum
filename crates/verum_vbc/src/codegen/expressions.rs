@@ -4172,12 +4172,41 @@ impl VbcCodegen {
                 .collect();
             qualified_keys.sort();
             qualified_keys.dedup();
-            // Filter to arity matches.
+            // Filter to STRICT-arity matches.
+            //
+            // **Critical correctness invariant**: `lookup_function_with_arity`
+            // is lenient — it returns the primary registration even when
+            // its `param_count` does not equal the requested arity (see
+            // its docstring at codegen/context.rs).  Including wrong-arity
+            // entries in `arity_matches` poisons the downstream
+            // type-based disambiguation: the type filter uses
+            // `param_type_names.iter().zip(arg_type_names.iter()).all(...)`,
+            // and `zip` truncates to the shorter sequence, so a candidate
+            // with FEWER param_types than args.len() passes the filter
+            // when its short prefix happens to match — even though the
+            // overall arity is wrong.  Concrete failure (task #14):
+            //
+            //   `mount core.async.timer.{timeout_ms};
+            //    timeout_ms(500, ready(7))`
+            //
+            // gets `arity_matches = [timer (2 params), Resolver (2),
+            // ShutdownStrategy (1), MetaRuntime (0)]`.  With
+            // arg_type_names = [None, Some("ReadyFuture")], only
+            // ShutdownStrategy passes the type filter (its single `()`
+            // param zips against arg[0]=None, the `all` succeeds, args[1]
+            // is never inspected because zip truncates).  Type-aware
+            // lookup then picks ShutdownStrategy (arity 1), and the call
+            // panics with `WrongArgumentCount expected:1 found:2`.
+            //
+            // The strict-arity filter eliminates this collision class
+            // structurally: type-based disambiguation runs ONLY between
+            // candidates that already agree on parameter count.
             let arity_matches: Vec<(String, FunctionInfo)> = qualified_keys
                 .iter()
                 .filter_map(|k| {
                     self.ctx
                         .lookup_function_with_arity(k, args.len())
+                        .filter(|info| info.param_count == args.len())
                         .map(|info| (k.clone(), info.clone()))
                 })
                 .collect();

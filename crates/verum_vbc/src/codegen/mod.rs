@@ -7131,21 +7131,8 @@ impl VbcCodegen {
                 // mounts (`mount X.*`) deliberately keep first-wins to
                 // preserve the FFI-raw / safe-wrapper precedence rule.
 
-                if std::env::var("VERUM_TRACE_MOUNT_LOOKUP").is_ok() {
-                    eprintln!(
-                        "[mount-enter] func='{}' full_path={:?} qualified_verum='{}'",
-                        func_name, full_path, qualified_verum
-                    );
-                }
-
                 // First try Verum-style qualified name
                 if let Some(func_info) = self.ctx.lookup_function(&qualified_verum).cloned() {
-                    if std::env::var("VERUM_TRACE_MOUNT_LOOKUP").is_ok() {
-                        eprintln!(
-                            "[mount-enter]   HIT verbatim '{}' (param_count={})",
-                            qualified_verum, func_info.param_count
-                        );
-                    }
                     self.ctx
                         .register_function_authoritative(alias_name.clone(), func_info);
                     return Ok(());
@@ -7233,28 +7220,6 @@ impl VbcCodegen {
                 // The `full_path.len() >= 3` gate skips paths whose parent
                 // is already a single segment (verbatim lookup above
                 // already covers `<segment>.<func_name>`).
-                if std::env::var("VERUM_TRACE_MOUNT_LOOKUP").is_ok() {
-                    eprintln!(
-                        "[mount-lookup] func_name='{}' full_path={:?}",
-                        func_name, full_path
-                    );
-                    let probe_prefix = func_name.clone();
-                    let candidates: Vec<String> = self
-                        .ctx
-                        .functions
-                        .keys()
-                        .filter(|k| {
-                            k.ends_with(&format!(".{}", probe_prefix))
-                                || k.as_str() == probe_prefix.as_str()
-                        })
-                        .take(15)
-                        .cloned()
-                        .collect();
-                    eprintln!(
-                        "[mount-lookup]   candidates: {:?}",
-                        candidates
-                    );
-                }
                 if full_path.len() >= 3 {
                     let parent_path = &full_path[..full_path.len() - 1];
                     for start_idx in 1..parent_path.len() {
@@ -7263,12 +7228,6 @@ impl VbcCodegen {
                         if let Some(func_info) =
                             self.ctx.lookup_function(&qualified).cloned()
                         {
-                            if std::env::var("VERUM_TRACE_MOUNT_LOOKUP").is_ok() {
-                                eprintln!(
-                                    "[mount-lookup]   HIT via path-suffix narrowing: '{}' (param_count={})",
-                                    qualified, func_info.param_count
-                                );
-                            }
                             self.ctx
                                 .register_function_authoritative(alias_name.clone(), func_info);
                             return Ok(());
