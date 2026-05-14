@@ -154,6 +154,46 @@ for zero semantic gain.
 funnel through `try_emit_display_dispatch`.  Emitting `ToString`
 directly is a regression on user Display impls.
 
+### §3.3.1 Cross-module Display dispatch — CLOSED 2026-05-14 (task #10)
+
+The initial §3.3 fix worked only when `<Type>.fmt` was already
+materialised in the user-side function table — user-defined
+impls in the same module + stdlib impls explicitly referenced
+via `.fmt()`.  Stdlib Display impls (Ordering / Maybe / Result /
+…) land in the function table under FULLY-QUALIFIED keys like
+`core.base.Ordering.fmt`, so the bare `lookup_function("Ordering.fmt")`
+missed them and `f"{var}"` for `var: Ordering` fell back to
+`ToString`.
+
+Closed by two architectural channels added to
+`try_emit_display_dispatch` (commit `a840262f9`):
+
+1. **Function-table parent-scan** — walks `ctx.functions` for
+   entries whose `parent_type_name == base` AND key ends with
+   `.fmt` (or key matches `.<Base>.fmt`).  Captures the
+   FunctionId into `display_func_id` for static `Call`
+   emission.  Surfaces every stdlib Display impl loaded under
+   its canonical module-qualified key.
+
+2. **TypeDescriptor → ProtocolImpl probe** — `ProtocolId` is a
+   TypeId reference (protocols are types).  When `self.types`
+   contains the base type's descriptor with a `ProtocolImpl`
+   pointing to the Display protocol type, `proto_impl.methods[0]`
+   is the canonical Display `fmt` FunctionId.  This channel
+   surfaces Display impls even when the function table doesn't
+   have them — the type descriptor is loaded eagerly by
+   `register_archive_type` for every archived type.
+
+Same multi-channel applied to `Formatter.new`: bare key first,
+then function-table scan pinned by `parent_type_name == "Formatter"`
+AND key ends with `.new`.
+
+The emit path branches on `display_func_id`:
+* `Some(fid)`: static `Call { func_id: fid, … }` — fastest
+  dispatch shape, resolves at compile time, optimal for both
+  Tier-0 interpreter and Tier-1 LLVM AOT.
+* `None`: `CallM` fallback (dynamic dispatch by method name).
+
 ### §3.4 Other defects unrelated to ordering
 
 `test_ordering_across_units` (lives in
