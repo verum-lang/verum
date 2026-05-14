@@ -515,10 +515,38 @@ implement Text {
         text_byte_len(self) == 0
     }
 
-    /// Capacity in bytes.
-    @inline(always)
+    /// Capacity in bytes — the number of bytes the buffer can hold
+    /// without reallocating.  The semantics depend on the underlying
+    /// representation:
+    ///
+    /// | Representation | `capacity()` |
+    /// |----------------|--------------|
+    /// | Static literal `"..."` (cap = 0, immutable) | `len()` |
+    /// | Small-string (NaN-boxed inline, ≤6 bytes) | `len()` |
+    /// | Heap-allocated flat `[hdr][len:u64][bytes…]` | `len()` |
+    /// | Builder layout `{ptr, len, cap}` | the `cap` field |
+    ///
+    /// The first three are immutable views — pushing past `len()`
+    /// requires migrating to the builder layout, so the reported
+    /// capacity equals the current byte length.  Only the builder
+    /// layout (produced by `with_capacity` / `try_with_capacity` /
+    /// `reserve`) carries a separate `cap` field that can exceed
+    /// `len()`.
+    ///
+    /// The body uses `text_byte_len` as a conservative lower bound;
+    /// the Tier-0 interpreter intercepts the call at
+    /// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
+    /// text_static_runtime.rs` and returns the true capacity by
+    /// reading the underlying representation directly.  Pinned by
+    /// `core-tests/text/text/regression_test.vr::regression_*_reports_capacity`.
+    ///
+    /// `@no_inline` is critical: without it, the Verum compiler
+    /// folds the single-intrinsic body into the caller's bytecode,
+    /// emitting `TextExtended::ByteLen` directly and bypassing the
+    /// Tier-0 intercept.  The intercept can only fire when the call
+    /// reaches the interpreter as `Call(Text.capacity_fid)`.
+    @no_inline
     public fn capacity(&self) -> Int {
-        // Use byte length as capacity proxy (capacity tracking requires runtime support)
         text_byte_len(self)
     }
 
