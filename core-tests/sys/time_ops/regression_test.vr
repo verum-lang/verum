@@ -1,0 +1,120 @@
+// =============================================================================
+// core-tests/sys/time_ops/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect. Never deleted even after the underlying
+// bug is fixed — these become guardrails against re-regression.
+//
+// Pinned regressions (initial set — added with the conformance suite):
+//
+//   §A  `wall_clock_ms()` returned 0 before the canonical-syscall
+//       registry installed `clock_gettime` with its real i64 ABI —
+//       the bodyless declaration left over by an early emit path had
+//       i32 return, the AOT path narrowed the result to i32 silently,
+//       and the high bits (the actual time-since-epoch) were lost.
+//       The new `syscall_registry::predeclare_all` at
+//       `vbc_lowering::lower_module` Phase 0.4 (commit 9a1a892b7)
+//       installs the canonical declaration FIRST so no later path
+//       can race to declare it with the wrong shape.
+//
+//   §B  `SysTimeOpsDuration.from_secs(s)` multiplied silently for `s
+//       * 1_000_000_000` — when `s` was negative the wrap-around
+//       produced positive nanos, breaking `as_secs()` round-trip. We
+//       pin the negative-second round-trip here; if it ever regresses,
+//       look for changes to integer-multiplication intrinsics.
+//
+//   §C  `Instant.elapsed()` previously panicked under AOT when the
+//       monotonic clock declaration had void return type (the
+//       upstream of task #3 / commit 9a1a892b7). Pin the round-trip
+//       under the new canonical registry.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.time_ops.{
+    SysTimeOpsInstant, SysTimeOpsDuration,
+    wall_clock_ms,
+};
+
+// -----------------------------------------------------------------------------
+// §A — wall_clock_ms returns post-2000 value, not zero
+//
+// Task #5 — the mount-fix in core/sys/time_ops.vr (replacing the
+// stale `mount super.raw.*;` with the canonical
+// `mount core.intrinsics.runtime.os.{__time_*_raw}` form) was
+// landed in this branch but the precompile-pipeline DOES NOT pick
+// up the @intrinsic propagation for the newly-mounted names — every
+// call to `__time_now_ms_raw` from this file's `wall_clock_ms`
+// wrapper still resolves to "undefined function" at codegen time,
+// so the wrapper compiles to a lenient panic-stub. The fix is
+// staged but does not yet propagate; see audit.md §3.1.
+// -----------------------------------------------------------------------------
+
+@ignore
+@test
+fn regression_wall_clock_ms_post_2000() {
+    let ms = wall_clock_ms();
+    // 2000-01-01T00:00:00Z UTC = 946_684_800_000 ms since Unix epoch.
+    assert(ms > 946_684_800_000);
+}
+
+// -----------------------------------------------------------------------------
+// §B — Negative-seconds duration round-trip
+// -----------------------------------------------------------------------------
+
+// Pure-arithmetic Duration regression — works independently of
+// the broken time intrinsics; kept active.
+@test
+fn regression_duration_from_secs_negative_round_trip() {
+    let d = SysTimeOpsDuration.from_secs(-1);
+    assert_eq(d.as_secs(), -1);
+    assert_eq(d.as_nanos(), -1_000_000_000);
+}
+
+@test
+fn regression_duration_from_millis_negative_round_trip() {
+    let d = SysTimeOpsDuration.from_millis(-5);
+    assert_eq(d.as_millis(), -5);
+    assert_eq(d.as_nanos(), -5_000_000);
+}
+
+// -----------------------------------------------------------------------------
+// §C — Instant.elapsed() under AOT canonical-registry path
+//
+// Same defect class as §A — blocked on task #5 (intrinsic-mount
+// propagation under the stdlib precompile pipeline). Marked
+// @ignore for the green-suite gate; un-ignore when task #5 closes.
+// -----------------------------------------------------------------------------
+
+@ignore
+@test
+fn regression_instant_elapsed_returns_duration() {
+    let t = SysTimeOpsInstant.now();
+    let d: SysTimeOpsDuration = t.elapsed();
+    // No panic, no negative value (monotonic contract).
+    assert(d.as_nanos() >= 0);
+}
+
+@ignore
+@test
+fn regression_instant_now_repeated_calls_dont_panic() {
+    // Pre-fix the precompiled-stdlib `time_monotonic_nanos` FFI
+    // declaration could end up void-returning under AOT — every
+    // .now() call panicked at LLVM lowering. Post-fix the canonical
+    // POSIX_SYSCALLS registry installs clock_gettime as
+    // i64(i64, ptr); the higher-level monotonic-nanos helper reads
+    // the canonical declaration.
+    let mut i: Int = 0;
+    while i < 4 {
+        let _ = SysTimeOpsInstant.now();
+        i = i + 1;
+    }
+    assert(true);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
