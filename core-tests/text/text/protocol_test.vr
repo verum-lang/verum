@@ -947,6 +947,97 @@ fn join_empty_separator_concatenates() {
 }
 
 // =============================================================================
+// Section P30: count_matches / count — frequency operations
+// =============================================================================
+//
+// Pre-fix, audit §R reported a typechecker ICE on `count_matches`.
+// That ICE no longer reproduces (closed by an unrelated earlier
+// type-inference fix).  These tests pin the contract.
+
+@test
+fn count_matches_three_occurrences() {
+    let s: Text = "abcabcabc";
+    let n: Int = s.count_matches(&"abc");
+    assert_eq(n, 3);
+}
+
+@test
+fn count_matches_zero_when_absent() {
+    let s: Text = "hello";
+    let n: Int = s.count_matches(&"xyz");
+    assert_eq(n, 0);
+}
+
+@test
+fn count_matches_alias_count_agrees() {
+    let s: Text = "abcabc";
+    assert_eq(s.count(&"abc"), s.count_matches(&"abc"));
+}
+
+// =============================================================================
+// Section P31: Ord — cmp produces Ordering variants
+// =============================================================================
+//
+// Pre-fix, audit §I noted Text.cmp returning the wrong Ordering
+// variant under variant-tag stability defects.  Validate the
+// three-arm contract directly.
+
+@test
+fn cmp_equal_returns_equal() {
+    let a: Text = "abc";
+    let b: Text = "abc";
+    match a.cmp(&b) {
+        Equal => (),
+        Less => panic("equal Texts must cmp to Equal, not Less"),
+        Greater => panic("equal Texts must cmp to Equal, not Greater"),
+    };
+}
+
+@test
+fn cmp_less_returns_less() {
+    let a: Text = "abc";
+    let b: Text = "abd";
+    match a.cmp(&b) {
+        Less => (),
+        Equal => panic("abc.cmp(abd) must be Less, not Equal"),
+        Greater => panic("abc.cmp(abd) must be Less, not Greater"),
+    };
+}
+
+@test
+fn cmp_greater_returns_greater() {
+    let a: Text = "abd";
+    let b: Text = "abc";
+    match a.cmp(&b) {
+        Greater => (),
+        Equal => panic("abd.cmp(abc) must be Greater, not Equal"),
+        Less => panic("abd.cmp(abc) must be Greater, not Less"),
+    };
+}
+
+@test
+fn cmp_prefix_is_less() {
+    let a: Text = "ab";
+    let b: Text = "abc";
+    match a.cmp(&b) {
+        Less => (),
+        Equal => panic("ab.cmp(abc) must be Less, not Equal"),
+        Greater => panic("ab.cmp(abc) must be Less, not Greater"),
+    };
+}
+
+@test
+fn cmp_empty_versus_non_empty() {
+    let a: Text = "";
+    let b: Text = "abc";
+    match a.cmp(&b) {
+        Less => (),
+        Equal => panic("''.cmp('abc') must be Less"),
+        Greater => panic("''.cmp('abc') must be Less"),
+    };
+}
+
+// =============================================================================
 // Section P29: Padding family — center / pad_left / pad_right / zfill
 // =============================================================================
 
