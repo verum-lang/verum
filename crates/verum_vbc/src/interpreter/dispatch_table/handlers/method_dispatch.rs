@@ -3762,8 +3762,24 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::unit()));
                 }
                 "contains" => {
+                    // `List.contains(&value)` and `[..].contains(&value)` lower
+                    // the needle as a CBGR reference at the call site (`&value`
+                    // builds a ThinRef pointing at the caller's stack slot).
+                    // Comparing the ref-encoded bits against an Int element's
+                    // NaN-boxed bits never matches — so without the deref the
+                    // intercept reports `contains(&20) == false` for every
+                    // primitive value in the list. Auto-deref through
+                    // `decode_cbgr_ref` recovers the underlying scalar, and
+                    // the bit-equality compare then behaves correctly for Int,
+                    // Bool, Float, small-string Text, and pointer values.
                     let caller_base = state.reg_base();
-                    let needle = state.registers.get(caller_base, Reg(args.start.0));
+                    let needle_raw = state.registers.get(caller_base, Reg(args.start.0));
+                    let needle = if is_cbgr_ref(&needle_raw) {
+                        let (abs_index, _) = decode_cbgr_ref(needle_raw.as_i64());
+                        state.registers.get_absolute(abs_index)
+                    } else {
+                        needle_raw
+                    };
                     let len = get_array_length(ptr, header)?;
                     let mut found = false;
                     for i in 0..len {
