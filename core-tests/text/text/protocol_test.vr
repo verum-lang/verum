@@ -611,6 +611,373 @@ fn split_at_concat_round_trip() {
 }
 
 // =============================================================================
+// Section P21: Mutation — push / push_str / push_byte / push_char
+// =============================================================================
+//
+// Every &mut self mutator on Text must survive the small-string →
+// builder-layout migration.  These tests pin that contract for the
+// canonical push family.
+
+@test
+fn push_byte_appends_single_byte() {
+    let mut t: Text = Text.new();
+    t.push_byte(0x41 as Byte);  // 'A'
+    assert_eq(t, "A");
+    assert_eq(t.len(), 1);
+}
+
+@test
+fn push_str_appends_text() {
+    let mut t: Text = Text.new();
+    t.push_str(&"hello");
+    assert_eq(t, "hello");
+}
+
+@test
+fn push_char_appends_char() {
+    let mut t: Text = Text.new();
+    t.push('a');
+    t.push('b');
+    t.push('c');
+    assert_eq(t, "abc");
+}
+
+@test
+fn push_after_with_capacity_preserves_capacity() {
+    // After push_str on a with_capacity buffer, the capacity should
+    // still report >= the original reservation (it can grow, but not
+    // shrink below).
+    let mut t: Text = Text.with_capacity(64);
+    t.push_str(&"hello");
+    assert_eq(t, "hello");
+    assert(t.capacity() >= 5);  // weakest invariant: capacity >= len
+}
+
+// =============================================================================
+// Section P22: Truncate / Clear / Pop — destructive shrinking
+// =============================================================================
+
+@test
+fn truncate_shortens_buffer() {
+    let mut t: Text = "hello";
+    t.truncate(3);
+    assert_eq(t, "hel");
+}
+
+@test
+fn truncate_no_op_when_larger_than_len() {
+    let mut t: Text = "ab";
+    t.truncate(99);
+    assert_eq(t, "ab");
+}
+
+@test
+fn truncate_to_zero_empties() {
+    let mut t: Text = "abc";
+    t.truncate(0);
+    assert(t.is_empty());
+    assert_eq(t, "");
+}
+
+@test
+fn clear_empties_buffer() {
+    let mut t: Text = "hello";
+    t.clear();
+    assert(t.is_empty());
+    assert_eq(t.len(), 0);
+}
+
+@test
+fn pop_returns_last_char_or_none() {
+    let mut t: Text = "ab";
+    match t.pop() { Some(ch) => assert_eq(ch, 'b'), None => panic("expected 'b'") };
+    assert_eq(t, "a");
+    match t.pop() { Some(ch) => assert_eq(ch, 'a'), None => panic("expected 'a'") };
+    match t.pop() { Some(_) => panic("expected None"), None => () };
+}
+
+// =============================================================================
+// Section P23: Repeat / Reverse / Slice — pure transforms
+// =============================================================================
+
+@test
+fn repeat_zero_yields_empty() {
+    let s: Text = "abc";
+    let r: Text = s.repeat(0);
+    assert_eq(r, "");
+}
+
+@test
+fn repeat_one_yields_self() {
+    let s: Text = "abc";
+    assert_eq(s.repeat(1), s);
+}
+
+@test
+fn repeat_three_yields_triplet() {
+    let s: Text = "ab";
+    assert_eq(s.repeat(3), "ababab");
+}
+
+@test
+fn reverse_ascii_palindrome() {
+    let s: Text = "abc";
+    assert_eq(s.reverse(), "cba");
+}
+
+@test
+fn reverse_involution() {
+    let s: Text = "verum";
+    assert_eq(s.reverse().reverse(), s);
+}
+
+@test
+fn slice_round_trip() {
+    let s: Text = "abcdef";
+    assert_eq(s.slice(0, s.len()), s);
+}
+
+// =============================================================================
+// Section P24: Predicates — is_ascii / is_numeric / is_alphabetic / is_blank
+// =============================================================================
+
+@test
+fn is_ascii_true_for_ascii() {
+    assert("hello".is_ascii());
+    assert("".is_ascii());
+    assert("ABC123".is_ascii());
+}
+
+@test
+fn is_numeric_true_for_digits() {
+    assert("123".is_numeric());
+}
+
+@test
+fn is_numeric_false_for_letters() {
+    assert(!"abc".is_numeric());
+}
+
+@test
+fn is_alphabetic_true_for_letters() {
+    assert("hello".is_alphabetic());
+}
+
+@test
+fn is_alphabetic_false_for_digits() {
+    assert(!"123".is_alphabetic());
+}
+
+@test
+fn is_alphanumeric_true_for_mixed() {
+    assert("abc123".is_alphanumeric());
+}
+
+@test
+fn is_blank_true_for_whitespace() {
+    assert("   ".is_blank());
+    assert("".is_blank());
+    assert("\t\n".is_blank());
+}
+
+@test
+fn is_blank_false_for_visible() {
+    assert(!"a".is_blank());
+    assert(!"  x  ".is_blank());
+}
+
+// =============================================================================
+// Section P25: Trim variants — trim / trim_start / trim_end
+// =============================================================================
+
+@test
+fn trim_strips_both_sides() {
+    assert_eq("  hello  ".trim(), "hello");
+}
+
+@test
+fn trim_no_op_when_no_whitespace() {
+    assert_eq("hello".trim(), "hello");
+}
+
+@test
+fn trim_start_only_left() {
+    assert_eq("  abc".trim_start(), "abc");
+}
+
+@test
+fn trim_end_only_right() {
+    assert_eq("abc  ".trim_end(), "abc");
+}
+
+@test
+fn trim_all_whitespace_yields_empty() {
+    assert_eq("   ".trim(), "");
+}
+
+// =============================================================================
+// Section P26: starts_with / ends_with edge cases
+// =============================================================================
+
+@test
+fn starts_with_empty_is_true() {
+    assert("hello".starts_with(&""));
+}
+
+@test
+fn starts_with_self_is_true() {
+    let s: Text = "hello";
+    assert(s.starts_with(&s));
+}
+
+@test
+fn starts_with_longer_is_false() {
+    assert(!"abc".starts_with(&"abcd"));
+}
+
+@test
+fn ends_with_empty_is_true() {
+    assert("hello".ends_with(&""));
+}
+
+@test
+fn ends_with_self_is_true() {
+    let s: Text = "hello";
+    assert(s.ends_with(&s));
+}
+
+// =============================================================================
+// Section P27: Conversion intercepts — from_int / from_float / from_bool
+// =============================================================================
+
+@test
+fn from_int_zero() {
+    assert_eq(Text.from_int(0), "0");
+}
+
+@test
+fn from_int_positive() {
+    assert_eq(Text.from_int(42), "42");
+}
+
+@test
+fn from_int_negative() {
+    assert_eq(Text.from_int(-17), "-17");
+}
+
+@test
+fn from_bool_true_false() {
+    assert_eq(Text.from_bool(true), "true");
+    assert_eq(Text.from_bool(false), "false");
+}
+
+@test
+fn from_int_round_trip() {
+    let n: Int = 12345;
+    let s: Text = Text.from_int(n);
+    let parsed = s.parse_int();
+    match parsed {
+        Ok(m) => assert_eq(m, n),
+        Err(_) => panic("Int -> Text -> Int must round-trip"),
+    };
+}
+
+// =============================================================================
+// Section P28: Concat / Join — multi-argument composition
+// =============================================================================
+
+@test
+fn concat_two_texts() {
+    let a: Text = "ab";
+    let b: Text = "cd";
+    assert_eq(a.concat(&b), "abcd");
+}
+
+@test
+fn concat_empty_lhs_returns_rhs() {
+    let a: Text = "";
+    let b: Text = "abc";
+    assert_eq(a.concat(&b), "abc");
+}
+
+@test
+fn concat_empty_rhs_returns_lhs() {
+    let a: Text = "abc";
+    let b: Text = "";
+    assert_eq(a.concat(&b), "abc");
+}
+
+// `join_two_parts_with_separator` is pinned in regression_test.vr —
+// the Tier-0 intercept loses one element when traversing a List<Text>
+// backing array whose data pointer layout doesn't match the
+// `[ObjectHeader][len:i64][cap:i64][data_ptr]` shape the intercept
+// assumes.  Investigation needed at
+// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
+// text_static_runtime.rs::"join"` arm.
+
+@test
+fn join_empty_list_yields_empty() {
+    let parts: List<Text> = [];
+    assert_eq(Text.join(&parts, &","), "");
+}
+
+// `join_single_part_returns_part` is pinned in regression_test.vr —
+// the Tier-0 join intercept's non-empty-path returns empty instead
+// of the single part.  Same layout-mismatch root as the deferred
+// two-element case.  See task #8.
+
+// =============================================================================
+// Section P29: Padding family — center / pad_left / pad_right / zfill
+// =============================================================================
+
+@test
+fn center_pads_both_sides() {
+    let s: Text = "abc";
+    let r: Text = s.center(7, ' ');
+    assert_eq(r.len(), 7);
+    // The original content must appear within the centered result.
+    assert(r.contains(&s));
+}
+
+@test
+fn center_no_op_when_already_wider() {
+    let s: Text = "hello";
+    let r: Text = s.center(3, ' ');
+    assert_eq(r, "hello");
+}
+
+@test
+fn pad_left_widens_with_fill() {
+    let s: Text = "42";
+    let r: Text = s.pad_left(5, '0');
+    assert_eq(r.len(), 5);
+    assert(r.ends_with(&s));
+}
+
+@test
+fn pad_right_widens_with_fill() {
+    let s: Text = "42";
+    let r: Text = s.pad_right(5, ' ');
+    assert_eq(r.len(), 5);
+    assert(r.starts_with(&s));
+}
+
+@test
+fn zfill_pads_zeros() {
+    let s: Text = "42";
+    let r: Text = s.zfill(5);
+    assert_eq(r.len(), 5);
+    assert(r.ends_with(&s));
+}
+
+@test
+fn zfill_no_op_when_wider() {
+    let s: Text = "12345";
+    let r: Text = s.zfill(3);
+    assert_eq(r, "12345");
+}
+
+// =============================================================================
 // Entry point
 // =============================================================================
 

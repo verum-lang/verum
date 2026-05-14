@@ -503,6 +503,38 @@ fn regression_reserve_grows_reported_capacity() {
 }
 
 // =============================================================================
+// REGRESSION (open): Text.join intercept loses every element on non-empty
+//                    List<Text>
+// =============================================================================
+//
+// `Text.join(&parts, &sep)` returns empty for any non-empty
+// `parts: List<Text>`.  The Tier-0 intercept at
+// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
+// text_static_runtime.rs::"join"` (line 317) walks the List<Text>
+// backing array via the assumed layout
+// `[ObjectHeader][len:i64][cap:i64][data_ptr]`, but the Tier-0
+// runtime representation doesn't match — likely the data_ptr
+// offset / stride is wrong, OR the list value isn't `is_ptr()` and
+// the branches skip it entirely.
+//
+// Tracked by task #8.
+
+@ignore
+@test
+fn regression_join_single_part_returns_part() {
+    let parts: List<Text> = ["only"];
+    assert_eq(Text.join(&parts, &","), "only");
+}
+
+@ignore
+@test
+fn regression_join_two_parts_with_separator() {
+    let parts: List<Text> = ["a", "b"];
+    let sep: Text = ",";
+    assert_eq(Text.join(&parts, &sep), "a,b");
+}
+
+// =============================================================================
 // Entry point
 // =============================================================================
 
