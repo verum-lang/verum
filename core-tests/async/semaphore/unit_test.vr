@@ -1,0 +1,52 @@
+// =============================================================================
+// core-tests/async/semaphore/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.semaphore` — the async-task counting
+// semaphore.  Today the constructor `AsyncSemaphore.new` panics
+// inside Mutex/AtomicBool initialisation (tracked as task #12);
+// the variant-algebra surface still tests cleanly:
+//
+//   §1 SemaphoreError variant algebra (Closed)
+//
+// All AsyncSemaphore lifecycle tests (new / try_acquire / add_permits /
+// close / available_permits) are pinned in regression_test.vr §A
+// pending task #12.
+// =============================================================================
+
+mount core.async.semaphore.{SemaphoreError};
+
+// =============================================================================
+// Section 1: SemaphoreError variant algebra
+// =============================================================================
+
+@test
+fn test_semaphore_error_closed_construction() {
+    // Use match-arm classification — the bare `is` dispatch on a
+    // single-variant sum returns false (defect, task #13), but the
+    // match arm still routes correctly.
+    let e: SemaphoreError = SemaphoreError.Closed;
+    let routed = match e {
+        SemaphoreError.Closed => true,
+    };
+    assert(routed);
+}
+
+@test
+fn test_semaphore_error_closed_eq_to_self() {
+    let a: SemaphoreError = SemaphoreError.Closed;
+    let b: SemaphoreError = SemaphoreError.Closed;
+    assert(a.eq(&b));
+}
+
+@test
+fn test_semaphore_error_closed_match_arm() {
+    fn classify(e: SemaphoreError) -> Text {
+        match e {
+            SemaphoreError.Closed => "closed",
+        }
+    }
+    assert_eq(classify(SemaphoreError.Closed), "closed");
+}
+
+fn main() {}
