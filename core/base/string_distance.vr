@@ -226,10 +226,14 @@ public fn jaro_winkler(a: &[Byte], b: &[Byte]) -> Float {
 
 /// Find the closest candidate to `query` within `max_distance`.
 /// Returns `(best_match_index, distance)` on success.
+///
+/// Default `max_distance = 3` — the canonical edit-distance
+/// threshold for "did you mean ...?" suggestions; covers most
+/// single-typo / minor-transposition cases without over-matching.
 public fn closest<'a>(
     query:        &[Byte],
     candidates:   &[&'a [Byte]],
-    max_distance: Int,
+    max_distance: Int = 3,
 ) -> Maybe<(Int, Int)> {
     let mut best_idx: Int = -1;
     let mut best_d: Int = max_distance + 1;
