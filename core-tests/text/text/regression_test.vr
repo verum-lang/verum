@@ -455,33 +455,31 @@ fn guard_to_int_roundtrip() {
 }
 
 // =============================================================================
-// REGRESSION (open): Text.capacity() returns byte length, not cap field
+// REGRESSION (closed): Text.capacity() reports the true cap field
 // =============================================================================
 //
-// `Text.with_capacity(64)` allocates a heap-Text with `len=0, cap=64`,
-// but the public `capacity()` method (core/text/text.vr:519) reads
-// `text_byte_len(self)` instead of the `cap` field. After construction
-// the returned Text has `len=0`, so `capacity()` returns 0.
+// Pre-fix, `Text.with_capacity(64).capacity()` returned 0 because
+// `core/text/text.vr::capacity()` body called `text_byte_len(self)`
+// for every representation, silently losing the `cap` field on builder-
+// layout Text values.
 //
-// Fixing this requires a new `text_capacity` intrinsic that dispatches
-// by Text representation:
-//   * Small-string (NaN-boxed, inline 6 bytes): return 6
-//   * Static (immutable view into the binary): return byte_len
-//   * Heap-allocated `{ptr,len,cap}`: return `cap`
+// Closed by adding a `capacity` intercept in the Tier-0 method dispatch
+// at `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
+// method_dispatch.rs` that dispatches by Text representation:
+//   * Small-string (NaN-boxed inline): capacity == byte_len
+//   * FatRef Text (immutable view): capacity == byte_len
+//   * Heap-string flat layout `[hdr][len:u64][bytes...]`: capacity == byte_len
+//   * Builder layout `[hdr]{ptr,len,cap}` (24-byte payload): capacity == cap (field2)
 //
-// User code can't express this dispatch without runtime support, so
-// the stdlib is currently honest but coarse — `capacity()` returns a
-// lower bound on the actual capacity. See task #5 for the full
-// architectural fix (add `TextSubOpcode::Capacity = 0x35`).
+// These pass-guards keep the contract pinned so any regression on the
+// dispatch surfaces immediately.
 
-@ignore
 @test
 fn regression_with_capacity_reports_capacity() {
     let t: Text = Text.with_capacity(64);
     assert(t.capacity() >= 64);
 }
 
-@ignore
 @test
 fn regression_try_with_capacity_reports_capacity() {
     let r: Result<Text, _> = Text.try_with_capacity(64);
@@ -491,6 +489,14 @@ fn regression_try_with_capacity_reports_capacity() {
     };
 }
 
+// `reserve` still pinned ignored — the user-side `Text.reserve` body
+// dispatches through `Text.grow` (CallM, &mut self) which calls
+// `SetF` on a small-string receiver and null-derefs.  The fix sits
+// next to the capacity intercept in method_dispatch.rs but requires
+// migrating the receiver from small-string to builder layout in
+// place via the CBGR-ref writeback discipline (mirrors the
+// `push_str` / `push` intercept).  Pinned to keep the contract
+// visible until the dedicated migration lands.
 @ignore
 @test
 fn regression_reserve_grows_reported_capacity() {

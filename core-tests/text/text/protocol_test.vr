@@ -457,15 +457,20 @@ fn try_with_capacity_zero_returns_empty() {
 }
 
 @test
-fn try_with_capacity_positive_returns_empty() {
-    // Green-path assertion: the constructor returns Ok with an empty
-    // Text. The capacity-tracking assertion (Text.capacity() >= 64) is
-    // pinned separately in regression_test.vr because it requires
-    // runtime support — `Text.capacity()` currently returns the byte
-    // length, not the true `cap` field. See task #5.
+fn try_with_capacity_positive_returns_empty_with_room() {
+    // Closed by the `capacity` intercept in
+    // `method_dispatch.rs` (Tier-0 CallM dispatch) plus the
+    // builder-layout heap allocation in `text_static_runtime.rs`
+    // (`with_capacity` / `try_with_capacity`).  The constructor
+    // returns Ok with an empty Text whose `capacity()` exposes the
+    // `cap` field — see task #5 close-out.
     let r: Result<Text, _> = Text.try_with_capacity(64);
     match r {
-        Ok(t) => { assert(t.is_empty()); assert_eq(t.len(), 0); },
+        Ok(t) => {
+            assert(t.is_empty());
+            assert_eq(t.len(), 0);
+            assert(t.capacity() >= 64);
+        },
         Err(_) => panic("try_with_capacity(64) must succeed"),
     };
 }

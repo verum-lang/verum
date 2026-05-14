@@ -84,9 +84,6 @@ pub(in super::super) fn handle_call_method(
     } else {
         method_name.clone()
     };
-    if std::env::var("VERUM_TRACE_TEXT_INTERCEPT").is_ok() && bare_method_name == "capacity" {
-        eprintln!("[callm-trace] method='{}' bare='{}'", method_name, bare_method_name);
-    }
 
     // **High-level Rust intercept** — TcpStream method calls
     // (`read`, `write`, `flush`, `close`) bypass the libSystem
@@ -6621,6 +6618,76 @@ pub(super) fn dispatch_primitive_method(
             }
             "is_empty" => {
                 return Ok(Some(Value::from_bool(text.is_empty())));
+            }
+            // `capacity()` reports the byte budget the buffer can hold
+            // without reallocating.  Dispatches by representation:
+            //
+            //   * small-string (NaN-boxed inline): capacity == byte_len
+            //   * FatRef Text (immutable byte view):  capacity == byte_len
+            //   * heap-string `[hdr][len:u64][bytes…]` (flat, immutable):
+            //                                        capacity == byte_len
+            //   * builder layout `[hdr]{ptr,len,cap}` (24-byte payload —
+            //     what `Text.with_capacity` / `try_with_capacity` /
+            //     `reserve` produce): capacity == field2 (the `cap` field)
+            //
+            // Pre-fix, the user-side `capacity()` body returned
+            // `text_byte_len(self)`, which lost the `cap` field on every
+            // builder-layout Text.  Pinned by
+            // `core-tests/text/text/regression_test.vr::
+            // regression_with_capacity_reports_capacity` and siblings.
+            "capacity" => {
+                let cap = if receiver.is_small_string() {
+                    receiver.as_small_string().len() as i64
+                } else if receiver.is_fat_ref() {
+                    receiver.as_fat_ref().len() as i64
+                } else if receiver.is_ptr() && !receiver.is_nil() {
+                    let base = receiver.as_ptr::<u8>();
+                    if !base.is_null()
+                        && (base as usize)
+                            .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+                    {
+                        let header = unsafe { heap::ObjectHeader::ref_or_stub(base) };
+                        if header.type_id == TypeId::TEXT
+                            || header.type_id == TypeId(0x0001)
+                        {
+                            let data_ptr =
+                                unsafe { base.add(heap::OBJECT_HEADER_SIZE) };
+                            let header_size = header.size as usize;
+                            if header_size == 24 {
+                                // Builder layout: disambiguate via field1
+                                // (Int → builder, else → 16-byte heap-
+                                // string).  Builder's field2 holds cap.
+                                let field1 = unsafe {
+                                    *(data_ptr as *const Value).add(1)
+                                };
+                                if field1.is_int() {
+                                    let field2 = unsafe {
+                                        *(data_ptr as *const Value).add(2)
+                                    };
+                                    if field2.is_int() {
+                                        field2.as_i64()
+                                    } else {
+                                        unsafe {
+                                            *(data_ptr as *const u64).add(2)
+                                                as i64
+                                        }
+                                    }
+                                } else {
+                                    text.len() as i64
+                                }
+                            } else {
+                                text.len() as i64
+                            }
+                        } else {
+                            text.len() as i64
+                        }
+                    } else {
+                        text.len() as i64
+                    }
+                } else {
+                    text.len() as i64
+                };
+                return Ok(Some(Value::from_i64(cap)));
             }
             "contains" => {
                 let arg = state.get_reg(Reg(args.start.0));

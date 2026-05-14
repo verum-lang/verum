@@ -29,6 +29,7 @@
 //!  * `Text.from_char(ch: Char)`        — single-char Text
 
 use super::super::super::error::InterpreterResult;
+use super::super::super::heap;
 use super::super::super::state::InterpreterState;
 use super::heap_helpers::{extract_byte_slice, wrap_in_variant};
 use super::string_helpers::alloc_string_value;
@@ -65,17 +66,132 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             Ok(Some(empty_text()))
         }
         "with_capacity" if arg_count == 1 => {
-            // Capacity hint is informational at Tier-0 (the heap
-            // grows on demand).  Read the arg solely to validate
-            // shape; an empty Text is the canonical return.
-            let _ = read_arg(state, args_start_reg, 0, caller_base);
-            Ok(Some(empty_text()))
+            // Allocate a builder-layout Text `{ptr, len, cap}` so that
+            // the `cap` field survives to subsequent `capacity()` /
+            // `push_*` calls.  Pre-fix this returned an empty small-
+            // string, silently discarding the capacity argument — see
+            // `core-tests/text/text/regression_test.vr::regression_with_capacity_*`.
+            let cap = match read_arg(state, args_start_reg, 0, caller_base) {
+                Some(v) if v.is_int() => v.as_i64(),
+                _ => 0,
+            };
+            Ok(Some(alloc_text_builder(state, cap)?))
         }
         "try_with_capacity" if arg_count == 1 => {
-            // `Result<Text, AllocError>` — always Ok at Tier-0.
-            let _ = read_arg(state, args_start_reg, 0, caller_base);
-            let empty = empty_text();
-            Ok(Some(wrap_in_variant(state, "Result", 0, &[empty])?))
+            // `Result<Text, AllocError>` — always Ok at Tier-0 (the
+            // host allocator panics on OOM rather than returning Err).
+            // Same builder-layout allocation as `with_capacity`.
+            let cap = match read_arg(state, args_start_reg, 0, caller_base) {
+                Some(v) if v.is_int() => v.as_i64(),
+                _ => 0,
+            };
+            let val = alloc_text_builder(state, cap)?;
+            Ok(Some(wrap_in_variant(state, "Result", 0, &[val])?))
+        }
+        // Instance-method intercept: `Text.capacity(&self) -> Int`.
+        //
+        // The user-side body calls `text_byte_len(self)` which loses
+        // the `cap` field on builder-layout Text values (the Tier-0
+        // `TextExtended::ByteLen` handler only recognises small-string
+        // values; non-small returns 0).  This intercept dispatches
+        // directly on the runtime representation:
+        //
+        //   * small-string (NaN-boxed inline):  capacity == byte_len
+        //   * FatRef Text (immutable byte view): capacity == byte_len
+        //   * heap-string `[hdr][len:u64][bytes…]` (flat, immutable):
+        //                                        capacity == byte_len
+        //   * builder layout `[hdr]{ptr,len,cap}` (24-byte payload):
+        //                                        capacity == field2 (cap)
+        //
+        // Pinned by `core-tests/text/text/regression_test.vr::
+        // regression_with_capacity_reports_capacity` and siblings.
+        "capacity" if arg_count == 1 => {
+            use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
+            let raw = state
+                .registers
+                .get(caller_base, Reg(args_start_reg));
+            let v = if is_cbgr_ref(&raw) {
+                let (abs_index, _) = decode_cbgr_ref(raw.as_i64());
+                state.registers.get_absolute(abs_index)
+            } else if raw.is_thin_ref() {
+                let tr = raw.as_thin_ref();
+                if !tr.ptr.is_null() {
+                    unsafe { *(tr.ptr as *const Value) }
+                } else {
+                    raw
+                }
+            } else {
+                raw
+            };
+            Ok(Some(Value::from_i64(text_capacity_value(&v))))
+        }
+        // Instance-method intercept: `Text.reserve(&mut self, additional: Int)`.
+        //
+        // The stdlib body grows the underlying buffer in-place via
+        // `Text.grow`, but `Text.new()` returns a small-string that has
+        // no heap object to mutate.  Migrating from small → builder
+        // layout requires writing back through the receiver's CBGR ref
+        // (same writeback discipline as `push_str` / `push` / `push_byte`).
+        //
+        // After the intercept, `self` holds a builder-layout heap object
+        // with `len = previous_len`, `cap = max(old_cap, len + additional)`.
+        "reserve" if arg_count == 2 => {
+            use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
+            use super::string_helpers::extract_string;
+            let self_raw = state
+                .registers
+                .get(caller_base, Reg(args_start_reg));
+            let add_raw = state
+                .registers
+                .get(caller_base, Reg(args_start_reg + 1));
+            let additional = if add_raw.is_int() { add_raw.as_i64() } else { 0 };
+            if additional <= 0 {
+                return Ok(Some(Value::unit()));
+            }
+            // Decode receiver — may be a CBGR ref pointing into the
+            // caller's register window, OR a ThinRef pointing into
+            // some other register slot.  We need the absolute register
+            // to write the new value back into.
+            let (writeback_abs, current_val) = if is_cbgr_ref(&self_raw) {
+                let (abs, _) = decode_cbgr_ref(self_raw.as_i64());
+                (Some(abs), state.registers.get_absolute(abs))
+            } else if self_raw.is_thin_ref() {
+                let tr = self_raw.as_thin_ref();
+                let v = if !tr.ptr.is_null() {
+                    unsafe { *(tr.ptr as *const Value) }
+                } else {
+                    self_raw
+                };
+                (None, v)
+            } else {
+                (None, self_raw)
+            };
+            let bytes = extract_string(&current_val, state);
+            let current_len = bytes.len() as i64;
+            let current_cap = text_capacity_value(&current_val);
+            let needed_cap = current_len + additional;
+            let new_cap = if needed_cap > current_cap { needed_cap } else { current_cap };
+            // Allocate a new builder layout and carry the existing
+            // bytes across.  Field0 holds a fresh heap-string Value
+            // carrying the bytes; field1 = len; field2 = cap.
+            let bytes_val = if bytes.is_empty() {
+                Value::nil()
+            } else {
+                alloc_string_value(state, &bytes)?
+            };
+            let new_val = alloc_text_builder_with_bytes(
+                state,
+                bytes_val,
+                current_len,
+                new_cap,
+            )?;
+            // Write back through the CBGR ref so the caller sees the
+            // new representation.  Without writeback the receiver
+            // register still points at the old small-string value.
+            if let Some(abs) = writeback_abs {
+                state.registers.set_absolute(abs, new_val);
+            }
+            Ok(Some(Value::unit()))
         }
         "from_static" if arg_count == 1 => {
             // Identity: `from_static(&'static Text)` collapses to
@@ -414,4 +530,104 @@ fn read_arg(
         .registers
         .get(caller_base, Reg(args_start_reg + idx as u16));
     Some(v)
+}
+
+/// Allocate a builder-layout Text `[ObjectHeader]{ptr,len,cap}` with
+/// the given capacity hint, zero bytes written so far, and a null
+/// `ptr` slot.  This is the canonical empty-with-capacity shape that
+/// `Text.with_capacity` / `try_with_capacity` must produce so the
+/// `cap` field survives to subsequent method dispatches.
+///
+/// Layout disambiguation: field1 (`len`) is stored as
+/// `Value::from_i64(0)` so the `AsBytes` / `extract_string` handlers'
+/// "field1 is Int → builder layout" branch fires; field2 (`cap`)
+/// holds the requested capacity.  Field0 is `Value::nil()` (no
+/// allocated byte buffer yet — the buffer is allocated lazily on the
+/// first `push_*` that exceeds the small-string inline budget).
+#[inline]
+fn alloc_text_builder(
+    state: &mut InterpreterState,
+    cap: i64,
+) -> InterpreterResult<Value> {
+    alloc_text_builder_with_bytes(state, Value::nil(), 0, cap)
+}
+
+/// Allocate a builder-layout Text with an existing byte payload.  Used
+/// by `reserve` to migrate a small-string value to the builder
+/// representation while preserving the existing bytes.  `bytes_val`
+/// is the Value carrying the bytes (typically a heap-string Value
+/// produced by `alloc_string_value`), `len` is the byte count, and
+/// `cap` is the new capacity (>= len).
+fn alloc_text_builder_with_bytes(
+    state: &mut InterpreterState,
+    bytes_val: Value,
+    len: i64,
+    cap: i64,
+) -> InterpreterResult<Value> {
+    // 24-byte payload: three Value-sized slots.  Use `TypeId::TEXT` so
+    // every downstream Text-classifier (`is_heap_string`, the AsBytes
+    // handler's builder-layout branch, `extract_string`, …) recognises
+    // the allocation as Text-shaped.
+    let obj = state.heap.alloc(crate::types::TypeId::TEXT, 24)?;
+    state.record_allocation();
+    let base = obj.as_ptr() as *mut u8;
+    unsafe {
+        let data_ptr = base.add(heap::OBJECT_HEADER_SIZE) as *mut Value;
+        *data_ptr = bytes_val;
+        *data_ptr.add(1) = Value::from_i64(len);
+        *data_ptr.add(2) = Value::from_i64(cap);
+    }
+    Ok(Value::from_ptr(base))
+}
+
+/// Read the capacity of a Text Value, dispatching by representation.
+/// Returns the byte budget the buffer can hold without reallocating.
+///
+///   * small-string (NaN-boxed inline): byte_len
+///   * FatRef Text (immutable byte view): byte_len
+///   * heap-string flat layout `[hdr][len:u64][bytes…]`: byte_len
+///   * builder layout `[hdr]{ptr,len,cap}` (24-byte payload): cap (field2)
+fn text_capacity_value(v: &Value) -> i64 {
+    if v.is_small_string() {
+        return v.as_small_string().len() as i64;
+    }
+    if v.is_fat_ref() {
+        return v.as_fat_ref().len() as i64;
+    }
+    if !v.is_ptr() || v.is_nil() {
+        return 0;
+    }
+    let base = v.as_ptr::<u8>();
+    if base.is_null()
+        || !(base as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+    {
+        return 0;
+    }
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(base) };
+    if header.type_id != crate::types::TypeId::TEXT
+        && header.type_id != crate::types::TypeId(0x0001)
+    {
+        return 0;
+    }
+    let data_ptr = unsafe { base.add(heap::OBJECT_HEADER_SIZE) };
+    let header_size = header.size as usize;
+    if header_size == 24 {
+        // Builder layout: disambiguate via field1 (Int → builder, else
+        // → 16-byte heap-string).  Builder's field2 holds cap.
+        let field1 = unsafe { *(data_ptr as *const Value).add(1) };
+        if field1.is_int() {
+            let field2 = unsafe { *(data_ptr as *const Value).add(2) };
+            if field2.is_int() {
+                return field2.as_i64();
+            }
+            return unsafe { *(data_ptr as *const u64).add(2) } as i64;
+        }
+        // 16-byte heap-string layout: `[len:u64][bytes…]`, no cap to
+        // report — capacity == byte_len.
+        let len_ptr = data_ptr as *const u64;
+        return unsafe { *len_ptr } as i64;
+    }
+    // Flat heap-string layout: `[len:u64][bytes…]`, no cap, immutable.
+    let len_ptr = data_ptr as *const u64;
+    unsafe { *len_ptr as i64 }
 }
