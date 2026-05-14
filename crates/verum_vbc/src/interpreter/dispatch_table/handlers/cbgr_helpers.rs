@@ -78,6 +78,61 @@ pub(super) fn is_cbgr_ref(val: &Value) -> bool {
     val.is_inline_int() && val.as_i64() < -(1i64 << 32)
 }
 
+/// Resolve a method-call argument Value to its underlying scalar Value,
+/// regardless of which reference shape the caller passed.
+///
+/// Verum lowers `&expr` to one of three runtime shapes depending on the
+/// shape of `expr`:
+///
+///   * **CBGR register-ref** — emitted by `UnOp::Ref` on a bare variable
+///     (`&x` where `x: Int`). Encoded as a negative inline-Int packing
+///     `(abs_index, generation)`; decoded via [`decode_cbgr_ref`].
+///   * **Heap-interior pointer** — emitted by `RefListElement` / `RefField`
+///     when the borrow target lives inside a heap object (`&xs[i]`,
+///     `&record.field`). Encoded as `Value::from_ptr(elem_ptr)` and
+///     tracked in `state.cbgr_mutable_ptrs` so the generic Deref handler
+///     reads through it instead of returning the pointer as a value.
+///   * **ThinRef** — 16-byte CBGR reference produced by some FFI / mem
+///     paths; pointer + generation + epoch in heap. Auto-derefed via
+///     `*const Value` when non-null.
+///
+/// Every primitive-method intercept that consumes `other: &T` MUST funnel
+/// the argument through this helper. The buggy alternative — checking
+/// only `is_cbgr_ref` and otherwise calling `val.as_i64()` — silently
+/// returns the raw pointer address when the caller borrowed a list
+/// element or a field, producing nonsense comparisons (e.g. for
+/// `xs[0].cmp(&xs[1])` the bubble-sort decision flips).
+///
+/// The helper deliberately does NOT validate generation/epoch — it
+/// preserves whatever the caller's CBGR-validation policy is (see
+/// `state.config.cbgr_enabled`). Callers that need validation should
+/// invoke [`validate_cbgr_generation`] on the decoded `(abs_index, gen)`
+/// pair separately; matches the pre-existing behaviour of the 24 sites
+/// this helper replaces.
+#[inline]
+pub(super) fn resolve_arg_value(
+    state: &super::super::super::state::InterpreterState,
+    val: Value,
+) -> Value {
+    if is_cbgr_ref(&val) {
+        let (abs_index, _gen) = decode_cbgr_ref(val.as_i64());
+        return state.registers.get_absolute(abs_index);
+    }
+    if val.is_ptr() && !val.is_nil() {
+        let ptr_addr = val.as_ptr::<u8>() as usize;
+        if state.cbgr_mutable_ptrs.contains(&ptr_addr) {
+            return unsafe { *(ptr_addr as *const Value) };
+        }
+    }
+    if val.is_thin_ref() {
+        let thin_ref = val.as_thin_ref();
+        if !thin_ref.ptr.is_null() {
+            return unsafe { *(thin_ref.ptr as *const Value) };
+        }
+    }
+    val
+}
+
 /// Validates CBGR generation and epoch for a register-based reference.
 ///
 
