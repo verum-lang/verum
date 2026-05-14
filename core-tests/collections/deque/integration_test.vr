@@ -1,0 +1,125 @@
+// =============================================================================
+// core-tests/collections/deque/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.collections.deque`. Deque<T> is the
+// canonical work-queue / BFS-frontier / sliding-window primitive — these
+// tests exercise it in those interaction shapes.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.deque.Deque;
+
+// =============================================================================
+// §1  BFS frontier — FIFO discipline over Int "nodes"
+// =============================================================================
+
+@test
+fn integration_deque_as_bfs_frontier() {
+    // Seed the frontier with a "root" node, simulate enumerating two
+    // children, then continue draining FIFO.
+    let mut frontier: Deque<Int> = Deque.new();
+    frontier.push_back(1);
+    // Visit 1: discovers 2, 3.
+    let v1 = frontier.pop_front();
+    assert_eq(v1, Some(1));
+    frontier.push_back(2);
+    frontier.push_back(3);
+    // Visit 2: discovers 4.
+    let v2 = frontier.pop_front();
+    assert_eq(v2, Some(2));
+    frontier.push_back(4);
+    // Drain remaining in FIFO order.
+    assert_eq(frontier.pop_front(), Some(3));
+    assert_eq(frontier.pop_front(), Some(4));
+    assert(frontier.is_empty());
+}
+
+// =============================================================================
+// §2  Work-queue with priority shortcut (push_front for high-priority)
+// =============================================================================
+
+@test
+fn integration_deque_as_work_queue_with_priority_shortcut() {
+    let mut q: Deque<Int> = Deque.new();
+    q.push_back(10);
+    q.push_back(20);
+    q.push_back(30);
+    // High-priority item arrives — jumps to the front.
+    q.push_front(999);
+    assert_eq(q.pop_front(), Some(999));
+    assert_eq(q.pop_front(), Some(10));
+    assert_eq(q.pop_front(), Some(20));
+    assert_eq(q.pop_front(), Some(30));
+}
+
+// =============================================================================
+// §3  Sliding window of fixed size N
+// =============================================================================
+
+@test
+fn integration_deque_as_sliding_window_drops_oldest() {
+    // Maintain a window of size 3: every new element pushes the
+    // oldest one out the front.
+    let mut win: Deque<Int> = Deque.new();
+    let mut i = 1;
+    while i <= 10 {
+        win.push_back(i);
+        if win.len() > 3 {
+            let _ = win.pop_front();
+        }
+        i = i + 1;
+    }
+    // After processing 1..=10 with window size 3, the window holds
+    // the last 3 elements: 8, 9, 10.
+    assert_eq(win.len(), 3);
+    assert_eq(win.front(), Some(8));
+    assert_eq(win.back(), Some(10));
+}
+
+// =============================================================================
+// §4  Reversal via paired pop_back + push_front into a new deque
+// =============================================================================
+
+@test
+fn integration_deque_reversal_via_pop_back_push_front() {
+    let mut src: Deque<Int> = Deque.new();
+    src.push_back(1);
+    src.push_back(2);
+    src.push_back(3);
+    src.push_back(4);
+
+    let mut rev: Deque<Int> = Deque.new();
+    while !src.is_empty() {
+        // pop_back yields elements in reverse insertion order.
+        let v = src.pop_back();
+        match v {
+            Some(x) => rev.push_back(x),
+            None => {},
+        }
+    }
+    assert_eq(rev.len(), 4);
+    assert_eq(rev.pop_front(), Some(4));
+    assert_eq(rev.pop_front(), Some(3));
+    assert_eq(rev.pop_front(), Some(2));
+    assert_eq(rev.pop_front(), Some(1));
+}
+
+// =============================================================================
+// §5  Two independent deque instances don't share state
+// =============================================================================
+
+@test
+fn integration_two_deques_are_independent() {
+    let mut a: Deque<Int> = Deque.new();
+    let mut b: Deque<Int> = Deque.new();
+    a.push_back(1);
+    a.push_back(2);
+    b.push_back(99);
+    assert_eq(a.len(), 2);
+    assert_eq(b.len(), 1);
+    assert_eq(a.front(), Some(1));
+    assert_eq(b.front(), Some(99));
+}
+
+fn main() {}

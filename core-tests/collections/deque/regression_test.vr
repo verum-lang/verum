@@ -1,0 +1,80 @@
+// =============================================================================
+// core-tests/collections/deque/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions surfaced while building the deque conformance suite.
+// Each test reproduces a specific stdlib / language-level defect in the
+// minimum form possible. `@ignore`d tests stay forever even after the
+// underlying defect closes — they then become guardrails.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.deque.Deque;
+
+// =============================================================================
+// §A  Static-constructor name resolution for non-intercepted constructors.
+//
+//   Same defect class as the List equivalent (see
+//   `core-tests/collections/list/regression_test.vr` §A). `Deque.new` is
+//   intercepted at the dispatch-table static-constructor block, but
+//   `Deque.with_capacity(n)` is a real `public fn` and isn't intercepted,
+//   so the codegen lookup for `Deque.with_capacity` may miss in the
+//   user-side function-id remap.
+// =============================================================================
+
+@ignore
+@test
+fn regression_deque_with_capacity_undefined_function() {
+    // Expected: Deque.with_capacity(16) creates a Deque<Int> with cap >= 16.
+    // Actual: pre-fix, codegen raises UndefinedFunction("Deque.with_capacity").
+    let d: Deque<Int> = Deque.with_capacity(16);
+    assert_eq(d.len(), 0);
+    assert(d.capacity() >= 16);
+}
+
+@ignore
+@test
+fn regression_deque_from_list_undefined_function() {
+    // Expected: Deque.from_list builds a Deque from a List in FIFO order.
+    // Actual: not in any user-side body Call instruction, so the function-
+    // id remap drops the entry — UndefinedFunction at every user-side use.
+    let xs: List<Int> = [1, 2, 3];
+    let d: Deque<Int> = Deque.from_list(&xs);
+    assert_eq(d.len(), 3);
+    assert_eq(d.front(), Some(1));
+}
+
+// =============================================================================
+// §B  Unintercepted methods that touch `self.<field>` work IFF the stdlib
+//     type-decl field order matches the runtime intercept layout.
+//
+//   Deque's stdlib type decl `{ data, head, len, cap }` matches the runtime
+//   intercept's `[data@0, head@1, len@2, cap@3]` allocation, so
+//   `self.len` / `self.head` / `self.data` / `self.cap` resolve to the
+//   correct slot. The List defect class (#B in core-tests/collections/list)
+//   does NOT apply here — but the lemma DOES: every collection's stdlib
+//   type-decl field order must match the runtime intercept's slot
+//   ordering. Pin this as an architectural guardrail.
+// =============================================================================
+
+@test
+fn regression_deque_field_order_matches_runtime_layout() {
+    // If stdlib field order ever drifts from runtime intercept layout,
+    // a sequence of push_back + pop_front + push_back fails because
+    // head/len/cap end up in the wrong slots and the wrap_index math
+    // misroutes.
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    let _ = d.pop_front();
+    d.push_back(4);
+    let _ = d.pop_front();
+    d.push_back(5);
+    assert_eq(d.len(), 3);
+    assert_eq(d.pop_front(), Some(3));
+    assert_eq(d.pop_front(), Some(4));
+    assert_eq(d.pop_front(), Some(5));
+}
+
+fn main() {}

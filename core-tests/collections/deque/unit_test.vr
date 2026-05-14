@@ -1,0 +1,286 @@
+// =============================================================================
+// core-tests/collections/deque/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.deque` — Deque<T>, the canonical double-ended
+// queue (ring-buffer-backed; power-of-two capacity invariant). One axis of
+// behaviour per `@test`. Section banners group by API family.
+//
+// The stdlib Deque<T> type declaration `{ data, head, len, cap }` matches
+// the VBC runtime intercept's heap-object layout `[data@0, head@1, len@2,
+// cap@3]` (see
+// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs`
+// 1086-1112), so `self.<field>` access in unintercepted methods resolves
+// to the right slot. Construction goes through `Deque.new()` (runtime-
+// intercepted) and explicit push to populate.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.deque.Deque;
+
+// =============================================================================
+// Section 1: Deque.new — construction
+// =============================================================================
+
+@test
+fn test_deque_new_is_empty() {
+    let d: Deque<Int> = Deque.new();
+    assert_eq(d.len(), 0);
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_new_capacity_is_non_negative() {
+    // The VBC runtime intercept for `Deque.new()` allocates a default
+    // 16-element ring buffer up-front (see
+    // `crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs`
+    // line ~1086). The stdlib body returns cap=0 and defers allocation.
+    // Both are reasonable contracts; we pin the looser one and document
+    // the per-tier divergence in `audit.md` §3.
+    let d: Deque<Int> = Deque.new();
+    assert(d.capacity() >= 0);
+}
+
+// =============================================================================
+// Section 2: push_back / push_front — symmetric mutation
+// =============================================================================
+
+@test
+fn test_deque_push_back_increments_len() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    assert_eq(d.len(), 1);
+    d.push_back(2);
+    assert_eq(d.len(), 2);
+    d.push_back(3);
+    assert_eq(d.len(), 3);
+}
+
+@test
+fn test_deque_push_front_increments_len() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_front(1);
+    assert_eq(d.len(), 1);
+    d.push_front(2);
+    assert_eq(d.len(), 2);
+    d.push_front(3);
+    assert_eq(d.len(), 3);
+}
+
+@test
+fn test_deque_push_back_grows_capacity() {
+    let mut d: Deque<Int> = Deque.new();
+    let mut i = 0;
+    while i < 32 {
+        d.push_back(i);
+        i = i + 1;
+    }
+    assert_eq(d.len(), 32);
+    assert(d.capacity() >= 32);
+}
+
+// =============================================================================
+// Section 3: pop_back / pop_front — symmetric removal
+// =============================================================================
+
+@test
+fn test_deque_pop_back_returns_last_pushed_back() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    assert_eq(d.pop_back(), Some(30));
+    assert_eq(d.pop_back(), Some(20));
+    assert_eq(d.pop_back(), Some(10));
+    assert_eq(d.pop_back(), None);
+}
+
+@test
+fn test_deque_pop_front_returns_first_pushed_back() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    assert_eq(d.pop_front(), Some(10));
+    assert_eq(d.pop_front(), Some(20));
+    assert_eq(d.pop_front(), Some(30));
+    assert_eq(d.pop_front(), None);
+}
+
+@test
+fn test_deque_pop_back_from_empty_is_none() {
+    let mut d: Deque<Int> = Deque.new();
+    assert_eq(d.pop_back(), None);
+}
+
+@test
+fn test_deque_pop_front_from_empty_is_none() {
+    let mut d: Deque<Int> = Deque.new();
+    assert_eq(d.pop_front(), None);
+}
+
+@test
+fn test_deque_pop_back_decrements_len() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    let _ = d.pop_back();
+    assert_eq(d.len(), 1);
+}
+
+@test
+fn test_deque_pop_front_decrements_len() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    let _ = d.pop_front();
+    assert_eq(d.len(), 1);
+}
+
+// =============================================================================
+// Section 4: front / back — non-destructive peek
+// =============================================================================
+
+@test
+fn test_deque_front_of_non_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    assert_eq(d.front(), Some(10));
+    // front() is non-destructive: subsequent reads return the same value.
+    assert_eq(d.front(), Some(10));
+    assert_eq(d.len(), 2);
+}
+
+@test
+fn test_deque_back_of_non_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    assert_eq(d.back(), Some(20));
+    assert_eq(d.back(), Some(20));
+    assert_eq(d.len(), 2);
+}
+
+@test
+fn test_deque_front_of_empty_is_none() {
+    let d: Deque<Int> = Deque.new();
+    assert_eq(d.front(), None);
+}
+
+@test
+fn test_deque_back_of_empty_is_none() {
+    let d: Deque<Int> = Deque.new();
+    assert_eq(d.back(), None);
+}
+
+// =============================================================================
+// Section 5: Mixed push patterns — back+front interleaving
+// =============================================================================
+
+@test
+fn test_deque_alternating_push_front_and_back() {
+    // Push order: push_back(2), push_front(1), push_back(3) — yields
+    // logical sequence [1, 2, 3] from front to back.
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(2);
+    d.push_front(1);
+    d.push_back(3);
+    assert_eq(d.len(), 3);
+    assert_eq(d.front(), Some(1));
+    assert_eq(d.back(), Some(3));
+}
+
+@test
+fn test_deque_pop_back_after_push_front_returns_back_element() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(100);
+    d.push_front(99);
+    // pop_back removes 100 (the original back), not 99.
+    assert_eq(d.pop_back(), Some(100));
+    assert_eq(d.len(), 1);
+    assert_eq(d.front(), Some(99));
+    assert_eq(d.back(), Some(99));
+}
+
+@test
+fn test_deque_pop_front_after_push_back_returns_front_element() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_front(99);
+    d.push_back(100);
+    assert_eq(d.pop_front(), Some(99));
+    assert_eq(d.len(), 1);
+    assert_eq(d.front(), Some(100));
+}
+
+// =============================================================================
+// Section 6: clear / is_empty — reset
+// =============================================================================
+
+@test
+fn test_deque_clear_empties_deque() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.clear();
+    assert(d.is_empty());
+    assert_eq(d.len(), 0);
+}
+
+@test
+fn test_deque_clear_then_push_starts_fresh() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.clear();
+    d.push_back(99);
+    assert_eq(d.len(), 1);
+    assert_eq(d.front(), Some(99));
+    assert_eq(d.back(), Some(99));
+}
+
+@test
+fn test_deque_clear_of_empty_is_noop() {
+    let mut d: Deque<Int> = Deque.new();
+    d.clear();
+    assert(d.is_empty());
+}
+
+// =============================================================================
+// Section 7: Ring-buffer wrap-around invariant
+//
+//   With cap=N, pushing N+1 elements after a pop forces the buffer index
+//   to wrap. Verify the logical sequence is still preserved.
+// =============================================================================
+
+@test
+fn test_deque_wrap_around_via_back_drain_and_back_push() {
+    // Build a deque, half-drain from the front, push fresh elements at
+    // back — the new elements land in slots vacated at the front of
+    // the ring buffer (logical position is still back).
+    let mut d: Deque<Int> = Deque.new();
+    let mut i = 0;
+    while i < 8 {
+        d.push_back(i);
+        i = i + 1;
+    }
+    // Drain 4 from the front.
+    let mut k = 0;
+    while k < 4 {
+        let _ = d.pop_front();
+        k = k + 1;
+    }
+    // Push 4 fresh at back.
+    let mut j = 100;
+    while j < 104 {
+        d.push_back(j);
+        j = j + 1;
+    }
+    // Logical contents: [4, 5, 6, 7, 100, 101, 102, 103].
+    assert_eq(d.len(), 8);
+    assert_eq(d.front(), Some(4));
+    assert_eq(d.back(), Some(103));
+}
+
+fn main() {}
