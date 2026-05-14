@@ -4841,6 +4841,50 @@ impl TypeChecker {
 
     /// This is called before Phase 2 (type checking) so that constants defined
     /// after functions in source order are still visible within function bodies.
+    /// Reject duplicate item names within a single `impl` / `implement` block.
+    ///
+    /// Without this guard the HashMap-backed registries (`inherent_methods`,
+    /// protocol-method tables, associated-type tables) silently let the second
+    /// definition overwrite the first, so the second body wins — a defect
+    /// witnessed by `Heap.is_freed` appearing twice in `core/base/memory.vr`
+    /// before commit X (both bodies identical, but the second masking the
+    /// first is structurally indistinguishable from a typo or a botched
+    /// merge). Method/const/type/proof names share a single per-impl
+    /// namespace, so we reject collisions across kinds too.
+    fn check_no_duplicate_impl_items(
+        impl_decl: &verum_ast::decl::ImplDecl,
+    ) -> Result<()> {
+        use std::collections::HashSet;
+        use verum_ast::decl::ImplItemKind;
+        let mut seen: HashSet<String> = HashSet::new();
+        for item in impl_decl.items.iter() {
+            let name = match &item.kind {
+                ImplItemKind::Function(f) => f.name.name.as_str().to_string(),
+                ImplItemKind::Type { name, .. } => name.name.as_str().to_string(),
+                ImplItemKind::Const { name, .. } => name.name.as_str().to_string(),
+                ImplItemKind::Proof { axiom_name, .. } => axiom_name.name.as_str().to_string(),
+            };
+            if !seen.insert(name.clone()) {
+                let kind = match &item.kind {
+                    ImplItemKind::Function(_) => "method",
+                    ImplItemKind::Type { .. } => "associated type",
+                    ImplItemKind::Const { .. } => "associated const",
+                    ImplItemKind::Proof { .. } => "proof clause",
+                };
+                return Err(TypeError::Other(verum_common::Text::from(format!(
+                    "duplicate {} '{}' in impl block.\n  \
+                     note: the same name cannot be defined more than once \
+                     within a single `implement` block — the second \
+                     definition would silently shadow the first.\n  \
+                     help: rename one of the definitions, or merge their \
+                     bodies if both were meant to express the same operation",
+                    kind, name
+                ))));
+            }
+        }
+        Ok(())
+    }
+
     /// Register method signatures from an `implement Type { ... }` (inherent) block.
     /// Processes both static and instance methods, resolves Self type, and wires
     /// per-instantiation method-gating patterns.
@@ -4851,6 +4895,7 @@ impl TypeChecker {
     ) -> Result<()> {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
         use verum_common::Text;
+        Self::check_no_duplicate_impl_items(impl_decl)?;
         let ImplKind::Inherent(for_type) = &impl_decl.kind
             else { unreachable!() };
         let type_param_names = type_param_names.clone();
@@ -5333,6 +5378,7 @@ impl TypeChecker {
     ) -> Result<()> {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
         use verum_common::Text;
+        Self::check_no_duplicate_impl_items(impl_decl)?;
         let ImplKind::Protocol { protocol, protocol_args, for_type } = &impl_decl.kind
             else { unreachable!() };
         let type_param_names = type_param_names.clone();
