@@ -3788,12 +3788,7 @@ pub(super) fn dispatch_primitive_method(
                     // Bool, Float, small-string Text, and pointer values.
                     let caller_base = state.reg_base();
                     let needle_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let needle = if is_cbgr_ref(&needle_raw) {
-                        let (abs_index, _) = decode_cbgr_ref(needle_raw.as_i64());
-                        state.registers.get_absolute(abs_index)
-                    } else {
-                        needle_raw
-                    };
+                    let needle = resolve_arg_value(state, needle_raw);
                     let len = get_array_length(ptr, header)?;
                     let mut found = false;
                     for i in 0..len {
@@ -4394,12 +4389,7 @@ pub(super) fn dispatch_primitive_method(
                     // for the explanation of the defect class.
                     let caller_base = state.reg_base();
                     let key_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let key = if is_cbgr_ref(&key_raw) {
-                        let (abs_index, _) = decode_cbgr_ref(key_raw.as_i64());
-                        state.registers.get_absolute(abs_index)
-                    } else {
-                        key_raw
-                    };
+                    let key = resolve_arg_value(state, key_raw);
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     // Empty-map / cap=0 guard — return false instead of
@@ -4551,12 +4541,7 @@ pub(super) fn dispatch_primitive_method(
                     // CBGR-ref auto-deref — same defect class as Map.get.
                     let caller_base = state.reg_base();
                     let val_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let val = if is_cbgr_ref(&val_raw) {
-                        let (abs_index, _) = decode_cbgr_ref(val_raw.as_i64());
-                        state.registers.get_absolute(abs_index)
-                    } else {
-                        val_raw
-                    };
+                    let val = resolve_arg_value(state, val_raw);
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     // Empty-set guard.
@@ -4739,12 +4724,7 @@ pub(super) fn dispatch_primitive_method(
                     // this same defect class.
                     let caller_base = state.reg_base();
                     let key_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let key = if is_cbgr_ref(&key_raw) {
-                        let (abs_index, _) = decode_cbgr_ref(key_raw.as_i64());
-                        state.registers.get_absolute(abs_index)
-                    } else {
-                        key_raw
-                    };
+                    let key = resolve_arg_value(state, key_raw);
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     if capacity == 0 {
@@ -4859,12 +4839,7 @@ pub(super) fn dispatch_primitive_method(
                     // CBGR-ref auto-deref — see Map.get intercept above.
                     let caller_base = state.reg_base();
                     let key_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let key = if is_cbgr_ref(&key_raw) {
-                        let (abs_index, _) = decode_cbgr_ref(key_raw.as_i64());
-                        state.registers.get_absolute(abs_index)
-                    } else {
-                        key_raw
-                    };
+                    let key = resolve_arg_value(state, key_raw);
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
@@ -5122,12 +5097,7 @@ pub(super) fn dispatch_primitive_method(
                     // CBGR-ref auto-deref — same defect class as Map.get.
                     let caller_base = state.reg_base();
                     let val_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    let val = if is_cbgr_ref(&val_raw) {
-                        let (abs_index, _) = decode_cbgr_ref(val_raw.as_i64());
-                        state.registers.get_absolute(abs_index)
-                    } else {
-                        val_raw
-                    };
+                    let val = resolve_arg_value(state, val_raw);
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
@@ -5220,22 +5190,12 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_bool(count == 0)));
                 }
                 "union" if is_set => {
-                    // Set.union(other) -> Set (new set with elements from both)
+                    // Set.union(other: &Set<T>) -> Set (new set with elements from both)
+                    // CBGR ref auto-deref — see `is_subset` below for the
+                    // shared rationale.
                     let caller_base = state.reg_base();
                     let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    // `Set.union(other: &Set<T>)` — the caller passes
-                    // `&other` as a CBGR ref. Without deref the raw bits
-                    // get interpreted as a heap pointer and the next
-                    // dereference SIGSEGVs (same shape as the contains
-                    // needle fix earlier in this file). Auto-deref through
-                    // `decode_cbgr_ref` so the intercept can read the
-                    // pointed-to Set object.
-                    let other_val = if is_cbgr_ref(&other_val_raw) {
-                        let (abs_index, _) = decode_cbgr_ref(other_val_raw.as_i64());
-                        state.registers.get_absolute(abs_index)
-                    } else {
-                        other_val_raw
-                    };
+                    let other_val = resolve_arg_value(state, other_val_raw);
 
                     // Read self entries
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
@@ -5327,17 +5287,10 @@ pub(super) fn dispatch_primitive_method(
                 }
                 "intersection" if is_set => {
                     // Set.intersection(other) -> Set (elements in both sets)
+                    // Same CBGR-ref auto-deref as `union` above.
                     let caller_base = state.reg_base();
                     let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
-                    // Same CBGR-ref auto-deref as `union` above — `&other`
-                    // is passed as a ThinRef on the stack; without deref
-                    // the next pointer reinterpret SIGSEGVs.
-                    let other_val = if is_cbgr_ref(&other_val_raw) {
-                        let (abs_index, _) = decode_cbgr_ref(other_val_raw.as_i64());
-                        state.registers.get_absolute(abs_index)
-                    } else {
-                        other_val_raw
-                    };
+                    let other_val = resolve_arg_value(state, other_val_raw);
 
                     // Read self entries
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
@@ -5429,9 +5382,11 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_ptr(new_obj.as_ptr() as *mut u8)));
                 }
                 "difference" if is_set => {
-                    // Set.difference(other) -> Set (elements in self but not in other)
+                    // Set.difference(other: &Set<T>) -> Set (elements in self but not in other)
+                    // CBGR ref auto-deref via canonical helper.
                     let caller_base = state.reg_base();
-                    let other_val = state.registers.get(caller_base, Reg(args.start.0));
+                    let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
+                    let other_val = resolve_arg_value(state, other_val_raw);
 
                     // Read self entries
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
@@ -5523,9 +5478,17 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_ptr(new_obj.as_ptr() as *mut u8)));
                 }
                 "is_subset" if is_set => {
-                    // Set.is_subset(other) -> Bool (all self elements are in other)
+                    // Set.is_subset(other: &Set<T>) -> Bool (all self elements are in other)
+                    //
+                    // Auto-deref `other` through the canonical
+                    // `resolve_arg_value` helper. The caller passes
+                    // `&other` as a CBGR ThinRef; without deref the
+                    // following `as_ptr::<u8>()` returns ref-bits
+                    // reinterpreted as a heap pointer — SIGSEGV at
+                    // the next dereference.
                     let caller_base = state.reg_base();
-                    let other_val = state.registers.get(caller_base, Reg(args.start.0));
+                    let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
+                    let other_val = resolve_arg_value(state, other_val_raw);
 
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
@@ -5572,9 +5535,11 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_bool(is_subset)));
                 }
                 "is_superset" if is_set => {
-                    // Set.is_superset(other) -> Bool (all other elements are in self)
+                    // Set.is_superset(other: &Set<T>) -> Bool (all other elements are in self)
+                    // CBGR ref auto-deref — same as is_subset above.
                     let caller_base = state.reg_base();
-                    let other_val = state.registers.get(caller_base, Reg(args.start.0));
+                    let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
+                    let other_val = resolve_arg_value(state, other_val_raw);
 
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
@@ -5622,9 +5587,11 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_bool(is_superset)));
                 }
                 "symmetric_difference" if is_set => {
-                    // Set.symmetric_difference(other) -> Set (elements in either but not both)
+                    // Set.symmetric_difference(other: &Set<T>) -> Set (elements in either but not both)
+                    // CBGR ref auto-deref via canonical helper.
                     let caller_base = state.reg_base();
-                    let other_val = state.registers.get(caller_base, Reg(args.start.0));
+                    let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
+                    let other_val = resolve_arg_value(state, other_val_raw);
 
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
@@ -5739,9 +5706,11 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_ptr(new_obj.as_ptr() as *mut u8)));
                 }
                 "disjoint" | "is_disjoint" if is_set => {
-                    // Set.is_disjoint(other) -> Bool (no elements in common)
+                    // Set.is_disjoint(other: &Set<T>) -> Bool (no elements in common)
+                    // CBGR ref auto-deref via canonical helper.
                     let caller_base = state.reg_base();
-                    let other_val = state.registers.get(caller_base, Reg(args.start.0));
+                    let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
+                    let other_val = resolve_arg_value(state, other_val_raw);
 
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
@@ -8061,10 +8030,31 @@ pub(super) fn dispatch_array_method(
 
         // ===== Element access =====
         "get" => {
-            let idx = state.registers.get(caller_base, Reg(args.start.0)).as_i64() as usize;
+            let raw_arg = state.registers.get(caller_base, Reg(args.start.0));
+            let idx = raw_arg.as_i64() as usize;
+            if std::env::var("VERUM_TRACE_GET").is_ok() {
+                eprintln!(
+                    "[get trace] args.start={} count={} raw_arg.bits=0x{:016x} idx={} len={}",
+                    args.start.0,
+                    args.count,
+                    raw_arg.bits(),
+                    idx,
+                    len
+                );
+            }
             if idx < len {
                 let elem = get_array_element(ptr, header, idx)?;
+                if std::env::var("VERUM_TRACE_GET").is_ok() {
+                    eprintln!(
+                        "[get trace] elem.bits=0x{:016x} as_i64={}",
+                        elem.bits(),
+                        elem.as_i64()
+                    );
+                }
                 let result = make_some_value(state, elem)?;
+                if std::env::var("VERUM_TRACE_GET").is_ok() {
+                    eprintln!("[get trace] result.bits=0x{:016x}", result.bits());
+                }
                 Ok(Some(result))
             } else {
                 let result = make_none_value(state)?;
@@ -8208,19 +8198,9 @@ pub(super) fn dispatch_array_method(
                 return Ok(None);
             }
             let idx_raw = state.registers.get(caller_base, Reg(args.start.0));
-            let idx = if is_cbgr_ref(&idx_raw) {
-                let (abs_index, _) = decode_cbgr_ref(idx_raw.as_i64());
-                state.registers.get_absolute(abs_index).as_i64() as usize
-            } else {
-                idx_raw.as_i64() as usize
-            };
+            let idx = resolve_arg_value(state, idx_raw).as_i64() as usize;
             let value_raw = state.registers.get(caller_base, Reg(args.start.0 + 1));
-            let value = if is_cbgr_ref(&value_raw) {
-                let (abs_index, _) = decode_cbgr_ref(value_raw.as_i64());
-                state.registers.get_absolute(abs_index)
-            } else {
-                value_raw
-            };
+            let value = resolve_arg_value(state, value_raw);
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             let current_len = unsafe { (*data_ptr).as_i64() } as usize;
             if idx >= current_len {
@@ -8249,12 +8229,7 @@ pub(super) fn dispatch_array_method(
                 return Ok(None);
             }
             let new_len_raw = state.registers.get(caller_base, Reg(args.start.0));
-            let new_len = if is_cbgr_ref(&new_len_raw) {
-                let (abs_index, _) = decode_cbgr_ref(new_len_raw.as_i64());
-                state.registers.get_absolute(abs_index).as_i64()
-            } else {
-                new_len_raw.as_i64()
-            };
+            let new_len = resolve_arg_value(state, new_len_raw).as_i64();
             let clamped = new_len.max(0);
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let current_len = unsafe { (*data_ptr).as_i64() };
@@ -8277,12 +8252,7 @@ pub(super) fn dispatch_array_method(
                 return Ok(None);
             }
             let idx_raw = state.registers.get(caller_base, Reg(args.start.0));
-            let idx = if is_cbgr_ref(&idx_raw) {
-                let (abs_index, _) = decode_cbgr_ref(idx_raw.as_i64());
-                state.registers.get_absolute(abs_index).as_i64() as usize
-            } else {
-                idx_raw.as_i64() as usize
-            };
+            let idx = resolve_arg_value(state, idx_raw).as_i64() as usize;
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let current_len = unsafe { (*data_ptr).as_i64() } as usize;
             if idx >= current_len {
@@ -8319,19 +8289,9 @@ pub(super) fn dispatch_array_method(
                 return Ok(None);
             }
             let idx_raw = state.registers.get(caller_base, Reg(args.start.0));
-            let idx = if is_cbgr_ref(&idx_raw) {
-                let (abs_index, _) = decode_cbgr_ref(idx_raw.as_i64());
-                state.registers.get_absolute(abs_index).as_i64()
-            } else {
-                idx_raw.as_i64()
-            };
+            let idx = resolve_arg_value(state, idx_raw).as_i64();
             let default_raw = state.registers.get(caller_base, Reg(args.start.0 + 1));
-            let default = if is_cbgr_ref(&default_raw) {
-                let (abs_index, _) = decode_cbgr_ref(default_raw.as_i64());
-                state.registers.get_absolute(abs_index)
-            } else {
-                default_raw
-            };
+            let default = resolve_arg_value(state, default_raw);
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             let current_len = unsafe { (*data_ptr).as_i64() };
             if idx < 0 || idx >= current_len {

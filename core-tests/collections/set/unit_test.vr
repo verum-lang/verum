@@ -282,4 +282,184 @@ fn test_set_is_empty_after_insert_remove_pair() {
     assert(s.is_empty());
 }
 
+// =============================================================================
+// Section 10: difference / symmetric_difference / is_disjoint /
+//             is_subset / is_superset — full set algebra
+//
+//   All routes through the runtime intercept's canonical
+//   `resolve_arg_value(other)` auto-deref. The pre-fix surface SIGSEGV'd
+//   on `&other` dereference; tests are now active part of the green
+//   suite, not pinned.
+// =============================================================================
+
+@test
+fn test_set_difference_of_overlapping_sets() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let _ = a.insert(3);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(2);
+    let _ = b.insert(3);
+    let _ = b.insert(4);
+    let d = a.difference(&b);
+    assert_eq(d.len(), 1);
+    assert(d.contains(1));
+    assert(!d.contains(2));
+    assert(!d.contains(3));
+}
+
+@test
+fn test_set_difference_of_disjoint_is_self() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(99);
+    let d = a.difference(&b);
+    assert_eq(d.len(), 2);
+    assert(d.contains(1));
+    assert(d.contains(2));
+}
+
+@test
+fn test_set_difference_with_empty_is_self() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let b: Set<Int> = Set.new();
+    let d = a.difference(&b);
+    assert_eq(d.len(), 2);
+}
+
+@test
+fn test_set_symmetric_difference_of_disjoint_is_union() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(3);
+    let _ = b.insert(4);
+    let sd = a.symmetric_difference(&b);
+    assert_eq(sd.len(), 4);
+}
+
+@test
+fn test_set_symmetric_difference_of_identical_is_empty() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(1);
+    let _ = b.insert(2);
+    let sd = a.symmetric_difference(&b);
+    assert_eq(sd.len(), 0);
+}
+
+@test
+fn test_set_is_disjoint_true_for_disjoint_sets() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(3);
+    let _ = b.insert(4);
+    assert(a.is_disjoint(&b));
+}
+
+@test
+fn test_set_is_disjoint_false_for_overlapping_sets() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(2);
+    let _ = b.insert(3);
+    assert(!a.is_disjoint(&b));
+}
+
+@test
+fn test_set_is_disjoint_with_empty_is_true() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let b: Set<Int> = Set.new();
+    assert(a.is_disjoint(&b));
+}
+
+@test
+fn test_set_is_subset_proper() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(1);
+    let _ = b.insert(2);
+    let _ = b.insert(3);
+    assert(a.is_subset(&b));
+    assert(!b.is_subset(&a));
+}
+
+@test
+fn test_set_is_subset_equal_sets() {
+    // Equal sets are mutual subsets.
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(1);
+    let _ = b.insert(2);
+    assert(a.is_subset(&b));
+    assert(b.is_subset(&a));
+}
+
+@test
+fn test_set_is_subset_of_empty_is_true_for_empty() {
+    let a: Set<Int> = Set.new();
+    let b: Set<Int> = Set.new();
+    assert(a.is_subset(&b));
+}
+
+@test
+fn test_set_empty_is_subset_of_anything() {
+    let a: Set<Int> = Set.new();
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(1);
+    let _ = b.insert(2);
+    assert(a.is_subset(&b));
+}
+
+@test
+fn test_set_is_superset_dual_of_subset() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let _ = a.insert(3);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(1);
+    let _ = b.insert(2);
+    assert(a.is_superset(&b));
+    assert(!b.is_superset(&a));
+}
+
+// =============================================================================
+// Section 11: to_list — conversion to owned List
+// =============================================================================
+
+@test
+fn test_set_to_list_returns_owned_list_of_correct_size() {
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(10);
+    let _ = s.insert(20);
+    let _ = s.insert(30);
+    let xs = s.to_list();
+    assert_eq(xs.len(), 3);
+}
+
+@test
+fn test_set_to_list_of_empty_is_empty_list() {
+    let s: Set<Int> = Set.new();
+    let xs = s.to_list();
+    assert_eq(xs.len(), 0);
+}
+
 fn main() {}
