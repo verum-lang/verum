@@ -5,12 +5,19 @@ max-heap priority queue backed by List<T>).
 
 ## Status
 
-**partial** — Unit / property / integration coverage targets construction
-(new), basic priority-queue ops (push, pop, peek, clear), and full-drain
-sorted output (into_sorted_list). `BinaryHeap.with_capacity(n)` and
-`BinaryHeap.from_list(xs)` constructors are pinned in regression §A
-because they share the cross-module function-name resolution defect class
-with List/Deque/Set non-intercepted constructors.
+**partial** — Unit / property / integration coverage spans construction
+(new, with_capacity, from_list), basic priority-queue ops (push, pop,
+peek, clear), and full-drain sorted output (into_sorted_list). Two
+architectural fixes landed in this branch:
+
+1. **Cross-module name table for non-intercepted static constructors**
+   — `BinaryHeap.with_capacity(n)` / `BinaryHeap.from_list(xs)` now
+   resolve through the canonical user-side function table (parallel
+   agent's earlier task close-out).
+2. **Array-dispatch polarity defect** — closed via `dispatch_primitive_method`
+   gating on the positive `header.type_id.is_array_dispatchable()`
+   predicate instead of the broken negative `is_value_array && type_id
+   < 256` pair. See regression §C for full root-cause analysis.
 
 ## 1. Cross-stdlib usage
 
@@ -38,21 +45,16 @@ intercepted. The wrapper-record indirection is safe because:
 
 | Gap | Impact | Fundamental fix |
 |---|---|---|
-| `BinaryHeap.with_capacity(n)` / `BinaryHeap.from_list(xs)` cross-module UndefinedFunction | Pinned in regression §A. | Same fix path as #24/#25/#26 close-out. |
-| Heap depends transitively on the List intercept correctness — every List defect propagates here | Indirect. Audited via List audit §3 line items; heap doesn't add new defects. | Close the List defects (List.set / List.get_or already closed in this branch; runtime memory-layout drift open). |
+| Array-dispatch polarity defect (negative gate `type_id != X && type_id < 256` mis-routed every stdlib type whose `alloc_user_type_id` cursor crossed 256 into the array intercepts) — **CLOSED** | `BinaryHeap.new().len()` returned 1 (the heap object's slot count from `header.size / sizeof::<Value>()`) instead of 0. Affected every stdlib record whose TypeId landed in [260, 512) — the gap between meta-system and semantic ranges. | Polarity invert: gate on `header.type_id.is_array_dispatchable()` — single source of truth (LIST=512, ARRAY=518, BYTE_LIST=527 only). Mirrors `dispatch_array_method`'s identical invariant. |
+| Heap depends transitively on the List intercept correctness — every List defect propagates here | Indirect. Audited via List audit §3 line items; heap doesn't add new defects. | Close the List defects (List.set / List.get_or / runtime memory-layout drift all closed earlier in this branch). |
 
 ## 4. Defect inventory
 
-* `BinaryHeap.with_capacity` — cross-module UndefinedFunction (ignored).
-* `BinaryHeap.from_list` — cross-module UndefinedFunction (ignored).
-* `regression_heap_wrapper_field_resolves_to_inner_list` — active
-  guardrail that fails immediately if the wrapper-record indirection
-  ever breaks.
+* `BinaryHeap.with_capacity` / `BinaryHeap.from_list` — CLOSED (active guardrails in regression §A).
+* Array-dispatch polarity (`h.len()` returned 1 for empty heap) — CLOSED (active guardrails in regression §C: `regression_heap_len_zero_after_new` / `regression_heap_is_empty_after_new`).
+* `regression_heap_wrapper_field_resolves_to_inner_list` — active guardrail (§B).
 
 ## 5. Action items
 
-1. Close cross-module constructor name-table gap (audit.md §3, same
-   item as List/Deque/Set audits).
-2. Audit heap for transitive List-defect impact once the List runtime
-   memory-layout drift closes — heap's drain/extract_if/retain shapes
-   should re-enable test coverage at that point.
+All known heap defects are closed. Further work would target audit of
+transitive List defects as List's audit closes them.
