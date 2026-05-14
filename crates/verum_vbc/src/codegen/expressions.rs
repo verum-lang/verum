@@ -10762,9 +10762,6 @@ impl VbcCodegen {
         scrutinee: &Expr,
         arms: &verum_common::List<verum_ast::MatchArm>,
     ) -> CodegenResult<Option<Reg>> {
-        if std::env::var("VERUM_TRACE_PAT").is_ok() {
-            eprintln!("[compile_match ENTER]");
-        }
         // Evaluate scrutinee
         let scrutinee_reg = self
             .compile_expr(scrutinee)?
@@ -10773,19 +10770,6 @@ impl VbcCodegen {
         // Try to determine the type of the scrutinee for variant pattern resolution.
         // Uses extract_expr_type_name which handles variables, field access, method calls etc.
         let scrutinee_type = self.extract_expr_type_name(scrutinee);
-        if std::env::var("VERUM_TRACE_PAT").is_ok() {
-            eprintln!(
-                "[match-scrutinee] type={:?} scrutinee_kind={}",
-                scrutinee_type,
-                match &scrutinee.kind {
-                    verum_ast::expr::ExprKind::Call { .. } => "Call",
-                    verum_ast::expr::ExprKind::Path(_) => "Path",
-                    verum_ast::expr::ExprKind::MethodCall { .. } => "MethodCall",
-                    verum_ast::expr::ExprKind::Field { .. } => "Field",
-                    _ => "Other",
-                }
-            );
-        }
 
         // Store the scrutinee type for pattern binding to use
         let prev_scrutinee_type = self.ctx.match_scrutinee_type.take();
@@ -12504,24 +12488,6 @@ impl VbcCodegen {
         scrutinee: Reg,
     ) -> CodegenResult<()> {
         use verum_ast::PatternKind;
-        if std::env::var("VERUM_TRACE_PAT").is_ok() {
-            eprintln!(
-                "[pat-bind-enter] pattern_kind={} scrutinee_type={:?}",
-                match &pattern.kind {
-                    PatternKind::Wildcard => "Wildcard",
-                    PatternKind::Ident { .. } => "Ident",
-                    PatternKind::Tuple(_) => "Tuple",
-                    PatternKind::Variant { .. } => "Variant",
-                    PatternKind::Record { .. } => "Record",
-                    PatternKind::Or(_) => "Or",
-                    PatternKind::Reference { .. } => "Reference",
-                    PatternKind::Literal(_) => "Literal",
-                    PatternKind::Paren(_) => "Paren",
-                    _ => "Other",
-                },
-                self.ctx.match_scrutinee_type
-            );
-        }
 
         match &pattern.kind {
             PatternKind::Wildcard => {
@@ -12820,25 +12786,12 @@ impl VbcCodegen {
                                     if let Some(type_name) = field_type
                                         && let PatternKind::Ident { name, .. } = &pat.kind
                                     {
-                                        if std::env::var("VERUM_TRACE_PAT").is_ok() {
-                                            eprintln!(
-                                                "[pat-bind] var={} type={} variant={}",
-                                                name.name, type_name, variant_name
-                                            );
-                                        }
                                         self.ctx
                                             .variable_type_names
                                             .insert(name.name.to_string(), type_name.clone());
                                         // Also register VarTypeKind for type-aware codegen
                                         let var_type = self.type_name_to_var_type(&type_name);
                                         self.ctx.register_variable_type(&name.name, var_type);
-                                    } else if std::env::var("VERUM_TRACE_PAT").is_ok() {
-                                        if let PatternKind::Ident { name, .. } = &pat.kind {
-                                            eprintln!(
-                                                "[pat-bind] var={} NO TYPE variant={} scrutinee={:?}",
-                                                name.name, variant_name, self.ctx.match_scrutinee_type
-                                            );
-                                        }
                                     }
                                 }
                             }
@@ -17078,35 +17031,41 @@ impl VbcCodegen {
             }
             // Function call: check return type for Result/Maybe, or tuple-style constructor
             ExprKind::Call { func, args, .. } => {
-                if std::env::var("VERUM_TRACE_PAT").is_ok() {
-                    eprintln!(
-                        "[call-arm] func_kind={} args_len={}",
-                        match &func.kind {
-                            ExprKind::Path(p) => format!("Path({} segs)", p.segments.len()),
-                            ExprKind::Field { .. } => "Field".to_string(),
-                            ExprKind::MethodCall { .. } => "MethodCall".to_string(),
-                            _ => "Other".to_string(),
-                        },
-                        args.len()
-                    );
-                }
                 if let ExprKind::Path(path) = &func.kind {
                     if path.segments.len() == 1
                         && let PathSegment::Name(ident) = &path.segments[0]
                     {
                         let name = &ident.name;
-                        // Look up the function to check return type
-                        if std::env::var("VERUM_TRACE_PAT").is_ok() {
-                            eprintln!(
-                                "[call-type] name={} lookup={} return_type_name={:?}",
-                                name,
-                                self.ctx.lookup_function(name).is_some(),
-                                self.ctx
-                                    .lookup_function(name)
-                                    .and_then(|fi| fi.return_type_name.clone())
-                            );
-                        }
-                        if let Some(func_info) = self.ctx.lookup_function(name) {
+                        // FUNDAMENTAL #5 — arity-aware function lookup.
+                        //
+                        // When a user-defined fn shares its simple name
+                        // with a stdlib intrinsic of different arity
+                        // (canonical case: user `fn safe_open(raw: Int)
+                        // -> Maybe<FileDesc>` vs POSIX `safe_open(path,
+                        // flags, mode) -> Fd`), the bare-name slot in
+                        // `ctx.functions` is owned by whichever
+                        // registration ran first.  `register_function`'s
+                        // arity-conflict branch shoves the second
+                        // registration to `<name>#<arity>` (alt-arity
+                        // key) and leaves the bare key alone — so a
+                        // bare `lookup_function("safe_open")` returns
+                        // the FIRST registration (often a stub from
+                        // pre-registration with `return_type_name = None`),
+                        // and every downstream type inference for the
+                        // user-side call site loses the wrapper type.
+                        //
+                        // Use the call-site arity to consult the right
+                        // entry: bare key when arity matches, otherwise
+                        // `<name>#<arity>` alt-key.  Same dispatch
+                        // discipline that `compile_call` /
+                        // `compile_method_call` already use.  Closes the
+                        // entire `Maybe<TupleNewtype>` destructure-loses-
+                        // wrapper-identity class, plus every other
+                        // user-fn/stdlib-fn arity collision that
+                        // misroutes type inference at the call site.
+                        if let Some(func_info) =
+                            self.ctx.lookup_function_with_arity(name, args.len())
+                        {
                             // For variant constructors (Some, Ok, Err), try to infer
                             // generic args from constructor arguments BEFORE falling back
                             // to bare return_type_name. This way Some(node) → "Maybe<Node>"

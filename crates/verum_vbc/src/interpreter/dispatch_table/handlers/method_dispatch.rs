@@ -28,7 +28,7 @@ use super::bytecode_io::{read_reg, read_reg_range, read_varint};
 use super::string_helpers::{alloc_string_value, extract_string, is_heap_string};
 
 // Re-import CBGR helper functions
-use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, is_cbgr_ref_mutable};
+use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, is_cbgr_ref_mutable, resolve_arg_value};
 
 // Re-import debug helpers
 use super::debug::format_value_for_print;
@@ -1390,20 +1390,8 @@ pub(in super::super) fn handle_call_method(
             let caller_base = state.reg_base();
             let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
-            // Handle CBGR reference
-            let other = if is_cbgr_ref(&other_val) {
-                let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                state.registers.get_absolute(abs_index)
-            } else {
-                other_val
-            };
-
-            let recv = if is_cbgr_ref(&receiver) {
-                let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
-                state.registers.get_absolute(abs_index)
-            } else {
-                receiver
-            };
+            let other = resolve_arg_value(state, other_val);
+            let recv = resolve_arg_value(state, receiver);
 
             let result = deep_value_eq(&recv, &other, state);
             let final_result = if bare_method_name == "eq" {
@@ -1996,21 +1984,8 @@ pub(in super::super) fn handle_call_method(
         let caller_base = state.reg_base();
         let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
-        // Handle CBGR reference: the argument might be &T (CBGR ref), need to deref
-        let other = if is_cbgr_ref(&other_val) {
-            let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-            state.registers.get_absolute(abs_index)
-        } else {
-            other_val
-        };
-
-        // Also handle receiver being a CBGR reference
-        let recv = if is_cbgr_ref(&receiver) {
-            let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
-            state.registers.get_absolute(abs_index)
-        } else {
-            receiver
-        };
+        let other = resolve_arg_value(state, other_val);
+        let recv = resolve_arg_value(state, receiver);
 
         let result = deep_value_eq(&recv, &other, state);
         state.set_reg(dst, Value::from_bool(result));
@@ -2023,21 +1998,8 @@ pub(in super::super) fn handle_call_method(
         let caller_base = state.reg_base();
         let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
-        // Handle CBGR reference: the argument might be &T (CBGR ref), need to deref
-        let other = if is_cbgr_ref(&other_val) {
-            let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-            state.registers.get_absolute(abs_index)
-        } else {
-            other_val
-        };
-
-        // Also handle receiver being a CBGR reference
-        let recv = if is_cbgr_ref(&receiver) {
-            let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
-            state.registers.get_absolute(abs_index)
-        } else {
-            receiver
-        };
+        let other = resolve_arg_value(state, other_val);
+        let recv = resolve_arg_value(state, receiver);
 
         // ne is the inverse of eq
         let result = !deep_value_eq(&recv, &other, state);
@@ -3522,12 +3484,7 @@ pub(super) fn dispatch_primitive_method(
                 let other_val = state.get_reg(Reg(args.start.0));
                 // Handle reference: the argument might be &Int (CBGR ref), need to deref
                 // Check CBGR ref FIRST since CBGR refs also pass is_int()
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_i64()
-                } else {
-                    other_val.as_i64()
-                };
+                let other = resolve_arg_value(state, other_val).as_i64();
                 return Ok(Some(make_ordering(state, v.cmp(&other))?));
             }
 
@@ -3536,64 +3493,34 @@ pub(super) fn dispatch_primitive_method(
             "eq" => {
                 let other_val = state.get_reg(Reg(args.start.0));
                 // Handle CBGR reference: the argument might be &Int, need to deref
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_i64()
-                } else {
-                    other_val.as_i64()
-                };
+                let other = resolve_arg_value(state, other_val).as_i64();
                 Value::from_bool(v == other)
             }
             "ne" => {
                 let other_val = state.get_reg(Reg(args.start.0));
                 // Handle CBGR reference: the argument might be &Int, need to deref
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_i64()
-                } else {
-                    other_val.as_i64()
-                };
+                let other = resolve_arg_value(state, other_val).as_i64();
                 Value::from_bool(v != other)
             }
             // Ord protocol comparison methods - handle directly to avoid incorrect dispatch
             "lt" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_i64()
-                } else {
-                    other_val.as_i64()
-                };
+                let other = resolve_arg_value(state, other_val).as_i64();
                 Value::from_bool(v < other)
             }
             "le" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_i64()
-                } else {
-                    other_val.as_i64()
-                };
+                let other = resolve_arg_value(state, other_val).as_i64();
                 Value::from_bool(v <= other)
             }
             "gt" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_i64()
-                } else {
-                    other_val.as_i64()
-                };
+                let other = resolve_arg_value(state, other_val).as_i64();
                 Value::from_bool(v > other)
             }
             "ge" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_i64()
-                } else {
-                    other_val.as_i64()
-                };
+                let other = resolve_arg_value(state, other_val).as_i64();
                 Value::from_bool(v >= other)
             }
 
@@ -3723,24 +3650,14 @@ pub(super) fn dispatch_primitive_method(
             "eq" => {
                 let other_val = state.get_reg(Reg(args.start.0));
                 // Handle CBGR reference: the argument might be &Float, need to deref
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_f64()
-                } else {
-                    other_val.as_f64()
-                };
+                let other = resolve_arg_value(state, other_val).as_f64();
                 // Use partial equality for floats (NaN != NaN)
                 Value::from_bool(v == other)
             }
             "ne" => {
                 let other_val = state.get_reg(Reg(args.start.0));
                 // Handle CBGR reference: the argument might be &Float, need to deref
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_f64()
-                } else {
-                    other_val.as_f64()
-                };
+                let other = resolve_arg_value(state, other_val).as_f64();
                 Value::from_bool(v != other)
             }
             // Ordering comparisons: lt/le/gt/ge/cmp/partial_cmp.
@@ -3751,52 +3668,27 @@ pub(super) fn dispatch_primitive_method(
             // documented in core/base/ordering tests).
             "lt" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_f64()
-                } else {
-                    other_val.as_f64()
-                };
+                let other = resolve_arg_value(state, other_val).as_f64();
                 Value::from_bool(v < other)
             }
             "le" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_f64()
-                } else {
-                    other_val.as_f64()
-                };
+                let other = resolve_arg_value(state, other_val).as_f64();
                 Value::from_bool(v <= other)
             }
             "gt" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_f64()
-                } else {
-                    other_val.as_f64()
-                };
+                let other = resolve_arg_value(state, other_val).as_f64();
                 Value::from_bool(v > other)
             }
             "ge" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_f64()
-                } else {
-                    other_val.as_f64()
-                };
+                let other = resolve_arg_value(state, other_val).as_f64();
                 Value::from_bool(v >= other)
             }
             "cmp" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_f64()
-                } else {
-                    other_val.as_f64()
-                };
+                let other = resolve_arg_value(state, other_val).as_f64();
                 let ord = if v.is_nan() || other.is_nan() {
                     std::cmp::Ordering::Equal
                 } else if v < other {
@@ -4819,8 +4711,25 @@ pub(super) fn dispatch_primitive_method(
                     // value (every numeric type, every Option-like inner V,
                     // every bitflag).  Eliminated as part of the Map API
                     // canonicalisation (task #12).
+                    //
+                    // CBGR-ref auto-deref: `m.get(&key)` lowers `&key`
+                    // as a CBGR ThinRef pointing at the caller's stack
+                    // slot. Without deref the intercept's `value_hash`
+                    // / `value_eq` operate on the ref bits, which
+                    // never match any stored entry key — every present
+                    // key reported as None. Mirror of the contains /
+                    // union / intersection deref patterns elsewhere
+                    // in this file. Unblocks the toposort + union_find
+                    // regression cascade that pinned Map.get behind
+                    // this same defect class.
                     let caller_base = state.reg_base();
-                    let key = state.registers.get(caller_base, Reg(args.start.0));
+                    let key_raw = state.registers.get(caller_base, Reg(args.start.0));
+                    let key = if is_cbgr_ref(&key_raw) {
+                        let (abs_index, _) = decode_cbgr_ref(key_raw.as_i64());
+                        state.registers.get_absolute(abs_index)
+                    } else {
+                        key_raw
+                    };
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     if capacity == 0 {
@@ -7458,75 +7367,40 @@ pub(super) fn dispatch_primitive_method(
             "eq" => {
                 let other_val = state.get_reg(Reg(args.start.0));
                 // Handle CBGR reference: the argument might be &Bool, need to deref
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_bool()
-                } else {
-                    other_val.as_bool()
-                };
+                let other = resolve_arg_value(state, other_val).as_bool();
                 Value::from_bool(v == other)
             }
             "ne" => {
                 let other_val = state.get_reg(Reg(args.start.0));
                 // Handle CBGR reference: the argument might be &Bool, need to deref
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_bool()
-                } else {
-                    other_val.as_bool()
-                };
+                let other = resolve_arg_value(state, other_val).as_bool();
                 Value::from_bool(v != other)
             }
             // Ord protocol comparison methods — convention: false < true.
             // Mirrors `core/base/primitives.vr::implement Ord for Bool`.
             "lt" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_bool()
-                } else {
-                    other_val.as_bool()
-                };
+                let other = resolve_arg_value(state, other_val).as_bool();
                 Value::from_bool(!v && other)
             }
             "le" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_bool()
-                } else {
-                    other_val.as_bool()
-                };
+                let other = resolve_arg_value(state, other_val).as_bool();
                 Value::from_bool(!v || other)
             }
             "gt" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_bool()
-                } else {
-                    other_val.as_bool()
-                };
+                let other = resolve_arg_value(state, other_val).as_bool();
                 Value::from_bool(v && !other)
             }
             "ge" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_bool()
-                } else {
-                    other_val.as_bool()
-                };
+                let other = resolve_arg_value(state, other_val).as_bool();
                 Value::from_bool(v || !other)
             }
             "cmp" => {
                 let other_val = state.get_reg(Reg(args.start.0));
-                let other = if is_cbgr_ref(&other_val) {
-                    let (abs_index, _) = decode_cbgr_ref(other_val.as_i64());
-                    state.registers.get_absolute(abs_index).as_bool()
-                } else {
-                    other_val.as_bool()
-                };
+                let other = resolve_arg_value(state, other_val).as_bool();
                 let ord = match (v, other) {
                     (false, true) => std::cmp::Ordering::Less,
                     (true, false) => std::cmp::Ordering::Greater,

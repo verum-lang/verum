@@ -6537,14 +6537,6 @@ impl VbcCodegen {
         } else {
             None
         };
-        if std::env::var("VERUM_TRACE_PAT").is_ok() && (name == "safe_open" || name.contains("safe_open")) {
-            eprintln!(
-                "[register-fn] name={} return_type_name={:?} has_return_ty={}",
-                name,
-                return_type_name,
-                func.return_type.is_some()
-            );
-        }
 
         let info = FunctionInfo {
             id,
@@ -12241,48 +12233,52 @@ impl VbcCodegen {
         for ((param_name, is_mut), param) in params_with_mutability.iter().zip(func.params.iter()) {
             use verum_ast::FunctionParamKind;
             use crate::types::{CbgrTier, Mutability};
+            // **Targeted fix for task #11** — only the `&mut`-family
+            // self-shape variants need a meaningful `TypeRef` round-trip
+            // (so the user-side dispatch can recover `takes_self_mut_ref`
+            // from `param.type_ref`).  Value-typed self and `&self` keep
+            // `Concrete(UNIT)` (the pre-fix behaviour) — those variants
+            // never trigger `RefMut`/`DerefMut` semantics, so the type
+            // info isn't needed for the writeback-correctness invariant,
+            // and preserving the pre-fix encoding avoids the
+            // "self type tracked as Box but no method-table populated"
+            // regression that surfaced as field-access on the result of
+            // a static constructor returning bogus values.
+            //
+            // Rationale: the `takes_self_mut_ref` detector at
+            // `archive_ctx_loader.rs::param_is_mut_self_ref` only fires
+            // for `Reference { Mutability::Mutable, .. }`.  Every other
+            // self-shape can stay `Concrete(UNIT)` and still produces
+            // the correct false-flag result.
             let type_ref = match &param.kind {
                 FunctionParamKind::Regular { ty, .. } => {
                     self.resolve_field_type_ref(ty, &method_generic_param_map)
                 }
-                FunctionParamKind::SelfValue
-                | FunctionParamKind::SelfValueMut
-                | FunctionParamKind::SelfOwn
-                | FunctionParamKind::SelfOwnMut => TypeRef::Concrete(parent_tid),
-                FunctionParamKind::SelfRef => TypeRef::Reference {
-                    inner: Box::new(TypeRef::Concrete(parent_tid)),
-                    mutability: Mutability::Immutable,
-                    tier: CbgrTier::Tier0,
-                },
                 FunctionParamKind::SelfRefMut => TypeRef::Reference {
                     inner: Box::new(TypeRef::Concrete(parent_tid)),
                     mutability: Mutability::Mutable,
                     tier: CbgrTier::Tier0,
-                },
-                // CBGR tier naming:
-                //   Tier0 — runtime checked (default `&T` / `&mut T`)
-                //   Tier1 — compiler-proven safe (`&checked T`)
-                //   Tier2 — manual proof required (`&unsafe T`)
-                FunctionParamKind::SelfRefChecked => TypeRef::Reference {
-                    inner: Box::new(TypeRef::Concrete(parent_tid)),
-                    mutability: Mutability::Immutable,
-                    tier: CbgrTier::Tier1,
                 },
                 FunctionParamKind::SelfRefCheckedMut => TypeRef::Reference {
                     inner: Box::new(TypeRef::Concrete(parent_tid)),
                     mutability: Mutability::Mutable,
                     tier: CbgrTier::Tier1,
                 },
-                FunctionParamKind::SelfRefUnsafe => TypeRef::Reference {
-                    inner: Box::new(TypeRef::Concrete(parent_tid)),
-                    mutability: Mutability::Immutable,
-                    tier: CbgrTier::Tier2,
-                },
                 FunctionParamKind::SelfRefUnsafeMut => TypeRef::Reference {
                     inner: Box::new(TypeRef::Concrete(parent_tid)),
                     mutability: Mutability::Mutable,
                     tier: CbgrTier::Tier2,
                 },
+                // Value-typed self (`self`, `mut self`, `self` by ownership)
+                // and `&self` / `&checked self` / `&unsafe self` keep
+                // `Concrete(UNIT)` — see comment above.
+                FunctionParamKind::SelfValue
+                | FunctionParamKind::SelfValueMut
+                | FunctionParamKind::SelfOwn
+                | FunctionParamKind::SelfOwnMut
+                | FunctionParamKind::SelfRef
+                | FunctionParamKind::SelfRefChecked
+                | FunctionParamKind::SelfRefUnsafe => TypeRef::Concrete(TypeId::UNIT),
             };
             let param_name_id = StringId(self.intern_string(param_name));
             descriptor.params.push(ParamDescriptor {
@@ -12506,54 +12502,38 @@ impl VbcCodegen {
         if let Some(ref ret_type) = func_info.return_type {
             descriptor.return_type = ret_type.clone();
         }
-        // Mirror the self-shape → TypeRef encoding from the
-        // primary `compile_function` site above so panic-stub
-        // descriptors round-trip the `&mut self` marker through the
-        // archive (closes task #11 for the lenient-skip path).
-        // The parent_tid is best-effort: `compile_function_panic_stub`
-        // doesn't carry `impl_type_name` directly, so we fall back to
-        // UNIT when the impl target is unknown — that still correctly
-        // preserves the Reference + Mutability shape, which is all
-        // the user-side dispatch consults.
+        // Mirror the self-shape → TypeRef encoding from the primary
+        // `compile_function` site above, restricted to the `&mut`-family
+        // variants — see that site's comment for the targeted-fix
+        // rationale (closes task #11 panic-stub path without regressing
+        // value-self semantics).
         for ((param_name, is_mut), param) in params_with_mutability.iter().zip(func.params.iter()) {
             use verum_ast::FunctionParamKind;
             use crate::types::{CbgrTier, Mutability};
             let type_ref = match &param.kind {
                 FunctionParamKind::Regular { ty, .. } => self.ast_type_to_type_ref(ty),
-                FunctionParamKind::SelfValue
-                | FunctionParamKind::SelfValueMut
-                | FunctionParamKind::SelfOwn
-                | FunctionParamKind::SelfOwnMut => TypeRef::Concrete(TypeId::UNIT),
-                FunctionParamKind::SelfRef => TypeRef::Reference {
-                    inner: Box::new(TypeRef::Concrete(TypeId::UNIT)),
-                    mutability: Mutability::Immutable,
-                    tier: CbgrTier::Tier0,
-                },
                 FunctionParamKind::SelfRefMut => TypeRef::Reference {
                     inner: Box::new(TypeRef::Concrete(TypeId::UNIT)),
                     mutability: Mutability::Mutable,
                     tier: CbgrTier::Tier0,
-                },
-                FunctionParamKind::SelfRefChecked => TypeRef::Reference {
-                    inner: Box::new(TypeRef::Concrete(TypeId::UNIT)),
-                    mutability: Mutability::Immutable,
-                    tier: CbgrTier::Tier1,
                 },
                 FunctionParamKind::SelfRefCheckedMut => TypeRef::Reference {
                     inner: Box::new(TypeRef::Concrete(TypeId::UNIT)),
                     mutability: Mutability::Mutable,
                     tier: CbgrTier::Tier1,
                 },
-                FunctionParamKind::SelfRefUnsafe => TypeRef::Reference {
-                    inner: Box::new(TypeRef::Concrete(TypeId::UNIT)),
-                    mutability: Mutability::Immutable,
-                    tier: CbgrTier::Tier2,
-                },
                 FunctionParamKind::SelfRefUnsafeMut => TypeRef::Reference {
                     inner: Box::new(TypeRef::Concrete(TypeId::UNIT)),
                     mutability: Mutability::Mutable,
                     tier: CbgrTier::Tier2,
                 },
+                FunctionParamKind::SelfValue
+                | FunctionParamKind::SelfValueMut
+                | FunctionParamKind::SelfOwn
+                | FunctionParamKind::SelfOwnMut
+                | FunctionParamKind::SelfRef
+                | FunctionParamKind::SelfRefChecked
+                | FunctionParamKind::SelfRefUnsafe => TypeRef::Concrete(TypeId::UNIT),
             };
             let param_name_id = StringId(self.intern_string(param_name));
             descriptor.params.push(ParamDescriptor {
