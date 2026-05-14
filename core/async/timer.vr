@@ -532,7 +532,7 @@ implement Throttle {
     }
 
     /// Wait until the throttle allows an operation.
-    pub async fn acquire(&mut self) {
+    public async fn acquire(&mut self) {
         match self.last_allowed {
             None => {
                 self.last_allowed = Some(Instant.now());
