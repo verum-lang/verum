@@ -1,0 +1,147 @@
+// =============================================================================
+// core-tests/collections/list/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.collections.list`. The List<T> type is
+// the spine of Verum's value vocabulary — every other collection, every
+// iterator pipeline, every Maybe-returning search path interacts with it.
+// These tests exercise List in those interaction shapes (Maybe<T> elements,
+// nested List<List<T>>, ordering protocol, mutation-during-iteration
+// avoidance via pre-sized capacity).
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// §1  List of Maybe<T> — Maybe-returning search round-trips
+// =============================================================================
+
+@test
+fn integration_list_of_maybe_propagates_some_and_none() {
+    let mut xs: List<Maybe<Int>> = List.new();
+    xs.push(Some(1));
+    xs.push(None);
+    xs.push(Some(3));
+    assert_eq(xs.len(), 3);
+    assert_eq(xs.get(0), Some(Some(1)));
+    assert_eq(xs.get(1), Some(None));
+    assert_eq(xs.get(2), Some(Some(3)));
+}
+
+@test
+fn integration_list_first_threads_through_maybe() {
+    // first() on a non-empty list returns Some(head).
+    let xs: List<Int> = [42];
+    assert_eq(xs.first(), Some(42));
+    // first() on an empty list returns None.
+    let empty: List<Int> = List.new();
+    assert_eq(empty.first(), None);
+}
+
+// =============================================================================
+// §2  Nested List<List<T>> — push, length invariants under nesting
+// =============================================================================
+
+@test
+fn integration_nested_list_preserves_inner_lengths() {
+    let mut outer: List<List<Int>> = List.new();
+    let inner_a: List<Int> = [1, 2, 3];
+    let inner_b: List<Int> = [4, 5];
+    let inner_c: List<Int> = [];
+    outer.push(inner_a);
+    outer.push(inner_b);
+    outer.push(inner_c);
+    assert_eq(outer.len(), 3);
+    // Inner lengths preserved through the outer push.
+    assert_eq(outer.get(0).map(|x| x.len()), Some(3));
+    assert_eq(outer.get(1).map(|x| x.len()), Some(2));
+    assert_eq(outer.get(2).map(|x| x.len()), Some(0));
+}
+
+// =============================================================================
+// §3  Capacity hint preserved through push-up-to-capacity sequence
+// =============================================================================
+
+@test
+fn integration_with_capacity_avoids_realloc_within_hint() {
+    let mut xs: List<Int> = List.with_capacity(32);
+    let cap_initial = xs.capacity();
+    let mut i = 0;
+    while i < 32 {
+        xs.push(i);
+        i = i + 1;
+    }
+    // Capacity has not grown — every push stayed within the hint.
+    assert_eq(xs.capacity(), cap_initial);
+    assert_eq(xs.len(), 32);
+}
+
+// =============================================================================
+// §4  Sort + first / last as min / max for Int element type
+// =============================================================================
+
+@test
+fn integration_sort_plus_first_extracts_minimum() {
+    let mut xs: List<Int> = [7, 3, 9, 1, 5, 8, 2];
+    xs.sort();
+    assert_eq(xs.first(), Some(1));
+}
+
+@test
+fn integration_sort_plus_last_extracts_maximum() {
+    let mut xs: List<Int> = [7, 3, 9, 1, 5, 8, 2];
+    xs.sort();
+    assert_eq(xs.last(), Some(9));
+}
+
+// =============================================================================
+// §5  Insert + remove preserve neighbouring elements
+// =============================================================================
+
+@test
+fn integration_insert_at_idx_shifts_only_tail() {
+    let mut xs: List<Int> = [10, 20, 30, 40, 50];
+    xs.insert(2, 99);
+    // Head untouched.
+    assert_eq(xs.get(0), Some(10));
+    assert_eq(xs.get(1), Some(20));
+    // New element at idx.
+    assert_eq(xs.get(2), Some(99));
+    // Tail shifted right.
+    assert_eq(xs.get(3), Some(30));
+    assert_eq(xs.get(4), Some(40));
+    assert_eq(xs.get(5), Some(50));
+    assert_eq(xs.len(), 6);
+}
+
+// =============================================================================
+// §6  Sequential pop empties list and preserves "no observable element"
+// =============================================================================
+
+@test
+fn integration_drain_via_pop_to_empty() {
+    let mut xs: List<Int> = [10, 20, 30];
+    let _ = xs.pop();
+    let _ = xs.pop();
+    let _ = xs.pop();
+    assert(xs.is_empty());
+    assert_eq(xs.first(), None);
+    assert_eq(xs.last(), None);
+    assert_eq(xs.get(0), None);
+}
+
+// =============================================================================
+// §7  contains across mixed numeric values (Int boundary cases)
+// =============================================================================
+
+@test
+fn integration_contains_with_signed_extremes() {
+    let xs: List<Int> = [-100, -1, 0, 1, 100];
+    assert(xs.contains(&-100));
+    assert(xs.contains(&0));
+    assert(xs.contains(&100));
+    assert(!xs.contains(&50));
+    assert(!xs.contains(&-50));
+}
+
+fn main() {}

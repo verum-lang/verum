@@ -84,6 +84,9 @@ pub(in super::super) fn handle_call_method(
     } else {
         method_name.clone()
     };
+    if std::env::var("VERUM_TRACE_TEXT_INTERCEPT").is_ok() && bare_method_name == "capacity" {
+        eprintln!("[callm-trace] method='{}' bare='{}'", method_name, bare_method_name);
+    }
 
     // **High-level Rust intercept** — TcpStream method calls
     // (`read`, `write`, `flush`, `close`) bypass the libSystem
@@ -8078,6 +8081,77 @@ pub(super) fn dispatch_array_method(
                 *backing_data.add(idx) = value;
             }
             Ok(Some(Value::unit()))
+        }
+        // `xs.truncate(new_len)` — drop trailing elements down to new_len.
+        // Without this intercept the stdlib body's
+        // `while self.len > new_len { self.pop() }` reads `self.len` from
+        // struct field 1 (the stdlib `{ ptr, len, cap }` declaration order)
+        // which is slot 1 in the runtime layout = `cap` — and `pop()`
+        // decrements slot 0 (`len`). The condition reads from an unchanging
+        // field, so the loop runs forever.
+        "truncate" => {
+            if header.type_id != TypeId::LIST {
+                return Ok(None);
+            }
+            let new_len_raw = state.registers.get(caller_base, Reg(args.start.0));
+            let new_len = if is_cbgr_ref(&new_len_raw) {
+                let (abs_index, _) = decode_cbgr_ref(new_len_raw.as_i64());
+                state.registers.get_absolute(abs_index).as_i64()
+            } else {
+                new_len_raw.as_i64()
+            };
+            let clamped = new_len.max(0);
+            let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+            let current_len = unsafe { (*data_ptr).as_i64() };
+            if clamped < current_len {
+                unsafe {
+                    *data_ptr = Value::from_i64(clamped);
+                }
+            }
+            Ok(Some(Value::unit()))
+        }
+        // `xs.swap_remove(idx)` — O(1) remove by overwriting with last.
+        // Without this intercept the stdlib body does
+        // `ptr_read(self.ptr.offset(idx))` against the wrong slot, returning
+        // whatever bit-pattern sits where `ptr` should be (a NaN-boxed cap
+        // value, etc.) instead of the element at `idx`. Test impact: the
+        // returned element is wrong even when the length / overwrite
+        // semantics look plausible at a glance.
+        "swap_remove" => {
+            if header.type_id != TypeId::LIST {
+                return Ok(None);
+            }
+            let idx_raw = state.registers.get(caller_base, Reg(args.start.0));
+            let idx = if is_cbgr_ref(&idx_raw) {
+                let (abs_index, _) = decode_cbgr_ref(idx_raw.as_i64());
+                state.registers.get_absolute(abs_index).as_i64() as usize
+            } else {
+                idx_raw.as_i64() as usize
+            };
+            let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+            let current_len = unsafe { (*data_ptr).as_i64() } as usize;
+            if idx >= current_len {
+                return Err(InterpreterError::TypeMismatch {
+                    expected: "valid index",
+                    got: "out of bounds",
+                    operation: "List.swap_remove",
+                });
+            }
+            let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+            let backing_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+            let last_idx = current_len - 1;
+            let removed = unsafe { *backing_data.add(idx) };
+            if idx != last_idx {
+                let last_val = unsafe { *backing_data.add(last_idx) };
+                unsafe {
+                    *backing_data.add(idx) = last_val;
+                }
+            }
+            // Decrement length.
+            unsafe {
+                *data_ptr = Value::from_i64((current_len - 1) as i64);
+            }
+            Ok(Some(removed))
         }
         // `xs.get_or(idx, default)` — bounded read with fallback. Without
         // this intercept the call falls through to the stdlib body which
