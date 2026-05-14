@@ -1,0 +1,168 @@
+// =============================================================================
+// core-tests/sys/time_ops/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for `core.sys.time_ops`.
+//
+// Laws verified:
+//   §A  from_nanos(n).as_nanos() = n                       (identity)
+//   §B  from_micros(n).as_nanos() = n * 1000               (scale invariant)
+//   §C  from_millis(n).as_nanos() = n * 1_000_000          (scale invariant)
+//   §D  from_secs(n).as_nanos() = n * 1_000_000_000        (scale invariant)
+//   §E  from_X(n).as_X() = n  for X ∈ {nanos, micros, millis, secs}
+//   §F  as_secs ⊆ as_millis ⊆ as_micros ⊆ as_nanos     (refinement chain)
+//   §G  zero().as_nanos() = 0
+//   §H  Instant.now() ≥ 0   (monotonic clock non-negative)
+//   §I  Instant.now() at t1 ≤ Instant.now() at t2   (sequential ≤)
+//   §J  Instant.duration_since(self) = zero
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.time_ops.{SysTimeOpsInstant, SysTimeOpsDuration};
+
+// =============================================================================
+// §A — round-trip identity at boundary values
+// =============================================================================
+
+@test
+fn law_from_nanos_identity_pinned() {
+    let cases: List<Int> = [0, 1, -1, 1_000_000_000, Int.MAX, Int.MIN];
+    for n in cases.iter() {
+        let d: SysTimeOpsDuration = SysTimeOpsDuration.from_nanos(*n);
+        assert_eq(d.as_nanos(), *n);
+    }
+}
+
+// =============================================================================
+// §B / §C / §D — scale invariance for each unit
+// =============================================================================
+
+@test
+fn law_from_micros_multiplies_by_1000() {
+    // Use values that won't overflow Int when multiplied.
+    let cases: List<Int> = [0, 1, 2, 1000, 1_000_000];
+    for n in cases.iter() {
+        let d: SysTimeOpsDuration = SysTimeOpsDuration.from_micros(*n);
+        assert_eq(d.as_nanos(), (*n) * 1000);
+    }
+}
+
+@test
+fn law_from_millis_multiplies_by_million() {
+    let cases: List<Int> = [0, 1, 2, 1000];
+    for n in cases.iter() {
+        let d: SysTimeOpsDuration = SysTimeOpsDuration.from_millis(*n);
+        assert_eq(d.as_nanos(), (*n) * 1_000_000);
+    }
+}
+
+@test
+fn law_from_secs_multiplies_by_billion() {
+    let cases: List<Int> = [0, 1, 2, 60, 3600];
+    for n in cases.iter() {
+        let d: SysTimeOpsDuration = SysTimeOpsDuration.from_secs(*n);
+        assert_eq(d.as_nanos(), (*n) * 1_000_000_000);
+    }
+}
+
+// =============================================================================
+// §E — round-trip per unit
+// =============================================================================
+
+@test
+fn law_from_X_as_X_round_trip() {
+    let cases: List<Int> = [0, 1, 7, 100, 10_000];
+    for n in cases.iter() {
+        assert_eq(SysTimeOpsDuration.from_nanos(*n).as_nanos(),  *n);
+        assert_eq(SysTimeOpsDuration.from_micros(*n).as_micros(), *n);
+        assert_eq(SysTimeOpsDuration.from_millis(*n).as_millis(), *n);
+        assert_eq(SysTimeOpsDuration.from_secs(*n).as_secs(),     *n);
+    }
+}
+
+// =============================================================================
+// §F — refinement: as_secs ⊆ as_millis ⊆ as_micros ⊆ as_nanos
+//
+// For any non-negative duration d, integer truncation gives:
+//   d.as_secs()   <= d.as_millis() / 1000
+//   d.as_millis() <= d.as_micros() / 1000
+//   d.as_micros() <= d.as_nanos()  / 1000
+// =============================================================================
+
+@test
+fn law_unit_refinement_chain() {
+    let cases: List<Int> = [0, 1, 1_500, 1_500_000, 1_500_000_000];
+    for n in cases.iter() {
+        let d: SysTimeOpsDuration = SysTimeOpsDuration.from_nanos(*n);
+        let ns = d.as_nanos();
+        let us = d.as_micros();
+        let ms = d.as_millis();
+        let s  = d.as_secs();
+        // Each coarser unit equals the next-finer divided by 1000.
+        assert_eq(us, ns / 1000);
+        assert_eq(ms, us / 1000);
+        assert_eq(s,  ms / 1000);
+    }
+}
+
+// =============================================================================
+// §G — zero identity
+// =============================================================================
+
+@test
+fn law_zero_is_neutral_in_every_unit() {
+    let z: SysTimeOpsDuration = SysTimeOpsDuration.zero();
+    assert_eq(z.as_nanos(), 0);
+    assert_eq(z.as_micros(), 0);
+    assert_eq(z.as_millis(), 0);
+    assert_eq(z.as_secs(), 0);
+}
+
+// =============================================================================
+// §H / §I / §J — Instant.now() laws — gated by task #5
+//
+// These three laws all call SysTimeOpsInstant.now() which transitively
+// invokes __time_monotonic_nanos_raw. Pre-fix the stale `mount
+// super.raw.*` in core/sys/time_ops.vr meant the intrinsic was never
+// in scope; the wrapper compiled to a panic-stub. The mount fix
+// landed in this branch (canonical
+// `mount core.intrinsics.runtime.os.{__time_*_raw}` form), but the
+// @intrinsic propagation does not yet reach the precompile pipeline
+// — un-ignore once task #5 closes.
+// =============================================================================
+
+@ignore
+@test
+fn law_instant_now_non_negative() {
+    let t = SysTimeOpsInstant.now();
+    assert(t.nanos >= 0);
+}
+
+@ignore
+@test
+fn law_instant_now_sequential_non_decreasing() {
+    let mut prev: Int = 0;
+    let mut i: Int = 0;
+    while i < 16 {
+        let cur = SysTimeOpsInstant.now().nanos;
+        assert(cur >= prev);
+        prev = cur;
+        i = i + 1;
+    }
+}
+
+@ignore
+@test
+fn law_instant_duration_since_self_is_zero() {
+    let t = SysTimeOpsInstant.now();
+    let d = t.duration_since(t);
+    assert_eq(d.as_nanos(), 0);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

@@ -1,0 +1,102 @@
+// =============================================================================
+// core-tests/sys/time_ops/integration_test.vr
+// =============================================================================
+//
+// Integration tests: `core.sys.time_ops` is the raw-syscall layer behind
+// the higher-level `core.time.{Instant, Duration}`.  Verify they stay in
+// sync — the user-facing API and the syscall layer must observe a
+// consistent wall-clock + monotonic-clock universe.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.time_ops.{
+    SysTimeOpsInstant, SysTimeOpsDuration,
+    sleep, sleep_ms, wall_clock_ms,
+};
+mount core.collections.list.List;
+
+// -----------------------------------------------------------------------------
+// §1  Monotonic clock under sleep — measured elapsed time >= requested
+// -----------------------------------------------------------------------------
+
+// All four integration tests below transitively invoke
+// __time_*_raw intrinsics through SysTimeOpsInstant.now /
+// wall_clock_ms / sleep_ms — gated `@ignore` until task #5
+// (`mount super.raw.*` propagation defect) closes. The pure-
+// arithmetic Duration scenarios still run live.
+
+@ignore
+@test
+fn integration_sleep_ms_lower_bound() {
+    // sleep_ms(2) should give at least 1 ms of elapsed monotonic time.
+    let t = SysTimeOpsInstant.now();
+    sleep_ms(2);
+    let d = t.elapsed();
+    assert(d.as_nanos() >= 1_000_000);
+}
+
+@ignore
+@test
+fn integration_three_sequential_sleeps_compose() {
+    // sleep_ms(1) × 3 ≈ at least 1.5 ms total elapsed.
+    let t = SysTimeOpsInstant.now();
+    sleep_ms(1);
+    sleep_ms(1);
+    sleep_ms(1);
+    let d = t.elapsed();
+    assert(d.as_nanos() >= 1_500_000);
+}
+
+// -----------------------------------------------------------------------------
+// §2  wall_clock_ms vs SysTimeOpsInstant — both clocks observable
+// -----------------------------------------------------------------------------
+
+@ignore
+@test
+fn integration_wall_clock_and_monotonic_both_advance() {
+    let w0 = wall_clock_ms();
+    let m0 = SysTimeOpsInstant.now();
+    sleep_ms(2);
+    let w1 = wall_clock_ms();
+    let m1 = SysTimeOpsInstant.now();
+    assert(w1 >= w0);
+    assert(m1.nanos >= m0.nanos);
+}
+
+// -----------------------------------------------------------------------------
+// §3  List<SysTimeOpsInstant> — collections of timestamps
+// -----------------------------------------------------------------------------
+
+@ignore
+@test
+fn integration_list_of_instants_collected() {
+    let mut xs: List<SysTimeOpsInstant> = List.new();
+    xs.push(SysTimeOpsInstant.now());
+    xs.push(SysTimeOpsInstant.now());
+    xs.push(SysTimeOpsInstant.now());
+    assert_eq(xs.len(), 3);
+    // Monotonic-clock contract: index 0 <= index 1 <= index 2.
+    assert(xs[0].nanos <= xs[1].nanos);
+    assert(xs[1].nanos <= xs[2].nanos);
+}
+
+// -----------------------------------------------------------------------------
+// §4  SysTimeOpsDuration arithmetic via field access — `.nanos` is public
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_duration_field_arithmetic() {
+    let a = SysTimeOpsDuration.from_millis(5);
+    let b = SysTimeOpsDuration.from_millis(3);
+    let sum_ns = a.nanos + b.nanos;
+    let sum = SysTimeOpsDuration.from_nanos(sum_ns);
+    assert_eq(sum.as_millis(), 8);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

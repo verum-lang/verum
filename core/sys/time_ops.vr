@@ -14,7 +14,20 @@ module sys.time_ops;
 
 // =============================================================================
 
-mount super.raw.*;
+// Raw-intrinsic mount. Historical comment in `core/sys/mod.vr:40-49`
+// notes that `sys/raw.vr` was migrated away to
+// `core/intrinsics/runtime/os.vr`; pre-fix this file still carried
+// `mount super.raw.*` from before the migration. The dangling mount
+// silently resolved to nothing — every `__time_*_raw()` call below
+// failed function-id lookup at codegen time and the surrounding
+// wrappers (`SysTimeOpsInstant.now` / `sleep` / `wall_clock_ms` /
+// …) all compiled to lenient panic-stubs that fired at runtime
+// with `undefined function: __time_*_raw`.
+mount core.intrinsics.runtime.os.{
+    __time_monotonic_nanos_raw,
+    __time_sleep_nanos_raw,
+    __time_now_ms_raw,
+};
 
 /// A monotonic timestamp (nanoseconds since some fixed point).
 public type SysTimeOpsInstant is {
