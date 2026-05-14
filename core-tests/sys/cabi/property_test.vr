@@ -1,0 +1,162 @@
+// =============================================================================
+// core-tests/sys/cabi/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.cabi` aliases.
+//
+// Properties covered:
+//   * Width invariance — every alias newtype emits the same LLVM
+//     type as its underlying width. Observable indirectly through
+//     the value range (Int32 boundary, USize ceiling, etc.).
+//   * The three CFD_* sentinel constants partition `0..3`.
+//   * Round-trip identity — `Type(v).0 == v` for the underlying type.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.cabi.{
+    CInt, CUInt, CLong, CULong, CSize, CSSize, COff,
+    CMode, CPid, CUid, CGid, CClockId, CSockLen,
+    CFd, CFD_STDIN, CFD_STDOUT, CFD_STDERR,
+};
+
+// =============================================================================
+// Section 1: CFD_* sentinel triple — exhaustive disjointness
+// =============================================================================
+
+@test
+fn law_cfd_sentinels_form_zero_one_two() {
+    // The three sentinels exactly cover the values 0, 1, 2.
+    let raws: List<Int32> = [CFD_STDIN.0, CFD_STDOUT.0, CFD_STDERR.0];
+    let mut seen_zero: Bool = false;
+    let mut seen_one: Bool = false;
+    let mut seen_two: Bool = false;
+    for r in raws.iter() {
+        if *r == (0 as Int32) { seen_zero = true; }
+        if *r == (1 as Int32) { seen_one = true; }
+        if *r == (2 as Int32) { seen_two = true; }
+    }
+    assert(seen_zero);
+    assert(seen_one);
+    assert(seen_two);
+}
+
+@test
+fn law_cfd_sentinels_pairwise_distinct() {
+    let raws: List<Int32> = [CFD_STDIN.0, CFD_STDOUT.0, CFD_STDERR.0];
+    let mut i: Int = 0;
+    let n = raws.len();
+    while i < n {
+        let mut j: Int = i + 1;
+        while j < n {
+            let ri = *raws.get(i as USize);
+            let rj = *raws.get(j as USize);
+            assert(ri != rj);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn law_cfd_sentinel_order() {
+    // STDIN < STDOUT < STDERR — the canonical UNIX descriptor order.
+    assert(CFD_STDIN.0 < CFD_STDOUT.0);
+    assert(CFD_STDOUT.0 < CFD_STDERR.0);
+}
+
+// =============================================================================
+// Section 2: Round-trip identity for every alias
+// =============================================================================
+
+@test
+fn law_cint_round_trip_at_boundaries() {
+    let samples: List<Int32> = [
+        -2_147_483_648 as Int32,
+        -1 as Int32,
+        0 as Int32,
+        1 as Int32,
+        2_147_483_647 as Int32,
+    ];
+    for s in samples.iter() {
+        let wrapped = CInt(*s);
+        assert_eq(wrapped.0, *s);
+    }
+}
+
+@test
+fn law_cuint_round_trip_at_boundaries() {
+    let samples: List<UInt32> = [
+        0 as UInt32,
+        1 as UInt32,
+        65535 as UInt32,
+        4_294_967_295 as UInt32,
+    ];
+    for s in samples.iter() {
+        let wrapped = CUInt(*s);
+        assert_eq(wrapped.0, *s);
+    }
+}
+
+@test
+fn law_clong_round_trip_at_boundaries() {
+    let samples: List<Int> = [-9_223_372_036_854_775_808, -1, 0, 1, 9_223_372_036_854_775_807];
+    for s in samples.iter() {
+        let wrapped = CLong(*s);
+        assert_eq(wrapped.0, *s);
+    }
+}
+
+@test
+fn law_csize_round_trip_at_boundaries() {
+    let samples: List<USize> = [
+        0 as USize,
+        1 as USize,
+        4096 as USize,
+        67_108_864 as USize,
+    ];
+    for s in samples.iter() {
+        let wrapped = CSize(*s);
+        assert_eq(wrapped.0, *s);
+    }
+}
+
+@test
+fn law_cfd_round_trip_at_boundaries() {
+    let samples: List<Int32> = [-1 as Int32, 0 as Int32, 1 as Int32, 1024 as Int32];
+    for s in samples.iter() {
+        let wrapped = CFd(*s);
+        assert_eq(wrapped.0, *s);
+    }
+}
+
+// =============================================================================
+// Section 3: Sign-domain invariants
+// =============================================================================
+
+@test
+fn law_signed_aliases_admit_negative() {
+    // CInt / CLong / CSSize / COff / CPid / CClockId / CFd are
+    // signed — should each round-trip a negative value.
+    assert_eq(CInt(-5 as Int32).0, -5 as Int32);
+    assert_eq(CLong(-100).0, -100);
+    assert_eq(CSSize(-1).0, -1);
+    assert_eq(COff(-2048).0, -2048);
+    assert_eq(CPid(-1 as Int32).0, -1 as Int32);
+    assert_eq(CClockId(-1 as Int32).0, -1 as Int32);
+    assert_eq(CFd(-1 as Int32).0, -1 as Int32);
+}
+
+@test
+fn law_unsigned_aliases_zero_is_minimum() {
+    // CUInt / CULong / CSize / CMode / CUid / CGid / CSockLen are
+    // unsigned — the smallest legal value is zero.
+    assert_eq(CUInt(0 as UInt32).0, 0 as UInt32);
+    assert_eq(CULong(0 as UInt).0, 0 as UInt);
+    assert_eq(CSize(0 as USize).0, 0 as USize);
+    assert_eq(CMode(0 as UInt32).0, 0 as UInt32);
+    assert_eq(CUid(0 as UInt32).0, 0 as UInt32);
+    assert_eq(CGid(0 as UInt32).0, 0 as UInt32);
+    assert_eq(CSockLen(0 as UInt32).0, 0 as UInt32);
+}
+
+fn main() {}

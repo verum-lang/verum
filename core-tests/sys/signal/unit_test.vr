@@ -1,0 +1,344 @@
+// =============================================================================
+// core-tests/sys/signal/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.signal` — POSIX signal handling primitives.
+//
+// API surface tested here:
+//
+//   Signal — 18-variant POSIX signal algebra + name + is_catchable +
+//            to_raw / from_raw round-trip
+//   SignalError — Uncatchable / InvalidSignal / RegistrationFailed /
+//                 RaiseFailed 4-variant
+//   SignalFlag — atomic flag for signal-safe handler-to-mainloop
+//                communication
+//
+// What lives in integration_test.vr:
+//   * on_signal / reset_signal / ignore_signal / raise_signal — real
+//     runtime signal delivery; tested with a fixture that registers
+//     a handler and asserts the flag flips.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.signal.{
+    Signal,
+    SignalError,
+    SignalFlag,
+};
+
+// =============================================================================
+// Section 1: Signal name() — every variant has a canonical SIG* name
+// =============================================================================
+
+@test
+fn test_signal_hup_name() { assert_eq(Signal.Hup.name(), "SIGHUP"); }
+
+@test
+fn test_signal_int_name() { assert_eq(Signal.Int.name(), "SIGINT"); }
+
+@test
+fn test_signal_quit_name() { assert_eq(Signal.Quit.name(), "SIGQUIT"); }
+
+@test
+fn test_signal_ill_name() { assert_eq(Signal.Ill.name(), "SIGILL"); }
+
+@test
+fn test_signal_abort_name() { assert_eq(Signal.Abort.name(), "SIGABRT"); }
+
+@test
+fn test_signal_fpe_name() { assert_eq(Signal.Fpe.name(), "SIGFPE"); }
+
+@test
+fn test_signal_kill_name() { assert_eq(Signal.Kill.name(), "SIGKILL"); }
+
+@test
+fn test_signal_segv_name() { assert_eq(Signal.Segv.name(), "SIGSEGV"); }
+
+@test
+fn test_signal_pipe_name() { assert_eq(Signal.Pipe.name(), "SIGPIPE"); }
+
+@test
+fn test_signal_alarm_name() { assert_eq(Signal.Alarm.name(), "SIGALRM"); }
+
+@test
+fn test_signal_term_name() { assert_eq(Signal.Term.name(), "SIGTERM"); }
+
+@test
+fn test_signal_usr1_name() { assert_eq(Signal.Usr1.name(), "SIGUSR1"); }
+
+@test
+fn test_signal_usr2_name() { assert_eq(Signal.Usr2.name(), "SIGUSR2"); }
+
+@test
+fn test_signal_child_name() { assert_eq(Signal.Child.name(), "SIGCHLD"); }
+
+@test
+fn test_signal_cont_name() { assert_eq(Signal.Cont.name(), "SIGCONT"); }
+
+@test
+fn test_signal_stop_name() { assert_eq(Signal.Stop.name(), "SIGSTOP"); }
+
+@test
+fn test_signal_tstp_name() { assert_eq(Signal.Tstp.name(), "SIGTSTP"); }
+
+@test
+fn test_signal_winch_name() { assert_eq(Signal.Winch.name(), "SIGWINCH"); }
+
+// =============================================================================
+// Section 2: Signal is_catchable() — KILL and STOP are uncatchable
+// =============================================================================
+
+@test
+fn test_signal_kill_not_catchable() {
+    // SIGKILL cannot be caught — pinned by POSIX. Any future
+    // refactor that flips this would silently let user code attempt
+    // to register a handler for SIGKILL, which the kernel rejects.
+    assert(!Signal.Kill.is_catchable());
+}
+
+@test
+fn test_signal_stop_not_catchable() {
+    assert(!Signal.Stop.is_catchable());
+}
+
+@test
+fn test_signal_int_is_catchable() {
+    // SIGINT (Ctrl+C) — every long-running daemon catches this for
+    // graceful shutdown.
+    assert(Signal.Int.is_catchable());
+}
+
+@test
+fn test_signal_term_is_catchable() {
+    // SIGTERM — the canonical "shutdown please" signal.
+    assert(Signal.Term.is_catchable());
+}
+
+@test
+fn test_signal_hup_is_catchable() {
+    // SIGHUP — terminal close; daemons reload config on this.
+    assert(Signal.Hup.is_catchable());
+}
+
+@test
+fn test_signal_winch_is_catchable() {
+    // SIGWINCH — terminal resize; TUI apps redraw on this.
+    assert(Signal.Winch.is_catchable());
+}
+
+// =============================================================================
+// Section 3: Signal to_raw() — canonical POSIX signal numbers
+// =============================================================================
+
+@test
+fn test_signal_to_raw_canonical_posix_numbers() {
+    // Pin the standard POSIX signal numbers (Linux + macOS converge
+    // on 1-15 for the historical first 15 signals). Drift would
+    // break every cross-platform handler registration that round-
+    // trips through the raw number.
+    assert_eq(Signal.Hup.to_raw(),    1);
+    assert_eq(Signal.Int.to_raw(),    2);
+    assert_eq(Signal.Quit.to_raw(),   3);
+    assert_eq(Signal.Ill.to_raw(),    4);
+    assert_eq(Signal.Abort.to_raw(),  6);
+    assert_eq(Signal.Fpe.to_raw(),    8);
+    assert_eq(Signal.Kill.to_raw(),   9);
+    assert_eq(Signal.Segv.to_raw(),   11);
+    assert_eq(Signal.Pipe.to_raw(),   13);
+    assert_eq(Signal.Alarm.to_raw(),  14);
+    assert_eq(Signal.Term.to_raw(),   15);
+}
+
+@test
+fn test_signal_winch_to_raw_canonical() {
+    // SIGWINCH = 28 on both Linux and macOS.
+    assert_eq(Signal.Winch.to_raw(), 28);
+}
+
+// =============================================================================
+// Section 4: Signal from_raw() — partial inverse
+// =============================================================================
+
+@test
+fn test_signal_from_raw_known_codes_round_trip() {
+    // Every signal whose number is platform-invariant round-trips.
+    let codes: List<(Int, Signal)> = [
+        (1,  Signal.Hup),
+        (2,  Signal.Int),
+        (3,  Signal.Quit),
+        (4,  Signal.Ill),
+        (6,  Signal.Abort),
+        (8,  Signal.Fpe),
+        (9,  Signal.Kill),
+        (11, Signal.Segv),
+        (13, Signal.Pipe),
+        (14, Signal.Alarm),
+        (15, Signal.Term),
+        (28, Signal.Winch),
+    ];
+    for c in codes.iter() {
+        let (n, expected) = *c;
+        match Signal.from_raw(n) {
+            Some(s) => assert(s.eq(&expected)),
+            None => assert(false),
+        };
+    }
+}
+
+@test
+fn test_signal_from_raw_unknown_yields_none() {
+    // Signal numbers outside the supported set return None — pinning
+    // both the structural "unknown → None" property and the boundary
+    // at the high end.
+    match Signal.from_raw(0) {
+        None => assert(true),
+        Some(_) => assert(false),
+    };
+    match Signal.from_raw(99) {
+        None => assert(true),
+        Some(_) => assert(false),
+    };
+    match Signal.from_raw(-1) {
+        None => assert(true),
+        Some(_) => assert(false),
+    };
+}
+
+// =============================================================================
+// Section 5: Signal Eq — based on raw number
+// =============================================================================
+
+@test
+fn test_signal_eq_reflexive() {
+    let s = Signal.Term;
+    assert(s.eq(&s));
+}
+
+@test
+fn test_signal_eq_distinguishes_distinct_variants() {
+    let a = Signal.Int;
+    let b = Signal.Term;
+    assert(!a.eq(&b));
+}
+
+@test
+fn test_signal_eq_consistent_with_to_raw() {
+    // Eq is defined as `self.to_raw() == other.to_raw()`. Pin the
+    // contract so a future variant-tag-based Eq refactor surfaces
+    // here.
+    let a = Signal.Hup;
+    let b = Signal.Hup;
+    assert_eq(a.to_raw(), b.to_raw());
+    assert(a.eq(&b));
+}
+
+// =============================================================================
+// Section 6: SignalError — 4-variant algebra
+// =============================================================================
+
+@test
+fn test_signal_error_uncatchable_construction() {
+    let e = SignalError.Uncatchable(Signal.Kill);
+    match e {
+        SignalError.Uncatchable(s) => assert(s.eq(&Signal.Kill)),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_signal_error_invalid_signal_construction() {
+    let e = SignalError.InvalidSignal(999);
+    match e {
+        SignalError.InvalidSignal(n) => assert_eq(n, 999),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_signal_error_registration_failed_construction() {
+    let e = SignalError.RegistrationFailed(13);
+    match e {
+        SignalError.RegistrationFailed(n) => assert_eq(n, 13),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_signal_error_raise_failed_construction() {
+    let e = SignalError.RaiseFailed(Signal.Term);
+    match e {
+        SignalError.RaiseFailed(s) => assert(s.eq(&Signal.Term)),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_signal_error_eq_same_variant_same_payload() {
+    let a = SignalError.InvalidSignal(7);
+    let b = SignalError.InvalidSignal(7);
+    assert(a.eq(&b));
+}
+
+@test
+fn test_signal_error_eq_same_variant_different_payload() {
+    let a = SignalError.InvalidSignal(7);
+    let b = SignalError.InvalidSignal(8);
+    assert(!a.eq(&b));
+}
+
+@test
+fn test_signal_error_eq_distinct_variants_disagree() {
+    let a = SignalError.Uncatchable(Signal.Kill);
+    let b = SignalError.InvalidSignal(9);
+    assert(!a.eq(&b));
+}
+
+// =============================================================================
+// Section 7: SignalFlag — clear-set-isset state machine
+// =============================================================================
+
+@test
+fn test_signal_flag_starts_unset() {
+    let f = SignalFlag.new();
+    assert(!f.is_set());
+}
+
+@test
+fn test_signal_flag_set_then_isset_is_true() {
+    let f = SignalFlag.new();
+    f.set();
+    assert(f.is_set());
+}
+
+@test
+fn test_signal_flag_clear_after_set_returns_to_unset() {
+    let f = SignalFlag.new();
+    f.set();
+    assert(f.is_set());
+    f.clear();
+    assert(!f.is_set());
+}
+
+@test
+fn test_signal_flag_set_is_idempotent() {
+    // Setting an already-set flag is observable as a no-op.
+    let f = SignalFlag.new();
+    f.set();
+    f.set();
+    f.set();
+    assert(f.is_set());
+}
+
+@test
+fn test_signal_flag_clear_is_idempotent() {
+    let f = SignalFlag.new();
+    f.clear();
+    f.clear();
+    assert(!f.is_set());
+    f.set();
+    f.clear();
+    f.clear();
+    assert(!f.is_set());
+}
+
+fn main() {}

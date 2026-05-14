@@ -545,6 +545,116 @@ fn register_module(
             // resolve the user's local sum type unambiguously.
         }
     }
+
+    // Pass 5 — transparent-wrapper newtype constructor registration.
+    //
+    // For every `type X is T;` / `type X is (T);` declaration in the
+    // source, `compile_type_decl` mirrors the type's structural shape
+    // onto BOTH (1) the `TypeDescriptor.is_transparent_wrapper` flag
+    // (archived) AND (2) a synthetic constructor `FunctionInfo` with
+    // `is_transparent_wrapper: true` (NOT archived — sentinel id
+    // `FunctionId(u32::MAX / 2)` means there's no body to emit).
+    //
+    // The archive carries (1) via the type descriptor table but
+    // drops (2). On user-side load, the call site `CFd(0 as Int32)`
+    // looks up `CFd` in `ctx.functions`, misses, falls through to
+    // `compile_variant_constructor_hinted`'s byte-sum-hash tag
+    // fallback at `expressions.rs:6419-6428` — and the result is a
+    // `Variant(tag=237, payload=0)` wrapper instead of the
+    // transparent Int32 value.  Downstream `CFd.0` access then
+    // operates on the bogus variant, surfacing as `Variant(237, 5)`
+    // when the user prints it.
+    //
+    // Fix: walk every loaded `TypeDescriptor` carrying
+    // `is_transparent_wrapper == true`, synthesise the constructor
+    // `FunctionInfo` that `compile_type_decl` would have registered
+    // in-source, and ALSO populate `newtype_names` /
+    // `newtype_inner_type` (the codegen-local caches that the
+    // `compile_tuple_index` Mov fast-path consults).
+    //
+    // Skips when `ctx.functions[type_name]` is already populated —
+    // this is the first-wins discipline used elsewhere in the archive
+    // loader (a user-side `type CFd is ...` declaration that
+    // shadows an archive transparent-wrapper takes precedence).
+    use verum_vbc::types::TypeKind;
+    for ty in &module.types {
+        if !ty.is_transparent_wrapper {
+            continue;
+        }
+        // Only `Record` shape — `compile_type_decl` flips the flag in
+        // both the Record (`type X is T;`) and Tuple (`type X is (T);`)
+        // arms but emits `TypeKind::Record` for both. Defensive: skip
+        // non-Record kinds.
+        if !matches!(ty.kind, TypeKind::Record) {
+            continue;
+        }
+        let type_name = match lookup(ty.name) {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        // Skip if already registered (user shadowing or a previous
+        // archive-loader pass picked it up).
+        if ctx.lookup_function(&type_name).is_some() {
+            // Still need to update the type-aware caches so
+            // `compile_tuple_index` Mov fast-path fires for the
+            // existing entry's `.0` access.
+            ctx.newtype_names.insert(type_name.clone());
+            if let Some(first_field) = ty.fields.first()
+                && let Some(inner_name) = type_ref_simple_name(&first_field.type_ref, module)
+            {
+                ctx.newtype_inner_type.insert(type_name.clone(), inner_name);
+            }
+            continue;
+        }
+        // Single-field transparent wrappers (`type X is T;` or
+        // single-element tuple `type X is (T);`) have exactly one
+        // payload field — pin that as the constructor's only param.
+        // Multi-element tuples don't flip `is_transparent_wrapper` so
+        // we don't need to handle the N > 1 case here.
+        let arity = ty.fields.len().max(1);
+        let param_names: Vec<String> = (0..arity).map(|i| format!("_{}", i)).collect();
+        let param_type_names: Vec<String> = ty
+            .fields
+            .iter()
+            .map(|f| type_ref_simple_name(&f.type_ref, module).unwrap_or_default())
+            .collect();
+        let info = FunctionInfo {
+            id: verum_vbc::module::FunctionId(u32::MAX / 2),
+            param_count: arity,
+            param_names,
+            param_type_names,
+            is_async: false,
+            is_generator: false,
+            contexts: vec![],
+            return_type: None,
+            yield_type: None,
+            intrinsic_name: None,
+            variant_tag: None,
+            parent_type_name: None,
+            variant_payload_types: None,
+            is_partial_pattern: false,
+            takes_self_mut_ref: false,
+            return_type_name: Some(type_name.clone()),
+            return_type_inner: None,
+            is_const: false,
+            // The whole point of Pass 5 — flip this flag so the
+            // call-site passthrough arms in `compile_call` /
+            // `compile_method_call` fire on archive-loaded newtypes.
+            is_transparent_wrapper: true,
+        };
+        ctx.register_function(type_name.clone(), info);
+        stats.functions_registered += 1;
+        // Mirror the codegen-local newtype-tracking caches that
+        // `compile_type_decl` populates in-source; these gate the
+        // `Mov` fast-path in `compile_tuple_index` and the
+        // float-propagation logic in `infer_expr_type_name`.
+        ctx.newtype_names.insert(type_name.clone());
+        if let Some(first_field) = ty.fields.first()
+            && let Some(inner_name) = type_ref_simple_name(&first_field.type_ref, module)
+        {
+            ctx.newtype_inner_type.insert(type_name.clone(), inner_name);
+        }
+    }
 }
 
 /// Per-variant index entry.
@@ -3640,6 +3750,84 @@ fn register_module_filtered(
             // matching site in `register_module_filtered` for the
             // collision rationale (user `type ... is | Help | ...`
             // would otherwise be silently de-aliased).
+        }
+    }
+
+    // Pass 5 — transparent-wrapper newtype constructor registration
+    // (lazy-loaded mirror of the matching block in `register_module`).
+    //
+    // See the full rationale at the matching site in `register_module`.
+    // Briefly: archive type descriptors carry `is_transparent_wrapper`,
+    // but the synthetic constructor `FunctionInfo` that
+    // `compile_type_decl` emits in-source has a sentinel id and never
+    // archives.  Without re-synthesising it on the user side, every
+    // call `CFd(0)` falls through to `compile_variant_constructor`'s
+    // byte-sum-hash tag fallback, producing a bogus
+    // `Variant(tag, payload)` wrapper instead of a transparent passthrough.
+    //
+    // Same `wanted` gate as the variant pass above — only register
+    // newtype constructors whose parent type name is reachable through
+    // the user's mount tree, matching the lazy-load discipline.
+    for ty in &module.types {
+        if !ty.is_transparent_wrapper {
+            continue;
+        }
+        if !matches!(ty.kind, verum_vbc::types::TypeKind::Record) {
+            continue;
+        }
+        let type_name = match lookup(ty.name) {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        let parent_in_scope = wanted.contains(&type_name);
+        let is_wholesale_module_mount = wanted.contains(module_name);
+        if !parent_in_scope && !is_wholesale_module_mount {
+            continue;
+        }
+        if ctx.lookup_function(&type_name).is_some() {
+            // Already registered; still mirror the type-aware caches.
+            ctx.newtype_names.insert(type_name.clone());
+            if let Some(first_field) = ty.fields.first()
+                && let Some(inner_name) = type_ref_simple_name(&first_field.type_ref, module)
+            {
+                ctx.newtype_inner_type.insert(type_name.clone(), inner_name);
+            }
+            continue;
+        }
+        let arity = ty.fields.len().max(1);
+        let param_names: Vec<String> = (0..arity).map(|i| format!("_{}", i)).collect();
+        let param_type_names: Vec<String> = ty
+            .fields
+            .iter()
+            .map(|f| type_ref_simple_name(&f.type_ref, module).unwrap_or_default())
+            .collect();
+        let info = FunctionInfo {
+            id: FunctionId(u32::MAX / 2),
+            param_count: arity,
+            param_names,
+            param_type_names,
+            is_async: false,
+            is_generator: false,
+            contexts: vec![],
+            return_type: None,
+            yield_type: None,
+            intrinsic_name: None,
+            variant_tag: None,
+            parent_type_name: None,
+            variant_payload_types: None,
+            is_partial_pattern: false,
+            takes_self_mut_ref: false,
+            return_type_name: Some(type_name.clone()),
+            return_type_inner: None,
+            is_const: false,
+            is_transparent_wrapper: true,
+        };
+        ctx.register_function(type_name.clone(), info);
+        ctx.newtype_names.insert(type_name.clone());
+        if let Some(first_field) = ty.fields.first()
+            && let Some(inner_name) = type_ref_simple_name(&first_field.type_ref, module)
+        {
+            ctx.newtype_inner_type.insert(type_name.clone(), inner_name);
         }
     }
     func_id_remap

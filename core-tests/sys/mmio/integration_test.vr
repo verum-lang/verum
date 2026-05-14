@@ -1,0 +1,183 @@
+// =============================================================================
+// core-tests/sys/mmio/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.mmio`. Exercises
+// BarrierKind / MemoryFlags / MemoryRegion in combination with the
+// rest of the standard library.
+//
+// What this file pins:
+//
+//   * BarrierKind in match-dispatch tables — pattern surface
+//     mirroring the runtime atomic-fence dispatch path.
+//   * MemoryFlags participating in `List<MemoryRegion>` iteration —
+//     the canonical "linker-table walk" the bare-metal runtime would
+//     issue on every boot.
+//   * MemoryRegion.contains() composed with List.iter().filter() —
+//     touches both the iterator-element receiver path and the
+//     method-dispatch chain that the cross-stdlib integration
+//     surface depends on.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.mmio.{
+    BarrierKind,
+    MemoryFlags,
+    MemoryRegion,
+};
+
+// =============================================================================
+// Section 1: BarrierKind classifier — runtime-style dispatch table
+// =============================================================================
+
+@test
+fn test_barrier_kind_dispatch_dataflow() {
+    // The canonical pattern: take a BarrierKind, decide whether it
+    // emits both an acquire fence AND a release fence (only AcqRel
+    // and SeqCst do).
+    fn is_dual_fence(b: BarrierKind) -> Bool {
+        match b {
+            BarrierKind.AcqRel => true,
+            BarrierKind.SeqCst => true,
+            _ => false,
+        }
+    }
+    assert(!is_dual_fence(BarrierKind.Compiler));
+    assert(!is_dual_fence(BarrierKind.Acquire));
+    assert(!is_dual_fence(BarrierKind.Release));
+    assert(is_dual_fence(BarrierKind.AcqRel));
+    assert(is_dual_fence(BarrierKind.SeqCst));
+}
+
+@test
+fn test_barrier_kind_strength_ordering() {
+    // The 5 ordering variants form a partial order by strength:
+    //   Compiler ≤ Acquire ≤ AcqRel ≤ SeqCst
+    //   Compiler ≤ Release ≤ AcqRel ≤ SeqCst
+    fn strength(b: BarrierKind) -> Int {
+        match b {
+            BarrierKind.Compiler => 0,
+            BarrierKind.Acquire  => 1,
+            BarrierKind.Release  => 1,
+            BarrierKind.AcqRel   => 2,
+            BarrierKind.SeqCst   => 3,
+        }
+    }
+    assert(strength(BarrierKind.Compiler) < strength(BarrierKind.Acquire));
+    assert(strength(BarrierKind.Acquire) <= strength(BarrierKind.AcqRel));
+    assert(strength(BarrierKind.AcqRel) < strength(BarrierKind.SeqCst));
+    assert_eq(strength(BarrierKind.Acquire), strength(BarrierKind.Release));
+}
+
+// =============================================================================
+// Section 2: MemoryFlags participating in collection iteration
+// =============================================================================
+
+@test
+fn test_memory_flags_in_list_filter() {
+    // Build a list of "is permission set?" flags as we iterate the
+    // canonical 4-flag set.
+    let flags: List<MemoryFlags> = [
+        MemoryFlags.READ,
+        MemoryFlags.WRITE,
+        MemoryFlags.EXEC,
+        MemoryFlags.DMA,
+    ];
+    let raw: List<UInt32> = flags.iter().map(|f| (*f).0).collect();
+    assert_eq(raw.len(), 4);
+    let sum: UInt32 = (*raw.get(0 as USize)) + (*raw.get(1 as USize))
+                    + (*raw.get(2 as USize)) + (*raw.get(3 as USize));
+    assert_eq(sum, 15 as UInt32);
+}
+
+// =============================================================================
+// Section 3: MemoryRegion table walk — bare-metal linker map
+// =============================================================================
+
+@test
+fn test_memory_region_contains_in_list() {
+    // Simulate a bare-metal kernel's section-permission table. We
+    // build a 4-region list, then for each candidate address ask
+    // "which region (if any) contains this?".
+    let regions: List<MemoryRegion> = [
+        MemoryRegion {
+            start: 0x0000_0000 as *const (),
+            size: 0x1000 as USize,
+            flags: MemoryFlags.READ,
+        },
+        MemoryRegion {
+            start: 0x1000 as *const (),
+            size: 0x1000 as USize,
+            flags: MemoryFlags(MemoryFlags.READ.0 | MemoryFlags.WRITE.0),
+        },
+        MemoryRegion {
+            start: 0x2000 as *const (),
+            size: 0x1000 as USize,
+            flags: MemoryFlags(MemoryFlags.READ.0 | MemoryFlags.EXEC.0),
+        },
+        MemoryRegion {
+            start: 0x3000 as *const (),
+            size: 0x1000 as USize,
+            flags: MemoryFlags.DMA,
+        },
+    ];
+
+    fn region_of(regions: &List<MemoryRegion>, addr: USize) -> Maybe<USize> {
+        let mut i: Int = 0;
+        let n = regions.len();
+        while i < n {
+            if regions.get(i as USize).contains(addr) {
+                return Some(i as USize);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    match region_of(&regions, 0x500 as USize) {
+        Some(i) => assert_eq(i, 0 as USize),
+        None => assert(false),
+    };
+    match region_of(&regions, 0x1500 as USize) {
+        Some(i) => assert_eq(i, 1 as USize),
+        None => assert(false),
+    };
+    match region_of(&regions, 0x2800 as USize) {
+        Some(i) => assert_eq(i, 2 as USize),
+        None => assert(false),
+    };
+    match region_of(&regions, 0x3FFF as USize) {
+        Some(i) => assert_eq(i, 3 as USize),
+        None => assert(false),
+    };
+    match region_of(&regions, 0x4000 as USize) {
+        None => assert(true),
+        Some(_) => assert(false),
+    };
+}
+
+@test
+fn test_memory_region_end_chain() {
+    // Three contiguous regions of size 0x1000 each starting at
+    // 0x4000 — every region's `end()` equals the next region's
+    // `start`.
+    let r0 = MemoryRegion {
+        start: 0x4000 as *const (),
+        size: 0x1000 as USize,
+        flags: MemoryFlags.READ,
+    };
+    let r1 = MemoryRegion {
+        start: 0x5000 as *const (),
+        size: 0x1000 as USize,
+        flags: MemoryFlags.WRITE,
+    };
+    let r2 = MemoryRegion {
+        start: 0x6000 as *const (),
+        size: 0x1000 as USize,
+        flags: MemoryFlags.EXEC,
+    };
+    assert_eq(r0.end(), r1.start as USize);
+    assert_eq(r1.end(), r2.start as USize);
+}
+
+fn main() {}

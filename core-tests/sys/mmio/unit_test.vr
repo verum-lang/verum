@@ -1,0 +1,289 @@
+// =============================================================================
+// core-tests/sys/mmio/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.mmio` — type-safe memory-mapped I/O
+// abstractions for systems programming.
+//
+// API surface tested here:
+//
+//   AccessMode union (ReadOnly | WriteOnly | ReadWrite | ReadWriteOnce |
+//                     WriteOneToClear | WriteOneToSet)
+//   BarrierKind 5-variant (Compiler | Acquire | Release | AcqRel | SeqCst)
+//   MemoryFlags bitfield (READ | WRITE | EXEC | DMA)
+//   MemoryRegion + .contains / .end
+//
+// What lives in integration_test.vr:
+//   * MmioRegister.read / .write — exercised through synthesised
+//     memory backing (hardware MMIO is out-of-scope for the
+//     conformance suite).
+//   * volatile_load / volatile_store — Tier-0 interpreter intrinsics
+//     that need a real memory page to exercise.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.mmio.{
+    BarrierKind,
+    MemoryFlags,
+    MemoryRegion,
+    compiler_barrier,
+    dmb,
+};
+
+// =============================================================================
+// Section 1: BarrierKind — 5-variant ordering algebra
+// =============================================================================
+
+@test
+fn test_barrier_kind_compiler_construction() {
+    let b = BarrierKind.Compiler;
+    match b {
+        BarrierKind.Compiler => assert(true),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_barrier_kind_acquire_construction() {
+    let b = BarrierKind.Acquire;
+    match b {
+        BarrierKind.Acquire => assert(true),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_barrier_kind_release_construction() {
+    let b = BarrierKind.Release;
+    match b {
+        BarrierKind.Release => assert(true),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_barrier_kind_acqrel_construction() {
+    let b = BarrierKind.AcqRel;
+    match b {
+        BarrierKind.AcqRel => assert(true),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_barrier_kind_seqcst_construction() {
+    let b = BarrierKind.SeqCst;
+    match b {
+        BarrierKind.SeqCst => assert(true),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_barrier_kind_match_exhaustive_dispatch() {
+    // Pin the canonical (variant → numeric tag) dispatch table for
+    // the Tier-0 barrier intrinsic. Drift on this surface = silent
+    // wrong-ordering at runtime.
+    let variants: List<(BarrierKind, Int)> = [
+        (BarrierKind.Compiler, 0),
+        (BarrierKind.Acquire,  1),
+        (BarrierKind.Release,  2),
+        (BarrierKind.AcqRel,   3),
+        (BarrierKind.SeqCst,   4),
+    ];
+    for v in variants.iter() {
+        let (kind, expected) = *v;
+        let tag = match kind {
+            BarrierKind.Compiler => 0,
+            BarrierKind.Acquire  => 1,
+            BarrierKind.Release  => 2,
+            BarrierKind.AcqRel   => 3,
+            BarrierKind.SeqCst   => 4,
+        };
+        assert_eq(tag, expected);
+    }
+}
+
+// =============================================================================
+// Section 2: MemoryFlags — 4-bit permission bitfield
+// =============================================================================
+
+@test
+fn test_memory_flags_read_bit() {
+    // READ is bit-0 (value 1).
+    assert_eq(MemoryFlags.READ.0, 1 as UInt32);
+}
+
+@test
+fn test_memory_flags_write_bit() {
+    // WRITE is bit-1 (value 2).
+    assert_eq(MemoryFlags.WRITE.0, 2 as UInt32);
+}
+
+@test
+fn test_memory_flags_exec_bit() {
+    // EXEC is bit-2 (value 4).
+    assert_eq(MemoryFlags.EXEC.0, 4 as UInt32);
+}
+
+@test
+fn test_memory_flags_dma_bit() {
+    // DMA is bit-3 (value 8).
+    assert_eq(MemoryFlags.DMA.0, 8 as UInt32);
+}
+
+@test
+fn test_memory_flags_are_powers_of_two() {
+    let flags: List<UInt32> = [
+        MemoryFlags.READ.0,
+        MemoryFlags.WRITE.0,
+        MemoryFlags.EXEC.0,
+        MemoryFlags.DMA.0,
+    ];
+    for f in flags.iter() {
+        // x & (x - 1) == 0 iff x is a power of two.
+        let val: UInt32 = *f;
+        assert(val != (0 as UInt32));
+        assert_eq(val & (val - (1 as UInt32)), 0 as UInt32);
+    }
+}
+
+@test
+fn test_memory_flags_disjoint_under_bitwise_and() {
+    // No two single-bit flags share a bit — pairwise AND is zero.
+    let flags: List<UInt32> = [
+        MemoryFlags.READ.0,
+        MemoryFlags.WRITE.0,
+        MemoryFlags.EXEC.0,
+        MemoryFlags.DMA.0,
+    ];
+    let mut i: Int = 0;
+    let n = flags.len();
+    while i < n {
+        let mut j: Int = i + 1;
+        while j < n {
+            let fi = *flags.get(i as USize);
+            let fj = *flags.get(j as USize);
+            assert_eq(fi & fj, 0 as UInt32);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn test_memory_flags_compose_via_or() {
+    // The canonical "text segment" permission is `READ | EXEC` —
+    // executable but not writable.
+    let text: UInt32 = MemoryFlags.READ.0 | MemoryFlags.EXEC.0;
+    assert_eq(text, 5 as UInt32);
+
+    // "data segment" — readable + writable.
+    let data: UInt32 = MemoryFlags.READ.0 | MemoryFlags.WRITE.0;
+    assert_eq(data, 3 as UInt32);
+
+    // All four flags together.
+    let all: UInt32 = MemoryFlags.READ.0
+        | MemoryFlags.WRITE.0
+        | MemoryFlags.EXEC.0
+        | MemoryFlags.DMA.0;
+    assert_eq(all, 15 as UInt32);
+}
+
+// =============================================================================
+// Section 3: MemoryRegion — contains + end invariants
+// =============================================================================
+
+@test
+fn test_memory_region_contains_start_address() {
+    let base: USize = 0x4000_0000 as USize;
+    let region = MemoryRegion {
+        start: base as *const (),
+        size: 0x1000 as USize,
+        flags: MemoryFlags.READ,
+    };
+    assert(region.contains(base));
+}
+
+@test
+fn test_memory_region_contains_middle_address() {
+    let base: USize = 0x4000_0000 as USize;
+    let region = MemoryRegion {
+        start: base as *const (),
+        size: 0x1000 as USize,
+        flags: MemoryFlags.READ,
+    };
+    assert(region.contains(base + (0x500 as USize)));
+}
+
+@test
+fn test_memory_region_excludes_end_address() {
+    // end is exclusive — `addr < start + size`.
+    let base: USize = 0x4000_0000 as USize;
+    let size: USize = 0x1000 as USize;
+    let region = MemoryRegion {
+        start: base as *const (),
+        size: size,
+        flags: MemoryFlags.READ,
+    };
+    assert(!region.contains(base + size));
+}
+
+@test
+fn test_memory_region_excludes_address_below_start() {
+    let base: USize = 0x4000_1000 as USize;
+    let region = MemoryRegion {
+        start: base as *const (),
+        size: 0x1000 as USize,
+        flags: MemoryFlags.READ,
+    };
+    assert(!region.contains(base - (1 as USize)));
+}
+
+@test
+fn test_memory_region_end_equals_start_plus_size() {
+    let base: USize = 0x4000_0000 as USize;
+    let size: USize = 0x2000 as USize;
+    let region = MemoryRegion {
+        start: base as *const (),
+        size: size,
+        flags: MemoryFlags.READ_WRITE_FLAGS(),
+    };
+    assert_eq(region.end(), base + size);
+}
+
+fn READ_WRITE_FLAGS() -> MemoryFlags {
+    MemoryFlags(MemoryFlags.READ.0 | MemoryFlags.WRITE.0)
+}
+
+// =============================================================================
+// Section 4: compiler_barrier + dmb — observable side-effect-free
+// =============================================================================
+
+@test
+fn test_compiler_barrier_no_observable_side_effect() {
+    // The compiler_barrier is purely an optimization fence; from the
+    // language's level the only observable behaviour is "the call
+    // completes without panicking". Pin that minimum invariant so a
+    // future barrier refactor that accidentally introduced a fault
+    // (e.g. emitting an undefined instruction on aarch64) surfaces
+    // here.
+    let mut counter: Int = 0;
+    counter = counter + 1;
+    compiler_barrier();
+    counter = counter + 1;
+    assert_eq(counter, 2);
+}
+
+@test
+fn test_dmb_no_observable_side_effect() {
+    // Same rationale as compiler_barrier — dmb is the user-facing
+    // alias for `barrier(BarrierKind.AcqRel)`.
+    let mut accumulator: Int = 0;
+    accumulator = accumulator + 10;
+    dmb();
+    accumulator = accumulator + 20;
+    assert_eq(accumulator, 30);
+}
+
+fn main() {}

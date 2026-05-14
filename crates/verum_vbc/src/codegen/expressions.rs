@@ -17079,7 +17079,43 @@ impl VbcCodegen {
                 if path.segments.len() == 1 {
                     match &path.segments[0] {
                         PathSegment::Name(ident) => {
-                            self.ctx.variable_type_names.get(&*ident.name).cloned()
+                            // Primary source: the locally-scoped
+                            // variable type table populated by `let`
+                            // statements and function-param entry.
+                            if let Some(n) =
+                                self.ctx.variable_type_names.get(&*ident.name).cloned()
+                            {
+                                return Some(n);
+                            }
+                            // Fall back to the function table for
+                            // zero-arity values — module-level
+                            // `public const X: T = ...` declarations
+                            // and `is_transparent_wrapper`-flagged
+                            // newtype constructors lower to functions
+                            // whose `return_type_name` is the
+                            // declared type.
+                            //
+                            // Without this branch, the tuple-newtype
+                            // Mov fast-path in `compile_tuple_index`
+                            // (which gates on `infer_expr_type_name(base)`
+                            // matching `ctx.newtype_names`) misses the
+                            // `CFD_STDIN.0` form because the resolver
+                            // returned None for a Path-typed const
+                            // base — and the fallthrough `GetF` site
+                            // null-derefs on the inlined `LoadI 0`.
+                            if let Some(info) =
+                                self.ctx.lookup_function(&ident.name)
+                                && info.param_count == 0
+                                && (info.is_const
+                                    || info
+                                        .intrinsic_name
+                                        .as_deref()
+                                        .map(|s| s.starts_with("__const_val_"))
+                                        .unwrap_or(false))
+                            {
+                                return info.return_type_name.clone();
+                            }
+                            None
                         }
                         PathSegment::SelfValue => self.ctx.variable_type_names.get("self").cloned(),
                         _ => None,
@@ -17143,24 +17179,54 @@ impl VbcCodegen {
             }
             // Field access: look up field type in type_field_type_names
             ExprKind::Field { expr: base, field } => {
-                let base_type = self.infer_expr_type_name(base)?;
                 let field_name = field.name.to_string();
-                // Try exact match first
-                if let Some(ft) = self
-                    .type_field_type_names
-                    .get(&(base_type.clone(), field_name.clone()))
+                // Primary path: the base expression resolves to a known
+                // type, then look the field's static type up in the
+                // codegen-side type → field-name → field-type-name table.
+                if let Some(base_type) = self.infer_expr_type_name(base) {
+                    if let Some(ft) = self
+                        .type_field_type_names
+                        .get(&(base_type.clone(), field_name.clone()))
+                    {
+                        return Some(ft.clone());
+                    }
+                    // Try with generic params stripped (e.g., "Map<K, V>" → "Map")
+                    let stripped = VbcCodegen::strip_generic_args(&base_type);
+                    if stripped != base_type
+                        && let Some(ft) = self
+                            .type_field_type_names
+                            .get(&(stripped.to_string(), field_name.clone()))
+                    {
+                        return Some(ft.clone());
+                    }
+                }
+                // Fallback: `<TypeName>.<CONST>` form where the base is
+                // a bare Path to a type and the field is a 0-arg const
+                // member declared inside an `implement` block.  These
+                // are stored in the function table as qualified-name
+                // `TypeName.CONST` 0-arity is_const entries; the
+                // inferred type IS the const's declared return type
+                // (`MemoryFlags.READ : MemoryFlags`).  Required so the
+                // outer `.0` tuple-newtype access fires the Mov
+                // fast-path in `compile_tuple_index`.
+                if let ExprKind::Path(path) = &base.kind
+                    && path.segments.len() == 1
+                    && let PathSegment::Name(ident) = &path.segments[0]
                 {
-                    return Some(ft.clone());
+                    let qualified = format!("{}.{}", ident.name, field_name);
+                    if let Some(info) = self.ctx.lookup_function(&qualified)
+                        && info.param_count == 0
+                        && (info.is_const
+                            || info
+                                .intrinsic_name
+                                .as_deref()
+                                .map(|s| s.starts_with("__const_val_"))
+                                .unwrap_or(false))
+                    {
+                        return info.return_type_name.clone();
+                    }
                 }
-                // Try with generic params stripped (e.g., "Map<K, V>" → "Map")
-                let stripped = VbcCodegen::strip_generic_args(&base_type);
-                if stripped != base_type {
-                    self.type_field_type_names
-                        .get(&(stripped.to_string(), field_name))
-                        .cloned()
-                } else {
-                    None
-                }
+                None
             }
             // Function call OR variant constructor: look up the
             // return type. Variant constructors are critical for
