@@ -154,6 +154,29 @@ pub struct TypeDescriptor {
     /// thanks to `#[serde(default)]`.
     #[serde(default)]
     pub decl_span: Maybe<DeclSpan>,
+
+    /// Mirror of `verum_vbc::types::TypeDescriptor::is_transparent_wrapper`.
+    ///
+    /// `true` when the type is a transparent wrapper — declared via
+    /// `type X is T;` (Newtype) or `type X is (T);` (single-element
+    /// Tuple).  Such types have no runtime identity: their values
+    /// are represented as the bare inner value at the VBC layer, and
+    /// `X.0` is an identity Mov on the wrapper.
+    ///
+    /// Carried through the archive so the typechecker's lazy loader
+    /// can re-register `__newtype_inner_X` keys for archive-loaded
+    /// transparent wrappers (mirror of `infer/decls.rs:454`'s
+    /// source-decl path).  Without this flag the typechecker treats
+    /// archive-loaded `type FileDesc is (Int)` like an opaque Record
+    /// and rejects `FileDesc.STDIN.0` with `cannot index type
+    /// 'FileDesc' — only tuple types support .0, .1, etc.`.
+    ///
+    /// `#[serde(default)]` so legacy archives without this field
+    /// continue to deserialise as `false` — the typechecker degrades
+    /// to the pre-fix behaviour on stale archives instead of
+    /// crashing.
+    #[serde(default)]
+    pub is_transparent_wrapper: bool,
 }
 
 /// Source-span tag carried by [`TypeDescriptor`], [`FunctionDescriptor`],

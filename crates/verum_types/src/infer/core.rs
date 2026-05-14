@@ -890,6 +890,42 @@ impl TypeChecker {
             }
         }
 
+        // FUNDAMENTAL #3 — transparent-wrapper newtype inner type
+        // registration.  Mirror of the source-decl path at
+        // `infer/decls.rs:454` so archive-loaded `type X is T;` and
+        // `type X is (T);` produce a `__newtype_inner_X` key — the
+        // same one `infer/env.rs:1993-2014` consults when typechecking
+        // `<wrapper>.0` access.
+        //
+        // ALWAYS runs (outside the `lookup_type(name).is_none()` gate
+        // above) — mirrors the inherent-methods discipline.  Without
+        // this, types already registered into ctx by an upstream
+        // pathway (`archive_ctx_loader::populate_ctx_from_archive`
+        // primary types, eager `load_stdlib_from_metadata`, or a
+        // prior `ensure_stdlib_type_loaded` call) miss the
+        // `__newtype_inner_X` registration.  Idempotent: re-defining
+        // the same key with the same value is a no-op.
+        //
+        // The inner-type field is keyed as "_0" by
+        // `compile_type_decl`'s Newtype / Tuple-single arms; the
+        // parser produces only one such field per transparent
+        // wrapper.  Use that field's `ty` text and route it through
+        // `parse_descriptor_type_string` so generic-instantiated
+        // inner types (`type Cell<T> is (T)`) resolve to the right
+        // structural shape.
+        if type_desc.is_transparent_wrapper
+            && let crate::core_metadata::TypeDescriptorKind::Record { fields } = &type_desc.kind
+            && let Some(first_field) = fields.first()
+            && !first_field.ty.is_empty()
+        {
+            let inner_key_text =
+                verum_common::Text::from(format!("__newtype_inner_{}", name).as_str());
+            if self.ctx.lookup_type(inner_key_text.as_str()).is_none() {
+                let inner_ty = parse_descriptor_type_string(first_field.ty.as_str());
+                self.ctx.define_type(inner_key_text, inner_ty);
+            }
+        }
+
         // ALWAYS register inherent methods, even when the type
         // itself was already in ctx (e.g. primitives like Text,
         // List, Map registered via `register_builtins`).  Without
@@ -1924,6 +1960,25 @@ impl TypeChecker {
             if !type_desc.generic_params.is_empty() {
                 self.type_generics_count
                     .insert(name.clone(), type_desc.generic_params.len());
+            }
+
+            // FUNDAMENTAL #3 — mirror the lazy loader's
+            // `__newtype_inner_X` hook here so the eager path
+            // (`load_stdlib_from_metadata`) also registers newtype
+            // inner-types when it's the active loader.  Without this
+            // hook, transparent-wrapper newtypes loaded eagerly
+            // (which is the default for the embedded stdlib) miss
+            // their inner-type binding and every `.0` access path
+            // through the typechecker fails.
+            if type_desc.is_transparent_wrapper
+                && let TypeDescriptorKind::Record { fields } = &type_desc.kind
+                && let Some(first_field) = fields.first()
+                && !first_field.ty.is_empty()
+            {
+                let inner_ty = parse_descriptor_type_string(first_field.ty.as_str());
+                let inner_key = format!("__newtype_inner_{}", name);
+                self.ctx
+                    .define_type(verum_common::Text::from(inner_key.as_str()), inner_ty);
             }
         }
 

@@ -1628,6 +1628,11 @@ impl<'s> CompilationPipeline<'s> {
                 implements: List::new(),
                 // #101 — incremental cached path; spans aren't cached.
                 decl_span: Maybe::None,
+                // FUNDAMENTAL #3 — incremental cached path doesn't
+                // round-trip the transparent-wrapper flag; defaults to
+                // false.  Affected types re-flip the flag on the next
+                // full precompile pass.
+                is_transparent_wrapper: false,
             };
             metadata
                 .types

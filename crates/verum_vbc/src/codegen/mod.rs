@@ -7131,8 +7131,21 @@ impl VbcCodegen {
                 // mounts (`mount X.*`) deliberately keep first-wins to
                 // preserve the FFI-raw / safe-wrapper precedence rule.
 
+                if std::env::var("VERUM_TRACE_MOUNT_LOOKUP").is_ok() {
+                    eprintln!(
+                        "[mount-enter] func='{}' full_path={:?} qualified_verum='{}'",
+                        func_name, full_path, qualified_verum
+                    );
+                }
+
                 // First try Verum-style qualified name
                 if let Some(func_info) = self.ctx.lookup_function(&qualified_verum).cloned() {
+                    if std::env::var("VERUM_TRACE_MOUNT_LOOKUP").is_ok() {
+                        eprintln!(
+                            "[mount-enter]   HIT verbatim '{}' (param_count={})",
+                            qualified_verum, func_info.param_count
+                        );
+                    }
                     self.ctx
                         .register_function_authoritative(alias_name.clone(), func_info);
                     return Ok(());
@@ -7195,6 +7208,31 @@ impl VbcCodegen {
                 // `core.async.timer.timeout_ms` and `async.timer.timeout_ms`
                 // — neither of which is registered.
                 //
+                //
+                // Without this branch the bare-name fallback at the bottom
+                // of this function picks whichever module's `timeout_ms`
+                // happened to win the bare-name slot during archive load —
+                // typically the first-loaded `core.runtime.supervisor.
+                // timeout_ms(&self)` 1-param method, which then panics with
+                // `WrongArgumentCount expected:1 found:2` when the user's
+                // 2-arg call site lowers.
+                //
+                // The probe walks the parent path from FULL to LEAF,
+                // stripping one leading segment at a time and re-anchoring
+                // on `func_name`. The FIRST tail that resolves wins —
+                // longest-prefix-match routing-table discipline.
+                //
+                // `full_path` already contains the function-name as the
+                // last element, so the *parent path* is
+                // `full_path[..full_path.len() - 1]`.  For
+                // path = ["core","async","timer","timeout_ms"] the probe
+                // tries (in order):
+                //   ["async","timer"].timeout_ms       (covered by core-stripped above)
+                //   ["timer"].timeout_ms               ← NEW: matches `module timer;` decl
+                //
+                // The `full_path.len() >= 3` gate skips paths whose parent
+                // is already a single segment (verbatim lookup above
+                // already covers `<segment>.<func_name>`).
                 if std::env::var("VERUM_TRACE_MOUNT_LOOKUP").is_ok() {
                     eprintln!(
                         "[mount-lookup] func_name='{}' full_path={:?}",
@@ -7213,46 +7251,28 @@ impl VbcCodegen {
                         .cloned()
                         .collect();
                     eprintln!(
-                        "[mount-lookup]   candidates ending with .{}: {:?}",
-                        probe_prefix, candidates
+                        "[mount-lookup]   candidates: {:?}",
+                        candidates
                     );
                 }
-                //
-                // Without this branch the bare-name fallback at the bottom
-                // of this function picks whichever module's `timeout_ms`
-                // happened to win the bare-name slot during archive load —
-                // typically the first-loaded `core.runtime.supervisor.
-                // timeout_ms(&self)` 1-param method, which then panics with
-                // `WrongArgumentCount expected:1 found:2` when the user's
-                // 2-arg call site lowers.
-                //
-                // The probe walks the path from FULL to LEAF, trying each
-                // tail suffix as a qualified-form lookup.  The FIRST suffix
-                // that resolves wins — this is monotonic narrowing: more
-                // specific path-prefixes are checked first, so an exact
-                // match always preempts a shorter-prefix match.
-                //
-                // Architectural rule: the qualified-form lookup probe order
-                // is `full > suffix(1)..suffix(n-1) > leaf-only`, and the
-                // first hit wins.  This is structurally equivalent to a
-                // "longest-prefix-match" routing table — the same
-                // discipline a network stack uses to disambiguate routes.
-                if full_path.len() >= 2 {
-                    let mut found_via_narrowing = false;
-                    for start_idx in 1..full_path.len() {
-                        let tail = &full_path[start_idx..];
+                if full_path.len() >= 3 {
+                    let parent_path = &full_path[..full_path.len() - 1];
+                    for start_idx in 1..parent_path.len() {
+                        let tail = &parent_path[start_idx..];
                         let qualified = format!("{}.{}", tail.join("."), func_name);
                         if let Some(func_info) =
                             self.ctx.lookup_function(&qualified).cloned()
                         {
+                            if std::env::var("VERUM_TRACE_MOUNT_LOOKUP").is_ok() {
+                                eprintln!(
+                                    "[mount-lookup]   HIT via path-suffix narrowing: '{}' (param_count={})",
+                                    qualified, func_info.param_count
+                                );
+                            }
                             self.ctx
                                 .register_function_authoritative(alias_name.clone(), func_info);
-                            found_via_narrowing = true;
-                            break;
+                            return Ok(());
                         }
-                    }
-                    if found_via_narrowing {
-                        return Ok(());
                     }
                 }
 
@@ -10028,12 +10048,40 @@ impl VbcCodegen {
                     tid
                 };
 
+                // Generic-param map for the inner-type resolution —
+                // `type Wrap<T> is T;` writes a `Generic(0)` slot, and
+                // the consumer side substitutes against the type's
+                // `type_params` to recover `T`'s identity.  Same shape
+                // as the Record arm; empty for the common
+                // non-generic newtype case (`type FileDesc is Int;`).
+                let mut generic_param_map: std::collections::HashMap<String, u16> =
+                    std::collections::HashMap::new();
+                for (idx, gp) in type_decl.generics.iter().enumerate() {
+                    if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
+                        generic_param_map.insert(gname.name.to_string(), idx as u16);
+                    }
+                }
+                let inner_type_ref = self.resolve_field_type_ref(_inner_type, &generic_param_map);
+                let inner_field_idx = self.intern_field_name("_0");
+
                 // Canonical (serialisable) marker on the type
                 // descriptor: this type IS a transparent wrapper.
                 // Mirrors `newtype_names` so archive-loaded types
                 // recover their representation policy after a
                 // round-trip without rebuilding the codegen-local
                 // HashSet from source.  See `TypeDescriptor::is_transparent_wrapper`.
+                //
+                // Inner-type field "_0" — pushed into `type_desc.fields`
+                // unconditionally so the archive carries the inner
+                // type via the same structural channel as every other
+                // record type.  Downstream consumers (typechecker's
+                // `__newtype_inner_X` registration, archive_ctx_loader's
+                // Pass 5, runtime field dispatch) read this directly
+                // instead of relying on out-of-band metadata.  Without
+                // this push, the inner-type identity vanished at the
+                // archive boundary and `FileDesc.STDIN.as_raw()`
+                // dispatched on the bare inner value (Int) — losing
+                // the wrapper's static type identity.
                 let mut type_desc = TypeDescriptor {
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
@@ -10041,6 +10089,12 @@ impl VbcCodegen {
                     is_transparent_wrapper: true,
                     ..Default::default()
                 };
+                type_desc.fields.push(crate::types::FieldDescriptor {
+                    name: StringId(self.ctx.intern_string_raw("_0")),
+                    type_ref: inner_type_ref,
+                    offset: inner_field_idx * 8,
+                    visibility: crate::types::Visibility::Public,
+                });
                 type_desc.size = 8; // single inner value (one Value-slot)
                 self.push_type_dedupe(type_desc);
 
@@ -10097,6 +10151,16 @@ impl VbcCodegen {
                     tid
                 };
 
+                // Generic-param map for inner type resolution — mirror
+                // of the Newtype arm above.
+                let mut generic_param_map: std::collections::HashMap<String, u16> =
+                    std::collections::HashMap::new();
+                for (idx, gp) in type_decl.generics.iter().enumerate() {
+                    if let verum_ast::ty::GenericParamKind::Type { name: gname, .. } = &gp.kind {
+                        generic_param_map.insert(gname.name.to_string(), idx as u16);
+                    }
+                }
+
                 // Canonical descriptor — flips the transparent flag for
                 // single-element tuples; multi-element tuples remain
                 // boxed records (one slot per element).
@@ -10107,6 +10171,25 @@ impl VbcCodegen {
                     is_transparent_wrapper: is_transparent,
                     ..Default::default()
                 };
+                // Push the inner-type fields into `type_desc.fields` —
+                // for single-element tuples ("_0") this is the transparent
+                // wrapper's inner type that downstream typechecker /
+                // archive_ctx_loader paths key on for `__newtype_inner_X`
+                // registration.  For multi-element tuples ("_0", "_1",
+                // ...) every slot is preserved so generic destructure
+                // and `value.<index>` field-access resolve their static
+                // types correctly.
+                for (i, inner_ty) in types.iter().enumerate() {
+                    let field_name = format!("_{}", i);
+                    let inner_type_ref = self.resolve_field_type_ref(inner_ty, &generic_param_map);
+                    let field_idx = self.intern_field_name(&field_name);
+                    type_desc.fields.push(crate::types::FieldDescriptor {
+                        name: StringId(self.ctx.intern_string_raw(&field_name)),
+                        type_ref: inner_type_ref,
+                        offset: field_idx * 8,
+                        visibility: crate::types::Visibility::Public,
+                    });
+                }
                 type_desc.size = (types.len() as u32) * 8;
                 self.push_type_dedupe(type_desc);
 
