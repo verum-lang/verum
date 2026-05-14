@@ -455,6 +455,51 @@ fn guard_to_int_roundtrip() {
 }
 
 // =============================================================================
+// REGRESSION (open): Text.capacity() returns byte length, not cap field
+// =============================================================================
+//
+// `Text.with_capacity(64)` allocates a heap-Text with `len=0, cap=64`,
+// but the public `capacity()` method (core/text/text.vr:519) reads
+// `text_byte_len(self)` instead of the `cap` field. After construction
+// the returned Text has `len=0`, so `capacity()` returns 0.
+//
+// Fixing this requires a new `text_capacity` intrinsic that dispatches
+// by Text representation:
+//   * Small-string (NaN-boxed, inline 6 bytes): return 6
+//   * Static (immutable view into the binary): return byte_len
+//   * Heap-allocated `{ptr,len,cap}`: return `cap`
+//
+// User code can't express this dispatch without runtime support, so
+// the stdlib is currently honest but coarse — `capacity()` returns a
+// lower bound on the actual capacity. See task #5 for the full
+// architectural fix (add `TextSubOpcode::Capacity = 0x35`).
+
+@ignore
+@test
+fn regression_with_capacity_reports_capacity() {
+    let t: Text = Text.with_capacity(64);
+    assert(t.capacity() >= 64);
+}
+
+@ignore
+@test
+fn regression_try_with_capacity_reports_capacity() {
+    let r: Result<Text, _> = Text.try_with_capacity(64);
+    match r {
+        Ok(t) => assert(t.capacity() >= 64),
+        Err(_) => panic("try_with_capacity(64) must succeed"),
+    };
+}
+
+@ignore
+@test
+fn regression_reserve_grows_reported_capacity() {
+    let mut t: Text = Text.new();
+    t.reserve(128);
+    assert(t.capacity() >= 128);
+}
+
+// =============================================================================
 // Entry point
 // =============================================================================
 
