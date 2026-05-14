@@ -131,43 +131,82 @@ the asserted vs actual value at pc=25.
     interp-only, that's a tier-divergence kernel incident.
   - **§C** Build a per-test status appendix below once §A completes.
 
-### 3.5 AOT lowering fails on `Heap.new(_).is_freed()` (CROSS-TIER divergence)
+### 3.5 AOT lowering fails on `Heap.new(_).is_freed()` (CLOSED — commit 9a1a892b7)
 
-Runtime-validated: `verum test --aot --filter regression_heap_round_trip_baseline`
-fails at LLVM lowering with
+Original symptom: `verum test --aot --filter regression_heap_round_trip_baseline`
+hard-failed at LLVM lowering with
 
 ```
 compilation failed: Failed to lower VBC to LLVM IR:
 Internal("call_native_i64(lr): callee returns void; use build_call directly")
 ```
 
-while the same source passes under `--interp`. The error is raised by
-`crates/verum_codegen/src/llvm/platform_ir.rs:246` —
-`call_native_i64` expects every native FFI callee to return an
-IntType / PointerType, but somewhere along the `Heap.new` →
-`cbgr_alloc` → allocator path a callee is declared with a `void`
-return type, then call_native_i64 is reached for it and refuses.
+The error fired in `crates/verum_codegen/src/llvm/platform_ir.rs::emit_tcp_listen`
+calling `call_native_i64` against a `listen` declaration whose actual
+LLVM type was `void (i64, i64)` — the POSIX `listen(int, int) → int`
+shape had been corrupted somewhere during VBC FFI lowering.
 
-This is the SAME failure class as MEMORY.md task #23's residual entry:
+**Actual root cause** (deeper than original hypothesis): the codegen
+helper `crates/verum_codegen/src/llvm/error.rs::get_or_declare_function`
+had silent "first declaration wins" semantics — if a function name was
+already declared with a *different* `fn_type`, the helper returned the
+existing function and the caller's `fn_type` was discarded. 240+ call
+sites of this helper plus 116 inline copies of the same `unwrap_or_else`
+pattern each potentially raced to declare the same FFI symbol with
+conflicting signatures, and the loser silently got a wrong-typed
+FunctionValue back. For `listen`, the precompiled-stdlib FFI lowering
+at `instruction.rs:22655` constructed a void-returning declaration
+from a malformed ffi_symbol signature (`ret_type → None → void_type`
+fallback) and got there first.
 
-> AOT proceeds, falls back to interpreter on a different remaining
-> error (`call_native_i64(lr): callee returns void; use build_call
-> directly`)
+**Five-part architectural fix** landed in `9a1a892b7`:
 
-So this defect surfaces on the most basic `Heap.new` allocation, not
-on a niche path. Fix layer: the registration site that declares
-`verum_internal_close` / `verum_internal_*` wrappers with the wrong
-return type must reconcile with the `i64`-ABI invariant declared by
-`crates/verum_codegen/src/llvm/runtime.rs:8271+ get_or_declare_close`.
-The adopt-and-emit path there explicitly states the wrapper "returns
-i64" — so the divergence is upstream: an earlier code path is
-forward-declaring the wrapper with a void return before
-`get_or_declare_close` runs, and the i64-promotion never overwrites
-the prior signature.
+  1. **Canonical POSIX-syscall registry** (`syscall_registry.rs`) —
+     `POSIX_SYSCALLS` table extended with every socket syscall
+     (`socket` / `bind` / `listen` / `accept` / `connect` / `send` /
+     `recv` / `sendto` / `recvfrom` / `setsockopt` / `waitpid`)
+     under Verum's i64-everywhere AOT ABI.
+  2. **`predeclare_all`** — new helper, wired into
+     `vbc_lowering.rs::lower_module` as Phase 0.4, installs every
+     registry entry into the LLVM module BEFORE any other emit path
+     can race.
+  3. **FFI-lowering registry override** at
+     `instruction.rs::CallFfi` — when the symbol name is in
+     `POSIX_SYSCALLS`, the canonical registry signature supersedes
+     whatever shape the (potentially malformed) FFI declaration
+     carries.
+  4. **`emit_libc_free_socket_wrapper`** rewritten to consult the
+     registry instead of constructing fn_types via an inline match
+     table — 144 lines of drift-prone duplicated fn_type
+     construction eliminated.
+  5. **Signature-mismatch registry** in `error.rs` records every
+     conflicting declaration into a process-global side channel;
+     `check_no_signature_mismatches()` drains the registry at the end
+     of LLVM lowering. Default mode writes warnings; strict mode
+     (`VERUM_STRICT_SIGNATURES=1`) elevates to hard error.
 
-**Pinned by**: `regression_test.vr §B` (round-trip baseline) — pin
-fails in AOT, passes in interp; the CROSS-TIER DIVERGENCE is itself
-the regression.
+**Verification**: `verum test --aot --filter regression_heap_round_trip_baseline`
+passes (188s); same under `--interp` (124s). The original
+`call_native_i64(lr): callee returns void` panic is structurally
+eliminated.
+
+**Drift surface (now visible, future work)**: the mismatch detector
+surfaces 40+ pre-existing signature divergences as
+`[codegen-warn] N signature mismatch(es) detected during LLVM lowering`
+during every AOT build. Each is a real defect that was silently
+producing wrong IR until this commit; LTO/DCE was hiding them at the
+linker level. Notable families:
+
+  * `pthread_*` (key_create / getspecific / setspecific) — `i32(ptr,…)`
+    vs `i64(ptr,…)` POSIX-vs-Verum ABI inconsistency.
+  * `verum_list_reverse` / `verum_list_swap` — `void(ptr,…)` vs
+    `ptr(ptr,…)` return-type drift across emit paths.
+  * `verum_string_join` — param-type drift (`ptr` vs `i64` for first arg).
+  * `verum_raw_open3` / `verum_tcp_connect` — param width drift.
+  * `sched_yield` — `i64()` vs `i32()` width drift.
+
+Each of these is a separate fixable defect; the registry now makes
+them discoverable. Tracked as future audit items.
 
 ### 3.6 `Heap.is_freed` returns Bool but the post-dealloc generation may not always be 0
 
@@ -200,4 +239,5 @@ inequality, while a *strict* "incremented past" would be
 | §C | Per-test status appendix below this section | ~5 min after §A,§B | blocked on §A |
 | §D | `Heap.is_freed` strict-greater-than semantics audit + wrap-around handling | ~30 min | open |
 | §E | Hoist `- 32` literal CBGR header offset into a single const (see §3.2) | ~20 min | open |
-| §F | Fix AOT `call_native_i64(lr): callee returns void` on `Heap.new` (see §3.5) — reconcile the forward-declare path with `get_or_declare_close`'s i64 ABI in `crates/verum_codegen/src/llvm/runtime.rs:8271+` | ~2 h (kernel-level) | open |
+| §F | Fix AOT `call_native_i64(lr): callee returns void` on `Heap.new` (see §3.5) | LANDED — commit `9a1a892b7` (canonical POSIX-syscall registry + signature-mismatch detection). 144 LOC eliminated; AOT regression test passes. |
+| §G | Fix 40+ signature-mismatch warnings surfaced by the new gate (`pthread_*` family, `verum_list_reverse`/`swap` return-type drift, `verum_string_join` param drift, `verum_raw_open3` / `verum_tcp_connect` param width, `sched_yield` width). Each is a real defect that LTO/DCE hides at the linker level; route every declaration site through the canonical registry helper. | ~30 min per family | open |
