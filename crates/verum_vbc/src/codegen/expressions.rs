@@ -8785,38 +8785,18 @@ impl VbcCodegen {
         // code, and they NEVER have Strategy 0 handling — devirting
         // them is always safe.  The stdlib collection types are a
         // small bounded set that we can enumerate.
+        // FUNDAMENTAL #7 — query the centralised
+        // `WellKnownType::has_runtime_inline_dispatch` predicate
+        // instead of an inline hardcoded list.  Single source of
+        // truth for the "interpreter intercepts this type's method
+        // dispatch" classification; adding a new well-known type
+        // updates this branch automatically.
         fn type_prefix_intercepted_by_runtime(qualified: &str) -> bool {
             let prefix = match qualified.find('.') {
                 Some(p) => &qualified[..p],
                 None => return false,
             };
-            matches!(
-                prefix,
-                "Text"
-                    | "List"
-                    | "Map"
-                    | "Set"
-                    | "Deque"
-                    | "Slice"
-                    | "Maybe"
-                    | "Result"
-                    | "Option"
-                    | "Heap"
-                    | "Shared"
-                    | "Mutex"
-                    | "RwLock"
-                    | "Channel"
-                    | "Range"
-                    | "Int"
-                    | "Float"
-                    | "Bool"
-                    | "Char"
-                    | "Byte"
-                    | "Int32"
-                    | "UInt64"
-                    | "FatRef"
-                    | "ThinRef"
-            )
+            verum_common::well_known_types::WellKnownType::has_runtime_inline_dispatch(prefix)
         }
 
         let devirt_func_id: Option<u32> = if effective_method_name.starts_with("dyn:")
@@ -28324,7 +28304,14 @@ impl VbcCodegen {
                     dst: str_reg,
                     src: expr_reg,
                 });
-            } else {
+            } else if !self.try_emit_display_dispatch(expr, expr_reg, str_reg)? {
+                // No user-defined Display impl for `expr`'s static type
+                // (or the type is non-introspectable) — fall back to the
+                // runtime Debug-style formatter via `ToString`.  This
+                // preserves the existing behaviour for primitives
+                // (Int / Float / Bool / Byte / Int32 / UInt64 / …)
+                // which have dedicated branches inside
+                // `format_value_for_print`.
                 self.ctx.emit(Instruction::ToString {
                     dst: str_reg,
                     src: expr_reg,
@@ -28358,6 +28345,184 @@ impl VbcCodegen {
         }
 
         Ok(Some(dest))
+    }
+
+    /// Route `f"{expr}"` (and `print(expr)` via the same path when the
+    /// dispatch surface lands here) through the user-defined
+    /// `implement Display for <T> { fn fmt(&self, f: &mut Formatter) … }`
+    /// impl when one exists for `expr`'s static type.
+    ///
+    /// Without this dispatch, `f"{Less}"` for `Ordering` (and every
+    /// other stdlib / user Display impl across the language) would
+    /// fall through to the runtime `ToString` opcode, which calls
+    /// `format_value_for_print` — a Debug-style formatter that prints
+    /// variant NAMES (`Less` / `Equal` / `Greater`) rather than the
+    /// user-defined glyph (`<` / `=` / `>`).  Every `Display` impl in
+    /// `core/` is silently bypassed by f-strings under the legacy path.
+    ///
+    /// **Inlined sequence** when a Display impl exists for `<TypeName>`:
+    ///
+    /// ```text
+    ///   buf       := ""                      // empty small-string
+    ///   ref_buf   := &mut buf                 // CBGR mutable ref
+    ///   formatter := Formatter.new(ref_buf)   // record `{ buffer: &mut buf }`
+    ///   ref_fmt   := &mut formatter
+    ///   _         := <TypeName>.fmt(expr, ref_fmt)
+    ///   str_reg   := buf                      // result text
+    /// ```
+    ///
+    /// Returns `Ok(true)` when the dispatch was emitted (caller must
+    /// NOT emit a fallback `ToString`).  Returns `Ok(false)` when no
+    /// Display impl is registered for `expr`'s static type, OR when
+    /// `Formatter.new` isn't available (e.g. compiling the prelude
+    /// itself before `core.base.protocols` lands) — the caller should
+    /// emit the legacy `ToString` fallback in that case.
+    ///
+    /// **Architectural rule** — every f-string placeholder + every
+    /// `print(value)` call site that wants protocol-aware formatting
+    /// MUST funnel through this helper.  Adding new fallback paths
+    /// that emit `ToString` directly is a regression on user Display
+    /// impls.
+    fn try_emit_display_dispatch(
+        &mut self,
+        expr: &Expr,
+        expr_reg: Reg,
+        str_reg: Reg,
+    ) -> CodegenResult<bool> {
+        // Step 1: infer the expression's static type.  Strip generic
+        // args because the codegen registers Display impls under the
+        // unparameterised base name (`Result.fmt`, not `Result<T,E>.fmt`).
+        let type_name = match self.infer_expr_type_name(expr) {
+            Some(t) => t,
+            None => return Ok(false),
+        };
+        let base = type_name.split('<').next().unwrap_or(&type_name).to_string();
+        // Bare generic-param-shaped names (`T`, `U`, `E`) are never
+        // valid Display targets — they only exist as placeholders in
+        // generic bodies.  Routing through them would emit a Call to
+        // a literal-`T.fmt` ghost function.
+        if verum_common::well_known_types::looks_like_type_param(&base) {
+            return Ok(false);
+        }
+        // Primitives have inline `ToString` handlers in the runtime
+        // (`format_value_for_print`'s Int/Float/Bool/Byte branches at
+        // `handlers/debug.rs:168-196`).  Routing them through the
+        // protocol-dispatch chain inflates each f-string interpolation
+        // from one opcode (`ToString`) to ~9 opcodes (LoadK + 2×RefMut
+        // + 2×Call + 2×Mov + register-block setup) for zero semantic
+        // gain — the user-side `implement Display for Int` body
+        // produces identical text to the runtime formatter.  Skip
+        // for the canonical primitive set so the hot path stays cheap.
+        if matches!(
+            base.as_str(),
+            "Int"
+                | "Float"
+                | "Bool"
+                | "Byte"
+                | "Char"
+                | "Int32"
+                | "UInt64"
+                | "Float32"
+                | "Float64"
+                | "Int8"
+                | "Int16"
+                | "UInt8"
+                | "UInt16"
+                | "UInt32"
+                | "USize"
+                | "ISize"
+        ) {
+            return Ok(false);
+        }
+
+        let fmt_qualified = format!("{}.fmt", base);
+        let fmt_info = match self.ctx.lookup_function(&fmt_qualified).cloned() {
+            Some(info) => info,
+            None => return Ok(false),
+        };
+        // The Display protocol requires `fn fmt(&self, f: &mut Formatter)`.
+        // Reject candidates whose registered arity doesn't match — they
+        // belong to a different method called `fmt` (e.g. format-builder
+        // entrypoints) and routing through them would corrupt the call
+        // boundary.
+        if fmt_info.param_count != 2 || fmt_info.id.0 == u32::MAX {
+            return Ok(false);
+        }
+        let formatter_new_info = match self
+            .ctx
+            .lookup_function("Formatter.new")
+            .cloned()
+        {
+            Some(info) if info.param_count == 1 && info.id.0 != u32::MAX => info,
+            _ => return Ok(false),
+        };
+
+        // Step 2: allocate `buf` = "" (empty small-string).  The
+        // user-side `Formatter.write_str` mutates this buffer via
+        // `self.buffer.push_str(s)` which routes through the runtime
+        // Text-push intercept; small-string → heap-string promotion
+        // is handled transparently by that intercept.
+        let buf_reg = self.ctx.alloc_temp();
+        let empty_const = self.ctx.add_const_string("");
+        self.ctx.emit(Instruction::LoadK {
+            dst: buf_reg,
+            const_id: empty_const.0,
+        });
+
+        // Step 3: formatter = Formatter.new(&mut buf).  `Call` requires
+        // args in a contiguous fresh-allocated block; we put the
+        // `&mut buf` CBGR ref at slot 0.
+        let new_arg_block = self.ctx.registers.alloc_fresh();
+        self.ctx.emit(Instruction::RefMut {
+            dst: new_arg_block,
+            src: buf_reg,
+        });
+        let formatter_reg = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::Call {
+            dst: formatter_reg,
+            func_id: formatter_new_info.id.0,
+            args: crate::instruction::RegRange {
+                start: new_arg_block,
+                count: 1,
+            },
+        });
+
+        // Step 4: _ = <Type>.fmt(expr, &mut formatter).  Static Call
+        // expects `[receiver, args...]` in a contiguous block; we
+        // copy `expr_reg` (the value) into slot 0 and a fresh
+        // `&mut formatter` CBGR ref into slot 1.  `expr_reg` itself
+        // stays live for the surrounding interpolation loop.
+        let fmt_args_start = self.ctx.registers.alloc_fresh();
+        let _fmt_args_slot1 = self.ctx.registers.alloc_fresh();
+        self.ctx.emit(Instruction::Mov {
+            dst: fmt_args_start,
+            src: expr_reg,
+        });
+        self.ctx.emit(Instruction::RefMut {
+            dst: Reg(fmt_args_start.0 + 1),
+            src: formatter_reg,
+        });
+        let fmt_result_reg = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::Call {
+            dst: fmt_result_reg,
+            func_id: fmt_info.id.0,
+            args: crate::instruction::RegRange {
+                start: fmt_args_start,
+                count: 2,
+            },
+        });
+
+        // Step 5: str_reg <- buf.  The buf was mutated in place by
+        // `Formatter.write_str` calls inside the Display::fmt body.
+        self.ctx.emit(Instruction::Mov {
+            dst: str_reg,
+            src: buf_reg,
+        });
+
+        self.ctx.free_temp(buf_reg);
+        self.ctx.free_temp(formatter_reg);
+        self.ctx.free_temp(fmt_result_reg);
+        Ok(true)
     }
 
     // ==================== Tensor/Map/Set Literals ====================

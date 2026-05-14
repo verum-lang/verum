@@ -880,8 +880,16 @@ impl VbcCodegen {
     /// is intercepted so the interpreter creates a built-in heap object with
     /// the correct TypeId. These are the interpreter's built-in collection
     /// constructors (Channel, List, Map, Set, Deque).
+    ///
+    /// FUNDAMENTAL #7 — delegates to the centralised
+    /// `WellKnownType::name_has_builtin_constructor_intercept` predicate
+    /// instead of consulting an in-memory HashSet that had to be
+    /// hand-populated.  The HashSet field (`builtin_ctor_collections`)
+    /// is retained as a no-op for binary-compat with the construction
+    /// site but is no longer consulted on the hot path; future cleanup
+    /// can remove it once all reads are migrated.
     pub fn is_builtin_ctor_collection(&self, name: &str) -> bool {
-        self.builtin_ctor_collections.contains(name)
+        verum_common::well_known_types::WellKnownType::name_has_builtin_constructor_intercept(name)
     }
 
     /// Resolves a type name through the type alias chain.
