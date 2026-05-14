@@ -8030,31 +8030,10 @@ pub(super) fn dispatch_array_method(
 
         // ===== Element access =====
         "get" => {
-            let raw_arg = state.registers.get(caller_base, Reg(args.start.0));
-            let idx = raw_arg.as_i64() as usize;
-            if std::env::var("VERUM_TRACE_GET").is_ok() {
-                eprintln!(
-                    "[get trace] args.start={} count={} raw_arg.bits=0x{:016x} idx={} len={}",
-                    args.start.0,
-                    args.count,
-                    raw_arg.bits(),
-                    idx,
-                    len
-                );
-            }
+            let idx = state.registers.get(caller_base, Reg(args.start.0)).as_i64() as usize;
             if idx < len {
                 let elem = get_array_element(ptr, header, idx)?;
-                if std::env::var("VERUM_TRACE_GET").is_ok() {
-                    eprintln!(
-                        "[get trace] elem.bits=0x{:016x} as_i64={}",
-                        elem.bits(),
-                        elem.as_i64()
-                    );
-                }
                 let result = make_some_value(state, elem)?;
-                if std::env::var("VERUM_TRACE_GET").is_ok() {
-                    eprintln!("[get trace] result.bits=0x{:016x}", result.bits());
-                }
                 Ok(Some(result))
             } else {
                 let result = make_none_value(state)?;
