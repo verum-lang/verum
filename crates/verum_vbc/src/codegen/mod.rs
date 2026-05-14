@@ -7802,6 +7802,14 @@ impl VbcCodegen {
             .filter_map(|p| {
                 if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
                     let name = Self::extract_type_name_from_ast(ty);
+                    // **Self → concrete substitution** so default-method
+                    // monomorphisations (`Ord.max(self, other: Self)`
+                    // monomorphised onto `Amount`) record the concrete
+                    // parameter type — downstream variant-dispatch
+                    // disambiguation, method-receiver inference, and
+                    // every `field_type_name` lookup against
+                    // `param_type_names` operate on the real layout.
+                    let name = Self::substitute_self_in_type_name(&name, type_name);
                     if !name.is_empty() && name != "()" {
                         Some(name)
                     } else {
@@ -7857,9 +7865,17 @@ impl VbcCodegen {
             )
         });
 
-        // Extract return type name for method dispatch tracking
+        // Extract return type name for method dispatch tracking.
+        // **Self → concrete substitution** is critical for default-
+        // method monomorphisation: `Ord.max(self, other: Self) -> Self`
+        // monomorphised onto `Amount` must record `return_type_name =
+        // "Amount"`, not the literal `"Self"`.  Downstream call sites
+        // like `let m = a.max(b); m.<field>` rely on
+        // `infer_expr_type_name`'s MethodCall arm reading
+        // `return_type_name` to look up the right field layout.
         let return_type_name = if let verum_common::Maybe::Some(ref ret_ty) = func.return_type {
             self.extract_type_name(ret_ty)
+                .map(|n| Self::substitute_self_in_type_name(&n, type_name))
         } else {
             None
         };
@@ -9242,10 +9258,45 @@ impl VbcCodegen {
                                 .iter()
                                 .map(|f| self.type_to_simple_name(&f.ty))
                                 .collect();
-                            // Register field layout for the variant name so
-                            // match destructuring with `..` resolves correct field indices
+                            // **Architectural rule** (closes task #16):
+                            // record-style variant field layouts MUST be
+                            // registered under the QUALIFIED
+                            // `<ParentType>.<Variant>` name — never the bare
+                            // variant simple name — because variants are
+                            // NOT independent types in the type-name
+                            // registry.  Pre-fix this site called
+                            // `register_record_fields(&variant_name, …)`
+                            // with bare `variant_name = "Timeout"`,
+                            // populating `type_field_layouts["Timeout"]`
+                            // with the variant's payload field set
+                            // (e.g. `["ts"]` from
+                            // `core.sys.io_engine.CompletionOp.Timeout {
+                            // ts: &TimeSpec }`).  When the real
+                            // `core.async.timer.Timeout<F>` record then
+                            // tried to register its 3-field layout
+                            // (`["future", "sleep", "completed"]`), the
+                            // first-wins guard at
+                            // `register_record_fields:13146` blocked the
+                            // overwrite — `type_field_layouts["Timeout"]`
+                            // stayed at `["ts"]`.  Downstream
+                            // `Timeout.new`'s precompiled body emitted
+                            // `Instruction::New { type_id, field_count: 1 }`
+                            // (via `type_field_count("Timeout") ⇒ 1`),
+                            // and the subsequent SetF for field index 5
+                            // wrote 40 bytes past the 8-byte allocation —
+                            // the exact field-write OOB panic this task
+                            // pinned.
+                            //
+                            // Match-destructure (`match e { Timeout { .. }
+                            // => … }`) still works because it dispatches
+                            // by the scrutinee's nominal type via
+                            // `<scrutinee_type>.<variant>` qualified
+                            // lookup, NOT by the bare variant name —
+                            // verified by the absence of regressions on
+                            // record-style variant match arms after this
+                            // fix.
                             self.register_record_fields(
-                                &variant_name,
+                                &qualified_name,
                                 names.clone(),
                                 type_names.clone(),
                             );
@@ -11843,18 +11894,57 @@ impl VbcCodegen {
 
         // Register parameter types for proper instruction selection
         // This is critical for generating correct float vs integer operations
-        // AND for resolving field indices in type-specific record access
+        // AND for resolving field indices in type-specific record access.
+        //
+        // **`Self` → concrete type substitution** (FUNDAMENTAL): when
+        // compiling a protocol default method body monomorphised onto
+        // a concrete type (`impl_type_name = Some("Amount")` for the
+        // `Ord.max(self, other: Self) -> Self` default), every `Self`
+        // reference in the AST must be substituted with the concrete
+        // name so downstream field-index / method-dispatch resolution
+        // operates on the real layout.  Without this substitution
+        // `other: Self` registered as `variable_type_names["other"] = "Self"`,
+        // and the post-return `let m = self.max(other); m.<field>`
+        // field-access lookup uses the literal `"Self"` key — misses
+        // the registered Amount layout entirely, falls through to
+        // heuristic field-count = 2, and reads slot 1 of a 1-slot
+        // record → "field access out of bounds: field index 1
+        // exceeds object data size 8".  Closes the entire class of
+        // default-method-monomorphisation-leaks-Self field-index
+        // drifts that affects `Ord.max`, `Ord.min`, `Ord.clamp`,
+        // `Eq.ne`, `Hash.hash_value`, and every other default method
+        // with a `Self`-typed parameter or return.
         for ((param_name, _), param) in params_with_mutability.iter().zip(func.params.iter()) {
             if let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind {
                 let var_type = self.type_kind_to_var_type(&ty.kind);
                 self.ctx.register_variable_type(param_name, var_type);
                 // Track type name for field index resolution
-                let type_name = Self::extract_type_name_from_ast(ty);
+                let raw_type_name = Self::extract_type_name_from_ast(ty);
+                let type_name = if let Some(concrete) = impl_type_name {
+                    Self::substitute_self_in_type_name(&raw_type_name, concrete)
+                } else {
+                    raw_type_name
+                };
                 if type_name != "()" && !type_name.is_empty() {
                     self.ctx
                         .variable_type_names
                         .insert(param_name.clone(), type_name);
                 }
+            }
+        }
+        // Substitute `Self` in the saved return-type-name so that
+        // call-sites like `let m = a.max(b); m.field` (where `m`'s
+        // type was inferred from `max`'s return type via
+        // `infer_expr_type_name`'s MethodCall arm at line ~17486)
+        // resolve field indices through the concrete type's layout
+        // rather than the literal `Self` (which is unregistered and
+        // falls through to heuristics).
+        if let Some(concrete) = impl_type_name
+            && let Some(ref rtn) = self.ctx.current_return_type_name.clone()
+        {
+            let substituted = Self::substitute_self_in_type_name(rtn, concrete);
+            if substituted != *rtn {
+                self.ctx.current_return_type_name = Some(substituted);
             }
         }
 
@@ -12989,6 +13079,61 @@ impl VbcCodegen {
         self.type_field_type_names
             .get(&(type_name.to_string(), field_name.to_string()))
             .map(|s| s.as_str())
+    }
+
+    /// Substitute the literal `Self` token in a textual type name with
+    /// the concrete impl type — used during default-method
+    /// monomorphisation to bind `Self`-typed params and returns to
+    /// the concrete receiver's type.  Handles three shapes:
+    ///   * bare `Self` → `<Concrete>`
+    ///   * `Self<...>` → `<Concrete><...>` (preserves generic args)
+    ///   * `&Self`, `&mut Self`, `Maybe<Self>`, `Result<Self, E>`,
+    ///     etc. — substitution is performed inside the rendered
+    ///     name string at word boundaries.
+    ///
+    /// The substitution operates on the rendered name (the output
+    /// of `extract_type_name_from_ast`) rather than the AST so
+    /// nested compositions (`&Self`, `Option<Self>`, …) are handled
+    /// uniformly without re-walking the AST.  Word-boundary detection
+    /// uses ASCII identifier characters as separators so a literal
+    /// `Self` inside another identifier (`MySelf`, `SelfHash`)
+    /// remains untouched.
+    pub(super) fn substitute_self_in_type_name(name: &str, concrete: &str) -> String {
+        if name == "Self" {
+            return concrete.to_string();
+        }
+        if !name.contains("Self") {
+            return name.to_string();
+        }
+        // Word-boundary substitution.  We replace `Self` only when
+        // it appears as a standalone identifier — preceded and
+        // followed by either string boundary or a non-identifier
+        // character (anything outside `[A-Za-z0-9_]`).
+        let mut out = String::with_capacity(name.len() + concrete.len());
+        let bytes = name.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            // Look for `Self` at position i.
+            let token_len = 4; // bytes in "Self"
+            if i + token_len <= bytes.len() && &bytes[i..i + token_len] == b"Self" {
+                let before_ok = i == 0 || !Self::is_ident_byte(bytes[i - 1]);
+                let after_ok = i + token_len == bytes.len()
+                    || !Self::is_ident_byte(bytes[i + token_len]);
+                if before_ok && after_ok {
+                    out.push_str(concrete);
+                    i += token_len;
+                    continue;
+                }
+            }
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+        out
+    }
+
+    #[inline]
+    fn is_ident_byte(b: u8) -> bool {
+        b.is_ascii_alphanumeric() || b == b'_'
     }
 
     /// Generic parameters are preserved so that element types can be extracted
