@@ -243,8 +243,15 @@ impl<'ctx> PlatformIR<'ctx> {
         let ret_ty = func.get_type().get_return_type();
         match ret_ty {
             None => Err(super::error::LlvmLoweringError::internal(format!(
-                "call_native_i64({}): callee returns void; use build_call directly",
-                name
+                "call_native_i64({}): callee `{}` returns void; use build_call directly.\n  \
+                 callee fn_type: {:?}\n  \
+                 hint: a prior declaration of `{}` with void return is masking the \
+                 expected signature — locate and unify it (use \
+                 `take_signature_mismatches()` to enumerate divergent decls).",
+                name,
+                func.get_name().to_string_lossy(),
+                func.get_type(),
+                func.get_name().to_string_lossy(),
             ))),
             Some(BasicTypeEnum::IntType(it)) => {
                 let raw = call_site
@@ -5106,10 +5113,15 @@ impl<'ctx> PlatformIR<'ctx> {
         sys_x86_64: u64,
         sys_aarch64: u64,
     ) -> super::error::Result<()> {
-        // Idempotent: if the wrapper is already in the module, skip.
-        // Multiple call sites (different `emit_*` functions in this
-        // file) call `ensure_networking_syscalls` and we want to
-        // emit the body exactly once.
+        // Idempotent: if the wrapper is already in the module WITH a
+        // body, skip — we only emit each wrapper once. A bodyless
+        // pre-existing declaration is fine; we'll re-stamp its
+        // signature below via the canonical syscall registry and
+        // then write the body. This is the "first declaration wins"
+        // fix: the registry IS the first (canonical) declaration,
+        // and any bodyless declaration emitted earlier with a
+        // divergent signature gets surfaced as a hard signature
+        // mismatch by the lowering-pass gate.
         if let Some(f) = module.get_function(name) {
             if f.count_basic_blocks() > 0 {
                 return Ok(());
@@ -5118,113 +5130,31 @@ impl<'ctx> PlatformIR<'ctx> {
 
         let ctx = self.context;
         let i64_type = ctx.i64_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
 
-        // Per-symbol signature: parameter list matches what callers
-        // expect (i64 fd, i64 args, ptr buffers). The historical
-        // declarations in `ensure_networking_syscalls` are reproduced
-        // here. Each signature is mapped to the syscall by the
-        // dispatch table below.
-        let fn_type = match name {
-            "socket" => {
-                i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false)
-            }
-            "connect" => {
-                i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false)
-            }
-            "bind" => i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false),
-            "listen" => i64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
-            "accept" => {
-                i64_type.fn_type(&[i64_type.into(), ptr_type.into(), ptr_type.into()], false)
-            }
-            "send" => i64_type.fn_type(
-                &[
-                    i64_type.into(),
-                    ptr_type.into(),
-                    i64_type.into(),
-                    i64_type.into(),
-                ],
-                false,
-            ),
-            "recv" => i64_type.fn_type(
-                &[
-                    i64_type.into(),
-                    ptr_type.into(),
-                    i64_type.into(),
-                    i64_type.into(),
-                ],
-                false,
-            ),
-            "sendto" => i64_type.fn_type(
-                &[
-                    i64_type.into(),
-                    ptr_type.into(),
-                    i64_type.into(),
-                    i64_type.into(),
-                    ptr_type.into(),
-                    i64_type.into(),
-                ],
-                false,
-            ),
-            "recvfrom" => i64_type.fn_type(
-                &[
-                    i64_type.into(),
-                    ptr_type.into(),
-                    i64_type.into(),
-                    i64_type.into(),
-                    ptr_type.into(),
-                    ptr_type.into(),
-                ],
-                false,
-            ),
-            "setsockopt" => i64_type.fn_type(
-                &[
-                    i64_type.into(),
-                    i64_type.into(),
-                    i64_type.into(),
-                    ptr_type.into(),
-                    i64_type.into(),
-                ],
-                false,
-            ),
-            "waitpid" => {
-                i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false)
-            }
-            _ => {
-                return Err(super::error::LlvmLoweringError::internal(format!(
-                    "emit_libc_free_socket_wrapper: unknown symbol `{}`",
+        // Per-symbol signature is sourced from the canonical
+        // `syscall_registry::POSIX_SYSCALLS` table — the single
+        // source of truth for native-FFI signatures under Verum's
+        // i64-everywhere AOT ABI. Pre-fix this function had its own
+        // inline match arm per symbol, which drifted from the
+        // registry's entries silently when callers reached for the
+        // same symbol via different emit paths.
+        let wrapper = super::syscall_registry::get_or_declare(module, ctx, name)
+            .ok_or_else(|| {
+                super::error::LlvmLoweringError::internal(format!(
+                    "emit_libc_free_socket_wrapper: `{}` is not in the canonical POSIX_SYSCALLS registry — \
+                     add an entry to syscall_registry.rs::POSIX_SYSCALLS or remove the call site",
                     name
-                )));
-            }
-        };
+                ))
+            })?;
+        let fn_type = wrapper.get_type();
 
-        // **Signature reconciliation** (#96 fundamental fix).
-        //
-        // Either reuse an existing declaration or add a new one with
-        // the canonical i64-everywhere ABI.  The pre-existing
-        // declaration may come from VBC-compiled FFI in
-        // `core/sys/darwin/libsystem.vr` which uses NATIVE POSIX
-        // types (e.g. `socket(domain: Int32, ...) -> Int32`).
-        //
-        // Pre-fix the wrapper imposed i64-everywhere unconditionally
-        // — but only on the libsys helper signature, while reusing
-        // the existing wrapper signature.  The wrapper body then
-        // routed i32 params through an i64-typed libsys call,
-        // producing IR like:
-        //
-        //     define internal i32 @socket(i32, i32, i32) {
-        //       %ret = call i64 @__verum_libsys_socket(i32, i32, i32)
-        //       ret i64 %ret
-        //     }
-        //
-        // ...which LLVM verifier rejects ("value doesn't match
-        // function result type" + "call parameter type does not
-        // match function signature").
-        //
-        // Post-fix: the libsys helper conforms to the WRAPPER's
-        // signature.  All param/return shapes round-trip cleanly.
-        let wrapper = super::error::get_or_declare_function(module, name, fn_type);
-        let wrapper_fn_ty = wrapper.get_type();
+        // `wrapper` and `fn_type` were both established above via
+        // `syscall_registry::get_or_declare` — the registry IS the
+        // signature reconciliation point. Any pre-existing
+        // divergent declaration is recorded into the global
+        // signature-mismatch registry and surfaced as a hard error
+        // by the lowering pass's final gate.
+        let wrapper_fn_ty = fn_type;
         let wrapper_ret_ty = wrapper_fn_ty.get_return_type();
 
         let entry = ctx.append_basic_block(wrapper, "entry");

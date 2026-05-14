@@ -903,6 +903,19 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
     /// 3. Emit global constructors/destructors
     /// 4. Verify the module
     pub fn lower_module(&mut self, vbc_module: &VbcModule) -> Result<()> {
+        // Phase 0.4: Pre-declare every POSIX syscall under the
+        // canonical Verum-ABI signature from the
+        // `syscall_registry::POSIX_SYSCALLS` table. This MUST happen
+        // before any other emit path can race to declare a syscall
+        // with the wrong shape — the FFI lowering for VBC `CallFfi`
+        // instructions (`instruction.rs:22655`) then finds the
+        // canonical declaration and reuses it instead of constructing
+        // a void-returning declaration from a corrupted FFI
+        // signature. Fixes the AOT "callee returns void" class of
+        // defects on `listen` / `socket` / `accept` / friends that
+        // previously gated every `Heap.new`-touching AOT test.
+        super::syscall_registry::predeclare_all(&self.module, self.context);
+
         // Phase 0.5: Emit LLVM IR helper functions (replaces C runtime stubs)
         super::runtime::define_text_ir_helpers(self.context, &self.module)?;
         super::runtime::define_list_ir_helpers(self.context, &self.module)?;
@@ -1281,6 +1294,22 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             if trace {
                 eprintln!("[aot-runtime-stage] all_done");
             }
+
+            // Architectural-invariant gate: every declaration of an
+            // LLVM function symbol must agree on its `fn_type` across
+            // all 240+ `get_or_declare_function` call sites and the
+            // 70+ raw `module.add_function` sites. Pre-fix the helper
+            // silently returned the first declaration when callers
+            // disagreed (e.g. `listen` declared once as
+            // `i32(i32, i32)` and again as `i64(i64, i64)`), producing
+            // an LLVM IR module whose runtime ABI shape diverged from
+            // what later codegen assumed — surfaced as cryptic
+            // "callee returns void" / "param type mismatch" errors
+            // thousands of instructions later. The check fuses every
+            // recorded mismatch into a single typed diagnostic so the
+            // root cause (two emit paths fighting over one symbol's
+            // ABI) is visible at compile time.
+            super::error::check_no_signature_mismatches()?;
         }
 
         // Phase 3.6 (#106 Path A.2): final-pass safety net — for any
