@@ -40,20 +40,25 @@
 
 ## 3. Language-implementation gaps surfaced by this folder
 
-### §A — `Char.make_ascii_{upper,lower}case` does not mutate
+### §A — `Char.make_ascii_{upper,lower}case` does not mutate — **TRACKED AS TASK #13 (2026-05-14)**
 **Symptom**: `let mut c: Char = 'a'; c.make_ascii_uppercase()` leaves
-`c == 'a'`. The body is `*self = self.to_ascii_uppercase();`. The
-underlying `to_ascii_uppercase` is correct (proven by §pure-conversion
-PASS-GUARDs); the assignment to `*self: &mut Char` does not commit.
-**Root cause hypothesis**: Char is a primitive type whose `&mut` form
-does not dispatch to a real DerefMut at the runtime level — the
-runtime treats `&mut Char` as a value-copy and discards the
-post-assignment value. Same family as the SetF / NullPointerAt issue
-in `Text.truncate` (text/text §E).
-**Action**: investigate `&mut <Primitive>` deref-assign semantics in
-`crates/verum_vbc/src/codegen/expressions.rs`. Likely fix: lower
-`*self = X` for primitive `Self` to a register-write via the
-register-aliasing path used by text §F.
+`c == 'a'`. Body is `*self = self.to_ascii_uppercase();`.
+**Bisection (this session)**: the defect reproduces identically for
+**every primitive** `&mut self` method that uses `*self = X` to write
+back — not just Char.  A user-defined `implement Int { fn
+double_in_place(&mut self) { *self = *self * 2 } }` also fails to
+persist.  So the root is at the codegen / call-dispatch layer for
+primitive receivers: when a primitive receiver dispatches a `&mut self`
+method, the call site's `takes_self_mut_ref → RefMut(ref_reg,
+receiver_reg)` wrapping at `expressions.rs:8731` is bypassed (likely
+the receiver_is_primitive_numeric path at line 8109+ short-circuits
+to an inline-sequence dispatch that drops the RefMut step).  The
+Deref / DerefMut Tier-0 handlers themselves are correct (verified at
+`cbgr.rs:159+ / 273+`).
+**Status**: file open as task #13 — fix needs the codegen path for
+primitive `&mut self` to route through the same RefMut wrapping as
+user-type `&mut self`.  Pinned by
+`core-tests/text/char/regression_test.vr::regression_a_make_ascii_uppercase_pinned`.
 
 ### §B — `eq_ignore_ascii_case` false-negative
 **Symptom**: `'A'.eq_ignore_ascii_case(&'a')` returns false. Body is
