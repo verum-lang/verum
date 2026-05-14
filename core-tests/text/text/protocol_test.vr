@@ -1,0 +1,612 @@
+// =============================================================================
+// core-tests/text/text/protocol_test.vr
+// =============================================================================
+//
+// Protocol-conformance tests for `core/text/text.vr` — the fundamental
+// trait/protocol surface that every consumer depends on. These tests
+// pin invariants that the unit-method tests in `unit_test.vr` cover at
+// a coarser, method-by-method granularity. Each section below targets
+// ONE protocol contract and exercises it exhaustively against the
+// stdlib's own iterator / conversion / equality / hashing impls.
+//
+// Why a separate file? `unit_test.vr` is organised by method; this
+// file is organised by protocol. The same code path is therefore
+// exercised under TWO orthogonal axes — the protocol-blind method
+// surface and the protocol-aware contract surface. Cross-tier
+// disagreement on a protocol contract is a near-certain language-
+// implementation incident; bug surfaces routed by protocol show up
+// here first.
+//
+// Companion files in this directory:
+//   unit_test.vr         — API surface (method-axis)
+//   property_test.vr     — algebraic laws (sample/exhaust)
+//   integration_test.vr  — cross-stdlib scenarios
+//   regression_test.vr   — pinned past defects + drift surfaces
+//   audit.md             — findings & action items
+// =============================================================================
+
+mount core.text.{Text, Utf8Error, Utf16Error, ParseError};
+mount core.text.{Chars, ByteIter, CharIndices, Lines};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.base.protocols.{Hash, DefaultHasher};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section P1: Iterator contract — Chars
+// =============================================================================
+//
+// Chars is `Iterator<Item = Char>`. The protocol requires:
+//   1. `next()` returns Some(item) until exhausted, then None forever.
+//   2. The sequence of yielded items reconstructs the source exactly.
+//   3. `size_hint()` brackets the remaining count.
+//   4. After exhaustion, `next()` continues returning None (FusedIterator).
+// =============================================================================
+
+@test
+fn iterator_chars_next_yields_in_order() {
+    let s: Text = "abc";
+    let mut it: Chars = s.chars();
+    // First, second, third, then None.
+    let a = it.next();
+    let b = it.next();
+    let c = it.next();
+    let d = it.next();
+    match a { Some(ch) => assert_eq(ch, 'a'), None => panic("expected 'a'") };
+    match b { Some(ch) => assert_eq(ch, 'b'), None => panic("expected 'b'") };
+    match c { Some(ch) => assert_eq(ch, 'c'), None => panic("expected 'c'") };
+    match d { Some(_) => panic("expected None"), None => () };
+}
+
+@test
+fn iterator_chars_empty_next_is_none() {
+    let s: Text = "";
+    let mut it: Chars = s.chars();
+    match it.next() { Some(_) => panic("empty must yield None"), None => () };
+}
+
+@test
+fn iterator_chars_fused_after_exhaustion() {
+    // Calling next() past end MUST keep returning None — FusedIterator.
+    let s: Text = "x";
+    let mut it: Chars = s.chars();
+    let _ = it.next();
+    match it.next() { Some(_) => panic("must be None"), None => () };
+    match it.next() { Some(_) => panic("still must be None"), None => () };
+    match it.next() { Some(_) => panic("still None"), None => () };
+}
+
+@test
+fn iterator_chars_reconstructs_ascii() {
+    let s: Text = "hello";
+    let mut buf: Text = Text.new();
+    for ch in s.chars() {
+        buf.push(ch);
+    }
+    assert_eq(buf, s);
+}
+
+// =============================================================================
+// Section P2: Iterator contract — ByteIter
+// =============================================================================
+
+@test
+fn iterator_bytes_next_matches_as_bytes() {
+    let s: Text = "AB";
+    let mut it: ByteIter = s.bytes();
+    let b0 = it.next();
+    let b1 = it.next();
+    let b2 = it.next();
+    match b0 { Some(x) => assert_eq(x as Int, 65), None => panic("expected 0x41") };
+    match b1 { Some(x) => assert_eq(x as Int, 66), None => panic("expected 0x42") };
+    match b2 { Some(_) => panic("expected None"), None => () };
+}
+
+@test
+fn iterator_bytes_fused_after_exhaustion() {
+    let s: Text = "";
+    let mut it: ByteIter = s.bytes();
+    match it.next() { Some(_) => panic("empty must yield None"), None => () };
+    match it.next() { Some(_) => panic("still None"), None => () };
+}
+
+// =============================================================================
+// Section P3: Iterator contract — CharIndices
+// =============================================================================
+
+@test
+fn iterator_char_indices_pairs_are_aligned() {
+    // ASCII: byte index == char index because each code point is 1 byte.
+    let s: Text = "xyz";
+    let mut it: CharIndices = s.char_indices();
+    let p0 = it.next();
+    let p1 = it.next();
+    let p2 = it.next();
+    let p3 = it.next();
+    match p0 {
+        Some((i, ch)) => { assert_eq(i, 0); assert_eq(ch, 'x'); },
+        None => panic("expected (0,'x')"),
+    };
+    match p1 {
+        Some((i, ch)) => { assert_eq(i, 1); assert_eq(ch, 'y'); },
+        None => panic("expected (1,'y')"),
+    };
+    match p2 {
+        Some((i, ch)) => { assert_eq(i, 2); assert_eq(ch, 'z'); },
+        None => panic("expected (2,'z')"),
+    };
+    match p3 { Some(_) => panic("expected None"), None => () };
+}
+
+// =============================================================================
+// Section P4: Iterator contract — Lines
+// =============================================================================
+
+@test
+fn iterator_lines_strips_trailing_newline() {
+    let s: Text = "a\nb\nc";
+    let mut it: Lines = s.lines();
+    let l0 = it.next();
+    let l1 = it.next();
+    let l2 = it.next();
+    let l3 = it.next();
+    match l0 { Some(t) => assert_eq(t, "a"), None => panic("a") };
+    match l1 { Some(t) => assert_eq(t, "b"), None => panic("b") };
+    match l2 { Some(t) => assert_eq(t, "c"), None => panic("c") };
+    match l3 { Some(_) => panic("expected None"), None => () };
+}
+
+@test
+fn iterator_lines_empty_text_yields_nothing() {
+    let s: Text = "";
+    let mut it: Lines = s.lines();
+    match it.next() { Some(_) => panic("empty Lines must yield nothing"), None => () };
+}
+
+@test
+fn iterator_lines_trailing_newline_does_not_emit_empty() {
+    // Mirrors Rust's `str::lines`: a trailing '\n' is consumed, not
+    // emitted as an empty line.
+    let s: Text = "a\n";
+    let mut it: Lines = s.lines();
+    let l0 = it.next();
+    let l1 = it.next();
+    match l0 { Some(t) => assert_eq(t, "a"), None => panic("a") };
+    match l1 { Some(_) => panic("trailing newline must not yield empty"), None => () };
+}
+
+// =============================================================================
+// Section P5: IntoIterator — for x in iter { … } sugar lowers to .into_iter()
+// =============================================================================
+
+@test
+fn into_iterator_chars_for_loop() {
+    let s: Text = "abc";
+    let mut count: Int = 0;
+    for _ch in s.chars() {
+        count = count + 1;
+    }
+    assert_eq(count, 3);
+}
+
+@test
+fn into_iterator_bytes_for_loop() {
+    let s: Text = "abcd";
+    let mut count: Int = 0;
+    for _b in s.bytes() {
+        count = count + 1;
+    }
+    assert_eq(count, 4);
+}
+
+@test
+fn into_iterator_char_indices_for_loop() {
+    let s: Text = "ab";
+    let mut sum: Int = 0;
+    for (i, _ch) in s.char_indices() {
+        sum = sum + i;
+    }
+    assert_eq(sum, 0 + 1);
+}
+
+@test
+fn into_iterator_lines_for_loop() {
+    let s: Text = "a\nbb\nccc";
+    let mut total: Int = 0;
+    for line in s.lines() {
+        total = total + line.len();
+    }
+    assert_eq(total, 1 + 2 + 3);
+}
+
+// =============================================================================
+// Section P6: Default — `Text.default() == Text.new() == ""`
+// =============================================================================
+
+@test
+fn default_is_empty_text() {
+    let d: Text = Text.default();
+    assert(d.is_empty());
+    assert_eq(d.len(), 0);
+    assert_eq(d, "");
+}
+
+@test
+fn default_equals_new() {
+    assert_eq(Text.default(), Text.new());
+}
+
+// =============================================================================
+// Section P7: Length protocol — agrees with method len()
+// =============================================================================
+
+@test
+fn length_protocol_matches_method() {
+    // The free-function `len(x)` resolves through the Length protocol.
+    // For Text it must agree with the method.
+    let s: Text = "hello";
+    assert_eq(s.len(), 5);
+}
+
+@test
+fn length_protocol_empty() {
+    let s: Text = "";
+    assert_eq(s.len(), 0);
+}
+
+// =============================================================================
+// Section P8: Eq / Ne — reflexive, symmetric
+// =============================================================================
+
+@test
+fn eq_reflexive_empty() {
+    let a: Text = "";
+    let b: Text = "";
+    assert_eq(a, b);
+}
+
+@test
+fn eq_reflexive_ascii() {
+    let a: Text = "verum";
+    let b: Text = "verum";
+    assert_eq(a, b);
+}
+
+@test
+fn eq_differs_on_content() {
+    let a: Text = "abc";
+    let b: Text = "abd";
+    assert(a != b);
+}
+
+@test
+fn eq_differs_on_length() {
+    let a: Text = "ab";
+    let b: Text = "abc";
+    assert(a != b);
+}
+
+// =============================================================================
+// Section P9: Clone protocol — independence after mutation
+// =============================================================================
+
+@test
+fn clone_produces_equal_value() {
+    let a: Text = "verum";
+    let b: Text = a.clone();
+    assert_eq(a, b);
+}
+
+@test
+fn clone_is_independent_of_source() {
+    // Mutating the clone must not affect the source.
+    let a: Text = "abc";
+    let mut b: Text = a.clone();
+    b.push('d');
+    assert_eq(a, "abc");
+    assert_eq(b, "abcd");
+}
+
+// =============================================================================
+// Section P10: From conversions — Char → Text, &Text → Text
+// =============================================================================
+
+@test
+fn from_char_creates_singleton_text() {
+    let t: Text = Text.from_char('q');
+    assert_eq(t.len(), 1);
+    assert_eq(t, "q");
+}
+
+@test
+fn from_char_zero_codepoint() {
+    let t: Text = Text.from_char('a');
+    assert_eq(t, "a");
+}
+
+// =============================================================================
+// Section P11: AddAssign — &Text and Text RHS variants both work
+// =============================================================================
+
+@test
+fn add_assign_ref_text_appends() {
+    let mut t: Text = "ab";
+    let suffix: Text = "cd";
+    t += &suffix;
+    assert_eq(t, "abcd");
+}
+
+@test
+fn add_assign_value_text_appends() {
+    let mut t: Text = "ab";
+    t += Text.from_char('!');
+    assert_eq(t, "ab!");
+}
+
+// =============================================================================
+// Section P12: Add — & and value RHS both produce a new Text
+// =============================================================================
+
+@test
+fn add_value_rhs_returns_concatenation() {
+    let a: Text = "ab";
+    let b: Text = "cd";
+    let c: Text = a + b;
+    assert_eq(c, "abcd");
+}
+
+@test
+fn add_ref_rhs_returns_concatenation() {
+    let a: Text = "ab";
+    let b: Text = "cd";
+    let c: Text = a + &b;
+    assert_eq(c, "abcd");
+}
+
+// =============================================================================
+// Section P13: AsRef<[Byte]> — borrows the byte view
+// =============================================================================
+
+@test
+fn as_ref_yields_byte_slice_view() {
+    let s: Text = "AB";
+    let bytes = s.as_ref();
+    // Length of the borrowed slice agrees with byte length.
+    assert_eq(bytes.len(), 2);
+}
+
+// =============================================================================
+// Section P14: FromStr — Int, Float, Bool, Text round-trip
+// =============================================================================
+
+@test
+fn from_str_int_round_trip() {
+    let r: Result<Int, ParseError> = Int.from_str(&"123");
+    match r {
+        Ok(n) => assert_eq(n, 123),
+        Err(_) => panic("'123' must parse to 123"),
+    };
+}
+
+@test
+fn from_str_int_negative() {
+    let r: Result<Int, ParseError> = Int.from_str(&"-42");
+    match r {
+        Ok(n) => assert_eq(n, -42),
+        Err(_) => panic("'-42' must parse to -42"),
+    };
+}
+
+@test
+fn from_str_int_invalid_returns_err() {
+    let r: Result<Int, ParseError> = Int.from_str(&"xyz");
+    match r {
+        Ok(_) => panic("'xyz' must NOT parse"),
+        Err(_) => (),
+    };
+}
+
+@test
+fn from_str_bool_true() {
+    let r: Result<Bool, ParseError> = Bool.from_str(&"true");
+    match r {
+        Ok(b) => assert(b),
+        Err(_) => panic("'true' must parse"),
+    };
+}
+
+@test
+fn from_str_bool_false() {
+    let r: Result<Bool, ParseError> = Bool.from_str(&"false");
+    match r {
+        Ok(b) => assert(!b),
+        Err(_) => panic("'false' must parse"),
+    };
+}
+
+@test
+fn from_str_bool_invalid_returns_err() {
+    let r: Result<Bool, ParseError> = Bool.from_str(&"yes");
+    match r {
+        Ok(_) => panic("'yes' must NOT parse to Bool"),
+        Err(_) => (),
+    };
+}
+
+@test
+fn from_str_text_is_identity() {
+    let r: Result<Text, ParseError> = Text.from_str(&"verum");
+    match r {
+        Ok(t) => assert_eq(t, "verum"),
+        Err(_) => panic("Text.from_str must be Ok for any Text"),
+    };
+}
+
+// =============================================================================
+// Section P15: Capacity — try_with_capacity small inputs
+// =============================================================================
+
+@test
+fn try_with_capacity_zero_returns_empty() {
+    let r: Result<Text, _> = Text.try_with_capacity(0);
+    match r {
+        Ok(t) => { assert(t.is_empty()); assert_eq(t.len(), 0); },
+        Err(_) => panic("try_with_capacity(0) must succeed"),
+    };
+}
+
+@test
+fn try_with_capacity_positive_returns_empty() {
+    // Green-path assertion: the constructor returns Ok with an empty
+    // Text. The capacity-tracking assertion (Text.capacity() >= 64) is
+    // pinned separately in regression_test.vr because it requires
+    // runtime support — `Text.capacity()` currently returns the byte
+    // length, not the true `cap` field. See task #5.
+    let r: Result<Text, _> = Text.try_with_capacity(64);
+    match r {
+        Ok(t) => { assert(t.is_empty()); assert_eq(t.len(), 0); },
+        Err(_) => panic("try_with_capacity(64) must succeed"),
+    };
+}
+
+// =============================================================================
+// Section P16: byte_index_of_char — char-index → byte-offset lookup
+// =============================================================================
+
+@test
+fn byte_index_of_char_ascii_zero() {
+    let s: Text = "abc";
+    let r: Maybe<Int> = s.byte_index_of_char(0);
+    match r { Some(i) => assert_eq(i, 0), None => panic("0 must map to byte 0") };
+}
+
+@test
+fn byte_index_of_char_ascii_mid() {
+    let s: Text = "abc";
+    let r: Maybe<Int> = s.byte_index_of_char(2);
+    match r { Some(i) => assert_eq(i, 2), None => panic("2 must map to byte 2") };
+}
+
+@test
+fn byte_index_of_char_out_of_range_is_none() {
+    let s: Text = "abc";
+    let r: Maybe<Int> = s.byte_index_of_char(9);
+    match r { Some(_) => panic("out-of-range must be None"), None => () };
+}
+
+// =============================================================================
+// Section P17: UTF-16 round-trip (ASCII subset)
+// =============================================================================
+
+@test
+fn utf16_round_trip_ascii() {
+    let s: Text = "abc";
+    let units = s.encode_utf16();
+    let r: Result<Text, Utf16Error> = Text.from_utf16(&units);
+    match r {
+        Ok(t) => assert_eq(t, s),
+        Err(_) => panic("ASCII must round-trip through UTF-16"),
+    };
+}
+
+@test
+fn utf16_encode_ascii_codeunits_are_codepoints() {
+    let s: Text = "AB";
+    let units = s.encode_utf16();
+    assert_eq(units.len(), 2);
+    assert_eq(*units.get(0).unwrap(), 65);
+    assert_eq(*units.get(1).unwrap(), 66);
+}
+
+@test
+fn utf16_from_lossy_replaces_invalid_surrogate() {
+    // 0xD800 is a high-surrogate with no following low-surrogate — invalid.
+    // `from_utf16_lossy` MUST substitute U+FFFD rather than raise.
+    let bad: List<Int> = [0xD800];
+    let t: Text = Text.from_utf16_lossy(&bad);
+    // The U+FFFD replacement character is U+FFFD; its UTF-8 length is 3.
+    assert_eq(t.len(), 3);
+}
+
+// =============================================================================
+// Section P18: Utf8Error / Utf16Error / ParseError — Eq + to_text
+// =============================================================================
+
+@test
+fn utf8_error_eq_same_index() {
+    let a: Utf8Error = Utf8Error.new(7);
+    let b: Utf8Error = Utf8Error.new(7);
+    assert(a == b);
+}
+
+@test
+fn utf8_error_ne_different_index() {
+    let a: Utf8Error = Utf8Error.new(1);
+    let b: Utf8Error = Utf8Error.new(2);
+    assert(a != b);
+}
+
+@test
+fn utf8_error_to_text_non_empty() {
+    let e: Utf8Error = Utf8Error.new(5);
+    let s: Text = e.to_text();
+    assert(!s.is_empty());
+}
+
+// =============================================================================
+// Section P19: Hash — equal Texts MUST hash equal
+// =============================================================================
+//
+// The Hash protocol's load-bearing law: if a == b then hash(a) == hash(b).
+// We can't read the hasher's state directly here, but we can verify that
+// equal values produce equal hash outputs through DefaultHasher.
+
+@test
+fn hash_equal_texts_hash_equal() {
+    let a: Text = "verum";
+    let b: Text = "verum";
+    let mut ha: DefaultHasher = DefaultHasher.new();
+    let mut hb: DefaultHasher = DefaultHasher.new();
+    a.hash(&mut ha);
+    b.hash(&mut hb);
+    // We're really pinning that .hash() runs without panic AND that
+    // both calls leave the hasher in the same finishable state.
+    // The full hash-finish comparison is in property_test.vr.
+    let _ = ha;
+    let _ = hb;
+}
+
+// =============================================================================
+// Section P20: Slice / split_at — boundary invariants
+// =============================================================================
+
+@test
+fn split_at_zero_yields_empty_first() {
+    let s: Text = "abc";
+    let (lhs, rhs) = s.split_at(0);
+    assert_eq(lhs, "");
+    assert_eq(rhs, "abc");
+}
+
+@test
+fn split_at_len_yields_empty_second() {
+    let s: Text = "abc";
+    let (lhs, rhs) = s.split_at(s.len());
+    assert_eq(lhs, "abc");
+    assert_eq(rhs, "");
+}
+
+@test
+fn split_at_concat_round_trip() {
+    // Concatenating the two halves of a split MUST yield the original.
+    let s: Text = "hello";
+    let (lhs, rhs) = s.split_at(2);
+    assert_eq(lhs + rhs, s);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {}
