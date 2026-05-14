@@ -539,15 +539,32 @@ fn regression_join_two_parts_with_separator() {
 }
 
 // =============================================================================
-// REGRESSION (open): DefaultHasher cross-tier divergence
+// REGRESSION (closed): DefaultHasher cross-tier divergence
 // =============================================================================
 //
-// `DefaultHasher.write(bytes).finish()` returns the SAME u64 for
-// distinct inputs on the Tier-0 interpreter, but different values on
-// the AOT path.  Suspected: the Tier-0 Hasher.write / Hasher.finish
-// intercepts don't accumulate byte state properly.  Tracked by task #10.
+// Pre-fix, `DefaultHasher.write(bytes).finish()` returned the SAME
+// u64 for distinct inputs on the Tier-0 interpreter, while AOT
+// correctly distinguished them.  Bisection (task #10) revealed two
+// compounding root causes:
+//
+// (1) The user-side `Hasher.write(&mut self, bytes: &[Byte])` body
+//     performs `self.state = …` SetF on a `&mut self` whose method
+//     has a slice argument; that SetF doesn't persist to the caller's
+//     frame in the precompiled stdlib body (task #11 — architectural
+//     codegen defect, separate fix path).
+//
+// (2) The `try_intercept_file_runtime` Tier-0 intercept strips
+//     qualifiers and matches on bare names — it consumed every
+//     `*.write` call with arg_count == 2 regardless of the type
+//     qualifier, routing `DefaultHasher.write` to the FS write
+//     dispatch.
+//
+// Closed by adding a dedicated `hasher_runtime` Tier-0 intercept that
+// fires BEFORE `file_runtime` in the dispatch chain.  The intercept
+// computes the canonical FxHash 64-bit step directly on the heap
+// record's state field, in place — bypassing both the broken stdlib
+// body and the misclassifying file_runtime intercept.
 
-@ignore
 @test
 fn regression_default_hasher_distinguishes_inputs() {
     let mut ha: DefaultHasher = DefaultHasher.new();

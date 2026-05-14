@@ -584,9 +584,19 @@ fn hash_equal_texts_hash_equal() {
     assert_eq(ha.finish(), hb.finish());
 }
 
-// `hash_distinct_texts_hash_distinctly` pinned in regression_test.vr —
-// AOT returns distinct hashes for "alpha" vs "beta" but the Tier-0
-// interpreter returns the same value.  Cross-tier divergence — task #10.
+@test
+fn hash_distinct_texts_hash_distinctly() {
+    // Strong invariant: distinct texts must produce distinct hashes
+    // for any reasonable hash function.  Closed 2026-05-14 by the
+    // `hasher_runtime` Tier-0 intercept — see task #10 / task #11.
+    let a: Text = "alpha";
+    let b: Text = "beta";
+    let mut ha: DefaultHasher = DefaultHasher.new();
+    let mut hb: DefaultHasher = DefaultHasher.new();
+    ha.write(a.as_bytes());
+    hb.write(b.as_bytes());
+    assert(ha.finish() != hb.finish());
+}
 
 // =============================================================================
 // Section P20: Slice / split_at — boundary invariants
