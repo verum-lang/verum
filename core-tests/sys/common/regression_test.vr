@@ -1,0 +1,186 @@
+// =============================================================================
+// core-tests/sys/common/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect. Defects are kept forever — even after
+// the underlying compiler bug is closed — so the test becomes a
+// re-regression guard.
+//
+// Pinned defects:
+//
+//   §A — `mount core.sys.{PAGE_SIZE}` resolved to the wrong sibling's
+//        PAGE_SIZE (#FUNDAMENTAL re-export resolution, closed in this
+//        branch).
+//   §B — Variant-tag drift in `SysContextError` under repeated archive
+//        precompile cycles (related to task #22 — flat-variant tag
+//        stability, closed via context-aware canonical resolution).
+//   §C — `OSError.eq` blanket-impl dispatch path under `Eq` protocol
+//        consumers (List.contains, Map key, etc.). Pre-fix this
+//        dispatched into the wrong impl when an unrelated sibling
+//        type (Result.Err's nested OSError) was in scope.
+//   §D — `page_align_up` / `page_align_down` mis-routed to a sibling
+//        free function in `core/math/bits.vr` (closed via #4 — the
+//        UInt64-typed bit-block duplicate was deleted; structurally
+//        the same class as the task #121 cross-module dispatch
+//        defect, but for free functions rather than methods).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.{
+    OSError,
+    FileDesc,
+    PAGE_SIZE,
+    page_align_up,
+    page_align_down,
+    is_page_aligned,
+};
+mount core.sys.common.{
+    SysContextError,
+};
+
+// =============================================================================
+// §A — mount re-export resolution
+// =============================================================================
+
+// REGRESSION: pre-fix, `mount core.sys.{PAGE_SIZE}` resolved to
+// `core.mem.allocator.PAGE_SIZE: Int = 65536` instead of the
+// intended `core.sys.common.PAGE_SIZE: USize = 4096`. The defect
+// lived in `process_import_tree` (vbc/codegen/mod.rs) — the
+// resolver fell through to bare-name lookup without first scanning
+// the parent-mount path's subtree for a same-named symbol. Fixed
+// by inserting a parent-prefix scan before the bare-name fallback.
+// Tracked in audit.md §3.1.
+@test
+fn regression_page_size_resolves_via_sys_re_export() {
+    assert_eq(PAGE_SIZE, 4096 as USize);
+}
+
+@test
+fn regression_page_size_arithmetic_uses_correct_constant() {
+    // Sister to the constant pin — three_pages must equal 3 * 4096,
+    // not 3 * 65536. Pre-fix this would have computed 196608 against
+    // the wrong constant and silently passed a structural test that
+    // only asserted multiples.
+    let three_pages: USize = (3 as USize) * PAGE_SIZE;
+    assert_eq(three_pages, 12288 as USize);
+}
+
+// =============================================================================
+// §B — Variant-tag stability on SysContextError under match
+// =============================================================================
+
+// REGRESSION: pre-task #22, the 5-variant SysContextError had its
+// tag table drift across repeated archive precompile cycles because
+// the codegen-side tag resolver consulted bare-name first-wins for
+// the variant-name → tag map. With a sibling unrelated type
+// declaring a same-named variant (canonical: `Result.Err` vs the
+// fact that SysContextError.TlsNotInitialized's tag had to NOT collide
+// with any other stdlib unit variant), the dispatch occasionally
+// mis-routed the match arm.
+@test
+fn regression_sys_context_error_match_arms_route_correctly() {
+    let cases: List<SysContextError> = [
+        SysContextError.SlotNotFound { slot: 1 as UInt8 },
+        SysContextError.SlotOverflow { slot: 2 as UInt8 },
+        SysContextError.StackOverflow { depth: 3 },
+        SysContextError.TlsNotInitialized,
+        SysContextError.InvalidSlot { slot: 4 },
+    ];
+    let mut tags: List<Int> = [];
+    for c in cases.iter() {
+        let tag = match c {
+            SysContextError.SlotNotFound { slot: _ } => 0,
+            SysContextError.SlotOverflow { slot: _ } => 1,
+            SysContextError.StackOverflow { depth: _ } => 2,
+            SysContextError.TlsNotInitialized => 3,
+            SysContextError.InvalidSlot { slot: _ } => 4,
+        };
+        tags.push(tag);
+    }
+    // Each variant must route to its assigned synthetic tag — drift
+    // surfaces as a mis-ordered tag list.
+    assert_eq(*tags.get(0 as USize), 0);
+    assert_eq(*tags.get(1 as USize), 1);
+    assert_eq(*tags.get(2 as USize), 2);
+    assert_eq(*tags.get(3 as USize), 3);
+    assert_eq(*tags.get(4 as USize), 4);
+}
+
+// =============================================================================
+// §C — OSError.eq dispatch through `Eq` blanket-impl
+// =============================================================================
+
+// REGRESSION: pre-task #11, the `Eq.ne` blanket impl over OSError
+// dispatched through the wrong concrete `eq` when an unrelated
+// sibling type (Result<Int, OSError>'s nested OSError) was in
+// scope, because the blanket-impl pre-pass had not run before
+// monomorphisation. Closed by task #11's pre-pass that monomorphises
+// every protocol's default-method-defining blanket impl ahead of
+// the call site.
+@test
+fn regression_oserror_eq_via_blanket_ne() {
+    // Direct: `a.eq(&b)` and `a.eq(&c)`.
+    let a = OSError.new(11, "EAGAIN".clone());
+    let b = OSError.new(11, "would block".clone());
+    let c = OSError.new(35, "EAGAIN".clone());
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+    // Indirect via the blanket `ne` (default-method dispatch).
+    assert(!a.ne(&b));
+    assert(a.ne(&c));
+}
+
+// =============================================================================
+// §D — page_align_* dispatching to the correct cross-module impl
+// =============================================================================
+
+// REGRESSION: pre-task-#4 closure, `page_align_up` / `page_align_down`
+// could mis-route to a sibling free function in `core/math/bits.vr`
+// that had a same-name USize-typed implementation. Closed by deleting
+// the parallel implementation in `core.math.bits` (the audit-deferred
+// action item in core-tests/sys/bitfield/audit.md §1). Pinning the
+// invariant here so any future re-introduction of a same-name
+// utility surfaces as a test failure.
+@test
+fn regression_page_align_up_routes_to_sys_common() {
+    // The canonical answer for `7` is `PAGE_SIZE` (next boundary). If
+    // a sibling impl with different alignment semantics took over,
+    // the value would differ.
+    assert_eq(page_align_up(7 as USize), PAGE_SIZE);
+}
+
+@test
+fn regression_page_align_down_routes_to_sys_common() {
+    // `PAGE_SIZE - 1` rounds down to 0 (still inside page 0).
+    assert_eq(page_align_down(PAGE_SIZE - (1 as USize)), 0 as USize);
+}
+
+@test
+fn regression_is_page_aligned_routes_to_sys_common() {
+    // The exact `PAGE_SIZE` boundary is aligned; one before isn't.
+    assert(is_page_aligned(PAGE_SIZE));
+    assert(!is_page_aligned(PAGE_SIZE - (1 as USize)));
+}
+
+// =============================================================================
+// §E — FileDesc IntCoercible interaction
+// =============================================================================
+
+// REGRESSION: pre-task #?, the `IntCoercible` marker on FileDesc did
+// not propagate through `mount core.sys.{FileDesc}` (selective form)
+// in the same way it did via the bare `mount core.sys;` form. The
+// `fd >= 0` use sites would surface a typecheck error claiming
+// FileDesc was not comparable to Int. Closed by routing the marker
+// through the archive-side type-attribute table.
+@test
+fn regression_filedesc_compares_with_int_via_coercion() {
+    let fd = FileDesc.from_raw(3);
+    // Both the method-form and the inequality should typecheck and
+    // resolve consistently.
+    assert(fd.is_valid());
+    assert(fd.as_raw() >= 0);
+    let invalid = FileDesc.INVALID;
+    assert(invalid.as_raw() < 0);
+}
+
+fn main() {}

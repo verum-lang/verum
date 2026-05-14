@@ -1,0 +1,95 @@
+// =============================================================================
+// core-tests/sys/mmio/regression_test.vr
+// =============================================================================
+//
+// Pinned compiler-side defects for `core.sys.mmio`.
+//
+//   §A — `mount core.sys.mmio.{BarrierKind}` resolves the variant
+//        list correctly through the parent-prefix scan
+//        (#FUNDAMENTAL fix).
+//   §B — MemoryFlags tuple-newtype constant access (`MemoryFlags.READ.0`)
+//        preserves UInt32 width through the codegen.
+//   §C — MemoryRegion record-literal construction + `.contains` /
+//        `.end` method dispatch via implement-block lookup (sister
+//        regression to task #35 / #41 — nested impl save/restore).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.mmio.{
+    BarrierKind,
+    MemoryFlags,
+    MemoryRegion,
+};
+
+// =============================================================================
+// §A — BarrierKind variant set resolution
+// =============================================================================
+
+@test
+fn regression_barrier_kind_variants_resolve() {
+    // Pin every variant constructs without `UndefinedVariable`.
+    let bs: List<BarrierKind> = [
+        BarrierKind.Compiler,
+        BarrierKind.Acquire,
+        BarrierKind.Release,
+        BarrierKind.AcqRel,
+        BarrierKind.SeqCst,
+    ];
+    assert_eq(bs.len(), 5);
+}
+
+// =============================================================================
+// §B — MemoryFlags tuple-newtype constant access
+// =============================================================================
+
+@test
+fn regression_memory_flags_const_access_preserves_uint32() {
+    // Pre-commit `61ed2cdaa`, the tuple-newtype const initialiser
+    // `public const READ: MemoryFlags = MemoryFlags(0b0001)` would
+    // widen the implicit `0b0001` Int64 to a UInt32 incorrectly at
+    // the access site, surfacing as the wrong bit-pattern when the
+    // flags were ORed.
+    assert_eq(MemoryFlags.READ.0, 1 as UInt32);
+    assert_eq(MemoryFlags.WRITE.0, 2 as UInt32);
+    assert_eq(MemoryFlags.EXEC.0, 4 as UInt32);
+    assert_eq(MemoryFlags.DMA.0, 8 as UInt32);
+}
+
+@test
+fn regression_memory_flags_compose_via_or_uint32() {
+    // OR composition of two UInt32 constants must remain UInt32.
+    let rw: UInt32 = MemoryFlags.READ.0 | MemoryFlags.WRITE.0;
+    assert_eq(rw, 3 as UInt32);
+}
+
+// =============================================================================
+// §C — MemoryRegion method dispatch via implement block
+// =============================================================================
+
+@test
+fn regression_memory_region_method_dispatch_contains() {
+    // Pre-task #35 / #41 closure, nested impl blocks inside a fn
+    // body would clobber the outer fn's compilation context, and
+    // `region.contains(addr)` could mis-dispatch. Pinning the
+    // healthy post-fix dispatch.
+    let region = MemoryRegion {
+        start: 0x1000 as *const (),
+        size: 0x1000 as USize,
+        flags: MemoryFlags.READ,
+    };
+    assert(region.contains(0x1000 as USize));
+    assert(region.contains(0x1FFF as USize));
+    assert(!region.contains(0x2000 as USize));
+}
+
+@test
+fn regression_memory_region_method_dispatch_end() {
+    let region = MemoryRegion {
+        start: 0x4000 as *const (),
+        size: 0x1000 as USize,
+        flags: MemoryFlags.READ,
+    };
+    assert_eq(region.end(), 0x5000 as USize);
+}
+
+fn main() {}

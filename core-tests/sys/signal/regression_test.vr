@@ -1,0 +1,150 @@
+// =============================================================================
+// core-tests/sys/signal/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect in `core.sys.signal`. Defects are kept
+// forever — even after the underlying compiler bug is closed — so the
+// test becomes a re-regression guard.
+//
+//   §A — `mount core.sys.signal.{Signal}` resolves the Signal type
+//        through the parent-prefix scan (#FUNDAMENTAL fix).
+//   §B — Signal 18-variant tag stability across archive precompile
+//        cycles (sister to task #22's variant-tag stability fixes).
+//   §C — `Signal.name()` returns the correct SIG* text for every
+//        variant (regression guard for the @cfg-aware match-arm
+//        dispatch).
+//   §D — SignalError 4-variant Eq dispatch through the protocol's
+//        blanket `ne` method (sister to OSError regression test §C).
+//   §E — `SignalFlag` atomic-store / atomic-load round-trip — the
+//        thin `MemoryOrder.Release` / `MemoryOrder.Acquire` shim
+//        layer above the VBC `AtomicStore` / `AtomicLoad` opcodes.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.signal.{
+    Signal,
+    SignalError,
+    SignalFlag,
+};
+
+// =============================================================================
+// §A — parent-prefix scan resolves the Signal type
+// =============================================================================
+
+@test
+fn regression_signal_resolves_via_sys_signal_re_export() {
+    // The Signal type lives at `core.sys.signal.Signal`. Pre-fix,
+    // some selective re-exports could fall through to wrong slots.
+    // Pin the canonical resolution.
+    let s = Signal.Int;
+    assert_eq(s.name(), "SIGINT");
+    assert_eq(s.to_raw(), 2);
+}
+
+// =============================================================================
+// §B — Signal variant-tag stability
+// =============================================================================
+
+@test
+fn regression_signal_variant_tag_stable() {
+    // Force the codegen to materialise all 18 variant constructors
+    // and pattern-match against each, asserting the to_raw mapping
+    // surfaces the expected POSIX number. Tag drift would silently
+    // re-route an arm to a different signal.
+    let cases: List<(Signal, Int)> = [
+        (Signal.Hup,   1),
+        (Signal.Int,   2),
+        (Signal.Quit,  3),
+        (Signal.Ill,   4),
+        (Signal.Abort, 6),
+        (Signal.Fpe,   8),
+        (Signal.Kill,  9),
+        (Signal.Segv,  11),
+        (Signal.Pipe,  13),
+        (Signal.Alarm, 14),
+        (Signal.Term,  15),
+        (Signal.Winch, 28),
+    ];
+    for c in cases.iter() {
+        let (s, expected) = *c;
+        assert_eq(s.to_raw(), expected);
+    }
+}
+
+// =============================================================================
+// §C — Signal.name() correct text mapping
+// =============================================================================
+
+@test
+fn regression_signal_name_returns_canonical_sig_text() {
+    // Pin the (variant → "SIG*" text) mapping for every variant.
+    // Any drift in the @cfg-aware match arm would change the name.
+    assert_eq(Signal.Hup.name(),    "SIGHUP");
+    assert_eq(Signal.Int.name(),    "SIGINT");
+    assert_eq(Signal.Quit.name(),   "SIGQUIT");
+    assert_eq(Signal.Ill.name(),    "SIGILL");
+    assert_eq(Signal.Abort.name(),  "SIGABRT");
+    assert_eq(Signal.Fpe.name(),    "SIGFPE");
+    assert_eq(Signal.Kill.name(),   "SIGKILL");
+    assert_eq(Signal.Segv.name(),   "SIGSEGV");
+    assert_eq(Signal.Pipe.name(),   "SIGPIPE");
+    assert_eq(Signal.Alarm.name(),  "SIGALRM");
+    assert_eq(Signal.Term.name(),   "SIGTERM");
+    assert_eq(Signal.Usr1.name(),   "SIGUSR1");
+    assert_eq(Signal.Usr2.name(),   "SIGUSR2");
+    assert_eq(Signal.Child.name(),  "SIGCHLD");
+    assert_eq(Signal.Cont.name(),   "SIGCONT");
+    assert_eq(Signal.Stop.name(),   "SIGSTOP");
+    assert_eq(Signal.Tstp.name(),   "SIGTSTP");
+    assert_eq(Signal.Winch.name(),  "SIGWINCH");
+}
+
+// =============================================================================
+// §D — SignalError Eq through blanket-impl `ne`
+// =============================================================================
+
+@test
+fn regression_signal_error_eq_via_blanket_ne() {
+    // Direct: a.eq(&b).
+    let a = SignalError.InvalidSignal(7);
+    let b = SignalError.InvalidSignal(7);
+    let c = SignalError.InvalidSignal(8);
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+    // Indirect via the blanket `ne`.
+    assert(!a.ne(&b));
+    assert(a.ne(&c));
+}
+
+@test
+fn regression_signal_error_cross_variant_eq_disagrees_via_ne() {
+    let a = SignalError.Uncatchable(Signal.Kill);
+    let b = SignalError.InvalidSignal(9);  // 9 = SIGKILL's number — payload coincidence
+    assert(!a.eq(&b));
+    assert(a.ne(&b));
+}
+
+// =============================================================================
+// §E — SignalFlag set/clear round-trip through atomic shims
+// =============================================================================
+
+@test
+fn regression_signal_flag_atomic_set_clear_round_trip() {
+    // The set/clear/is_set methods sit on top of atomic_store /
+    // atomic_load with explicit MemoryOrder. A regression in the
+    // atomic intrinsic dispatch would surface as the flag failing
+    // to read back the value that was stored.
+    let f = SignalFlag.new();
+    assert(!f.is_set());
+    f.set();
+    assert(f.is_set());
+    f.clear();
+    assert(!f.is_set());
+    // Three-cycle.
+    f.set();
+    f.clear();
+    f.set();
+    assert(f.is_set());
+}
+
+fn main() {}

@@ -1,0 +1,538 @@
+// =============================================================================
+// core-tests/sys/common/property_test.vr
+// =============================================================================
+//
+// Algebraic / mathematical laws over `core.sys.common`'s public types.
+//
+// Conventions:
+//   * Finite domains (Bool tuples, 5-variant enums) — EXHAUSTIVE sweep.
+//   * Continuous domains (USize / Int sizes) — boundary + mid-range
+//     sweeps with the sample rationale documented inline.
+//
+// Properties covered:
+//   * page_align_up / down — idempotence, monotonicity, alignment,
+//     up-down round-trip, page-boundary fix points
+//   * is_page_aligned — relationship to page_align_* and to modulo
+//   * MemProt.to_unix_flags — bijection between Bool³ and `0..8`
+//   * MapFlags structural — disjointness, bit-flag composition
+//   * OSError.{is_success, would_block, interrupted, eq} — boolean
+//     algebra over the error-code domain
+//   * SysContextError.eq — reflexive + symmetric + variant-disjoint
+//   * FileDesc — sentinel disjointness, validity boundary
+//   * SysMemoryOrdering.to_opcode — injection into `0..5`
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.{
+    OSError,
+    FileDesc,
+    MemProt,
+    MapFlags,
+    PAGE_SIZE,
+    page_align_up,
+    page_align_down,
+    is_page_aligned,
+};
+mount core.sys.common.{
+    SysContextError,
+    SysMemoryOrdering,
+    FcntlLockKind,
+};
+
+// =============================================================================
+// Section 1: page_align_up laws
+// =============================================================================
+
+@test
+fn law_page_align_up_idempotent() {
+    // page_align_up(page_align_up(x)) == page_align_up(x) — the
+    // standard "alignment is a closure operator" property.
+    let samples: List<USize> = [
+        0 as USize,
+        1 as USize,
+        PAGE_SIZE - (1 as USize),
+        PAGE_SIZE,
+        PAGE_SIZE + (1 as USize),
+        (5 as USize) * PAGE_SIZE + (123 as USize),
+        (1024 as USize) * PAGE_SIZE,
+    ];
+    for x in samples.iter() {
+        let once = page_align_up(*x);
+        let twice = page_align_up(once);
+        assert_eq(once, twice);
+    }
+}
+
+@test
+fn law_page_align_up_monotone() {
+    // x ≤ y ⇒ page_align_up(x) ≤ page_align_up(y).
+    let samples: List<USize> = [
+        0 as USize,
+        1 as USize,
+        PAGE_SIZE - (1 as USize),
+        PAGE_SIZE,
+        PAGE_SIZE + (1 as USize),
+        (3 as USize) * PAGE_SIZE,
+        (3 as USize) * PAGE_SIZE + (1 as USize),
+    ];
+    let mut i: Int = 0;
+    let n = samples.len();
+    while i + 1 < n {
+        let xi: USize = *samples.get(i as USize);
+        let xj: USize = *samples.get((i + 1) as USize);
+        assert(xi <= xj);
+        let ai = page_align_up(xi);
+        let aj = page_align_up(xj);
+        assert(ai <= aj);
+        i = i + 1;
+    }
+}
+
+@test
+fn law_page_align_up_result_is_aligned() {
+    // page_align_up(x) is always page-aligned.
+    let samples: List<USize> = [
+        0 as USize,
+        7 as USize,
+        PAGE_SIZE - (1 as USize),
+        PAGE_SIZE + (1 as USize),
+        (7 as USize) * PAGE_SIZE + (3 as USize),
+    ];
+    for x in samples.iter() {
+        assert(is_page_aligned(page_align_up(*x)));
+    }
+}
+
+@test
+fn law_page_align_up_bounded_above_by_x_plus_page_minus_one() {
+    // The result lies in `[x, x + PAGE_SIZE)`. Pins the "doesn't
+    // round past the next page" property.
+    let samples: List<USize> = [
+        0 as USize,
+        1 as USize,
+        PAGE_SIZE,
+        PAGE_SIZE + (777 as USize),
+        (10 as USize) * PAGE_SIZE,
+    ];
+    for x in samples.iter() {
+        let a = page_align_up(*x);
+        assert(a >= *x);
+        assert(a < *x + PAGE_SIZE);
+    }
+}
+
+// =============================================================================
+// Section 2: page_align_down laws
+// =============================================================================
+
+@test
+fn law_page_align_down_idempotent() {
+    let samples: List<USize> = [
+        0 as USize,
+        7 as USize,
+        PAGE_SIZE,
+        PAGE_SIZE + (3 as USize),
+        (4 as USize) * PAGE_SIZE - (1 as USize),
+    ];
+    for x in samples.iter() {
+        let once = page_align_down(*x);
+        let twice = page_align_down(once);
+        assert_eq(once, twice);
+    }
+}
+
+@test
+fn law_page_align_down_monotone() {
+    let samples: List<USize> = [
+        0 as USize,
+        100 as USize,
+        PAGE_SIZE,
+        (2 as USize) * PAGE_SIZE - (1 as USize),
+        (2 as USize) * PAGE_SIZE,
+    ];
+    let mut i: Int = 0;
+    let n = samples.len();
+    while i + 1 < n {
+        let xi: USize = *samples.get(i as USize);
+        let xj: USize = *samples.get((i + 1) as USize);
+        let ai = page_align_down(xi);
+        let aj = page_align_down(xj);
+        assert(ai <= aj);
+        i = i + 1;
+    }
+}
+
+@test
+fn law_page_align_down_bounded_above_by_x() {
+    // The result is always ≤ x — flooring never rounds up.
+    let samples: List<USize> = [
+        0 as USize,
+        1 as USize,
+        PAGE_SIZE - (1 as USize),
+        PAGE_SIZE,
+        (3 as USize) * PAGE_SIZE + (777 as USize),
+    ];
+    for x in samples.iter() {
+        let a = page_align_down(*x);
+        assert(a <= *x);
+        assert(*x - a < PAGE_SIZE);
+    }
+}
+
+@test
+fn law_page_align_down_result_is_aligned() {
+    let samples: List<USize> = [
+        7 as USize,
+        PAGE_SIZE + (1 as USize),
+        (5 as USize) * PAGE_SIZE - (1 as USize),
+    ];
+    for x in samples.iter() {
+        assert(is_page_aligned(page_align_down(*x)));
+    }
+}
+
+// =============================================================================
+// Section 3: page_align_up / down — round-trip relationships
+// =============================================================================
+
+@test
+fn law_page_align_up_equals_down_for_aligned() {
+    // For aligned x: up(x) == down(x) == x.
+    let samples: List<USize> = [
+        0 as USize,
+        PAGE_SIZE,
+        (4 as USize) * PAGE_SIZE,
+        (123 as USize) * PAGE_SIZE,
+    ];
+    for x in samples.iter() {
+        assert_eq(page_align_up(*x), *x);
+        assert_eq(page_align_down(*x), *x);
+    }
+}
+
+@test
+fn law_page_align_up_minus_down_is_page_size_for_non_aligned() {
+    // For non-aligned x: up(x) - down(x) == PAGE_SIZE.
+    let samples: List<USize> = [
+        1 as USize,
+        PAGE_SIZE - (1 as USize),
+        PAGE_SIZE + (1 as USize),
+        (5 as USize) * PAGE_SIZE + (777 as USize),
+    ];
+    for x in samples.iter() {
+        assert(!is_page_aligned(*x));
+        let diff = page_align_up(*x) - page_align_down(*x);
+        assert_eq(diff, PAGE_SIZE);
+    }
+}
+
+// =============================================================================
+// Section 4: is_page_aligned ↔ modulo
+// =============================================================================
+
+@test
+fn law_is_page_aligned_iff_modulo_zero() {
+    // is_page_aligned(x) ⇔ x % PAGE_SIZE == 0.
+    let samples: List<USize> = [
+        0 as USize,
+        1 as USize,
+        PAGE_SIZE - (1 as USize),
+        PAGE_SIZE,
+        PAGE_SIZE + (3 as USize),
+        (2 as USize) * PAGE_SIZE,
+        (2 as USize) * PAGE_SIZE + (1 as USize),
+    ];
+    for x in samples.iter() {
+        let aligned = is_page_aligned(*x);
+        let zero_mod = (*x % PAGE_SIZE) == (0 as USize);
+        assert_eq(aligned, zero_mod);
+    }
+}
+
+// =============================================================================
+// Section 5: MemProt.to_unix_flags — Bool³ → 0..8 bijection
+// =============================================================================
+
+@test
+fn law_mem_prot_to_unix_flags_exhaustive() {
+    // 2^3 = 8 distinct (read, write, exec) tuples; each must map to
+    // a unique 3-bit integer. The mapping is:
+    //   read  → bit 0 (PROT_READ  = 1)
+    //   write → bit 1 (PROT_WRITE = 2)
+    //   exec  → bit 2 (PROT_EXEC  = 4)
+    let cases: List<(Bool, Bool, Bool, Int)> = [
+        (false, false, false, 0),
+        (true,  false, false, 1),
+        (false, true,  false, 2),
+        (true,  true,  false, 3),
+        (false, false, true,  4),
+        (true,  false, true,  5),
+        (false, true,  true,  6),
+        (true,  true,  true,  7),
+    ];
+    for c in cases.iter() {
+        let (r, w, x, expected) = *c;
+        let p = MemProt { read: r, write: w, exec: x };
+        assert_eq(p.to_unix_flags(), expected);
+    }
+}
+
+@test
+fn law_mem_prot_unix_flags_in_range_zero_to_seven() {
+    // The output bit-pattern is always in [0, 8).
+    let p = MemProt.READ_WRITE_EXEC;
+    let f = p.to_unix_flags();
+    assert(f >= 0);
+    assert(f < 8);
+}
+
+// =============================================================================
+// Section 6: MapFlags — bit-flag disjointness
+// =============================================================================
+
+@test
+fn law_map_flags_private_anon_and_shared_are_distinct() {
+    // PRIVATE_ANON vs SHARED differ on every field — the canonical
+    // "private mapping" vs "shared IPC mapping" disjointness.
+    let p = MapFlags.PRIVATE_ANON;
+    let s = MapFlags.SHARED;
+    assert(p.shared != s.shared);
+    assert(p.is_private != s.is_private);
+    assert(p.anonymous != s.anonymous);
+}
+
+// =============================================================================
+// Section 7: OSError boolean predicates
+// =============================================================================
+
+@test
+fn law_oserror_is_success_iff_code_zero_exhaustive() {
+    // is_success() ⇔ code == 0 across a representative error set.
+    let codes: List<Int> = [-1, 0, 1, 2, 4, 11, 13, 35, 10035, 100];
+    for c in codes.iter() {
+        let e = OSError.new(*c, "x".clone());
+        assert_eq(e.is_success(), (*c == 0));
+    }
+}
+
+@test
+fn law_oserror_interrupted_iff_code_four() {
+    // interrupted() exactly the predicate `code == 4`.
+    let codes: List<Int> = [0, 3, 4, 5, 11, 35, 10035];
+    for c in codes.iter() {
+        let e = OSError.new(*c, "x".clone());
+        assert_eq(e.interrupted(), (*c == 4));
+    }
+}
+
+@test
+fn law_oserror_would_block_three_known_codes() {
+    // would_block() is true exactly for codes {11, 35, 10035}.
+    let codes: List<Int> = [0, 1, 2, 4, 11, 13, 35, 50, 100, 10000, 10035];
+    let expected: List<Bool> = [
+        false, false, false, false, true, false, true, false, false, false, true,
+    ];
+    let mut i: Int = 0;
+    let n = codes.len();
+    while i < n {
+        let c = *codes.get(i as USize);
+        let exp = *expected.get(i as USize);
+        let e = OSError.new(c, "x".clone());
+        assert_eq(e.would_block(), exp);
+        i = i + 1;
+    }
+}
+
+@test
+fn law_oserror_eq_reflexive() {
+    let codes: List<Int> = [0, 4, 11, 35, 10035, 13, 99];
+    for c in codes.iter() {
+        let a = OSError.new(*c, "x".clone());
+        let b = OSError.new(*c, "y".clone());  // different message, same code
+        assert(a.eq(&b));
+    }
+}
+
+@test
+fn law_oserror_eq_symmetric() {
+    let pairs: List<(Int, Int, Bool)> = [
+        (0, 0, true),
+        (4, 4, true),
+        (11, 35, false),
+        (10035, 11, false),
+        (13, 13, true),
+    ];
+    for p in pairs.iter() {
+        let (a, b, expected) = *p;
+        let ea = OSError.new(a, "x".clone());
+        let eb = OSError.new(b, "x".clone());
+        assert_eq(ea.eq(&eb), expected);
+        assert_eq(eb.eq(&ea), expected);
+    }
+}
+
+// =============================================================================
+// Section 8: FileDesc invariants
+// =============================================================================
+
+@test
+fn law_filedesc_invalid_sentinel_is_invalid() {
+    // INVALID and any other fd disagree on validity.
+    assert(!FileDesc.INVALID.is_valid());
+}
+
+@test
+fn law_filedesc_standard_fds_are_valid_and_distinct() {
+    let std_fds: List<FileDesc> = [
+        FileDesc.STDIN,
+        FileDesc.STDOUT,
+        FileDesc.STDERR,
+    ];
+    for fd in std_fds.iter() {
+        assert((*fd).is_valid());
+    }
+    assert(!FileDesc.STDIN.eq(&FileDesc.STDOUT));
+    assert(!FileDesc.STDOUT.eq(&FileDesc.STDERR));
+    assert(!FileDesc.STDIN.eq(&FileDesc.STDERR));
+}
+
+@test
+fn law_filedesc_is_valid_iff_nonneg_raw() {
+    // is_valid() ⇔ raw ≥ 0 across the boundary domain.
+    let raws: List<Int> = [-100, -2, -1, 0, 1, 2, 3, 1024];
+    for r in raws.iter() {
+        let fd = FileDesc.from_raw(*r);
+        assert_eq(fd.is_valid(), (*r >= 0));
+    }
+}
+
+@test
+fn law_filedesc_from_raw_as_raw_round_trip() {
+    // from_raw(r).as_raw() == r — the newtype is a transparent wrapper.
+    let raws: List<Int> = [-1, 0, 1, 42, 1024, 65535];
+    for r in raws.iter() {
+        assert_eq(FileDesc.from_raw(*r).as_raw(), *r);
+    }
+}
+
+// =============================================================================
+// Section 9: SysContextError equality algebra
+// =============================================================================
+
+@test
+fn law_sys_context_error_eq_reflexive() {
+    let variants: List<SysContextError> = [
+        SysContextError.SlotNotFound { slot: 0 as UInt8 },
+        SysContextError.SlotOverflow { slot: 255 as UInt8 },
+        SysContextError.StackOverflow { depth: 8 },
+        SysContextError.TlsNotInitialized,
+        SysContextError.InvalidSlot { slot: -1 },
+    ];
+    for v in variants.iter() {
+        // Construct an independent clone of the same shape and assert
+        // structural equality.
+        let copy = match v {
+            SysContextError.SlotNotFound { slot } =>
+                SysContextError.SlotNotFound { slot: *slot },
+            SysContextError.SlotOverflow { slot } =>
+                SysContextError.SlotOverflow { slot: *slot },
+            SysContextError.StackOverflow { depth } =>
+                SysContextError.StackOverflow { depth: *depth },
+            SysContextError.TlsNotInitialized =>
+                SysContextError.TlsNotInitialized,
+            SysContextError.InvalidSlot { slot } =>
+                SysContextError.InvalidSlot { slot: *slot },
+        };
+        assert((*v).eq(&copy));
+    }
+}
+
+@test
+fn law_sys_context_error_eq_distinct_variants_disagree() {
+    // Cross-variant equality is always false — the variant tag
+    // dominates the comparison.
+    let a = SysContextError.SlotNotFound { slot: 5 as UInt8 };
+    let b = SysContextError.SlotOverflow { slot: 5 as UInt8 };
+    let c = SysContextError.StackOverflow { depth: 5 };
+    let d = SysContextError.TlsNotInitialized;
+    let e = SysContextError.InvalidSlot { slot: 5 };
+    assert(!a.eq(&b));
+    assert(!a.eq(&c));
+    assert(!a.eq(&d));
+    assert(!a.eq(&e));
+    assert(!b.eq(&c));
+    assert(!c.eq(&d));
+    assert(!d.eq(&e));
+}
+
+// =============================================================================
+// Section 10: SysMemoryOrdering.to_opcode — injection
+// =============================================================================
+
+@test
+fn law_sys_memory_ordering_to_opcode_distinct() {
+    // The 5 ordering variants must encode to 5 distinct opcodes for
+    // the runtime atomic-fence dispatch to be unambiguous.
+    let orderings: List<SysMemoryOrdering> = [
+        SysMemoryOrdering.Relaxed,
+        SysMemoryOrdering.Acquire,
+        SysMemoryOrdering.Release,
+        SysMemoryOrdering.AcqRel,
+        SysMemoryOrdering.SeqCst,
+    ];
+    let codes: List<Int> = orderings.iter().map(|o| (*o).to_opcode()).collect();
+    let mut i: Int = 0;
+    let n = codes.len();
+    while i < n {
+        let mut j: Int = i + 1;
+        while j < n {
+            let ci = *codes.get(i as USize);
+            let cj = *codes.get(j as USize);
+            assert(ci != cj);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn law_sys_memory_ordering_to_opcode_in_range() {
+    // Every opcode in [0, 5).
+    let orderings: List<SysMemoryOrdering> = [
+        SysMemoryOrdering.Relaxed,
+        SysMemoryOrdering.Acquire,
+        SysMemoryOrdering.Release,
+        SysMemoryOrdering.AcqRel,
+        SysMemoryOrdering.SeqCst,
+    ];
+    for o in orderings.iter() {
+        let c = (*o).to_opcode();
+        assert(c >= 0);
+        assert(c < 5);
+    }
+}
+
+// =============================================================================
+// Section 11: FcntlLockKind exhaustive match
+// =============================================================================
+
+@test
+fn law_fcntl_lock_kind_match_exhaustive() {
+    // The 3 variants partition the type's value space exactly.
+    let variants: List<FcntlLockKind> = [
+        FcntlLockKind.Shared,
+        FcntlLockKind.Exclusive,
+        FcntlLockKind.Unlock,
+    ];
+    let mut count: Int = 0;
+    for v in variants.iter() {
+        match v {
+            FcntlLockKind.Shared => count = count + 1,
+            FcntlLockKind.Exclusive => count = count + 1,
+            FcntlLockKind.Unlock => count = count + 1,
+        };
+    }
+    assert_eq(count, 3);
+}
+
+fn main() {}

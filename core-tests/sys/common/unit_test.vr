@@ -2,39 +2,73 @@
 // core-tests/sys/common/unit_test.vr
 // =============================================================================
 //
-// Unit tests for `core.sys.common` — cross-platform system primitives
-// (publicly re-exported via `core/sys/mod.vr`'s `public mount .common.{...}`
-// block). Focused on observable constants that don't require FFI setup;
-// OS-dependent functions (pread/pwrite/fsync/os_alloc/thread_id/…) are
-// exercised in integration tests where the per-platform plumbing is
-// appropriate.
+// Unit tests for `core.sys.common` — cross-platform low-level system
+// primitives forming the foundation of the V-LLSI bootstrap kernel.
 //
-// Mount form: bare-name `mount core.sys.{NAME};` — the form that's
-// confirmed-working post-task #18 (commit ba5acac70 + the
-// type-aware bare-name resolver in compile_call). The
-// grand-parent-bundled qualified `bitfield.NAME` form remains
-// blocked behind task #19 stage 2 (parallel `pending_constants`
-// source-module-capture work in flight).
+// API surface tested here:
+//
+//   OSError                — error code + message + Eq/Debug/Display
+//   FileDesc               — newtype wrapper over Int + constants
+//   IOVec                  — scatter/gather I/O vector
+//   MemProt                — read/write/exec flag triple + to_unix_flags
+//   MapFlags               — shared/private/anonymous/fixed flag set
+//   SysMemoryOrdering      — atomic ordering 5-variant + to_opcode
+//   PAGE_SIZE              — canonical 4 KiB page size (USize)
+//   page_align_up / down   — page-aligned arithmetic
+//   is_page_aligned        — alignment predicate
+//   MAX_CONTEXT_SLOTS      — V-LLSI per-thread arena ceiling
+//   CONTEXT_STACK_DEPTH    — V-LLSI per-slot stack frames
+//   SysContextError        — 5-variant context error algebra
+//   FcntlLockKind          — Shared | Exclusive | Unlock 3-variant
+//   SEEK_SET / F_RDLCK / F_WRLCK / F_UNLCK — POSIX fcntl tags
+//   ACCESS_F_OK / X_OK / W_OK / R_OK       — access(2) mode bits
+//
+// Companion files:
+//   property_test.vr     — algebraic laws (page-align idempotence, flag
+//                          round-trips, OSError eq, etc.)
+//   integration_test.vr  — cross-stdlib usage with Maybe/Result/protocols
+//   regression_test.vr   — pinned compiler-side defects
+//   audit.md             — implementation audit
+//
+// Mount strategy — bare-name selective form via the canonical
+// `core.sys.{...}` re-export point. Pinned working post-#FUNDAMENTAL
+// fix to `process_import_tree`'s parent-prefix scan.
 // =============================================================================
 
 mount core.prelude.*;
 mount core.sys.{
+    OSError,
+    FileDesc,
+    MemProt,
+    MapFlags,
     PAGE_SIZE,
+    page_align_up,
+    page_align_down,
+    is_page_aligned,
     MAX_CONTEXT_SLOTS,
     CONTEXT_STACK_DEPTH,
 };
+mount core.sys.common.{
+    IOVec,
+    SysMemoryOrdering,
+    SysContextError,
+    FcntlLockKind,
+    SEEK_SET,
+    F_RDLCK, F_WRLCK, F_UNLCK,
+    ACCESS_F_OK, ACCESS_X_OK, ACCESS_W_OK, ACCESS_R_OK,
+};
 
 // =============================================================================
-// Page-size constant pin + invariants
+// Section 1: PAGE_SIZE — canonical 4 KiB constant
 // =============================================================================
 
 @test
 fn test_page_size_canonical() {
-    // POSIX/macOS/Linux/Windows aarch64 + x86_64 all converge on 4 KiB
-    // as the conventional page-size constant exposed at source level.
-    // Bigger physical pages (16 KiB on macOS, 2 MiB / 1 GiB huge pages)
-    // are queried via the `page_size()` runtime call — pinned here only
-    // for the source-level constant that the precompiler emits.
+    // The constant is the source-level page-size hint emitted by the
+    // precompiler. Every supported target converges on 4 KiB at this
+    // layer; physical pages of 16 KiB / 2 MiB / 1 GiB are queried via
+    // `page_size()` at runtime, NOT via this constant. The drift-pin
+    // here closes the `mount X.{CONST}` re-export resolution defect.
     assert_eq(PAGE_SIZE, 4096 as USize);
 }
 
@@ -42,16 +76,19 @@ fn test_page_size_canonical() {
 fn test_page_size_is_power_of_two() {
     // Hardware-aligned page sizes are always powers of two so that
     // `addr & -(PAGE_SIZE-1)` cleanly rounds an address down to a
-    // page boundary in O(1). The `n & (n-1) == 0` identity pins this.
+    // page boundary in O(1). The `n & (n-1) == 0` identity pins this
+    // — and ALSO falsely passes for the zero-value miscompile, which
+    // is why we keep `test_page_size_canonical` as the authoritative
+    // value pin.
     let mask: USize = PAGE_SIZE - (1 as USize);
     assert_eq(PAGE_SIZE & mask, 0 as USize);
 }
 
 @test
 fn test_page_size_arithmetic_invariants() {
-    // Page boundaries: every multiple of PAGE_SIZE is page-aligned;
-    // every non-multiple isn't. The relationship is observable through
-    // modulo arithmetic against PAGE_SIZE itself without needing the
+    // Every multiple of PAGE_SIZE is page-aligned; non-multiples
+    // aren't. The relationship is observable through modulo
+    // arithmetic against PAGE_SIZE itself without needing the
     // FFI-adjacent `page_align_up` / `page_align_down` helpers.
     let three_pages: USize = (3 as USize) * PAGE_SIZE;
     let mid_of_fourth_page: USize = three_pages + (1024 as USize);
@@ -67,7 +104,92 @@ fn test_page_size_strictly_positive() {
 }
 
 // =============================================================================
-// V-LLSI context-system capacity invariants
+// Section 2: page_align_up / page_align_down / is_page_aligned
+// =============================================================================
+
+@test
+fn test_page_align_up_zero_is_zero() {
+    // The smallest aligned value is 0 itself — there's no negative
+    // budget to round up from. Pinning the boundary case so callers
+    // can rely on `page_align_up(0) == 0` without special-casing.
+    assert_eq(page_align_up(0 as USize), 0 as USize);
+}
+
+@test
+fn test_page_align_up_one_rounds_to_page() {
+    // Any byte inside page 0 rounds up to the next page boundary.
+    assert_eq(page_align_up(1 as USize), PAGE_SIZE);
+}
+
+@test
+fn test_page_align_up_just_below_page_rounds_to_page() {
+    // `PAGE_SIZE - 1` is the last byte of page 0; rounds up to
+    // page 1's start.
+    assert_eq(page_align_up(PAGE_SIZE - (1 as USize)), PAGE_SIZE);
+}
+
+@test
+fn test_page_align_up_exact_page_stays() {
+    // Already-aligned values must round up to themselves — the
+    // alignment relation is idempotent. This is the property that
+    // makes `page_align_up(x) == x ⇔ is_page_aligned(x)`.
+    assert_eq(page_align_up(PAGE_SIZE), PAGE_SIZE);
+    let two_pages: USize = (2 as USize) * PAGE_SIZE;
+    assert_eq(page_align_up(two_pages), two_pages);
+}
+
+@test
+fn test_page_align_up_arbitrary_size() {
+    // Mid-page sizes round up to the next page boundary.
+    let size: USize = PAGE_SIZE + (123 as USize);  // page 1, byte 123
+    assert_eq(page_align_up(size), (2 as USize) * PAGE_SIZE);
+}
+
+@test
+fn test_page_align_down_zero_is_zero() {
+    // The base case mirrors page_align_up — nothing to round down to.
+    assert_eq(page_align_down(0 as USize), 0 as USize);
+}
+
+@test
+fn test_page_align_down_just_below_page_rounds_to_zero() {
+    // Any value inside page 0 rounds down to page 0's base.
+    assert_eq(page_align_down(PAGE_SIZE - (1 as USize)), 0 as USize);
+}
+
+@test
+fn test_page_align_down_exact_page_stays() {
+    // Idempotence on the exact-page boundary — mirror of page_align_up.
+    assert_eq(page_align_down(PAGE_SIZE), PAGE_SIZE);
+}
+
+@test
+fn test_page_align_down_arbitrary_size() {
+    let size: USize = PAGE_SIZE + (4097 as USize);  // page 2, byte 1
+    assert_eq(page_align_down(size), (2 as USize) * PAGE_SIZE);
+}
+
+@test
+fn test_is_page_aligned_zero() {
+    // Zero is trivially aligned to any boundary, including PAGE_SIZE.
+    assert(is_page_aligned(0 as USize));
+}
+
+@test
+fn test_is_page_aligned_page_boundary() {
+    assert(is_page_aligned(PAGE_SIZE));
+    assert(is_page_aligned((4 as USize) * PAGE_SIZE));
+}
+
+@test
+fn test_is_page_aligned_non_aligned() {
+    assert(!is_page_aligned(1 as USize));
+    assert(!is_page_aligned(PAGE_SIZE - (1 as USize)));
+    assert(!is_page_aligned(PAGE_SIZE + (1 as USize)));
+}
+
+// =============================================================================
+// Section 3: V-LLSI context-system capacity invariants
 // =============================================================================
 
 @test
@@ -87,8 +209,6 @@ fn test_context_stack_depth_canonical() {
 
 @test
 fn test_context_capacity_strictly_positive() {
-    // Both capacity caps must be > 0 — a zero-sized arena would
-    // surface as immediate context-stack overflow on the first ctx_get.
     assert(MAX_CONTEXT_SLOTS > 0);
     assert(CONTEXT_STACK_DEPTH > 0);
 }
@@ -97,17 +217,13 @@ fn test_context_capacity_strictly_positive() {
 fn test_max_context_slots_is_power_of_two() {
     // Power-of-two MAX_CONTEXT_SLOTS lets the runtime mask the slot
     // index with `index & (cap - 1)` instead of `index % cap`,
-    // saving the modulo on every ctx_get / ctx_set call. Pin the
-    // structural property so a future capacity bump preserves it.
+    // saving the modulo on every ctx_get / ctx_set call.
     let n: USize = MAX_CONTEXT_SLOTS as USize;
     assert_eq(n & (n - (1 as USize)), 0 as USize);
 }
 
 @test
 fn test_context_stack_depth_is_power_of_two() {
-    // Same rationale as `MAX_CONTEXT_SLOTS` — the per-slot
-    // stack-frame indexer uses bitwise-AND masking for O(1)
-    // wrap-around on push/pop.
     let n: USize = CONTEXT_STACK_DEPTH as USize;
     assert_eq(n & (n - (1 as USize)), 0 as USize);
 }
@@ -117,11 +233,398 @@ fn test_context_total_capacity_fits_in_u32() {
     // Total context-stack entries = MAX_CONTEXT_SLOTS *
     // CONTEXT_STACK_DEPTH = 2048 — well under any UInt32 cap, so the
     // runtime can index every entry with a single u32 without overflow.
-    // Pin the structural budget so a future capacity bump that would
-    // exceed u32 surfaces here.
     let total: USize = (MAX_CONTEXT_SLOTS as USize) * (CONTEXT_STACK_DEPTH as USize);
     assert_eq(total, 2048 as USize);
     assert(total < (4_294_967_296 as USize));
+}
+
+// =============================================================================
+// Section 4: OSError — construction and equality
+// =============================================================================
+
+@test
+fn test_oserror_new_carries_code_and_message() {
+    let e = OSError.new(2, "ENOENT".clone());
+    assert_eq(e.code, 2);
+    assert_eq(e.message, "ENOENT");
+}
+
+@test
+fn test_oserror_is_success_zero_code() {
+    // POSIX: errno == 0 == "no error". The is_success() predicate is
+    // the boolean-classification API for return-without-error.
+    let e = OSError.new(0, "ok".clone());
+    assert(e.is_success());
+}
+
+@test
+fn test_oserror_is_success_nonzero_code_is_failure() {
+    let e = OSError.new(1, "EPERM".clone());
+    assert(!e.is_success());
+}
+
+@test
+fn test_oserror_interrupted_eintr() {
+    // EINTR = 4 on every POSIX platform Verum supports.
+    let e = OSError.new(4, "EINTR".clone());
+    assert(e.interrupted());
+
+    let other = OSError.new(2, "ENOENT".clone());
+    assert(!other.interrupted());
+}
+
+@test
+fn test_oserror_would_block_linux_eagain() {
+    // Linux EAGAIN == EWOULDBLOCK == 11.
+    let e = OSError.new(11, "EAGAIN".clone());
+    assert(e.would_block());
+}
+
+@test
+fn test_oserror_would_block_darwin_eagain() {
+    // macOS EAGAIN == EWOULDBLOCK == 35.
+    let e = OSError.new(35, "EAGAIN".clone());
+    assert(e.would_block());
+}
+
+@test
+fn test_oserror_would_block_windows_wsa() {
+    // WSAEWOULDBLOCK == 10035.
+    let e = OSError.new(10035, "WSAEWOULDBLOCK".clone());
+    assert(e.would_block());
+}
+
+@test
+fn test_oserror_would_block_negative_for_unrelated_code() {
+    let e = OSError.new(2, "ENOENT".clone());
+    assert(!e.would_block());
+}
+
+@test
+fn test_oserror_eq_compares_code_only() {
+    // Eq for OSError is intentionally code-only — message strings
+    // drift across platforms even for the same errno (`"No such file
+    // or directory"` vs `"file not found"`).
+    let a = OSError.new(2, "ENOENT".clone());
+    let b = OSError.new(2, "file not found".clone());
+    let c = OSError.new(13, "EACCES".clone());
+    assert(a.eq(&b));
+    assert(!a.eq(&c));
+}
+
+// =============================================================================
+// Section 5: FileDesc — newtype + sentinel constants
+// =============================================================================
+
+@test
+fn test_filedesc_invalid_constant() {
+    // -1 is the universal "no fd / failed open" sentinel.
+    assert_eq(FileDesc.INVALID.as_raw(), -1);
+    assert(!FileDesc.INVALID.is_valid());
+}
+
+@test
+fn test_filedesc_stdin_constant() {
+    assert_eq(FileDesc.STDIN.as_raw(), 0);
+    assert(FileDesc.STDIN.is_valid());
+}
+
+@test
+fn test_filedesc_stdout_constant() {
+    assert_eq(FileDesc.STDOUT.as_raw(), 1);
+    assert(FileDesc.STDOUT.is_valid());
+}
+
+@test
+fn test_filedesc_stderr_constant() {
+    assert_eq(FileDesc.STDERR.as_raw(), 2);
+    assert(FileDesc.STDERR.is_valid());
+}
+
+@test
+fn test_filedesc_from_raw_round_trip() {
+    let fd = FileDesc.from_raw(42);
+    assert_eq(fd.as_raw(), 42);
+    assert(fd.is_valid());
+}
+
+@test
+fn test_filedesc_is_valid_negative_is_false() {
+    let fd = FileDesc.from_raw(-5);
+    assert(!fd.is_valid());
+}
+
+@test
+fn test_filedesc_eq_reflexive() {
+    let a = FileDesc.from_raw(7);
+    let b = FileDesc.from_raw(7);
+    assert(a.eq(&b));
+}
+
+@test
+fn test_filedesc_eq_distinguishes_different_fds() {
+    let a = FileDesc.from_raw(3);
+    let b = FileDesc.from_raw(4);
+    assert(!a.eq(&b));
+}
+
+// =============================================================================
+// Section 6: MemProt — protection-flag triple and Unix encoding
+// =============================================================================
+
+@test
+fn test_memprot_none_constant() {
+    let p = MemProt.NONE;
+    assert(!p.read);
+    assert(!p.write);
+    assert(!p.exec);
+    assert_eq(p.to_unix_flags(), 0);
+}
+
+@test
+fn test_memprot_read_only_bit_pattern() {
+    // PROT_READ = 1 on Linux/macOS — the canonical bit-0 in the
+    // bitmask.
+    let p = MemProt.READ;
+    assert(p.read);
+    assert(!p.write);
+    assert(!p.exec);
+    assert_eq(p.to_unix_flags(), 1);
+}
+
+@test
+fn test_memprot_read_write_bit_pattern() {
+    // PROT_READ | PROT_WRITE = 0b011 = 3.
+    let p = MemProt.READ_WRITE;
+    assert(p.read);
+    assert(p.write);
+    assert(!p.exec);
+    assert_eq(p.to_unix_flags(), 3);
+}
+
+@test
+fn test_memprot_read_exec_bit_pattern() {
+    // PROT_READ | PROT_EXEC = 0b101 = 5.
+    let p = MemProt.READ_EXEC;
+    assert(p.read);
+    assert(!p.write);
+    assert(p.exec);
+    assert_eq(p.to_unix_flags(), 5);
+}
+
+@test
+fn test_memprot_read_write_exec_bit_pattern() {
+    // All three flags set = 0b111 = 7.
+    let p = MemProt.READ_WRITE_EXEC;
+    assert(p.read);
+    assert(p.write);
+    assert(p.exec);
+    assert_eq(p.to_unix_flags(), 7);
+}
+
+// =============================================================================
+// Section 7: MapFlags — mmap MAP_* flag encoding
+// =============================================================================
+
+@test
+fn test_mapflags_private_anon_canonical() {
+    let f = MapFlags.PRIVATE_ANON;
+    assert(!f.shared);
+    assert(f.is_private);
+    assert(f.anonymous);
+    assert(!f.fixed);
+}
+
+@test
+fn test_mapflags_shared_canonical() {
+    let f = MapFlags.SHARED;
+    assert(f.shared);
+    assert(!f.is_private);
+    assert(!f.anonymous);
+    assert(!f.fixed);
+}
+
+// =============================================================================
+// Section 8: IOVec — scatter/gather construction
+// =============================================================================
+
+@test
+fn test_iovec_from_raw_parts_carries_len() {
+    // We can't dereference the (unsafe) base pointer in a unit test,
+    // but the structural invariant — `from_raw_parts(base, len)`
+    // stores `len` verbatim — is observable. Pinning this so future
+    // refactors that move the base/len fields surface here.
+    let zero_base: &unsafe Byte = 0 as &unsafe Byte;
+    let v = IOVec.from_raw_parts(zero_base, 42);
+    assert_eq(v.len, 42);
+}
+
+// =============================================================================
+// Section 9: FcntlLockKind — Shared | Exclusive | Unlock 3-variant
+// =============================================================================
+
+@test
+fn test_fcntl_lock_kind_shared_construction() {
+    let k = FcntlLockKind.Shared;
+    match k {
+        FcntlLockKind.Shared => assert(true),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_fcntl_lock_kind_exclusive_construction() {
+    let k = FcntlLockKind.Exclusive;
+    match k {
+        FcntlLockKind.Exclusive => assert(true),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_fcntl_lock_kind_unlock_construction() {
+    let k = FcntlLockKind.Unlock;
+    match k {
+        FcntlLockKind.Unlock => assert(true),
+        _ => assert(false),
+    };
+}
+
+// =============================================================================
+// Section 10: POSIX fcntl constants — SEEK_SET / F_*LCK
+// =============================================================================
+
+@test
+fn test_seek_set_canonical() {
+    // SEEK_SET = 0 by POSIX; the implementation passes this through
+    // to fcntl's `l_whence` field unchanged.
+    assert_eq(SEEK_SET, 0 as Int16);
+}
+
+@test
+fn test_fcntl_lock_tag_constants() {
+    // F_RDLCK = 0, F_WRLCK = 1, F_UNLCK = 2 — the contiguous tag set
+    // POSIX uses in the `l_type` field of `struct flock`.
+    assert_eq(F_RDLCK, 0 as Int16);
+    assert_eq(F_WRLCK, 1 as Int16);
+    assert_eq(F_UNLCK, 2 as Int16);
+}
+
+@test
+fn test_fcntl_lock_tags_pairwise_distinct() {
+    // The dispatch matrix relies on the three lock-type tags being
+    // pairwise-distinct integers in the Int16 domain.
+    assert(F_RDLCK != F_WRLCK);
+    assert(F_WRLCK != F_UNLCK);
+    assert(F_RDLCK != F_UNLCK);
+}
+
+// =============================================================================
+// Section 11: POSIX access(2) mode bits
+// =============================================================================
+
+@test
+fn test_access_f_ok_is_zero() {
+    // F_OK = 0 — "test for existence only, no permission check".
+    assert_eq(ACCESS_F_OK, 0);
+}
+
+@test
+fn test_access_mode_bits_are_distinct_powers_of_two() {
+    // X_OK = 1, W_OK = 2, R_OK = 4 — disjoint single-bit flags that
+    // OR together cleanly for combined-mode queries.
+    assert_eq(ACCESS_X_OK, 1);
+    assert_eq(ACCESS_W_OK, 2);
+    assert_eq(ACCESS_R_OK, 4);
+}
+
+@test
+fn test_access_mode_bits_compose_via_or() {
+    // The canonical "is the file readable and writable?" probe is
+    // `access(path, R_OK | W_OK)`. Composition yields a non-trivial
+    // bitmask that's still expressible in 3 bits.
+    let rw = ACCESS_R_OK | ACCESS_W_OK;
+    assert_eq(rw, 6);
+    let rwx = ACCESS_R_OK | ACCESS_W_OK | ACCESS_X_OK;
+    assert_eq(rwx, 7);
+}
+
+// =============================================================================
+// Section 12: SysContextError — 5-variant algebra
+// =============================================================================
+
+@test
+fn test_sys_context_error_slot_not_found_round_trip() {
+    let e = SysContextError.SlotNotFound { slot: 17 as UInt8 };
+    match e {
+        SysContextError.SlotNotFound { slot } => assert_eq(slot, 17 as UInt8),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_sys_context_error_slot_overflow_round_trip() {
+    let e = SysContextError.SlotOverflow { slot: 255 as UInt8 };
+    match e {
+        SysContextError.SlotOverflow { slot } => assert_eq(slot, 255 as UInt8),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_sys_context_error_stack_overflow_round_trip() {
+    let e = SysContextError.StackOverflow { depth: 9 };
+    match e {
+        SysContextError.StackOverflow { depth } => assert_eq(depth, 9),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_sys_context_error_tls_not_initialized_unit() {
+    let e = SysContextError.TlsNotInitialized;
+    match e {
+        SysContextError.TlsNotInitialized => assert(true),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_sys_context_error_invalid_slot_round_trip() {
+    let e = SysContextError.InvalidSlot { slot: -3 };
+    match e {
+        SysContextError.InvalidSlot { slot } => assert_eq(slot, -3),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_sys_context_error_eq_same_variant_same_payload() {
+    let a = SysContextError.SlotNotFound { slot: 5 as UInt8 };
+    let b = SysContextError.SlotNotFound { slot: 5 as UInt8 };
+    assert(a.eq(&b));
+}
+
+@test
+fn test_sys_context_error_eq_same_variant_different_payload() {
+    let a = SysContextError.SlotNotFound { slot: 5 as UInt8 };
+    let b = SysContextError.SlotNotFound { slot: 6 as UInt8 };
+    assert(!a.eq(&b));
+}
+
+@test
+fn test_sys_context_error_eq_different_variants() {
+    let a = SysContextError.SlotNotFound { slot: 5 as UInt8 };
+    let b = SysContextError.SlotOverflow { slot: 5 as UInt8 };
+    assert(!a.eq(&b));
+}
+
+@test
+fn test_sys_context_error_eq_tls_not_initialized_singleton() {
+    // The unit variant — every instance is equal to every other.
+    let a = SysContextError.TlsNotInitialized;
+    let b = SysContextError.TlsNotInitialized;
+    assert(a.eq(&b));
 }
 
 fn main() {}

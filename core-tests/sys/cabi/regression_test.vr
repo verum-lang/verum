@@ -1,0 +1,89 @@
+// =============================================================================
+// core-tests/sys/cabi/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect for `core.sys.cabi`. Defects are kept
+// forever — even after the underlying compiler bug is closed — so the
+// test becomes a re-regression guard.
+//
+// Pinned defects:
+//
+//   §A — `mount core.sys.cabi.{CFD_STDIN, CFD_STDOUT, CFD_STDERR}`
+//        resolves the right constants via the parent-prefix scan
+//        landed in `process_import_tree` (the #FUNDAMENTAL fix for
+//        re-export resolution, closed in this branch).
+//
+//   §B — Newtype tuple-access on `(Int32)`-wrapped aliases (e.g.
+//        `CFd(0).0`) routes through the correct Int32 register-class
+//        instead of widening to Int64 prematurely (closed by the
+//        commit `61ed2cdaa fix(vbc/codegen,precompile): unwrap
+//        reference type for const VarTypeKind classification`).
+//
+//   §C — `as Int32` cast inside a tuple-newtype constructor literal
+//        (e.g. `CFd(0 as Int32)`) preserves the Int32 width through
+//        the codegen path (sister regression to §B).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.cabi.{CFd, CFD_STDIN, CFD_STDOUT, CFD_STDERR, CInt, CSSize};
+
+// =============================================================================
+// §A — selective re-export of cabi constants
+// =============================================================================
+
+@test
+fn regression_cfd_stdin_resolves_via_cabi_re_export() {
+    // Pre-#FUNDAMENTAL fix, the selective form
+    // `mount core.sys.cabi.{CFD_STDIN}` would fall through to
+    // bare-name lookup, which had no `CFD_STDIN` slot owner. With
+    // the parent-prefix scan in place, the resolver finds
+    // `core.sys.cabi.CFD_STDIN` via its canonical registration.
+    assert_eq(CFD_STDIN.0, 0 as Int32);
+}
+
+@test
+fn regression_cfd_stdout_resolves_via_cabi_re_export() {
+    assert_eq(CFD_STDOUT.0, 1 as Int32);
+}
+
+@test
+fn regression_cfd_stderr_resolves_via_cabi_re_export() {
+    assert_eq(CFD_STDERR.0, 2 as Int32);
+}
+
+// =============================================================================
+// §B — tuple-newtype access width preservation
+// =============================================================================
+
+@test
+fn regression_cfd_tuple_access_preserves_int32() {
+    // The newtype `CFd = (Int32)` stores its value in slot 0. Pre-
+    // commit `61ed2cdaa`, the const-VarTypeKind classifier failed
+    // to unwrap the reference type for tuple-newtype const
+    // initializers, surfacing as widened values at the use site.
+    let fd: CFd = CFd(7 as Int32);
+    assert_eq(fd.0, 7 as Int32);
+}
+
+@test
+fn regression_cint_tuple_access_preserves_int32() {
+    let v: CInt = CInt(-2147483647 as Int32);
+    assert_eq(v.0, -2147483647 as Int32);
+}
+
+// =============================================================================
+// §C — sign domain preservation through cast
+// =============================================================================
+
+@test
+fn regression_cssize_negative_sentinel_round_trip() {
+    // CSSize is the signed-size_t alias used as the read(2) /
+    // write(2) return type. The -1 error sentinel must survive
+    // round-tripping through both the constructor and the tuple
+    // accessor.
+    let err: CSSize = CSSize(-1);
+    assert_eq(err.0, -1);
+    assert(err.0 < 0);
+}
+
+fn main() {}

@@ -1,0 +1,239 @@
+// =============================================================================
+// core-tests/sys/signal/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.signal`.
+//
+// Properties covered:
+//   * Signal.from_raw ∘ Signal.to_raw = id (for variants whose number
+//     is platform-invariant).
+//   * is_catchable() partitions the 18-variant signal space exactly
+//     2 / 16 (Kill + Stop are uncatchable; all others catchable).
+//   * Eq is reflexive, symmetric, and consistent with to_raw.
+//   * SignalError.eq is reflexive + variant-disjoint.
+//   * SignalFlag transitions form a 2-state machine (Unset / Set).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.signal.{
+    Signal,
+    SignalError,
+    SignalFlag,
+};
+
+// =============================================================================
+// Section 1: Signal — exhaustive 18-variant sweeps
+// =============================================================================
+
+fn all_signals() -> List<Signal> {
+    [
+        Signal.Hup, Signal.Int, Signal.Quit, Signal.Ill, Signal.Abort,
+        Signal.Fpe, Signal.Kill, Signal.Segv, Signal.Pipe, Signal.Alarm,
+        Signal.Term, Signal.Usr1, Signal.Usr2, Signal.Child, Signal.Cont,
+        Signal.Stop, Signal.Tstp, Signal.Winch,
+    ]
+}
+
+@test
+fn law_signal_to_raw_is_non_negative() {
+    // Every signal maps to a non-negative integer on POSIX.
+    for s in all_signals().iter() {
+        assert((*s).to_raw() > 0);
+    }
+}
+
+@test
+fn law_signal_to_raw_pairwise_distinct() {
+    let signals = all_signals();
+    let raws: List<Int> = signals.iter().map(|s| (*s).to_raw()).collect();
+    let n = raws.len();
+    let mut i: Int = 0;
+    while i < n {
+        let mut j: Int = i + 1;
+        while j < n {
+            let ri = *raws.get(i as USize);
+            let rj = *raws.get(j as USize);
+            assert(ri != rj);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn law_signal_from_raw_to_raw_round_trip_for_invariant_signals() {
+    // Every signal whose number is platform-invariant
+    // (i.e. excludes the per-platform diverging USR1/USR2/CHILD/
+    // CONT/STOP/TSTP) round-trips through to_raw → from_raw.
+    let invariant: List<Signal> = [
+        Signal.Hup, Signal.Int, Signal.Quit, Signal.Ill, Signal.Abort,
+        Signal.Fpe, Signal.Kill, Signal.Segv, Signal.Pipe, Signal.Alarm,
+        Signal.Term, Signal.Winch,
+    ];
+    for s in invariant.iter() {
+        let raw = (*s).to_raw();
+        match Signal.from_raw(raw) {
+            Some(recovered) => assert(recovered.eq(s)),
+            None => assert(false),
+        };
+    }
+}
+
+@test
+fn law_signal_is_catchable_partition_count() {
+    // Exactly 2 signals are uncatchable (Kill + Stop) — the rest is.
+    let mut catchable: Int = 0;
+    let mut uncatchable: Int = 0;
+    for s in all_signals().iter() {
+        if (*s).is_catchable() {
+            catchable = catchable + 1;
+        } else {
+            uncatchable = uncatchable + 1;
+        }
+    }
+    assert_eq(catchable, 16);
+    assert_eq(uncatchable, 2);
+}
+
+@test
+fn law_signal_eq_reflexive() {
+    for s in all_signals().iter() {
+        assert((*s).eq(s));
+    }
+}
+
+@test
+fn law_signal_eq_consistent_with_to_raw() {
+    let signals = all_signals();
+    let n = signals.len();
+    let mut i: Int = 0;
+    while i < n {
+        let mut j: Int = 0;
+        while j < n {
+            let si = signals.get(i as USize);
+            let sj = signals.get(j as USize);
+            let raws_eq = si.to_raw() == sj.to_raw();
+            let signals_eq = si.eq(sj);
+            assert_eq(raws_eq, signals_eq);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 2: Signal.name() — every variant has a distinct SIG* prefix
+// =============================================================================
+
+@test
+fn law_signal_name_starts_with_sig() {
+    // Every name is "SIG" + variant-specific suffix.
+    for s in all_signals().iter() {
+        let n = (*s).name();
+        assert(n.starts_with("SIG"));
+    }
+}
+
+@test
+fn law_signal_names_pairwise_distinct() {
+    let signals = all_signals();
+    let names: List<Text> = signals.iter().map(|s| (*s).name()).collect();
+    let n = names.len();
+    let mut i: Int = 0;
+    while i < n {
+        let mut j: Int = i + 1;
+        while j < n {
+            let ni = names.get(i as USize);
+            let nj = names.get(j as USize);
+            assert(!ni.eq(nj));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 3: SignalError — equality algebra
+// =============================================================================
+
+@test
+fn law_signal_error_eq_reflexive_per_variant() {
+    let variants: List<SignalError> = [
+        SignalError.Uncatchable(Signal.Kill),
+        SignalError.InvalidSignal(99),
+        SignalError.RegistrationFailed(13),
+        SignalError.RaiseFailed(Signal.Term),
+    ];
+    for v in variants.iter() {
+        // Use a fresh-construction copy to drive the structural
+        // equality check (not just identity).
+        let copy = match v {
+            SignalError.Uncatchable(s) => SignalError.Uncatchable(*s),
+            SignalError.InvalidSignal(n) => SignalError.InvalidSignal(*n),
+            SignalError.RegistrationFailed(n) => SignalError.RegistrationFailed(*n),
+            SignalError.RaiseFailed(s) => SignalError.RaiseFailed(*s),
+        };
+        assert((*v).eq(&copy));
+    }
+}
+
+@test
+fn law_signal_error_eq_distinct_variants_disagree() {
+    let a = SignalError.Uncatchable(Signal.Kill);
+    let b = SignalError.InvalidSignal(9);  // 9 is SIGKILL's number — payload coincidence
+    assert(!a.eq(&b));
+
+    let c = SignalError.RegistrationFailed(9);
+    let d = SignalError.InvalidSignal(9);
+    assert(!c.eq(&d));
+}
+
+// =============================================================================
+// Section 4: SignalFlag — 2-state machine laws
+// =============================================================================
+
+@test
+fn law_signal_flag_new_starts_unset() {
+    let f = SignalFlag.new();
+    assert(!f.is_set());
+}
+
+@test
+fn law_signal_flag_set_idempotent() {
+    // set(set(unset)) == set(unset) — the post-state is observably
+    // identical whether we set once or many times.
+    let f = SignalFlag.new();
+    f.set();
+    let after_one_set = f.is_set();
+    f.set();
+    f.set();
+    f.set();
+    let after_many_sets = f.is_set();
+    assert_eq(after_one_set, after_many_sets);
+}
+
+@test
+fn law_signal_flag_clear_idempotent() {
+    // clear(clear(set)) == clear(set).
+    let f = SignalFlag.new();
+    f.set();
+    f.clear();
+    let after_one_clear = f.is_set();
+    f.clear();
+    f.clear();
+    let after_many_clears = f.is_set();
+    assert_eq(after_one_clear, after_many_clears);
+}
+
+@test
+fn law_signal_flag_set_clear_inverse() {
+    // set then clear returns to the starting state.
+    let f = SignalFlag.new();
+    let start = f.is_set();
+    f.set();
+    f.clear();
+    let end = f.is_set();
+    assert_eq(start, end);
+}
+
+fn main() {}

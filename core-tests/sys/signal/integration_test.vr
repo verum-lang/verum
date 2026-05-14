@@ -1,0 +1,210 @@
+// =============================================================================
+// core-tests/sys/signal/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.signal`. Touches the
+// signal algebra in combination with `Maybe`, `Result`, `List`, and
+// pattern matching.
+//
+// What this file pins:
+//
+//   * Signal → Result error funnel via `register_handler` style flow.
+//   * SignalFlag interplay with iteration — single-threaded "did the
+//     handler set the flag during this loop iteration?" pattern.
+//   * Signal.from_raw round-trip through Maybe<Signal>.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.signal.{
+    Signal,
+    SignalError,
+    SignalFlag,
+};
+
+// =============================================================================
+// Section 1: Signal round-trip via Maybe<Signal>
+// =============================================================================
+
+@test
+fn test_signal_from_raw_collect_known_codes() {
+    let codes: List<Int> = [1, 2, 3, 4, 6, 8, 9, 11, 13, 14, 15, 28];
+    let signals: List<Signal> = codes.iter()
+        .filter_map(|c| Signal.from_raw(*c))
+        .collect();
+    assert_eq(signals.len(), 12);
+}
+
+@test
+fn test_signal_from_raw_filters_unknown() {
+    let codes: List<Int> = [0, 1, 2, 50, 99, 6, 9, -1];
+    let signals: List<Signal> = codes.iter()
+        .filter_map(|c| Signal.from_raw(*c))
+        .collect();
+    // Only 1, 2, 6, 9 round-trip — 4 known signals out of 8 inputs.
+    assert_eq(signals.len(), 4);
+}
+
+// =============================================================================
+// Section 2: Signal classifier — catchable subset
+// =============================================================================
+
+@test
+fn test_signal_partition_catchable_uncatchable() {
+    let all_signals: List<Signal> = [
+        Signal.Hup, Signal.Int, Signal.Quit, Signal.Ill, Signal.Abort,
+        Signal.Fpe, Signal.Kill, Signal.Segv, Signal.Pipe, Signal.Alarm,
+        Signal.Term, Signal.Usr1, Signal.Usr2, Signal.Child, Signal.Cont,
+        Signal.Stop, Signal.Tstp, Signal.Winch,
+    ];
+    let mut catchable_count: Int = 0;
+    let mut uncatchable_count: Int = 0;
+    for s in all_signals.iter() {
+        if (*s).is_catchable() {
+            catchable_count = catchable_count + 1;
+        } else {
+            uncatchable_count = uncatchable_count + 1;
+        }
+    }
+    // 18 signals total — KILL and STOP are uncatchable, rest is.
+    assert_eq(uncatchable_count, 2);
+    assert_eq(catchable_count, 16);
+}
+
+// =============================================================================
+// Section 3: SignalError via Result combinator chain
+// =============================================================================
+
+@test
+fn test_signal_error_via_result_chain() {
+    // Simulate a "register handler if catchable, else fail with
+    // Uncatchable" pattern.
+    fn try_register(sig: Signal) -> Result<(), SignalError> {
+        if !sig.is_catchable() {
+            Err(SignalError.Uncatchable(sig))
+        } else {
+            Ok(())
+        }
+    }
+
+    match try_register(Signal.Int) {
+        Ok(()) => assert(true),
+        Err(_) => assert(false),
+    };
+    match try_register(Signal.Kill) {
+        Ok(()) => assert(false),
+        Err(e) => {
+            match e {
+                SignalError.Uncatchable(s) => assert(s.eq(&Signal.Kill)),
+                _ => assert(false),
+            };
+        }
+    };
+    match try_register(Signal.Stop) {
+        Ok(()) => assert(false),
+        Err(e) => {
+            match e {
+                SignalError.Uncatchable(s) => assert(s.eq(&Signal.Stop)),
+                _ => assert(false),
+            };
+        }
+    };
+}
+
+@test
+fn test_signal_error_partition_list() {
+    // Build a list of (Signal, Result<(), SignalError>) outcomes
+    // and count how many were successfully registerable.
+    let signals: List<Signal> = [Signal.Int, Signal.Kill, Signal.Term, Signal.Stop, Signal.Hup];
+    fn try_register(sig: Signal) -> Result<(), SignalError> {
+        if !sig.is_catchable() {
+            Err(SignalError.Uncatchable(sig))
+        } else {
+            Ok(())
+        }
+    }
+    let mut ok_count: Int = 0;
+    let mut err_count: Int = 0;
+    for sig in signals.iter() {
+        match try_register(*sig) {
+            Ok(()) => ok_count = ok_count + 1,
+            Err(_) => err_count = err_count + 1,
+        };
+    }
+    // 3 catchable (Int, Term, Hup) and 2 uncatchable (Kill, Stop).
+    assert_eq(ok_count, 3);
+    assert_eq(err_count, 2);
+}
+
+// =============================================================================
+// Section 4: SignalFlag synchronisation pattern (single-threaded)
+// =============================================================================
+
+@test
+fn test_signal_flag_loop_until_set() {
+    // Canonical "drain a queue until the shutdown flag is set"
+    // pattern. We simulate the handler by setting the flag at
+    // iteration 3.
+    let flag = SignalFlag.new();
+    let mut iterations: Int = 0;
+    let mut i: Int = 0;
+    while !flag.is_set() && i < 10 {
+        iterations = iterations + 1;
+        if i == 3 {
+            flag.set();
+        }
+        i = i + 1;
+    }
+    // The loop runs 4 iterations (0, 1, 2, 3) — flag.set() fires on
+    // i==3, and the while condition rechecks before i==4.
+    assert_eq(iterations, 4);
+    assert(flag.is_set());
+}
+
+@test
+fn test_signal_flag_set_clear_round_trip() {
+    // Three-state machine: clear → set → clear → set. Each state is
+    // observable through is_set().
+    let f = SignalFlag.new();
+    assert(!f.is_set());
+    f.set();
+    assert(f.is_set());
+    f.clear();
+    assert(!f.is_set());
+    f.set();
+    assert(f.is_set());
+}
+
+// =============================================================================
+// Section 5: Signal.name() composition with Display surface
+// =============================================================================
+
+@test
+fn test_signal_name_in_format_string() {
+    // Signals must be printable via their `name()` accessor without
+    // surfacing as `Signal.Int` (the Debug-ish form). The user-
+    // facing canonical form is the SIG* uppercase.
+    let n = Signal.Term.name();
+    assert_eq(n, "SIGTERM");
+}
+
+@test
+fn test_signal_names_are_distinct() {
+    let names: List<Text> = [
+        Signal.Hup.name(), Signal.Int.name(), Signal.Term.name(),
+        Signal.Kill.name(), Signal.Stop.name(), Signal.Usr1.name(),
+    ];
+    let mut i: Int = 0;
+    let n = names.len();
+    while i < n {
+        let mut j: Int = i + 1;
+        while j < n {
+            let ni = names.get(i as USize);
+            let nj = names.get(j as USize);
+            assert(!ni.eq(nj));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn main() {}

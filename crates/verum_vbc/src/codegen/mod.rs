@@ -7182,6 +7182,80 @@ impl VbcCodegen {
                     }
                 }
 
+                // #FUNDAMENTAL — Path-suffix narrowing for selective mount.
+                //
+                // The source-side `module X;` declaration determines the
+                // canonical registration prefix.  A file at
+                // `core/async/timer.vr` declaring `module timer;` registers
+                // every function as `timer.<fn_name>` — NOT under the
+                // file-path-canonical `core.async.timer.<fn_name>`.  The
+                // selective-mount user writes the file-path-canonical form
+                // (`mount core.async.timer.{timeout_ms}`), and the verbatim /
+                // `core.`-stripped lookups above probe
+                // `core.async.timer.timeout_ms` and `async.timer.timeout_ms`
+                // — neither of which is registered.
+                //
+                if std::env::var("VERUM_TRACE_MOUNT_LOOKUP").is_ok() {
+                    eprintln!(
+                        "[mount-lookup] func_name='{}' full_path={:?}",
+                        func_name, full_path
+                    );
+                    let probe_prefix = func_name.clone();
+                    let candidates: Vec<String> = self
+                        .ctx
+                        .functions
+                        .keys()
+                        .filter(|k| {
+                            k.ends_with(&format!(".{}", probe_prefix))
+                                || k.as_str() == probe_prefix.as_str()
+                        })
+                        .take(15)
+                        .cloned()
+                        .collect();
+                    eprintln!(
+                        "[mount-lookup]   candidates ending with .{}: {:?}",
+                        probe_prefix, candidates
+                    );
+                }
+                //
+                // Without this branch the bare-name fallback at the bottom
+                // of this function picks whichever module's `timeout_ms`
+                // happened to win the bare-name slot during archive load —
+                // typically the first-loaded `core.runtime.supervisor.
+                // timeout_ms(&self)` 1-param method, which then panics with
+                // `WrongArgumentCount expected:1 found:2` when the user's
+                // 2-arg call site lowers.
+                //
+                // The probe walks the path from FULL to LEAF, trying each
+                // tail suffix as a qualified-form lookup.  The FIRST suffix
+                // that resolves wins — this is monotonic narrowing: more
+                // specific path-prefixes are checked first, so an exact
+                // match always preempts a shorter-prefix match.
+                //
+                // Architectural rule: the qualified-form lookup probe order
+                // is `full > suffix(1)..suffix(n-1) > leaf-only`, and the
+                // first hit wins.  This is structurally equivalent to a
+                // "longest-prefix-match" routing table — the same
+                // discipline a network stack uses to disambiguate routes.
+                if full_path.len() >= 2 {
+                    let mut found_via_narrowing = false;
+                    for start_idx in 1..full_path.len() {
+                        let tail = &full_path[start_idx..];
+                        let qualified = format!("{}.{}", tail.join("."), func_name);
+                        if let Some(func_info) =
+                            self.ctx.lookup_function(&qualified).cloned()
+                        {
+                            self.ctx
+                                .register_function_authoritative(alias_name.clone(), func_info);
+                            found_via_narrowing = true;
+                            break;
+                        }
+                    }
+                    if found_via_narrowing {
+                        return Ok(());
+                    }
+                }
+
                 // Try with "core." prefix (modules are registered as core.sys.* but imported as sys.*)
                 if full_path.first().map(|s| s.as_str()) == Some("sys")
                     || full_path.first().map(|s| s.as_str()) == Some(".")
@@ -7205,6 +7279,90 @@ impl VbcCodegen {
                         if let Some(func_info) = self.ctx.lookup_function(&simplified).cloned() {
                             self.ctx
                                 .register_function_authoritative(alias_name.clone(), func_info);
+                            return Ok(());
+                        }
+                    }
+                }
+
+                // #FUNDAMENTAL — `public mount` re-export traversal.
+                //
+                // Before falling through to bare-name lookup (which is
+                // structurally ambiguous when multiple modules export
+                // the same simple name — canonical example:
+                // `core.sys.common.PAGE_SIZE: USize = 4096` vs sibling
+                // `core.mem.allocator.PAGE_SIZE: Int = 65536`), look
+                // for a function/const registered under the user-named
+                // parent's subtree. `mount core.sys.{PAGE_SIZE}`
+                // expresses "the PAGE_SIZE re-exported by core.sys",
+                // and `core/sys/mod.vr` routes that re-export through
+                // `public mount .common.{PAGE_SIZE, ...}`, so the
+                // canonical registration is `core.sys.common.PAGE_SIZE`.
+                // Without this branch, the bare-name fallback at the
+                // bottom of this function picks whichever sibling
+                // module's `PAGE_SIZE` happens to own the bare slot —
+                // a first-wins race that depends on archive iteration
+                // order and surfaces as silent value drift (`PAGE_SIZE`
+                // imports as 65536 instead of 4096).
+                //
+                // Scope: only fire when `full_path.len() >= 2` (there's
+                // a real parent prefix to anchor the scan against).
+                // The probe builds two prefix variants — verbatim and
+                // `core.`-stripped — to match both the user-written
+                // mount path (`core.sys.PAGE_SIZE`) and the source-side
+                // registration form (`sys.common.PAGE_SIZE`, because
+                // the source file declared `module sys.common;`
+                // without a leading `core.`).
+                //
+                // Tie-breaker: prefer the SHALLOWEST hit (fewest dots
+                // = closest sibling of the parent path) so a direct
+                // submodule re-export wins over a deeper sibling that
+                // happens to define the same simple name. Multiple hits
+                // at the same depth are sorted alphabetically for
+                // determinism.
+                if full_path.len() >= 2 {
+                    let parent_segs = &full_path[..full_path.len() - 1];
+                    let parent_dot = format!("{}.", parent_segs.join("."));
+                    let leaf_suffix = format!(".{}", func_name);
+                    let mut hits: Vec<String> = self
+                        .ctx
+                        .functions
+                        .keys()
+                        .filter(|k| k.starts_with(&parent_dot) && k.ends_with(&leaf_suffix))
+                        .cloned()
+                        .collect();
+                    // Also try the `core.`-stripped prefix (covers
+                    // the stdlib case where the source file declared
+                    // `module sys.common;` and the function was
+                    // registered as `sys.common.PAGE_SIZE`).
+                    if parent_segs.first().map(|s| s.as_str()) == Some("core")
+                        && parent_segs.len() >= 2
+                    {
+                        let stripped_parent_dot =
+                            format!("{}.", parent_segs[1..].join("."));
+                        for k in self.ctx.functions.keys() {
+                            if k.starts_with(&stripped_parent_dot)
+                                && k.ends_with(&leaf_suffix)
+                                && !hits.iter().any(|h| h == k)
+                            {
+                                hits.push(k.clone());
+                            }
+                        }
+                    }
+                    if !hits.is_empty() {
+                        // Shallowest first; alphabetical as deterministic
+                        // tiebreak among same-depth hits.
+                        hits.sort_by(|a, b| {
+                            let da = a.matches('.').count();
+                            let db = b.matches('.').count();
+                            da.cmp(&db).then_with(|| a.cmp(b))
+                        });
+                        if let Some(func_info) =
+                            self.ctx.lookup_function(&hits[0]).cloned()
+                        {
+                            self.ctx.register_function_authoritative(
+                                alias_name.clone(),
+                                func_info,
+                            );
                             return Ok(());
                         }
                     }

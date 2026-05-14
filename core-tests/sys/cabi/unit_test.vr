@@ -1,0 +1,226 @@
+// =============================================================================
+// core-tests/sys/cabi/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.cabi` — C-ABI integer type aliases for
+// FFI declarations.
+//
+// API surface tested here:
+//
+//   CInt / CUInt / CLong / CULong / CSize / CSSize / COff
+//   CMode / CPid / CUid / CGid / CClockId / CSockLen
+//   CFd / CFD_STDIN / CFD_STDOUT / CFD_STDERR
+//
+// What we pin:
+//
+//   1. Every alias newtype wraps the documented underlying width
+//      (CInt → Int32, CSize → USize, etc.).
+//   2. The three CFD_* sentinel constants form 0/1/2 — the universal
+//      POSIX stdin/out/err triple.
+//   3. Construction + raw-value round-trip via tuple-newtype access
+//      (`fd.0`) and via the wrapper constructor `CFd(...)`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.cabi.{
+    CInt, CUInt, CLong, CULong, CSize, CSSize, COff,
+    CMode, CPid, CUid, CGid, CClockId, CSockLen,
+    CFd, CFD_STDIN, CFD_STDOUT, CFD_STDERR,
+};
+
+// =============================================================================
+// Section 1: CFD_STDIN / STDOUT / STDERR constants
+// =============================================================================
+
+@test
+fn test_cfd_stdin_is_zero() {
+    // POSIX STDIN_FILENO = 0. Pin the surface-level constant so any
+    // future regression (e.g. cross-platform table reordering)
+    // surfaces here.
+    assert_eq(CFD_STDIN.0, 0 as Int32);
+}
+
+@test
+fn test_cfd_stdout_is_one() {
+    assert_eq(CFD_STDOUT.0, 1 as Int32);
+}
+
+@test
+fn test_cfd_stderr_is_two() {
+    assert_eq(CFD_STDERR.0, 2 as Int32);
+}
+
+@test
+fn test_cfd_standard_descriptors_are_distinct() {
+    assert(CFD_STDIN.0 != CFD_STDOUT.0);
+    assert(CFD_STDOUT.0 != CFD_STDERR.0);
+    assert(CFD_STDIN.0 != CFD_STDERR.0);
+}
+
+@test
+fn test_cfd_standard_descriptors_are_non_negative() {
+    // All three sentinels are valid POSIX descriptors — non-negative
+    // by definition.
+    assert(CFD_STDIN.0 >= (0 as Int32));
+    assert(CFD_STDOUT.0 >= (0 as Int32));
+    assert(CFD_STDERR.0 >= (0 as Int32));
+}
+
+// =============================================================================
+// Section 2: Newtype constructor + tuple-access round trip
+// =============================================================================
+
+@test
+fn test_cint_round_trip_through_newtype() {
+    let v: CInt = CInt(42 as Int32);
+    assert_eq(v.0, 42 as Int32);
+}
+
+@test
+fn test_cuint_round_trip_through_newtype() {
+    let v: CUInt = CUInt(65535 as UInt32);
+    assert_eq(v.0, 65535 as UInt32);
+}
+
+@test
+fn test_clong_round_trip_through_newtype() {
+    let v: CLong = CLong(1_000_000_000);
+    assert_eq(v.0, 1_000_000_000);
+}
+
+@test
+fn test_cculong_round_trip_through_newtype() {
+    let v: CULong = CULong(4_000_000_000 as UInt);
+    assert_eq(v.0, 4_000_000_000 as UInt);
+}
+
+@test
+fn test_csize_round_trip_through_newtype() {
+    let v: CSize = CSize(4096 as USize);
+    assert_eq(v.0, 4096 as USize);
+}
+
+@test
+fn test_cssize_round_trip_through_newtype() {
+    // ssize_t can be negative — pin the -1 error sentinel since
+    // every POSIX read/write returns it on failure.
+    let err_sentinel: CSSize = CSSize(-1);
+    assert_eq(err_sentinel.0, -1);
+
+    let ok: CSSize = CSSize(1024);
+    assert_eq(ok.0, 1024);
+}
+
+@test
+fn test_coff_round_trip_through_newtype() {
+    let v: COff = COff(8192);
+    assert_eq(v.0, 8192);
+}
+
+@test
+fn test_cmode_round_trip_through_newtype() {
+    // 0o644 = 420 — typical "rw-r--r--" file mode.
+    let mode: CMode = CMode(420 as UInt32);
+    assert_eq(mode.0, 420 as UInt32);
+}
+
+@test
+fn test_cpid_round_trip_through_newtype() {
+    let pid: CPid = CPid(12345 as Int32);
+    assert_eq(pid.0, 12345 as Int32);
+}
+
+@test
+fn test_cuid_round_trip_through_newtype() {
+    let uid: CUid = CUid(1000 as UInt32);
+    assert_eq(uid.0, 1000 as UInt32);
+}
+
+@test
+fn test_cgid_round_trip_through_newtype() {
+    let gid: CGid = CGid(1000 as UInt32);
+    assert_eq(gid.0, 1000 as UInt32);
+}
+
+@test
+fn test_cclockid_round_trip_through_newtype() {
+    // CLOCK_MONOTONIC = 1 on Linux / macOS.
+    let id: CClockId = CClockId(1 as Int32);
+    assert_eq(id.0, 1 as Int32);
+}
+
+@test
+fn test_csocklen_round_trip_through_newtype() {
+    let len: CSockLen = CSockLen(16 as UInt32);
+    assert_eq(len.0, 16 as UInt32);
+}
+
+@test
+fn test_cfd_round_trip_through_newtype() {
+    let fd: CFd = CFd(7 as Int32);
+    assert_eq(fd.0, 7 as Int32);
+}
+
+// =============================================================================
+// Section 3: Width invariants observable through casts
+// =============================================================================
+
+@test
+fn test_cint_holds_int32_min_max_extremes() {
+    // CInt → Int32 round-trip across the signed-32 boundary.
+    let min: CInt = CInt(-2_147_483_648 as Int32);
+    let max: CInt = CInt(2_147_483_647 as Int32);
+    assert_eq(min.0, -2_147_483_648 as Int32);
+    assert_eq(max.0, 2_147_483_647 as Int32);
+}
+
+@test
+fn test_cuint_holds_uint32_max_extreme() {
+    let max: CUInt = CUInt(4_294_967_295 as UInt32);
+    assert_eq(max.0, 4_294_967_295 as UInt32);
+}
+
+@test
+fn test_csize_holds_large_buffer_lengths() {
+    // 64 MiB is well within USize range on every platform Verum
+    // supports.
+    let big: CSize = CSize(67_108_864 as USize);
+    assert_eq(big.0, 67_108_864 as USize);
+}
+
+// =============================================================================
+// Section 4: POSIX semantic conventions pinned through aliases
+// =============================================================================
+
+@test
+fn test_csize_matches_page_size_arithmetic() {
+    // The canonical "allocator-side" pattern: round a CSize up to the
+    // next page boundary.
+    let req: CSize = CSize(7 as USize);
+    let page_aligned = if req.0 == (0 as USize) {
+        4096 as USize
+    } else {
+        ((req.0 + (4095 as USize)) / (4096 as USize)) * (4096 as USize)
+    };
+    assert_eq(page_aligned, 4096 as USize);
+}
+
+@test
+fn test_cssize_can_express_read_write_error_sentinel() {
+    // The canonical read(2) / write(2) error path returns ssize_t = -1.
+    let n: CSSize = CSSize(-1);
+    assert(n.0 < 0);
+}
+
+@test
+fn test_cpid_zero_indicates_child_in_fork() {
+    // fork(2) returns 0 in the child, > 0 in the parent, -1 on error.
+    let child: CPid = CPid(0 as Int32);
+    assert_eq(child.0, 0 as Int32);
+    let parent: CPid = CPid(42 as Int32);
+    assert(parent.0 > (0 as Int32));
+    let err: CPid = CPid(-1 as Int32);
+    assert(err.0 < (0 as Int32));
+}
+
+fn main() {}

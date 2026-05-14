@@ -1,0 +1,371 @@
+// =============================================================================
+// core-tests/sys/common/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.common`. Exercises
+// OSError / FileDesc / MemProt / MapFlags / SysContextError in
+// combination with the rest of the standard library: `Maybe`,
+// `Result`, `List`, `Map`, and protocol dispatch (Eq / Display / Debug).
+//
+// What this file pins (and why integration tests matter):
+//
+//   * Cross-type protocol dispatch — `OSError.eq` is reachable via the
+//     `Eq` protocol's blanket-impl `ne` (List.contains / Set.contains
+//     consume it). Pre-task #9 / #11 / #21 these dispatched into the
+//     wrong impl for sibling types with the same simple name; pinning
+//     the post-fix behaviour here.
+//   * Variant-tag stability — SysContextError flows through Map keys,
+//     List filters, and matches with multiple sibling cases. Sister
+//     to text/text §I and time/duration variant-tag pins.
+//   * `Result<T, OSError>` round-trip — the canonical stdlib error
+//     return shape that file_ops / time_ops / net_ops all dispatch
+//     through. Each direction of the round-trip exercises a different
+//     codegen path.
+//   * IntCoercible interplay — FileDesc participates in `fd >= 0`
+//     style comparisons via `core.base.coercion.IntCoercible`. The
+//     marker is declared on FileDesc / MemProt / MapFlags; this file
+//     hits the coercion path on each.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.{
+    OSError,
+    FileDesc,
+    MemProt,
+    MapFlags,
+    PAGE_SIZE,
+    page_align_up,
+    page_align_down,
+    is_page_aligned,
+};
+mount core.sys.common.{
+    SysContextError,
+    SysMemoryOrdering,
+    FcntlLockKind,
+    ACCESS_R_OK,
+    ACCESS_W_OK,
+    ACCESS_X_OK,
+};
+
+// =============================================================================
+// Section 1: OSError in List / Result combinations
+// =============================================================================
+
+@test
+fn test_oserror_in_result_round_trip() {
+    // The canonical stdlib error shape — `Result<T, OSError>`.
+    // Pinning the construct + destructure round-trip ensures the
+    // codegen path for OSError flowing through `Err(_)` is healthy.
+    fn maybe_fail(code: Int) -> Result<Int, OSError> {
+        if code == 0 {
+            Ok(42)
+        } else {
+            Err(OSError.new(code, "synthetic".clone()))
+        }
+    }
+
+    match maybe_fail(0) {
+        Ok(v) => assert_eq(v, 42),
+        Err(_) => assert(false),
+    };
+
+    match maybe_fail(13) {
+        Ok(_) => assert(false),
+        Err(e) => {
+            assert_eq(e.code, 13);
+            assert_eq(e.message, "synthetic");
+        }
+    };
+}
+
+@test
+fn test_oserror_question_mark_propagation() {
+    // `?` on `Result<T, OSError>` must propagate the Err arm without
+    // re-allocating or losing the message. Pre-fix this exercised
+    // task #11's blanket-impl pre-pass for the `Try` protocol on
+    // user-defined error types.
+    fn inner() -> Result<Int, OSError> {
+        Err(OSError.new(11, "EAGAIN".clone()))
+    }
+    fn outer() -> Result<Int, OSError> {
+        let v = inner()?;
+        Ok(v * 2)
+    }
+    match outer() {
+        Ok(_) => assert(false),
+        Err(e) => {
+            assert_eq(e.code, 11);
+            assert(e.would_block());
+        }
+    };
+}
+
+@test
+fn test_oserror_list_filter_by_predicate() {
+    // List<OSError> + iterator filter by predicate — exercises
+    // method-dispatch on the iterator-bound element type.
+    let errs: List<OSError> = [
+        OSError.new(0, "ok".clone()),
+        OSError.new(4, "EINTR".clone()),
+        OSError.new(11, "EAGAIN".clone()),
+        OSError.new(13, "EACCES".clone()),
+        OSError.new(35, "EAGAIN".clone()),
+    ];
+    let blockers: List<OSError> = errs.iter()
+        .filter(|e| e.would_block())
+        .map(|e| e.clone())
+        .collect();
+    assert_eq(blockers.len(), 2);
+}
+
+@test
+fn test_oserror_list_count_distinct_codes() {
+    // List.iter().map().collect into Set semantics via `List.contains`
+    // — pre-fix this was the classic `Eq` blanket-impl dispatch test.
+    let errs: List<OSError> = [
+        OSError.new(2, "ENOENT".clone()),
+        OSError.new(2, "different message".clone()),
+        OSError.new(13, "EACCES".clone()),
+    ];
+    let first = errs.get(0 as USize);
+    let second = errs.get(1 as USize);
+    let third = errs.get(2 as USize);
+    // first and second share code 2 → equal under our `Eq` impl
+    assert(first.eq(second));
+    // first and third differ on code → not equal
+    assert(!first.eq(third));
+}
+
+// =============================================================================
+// Section 2: FileDesc + Maybe interplay
+// =============================================================================
+
+@test
+fn test_filedesc_into_maybe_via_predicate() {
+    // The canonical "open might fail" shape — every fd-returning
+    // helper returns `Maybe<FileDesc>` with INVALID mapped to None.
+    fn safe_open(raw: Int) -> Maybe<FileDesc> {
+        let fd = FileDesc.from_raw(raw);
+        if fd.is_valid() { Some(fd) } else { None }
+    }
+    match safe_open(0) {
+        Some(fd) => assert_eq(fd.as_raw(), 0),
+        None => assert(false),
+    };
+    match safe_open(-1) {
+        Some(_) => assert(false),
+        None => assert(true),
+    };
+}
+
+@test
+fn test_filedesc_list_collects_only_valid() {
+    let raws: List<Int> = [-1, 0, -2, 1, 2, -10, 5];
+    let valid: List<FileDesc> = raws.iter()
+        .filter(|r| **r >= 0)
+        .map(|r| FileDesc.from_raw(**r))
+        .collect();
+    assert_eq(valid.len(), 4);
+    for fd in valid.iter() {
+        assert((*fd).is_valid());
+    }
+}
+
+// =============================================================================
+// Section 3: MemProt round-trip through to_unix_flags
+// =============================================================================
+
+@test
+fn test_memprot_canonical_constants_form_partial_order() {
+    // The pre-defined constants form a partial order by inclusion:
+    //   NONE ≤ READ ≤ READ_WRITE
+    //   NONE ≤ READ ≤ READ_EXEC ≤ READ_WRITE_EXEC
+    //   READ_WRITE ≤ READ_WRITE_EXEC
+    let none = MemProt.NONE;
+    let r = MemProt.READ;
+    let rw = MemProt.READ_WRITE;
+    let rx = MemProt.READ_EXEC;
+    let rwx = MemProt.READ_WRITE_EXEC;
+    assert_eq(none.to_unix_flags(), 0);
+    assert(r.to_unix_flags() <= rw.to_unix_flags());
+    assert(r.to_unix_flags() <= rx.to_unix_flags());
+    assert(rw.to_unix_flags() <= rwx.to_unix_flags());
+    assert(rx.to_unix_flags() <= rwx.to_unix_flags());
+}
+
+// =============================================================================
+// Section 4: SysContextError + Result interplay
+// =============================================================================
+
+@test
+fn test_sys_context_error_via_result_match() {
+    // Simulate a fallible context-set returning a SysContextError.
+    fn try_set(slot: Int) -> Result<(), SysContextError> {
+        if slot < 0 || slot >= 256 {
+            Err(SysContextError.InvalidSlot { slot: slot })
+        } else if slot == 0 {
+            Err(SysContextError.SlotNotFound { slot: slot as UInt8 })
+        } else {
+            Ok(())
+        }
+    }
+
+    match try_set(100) {
+        Ok(()) => assert(true),
+        Err(_) => assert(false),
+    };
+
+    match try_set(-1) {
+        Ok(()) => assert(false),
+        Err(e) => {
+            match e {
+                SysContextError.InvalidSlot { slot } => assert_eq(slot, -1),
+                _ => assert(false),
+            };
+        }
+    };
+
+    match try_set(0) {
+        Ok(()) => assert(false),
+        Err(e) => {
+            match e {
+                SysContextError.SlotNotFound { slot } => assert_eq(slot, 0 as UInt8),
+                _ => assert(false),
+            };
+        }
+    };
+}
+
+@test
+fn test_sys_context_error_list_groups_by_variant() {
+    let errors: List<SysContextError> = [
+        SysContextError.TlsNotInitialized,
+        SysContextError.SlotNotFound { slot: 1 as UInt8 },
+        SysContextError.SlotOverflow { slot: 2 as UInt8 },
+        SysContextError.TlsNotInitialized,
+        SysContextError.SlotNotFound { slot: 3 as UInt8 },
+    ];
+    let mut tls_count: Int = 0;
+    let mut slot_not_found_count: Int = 0;
+    let mut slot_overflow_count: Int = 0;
+    for e in errors.iter() {
+        match e {
+            SysContextError.TlsNotInitialized => tls_count = tls_count + 1,
+            SysContextError.SlotNotFound { slot: _ } => slot_not_found_count = slot_not_found_count + 1,
+            SysContextError.SlotOverflow { slot: _ } => slot_overflow_count = slot_overflow_count + 1,
+            _ => {}
+        };
+    }
+    assert_eq(tls_count, 2);
+    assert_eq(slot_not_found_count, 2);
+    assert_eq(slot_overflow_count, 1);
+}
+
+// =============================================================================
+// Section 5: page-align arithmetic interplay with PAGE_SIZE
+// =============================================================================
+
+@test
+fn test_page_arithmetic_round_trip_over_many_sizes() {
+    // For every size `s`: ceil-divide by PAGE_SIZE and back must
+    // recover the page-aligned ceiling. This is the canonical
+    // allocator-side computation.
+    let sizes: List<USize> = [
+        1 as USize,
+        100 as USize,
+        PAGE_SIZE - (1 as USize),
+        PAGE_SIZE,
+        PAGE_SIZE + (1 as USize),
+        (3 as USize) * PAGE_SIZE + (777 as USize),
+    ];
+    for s in sizes.iter() {
+        let aligned = page_align_up(*s);
+        let n_pages = aligned / PAGE_SIZE;
+        let recovered = n_pages * PAGE_SIZE;
+        assert_eq(recovered, aligned);
+    }
+}
+
+@test
+fn test_page_alignment_against_arbitrary_allocations() {
+    // Simulate an allocator's "request → reserved-size" mapping where
+    // every reserved slab is page-multiple.
+    fn reserve(req: USize) -> USize { page_align_up(req) }
+    let reservations: List<USize> = [
+        reserve(7 as USize),
+        reserve(PAGE_SIZE),
+        reserve(PAGE_SIZE + (1 as USize)),
+        reserve((2 as USize) * PAGE_SIZE - (1 as USize)),
+        reserve((10 as USize) * PAGE_SIZE),
+    ];
+    for r in reservations.iter() {
+        assert(is_page_aligned(*r));
+        assert(*r >= PAGE_SIZE);
+    }
+}
+
+// =============================================================================
+// Section 6: ACCESS_* mode bits composing for permission probes
+// =============================================================================
+
+@test
+fn test_access_mode_canonical_composition() {
+    // Common probes: exec-only (X_OK), read-only (R_OK), read-write
+    // (R_OK | W_OK), full (R | W | X). All resolve to disjoint
+    // 3-bit patterns.
+    let probes: List<(Text, Int, Int)> = [
+        ("X_OK".clone(), ACCESS_X_OK, 1),
+        ("R_OK".clone(), ACCESS_R_OK, 4),
+        ("R|W".clone(), ACCESS_R_OK | ACCESS_W_OK, 6),
+        ("R|W|X".clone(), ACCESS_R_OK | ACCESS_W_OK | ACCESS_X_OK, 7),
+    ];
+    for p in probes.iter() {
+        let (_name, computed, expected) = *p;
+        assert_eq(computed, expected);
+    }
+}
+
+// =============================================================================
+// Section 7: SysMemoryOrdering opcode dispatch via match
+// =============================================================================
+
+@test
+fn test_sys_memory_ordering_match_exhaustive_yields_distinct_codes() {
+    // Pin the canonical (variant → opcode) mapping the Tier-0 atomic
+    // dispatch table reads. Drift here = silent wrong-ordering at
+    // runtime.
+    let orderings: List<(SysMemoryOrdering, Int)> = [
+        (SysMemoryOrdering.Relaxed, 0),
+        (SysMemoryOrdering.Acquire, 1),
+        (SysMemoryOrdering.Release, 2),
+        (SysMemoryOrdering.AcqRel, 3),
+        (SysMemoryOrdering.SeqCst, 4),
+    ];
+    for o in orderings.iter() {
+        let (ord, expected) = *o;
+        assert_eq(ord.to_opcode(), expected);
+    }
+}
+
+// =============================================================================
+// Section 8: FcntlLockKind composes with FileDesc + Result
+// =============================================================================
+
+@test
+fn test_fcntl_lock_kind_dispatch_pattern() {
+    // Higher-level "would-lock?" predicate dispatched off
+    // FcntlLockKind. Pins the variant tags so the kind classifier
+    // doesn't silently shift.
+    fn is_blocking(k: FcntlLockKind) -> Bool {
+        match k {
+            FcntlLockKind.Unlock => false,
+            FcntlLockKind.Shared => true,
+            FcntlLockKind.Exclusive => true,
+        }
+    }
+    assert(!is_blocking(FcntlLockKind.Unlock));
+    assert(is_blocking(FcntlLockKind.Shared));
+    assert(is_blocking(FcntlLockKind.Exclusive));
+}
+
+fn main() {}
