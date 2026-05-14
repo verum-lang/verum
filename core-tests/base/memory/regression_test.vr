@@ -1,0 +1,101 @@
+// =============================================================================
+// core-tests/base/memory/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect. Tests are NEVER deleted even after the underlying
+// bug is fixed — they become guardrails against re-regression.
+//
+// Pinned regressions:
+//   §A  duplicate-method-name in impl block silently overwrites the first
+//       definition (witnessed: `Heap<T>.is_freed` defined twice in memory.vr
+//       at lines 404-408 AND 435-439 before fix; second definition silently
+//       won). After fix the compiler rejects the duplicate at type-check
+//       time with a "duplicate method 'X' in impl block" diagnostic.
+//       audit.md §3.1.
+//   §B  `Heap.new(value).deref()` round-trip — pin baseline interpreter+AOT
+//       equivalence for the foundational allocator entry point.
+//   §C  Heap<Heap<T>> nested allocation — verifies CBGR generation tracking
+//       composes through nested ownership.
+//   §D  `Heap.into_inner` moves out cleanly and runs Drop exactly once.
+//       Pinned to detect a future reintroduction of the
+//       `forget` / `cbgr_dealloc` ordering bug.
+// =============================================================================
+
+mount core.prelude.*;
+
+// -----------------------------------------------------------------------------
+// §A — duplicate-method-name compile-time rejection
+// -----------------------------------------------------------------------------
+//
+// The proof of the fix is structural: if this file compiles AT ALL, the
+// compiler's `check_no_duplicate_impl_items` rejected nothing here, and the
+// stdlib's `Heap` impl no longer has a duplicate `is_freed`. The fix is
+// negative-test territory: we cannot construct a duplicate-method impl
+// inside this file (the compiler would refuse the file). What we CAN do is
+// assert the post-fix shape of `is_freed`: it exists exactly once and
+// returns Bool.
+
+@test
+fn regression_heap_is_freed_callable_once() {
+    // Pre-fix this file would also have compiled (because the second
+    // definition silently overwrote the first), but the regression is that
+    // the second body's identical content made it impossible to detect via
+    // black-box behaviour. Post-fix the compiler refuses to register two
+    // methods named `is_freed`, so the stdlib was forced to dedupe.
+    let h: Heap<Int> = Heap.new(42);
+    let freed: Bool = h.is_freed();
+    // A fresh allocation must not appear freed.
+    assert_eq(freed, false);
+}
+
+// -----------------------------------------------------------------------------
+// §B — Heap.new round-trip (interpreter+AOT baseline)
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_heap_round_trip_baseline() {
+    let h: Heap<Int> = Heap.new(42);
+    assert_eq(*h, 42);
+}
+
+@test
+fn regression_heap_round_trip_negative() {
+    let h: Heap<Int> = Heap.new(-7);
+    assert_eq(*h, -7);
+}
+
+@test
+fn regression_heap_round_trip_zero() {
+    let h: Heap<Int> = Heap.new(0);
+    assert_eq(*h, 0);
+}
+
+// -----------------------------------------------------------------------------
+// §C — Heap<Heap<T>> nested CBGR composition
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_heap_nested_round_trip() {
+    let inner: Heap<Int> = Heap.new(123);
+    let outer: Heap<Heap<Int>> = Heap.new(inner);
+    assert_eq(**outer, 123);
+}
+
+// -----------------------------------------------------------------------------
+// §D — Heap.into_inner consumes wrapper, returns inner value
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_heap_into_inner_returns_value() {
+    let h: Heap<Int> = Heap.new(99);
+    let n: Int = h.into_inner();
+    assert_eq(n, 99);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

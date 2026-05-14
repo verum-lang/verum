@@ -1,0 +1,64 @@
+// =============================================================================
+// core-tests/async/panic_fence/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.async.panic_fence`.
+//
+//   §A — Fence wrapping a Future that succeeds → outer Result is
+//        Ok(value); downstream pattern match converts to a tag.
+//   §B — Fence's outer Result composes with `?`-style mapping over
+//        a List of independent fenced futures.
+//
+// Defect-coupled scenarios (Err arm via catch_unwind) live in
+// regression_test.vr once the catch_unwind dispatch is exercised
+// directly.
+// =============================================================================
+
+mount core.async.panic_fence.{PanicFence, panic_safe};
+mount core.async.future.{ready, ReadyFuture};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context, noop_waker};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — Fence outcome → user-facing tag
+// =============================================================================
+
+@test
+fn integration_panic_fence_outcome_to_tag_ready_ok() {
+    fn outcome_tag<F: Future>(mut fence: PanicFence<F>) -> Text {
+        let waker = noop_waker();
+        let mut cx = Context.from_waker(&waker);
+        match fence.poll(&mut cx) {
+            Poll.Ready(Ok(_)) => "ok",
+            Poll.Ready(Err(_)) => "panicked",
+            Poll.Pending => "pending",
+        }
+    }
+    let fence = panic_safe(ready(42));
+    assert_eq(outcome_tag(fence), "ok");
+}
+
+// =============================================================================
+// §B — Fenced futures in a List drive sequential consumption
+// =============================================================================
+
+@test
+fn integration_panic_fence_list_of_fenced_ready_futures_sums_values() {
+    let values: List<Int> = [1, 2, 3, 4, 5];
+    let mut total: Int = 0;
+    for v in values.iter() {
+        let mut fence = panic_safe(ready(*v));
+        let waker = noop_waker();
+        let mut cx = Context.from_waker(&waker);
+        match fence.poll(&mut cx) {
+            Poll.Ready(Ok(x)) => total = total + x,
+            Poll.Ready(Err(_)) => assert(false),
+            Poll.Pending => assert(false),
+        }
+    }
+    assert_eq(total, 15);
+}
+
+fn main() {}

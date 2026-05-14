@@ -427,17 +427,6 @@ implement<T> Heap<T> {
         32
     }
 
-    /// Check if this allocation has been freed.
-    ///
-
-    /// Compares the stored generation against the current header generation.
-    /// If they differ, the allocation was freed and the slot potentially reused.
-    public fn is_freed(&self) -> Bool {
-        let header_addr = self.ptr as Int - 32;
-        let actual_gen = atomic_load_u32(header_addr as *const UInt32, ORDERING_ACQUIRE);
-        actual_gen != self.generation
-    }
-
     /// Get the CBGR capability flags from the allocation header.
     public fn capabilities(&self) -> UInt16 {
         let header_addr = self.ptr as Int - 32;

@@ -1,0 +1,70 @@
+// =============================================================================
+// core-tests/async/panic_fence/property_test.vr
+// =============================================================================
+//
+// Property tests for `core.async.panic_fence`.
+//
+//   §A — panic_safe(ready(v)) is *non-destructive* over payloads:
+//        the value observed at Poll.Ready(Ok(v)) equals v.
+//   §B — record-literal construction of PanicFence with Some/None
+//        is the identity on the inner Maybe (round-trip).
+// =============================================================================
+
+mount core.async.panic_fence.{PanicFence, panic_safe};
+mount core.async.future.{ready, ReadyFuture};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context, noop_waker};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — Ready payload round-trip through the fence for many values
+// =============================================================================
+
+@test
+fn property_panic_fence_int_payload_round_trip() {
+    let payloads: List<Int> = [-100, -1, 0, 1, 42, 100, 99999];
+    for v in payloads.iter() {
+        let mut fence = panic_safe(ready(*v));
+        let waker = noop_waker();
+        let mut cx = Context.from_waker(&waker);
+        match fence.poll(&mut cx) {
+            Poll.Ready(Ok(x)) => assert_eq(x, *v),
+            Poll.Ready(Err(_)) => assert(false),
+            Poll.Pending => assert(false),
+        }
+    }
+}
+
+@test
+fn property_panic_fence_text_payload_round_trip() {
+    let payloads: List<Text> = ["", "a", "hello", "boundary: ✓"];
+    for v in payloads.iter() {
+        let mut fence: PanicFence<ReadyFuture<Text>> = panic_safe(ready((*v).clone()));
+        let waker = noop_waker();
+        let mut cx = Context.from_waker(&waker);
+        match fence.poll(&mut cx) {
+            Poll.Ready(Ok(x)) => assert_eq(x, *v),
+            Poll.Ready(Err(_)) => assert(false),
+            Poll.Pending => assert(false),
+        }
+    }
+}
+
+// =============================================================================
+// §B — Construction shape round-trip
+// =============================================================================
+
+@test
+fn property_panic_fence_record_literal_with_some_inner_round_trip() {
+    let f: PanicFence<ReadyFuture<Int>> = PanicFence { inner: Some(ready(42)) };
+    assert(f.inner.is_some());
+}
+
+@test
+fn property_panic_fence_record_literal_with_none_inner_round_trip() {
+    let f: PanicFence<ReadyFuture<Int>> = PanicFence { inner: None };
+    assert(f.inner.is_none());
+}
+
+fn main() {}
