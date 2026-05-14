@@ -11435,12 +11435,17 @@ impl VbcCodegen {
             }
             TypeKind::Path(path) => {
                 // Extract the first type name from the path
-                path.segments.iter().find_map(|seg| {
-                    if let PathSegment::Name(ident) = seg {
-                        Some(ident.name.to_string())
-                    } else {
-                        None
-                    }
+                // `Self` is encoded as `PathSegment::SelfValue` — surface it
+                // as the canonical capitalised `"Self"` token so downstream
+                // `substitute_self_in_type_name` can perform Self → concrete
+                // substitution at register_impl_function time (default-method
+                // monomorphisation of protocol bodies — `fn max(self, other:
+                // Self) -> Self` registered onto a concrete `<T>` must
+                // surface `return_type_name = "T"`, not `None`).
+                path.segments.iter().find_map(|seg| match seg {
+                    PathSegment::Name(ident) => Some(ident.name.to_string()),
+                    PathSegment::SelfValue => Some("Self".to_string()),
+                    _ => None,
                 })
             }
             TypeKind::Generic { base, args } => {
@@ -13146,10 +13151,17 @@ impl VbcCodegen {
         match &ty.kind {
             TypeKind::Path(path) => {
                 // Get the last segment name (handles qualified paths like core.collections.List)
+                // Self is encoded as PathSegment::SelfValue — surface it as the
+                // canonical capitalised "Self" token so substitute_self_in_type_name
+                // can perform Self → concrete substitution at register_impl_function
+                // time. Falling through to `format!("{}", path)` here would render
+                // Self as lowercase "self" (the Path Display impl), which the
+                // word-boundary substitution then misses.
                 path.segments
                     .last()
                     .and_then(|seg| match seg {
                         PathSegment::Name(ident) => Some(ident.name.to_string()),
+                        PathSegment::SelfValue => Some("Self".to_string()),
                         _ => None,
                     })
                     .unwrap_or_else(|| format!("{}", path))
