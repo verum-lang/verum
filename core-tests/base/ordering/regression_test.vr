@@ -151,6 +151,59 @@ fn regression_lt_le_gt_ge_on_indexed_arguments() {
     assert(xs[0].le(&xs[0]));   //  2 <= 2
 }
 
+// =============================================================================
+// REGRESSION (task #9, 2026-05-14): `f"{x}"` interpolation lowered
+// unconditionally to the `ToString` opcode, which routes through the
+// runtime `format_value_for_print` Debug-style formatter — every
+// user-defined `implement Display for T` impl across `core/` (Ordering,
+// Maybe, Result, error variants, every domain-specific glyph) was
+// silently bypassed.  Closed by introducing a codegen-side dispatch in
+// `compile_interpolated_string` (`try_emit_display_dispatch`) that
+// detects `<TypeName>.fmt` registration at compile time and emits the
+// canonical Formatter wiring (`buf := ""; formatter := Formatter.new
+// (&mut buf); _ := value.fmt(&mut formatter); buf`) inline.  Primitives
+// (Int / Float / Bool / Byte / Char / Int32 / UInt64 / …) keep the
+// inline `ToString` fast path — their runtime formatter matches the
+// stdlib Display impl bit-for-bit.
+// =============================================================================
+
+@test
+fn regression_display_ordering_via_f_string() {
+    // The original repro: `f"{Less}"` must produce `<`, not `Less`.
+    let l = Less;
+    let e = Equal;
+    let g = Greater;
+    assert_eq(f"{l}", "<");
+    assert_eq(f"{e}", "=");
+    assert_eq(f"{g}", ">");
+}
+
+@test
+fn regression_display_ordering_in_interpolated_text() {
+    let ord = Less;
+    assert_eq(f"ordering={ord}", "ordering=<");
+}
+
+@test
+fn regression_display_ordering_inline_constructor() {
+    // Direct constructor in placeholder — exercises the codegen path
+    // where `expr_reg` is the variant value itself, not a bound var.
+    assert_eq(f"{Equal}", "=");
+}
+
+@test
+fn regression_display_does_not_break_primitives() {
+    // Int / Bool / Char must continue to use the ToString fast path —
+    // verify the primitive bypass is intact.  (Float formatting is
+    // exercised in float_test.vr; here we keep the assertion exact.)
+    let n: Int = 42;
+    let b: Bool = true;
+    let c: Char = 'A';
+    assert_eq(f"{n}", "42");
+    assert_eq(f"{b}", "true");
+    assert_eq(f"{c}", "A");
+}
+
 fn main() {
     // Tests run via @test annotations
 }
