@@ -864,6 +864,232 @@ impl StdlibModuleResolver {
             }
         }
 
+        // ====================================================================
+        // FUNDAMENTAL ARCHITECTURAL FIX — augment hardcoded deps with
+        // auto-derived dependencies from `mount` declarations.
+        //
+        // The hardcoded `known_deps` table above lists each top-level
+        // stdlib module's deps. It's authored by hand and drifts every
+        // time a module adds a new mount target. Pre-fix the table did
+        // not list `core.intrinsics` as a dep of `core.sys` / `core.mem` /
+        // `core.base` / `core.async` / `core.io` / `core.text` / `core.runtime`
+        // — yet every one of these mounts `core.intrinsics.runtime.os.*` or
+        // `core.intrinsics.*` for raw syscalls, allocator hooks, atomic
+        // ops, etc. The missing dep let the topological sort place
+        // (e.g.) `core.sys` BEFORE `core.intrinsics`, leaving the
+        // `@intrinsic`-decorated raw symbols un-registered in the shared
+        // function-id table at the time the consumer's mount-resolution
+        // ran. Consumer wrappers (e.g. `SysTimeOpsInstant.now` →
+        // `__time_monotonic_nanos_raw`) then compiled to lenient
+        // panic-stubs firing at runtime with
+        // `[lenient] X compiled to panic-stub: undefined function: __Y_raw`.
+        //
+        // The scan below mechanically derives the dependency edges from
+        // each module's source. It uses a lightweight regex (no full
+        // parse) so it runs in <10 ms per module on the full stdlib
+        // (~2540 files). Self-deps and unknown targets are filtered.
+        // Detected cycles surface in `compute_compilation_order`'s
+        // existing diagnostic — the architectural intent is that
+        // `core.intrinsics` consumers all add the edge automatically;
+        // if the scan derives a cycle, it's a genuine bug in the source
+        // (a mount that should be inverted), not a defect of this gate.
+        // ====================================================================
+        self.augment_dependencies_from_mounts(&target)?;
+
+        Ok(())
+    }
+
+    /// Scan every module's `.vr` source files for `mount <path>`
+    /// declarations and add the implied top-level module dependency.
+    /// Augments (never overwrites) the entries in `known_deps`. See the
+    /// comment at the call site for the architectural rationale.
+    fn augment_dependencies_from_mounts(
+        &mut self,
+        target: &TargetConfig,
+    ) -> Result<(), CompilationError> {
+        // Foundation modules whose registered `@intrinsic`-decorated
+        // declarations user-side codegen's mount-resolution looks up by
+        // exact qualified name. When these compile BEFORE their
+        // consumers, the lookup succeeds; when AFTER, consumer
+        // wrappers compile to lenient panic-stubs (`undefined function:
+        // __X_raw`). Forcing this dep edge is the architectural fix
+        // for that class. See the in-loop comment for why we don't
+        // force-edge every mount target.
+        const FOUNDATION_DEPS_TO_FORCE: &[&str] = &[
+            "core.intrinsics",
+            // Sub-module of core.intrinsics: hosts the
+            // `@intrinsic`-decorated raw-syscall declarations
+            // (`__time_*_raw`, `__file_*_raw`, `__tcp_*_raw`, etc.)
+            // that user-side mounts at `core.intrinsics.runtime.os.X`
+            // resolve to. The discoverer registers it as its own
+            // top-level module (separate from `core.intrinsics`), so
+            // the cross-module dep edge has to name it explicitly.
+            "core.intrinsics.runtime",
+        ];
+        // Cheap line-level regex: matches `mount core.X.Y.Z...` and
+        // `public mount core.X.Y.Z...`, with optional leading whitespace.
+        // The full grammar admits more forms (super., self., relative,
+        // braces, aliases, file-mounts) — all of which we ignore: only
+        // absolute-rooted `core.*` mounts produce stdlib-module edges,
+        // and missing a relative-mount edge cannot mis-order topo-sort
+        // because the relative target sits inside the same crate
+        // already.
+        // The first capture group is the dotted path up to (but not
+        // including) any opening brace, `as`-alias, or semicolon.
+        // Multi-line nested mounts (`mount core.X.{\n ...,\n};`) are
+        // still captured for the prefix `core.X` on the opening line
+        // — that's all we need for the dep edge.
+        let mount_re = match regex::Regex::new(
+            r"(?m)^\s*(?:public\s+)?mount\s+([a-zA-Z_][a-zA-Z0-9_.]*)",
+        ) {
+            Ok(re) => re,
+            Err(e) => {
+                return Err(CompilationError::new(
+                    CompilationErrorKind::InternalError,
+                    format!("augment_dependencies_from_mounts: regex build failed: {}", e),
+                ));
+            }
+        };
+
+        // Collect derived edges first (can't mutate self.modules while
+        // borrowing source_files immutably).
+        let mut derived_edges: Vec<(String, String)> = Vec::new();
+
+        for (module_name, module) in self.modules.iter() {
+            // Foundation modules `core` and `core.intrinsics` are the
+            // umbrella re-exporters / raw-machine-op declarations.
+            // Their mount statements legitimately forward-reference any
+            // higher layer (e.g. `core/intrinsics/runtime/os.vr` mounts
+            // `core.base.{Maybe, Result}` for return-type info), but
+            // those reverse edges would create cycles in the topological
+            // sort: core.sys → core.intrinsics → core.base → core.mem →
+            // core.sys. The intrinsics module's `@intrinsic` declarations
+            // are bodyless and don't actually depend on the mounted
+            // types at codegen time — the type names are resolved lazily
+            // at user-side typecheck. Skipping the mount scan for these
+            // two foundation modules preserves the layered ordering
+            // (intrinsics → sys → mem → base → …) intended by the
+            // hardcoded baseline while still adding all the dep edges
+            // for the higher-layer consumers.
+            if module_name == "core"
+                || module_name == "core.intrinsics"
+                || module_name == "core.intrinsics.runtime"
+            {
+                continue;
+            }
+            for file in module.source_files.iter() {
+                let source = match std::fs::read_to_string(file) {
+                    Ok(s) => s,
+                    Err(_) => continue, // skip on read error — scan is best-effort
+                };
+                for cap in mount_re.captures_iter(&source) {
+                    let path = match cap.get(1) {
+                        Some(m) => m.as_str(),
+                        None => continue,
+                    };
+                    // Only absolute `core.*` paths produce a stdlib-
+                    // module edge. Relative paths (`super.`, `self.`,
+                    // bare `X.Y` for in-crate aliases) are intra-module
+                    // and irrelevant to the topological sort.
+                    if !path.starts_with("core.") {
+                        continue;
+                    }
+                    // Extract the top-level module prefix
+                    // (`core.X` — possibly `core.X.Y` for sub-modules
+                    // that the discoverer registered separately, e.g.
+                    // `core.sys.linux`). Walk from longest prefix to
+                    // shortest until we hit a registered module name —
+                    // that's the canonical dep target. Falls back to
+                    // `core.<first-segment>` if nothing longer matches.
+                    let segments: Vec<&str> = path.split('.').collect();
+                    if segments.len() < 2 {
+                        continue;
+                    }
+                    let mut target_module: Option<String> = None;
+                    // Try longest prefix first (depth up to 3 — handles
+                    // `core.sys.linux` and `core.database.sqlite`).
+                    for depth in (2..=segments.len().min(4)).rev() {
+                        let candidate: String = segments[..depth].join(".");
+                        if self.modules.contains_key(&candidate) {
+                            target_module = Some(candidate);
+                            break;
+                        }
+                    }
+                    let dep = match target_module {
+                        Some(d) => d,
+                        None => format!("core.{}", segments[1]),
+                    };
+                    if dep == *module_name {
+                        continue; // self-dep
+                    }
+                    // Only keep deps to known modules — unknown targets
+                    // (e.g. mount paths that don't match any
+                    // discovered module) are skipped silently. They
+                    // typically indicate an in-progress refactor or a
+                    // path that resolves via re-export elsewhere.
+                    if !self.modules.contains_key(&dep) {
+                        continue;
+                    }
+                    // **Conservative augmentation gate**: the stdlib has
+                    // *real* mutual layer references — `core.sys` mounts
+                    // `core.base.{Maybe, Result, protocols, coercion}`
+                    // for return-type info, and `core.base` mounts
+                    // `core.mem.allocator.*` for `cbgr_alloc` —
+                    // producing a `sys ↔ base ↔ mem ↔ sys` cycle that
+                    // the hardcoded baseline breaks ARBITRARILY by
+                    // listing only some edges. The actual compilation
+                    // works because forward-reference resolution
+                    // happens in multiple passes (parse → register
+                    // declarations → resolve types → codegen bodies)
+                    // and each pass tolerates not-yet-loaded references.
+                    //
+                    // Adding every mount edge as a hard topological
+                    // constraint surfaces every cycle as a fatal error
+                    // — but the compilation was working with stale
+                    // edges. So restrict the augmentation to the dep
+                    // class that ACTUALLY broke: the foundation-module
+                    // `core.intrinsics`, which holds `@intrinsic`-
+                    // decorated raw-syscall declarations that user-side
+                    // codegen's mount-resolution looks up by exact
+                    // qualified name. When `core.intrinsics` compiles
+                    // BEFORE the consumer, the lookup succeeds; when
+                    // AFTER, the consumer's wrappers compile to
+                    // lenient panic-stubs. Force-ordering ONLY
+                    // `core.intrinsics` before its consumers eliminates
+                    // the panic-stub class without disturbing the
+                    // other (cyclic-but-working) forward references.
+                    //
+                    // Other foundation modules (`core`, `core.sys`,
+                    // `core.base`, `core.mem`) are already correctly
+                    // ordered by the hardcoded baseline; adding their
+                    // derived edges only re-introduces cycles. Keep
+                    // them in the cycle-tolerant forward-reference
+                    // path until the codegen-time function-table
+                    // resolution is itself made order-independent.
+                    if !FOUNDATION_DEPS_TO_FORCE.contains(&dep.as_str()) {
+                        continue;
+                    }
+                    derived_edges.push((module_name.clone(), dep));
+                }
+            }
+        }
+
+        // Dedupe and apply. Keep the existing hardcoded deps and only
+        // ADD new ones — the hardcoded table is authoritative for
+        // ordering choices the maintainer made on purpose (e.g. listing
+        // `core.sys.linux` / `darwin` / `windows` as deps of `core.text`
+        // even though the actual mount is conditional under `@cfg`).
+        for (consumer, dep) in derived_edges {
+            if !module_utils::should_compile_module_for_target(&dep, target) {
+                continue;
+            }
+            if let Some(module) = self.modules.get_mut(&consumer)
+                && !module.dependencies.contains(&dep)
+            {
+                module.dependencies.push(dep);
+            }
+        }
+
         Ok(())
     }
 

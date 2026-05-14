@@ -1120,12 +1120,24 @@ pub(in super::super) fn handle_call_method(
             state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
             return Ok(DispatchResult::Continue);
         } else if is_set || is_map {
-            // Create empty Set/Map: [count, capacity, entries_ptr]
+            // Create empty Set/Map: [count, capacity, entries_ptr, tombstones]
+            //
+            // The 4-slot allocation matches the stdlib decl shape:
+            //   * Map: `{ len, cap, entries, tombstones }`
+            //   * Set: `{ inner: Map }` — the wrapper field stays internal
+            //          to codegen; at the heap-object level Set is laid
+            //          out identically to Map so every intercept that
+            //          gates on `is_map || is_set` can read slots 0..2
+            //          uniformly. The 4th slot (tombstones) is reserved
+            //          for the Map case but allocated for Set too so
+            //          that any non-intercepted method that falls
+            //          through to a Map-body via `self.inner` finds the
+            //          expected slot.
             const DEFAULT_CAP: usize = 16;
             let type_id = if is_set { TypeId::SET } else { TypeId::MAP };
             let obj = state
                 .heap
-                .alloc(type_id, 3 * std::mem::size_of::<Value>())?;
+                .alloc(type_id, 4 * std::mem::size_of::<Value>())?;
             state.record_allocation();
             let header_ptr =
                 unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
@@ -1139,9 +1151,10 @@ pub(in super::super) fn handle_call_method(
                 }
             }
             unsafe {
-                *header_ptr = Value::from_i64(0);
-                *header_ptr.add(1) = Value::from_i64(DEFAULT_CAP as i64);
-                *header_ptr.add(2) = Value::from_ptr(entries_ptr);
+                *header_ptr = Value::from_i64(0); // len
+                *header_ptr.add(1) = Value::from_i64(DEFAULT_CAP as i64); // cap
+                *header_ptr.add(2) = Value::from_ptr(entries_ptr); // entries
+                *header_ptr.add(3) = Value::from_i64(0); // tombstones
             }
             state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
             return Ok(DispatchResult::Continue);
