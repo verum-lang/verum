@@ -3763,13 +3763,6 @@ pub(super) fn dispatch_primitive_method(
             }
         }
 
-        let is_value_array = header.type_id != TypeId::U8
-            && header.type_id != TypeId::LIST
-            && header.type_id != TypeId::MAP
-            && header.type_id != TypeId::SET
-            && header.type_id != TypeId::DEQUE
-            && header.type_id != TypeId::CHANNEL
-            && !is_heap_string;
         // `is_list` covers both canonical `LIST` (Value-per-element)
         // and packed `BYTE_LIST` (1-byte-per-element).  Both share the
         // 3-Value header `[len, cap, backing_ptr]`; downstream
@@ -3778,18 +3771,31 @@ pub(super) fn dispatch_primitive_method(
         // element stride.
         let is_list = header.type_id.is_list_like();
 
-        // IMPORTANT: For user-defined types (type_id >= FIRST_USER but < 256),
-        // skip the builtin array handlers. User-defined structs like core.collections.map.Map
-        // have their own len()/is_empty() methods that read from struct fields, not from the
-        // generic array memory layout. The type_id ranges are:
-        // - 0-15: primitives
-        // - 16-255: user-defined types (FIRST_USER to before meta types)
-        // - 256-511: meta system types
-        // - 512+: well-known collection types (LIST, MAP, SET, etc.)
-        let is_user_defined_struct =
-            header.type_id.0 >= crate::types::TypeId::FIRST_USER && header.type_id.0 < 256;
+        // Single source of truth for "this heap object has the array-
+        // shaped header that `get_array_length` / `get_array_element`
+        // know how to iterate". Mirrors the polarity discipline
+        // established by `TypeId::is_array_dispatchable` itself (see
+        // its 26-line rationale comment in `crates/verum_vbc/src/types.rs`):
+        // INVERT polarity — list the (small) set of TypeIds that ARE
+        // array-shaped (LIST=512, ARRAY=518, BYTE_LIST=527), and let
+        // every other TypeId fall through automatically.
+        //
+        // Pre-fix this site mirrored a negative list (NOT U8/LIST/MAP/
+        // SET/DEQUE/CHANNEL/heap-string) AND-ed with a narrow user-
+        // defined range guard (`type_id < 256`). The narrow upper bound
+        // mis-classified every stdlib type whose TypeId allocator
+        // landed in [260, 512) — the gap between meta-system types
+        // (256-259) and semantic types (512-1023) — as "value array".
+        // Concrete defect surfaced by `core-tests/collections/heap`:
+        // `BinaryHeap.new().len()` returned `1` (the heap object's
+        // total slot count from `header.size / sizeof::<Value>()`)
+        // instead of routing to the user-defined `BinaryHeap.len`
+        // method body. Same shape applies to any stdlib record whose
+        // TypeId crosses the 256 boundary during precompile —
+        // typically every wrapper or nested collection.
+        let is_array_shaped = header.type_id.is_array_dispatchable();
 
-        if (is_value_array && !is_user_defined_struct) || is_list {
+        if is_array_shaped || is_list {
             match method {
                 "len" => {
                     let len = get_array_length(ptr, header)?;

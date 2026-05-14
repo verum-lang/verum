@@ -9,25 +9,25 @@ mount core.prelude.*;
 mount core.collections.heap.BinaryHeap;
 
 // =============================================================================
-// §A  Static-constructor name resolution.
+// §A  Static-constructor name resolution — CLOSED.
 //
-//   `BinaryHeap.with_capacity(n)` and `BinaryHeap.from_list(xs)` are real
-//   stdlib static methods that aren't runtime-intercepted. Same defect
-//   class as List.from / List.of / Deque.with_capacity — cross-module
-//   function-name table omits non-intercepted constructors.
+//   `BinaryHeap.with_capacity(n)` / `BinaryHeap.from_list(xs)` are real
+//   stdlib static methods. The earlier pin of "UndefinedFunction" was
+//   superseded by the parallel agent's cross-module name-table fixes;
+//   the second defect class (`h.len()` returned 1 for empty heap due to
+//   the `dispatch_primitive_method` polarity defect) was closed in this
+//   branch — see §C.
 // =============================================================================
 
-@ignore
 @test
-fn regression_heap_with_capacity_undefined_function() {
+fn regression_heap_with_capacity_constructs_correctly() {
     let h: BinaryHeap<Int> = BinaryHeap.with_capacity(16);
     assert_eq(h.len(), 0);
     assert(h.capacity() >= 16);
 }
 
-@ignore
 @test
-fn regression_heap_from_list_undefined_function() {
+fn regression_heap_from_list_heapifies_in_place() {
     let xs: List<Int> = [3, 1, 4, 1, 5, 9];
     let h: BinaryHeap<Int> = BinaryHeap.from_list(xs);
     assert_eq(h.len(), 6);
@@ -36,13 +36,7 @@ fn regression_heap_from_list_undefined_function() {
 
 // =============================================================================
 // §B  Wrapper-record shape — BinaryHeap delegates through `self.data` to
-//     an inner List<T>. This works IFF the wrapper field resolves to the
-//     inner List pointer at the right slot.
-//
-//   Active (non-`@ignore`d) guardrail: a sequence of push + pop + push
-//   + peek must agree with the heap-property end-to-end, which only
-//   succeeds if `self.data` correctly routes to the inner List's
-//   runtime intercepts.
+//     an inner List<T>. Active guardrail.
 // =============================================================================
 
 @test
@@ -55,6 +49,53 @@ fn regression_heap_wrapper_field_resolves_to_inner_list() {
     h.push(10);
     h.push(2);
     assert_eq(h.peek(), Some(10));
+}
+
+// =============================================================================
+// §C  Array-dispatch polarity defect — CLOSED.
+//
+//   The runtime intercept block at
+//   `crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs`
+//   ~3739 gated "is this a built-in array? if so, intercept len/is_empty/
+//   contains/etc." on a NEGATIVE list: `type_id != U8 && != LIST && !=
+//   MAP && != SET && != DEQUE && != CHANNEL && not-heap-string`, AND-ed
+//   with a NARROW user-defined-struct guard `type_id < 256`.
+//
+//   Stdlib types are allocated TypeIds by `alloc_user_type_id` which
+//   skips the meta-system band [256, 260) and the semantic band
+//   [512, 1024). After ~240 prior stdlib type allocations the cursor
+//   crosses 256 → next allocations land in [260, 512), outside the
+//   narrow `< 256` user-defined check. Those types satisfied
+//   `is_value_array && !is_user_defined_struct` and erroneously routed
+//   to the array `len` intercept which read
+//   `header.size / sizeof::<Value>()` — for `BinaryHeap` (1-slot
+//   record) this returned `1` instead of dispatching to the user-
+//   defined `BinaryHeap.len` body.
+//
+//   Concrete symptom: `BinaryHeap.new().len() == 1` (should be 0).
+//   `h.diag_len()` (same body, different name) returned 0 — proving
+//   the dispatch divergence was name-based at the runtime intercept
+//   level, not a stdlib-body defect.
+//
+//   Fundamental fix (commit pending): collapse the negative gate to
+//   `header.type_id.is_array_dispatchable()` — the canonical positive
+//   predicate (matches LIST=512, ARRAY=518, BYTE_LIST=527 only) that
+//   `TypeId` itself documents with a 26-line rationale comment as
+//   "the single source of truth for polarity discipline". Mirrors the
+//   identical invariant already established by `dispatch_array_method`
+//   at handler line ~7975.
+// =============================================================================
+
+@test
+fn regression_heap_len_zero_after_new() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    assert_eq(h.len(), 0);
+}
+
+@test
+fn regression_heap_is_empty_after_new() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    assert(h.is_empty());
 }
 
 fn main() {}
