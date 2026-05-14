@@ -3381,20 +3381,43 @@ impl<'a> RecursiveParser<'a> {
                 return Ok(TypeDeclBody::Variant(variants.into_iter().collect()));
             }
 
-            // Single variant without pipe - convert to type alias if it's just a name
-            if first_variant.data.is_none() {
-                // Convert back to type alias
-                let ty = Type::new(
-                    verum_ast::TypeKind::Path(Path::from_ident(first_variant.name)),
-                    first_variant.span,
-                );
-                return Ok(TypeDeclBody::Alias(ty));
-            } else {
-                // Single variant with data - could be newtype
-                return Ok(TypeDeclBody::Variant(
-                    vec![first_variant].into_iter().collect(),
-                ));
-            }
+            // **Architectural rule** (closes task #13): per
+            // `grammar/verum.ebnf` §2.4 — `type X = Y;` (with the `=`
+            // sigil) is a TYPE ALIAS; `type X is Y;` (with the `is`
+            // sigil) is a SUM-TYPE DECLARATION whose `variant_list`
+            // production accepts a single variant without the leading
+            // `|`:
+            //
+            //     variant_list = [ '|' ] , variant , { '|' , variant } ;
+            //     type_alias   = 'type' , identifier , [ generics ]
+            //                  , [ ':' , bounds ] , '=' , type_expr , ';' ;
+            //
+            // Pre-fix this arm collapsed `type X is OnlyVariant;`
+            // (bare identifier, no payload, no leading `|`) into
+            // `TypeDeclBody::Alias(OnlyVariant)` — silently turning
+            // a single-variant sum into an alias to a (typically
+            // non-existent) type, then surfacing at the user's
+            // `match e { OnlyVariant => … }` /
+            // `e is OnlyVariant` /
+            // `eq(&self, other)` sites as
+            // "Pattern expects a variant type, but scrutinee has
+            // type X" because the alias resolved to nothing useful.
+            //
+            // The fix: emit `TypeDeclBody::Variant` for ANY
+            // `is`-form right-hand side that the variant probe
+            // accepted (`looks_like_variant`).  Single-variant sums
+            // (the canonical "marker-error" idiom — SemaphoreError /
+            // ChannelError / each of the empty-arm error types in
+            // stdlib) round-trip through the typechecker, codegen,
+            // and runtime variant-tag machinery on exactly the same
+            // path as multi-variant sums.  Marker syntax: keep the
+            // bare form `type X is Closed;` for readability AND the
+            // leading-pipe form `type X is | Closed;` for parity with
+            // multi-variant declarations — both produce identical
+            // `TypeDeclBody::Variant(["Closed"])` AST.
+            return Ok(TypeDeclBody::Variant(
+                vec![first_variant].into_iter().collect(),
+            ));
         }
 
         // Parse as type alias (handles complex types like Vec<T>, fn(Int) -> Int, Int{> 0}, &Int)
