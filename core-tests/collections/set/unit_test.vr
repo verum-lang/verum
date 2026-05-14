@@ -1,0 +1,285 @@
+// =============================================================================
+// core-tests/collections/set/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.set` — Set<T: Hash + Eq>, the canonical
+// hash-set primitive (stdlib decl: Set { inner: Map<T, ()> }; runtime
+// intercept layout: TypeId::SET with `[count, capacity, entries_ptr]`).
+//
+// Method-level coverage focuses on methods with explicit runtime
+// intercepts in `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
+// method_dispatch.rs`: new, insert, contains, remove, len, is_empty,
+// clear, union, intersection. Non-intercepted methods are pinned in
+// regression_test.vr because Set's stdlib type decl is a wrapper record
+// `{ inner: Map }` while the runtime intercept allocates a 3-slot
+// `[count, capacity, entries_ptr]` directly — the wrapper-vs-direct shape
+// drift means unintercepted methods misroute when reading `self.inner`.
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// Section 1: Set.new — construction
+// =============================================================================
+
+@test
+fn test_set_new_is_empty() {
+    let s: Set<Int> = Set.new();
+    assert_eq(s.len(), 0);
+    assert(s.is_empty());
+}
+
+// =============================================================================
+// Section 2: insert — membership growth
+// =============================================================================
+
+@test
+fn test_set_insert_new_element_returns_true() {
+    let mut s: Set<Int> = Set.new();
+    assert(s.insert(42));
+    assert_eq(s.len(), 1);
+}
+
+@test
+fn test_set_insert_duplicate_returns_false() {
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(42);
+    // Second insert of the same value is a no-op for both len and
+    // the set's contents; returns false to signal "already present".
+    assert(!s.insert(42));
+    assert_eq(s.len(), 1);
+}
+
+@test
+fn test_set_insert_multiple_distinct() {
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(10);
+    let _ = s.insert(20);
+    let _ = s.insert(30);
+    assert_eq(s.len(), 3);
+}
+
+// =============================================================================
+// Section 3: contains — membership test
+// =============================================================================
+
+@test
+fn test_set_contains_inserted_value() {
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(42);
+    assert(s.contains(42));
+}
+
+@test
+fn test_set_contains_uninserted_returns_false() {
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(42);
+    assert(!s.contains(99));
+}
+
+@test
+fn test_set_contains_in_empty_is_false() {
+    let s: Set<Int> = Set.new();
+    assert(!s.contains(0));
+}
+
+@test
+fn test_set_contains_multiple_values() {
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(1);
+    let _ = s.insert(2);
+    let _ = s.insert(3);
+    assert(s.contains(1));
+    assert(s.contains(2));
+    assert(s.contains(3));
+    assert(!s.contains(4));
+}
+
+// =============================================================================
+// Section 4: remove — membership shrinkage
+// =============================================================================
+
+@test
+fn test_set_remove_existing_returns_true() {
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(42);
+    assert(s.remove(42));
+    assert_eq(s.len(), 0);
+    assert(!s.contains(42));
+}
+
+@test
+fn test_set_remove_nonexistent_returns_false() {
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(42);
+    assert(!s.remove(99));
+    // Length unchanged after attempting to remove an absent value.
+    assert_eq(s.len(), 1);
+}
+
+@test
+fn test_set_remove_from_empty_returns_false() {
+    let mut s: Set<Int> = Set.new();
+    assert(!s.remove(42));
+    assert_eq(s.len(), 0);
+}
+
+// =============================================================================
+// Section 5: clear — reset
+// =============================================================================
+
+@test
+fn test_set_clear_empties_set() {
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(1);
+    let _ = s.insert(2);
+    let _ = s.insert(3);
+    s.clear();
+    assert_eq(s.len(), 0);
+    assert(s.is_empty());
+    assert(!s.contains(1));
+    assert(!s.contains(2));
+    assert(!s.contains(3));
+}
+
+@test
+fn test_set_clear_of_empty_is_noop() {
+    let mut s: Set<Int> = Set.new();
+    s.clear();
+    assert(s.is_empty());
+}
+
+// =============================================================================
+// Section 6: Round-trip insert + remove + contains
+// =============================================================================
+
+@test
+fn test_set_insert_remove_round_trip() {
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(7);
+    assert(s.contains(7));
+    let _ = s.remove(7);
+    assert(!s.contains(7));
+    let _ = s.insert(7);
+    assert(s.contains(7));
+}
+
+// =============================================================================
+// Section 7: union — pairwise combination
+// =============================================================================
+
+@test
+fn test_set_union_of_disjoint_sets() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(3);
+    let _ = b.insert(4);
+    let u = a.union(&b);
+    assert_eq(u.len(), 4);
+    assert(u.contains(1));
+    assert(u.contains(2));
+    assert(u.contains(3));
+    assert(u.contains(4));
+}
+
+@test
+fn test_set_union_of_overlapping_sets() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let _ = a.insert(3);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(2);
+    let _ = b.insert(3);
+    let _ = b.insert(4);
+    let u = a.union(&b);
+    // Overlapping elements (2, 3) appear only once.
+    assert_eq(u.len(), 4);
+    assert(u.contains(1));
+    assert(u.contains(4));
+}
+
+@test
+fn test_set_union_with_empty_set() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let b: Set<Int> = Set.new();
+    let u = a.union(&b);
+    assert_eq(u.len(), 2);
+    assert(u.contains(1));
+    assert(u.contains(2));
+}
+
+// =============================================================================
+// Section 8: intersection — pairwise common
+// =============================================================================
+
+@test
+fn test_set_intersection_of_disjoint_sets() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(3);
+    let _ = b.insert(4);
+    let i = a.intersection(&b);
+    assert_eq(i.len(), 0);
+    assert(i.is_empty());
+}
+
+@test
+fn test_set_intersection_of_overlapping_sets() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let _ = a.insert(3);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(2);
+    let _ = b.insert(3);
+    let _ = b.insert(4);
+    let i = a.intersection(&b);
+    assert_eq(i.len(), 2);
+    assert(i.contains(2));
+    assert(i.contains(3));
+    assert(!i.contains(1));
+    assert(!i.contains(4));
+}
+
+@test
+fn test_set_intersection_with_empty_is_empty() {
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let b: Set<Int> = Set.new();
+    let i = a.intersection(&b);
+    assert_eq(i.len(), 0);
+    assert(i.is_empty());
+}
+
+// =============================================================================
+// Section 9: len / is_empty — observers
+// =============================================================================
+
+@test
+fn test_set_len_after_inserts_matches_count() {
+    let mut s: Set<Int> = Set.new();
+    let mut i = 0;
+    while i < 20 {
+        let _ = s.insert(i);
+        i = i + 1;
+    }
+    assert_eq(s.len(), 20);
+}
+
+@test
+fn test_set_is_empty_after_insert_remove_pair() {
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(42);
+    let _ = s.remove(42);
+    assert(s.is_empty());
+}
+
+fn main() {}

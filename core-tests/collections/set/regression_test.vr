@@ -1,0 +1,88 @@
+// =============================================================================
+// core-tests/collections/set/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions surfaced while building the set conformance suite.
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// §A  Stdlib wrapper-record vs runtime direct-shape divergence.
+//
+//   The stdlib type decl `Set<T> is { inner: Map<T, ()> }` is a 1-field
+//   record. The VBC runtime intercept at
+//   `crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs`
+//   1060-1085 allocates Set as `[count@0, capacity@1, entries_ptr@2]`
+//   directly with TypeId::SET (no inner Map wrapper).
+//
+//   Methods with explicit runtime intercepts (insert, contains, remove,
+//   clear, union, intersection, len, is_empty) work because the intercept
+//   reads from the canonical 3-slot layout. Methods without intercepts
+//   (any predicate-taking method that goes through the stdlib body's
+//   `self.inner.<method>`) misroute — `self.inner` reads slot 0 (= count)
+//   as a Map record, then dispatches `.contains/.insert/...` on an Int.
+//
+//   The fundamental fix is to either (a) drop the wrapper from the stdlib
+//   type decl (`type Set<T> is { count, capacity, entries_ptr }` raw),
+//   (b) extend the runtime intercept to allocate a wrapper record, or
+//   (c) intercept every Set method that touches `self.inner`.
+//
+//   This is the Map-wrapper equivalent of the List layout-drift defect
+//   (`core-tests/collections/list/regression_test.vr` §B). All ignored
+//   tests below pin the surface and re-enable once the fix lands.
+// =============================================================================
+
+@ignore
+@test
+fn regression_set_to_list_wrapper_shape_drift() {
+    // Expected: to_list() collects elements into a List<T>.
+    // Actual: stdlib body delegates via self.inner; the wrapper-shape
+    // drift makes the call misroute.
+    let mut s: Set<Int> = Set.new();
+    let _ = s.insert(1);
+    let _ = s.insert(2);
+    let xs = s.to_list();
+    assert_eq(xs.len(), 2);
+}
+
+@ignore
+@test
+fn regression_set_is_subset_wrapper_shape_drift() {
+    // Expected: is_subset returns true when every elem of self is in other.
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(1);
+    let _ = b.insert(2);
+    let _ = b.insert(3);
+    assert(a.is_subset(&b));
+}
+
+@ignore
+@test
+fn regression_set_difference_wrapper_shape_drift() {
+    // Expected: difference produces elements in self but not in other.
+    let mut a: Set<Int> = Set.new();
+    let _ = a.insert(1);
+    let _ = a.insert(2);
+    let _ = a.insert(3);
+    let mut b: Set<Int> = Set.new();
+    let _ = b.insert(2);
+    let diff = a.difference(&b);
+    assert_eq(diff.len(), 2);
+    assert(diff.contains(1));
+    assert(diff.contains(3));
+}
+
+@ignore
+@test
+fn regression_set_from_array_literal_undefined_function() {
+    // Same defect class as List.from: cross-module function-name table
+    // omits stdlib static methods that aren't runtime-intercepted.
+    let s: Set<Int> = Set.from([1, 2, 3]);
+    assert_eq(s.len(), 3);
+}
+
+fn main() {}
