@@ -40,25 +40,40 @@
 
 ## 3. Language-implementation gaps surfaced by this folder
 
-### §A — `Char.make_ascii_{upper,lower}case` does not mutate — **TRACKED AS TASK #13 (2026-05-14)**
+### §A — `Char.make_ascii_{upper,lower}case` does not mutate — **PARTIAL CLOSE 2026-05-14 (task #13)**
 **Symptom**: `let mut c: Char = 'a'; c.make_ascii_uppercase()` leaves
 `c == 'a'`. Body is `*self = self.to_ascii_uppercase();`.
-**Bisection (this session)**: the defect reproduces identically for
-**every primitive** `&mut self` method that uses `*self = X` to write
-back — not just Char.  A user-defined `implement Int { fn
-double_in_place(&mut self) { *self = *self * 2 } }` also fails to
-persist.  So the root is at the codegen / call-dispatch layer for
-primitive receivers: when a primitive receiver dispatches a `&mut self`
-method, the call site's `takes_self_mut_ref → RefMut(ref_reg,
-receiver_reg)` wrapping at `expressions.rs:8731` is bypassed (likely
-the receiver_is_primitive_numeric path at line 8109+ short-circuits
-to an inline-sequence dispatch that drops the RefMut step).  The
-Deref / DerefMut Tier-0 handlers themselves are correct (verified at
-`cbgr.rs:159+ / 273+`).
-**Status**: file open as task #13 — fix needs the codegen path for
-primitive `&mut self` to route through the same RefMut wrapping as
-user-type `&mut self`.  Pinned by
-`core-tests/text/char/regression_test.vr::regression_a_make_ascii_uppercase_pinned`.
+
+**Root cause (bisected via task #13)**: `compile_method_call`'s
+`effective_method_name` builder at `expressions.rs:8298` returned the
+bare `method.name` for primitive receivers whose `variable_type_names`
+slot wasn't populated in time.  The bare name then missed the
+function-table lookup at line 8748, short-circuiting the
+`takes_self_mut_ref → RefMut(ref_reg, receiver_reg)` wrapping.
+Without RefMut the method body wrote to a value-copy of self and the
+caller's variable was lost.  The Deref / DerefMut Tier-0 handlers
+themselves are correct (verified at `cbgr.rs:159+ / 273+`).
+
+**User-side surface closed (commit `df8e76037`)**: the call-site
+codegen now emits the qualified `Type.method` form directly from the
+VarTypeKind slot for the canonical primitive types (`Int`, `Float`,
+`Bool`, `Char`, `Text`).  Pinned by 2 new tests in
+`core-tests/text/text/protocol_test.vr::deref_mut_int_persists_*`.
+Every user-side `implement Int { fn x(&mut self) { *self = … } }` now
+mutates the caller's variable.
+
+**Stdlib precompiled body remains broken**: `Char.make_ascii_uppercase`
+(precompiled stdlib) still doesn't persist.  Adding diagnostic traces
+at the takes_self_mut_ref check shows NO trace fires for
+`c.make_ascii_uppercase()` — the call reaches `compile_method_call`
+via a path that bypasses the check entirely.  Likely a
+primitive-receiver intrinsic shortcut higher up in compile_method_call
+short-circuits before reaching line 8748.  Investigation: search for
+inline-sequence dispatches keyed on `Char.make_ascii_*` that bypass
+the standard call emission.
+
+**Pinned by**: `core-tests/text/char/regression_test.vr::regression_a_make_ascii_uppercase_pinned`
+(stdlib-body branch, still failing).  Tracked as follow-up to task #13.
 
 ### §B — `eq_ignore_ascii_case` false-negative
 **Symptom**: `'A'.eq_ignore_ascii_case(&'a')` returns false. Body is
