@@ -1,0 +1,60 @@
+// =============================================================================
+// core-tests/collections/heap/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions surfaced while building the heap conformance suite.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.heap.BinaryHeap;
+
+// =============================================================================
+// §A  Static-constructor name resolution.
+//
+//   `BinaryHeap.with_capacity(n)` and `BinaryHeap.from_list(xs)` are real
+//   stdlib static methods that aren't runtime-intercepted. Same defect
+//   class as List.from / List.of / Deque.with_capacity — cross-module
+//   function-name table omits non-intercepted constructors.
+// =============================================================================
+
+@ignore
+@test
+fn regression_heap_with_capacity_undefined_function() {
+    let h: BinaryHeap<Int> = BinaryHeap.with_capacity(16);
+    assert_eq(h.len(), 0);
+    assert(h.capacity() >= 16);
+}
+
+@ignore
+@test
+fn regression_heap_from_list_undefined_function() {
+    let xs: List<Int> = [3, 1, 4, 1, 5, 9];
+    let h: BinaryHeap<Int> = BinaryHeap.from_list(xs);
+    assert_eq(h.len(), 6);
+    assert_eq(h.peek(), Some(9));
+}
+
+// =============================================================================
+// §B  Wrapper-record shape — BinaryHeap delegates through `self.data` to
+//     an inner List<T>. This works IFF the wrapper field resolves to the
+//     inner List pointer at the right slot.
+//
+//   Active (non-`@ignore`d) guardrail: a sequence of push + pop + push
+//   + peek must agree with the heap-property end-to-end, which only
+//   succeeds if `self.data` correctly routes to the inner List's
+//   runtime intercepts.
+// =============================================================================
+
+@test
+fn regression_heap_wrapper_field_resolves_to_inner_list() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(5);
+    h.push(3);
+    h.push(7);
+    let _ = h.pop();
+    h.push(10);
+    h.push(2);
+    assert_eq(h.peek(), Some(10));
+}
+
+fn main() {}

@@ -1,0 +1,125 @@
+// =============================================================================
+// core-tests/collections/heap/property_test.vr
+// =============================================================================
+//
+// Heap-property and ordering invariants for `core.collections.heap`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.heap.BinaryHeap;
+
+// =============================================================================
+// §1  peek is the maximum element of all pushed values
+// =============================================================================
+
+@test
+fn property_peek_is_max_over_pushed_values() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let values: List<Int> = [7, 3, 1, 9, 5, 8, 2, 6, 4];
+    let mut i = 0;
+    while i < values.len() {
+        match values.get(i) {
+            Some(v) => h.push(v),
+            None => {},
+        }
+        i = i + 1;
+    }
+    assert_eq(h.peek(), Some(9));
+}
+
+// =============================================================================
+// §2  pop produces monotone-non-increasing sequence (heap-sort discipline)
+// =============================================================================
+
+@test
+fn property_pop_sequence_is_non_increasing() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let values: List<Int> = [3, 7, 1, 8, 2, 9, 4, 6, 5];
+    let mut i = 0;
+    while i < values.len() {
+        match values.get(i) {
+            Some(v) => h.push(v),
+            None => {},
+        }
+        i = i + 1;
+    }
+    let mut prev = h.pop();
+    while !h.is_empty() {
+        let cur = h.pop();
+        match (prev, cur) {
+            (Some(a), Some(b)) => assert(a >= b),
+            _ => assert(false),
+        }
+        prev = cur;
+    }
+}
+
+// =============================================================================
+// §3  push/pop preserves size — pop drains down to zero
+// =============================================================================
+
+@test
+fn property_full_drain_returns_all_elements() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let mut i = 0;
+    while i < 15 {
+        h.push(i);
+        i = i + 1;
+    }
+    let mut popped = 0;
+    while !h.is_empty() {
+        let _ = h.pop();
+        popped = popped + 1;
+    }
+    assert_eq(popped, 15);
+    assert_eq(h.len(), 0);
+}
+
+// =============================================================================
+// §4  into_sorted_list output is monotone-non-decreasing
+// =============================================================================
+
+@test
+fn property_into_sorted_list_is_monotone_non_decreasing() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let values: List<Int> = [3, 7, 1, 8, 2, 9, 4, 6, 5, 10];
+    let mut i = 0;
+    while i < values.len() {
+        match values.get(i) {
+            Some(v) => h.push(v),
+            None => {},
+        }
+        i = i + 1;
+    }
+    let sorted = h.into_sorted_list();
+    let mut j = 0;
+    while j + 1 < sorted.len() {
+        let a = sorted.get_or(j, 0);
+        let b = sorted.get_or(j + 1, 0);
+        assert(a <= b);
+        j = j + 1;
+    }
+}
+
+// =============================================================================
+// §5  len monotone-decreasing on pop, lower-bounded by zero
+// =============================================================================
+
+@test
+fn property_pop_decreases_len() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let mut i = 0;
+    while i < 10 {
+        h.push(i);
+        i = i + 1;
+    }
+    let mut prev_len = h.len();
+    while !h.is_empty() {
+        let _ = h.pop();
+        assert(h.len() < prev_len);
+        prev_len = h.len();
+    }
+    assert_eq(h.len(), 0);
+}
+
+fn main() {}

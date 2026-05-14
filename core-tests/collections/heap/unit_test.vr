@@ -1,0 +1,176 @@
+// =============================================================================
+// core-tests/collections/heap/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.heap` — BinaryHeap<T: Ord>, the canonical
+// max-heap priority queue.
+//
+// Stdlib decl: `type BinaryHeap<T: Ord> is { data: List<T> }`. No direct
+// runtime intercept — every method delegates through `self.data.<method>`
+// on the inner List, which is itself runtime-intercepted. The wrapper-
+// record indirection is safe IFF `self.data` resolves to the inner List
+// pointer at the right slot.
+//
+// Construction goes through `BinaryHeap.new()` which the stdlib body
+// builds as `BinaryHeap { data: List.new() }`. The runtime executes the
+// stdlib body, calling intercepted `List.new()`, and wraps the resulting
+// List in a 1-slot heap record. Codegen-side field access on `self.data`
+// then resolves to the inner List, and downstream method dispatch is on
+// a real List object.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.heap.BinaryHeap;
+
+// =============================================================================
+// Section 1: BinaryHeap.new — construction
+// =============================================================================
+
+@test
+fn test_heap_new_is_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    assert_eq(h.len(), 0);
+    assert(h.is_empty());
+}
+
+@test
+fn test_heap_new_peek_is_none() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    assert_eq(h.peek(), None);
+}
+
+// =============================================================================
+// Section 2: push / peek — basic heap-property
+// =============================================================================
+
+@test
+fn test_heap_push_one_element_peek_returns_it() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(42);
+    assert_eq(h.len(), 1);
+    assert_eq(h.peek(), Some(42));
+}
+
+@test
+fn test_heap_push_ascending_yields_max_on_top() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+    h.push(4);
+    h.push(5);
+    // Max-heap: top is the largest pushed.
+    assert_eq(h.peek(), Some(5));
+}
+
+@test
+fn test_heap_push_descending_yields_max_on_top() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(5);
+    h.push(4);
+    h.push(3);
+    h.push(2);
+    h.push(1);
+    assert_eq(h.peek(), Some(5));
+}
+
+@test
+fn test_heap_push_mixed_yields_max_on_top() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(3);
+    h.push(1);
+    h.push(4);
+    h.push(1);
+    h.push(5);
+    h.push(9);
+    h.push(2);
+    h.push(6);
+    assert_eq(h.peek(), Some(9));
+}
+
+// =============================================================================
+// Section 3: pop — drain in descending order
+// =============================================================================
+
+@test
+fn test_heap_pop_returns_max_first() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(3);
+    h.push(1);
+    h.push(4);
+    h.push(1);
+    h.push(5);
+    assert_eq(h.pop(), Some(5));
+    assert_eq(h.pop(), Some(4));
+    assert_eq(h.pop(), Some(3));
+    assert_eq(h.pop(), Some(1));
+    assert_eq(h.pop(), Some(1));
+    assert_eq(h.pop(), None);
+}
+
+@test
+fn test_heap_pop_decrements_len() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    h.push(30);
+    let _ = h.pop();
+    assert_eq(h.len(), 2);
+}
+
+@test
+fn test_heap_pop_from_empty_is_none() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    assert_eq(h.pop(), None);
+}
+
+// =============================================================================
+// Section 4: clear / is_empty — reset
+// =============================================================================
+
+@test
+fn test_heap_clear_empties_heap() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+    h.clear();
+    assert(h.is_empty());
+    assert_eq(h.len(), 0);
+}
+
+@test
+fn test_heap_clear_then_push_starts_fresh() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.clear();
+    h.push(99);
+    assert_eq(h.len(), 1);
+    assert_eq(h.peek(), Some(99));
+}
+
+// =============================================================================
+// Section 5: into_sorted_list — full drain in ascending order
+// =============================================================================
+
+@test
+fn test_heap_into_sorted_list_ascending() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(3);
+    h.push(1);
+    h.push(4);
+    h.push(1);
+    h.push(5);
+    h.push(9);
+    h.push(2);
+    h.push(6);
+    let sorted = h.into_sorted_list();
+    assert_eq(sorted.len(), 8);
+    assert_eq(sorted.get(0), Some(1));
+    assert_eq(sorted.get(1), Some(1));
+    assert_eq(sorted.get(2), Some(2));
+    assert_eq(sorted.get(7), Some(9));
+}
+
+fn main() {}
