@@ -49,7 +49,6 @@ mount core.sys.time_ops.{
 // staged but does not yet propagate; see audit.md §3.1.
 // -----------------------------------------------------------------------------
 
-@ignore
 @test
 fn regression_wall_clock_ms_post_2000() {
     let ms = wall_clock_ms();
@@ -85,7 +84,6 @@ fn regression_duration_from_millis_negative_round_trip() {
 // @ignore for the green-suite gate; un-ignore when task #5 closes.
 // -----------------------------------------------------------------------------
 
-@ignore
 @test
 fn regression_instant_elapsed_returns_duration() {
     let t = SysTimeOpsInstant.now();
@@ -94,7 +92,6 @@ fn regression_instant_elapsed_returns_duration() {
     assert(d.as_nanos() >= 0);
 }
 
-@ignore
 @test
 fn regression_instant_now_repeated_calls_dont_panic() {
     // Pre-fix the precompiled-stdlib `time_monotonic_nanos` FFI

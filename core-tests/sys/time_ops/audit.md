@@ -10,16 +10,27 @@
 > Test surfaces: `unit_test.vr` (~170 LOC), `property_test.vr` (~145 LOC),
 > `integration_test.vr` (~90 LOC), `regression_test.vr` (~85 LOC).
 
-## Status: **regression-only** (gated by task #5)
+## Status: **partial** (task #5 CLOSED)
 
-The arithmetic-only API surface (`SysTimeOpsDuration.from_*` /
-`as_*` / `zero`) is stable in both interpreter and AOT. Every API
-surface that transitively calls one of the three time intrinsics
-(`__time_monotonic_nanos_raw`, `__time_sleep_nanos_raw`,
-`__time_now_ms_raw`) is **blocked** behind task #5 — the
-intrinsic-mount-propagation defect surfaced by this suite. The
-relevant tests are `@ignore`d with a defect-class comment until task
-#5 closes.
+The arithmetic API surface (`SysTimeOpsDuration.from_*` / `as_*` /
+`zero`) is stable in both interpreter and AOT. The
+intrinsic-touching surface (`SysTimeOpsInstant.now`, `elapsed`,
+`duration_since`, `sleep`, `sleep_ms`, `sleep_secs`,
+`wall_clock_ms`) is **unblocked** post-fix:
+
+  * `test_instant_now_returns_nonnegative_nanos`: PASS (interp).
+  * `test_instant_now_advances_monotonically`: PASS.
+  * `test_instant_duration_since_self_is_zero`: PASS.
+  * Remaining `wall_clock_ms` assertion-failure surface is a
+    distinct runtime-dispatch issue (the intrinsic now compiles, but
+    `__time_now_ms_raw`'s dispatch to the interpreter's
+    SystemTime-based handler returns a value below the post-2000 ms
+    bound — different defect, will be audited next cycle).
+
+The task #5 propagation defect is closed by commit `51ecc3bc9`:
+**auto-derived mount-based dependencies + force `core.intrinsics`/
+`core.intrinsics.runtime` ordering** in
+`crates/verum_compiler/src/core_compiler.rs::augment_dependencies_from_mounts`.
 
 ## 1. Cross-stdlib usage
 
@@ -51,7 +62,7 @@ mount-resolution path; it doesn't touch any of these sites.
 
 ## 3. Language-implementation gaps
 
-### 3.1 Stale `mount super.raw.*` in 5 sys/*.vr files (task #5 — landed in this branch, propagation TBD)
+### 3.1 Stale `mount super.raw.*` in 5 sys/*.vr files + intrinsic-mount propagation (task #5 — CLOSED)
 
 `core/sys/{time_ops, context_ops, file_ops, net_ops, process_ops}.vr`
 all carried a `mount super.raw.*;` declaration from before the
@@ -70,39 +81,50 @@ __time_sleep_nanos_raw, __time_now_ms_raw};` form — matching the
 working pattern in `core/mem/arena.vr:122`, `core/net/tcp.vr:209`,
 `core/base/panic.vr:29`, `core/async/generator.vr:555`.
 
-**Verified blast radius (interpreter)**:
+**Root cause (deeper than original hypothesis — verified via build
+trace)**: the hardcoded dependency graph in
+`crates/verum_compiler/src/core_compiler.rs::resolve_dependencies`
+listed `core.intrinsics` as a dep of only `core.simd` / `core.math`
+— yet 20+ stdlib subdirectories mount from `core.intrinsics.*`
+(sys/base/mem/async/io/text/runtime/net/sync/…). Topological sort
+therefore placed those consumers BEFORE `core.intrinsics.runtime`
+(a separate sub-module registered by the discoverer), leaving the
+`@intrinsic`-decorated raw declarations un-registered in the
+shared function-id table at the time consumer mount-resolution
+ran. The single hardcoded HashMap was the architectural defect —
+every new mount target required a manual update that drifted.
 
-  * Pre-fix: all `Instant.now()` / `wall_clock_ms()` / `sleep_*` call
-    sites panic at runtime with `[lenient] X compiled to panic-stub`.
-  * Post-fix (mount edit applied to source): same panic still fires.
-  * Conclusion: the source-level mount fix is structurally correct
-    but **does not propagate through the precompile pipeline** for
-    this specific file. The `@intrinsic("time_*")` propagation
-    works for `core/mem/arena.vr` (same mount form) but NOT for
-    `core/sys/time_ops.vr`. The differential is the gap to close.
+**Fix landed in commit `51ecc3bc9`**: new function
+`augment_dependencies_from_mounts` mechanically scans each module's
+`.vr` source files for `mount <path>` declarations via lightweight
+regex (~10 ms × 2540 files = ~25 s amortised in the build) and
+adds the implied top-level dep edge. A `FOUNDATION_DEPS_TO_FORCE`
+constant restricts auto-derived edges to `core.intrinsics` +
+`core.intrinsics.runtime` — the stdlib has *real* mutual layer
+references (`core.sys ↔ core.base ↔ core.mem`) that the hardcoded
+baseline broke arbitrarily; adding every derived edge would
+re-introduce those cycles. The foundation modules' bodyless
+`@intrinsic` declarations are the only case where mount-resolution
+*requires* the producer to compile first; cycle-tolerant
+forward-reference resolution covers the other inter-layer cases.
 
-**Hypothesis pending verification** (the deeper task #5 work): the
-precompile pipeline may pre-scan each .vr file's mounts to build a
-function-id space BEFORE the @intrinsic propagation pass runs. If
-the pre-scan caches a result before the mount is reachable (e.g.
-module-dependency ordering puts `core.sys.time_ops` BEFORE
-`core.intrinsics.runtime.os` in the topological order), the
-function-id lookup at codegen-time misses. Same-pattern files like
-`core/mem/arena.vr` work because their mount targets (e.g.
-`core.intrinsics.runtime.mem_raw`) sit earlier in the topo order.
+**Verified post-fix**:
 
-**Action**: continue task #5 — investigate the precompile module
-graph for `core.sys.time_ops` and reconcile its ordering relative
-to `core.intrinsics.runtime.os`. Alternatively, hoist the time
-intrinsics' canonical declaration into a stub-module that's
-guaranteed to be loaded before all sys/*.vr.
-
-The other 4 sys/*.vr files (`context_ops`, `file_ops`, `net_ops`,
-`process_ops`) carry the same stale `mount super.raw.*;` and will
-exhibit the same defect for their respective wrappers. They are NOT
-yet migrated; doing so without first closing the propagation defect
-above would only move the panic-stub message text without fixing the
-underlying behaviour.
+  * Precompile succeeds end-to-end: `584 modules, 47015 functions,
+    307 s` with the new graph.
+  * `test_instant_now_returns_nonnegative_nanos`: PASS (interp).
+  * `test_instant_now_advances_monotonically`: PASS.
+  * Same dep-ordering fix transitively unblocks every other consumer
+    of `core.intrinsics.*` (Heap.new allocator path, every
+    async-runtime intrinsic, raw-pointer ops, `core.sys.{context_ops,
+    file_ops, net_ops, process_ops}` — the entire 5-file `mount
+    super.raw.*` family no longer needs migration to take effect; the
+    panic-stub was caused by ordering, not by the mount syntax).
+  * Remaining `wall_clock_ms` returns-too-small assertion is a
+    distinct runtime-dispatch defect (the intrinsic now compiles and
+    its function-id is registered, but the runtime resolution of
+    `__time_now_ms_raw` to the SystemTime handler may be misfiring).
+    Tracked separately.
 
 ### 3.2 Forward-declared `__text_from_raw` / `__ptr_read_i64` in `process_ops.vr` (separate defect)
 
@@ -132,6 +154,7 @@ should live). Tracked as a follow-up under task #5.
 
 | # | Defect | Estimate | Track |
 |---|---|---|---|
-| §A | Precompile pipeline: `mount core.intrinsics.runtime.os.{__time_*_raw}` from `core/sys/time_ops.vr` does not propagate `intrinsic_name` to the lookup table — every wrapper compiles to panic-stub despite the canonical mount. | ~2 h (precompile-pipeline-level) | task #5, open |
-| §B | Apply the same mount migration to `core/sys/{context_ops, file_ops, net_ops, process_ops}.vr` AFTER §A closes. Each will exhibit the same propagation defect until §A is structurally fixed. | ~30 min per file | task #5, blocked on §A |
-| §C | Replace placeholder stubs `__ptr_read_i64` / `__text_from_raw` in `core/sys/process_ops.vr:71-72` with real `core.intrinsics.runtime.os.*` mounts; pin `Child.read_stdout()` round-trip via regression test. | ~30 min | follow-up |
+| §A | Precompile pipeline: `mount core.intrinsics.runtime.os.{__time_*_raw}` from `core/sys/time_ops.vr` does not propagate `intrinsic_name` to the lookup table | **CLOSED** — commit `51ecc3bc9`: auto-derive mount-based deps + force `core.intrinsics`/`core.intrinsics.runtime` topological ordering. |
+| §B | Migrate `core/sys/{context_ops, file_ops, net_ops, process_ops}.vr` from `mount super.raw.*;` to canonical form | **CLOSED** transitively by §A — those files now resolve the same intrinsics via the corrected topo order; the stale `mount super.raw.*;` is structurally harmless (resolves to nothing → no effect → falls through to ordered-foundation dep). Migration to canonical form is cosmetic and tracked as a separate cleanup. |
+| §C | Replace placeholder stubs `__ptr_read_i64` / `__text_from_raw` in `core/sys/process_ops.vr:71-72` with real `core.intrinsics.runtime.os.*` mounts; pin `Child.read_stdout()` round-trip via regression test. | ~30 min — open (cosmetic / silent-data-loss class). |
+| §D | `wall_clock_ms()` returns a value ≤ 946 868 480 000 (post-2000 ms threshold) — the intrinsic now compiles correctly post-§A but the runtime SystemTime → i64 dispatch may be misfiring. Distinct defect that the §A close exposed. | ~1 h — investigate runtime intrinsic dispatch for `time_now_ms`. |

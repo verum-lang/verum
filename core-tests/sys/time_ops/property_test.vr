@@ -131,14 +131,12 @@ fn law_zero_is_neutral_in_every_unit() {
 // — un-ignore once task #5 closes.
 // =============================================================================
 
-@ignore
 @test
 fn law_instant_now_non_negative() {
     let t = SysTimeOpsInstant.now();
     assert(t.nanos >= 0);
 }
 
-@ignore
 @test
 fn law_instant_now_sequential_non_decreasing() {
     let mut prev: Int = 0;
@@ -151,7 +149,6 @@ fn law_instant_now_sequential_non_decreasing() {
     }
 }
 
-@ignore
 @test
 fn law_instant_duration_since_self_is_zero() {
     let t = SysTimeOpsInstant.now();
