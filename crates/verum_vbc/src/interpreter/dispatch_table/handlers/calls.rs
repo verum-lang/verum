@@ -171,6 +171,23 @@ pub(in super::super) fn handle_call(
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
+            // `Char.make_ascii_uppercase` / `make_ascii_lowercase` —
+            // precompiled stdlib body's `*self = X` DerefMut is lost
+            // (task #14, same architectural class as hasher_runtime).
+            // The intercept writes through the CBGR ref to the
+            // caller's Char slot directly.  Must fire before
+            // file_runtime for the same qualifier-precedence reason
+            // hasher_runtime does.
+            if let Some(result) = super::char_runtime::try_intercept_char_mutator(
+                state,
+                &func_name,
+                args.start.0,
+                args.count,
+                caller_base,
+            )? {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
             if let Some(result) = super::shell_runtime::try_intercept_shell_runtime(
                 state,
                 &func_name,

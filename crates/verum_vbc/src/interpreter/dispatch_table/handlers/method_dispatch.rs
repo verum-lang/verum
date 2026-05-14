@@ -685,6 +685,37 @@ pub(in super::super) fn handle_call_method(
         return Ok(DispatchResult::Continue);
     }
 
+    // `Char.make_ascii_uppercase` / `make_ascii_lowercase`
+    // CallM-path intercept — same architectural class as the
+    // `reserve` / `push_*` mutator intercepts above.  The
+    // precompiled stdlib body's `*self = self.to_ascii_uppercase()`
+    // emits Mov instead of DerefMut, so the caller's Char slot is
+    // never updated.  The intercept writes through the CBGR ref
+    // directly.  Closes audit char §A (task #14).
+    if (bare_method_name == "make_ascii_uppercase"
+        || bare_method_name == "make_ascii_lowercase")
+        && args.count == 0
+    {
+        let caller_base = state.reg_base();
+        // Build the qualified name so try_intercept_char_mutator's
+        // prefix gate matches.
+        let qualified = format!("Char.{}", bare_method_name);
+        // The CallM path placed `self` in `receiver_reg` and arg
+        // start at `args.start.0`.  The intercept expects arg[0] =
+        // self.  Synthesise a fresh args window starting at
+        // receiver_reg, then call through with arg_count = 1 (self).
+        if let Some(result) = super::char_runtime::try_intercept_char_mutator(
+            state,
+            &qualified,
+            receiver_reg.0,
+            1,
+            caller_base,
+        )? {
+            state.set_reg(dst, result);
+            return Ok(DispatchResult::Continue);
+        }
+    }
+
     // Path/PathBuf inherent-method intercept.  Stdlib bodies for
     // `core.io.path.{Path, PathBuf}` aren't loaded into the user
     // module — `emit_missing_stub_descriptors` only registers `RetV`
