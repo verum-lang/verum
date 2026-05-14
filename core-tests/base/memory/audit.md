@@ -131,7 +131,45 @@ the asserted vs actual value at pc=25.
     interp-only, that's a tier-divergence kernel incident.
   - **§C** Build a per-test status appendix below once §A completes.
 
-### 3.5 `Heap.is_freed` returns Bool but the post-dealloc generation may not always be 0
+### 3.5 AOT lowering fails on `Heap.new(_).is_freed()` (CROSS-TIER divergence)
+
+Runtime-validated: `verum test --aot --filter regression_heap_round_trip_baseline`
+fails at LLVM lowering with
+
+```
+compilation failed: Failed to lower VBC to LLVM IR:
+Internal("call_native_i64(lr): callee returns void; use build_call directly")
+```
+
+while the same source passes under `--interp`. The error is raised by
+`crates/verum_codegen/src/llvm/platform_ir.rs:246` —
+`call_native_i64` expects every native FFI callee to return an
+IntType / PointerType, but somewhere along the `Heap.new` →
+`cbgr_alloc` → allocator path a callee is declared with a `void`
+return type, then call_native_i64 is reached for it and refuses.
+
+This is the SAME failure class as MEMORY.md task #23's residual entry:
+
+> AOT proceeds, falls back to interpreter on a different remaining
+> error (`call_native_i64(lr): callee returns void; use build_call
+> directly`)
+
+So this defect surfaces on the most basic `Heap.new` allocation, not
+on a niche path. Fix layer: the registration site that declares
+`verum_internal_close` / `verum_internal_*` wrappers with the wrong
+return type must reconcile with the `i64`-ABI invariant declared by
+`crates/verum_codegen/src/llvm/runtime.rs:8271+ get_or_declare_close`.
+The adopt-and-emit path there explicitly states the wrapper "returns
+i64" — so the divergence is upstream: an earlier code path is
+forward-declaring the wrapper with a void return before
+`get_or_declare_close` runs, and the i64-promotion never overwrites
+the prior signature.
+
+**Pinned by**: `regression_test.vr §B` (round-trip baseline) — pin
+fails in AOT, passes in interp; the CROSS-TIER DIVERGENCE is itself
+the regression.
+
+### 3.6 `Heap.is_freed` returns Bool but the post-dealloc generation may not always be 0
 
 `is_freed` (line 404) checks `actual_gen != self.generation`. After a
 properly-tracked `cbgr_dealloc`, the header's generation is incremented
@@ -162,3 +200,4 @@ inequality, while a *strict* "incremented past" would be
 | §C | Per-test status appendix below this section | ~5 min after §A,§B | blocked on §A |
 | §D | `Heap.is_freed` strict-greater-than semantics audit + wrap-around handling | ~30 min | open |
 | §E | Hoist `- 32` literal CBGR header offset into a single const (see §3.2) | ~20 min | open |
+| §F | Fix AOT `call_native_i64(lr): callee returns void` on `Heap.new` (see §3.5) — reconcile the forward-declare path with `get_or_declare_close`'s i64 ABI in `crates/verum_codegen/src/llvm/runtime.rs:8271+` | ~2 h (kernel-level) | open |
