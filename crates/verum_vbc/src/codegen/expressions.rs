@@ -3944,17 +3944,6 @@ impl VbcCodegen {
         func: &Expr,
         args: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
-        if std::env::var("VERUM_TRACE_MUTSELF").is_ok() {
-            if let ExprKind::Path(path) = &func.kind {
-                let name = path.segments.iter().filter_map(|s| match s {
-                    verum_ast::ty::PathSegment::Name(i) => Some(i.name.as_str()),
-                    _ => None,
-                }).collect::<Vec<_>>().join(".");
-                if name.contains("make_ascii_uppercase") {
-                    eprintln!("[mutself-call] compile_call func='{}' args.len={}", name, args.len());
-                }
-            }
-        }
         // Get function name from path. Also remember whether the path was
         // rooted at a module-path keyword (`super`, `cog`, or `.`) — those
         // segments don't appear in any registered function name, but they
@@ -6726,18 +6715,6 @@ impl VbcCodegen {
         args: &verum_common::List<Expr>,
         resolved_target: Option<&verum_ast::expr::ResolvedCallTarget>,
     ) -> CodegenResult<Option<Reg>> {
-        if std::env::var("VERUM_TRACE_MUTSELF").is_ok() && method.name == "make_ascii_uppercase" {
-            eprintln!(
-                "[mutself-entry] compile_method_call method='{}' resolved={:?}",
-                method.name,
-                resolved_target.map(|t| match t {
-                    verum_ast::expr::ResolvedCallTarget::StaticCall { qualified_name } =>
-                        format!("StaticCall({})", qualified_name),
-                    verum_ast::expr::ResolvedCallTarget::VariantCtor { tag, parent_type_name } =>
-                        format!("VariantCtor(tag={}, parent={:?})", tag, parent_type_name),
-                })
-            );
-        }
         // ──────────────────────────────────────────────────────────
         // Phase 1: Pre-resolved fast path.
         // ──────────────────────────────────────────────────────────
@@ -8783,16 +8760,6 @@ impl VbcCodegen {
         // method to write back to the caller's variable.
         let actual_receiver =
             if let Some(func_info) = self.ctx.lookup_function(&effective_method_name) {
-                if std::env::var("VERUM_TRACE_MUTSELF").is_ok()
-                    && effective_method_name.contains("make_ascii_uppercase")
-                {
-                    eprintln!(
-                        "[mutself-callm-check] effective='{}' takes_self_mut_ref={} param_count={}",
-                        effective_method_name,
-                        func_info.takes_self_mut_ref,
-                        func_info.param_count
-                    );
-                }
                 if func_info.takes_self_mut_ref {
                     // Create a mutable reference to the receiver
                     let ref_reg = self.ctx.alloc_temp();
@@ -8806,14 +8773,6 @@ impl VbcCodegen {
                     receiver_reg
                 }
             } else {
-                if std::env::var("VERUM_TRACE_MUTSELF").is_ok()
-                    && effective_method_name.contains("make_ascii_uppercase")
-                {
-                    eprintln!(
-                        "[mutself-callm-check] effective='{}' NOT FOUND",
-                        effective_method_name
-                    );
-                }
                 receiver_reg
             };
 
@@ -15569,15 +15528,6 @@ impl VbcCodegen {
                     .type_field_count(&type_name)
                     .unwrap_or(fields.len() as u32);
 
-                if std::env::var("VERUM_TRACE_RECORD_ALLOC").is_ok()
-                    && (type_name == "Timeout" || type_name == "Delay")
-                {
-                    let layout = self.type_field_layouts.get(&type_name);
-                    eprintln!(
-                        "[record-alloc] type='{}' type_id={} alloc_slots={} literal_fields={} layout={:?}",
-                        type_name, type_id, alloc_slots, fields.len(), layout
-                    );
-                }
                 self.ctx.emit(Instruction::New {
                     dst: result,
                     type_id,
