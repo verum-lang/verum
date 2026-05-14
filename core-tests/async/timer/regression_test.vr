@@ -43,16 +43,54 @@ fn regression_timer_sleep_ms_factory_does_not_panic() {
 }
 
 // =============================================================================
-// §B — task #17 — TimerInterval.period() recursion
+// §B — task #17 CLOSED — TimerInterval.period() field-vs-method
+//                       shadowing no longer recurses
 // =============================================================================
+//
+// CLOSED 2026-05-15.  The defect was originally observed as a
+// StackOverflow when `it.period()` was called — the body
+// `self.period` inside the `period(&self) -> Duration` getter
+// method was dispatching as a recursive `self.period()` method
+// call instead of as a field access, blowing the stack.
+//
+// Verified at 2026-05-15: `it.period()` returns the stored Duration
+// without recursing.  Likely closed indirectly by one of the
+// recent codegen fixes that disambiguates field-access from
+// method-call in the user-side `compile_field_access` path —
+// candidates include the field-receiver writeback in
+// `compile_method_call` (task #11 closer) and the user-side
+// dispatch refinements landed by parallel agents.
+//
+// Architectural rule pinned: bare `self.X` (no parens) inside a
+// method body MUST resolve to field access when X names a field
+// of the impl's parent type — even when X also names a method on
+// the same type.  Only `self.X()` (with parens) resolves to a
+// method call.  The pattern is canonical for getter idioms (e.g.
+// `period: Duration` field + `period(&self) -> Duration` getter)
+// and was widely used in stdlib (Duration, Instant, Throttle,
+// Debounce, TimerInterval).
+//
+// Companion user-side reproducer that mirrors this shape is also
+// stable as of 2026-05-15:
+//
+//   type T is { period: Int };
+//   implement T {
+//     public fn period(&self) -> Int { self.period }
+//   }
+//   let t = T { period: 42 };
+//   assert_eq(t.period(), 42);   // method — works
+//   assert_eq(t.period,   42);   // field  — works
 
 @test
-@ignore
 fn regression_timer_interval_period_getter_does_not_stack_overflow() {
-    let p = Duration.from_secs(1);
+    // `Duration.from_secs(N)` is still gated by task #15 (archive-
+    // precompiled wrapper-fn return-register corruption); use the
+    // direct `Duration.secs(N)` form to skirt that pin.
+    let p = Duration.secs(1);
     let it = TimerInterval.new(p);
-    // Today: stack-overflow because `self.period` inside the method
-    // body dispatches to `self.period()` recursively.
+    // The .eq(&p) tail compares the returned Duration to the
+    // stored one; if the body had recursed it would have stack-
+    // overflowed long before reaching the comparison.
     assert(it.period().eq(&p));
 }
 
