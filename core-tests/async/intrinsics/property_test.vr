@@ -1,0 +1,99 @@
+// =============================================================================
+// core-tests/async/intrinsics/property_test.vr
+// =============================================================================
+//
+// Algebraic invariants for `core.async.intrinsics`.
+//
+//   §A — Executor.current() and Executor.in_async_context() always
+//        agree (None ⇔ false, Some ⇔ true).
+//   §B — future_poll_sync on a ReadyFuture is *idempotent* across
+//        repeated polls of separate ReadyFuture instances of the
+//        same payload.
+//   §C — IntrinsicsYieldNow exhibits a two-state lifecycle —
+//        Pending then Ready(()) — independent of the waker used.
+// =============================================================================
+
+mount core.async.intrinsics.{
+    Executor, IntrinsicsYieldNow, yield_now, future_poll_sync,
+};
+mount core.async.poll.{Poll};
+mount core.async.future.{ready, ReadyFuture};
+mount core.async.waker.{Context, noop_waker};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — Executor introspection coherence
+// =============================================================================
+
+@test
+fn property_intrinsics_executor_current_in_async_context_coherent() {
+    let in_ctx = Executor.in_async_context();
+    let cur    = Executor.current();
+    match cur {
+        Some(_) => assert_eq(in_ctx, true),
+        None    => assert_eq(in_ctx, false),
+    }
+}
+
+// =============================================================================
+// §B — future_poll_sync on ReadyFuture is deterministic over payloads
+// =============================================================================
+
+@test
+fn property_intrinsics_future_poll_sync_ready_int_round_trip_exhaustive() {
+    let payloads: List<Int> = [-1, 0, 1, 42, 99, 100000];
+    for v in payloads.iter() {
+        let mut f = ready(*v);
+        match future_poll_sync(&mut f) {
+            Some(x) => assert_eq(x, *v),
+            None => assert(false),
+        }
+    }
+}
+
+@test
+fn property_intrinsics_future_poll_sync_ready_text_round_trip_exhaustive() {
+    let payloads: List<Text> = ["", "a", "hello", "non-ascii: αβγ"];
+    for v in payloads.iter() {
+        let mut f: ReadyFuture<Text> = ready((*v).clone());
+        match future_poll_sync(&mut f) {
+            Some(x) => assert_eq(x, *v),
+            None => assert(false),
+        }
+    }
+}
+
+// =============================================================================
+// §C — IntrinsicsYieldNow two-state lifecycle exhaustive
+// =============================================================================
+
+@test
+fn property_intrinsics_yield_now_lifecycle_is_pending_then_ready() {
+    let mut y = yield_now();
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    // State 0 → Pending, state advances to "yielded=true"
+    match y.poll(&mut cx) {
+        Poll.Pending => assert(true),
+        Poll.Ready(_) => assert(false),
+    }
+    assert_eq(y.yielded, true);
+
+    // State 1 → Ready(()), state remains "yielded=true"
+    match y.poll(&mut cx) {
+        Poll.Ready(()) => assert(true),
+        Poll.Pending => assert(false),
+    }
+    assert_eq(y.yielded, true);
+}
+
+@test
+fn property_intrinsics_yield_now_factory_and_new_are_equivalent_initial_state() {
+    let a: IntrinsicsYieldNow = IntrinsicsYieldNow.new();
+    let b: IntrinsicsYieldNow = yield_now();
+    assert_eq(a.yielded, b.yielded);
+}
+
+fn main() {}

@@ -1,0 +1,144 @@
+// =============================================================================
+// core-tests/async/intrinsics/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.async.intrinsics` — the low-level intrinsic
+// API that bridges Verum's async surface to the runtime.  Three
+// classes of API live here:
+//
+//   1. `Executor`             — opaque handle + introspection
+//   2. `future_poll_sync`     — synchronous one-shot Future driver
+//   3. `IntrinsicsYieldNow`   — yields once, then Ready(())
+//
+// The spawn family (`spawn_with_env`, `executor_spawn`,
+// `executor_block_on`) consists of @intrinsic functions whose
+// runtime side-effects depend on an executor being live — they
+// are covered by integration tests once executor support lands.
+// =============================================================================
+
+mount core.async.intrinsics.{
+    Executor, IntrinsicsYieldNow, yield_now, future_poll_sync,
+};
+mount core.async.poll.{Poll};
+mount core.async.future.{Future, ready, ReadyFuture};
+mount core.async.waker.{Context, noop_waker};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Executor handle — construction + introspection
+// =============================================================================
+
+@test
+fn test_intrinsics_executor_record_literal_construction() {
+    // `Executor` is a public record with a single Int handle field.
+    // Construction must succeed even when no runtime is live.
+    let e: Executor = Executor { handle: 0 };
+    assert_eq(e.handle, 0);
+}
+
+@test
+fn test_intrinsics_executor_handle_round_trip() {
+    let e: Executor = Executor { handle: 0x4242 };
+    assert_eq(e.handle, 0x4242);
+}
+
+@test
+fn test_intrinsics_executor_in_async_context_outside_runtime_is_false() {
+    // Tests run *outside* any executor; the introspection helper
+    // must report that fact without panicking.
+    let inside = Executor.in_async_context();
+    assert_eq(inside, false);
+}
+
+@test
+fn test_intrinsics_executor_current_outside_runtime_is_none() {
+    // The flip side: Executor.current() returns None outside an
+    // executor.  Maintaining this invariant means callers can safely
+    // probe for an executor without crashing.
+    match Executor.current() {
+        Some(_) => assert(false),
+        None => assert(true),
+    }
+}
+
+// =============================================================================
+// Section 2: future_poll_sync — synchronous one-shot driver
+// =============================================================================
+
+@test
+fn test_intrinsics_future_poll_sync_ready_future_returns_some_value() {
+    let mut f = ready(42);
+    match future_poll_sync(&mut f) {
+        Some(v) => assert_eq(v, 42),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_intrinsics_future_poll_sync_ready_text_payload() {
+    let mut f: ReadyFuture<Text> = ready("hello");
+    match future_poll_sync(&mut f) {
+        Some(v) => assert_eq(v, "hello"),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_intrinsics_future_poll_sync_ready_bool_payload() {
+    let mut f: ReadyFuture<Bool> = ready(true);
+    match future_poll_sync(&mut f) {
+        Some(v) => assert_eq(v, true),
+        None => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 3: IntrinsicsYieldNow — yields once then Ready(())
+// =============================================================================
+
+@test
+fn test_intrinsics_yield_now_initial_state_not_yielded() {
+    let y = IntrinsicsYieldNow.new();
+    assert_eq(y.yielded, false);
+}
+
+@test
+fn test_intrinsics_yield_now_factory_function_returns_fresh_instance() {
+    // `yield_now()` is the public factory; must equal a fresh
+    // `IntrinsicsYieldNow.new()` in initial state.
+    let y = yield_now();
+    assert_eq(y.yielded, false);
+}
+
+@test
+fn test_intrinsics_yield_now_first_poll_yields_pending_and_marks_state() {
+    let mut y = yield_now();
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+    match y.poll(&mut cx) {
+        Poll.Pending => assert(true),
+        Poll.Ready(_) => assert(false),
+    }
+    // After first poll the future must remember it has yielded.
+    assert_eq(y.yielded, true);
+}
+
+@test
+fn test_intrinsics_yield_now_second_poll_yields_ready_unit() {
+    let mut y = yield_now();
+    let waker = noop_waker();
+    let mut cx = Context.from_waker(&waker);
+
+    // First poll — Pending.
+    match y.poll(&mut cx) {
+        Poll.Pending => assert(true),
+        Poll.Ready(_) => assert(false),
+    }
+    // Second poll — Ready(()).
+    match y.poll(&mut cx) {
+        Poll.Ready(()) => assert(true),
+        Poll.Pending => assert(false),
+    }
+}
+
+fn main() {}
