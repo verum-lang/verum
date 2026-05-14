@@ -316,10 +316,36 @@ implement<K: Hash + Eq, V> VacantEntry<K, V> {
 // =============================================================================
 
 // Hash map with Robin Hood hashing.
+//
+// Field-ordering invariant — load-bearing across the whole stdlib +
+// VBC runtime boundary.
+//
+// The VBC runtime intercepts at `Map.new()` / `Map.with_capacity()`
+// (see `crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs`)
+// allocate the canonical heap object as
+// `[len@slot0, cap@slot1, entries_ptr@slot2, tombstones@slot3]`. Every
+// runtime intercept that reads internal state (insert / contains_key /
+// remove / clear / get / len / iter / …) inspects those exact slot
+// indices.
+//
+// Codegen, in turn, resolves `self.<field>` against this type-decl's
+// field order — emit `GetF { field: N }` where N is the position here.
+//
+// To keep "intercepted-method dispatch" and "stdlib-body field access"
+// in perfect agreement, the type-decl field order MUST match the
+// runtime intercept slot order: len, cap, entries, tombstones. Any
+// other order makes `self.entries` resolve to a different slot than
+// the intercepts touch, corrupting state across the two views of the
+// same heap object (SIGSEGV when an unintercepted body dereferences
+// `self.entries` against an Int sitting in slot 0).
 public type Map<K: Hash + Eq, V> is {
-    entries: &unsafe Slot<K, V>,
+    // Number of live entries (slot 0 — matches runtime intercept).
     len: Int,
+    // Allocated table capacity, power of 2 (slot 1).
     cap: Int,
+    // Pointer to the entries array (slot 2).
+    entries: &unsafe Slot<K, V>,
+    // Number of tombstoned slots — drives `resize` accounting (slot 3).
     tombstones: Int,
 };
 

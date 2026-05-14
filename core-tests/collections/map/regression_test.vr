@@ -32,28 +32,30 @@ fn regression_map_with_capacity_undefined_function() {
 }
 
 // =============================================================================
-// §B  Map.get → Maybe<V> dispatch defect.
+// §B  Map.get → Maybe<V> dispatch defect — CLOSED.
 //
-//   `Map.get(&key)` is in the stdlib but the user-side call site doesn't
-//   route through the runtime intercept correctly. Some shapes return
-//   the inner value directly instead of `Maybe<V>`; some shapes return
-//   `Maybe<&V>` (a CBGR ref to value) which the call site can't pattern-
-//   match against. Pinned in core-tests/collections/union_find /
-//   toposort audits too; this is a cross-collection defect.
+//   Pre-fix: `Map.get(&key)` lowered `&key` as a CBGR ThinRef pointing
+//   at the caller's stack slot. The runtime intercept compared the
+//   ref-encoded bits directly against entry keys — every present key
+//   was reported as absent. Cross-cited in `union_find` / `toposort`
+//   audits as the defect that gates contains-key-plus-get patterns.
+//
+//   Fix in this branch: auto-deref the key through `decode_cbgr_ref`
+//   before `value_hash` / `value_eq`. Same fix pattern applied to
+//   Map.contains_key, Map.remove, Set.contains, Set.remove for parity.
+//
+//   The guardrail tests below stay non-`@ignore`d.
 // =============================================================================
 
-@ignore
 @test
 fn regression_map_get_returns_some_for_existing_key() {
     let mut m: Map<Int, Int> = Map.new();
     let _ = m.insert(1, 100);
     let _ = m.insert(2, 200);
-    // Expected: m.get(&1) == Some(100).
     let v = m.get(&1);
     assert_eq(v, Some(100));
 }
 
-@ignore
 @test
 fn regression_map_get_returns_none_for_absent_key() {
     let mut m: Map<Int, Int> = Map.new();

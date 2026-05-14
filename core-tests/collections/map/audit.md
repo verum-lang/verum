@@ -5,10 +5,23 @@ Robin Hood hash map).
 
 ## Status
 
-**partial** — Unit / property / integration coverage targets the
-runtime-intercepted API (new, insert, contains_key, len, remove, clear).
-`Map.get → Maybe<V>` is pinned in regression §B (cross-collection defect
-class). `Map.iter` shape is pinned in §C as a guardrail.
+**partial** — Unit / property / integration coverage spans the full
+runtime-intercepted API (new, insert, contains_key, get → Maybe<V>,
+remove, clear, len). Two fundamental fixes landed in this branch:
+
+* **Layout-drift CLOSED**: stdlib type decl reordered to
+  `{ len, cap, entries, tombstones }` to match the VBC runtime
+  intercept slot allocation `[len@0, cap@1, entries_ptr@2,
+  tombstones@3]`. Runtime allocation extended from 3 slots to 4 slots
+  so the stdlib `tombstones`-using resize path agrees with the
+  intercept-allocated heap object.
+* **Map.get(&key) CLOSED**: auto-deref CBGR-ref key in the intercept's
+  `value_hash` / `value_eq` path. Mirror fix applied to Map.contains_key
+  / Map.remove / Set.contains / Set.remove. Same defect class as the
+  earlier List.contains needle deref fix.
+
+The Map.get fix unblocks the union_find + toposort regression cascade
+that pinned this defect cross-collection.
 
 ## 1. Cross-stdlib usage
 
