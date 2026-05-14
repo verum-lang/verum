@@ -18,13 +18,12 @@ mount core.collections.list.List;
 fn property_semaphore_error_is_closed_partition() {
     // SemaphoreError today has exactly one variant, `Closed`.  Pin
     // the partition so that future additions are forced to update
-    // this test and the public-API audit.  Uses match-arm
-    // classification (the `is`-operator path is broken on
-    // single-variant sums — task #13).
+    // this test and the public-API audit.  Task #13 CLOSED
+    // 2026-05-15 — single-variant `is`-operator now works
+    // correctly, so the natural `e is SemaphoreError.Closed`
+    // classifier replaces the match-arm workaround.
     fn is_closed(e: SemaphoreError) -> Bool {
-        match e {
-            SemaphoreError.Closed => true,
-        }
+        e is SemaphoreError.Closed
     }
     let xs: List<SemaphoreError> = [
         SemaphoreError.Closed,

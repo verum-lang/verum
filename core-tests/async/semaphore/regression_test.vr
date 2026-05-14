@@ -19,13 +19,52 @@ mount core.base.maybe.{Maybe, Some, None};
 // §A — task #12 — AsyncSemaphore.new null-derefs through AtomicInt.swap
 // =============================================================================
 
-// §B — task #13 — `is`-operator returns false for the only variant of
-// a single-variant sum type.  Construction works (`SemaphoreError.Closed`
-// returns a valid value), match arms work, Eq.eq works — but
-// `e is SemaphoreError.Closed` returns false.
+// §B — task #13 CLOSED — `is`-operator on single-variant sum
+//
+// CLOSED 2026-05-15 by an architectural fix in the parser
+// (`crates/verum_fast_parser/src/decl.rs::parse_type_decl_body`).
+//
+// **Root cause (architectural)**: per `grammar/verum.ebnf` §2.4,
+// the `type X = Y;` form (with the `=` sigil) is a TYPE ALIAS, and
+// the `type X is Y;` form (with the `is` sigil) is a SUM-TYPE
+// declaration whose `variant_list` production accepts a single
+// variant without the leading `|`:
+//
+//     variant_list = [ '|' ] , variant , { '|' , variant } ;
+//     type_alias   = 'type' , identifier , [ generics ]
+//                  , [ ':' , bounds ] , '=' , type_expr , ';' ;
+//
+// Pre-fix the parser collapsed `type X is OnlyVariant;` (bare
+// identifier, no payload, no leading `|`) into
+// `TypeDeclBody::Alias(OnlyVariant)` — silently turning a
+// single-variant sum into an alias to a (typically non-existent)
+// type.  The downstream typechecker / codegen / runtime then saw
+// `SemaphoreError` as an alias, NOT as a variant type:
+//   - `match e { SemaphoreError.Closed => … }` still worked
+//     because the destructure-tag path tolerated alias resolution.
+//   - `e.eq(&other)` worked because Eq was an inherent impl.
+//   - `e is SemaphoreError.Closed` returned `false` because the
+//     `is`-operator path strictly required a Type::Variant.
+//
+// The fix changes the single-bare-name `is`-form arm at
+// `decl.rs:3384` to emit `TypeDeclBody::Variant(vec![variant])`
+// instead of `TypeDeclBody::Alias`.  Both forms produce identical
+// AST:
+//
+//     type X is | Closed;     -- explicit leading pipe
+//     type X is Closed;       -- now equivalent to the leading-pipe form
+//
+// Closes the SemaphoreError / ChannelError / Closed-marker idiom
+// across the entire stdlib without a stdlib-source change.
+//
+// **Architectural rule pinned**: the `is` / `=` sigils in type
+// declarations are NEVER interchangeable.  `is` introduces a
+// structural type body (record / variant / quotient / sigma);
+// `=` introduces a name alias.  The parser MUST honour that
+// invariant — any future "is-form right-hand side looks like a
+// type alias" optimisation MUST go through `=`, not `is`.
 
 @test
-@ignore
 fn regression_semaphore_error_is_closed_single_variant() {
     let e: SemaphoreError = SemaphoreError.Closed;
     assert(e is SemaphoreError.Closed);

@@ -22,10 +22,13 @@ mount core.async.semaphore.{SemaphoreError};
 
 @test
 fn test_semaphore_error_closed_construction() {
-    // Use match-arm classification — the bare `is` dispatch on a
-    // single-variant sum returns false (defect, task #13), but the
-    // match arm still routes correctly.
+    // Task #13 CLOSED 2026-05-15 — `is`-operator on a single-variant
+    // sum now resolves correctly.  See regression_test.vr §B for the
+    // architectural rationale (parser distinguishes `is`-form sum
+    // declarations from `=`-form aliases per grammar/verum.ebnf §2.4).
     let e: SemaphoreError = SemaphoreError.Closed;
+    assert(e is SemaphoreError.Closed);
+    // Also confirm the match-arm path still routes (it always did).
     let routed = match e {
         SemaphoreError.Closed => true,
     };
