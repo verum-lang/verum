@@ -52,13 +52,11 @@ fn regression_a_sql_garbage_pinned() {
 // with random regex-engine error text surfacing as a method name.
 // =============================================================================
 
-@ignore
 @test
 fn regression_b_json_object_pinned() {
     assert(validate_json("{}"));
 }
 
-@ignore
 @test
 fn regression_b_json_array_pinned() {
     assert(validate_json("[1, 2]"));
