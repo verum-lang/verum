@@ -78,6 +78,79 @@ fn test_iterator_rebind_reverse() {
 // This is a known type inference ordering issue.
 // Workaround: Use explicit dereference (*ord).reverse()
 
+// =============================================================================
+// REGRESSION (task #8, 2026-05-14): every primitive-method intercept on
+// the interpreter side (Int.cmp/eq/ne/lt/le/gt/ge, Bool.* mirrors, Float.*,
+// Byte.*, Char.*, Int32.*, UInt64.*) handled CBGR REGISTER refs but missed
+// HEAP-INTERIOR refs produced by `RefListElement` / `RefField`.
+//
+// Symptom: `xs[0].cmp(&xs[1])` for `xs = [5, 2]` returned `Less` instead of
+// `Greater` because the intercept fell through to `other_val.as_i64()` on a
+// `Value::from_ptr(elem_ptr)` and ended up comparing the receiver `5`
+// against the pointer ADDRESS (a large positive Int).
+//
+// Blast radius: bubble-sort on indexed lists, every `for byte in bytes`
+// comparison, every `cmp` over field-borrowed primitives. Closed by a
+// single canonical helper `resolve_arg_value(state, val)` in
+// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/cbgr_helpers.rs`
+// that unifies all three ref shapes (CBGR register-ref, heap-interior ptr,
+// thin-ref) — replaces 24+ inline duplicated `if is_cbgr_ref(...) { ... }`
+// sites across the primitive intercepts in `method_dispatch.rs`.
+// =============================================================================
+
+@test
+fn regression_cmp_on_two_indexed_int_arguments() {
+    // The minimal repro: `xs[0].cmp(&xs[1])` where xs[0]=5, xs[1]=2.
+    let xs: List<Int> = [5, 2];
+    let ord = xs[0].cmp(&xs[1]);
+    assert(ord is Greater);
+}
+
+@test
+fn regression_bubble_sort_via_indexed_cmp_chain() {
+    fn bubble_sort_int(xs: &mut List<Int>) {
+        let n = xs.len();
+        let mut i = 0;
+        while i < n {
+            let mut j = 0;
+            while j + 1 < n - i {
+                // Inline-indexed-receiver + inline-indexed-arg dispatch —
+                // pre-fix this swap was unreachable because
+                // `xs[j].cmp(&xs[j+1]).is_greater()` returned false on
+                // every adjacent pair.
+                if xs[j].cmp(&xs[j + 1]).is_greater() {
+                    let tmp = xs[j];
+                    xs[j] = xs[j + 1];
+                    xs[j + 1] = tmp;
+                }
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+    }
+    let mut xs: List<Int> = [5, 2, 8, 1, 9, 3];
+    bubble_sort_int(&mut xs);
+    assert_eq(xs, [1, 2, 3, 5, 8, 9]);
+}
+
+@test
+fn regression_eq_on_two_indexed_int_arguments() {
+    let xs: List<Int> = [7, 7, 3];
+    assert(xs[0].eq(&xs[1]));   // 7 == 7
+    assert(!xs[0].eq(&xs[2]));  // 7 != 3
+}
+
+@test
+fn regression_lt_le_gt_ge_on_indexed_arguments() {
+    let xs: List<Int> = [2, 5];
+    assert(xs[0].lt(&xs[1]));   //  2 <  5
+    assert(xs[0].le(&xs[1]));   //  2 <= 5
+    assert(!xs[1].lt(&xs[0]));  // !(5 <  2)
+    assert(xs[1].gt(&xs[0]));   //  5 >  2
+    assert(xs[1].ge(&xs[0]));   //  5 >= 2
+    assert(xs[0].le(&xs[0]));   //  2 <= 2
+}
+
 fn main() {
     // Tests run via @test annotations
 }

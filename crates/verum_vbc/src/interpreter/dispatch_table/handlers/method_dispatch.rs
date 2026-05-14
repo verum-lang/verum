@@ -4390,8 +4390,16 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_ptr(iter_obj.as_ptr() as *mut u8)));
                 }
                 "contains" | "contains_key" if is_map => {
+                    // CBGR-ref auto-deref — see Map.get intercept below
+                    // for the explanation of the defect class.
                     let caller_base = state.reg_base();
-                    let key = state.registers.get(caller_base, Reg(args.start.0));
+                    let key_raw = state.registers.get(caller_base, Reg(args.start.0));
+                    let key = if is_cbgr_ref(&key_raw) {
+                        let (abs_index, _) = decode_cbgr_ref(key_raw.as_i64());
+                        state.registers.get_absolute(abs_index)
+                    } else {
+                        key_raw
+                    };
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     // Empty-map / cap=0 guard — return false instead of
@@ -4540,8 +4548,15 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_bool(inserted)));
                 }
                 "contains" if is_set => {
+                    // CBGR-ref auto-deref — same defect class as Map.get.
                     let caller_base = state.reg_base();
-                    let val = state.registers.get(caller_base, Reg(args.start.0));
+                    let val_raw = state.registers.get(caller_base, Reg(args.start.0));
+                    let val = if is_cbgr_ref(&val_raw) {
+                        let (abs_index, _) = decode_cbgr_ref(val_raw.as_i64());
+                        state.registers.get_absolute(abs_index)
+                    } else {
+                        val_raw
+                    };
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     // Empty-set guard.
@@ -4840,8 +4855,16 @@ pub(super) fn dispatch_primitive_method(
                 "remove" if is_map => {
                     // Map.remove(key) -> Maybe<V>
                     // Returns Some(old_value) if key existed, None otherwise
+                    //
+                    // CBGR-ref auto-deref — see Map.get intercept above.
                     let caller_base = state.reg_base();
-                    let key = state.registers.get(caller_base, Reg(args.start.0));
+                    let key_raw = state.registers.get(caller_base, Reg(args.start.0));
+                    let key = if is_cbgr_ref(&key_raw) {
+                        let (abs_index, _) = decode_cbgr_ref(key_raw.as_i64());
+                        state.registers.get_absolute(abs_index)
+                    } else {
+                        key_raw
+                    };
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
@@ -5095,8 +5118,16 @@ pub(super) fn dispatch_primitive_method(
                 "remove" if is_set => {
                     // Set.remove(element) -> Bool
                     // Returns true if element was present, false otherwise
+                    //
+                    // CBGR-ref auto-deref — same defect class as Map.get.
                     let caller_base = state.reg_base();
-                    let val = state.registers.get(caller_base, Reg(args.start.0));
+                    let val_raw = state.registers.get(caller_base, Reg(args.start.0));
+                    let val = if is_cbgr_ref(&val_raw) {
+                        let (abs_index, _) = decode_cbgr_ref(val_raw.as_i64());
+                        state.registers.get_absolute(abs_index)
+                    } else {
+                        val_raw
+                    };
                     let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
