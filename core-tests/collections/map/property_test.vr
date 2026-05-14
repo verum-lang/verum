@@ -1,0 +1,111 @@
+// =============================================================================
+// core-tests/collections/map/property_test.vr
+// =============================================================================
+//
+// Algebraic + structural laws for `core.collections.map`.
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// §1  insert / contains_key round-trip
+// =============================================================================
+
+@test
+fn property_insert_then_contains_key_is_true() {
+    let mut m: Map<Int, Int> = Map.new();
+    let mut i = 0;
+    while i < 10 {
+        let _ = m.insert(i, i * 100);
+        assert(m.contains_key(i));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §2  insert idempotence on key — same key inserts don't grow len
+// =============================================================================
+
+@test
+fn property_insert_on_existing_key_preserves_len() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(7, 100);
+    let len_before = m.len();
+    let _ = m.insert(7, 200);
+    let _ = m.insert(7, 300);
+    let _ = m.insert(7, 400);
+    assert_eq(m.len(), len_before);
+}
+
+// =============================================================================
+// §3  remove of unobserved key is a no-op
+// =============================================================================
+
+@test
+fn property_remove_unobserved_key_is_identity() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    let _ = m.insert(2, 20);
+    let len_before = m.len();
+    let _ = m.remove(99);
+    assert_eq(m.len(), len_before);
+    assert(m.contains_key(1));
+    assert(m.contains_key(2));
+}
+
+// =============================================================================
+// §4  len monotonicity — non-decreasing on insert of new key, non-
+//     increasing on remove of existing key
+// =============================================================================
+
+@test
+fn property_len_non_decreasing_on_insert_distinct_keys() {
+    let mut m: Map<Int, Int> = Map.new();
+    let mut prev_len = m.len();
+    let mut i = 0;
+    while i < 12 {
+        let _ = m.insert(i, i * 10);
+        assert(m.len() >= prev_len);
+        prev_len = m.len();
+        i = i + 1;
+    }
+}
+
+@test
+fn property_len_non_increasing_on_remove() {
+    let mut m: Map<Int, Int> = Map.new();
+    let mut i = 0;
+    while i < 8 {
+        let _ = m.insert(i, i);
+        i = i + 1;
+    }
+    let mut prev_len = m.len();
+    let mut j = 0;
+    while j < 8 {
+        let _ = m.remove(j);
+        assert(m.len() <= prev_len);
+        prev_len = m.len();
+        j = j + 1;
+    }
+    assert_eq(m.len(), 0);
+}
+
+// =============================================================================
+// §5  clear zeroes len; idempotent
+// =============================================================================
+
+@test
+fn property_clear_is_idempotent() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    let _ = m.insert(2, 20);
+    let _ = m.insert(3, 30);
+    m.clear();
+    let after_first = m.len();
+    m.clear();
+    let after_second = m.len();
+    assert_eq(after_first, 0);
+    assert_eq(after_second, 0);
+}
+
+fn main() {}

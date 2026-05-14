@@ -1,0 +1,110 @@
+// =============================================================================
+// core-tests/collections/map/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.collections.map`. Map<K, V> is the
+// canonical key-value associative store — these tests exercise it in
+// counting / lookup-table / sparse-array shapes.
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// §1  Histogram — count occurrences via insert / lookup-update / insert
+// =============================================================================
+
+@test
+fn integration_map_as_histogram_counts_occurrences() {
+    // We can't yet test Map.get → Maybe<V> (deferred — see audit) so
+    // we test the indirect contract: insert(k, v) overwrites; len
+    // counts distinct keys; contains_key gates the "is observed" check.
+    let mut h: Map<Int, Int> = Map.new();
+    let _ = h.insert(1, 1);
+    let _ = h.insert(2, 1);
+    let _ = h.insert(1, 2);  // overwrite 1's value to 2 (count = 2)
+    let _ = h.insert(3, 1);
+    let _ = h.insert(2, 2);  // overwrite 2's value to 2 (count = 2)
+    let _ = h.insert(2, 3);  // overwrite 2's value to 3 (count = 3)
+    // Distinct keys: 1, 2, 3 — len reflects 3.
+    assert_eq(h.len(), 3);
+    assert(h.contains_key(1));
+    assert(h.contains_key(2));
+    assert(h.contains_key(3));
+}
+
+// =============================================================================
+// §2  Lookup table with remove → re-insert cycle
+// =============================================================================
+
+@test
+fn integration_map_remove_reinsert_cycle() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 100);
+    let _ = m.insert(2, 200);
+    let _ = m.insert(3, 300);
+    // Drop the middle entry.
+    let _ = m.remove(2);
+    assert_eq(m.len(), 2);
+    assert(!m.contains_key(2));
+    // Re-insert with a different value.
+    let _ = m.insert(2, 999);
+    assert_eq(m.len(), 3);
+    assert(m.contains_key(2));
+}
+
+// =============================================================================
+// §3  Sparse array — Map<Int, V> with non-contiguous Int keys
+// =============================================================================
+
+@test
+fn integration_map_as_sparse_array() {
+    let mut sparse: Map<Int, Int> = Map.new();
+    let _ = sparse.insert(0, 10);
+    let _ = sparse.insert(100, 20);
+    let _ = sparse.insert(10000, 30);
+    let _ = sparse.insert(-5, 40);
+    assert_eq(sparse.len(), 4);
+    assert(sparse.contains_key(0));
+    assert(sparse.contains_key(100));
+    assert(sparse.contains_key(10000));
+    assert(sparse.contains_key(-5));
+    assert(!sparse.contains_key(50));
+}
+
+// =============================================================================
+// §4  Two independent maps don't share state
+// =============================================================================
+
+@test
+fn integration_two_maps_are_independent() {
+    let mut a: Map<Int, Int> = Map.new();
+    let mut b: Map<Int, Int> = Map.new();
+    let _ = a.insert(1, 100);
+    let _ = b.insert(99, 9999);
+    assert_eq(a.len(), 1);
+    assert_eq(b.len(), 1);
+    assert(a.contains_key(1));
+    assert(b.contains_key(99));
+    assert(!a.contains_key(99));
+    assert(!b.contains_key(1));
+}
+
+// =============================================================================
+// §5  Clear + re-populate preserves the map shape but resets contents
+// =============================================================================
+
+@test
+fn integration_map_clear_then_repopulate() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 100);
+    let _ = m.insert(2, 200);
+    let _ = m.insert(3, 300);
+    m.clear();
+    assert_eq(m.len(), 0);
+    let _ = m.insert(99, 9900);
+    assert_eq(m.len(), 1);
+    assert(m.contains_key(99));
+    assert(!m.contains_key(1));
+}
+
+fn main() {}

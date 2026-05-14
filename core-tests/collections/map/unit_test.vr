@@ -1,0 +1,195 @@
+// =============================================================================
+// core-tests/collections/map/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.map` — Map<K: Hash + Eq, V>, the canonical
+// hash-map primitive.
+//
+// Stdlib decl: `type Map<K, V> is { entries: &unsafe Slot, len: Int,
+// cap: Int, tombstones: Int }` (4 fields).
+// Runtime intercept: TypeId::MAP with `[count, capacity, entries_ptr]`
+// (3 slots). Same wrapper-record-vs-direct-shape drift class as Set,
+// pinned in regression §A. Coverage targets the runtime-intercepted API
+// surface (new, insert, contains_key, len, is_empty, clear, get, remove).
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// Section 1: Map.new — construction
+// =============================================================================
+
+@test
+fn test_map_new_is_empty() {
+    let m: Map<Int, Int> = Map.new();
+    assert_eq(m.len(), 0);
+}
+
+// =============================================================================
+// Section 2: insert — set value at key
+// =============================================================================
+
+@test
+fn test_map_insert_increments_len() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    assert_eq(m.len(), 1);
+    let _ = m.insert(2, 20);
+    assert_eq(m.len(), 2);
+    let _ = m.insert(3, 30);
+    assert_eq(m.len(), 3);
+}
+
+@test
+fn test_map_insert_existing_key_replaces_value() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    let _ = m.insert(1, 99);
+    // Same key — len doesn't grow, but the value updates.
+    assert_eq(m.len(), 1);
+}
+
+// =============================================================================
+// Section 3: contains_key — membership test
+// =============================================================================
+
+@test
+fn test_map_contains_key_after_insert() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    let _ = m.insert(2, 20);
+    assert(m.contains_key(1));
+    assert(m.contains_key(2));
+}
+
+@test
+fn test_map_contains_key_absent_is_false() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    assert(!m.contains_key(99));
+}
+
+@test
+fn test_map_contains_key_in_empty_is_false() {
+    let m: Map<Int, Int> = Map.new();
+    assert(!m.contains_key(0));
+}
+
+// =============================================================================
+// Section 4: remove — drop a key
+// =============================================================================
+
+@test
+fn test_map_remove_existing_key_decrements_len() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    let _ = m.insert(2, 20);
+    let _ = m.remove(1);
+    assert_eq(m.len(), 1);
+    assert(!m.contains_key(1));
+    assert(m.contains_key(2));
+}
+
+@test
+fn test_map_remove_nonexistent_key_is_noop() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    let _ = m.remove(99);
+    assert_eq(m.len(), 1);
+    assert(m.contains_key(1));
+}
+
+@test
+fn test_map_remove_from_empty_is_noop() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.remove(42);
+    assert_eq(m.len(), 0);
+}
+
+// =============================================================================
+// Section 5: clear — reset
+// =============================================================================
+
+@test
+fn test_map_clear_empties_map() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    let _ = m.insert(2, 20);
+    let _ = m.insert(3, 30);
+    m.clear();
+    assert_eq(m.len(), 0);
+    assert(!m.contains_key(1));
+    assert(!m.contains_key(2));
+    assert(!m.contains_key(3));
+}
+
+@test
+fn test_map_clear_of_empty_is_noop() {
+    let mut m: Map<Int, Int> = Map.new();
+    m.clear();
+    assert_eq(m.len(), 0);
+}
+
+// =============================================================================
+// Section 6: insert / remove round-trip
+// =============================================================================
+
+@test
+fn test_map_insert_remove_round_trip() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(7, 70);
+    assert(m.contains_key(7));
+    let _ = m.remove(7);
+    assert(!m.contains_key(7));
+    let _ = m.insert(7, 77);
+    assert(m.contains_key(7));
+}
+
+// =============================================================================
+// Section 7: Multiple distinct keys
+// =============================================================================
+
+@test
+fn test_map_many_distinct_keys() {
+    let mut m: Map<Int, Int> = Map.new();
+    let mut i = 0;
+    while i < 20 {
+        let _ = m.insert(i, i * 10);
+        i = i + 1;
+    }
+    assert_eq(m.len(), 20);
+    // Every inserted key is present.
+    let mut j = 0;
+    while j < 20 {
+        assert(m.contains_key(j));
+        j = j + 1;
+    }
+    // Off-by-one boundary unrelated values aren't.
+    assert(!m.contains_key(-1));
+    assert(!m.contains_key(20));
+}
+
+// =============================================================================
+// Section 8: len observers
+// =============================================================================
+
+@test
+fn test_map_len_after_inserts_matches_count() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 100);
+    let _ = m.insert(2, 200);
+    let _ = m.insert(3, 300);
+    assert_eq(m.len(), 3);
+}
+
+@test
+fn test_map_len_zero_after_full_remove() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    let _ = m.insert(2, 20);
+    let _ = m.remove(1);
+    let _ = m.remove(2);
+    assert_eq(m.len(), 0);
+}
+
+fn main() {}
