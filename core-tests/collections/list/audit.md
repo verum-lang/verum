@@ -7,13 +7,22 @@ gaps; defect inventory.
 
 ## Status
 
-**partial** — Unit / property / integration tests cover the API surface
-that the runtime intercepts (allocation, push/pop, get/first/last,
-contains, set, get_or, swap, insert, remove, swap_remove, clear, truncate,
-reverse, sort, capacity management). Methods that fall through to the
-stdlib body and depend on direct `self.<field>` access are pinned in
-`regression_test.vr` §B until the runtime memory-layout drift closes
-(see `Open defects` §2 below).
+**partial** — Unit / property / integration coverage now spans both the
+runtime-intercepted API surface (allocation, push/pop, get/first/last,
+contains, set, get_or, swap, insert, remove, swap_remove, clear,
+truncate, reverse, sort, capacity management) AND the stdlib-body path
+that was previously gated by the memory-layout drift (retain, resize,
+rotate_left, dedup — see unit_test.vr §10 + regression_test.vr §B).
+
+**Architectural fix landed in this branch**: the stdlib `type List<T>`
+field decl was reordered from `{ ptr, len, cap }` to `{ len, cap, ptr }`
+so codegen field-index agrees with the VBC runtime intercept's slot
+allocation `[len@0, cap@1, backing_ptr@2]`. Eliminates the entire
+class of "unintercepted method reads wrong slot" defects.
+
+Residual defects are now in adjacent layers (Clone-dispatch for
+`value.clone()` inside `fill`; ref-deref-as-value comparison inside
+`is_sorted` / `sort_by`) — pinned in regression_test.vr §D.
 
 ## 1. Cross-stdlib usage
 
@@ -59,7 +68,9 @@ slots. Tracked as §2 below.
 | Gap | Impact | Fundamental fix |
 |---|---|---|
 | Cross-module function-name table omits non-intercepted stdlib static constructors | `List.from`, `List.from_elem`, `List.of` raise `UndefinedFunction` from user code despite stdlib-internal use compiling cleanly. | Same class as Tasks #24/#25/#26. Either fold these into the dispatch-table intercept block, or close the gap in the user-side function-id remap that drops constructor IDs absent from any user-side body Call instruction. |
-| Stdlib type field order != runtime heap layout | Every unintercepted `&mut self` / `&self` method that reads internal fields misroutes — SIGSEGV (on pointer dereference), infinite loop (on len-vs-cap condition), or silent data corruption (on shift / swap arithmetic). | Three options: (a) re-declare stdlib type as `{ len, cap, ptr }` to match runtime; (b) add a Rust-side intercept for every field-accessing method (set, get_or, swap_remove, truncate, retain, fill, resize, …); (c) move runtime allocation into a stdlib code path that uses the canonical record literal `List { ptr, len, cap }` so codegen field offsets agree on a single source of truth. Option (c) is cleanest but requires changing `List.new()` / `List.with_capacity()` away from runtime-intercept to stdlib-resident with a one-time `alloc_array` call. Intermediate fix landed in this branch: (b) for set / get_or / swap_remove / truncate. |
+| Stdlib type field order != runtime heap layout — **CLOSED** | (Pre-fix) Every unintercepted `&mut self` / `&self` method that reads internal fields misrouted — SIGSEGV on pointer dereference, infinite loop on len-vs-cap condition, silent data corruption on shift / swap arithmetic. | **Landed**: re-declared stdlib type as `{ len, cap, ptr }` to match runtime intercept layout (option a). Codegen field-index now equals runtime slot index across the whole API surface. Verified by 11 newly-passing tests for retain / resize / rotate_left / dedup in unit_test.vr §10 and 4 active (non-`@ignore`d) guardrails in regression_test.vr §B. The Rust-side intercepts for set / get_or / swap_remove / truncate remain as defense-in-depth: they bypass the stdlib body entirely and serve as a guarantee that the interpreter is correct independent of any future stdlib regression. |
+| Clone-dispatch defect surfaced by `List.fill(value)` — value.clone() returns wrong Value for Int. Tracked separately in regression §D. | `xs.fill(0)` writes a wrong NaN-boxed Value into every slot. | Out of scope for the layout fix. Trace the Int Clone dispatch in `verum_vbc/intrinsics/registry.rs`. |
+| Ref-deref-as-value compare defect surfaced by `List.is_sorted` / `List.sort_by`. Tracked separately in regression §D. | `a > b` where `a, b: &Int` compares pointer addresses, not Int values. | Out of scope for the layout fix. Audit codegen for `*x > *y` vs `x > y` resolution on `&T`. |
 
 ## 4. Defect inventory
 

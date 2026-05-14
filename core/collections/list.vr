@@ -66,13 +66,44 @@ type Ordering is Less | Equal | Greater;
 // Initial capacity is 0 (no allocation until first element).
 //
 
+// Field-ordering invariant — load-bearing across the whole stdlib +
+// VBC runtime boundary.
+//
+// The VBC runtime intercepts at `List.new()` / `List.with_capacity()`
+// (see `crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs`)
+// allocate the canonical heap object as
+// `[len@slot0, cap@slot1, backing_ptr@slot2]` after the heap header.
+// Every runtime intercept that reads internal state (push / pop / len /
+// is_empty / contains / sort / reverse / insert / remove / set / get_or /
+// swap_remove / truncate / clear / …) inspects those exact slot indices.
+// Codegen, in turn, resolves `self.<field>` against the type-decl's
+// field order — emit `GetF { field: N }` where N is the position in
+// THIS declaration.
+//
+// To keep "intercepted-method dispatch" and "stdlib-body field access"
+// in perfect agreement, the type-decl field order MUST match the
+// runtime intercept slot order: len, cap, ptr.  Any other order makes
+// `self.len` resolve to a different slot than the intercepts touch,
+// silently desynchronising the two views of the same heap object.
+//
+// Concretely:
+//
+//   * `self.len` → slot 0 (matches intercept's `len` read).
+//   * `self.cap` → slot 1 (matches intercept's `cap` read).
+//   * `self.ptr` → slot 2 (matches intercept's `backing_ptr` read).
+//
+// Touching this order requires re-checking every runtime intercept
+// that reads the same header.  See `core-tests/collections/list/
+// regression_test.vr` §B for the test surface that pinned the
+// pre-realignment defect class (SIGSEGV on retain / fill, infinite
+// loop on truncate, silent corruption on swap_remove / set / get_or).
 public type List<T> is {
-    // Pointer to data (null when cap == 0)
-    ptr: &unsafe T,
-    // Number of elements
+    // Number of elements (slot 0 — runtime layout).
     len: Int,
-    // Allocated capacity
+    // Allocated capacity (slot 1 — runtime layout).
     cap: Int,
+    // Pointer to data; null when cap == 0 (slot 2 — runtime layout).
+    ptr: &unsafe T,
 };
 
 // IntCoercible: `list.len() == 0` and similar contexts unify Int ↔
