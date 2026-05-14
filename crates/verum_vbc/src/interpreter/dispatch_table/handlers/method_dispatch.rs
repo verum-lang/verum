@@ -623,6 +623,68 @@ pub(in super::super) fn handle_call_method(
         return Ok(DispatchResult::Continue);
     }
 
+    // `Text.reserve(&mut self, additional: Int)` — pre-allocate
+    // capacity so subsequent push_* avoids re-allocation.  The
+    // user-side body calls `Text.grow` which SetF's field 0 on a
+    // small-string receiver and null-derefs.  This intercept
+    // migrates the receiver from small-string → builder layout
+    // `[hdr]{ptr,len,cap}` in place via the CBGR-ref writeback
+    // discipline (mirrors push_str).  After the call, `self` holds
+    // a builder-layout value with the existing bytes preserved and
+    // `cap = max(old_cap, len + additional)`.
+    //
+    // Pinned by `core-tests/text/text/regression_test.vr::
+    // regression_reserve_grows_reported_capacity`.
+    if bare_method_name == "reserve"
+        && (dispatch_receiver.is_small_string() || is_heap_string(&dispatch_receiver))
+    {
+        let caller_base = state.reg_base();
+        let add_raw = state.registers.get(caller_base, Reg(args.start.0));
+        let additional = if add_raw.is_int() { add_raw.as_i64() } else { 0 };
+        if additional <= 0 {
+            // Negative or zero — no-op, return Unit.
+            state.set_reg(dst, Value::unit());
+            return Ok(DispatchResult::Continue);
+        }
+        let bytes = extract_string(&dispatch_receiver, state);
+        let current_len = bytes.len() as i64;
+        // Compute current capacity via the same dispatch-by-
+        // representation logic as the "capacity" arm below — read
+        // field2 if builder layout, else byte_len.
+        let current_cap = text_capacity_of(&dispatch_receiver, current_len);
+        let needed_cap = current_len + additional;
+        let new_cap = if needed_cap > current_cap { needed_cap } else { current_cap };
+        // Carry the existing bytes across.  field0 holds a fresh
+        // heap-string Value for the bytes; field1 = len; field2 = cap.
+        let bytes_val = if bytes.is_empty() {
+            Value::nil()
+        } else {
+            alloc_string_value(state, &bytes)?
+        };
+        // Allocate the builder layout — 24-byte payload, TypeId::TEXT,
+        // disambiguator field1 = Int(len) so the AsBytes / capacity
+        // intercepts route through the builder branch.
+        let obj = state.heap.alloc(TypeId::TEXT, 24)?;
+        state.record_allocation();
+        let base = obj.as_ptr() as *mut u8;
+        unsafe {
+            let data_ptr = base.add(heap::OBJECT_HEADER_SIZE) as *mut Value;
+            *data_ptr = bytes_val;
+            *data_ptr.add(1) = Value::from_i64(current_len);
+            *data_ptr.add(2) = Value::from_i64(new_cap);
+        }
+        let new_value = Value::from_ptr(base);
+        // Writeback via CBGR ref to the caller-frame slot.
+        if is_cbgr_ref(&receiver) {
+            let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
+            state.registers.set_absolute(abs_index, new_value);
+        } else {
+            state.registers.set(caller_base, receiver_reg, new_value);
+        }
+        state.set_reg(dst, Value::unit());
+        return Ok(DispatchResult::Continue);
+    }
+
     // Path/PathBuf inherent-method intercept.  Stdlib bodies for
     // `core.io.path.{Path, PathBuf}` aren't loaded into the user
     // module — `emit_missing_stub_descriptors` only registers `RetV`
@@ -2479,6 +2541,53 @@ fn func_id_parent_compatible_with_receiver(
         None => true,
         Some(tid) => tid == recv_tid,
     }
+}
+
+/// Read the capacity of a Text Value, dispatching by representation.
+/// Returns the byte budget the buffer can hold without reallocating.
+///
+///   * small-string (NaN-boxed inline): byte_len
+///   * FatRef Text (immutable byte view): byte_len
+///   * heap-string flat layout `[hdr][len:u64][bytes…]`: byte_len
+///   * builder layout `[hdr]{ptr,len,cap}` (24-byte payload): field2 (cap)
+///
+/// Shared between the `"capacity"` intercept arm (`dispatch_primitive_method`)
+/// and the `reserve` intercept (which needs the current capacity to
+/// decide whether the migration actually needs to grow the buffer).
+#[inline]
+fn text_capacity_of(v: &Value, byte_len_fallback: i64) -> i64 {
+    if v.is_small_string() {
+        return v.as_small_string().len() as i64;
+    }
+    if v.is_fat_ref() {
+        return v.as_fat_ref().len() as i64;
+    }
+    if !v.is_ptr() || v.is_nil() {
+        return byte_len_fallback;
+    }
+    let base = v.as_ptr::<u8>();
+    if base.is_null()
+        || !(base as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+    {
+        return byte_len_fallback;
+    }
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(base) };
+    if header.type_id != TypeId::TEXT && header.type_id != TypeId(0x0001) {
+        return byte_len_fallback;
+    }
+    let data_ptr = unsafe { base.add(heap::OBJECT_HEADER_SIZE) };
+    let header_size = header.size as usize;
+    if header_size == 24 {
+        let field1 = unsafe { *(data_ptr as *const Value).add(1) };
+        if field1.is_int() {
+            let field2 = unsafe { *(data_ptr as *const Value).add(2) };
+            if field2.is_int() {
+                return field2.as_i64();
+            }
+            return unsafe { *(data_ptr as *const u64).add(2) } as i64;
+        }
+    }
+    byte_len_fallback
 }
 
 #[inline]
@@ -5084,7 +5193,20 @@ pub(super) fn dispatch_primitive_method(
                 "union" if is_set => {
                     // Set.union(other) -> Set (new set with elements from both)
                     let caller_base = state.reg_base();
-                    let other_val = state.registers.get(caller_base, Reg(args.start.0));
+                    let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
+                    // `Set.union(other: &Set<T>)` — the caller passes
+                    // `&other` as a CBGR ref. Without deref the raw bits
+                    // get interpreted as a heap pointer and the next
+                    // dereference SIGSEGVs (same shape as the contains
+                    // needle fix earlier in this file). Auto-deref through
+                    // `decode_cbgr_ref` so the intercept can read the
+                    // pointed-to Set object.
+                    let other_val = if is_cbgr_ref(&other_val_raw) {
+                        let (abs_index, _) = decode_cbgr_ref(other_val_raw.as_i64());
+                        state.registers.get_absolute(abs_index)
+                    } else {
+                        other_val_raw
+                    };
 
                     // Read self entries
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
@@ -5177,7 +5299,16 @@ pub(super) fn dispatch_primitive_method(
                 "intersection" if is_set => {
                     // Set.intersection(other) -> Set (elements in both sets)
                     let caller_base = state.reg_base();
-                    let other_val = state.registers.get(caller_base, Reg(args.start.0));
+                    let other_val_raw = state.registers.get(caller_base, Reg(args.start.0));
+                    // Same CBGR-ref auto-deref as `union` above — `&other`
+                    // is passed as a ThinRef on the stack; without deref
+                    // the next pointer reinterpret SIGSEGVs.
+                    let other_val = if is_cbgr_ref(&other_val_raw) {
+                        let (abs_index, _) = decode_cbgr_ref(other_val_raw.as_i64());
+                        state.registers.get_absolute(abs_index)
+                    } else {
+                        other_val_raw
+                    };
 
                     // Read self entries
                     let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
@@ -6648,58 +6779,9 @@ pub(super) fn dispatch_primitive_method(
             // `core-tests/text/text/regression_test.vr::
             // regression_with_capacity_reports_capacity` and siblings.
             "capacity" => {
-                let cap = if receiver.is_small_string() {
-                    receiver.as_small_string().len() as i64
-                } else if receiver.is_fat_ref() {
-                    receiver.as_fat_ref().len() as i64
-                } else if receiver.is_ptr() && !receiver.is_nil() {
-                    let base = receiver.as_ptr::<u8>();
-                    if !base.is_null()
-                        && (base as usize)
-                            .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
-                    {
-                        let header = unsafe { heap::ObjectHeader::ref_or_stub(base) };
-                        if header.type_id == TypeId::TEXT
-                            || header.type_id == TypeId(0x0001)
-                        {
-                            let data_ptr =
-                                unsafe { base.add(heap::OBJECT_HEADER_SIZE) };
-                            let header_size = header.size as usize;
-                            if header_size == 24 {
-                                // Builder layout: disambiguate via field1
-                                // (Int → builder, else → 16-byte heap-
-                                // string).  Builder's field2 holds cap.
-                                let field1 = unsafe {
-                                    *(data_ptr as *const Value).add(1)
-                                };
-                                if field1.is_int() {
-                                    let field2 = unsafe {
-                                        *(data_ptr as *const Value).add(2)
-                                    };
-                                    if field2.is_int() {
-                                        field2.as_i64()
-                                    } else {
-                                        unsafe {
-                                            *(data_ptr as *const u64).add(2)
-                                                as i64
-                                        }
-                                    }
-                                } else {
-                                    text.len() as i64
-                                }
-                            } else {
-                                text.len() as i64
-                            }
-                        } else {
-                            text.len() as i64
-                        }
-                    } else {
-                        text.len() as i64
-                    }
-                } else {
-                    text.len() as i64
-                };
-                return Ok(Some(Value::from_i64(cap)));
+                return Ok(Some(Value::from_i64(
+                    text_capacity_of(receiver, text.len() as i64),
+                )));
             }
             "contains" => {
                 let arg = state.get_reg(Reg(args.start.0));
