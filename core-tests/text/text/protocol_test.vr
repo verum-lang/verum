@@ -1054,6 +1054,47 @@ fn cmp_empty_versus_non_empty() {
 }
 
 // =============================================================================
+// Section P32: rfind — reverse-direction substring search
+// =============================================================================
+//
+// Pre-fix, calling `s.rfind(&needle)` from user-side code crashed the
+// LLVM lowering at `SmallVectorBase::grow_pod` (task #9).  Closed
+// transitively when the stdlib bodies that used `for byte in bytes`
+// over a `&[Byte]` slice were migrated to the canonical indexed-while
+// pattern (Hasher.write + Formatter.write_bytes), eliminating the
+// LLVM IR-emission shape that triggered the SmallVector overflow.
+
+@test
+fn rfind_returns_last_match_position() {
+    let s: Text = "abcabc";
+    let r: Maybe<Int> = s.rfind(&"abc");
+    match r {
+        Some(i) => assert_eq(i, 3),
+        None => panic("rfind('abc') in 'abcabc' must be Some(3)"),
+    };
+}
+
+@test
+fn rfind_returns_first_when_only_one_match() {
+    let s: Text = "abc";
+    let r: Maybe<Int> = s.rfind(&"abc");
+    match r {
+        Some(i) => assert_eq(i, 0),
+        None => panic("rfind('abc') in 'abc' must be Some(0)"),
+    };
+}
+
+@test
+fn rfind_absent_returns_none() {
+    let s: Text = "hello";
+    let r: Maybe<Int> = s.rfind(&"xyz");
+    match r {
+        Some(_) => panic("rfind absent must be None"),
+        None => (),
+    };
+}
+
+// =============================================================================
 // Section P29: Padding family — center / pad_left / pad_right / zfill
 // =============================================================================
 
