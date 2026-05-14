@@ -244,6 +244,22 @@ fn write_core_metadata_alongside_archive(
         // though `implement<T, E> FromResidual<Result<Never, E>> for Maybe<T>`
         // is declared at `core/base/maybe.vr:606`.
         scan_implementation_protocol_args(&mut metadata, root, verbose);
+
+        // **Audit-driven fundamental fix (Task #44)** — capture
+        // `extends` clause from every protocol declaration so
+        // `metadata.protocols[X].super_protocols` is populated.
+        // VBC archive serializes `ty.protocols` as the type's
+        // IMPLEMENTS list (per `archive_metadata.rs:384`), which is
+        // empty for a protocol declaration; the canonical source for
+        // protocol-extends is `ProtocolBody.extends` from the AST.
+        // Without this, `Eq extends PartialEq` round-trips with
+        // empty super_protocols and the user-side
+        // `lookup_protocol_method_for_type_with_args`'s
+        // superprotocol-method walk (`find_superprotocol_method`)
+        // returns None — every `v.ne(...)` on a user type that
+        // implements `Eq` fails MethodNotFound despite the default
+        // declaration on PartialEq.
+        scan_protocol_supers(&mut metadata, root, verbose);
     }
     let bytes = bincode::serialize(&metadata)
         .context("bincode serialise CoreMetadata for sidecar emit")?;
@@ -1059,6 +1075,151 @@ fn scan_implementation_protocol_args(
             impls_captured,
             populated,
             metadata.implementations.len(),
+        );
+    }
+}
+
+/// **Task #44 audit fix** — walk every `.vr` file under `root` and
+/// for each `type X is protocol extends Y, Z, ... { ... };` decl,
+/// capture the `extends` clause's protocol names into
+/// `metadata.protocols[X].super_protocols`.  The VBC archive's
+/// `ty.protocols` field captures concrete-type IMPLEMENTS lists, not
+/// protocol-declaration EXTENDS clauses — so without this source-walk
+/// every super-protocol relationship (`Eq extends PartialEq`,
+/// `Ord extends Eq + PartialOrd`, …) is lost after archive round-trip,
+/// breaking `find_superprotocol_method`'s default-method walk.
+fn scan_protocol_supers(
+    metadata: &mut verum_types::core_metadata::CoreMetadata,
+    root: &Path,
+    verbose: bool,
+) {
+    use std::collections::BTreeMap;
+    use verum_ast::ItemKind;
+    use verum_ast::decl::TypeDeclBody;
+    use verum_common::{List, Text};
+
+    let mut captured: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut files_visited = 0usize;
+    let mut files_parsed = 0usize;
+    let mut protos_seen = 0usize;
+
+    fn visit_dir(
+        dir: &Path,
+        captured: &mut BTreeMap<String, Vec<String>>,
+        files_visited: &mut usize,
+        files_parsed: &mut usize,
+        protos_seen: &mut usize,
+    ) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                visit_dir(&path, captured, files_visited, files_parsed, protos_seen);
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("vr") {
+                continue;
+            }
+            *files_visited += 1;
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            // Quick filter: `is protocol` substring eliminates files
+            // with no protocol decls (most of the stdlib).
+            if !content.contains("is protocol") {
+                continue;
+            }
+            let mut parser = verum_fast_parser::Parser::new(&content);
+            let module = match parser.parse_module() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            *files_parsed += 1;
+
+            collect_supers_from_items(module.items.as_slice(), captured, protos_seen);
+        }
+    }
+
+    /// Walk items recursively (also descends into inline `module X { ... }`
+    /// blocks where many stdlib protocols live).
+    fn collect_supers_from_items(
+        items: &[verum_ast::Item],
+        captured: &mut BTreeMap<String, Vec<String>>,
+        protos_seen: &mut usize,
+    ) {
+        for item in items.iter() {
+            match &item.kind {
+                ItemKind::Type(type_decl) => {
+                    if let TypeDeclBody::Protocol(body) = &type_decl.body {
+                        *protos_seen += 1;
+                        let proto_name = type_decl.name.name.as_str().to_string();
+                        let supers: Vec<String> = body
+                            .extends
+                            .iter()
+                            .filter_map(|ty| match &ty.kind {
+                                verum_ast::ty::TypeKind::Path(path) => {
+                                    path.segments.last().and_then(|seg| match seg {
+                                        verum_ast::ty::PathSegment::Name(ident) => {
+                                            Some(ident.name.as_str().to_string())
+                                        }
+                                        _ => None,
+                                    })
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                        if !supers.is_empty() {
+                            // first-wins per protocol name (collisions
+                            // across modules are vanishingly rare and
+                            // the source-walk's first encounter pins).
+                            captured.entry(proto_name).or_insert(supers);
+                        }
+                    }
+                }
+                ItemKind::Module(mod_decl) => {
+                    if let verum_common::Maybe::Some(sub_items) = &mod_decl.items {
+                        collect_supers_from_items(sub_items.as_slice(), captured, protos_seen);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    visit_dir(
+        root,
+        &mut captured,
+        &mut files_visited,
+        &mut files_parsed,
+        &mut protos_seen,
+    );
+
+    let mut populated = 0usize;
+    for (proto_name, supers) in &captured {
+        let key = Text::from(proto_name.as_str());
+        if let Some(pd) = metadata.protocols.get_mut(&key) {
+            // Only overwrite if archive didn't already capture them
+            // (currently always empty, but defensive against future
+            // changes that DO populate from VBC).
+            if pd.super_protocols.is_empty() {
+                pd.super_protocols = supers.iter().map(|s| Text::from(s.as_str())).collect::<List<_>>();
+                populated += 1;
+            }
+        }
+    }
+
+    if verbose {
+        eprintln!(
+            "verum stdlib precompile: scanned {} .vr files ({} parsed, {} protocol decls seen), populated super_protocols on {} of {} captured protocols",
+            files_visited,
+            files_parsed,
+            protos_seen,
+            populated,
+            captured.len(),
         );
     }
 }
