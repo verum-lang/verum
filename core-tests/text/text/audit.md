@@ -192,16 +192,13 @@ family — "Expected pointer, got Some(N)").
 **Symptom**: aliases for find that exhibit the same defect as §F.
 **Action**: closes when §F closes.
 
-### §I — Text.cmp wrong Ordering result
-**Symptom**: `"abc".cmp(&"abd")` does not return `Less`; `"ab".cmp(&"abc")`
-does not return `Less`. The byte-wise comparison loop at text.vr:3413–3436
-appears either to range-overflow or to emit the wrong variant
-constructor — same family as MEMORY §22 (variant tag stability under
-per-file test compilation).
-**Action**: investigate whether `Ordering.Less` / `Ordering.Greater`
-constructed inside `cmp` resolves to the SAME variant tag as the
-match-destructure at the call site. If not, this is a sub-case of
-task #22 and closes when that closes.
+### §I — Text.cmp wrong Ordering result — **CLOSED 2026-05-14**
+**Status**: CLOSED — `protocol_test.vr::cmp_{equal,less,greater,prefix_is_less,empty_versus_non_empty}_*` all pass
+(2026-05-14).  The fix landed transitively when task #22 closed the
+variant-tag stability defects (commits `90b94e68b` + `3f14510b8` +
+`485a230c6` + `f1dd6fd19`).  The 5 new protocol tests pin the
+contract directly so any regression in `Ordering` variant resolution
+re-surfaces immediately on the cmp surface.
 
 ### §J — Debug format escape sequences
 **Symptom**: `f"{s:?}"` does not produce `"\"hi\""`. Affects every Debug
@@ -270,18 +267,14 @@ CBGR-deref); flipped to green when §F closed via commit `f8d70e6ef`.
 **Status**: **CLOSED 2026-05-13** — downstream of §C (Iterator.next
 dispatch); flipped to green when §C closed via commit `48a76117f`.
 
-### §R — count_matches triggers internal compiler error
-**Symptom**: code that calls `count_matches` triggers an *internal
-compiler error*: `"Expected int, got Some(3)"`. Crash report saved to
-`~/.verum/crashes/`. This is a typechecker regression, NOT a stdlib
-defect — the test cannot even compile.
-**Root cause hypothesis**: type-inference assumes `count_matches`
-returns `Int` but the function signature is `Maybe<Int>` somewhere in
-the inference table — OR vice versa, the body returns `Some(3)` and
-the typechecker erases the wrapper.
-**Action**: capture the crash report; file in
-`crates/verum_types/src/infer/`. This is the highest-impact compiler
-defect surfaced by this audit.
+### §R — count_matches triggers internal compiler error — **CLOSED 2026-05-14**
+**Status**: CLOSED — no longer reproduces.  Pinned by
+`protocol_test.vr::count_matches_{three_occurrences,zero_when_absent,
+alias_count_agrees}` which compile and run cleanly (2026-05-14).
+The typechecker fix was landed transitively by an earlier
+type-inference improvement (no longer tagged to a single commit;
+audit replay finds no ICE on `count_matches(&"abc")` against either
+the `Int` direct return or the `count` alias).
 
 ---
 
@@ -314,21 +307,36 @@ defect surfaced by this audit.
   `obj.method()` MUST live in `dispatch_primitive_method`, NOT
   `try_intercept_text_static_runtime`.
 
-### Deferred — ranked by leverage
+### Deferred — ranked by leverage (updated 2026-05-14)
 | # | Item | Estimated effort | Tests unblocked |
 |---|------|-----:|------:|
-| 1 | §C close — Iterator.next dispatch on Text iterators | multi-session | ~30 |
-| 2 | §F close — KMP / find byte indexing | medium (1–2 sessions) | ~25 (downstream §G/§H/§L/§P/§Q) |
+| 1 | §A close — rfind dispatch | medium | ~5 |
+| 2 | §B close — Char.encode_utf8 receiver-kind classification | medium | ~5 |
 | 3 | §D close — function-id collision (CallM migration OR global next_func_id) | multi-session | ~10 (§O included) |
-| 4 | §A close — rfind dispatch | medium | ~5 |
-| 5 | §B close — Char.encode_utf8 receiver-kind classification | medium | ~5 |
-| 6 | §E close — null-ptr guard in Text.truncate | small (1–2 hours) | ~4 (clear/pop) |
-| 7 | §I close — Ordering variant tag stability for cmp body | shared with task #22 | ~3 |
-| 8 | §J close — Debug format escape sequences (likely downstream of §C) | downstream-only | ~5 |
-| 9 | §K close — padding helpers (likely downstream of §F or §C) | downstream-only | ~4 |
-| 10 | §M close — utf8_validate invariants | small | ~2 |
-| 11 | §N close — List.extend_from_slice | small (List task) | ~1 |
-| 12 | §R close — typechecker fix for count_matches | medium | ~1 (+ unblocks the count_matches API across the stdlib) |
+| 4 | §N close — List.extend_from_slice | small (List task) | ~1 |
+
+Closed this session (2026-05-14):
+- §T — Text.capacity (`d28517c10` + `344ebf903`) — three-part fix:
+  with_capacity allocates builder layout, dispatch-by-representation
+  intercept in CallM, reserve migrates small-string→builder.
+- §U — Text.join element loss on non-empty List (`65a2d1b29`) —
+  align Tier-0 intercept with canonical List<T> heap layout.
+
+Closed transitively (no work this session):
+- §C — Iterator.next dispatch (`48a76117f`, prior commit)
+- §E — Text.truncate NullPointer (`9136055a6`, prior commit)
+- §F — KMP find byte indexing (`f8d70e6ef`, prior commit) + the
+  downstream §G/§H/§L/§P
+- §I — Text.cmp Ordering — closed transitively by the task #22
+  variant-tag stability fixes; pinned by 5 new cmp tests in
+  protocol_test.vr (2026-05-14)
+- §J — Debug format escapes (downstream of §C)
+- §K — Padding helpers (`81b34faea`, prior commit)
+- §M — from_utf8 / from_utf16 (`9c9eeb996`, prior commit)
+- §O — Text.from_int / from_bool intercepts (`73b9db0d0`, prior)
+- §Q — capitalize / title_case / swapcase (downstream of §C)
+- §R — count_matches typechecker ICE — no longer reproduces; pinned
+  by 3 new count_matches tests in protocol_test.vr (2026-05-14)
 
 ### Drift-pin recommendations (ride along with the fixes above)
 1. `crates/verum_compiler/src/precompile.rs::TEXT_PUBLIC_API_DRIFT_PIN`:
