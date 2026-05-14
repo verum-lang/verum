@@ -27,7 +27,8 @@ mount core.text.builder.{TextBuilder};
 // resolve them — same family as text/text §C iterator-dispatch defect.
 // =============================================================================
 
-@ignore
+// §A closed 2026-05-15: transitively closed via the cumulative
+// text/text + primitive &mut self closures earlier this session.
 @test
 fn regression_a_push_text_pinned() {
     let mut b = TextBuilder.new();
@@ -35,6 +36,9 @@ fn regression_a_push_text_pinned() {
     assert_eq(b.build(), "hello");
 }
 
+// `push_char` still fails — body uses `char.encode_utf8(&mut buf)`,
+// which trips audit char §B (Char.encode_utf8 receiver-kind defect).
+// Closes when char §B closes (separate task).
 @ignore
 @test
 fn regression_a_push_char_pinned() {
@@ -43,7 +47,8 @@ fn regression_a_push_char_pinned() {
     assert_eq(b.build(), "a");
 }
 
-@ignore
+// §A closed 2026-05-15: transitively closed via the cumulative
+// text/text + primitive &mut self closures earlier this session.
 @test
 fn regression_a_push_line_pinned() {
     let mut b = TextBuilder.new();
@@ -52,7 +57,8 @@ fn regression_a_push_line_pinned() {
     assert_eq(out.len(), 5);  // "line" + '\n'
 }
 
-@ignore
+// §A closed 2026-05-15: transitively closed via the cumulative
+// text/text + primitive &mut self closures earlier this session.
 @test
 fn regression_a_clear_pinned() {
     let mut b = TextBuilder.new();
@@ -61,7 +67,8 @@ fn regression_a_clear_pinned() {
     assert(b.is_empty());
 }
 
-@ignore
+// §A closed 2026-05-15: transitively closed via the cumulative
+// text/text + primitive &mut self closures earlier this session.
 @test
 fn regression_a_clone_pinned() {
     let mut b = TextBuilder.new();

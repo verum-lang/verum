@@ -247,7 +247,12 @@ implement Char {
     }
 
     /// Create character from digit value in given radix.
-    /// Verum convention: hex digits are returned in uppercase (A-F).
+    /// Returns lowercase letters for hex digits 10..=35
+    /// (`a`..=`z`), matching the standard `from_digit` convention
+    /// shared with Rust / Swift / Python.  Callers that need
+    /// uppercase output should call `.to_ascii_uppercase()` on the
+    /// result.  Pinned by
+    /// `core-tests/text/char/regression_test.vr::regression_c_from_digit_hex_pinned`.
     public fn from_digit(digit: Int, radix: Int) -> Maybe<Char> {
         assert(radix >= 2 && radix <= 36, "radix must be 2..=36");
 
@@ -258,7 +263,7 @@ implement Char {
         if digit < 10 {
             Some(('0' as Int + digit) as Char)
         } else {
-            Some(('A' as Int + digit - 10) as Char)
+            Some(('a' as Int + digit - 10) as Char)
         }
     }
 
