@@ -557,9 +557,20 @@ implement TextFormatter {
     }
 
     // Write formatted bytes.
+    //
+    // Indexed iteration (`while i < n`) rather than `for b in bytes` —
+    // the `for x in &[T]` form on a slice value (e.g. one produced by
+    // `Text.as_bytes()`) trips an LLVM `SmallVectorBase::grow_pod`
+    // SIGSEGV in the slice-iter lowering (task #9 / task #11 share
+    // root).  Indexed access mirrors the canonical stdlib pattern
+    // (`utf8_validate` / `kmp_failure_table`) and is uniformly
+    // supported on both Tier-0 and Tier-1 paths.
     public fn write_bytes(&mut self, bytes: &[Byte]) -> Result<(), FormatError> {
-        for b in bytes {
-            self.buffer.push(*b as Char);
+        let n = bytes.len();
+        let mut i: Int = 0;
+        while i < n {
+            self.buffer.push(bytes[i] as Char);
+            i = i + 1;
         }
         Ok(())
     }

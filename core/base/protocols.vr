@@ -216,21 +216,28 @@ implement Hasher for DefaultHasher {
         // Canonical FxHash 64-bit step:
         //  state := (state.rotate_left(5) ^ byte) * SEED
         //
-
-        // The earlier implementation reversed the order
-        // (`state := state * SEED; state ^= byte`), which
-        // matches the function name "FxHash" only loosely:
-        //  * the most-recent byte never participated in the
-        //  multiplication (its bits got XOR'd in but never
-        //  diffused);
-        //  * the rotate-left avalanche step was missing,
-        //  weakening distribution further.
-        // Using the canonical step gives the avalanche
-        // properties the name implies.
-        for byte in bytes {
+        // Indexed iteration (`while i < n`) rather than `for byte in bytes`
+        // — the `for x in &[T]` form on a slice trips an LLVM
+        // `SmallVectorBase::grow_pod` SIGSEGV in the slice-iter
+        // lowering (task #9, shared root with task #11 / #11 was the
+        // hash-defect manifestation).  Indexed access mirrors the
+        // canonical stdlib pattern (utf8_validate / kmp_failure_table)
+        // and is uniformly supported on both Tier-0 and Tier-1 paths.
+        //
+        // The Tier-0 interpreter additionally bypasses this body via
+        // a dedicated intercept at
+        // `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
+        // hasher_runtime.rs`, which calls the canonical `fxhash_bytes`
+        // helper directly on the heap record's `state` field.  The
+        // body retains the indexed-while form so the AOT path (which
+        // doesn't hit the intercept) also produces correct hashes.
+        let n = bytes.len();
+        let mut i: Int = 0;
+        while i < n {
             let rotated = self.state.rotate_left(5);
-            let mixed = rotated ^ (*byte as Int);
+            let mixed = rotated ^ (bytes[i] as Int);
             self.state = mixed.wrapping_mul(0x517cc1b727220a95);
+            i = i + 1;
         }
     }
 
