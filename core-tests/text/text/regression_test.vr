@@ -489,15 +489,12 @@ fn regression_try_with_capacity_reports_capacity() {
     };
 }
 
-// `reserve` still pinned ignored — the user-side `Text.reserve` body
-// dispatches through `Text.grow` (CallM, &mut self) which calls
-// `SetF` on a small-string receiver and null-derefs.  The fix sits
-// next to the capacity intercept in method_dispatch.rs but requires
-// migrating the receiver from small-string to builder layout in
-// place via the CBGR-ref writeback discipline (mirrors the
-// `push_str` / `push` intercept).  Pinned to keep the contract
-// visible until the dedicated migration lands.
-@ignore
+// `reserve` closed by the dedicated CallM intercept in
+// `method_dispatch.rs` that migrates small-string receivers to
+// builder layout via the CBGR-ref writeback discipline (mirrors
+// the `push_str` / `push` intercept).  After this intercept,
+// `t.reserve(N)` produces a builder-layout Text with
+// `cap = max(old_cap, len + N)`.
 @test
 fn regression_reserve_grows_reported_capacity() {
     let mut t: Text = Text.new();
