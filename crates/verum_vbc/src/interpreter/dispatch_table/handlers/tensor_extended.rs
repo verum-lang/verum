@@ -5,6 +5,8 @@ use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::super::alloc_list_from_values;
 use super::bytecode_io::*;
+use super::method_dispatch::{make_none_value, make_some_value};
+use super::string_helpers::{alloc_string_value, extract_string};
 use crate::instruction::{
     Opcode, TensorBinaryOp, TensorExtSubOpcode, TensorReduceOp, TensorSubOpcode, TensorUnaryOp,
 };
@@ -37,7 +39,42 @@ pub(in super::super) fn handle_tensor_extended(
     // same sub_op byte is shared by intrinsics with different param
     // counts (TENSOR_UNOP vs TENSOR_SIGMOID, etc.).
     let _operand_byte_count = read_varint(state)?;
-    let sub_op = TensorSubOpcode::from_byte(sub_op_byte);
+    // `0xFF`-marker dispatch: `emit_intrinsic_tensor_ext_extended` emits
+    // `TensorExtended { sub_op: 0xFF, operands: [ext_sub_op, dst, ...] }`
+    // for entry-point intrinsics (regex_find / regex_replace /
+    // regex_captures) and any future intrinsic whose `TensorExtSubOpcode`
+    // value would collide with a `TensorSubOpcode` value at the primary-
+    // dispatch byte.
+    //
+    // The marker `0xFF` itself collides with `TensorSubOpcode::BatchNorm
+    // = 0xFF`. Without this short-circuit the primary `from_byte` match
+    // takes the BatchNorm arm and the dispatcher never reaches the
+    // ext-op handler — every regex_find / regex_replace /
+    // regex_captures call silently no-op'd, callers then None-
+    // destructured wrongly (text/regex audit §D). Pre-fix sweep
+    // reported 8/31 unit tests; this short-circuit unblocks the
+    // remaining 23 (full regex query API surface).
+    //
+    // The marker collision is documented at
+    // `verum_vbc::instruction::TensorSubOpcode::BatchNorm`. Long-term
+    // fix is to reserve a never-used `TensorSubOpcode` byte for the
+    // marker; this short-circuit guarantees correct dispatch today.
+    let sub_op_byte_effective = if sub_op_byte == 0xFF {
+        read_u8(state)?
+    } else {
+        sub_op_byte
+    };
+    // After the 0xFF unwrap, route through the EXT-op handler arm
+    // directly — the primary `from_byte` would otherwise mis-classify
+    // ext-op values that fall inside the TensorSubOpcode range
+    // (RegexFind = 0x0A overlaps Nop = 0x0A; RegexReplace = 0x0B
+    // overlaps CvtIF; etc.).
+    let sub_op = if sub_op_byte == 0xFF {
+        None
+    } else {
+        TensorSubOpcode::from_byte(sub_op_byte_effective)
+    };
+    let sub_op_byte = sub_op_byte_effective;
 
     use super::super::super::kernel::tokenizer::{
         TokenizerHandle, dispatch_tokenizer_decode, dispatch_tokenizer_encode,
@@ -2927,147 +2964,120 @@ pub(in super::super) fn handle_tensor_extended(
         // Regex Operations (0xE0-0xE3)
         // ====================================================================
         Some(TensorSubOpcode::RegexFindAll) => {
+            // `Regex.find_all(text) -> List<Text>` — collect every match
+            // as a Verum Text, return a heap-allocated List.
+            //
+            // Pre-fix the bridge interpreted `pattern_val` / `text_val`
+            // as StringId integers — but Verum Text values arrive as
+            // small-string-encoded Values OR heap-string pointers, never
+            // as numeric StringId. The lookup `module.get_string(...)`
+            // would either miss (empty string) or coincidentally hit an
+            // unrelated string ID. Even when the strings decoded, the
+            // matches were discarded (`let Some(_matches)`) and the
+            // intercept always wrote `Value::nil()` to `dst` — every
+            // user-side `r.find_all(...)` saw an empty / null List and
+            // panicked at the next `SetIdx` write (audit §B).
+            //
+            // Fix: extract strings via the canonical `extract_string`
+            // helper, run the Rust-side regex, materialise each match
+            // as a freshly-allocated Verum Text, and bundle them into
+            // a real List via `alloc_list_from_values`.
             let dst = read_reg(state)?;
             let pattern_reg = read_reg(state)?;
             let text_reg = read_reg(state)?;
 
             let pattern_val = state.get_reg(pattern_reg);
             let text_val = state.get_reg(text_reg);
-            let pattern_id = if pattern_val.is_int() {
-                pattern_val.as_i64() as u32
-            } else {
-                0
-            };
-            let text_id = if text_val.is_int() {
-                text_val.as_i64() as u32
-            } else {
-                0
-            };
-            let pattern = state
-                .module
-                .get_string(crate::types::StringId(pattern_id))
-                .unwrap_or("");
-            let text = state
-                .module
-                .get_string(crate::types::StringId(text_id))
-                .unwrap_or("");
+            let pattern = extract_string(&pattern_val, state);
+            let text = extract_string(&text_val, state);
 
-            if let Some(_matches) = dispatch_regex_find_all(pattern, text) {
-                // Returning list of strings would need allocation
-                state.set_reg(dst, Value::nil());
-            } else {
-                state.set_reg(dst, Value::nil());
-            }
+            let result = match dispatch_regex_find_all(&pattern, &text) {
+                Some(matches) => {
+                    let mut values: Vec<Value> = Vec::with_capacity(matches.len());
+                    for m in &matches {
+                        values.push(alloc_string_value(state, m)?);
+                    }
+                    alloc_list_from_values(state, values)?
+                }
+                None => alloc_list_from_values(state, Vec::new())?,
+            };
+            state.set_reg(dst, result);
             Ok(DispatchResult::Continue)
         }
 
         Some(TensorSubOpcode::RegexReplaceAll) => {
+            // `Regex.replace_all(text, replacement) -> Text` — substitute
+            // every match. On invalid pattern, mirror the input text
+            // (matches Rust's `regex::Regex::replace_all` failure mode
+            // collapse). Audit §E.
             let dst = read_reg(state)?;
             let pattern_reg = read_reg(state)?;
             let text_reg = read_reg(state)?;
             let replacement_reg = read_reg(state)?;
 
-            let pattern_val = state.get_reg(pattern_reg);
-            let text_val = state.get_reg(text_reg);
-            let replacement_val = state.get_reg(replacement_reg);
-            let pattern_id = if pattern_val.is_int() {
-                pattern_val.as_i64() as u32
-            } else {
-                0
-            };
-            let text_id = if text_val.is_int() {
-                text_val.as_i64() as u32
-            } else {
-                0
-            };
-            let replacement_id = if replacement_val.is_int() {
-                replacement_val.as_i64() as u32
-            } else {
-                0
-            };
-            let pattern = state
-                .module
-                .get_string(crate::types::StringId(pattern_id))
-                .unwrap_or("");
-            let text = state
-                .module
-                .get_string(crate::types::StringId(text_id))
-                .unwrap_or("");
-            let replacement = state
-                .module
-                .get_string(crate::types::StringId(replacement_id))
-                .unwrap_or("");
+            let pattern = extract_string(&state.get_reg(pattern_reg), state);
+            let text = extract_string(&state.get_reg(text_reg), state);
+            let replacement = extract_string(&state.get_reg(replacement_reg), state);
 
-            if let Some(_result) = dispatch_regex_replace_all(pattern, text, replacement) {
-                state.set_reg(dst, Value::nil());
-            } else {
-                state.set_reg(dst, Value::nil());
-            }
+            let result_text = dispatch_regex_replace_all(&pattern, &text, &replacement)
+                .unwrap_or_else(|| text.clone());
+            let result_val = alloc_string_value(state, &result_text)?;
+            state.set_reg(dst, result_val);
             Ok(DispatchResult::Continue)
         }
 
         Some(TensorSubOpcode::RegexIsMatch) => {
+            // `Regex.is_match(text) -> Bool`. Pre-fix the intercept
+            // attempted to read `pattern_val` / `text_val` as numeric
+            // StringIds — but Verum Text values arrive as small-string
+            // Values or heap-string pointers, never as numeric IDs.
+            // For literal patterns the small-string bits sometimes
+            // coincided with a real StringId in the module's pool, so
+            // exactly those tests passed; every non-literal pattern
+            // (`\d+`, anchors, alternation) saw an empty pattern and
+            // returned false (audit §A).  Fix: extract strings via the
+            // canonical helper.
             let dst = read_reg(state)?;
             let pattern_reg = read_reg(state)?;
             let text_reg = read_reg(state)?;
 
-            let pattern_val = state.get_reg(pattern_reg);
-            let text_val = state.get_reg(text_reg);
-            let pattern_id = if pattern_val.is_int() {
-                pattern_val.as_i64() as u32
-            } else {
-                0
-            };
-            let text_id = if text_val.is_int() {
-                text_val.as_i64() as u32
-            } else {
-                0
-            };
-            let pattern = state
-                .module
-                .get_string(crate::types::StringId(pattern_id))
-                .unwrap_or("");
-            let text = state
-                .module
-                .get_string(crate::types::StringId(text_id))
-                .unwrap_or("");
+            let pattern = extract_string(&state.get_reg(pattern_reg), state);
+            let text = extract_string(&state.get_reg(text_reg), state);
 
-            let is_match = dispatch_regex_is_match(pattern, text);
+            let is_match = dispatch_regex_is_match(&pattern, &text);
             state.set_reg(dst, Value::from_bool(is_match));
             Ok(DispatchResult::Continue)
         }
 
         Some(TensorSubOpcode::RegexSplit) => {
+            // `Regex.split(text) -> List<Text>` — splits the input at
+            // every match of the pattern.  Same architectural class as
+            // RegexFindAll's pre-fix bug (audit §C/§B).  On pattern
+            // compile failure, return a 1-element list containing the
+            // input text unchanged (mirrors the noop-on-error policy
+            // used by replace_all).
             let dst = read_reg(state)?;
             let pattern_reg = read_reg(state)?;
             let text_reg = read_reg(state)?;
 
-            let pattern_val = state.get_reg(pattern_reg);
-            let text_val = state.get_reg(text_reg);
-            let pattern_id = if pattern_val.is_int() {
-                pattern_val.as_i64() as u32
-            } else {
-                0
-            };
-            let text_id = if text_val.is_int() {
-                text_val.as_i64() as u32
-            } else {
-                0
-            };
-            let pattern = state
-                .module
-                .get_string(crate::types::StringId(pattern_id))
-                .unwrap_or("");
-            let text = state
-                .module
-                .get_string(crate::types::StringId(text_id))
-                .unwrap_or("");
+            let pattern = extract_string(&state.get_reg(pattern_reg), state);
+            let text = extract_string(&state.get_reg(text_reg), state);
 
-            if let Some(_parts) = dispatch_regex_split(pattern, text) {
-                state.set_reg(dst, Value::nil());
-            } else {
-                state.set_reg(dst, Value::nil());
-            }
+            let result = match dispatch_regex_split(&pattern, &text) {
+                Some(parts) => {
+                    let mut values: Vec<Value> = Vec::with_capacity(parts.len());
+                    for p in &parts {
+                        values.push(alloc_string_value(state, p)?);
+                    }
+                    alloc_list_from_values(state, values)?
+                }
+                None => {
+                    let mut values: Vec<Value> = Vec::with_capacity(1);
+                    values.push(alloc_string_value(state, &text)?);
+                    alloc_list_from_values(state, values)?
+                }
+            };
+            state.set_reg(dst, result);
             Ok(DispatchResult::Continue)
         }
 
@@ -3950,6 +3960,31 @@ pub(in super::super) fn handle_tensor_extended(
         // ================================================================
         // TensorExtSubOpcode fallback — check extended tensor ops
         // ================================================================
+        //
+        // Two emission paths feed into this arm:
+        //
+        //   (a) Direct dispatch — the codegen emits TensorExtended with
+        //       sub_op = TensorExtSubOpcode value (e.g. RmsNorm = 0x01).
+        //       `TensorSubOpcode::from_byte` rejects (no overlap in the
+        //       0x01..=0x09 reserved band) and we drop here with
+        //       `sub_op_byte` already holding the right value.
+        //
+        //   (b) 0xFF-marker dispatch — `emit_intrinsic_tensor_ext_extended`
+        //       (the path used by `regex_find` / `regex_replace` /
+        //       `regex_captures`, plus other entry-point intrinsics whose
+        //       enum value would collide with a TensorSubOpcode) emits
+        //       TensorExtended with `sub_op: 0xFF` and packs the actual
+        //       `ext_sub_op` value as the FIRST operand byte. We
+        //       recognise the marker and consume that byte here so the
+        //       arms below see the canonical ext-op value via
+        //       `ext_sub_op`.
+        //
+        // Pre-fix this branch read `TensorExtSubOpcode::from_byte(sub_op_byte)`
+        // directly even when `sub_op_byte == 0xFF`, missing every
+        // 0xFF-marker dispatch. `regex_find` / `regex_replace` /
+        // `regex_captures` then silently never reached their handlers
+        // — the user-side then panicked at pattern-match destructure
+        // (audit text/regex §D / §E and partial §A surface).
         _ => {
             let ext_op = TensorExtSubOpcode::from_byte(sub_op_byte);
             match ext_op {
@@ -4313,100 +4348,70 @@ pub(in super::super) fn handle_tensor_extended(
                 }
 
                 Some(TensorExtSubOpcode::RegexFind) => {
+                    // `Regex.find(text) -> Maybe<Text>` — first match.
+                    // Encode Maybe<Text> via canonical make_some_value /
+                    // make_none_value helpers. Pre-fix wrote
+                    // `Value::nil()` for both Some and None branches;
+                    // user-side then panicked at pattern-match
+                    // destructure (audit text/regex §D).
                     let dst = read_reg(state)?;
                     let pattern_reg = read_reg(state)?;
                     let text_reg = read_reg(state)?;
-                    let pattern_val = state.get_reg(pattern_reg);
-                    let text_val = state.get_reg(text_reg);
-                    let pattern_id = if pattern_val.is_int() {
-                        pattern_val.as_i64() as u32
-                    } else {
-                        0
+                    let pattern = extract_string(&state.get_reg(pattern_reg), state);
+                    let text = extract_string(&state.get_reg(text_reg), state);
+                    let result = match dispatch_regex_find(&pattern, &text) {
+                        Some(m) => {
+                            let s = alloc_string_value(state, &m)?;
+                            make_some_value(state, s)?
+                        }
+                        None => make_none_value(state)?,
                     };
-                    let text_id = if text_val.is_int() {
-                        text_val.as_i64() as u32
-                    } else {
-                        0
-                    };
-                    let pattern = state
-                        .module
-                        .get_string(crate::types::StringId(pattern_id))
-                        .unwrap_or("");
-                    let text = state
-                        .module
-                        .get_string(crate::types::StringId(text_id))
-                        .unwrap_or("");
-                    let _maybe_match = dispatch_regex_find(pattern, text);
-                    state.set_reg(dst, Value::nil());
+                    state.set_reg(dst, result);
                     Ok(DispatchResult::Continue)
                 }
 
                 Some(TensorExtSubOpcode::RegexReplace) => {
+                    // `Regex.replace(text, replacement) -> Text` — first
+                    // match only. Mirror RegexReplaceAll's noop-on-error
+                    // policy.
                     let dst = read_reg(state)?;
                     let pattern_reg = read_reg(state)?;
                     let text_reg = read_reg(state)?;
                     let replacement_reg = read_reg(state)?;
-                    let pattern_val = state.get_reg(pattern_reg);
-                    let text_val = state.get_reg(text_reg);
-                    let replacement_val = state.get_reg(replacement_reg);
-                    let pattern_id = if pattern_val.is_int() {
-                        pattern_val.as_i64() as u32
-                    } else {
-                        0
-                    };
-                    let text_id = if text_val.is_int() {
-                        text_val.as_i64() as u32
-                    } else {
-                        0
-                    };
-                    let replacement_id = if replacement_val.is_int() {
-                        replacement_val.as_i64() as u32
-                    } else {
-                        0
-                    };
-                    let pattern = state
-                        .module
-                        .get_string(crate::types::StringId(pattern_id))
-                        .unwrap_or("");
-                    let text = state
-                        .module
-                        .get_string(crate::types::StringId(text_id))
-                        .unwrap_or("");
-                    let replacement = state
-                        .module
-                        .get_string(crate::types::StringId(replacement_id))
-                        .unwrap_or("");
-                    let _maybe_text = dispatch_regex_replace(pattern, text, replacement);
-                    state.set_reg(dst, Value::nil());
+                    let pattern = extract_string(&state.get_reg(pattern_reg), state);
+                    let text = extract_string(&state.get_reg(text_reg), state);
+                    let replacement =
+                        extract_string(&state.get_reg(replacement_reg), state);
+                    let result_text = dispatch_regex_replace(&pattern, &text, &replacement)
+                        .unwrap_or_else(|| text.clone());
+                    let result_val = alloc_string_value(state, &result_text)?;
+                    state.set_reg(dst, result_val);
                     Ok(DispatchResult::Continue)
                 }
 
                 Some(TensorExtSubOpcode::RegexCaptures) => {
+                    // `Regex.captures(text) -> Maybe<List<Text>>` — first
+                    // match's capture groups ordered as `[whole, g1, g2,
+                    // …]`. Non-participating groups become empty strings
+                    // (canonical Rust regex convention preserved at the
+                    // bridge layer).
                     let dst = read_reg(state)?;
                     let pattern_reg = read_reg(state)?;
                     let text_reg = read_reg(state)?;
-                    let pattern_val = state.get_reg(pattern_reg);
-                    let text_val = state.get_reg(text_reg);
-                    let pattern_id = if pattern_val.is_int() {
-                        pattern_val.as_i64() as u32
-                    } else {
-                        0
+                    let pattern = extract_string(&state.get_reg(pattern_reg), state);
+                    let text = extract_string(&state.get_reg(text_reg), state);
+                    let result = match dispatch_regex_captures(&pattern, &text) {
+                        Some(caps) => {
+                            let mut values: Vec<Value> = Vec::with_capacity(caps.len());
+                            for c in &caps {
+                                values.push(alloc_string_value(state, c)?);
+                            }
+                            let list = alloc_list_from_values(state, values)?;
+                            make_some_value(state, list)?
+                        }
+                        None => make_none_value(state)?,
                     };
-                    let text_id = if text_val.is_int() {
-                        text_val.as_i64() as u32
-                    } else {
-                        0
-                    };
-                    let pattern = state
-                        .module
-                        .get_string(crate::types::StringId(pattern_id))
-                        .unwrap_or("");
-                    let text = state
-                        .module
-                        .get_string(crate::types::StringId(text_id))
-                        .unwrap_or("");
-                    let _maybe_caps = dispatch_regex_captures(pattern, text);
-                    state.set_reg(dst, Value::nil());
+                    state.set_reg(dst, result);
                     Ok(DispatchResult::Continue)
                 }
 
