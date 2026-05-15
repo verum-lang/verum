@@ -99,11 +99,21 @@ fn regression_sys_context_error_match_arms_route_correctly() {
     }
     // Each variant must route to its assigned synthetic tag — drift
     // surfaces as a mis-ordered tag list.
-    assert_eq(*tags.get(0 as USize), 0);
-    assert_eq(*tags.get(1 as USize), 1);
-    assert_eq(*tags.get(2 as USize), 2);
-    assert_eq(*tags.get(3 as USize), 3);
-    assert_eq(*tags.get(4 as USize), 4);
+    //
+    // **Idiom note**: use `tags[i]` (Index protocol → `&T` → auto-deref
+    // to `T` in `assert_eq`'s `T: Eq` context), NOT `*tags.get(i)` —
+    // the latter pattern routes through `List.get -> Maybe<T>` which
+    // does not auto-unwrap under `UnOp::Deref` (sum-type identity-deref
+    // is intentional per `interpreter/dispatch_table/handlers/cbgr.rs`
+    // `handle_deref` line ~244; auto-unwrapping single-field variants
+    // would silently break `match *self` for sum types like IpAddr).
+    // `assert_eq(*Some(0), 0)` therefore compares the Maybe heap
+    // variant against `Int 0` and always fails.
+    assert_eq(tags[0], 0);
+    assert_eq(tags[1], 1);
+    assert_eq(tags[2], 2);
+    assert_eq(tags[3], 3);
+    assert_eq(tags[4], 4);
 }
 
 // =============================================================================
