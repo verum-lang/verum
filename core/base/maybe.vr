@@ -19,7 +19,7 @@ mount core.result.{Result, Ok, Err};
 mount core.ops.{ControlFlow, Continue, Break, Try, FromResidual, Never};
 mount core.protocols.{
     Eq, Ord, Clone, Copy, Default, Debug, Display, Hash, Hasher, From, Into,
-    Formatter, FormatError,
+    Formatter, FormatError, Deref,
 };
 mount core.iterator.Iterator;
 
@@ -31,6 +31,46 @@ public type Maybe<T> is None | Some(T);
 // in Int ↔ Generic coercion. Treating Maybe<T> uniformly here mirrors
 // the hardcoded list entry so the coercion works regardless of T.
 implement<T> IntCoercible for Maybe<T> {}
+
+// `Deref` allows `*Maybe<T>` to evaluate to the inner `T` (panicking
+// on `None`).  This is the missing leg of a tri-layer story that
+// otherwise silently miscompiles:
+//
+//   1. Type checker accepts `let x: T = *maybe_t` via the
+//      `IntCoercible for Maybe<T>` impl above.
+//   2. Codegen `UnOp::Deref` dispatches `*receiver` through the
+//      generic user-Deref-protocol path in
+//      `crates/verum_vbc/src/codegen/expressions.rs::compile_unary`
+//      (no Maybe special-case — CLAUDE.md "no hardcoded stdlib
+//      knowledge in compiler" rule).
+//   3. Runtime `handle_deref` (`cbgr.rs:~244`) intentionally
+//      identity-derefs sum-type heap values so `match *self` on
+//      types like `IpAddr.V4(Ipv4Addr)` doesn't silently lose the
+//      variant tag.
+//
+// Without this impl, `*Some(0)` produced the heap variant itself —
+// `assert_eq(*tags.get(0), 0)` against `List<Int>` compared
+// `Maybe.Some(0)` against `Int 0` and always failed.  With it, the
+// generic Deref-protocol dispatch finds `Maybe.deref`, returns `&T`
+// (which `assert_eq<T: Eq>` auto-derefs at the comparison site
+// through the same `&_ < _` machinery validated by
+// `core-tests/base/primitives/comparison_test.vr::*ref_a < b`).
+//
+// Other sum types (IpAddr, custom variants) without their own
+// `Deref` impl keep the existing identity-deref behaviour — the
+// dispatch is strictly per-type.  `None` panics with a clear
+// message, mirroring `Maybe.unwrap()`'s contract.
+implement<T> Deref for Maybe<T> {
+    type Target = T;
+
+    @inline(always)
+    fn deref(&self) -> &T {
+        match self {
+            Some(ref v) => v,
+            None => panic("called deref() on None"),
+        }
+    }
+}
 
 implement<T> Maybe<T> {
     // =========================================================================
