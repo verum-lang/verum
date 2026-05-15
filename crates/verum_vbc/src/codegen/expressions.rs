@@ -3369,6 +3369,21 @@ impl VbcCodegen {
 
     /// Compiles a unary operation.
     fn compile_unary(&mut self, op: UnOp, inner: &Expr) -> CodegenResult<Option<Reg>> {
+        if std::env::var("VERUM_TRACE_UNARY_REF").is_ok()
+            && matches!(op, UnOp::Ref | UnOp::RefMut)
+        {
+            let kind_name = match &inner.kind {
+                ExprKind::Path(p) => format!("Path({:?} segs)", p.segments.len()),
+                ExprKind::Field { field, .. } => format!("Field('{}')", field),
+                ExprKind::TypeExpr(_) => "TypeExpr".to_string(),
+                ExprKind::Index { .. } => "Index".to_string(),
+                ExprKind::Call { .. } => "Call".to_string(),
+                ExprKind::MethodCall { method, .. } => format!("MethodCall('{}')", method.name),
+                ExprKind::Literal(_) => "Literal".to_string(),
+                _ => "Other".to_string(),
+            };
+            eprintln!("[unary-ref] op={:?} inner.kind={}", op, kind_name);
+        }
         // `&arr[range]` / `&mut arr[range]` — slice-borrow.
         //
 
@@ -3531,7 +3546,75 @@ impl VbcCodegen {
         // Only applies to Tier-0 `Ref`/`RefMut` — Tier-1 RefChecked /
         // Tier-2 RefUnsafe variants opt out of generation tracking
         // entirely, so the legacy register-ref path is fine for them.
+        //
+        // **Variant-ctor exclusion (task #25 fundamental fix)**:
+        // `&TypeName.VariantName` (e.g. `&Signal.Kill`) parses as a
+        // Field expression too — but the "field" here is a unit-variant
+        // constructor, not a record field on a value.  Pre-fix the
+        // `RefField` branch fired indiscriminately:
+        //
+        //   1. `resolve_field_index(Some("Signal"), "Kill")` returned
+        //      Kill's variant tag (6) used as a field offset.
+        //   2. `compile_expr(receiver=Signal_path)` produced a Nil /
+        //      garbage value for the bare type name.
+        //   3. The emitted `RefField base=garbage, field=6` then
+        //      crashed at runtime with
+        //      `RefField: field 6 (offset 48+8=56) exceeds object data
+        //      size 8` OR silently returned Hup (variant 0 = first
+        //      variant) via misread.
+        //
+        // Detect the variant-ctor shape — `receiver` is a single-segment
+        // Path whose name is registered as a Type (has a TypeId or
+        // functions-with-prefix), and `field` is a registered variant of
+        // that type — and FALL THROUGH to the generic `compile_expr(inner)
+        // → Ref` path, which routes through compile_field_access →
+        // compile_variant_constructor_with_tag_named_and_parent and
+        // produces a proper variant value before referencing.
+        let inner_is_variant_ctor_chain = matches!(op, UnOp::Ref | UnOp::RefMut)
+            && {
+                if let ExprKind::Field {
+                    expr: receiver,
+                    field,
+                } = &inner.kind
+                {
+                    if let ExprKind::Path(p) = &receiver.kind
+                        && p.segments.len() == 1
+                        && let verum_ast::ty::PathSegment::Name(ident) = &p.segments[0]
+                    {
+                        let type_name = ident.name.as_str();
+                        // Type-name shape: first letter uppercase + not a
+                        // local variable + registered as a TypeId OR has
+                        // qualified-name entries in the function table
+                        // (variants are registered under `Type.Variant`).
+                        let is_type = type_name
+                            .chars()
+                            .next()
+                            .is_some_and(|c| c.is_ascii_uppercase())
+                            && self.ctx.get_var_reg(type_name).is_err()
+                            && (self.type_name_to_id.contains_key(type_name)
+                                || self.ctx.has_functions_with_prefix(&format!(
+                                    "{}.",
+                                    type_name
+                                )));
+                        // Variant shape: the `Type.field` qualified name
+                        // resolves to a function with `variant_tag` set.
+                        let qualified = format!("{}.{}", type_name, field.name);
+                        let is_variant = self
+                            .ctx
+                            .lookup_function(&qualified)
+                            .and_then(|fi| fi.variant_tag)
+                            .is_some();
+                        is_type && is_variant
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            };
+
         if matches!(op, UnOp::Ref | UnOp::RefMut)
+            && !inner_is_variant_ctor_chain
             && let ExprKind::Field {
                 expr: receiver,
                 field,
@@ -17293,6 +17376,18 @@ impl VbcCodegen {
                         // wrapper-identity class, plus every other
                         // user-fn/stdlib-fn arity collision that
                         // misroutes type inference at the call site.
+                        if std::env::var("VERUM_TRACE_TYPE_INFER").is_ok()
+                            && name.starts_with("parse_")
+                        {
+                            eprintln!(
+                                "[type-infer-call-entry] name={} args.len={} lookup_with_arity={} lookup_bare={} ret_type_name={:?} ret_type_inner={:?}",
+                                name, args.len(),
+                                self.ctx.lookup_function_with_arity(name, args.len()).is_some(),
+                                self.ctx.lookup_function(name).is_some(),
+                                self.ctx.lookup_function(name).and_then(|f| f.return_type_name.clone()),
+                                self.ctx.lookup_function(name).and_then(|f| f.return_type_inner.clone()),
+                            );
+                        }
                         if let Some(func_info) =
                             self.ctx.lookup_function_with_arity(name, args.len())
                         {
@@ -17319,8 +17414,48 @@ impl VbcCodegen {
                                 // No args or can't infer — return bare parent type
                                 return Some(parent_type.clone());
                             }
-                            // Non-variant function: return full type name including generics
+                            // Non-variant function: return full type name including generics.
+                            //
+                            // **Task #20 §B — generic-instantiation preservation**:
+                            // `archive_ctx_loader` populates `return_type_name`
+                            // with the BASE name only ("Result") and stores
+                            // the inner generic args separately in
+                            // `return_type_inner` (["BigInt", "BigIntError"]).
+                            // Pre-fix this site returned just the base name —
+                            // so `extract_expr_type_name(parse_bigint(&"42"))`
+                            // returned "Result" instead of
+                            // "Result<BigInt, BigIntError>".  Downstream
+                            // `compile_match`/`compile_pattern_bind` then had
+                            // no way to substitute `T → BigInt` in the
+                            // `Ok(b)` arm — `b` got bound with the rigid
+                            // type-parameter name and `b.digits` resolved
+                            // through the global field-intern fallback to
+                            // `idx=4`, surfacing as "field access out of
+                            // bounds: field index 4 (offset 32+8=40)
+                            // exceeds object data size 16" at every
+                            // `match parse_X(&"...") { Ok(b) => b.field }`
+                            // site.
+                            //
+                            // Compose the canonical generic form when inner
+                            // args are present.  Mirrors the same shape the
+                            // bidirectional checker / explicit
+                            // `let r: Result<BigInt, _>` annotation produces
+                            // — those paths populated the variant payload
+                            // type correctly, hence the 2-of-3 split where
+                            // explicit-annotation tests passed.
                             if let Some(ref ret_type) = func_info.return_type_name {
+                                if std::env::var("VERUM_TRACE_TYPE_INFER").is_ok() {
+                                    eprintln!(
+                                        "[type-infer-call] name={} ret_type={:?} inner={:?}",
+                                        name, ret_type, func_info.return_type_inner
+                                    );
+                                }
+                                if let Some(ref inner) = func_info.return_type_inner
+                                    && !inner.is_empty()
+                                    && !ret_type.contains('<')
+                                {
+                                    return Some(format!("{}<{}>", ret_type, inner.join(", ")));
+                                }
                                 return Some(ret_type.clone());
                             }
                         }
