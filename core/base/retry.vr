@@ -90,6 +90,37 @@ implement<E> RetryOptions<E> {
         }
     }
 
+    /// Create a config with exponential backoff (multiplier 2.0).
+    ///
+    /// The `retry` free function above uses this same shape internally;
+    /// `RetryOptions.exponential(max_attempts, initial_ms, max_ms)` is the
+    /// builder-style alternative for sites that want to compose the config
+    /// before passing it to `retry_with_strategy`.
+    public fn exponential(
+        max_attempts: Int,
+        initial_delay_ms: Int,
+        max_delay_ms: Int,
+    ) -> RetryOptions<E> {
+        RetryOptions {
+            max_attempts: max_attempts,
+            strategy: RetryBackoff.Exponential {
+                initial_ms: initial_delay_ms,
+                max_ms: max_delay_ms,
+                multiplier: 2.0,
+            },
+            should_retry: |_| true,
+        }
+    }
+
+    /// Create a config with linear (fixed) backoff.
+    public fn linear(max_attempts: Int, delay_ms: Int) -> RetryOptions<E> {
+        RetryOptions {
+            max_attempts: max_attempts,
+            strategy: RetryBackoff.Linear { delay_ms: delay_ms },
+            should_retry: |_| true,
+        }
+    }
+
     /// Replace the should-retry predicate.
     public fn with_should_retry(self, predicate: fn(&E) -> Bool) -> RetryOptions<E> {
         RetryOptions {
