@@ -1,0 +1,44 @@
+// =============================================================================
+// core-tests/text/numeric/rational/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect in `core/text/numeric/rational.vr`.  Inherits
+// the §A defect class from BigInt (task #24).
+// =============================================================================
+
+mount core.text.numeric.rational.{Rational};
+
+// =============================================================================
+// PASS-GUARDs — constructors that don't go through arithmetic.
+// =============================================================================
+
+@test
+fn guard_zero_construction() {
+    let z = Rational.zero();
+    assert(z.is_zero());
+}
+
+@test
+fn guard_one_construction() {
+    let one = Rational.one();
+    assert(!one.is_zero());
+    assert(!one.is_negative());
+}
+
+@test
+fn guard_from_int_zero() {
+    let z = Rational.from_int(0);
+    assert(z.is_zero());
+}
+
+@test
+fn guard_from_int_negative_is_negative() {
+    let n = Rational.from_int(-1);
+    assert(n.is_negative());
+}
+
+// §A (transitive) — see core-tests/text/numeric/bigint/regression_test.vr
+// for the canonical pin; Rational's add/sub/mul/div all delegate through
+// BigInt and inherit the same defect.
+
+fn main() {}

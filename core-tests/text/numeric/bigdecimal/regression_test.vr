@@ -1,0 +1,70 @@
+// =============================================================================
+// core-tests/text/numeric/bigdecimal/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect (or open defect class) in
+// `core/text/numeric/bigdecimal.vr`.  Inherits the same §A defect class
+// as `core/text/numeric/bigint` (task #24 — method-return loses digits
+// List field).
+// =============================================================================
+
+mount core.text.numeric.bigdecimal.{BigDecimal};
+mount core.text.numeric.bigint.{BigInt};
+
+// =============================================================================
+// PASS-GUARDs — exercise canonical constructors that MUST stay green.
+// =============================================================================
+
+@test
+fn guard_zero_construction() {
+    let z = BigDecimal.zero();
+    assert(z.is_zero());
+}
+
+@test
+fn guard_one_construction() {
+    let one = BigDecimal.one();
+    assert(!one.is_zero());
+    assert(!one.is_negative());
+}
+
+@test
+fn guard_from_int_zero() {
+    let z = BigDecimal.from_int(0);
+    assert(z.is_zero());
+}
+
+@test
+fn guard_from_int_negative_is_negative() {
+    let n = BigDecimal.from_int(-1);
+    assert(n.is_negative());
+}
+
+// =============================================================================
+// §A (transitive) — BigInt method-return loses digits.  Every BigDecimal
+// arithmetic delegates to the BigInt coefficient; pinned via task #24.
+// =============================================================================
+
+@ignore
+@test
+fn regression_a_add_basic() {
+    let a = BigDecimal.from_int(3);
+    let b = BigDecimal.from_int(4);
+    match a.add(&b) {
+        Ok(r) => assert_eq(r.to_text(), "7"),
+        Err(_) => panic("BigDecimal add must succeed"),
+    };
+}
+
+@ignore
+@test
+fn regression_a_mul_basic() {
+    let a = BigDecimal.from_int(3);
+    let b = BigDecimal.from_int(4);
+    match a.mul(&b) {
+        Ok(r) => assert_eq(r.to_text(), "12"),
+        Err(_) => panic("BigDecimal mul must succeed"),
+    };
+}
+
+fn main() {}
