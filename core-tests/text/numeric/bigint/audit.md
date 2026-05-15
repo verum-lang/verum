@@ -1,21 +1,44 @@
 # `core.text.numeric.bigint` — audit
 
-> Status: **partial** (task #24 closed 2026-05-15 — interior-field-ref
-> auto-deref landed; `abs` / `neg` / `add` (positive operands) green;
-> `sub` / `mul` gated on separate defect classes).
-> Arbitrary-precision signed integers in base 10^9.  Construction
-> surface (`zero`, `one`, `from_int` for non-negative operands,
-> `parse_bigint`) and predicates (`is_zero`, `is_negative`,
-> `is_positive`, `is_even`, `is_odd`) work.  `abs`, `neg`, `add`
-> (positive) work after task #24 close.  Remaining gaps: `sub`
-> (NullPointer through `add(&other.neg())` chain), `mul` (StackOverflow
-> at recursion depth 16384), `from_int(-N)` (function-id collision on
-> `abs_int#1` — separate task #20 class).
+> Status: **partial** (tasks #14 / #15 / #16 ALL CLOSED 2026-05-15
+> by single fundamental fix in `try_compile_builtin` — primitive
+> poly-arith bare-call direct intrinsic emission, commit
+> `f89967176`).  `abs` / `neg` / `add` (positive operands) work
+> after task #24.  Now ALSO working: `add` (mixed signs), `sub`
+> (via direct `a.sub(&b)` with explicit stack-local `b`), `mul`
+> (was StackOverflow at depth 16384), `from_int(-N)` (was
+> function-id collision on `abs_int#1`).  **All three were the
+> SAME defect** — `implement Sub for Int { fn sub(self, rhs) -> Int { sub(self, rhs) } }`
+> wrappers in `core/base/primitives.vr` were resolving the bare
+> body call `sub(self, rhs)` to the enclosing `Int.sub` method
+> itself (registered in the function table under the bare name
+> `sub`), emitting a self-recursive `Call(Int.sub_func_id)` that
+> stack-overflowed at depth 16384.  The fix routes bare-name
+> calls matching the poly-arith intrinsic set (`add` / `sub` /
+> `mul` / `div` / `rem` / `neg` / `bitand` / `bitor` / `bitxor` /
+> `shl` / `shr` / `clamp` / `signum` / `abs_signed`) with
+> primitive-numeric args directly to the `ArithExtendedOpcode`
+> opcode — mirrors task #20 §A's `compile_unary::Neg` direct-
+> opcode rule for unary.  **Blast radius**: every stdlib `implement <Op> for <Numeric>`
+> wrapper closed.  BigInt sub/mul/from_int-of-negative all green
+> now; bigdecimal/rational/modular sub/mul should likewise close
+> on rebuild (they depend on bigint sub/mul).
 >
-> Suite: `unit_test.vr` (~338 lines, original — many tests fail due to
-> §A) + `property_test.vr` (new, 12 algebraic laws — all @ignored
-> until §A) + `integration_test.vr` (new, 7 cross-stdlib scenarios —
-> all @ignored) + `regression_test.vr` (new, 5 PASS-GUARDs + 5 §A pins).
+> **Residual (task #17)**: `BigInt.from_int(10).sub(&BigInt.from_int(3))`
+> (transient receiver) and `let a = BigInt.from_int(10); a.sub(&b)`
+> (BigInt.sub's body delegates `self.add(&other.neg())` — a chained
+> method call where `&other.neg()` is an `&` into a fresh BigInt
+> return value) NullPointer at GetF (op=0x62) pc=61 inside
+> `clone_digits`.  Same defect class as task #24 (interior-field-
+> ref auto-deref) but with one more indirection layer through
+> chained method receivers.  Direct stack-local equivalent
+> `let nb = b.neg(); a.add(&nb)` works fine.
+>
+> Suite: `unit_test.vr` (~338 lines, original) + `property_test.vr`
+> (12 algebraic laws — un-@ignore on task #17 close) +
+> `integration_test.vr` (7 cross-stdlib scenarios — un-@ignore
+> on task #17 close) + `regression_test.vr` (5 PASS-GUARDs + 5
+> §A pins now passing on the explicit-binding shape).
 
 ---
 
