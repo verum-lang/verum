@@ -520,66 +520,182 @@ pub(in super::super) fn handle_char_extended(
         }
 
         Some(CharSubOpcode::GeneralCategory) => {
-            // Get Unicode general category using Rust's char properties
+            // **Task #23 §D — Unicode general-category specific variant tag**.
+            //
+            // Pre-fix this returned a COARSE 7-category code (0=Letter,
+            // 1=Mark, …, 6=Other) that mapped to the FIRST variant of
+            // each category in the Verum `GeneralCategory` enum.  Tests
+            // like `'a'.general_category() is GeneralCategory.Ll`
+            // (tag 1) failed because the runtime returned 0 (= Lu's
+            // tag), regardless of upper-vs-lower-case.
+            //
+            // Verum `GeneralCategory` variant order (pinned by
+            // `core/text/char.vr:403`):
+            //   Lu=0 Ll=1 Lt=2 Lm=3 Lo=4
+            //   Mn=5 Mc=6 Me=7
+            //   Nd=8 Nl=9 No=10
+            //   Pc=11 Pd=12 Ps=13 Pe=14 Pi=15 Pf=16 Po=17
+            //   Sm=18 Sc=19 Sk=20 So=21
+            //   Zs=22 Zl=23 Zp=24
+            //   Cc=25 Cf=26 Cs=27 Co=28 Cn=29
+            //
+            // Architectural rule: the runtime intrinsic MUST return
+            // the exact variant tag matching the user-side enum's
+            // declaration order — coarse categories are a downstream
+            // helper (`is_letter()` walks via `match self { Lu | Ll
+            // | … => true }`), not the intrinsic's contract.  Returning
+            // a coarse code breaks the `is` operator at every specific-
+            // variant test site.
+            //
+            // Coverage: every ASCII codepoint maps to its specific
+            // Unicode general-category variant; non-ASCII falls back
+            // through a sequence of property tests that produces the
+            // best-available specific tag (Ll/Lu for alphabetic up/low,
+            // Nd for is_numeric, Zs/Zl/Zp split for whitespace, etc.).
+            //
+            // Tags as ordered in `core/text/char.vr::GeneralCategory`:
+            const TAG_LU: i64 = 0;
+            const TAG_LL: i64 = 1;
+            #[allow(dead_code)]
+            const TAG_LT: i64 = 2;
+            #[allow(dead_code)]
+            const TAG_LM: i64 = 3;
+            const TAG_LO: i64 = 4;
+            const TAG_MN: i64 = 5;
+            const TAG_ND: i64 = 8;
+            #[allow(dead_code)]
+            const TAG_NL: i64 = 9;
+            #[allow(dead_code)]
+            const TAG_NO: i64 = 10;
+            const TAG_PC: i64 = 11;
+            const TAG_PD: i64 = 12;
+            const TAG_PS: i64 = 13;
+            const TAG_PE: i64 = 14;
+            #[allow(dead_code)]
+            const TAG_PI: i64 = 15;
+            #[allow(dead_code)]
+            const TAG_PF: i64 = 16;
+            const TAG_PO: i64 = 17;
+            const TAG_SM: i64 = 18;
+            const TAG_SC: i64 = 19;
+            const TAG_SK: i64 = 20;
+            const TAG_SO: i64 = 21;
+            const TAG_ZS: i64 = 22;
+            const TAG_ZL: i64 = 23;
+            const TAG_ZP: i64 = 24;
+            const TAG_CC: i64 = 25;
+            const TAG_CF: i64 = 26;
+            const TAG_CS: i64 = 27;
+            #[allow(dead_code)]
+            const TAG_CO: i64 = 28;
+            const TAG_CN: i64 = 29;
+
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
             let c = state.get_reg(src_reg).as_char();
-            // Return a category code:
-            // 0 = Letter, 1 = Mark, 2 = Number, 3 = Punctuation,
-            // 4 = Symbol, 5 = Separator, 6 = Other/Control
-            let category = if c.is_alphabetic() {
-                0 // Letter (Lu, Ll, Lt, Lm, Lo)
-            } else if c.is_numeric() {
-                2 // Number (Nd, Nl, No)
-            } else if c.is_whitespace() {
-                5 // Separator (Zs, Zl, Zp) — whitespace is a superset
-            } else if c.is_ascii_punctuation()
-                || matches!(c,
-                    '\u{00A1}'..='\u{00BF}' |  // Latin-1 punctuation
-                    '\u{2010}'..='\u{2027}' |  // General punctuation
-                    '\u{2030}'..='\u{205E}' |  // More general punctuation
-                    '\u{3001}'..='\u{3003}' |  // CJK punctuation
-                    '\u{FE50}'..='\u{FE6F}' |  // Small form variants
-                    '\u{FF01}'..='\u{FF0F}' |  // Fullwidth punctuation
-                    '\u{FF1A}'..='\u{FF20}' |
-                    '\u{FF3B}'..='\u{FF40}' |
-                    '\u{FF5B}'..='\u{FF65}'
-                )
-            {
-                3 // Punctuation (Pc, Pd, Ps, Pe, Pi, Pf, Po)
-            } else if matches!(c,
-                '$' | '+' | '<' | '=' | '>' | '^' | '`' | '|' | '~' |
-                '\u{00A2}'..='\u{00A9}' |  // Currency/math symbols
-                '\u{00AC}' | '\u{00AE}' | '\u{00AF}' |
-                '\u{00B0}' | '\u{00B1}' |
-                '\u{00D7}' | '\u{00F7}' |
-                '\u{2190}'..='\u{21FF}' |  // Arrows
-                '\u{2200}'..='\u{22FF}' |  // Mathematical operators
-                '\u{2300}'..='\u{23FF}' |  // Misc technical
-                '\u{25A0}'..='\u{25FF}' |  // Geometric shapes
-                '\u{2600}'..='\u{26FF}' |  // Misc symbols
-                '\u{2700}'..='\u{27BF}' |  // Dingbats
-                '\u{1F300}'..='\u{1F9FF}'  // Emoji
-            ) {
-                4 // Symbol (Sm, Sc, Sk, So)
-            } else if c.is_control() {
-                6 // Other/Control (Cc, Cf, Cs, Co, Cn)
-            } else if matches!(c,
-                '\u{0300}'..='\u{036F}' |   // Combining diacriticals
-                '\u{0483}'..='\u{0489}' |   // Cyrillic combining marks
-                '\u{0591}'..='\u{05BD}' |   // Hebrew combining marks
-                '\u{0610}'..='\u{061A}' |   // Arabic combining marks
-                '\u{064B}'..='\u{065F}' |   // Arabic combining marks
-                '\u{0670}' |                // Arabic superscript alef
-                '\u{20D0}'..='\u{20FF}' |   // Combining marks for symbols
-                '\u{FE20}'..='\u{FE2F}'     // Combining half marks
-            ) {
-                1 // Mark (Mn, Mc, Me) — combining marks
+            let cp = c as u32;
+
+            // ASCII fast path — exact specific tag.
+            let category = if cp < 128 {
+                match c {
+                    'A'..='Z' => TAG_LU,
+                    'a'..='z' => TAG_LL,
+                    '0'..='9' => TAG_ND,
+                    ' ' => TAG_ZS,
+                    // ASCII control chars (0x00-0x1F + 0x7F)
+                    '\u{00}'..='\u{1F}' | '\u{7F}' => TAG_CC,
+                    // Connector punctuation
+                    '_' => TAG_PC,
+                    // Dash punctuation
+                    '-' => TAG_PD,
+                    // Open punctuation
+                    '(' | '[' | '{' => TAG_PS,
+                    // Close punctuation
+                    ')' | ']' | '}' => TAG_PE,
+                    // Currency symbol
+                    '$' => TAG_SC,
+                    // Math symbols
+                    '+' | '<' | '=' | '>' | '|' | '~' => TAG_SM,
+                    // Modifier symbol
+                    '^' | '`' => TAG_SK,
+                    // Other punctuation (catch-all for !, ", #, %, &, ',
+                    // *, ,, ., /, :, ;, ?, @, \, ASCII default)
+                    '!' | '"' | '#' | '%' | '&' | '\'' | '*' | ',' | '.' | '/'
+                    | ':' | ';' | '?' | '@' | '\\' => TAG_PO,
+                    _ => TAG_CN,
+                }
             } else {
-                // Default: treat remaining as Letter if alphabetic-like,
-                // otherwise Other
-                6
+                // Non-ASCII — best-available specific mapping via
+                // Rust char properties + Unicode block heuristics.
+                // The full Unicode UCD table is ~1500 entries and
+                // lives in the `unicode-properties` crate; this
+                // inline mapping covers the common cases and falls
+                // back to coarse categories for the rest.
+                if c.is_uppercase() {
+                    TAG_LU
+                } else if c.is_lowercase() {
+                    TAG_LL
+                } else if c.is_alphabetic() {
+                    TAG_LO // Letter, other — Han / Hiragana / etc.
+                } else if c.is_numeric() {
+                    TAG_ND // Number, decimal digit — extended digits
+                } else if c == '\u{2028}' {
+                    TAG_ZL
+                } else if c == '\u{2029}' {
+                    TAG_ZP
+                } else if c.is_whitespace() {
+                    TAG_ZS
+                } else if matches!(c,
+                    '\u{0300}'..='\u{036F}' |   // Combining diacriticals
+                    '\u{0483}'..='\u{0489}' |   // Cyrillic combining
+                    '\u{0591}'..='\u{05BD}' |   // Hebrew combining
+                    '\u{0610}'..='\u{061A}' |   // Arabic combining
+                    '\u{064B}'..='\u{065F}' |
+                    '\u{0670}' |
+                    '\u{20D0}'..='\u{20FF}' |
+                    '\u{FE20}'..='\u{FE2F}'
+                ) {
+                    TAG_MN
+                } else if matches!(c,
+                    '\u{00A2}'..='\u{00A5}' |
+                    '\u{20A0}'..='\u{20CF}'
+                ) {
+                    TAG_SC
+                } else if matches!(c,
+                    '\u{2190}'..='\u{21FF}' |
+                    '\u{2200}'..='\u{22FF}' |
+                    '\u{2300}'..='\u{23FF}'
+                ) {
+                    TAG_SM
+                } else if matches!(c,
+                    '\u{25A0}'..='\u{25FF}' |
+                    '\u{2600}'..='\u{26FF}' |
+                    '\u{2700}'..='\u{27BF}' |
+                    '\u{1F300}'..='\u{1F9FF}'
+                ) {
+                    TAG_SO
+                } else if matches!(c,
+                    '\u{00A1}' | '\u{00BF}' |
+                    '\u{2010}'..='\u{2027}' |
+                    '\u{2030}'..='\u{205E}'
+                ) {
+                    TAG_PO
+                } else if c.is_control() {
+                    TAG_CC
+                } else if cp >= 0xE000 && cp <= 0xF8FF {
+                    // Private Use Area
+                    TAG_CO
+                } else if cp >= 0xD800 && cp <= 0xDFFF {
+                    TAG_CS
+                } else if (0xFFF9..=0xFFFB).contains(&cp)
+                    || (0x2060..=0x206F).contains(&cp)
+                {
+                    TAG_CF
+                } else {
+                    TAG_CN
+                }
             };
+
             state.set_reg(dst, Value::from_i64(category));
             Ok(DispatchResult::Continue)
         }
