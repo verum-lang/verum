@@ -2412,6 +2412,31 @@ pub(in super::super) fn handle_call_method(
         s
     };
 
+    if std::env::var("VERUM_TRACE_CALLM_FAIL").is_ok() {
+        let depth = state.call_stack.depth();
+        let frame_info: Vec<String> = (0..depth)
+            .filter_map(|i| {
+                let frame_idx = depth.saturating_sub(1).saturating_sub(i);
+                state.call_stack.at(frame_idx).map(|f| {
+                    let fn_name = state
+                        .module
+                        .functions
+                        .get(f.function.0 as usize)
+                        .and_then(|fi| state.module.strings.get(fi.name))
+                        .unwrap_or("<unknown>");
+                    format!("  [{}] func_id={} name={} pc={}", i, f.function.0, fn_name, f.pc)
+                })
+            })
+            .collect();
+        eprintln!(
+            "[VERUM_TRACE_CALLM_FAIL] method={} receiver_kind={} receiver_type={:?}\n   call-stack (top-down):\n{}",
+            method_name,
+            receiver_kind,
+            receiver_type_name,
+            frame_info.join("\n")
+        );
+    }
+
     Err(InterpreterError::Panic {
         message: format!(
             "method '{}' not found on receiver of runtime kind {}. \
@@ -2987,6 +3012,24 @@ pub(super) fn dispatch_primitive_method(
             // Hasher heap allocation entirely.
             "hash_value" => Value::from_i64(hash_value_i64(v)),
             "abs" => Value::from_i64(v.abs()),
+            // Negation surface — closes task #20 §A's "Int.neg not found
+            // on receiver of runtime kind `Int`" defense-in-depth path.
+            // The codegen fix in `compile_unary::Neg` routes primitive
+            // numerics to `UnaryI{Neg}` directly so CallM("neg") never
+            // reaches here from a freshly-compiled `-x` site.  These
+            // intercepts catch the LEGACY archive paths where the
+            // precompiled stdlib body (pre-fix) emitted CallM("neg")
+            // through `implement Neg for Int { neg(self) { neg(self) } }`
+            // — without the intercept the precompiled `Decimal.neg`
+            // body would still panic.  `not` mirrors the same shape
+            // for bitwise-NOT on integer-typed receivers.
+            "neg" => Value::from_i64(v.wrapping_neg()),
+            "wrapping_neg" => Value::from_i64(v.wrapping_neg()),
+            "checked_neg" => {
+                return Ok(Some(make_maybe_int(state, v.checked_neg())?));
+            }
+            "saturating_neg" => Value::from_i64(v.saturating_neg()),
+            "not" => Value::from_i64(!v),
             "signum" => Value::from_i64(v.signum()),
             "is_positive" => Value::from_bool(v > 0),
             "is_negative" => Value::from_bool(v < 0),
@@ -3601,6 +3644,13 @@ pub(super) fn dispatch_primitive_method(
             // necessitates direct dispatcher-tier monomorphisation.
             "hash_value" => Value::from_i64(fxhash_bytes(0, &v.to_le_bytes())),
             "abs" => Value::from_f64(v.abs()),
+            // Negation surface — symmetric to the Int.neg intercept
+            // above. Catches legacy CallM("neg") emitted by the
+            // precompiled `implement Neg for Float { neg(self) {
+            // neg(self) } }` body. Fresh codegen routes `-x: Float`
+            // through `UnaryF{Neg}` directly via the task #20 §A fix
+            // in compile_unary.
+            "neg" => Value::from_f64(-v),
             "ceil" => Value::from_f64(v.ceil()),
             "floor" => Value::from_f64(v.floor()),
             "round" => Value::from_f64(v.round()),

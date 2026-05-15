@@ -25,9 +25,28 @@ mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
 // §A — Decimal.neg / from_parts(negative scale) panic with `Int.neg not found`
+//       — CLOSED 2026-05-15 by task #20 §A fix.
+//
+// Root cause: `compile_unary` for `UnOp::Neg` checked `has_neg_method`
+// FIRST and routed through `CallM("neg")` whenever `<T>.neg` was
+// registered — including `Int.neg` from `implement Neg for Int` in
+// primitives.vr.  The CallM had no runtime intercept for primitive
+// `Int.neg` and panicked with "Int.neg not found on receiver of
+// runtime kind 'Int'".
+//
+// Fix (two layers, defense-in-depth):
+//   1. Codegen: for primitive integer / float operands, ALWAYS emit
+//      `UnaryI{Neg}` / `UnaryF{Neg}` directly.  Canonical predicate
+//      `type_names::is_integer_type` / `is_float_type` covers every
+//      spelling (Int / Int8..128 / UInt8..128 / IntSize / USize /
+//      Rust-style i8..i128 / f32..f64).  User types with `Neg`
+//      protocol impls still route through `CallM("neg")`.
+//   2. Runtime intercept (catches LEGACY precompiled bodies): added
+//      `neg` / `wrapping_neg` / `checked_neg` / `saturating_neg` /
+//      `not` to the Int methods, and `neg` to the Float methods, in
+//      `dispatch_primitive_method`.
 // =============================================================================
 
-@ignore
 @test
 fn regression_a_decimal_neg_panic_pinned() {
     let d = Decimal.from_int(5);

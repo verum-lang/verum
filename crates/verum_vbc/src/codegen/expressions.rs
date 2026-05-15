@@ -3566,24 +3566,67 @@ impl VbcCodegen {
 
         match op {
             UnOp::Neg => {
-                // Determine if operand is float or integer using proper type inference
+                // **Architectural rule (closes task #20 §A — Int.neg dispatch)**:
+                //
+                // For built-in primitive numeric types, ALWAYS emit the
+                // direct UnaryI{Neg} / UnaryF{Neg} opcode.  The
+                // `implement Neg for Int` / `implement Neg for Float`
+                // bodies in `core/base/primitives.vr` are thin wrappers
+                // over the same `neg(self)` intrinsic the opcodes
+                // already implement — routing them through `CallM`
+                // would only re-enter the dispatcher, which has no
+                // primitive-`neg` intercept and panics with
+                // "Int.neg not found on receiver of runtime kind 'Int'".
+                //
+                // The previous logic was:
+                //   if `<Type>.neg` is registered → CallM("neg")
+                //   else                          → UnaryI{Neg}
+                //
+                // For `-x` where `x: Int`, the `Int.neg` lookup hit
+                // primitives.vr → CallM → runtime panic.  For
+                // `-self.coefficient` (Int) inside `Decimal.neg(&self)`,
+                // same chain — every primitive-numeric `-x` site was
+                // mis-routed.
+                //
+                // The fix uses `is_integer_type` / `is_float_type` —
+                // canonical numeric-name predicates in
+                // `verum_common::well_known_types::type_names` (already
+                // imported above) — to recognise every spelling
+                // (`Int`, `Int8`..`Int128`, `UInt8`..`UInt128`, sized
+                // and Rust-style aliases). For user types implementing
+                // `Neg` (`BigInt`, `Decimal`, `Rational`, …) the
+                // CallM("neg") dispatch is still emitted and resolves
+                // to the user-defined body via the existing function
+                // table lookup.
                 let type_kind = self.infer_expr_type_kind(inner);
-                let is_float = matches!(type_kind, Some(verum_ast::ty::TypeKind::Float));
+                let type_name = self.extract_expr_type_name(inner);
+                let is_float = matches!(type_kind, Some(verum_ast::ty::TypeKind::Float))
+                    || type_name.as_deref().is_some_and(type_names::is_float_type);
+                let is_int = matches!(type_kind, Some(verum_ast::ty::TypeKind::Int))
+                    || type_name.as_deref().is_some_and(type_names::is_integer_type);
                 if is_float {
                     self.ctx.emit(Instruction::UnaryF {
                         op: UnaryFloatOp::Neg,
                         dst: dest,
                         src: inner_reg,
                     });
+                } else if is_int {
+                    self.ctx.emit(Instruction::UnaryI {
+                        op: UnaryIntOp::Neg,
+                        dst: dest,
+                        src: inner_reg,
+                    });
                 } else {
-                    // Check if this is a user type with a neg method
-                    let type_name = self.extract_expr_type_name(inner);
+                    // User-defined type — dispatch to its `neg` impl
+                    // when present; otherwise fall back to UnaryI{Neg}
+                    // (treats the operand as integer-shaped; safe for
+                    // type-inference-failure cases the bidirectional
+                    // checker already validated).
                     let has_neg_method = type_name.as_ref().is_some_and(|name| {
                         let qualified = format!("{}.neg", name);
                         self.ctx.lookup_function(&qualified).is_some()
                     });
                     if has_neg_method {
-                        // Dispatch to method call: x.neg()
                         self.ctx.free_temp(dest);
                         let method_result = self.ctx.alloc_temp();
                         let method_id = self.intern_string("neg");
@@ -3695,24 +3738,18 @@ impl VbcCodegen {
                 let type_kind = self.infer_expr_type_kind(inner);
                 let is_bool = matches!(type_name.as_deref(), Some("Bool"))
                     || matches!(type_kind, Some(verum_ast::ty::TypeKind::Bool));
-                let is_integer_name = matches!(
-                    type_name.as_deref(),
-                    Some("Int")
-                        | Some("Int8")
-                        | Some("Int16")
-                        | Some("Int32")
-                        | Some("Int64")
-                        | Some("Int128")
-                        | Some("UInt")
-                        | Some("UInt8")
-                        | Some("UInt16")
-                        | Some("UInt32")
-                        | Some("UInt64")
-                        | Some("UInt128")
-                        | Some("ISize")
-                        | Some("USize")
-                        | Some("Byte")
-                );
+                // Canonical numeric-name oracle in
+                // `verum_common::well_known_types::type_names`.  Pre-fix
+                // this site duplicated the integer-spelling enumeration
+                // (16 hardcoded `Some("…")` arms) — every new alias
+                // added to `is_integer_type` would silently miss this
+                // dispatch path, surfacing as `!mask` → logical Not
+                // → `false` (= 0) → bitfield corruption. Routing
+                // through the single source of truth eliminates the
+                // drift surface entirely.
+                let is_integer_name = type_name
+                    .as_deref()
+                    .is_some_and(type_names::is_integer_type);
                 let is_integer_kind = matches!(
                     type_kind,
                     Some(verum_ast::ty::TypeKind::Int) | Some(verum_ast::ty::TypeKind::Char)
@@ -6230,6 +6267,13 @@ impl VbcCodegen {
                         ));
                     }
                 };
+                if std::env::var("VERUM_TRACE_RESOLVED_STATIC").is_ok() {
+                    let cur_fn: String = self.ctx.current_function.clone().unwrap_or_else(|| "<top>".to_string());
+                    eprintln!(
+                        "[resolved-static] in_fn='{}' qualified='{}' → info.id={} param_count={}",
+                        cur_fn, qualified_name.as_str(), info.id.0, info.param_count,
+                    );
+                }
                 // For instance-method dispatch (`recv.method(args)`)
                 // the typechecker resolves to a static fn whose first
                 // formal is `self` — the call-site `args` list does NOT
