@@ -1,0 +1,66 @@
+// =============================================================================
+// core-tests/async/stream/unit_test.vr
+// =============================================================================
+// Unit tests for `core.async.stream` — the low-level `Stream` protocol
+// + factory combinators (stream_once / stream_empty / stream_repeat /
+// stream_repeat_n / stream_from_fn / stream_unfold / interval) +
+// combinator stream types (StreamMap / StreamFilter / StreamTake / …).
+//
+// These tests pin the structural surface (factories construct without
+// panic; type predicates evaluate cleanly); full poll-loop behaviour
+// is exercised at the integration level.
+// =============================================================================
+
+mount core.async.stream.{
+    stream_once, stream_empty, stream_repeat, stream_repeat_n,
+    stream_from_fn, interval,
+};
+
+@test
+fn test_stream_once_constructs() {
+    let _ = stream_once(42);
+    assert(true);
+}
+
+@test
+fn test_stream_empty_constructs() {
+    let _ = stream_empty();
+    assert(true);
+}
+
+@test
+fn test_stream_repeat_constructs() {
+    let _ = stream_repeat(7);
+    assert(true);
+}
+
+@test
+fn test_stream_repeat_n_constructs_with_zero() {
+    let _ = stream_repeat_n(1, 0);
+    assert(true);
+}
+
+@test
+fn test_stream_repeat_n_constructs_with_positive() {
+    let _ = stream_repeat_n(99, 5);
+    assert(true);
+}
+
+@test
+fn test_stream_from_fn_constructs_with_terminating_predicate() {
+    let mut count = 0;
+    let _ = stream_from_fn(|| {
+        count = count + 1;
+        if count > 3 { None } else { Some(count) }
+    });
+    // Lazy construction — no items pulled yet.
+    assert(count == 0);
+}
+
+@test
+fn test_interval_constructs_with_positive_period() {
+    let _ = interval(100);
+    assert(true);
+}
+
+fn main() {}

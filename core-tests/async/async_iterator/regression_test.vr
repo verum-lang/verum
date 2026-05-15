@@ -1,0 +1,19 @@
+// =============================================================================
+// core-tests/async/async_iterator/regression_test.vr
+// =============================================================================
+// Regression pins for `core.async.async_iterator` defects.  The
+// protocol is exercised end-to-end by `for await` user-side tests,
+// which surface protocol-resolver / blanket-impl projection-reduction
+// gaps separately.
+// =============================================================================
+
+mount core.async.async_iterator.{AsyncIterator};
+
+@test
+fn regression_async_iterator_protocol_mount_does_not_panic() {
+    // Pin: bringing the protocol into scope must not panic at archive
+    // load (variant-tag-collision class of bugs).
+    assert(true);
+}
+
+fn main() {}
