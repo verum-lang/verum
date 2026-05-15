@@ -115,14 +115,58 @@ spanning both defect classes).
 
 ## Action items deferred
 
-### §A `unfold` / `successors` builders missing from prelude
+### §A `unfold` / `successors` builders + ReduceResult ctors — CLOSED 2026-05-15
 
-Tests `test_unfold_basic`, `test_unfold_empty`, `test_successors_basic`,
-`test_successors_until_none` fail with `unbound variable: unfold` /
-`successors`.  The iterator module exports these (verified in
-`core/base/iterator.vr`) but `core/prelude.vr`'s `super.base.*` glob
-mount doesn't surface them as bare names — they need explicit prelude
-entry or stdlib reorganisation.  Separate task.
+Closed by adding `unfold`, `successors`, `Continue`, `Reduced` to
+`core/base/mod.vr`'s `public mount .iterator.{...}` re-export clause
+so the `core/prelude.vr`'s `super.base.*` glob mount surfaces them as
+bare names.  Pre-fix tests using `mount core.prelude.*` couldn't
+resolve them and fell through to `E100 unbound variable`.
+
+The companion `ReduceResult<R>` variant-constructor side
+(`let r: ReduceResult<Int> = Reduced(99);` failed with `expected 'R',
+found 'Int'`) requires the metadata-side type-param substitution map
+for variant constructors to fire — this works for the source-driven
+path but the precompiled-metadata loader path still has the gap.
+Tracked as task #5 §F below.
+
+### §F Higher-order-function closure-shape bound metadata serialisation
+
+**Partial source-side fix landed in this branch** (`crates/verum_types/
+src/infer/decls.rs::register_function_signature` + `crates/verum_types
+/src/infer/expr.rs::infer_expr_call`):
+
+  * `register_function_signature` now extracts function-type bounds
+    (`F: fn(A) -> B`) from each generic param's `bounds` list via
+    `extract_type_bounds_from_ast` and attaches them to the
+    `TypeScheme` via `.with_type_bounds(...)`.  Mirrors the existing
+    `with_protocol_bounds` discipline.
+
+  * `infer_expr_call`'s default lookup path now instantiates BOTH
+    protocol and type bounds for the fresh TypeVars and registers the
+    function-type bounds on the global env via
+    `register_type_var_type_bound`, so
+    `check_closure_expr::get_function_type_bound(fresh_F)` recovers
+    the closure shape (`fn() -> Maybe<T>` for `from_fn`, etc.) and
+    propagates `Maybe<T>` as the closure body's expected return type.
+
+  * Validation: user-defined `fn run_with<T, F: fn() -> Maybe<T>>(f:
+    F)` correctly type-checks a closure body whose else branch is
+    bare `None` — the bare-Path bidirectional arm in §3.1 resolves
+    `None` against `Maybe<T>` instead of arity-blind first-wins.
+
+**Remaining gap**: stdlib functions like `from_fn`, `unfold`,
+`successors`, and every other HOF in `core/base/iterator.vr` are
+loaded via the precompiled CoreMetadata path (`load_stdlib_from_
+metadata` / `register_stdlib_constructors_from_metadata` /
+`resolve_metadata_reexport_function`), which doesn't yet serialise
+function-type bounds for generic parameters in
+`metadata.functions[name].generic_params[i].type_bounds`.  The
+metadata format needs a new `type_bounds: List<TypeString>` field on
+each generic param descriptor, with corresponding emit at precompile
+(`crates/verum_compiler/build.rs`'s metadata-emission walker) and
+parse at user-side load (`archive_metadata` /
+`load_stdlib_from_metadata`).  Tracked as a follow-up task.
 
 ### §B `Transducer.<method>` chain not yet implemented
 

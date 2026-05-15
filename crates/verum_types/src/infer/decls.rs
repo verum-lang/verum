@@ -6276,6 +6276,17 @@ impl TypeChecker {
         let mut implicit_type_vars: Set<TypeVar> = Set::new();
         let mut param_protocol_bounds: Map<TypeVar, List<crate::protocol::ProtocolBound>> =
             Map::new();
+        // **Function-type bounds** (`F: fn(A) -> B`-style closure-shape
+        // constraints) — collected alongside protocol bounds so the call-site
+        // scheme instantiation in `infer_expr_call` can recover the closure
+        // shape via `get_function_type_bound`.  Pre-fix these bounds were
+        // extracted at the type-parameter scope level but never wired into
+        // the scheme; call sites then instantiated through the
+        // bound-less `scheme.instantiate()` path, dropping the closure
+        // shape — every HOF closure body inferred its `expected_return`
+        // from synth_path arity-blind first-wins (the canonical
+        // `Backend.None` / `Maybe.None` collision).
+        let mut param_type_bounds: Map<TypeVar, List<Type>> = Map::new();
 
         // Save any existing types that will be shadowed by generic parameters,
         // so we can restore them after processing the function signature.
@@ -6309,6 +6320,16 @@ impl TypeChecker {
                             if !protocol_bounds.is_empty() {
                                 param_protocol_bounds.insert(fresh_var, protocol_bounds);
                             }
+                        }
+                        // Also collect direct type bounds (function-type
+                        // bounds: `F: fn(A) -> B`, equality bounds: `T =
+                        // Concrete`).  These flow into the scheme so call
+                        // sites can recover the constraint via
+                        // `get_function_type_bound` for closure-shape-
+                        // driven bidirectional type-check of the body.
+                        let type_bounds = self.extract_type_bounds_from_ast(bounds);
+                        if !type_bounds.is_empty() {
+                            param_type_bounds.insert(fresh_var, type_bounds);
                         }
                     }
                 }
@@ -6453,6 +6474,15 @@ impl TypeChecker {
             scheme
         } else {
             scheme.with_protocol_bounds(param_protocol_bounds)
+        };
+        // Attach function-type bounds to the scheme so call-site
+        // instantiation can register them on the fresh TypeVars (see
+        // `infer_expr_call`'s default path).  Mirrors the
+        // `with_protocol_bounds` discipline above.
+        let scheme = if param_type_bounds.is_empty() {
+            scheme
+        } else {
+            scheme.with_type_bounds(param_type_bounds)
         };
         // Protect builtin generic/meta functions from being DOWNGRADED by stdlib.
         // When a generic builtin (e.g., fn<T>(T) -> T for abs) already exists,

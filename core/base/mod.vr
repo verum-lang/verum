@@ -280,6 +280,8 @@ public mount .iterator.{
     repeat_with,
     count_from,
     from_fn,
+    unfold,
+    successors,
     RepeatWith,
     OnceWith,
     ExactSizeIterator,
@@ -289,6 +291,16 @@ public mount .iterator.{
     StatefulTransducer,
     Reducer,
     ReduceResult,
+    // ReduceResult variant constructors so users can write `Reduced(v)` /
+    // `Continue(v)` bare (no `ReduceResult.` prefix) under the prelude
+    // wildcard glob. Same discipline as `Some` / `None` / `Ok` / `Err` /
+    // `Less` / `Equal` / `Greater` already re-exported above. Without
+    // these the typechecker's `try_resolve_variant_constructor("Reduced")`
+    // misses the parent and falls into the rigid-param branch — surfaces
+    // as "expected 'R', found 'Int'" on every `let r: ReduceResult<Int> =
+    // Reduced(n);` site.
+    Continue,
+    Reduced,
 };
 
 // From panic

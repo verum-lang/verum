@@ -27,7 +27,7 @@ use crate::stage_checker::{StageChecker, StageConfig};
 #[allow(unused_imports)]
 use crate::subtype::Subtyping;
 #[allow(unused_imports)]
-use crate::ty::{Type, TypeVar};
+use crate::ty::{Substitution, Type, TypeVar};
 #[allow(unused_imports)]
 use crate::unify::Unifier;
 #[allow(unused_imports)]
@@ -500,7 +500,8 @@ impl TypeChecker {
                 };
 
                 // Expand expected type to variant form
-                let expanded_expected = self.expand_generic_to_variant(expected);
+                let resolved_expected_call = self.unifier.apply(expected);
+                let expanded_expected = self.expand_generic_to_variant(&resolved_expected_call);
                 if let Type::Variant(ref variants) = expanded_expected {
                     if let Some(payload_ty) = variants.get(constructor_name) {
                         // The expected variant type has this constructor — use it
@@ -5909,13 +5910,68 @@ impl TypeChecker {
                 self.synth_expr(func)?
             }
         } else {
-            // Default path: look up scheme for protocol bounds, then synth_expr for type
+            // Default path: look up scheme for protocol bounds AND function-type
+            // bounds (`F: fn() -> Maybe<T>` style closure constraints), then
+            // synth_expr for type.
+            //
+            // **Architectural fix** — the protocol-bounds branch existed but
+            // the parallel function-type-bounds path didn't, so any free
+            // function whose only type-var constraint was a closure shape
+            // (`from_fn<T, F: fn() -> Maybe<T>>`, `unfold<St, T, F: fn(...)
+            // -> Maybe<T>>`, `successors<T, F: fn(&T) -> Maybe<T>>`, the
+            // entire higher-order-function suite in `core/base/iterator.vr`'s
+            // source builders, plus every user-defined HOF that takes a
+            // closure with a bound) instantiated through plain
+            // `scheme.instantiate()` which DROPS the bounds.  The fresh
+            // var for F then carried no bound at the call site, so
+            // `check_closure_expr`'s `get_function_type_bound(F)` lookup
+            // returned None, the normalised expected stayed as `Type::Var`,
+            // and the closure body's expected return type was never
+            // propagated — every bare `None` / `Some(x)` inside the body
+            // synthesised through arity-blind first-wins and picked an
+            // unrelated variant (canonically `Backend.None` over
+            // `Maybe.None`).
             if let Some(ref name) = callee_name {
                 if let Some(scheme) = self.ctx.env.lookup(name.as_str()).cloned() {
-                    if !scheme.var_protocol_bounds.is_empty() {
-                        let (ty, _fresh_vars, proto_bounds) =
-                            scheme.instantiate_with_protocol_bounds();
-                        pending_protocol_bounds = proto_bounds;
+                    let has_proto_bounds = !scheme.var_protocol_bounds.is_empty();
+                    let has_type_bounds = !scheme.var_type_bounds.is_empty();
+                    if has_proto_bounds || has_type_bounds {
+                        // Instantiate with both kinds of bounds.  When both are
+                        // present we must use a SINGLE instantiation so the same
+                        // fresh-var mapping applies to both bound kinds.
+                        let mut subst = Substitution::new();
+                        let mut old_to_fresh: Map<TypeVar, TypeVar> = Map::new();
+                        for var in &scheme.vars {
+                            let fresh = TypeVar::fresh();
+                            subst.insert(*var, Type::Var(fresh));
+                            old_to_fresh.insert(*var, fresh);
+                        }
+                        let ty = scheme.ty.apply_subst(&subst);
+                        // Register protocol bounds for later call-site verification
+                        if has_proto_bounds {
+                            for (old_var, bounds) in &scheme.var_protocol_bounds {
+                                if let Some(fresh_var) = old_to_fresh.get(old_var) {
+                                    pending_protocol_bounds
+                                        .insert(*fresh_var, bounds.clone());
+                                }
+                            }
+                        }
+                        // Register function-type bounds on the global env so
+                        // `check_closure_expr`'s `get_function_type_bound(fresh)`
+                        // can recover the closure shape.  The bound itself is
+                        // substituted through the same `subst` so any nested
+                        // generic params (e.g. T inside `fn() -> Maybe<T>`)
+                        // share fresh vars with the function's own return type.
+                        if has_type_bounds {
+                            for (old_var, bounds) in &scheme.var_type_bounds {
+                                if let Some(fresh_var) = old_to_fresh.get(old_var) {
+                                    for b in bounds.iter() {
+                                        let mapped = b.apply_subst(&subst);
+                                        self.register_type_var_type_bound(*fresh_var, mapped);
+                                    }
+                                }
+                            }
+                        }
                         InferResult::new(ty)
                     } else {
                         self.synth_expr(func)?
