@@ -153,8 +153,15 @@ fn law_eq_distinguishes_ok_from_err() {
 
 @test
 fn law_ord_compares_inner_when_same_variant() {
-    assert(Ok::<Int, Text>(1) < Ok::<Int, Text>(2));
-    assert(Err::<Int, Text>("a") < Err::<Int, Text>("b"));
+    // Verum doesn't have Rust-style turbofish; use annotated let bindings
+    // so the bidirectional Call arm + my fix at task #5 §3.1 routes
+    // Ok(i)/Err(s) to the correct Result.Ok / Result.Err variant.
+    let a: Result<Int, Text> = Ok(1);
+    let b: Result<Int, Text> = Ok(2);
+    assert(a < b);
+    let c: Result<Int, Text> = Err("a");
+    let d: Result<Int, Text> = Err("b");
+    assert(c < d);
 }
 
 // =============================================================================
@@ -282,7 +289,8 @@ fn prop_map_preserves_ok_count(n: Int) {
 @property
 fn prop_q_on_ok_succeeds(n: Int) {
     fn body(n: Int) -> Result<Int, Text> {
-        let v = Ok::<Int, Text>(n)?;
+        let r: Result<Int, Text> = Ok(n);
+        let v = r?;
         Ok(v)
     }
     assert_eq(body(n), Ok(n));
