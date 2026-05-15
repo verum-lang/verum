@@ -4,7 +4,9 @@
 //
 // Cross-stdlib integration tests for `core.sys.file_ops` — pairing the
 // raw FFI surface with `Maybe`, `Text`, and `List` so the patterns user
-// code reaches for are pinned end-to-end.
+// code reaches for are pinned end-to-end.  Includes happy-path
+// write→read round-trips through `/tmp` (POSIX-portable across Linux
+// and macOS — both have a world-writable `/tmp` per FHS).
 // =============================================================================
 
 mount core.prelude.*;
@@ -78,6 +80,86 @@ fn integration_error_sentinels_chain_consistently() {
     assert_eq(exists, false);
     assert(sz < 0);
     assert_eq(deleted, false);
+}
+
+// =============================================================================
+// Section 4: Happy-path write → read round-trip via /tmp fixtures
+//
+// POSIX FHS guarantees `/tmp` is world-writable.  The interpreter's
+// real-file-IO implementation (`state.open_files` table backed by
+// `std::fs`) writes via `__file_write_string_raw` and reads via
+// `__file_read_to_string_raw`.  Cleanup on every code path.
+// =============================================================================
+
+@test
+fn integration_write_read_round_trip_ascii() {
+    let path: Text = "/tmp/__verum_test_write_read_ascii_19271837__";
+    let content: Text = "hello verum";
+    // Pre-clean so a stale prior run doesn't false-pass.
+    let _ = delete_file(path);
+    let wrote = write_file(path, content);
+    assert(wrote);
+    let read_back = read_file(path);
+    let observed = match read_back {
+        Some(s) => s,
+        None => panic("write succeeded but read returned None"),
+    };
+    assert_eq(observed, content);
+    let _ = delete_file(path);
+}
+
+@test
+fn integration_write_read_round_trip_empty() {
+    let path: Text = "/tmp/__verum_test_write_read_empty_293847_19__";
+    let _ = delete_file(path);
+    let wrote = write_file(path, "");
+    assert(wrote);
+    // After empty write, the file exists with 0 bytes — file_exists
+    // reports true.
+    assert(file_exists(path));
+    let _ = delete_file(path);
+}
+
+@test
+fn integration_append_extends_existing_content() {
+    // `append_file` post-fix opens with O_APPEND and writes via the
+    // fd-based `__file_write_text_raw` (NOT the path-based truncating
+    // `__file_write_string_raw`).  Two successive appends should
+    // concatenate, not clobber.
+    let path: Text = "/tmp/__verum_test_append_extends_92837_44__";
+    let _ = delete_file(path);
+    let _ = write_file(path, "abc");
+    let appended_once = append_file(path, "def");
+    assert(appended_once);
+    let appended_twice = append_file(path, "ghi");
+    assert(appended_twice);
+    let observed = match read_file(path) {
+        Some(s) => s,
+        None => panic("read after append returned None"),
+    };
+    assert_eq(observed, "abcdefghi");
+    let _ = delete_file(path);
+}
+
+@test
+fn integration_file_size_after_write_equals_byte_length() {
+    let path: Text = "/tmp/__verum_test_size_after_write_18273_99__";
+    let _ = delete_file(path);
+    let _ = write_file(path, "0123456789");
+    let sz = file_size(path);
+    assert_eq(sz, 10);
+    let _ = delete_file(path);
+}
+
+@test
+fn integration_delete_removes_file() {
+    let path: Text = "/tmp/__verum_test_delete_removes_29384_22__";
+    let _ = delete_file(path);
+    let _ = write_file(path, "x");
+    assert(file_exists(path));
+    let ok = delete_file(path);
+    assert(ok);
+    assert_eq(file_exists(path), false);
 }
 
 fn main() {}
