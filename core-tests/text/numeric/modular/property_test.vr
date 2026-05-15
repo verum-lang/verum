@@ -1,0 +1,270 @@
+// =============================================================================
+// core-tests/text/numeric/modular/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core/text/numeric/modular.vr` — number-theoretic
+// functions over BigInt.  Each law is exhausted over a small representative
+// sample of inputs.  Larger random sweeps await Verum's quickcheck adoption.
+//
+// Laws pinned:
+//   L1.  gcd commutativity:       gcd(a, b) == gcd(b, a)
+//   L2.  gcd identity:            gcd(a, 0) == |a|   (when a != 0)
+//   L3.  gcd-lcm product:         gcd(a, b) * lcm(a, b) == |a * b|
+//   L4.  ext_gcd Bezout:          a*x + b*y == gcd(a, b)
+//   L5.  mod_pow identity:        mod_pow(a, 0, m) == 1   (m != 0)
+//   L6.  mod_pow exponent law:    mod_pow(a, e+1, m) ≡ (mod_pow(a, e, m) * a) mod m
+//   L7.  mod_inverse round-trip:  (a * mod_inverse(a, m)) mod m == 1   (gcd(a,m)==1)
+//   L8.  is_probable_prime soundness: a known prime returns true for
+//                                     reasonable witness sets
+//   L9.  is_probable_prime composite: a known composite returns false
+//
+// Companion files: unit_test.vr, integration_test.vr, regression_test.vr,
+// audit.md.
+// =============================================================================
+
+mount core.text.numeric.modular.{
+    gcd, lcm, ext_gcd, mod_pow, mod_inverse, is_probable_prime,
+};
+mount core.text.numeric.bigint.{BigInt};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// Helpers — small-value BigInt construction used throughout this file.
+
+fn bi(n: Int) -> BigInt {
+    BigInt.from_int(n)
+}
+
+fn must_be_one(b: &BigInt, ctx: &Text) {
+    let txt = b.to_text();
+    if txt != "1" {
+        panic(f"{ctx}: expected BigInt(1), got {txt}");
+    }
+}
+
+// =============================================================================
+// L1 — gcd commutativity:  gcd(a, b) == gcd(b, a)
+// =============================================================================
+
+@test
+fn law_gcd_commutativity_12_18() {
+    let a = bi(12);
+    let b = bi(18);
+    assert(gcd(&a, &b).eq(&gcd(&b, &a)));
+}
+
+@test
+fn law_gcd_commutativity_17_5() {
+    let a = bi(17);
+    let b = bi(5);
+    assert(gcd(&a, &b).eq(&gcd(&b, &a)));
+}
+
+@test
+fn law_gcd_commutativity_100_25() {
+    let a = bi(100);
+    let b = bi(25);
+    assert(gcd(&a, &b).eq(&gcd(&b, &a)));
+}
+
+// =============================================================================
+// L2 — gcd identity:  gcd(a, 0) == |a|   for any non-zero a
+// =============================================================================
+
+@test
+fn law_gcd_with_zero_is_abs() {
+    let a = bi(42);
+    let zero = bi(0);
+    assert(gcd(&a, &zero).eq(&a));
+    assert(gcd(&zero, &a).eq(&a));
+}
+
+@test
+fn law_gcd_negative_with_zero() {
+    let a = bi(-7);
+    let zero = bi(0);
+    let g = gcd(&a, &zero);
+    // gcd is by convention non-negative (returns |a|)
+    assert(g.eq(&bi(7)));
+}
+
+// =============================================================================
+// L3 — gcd-lcm product:  gcd(a, b) * lcm(a, b) == |a * b|
+// =============================================================================
+
+@test
+fn law_gcd_lcm_product_12_18() {
+    let a = bi(12);
+    let b = bi(18);
+    let g = gcd(&a, &b);
+    let l = lcm(&a, &b);
+    let lhs = g.mul(&l);                          // gcd * lcm
+    let rhs = a.mul(&b).abs();                    // |a*b|
+    assert(lhs.eq(&rhs));
+}
+
+@test
+fn law_gcd_lcm_product_coprime() {
+    let a = bi(7);
+    let b = bi(11);
+    let g = gcd(&a, &b);
+    let l = lcm(&a, &b);
+    assert(g.eq(&bi(1)));                          // coprime
+    assert(l.eq(&bi(77)));                         // 7 * 11
+    assert(g.mul(&l).eq(&a.mul(&b)));
+}
+
+// =============================================================================
+// L4 — ext_gcd Bezout:  a*x + b*y == gcd(a, b)
+// =============================================================================
+
+@test
+fn law_ext_gcd_bezout_12_18() {
+    let a = bi(12);
+    let b = bi(18);
+    let (g, x, y) = ext_gcd(&a, &b);
+    let lhs = a.mul(&x).add(&b.mul(&y));           // a*x + b*y
+    assert(lhs.eq(&g));
+    assert(g.eq(&gcd(&a, &b)));                    // also matches gcd
+}
+
+@test
+fn law_ext_gcd_bezout_coprime() {
+    let a = bi(7);
+    let b = bi(11);
+    let (g, x, y) = ext_gcd(&a, &b);
+    let lhs = a.mul(&x).add(&b.mul(&y));
+    assert(lhs.eq(&g));
+    assert(g.eq(&bi(1)));
+}
+
+// =============================================================================
+// L5 — mod_pow identity:  mod_pow(a, 0, m) == 1   for any m > 1
+// =============================================================================
+
+@test
+fn law_mod_pow_exponent_zero_is_one() {
+    let a = bi(5);
+    let e = bi(0);
+    let m = bi(7);
+    match mod_pow(&a, &e, &m) {
+        Ok(r) => must_be_one(&r, &"mod_pow(5, 0, 7)"),
+        Err(_) => panic("mod_pow(5, 0, 7) must succeed"),
+    };
+}
+
+@test
+fn law_mod_pow_base_zero_is_zero_when_exp_positive() {
+    let a = bi(0);
+    let e = bi(5);
+    let m = bi(7);
+    match mod_pow(&a, &e, &m) {
+        Ok(r) => assert(r.is_zero()),
+        Err(_) => panic("mod_pow(0, 5, 7) must succeed"),
+    };
+}
+
+// =============================================================================
+// L6 — mod_pow exponent law:
+//     mod_pow(a, e+1, m) ≡ (mod_pow(a, e, m) * a) mod m
+// Verifies the recursive structure of the square-and-multiply algorithm.
+// =============================================================================
+
+@test
+fn law_mod_pow_exponent_recurrence_3_4_7() {
+    // 3^4 mod 7 = 81 mod 7 = 4
+    // 3^3 mod 7 * 3 mod 7 = 27*3 mod 7 = 81 mod 7 = 4
+    let a = bi(3);
+    let m = bi(7);
+    let r3 = mod_pow(&a, &bi(3), &m);
+    let r4 = mod_pow(&a, &bi(4), &m);
+    match (r3, r4) {
+        (Ok(p3), Ok(p4)) => {
+            let expected = p3.mul(&a);
+            let (_q, rem) = expected.div_rem(&m).unwrap();
+            assert(rem.eq(&p4));
+        },
+        _ => panic("mod_pow must succeed"),
+    };
+}
+
+// =============================================================================
+// L7 — mod_inverse round-trip:  (a * mod_inverse(a, m)) mod m == 1
+// Holds only when gcd(a, m) == 1.
+// =============================================================================
+
+@test
+fn law_mod_inverse_round_trip_3_mod_7() {
+    let a = bi(3);
+    let m = bi(7);
+    match mod_inverse(&a, &m) {
+        Ok(inv) => {
+            let product = a.mul(&inv);
+            let (_q, rem) = product.div_rem(&m).unwrap();
+            must_be_one(&rem, &"3 * mod_inverse(3, 7) mod 7");
+        },
+        Err(_) => panic("mod_inverse(3, 7) must succeed (gcd=1)"),
+    };
+}
+
+@test
+fn law_mod_inverse_round_trip_5_mod_11() {
+    let a = bi(5);
+    let m = bi(11);
+    match mod_inverse(&a, &m) {
+        Ok(inv) => {
+            let product = a.mul(&inv);
+            let (_q, rem) = product.div_rem(&m).unwrap();
+            must_be_one(&rem, &"5 * mod_inverse(5, 11) mod 11");
+        },
+        Err(_) => panic("mod_inverse(5, 11) must succeed"),
+    };
+}
+
+@test
+fn law_mod_inverse_fails_when_not_coprime() {
+    let a = bi(6);
+    let m = bi(9);  // gcd(6, 9) = 3, not coprime
+    match mod_inverse(&a, &m) {
+        Ok(_) => panic("mod_inverse(6, 9) must Err (gcd != 1)"),
+        Err(_) => (),
+    };
+}
+
+// =============================================================================
+// L8 — is_probable_prime soundness for known primes
+// =============================================================================
+
+@test
+fn law_is_probable_prime_7() {
+    let n = bi(7);
+    let witnesses: List<BigInt> = [bi(2), bi(3), bi(5)];
+    assert(is_probable_prime(&n, &witnesses));
+}
+
+@test
+fn law_is_probable_prime_13() {
+    let n = bi(13);
+    let witnesses: List<BigInt> = [bi(2), bi(3), bi(5), bi(7)];
+    assert(is_probable_prime(&n, &witnesses));
+}
+
+// =============================================================================
+// L9 — is_probable_prime correctly rejects known composites
+// =============================================================================
+
+@test
+fn law_is_probable_prime_rejects_15() {
+    let n = bi(15);
+    let witnesses: List<BigInt> = [bi(2), bi(3), bi(5), bi(7)];
+    assert(!is_probable_prime(&n, &witnesses));
+}
+
+@test
+fn law_is_probable_prime_rejects_21() {
+    let n = bi(21);
+    let witnesses: List<BigInt> = [bi(2), bi(3), bi(5)];
+    assert(!is_probable_prime(&n, &witnesses));
+}
+
+fn main() {}

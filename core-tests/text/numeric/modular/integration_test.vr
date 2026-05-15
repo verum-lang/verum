@@ -1,0 +1,132 @@
+// =============================================================================
+// core-tests/text/numeric/modular/integration_test.vr
+// =============================================================================
+//
+// Cross-type integration scenarios for `core/text/numeric/modular.vr` —
+// exercises the seam between modular and BigInt + Result + List<BigInt>.
+//
+// Companion files: unit_test.vr, property_test.vr, regression_test.vr,
+// audit.md.
+// =============================================================================
+
+mount core.text.numeric.modular.{gcd, lcm, ext_gcd, mod_pow, mod_inverse, crt, crt2};
+mount core.text.numeric.bigint.{BigInt};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+fn bi(n: Int) -> BigInt {
+    BigInt.from_int(n)
+}
+
+// =============================================================================
+// Integration 1: gcd reduction over a List of BigInt values
+// =============================================================================
+
+@test
+fn integration_gcd_over_list_three_values() {
+    // gcd(12, 18, 24) = 6
+    let xs: List<BigInt> = [bi(12), bi(18), bi(24)];
+    let mut acc = xs[0].clone();
+    let mut i: Int = 1;
+    while i < xs.len() {
+        acc = gcd(&acc, &xs[i]);
+        i = i + 1;
+    }
+    assert_eq(acc.to_text(), "6");
+}
+
+@test
+fn integration_lcm_over_list_three_values() {
+    // lcm(4, 6, 8) = 24
+    let xs: List<BigInt> = [bi(4), bi(6), bi(8)];
+    let mut acc = xs[0].clone();
+    let mut i: Int = 1;
+    while i < xs.len() {
+        acc = lcm(&acc, &xs[i]);
+        i = i + 1;
+    }
+    assert_eq(acc.to_text(), "24");
+}
+
+// =============================================================================
+// Integration 2: Chinese remainder theorem (crt2) two-system solve
+// =============================================================================
+
+@test
+fn integration_crt2_two_system() {
+    // x ≡ 2 (mod 3)
+    // x ≡ 3 (mod 5)
+    // solution: x ≡ 8 (mod 15)
+    let r = crt2(&bi(2), &bi(3), &bi(3), &bi(5));
+    match r {
+        Ok(x) => assert_eq(x.to_text(), "8"),
+        Err(_) => panic("crt2 must succeed for coprime moduli"),
+    };
+}
+
+@test
+fn integration_crt_three_system() {
+    // x ≡ 2 (mod 3), x ≡ 3 (mod 5), x ≡ 2 (mod 7)
+    // solution: x ≡ 23 (mod 105)
+    let residues: List<BigInt> = [bi(2), bi(3), bi(2)];
+    let moduli: List<BigInt> = [bi(3), bi(5), bi(7)];
+    match crt(&residues, &moduli) {
+        Ok(x) => assert_eq(x.to_text(), "23"),
+        Err(_) => panic("crt must succeed for coprime moduli"),
+    };
+}
+
+// =============================================================================
+// Integration 3: ext_gcd + mod_inverse — recover the modular inverse from
+//                ext_gcd's coefficient.
+// =============================================================================
+
+@test
+fn integration_ext_gcd_yields_mod_inverse() {
+    // For a, m coprime, ext_gcd(a, m) = (1, x, y) with a*x + m*y = 1.
+    // Therefore x mod m is the modular inverse of a mod m.
+    let a = bi(7);
+    let m = bi(13);
+    let (g, x, _y) = ext_gcd(&a, &m);
+    assert(g.eq(&bi(1)));
+    let (_q, x_mod_m) = x.div_rem(&m).unwrap();
+    // Normalise to [0, m).
+    let normalised = if x_mod_m.is_negative() {
+        x_mod_m.add(&m)
+    } else {
+        x_mod_m
+    };
+    // 7 * x ≡ 1 (mod 13) — verify by cross-check with mod_inverse.
+    let inv_via_modinv = mod_inverse(&a, &m).unwrap();
+    assert(normalised.eq(&inv_via_modinv));
+}
+
+// =============================================================================
+// Integration 4: mod_pow composes with mul / sub for Fermat's little theorem
+//                check: a^(p-1) mod p == 1 for prime p, gcd(a, p) == 1.
+// =============================================================================
+
+@test
+fn integration_fermat_little_theorem_p7() {
+    let p = bi(7);
+    let p_minus_1 = p.sub(&bi(1));
+    // a = 3, gcd(3, 7) = 1
+    let a = bi(3);
+    match mod_pow(&a, &p_minus_1, &p) {
+        Ok(r) => assert_eq(r.to_text(), "1"),
+        Err(_) => panic("mod_pow(3, 6, 7) must succeed"),
+    };
+}
+
+@test
+fn integration_fermat_little_theorem_p11() {
+    let p = bi(11);
+    let p_minus_1 = p.sub(&bi(1));
+    let a = bi(2);
+    match mod_pow(&a, &p_minus_1, &p) {
+        Ok(r) => assert_eq(r.to_text(), "1"),
+        Err(_) => panic("mod_pow(2, 10, 11) must succeed"),
+    };
+}
+
+fn main() {}
