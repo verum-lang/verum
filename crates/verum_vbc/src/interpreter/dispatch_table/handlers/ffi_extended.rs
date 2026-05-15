@@ -3399,11 +3399,18 @@ pub(in super::super) fn make_result_ok_ptr(
 }
 
 /// Construct a Result::Ok(()) variant.
+///
+/// Anchored to `TypeId::RESULT` so the heap header carries the
+/// canonical typed id — mirrors `make_result_variant`'s typed
+/// allocation, so Display renders "Ok" via Result's descriptor
+/// directly instead of falling through the synthetic-id global
+/// tag-scan in `format_variant_for_print_depth`.
 pub(in super::super) fn make_result_ok_unit(
     state: &mut InterpreterState,
 ) -> InterpreterResult<Value> {
     super::method_dispatch::alloc_unit_variant(
         state,
+        crate::types::TypeId::RESULT,
         verum_common::well_known_types::result_success_tag(),
     )
 }
