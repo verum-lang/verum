@@ -1,0 +1,81 @@
+// =============================================================================
+// core-tests/text/numeric/bigdecimal/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core/text/numeric/bigdecimal.vr` — arbitrary-
+// precision decimal numbers (coefficient: BigInt, scale: Int).
+//
+// All laws @ignore'd while task #24 (BigInt method-return loses digits
+// List field) blocks the underlying arithmetic.  BigDecimal is a thin
+// wrapper on BigInt; when that closes, these flip green.
+// =============================================================================
+
+mount core.text.numeric.bigdecimal.{BigDecimal};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.base.result.{Result, Ok, Err};
+
+fn bd(n: Int) -> BigDecimal {
+    BigDecimal.from_int(n)
+}
+
+@ignore
+@test
+fn law_add_commutativity() {
+    let a = bd(3);
+    let b = bd(7);
+    match (a.add(&b), b.add(&a)) {
+        (Ok(ab), Ok(ba)) => assert(ab.eq(&ba)),
+        _ => panic("add must succeed"),
+    };
+}
+
+@ignore
+@test
+fn law_add_zero_identity() {
+    let a = bd(42);
+    let zero = BigDecimal.zero();
+    match a.add(&zero) {
+        Ok(r) => assert(r.eq(&a)),
+        Err(_) => panic("a + 0 must succeed"),
+    };
+}
+
+@ignore
+@test
+fn law_mul_commutativity() {
+    let a = bd(3);
+    let b = bd(7);
+    match (a.mul(&b), b.mul(&a)) {
+        (Ok(ab), Ok(ba)) => assert(ab.eq(&ba)),
+        _ => panic("mul must succeed"),
+    };
+}
+
+@ignore
+@test
+fn law_mul_one_identity() {
+    let a = bd(42);
+    let one = BigDecimal.one();
+    match a.mul(&one) {
+        Ok(r) => assert(r.eq(&a)),
+        Err(_) => panic("a * 1 must succeed"),
+    };
+}
+
+@ignore
+@test
+fn law_neg_involution() {
+    let a = bd(42);
+    let r = a.neg().neg();
+    assert(r.eq(&a));
+}
+
+@ignore
+@test
+fn law_abs_is_non_negative() {
+    let a = bd(-42);
+    let r = a.abs();
+    assert(!r.is_negative());
+}
+
+fn main() {}

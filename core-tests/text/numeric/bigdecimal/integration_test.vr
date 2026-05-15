@@ -1,0 +1,58 @@
+// =============================================================================
+// core-tests/text/numeric/bigdecimal/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration scenarios for `core/text/numeric/bigdecimal.vr`.
+//
+// All @ignore'd while task #24 blocks the underlying arithmetic.
+// =============================================================================
+
+mount core.text.numeric.bigdecimal.{BigDecimal, parse_bigdecimal};
+mount core.text.numeric.bigint.{BigInt};
+mount core.text.numeric.decimal.{Decimal};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+@ignore
+@test
+fn integration_parse_to_text_round_trip() {
+    let r = parse_bigdecimal(&"3.14");
+    match r {
+        Ok(b) => assert_eq(b.to_text(), "3.14"),
+        Err(_) => panic("parse_bigdecimal('3.14') must succeed"),
+    };
+}
+
+@ignore
+@test
+fn integration_from_bigint() {
+    let bi = BigInt.from_int(42);
+    let bd = BigDecimal.from_bigint(&bi);
+    assert_eq(bd.to_text(), "42");
+}
+
+@ignore
+@test
+fn integration_div_by_zero_returns_err() {
+    let a = BigDecimal.from_int(10);
+    let zero = BigDecimal.zero();
+    match a.div(&zero, 10) {
+        Ok(_) => panic("div by zero must Err"),
+        Err(_) => (),
+    };
+}
+
+@ignore
+@test
+fn integration_try_to_decimal_round_trip() {
+    let bd = BigDecimal.from_int(42);
+    match bd.try_to_decimal() {
+        Some(d) => {
+            // Round-trip preserves value
+            let _ = d;
+        },
+        None => panic("BigDecimal(42).try_to_decimal must Some"),
+    };
+}
+
+fn main() {}

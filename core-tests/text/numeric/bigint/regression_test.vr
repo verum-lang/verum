@@ -1,0 +1,132 @@
+// =============================================================================
+// core-tests/text/numeric/bigint/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect (or current defect class) in
+// `core/text/numeric/bigint.vr` and the supporting plumbing it relies on.
+//
+// Defect classes:
+//   §A  Method-return loses digits List field (task #24) — every BigInt
+//       arithmetic method returns a BigInt record whose `digits` field
+//       behaves as if empty downstream.
+// =============================================================================
+
+mount core.text.numeric.bigint.{BigInt, parse_bigint};
+mount core.base.result.{Result, Ok, Err};
+
+fn bi(n: Int) -> BigInt {
+    BigInt.from_int(n)
+}
+
+// =============================================================================
+// PASS-GUARDs — exercise canonical construction surfaces that MUST stay green.
+// These don't return from method bodies, so they're not blocked by §A.
+// =============================================================================
+
+@test
+fn guard_zero_is_empty_digits() {
+    assert(BigInt.zero().digits.len() == 0);
+}
+
+@test
+fn guard_one_has_single_digit() {
+    let one = BigInt.one();
+    assert_eq(one.digits.len(), 1);
+    assert_eq(one.digits[0], 1);
+    assert(!one.sign);
+}
+
+@test
+fn guard_from_int_zero() {
+    let z = BigInt.from_int(0);
+    assert(z.is_zero());
+}
+
+@test
+fn guard_from_int_positive() {
+    let a = BigInt.from_int(42);
+    assert(!a.is_negative());
+    assert(a.is_positive());
+    assert_eq(a.digits.len(), 1);
+    assert_eq(a.digits[0], 42);
+}
+
+@test
+fn guard_from_int_negative() {
+    let a = BigInt.from_int(-42);
+    assert(a.is_negative());
+    assert(!a.is_positive());
+    assert_eq(a.digits.len(), 1);
+    assert_eq(a.digits[0], 42);
+}
+
+// `parse_bigint` is gated by the same task #24 defect family —
+// returns a Result<BigInt, ...> whose Ok BigInt has the digits
+// field destroyed.  Pinned `@ignore` until the codegen-level
+// return-record-shape defect closes.
+@ignore
+@test
+fn guard_parse_simple_positive() {
+    match parse_bigint(&"42") {
+        Ok(b) => {
+            assert_eq(b.digits.len(), 1);
+            assert_eq(b.digits[0], 42);
+        },
+        Err(_) => panic("parse_bigint('42') must succeed"),
+    };
+}
+
+// =============================================================================
+// §A — Method-return loses digits List field (task #24)
+// =============================================================================
+
+@ignore
+@test
+fn regression_a_abs_preserves_digits() {
+    let a = BigInt.from_int(7);
+    let b = a.abs();
+    assert_eq(b.digits.len(), 1);
+    assert_eq(b.digits[0], 7);
+}
+
+@ignore
+@test
+fn regression_a_neg_preserves_digits() {
+    let a = BigInt.from_int(7);
+    let b = a.neg();
+    assert_eq(b.digits.len(), 1);
+    assert_eq(b.digits[0], 7);
+    assert(b.sign);
+}
+
+@ignore
+@test
+fn regression_a_add_preserves_digits() {
+    let a = BigInt.from_int(3);
+    let b = BigInt.from_int(4);
+    let s = a.add(&b);
+    assert_eq(s.digits.len(), 1);
+    assert_eq(s.digits[0], 7);
+}
+
+@ignore
+@test
+fn regression_a_sub_preserves_digits() {
+    let a = BigInt.from_int(10);
+    let b = BigInt.from_int(3);
+    let d = a.sub(&b);
+    assert_eq(d.digits.len(), 1);
+    assert_eq(d.digits[0], 7);
+}
+
+@ignore
+@test
+fn regression_a_mul_preserves_digits() {
+    let a = BigInt.from_int(3);
+    let b = BigInt.from_int(4);
+    let p = a.mul(&b);
+    assert_eq(p.digits.len(), 1);
+    assert_eq(p.digits[0], 12);
+}
+
+fn main() {}

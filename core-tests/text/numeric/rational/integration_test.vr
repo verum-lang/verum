@@ -1,0 +1,51 @@
+// =============================================================================
+// core-tests/text/numeric/rational/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration scenarios for `core/text/numeric/rational.vr`.
+//
+// All @ignore'd while task #24 blocks the underlying arithmetic.
+// =============================================================================
+
+mount core.text.numeric.rational.{Rational};
+mount core.text.numeric.bigint.{BigInt};
+mount core.text.numeric.bigdecimal.{BigDecimal};
+mount core.text.numeric.decimal.{Decimal};
+mount core.base.result.{Result, Ok, Err};
+
+@ignore
+@test
+fn integration_from_bigint() {
+    let bi = BigInt.from_int(42);
+    let r = Rational.from_bigint(&bi);
+    let _ = r;
+}
+
+@ignore
+@test
+fn integration_from_bigdecimal() {
+    let bd = BigDecimal.from_int(42);
+    let r = Rational.from_bigdecimal(&bd);
+    let _ = r;
+}
+
+@ignore
+@test
+fn integration_compose_arithmetic() {
+    // (1/2) + (1/3) = 5/6
+    // Each Rational built via from_parts(BigInt, BigInt)
+    let one = BigInt.one();
+    let two = BigInt.from_int(2);
+    let three = BigInt.from_int(3);
+    match (Rational.from_parts(one.clone(), two.clone()),
+           Rational.from_parts(one.clone(), three.clone())) {
+        (Ok(a), Ok(b)) => {
+            let s = a.add(&b);
+            // 5/6 expected; verify via to_text or reciprocal property
+            let _ = s;
+        },
+        _ => panic("from_parts must succeed for non-zero denominator"),
+    };
+}
+
+fn main() {}

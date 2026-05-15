@@ -1,0 +1,93 @@
+// =============================================================================
+// core-tests/text/numeric/rational/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core/text/numeric/rational.vr` — arbitrary-precision
+// rational numbers (numerator: BigInt, denominator: BigInt).
+//
+// All @ignore'd while task #24 (BigInt method-return) blocks the
+// underlying arithmetic.  Once that closes, these flip green.
+// =============================================================================
+
+mount core.text.numeric.rational.{Rational};
+mount core.base.result.{Result, Ok, Err};
+
+fn rt(n: Int) -> Rational {
+    Rational.from_int(n)
+}
+
+@ignore
+@test
+fn law_add_commutativity() {
+    let a = rt(3);
+    let b = rt(7);
+    assert(a.add(&b).eq(&b.add(&a)));
+}
+
+@ignore
+@test
+fn law_add_zero_identity() {
+    let a = rt(42);
+    let zero = Rational.zero();
+    assert(a.add(&zero).eq(&a));
+}
+
+@ignore
+@test
+fn law_mul_commutativity() {
+    let a = rt(3);
+    let b = rt(7);
+    assert(a.mul(&b).eq(&b.mul(&a)));
+}
+
+@ignore
+@test
+fn law_mul_one_identity() {
+    let a = rt(42);
+    let one = Rational.one();
+    assert(a.mul(&one).eq(&a));
+}
+
+@ignore
+@test
+fn law_neg_involution() {
+    let a = rt(42);
+    let r = a.neg().neg();
+    assert(r.eq(&a));
+}
+
+@ignore
+@test
+fn law_reciprocal_round_trip() {
+    let a = rt(3);
+    match a.reciprocal() {
+        Ok(r) => match r.reciprocal() {
+            Ok(rr) => assert(rr.eq(&a)),
+            Err(_) => panic("reciprocal must succeed for non-zero arg"),
+        },
+        Err(_) => panic("reciprocal(3) must succeed"),
+    };
+}
+
+@ignore
+@test
+fn law_reciprocal_zero_fails() {
+    let zero = Rational.zero();
+    match zero.reciprocal() {
+        Ok(_) => panic("reciprocal(0) must Err"),
+        Err(_) => (),
+    };
+}
+
+@ignore
+@test
+fn law_div_by_zero_fails() {
+    let a = rt(10);
+    let zero = Rational.zero();
+    match a.div(&zero) {
+        Ok(_) => panic("div by zero must Err"),
+        Err(_) => (),
+    };
+}
+
+fn main() {}

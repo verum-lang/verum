@@ -1,0 +1,210 @@
+// =============================================================================
+// core-tests/text/numeric/bigint/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core/text/numeric/bigint.vr` — arbitrary-precision
+// signed integers in base 10^9.
+//
+// Laws pinned:
+//   L1.  Add commutativity:        a + b == b + a
+//   L2.  Add associativity:        (a + b) + c == a + (b + c)
+//   L3.  Additive identity:        a + 0 == a
+//   L4.  Additive inverse:         a + neg(a) == 0
+//   L5.  Mul commutativity:        a * b == b * a
+//   L6.  Mul associativity:        (a * b) * c == a * (b * c)
+//   L7.  Multiplicative identity:  a * 1 == a
+//   L8.  Multiplicative zero:      a * 0 == 0
+//   L9.  Distributivity:           a * (b + c) == a*b + a*c
+//   L10. Ord antisymmetry:         a.compare(b) == reverse(b.compare(a))
+//   L11. Sub identity:             a - a == 0
+//   L12. div_rem reconstruction:   q*b + r == a   for `a.div_rem(b) = (q, r)`
+//
+// All laws gated by task #24 (BigInt method-return loses digits List field)
+// — once that closes, these laws are the canonical pin against regression.
+// =============================================================================
+
+mount core.text.numeric.bigint.{BigInt};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.base.result.{Result, Ok, Err};
+
+fn bi(n: Int) -> BigInt {
+    BigInt.from_int(n)
+}
+
+// =============================================================================
+// L1 — Add commutativity
+// =============================================================================
+
+@ignore
+@test
+fn law_add_commutativity_3_7() {
+    let a = bi(3);
+    let b = bi(7);
+    assert(a.add(&b).eq(&b.add(&a)));
+}
+
+@ignore
+@test
+fn law_add_commutativity_neg() {
+    let a = bi(-5);
+    let b = bi(11);
+    assert(a.add(&b).eq(&b.add(&a)));
+}
+
+// =============================================================================
+// L2 — Add associativity
+// =============================================================================
+
+@ignore
+@test
+fn law_add_associativity_small() {
+    let a = bi(2);
+    let b = bi(3);
+    let c = bi(5);
+    assert(a.add(&b).add(&c).eq(&a.add(&b.add(&c))));
+}
+
+// =============================================================================
+// L3 — Additive identity
+// =============================================================================
+
+@ignore
+@test
+fn law_add_zero_identity() {
+    let a = bi(42);
+    let zero = BigInt.zero();
+    assert(a.add(&zero).eq(&a));
+    assert(zero.add(&a).eq(&a));
+}
+
+// =============================================================================
+// L4 — Additive inverse
+// =============================================================================
+
+@ignore
+@test
+fn law_add_inverse_to_zero() {
+    let a = bi(42);
+    let neg_a = a.neg();
+    assert(a.add(&neg_a).is_zero());
+}
+
+// =============================================================================
+// L5 — Mul commutativity
+// =============================================================================
+
+@ignore
+@test
+fn law_mul_commutativity_3_7() {
+    let a = bi(3);
+    let b = bi(7);
+    assert(a.mul(&b).eq(&b.mul(&a)));
+}
+
+// =============================================================================
+// L6 — Mul associativity
+// =============================================================================
+
+@ignore
+@test
+fn law_mul_associativity_small() {
+    let a = bi(2);
+    let b = bi(3);
+    let c = bi(5);
+    assert(a.mul(&b).mul(&c).eq(&a.mul(&b.mul(&c))));
+}
+
+// =============================================================================
+// L7 — Multiplicative identity
+// =============================================================================
+
+@ignore
+@test
+fn law_mul_one_identity() {
+    let a = bi(42);
+    let one = BigInt.one();
+    assert(a.mul(&one).eq(&a));
+    assert(one.mul(&a).eq(&a));
+}
+
+// =============================================================================
+// L8 — Multiplicative zero
+// =============================================================================
+
+@ignore
+@test
+fn law_mul_zero_is_zero() {
+    let a = bi(42);
+    let zero = BigInt.zero();
+    assert(a.mul(&zero).is_zero());
+    assert(zero.mul(&a).is_zero());
+}
+
+// =============================================================================
+// L9 — Distributivity: a * (b + c) == a*b + a*c
+// =============================================================================
+
+@ignore
+@test
+fn law_distributivity_3_5_7() {
+    let a = bi(3);
+    let b = bi(5);
+    let c = bi(7);
+    let lhs = a.mul(&b.add(&c));
+    let rhs = a.mul(&b).add(&a.mul(&c));
+    assert(lhs.eq(&rhs));
+}
+
+// =============================================================================
+// L10 — Ord antisymmetry: cmp(a, b) is opposite of cmp(b, a)
+// =============================================================================
+
+@ignore
+@test
+fn law_cmp_antisymmetry_lt() {
+    let a = bi(3);
+    let b = bi(7);
+    assert(a.compare(&b) is Less);
+    assert(b.compare(&a) is Greater);
+}
+
+@ignore
+@test
+fn law_cmp_antisymmetry_equal() {
+    let a = bi(7);
+    let b = bi(7);
+    assert(a.compare(&b) is Equal);
+}
+
+// =============================================================================
+// L11 — Sub identity: a - a == 0
+// =============================================================================
+
+@ignore
+@test
+fn law_sub_self_is_zero() {
+    let a = bi(42);
+    let r = a.sub(&a);
+    assert(r.is_zero());
+}
+
+// =============================================================================
+// L12 — div_rem reconstruction: q*b + r == a
+// =============================================================================
+
+@ignore
+@test
+fn law_div_rem_reconstruction() {
+    let a = bi(17);
+    let b = bi(5);
+    match a.div_rem(&b) {
+        Ok((q, r)) => {
+            // 17 = 3 * 5 + 2; q*b + r should equal a
+            let reconstructed = q.mul(&b).add(&r);
+            assert(reconstructed.eq(&a));
+        },
+        Err(_) => panic("div_rem must succeed for non-zero divisor"),
+    };
+}
+
+fn main() {}

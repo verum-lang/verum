@@ -1,0 +1,111 @@
+// =============================================================================
+// core-tests/text/numeric/bigint/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration scenarios for `core/text/numeric/bigint.vr` —
+// exercises BigInt's interaction with Result, Ordering, Text, List<Byte>.
+//
+// All tests @ignore'd while task #24 (BigInt method-return loses digits
+// List field) blocks the arithmetic surface.  Once that fix lands, these
+// flip to active green guards.
+// =============================================================================
+
+mount core.text.numeric.bigint.{BigInt, BigIntError, parse_bigint};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.collections.list.List;
+
+fn bi(n: Int) -> BigInt {
+    BigInt.from_int(n)
+}
+
+// =============================================================================
+// Integration 1: parse_bigint Round-trip with to_text
+// =============================================================================
+
+@ignore
+@test
+fn integration_parse_to_text_round_trip_positive() {
+    let r = parse_bigint(&"12345");
+    match r {
+        Ok(b) => assert_eq(b.to_text(), "12345"),
+        Err(_) => panic("parse_bigint must succeed for '12345'"),
+    };
+}
+
+@ignore
+@test
+fn integration_parse_to_text_round_trip_negative() {
+    let r = parse_bigint(&"-42");
+    match r {
+        Ok(b) => assert_eq(b.to_text(), "-42"),
+        Err(_) => panic("parse_bigint must succeed for '-42'"),
+    };
+}
+
+@ignore
+@test
+fn integration_parse_invalid_returns_err() {
+    let r = parse_bigint(&"not-a-number");
+    match r {
+        Ok(_) => panic("'not-a-number' must NOT parse"),
+        Err(_) => (),
+    };
+}
+
+// =============================================================================
+// Integration 2: div_rem returns Result with (BigInt, BigInt) tuple
+// =============================================================================
+
+@ignore
+@test
+fn integration_div_rem_by_zero_returns_err() {
+    let a = bi(10);
+    let zero = BigInt.zero();
+    match a.div_rem(&zero) {
+        Ok(_) => panic("div by zero must Err"),
+        Err(_) => (),
+    };
+}
+
+// =============================================================================
+// Integration 3: to_unsigned_bytes_be round-trip through from_unsigned_bytes_be
+// =============================================================================
+
+@ignore
+@test
+fn integration_unsigned_bytes_round_trip_be() {
+    let a = bi(257);  // 0x101 = [1, 1] big-endian
+    let bytes = a.to_unsigned_bytes_be();
+    let restored = BigInt.from_unsigned_bytes_be(&bytes);
+    assert(restored.eq(&a));
+}
+
+@ignore
+@test
+fn integration_unsigned_bytes_round_trip_le() {
+    let a = bi(257);
+    let bytes = a.to_unsigned_bytes_le();
+    let restored = BigInt.from_unsigned_bytes_le(&bytes);
+    assert(restored.eq(&a));
+}
+
+// =============================================================================
+// Integration 4: BigInt.compare yields an Ordering routable by match
+// =============================================================================
+
+@ignore
+@test
+fn integration_compare_match_dispatch() {
+    let a = bi(3);
+    let b = bi(7);
+    let label = match a.compare(&b) {
+        Less => "less",
+        Equal => "equal",
+        Greater => "greater",
+    };
+    assert_eq(label, "less");
+}
+
+fn main() {}
