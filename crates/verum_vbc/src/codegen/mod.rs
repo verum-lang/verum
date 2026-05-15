@@ -1305,6 +1305,34 @@ impl VbcCodegen {
                 m.insert("BTreeSet".to_string(), vec!["T".to_string()]);
                 m.insert("Deque".to_string(), vec!["T".to_string()]);
                 m.insert("Channel".to_string(), vec!["T".to_string()]);
+                // task #12 §B: memory/concurrency carriers needed for
+                // the cross-method generic-arg substitution at
+                // `extract_expr_type_name`'s MethodCall arm. Without
+                // these, calls like `Shared.clone() -> Shared<T>`
+                // through `let shared = self.inner.clone()` leak the
+                // literal `T` into `variable_type_names["shared"]`
+                // and downstream `(*shared).lock()` resolves the
+                // method name to `T.lock` instead of `<concrete>.lock`.
+                m.insert("Heap".to_string(), vec!["T".to_string()]);
+                m.insert("Shared".to_string(), vec!["T".to_string()]);
+                m.insert("Weak".to_string(), vec!["T".to_string()]);
+                m.insert("Pin".to_string(), vec!["T".to_string()]);
+                m.insert("ManuallyDrop".to_string(), vec!["T".to_string()]);
+                m.insert("Cow".to_string(), vec!["T".to_string()]);
+                m.insert("Mutex".to_string(), vec!["T".to_string()]);
+                m.insert("MutexGuard".to_string(), vec!["T".to_string()]);
+                m.insert("RwLock".to_string(), vec!["T".to_string()]);
+                m.insert(
+                    "RwLockReadGuard".to_string(),
+                    vec!["T".to_string()],
+                );
+                m.insert(
+                    "RwLockWriteGuard".to_string(),
+                    vec!["T".to_string()],
+                );
+                m.insert("PoisonError".to_string(), vec!["T".to_string()]);
+                m.insert("AtomicInt".to_string(), Vec::new());
+                m.insert("AtomicBool".to_string(), Vec::new());
                 m
             },
             // Transparent wrapper types: bare wrapper without generic args falls through
@@ -13207,6 +13235,112 @@ impl VbcCodegen {
     #[inline]
     fn is_ident_byte(b: u8) -> bool {
         b.is_ascii_alphanumeric() || b == b'_'
+    }
+
+    /// **String-level generic-param substitution** (task #12 §B).
+    ///
+    /// Substitutes each occurrence of a generic param name (T, K, V, E,
+    /// …) in `name` with its corresponding concrete type argument from
+    /// `args`.  Word-boundary aware (so `Tree` doesn't get partially
+    /// substituted for param `T`).
+    ///
+    /// Used by `extract_expr_type_name`'s MethodCall arm to propagate
+    /// concrete generic instantiations through return-type annotations
+    /// like `Shared<T>` (from `Shared.clone`'s signature) — pre-fix the
+    /// `T` remained literal and downstream method-call name resolution
+    /// emitted `T.method` instead of `<concrete>.method`, mis-routing
+    /// dispatch.
+    ///
+    /// `params.len()` may be less than `args.len()` (extra args ignored)
+    /// or more (extra params not substituted) — both cases are handled
+    /// gracefully; substitution is best-effort.
+    pub(super) fn substitute_generic_params_in_type_name(
+        name: &str,
+        params: &[String],
+        args: &[String],
+    ) -> String {
+        if params.is_empty() || args.is_empty() {
+            return name.to_string();
+        }
+        let mut out = String::with_capacity(name.len() + args.iter().map(|a| a.len()).sum::<usize>());
+        let bytes = name.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let before_ok = i == 0 || !Self::is_ident_byte(bytes[i - 1]);
+            if before_ok {
+                // Look for any param name starting at position i.
+                let mut matched: Option<(usize, &str)> = None;
+                for (idx, pname) in params.iter().enumerate() {
+                    if idx >= args.len() {
+                        break;
+                    }
+                    let p = pname.as_bytes();
+                    if i + p.len() <= bytes.len() && &bytes[i..i + p.len()] == p {
+                        let after_ok = i + p.len() == bytes.len()
+                            || !Self::is_ident_byte(bytes[i + p.len()]);
+                        if after_ok {
+                            matched = Some((p.len(), args[idx].as_str()));
+                            break;
+                        }
+                    }
+                }
+                if let Some((plen, arg)) = matched {
+                    out.push_str(arg);
+                    i += plen;
+                    continue;
+                }
+            }
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+        out
+    }
+
+    /// Depth-aware split of a generic type's outer-arg list.
+    ///
+    /// For `"Shared<Mutex<SemaphoreInner>>"`, returns
+    /// `vec!["Mutex<SemaphoreInner>"]`.  For `"Map<Int, Node>"`,
+    /// returns `vec!["Int", "Node"]`.  For non-generic `"Mutex"`,
+    /// returns an empty Vec.
+    ///
+    /// Used in conjunction with `substitute_generic_params_in_type_name`
+    /// to map receiver-type's concrete args onto a callee's named
+    /// type parameters.
+    pub(super) fn split_generic_args(type_name: &str) -> Vec<String> {
+        let start = match type_name.find('<') {
+            Some(s) => s,
+            None => return Vec::new(),
+        };
+        let end = match type_name.rfind('>') {
+            Some(e) => e,
+            None => return Vec::new(),
+        };
+        if start + 1 >= end {
+            return Vec::new();
+        }
+        let inner = &type_name[start + 1..end];
+        let mut args = Vec::new();
+        let mut depth = 0;
+        let mut arg_start = 0;
+        for (i, c) in inner.char_indices() {
+            match c {
+                '<' => depth += 1,
+                '>' => depth -= 1,
+                ',' if depth == 0 => {
+                    let s = inner[arg_start..i].trim();
+                    if !s.is_empty() {
+                        args.push(s.to_string());
+                    }
+                    arg_start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        let tail = inner[arg_start..].trim();
+        if !tail.is_empty() {
+            args.push(tail.to_string());
+        }
+        args
     }
 
     /// Generic parameters are preserved so that element types can be extracted
