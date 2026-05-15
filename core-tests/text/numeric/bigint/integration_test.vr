@@ -5,9 +5,9 @@
 // Cross-stdlib integration scenarios for `core/text/numeric/bigint.vr` —
 // exercises BigInt's interaction with Result, Ordering, Text, List<Byte>.
 //
-// All tests @ignore'd while task #24 (BigInt method-return loses digits
-// List field) blocks the arithmetic surface.  Once that fix lands, these
-// flip to active green guards.
+// Tasks #14/#15/#16/#17 ALL CLOSED 2026-05-15/16 — these guards now
+// active green pins (poly-arith intrinsic emission + inlined
+// BigInt.sub magnitude dispatch).
 // =============================================================================
 
 mount core.text.numeric.bigint.{BigInt, BigIntError, parse_bigint};
@@ -24,7 +24,6 @@ fn bi(n: Int) -> BigInt {
 // Integration 1: parse_bigint Round-trip with to_text
 // =============================================================================
 
-@ignore
 @test
 fn integration_parse_to_text_round_trip_positive() {
     let r = parse_bigint(&"12345");
@@ -34,7 +33,6 @@ fn integration_parse_to_text_round_trip_positive() {
     };
 }
 
-@ignore
 @test
 fn integration_parse_to_text_round_trip_negative() {
     let r = parse_bigint(&"-42");
@@ -44,7 +42,6 @@ fn integration_parse_to_text_round_trip_negative() {
     };
 }
 
-@ignore
 @test
 fn integration_parse_invalid_returns_err() {
     let r = parse_bigint(&"not-a-number");
@@ -58,7 +55,6 @@ fn integration_parse_invalid_returns_err() {
 // Integration 2: div_rem returns Result with (BigInt, BigInt) tuple
 // =============================================================================
 
-@ignore
 @test
 fn integration_div_rem_by_zero_returns_err() {
     let a = bi(10);
@@ -73,7 +69,6 @@ fn integration_div_rem_by_zero_returns_err() {
 // Integration 3: to_unsigned_bytes_be round-trip through from_unsigned_bytes_be
 // =============================================================================
 
-@ignore
 @test
 fn integration_unsigned_bytes_round_trip_be() {
     let a = bi(257);  // 0x101 = [1, 1] big-endian
@@ -82,7 +77,6 @@ fn integration_unsigned_bytes_round_trip_be() {
     assert(restored.eq(&a));
 }
 
-@ignore
 @test
 fn integration_unsigned_bytes_round_trip_le() {
     let a = bi(257);
@@ -95,7 +89,6 @@ fn integration_unsigned_bytes_round_trip_le() {
 // Integration 4: BigInt.compare yields an Ordering routable by match
 // =============================================================================
 
-@ignore
 @test
 fn integration_compare_match_dispatch() {
     let a = bi(3);

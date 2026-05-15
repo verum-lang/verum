@@ -19,8 +19,9 @@
 //   L11. Sub identity:             a - a == 0
 //   L12. div_rem reconstruction:   q*b + r == a   for `a.div_rem(b) = (q, r)`
 //
-// All laws gated by task #24 (BigInt method-return loses digits List field)
-// — once that closes, these laws are the canonical pin against regression.
+// Tasks #14/#15/#16/#17 ALL CLOSED 2026-05-15/16 — these laws now
+// active green pins against arithmetic regression (poly-arith
+// intrinsic emission + inlined BigInt.sub magnitude dispatch).
 // =============================================================================
 
 mount core.text.numeric.bigint.{BigInt};
@@ -35,7 +36,6 @@ fn bi(n: Int) -> BigInt {
 // L1 — Add commutativity
 // =============================================================================
 
-@ignore
 @test
 fn law_add_commutativity_3_7() {
     let a = bi(3);
@@ -43,7 +43,6 @@ fn law_add_commutativity_3_7() {
     assert(a.add(&b).eq(&b.add(&a)));
 }
 
-@ignore
 @test
 fn law_add_commutativity_neg() {
     let a = bi(-5);
@@ -55,7 +54,6 @@ fn law_add_commutativity_neg() {
 // L2 — Add associativity
 // =============================================================================
 
-@ignore
 @test
 fn law_add_associativity_small() {
     let a = bi(2);
@@ -68,7 +66,6 @@ fn law_add_associativity_small() {
 // L3 — Additive identity
 // =============================================================================
 
-@ignore
 @test
 fn law_add_zero_identity() {
     let a = bi(42);
@@ -81,7 +78,6 @@ fn law_add_zero_identity() {
 // L4 — Additive inverse
 // =============================================================================
 
-@ignore
 @test
 fn law_add_inverse_to_zero() {
     let a = bi(42);
@@ -93,7 +89,6 @@ fn law_add_inverse_to_zero() {
 // L5 — Mul commutativity
 // =============================================================================
 
-@ignore
 @test
 fn law_mul_commutativity_3_7() {
     let a = bi(3);
@@ -105,7 +100,6 @@ fn law_mul_commutativity_3_7() {
 // L6 — Mul associativity
 // =============================================================================
 
-@ignore
 @test
 fn law_mul_associativity_small() {
     let a = bi(2);
@@ -118,7 +112,6 @@ fn law_mul_associativity_small() {
 // L7 — Multiplicative identity
 // =============================================================================
 
-@ignore
 @test
 fn law_mul_one_identity() {
     let a = bi(42);
@@ -131,7 +124,6 @@ fn law_mul_one_identity() {
 // L8 — Multiplicative zero
 // =============================================================================
 
-@ignore
 @test
 fn law_mul_zero_is_zero() {
     let a = bi(42);
@@ -144,7 +136,6 @@ fn law_mul_zero_is_zero() {
 // L9 — Distributivity: a * (b + c) == a*b + a*c
 // =============================================================================
 
-@ignore
 @test
 fn law_distributivity_3_5_7() {
     let a = bi(3);
@@ -159,7 +150,6 @@ fn law_distributivity_3_5_7() {
 // L10 — Ord antisymmetry: cmp(a, b) is opposite of cmp(b, a)
 // =============================================================================
 
-@ignore
 @test
 fn law_cmp_antisymmetry_lt() {
     let a = bi(3);
@@ -168,7 +158,6 @@ fn law_cmp_antisymmetry_lt() {
     assert(b.compare(&a) is Greater);
 }
 
-@ignore
 @test
 fn law_cmp_antisymmetry_equal() {
     let a = bi(7);
@@ -180,7 +169,6 @@ fn law_cmp_antisymmetry_equal() {
 // L11 — Sub identity: a - a == 0
 // =============================================================================
 
-@ignore
 @test
 fn law_sub_self_is_zero() {
     let a = bi(42);
@@ -192,7 +180,6 @@ fn law_sub_self_is_zero() {
 // L12 — div_rem reconstruction: q*b + r == a
 // =============================================================================
 
-@ignore
 @test
 fn law_div_rem_reconstruction() {
     let a = bi(17);
