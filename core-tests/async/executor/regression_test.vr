@@ -1,0 +1,31 @@
+// =============================================================================
+// core-tests/async/executor/regression_test.vr
+// =============================================================================
+// Regression pins for `core.async.executor`.
+// =============================================================================
+
+mount core.async.executor.{RuntimeBuilder};
+
+@test
+fn regression_runtime_builder_chain_does_not_panic() {
+    // The builder is fluent — chaining setters must not panic on
+    // intermediate states. Pin the chain shape.
+    let b = RuntimeBuilder.new()
+        .max_tasks(64)
+        .stack_size(65536)
+        .enable_work_stealing()
+        .enable_io()
+        .enable_time();
+    let _ = b;
+    assert(true);
+}
+
+@test
+fn regression_runtime_builder_zero_max_tasks() {
+    // Zero max_tasks is a degenerate setting — builder accepts it
+    // without panic; downstream `.build()` may reject.
+    let _ = RuntimeBuilder.new().max_tasks(0);
+    assert(true);
+}
+
+fn main() {}

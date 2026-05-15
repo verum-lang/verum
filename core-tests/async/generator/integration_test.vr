@@ -1,0 +1,44 @@
+// =============================================================================
+// core-tests/async/generator/integration_test.vr
+// =============================================================================
+// Integration scenarios composing multiple generator factories.
+// =============================================================================
+
+mount core.async.generator.{
+    generator_range, generator_repeat, generator_successors, generator_from_fn,
+};
+
+@test
+fn integration_range_and_repeat_compose_via_close() {
+    let mut r = generator_range(0, 5);
+    let mut p = generator_repeat(0);
+    // Both must be live initially.
+    assert(r.has_next());
+    assert(p.has_next());
+    p.close();
+    // Range remains live; repeat is closed.
+    assert(r.has_next());
+}
+
+@test
+fn integration_successors_powers_of_two() {
+    // 1 → 2 → 4 → 8 ...
+    let mut g = generator_successors(1, |x| x * 2);
+    assert(g.has_next());
+}
+
+@test
+fn integration_from_fn_finite_producer() {
+    // generator_from_fn(|| Maybe<T>) — None terminates.
+    let mut produced = 0;
+    let _ = generator_from_fn(|| {
+        produced = produced + 1;
+        if produced > 3 { None } else { Some(produced) }
+    });
+    // We can't easily drive iteration here without `for`; pin
+    // that construction itself doesn't panic and the function
+    // hasn't run yet (lazy).
+    assert(produced == 0);
+}
+
+fn main() {}

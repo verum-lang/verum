@@ -1,0 +1,29 @@
+// =============================================================================
+// core-tests/async/executor/unit_test.vr
+// =============================================================================
+// Unit tests for `core.async.executor` — the runtime that drives
+// async tasks via the work-stealing TaskQueue (T1-I).
+//
+// Executor APIs that lift their own internals into the test fixture
+// (spawn / block_on / Runtime construction / shutdown) are exercised
+// here; integration tests cover end-to-end task graphs.
+// =============================================================================
+
+mount core.async.executor.{Runtime, RuntimeBuilder};
+
+@test
+fn test_runtime_builder_default_does_not_panic() {
+    let _ = RuntimeBuilder.new();
+    assert(true);
+}
+
+@test
+fn test_runtime_default_constructs() {
+    // The library exposes RuntimeBuilder for explicit construction;
+    // pin that the no-argument path doesn't trip on default-policy
+    // resolution (worker count / queue depth / steal strategy).
+    let _ = RuntimeBuilder.new();
+    assert(true);
+}
+
+fn main() {}

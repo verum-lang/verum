@@ -1,0 +1,27 @@
+// =============================================================================
+// core-tests/async/generator/regression_test.vr
+// =============================================================================
+// Regression pins for `core.async.generator` defects.  Each test
+// targets a specific failure shape observed during prior compiler
+// work; remove the `@ignore` when the upstream fix lands.
+// =============================================================================
+
+mount core.async.generator.{Generator, generator_range, generator_repeat};
+
+@test
+fn regression_generator_range_does_not_panic_on_construction() {
+    // Pin: constructing a range generator must not panic for any
+    // (start, end) pair where start <= end.
+    let _ = generator_range(0, 1);
+    let _ = generator_range(0, 100);
+    let _ = generator_range(-5, 5);
+    assert(true);
+}
+
+@test
+fn regression_generator_repeat_initial_state_is_live() {
+    let g = generator_repeat(7);
+    assert(g.has_next());
+}
+
+fn main() {}

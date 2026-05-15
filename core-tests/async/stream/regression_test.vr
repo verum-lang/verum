@@ -1,0 +1,33 @@
+// =============================================================================
+// core-tests/async/stream/regression_test.vr
+// =============================================================================
+// Regression pins for `core.async.stream` defects.
+// =============================================================================
+
+mount core.async.stream.{stream_once, stream_empty, interval};
+
+@test
+fn regression_stream_empty_construct_does_not_panic() {
+    let _: () = ();
+    let _ = stream_empty();
+    assert(true);
+}
+
+@test
+fn regression_stream_once_with_complex_payload_constructs() {
+    // Constructing with non-trivial T (record literal) was a regression
+    // surface earlier — pin it stable.
+    let _ = stream_once((1, 2, 3));
+    assert(true);
+}
+
+@test
+fn regression_interval_zero_period_construct() {
+    // interval(0) is degenerate but must not panic at construction;
+    // semantics of pulling from a zero-period stream are intentionally
+    // unspecified.
+    let _ = interval(0);
+    assert(true);
+}
+
+fn main() {}
