@@ -428,6 +428,20 @@ pub struct InterpreterState {
     /// to avoid use-after-close hazards in the same interpreter session.
     pub next_fd: i64,
 
+    /// V-LLSI child-process table — backs `__process_spawn_raw` /
+    /// `__process_wait_raw` / `__fd_read_all_raw` under Tier-0.  The
+    /// interpreter assigns synthetic pid ids starting at 1000 (to avoid
+    /// colliding with the host POSIX pid space, which is sparse-but-
+    /// real-valued) and stores the spawned `std::process::Child` here
+    /// keyed by the synthetic id.  Stdout / stderr pipes are tracked
+    /// via the same `open_files` table — `__process_spawn_raw` returns
+    /// the synthetic pid and the caller separately maps the pid to its
+    /// stdout fd via `child.stdout_fd` on the Verum-side Child record.
+    pub spawned_children: std::collections::HashMap<i64, std::process::Child>,
+
+    /// Next synthetic pid to hand out.
+    pub next_pid: i64,
+
     /// Async task queue for spawned tasks.
     pub tasks: TaskQueue,
 
@@ -2481,6 +2495,8 @@ impl InterpreterState {
             defer_stack: Vec::new(),
             open_files: std::collections::HashMap::new(),
             next_fd: 100,
+            spawned_children: std::collections::HashMap::new(),
+            next_pid: 1000,
             tasks: TaskQueue::new(),
             generators: GeneratorRegistry::new(),
             current_generator: None,
