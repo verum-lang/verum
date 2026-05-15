@@ -1,0 +1,81 @@
+// =============================================================================
+// core-tests/text/numeric/modular/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect (or open defect class) in
+// `core/text/numeric/modular.vr` and the BigInt plumbing it relies on.
+//
+// modular sits on top of BigInt — most defects inherit from text/numeric/bigint
+// (cross-test see the bigint regression file).  These pin defects that arise
+// specifically at the modular-arithmetic layer.
+// =============================================================================
+
+mount core.text.numeric.modular.{gcd, ext_gcd, mod_pow, mod_inverse, is_probable_prime};
+mount core.text.numeric.bigint.{BigInt};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+fn bi(n: Int) -> BigInt {
+    BigInt.from_int(n)
+}
+
+// =============================================================================
+// PASS-GUARDs — exercise canonical surfaces that MUST stay green.
+// =============================================================================
+
+@test
+fn guard_gcd_basic_co_prime() {
+    assert(gcd(&bi(7), &bi(11)).eq(&bi(1)));
+}
+
+@test
+fn guard_gcd_basic_common_factor() {
+    assert(gcd(&bi(12), &bi(18)).eq(&bi(6)));
+}
+
+@test
+fn guard_mod_pow_basic() {
+    // 2^10 mod 1000 = 1024 mod 1000 = 24
+    let r = mod_pow(&bi(2), &bi(10), &bi(1000));
+    match r {
+        Ok(v) => assert_eq(v.to_text(), "24"),
+        Err(_) => panic("mod_pow(2, 10, 1000) must succeed"),
+    };
+}
+
+@test
+fn guard_mod_inverse_small_prime() {
+    // 3 * 5 = 15 ≡ 1 (mod 7), so 5 is mod_inverse(3, 7)
+    let r = mod_inverse(&bi(3), &bi(7));
+    match r {
+        Ok(v) => assert_eq(v.to_text(), "5"),
+        Err(_) => panic("mod_inverse(3, 7) must succeed"),
+    };
+}
+
+@test
+fn guard_ext_gcd_bezout_4_6() {
+    // gcd(4, 6) = 2; one Bezout pair: 4*(-1) + 6*1 = 2
+    let (g, x, y) = ext_gcd(&bi(4), &bi(6));
+    assert(g.eq(&bi(2)));
+    let lhs = bi(4).mul(&x).add(&bi(6).mul(&y));
+    assert(lhs.eq(&g));
+}
+
+@test
+fn guard_is_probable_prime_basic_small_prime() {
+    let n = bi(11);
+    let ws: List<BigInt> = [bi(2), bi(3)];
+    assert(is_probable_prime(&n, &ws));
+}
+
+// =============================================================================
+// REGRESSION (open): mod_pow with very large exponent — inherits the
+// bigint arithmetic-cascade defect family.  Pinned for future un-ignore.
+// =============================================================================
+
+// (No open regressions specific to modular yet — every defect surfaces
+//  at the bigint layer.  This file exists so audit.md can route any
+//  modular-specific symptoms back to a stable pin location.)
+
+fn main() {}
