@@ -1,10 +1,31 @@
 # `core.text.regex` — audit
 
-> Status: **regression-only**. Sweep on 2026-05-13: 8 / 31 unit tests
-> pass (26%). Regex construction (Regex.new), as_str round-trip, and
-> simple literal `is_match` work; everything that touches the
-> intrinsic-output decoding path (find / find_all / split / captures /
-> replace_all) panics or returns wrong results.
+> Status: **complete**. Sweep on 2026-05-15: 31/31 unit tests pass
+> (was 8/31, 26%, on 2026-05-13). All five pinned defects §A-§E
+> closed by two fundamental fixes in this branch:
+>
+> 1. **Regex bridge — every intercept ignored the buf args and threw
+>    away the result** (audit §A/§B/§C/§D/§E shared root). The seven
+>    `Regex.*` intrinsics in
+>    `crates/verum_vbc/src/interpreter/dispatch_table/handlers/tensor_extended.rs`
+>    treated `pattern` / `text` / `replacement` Verum Text values as
+>    numeric StringIds (wrong) and wrote `Value::nil()` to `dst`
+>    instead of encoding the actual Rust-side result back to Verum.
+>    Fixed by extracting strings through the canonical
+>    `string_helpers::extract_string` helper and materialising the
+>    result as a real Verum value (Text via `alloc_string_value`,
+>    `List<Text>` via `alloc_list_from_values`, `Maybe<T>` via
+>    `make_some_value` / `make_none_value`).
+>
+> 2. **`TensorSubOpcode::BatchNorm = 0xFF` collided with the 0xFF
+>    extended-dispatch marker** emitted by
+>    `emit_intrinsic_tensor_ext_extended` for entry-point intrinsics
+>    (regex_find / regex_replace / regex_captures). The primary
+>    `from_byte` match took the BatchNorm arm and never reached the
+>    extended-op handlers — silent no-op for every regex-find /
+>    -replace / -captures call. Fixed by short-circuiting the 0xFF
+>    case before the primary dispatch and consuming the next byte as
+>    the ext-op value.
 
 ---
 
