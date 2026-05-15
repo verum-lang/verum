@@ -28,5 +28,5 @@
 module core.database.sqlite.native.context_api;
 
 public module result;
-public module aux;
+public module auxdata;
 public module context;

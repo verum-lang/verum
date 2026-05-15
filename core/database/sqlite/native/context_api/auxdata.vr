@@ -1,5 +1,5 @@
 // =============================================================================
-// context_api/aux.vr — sqlite3_get_auxdata / _set_auxdata
+// context_api/auxdata.vr — sqlite3_get_auxdata / _set_auxdata
 // =============================================================================
 // Spec: SQLite C API
 //
@@ -14,7 +14,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.database.sqlite.native.context_api.aux;
+module core.database.sqlite.native.context_api.auxdata;
 
 mount core.*;
 mount base.{Bool, Maybe};
