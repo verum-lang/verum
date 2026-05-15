@@ -204,6 +204,72 @@ fn regression_display_does_not_break_primitives() {
     assert_eq(f"{c}", "A");
 }
 
+// =============================================================================
+// REGRESSION (task #11, 2026-05-15): protocol default-method monomorphisation
+// `Self → concrete-type` substitution.  `extract_type_name` /
+// `extract_type_name_from_ast` mis-handled `PathSegment::SelfValue`:
+// the first returned `None` (only matched `PathSegment::Name`), the
+// second fell through to `format!("{}", path)` which renders Self as
+// lowercase "self" (the Path Display impl).  `substitute_self_in_type_name`
+// then never matched — every `register_impl_function` for a default
+// method materialised onto a user type recorded `param_type_names =
+// ["self"]` (literal lowercase) and `return_type_name = None`.
+// Downstream `let m = a.max(b); m.<field>` lost the receiver type at
+// `extract_expr_type_name`'s MethodCall arm and fell through to
+// `resolve_field_index`'s scan-all-types path, picking the wrong
+// type's same-named field index — surfaced as "field index N exceeds
+// object data size M" panics.
+//
+// Closed by canonicalising `PathSegment::SelfValue` → `"Self"` (Pascal-
+// case canonical) in both extractors so `substitute_self_in_type_name`'s
+// word-boundary substitution fires correctly at registration time.
+// =============================================================================
+
+type OrdRegA is { value: Int };
+
+implement Ord for OrdRegA {
+    fn cmp(&self, other: &OrdRegA) -> Ordering {
+        self.value.cmp(&other.value)
+    }
+}
+
+@test
+fn regression_ord_max_user_type_inferred_binding() {
+    let a = OrdRegA { value: 100 };
+    let b = OrdRegA { value: 200 };
+    let m = a.max(b);
+    assert_eq(m.value, 200);
+}
+
+@test
+fn regression_ord_min_user_type_inferred_binding() {
+    let a = OrdRegA { value: 100 };
+    let b = OrdRegA { value: 200 };
+    let m = a.min(b);
+    assert_eq(m.value, 100);
+}
+
+@test
+fn regression_ord_clamp_user_type_inferred_binding() {
+    let v = OrdRegA { value: 150 };
+    let lo = OrdRegA { value: 0 };
+    let hi = OrdRegA { value: 100 };
+    let c = v.clamp(lo, hi);
+    assert_eq(c.value, 100);
+}
+
+@test
+fn regression_ord_default_comparisons_user_type() {
+    let a = OrdRegA { value: 100 };
+    let b = OrdRegA { value: 200 };
+    assert(a.lt(&b));
+    assert(a.le(&b));
+    assert(b.gt(&a));
+    assert(b.ge(&a));
+    assert(a.le(&a));
+    assert(a.ge(&a));
+}
+
 fn main() {
     // Tests run via @test annotations
 }

@@ -194,7 +194,104 @@ The emit path branches on `display_func_id`:
   Tier-0 interpreter and Tier-1 LLVM AOT.
 * `None`: `CallM` fallback (dynamic dispatch by method name).
 
-### §3.4 Other defects unrelated to ordering
+### §3.4 Protocol default-method `Self → concrete` substitution — CLOSED 2026-05-15 (task #11)
+
+**Defect class** — `extract_type_name` /
+`extract_type_name_from_ast` in `crates/verum_vbc/src/codegen/mod.rs`
+mis-handled `PathSegment::SelfValue` (the AST encoding of the
+`Self` token in type position).
+
+`extract_type_name`'s `TypeKind::Path` arm matched only
+`PathSegment::Name(ident)` and returned `None` for `SelfValue`.
+`extract_type_name_from_ast`'s parallel arm fell through to
+`format!("{}", path)` — the Path `Display` impl renders SelfValue
+as lowercase `"self"` (the keyword spelling, not a capitalised
+type token).
+
+Downstream `substitute_self_in_type_name` then never fired at
+`register_impl_function`: its word-boundary substitution rule
+checks for the canonical Pascal-case `"Self"` token, so `"Self"
+→ "Amount"` ran against either `None` (extract_type_name) or
+`"self"` (extract_type_name_from_ast), producing no
+substitution.
+
+Every protocol default-method monomorphisation
+(`fn max(self, other: Self) -> Self` materialised onto a
+concrete user type via `generate_default_protocol_methods`)
+landed in the function table with `param_type_names = ["self"]`
+(literal lowercase placeholder) and `return_type_name = None`.
+
+**Live repro** —
+```verum
+type Amount is { value: Int };
+implement Ord for Amount {
+    fn cmp(&self, other: &Amount) -> Ordering {
+        self.value.cmp(&other.value)
+    }
+}
+let a = Amount { value: 100 };
+let b = Amount { value: 200 };
+let m = a.max(b);              // inferred type binding
+print(f"m.value={m.value}");   // PANIC: "field index N exceeds size 8"
+```
+
+`extract_expr_type_name(a.max(b))`'s MethodCall arm read
+`func_info.return_type_name = None` for `Amount.max`, fell out
+the bottom returning `None`, and `let m = …` skipped the
+`variable_type_names.insert` step.  Subsequent
+`compile_field_access(m, "value")` called
+`infer_expr_type_name(m)` which read the now-empty
+`variable_type_names["m"]` and returned `None` —
+`resolve_field_index(None, "value")` then scanned every
+registered type with a `value` field, picked the one with the
+most fields (an `Atomic`/`Cell`-shaped type with `value` at
+field-index 1), and emitted `GetF { field_idx: 1 }` against
+`Amount`'s 1-field record.  The "field index 1 (offset 8+8 =
+16) exceeds object data size 8" panic surfaced at every
+inferred-binding call site for every default Ord/Eq method.
+
+Explicit annotation (`let m: Amount = a.max(b)`) sidestepped
+the bug because `compile_let`'s annotation arm bypasses
+`extract_expr_type_name` and reads the type name directly from
+the AST.
+
+**Fundamental fix** — canonicalise `PathSegment::SelfValue` →
+`"Self"` (Pascal-case canonical) in BOTH extractors in
+`crates/verum_vbc/src/codegen/mod.rs`:
+
+```rust
+TypeKind::Path(path) => {
+    path.segments.iter().find_map(|seg| match seg {
+        PathSegment::Name(ident) => Some(ident.name.to_string()),
+        PathSegment::SelfValue   => Some("Self".to_string()),
+        _ => None,
+    })
+}
+```
+
+`substitute_self_in_type_name`'s word-boundary substitution
+now fires at `register_impl_function` for both the param-type
+walk AND the return-type extraction.  Every default method
+monomorphised onto a user type records the concrete receiver
+type as the canonical resolved name, and the entire downstream
+field-index chain works correctly.
+
+**Architectural rule** — `PathSegment::SelfValue` is the AST
+spelling of the *type* token `Self`; renderers and extractors
+MUST emit the Pascal-case canonical `"Self"`, never the
+keyword-form lowercase `"self"` or `None`.  Drift here breaks
+every protocol default-method body that mentions `Self` in
+its signature — `Ord.max/min/clamp/lt/le/gt/ge`, `Eq.ne`,
+every `Hash` / `Clone` / `Display` default-fmt forwarder.
+
+Pinned by `core-tests/base/ordering/regression_test.vr §task-#11`
+(4 new tests covering max/min/clamp/lt-le-gt-ge on a user
+type with an inferred-type let binding).  Also closes
+`test_ord_max`/`min`/`clamp` (`core-tests/base/protocols/unit_test.vr`)
+once the unrelated `partial_cmp` compile error elsewhere in
+that file is resolved.
+
+### §3.5 Other defects unrelated to ordering
 
 `test_ordering_across_units` (lives in
 `core-tests/time/duration/integration_test.vr` and exercises

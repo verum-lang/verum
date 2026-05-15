@@ -16999,7 +16999,17 @@ impl VbcCodegen {
                             {
                                 return Some(resolved);
                             }
-                            return Some(ret_type_name.clone());
+                            // **Self → concrete substitution at READ-site**
+                            // (task #11): defensive substitution so
+                            // protocol default-method monomorphisations
+                            // whose `return_type_name` is the literal
+                            // `Self` still resolve to the concrete
+                            // receiver type here.  Mirrors the same fix
+                            // in `infer_expr_type_name`'s MethodCall arm.
+                            return Some(VbcCodegen::substitute_self_in_type_name(
+                                ret_type_name,
+                                receiver_type,
+                            ));
                         }
                     }
                 }
@@ -17022,7 +17032,12 @@ impl VbcCodegen {
                             {
                                 return Some(resolved);
                             }
-                            return Some(ret_type_name.clone());
+                            // Same defensive `Self` substitution as
+                            // above — applies to non-Path receivers
+                            // (chained method calls, field-receivers).
+                            return Some(VbcCodegen::substitute_self_in_type_name(
+                                ret_type_name, rt,
+                            ));
                         }
                         // Pointer methods like offset/add/sub return the same type as receiver
                         if matches!(&*method.name, "offset" | "add" | "sub") {
@@ -17540,6 +17555,21 @@ impl VbcCodegen {
                     .lookup_function(&method_name)
                     .and_then(|info| info.return_type_name.clone())
                 {
+                    // **Self → concrete substitution at the READ-site**
+                    // (task #11): protocol default methods declared as
+                    // `fn max(self, other: Self) -> Self` are
+                    // monomorphised per concrete type, but the
+                    // `return_type_name` stored in the function table
+                    // may still be the literal `Self` (registration-
+                    // path drift across the protocol-registry → impl-
+                    // monomorphisation → typechecker chain).  Defensive
+                    // substitution here unbreaks every `let m = a.max(b);
+                    // m.<field>` site regardless of the registration
+                    // path that produced the func_info — the call-site
+                    // ALWAYS knows the concrete receiver type, so we
+                    // resolve `Self` to it here as the canonical
+                    // read-side fix.
+                    let ret = VbcCodegen::substitute_self_in_type_name(&ret, &receiver_type);
                     return Some(ret);
                 }
                 // Try with generic params stripped (e.g., "Slot<K, V>" → "Slot")
@@ -17561,6 +17591,10 @@ impl VbcCodegen {
                         {
                             return Some(resolved);
                         }
+                        // Same read-site `Self` substitution as above —
+                        // covers the stripped-generic-base lookup path
+                        // (`Map<Int, V>` → look up `Map.method`).
+                        let ret = VbcCodegen::substitute_self_in_type_name(&ret, &receiver_type);
                         return Some(ret);
                     }
                 }
