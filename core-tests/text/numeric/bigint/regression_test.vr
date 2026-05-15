@@ -177,13 +177,18 @@ fn regression_a_from_int_negative_preserves_magnitude() {
     assert_eq(b.digits[0], 1);
 }
 
-// Task #17 PIN — chained method on temporary receiver.
-// `a.sub(&b)` delegates internally to `self.add(&other.neg())`
-// where `other.neg()` is a transient BigInt.  The interior-field-
-// ref through that transient currently NullPointers at
-// `clone_digits`'s GetF.  Workaround: bind the neg result locally
-// (`let nb = b.neg(); a.add(&nb)`) — see `regression_a_sub_preserves_digits`.
-@ignore
+// Task #17 close-out: `BigInt.sub` body adopts the explicit-binding
+// shape (`let neg_other = other.neg(); self.add(&neg_other)`) instead
+// of the chained `self.add(&other.neg())` form to sidestep the
+// interior-ref-through-chained-method-receiver gap.  The deeper
+// language defect — `&MethodCall()` producing an interior pointer
+// that the receiving function's `dispatch_method_call` doesn't
+// auto-deref correctly across the precompile / cross-frame boundary
+// — is tracked as a separate follow-up under the task #24 cascade
+// extension (every reference-shape unwrap site must handle ALL
+// referent shapes, including interior-ptr-to-fresh-return-value).
+// The stdlib-side workaround keeps the user-facing `a.sub(&b)` API
+// surface working through both call shapes.
 @test
 fn regression_a_sub_via_chained_method_receiver() {
     let a = BigInt.from_int(10);
