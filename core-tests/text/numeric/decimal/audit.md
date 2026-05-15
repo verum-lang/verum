@@ -34,12 +34,29 @@
 
 ## 3. Language-implementation gaps surfaced by this folder
 
-### §A — `Int.neg` not found on receiver of runtime kind `Int`
+### §A — `Int.neg` not found on receiver of runtime kind `Int` — **CLOSED 2026-05-15**
 **Symptom**: `Decimal.neg()` panics. Body computes `-self.coefficient`
 which lowers to `Int.neg(self.coefficient)`. The dispatcher cannot
 find the `neg` method for `Int`.
-**Action**: same class as Char/§A — investigate primitive-Int method
-table after archive load.
+**Root cause**: `compile_unary` for `UnOp::Neg` checked
+`has_neg_method` FIRST and routed through `CallM("neg")` whenever
+`<T>.neg` was registered — including `Int.neg` from `implement Neg
+for Int` in primitives.vr.  The CallM had no runtime intercept for
+primitive `Int.neg` and panicked.
+**Fix** (two-layer, defense-in-depth):
+1. Codegen (`compile_unary` Neg arm): for primitive integer / float
+   operands, ALWAYS emit `UnaryI{Neg}` / `UnaryF{Neg}` directly.
+   Canonical predicate `type_names::is_integer_type` /
+   `is_float_type` covers every spelling.  User types with `Neg`
+   protocol impls still route through `CallM("neg")`.
+2. Runtime intercept (`dispatch_primitive_method` Int + Float arms):
+   added `neg` / `wrapping_neg` / `checked_neg` / `saturating_neg`
+   / `not` for Int, `neg` for Float — catches LEGACY precompiled
+   bodies still emitting `CallM("neg")`.
+**Result**: `test_neg_positive`, `test_neg_negative`, `test_neg_zero`
+all green; `regression_a_decimal_neg_panic_pinned` un-`@ignore`d.
+Same fix unblocks `BigInt.neg(&self)` / `Rational.neg` and every
+user record method shaped like `Self { field: -self.field, ... }`.
 
 ### §B — FunctionNotFound on parse_decimal / arithmetic
 **Symptom**: `parse_decimal(&"42")` panics with
