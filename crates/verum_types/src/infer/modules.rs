@@ -3088,10 +3088,28 @@ impl TypeChecker {
                                     registry,
                                 )
                             {
+                                // Drain any function-type bounds that
+                                // `extract_function_type_from_module` stashed
+                                // during this resolution.  Carrying them
+                                // through the scheme is what enables
+                                // closure-shape recovery at the call site
+                                // for stdlib HOFs like `from_fn` / `unfold`
+                                // / `successors`.  Mirrors the source-
+                                // driven plumbing in `register_function_
+                                // signature` (decls.rs:~6286 — same
+                                // `with_type_bounds` attachment).
+                                let extracted_bounds = std::mem::take(
+                                    &mut self.pending_extracted_type_bounds,
+                                );
                                 let scheme = if type_vars.is_empty() {
                                     TypeScheme::mono(func_type)
                                 } else {
                                     TypeScheme::poly(type_vars, func_type)
+                                };
+                                let scheme = if extracted_bounds.is_empty() {
+                                    scheme
+                                } else {
+                                    scheme.with_type_bounds(extracted_bounds)
                                 };
                                 self.ctx.env.insert(register_name, scheme);
                                 registered_successfully = true;
@@ -7797,6 +7815,12 @@ impl TypeChecker {
         use verum_ast::ty::GenericParamKind;
         use verum_ast::ty::TypeBoundKind;
 
+        // Reset the function-type-bound side channel before each lookup
+        // so leftover entries from earlier resolutions don't leak into
+        // this scheme.  Callers that want to consume the bounds drain
+        // `pending_extracted_type_bounds` AFTER the successful return.
+        self.pending_extracted_type_bounds.clear();
+
         for item in &ast.items {
             // Check for function declarations
             if let ItemKind::Function(func) = &item.kind
@@ -7846,6 +7870,31 @@ impl TypeChecker {
                                 }
                             })
                             .collect();
+
+                        // **Function-type bound extraction** (closes the
+                        // stdlib-side gap for HOF closure-shape inference).
+                        // Equality bounds like `F: fn() -> Maybe<T>` carry the
+                        // closure's expected shape — the caller wraps the
+                        // function as a polymorphic `TypeScheme`, and the
+                        // call-site instantiation path in `infer_expr_call`
+                        // registers these bounds on the fresh TypeVars via
+                        // `register_type_var_type_bound` so
+                        // `check_closure_expr::get_function_type_bound(F)`
+                        // recovers the closure shape for bidirectional
+                        // checking of the body.
+                        //
+                        // Mirrors the source-driven plumbing in
+                        // `register_function_signature`
+                        // (decls.rs:~6286) — the same `extract_type_
+                        // bounds_from_ast` helper is reused here so user-
+                        // side cross-module HOF mounts get the same
+                        // closure-shape inference power as user-side
+                        // direct HOF definitions.
+                        let type_bounds = self.extract_type_bounds_from_ast(bounds);
+                        if !type_bounds.is_empty() {
+                            self.pending_extracted_type_bounds
+                                .insert(fresh_var, type_bounds);
+                        }
 
                         // Create TypeParam with bounds
                         let type_param = ContextTypeParam {
