@@ -198,28 +198,55 @@ implement BigInt {
 
     /// Difference `self - other` = `self + (-other)`.
     ///
-    /// **Explicit-binding shape required** (closes task #17): the
-    /// natural single-expression form `self.add(&other.neg())` hits a
-    /// language-implementation defect — taking `&` of a freshly-
-    /// constructed method-return value (the `BigInt` from `neg()`)
-    /// produces an interior pointer that the chained `add` dispatch
-    /// does not auto-deref correctly inside the precompiled stdlib
-    /// body, surfacing as a `NullPointer at GetF (op=0x62)` panic
-    /// during `clone_digits` (or wrong-shape return seen by the
-    /// caller).  The user-side replica with the same body works
-    /// because fresh-compile uses the post-fix codegen for the
-    /// chained `&MethodCall` Ref-stabilization; the precompile
-    /// archive was generated before the cascade closed, and the
-    /// architectural rule from task #24 (every reference-shape
-    /// unwrap site must handle ALL referent shapes, including
-    /// interior-ptr-to-fresh-return-value) is not yet extended to
-    /// the cross-frame interior-ref propagation through chained
-    /// method receivers.  Binding the `neg()` result to a stack-
-    /// local first sidesteps the gap until the deeper interpreter
-    /// fix lands (separate follow-up).
+    /// **Inlined add-path** (closes task #17): the natural form
+    /// `self.add(&other.neg())` hits a language-implementation
+    /// defect — even with the explicit-binding shape
+    /// `let neg_other = other.neg(); self.add(&neg_other)`, the
+    /// precompiled stdlib body's `self.add(...)` call returns a
+    /// null/garbage value (the call is dispatched but the chain
+    /// somewhere mis-routes; user-side `my_sub` with the same body
+    /// works because fresh-compile codegen handles
+    /// `&BigInt-receiver.add(&BigInt-arg)` correctly, but the
+    /// precompile archive doesn't).  To sidestep both forms entirely,
+    /// the body inlines the `add` semantics with the `other.sign`
+    /// flipped — direct magnitude dispatch via
+    /// `add_magnitudes` / `sub_magnitudes` (bare free-function calls
+    /// with `&List<Int>` args, unaffected by any chained-method
+    /// codegen path).  The deeper language defect remains tracked
+    /// as a task #24 cascade-extension follow-up.
     public fn sub(&self, other: &BigInt) -> BigInt {
-        let neg_other = other.neg();
-        self.add(&neg_other)
+        // Treat `self - other` as `self + (-other)` with the sign
+        // of `other` flipped at field-read time — no intermediate
+        // BigInt construction, no chained method call.
+        if self.is_zero() {
+            return BigInt { sign: !other.sign, digits: clone_digits(&other.digits) };
+        }
+        if other.is_zero() {
+            return BigInt { sign: self.sign, digits: clone_digits(&self.digits) };
+        }
+
+        // After negating `other`, the signs match iff they DIFFERED
+        // originally — magnitude addition path.
+        if self.sign != other.sign {
+            let sum = add_magnitudes(&self.digits, &other.digits);
+            return BigInt { sign: self.sign, digits: sum };
+        }
+
+        // Same sign originally → after negating `other`, signs differ
+        // → magnitude subtraction path, result sign by magnitude
+        // comparison.
+        let cmp = compare_magnitudes(&self.digits, &other.digits);
+        match cmp {
+            Equal => BigInt.zero(),
+            Greater => {
+                let diff = sub_magnitudes(&self.digits, &other.digits);
+                BigInt { sign: self.sign, digits: diff }
+            }
+            Less => {
+                let diff = sub_magnitudes(&other.digits, &self.digits);
+                BigInt { sign: !other.sign, digits: diff }
+            }
+        }
     }
 
     /// Product `self * other`.  Schoolbook O(N×M) multiplication
