@@ -1,0 +1,53 @@
+// =============================================================================
+// core-tests/sys/init/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.init::InitError`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.init.InitError;
+
+// =============================================================================
+// Section 1: InitError composes with Result<T, InitError>
+// =============================================================================
+
+fn fake_init(succeed: Bool) -> Result<Int, InitError> {
+    if succeed {
+        Ok(42)
+    } else {
+        Err(InitError.AllocatorFailed { reason: "synthetic-test-fail" })
+    }
+}
+
+@test
+fn integration_init_error_routes_through_result() {
+    match fake_init(true) {
+        Ok(n) => assert_eq(n, 42),
+        Err(_) => panic("succeed branch must yield Ok"),
+    }
+    match fake_init(false) {
+        Ok(_) => panic("fail branch must yield Err"),
+        Err(e) => assert_eq(e.message(), "Allocator initialization failed: synthetic-test-fail"),
+    }
+}
+
+// =============================================================================
+// Section 2: InitError collects into a List<InitError>
+// =============================================================================
+
+@test
+fn integration_init_error_list_round_trip() {
+    let errs: List<InitError> = [
+        InitError.TlsFailed { reason: "a" },
+        InitError.AllocatorFailed { reason: "b" },
+        InitError.AlreadyInitialized,
+    ];
+    let mut total_msg_len: Int = 0;
+    for e in errs.iter() {
+        total_msg_len = total_msg_len + ((*e).message().len() as Int);
+    }
+    assert(total_msg_len > 0);
+}
+
+fn main() {}

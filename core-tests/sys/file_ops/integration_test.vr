@@ -1,0 +1,83 @@
+// =============================================================================
+// core-tests/sys/file_ops/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.file_ops` — pairing the
+// raw FFI surface with `Maybe`, `Text`, and `List` so the patterns user
+// code reaches for are pinned end-to-end.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.file_ops.{
+    OpenMode,
+    read_file, write_file, append_file,
+    file_exists, file_size, delete_file,
+};
+
+// =============================================================================
+// Section 1: Maybe-shaped read_file vs missing path
+// =============================================================================
+
+@test
+fn integration_read_file_none_branch_is_taken_for_missing() {
+    let path: Text = "/tmp/__verum_integration_read_missing_8273645__";
+    let observed: Maybe<Text> = read_file(path);
+    let tag: Int = match observed {
+        Some(_) => 1,
+        None => 0,
+    };
+    assert_eq(tag, 0);
+}
+
+// =============================================================================
+// Section 2: Open-mode flag-set distinctness via List
+// =============================================================================
+
+@test
+fn integration_openmode_flag_set_through_list() {
+    // The five OpenMode constructors must produce five distinct
+    // flag values — collect them into a List and verify pairwise
+    // distinctness in O(N²) without relying on a Set type
+    // (which Map/Set has its own coverage gaps for cross-tier).
+    let flags: List<Int> = [
+        OpenMode.read().flags,
+        OpenMode.write().flags,
+        OpenMode.read_write().flags,
+        OpenMode.append().flags,
+        OpenMode.create().flags,
+    ];
+    let n = flags.len();
+    let mut i: Int = 0;
+    while i < n {
+        let mut j: Int = i + 1;
+        while j < n {
+            let fi = *flags.get(i as USize);
+            let fj = *flags.get(j as USize);
+            assert(fi != fj);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 3: Error-sentinel chaining (file_size + delete + exists)
+// =============================================================================
+
+@test
+fn integration_error_sentinels_chain_consistently() {
+    // For a path that demonstrably doesn't exist, all three
+    // introspection APIs must agree it doesn't exist:
+    //  * file_exists -> false
+    //  * file_size   -> negative
+    //  * delete_file -> false (unlink ENOENT)
+    let p: Text = "/tmp/__verum_integration_chain_consistent_172836__";
+    let exists = file_exists(p);
+    let sz = file_size(p);
+    let deleted = delete_file(p);
+    assert_eq(exists, false);
+    assert(sz < 0);
+    assert_eq(deleted, false);
+}
+
+fn main() {}

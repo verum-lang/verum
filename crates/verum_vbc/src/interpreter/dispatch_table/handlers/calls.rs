@@ -117,6 +117,7 @@ pub(in super::super) fn handle_call(
     let bytecode_length = func.bytecode_length;
     let func_name_id = func.name;
     let reg_count = func.register_count;
+    let has_intrinsic_marker = func.intrinsic_name.is_some();
 
     if std::env::var("VERUM_TRACE_CALLS").is_ok() {
         let func_name: String = state
@@ -188,6 +189,15 @@ pub(in super::super) fn handle_call(
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
+            // NB: V-LLSI context-system + defer raw intrinsics
+            // (`__ctx_*_raw` / `__defer_*_raw`) used to be intercepted
+            // here as a sibling to hasher_runtime / char_runtime.  The
+            // widened bytecode_length gate below (`is_intrinsic_stub`)
+            // now routes them through `try_dispatch_intrinsic_by_name`
+            // directly — the dedicated intercept is preserved at
+            // `super::ctx_runtime` for defensive depth but no longer
+            // wired here.  See the `is_intrinsic_stub` comment for
+            // the architectural rationale.
             if let Some(result) = super::shell_runtime::try_intercept_shell_runtime(
                 state,
                 &func_name,
@@ -375,13 +385,23 @@ pub(in super::super) fn handle_call(
         }
     }
 
-    // Check for external/intrinsic functions with no bytecode body.
-    // These are functions declared with @intrinsic("llvm.xxx") that have no
-    // Verum implementation body. When the codegen can't resolve the intrinsic
-    // to a typed opcode, it emits a plain Call to the function descriptor,
-    // which has bytecode_length == 0. We intercept these here and compute
-    // the result directly in Rust.
-    if bytecode_length == 0 {
+    // Check for external/intrinsic functions with no bytecode body OR
+    // an `@intrinsic`-tagged forward declaration whose body is the
+    // 1-byte Return stub the codegen emits when `lookup_intrinsic`
+    // doesn't find a registry entry for the intrinsic name (e.g.
+    // every `core/intrinsics/runtime/os.vr` declaration tagged
+    // `@intrinsic("file_open")`, `@intrinsic("time_now_ms")`,
+    // `@intrinsic("ctx_get")`, …).
+    //
+    // Pre-fix the gate was strictly `bytecode_length == 0` — so
+    // every `__*_raw` stub-bodied intrinsic call fell through to
+    // the body's Return-Unit, defeating the per-name dispatch arms
+    // in `try_dispatch_intrinsic_by_name`.  The widened gate
+    // captures both shapes (no body / stub body) without
+    // false-positive-intercepting real Verum bodies: the
+    // `has_intrinsic_marker` discriminator captured above pins the
+    // intercept to declarations explicitly tagged @intrinsic.
+    if bytecode_length == 0 || (bytecode_length <= 1 && has_intrinsic_marker) {
         let caller_base = state.reg_base();
         if let Some(result) = try_dispatch_intrinsic_by_name(
             state,
@@ -1030,8 +1050,30 @@ fn try_dispatch_intrinsic_by_name(
 
     // Normalize function name: strip common prefixes and qualifications
     // e.g., "math.sqrt" -> "sqrt", "elementary.sqrt" -> "sqrt",
-    //  "llvm.sqrt.f64" -> handled directly
-    let name = func_name.as_str();
+    //  "llvm.sqrt.f64" -> handled directly.
+    //
+    // Module-qualified intrinsics (`core.intrinsics.runtime.os.__time_now_ms_raw`
+    // etc.) also need the bare-name form for the per-name match arms
+    // below.  This is the canonical normalisation step — every other
+    // path (`@intrinsic("name")` registry lookup, alias rules in
+    // intrinsics/mod.rs::lookup_intrinsic) already keys off the bare
+    // name; the dispatch table here is the last place that historically
+    // saw only the bare form because `bytecode_length == 0` short-
+    // circuited before name canonicalisation.  Now that the widened
+    // gate at `is_intrinsic_stub` admits qualified-form stubs, strip
+    // the module prefix off any `__*_raw`-shaped name so the existing
+    // per-name arms still fire.
+    let normalized: String = if let Some(idx) = func_name.rfind('.') {
+        let suffix = &func_name[idx + 1..];
+        if suffix.starts_with("__") && suffix.ends_with("_raw") {
+            suffix.to_string()
+        } else {
+            func_name.clone()
+        }
+    } else {
+        func_name.clone()
+    };
+    let name = normalized.as_str();
 
     // Match against known intrinsic function names.
     // We check both qualified names (e.g., "llvm.sqrt.f64") and bare names
@@ -1504,15 +1546,163 @@ fn try_dispatch_intrinsic_by_name(
         // These mirror the AOT C runtime functions, using Rust std.
         // ================================================================
 
-        // --- File I/O (interpreter: basic support via Rust std) ---
-        "__file_read_to_string_raw" => {
-            // In interpreter, file paths are NaN-boxed values — extract would need
-            // VBC string infrastructure. Return nil for now; use AOT for file I/O.
-            Ok(Some(Value::nil()))
+        // --- File I/O (Tier-0: real std::fs-backed implementations) ---
+        //
+        // Pre-fix these were stubs returning -1 / 0 / nil, leaving the
+        // entire `core.sys.file_ops` stack inert under `--interp`.
+        // Real implementations route through `state.open_files` (the
+        // synthetic-fd table) so user code observes the same
+        // open/read/write/close lifecycle as the AOT path.
+        //
+        // POSIX O_* flag mapping (matches `core.sys.file_ops.OpenMode`):
+        //   0x000 = O_RDONLY            (read())
+        //   0x002 = O_RDWR              (read_write())
+        //   0x301 = O_WRONLY|O_CREAT|O_TRUNC   (write())
+        //   0x241 = O_WRONLY|O_CREAT|O_EXCL    (create())
+        //   0x409 = O_WRONLY|O_CREAT|O_APPEND  (append())
+        "__file_open_raw" => {
+            let path = super::string_helpers::resolve_string_value(&get_arg(state, 0), state);
+            let flags = get_i64_arg(state, 1);
+            let _mode = get_i64_arg(state, 2);
+            let mut opts = std::fs::OpenOptions::new();
+            // Bit 0/1 = access mode (POSIX): 0=RDONLY, 1=WRONLY, 2=RDWR.
+            let access = flags & 0x3;
+            opts.read(access == 0 || access == 2);
+            opts.write(access == 1 || access == 2);
+            // O_APPEND = 0x400 (Darwin/Linux convention).
+            if flags & 0x400 != 0 {
+                opts.append(true);
+            }
+            // O_CREAT = 0x40 (Darwin/Linux).
+            if flags & 0x40 != 0 {
+                opts.create(true);
+            }
+            // O_TRUNC = 0x200 — but tier-0 maps via `truncate(true)`
+            // only when WRITE is set; otherwise it's a no-op POSIX-side.
+            if flags & 0x200 != 0 && (access == 1 || access == 2) {
+                opts.truncate(true);
+            }
+            // O_EXCL = 0x800 on darwin, 0x80 on linux — interpreted as
+            // create_new() which requires create+!exists.
+            if flags & 0x80 != 0 && (flags & 0x40) != 0 {
+                opts.create_new(true);
+            }
+            match opts.open(&path) {
+                Ok(file) => {
+                    let fd = state.next_fd;
+                    state.next_fd += 1;
+                    state.open_files.insert(fd, file);
+                    Ok(Some(Value::from_i64(fd)))
+                }
+                Err(_) => Ok(Some(Value::from_i64(-1))),
+            }
         }
-        "__file_write_string_raw" => Ok(Some(Value::from_i64(-1))),
-        "__file_open_raw" | "__file_close_raw" | "__file_size_raw" | "__file_seek_raw"
-        | "__file_delete_raw" | "__mkdir_raw" => Ok(Some(Value::from_i64(0))),
+        "__file_close_raw" | "__fd_close_raw" => {
+            let fd = get_i64_arg(state, 0);
+            state.open_files.remove(&fd);
+            Ok(Some(Value::from_i64(0)))
+        }
+        "__file_size_raw" => {
+            let fd = get_i64_arg(state, 0);
+            match state.open_files.get(&fd) {
+                Some(file) => match file.metadata() {
+                    Ok(md) => Ok(Some(Value::from_i64(md.len() as i64))),
+                    Err(_) => Ok(Some(Value::from_i64(-1))),
+                },
+                None => Ok(Some(Value::from_i64(-1))),
+            }
+        }
+        "__file_seek_raw" => {
+            use std::io::{Seek, SeekFrom};
+            let fd = get_i64_arg(state, 0);
+            let offset = get_i64_arg(state, 1);
+            let whence = get_i64_arg(state, 2);
+            let from = match whence {
+                0 => SeekFrom::Start(offset.max(0) as u64),
+                1 => SeekFrom::Current(offset),
+                2 => SeekFrom::End(offset),
+                _ => return Ok(Some(Value::from_i64(-1))),
+            };
+            match state.open_files.get_mut(&fd) {
+                Some(file) => match file.seek(from) {
+                    Ok(pos) => Ok(Some(Value::from_i64(pos as i64))),
+                    Err(_) => Ok(Some(Value::from_i64(-1))),
+                },
+                None => Ok(Some(Value::from_i64(-1))),
+            }
+        }
+        "__file_delete_raw" => {
+            let path = super::string_helpers::resolve_string_value(&get_arg(state, 0), state);
+            match std::fs::remove_file(&path) {
+                Ok(()) => Ok(Some(Value::from_i64(0))),
+                Err(_) => Ok(Some(Value::from_i64(-1))),
+            }
+        }
+        "__mkdir_raw" => {
+            let path = super::string_helpers::resolve_string_value(&get_arg(state, 0), state);
+            match std::fs::create_dir(&path) {
+                Ok(()) => Ok(Some(Value::from_i64(0))),
+                Err(_) => Ok(Some(Value::from_i64(-1))),
+            }
+        }
+        "__file_read_to_string_raw" => {
+            let path = super::string_helpers::resolve_string_value(&get_arg(state, 0), state);
+            let body = std::fs::read_to_string(&path).unwrap_or_default();
+            let v = super::string_helpers::alloc_string_value(state, &body)?;
+            Ok(Some(v))
+        }
+        "__file_write_string_raw" => {
+            let path = super::string_helpers::resolve_string_value(&get_arg(state, 0), state);
+            let content = super::string_helpers::resolve_string_value(&get_arg(state, 1), state);
+            match std::fs::write(&path, content.as_bytes()) {
+                Ok(()) => Ok(Some(Value::from_i64(content.len() as i64))),
+                Err(_) => Ok(Some(Value::from_i64(-1))),
+            }
+        }
+        "__file_write_text_raw" => {
+            // Fd-based write of a Text payload — required by `append_file`
+            // and any other caller that opened the fd with a non-trunc
+            // mode (O_APPEND etc.) and so cannot route through the
+            // path-based `__file_write_string_raw`.  Honours the fd's
+            // open-flags.
+            use std::io::Write;
+            let fd = get_i64_arg(state, 0);
+            let content = super::string_helpers::resolve_string_value(&get_arg(state, 1), state);
+            match state.open_files.get_mut(&fd) {
+                Some(file) => match file.write_all(content.as_bytes()) {
+                    Ok(()) => Ok(Some(Value::from_i64(content.len() as i64))),
+                    Err(_) => Ok(Some(Value::from_i64(-1))),
+                },
+                None => Ok(Some(Value::from_i64(-1))),
+            }
+        }
+        "__file_read_raw" => {
+            use std::io::Read;
+            let fd = get_i64_arg(state, 0);
+            let _buf = get_i64_arg(state, 1);
+            let len = get_i64_arg(state, 2);
+            match state.open_files.get_mut(&fd) {
+                Some(file) => {
+                    let mut buf = vec![0u8; len.max(0) as usize];
+                    match file.read(&mut buf) {
+                        Ok(n) => Ok(Some(Value::from_i64(n as i64))),
+                        Err(_) => Ok(Some(Value::from_i64(-1))),
+                    }
+                }
+                None => Ok(Some(Value::from_i64(-1))),
+            }
+        }
+        "__file_write_raw" => {
+            // The (fd, buf_ptr, len) shape — fd-based byte write.
+            // In Tier-0 we don't actually have a usable buf_ptr in the
+            // user's address space, so this stays as a stub returning
+            // bytes-pretended-written.  Callers should use
+            // `__file_write_text_raw(fd, text)` for Text-shaped data.
+            let _fd = get_i64_arg(state, 0);
+            let _buf = get_i64_arg(state, 1);
+            let len = get_i64_arg(state, 2);
+            Ok(Some(Value::from_i64(len)))
+        }
 
         // --- Command-line Arguments ---
         "__args_count_raw" => Ok(Some(Value::from_i64(std::env::args().count() as i64))),
@@ -1863,15 +2053,78 @@ fn try_dispatch_intrinsic_by_name(
             Ok(Some(v))
         }
 
-        // --- Context System ---
-        "__ctx_get_raw" => Ok(Some(Value::nil())),
-        "__ctx_provide_raw" | "__ctx_end_raw" => Ok(Some(Value::from_i64(0))),
-
-        // --- Defer Cleanup ---
-        "__defer_push_raw" | "__defer_pop_raw" | "__defer_run_to_raw" => {
+        // --- Context System (V-LLSI, `core.sys.context_ops`) ---
+        //
+        // Pre-fix these intrinsics returned constant 0 / nil and the
+        // type_id-keyed context store was entirely inert.  Wiring
+        // them to the real `state.context_stack` makes `tls_get` /
+        // `tls_set` / `context_provide` / `context_get` /
+        // `context_end` round-trip values correctly under the
+        // interpreter — which is the contract `core.sys.context_ops`
+        // advertises and that downstream consumers (the V-LLSI
+        // bootstrap kernel, async runtime context propagation, etc.)
+        // depend on.
+        "__ctx_get_raw" => {
+            let type_id = get_i64_arg(state, 0);
+            let ctx_type = (type_id as u32) & 0x7fff_ffff;
+            let v = state
+                .context_stack
+                .get(ctx_type)
+                .map(|val| val.as_i64())
+                .unwrap_or(0);
+            Ok(Some(Value::from_i64(v)))
+        }
+        "__ctx_provide_raw" => {
+            let type_id = get_i64_arg(state, 0);
+            let value = get_i64_arg(state, 1);
+            let ctx_type = (type_id as u32) & 0x7fff_ffff;
+            let depth = state.call_stack.depth();
+            state
+                .context_stack
+                .provide(ctx_type, Value::from_i64(value), depth);
             Ok(Some(Value::from_i64(0)))
         }
-        "__defer_depth_raw" => Ok(Some(Value::from_i64(0))),
+        "__ctx_end_raw" => {
+            let type_id = get_i64_arg(state, 0);
+            let ctx_type = (type_id as u32) & 0x7fff_ffff;
+            state.context_stack.end_by_type(ctx_type);
+            Ok(Some(Value::from_i64(0)))
+        }
+
+        // --- Defer Cleanup (V-LLSI, `core.sys.context_ops`) ---
+        //
+        // Maintains the (fn_id, arg) pair stack — depth tracking is
+        // wired end-to-end, so `defer_depth()` returns the real count
+        // and `defer_run_to(depth)` correctly truncates back to it.
+        // Callback invocation under `defer_execute` / `defer_run_to`
+        // is deferred to Tier-1: the interpreter would need to
+        // synthesise an indirect dispatch for an arbitrary
+        // `fn(Int) -> Int` pointer, which crosses the call-frame
+        // machinery boundary.  Pinned as a follow-up in
+        // `core-tests/sys/context_ops/audit.md`.
+        "__defer_push_raw" => {
+            let fn_id = get_i64_arg(state, 0);
+            let arg = get_i64_arg(state, 1);
+            state.defer_stack.push((fn_id, arg));
+            Ok(Some(Value::from_i64(0)))
+        }
+        "__defer_pop_raw" => {
+            state.defer_stack.pop();
+            Ok(Some(Value::from_i64(0)))
+        }
+        "__defer_run_to_raw" => {
+            let target_depth = get_i64_arg(state, 0);
+            let target = if target_depth < 0 {
+                0
+            } else {
+                target_depth as usize
+            };
+            while state.defer_stack.len() > target {
+                state.defer_stack.pop();
+            }
+            Ok(Some(Value::from_i64(0)))
+        }
+        "__defer_depth_raw" => Ok(Some(Value::from_i64(state.defer_stack.len() as i64))),
 
         // --- Memory Allocation ---
         "__alloc_raw" => {
@@ -1955,7 +2208,7 @@ fn try_dispatch_intrinsic_by_name(
         | "__process_kill_raw" => Ok(Some(Value::from_i64(-1))),
         "__fd_read_all_raw" | "__fd_read_chunk_raw" => Ok(Some(Value::from_i64(0))),
         "__fd_write_all_raw" => Ok(Some(Value::from_i64(-1))),
-        "__fd_close_raw" | "__fd_close_raw_buf" => Ok(Some(Value::from_i64(0))),
+        "__fd_close_raw_buf" => Ok(Some(Value::from_i64(0))),
         "__ptr_read_i64" | "__ptr_free" => Ok(Some(Value::from_i64(0))),
 
         // --- Echo control (interactive password prompt) ---

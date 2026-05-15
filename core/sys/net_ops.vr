@@ -15,7 +15,22 @@ module sys.net_ops;
 // =============================================================================
 
 mount core.*;
-mount super.raw.*;
+// Raw-intrinsic mount. The pre-migration `mount super.raw.*` pointed
+// at a `core/sys/raw.vr` file that no longer exists — declarations
+// migrated to `core/intrinsics/runtime/os.vr`. Same architectural fix
+// as the one already landed for time_ops.vr.
+mount core.intrinsics.runtime.os.{
+    __tcp_connect_raw,
+    __tcp_listen_raw,
+    __tcp_accept_raw,
+    __tcp_send_raw,
+    __tcp_recv_raw,
+    __tcp_close_raw,
+    __udp_bind_raw,
+    __udp_send_raw,
+    __udp_recv_raw,
+    __udp_close_raw,
+};
 
 // =============================================================================
 // TCP

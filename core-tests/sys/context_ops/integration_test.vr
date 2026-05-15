@@ -1,0 +1,151 @@
+// =============================================================================
+// core-tests/sys/context_ops/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.context_ops` —
+// pairing the V-LLSI raw TLS / DI surface with `Maybe`, `Result`,
+// and the protocol layer so the patterns user code will actually
+// reach for are pinned end-to-end.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.context_ops.{
+    TLS_SLOT_COUNT,
+    tls_get, tls_set,
+    context_provide, context_get, context_end,
+};
+
+// =============================================================================
+// Section 1: TLS slots as the backing store for a per-thread counter
+// =============================================================================
+
+const COUNTER_SLOT: Int = 200;
+
+fn counter_get() -> Int {
+    tls_get(COUNTER_SLOT)
+}
+
+fn counter_set(v: Int) {
+    tls_set(COUNTER_SLOT, v);
+}
+
+fn counter_increment() -> Int {
+    let next = counter_get() + 1;
+    counter_set(next);
+    next
+}
+
+@test
+fn integration_tls_backed_counter_increments_monotonically() {
+    counter_set(0);
+    let a = counter_increment();
+    let b = counter_increment();
+    let c = counter_increment();
+    assert_eq(a, 1);
+    assert_eq(b, 2);
+    assert_eq(c, 3);
+}
+
+@test
+fn integration_tls_counter_round_trips_through_maybe() {
+    // Compose the V-LLSI primitive with the canonical Maybe shape
+    // — a real DI surface user wraps `tls_get` with bounds-checks.
+    counter_set(0);
+    let _ = counter_increment();
+    let _ = counter_increment();
+
+    let observed: Maybe<Int> = {
+        let v = counter_get();
+        if v > 0 { Some(v) } else { None }
+    };
+    match observed {
+        Some(n) => assert_eq(n, 2),
+        None => panic("counter must have advanced past 0"),
+    }
+}
+
+// =============================================================================
+// Section 2: Context system as a Map-shaped scoped value provider
+// =============================================================================
+
+@test
+fn integration_context_provide_chain_three_values() {
+    // Three independent type_ids — a "config", a "log_level", a
+    // "request_id" pretending to live in the same scope.
+    let cfg: Int = 7001;
+    let log: Int = 7002;
+    let rid: Int = 7003;
+    context_provide(cfg, 1);
+    context_provide(log, 2);
+    context_provide(rid, 3);
+    let vc = context_get(cfg);
+    let vl = context_get(log);
+    let vr = context_get(rid);
+    assert_eq(vc + vl + vr, 6);
+    context_end(rid);
+    context_end(log);
+    context_end(cfg);
+}
+
+@test
+fn integration_context_get_threads_into_list_fold() {
+    // After providing N values, reading them back into a List and
+    // folding lines up with the canonical iteration pattern of
+    // user code.
+    let base: Int = 7100;
+    let mut tids: List<Int> = [];
+    let mut i: Int = 0;
+    while i < 5 {
+        let tid = base + i;
+        context_provide(tid, i * 10);
+        tids.push(tid);
+        i = i + 1;
+    }
+    let mut sum: Int = 0;
+    for t in tids.iter() {
+        sum = sum + context_get(*t);
+    }
+    // 0 + 10 + 20 + 30 + 40 = 100
+    assert_eq(sum, 100);
+    // Cleanup.
+    for t in tids.iter() {
+        context_end(*t);
+    }
+}
+
+// =============================================================================
+// Section 3: Saturating across the full slot range
+// =============================================================================
+
+@test
+fn integration_tls_slot_range_saturating_sweep() {
+    // Write distinct sentinel values to a spread of slots so any
+    // bleed between slots surfaces as a wrong read at a later slot.
+    let slots: List<Int> = [50, 75, 100, 125, 150, 175];
+    let mut i: Int = 0;
+    let n = slots.len();
+    while i < n {
+        let s = *slots.get(i as USize);
+        tls_set(s, s * 7);
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < n {
+        let s = *slots.get(j as USize);
+        let v = tls_get(s);
+        assert_eq(v, s * 7);
+        j = j + 1;
+    }
+}
+
+@test
+fn integration_tls_slot_count_matches_addressable_range() {
+    // We can write to slot TLS_SLOT_COUNT - 1 and read back the
+    // value without OOB issues — pins the per-thread arena ceiling.
+    let last_slot: Int = TLS_SLOT_COUNT - 1;
+    tls_set(last_slot, 0xDEADBEEF);
+    let v = tls_get(last_slot);
+    assert_eq(v, 0xDEADBEEF);
+}
+
+fn main() {}

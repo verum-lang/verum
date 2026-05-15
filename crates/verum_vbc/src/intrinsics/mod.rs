@@ -181,6 +181,24 @@ pub fn lookup_intrinsic(name: &str) -> Option<IntrinsicInfo> {
             "f64_infinity" | "infinity" => "f64_infinity",
             "f64_neg_infinity" => "f64_neg_infinity",
             "f64_nan" | "nan" => "f64_nan",
+            // Generic atomic intrinsics — `core/intrinsics/atomic.vr`
+            // declares `atomic_load<T>(...)` / `atomic_store<T>(...)`
+            // without a width suffix.  The Tier-0 / Tier-1 lowering
+            // operates at machine-word width, so the bare name is an
+            // alias of the canonical 64-bit form.  The dispatch
+            // honours MemoryOrder via the ordering operand (drops to
+            // SeqCst for Tier-0; LLVM consumes the operand directly
+            // for Tier-1).  Same alias-rule shape as the float-math
+            // entries above.
+            "atomic_load" => "atomic_load_u64",
+            "atomic_store" => "atomic_store_u64",
+            "atomicrmw_xchg" => "atomic_exchange_u64",
+            "atomicrmw_add" => "atomic_fetch_add_u64",
+            "atomicrmw_sub" => "atomic_fetch_sub_u64",
+            "atomicrmw_and" => "atomic_fetch_and_u64",
+            "atomicrmw_or" => "atomic_fetch_or_u64",
+            "atomicrmw_xor" => "atomic_fetch_xor_u64",
+            "cmpxchg" | "cmpxchg_weak" => "atomic_cas_u64",
             _ => {
                 // Strip common prefixes used in import aliases
                 // e.g., intrinsic_memcpy → memcpy, intrinsic_slice_from_raw_parts_mut → slice_from_raw_parts_mut

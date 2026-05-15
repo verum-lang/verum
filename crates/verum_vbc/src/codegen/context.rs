@@ -1923,10 +1923,57 @@ impl CodegenContext {
             // AND existing have `return_type_name` (or both lack it),
             // first-wins still applies.  Only the stub-vs-real
             // asymmetric case promotes.
-            let new_is_richer =
-                info.return_type_name.is_some() && existing.return_type_name.is_none();
+            // **Stub-vs-real promotion heuristic (#23 fundamental fix)**.
+            //
+            // Pre-fix the rule was strictly `new.rt.is_some() &&
+            // existing.rt.is_none()` — i.e. "richer return-type info
+            // wins". That heuristic FAILS in the following defect
+            // pattern (observed for `file_exists`, `read_file`, every
+            // common simple-name across modules):
+            //
+            //   1. Real `core.sys.file_ops.file_exists(path: Text) -> Bool`
+            //      registers under bare `file_exists` with
+            //      `return_type_name = None` (the early decl-collection
+            //      pass hadn't yet extracted the return type) and
+            //      `param_count = 1`.
+            //
+            //   2. A panic-stub for `core.database.…value_api.file_exists`
+            //      (or any other module's failed compile) registers
+            //      with `return_type_name = Some("()")` (Unit) and
+            //      `param_count = 0` — synthesised by
+            //      `emit_lenient_panic_stub` with the canonical
+            //      `Panic; RetV;` 1-byte body.
+            //
+            //   3. The arity-collision branch saw `new.rt.is_some()`
+            //      (Unit) vs `existing.rt.is_none()` and PROMOTED the
+            //      stub to the bare slot — demoting the real function
+            //      to `file_exists#1`.  Call sites resolving bare
+            //      `file_exists` then dispatched to the 0-param stub
+            //      and the real function's bytecode body was
+            //      unreachable.
+            //
+            // Sharpened heuristic: the stub-vs-real signature is
+            // distinctive — stubs have `param_count == 0` AND return
+            // Unit (`rt == "()"`).  Don't promote in that shape even
+            // when the existing entry has no return_type_name.
+            let new_is_stub_shape =
+                info.param_count == 0 && info.return_type_name.as_deref() == Some("()");
+            let existing_is_stub_shape =
+                existing.param_count == 0 && existing.return_type_name.as_deref() == Some("()");
+            let new_is_richer = info.return_type_name.is_some()
+                && existing.return_type_name.is_none()
+                && !new_is_stub_shape;
+            // The inverse: if the EXISTING entry is a stub-shape and
+            // the new entry is a real function (any non-zero
+            // param_count OR non-Unit return), promote the new entry
+            // regardless of `rt.is_some()` parity.  This closes the
+            // case where the stub got there first and the real fn
+            // arrives second.
+            let new_is_real_over_stub = existing_is_stub_shape
+                && !new_is_stub_shape
+                && info.param_count > 0;
             let alt_key = format!("{}#{}", name, info.param_count);
-            if new_is_richer {
+            if new_is_richer || new_is_real_over_stub {
                 let existing_alt = format!("{}#{}", name, existing.param_count);
                 if let Some(existing_info) = self.functions.remove(&name) {
                     self.functions

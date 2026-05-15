@@ -1,0 +1,52 @@
+// =============================================================================
+// core-tests/sys/net_ops/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.net_ops`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.net_ops.{
+    RawTcpStream,
+    RawUdpSocket,
+};
+
+// =============================================================================
+// Section 1: Maybe<RawTcpStream> match composes with List of attempts
+// =============================================================================
+
+@test
+fn integration_tcp_connect_sweep_collects_none_count() {
+    // Sweep a list of unroutable ports; collect the count of Nones.
+    let ports: List<Int> = [1, 2, 3, 4, 5];
+    let mut none_count: Int = 0;
+    for p in ports.iter() {
+        let r = RawTcpStream.connect("127.0.0.1", *p);
+        match r {
+            Some(_) => {}
+            None => { none_count = none_count + 1; }
+        }
+    }
+    // All 5 unroutable — None count = 5.
+    assert_eq(none_count, 5);
+}
+
+// =============================================================================
+// Section 2: fd field is observable through record-projection iteration
+// =============================================================================
+
+@test
+fn integration_raw_tcp_fd_list_projection() {
+    let sockets: List<RawUdpSocket> = [
+        RawUdpSocket { fd: 10 },
+        RawUdpSocket { fd: 20 },
+        RawUdpSocket { fd: 30 },
+    ];
+    let mut sum: Int = 0;
+    for s in sockets.iter() {
+        sum = sum + (*s).fd;
+    }
+    assert_eq(sum, 60);
+}
+
+fn main() {}

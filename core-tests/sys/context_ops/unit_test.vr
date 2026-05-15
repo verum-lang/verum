@@ -1,0 +1,186 @@
+// =============================================================================
+// core-tests/sys/context_ops/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.context_ops` — V-LLSI Thread-Local Storage
+// slots + per-type-id context dependency injection + RAII defer stack.
+//
+// The module sits directly on top of the raw context-system intrinsics
+// (`__ctx_get_raw` / `__ctx_provide_raw` / `__ctx_end_raw` and the
+// `__defer_*_raw` family). Every public function here is a one-line
+// wrapper over a raw intrinsic. The pre-migration `mount super.raw.*`
+// pointed at a `core/sys/raw.vr` file that no longer exists, which
+// silently caused every call here to compile to a panic-stub at the
+// codegen layer — the same architectural defect already pinned for
+// `time_ops.vr` and now closed for `context_ops.vr` in this branch.
+//
+// API surface tested here:
+//
+//   TLS_SLOT_COUNT          — Int constant (canonical 256)
+//   tls_get / tls_set       — Int → Int round-trip
+//   context_provide /
+//   context_get /
+//   context_end             — type_id-keyed DI scope stack
+//   defer_register /
+//   defer_execute /
+//   defer_depth /
+//   defer_run_to            — RAII cleanup callback stack
+//
+// Companion files:
+//   property_test.vr     — algebraic laws (push/pop balance, idempotence)
+//   integration_test.vr  — cross-stdlib uses (TLS-backed counters etc.)
+//   regression_test.vr   — pinned compiler-side defects
+//   audit.md             — implementation audit
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.context_ops.{
+    TLS_SLOT_COUNT,
+    tls_get, tls_set,
+    context_provide, context_get, context_end,
+    defer_depth,
+};
+
+// =============================================================================
+// Section 1: TLS_SLOT_COUNT — canonical 256 slots
+// =============================================================================
+
+@test
+fn test_tls_slot_count_canonical() {
+    // V-LLSI per-thread arena ceiling. The constant value is documented
+    // by `core/sys/common.vr::MAX_CONTEXT_SLOTS` and mirrored here at
+    // the TLS surface. Drift between the two would silently halve the
+    // per-thread arena while compiling cleanly — pin both ends.
+    assert_eq(TLS_SLOT_COUNT, 256);
+}
+
+@test
+fn test_tls_slot_count_is_power_of_two() {
+    // The slot index is bit-masked against `TLS_SLOT_COUNT - 1` on the
+    // hot path; that requires power-of-two semantics.
+    let mask: Int = TLS_SLOT_COUNT - 1;
+    assert_eq(TLS_SLOT_COUNT & mask, 0);
+}
+
+@test
+fn test_tls_slot_count_strictly_positive() {
+    // A zero or negative ceiling would silently disable TLS entirely.
+    assert(TLS_SLOT_COUNT > 0);
+}
+
+// =============================================================================
+// Section 2: tls_get / tls_set — TLS slot round-trip
+// =============================================================================
+
+@test
+fn test_tls_set_then_get_round_trip() {
+    // Reserve a high slot to avoid colliding with whatever pre-existing
+    // bootstrap state lives in low slots.
+    let slot: Int = 250;
+    tls_set(slot, 12345);
+    let v = tls_get(slot);
+    assert_eq(v, 12345);
+}
+
+@test
+fn test_tls_set_zero_is_observable() {
+    let slot: Int = 251;
+    tls_set(slot, 0);
+    let v = tls_get(slot);
+    assert_eq(v, 0);
+}
+
+@test
+fn test_tls_set_overwrites_prior_value() {
+    let slot: Int = 252;
+    tls_set(slot, 100);
+    tls_set(slot, 200);
+    let v = tls_get(slot);
+    assert_eq(v, 200);
+}
+
+@test
+fn test_tls_distinct_slots_are_independent() {
+    // Writing slot N must not bleed into slot M.
+    let a: Int = 240;
+    let b: Int = 241;
+    tls_set(a, 7);
+    tls_set(b, 13);
+    let va = tls_get(a);
+    let vb = tls_get(b);
+    assert_eq(va, 7);
+    assert_eq(vb, 13);
+}
+
+// =============================================================================
+// Section 3: context_provide / context_get / context_end — DI scope
+// =============================================================================
+
+@test
+fn test_context_provide_then_get_round_trip() {
+    // Use a high `type_id` to avoid stepping on bootstrap-provided
+    // contexts (`Logger`, `Allocator`, etc. claim low type_ids).
+    let tid: Int = 8001;
+    context_provide(tid, 42);
+    let v = context_get(tid);
+    assert_eq(v, 42);
+    context_end(tid);
+}
+
+@test
+fn test_context_end_clears_value() {
+    let tid: Int = 8002;
+    context_provide(tid, 999);
+    context_end(tid);
+    let v = context_get(tid);
+    // V-LLSI contract: unprovided context returns 0.
+    assert_eq(v, 0);
+}
+
+@test
+fn test_context_distinct_type_ids_are_independent() {
+    let a: Int = 8010;
+    let b: Int = 8011;
+    context_provide(a, 100);
+    context_provide(b, 200);
+    let va = context_get(a);
+    let vb = context_get(b);
+    assert_eq(va, 100);
+    assert_eq(vb, 200);
+    context_end(a);
+    context_end(b);
+}
+
+@test
+fn test_context_get_for_unprovided_returns_zero() {
+    // Reserved unused type_id never receives a `provide`. The
+    // V-LLSI contract returns 0 for unprovided contexts.
+    let tid: Int = 8099;
+    let v = context_get(tid);
+    assert_eq(v, 0);
+}
+
+// =============================================================================
+// Section 4: defer_depth — RAII stack depth introspection
+// =============================================================================
+
+@test
+fn test_defer_depth_initial_is_non_negative() {
+    // Even if the test harness pre-registered some defers, the depth
+    // must be a sensible non-negative integer.
+    let d = defer_depth();
+    assert(d >= 0);
+}
+
+@test
+fn test_defer_depth_stable_across_repeated_calls() {
+    // Pure read-only introspection; repeated calls without any
+    // intervening register/execute must return the same value.
+    let a = defer_depth();
+    let b = defer_depth();
+    let c = defer_depth();
+    assert_eq(a, b);
+    assert_eq(b, c);
+}
+
+fn main() {}

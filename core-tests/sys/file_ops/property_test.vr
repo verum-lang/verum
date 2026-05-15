@@ -1,0 +1,101 @@
+// =============================================================================
+// core-tests/sys/file_ops/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.file_ops`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.file_ops.{
+    OpenMode,
+    file_exists, delete_file, file_size,
+};
+
+// =============================================================================
+// Section 1: OpenMode — flag-bit invariants
+// =============================================================================
+
+@test
+fn law_openmode_read_carries_no_create_bit() {
+    // Pure O_RDONLY (0) must never set the O_CREAT (0x40) bit.
+    let r = OpenMode.read();
+    assert_eq(r.flags & 0x40, 0);
+}
+
+@test
+fn law_openmode_write_create_carry_create_bit() {
+    // write/append/create all carry O_CREAT (0x40).
+    let w = OpenMode.write();
+    let app = OpenMode.append();
+    let cre = OpenMode.create();
+    assert(w.flags & 0x40 != 0);
+    assert(app.flags & 0x40 != 0);
+    assert(cre.flags & 0x40 != 0);
+}
+
+@test
+fn law_openmode_append_carries_append_bit() {
+    let app = OpenMode.append();
+    // O_APPEND = 0x400.
+    assert(app.flags & 0x400 != 0);
+}
+
+@test
+fn law_openmode_write_carries_trunc_bit() {
+    let w = OpenMode.write();
+    // O_TRUNC = 0x200.
+    assert(w.flags & 0x200 != 0);
+}
+
+@test
+fn law_openmode_modes_are_repeatable() {
+    // Calling .read() twice gives the same flag pattern.
+    let a = OpenMode.read().flags;
+    let b = OpenMode.read().flags;
+    assert_eq(a, b);
+    let c = OpenMode.write().flags;
+    let d = OpenMode.write().flags;
+    assert_eq(c, d);
+    let e = OpenMode.append().flags;
+    let f = OpenMode.append().flags;
+    assert_eq(e, f);
+}
+
+// =============================================================================
+// Section 2: error-sentinel partitioning for missing files
+// =============================================================================
+
+fn missing_paths() -> List<Text> {
+    [
+        "/tmp/__verum_property_test_missing_a_192836__",
+        "/tmp/__verum_property_test_missing_b_283746__",
+        "/tmp/__verum_property_test_missing_c_374651__",
+    ]
+}
+
+@test
+fn law_file_exists_false_for_missing_paths() {
+    let paths = missing_paths();
+    for p in paths.iter() {
+        assert_eq(file_exists(*p), false);
+    }
+}
+
+@test
+fn law_file_size_negative_for_missing_paths() {
+    let paths = missing_paths();
+    for p in paths.iter() {
+        let sz = file_size(*p);
+        assert(sz < 0);
+    }
+}
+
+@test
+fn law_delete_file_false_for_missing_paths() {
+    let paths = missing_paths();
+    for p in paths.iter() {
+        assert_eq(delete_file(*p), false);
+    }
+}
+
+fn main() {}

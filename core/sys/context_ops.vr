@@ -14,7 +14,25 @@ module sys.context_ops;
 
 // =============================================================================
 
-mount super.raw.*;
+// Raw-intrinsic mount. The pre-migration `mount super.raw.*` pointed
+// at a `core/sys/raw.vr` file that no longer exists — the migration
+// moved every `__*_raw` declaration to `core/intrinsics/runtime/os.vr`
+// (see `core/sys/mod.vr` lines 39-49 for the migration note).
+// Without this fix every `__ctx_*_raw` / `__defer_*_raw` call below
+// failed function-id lookup at codegen time and the surrounding
+// wrappers (`tls_get` / `tls_set` / `context_provide` / `context_get`
+// / `context_end` / `defer_*`) all compiled to lenient panic-stubs
+// that fired at runtime with `undefined function: __ctx_*_raw`.
+// Same architectural fix as the one already landed for time_ops.vr.
+mount core.intrinsics.runtime.os.{
+    __ctx_get_raw,
+    __ctx_provide_raw,
+    __ctx_end_raw,
+    __defer_push_raw,
+    __defer_pop_raw,
+    __defer_depth_raw,
+    __defer_run_to_raw,
+};
 
 // =============================================================================
 // TLS Slots

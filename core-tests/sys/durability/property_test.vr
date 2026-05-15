@@ -1,0 +1,69 @@
+// =============================================================================
+// core-tests/sys/durability/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.durability`.
+//
+// The fsync family is a fundamental data-integrity gate. The laws
+// pinned here:
+//
+//   1. fsync of an invalid descriptor returns Err — never Ok and never
+//      panics. Multiple invalid sentinels (-1, -2, large positives)
+//      must all funnel to the same Err shape.
+//   2. data_only_fsync and full_fsync share the invalid-fd contract.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.durability.{
+    full_fsync,
+    data_only_fsync,
+    FileDesc,
+};
+
+fn invalid_fds() -> List<Int> {
+    [-1, -2, -100, 99_999, 999_999]
+}
+
+@test
+fn law_full_fsync_invalid_fd_always_err() {
+    let fds = invalid_fds();
+    for fd in fds.iter() {
+        let r = full_fsync(FileDesc(*fd));
+        match r {
+            Ok(()) => panic("full_fsync on invalid fd must NOT succeed"),
+            Err(_) => {}
+        }
+    }
+}
+
+@test
+fn law_data_only_fsync_invalid_fd_always_err() {
+    let fds = invalid_fds();
+    for fd in fds.iter() {
+        let r = data_only_fsync(FileDesc(*fd));
+        match r {
+            Ok(()) => panic("data_only_fsync on invalid fd must NOT succeed"),
+            Err(_) => {}
+        }
+    }
+}
+
+@test
+fn law_full_and_data_fsync_agree_on_invalid_fd() {
+    // Both syscalls return EBADF for -1. The wrappers should
+    // funnel the same Err shape — pin shape-agreement.
+    let bad = FileDesc(-1);
+    let a = full_fsync(bad);
+    let b = data_only_fsync(bad);
+    let a_is_err = match a {
+        Ok(()) => false,
+        Err(_) => true,
+    };
+    let b_is_err = match b {
+        Ok(()) => false,
+        Err(_) => true,
+    };
+    assert_eq(a_is_err, b_is_err);
+}
+
+fn main() {}

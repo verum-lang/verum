@@ -1,0 +1,57 @@
+// =============================================================================
+// core-tests/sys/fs_watch/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.fs_watch::FsEventKind`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.fs_watch.{FsEventKind, FsEvent};
+
+// =============================================================================
+// Section 1: FsEvent path round-trip with each kind
+// =============================================================================
+
+fn paths() -> List<Text> {
+    ["/tmp/a", "/var/log/b", "C:\\temp\\c", "", "/"]
+}
+
+@test
+fn law_fs_event_path_field_preserves_value() {
+    for p in paths().iter() {
+        let e = FsEvent { path: *p, kind: FsEventKind.Created };
+        assert_eq(e.path, *p);
+    }
+}
+
+@test
+fn law_fs_event_constructible_with_each_kind() {
+    // Five FsEvent records, one per FsEventKind variant. All must
+    // construct cleanly.
+    let _a = FsEvent { path: "/", kind: FsEventKind.Created };
+    let _b = FsEvent { path: "/", kind: FsEventKind.Modified };
+    let _c = FsEvent { path: "/", kind: FsEventKind.Deleted };
+    let _d = FsEvent { path: "/", kind: FsEventKind.Renamed };
+    let _e = FsEvent { path: "/", kind: FsEventKind.AttribChanged };
+}
+
+// =============================================================================
+// Section 2: Clone returns same-shaped value
+// =============================================================================
+
+@test
+fn law_clone_preserves_variant_shape() {
+    let kinds: List<FsEventKind> = [
+        FsEventKind.Created,
+        FsEventKind.Modified,
+        FsEventKind.Deleted,
+        FsEventKind.Renamed,
+        FsEventKind.AttribChanged,
+    ];
+    for k in kinds.iter() {
+        let cloned = (*k).clone();
+        let _: FsEventKind = cloned;
+    }
+}
+
+fn main() {}

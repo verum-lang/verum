@@ -1,0 +1,66 @@
+// =============================================================================
+// core-tests/sys/locking/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.locking`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.locking.{
+    FileLockKind,
+    LockRegion,
+};
+
+// =============================================================================
+// Section 1: LockRegion field round-trip across the boundary cases
+// =============================================================================
+
+fn region_starts() -> List<Int> {
+    [0, 1, 1024, 65535, 1_000_000_000]
+}
+
+fn region_lengths() -> List<Int> {
+    [-1, 0, 1, 4096, 65536, 1_000_000_000]
+}
+
+@test
+fn law_lock_region_start_field_round_trip() {
+    let starts = region_starts();
+    for s in starts.iter() {
+        let r = LockRegion { start: *s, length: 1 };
+        assert_eq(r.start, *s);
+    }
+}
+
+@test
+fn law_lock_region_length_field_round_trip() {
+    let lens = region_lengths();
+    for l in lens.iter() {
+        let r = LockRegion { start: 0, length: *l };
+        assert_eq(r.length, *l);
+    }
+}
+
+// =============================================================================
+// Section 2: FileLockKind — 2-variant disjointness
+// =============================================================================
+
+@test
+fn law_file_lock_kind_variants_are_distinct_under_match() {
+    let kinds: List<FileLockKind> = [
+        FileLockKind.Shared,
+        FileLockKind.Exclusive,
+    ];
+    let mut tag_sum: Int = 0;
+    for k in kinds.iter() {
+        let t = match k {
+            FileLockKind.Shared => 1,
+            FileLockKind.Exclusive => 2,
+        };
+        tag_sum = tag_sum + t;
+    }
+    // Each variant matches its own arm exactly once → 1 + 2 = 3.
+    assert_eq(tag_sum, 3);
+}
+
+fn main() {}

@@ -404,6 +404,30 @@ pub struct InterpreterState {
     /// Context stack for scoped context values.
     pub context_stack: ContextStack,
 
+    /// V-LLSI defer stack — pairs of (cleanup_fn_id, arg) registered
+    /// via `core.sys.context_ops.defer_register`. The interpreter
+    /// maintains stack depth + push/pop semantics so user-code
+    /// patterns that key off `defer_depth()` work end-to-end; actual
+    /// callback invocation under `defer_execute` / `defer_run_to` is
+    /// deferred to the AOT path (the interpreter can't synthesise an
+    /// indirect dispatch for an arbitrary `fn(Int) -> Int` pointer
+    /// without going through the Tier-1 call-frame machinery).
+    pub defer_stack: Vec<(i64, i64)>,
+
+    /// V-LLSI file-descriptor table — backs `__file_open_raw` /
+    /// `__file_read_raw` / `__file_write_raw` / `__file_close_raw` /
+    /// `__file_size_raw` / `__file_seek_raw` under Tier-0. Tier-1 AOT
+    /// uses real OS-level fds via libSystem / direct syscall.
+    /// The interpreter assigns synthetic fd ids starting at 100 (to
+    /// avoid colliding with the host POSIX 0/1/2 sentinels) and stores
+    /// the backing `std::fs::File` here keyed by the synthetic id.
+    pub open_files: std::collections::HashMap<i64, std::fs::File>,
+
+    /// Next synthetic fd id to hand out from `__file_open_raw`.
+    /// Monotonically increases; never reused even after `__file_close_raw`
+    /// to avoid use-after-close hazards in the same interpreter session.
+    pub next_fd: i64,
+
     /// Async task queue for spawned tasks.
     pub tasks: TaskQueue,
 
@@ -835,6 +859,19 @@ impl ContextStack {
     /// correct even when nested provides occur in the same stack frame.
     pub fn pop_one(&mut self) {
         self.entries.pop();
+    }
+
+    /// Removes the topmost entry whose `ctx_type` matches.  Returns true
+    /// if an entry was removed.  Used by the V-LLSI raw intrinsic
+    /// `__ctx_end_raw(type_id)` from `core.sys.context_ops`, which
+    /// addresses the entry by type_id rather than by stack depth.
+    pub fn end_by_type(&mut self, ctx_type: u32) -> bool {
+        if let Some(idx) = self.entries.iter().rposition(|e| e.ctx_type == ctx_type) {
+            self.entries.remove(idx);
+            true
+        } else {
+            false
+        }
     }
 
     /// Clears all context entries.
@@ -2441,6 +2478,9 @@ impl InterpreterState {
             stats: ExecutionStats::default(),
             config,
             context_stack: ContextStack::new(),
+            defer_stack: Vec::new(),
+            open_files: std::collections::HashMap::new(),
+            next_fd: 100,
             tasks: TaskQueue::new(),
             generators: GeneratorRegistry::new(),
             current_generator: None,

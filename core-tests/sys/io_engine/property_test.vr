@@ -1,0 +1,144 @@
+// =============================================================================
+// core-tests/sys/io_engine/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.io_engine`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.io_engine.{
+    EngineDuration,
+    Fd,
+};
+
+// =============================================================================
+// Section 1: EngineDuration — scaling laws
+// =============================================================================
+
+fn nano_samples() -> List<UInt64> {
+    [
+        0 as UInt64,
+        1 as UInt64,
+        1_000 as UInt64,
+        1_000_000 as UInt64,
+        1_000_000_000 as UInt64,
+        100_000_000_000 as UInt64,
+    ]
+}
+
+@test
+fn law_from_nanos_round_trip_identity() {
+    let samples = nano_samples();
+    for ns in samples.iter() {
+        let d = EngineDuration.from_nanos(*ns);
+        assert_eq(d.as_nanos(), *ns);
+    }
+}
+
+@test
+fn law_from_micros_then_as_nanos_multiplies_by_thousand() {
+    let micros: List<UInt64> = [0 as UInt64, 1 as UInt64, 7 as UInt64, 1000 as UInt64];
+    for us in micros.iter() {
+        let d = EngineDuration.from_micros(*us);
+        assert_eq(d.as_nanos(), *us * (1_000 as UInt64));
+    }
+}
+
+@test
+fn law_from_millis_then_as_millis_round_trip() {
+    let millis: List<UInt64> = [0 as UInt64, 1 as UInt64, 100 as UInt64, 10_000 as UInt64];
+    for ms in millis.iter() {
+        let d = EngineDuration.from_millis(*ms);
+        assert_eq(d.as_millis(), *ms);
+    }
+}
+
+@test
+fn law_from_secs_then_as_secs_round_trip() {
+    let secs: List<UInt64> = [0 as UInt64, 1 as UInt64, 60 as UInt64, 3600 as UInt64];
+    for s in secs.iter() {
+        let d = EngineDuration.from_secs(*s);
+        assert_eq(d.as_secs(), *s);
+    }
+}
+
+// =============================================================================
+// Section 2: EngineDuration — saturating arithmetic identities
+// =============================================================================
+
+@test
+fn law_saturating_add_zero_is_identity() {
+    let samples = nano_samples();
+    let zero = EngineDuration.ZERO;
+    for ns in samples.iter() {
+        let d = EngineDuration.from_nanos(*ns);
+        let r = d.saturating_add(zero);
+        assert_eq(r.as_nanos(), *ns);
+    }
+}
+
+@test
+fn law_saturating_sub_zero_is_identity() {
+    let samples = nano_samples();
+    let zero = EngineDuration.ZERO;
+    for ns in samples.iter() {
+        let d = EngineDuration.from_nanos(*ns);
+        let r = d.saturating_sub(zero);
+        assert_eq(r.as_nanos(), *ns);
+    }
+}
+
+@test
+fn law_saturating_sub_self_yields_zero() {
+    let samples = nano_samples();
+    for ns in samples.iter() {
+        let d = EngineDuration.from_nanos(*ns);
+        let r = d.saturating_sub(d);
+        assert(r.is_zero());
+    }
+}
+
+@test
+fn law_saturating_add_commutative() {
+    let samples = nano_samples();
+    let mut i: Int = 0;
+    let n = samples.len();
+    while i < n {
+        let mut j: Int = i;
+        while j < n {
+            let a = EngineDuration.from_nanos(*samples.get(i as USize));
+            let b = EngineDuration.from_nanos(*samples.get(j as USize));
+            let ab = a.saturating_add(b);
+            let ba = b.saturating_add(a);
+            assert_eq(ab.as_nanos(), ba.as_nanos());
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 3: Fd — is_valid ↔ raw >= 0 partitioning
+// =============================================================================
+
+@test
+fn law_fd_is_valid_iff_raw_non_negative() {
+    let raws: List<Int32> = [
+        -100 as Int32, -1 as Int32, 0 as Int32, 1 as Int32, 1024 as Int32, 65535 as Int32,
+    ];
+    for r in raws.iter() {
+        let f = Fd(*r);
+        let valid = f.is_valid();
+        let expected = *r >= (0 as Int32);
+        assert_eq(valid, expected);
+    }
+}
+
+@test
+fn law_fd_invalid_constant_is_minus_one() {
+    let f = Fd.INVALID;
+    assert_eq(f.as_raw(), -1 as Int32);
+    assert_eq(f.is_valid(), false);
+}
+
+fn main() {}

@@ -1,0 +1,84 @@
+// =============================================================================
+// core-tests/sys/context_ops/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect for `core.sys.context_ops`. Defects are
+// kept forever — even after the underlying compiler bug is closed — so
+// the test becomes a re-regression guard.
+//
+// Pinned defects:
+//
+//   §A — `mount super.raw.*` pointed at a deleted `core/sys/raw.vr`
+//        file after the runtime-intrinsic migration. Every
+//        `__ctx_*_raw` / `__defer_*_raw` call in `context_ops.vr`
+//        silently compiled to a lenient panic-stub at codegen time
+//        and surfaced at runtime as `undefined function: __ctx_*_raw`.
+//        Same architectural defect as the one already closed for
+//        `time_ops.vr`. Fixed in this branch by replacing
+//        `mount super.raw.*` with the canonical
+//        `mount core.intrinsics.runtime.os.{__ctx_*_raw, __defer_*_raw}`.
+//
+//   §B — `TLS_SLOT_COUNT` symbol resolves via the
+//        `core.sys.context_ops.{...}` selective re-export — pinned to
+//        guard against the parent-prefix-scan regression class.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.context_ops.{
+    TLS_SLOT_COUNT,
+    tls_get, tls_set,
+    context_provide, context_get, context_end,
+    defer_depth,
+};
+
+// =============================================================================
+// §A — raw-intrinsic mount migration (super.raw.* → intrinsics.runtime.os)
+// =============================================================================
+
+@test
+fn regression_tls_set_then_get_does_not_panic_stub() {
+    // Pre-fix the wrapper compiled to a panic-stub because
+    // `mount super.raw.*` resolved to nothing — the raw intrinsic
+    // function-id lookup at codegen failed silently. Post-fix the
+    // call routes to `core.intrinsics.runtime.os.__ctx_provide_raw`
+    // / `__ctx_get_raw` via the explicit selective import.
+    let slot: Int = 235;
+    tls_set(slot, 4321);
+    let v = tls_get(slot);
+    print(f"DIAG tls_get returned: {v}");
+    assert_eq(v, 4321);
+}
+
+@test
+fn regression_context_provide_then_get_does_not_panic_stub() {
+    // Same architectural fix — context_provide / context_get /
+    // context_end are the type_id-keyed analogues of the TLS pair.
+    let tid: Int = 6500;
+    context_provide(tid, 7);
+    let v = context_get(tid);
+    assert_eq(v, 7);
+    context_end(tid);
+}
+
+@test
+fn regression_defer_depth_returns_int_not_panics() {
+    // The defer family lives on the same dangling-mount fault.
+    // Pre-fix calling `defer_depth()` would have hit the lenient
+    // panic-stub. Post-fix returns the current depth (≥ 0).
+    let d = defer_depth();
+    assert(d >= 0);
+}
+
+// =============================================================================
+// §B — selective re-export resolves the canonical TLS_SLOT_COUNT
+// =============================================================================
+
+@test
+fn regression_tls_slot_count_resolves_via_context_ops_re_export() {
+    // Pin the constant so any future drift in the parent-prefix
+    // scan immediately surfaces here. The canonical value is 256
+    // (V-LLSI per-thread arena ceiling).
+    assert_eq(TLS_SLOT_COUNT, 256);
+}
+
+fn main() {}

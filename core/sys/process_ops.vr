@@ -14,7 +14,18 @@ module sys.process_ops;
 // =============================================================================
 
 mount core.{List, Text, Maybe};
-mount super.raw.*;
+// Raw-intrinsic mount. The pre-migration `mount super.raw.*` pointed
+// at a `core/sys/raw.vr` file that no longer exists — declarations
+// migrated to `core/intrinsics/runtime/os.vr`. Same architectural fix
+// as the one already landed for time_ops.vr.
+mount core.intrinsics.runtime.os.{
+    __process_spawn_raw,
+    __process_wait_raw,
+    __fd_read_all_raw,
+    __fd_close_raw,
+    __args_count_raw,
+    __arg_raw,
+};
 
 /// Exit status from a child process.
 public type ProcessExitStatus is {

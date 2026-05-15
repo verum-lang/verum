@@ -1,0 +1,115 @@
+// =============================================================================
+// core-tests/sys/process_ops/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.process_ops` — Verum-side process spawn,
+// wait, argv access primitives sitting on top of the raw FFI surface
+// (`__process_spawn_raw` / `__process_wait_raw` / `__fd_read_all_raw` /
+// `__fd_close_raw` / `__args_count_raw` / `__arg_raw`).
+//
+// API surface tested here:
+//
+//   ProcessExitStatus              — newtype { code: Int }
+//   ProcessExitStatus.success      — code == 0
+//   ProcessExitStatus.code         — accessor
+//   Child                          — { pid, stdout_fd, stderr_fd }
+//   Child.wait / read_stdout       — process lifecycle
+//   spawn / run                    — top-level entry points
+//   args / arg_count / arg_unchecked  — process argv introspection
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.process_ops.{
+    ProcessExitStatus,
+    Child,
+    arg_count,
+    args,
+};
+
+// =============================================================================
+// Section 1: ProcessExitStatus — construction + success predicate
+// =============================================================================
+
+@test
+fn test_exit_status_zero_is_success() {
+    let s = ProcessExitStatus { code: 0 };
+    assert(s.success());
+    assert_eq(s.code(), 0);
+}
+
+@test
+fn test_exit_status_one_is_not_success() {
+    let s = ProcessExitStatus { code: 1 };
+    assert_eq(s.success(), false);
+    assert_eq(s.code(), 1);
+}
+
+@test
+fn test_exit_status_negative_is_not_success() {
+    // Many syscall wrappers return -1 on failure — that must NOT
+    // be considered success.
+    let s = ProcessExitStatus { code: -1 };
+    assert_eq(s.success(), false);
+    assert_eq(s.code(), -1);
+}
+
+@test
+fn test_exit_status_arbitrary_code_round_trips() {
+    let s = ProcessExitStatus { code: 137 };
+    assert_eq(s.code(), 137);
+    assert_eq(s.success(), false);
+}
+
+// =============================================================================
+// Section 2: Child record — field round-trip
+// =============================================================================
+
+@test
+fn test_child_record_field_round_trip() {
+    let c = Child {
+        pid: 12345,
+        stdout_fd: -1,
+        stderr_fd: -1,
+    };
+    assert_eq(c.pid, 12345);
+    assert_eq(c.stdout_fd, -1);
+    assert_eq(c.stderr_fd, -1);
+}
+
+@test
+fn test_child_read_stdout_returns_empty_for_invalid_fd() {
+    // stdout_fd == -1 means stdout wasn't captured. The wrapper
+    // short-circuits to "" without touching the OS.
+    let c = Child {
+        pid: 0,
+        stdout_fd: -1,
+        stderr_fd: -1,
+    };
+    let out = c.read_stdout();
+    assert_eq(out, "");
+}
+
+// =============================================================================
+// Section 3: arg_count / args — process argv
+// =============================================================================
+
+@test
+fn test_arg_count_returns_non_negative() {
+    // The test binary always has at least one argv (its own path)
+    // — argv count must be ≥ 1 under any sane bootstrap, but we
+    // pin only non-negative to avoid platform-dependent value flux.
+    let n = arg_count();
+    assert(n >= 0);
+}
+
+@test
+fn test_args_returns_list_with_count_arg_count() {
+    // `args()` constructs a List by iterating `__arg_raw(i)` for
+    // i in 0..arg_count(). The result's length must match
+    // arg_count().
+    let n = arg_count();
+    let xs = args();
+    assert_eq(xs.len() as Int, n);
+}
+
+fn main() {}

@@ -1,0 +1,68 @@
+// =============================================================================
+// core-tests/sys/process_ops/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.process_ops`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.process_ops.{
+    ProcessExitStatus,
+    arg_count,
+    args,
+};
+
+// =============================================================================
+// Section 1: ProcessExitStatus composes with Maybe-shaped error funnel
+// =============================================================================
+
+@test
+fn integration_exit_status_via_maybe_funnel() {
+    let codes: List<Int> = [0, 1, 137, -1];
+    let mut succ_count: Int = 0;
+    for c in codes.iter() {
+        let s = ProcessExitStatus { code: *c };
+        let maybe: Maybe<Int> = if s.success() {
+            Some(s.code())
+        } else {
+            None
+        };
+        match maybe {
+            Some(_) => { succ_count = succ_count + 1; }
+            None => {}
+        }
+    }
+    // Only code=0 succeeds → 1 hit.
+    assert_eq(succ_count, 1);
+}
+
+// =============================================================================
+// Section 2: args composes with List iteration
+// =============================================================================
+
+@test
+fn integration_args_list_iter_does_not_panic() {
+    // Iterating the args() result must work end-to-end — exercising
+    // the List<Text> shape pulled out of __arg_raw calls.
+    let xs = args();
+    let mut count: Int = 0;
+    for _x in xs.iter() {
+        count = count + 1;
+    }
+    assert_eq(count as Int, arg_count());
+}
+
+@test
+fn integration_args_fold_does_not_panic() {
+    // The Text returned by __arg_raw must be a usable Text value
+    // for which `len()` is well-defined. We fold over the lengths.
+    let xs = args();
+    let mut total_len: Int = 0;
+    for x in xs.iter() {
+        total_len = total_len + ((*x).len() as Int);
+    }
+    // Non-negative sum.
+    assert(total_len >= 0);
+}
+
+fn main() {}

@@ -89,6 +89,16 @@ public fn __file_read_to_string_raw(path: Text) -> Text;
 @intrinsic("file_write_string")
 public fn __file_write_string_raw(path: Text, content: Text) -> Int;
 
+/// Write Text to an already-opened fd.  The fd's open-flags decide
+/// whether this is appending or overwriting — for append callers
+/// (`core.sys.file_ops.append_file`) the fd must have been opened
+/// with O_APPEND.  Returns bytes written, -1 on error.  Same
+/// architectural shape as `__file_write_raw(fd, buf, len)` but
+/// avoids the raw-pointer marshalling round-trip for Text-typed
+/// callers.
+@intrinsic("file_write_text")
+public fn __file_write_text_raw(fd: Int, content: Text) -> Int;
+
 // =============================================================================
 // Networking — TCP
 // =============================================================================

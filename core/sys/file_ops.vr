@@ -15,7 +15,19 @@ module sys.file_ops;
 // =============================================================================
 
 mount core.*;
-mount super.raw.*;
+// Raw-intrinsic mount. The pre-migration `mount super.raw.*` pointed
+// at a `core/sys/raw.vr` file that no longer exists — declarations
+// migrated to `core/intrinsics/runtime/os.vr`. Same architectural fix
+// as the one already landed for time_ops.vr.
+mount core.intrinsics.runtime.os.{
+    __file_open_raw,
+    __file_close_raw,
+    __file_read_to_string_raw,
+    __file_write_string_raw,
+    __file_write_text_raw,
+    __file_delete_raw,
+    __file_size_raw,
+};
 
 // =============================================================================
 // Default file-creation mode
@@ -66,13 +78,19 @@ public fn write_file(path: Text, content: Text) -> Bool {
 }
 
 /// Append Text to file.
+///
+/// Opens the file with O_WRONLY|O_CREAT|O_APPEND (creating it if
+/// absent) and writes `content` through the opened fd so O_APPEND
+/// semantics survive.  Pre-fix this delegated to the path-based
+/// `__file_write_string_raw` for the actual write — which silently
+/// re-opened the file with O_TRUNC and clobbered the existing
+/// contents.  Sister fix to the file_ops audit (§5 deferral closed).
 public fn append_file(path: Text, content: Text) -> Bool {
     let fd = __file_open_raw(path, 0x409, DEFAULT_FILE_MODE);
     if fd < 0 {
         return false;
     }
-    // Write content using raw write
-    let written = __file_write_string_raw(path, content);
+    let written = __file_write_text_raw(fd, content);
     __file_close_raw(fd);
     written >= 0
 }

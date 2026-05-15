@@ -1,0 +1,75 @@
+// =============================================================================
+// core-tests/sys/file_ops/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect for `core.sys.file_ops`.
+//
+// Pinned defects:
+//
+//   §A — `mount super.raw.*` pointed at a deleted `core/sys/raw.vr`
+//        file after the runtime-intrinsic migration. Every
+//        `__file_*_raw` call silently compiled to a lenient panic-stub
+//        at the codegen layer. Same architectural defect as the one
+//        already closed for `time_ops.vr`. Fixed in this branch.
+//
+//   §B — OpenMode constructor (e.g. `OpenMode.append()`) routes to
+//        the canonical `0x409` flag pattern — not silently bumped by
+//        a misordered associated-method dispatch.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.file_ops.{
+    OpenMode,
+    read_file,
+    file_exists, file_size, delete_file,
+};
+
+// =============================================================================
+// §A — raw-intrinsic mount migration
+// =============================================================================
+
+@test
+fn regression_file_exists_does_not_panic_stub() {
+    // Pre-fix `__file_open_raw` / `__file_close_raw` failed function-id
+    // lookup at codegen and `file_exists` compiled to a panic-stub.
+    // Post-fix the wrapper routes to the canonical intrinsics.
+    let p: Text = "/tmp/__verum_regression_file_exists_19283__";
+    let _exists = file_exists(p);
+}
+
+@test
+fn regression_file_size_does_not_panic_stub() {
+    let p: Text = "/tmp/__verum_regression_file_size_28374__";
+    let _sz = file_size(p);
+}
+
+@test
+fn regression_delete_file_does_not_panic_stub() {
+    let p: Text = "/tmp/__verum_regression_delete_37465__";
+    let _ok = delete_file(p);
+}
+
+@test
+fn regression_read_file_does_not_panic_stub() {
+    // Same surface — `__file_read_to_string_raw` and the open-probe
+    // both have to be reachable for the wrapper to return None
+    // gracefully instead of hitting the panic-stub.
+    let p: Text = "/tmp/__verum_regression_read_file_46576__";
+    let _r: Maybe<Text> = read_file(p);
+}
+
+// =============================================================================
+// §B — OpenMode dispatch returns canonical POSIX flags
+// =============================================================================
+
+@test
+fn regression_openmode_read_flags_zero() {
+    assert_eq(OpenMode.read().flags, 0);
+}
+
+@test
+fn regression_openmode_append_flags_match_create_append() {
+    assert_eq(OpenMode.append().flags, 0x409);
+}
+
+fn main() {}

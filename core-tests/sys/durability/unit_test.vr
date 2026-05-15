@@ -1,0 +1,75 @@
+// =============================================================================
+// core-tests/sys/durability/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.durability` — crash-safe persistence
+// primitives. This is a thin re-export surface over `core.sys.common`;
+// every wrapper here exists to give callers an intent-named import
+// (`mount core.sys.durability.{full_fsync, sync_directory}`).
+//
+// API surface tested here:
+//
+//   full_fsync        — fsync/F_FULLFSYNC/FlushFileBuffers
+//   data_only_fsync   — fdatasync where supported
+//   sync_directory    — POSIX directory-rename-survival
+//   pread / pwrite    — atomic positioned-IO
+//   FileDesc          — re-exported newtype
+//   OSError           — re-exported error type
+//
+// What we pin at this layer:
+//   1. The intent-named symbols resolve via the
+//      `core.sys.durability.{...}` re-export.
+//   2. The error funnel (`Result<(), OSError>`) on the fsync family
+//      reaches a `Maybe`-shaped consumer without exotic shape errors.
+//   3. The wrapper functions are NOT shadowed by sibling Rust-side
+//      WKT intercepts.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.durability.{
+    full_fsync,
+    data_only_fsync,
+    FileDesc,
+    OSError,
+};
+
+// =============================================================================
+// Section 1: full_fsync — error sentinel for invalid fd
+// =============================================================================
+
+@test
+fn test_full_fsync_invalid_fd_yields_err() {
+    // fd = -1 is the canonical POSIX "invalid descriptor" sentinel.
+    // fsync(-1) returns EBADF. The wrapper must funnel this into
+    // `Err(OSError)` — not panic, not unwind, not silently succeed.
+    let bad = FileDesc(-1);
+    let r: Result<(), OSError> = full_fsync(bad);
+    match r {
+        Ok(()) => panic("fsync(-1) must NOT succeed"),
+        Err(_) => {}
+    }
+}
+
+@test
+fn test_data_only_fsync_invalid_fd_yields_err() {
+    let bad = FileDesc(-1);
+    let r: Result<(), OSError> = data_only_fsync(bad);
+    match r {
+        Ok(()) => panic("fdatasync(-1) must NOT succeed"),
+        Err(_) => {}
+    }
+}
+
+@test
+fn test_full_fsync_high_invalid_fd_yields_err() {
+    // A high-but-unallocated descriptor (e.g. 99999) must also
+    // funnel to Err — EBADF / errno path.
+    let bad = FileDesc(99_999);
+    let r = full_fsync(bad);
+    match r {
+        Ok(()) => panic("fsync(99999) must NOT succeed for unallocated fd"),
+        Err(_) => {}
+    }
+}
+
+fn main() {}

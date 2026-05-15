@@ -1,0 +1,187 @@
+// =============================================================================
+// core-tests/sys/io_engine/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.io_engine` — completion-based I/O engine
+// protocol foundation.
+//
+// API surface tested here:
+//
+//   EngineDuration                — newtype UInt64 + arithmetic
+//   EngineDuration.from_nanos / micros / millis / secs
+//   EngineDuration.as_nanos / millis / secs
+//   EngineDuration.is_zero / saturating_add / saturating_sub
+//   EngineDuration.to_timespec    — POSIX timespec conversion
+//   EngineDuration.ZERO / MAX     — sentinel constants
+//   Fd                            — Int32 newtype
+//   Fd.INVALID                    — -1 sentinel
+//   Fd.is_valid                   — predicate
+//   TimeSpec                      — {tv_sec, tv_nsec} record
+//
+// Companion files:
+//   property_test.vr     — algebraic laws (Duration ring properties)
+//   regression_test.vr   — pinned compiler-side defects
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.io_engine.{
+    EngineDuration,
+    TimeSpec,
+    Fd,
+};
+
+// =============================================================================
+// Section 1: EngineDuration — construction + accessor round-trip
+// =============================================================================
+
+@test
+fn test_engine_duration_zero_is_zero() {
+    let d = EngineDuration.ZERO;
+    assert(d.is_zero());
+    assert_eq(d.as_nanos(), 0 as UInt64);
+}
+
+@test
+fn test_engine_duration_from_nanos_round_trip() {
+    let d = EngineDuration.from_nanos(123_456 as UInt64);
+    assert_eq(d.as_nanos(), 123_456 as UInt64);
+    assert_eq(d.is_zero(), false);
+}
+
+@test
+fn test_engine_duration_from_micros_scales_to_thousand_nanos() {
+    // 1 microsecond = 1000 nanoseconds.
+    let d = EngineDuration.from_micros(1 as UInt64);
+    assert_eq(d.as_nanos(), 1_000 as UInt64);
+}
+
+@test
+fn test_engine_duration_from_millis_scales_to_million_nanos() {
+    let d = EngineDuration.from_millis(1 as UInt64);
+    assert_eq(d.as_nanos(), 1_000_000 as UInt64);
+}
+
+@test
+fn test_engine_duration_from_secs_scales_to_billion_nanos() {
+    let d = EngineDuration.from_secs(1 as UInt64);
+    assert_eq(d.as_nanos(), 1_000_000_000 as UInt64);
+}
+
+@test
+fn test_engine_duration_as_millis_truncates_sub_milli() {
+    // 1_999_999 ns = 1 ms (truncating sub-ms).
+    let d = EngineDuration.from_nanos(1_999_999 as UInt64);
+    assert_eq(d.as_millis(), 1 as UInt64);
+}
+
+@test
+fn test_engine_duration_as_secs_truncates_sub_second() {
+    // 999_999_999 ns = 0 seconds (truncating sub-second).
+    let d = EngineDuration.from_nanos(999_999_999 as UInt64);
+    assert_eq(d.as_secs(), 0 as UInt64);
+}
+
+// =============================================================================
+// Section 2: EngineDuration — saturating arithmetic
+// =============================================================================
+
+@test
+fn test_engine_duration_saturating_add_normal() {
+    let a = EngineDuration.from_nanos(100 as UInt64);
+    let b = EngineDuration.from_nanos(200 as UInt64);
+    let r = a.saturating_add(b);
+    assert_eq(r.as_nanos(), 300 as UInt64);
+}
+
+@test
+fn test_engine_duration_saturating_sub_underflow_floors_at_zero() {
+    let a = EngineDuration.from_nanos(100 as UInt64);
+    let b = EngineDuration.from_nanos(200 as UInt64);
+    let r = a.saturating_sub(b);
+    assert(r.is_zero());
+}
+
+@test
+fn test_engine_duration_saturating_sub_normal() {
+    let a = EngineDuration.from_nanos(500 as UInt64);
+    let b = EngineDuration.from_nanos(100 as UInt64);
+    let r = a.saturating_sub(b);
+    assert_eq(r.as_nanos(), 400 as UInt64);
+}
+
+// =============================================================================
+// Section 3: EngineDuration — to_timespec conversion
+// =============================================================================
+
+@test
+fn test_engine_duration_to_timespec_at_exact_second() {
+    // 1 second = {tv_sec: 1, tv_nsec: 0}.
+    let d = EngineDuration.from_secs(1 as UInt64);
+    let ts = d.to_timespec();
+    assert_eq(ts.tv_sec, 1 as Int64);
+    assert_eq(ts.tv_nsec, 0 as Int64);
+}
+
+@test
+fn test_engine_duration_to_timespec_at_sub_second() {
+    // 1_500_000_000 ns = 1.5 seconds = {tv_sec: 1, tv_nsec: 500M}.
+    let d = EngineDuration.from_nanos(1_500_000_000 as UInt64);
+    let ts = d.to_timespec();
+    assert_eq(ts.tv_sec, 1 as Int64);
+    assert_eq(ts.tv_nsec, 500_000_000 as Int64);
+}
+
+// =============================================================================
+// Section 4: Fd — newtype + INVALID sentinel
+// =============================================================================
+
+@test
+fn test_fd_invalid_sentinel_is_minus_one() {
+    let f = Fd.INVALID;
+    assert_eq(f.as_raw(), -1 as Int32);
+    assert_eq(f.is_valid(), false);
+}
+
+@test
+fn test_fd_zero_is_valid() {
+    let f = Fd(0 as Int32);
+    assert(f.is_valid());
+}
+
+@test
+fn test_fd_positive_is_valid() {
+    let f = Fd(42 as Int32);
+    assert(f.is_valid());
+    assert_eq(f.as_raw(), 42 as Int32);
+}
+
+@test
+fn test_fd_try_as_valid_for_invalid_returns_none() {
+    let f = Fd.INVALID;
+    match f.try_as_valid() {
+        Some(_) => panic("INVALID must NOT convert to ValidFd"),
+        None => {}
+    }
+}
+
+@test
+fn test_fd_try_as_valid_for_valid_returns_some() {
+    let f = Fd(7 as Int32);
+    match f.try_as_valid() {
+        Some(_) => {},
+        None => panic("valid fd must convert to Some(ValidFd)"),
+    }
+}
+
+// =============================================================================
+// Section 5: TimeSpec — record round-trip
+// =============================================================================
+
+@test
+fn test_timespec_field_round_trip() {
+    let ts = TimeSpec { tv_sec: 10 as Int64, tv_nsec: 500 as Int64 };
+    assert_eq(ts.tv_sec, 10 as Int64);
+    assert_eq(ts.tv_nsec, 500 as Int64);
+}
+
+fn main() {}

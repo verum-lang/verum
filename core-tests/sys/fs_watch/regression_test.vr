@@ -1,0 +1,34 @@
+// =============================================================================
+// core-tests/sys/fs_watch/regression_test.vr
+// =============================================================================
+//
+// Pinned defects:
+//
+//   §A — `FsEventKind` 5-variant ADT constructs without falling
+//        through to the `__newtype_inner_X` typechecker gap (this is
+//        the same gap pinned by the FileDesc.STDIN family in
+//        `core-tests/sys/common/audit.md`).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.fs_watch.{FsEventKind, FsEvent};
+
+// =============================================================================
+// §A — variant-constructor stability across the 5 unit variants
+// =============================================================================
+
+@test
+fn regression_all_five_variants_construct() {
+    let _a = FsEventKind.Created;
+    let _b = FsEventKind.Modified;
+    let _c = FsEventKind.Deleted;
+    let _d = FsEventKind.Renamed;
+    let _e = FsEventKind.AttribChanged;
+}
+
+@test
+fn regression_fs_event_record_constructs() {
+    let _e = FsEvent { path: "/x", kind: FsEventKind.Created };
+}
+
+fn main() {}

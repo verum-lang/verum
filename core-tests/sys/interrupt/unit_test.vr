@@ -1,0 +1,60 @@
+// =============================================================================
+// core-tests/sys/interrupt/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.interrupt` — interrupt handling
+// infrastructure.
+//
+// Most of the surface is platform-conditional (target_arch + privileged-
+// mode-only intrinsics). The user-side test contract pins the
+// types + constructor shapes that user code reaches for; the actual
+// hardware interaction is exercised by VCS specs under
+// `vcs/specs/L0-critical/` and integration tests in the embedded
+// runtime suite.
+//
+// API surface tested here:
+//
+//   CriticalSection.is_active()         — Bool (returns !interrupts_enabled)
+//   InterruptCell.new(v)                — construction at user-space
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.interrupt.{
+    CriticalSection,
+    InterruptCell,
+};
+
+// =============================================================================
+// Section 1: CriticalSection — shape pin only (entering a CS at
+//            user-space disables nothing on most hosts; we only pin
+//            the introspection function works)
+// =============================================================================
+
+@test
+fn test_critical_section_is_active_returns_bool() {
+    // We don't pin the value — at user-space on a host kernel,
+    // interrupts are always "enabled" from the CPU's perspective
+    // (the host kernel masks them transparently), so the value
+    // depends on the platform. The shape pin guards against
+    // future drift.
+    let _state: Bool = CriticalSection.is_active();
+}
+
+// =============================================================================
+// Section 2: InterruptCell — construction
+// =============================================================================
+
+@test
+fn test_interrupt_cell_new_constructs_with_int_value() {
+    // The generic shape `InterruptCell<Int>` constructs via
+    // `.new(value)`. We don't exercise `.with_disabled` here —
+    // that needs an actual interrupt context to be meaningful.
+    let _cell: InterruptCell<Int> = InterruptCell.new(42);
+}
+
+@test
+fn test_interrupt_cell_new_constructs_with_text_value() {
+    let _cell: InterruptCell<Text> = InterruptCell.new("payload");
+}
+
+fn main() {}
