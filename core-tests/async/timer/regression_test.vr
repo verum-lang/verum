@@ -18,7 +18,7 @@
 mount core.async.timer.{
     Sleep, SleepUntil, TimerInterval, Delay, Timeout, TimeoutError,
     Debounce, Throttle,
-    sleep_secs, sleep_until, delay, timeout_ms,
+    sleep_secs, sleep_until, delay, timeout, timeout_ms,
 };
 mount core.async.future.{ready, ReadyFuture};
 mount core.time.{Duration};
@@ -95,21 +95,62 @@ fn regression_timer_interval_period_getter_does_not_stack_overflow() {
 }
 
 // =============================================================================
-// §C — task #16 — Timeout<F> field-layout write out of bounds
+// §C — task #16 CLOSED — Timeout<F> field-layout write out of bounds
 // =============================================================================
+//
+// CLOSED 2026-05-15 by a two-layer consumer-side architectural fix:
+//
+// **Defect summary**: Pre-fix `type_field_layouts` (the flat
+// simple-name → declared-field-names cache in vbc/codegen) was
+// polluted by record-style variant constructors that shared a
+// simple name with a standalone record type.  Canonical case:
+// `core.sys.io_engine.CompletionOp.Timeout { ts: &TimeSpec }`
+// (1-field variant payload) registered `type_field_layouts["Timeout"]
+// = ["ts"]` before `core.async.timer.Timeout<F>` (3-field record)
+// could claim the simple-name slot.  Under first-wins, the host
+// record's 3-field layout was silently shadowed.  `Timeout.new`'s
+// precompiled body then emitted `Instruction::New { field_count: 1 }`
+// (one slot, 8 bytes of data) and the subsequent SetF for field
+// index 2 (or 5 after Sleep nested allocation) wrote past the
+// allocation — exact failure mode this regression pinned.
+//
+// **Architectural fix**: shift the consumer-side resolution to
+// query the canonical `TypeDescriptor` (single source of truth per
+// type) BEFORE consulting the polluted flat cache.  Two sites
+// updated:
+//   (1) `compile_record`'s `alloc_slots` resolution
+//       (expressions.rs:~15517) — emits
+//       `Instruction::New { field_count }` from
+//       `TypeDescriptor.fields.len()`.
+//   (2) `resolve_field_index` (mod.rs:~12886) — strips generic args
+//       (`Timeout<ReadyFuture>` → `Timeout`), looks up the
+//       descriptor, scans its `fields` for the field-name match;
+//       returns the descriptor-canonical index.
+//
+// The TypeDescriptor source-of-truth discipline eliminates the
+// entire collision class structurally — every record type whose
+// simple name happens to collide with a sum-type's variant payload
+// across the type universe now resolves correctly.  Closes
+// `Timeout<F>`, but also `NurseryError.Timeout` / `ShellError.Timeout`
+// / `CompletionOp.Timeout` variants that all carried record
+// payloads under the same simple name.
 
 @test
-@ignore
 fn regression_timer_timeout_new_does_not_field_write_out_of_bounds() {
-    let _t = Timeout.new(Duration.from_secs(1), ready(42));
+    // Direct `Duration.secs` form to skirt the task #15 archive-
+    // wrapper-return-register defect; once #15 closes, swap back to
+    // the canonical `Duration.from_secs` form.
+    let _t = Timeout.new(Duration.secs(1), ready(42));
     assert(true);
 }
 
 @test
-@ignore
 fn regression_timer_timeout_factory_does_not_field_write_out_of_bounds() {
-    // mount: core.async.timer.{timeout};
-    // let _t = timeout(Duration.from_secs(1), ready(42));
+    // The `timeout` factory wraps `Timeout.new` — verified by
+    // construction that the same descriptor-first allocation
+    // discipline flows through every entry point to the 3-field
+    // generic-wrapper record.
+    let _t = timeout(Duration.secs(1), ready(42));
     assert(true);
 }
 
