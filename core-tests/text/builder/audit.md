@@ -1,14 +1,29 @@
 # `core.text.builder` — audit
 
-> Status: **regression-only**. Sweep on 2026-05-13: 4 / 23 unit tests
-> pass (17%). The TextBuilder module is correctly implemented (a thin
-> wrapper around `Text.push_str` + `Text.push_byte` + `Text.clone`),
-> but its underlying primitives panic at runtime with `Int.BAnd not
-> found` / `Int.BNeq not found` — these bitwise operators are
-> lenient-skipped or mis-dispatched in the Text.grow / capacity-doubling
-> path. Every push fails. The 4 passing tests are constructor-only
-> (new, with_capacity, default) plus is_empty / len queries that don't
-> trigger any Text-write code path.
+> Status: **complete**. Sweep on 2026-05-15: 23/23 unit tests pass.
+> Pre-fix (2026-05-13) only the 4 constructor/query tests passed (17%);
+> every push-related test failed.
+>
+> The pre-fix audit pinned `Int.BAnd not found` / `Int.BNeq not found`
+> as the root cause. Those were downstream symptoms of an unrelated
+> bitwise-op dispatch defect that closed earlier. The final blocker
+> remaining at sweep time was `Char.encode_utf8(&mut buf) -> Int`:
+> the runtime intercept ignored the buf argument, allocated a fresh
+> List of byte values, and returned the list pointer. Every caller
+> that paid the cost of `let mut tmp: [Byte; 4] = [0_u8; 4]; let n =
+> ch.encode_utf8(&mut tmp);` observed (a) tmp never written, (b) n =
+> List pointer (treated as Unit downstream). `while i < n { … }` then
+> iterated zero or wildly many times — TextBuilder.push_char silently
+> dropped every char.
+>
+> Fundamental fix in this branch: rewrite the
+> `CharSubOpcode::EncodeUtf8` intercept in
+> `crates/verum_vbc/src/interpreter/dispatch_table/handlers/char_extended.rs`
+> to honour the stdlib signature — encode UTF-8 into a stack buffer,
+> write bytes into the caller's buf via its backing-array pointer
+> (handling BYTE_LIST / LIST / direct-byte-array / ThinRef shapes
+> uniformly through `cbgr_helpers::resolve_arg_value`), and return
+> the byte count Int. See §A for the full rationale.
 
 ---
 

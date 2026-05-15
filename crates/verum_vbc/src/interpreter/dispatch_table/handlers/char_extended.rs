@@ -300,52 +300,103 @@ pub(in super::super) fn handle_char_extended(
         // UTF-8 Encoding/Decoding (0x50-0x5F)
         // ================================================================
         Some(CharSubOpcode::EncodeUtf8) => {
-            // Encode character as UTF-8 bytes and return a heap-allocated list of byte values
+            // `Char.encode_utf8(&mut buf: [Byte]) -> Int`
+            //
+            // Canonical semantics (matches stdlib body in
+            // `core/text/char.vr::Char.encode_utf8`):
+            //   * Side effect: writes 1..=4 UTF-8 bytes into the caller's
+            //     mutable byte buffer.
+            //   * Return: number of bytes written (1, 2, 3, or 4 — Int).
+            //
+            // Pre-fix the intercept IGNORED the buf argument, allocated a
+            // FRESH list of bytes, and returned the list pointer. Every
+            // caller that paid the cost of providing a stack-allocated
+            // `[Byte; 4]` (TextBuilder.push_char, Text.push_char,
+            // Formatter byte-level encoding, regex Unicode dispatch)
+            // observed: (a) the local buffer never written, (b) the
+            // return value not an Int. `let n = ch.encode_utf8(&mut tmp);
+            // while i < n { … }` then iterated zero times → push_char
+            // silently dropped every char.
+            //
+            // Fix: read both operands, write bytes into the caller's buf
+            // via its backing-array pointer, return the byte count Int.
             let dst = read_reg(state)?;
-            let src_reg = read_reg(state)?;
-            let c = state.get_reg(src_reg).as_char();
-            let mut buf = [0u8; 4];
-            let encoded = c.encode_utf8(&mut buf);
-            let len = encoded.len();
+            let src_char = read_reg(state)?;
+            let src_buf = read_reg(state)?;
 
-            // Allocate backing array for bytes
-            let backing_layout = std::alloc::Layout::from_size_align(len * 8, 8).map_err(|_| {
-                InterpreterError::Panic {
-                    message: "bad layout for utf8 bytes".into(),
+            let c = state.get_reg(src_char).as_char();
+            let mut tmp = [0u8; 4];
+            let encoded = c.encode_utf8(&mut tmp);
+            let n_bytes = encoded.len();
+
+            // Resolve the buf argument through the canonical helper so
+            // all three Verum reference shapes (CBGR register-ref,
+            // heap-interior pointer, ThinRef) collapse to the underlying
+            // heap value first.
+            let buf_val_raw = state.get_reg(src_buf);
+            let buf_val =
+                super::cbgr_helpers::resolve_arg_value(state, buf_val_raw);
+
+            if buf_val.is_ptr() && !buf_val.is_nil() {
+                let buf_ptr = buf_val.as_ptr::<u8>();
+                let header = unsafe {
+                    super::super::super::heap::ObjectHeader::ref_or_stub(buf_ptr)
+                };
+                let header_data = unsafe {
+                    buf_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE)
+                        as *mut Value
+                };
+                if header.type_id == crate::types::TypeId::BYTE_LIST {
+                    // BYTE_LIST: `[len, cap, backing_ptr]`, 1 byte/elem.
+                    let backing_ptr =
+                        unsafe { (*header_data.add(2)).as_ptr::<u8>() };
+                    let dst_bytes = unsafe {
+                        backing_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE)
+                            as *mut u8
+                    };
+                    for (i, b) in tmp.iter().enumerate().take(n_bytes) {
+                        unsafe {
+                            *dst_bytes.add(i) = *b;
+                        }
+                    }
+                } else if header.type_id == crate::types::TypeId::LIST {
+                    // LIST: `[len, cap, backing_ptr]`, NaN-boxed Value/elem.
+                    let backing_ptr =
+                        unsafe { (*header_data.add(2)).as_ptr::<u8>() };
+                    let dst_vals = unsafe {
+                        backing_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE)
+                            as *mut Value
+                    };
+                    for (i, b) in tmp.iter().enumerate().take(n_bytes) {
+                        unsafe {
+                            *dst_vals.add(i) = Value::from_i64(*b as i64);
+                        }
+                    }
+                } else {
+                    // Fixed-size byte array (no LIST/BYTE_LIST header) —
+                    // the heap object's payload IS the byte buffer.
+                    let dst_bytes = unsafe {
+                        buf_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE)
+                            as *mut u8
+                    };
+                    for (i, b) in tmp.iter().enumerate().take(n_bytes) {
+                        unsafe {
+                            *dst_bytes.add(i) = *b;
+                        }
+                    }
                 }
-            })?;
-            let backing_ptr = unsafe { std::alloc::alloc_zeroed(backing_layout) };
-            if backing_ptr.is_null() {
-                return Err(InterpreterError::Panic {
-                    message: "alloc failed for utf8 bytes".into(),
-                });
-            }
-            // Fill backing array with byte values
-            for (i, &byte_val) in buf.iter().enumerate().take(len) {
-                let val = Value::from_i64(byte_val as i64);
-                unsafe {
-                    std::ptr::write((backing_ptr as *mut Value).add(i), val);
+            } else if buf_val.is_thin_ref() {
+                let thin_ref = buf_val.as_thin_ref();
+                if !thin_ref.ptr.is_null() {
+                    for (i, b) in tmp.iter().enumerate().take(n_bytes) {
+                        unsafe {
+                            *thin_ref.ptr.add(i) = *b;
+                        }
+                    }
                 }
             }
 
-            // Allocate list header: [length, capacity, backing_ptr]
-            let header_layout = std::alloc::Layout::from_size_align(3 * 8, 8).map_err(|_| {
-                InterpreterError::Panic {
-                    message: "bad layout for utf8 header".into(),
-                }
-            })?;
-            let header_ptr = unsafe { std::alloc::alloc_zeroed(header_layout) };
-            if header_ptr.is_null() {
-                return Err(InterpreterError::Panic {
-                    message: "alloc failed for utf8 header".into(),
-                });
-            }
-            unsafe {
-                std::ptr::write(header_ptr as *mut i64, len as i64);
-                std::ptr::write((header_ptr as *mut i64).add(1), len as i64);
-                std::ptr::write((header_ptr as *mut i64).add(2), backing_ptr as i64);
-            }
-            state.set_reg(dst, Value::from_ptr(header_ptr));
+            state.set_reg(dst, Value::from_i64(n_bytes as i64));
             Ok(DispatchResult::Continue)
         }
 

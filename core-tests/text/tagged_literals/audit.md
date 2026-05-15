@@ -1,12 +1,15 @@
 # `core.text.tagged_literals` — audit
 
-> Status: **regression-only**. Sweep on 2026-05-13: 1 / 29 unit tests
-> pass (3.4%). All 28 failures share a single root cause: the runtime
-> dispatcher reads a CallM key from a wrong register, producing panic
-> messages that name **random Text values from elsewhere in the
-> process** as missing method names — "WARN", "DEBUG", "glob: empty
-> character class". The validators themselves (3 free functions, 30
-> source lines total) are trivially correct; the dispatcher is broken.
+> Status: **complete**. Sweep on 2026-05-15: 29/29 unit + 9 property +
+> 4 integration + 5 regression + 1 guard all pass interp.
+>
+> Historic note: pre-2026-05-15 sweep reported 1/29 (3.4%) with all 28
+> failures pinned to a "CallM register-slot read" defect that surfaced
+> random Text values as method names — "WARN", "DEBUG", "glob: empty
+> character class". That defect closed transitively via parallel agent
+> dispatch fixes prior to the 2026-05-15 sweep. No new defects
+> uncovered. The audit's §A/§B sections below remain as a historic
+> reference and to lock in the test surface as guardrails.
 
 ---
 
