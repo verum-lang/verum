@@ -1752,6 +1752,66 @@ impl VbcCodegen {
     }
 
     /// Compiles a qualified (multi-segment) path like `module::function` or `Type::method`.
+    /// Emit codegen for a resolved-path value.  When the resolved
+    /// function is a zero-arg **variant constructor** (i.e. has a
+    /// `variant_tag` AND zero parameters — the unit-variant shape like
+    /// `Signal.Hup`, `Maybe.None`, `Ordering.Less`, …), INVOKE the
+    /// constructor so the caller observes a proper variant value.
+    /// Otherwise fall back to the legacy "load func_id as Int"
+    /// behaviour (used by `fn x = some_fn` function-reference shape).
+    ///
+    /// **Architectural rationale**: pre-fix the path-resolution arms
+    /// in `compile_qualified_path` indiscriminately emitted `LoadI
+    /// func_id` for every resolved path — so `Signal.Hup.name()`
+    /// parsed as `MethodCall { receiver = Path("Signal.Hup"), method =
+    /// "name" }` lowered to:
+    ///
+    ///   LoadI tmp, func_id_of(Signal.Hup)       ; receiver is Int!
+    ///   CallM result, tmp, "name", []           ; method on Int
+    ///
+    /// The interpreter's CallM dispatcher then fell through to a
+    /// fallback that returned NULL/Unit, so subsequent `result.len()`
+    /// crashed with NullPointerAt opcode 0x66.  The let-bound form
+    /// `let s: Signal = Signal.Hup; s.name()` worked because the
+    /// `let` binding has its own variant-construction path that emits
+    /// `Call` to the constructor.
+    ///
+    /// Fix: every path-resolution branch routes through this helper,
+    /// which detects the variant-ctor shape and emits a proper
+    /// zero-arg `Call` to the constructor so the value materialises
+    /// before downstream consumers (method calls, field reads,
+    /// comparisons) see it.  Architecture mirrors how
+    /// `compile_simple_path` handles the same shape for single-
+    /// segment paths.
+    fn emit_path_resolved_value(
+        &mut self,
+        func_id: crate::module::FunctionId,
+        variant_tag: Option<u32>,
+        param_count: usize,
+        _parts: &[String],
+    ) -> CodegenResult<Option<Reg>> {
+        if variant_tag.is_some() && param_count == 0 {
+            // Zero-arg variant constructor — invoke it to produce the
+            // canonical variant value.  Matches what `let s = Signal.Hup;`
+            // already does via the let-binding path.
+            let dest = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::Call {
+                dst: dest,
+                func_id: func_id.0,
+                args: crate::instruction::RegRange::new(dest, 0),
+            });
+            return Ok(Some(dest));
+        }
+        // Function-reference shape — load the func_id as an Int the
+        // caller can dispatch through `CallV` / `CallC` later.
+        let dest = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::LoadI {
+            dst: dest,
+            value: func_id.0 as i64,
+        });
+        Ok(Some(dest))
+    }
+
     fn compile_qualified_path(&mut self, path: &Path) -> CodegenResult<Option<Reg>> {
         // Collect path segments into a qualified name
         let mut parts: Vec<String> = Vec::new();
@@ -1768,18 +1828,13 @@ impl VbcCodegen {
         let qualified_name = parts.join("::");
 
         // Try to find as a qualified function
-        // Extract func_id first to avoid borrow conflicts
-        let func_id_opt = self
+        // Extract func_id + variant_tag + param_count first to avoid borrow conflicts
+        let qualified_info_opt = self
             .ctx
             .lookup_qualified_function(&qualified_name)
-            .map(|f| f.id);
-        if let Some(func_id) = func_id_opt {
-            let dest = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::LoadI {
-                dst: dest,
-                value: func_id.0 as i64,
-            });
-            return Ok(Some(dest));
+            .map(|f| (f.id, f.variant_tag, f.param_count));
+        if let Some((func_id, variant_tag, param_count)) = qualified_info_opt {
+            return self.emit_path_resolved_value(func_id, variant_tag, param_count, &parts);
         }
 
         // Try the last segment as a method on the type formed by preceding segments
@@ -1792,18 +1847,13 @@ impl VbcCodegen {
 
             // Look up Type.method style
             let full_method = format!("{}.{}", type_path, method_name);
-            // Extract func_id first to avoid borrow conflicts
-            let method_func_id_opt = self
+            // Extract metadata first to avoid borrow conflicts
+            let method_info_opt = self
                 .ctx
                 .lookup_qualified_function(&full_method)
-                .map(|f| f.id);
-            if let Some(func_id) = method_func_id_opt {
-                let dest = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI {
-                    dst: dest,
-                    value: func_id.0 as i64,
-                });
-                return Ok(Some(dest));
+                .map(|f| (f.id, f.variant_tag, f.param_count));
+            if let Some((func_id, variant_tag, param_count)) = method_info_opt {
+                return self.emit_path_resolved_value(func_id, variant_tag, param_count, &parts);
             }
         }
 
@@ -1826,18 +1876,13 @@ impl VbcCodegen {
             let qualified_verum = parts.join(".");
             let suffix_verum = format!(".{}", qualified_verum);
             let suffix_rust = format!("::{}", qualified_name);
-            let matched_id = self
+            let matched_info = self
                 .ctx
                 .find_function_by_suffix(&suffix_verum)
                 .or_else(|| self.ctx.find_function_by_suffix(&suffix_rust))
-                .map(|f| f.id);
-            if let Some(func_id) = matched_id {
-                let dest = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI {
-                    dst: dest,
-                    value: func_id.0 as i64,
-                });
-                return Ok(Some(dest));
+                .map(|f| (f.id, f.variant_tag, f.param_count));
+            if let Some((func_id, variant_tag, param_count)) = matched_info {
+                return self.emit_path_resolved_value(func_id, variant_tag, param_count, &parts);
             }
         }
 
@@ -7443,11 +7488,38 @@ impl VbcCodegen {
                 // Gate the stub: only emit LoadNil when the *receiver
                 // path alone* — `parts` minus the trailing `method.name`
                 // segment that was appended at line 7216 above — is NOT
-                // itself a registered 0-arity function.  When it IS,
-                // the receiver is a real const value (impl-block
-                // `const X` or module-level `public const X`), so the
-                // call should fall through to the receiver-compile +
-                // CallM path below, NOT collapse to nil.
+                // itself a registered 0-arity producer of a value.
+                //
+                // "Producer of a value" covers TWO shapes, both of
+                // which are valid receivers for the trailing `.method`
+                // call:
+                //
+                //   * **Impl-block `const`** (e.g. `FileDesc.INVALID`,
+                //     `Duration.ZERO`) — registered with `param_count
+                //     == 0` and NO `variant_tag` (these are pure
+                //     constants).
+                //   * **Unit-variant constructor** (e.g. `Signal.Hup`,
+                //     `Maybe.None`, `Ordering.Less`) — registered with
+                //     `param_count == 0` AND `variant_tag.is_some()`.
+                //
+                // Pre-fix the rule was `param_count == 0 &&
+                // variant_tag.is_none()` — which EXCLUDED unit-variant
+                // constructors from the "known value" set.  Every
+                // chained `Type.Variant.method()` site (every
+                // `Signal.Hup.name()`, `Maybe.None.is_some()`, …) then
+                // collapsed to `LoadNil` instead of dispatching to the
+                // variant value's method.  That was the silent
+                // miscompile that surfaced as "Signal.name() returns
+                // empty" — only chained calls broke; the let-bound
+                // form `let s = Signal.Hup; s.name()` worked because
+                // it went through `compile_simple_path` for `s`.
+                //
+                // Fixed rule: param_count == 0 is sufficient on its
+                // own — both impl-block consts and unit-variant
+                // constructors qualify.  Any 0-arg function whose
+                // qualified name lives under the type namespace
+                // produces a value; the trailing method call should
+                // dispatch against that value.
                 let receiver_path_len = parts.len().saturating_sub(1);
                 let receiver_is_known_value = if receiver_path_len >= 1 {
                     let receiver_parts = &parts[..receiver_path_len];
@@ -7458,7 +7530,7 @@ impl VbcCodegen {
                         .or_else(|| {
                             self.ctx.lookup_qualified_function(&receiver_qualified_rust)
                         })
-                        .map(|fi| fi.param_count == 0 && fi.variant_tag.is_none())
+                        .map(|fi| fi.param_count == 0)
                         .unwrap_or(false)
                 } else {
                     false
@@ -8616,7 +8688,27 @@ impl VbcCodegen {
                             inner_type.clone()
                         };
                     let base_type = VbcCodegen::strip_generic_args(&derefed_type);
-                    format!("{}.{}", base_type, method.name)
+                    // **Architectural rule** (closes task #12 generic-method-
+                    // dispatch leg): when the deref'd base_type looks like an
+                    // unresolved generic type-param (single letter `T`, `K`,
+                    // `V`, `E` …), emitting `T.method` would burn the param
+                    // name into the runtime CallM key — runtime then panics
+                    // with "method 'T.lock' not found on receiver of runtime
+                    // kind Object" (canonical case: `(*shared).lock()` where
+                    // `shared: Shared<Mutex<T>>` inside `AsyncSemaphore.
+                    // available_permits` — the Shared<T> wrap erases the
+                    // outer generic instantiation through method-call return-
+                    // type tracking, leaving `T` as the visible derefed
+                    // shape).  Mirror the Case 1a / 1b discipline (named
+                    // bare-variable / SelfValue receiver) and fall back to
+                    // bare method-name dispatch — the runtime then routes
+                    // by the receiver's ACTUAL heap-tagged type at dispatch
+                    // time.
+                    if verum_common::well_known_types::looks_like_type_param(&base_type) {
+                        method.name.to_string()
+                    } else {
+                        format!("{}.{}", base_type, method.name)
+                    }
                 } else {
                     method.name.to_string()
                 }
@@ -10918,6 +11010,12 @@ impl VbcCodegen {
 
             // Compile arm body
             let arm_result = self.compile_expr(&arm.body)?;
+            if std::env::var("VERUM_TRACE_MATCH_ARM").is_ok() {
+                eprintln!(
+                    "[match-arm {}] result_reg={} arm_result={:?}",
+                    i, result.0, arm_result.map(|r| r.0)
+                );
+            }
             if let Some(reg) = arm_result {
                 self.ctx.emit(Instruction::Mov {
                     dst: result,
