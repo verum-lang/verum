@@ -1,0 +1,78 @@
+// =============================================================================
+// core-tests/sys/net_ops/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.net_ops` — the raw FFI-only
+// TCP/UDP fallback shapes.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.net_ops.{
+    RawTcpStream,
+    RawTcpListener,
+    RawUdpSocket,
+};
+
+// =============================================================================
+// Section 1: fd round-trip across the three transport newtypes
+// =============================================================================
+
+fn sample_fds() -> List<Int> {
+    [-1, 0, 1, 7, 1024, 65535]
+}
+
+@test
+fn law_raw_tcp_stream_fd_round_trip() {
+    let fds = sample_fds();
+    for fd in fds.iter() {
+        let s = RawTcpStream { fd: *fd };
+        assert_eq(s.fd, *fd);
+        assert_eq(s.raw_fd(), *fd);
+    }
+}
+
+@test
+fn law_raw_tcp_listener_fd_round_trip() {
+    let fds = sample_fds();
+    for fd in fds.iter() {
+        let l = RawTcpListener { fd: *fd };
+        assert_eq(l.fd, *fd);
+        assert_eq(l.raw_fd(), *fd);
+    }
+}
+
+@test
+fn law_raw_udp_socket_fd_round_trip() {
+    let fds = sample_fds();
+    for fd in fds.iter() {
+        let u = RawUdpSocket { fd: *fd };
+        assert_eq(u.fd, *fd);
+    }
+}
+
+// =============================================================================
+// Section 2: RawTcpStream.connect Maybe-shape contract
+// =============================================================================
+
+@test
+fn law_connect_to_unroutable_yields_none() {
+    // Three guaranteed-refused targets — pinning the negative
+    // case across multiple hosts so a transient connectivity
+    // anomaly doesn't false-pass.
+    let hosts: List<Text> = ["127.0.0.1", "127.0.0.1", "0.0.0.0"];
+    let ports: List<Int> = [1, 2, 3];
+    let mut i: Int = 0;
+    let n = hosts.len();
+    while i < n {
+        let host = *hosts.get(i as USize);
+        let port = *ports.get(i as USize);
+        let r = RawTcpStream.connect(host, port);
+        match r {
+            Some(_) => panic("unroutable connect must yield None"),
+            None => {}
+        }
+        i = i + 1;
+    }
+}
+
+fn main() {}

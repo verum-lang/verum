@@ -1,0 +1,80 @@
+// =============================================================================
+// core-tests/sys/fs_watch/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.fs_watch` — native filesystem watcher
+// (kqueue / inotify / ReadDirectoryChangesW).
+//
+// API surface tested here:
+//
+//   FsEventKind (5-variant) + Clone
+//   FsEvent { path, kind }   — record round-trip
+//
+// What we do NOT exercise:
+//   FsWatcher.new() / .watch() — these allocate kernel resources
+//   (inotify fd / kqueue fd / Windows handle). Tier-0 in-process
+//   tests can't reliably exercise the kernel-event path without
+//   a temp-directory fixture + a backgrounded writer process.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.fs_watch.{FsEventKind, FsEvent};
+
+// =============================================================================
+// Section 1: FsEventKind — 5 variant constructors
+// =============================================================================
+
+@test
+fn test_fs_event_kind_created() {
+    let _e = FsEventKind.Created;
+}
+
+@test
+fn test_fs_event_kind_modified() {
+    let _e = FsEventKind.Modified;
+}
+
+@test
+fn test_fs_event_kind_deleted() {
+    let _e = FsEventKind.Deleted;
+}
+
+@test
+fn test_fs_event_kind_renamed() {
+    let _e = FsEventKind.Renamed;
+}
+
+@test
+fn test_fs_event_kind_attrib_changed() {
+    let _e = FsEventKind.AttribChanged;
+}
+
+// =============================================================================
+// Section 2: FsEventKind — Clone
+// =============================================================================
+
+@test
+fn test_fs_event_kind_clone_round_trip() {
+    let original = FsEventKind.Modified;
+    let cloned = original.clone();
+    // No equality protocol pinned for FsEventKind yet — pin the
+    // shape (clone returns FsEventKind) via assignment.
+    let _: FsEventKind = cloned;
+}
+
+// =============================================================================
+// Section 3: FsEvent — record construction + field access
+// =============================================================================
+
+@test
+fn test_fs_event_record_field_round_trip() {
+    let e = FsEvent {
+        path: "/tmp/test",
+        kind: FsEventKind.Created,
+    };
+    assert_eq(e.path, "/tmp/test");
+    // kind field round-trips: pin its shape via assignment.
+    let _k: FsEventKind = e.kind;
+}
+
+fn main() {}

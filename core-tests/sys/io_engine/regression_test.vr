@@ -1,0 +1,62 @@
+// =============================================================================
+// core-tests/sys/io_engine/regression_test.vr
+// =============================================================================
+//
+// Pinned defects:
+//
+//   §A — `EngineDuration.from_nanos(...).as_nanos()` round-trip
+//        preserves UInt64 width — pre-class-of-fix this could
+//        silently widen / narrow through the codegen path.
+//
+//   §B — `Fd.INVALID` const initialises to `Fd(-1)` (Int32 width)
+//        via the same tuple-newtype const path the cabi case
+//        already pins. Same architectural class as
+//        `core-tests/sys/cabi/regression_test.vr` §B.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.io_engine.{
+    EngineDuration,
+    Fd,
+};
+
+// =============================================================================
+// §A — EngineDuration UInt64 round-trip
+// =============================================================================
+
+@test
+fn regression_engine_duration_round_trip_at_max_practical() {
+    // 1 year in ns — a typical timeout cap.
+    let ns: UInt64 = (365 as UInt64) * (24 as UInt64) * (60 as UInt64)
+        * (60 as UInt64) * (1_000_000_000 as UInt64);
+    let d = EngineDuration.from_nanos(ns);
+    assert_eq(d.as_nanos(), ns);
+}
+
+@test
+fn regression_engine_duration_round_trip_at_zero() {
+    let d = EngineDuration.from_nanos(0 as UInt64);
+    assert(d.is_zero());
+    assert_eq(d.as_nanos(), 0 as UInt64);
+}
+
+// =============================================================================
+// §B — Fd.INVALID constant Int32 width preservation
+// =============================================================================
+
+@test
+fn regression_fd_invalid_is_minus_one_int32() {
+    let f = Fd.INVALID;
+    assert_eq(f.as_raw(), -1 as Int32);
+}
+
+@test
+fn regression_fd_construct_with_int32_round_trip() {
+    let samples: List<Int32> = [-1 as Int32, 0 as Int32, 1 as Int32, 32767 as Int32];
+    for s in samples.iter() {
+        let f = Fd(*s);
+        assert_eq(f.as_raw(), *s);
+    }
+}
+
+fn main() {}

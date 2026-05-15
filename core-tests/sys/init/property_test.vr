@@ -1,0 +1,111 @@
+// =============================================================================
+// core-tests/sys/init/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.init::InitError`.
+//
+// The 6-variant InitError is a small, finite domain — exhaust the
+// reflexivity / symmetry / transitivity laws of Eq across the whole
+// domain.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.init.InitError;
+
+// Six representative variants spanning the full domain. Each is
+// constructed with a distinct "reason" where the variant carries one,
+// so the variant constructors are exercised at the same time.
+fn variants() -> List<InitError> {
+    [
+        InitError.TlsFailed { reason: "tls" },
+        InitError.ContextFailed { reason: "context" },
+        InitError.AllocatorFailed { reason: "allocator" },
+        InitError.PanicHandlerFailed { reason: "panic-handler" },
+        InitError.AlreadyInitialized,
+        InitError.NotInitialized,
+    ]
+}
+
+// =============================================================================
+// Section 1: Eq laws
+// =============================================================================
+
+@test
+fn law_eq_reflexivity_exhaustive() {
+    for v in variants().iter() {
+        assert(v.eq(v));
+    }
+}
+
+@test
+fn law_eq_symmetric_exhaustive() {
+    let vs = variants();
+    let n = vs.len();
+    let mut i: Int = 0;
+    while i < n {
+        let mut j: Int = 0;
+        while j < n {
+            let a = vs.get(i as USize);
+            let b = vs.get(j as USize);
+            let ab = a.eq(b);
+            let ba = b.eq(a);
+            assert_eq(ab, ba);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn law_eq_only_same_variant_eq() {
+    // Cross-variant pairs are NOT equal. Same-variant pairs with
+    // same payload (or no payload) ARE equal.
+    let vs = variants();
+    let n = vs.len();
+    let mut i: Int = 0;
+    while i < n {
+        let mut j: Int = 0;
+        while j < n {
+            let a = vs.get(i as USize);
+            let b = vs.get(j as USize);
+            let same = a.eq(b);
+            // Each variants() entry has a distinct payload / tag,
+            // so equality must align exactly with the index equality.
+            assert_eq(same, i == j);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 2: .message — non-empty + well-formed
+// =============================================================================
+
+@test
+fn law_message_non_empty_exhaustive() {
+    for v in variants().iter() {
+        let m = v.message();
+        assert(m.len() > 0);
+    }
+}
+
+@test
+fn law_message_distinct_per_variant() {
+    // Each variants() entry must produce a distinct message string.
+    let vs = variants();
+    let n = vs.len();
+    let mut i: Int = 0;
+    while i < n {
+        let mut j: Int = i + 1;
+        while j < n {
+            let ai = vs.get(i as USize);
+            let bj = vs.get(j as USize);
+            assert(ai.message() != bj.message());
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn main() {}

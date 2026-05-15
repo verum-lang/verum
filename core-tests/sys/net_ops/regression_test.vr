@@ -1,0 +1,76 @@
+// =============================================================================
+// core-tests/sys/net_ops/regression_test.vr
+// =============================================================================
+//
+// Pinned defects:
+//
+//   §A — `mount super.raw.*` pointed at a deleted `core/sys/raw.vr`
+//        file after the runtime-intrinsic migration. Every
+//        `__tcp_*_raw` / `__udp_*_raw` call silently compiled to a
+//        lenient panic-stub. Fixed in this branch via the canonical
+//        `mount core.intrinsics.runtime.os.{...}` replacement.
+//
+//   §B — The raw types under this module were originally named
+//        `TcpStream` / `TcpListener` / `UdpSocket` and silently
+//        shadowed the rich API under `core.net.tcp` / `core.net.udp`.
+//        Renamed to `Raw*` in #75 to break the shadow. Pin the
+//        canonical name so a future rename regression surfaces here.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.net_ops.{
+    RawTcpStream,
+    RawTcpListener,
+    RawUdpSocket,
+};
+
+// =============================================================================
+// §A — raw-intrinsic mount migration
+// =============================================================================
+
+@test
+fn regression_tcp_connect_does_not_panic_stub() {
+    // Pre-fix `__tcp_connect_raw` failed function-id lookup at
+    // codegen. The wrapper compiled to a panic-stub.
+    let _r = RawTcpStream.connect("127.0.0.1", 1);
+}
+
+@test
+fn regression_tcp_listener_bind_does_not_panic_stub() {
+    // Pre-fix `__tcp_listen_raw` failed function-id lookup at
+    // codegen.
+    let _r: Maybe<RawTcpListener> = RawTcpListener.bind(0);
+}
+
+@test
+fn regression_udp_socket_bind_does_not_panic_stub() {
+    // Pre-fix `__udp_bind_raw` failed function-id lookup at codegen.
+    let _r: Maybe<RawUdpSocket> = RawUdpSocket.bind(0);
+}
+
+// =============================================================================
+// §B — canonical Raw* names (shadow break)
+// =============================================================================
+
+@test
+fn regression_raw_tcp_stream_canonical_name_resolves() {
+    // Construction via the canonical Raw* name must succeed and
+    // round-trip the fd. A regression would re-introduce the
+    // bare `TcpStream` shadow and silently route to the rich API.
+    let s = RawTcpStream { fd: 42 };
+    assert_eq(s.fd, 42);
+}
+
+@test
+fn regression_raw_tcp_listener_canonical_name_resolves() {
+    let l = RawTcpListener { fd: 42 };
+    assert_eq(l.fd, 42);
+}
+
+@test
+fn regression_raw_udp_socket_canonical_name_resolves() {
+    let u = RawUdpSocket { fd: 42 };
+    assert_eq(u.fd, 42);
+}
+
+fn main() {}

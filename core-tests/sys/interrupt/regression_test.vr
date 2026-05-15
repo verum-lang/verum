@@ -1,0 +1,31 @@
+// =============================================================================
+// core-tests/sys/interrupt/regression_test.vr
+// =============================================================================
+//
+// Pinned defects:
+//
+//   §A — Generic `InterruptCell<T>` constructor properly substitutes
+//        T at the use site. The constructor goes through
+//        `UnsafeCell.new(value)` internally, and a regression class
+//        of generic-arg substitution defects (tracked under task #26
+//        in `MEMORY.md`) could break the construction.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.interrupt.InterruptCell;
+
+// =============================================================================
+// §A — Generic substitution through constructor
+// =============================================================================
+
+@test
+fn regression_interrupt_cell_int_constructs() {
+    let _c: InterruptCell<Int> = InterruptCell.new(1);
+}
+
+@test
+fn regression_interrupt_cell_bool_constructs() {
+    let _c: InterruptCell<Bool> = InterruptCell.new(true);
+}
+
+fn main() {}

@@ -99,6 +99,17 @@ pub(super) mod hasher_runtime;
 // as hasher_runtime).  See `char_runtime` doc comment for rationale.
 pub(super) mod char_runtime;
 
+// High-level Rust intercepts for V-LLSI context-system raw intrinsics
+// (`__ctx_get_raw` / `__ctx_provide_raw` / `__ctx_end_raw` /
+// `__defer_*_raw`).  The intrinsic registry has no entry for the
+// `@intrinsic("ctx_get")` etc. annotations these declarations carry,
+// so the codegen falls through and emits a single Return-opcode body —
+// defeating the `bytecode_length == 0` gate in
+// `try_dispatch_intrinsic_by_name`.  The intercept fires BEFORE the
+// Call reaches the body and routes through the existing
+// `state.context_stack` + `state.defer_stack` machinery.
+pub(super) mod ctx_runtime;
+
 // High-level Rust intercepts for process spawning
 // (spawn_child_with_output for `Command.output()` / `.status()`).
 // Sibling to shell_runtime; bypasses libSystem fork/execve/pipe via

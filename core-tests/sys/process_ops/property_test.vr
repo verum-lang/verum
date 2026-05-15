@@ -1,0 +1,96 @@
+// =============================================================================
+// core-tests/sys/process_ops/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.process_ops`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.process_ops.{
+    ProcessExitStatus,
+    Child,
+    arg_count,
+    args,
+};
+
+// =============================================================================
+// Section 1: ProcessExitStatus.success ↔ code == 0 partitioning
+// =============================================================================
+
+fn exit_codes() -> List<Int> {
+    [-1, 0, 1, 2, 137, 255]
+}
+
+@test
+fn law_success_iff_code_is_zero() {
+    let codes = exit_codes();
+    for c in codes.iter() {
+        let s = ProcessExitStatus { code: *c };
+        let succ = s.success();
+        let zero = *c == 0;
+        assert_eq(succ, zero);
+    }
+}
+
+@test
+fn law_code_round_trip() {
+    let codes = exit_codes();
+    for c in codes.iter() {
+        let s = ProcessExitStatus { code: *c };
+        assert_eq(s.code(), *c);
+    }
+}
+
+@test
+fn law_success_is_pure_function_of_code() {
+    // success() depends ONLY on .code — same code → same result.
+    let a = ProcessExitStatus { code: 7 };
+    let b = ProcessExitStatus { code: 7 };
+    assert_eq(a.success(), b.success());
+    let c = ProcessExitStatus { code: 0 };
+    let d = ProcessExitStatus { code: 0 };
+    assert_eq(c.success(), d.success());
+}
+
+// =============================================================================
+// Section 2: arg_count / args coherence
+// =============================================================================
+
+@test
+fn law_args_length_matches_arg_count() {
+    // Two consecutive calls must agree on the value.
+    let n1 = arg_count();
+    let xs = args();
+    let n2 = arg_count();
+    assert_eq(xs.len() as Int, n1);
+    assert_eq(n1, n2);
+}
+
+@test
+fn law_arg_count_repeatable() {
+    // Pure read of argv-count must be stable across repeated calls.
+    let a = arg_count();
+    let b = arg_count();
+    let c = arg_count();
+    assert_eq(a, b);
+    assert_eq(b, c);
+}
+
+// =============================================================================
+// Section 3: Child stdout_fd negative ⇒ read_stdout = ""
+// =============================================================================
+
+@test
+fn law_child_invalid_fd_yields_empty_stdout() {
+    let invalid_fds: List<Int> = [-1, -2, -100];
+    for fd in invalid_fds.iter() {
+        let c = Child {
+            pid: 0,
+            stdout_fd: *fd,
+            stderr_fd: *fd,
+        };
+        assert_eq(c.read_stdout(), "");
+    }
+}
+
+fn main() {}

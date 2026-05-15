@@ -1,0 +1,94 @@
+// =============================================================================
+// core-tests/sys/net_ops/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.net_ops` — raw FFI-only TCP/UDP fallback
+// shapes sitting on top of the raw FFI surface (`__tcp_*_raw` /
+// `__udp_*_raw`).
+//
+// The user-facing rich API lives in `core.net.tcp` /  `core.net.udp`.
+// The types under test here (`RawTcpStream` / `RawTcpListener` /
+// `RawUdpSocket`) are the FFI-only fallback originally named
+// `TcpStream` / `TcpListener` / `UdpSocket` — renamed to break the
+// silent shadow of the rich API (#75).
+//
+// API surface tested here:
+//
+//   RawTcpStream — { fd: Int } + connect / send / recv / close / raw_fd
+//   RawTcpListener — { fd: Int } + bind / accept / close / raw_fd
+//   RawUdpSocket — { fd: Int } + bind / send_to / recv / close
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.net_ops.{
+    RawTcpStream,
+    RawTcpListener,
+    RawUdpSocket,
+};
+
+// =============================================================================
+// Section 1: RawTcpStream / RawTcpListener / RawUdpSocket — field round-trip
+// =============================================================================
+
+@test
+fn test_raw_tcp_stream_field_round_trip() {
+    let s = RawTcpStream { fd: 7 };
+    assert_eq(s.fd, 7);
+    assert_eq(s.raw_fd(), 7);
+}
+
+@test
+fn test_raw_tcp_listener_field_round_trip() {
+    let l = RawTcpListener { fd: 11 };
+    assert_eq(l.fd, 11);
+    assert_eq(l.raw_fd(), 11);
+}
+
+@test
+fn test_raw_udp_socket_field_round_trip() {
+    let u = RawUdpSocket { fd: 19 };
+    assert_eq(u.fd, 19);
+}
+
+// =============================================================================
+// Section 2: RawTcpStream.connect — error sentinel for unroutable port
+// =============================================================================
+
+@test
+fn test_tcp_connect_unroutable_returns_none() {
+    // Port 1 on localhost is virtually guaranteed to refuse connection
+    // under any sane bootstrap. The wrapper returns None for fd < 0.
+    let result = RawTcpStream.connect("127.0.0.1", 1);
+    match result {
+        Some(_) => panic("unroutable connect must yield None"),
+        None => {}
+    }
+}
+
+// =============================================================================
+// Section 3: RawTcpListener.bind — high-port should succeed (under interpreter
+//            sandbox we don't actually exercise the listener; the API surface
+//            is structural)
+// =============================================================================
+
+@test
+fn test_tcp_listener_bind_returns_maybe() {
+    // The shape returned by RawTcpListener.bind must be a
+    // Maybe<RawTcpListener>. We don't pin a specific result for the
+    // actual bind — port reservation is platform/state dependent —
+    // but we DO pin the type-shape via destructure.
+    let _result: Maybe<RawTcpListener> = RawTcpListener.bind(0);
+    // No assertion — the test passes if the type is the shape we
+    // expect (compiler-enforced).
+}
+
+// =============================================================================
+// Section 4: RawUdpSocket.bind — same shape pin
+// =============================================================================
+
+@test
+fn test_udp_socket_bind_returns_maybe() {
+    let _result: Maybe<RawUdpSocket> = RawUdpSocket.bind(0);
+}
+
+fn main() {}

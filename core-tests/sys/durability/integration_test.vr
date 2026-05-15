@@ -1,0 +1,48 @@
+// =============================================================================
+// core-tests/sys/durability/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.durability`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.durability.{
+    full_fsync,
+    data_only_fsync,
+    FileDesc,
+    OSError,
+};
+
+// =============================================================================
+// Section 1: Result<(), OSError> composes with `?` / match
+// =============================================================================
+
+fn try_full_fsync_and_classify(fd: Int) -> Int {
+    match full_fsync(FileDesc(fd)) {
+        Ok(()) => 0,
+        Err(_) => 1,
+    }
+}
+
+@test
+fn integration_full_fsync_classify_returns_error_for_invalid() {
+    assert_eq(try_full_fsync_and_classify(-1), 1);
+    assert_eq(try_full_fsync_and_classify(99_999), 1);
+}
+
+@test
+fn integration_full_fsync_error_collectable_into_list() {
+    // Each invalid fd → Err. Collect the count into a List using
+    // the canonical user-side pattern.
+    let fds: List<Int> = [-1, -2, -3, 99_999];
+    let mut err_count: Int = 0;
+    for fd in fds.iter() {
+        match full_fsync(FileDesc(*fd)) {
+            Ok(()) => {}
+            Err(_) => { err_count = err_count + 1; }
+        }
+    }
+    assert_eq(err_count, 4);
+}
+
+fn main() {}

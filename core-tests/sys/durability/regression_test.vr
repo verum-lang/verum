@@ -1,0 +1,57 @@
+// =============================================================================
+// core-tests/sys/durability/regression_test.vr
+// =============================================================================
+//
+// Pinned defects:
+//
+//   §A — `mount core.sys.durability.{full_fsync, ...}` resolves the
+//        intent-named symbol through the `public mount core.sys.common.X`
+//        re-export chain (same parent-prefix-scan pattern as the cabi
+//        case in `core-tests/sys/cabi/regression_test.vr`).
+//
+//   §B — `Result<(), OSError>` shape on the fsync family does not
+//        collapse to `Result<Bool, OSError>` or other near-shapes via
+//        type-coercion drift.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.durability.{
+    full_fsync,
+    data_only_fsync,
+    FileDesc,
+    OSError,
+};
+
+// =============================================================================
+// §A — re-export resolves via intent-named module
+// =============================================================================
+
+@test
+fn regression_full_fsync_resolves_via_durability_re_export() {
+    let bad = FileDesc(-1);
+    let _r = full_fsync(bad);
+}
+
+@test
+fn regression_data_only_fsync_resolves_via_durability_re_export() {
+    let bad = FileDesc(-1);
+    let _r = data_only_fsync(bad);
+}
+
+// =============================================================================
+// §B — Result<(), OSError> shape stability
+// =============================================================================
+
+@test
+fn regression_fsync_err_branch_takes_correct_shape() {
+    let bad = FileDesc(-1);
+    let r = full_fsync(bad);
+    // Destructure the Err branch — this fails to compile if the
+    // shape silently drifts to e.g. Result<Bool, OSError>.
+    match r {
+        Ok(()) => panic("expected Err"),
+        Err(_e) => {}
+    }
+}
+
+fn main() {}

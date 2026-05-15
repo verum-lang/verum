@@ -1,0 +1,99 @@
+// =============================================================================
+// core-tests/sys/locking/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.locking` — byte-range advisory file locking.
+//
+// API surface tested here:
+//
+//   FileLockKind            — Shared | Exclusive
+//   LockRegion              — { start, length }
+//   LockError               — Conflict(Maybe<Int>) | IoError(OSError)
+//   LockError.eq            — explicit Eq impl
+//
+// What we do NOT exercise:
+//   try_lock / unlock — these need a real file descriptor and a
+//   second-holder fixture. Tracked in
+//   `core-tests/integration/locking/`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.locking.{
+    FileLockKind,
+    LockRegion,
+    LockError,
+};
+
+// =============================================================================
+// Section 1: FileLockKind — variant construction
+// =============================================================================
+
+@test
+fn test_file_lock_kind_shared() {
+    let _k = FileLockKind.Shared;
+}
+
+@test
+fn test_file_lock_kind_exclusive() {
+    let _k = FileLockKind.Exclusive;
+}
+
+// =============================================================================
+// Section 2: LockRegion — record round-trip
+// =============================================================================
+
+@test
+fn test_lock_region_field_round_trip() {
+    let r = LockRegion { start: 0, length: 1024 };
+    assert_eq(r.start, 0);
+    assert_eq(r.length, 1024);
+}
+
+@test
+fn test_lock_region_to_eof_sentinel() {
+    // length == -1 → "from start to EOF" per the spec.
+    let r = LockRegion { start: 100, length: -1 };
+    assert_eq(r.start, 100);
+    assert_eq(r.length, -1);
+}
+
+@test
+fn test_lock_region_zero_length() {
+    let r = LockRegion { start: 0, length: 0 };
+    assert_eq(r.start, 0);
+    assert_eq(r.length, 0);
+}
+
+// =============================================================================
+// Section 3: LockError — variant construction
+// =============================================================================
+
+@test
+fn test_lock_error_conflict_with_pid() {
+    let e = LockError.Conflict(Some(12345));
+    match e {
+        LockError.Conflict(pid) => {
+            match pid {
+                Some(p) => assert_eq(p, 12345),
+                None => panic("expected Some(pid)"),
+            }
+        }
+        LockError.IoError(_) => panic("expected Conflict, got IoError"),
+    }
+}
+
+@test
+fn test_lock_error_conflict_with_none_owner() {
+    let e = LockError.Conflict(None);
+    match e {
+        LockError.Conflict(pid) => {
+            match pid {
+                Some(_) => panic("expected None owner"),
+                None => {}
+            }
+        }
+        LockError.IoError(_) => panic("expected Conflict, got IoError"),
+    }
+}
+
+fn main() {}

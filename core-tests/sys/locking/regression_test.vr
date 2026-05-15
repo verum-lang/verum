@@ -1,0 +1,48 @@
+// =============================================================================
+// core-tests/sys/locking/regression_test.vr
+// =============================================================================
+//
+// Pinned defects:
+//
+//   §A — `FileLockKind` was renamed from `LockKind` (task #160) to
+//        avoid simple-name collision with
+//        `core.database.sqlite.native.l0_vfs.vfs_protocol.LockKind`.
+//        Pin both variant constructors so a future rename regression
+//        re-introducing the bare `LockKind` shadow surfaces here.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.locking.{FileLockKind, LockError};
+
+// =============================================================================
+// §A — canonical FileLockKind name resolves both variants
+// =============================================================================
+
+@test
+fn regression_file_lock_kind_shared_canonical() {
+    let _k = FileLockKind.Shared;
+}
+
+@test
+fn regression_file_lock_kind_exclusive_canonical() {
+    let _k = FileLockKind.Exclusive;
+}
+
+// =============================================================================
+// §B — LockError carries the correct payload shapes
+// =============================================================================
+
+@test
+fn regression_lock_error_conflict_carries_maybe_pid() {
+    let e = LockError.Conflict(Some(42));
+    let pid: Maybe<Int> = match e {
+        LockError.Conflict(p) => p,
+        LockError.IoError(_) => panic("wrong arm"),
+    };
+    match pid {
+        Some(p) => assert_eq(p, 42),
+        None => panic("Some expected"),
+    }
+}
+
+fn main() {}

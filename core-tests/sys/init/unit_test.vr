@@ -1,0 +1,110 @@
+// =============================================================================
+// core-tests/sys/init/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.init` — V-LLSI runtime initialization
+// entry point.
+//
+// API surface tested here:
+//
+//   InitError (6-variant) + Eq + Debug + Display + .message
+//   is_initialized() -> Bool
+//
+// What we do NOT exercise here:
+//   verum_init / verum_shutdown — these are bootstrap-time entry
+//   points; running them under the test harness would re-trigger
+//   the bootstrap sequence the harness already drove. They're
+//   covered indirectly by every other passing test (which only
+//   runs because verum_init succeeded).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.init.{InitError, is_initialized};
+
+// =============================================================================
+// Section 1: InitError — variant construction
+// =============================================================================
+
+@test
+fn test_init_error_tls_failed_holds_reason() {
+    let e = InitError.TlsFailed { reason: "fcntl(F_GETFD) failed" };
+    assert_eq(e.message(), "TLS initialization failed: fcntl(F_GETFD) failed");
+}
+
+@test
+fn test_init_error_context_failed_holds_reason() {
+    let e = InitError.ContextFailed { reason: "no slot" };
+    assert_eq(e.message(), "Context initialization failed: no slot");
+}
+
+@test
+fn test_init_error_allocator_failed_holds_reason() {
+    let e = InitError.AllocatorFailed { reason: "mmap returned MAP_FAILED" };
+    assert_eq(e.message(), "Allocator initialization failed: mmap returned MAP_FAILED");
+}
+
+@test
+fn test_init_error_panic_handler_failed_holds_reason() {
+    let e = InitError.PanicHandlerFailed { reason: "signal(SIGSEGV, ...) returned SIG_ERR" };
+    assert_eq(e.message(), "Panic handler initialization failed: signal(SIGSEGV, ...) returned SIG_ERR");
+}
+
+@test
+fn test_init_error_already_initialized() {
+    let e = InitError.AlreadyInitialized;
+    assert_eq(e.message(), "Runtime already initialized");
+}
+
+@test
+fn test_init_error_not_initialized() {
+    let e = InitError.NotInitialized;
+    assert_eq(e.message(), "Runtime not initialized");
+}
+
+// =============================================================================
+// Section 2: InitError — Eq impl
+// =============================================================================
+
+@test
+fn test_init_error_eq_reflexivity_already_initialized() {
+    let a = InitError.AlreadyInitialized;
+    let b = InitError.AlreadyInitialized;
+    assert(a.eq(&b));
+}
+
+@test
+fn test_init_error_eq_reflexivity_not_initialized() {
+    let a = InitError.NotInitialized;
+    let b = InitError.NotInitialized;
+    assert(a.eq(&b));
+}
+
+@test
+fn test_init_error_eq_distinct_variants_not_equal() {
+    let a = InitError.AlreadyInitialized;
+    let b = InitError.NotInitialized;
+    assert_eq(a.eq(&b), false);
+}
+
+@test
+fn test_init_error_eq_tls_failed_compares_reason() {
+    let a = InitError.TlsFailed { reason: "same" };
+    let b = InitError.TlsFailed { reason: "same" };
+    let c = InitError.TlsFailed { reason: "different" };
+    assert(a.eq(&b));
+    assert_eq(a.eq(&c), false);
+}
+
+// =============================================================================
+// Section 3: is_initialized — bootstrap state introspection
+// =============================================================================
+
+@test
+fn test_is_initialized_returns_bool() {
+    // Pin the type of the return — the bootstrap state should
+    // be a stable Bool. We don't pin the value (it depends on
+    // the test harness's bootstrap) but we confirm the shape.
+    let _state: Bool = is_initialized();
+}
+
+fn main() {}

@@ -1,0 +1,66 @@
+// =============================================================================
+// core-tests/sys/process_ops/regression_test.vr
+// =============================================================================
+//
+// Pinned defects:
+//
+//   §A — `mount super.raw.*` pointed at a deleted `core/sys/raw.vr`
+//        file after the runtime-intrinsic migration. Every
+//        `__process_*_raw` / `__fd_*_raw` / `__args*_raw` call silently
+//        compiled to a lenient panic-stub. Fixed in this branch via
+//        the canonical `mount core.intrinsics.runtime.os.{...}`
+//        replacement.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.process_ops.{
+    ProcessExitStatus,
+    Child,
+    arg_count,
+    args,
+};
+
+// =============================================================================
+// §A — raw-intrinsic mount migration
+// =============================================================================
+
+@test
+fn regression_arg_count_does_not_panic_stub() {
+    // Pre-fix `__args_count_raw` failed function-id lookup at codegen.
+    let _n = arg_count();
+}
+
+@test
+fn regression_args_does_not_panic_stub() {
+    // Pre-fix `__arg_raw` failed function-id lookup at codegen.
+    let _xs = args();
+}
+
+@test
+fn regression_child_invalid_fd_does_not_panic_stub() {
+    // Constructing a Child + calling read_stdout under invalid fd
+    // must short-circuit to "" — pre-fix the wrapper's defensive
+    // `__fd_read_all_raw` / `__fd_close_raw` path also panic-stubbed
+    // when reached. We pin the short-circuit path explicitly.
+    let c = Child { pid: 0, stdout_fd: -1, stderr_fd: -1 };
+    let out = c.read_stdout();
+    assert_eq(out, "");
+}
+
+// =============================================================================
+// §B — ProcessExitStatus.success/code algebraic invariants stable
+// =============================================================================
+
+@test
+fn regression_exit_status_success_for_zero_code() {
+    let s = ProcessExitStatus { code: 0 };
+    assert(s.success());
+}
+
+@test
+fn regression_exit_status_not_success_for_nonzero_code() {
+    let s = ProcessExitStatus { code: 1 };
+    assert_eq(s.success(), false);
+}
+
+fn main() {}

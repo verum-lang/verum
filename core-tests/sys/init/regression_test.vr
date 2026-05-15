@@ -1,0 +1,55 @@
+// =============================================================================
+// core-tests/sys/init/regression_test.vr
+// =============================================================================
+//
+// Pinned defects:
+//
+//   §A — `InitError`'s `Eq` impl correctly handles the 4 unit-variant
+//        × 2 payload-variant cross-product without payload-leak.
+//
+//   §B — `is_initialized()` returns a Bool value, not Unit or panic
+//        (regression class on the @inline attribute when reading
+//        from a `static mut` field).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.init.{InitError, is_initialized};
+
+// =============================================================================
+// §A — Eq impl across payload + unit variants
+// =============================================================================
+
+@test
+fn regression_eq_unit_variants_pair_correctly() {
+    let a = InitError.AlreadyInitialized;
+    let b = InitError.AlreadyInitialized;
+    let c = InitError.NotInitialized;
+    assert(a.eq(&b));
+    assert_eq(a.eq(&c), false);
+}
+
+@test
+fn regression_eq_payload_variants_pair_correctly() {
+    let a = InitError.TlsFailed { reason: "x" };
+    let b = InitError.TlsFailed { reason: "x" };
+    let c = InitError.TlsFailed { reason: "y" };
+    let d = InitError.AllocatorFailed { reason: "x" };
+    assert(a.eq(&b));
+    assert_eq(a.eq(&c), false);
+    assert_eq(a.eq(&d), false);
+}
+
+// =============================================================================
+// §B — is_initialized returns Bool
+// =============================================================================
+
+@test
+fn regression_is_initialized_returns_bool_shape() {
+    let v: Bool = is_initialized();
+    // Whether true or false, the value must be assignable to Bool.
+    // We do a no-op cast to pin the shape — the assignment itself
+    // is what enforces the contract.
+    let _ = v;
+}
+
+fn main() {}
