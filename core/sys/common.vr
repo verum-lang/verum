@@ -103,6 +103,51 @@ implement Eq for OSError {
     fn eq(&self, other: &OSError) -> Bool {
         self.code == other.code
     }
+
+    // Explicit `ne` override, mirroring the canonical
+    // `PartialEq.ne` default body `!self.eq(other)`.  Pre-fix the
+    // archive precompile of `core/sys/common.vr` did NOT emit a body
+    // for the inherited default `ne` onto `OSError` — the
+    // `generate_default_protocol_methods("Eq", "OSError", {"eq"})`
+    // pass registered a `OSError.ne` `FunctionInfo` slot via
+    // `register_impl_function`, but `compile_pending_default_methods`
+    // produced a stub for this slot in the precompiled archive.
+    // User-side dispatch of `a.ne(&b)` then routed to the stub via
+    // the auto-stub fallback in `emit_missing_stub_descriptors`,
+    // which returns the Bool default `true` for every call — surfacing
+    // as `regression_oserror_eq_via_blanket_ne` failing at
+    // `assert(!a.ne(&b))` (a.ne(&b) was always true regardless of
+    // payload equality).
+    //
+    // Sister failure mode `regression_signal_error_eq_via_blanket_ne`
+    // does NOT exhibit the same: `SignalError` is a sum type whose
+    // protocol-default-method materialisation appears to take a
+    // different (working) path through the precompile pipeline.
+    //
+    // The blanket-default codepath for record-shaped stdlib types
+    // still needs a fundamental fix at the precompile-pass layer
+    // (tracked as task #29).  Until then, every record-shaped stdlib
+    // type implementing `Eq` MUST carry an explicit `ne` body
+    // — the workaround pinned here, the explicit
+    // `implement Eq for X { fn eq(...); fn ne(...) }` shape, is the
+    // canonical pattern to apply across the rest of `core/sys/*`
+    // when surface-level `.ne()` dispatch is exercised.
+    @inline(always)
+    fn ne(&self, other: &OSError) -> Bool {
+        // Field-access materialised into LET bindings before the
+        // comparison — bypasses the codegen path that miscompiles
+        // `self.code != other.code` written as a single inline
+        // BinaryI{Ne} (task #29).  Empirically: with the inline
+        // form, both operand registers resolve to the same value
+        // (likely both `self.code` due to a register-aliasing bug
+        // in `compile_method_call`'s receiver-bind path when both
+        // sides of a binary op share `&self` framing); with explicit
+        // let-bindings the two field-reads land in distinct registers
+        // and the comparison fires correctly.
+        let sc = self.code;
+        let oc = other.code;
+        sc != oc
+    }
 }
 
 // =============================================================================
