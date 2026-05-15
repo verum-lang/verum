@@ -13,4 +13,4 @@
 )
 module core.database.sqlite.native.fts5_offsets_fn_api;
 
-public module aux;
+public module auxdata;

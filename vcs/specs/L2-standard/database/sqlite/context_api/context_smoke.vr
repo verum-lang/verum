@@ -10,7 +10,7 @@ mount core.database.sqlite.native.context_api.result.{
     FrNull, FrInt, FrDouble, FrText, FrBlob, FrZeroBlob, FrError, FrSubtype,
     result_kind_name, is_error, error_numeric,
 };
-mount core.database.sqlite.native.context_api.aux.{
+mount core.database.sqlite.native.context_api.auxdata.{
     AuxSlot, AuxRegistry,
     new_slot, new_registry,
 };

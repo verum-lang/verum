@@ -5,7 +5,7 @@
 // @timeout: 5000
 // @expected-exit: 0
 
-mount core.database.sqlite.native.fts5_offsets_fn_api.aux.{
+mount core.database.sqlite.native.fts5_offsets_fn_api.auxdata.{
     MatchHit, OffsetsResult,
     new_hit, is_well_formed,
     empty_result, append_hit, hit_count, is_empty,

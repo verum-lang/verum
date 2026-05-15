@@ -9,7 +9,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Theorem("v0.1")
 )
-module core.database.sqlite.native.fts5_offsets_fn_api.aux;
+module core.database.sqlite.native.fts5_offsets_fn_api.auxdata;
 
 mount base.{Bool, Int64, Text};
 mount core.collections.list.{List};
