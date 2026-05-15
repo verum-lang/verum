@@ -609,6 +609,20 @@ pub(in super::super) fn handle_get_index(
             return Err(InterpreterError::NullPointer);
         }
         unsafe { *(thin_ref.ptr as *const Value) }
+    } else if arr_val.is_ptr()
+        && !arr_val.is_nil()
+        && state
+            .cbgr_mutable_ptrs
+            .contains(&(arr_val.as_ptr::<u8>() as usize))
+    {
+        // **Task #24 — interior-field-ref auto-deref for indexing**.
+        // Mirrors the deref in `dispatch_method_call`:
+        // `&record.field` lowers to `Value::from_ptr(field_ptr)` tracked
+        // in `cbgr_mutable_ptrs`. Without this deref, `src[i]` reads
+        // ObjectHeader from the interior pointer (parent record) instead
+        // of the actual List, surfacing as `IndexOutOfBounds(0, 0)` on
+        // every `&self.list_field[i]` access through a function boundary.
+        unsafe { *(arr_val.as_ptr::<Value>()) }
     } else {
         arr_val
     };
@@ -942,6 +956,18 @@ pub(in super::super) fn handle_set_index(
             return Err(InterpreterError::NullPointer);
         }
         unsafe { *(thin_ref.ptr as *const Value) }
+    } else if arr_val.is_ptr()
+        && !arr_val.is_nil()
+        && state
+            .cbgr_mutable_ptrs
+            .contains(&(arr_val.as_ptr::<u8>() as usize))
+    {
+        // **Task #24 — interior-field-ref auto-deref for SetIdx**.
+        // Mirrors `handle_get_index`: `&record.field` lowers to
+        // `Value::from_ptr(field_ptr)` tracked in `cbgr_mutable_ptrs`.
+        // Writes through `&self.list_field[i] = v` need the same deref
+        // or they corrupt the parent record's header memory.
+        unsafe { *(arr_val.as_ptr::<Value>()) }
     } else {
         arr_val
     };

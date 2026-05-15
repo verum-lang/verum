@@ -1,13 +1,16 @@
 # `core.text.numeric.bigint` — audit
 
-> Status: **partial** (conformance suite landed 2026-05-15; arithmetic
-> surface gated by task #24).  Arbitrary-precision signed integers in
-> base 10^9.  Construction surface (`zero`, `one`, `from_int`,
+> Status: **partial** (task #24 closed 2026-05-15 — interior-field-ref
+> auto-deref landed; `abs` / `neg` / `add` (positive operands) green;
+> `sub` / `mul` gated on separate defect classes).
+> Arbitrary-precision signed integers in base 10^9.  Construction
+> surface (`zero`, `one`, `from_int` for non-negative operands,
 > `parse_bigint`) and predicates (`is_zero`, `is_negative`,
-> `is_positive`, `is_even`, `is_odd`) work.  Arithmetic surface
-> (`add`, `sub`, `mul`, `div_rem`, `compare`, `abs`, `neg`) is blocked
-> by task #24 — every method-return loses the inner `digits` List
-> field.
+> `is_positive`, `is_even`, `is_odd`) work.  `abs`, `neg`, `add`
+> (positive) work after task #24 close.  Remaining gaps: `sub`
+> (NullPointer through `add(&other.neg())` chain), `mul` (StackOverflow
+> at recursion depth 16384), `from_int(-N)` (function-id collision on
+> `abs_int#1` — separate task #20 class).
 >
 > Suite: `unit_test.vr` (~338 lines, original — many tests fail due to
 > §A) + `property_test.vr` (new, 12 algebraic laws — all @ignored
@@ -36,26 +39,42 @@
 
 ## 3. Language-implementation gaps surfaced by this folder
 
-### §A — Method-return loses `digits` List field — **TASK #24**
+### §A — Method-return loses `digits` List field — **TASK #24 CLOSED 2026-05-15**
 
 **Symptom**: every method that returns a freshly-constructed `BigInt`
 (via `BigInt { sign: ..., digits: ... }` record literal) returns a
 value whose `digits` field behaves as an empty List downstream.
 
-```verum
-let a = BigInt.from_int(7);  // a.digits.len() == 1, a.digits[0] == 7 — VERIFIED
-let b = a.abs();
-b.digits.len()                // panic: IndexOutOfBounds { index: 0, length: 0 }
-```
+**Root cause**: NOT in record construction.  When `&self.digits` is
+passed across a function boundary (`clone_digits(&self.digits)`),
+the `Value::from_ptr` interior pointer was not auto-derefed by
+`dispatch_method_call`, `handle_get_index`, or `handle_set_index`.
+Callee dispatchers then treated the parent-record header as the
+receiver — every `src.len()` / `src[i]` inside `clone_digits`
+mis-routed to the parent's ObjectHeader, surfacing as
+`IndexOutOfBounds(0, 0)` and `length: 0` downstream.
 
-Verified `abs`'s body is correct (calls `clone_digits` which is a
-verified-correct free function building a List<Int> via
-`List.with_capacity(n)` + `push`).  The defect is in the
-record-construction + return path.  Affects every BigInt method
-that returns a new BigInt: `abs`, `neg`, `add`, `sub`, `mul`,
-`div_rem` (Ok variant), `compare` (not affected — returns Ordering).
+**Fix** (`crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs`
++ `memory_collections.rs`): added the parallel third deref branch
+alongside the existing `is_cbgr_ref` and `is_thin_ref` arms — when
+the receiver/array is `Value::from_ptr` whose address is in
+`state.cbgr_mutable_ptrs`, deref to the actual underlying Value
+before dispatching.
 
-Investigation path documented in task #24.
+**Architectural rule**: every dispatch path that matches
+`is_cbgr_ref` or `is_thin_ref` MUST also handle the
+heap-interior-pointer case — same shape, third branch.
+
+**Validated** by 21 regression tests across
+`core-tests/text/numeric/bigint/regression_test.vr` (5 §A pins),
+`core-tests/text/text/regression_test.vr` (2 §V pins), and the
+unit_test surface (`test_abs_positive_identity`,
+`test_abs_zero_is_zero` previously @ignored — now PASS).
+
+**Remaining gaps** (separate tasks):
+- `sub` — `add(&other.neg())` chain NullPointers at pc=54
+- `mul` — StackOverflow at depth 16384 in `mul_magnitudes` recursion
+- `from_int(-N)` — `abs_int#1` function-id collision (task #20 class)
 
 ---
 

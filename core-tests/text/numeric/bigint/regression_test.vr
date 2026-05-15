@@ -77,10 +77,22 @@ fn guard_parse_simple_positive() {
 }
 
 // =============================================================================
-// §A — Method-return loses digits List field (task #24)
+// §A — Method-return loses digits List field (task #24 — CLOSED 2026-05-15)
 // =============================================================================
+//
+// Root cause: when `&self.field` is passed across a function boundary
+// (`clone_digits(&self.digits)`), the resulting `Value::from_ptr`
+// interior pointer was not auto-derefed by `dispatch_method_call`,
+// `handle_get_index`, or `handle_set_index`.  Callee dispatchers
+// then treated the parent-record header as the receiver — every
+// `src.len()` / `src[i]` mis-routed.  Fix: added the same deref
+// branch already present for `is_cbgr_ref` and `is_thin_ref` to
+// also handle `Value::from_ptr`-in-`cbgr_mutable_ptrs`.
+//
+// Pins now exercise positive-magnitude paths. Negative-magnitude
+// paths are gated on task #20 (`from_int(-N)` returns empty digits
+// — separate function-id-collision class on `abs_int#1`).
 
-@ignore
 @test
 fn regression_a_abs_preserves_digits() {
     let a = BigInt.from_int(7);
@@ -89,7 +101,6 @@ fn regression_a_abs_preserves_digits() {
     assert_eq(b.digits[0], 7);
 }
 
-@ignore
 @test
 fn regression_a_neg_preserves_digits() {
     let a = BigInt.from_int(7);
@@ -99,7 +110,6 @@ fn regression_a_neg_preserves_digits() {
     assert(b.sign);
 }
 
-@ignore
 @test
 fn regression_a_add_preserves_digits() {
     let a = BigInt.from_int(3);
@@ -109,6 +119,11 @@ fn regression_a_add_preserves_digits() {
     assert_eq(s.digits[0], 7);
 }
 
+// `sub` and `mul` still gated — they touch deeper paths (sub goes
+// through `add(&other.neg())` which trips a NullPointer at pc=54 on
+// the negation chain; mul recurses through schoolbook multiply and
+// stack-overflows at 16384 depth in the precompiled body).  These
+// are separate defects from task #24 — pinned for future close.
 @ignore
 @test
 fn regression_a_sub_preserves_digits() {
