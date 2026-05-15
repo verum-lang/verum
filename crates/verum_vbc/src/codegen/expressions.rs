@@ -8954,7 +8954,34 @@ impl VbcCodegen {
                         }
                     }
                     UnOp::Deref => {
-                        // Handle `(*x).method()` — infer inner type and unwrap Heap<T>/Shared<T>
+                        if std::env::var("VERUM_TRACE_PAREN_DEREF").is_ok() {
+                            let extracted = self.extract_expr_type_name(inner_unary);
+                            eprintln!("[paren-deref] method={} inner_type={:?}", method.name, extracted);
+                        }
+                        // Handle `(*x).method()` — infer inner type and unwrap Heap<T>/Shared<T>.
+                        //
+                        // Mirrors the non-paren `*x.method()` arm above
+                        // (Case 6b) including the `looks_like_type_param`
+                        // guard: when the derefed `base_type` is a generic
+                        // type-param (`T`, `K`, `V`, `E`, …), emitting
+                        // `T.method` burns the param name into the runtime
+                        // CallM key and the dispatcher panics with
+                        // "method 'T.method' not found on receiver of
+                        // runtime kind ..." instead of routing by
+                        // receiver's actual heap-tagged TypeId.
+                        //
+                        // Canonical case closing task #12 §B: inside
+                        // `AsyncSemaphore.available_permits`,
+                        // `(*shared).lock()` where
+                        // `shared: Shared<Mutex<SemaphoreInner>>` — the
+                        // `extract_expr_type_name` chain returns "T"
+                        // when Shared.clone's `return_type_name` is the
+                        // literal `Shared<T>` (concrete instantiation
+                        // not propagated through the .clone()
+                        // intermediary).  Without this guard the body
+                        // emitted `CallM { method_id: 'T.lock' }`,
+                        // mis-routed dispatch down the failure chain,
+                        // and panicked at `into_inner` on Unit.
                         if let Some(inner_type) = self.extract_expr_type_name(inner_unary) {
                             let derefed_type = if inner_type.starts_with("Heap<")
                                 || inner_type.starts_with("Shared<")
@@ -8969,7 +8996,11 @@ impl VbcCodegen {
                                 inner_type.clone()
                             };
                             let base_type = VbcCodegen::strip_generic_args(&derefed_type);
-                            format!("{}.{}", base_type, method.name)
+                            if verum_common::well_known_types::looks_like_type_param(&base_type) {
+                                method.name.to_string()
+                            } else {
+                                format!("{}.{}", base_type, method.name)
+                            }
                         } else {
                             method.name.to_string()
                         }
@@ -17329,10 +17360,45 @@ impl VbcCodegen {
                             // `Self` still resolve to the concrete
                             // receiver type here.  Mirrors the same fix
                             // in `infer_expr_type_name`'s MethodCall arm.
-                            return Some(VbcCodegen::substitute_self_in_type_name(
-                                ret_type_name,
-                                receiver_type,
-                            ));
+                            let after_self =
+                                VbcCodegen::substitute_self_in_type_name(
+                                    ret_type_name,
+                                    receiver_type,
+                                );
+                            // **Generic-param → concrete substitution**
+                            // (task #12 §B): when the callee's
+                            // `return_type_name` contains a generic
+                            // param mention nested inside a wrapper
+                            // (e.g. `Shared<T>` on `Shared.clone`'s
+                            // signature), substitute the param with
+                            // the corresponding concrete arg from
+                            // `receiver_type`.  Without this, the
+                            // literal `T` leaks into downstream
+                            // tracking and method-name resolution emits
+                            // `T.method` instead of `<concrete>.method`.
+                            let params = self
+                                .ctx
+                                .functions
+                                .get(&qualified_method)
+                                .map(|_| ())
+                                .and_then(|_| {
+                                    self.collection_type_params
+                                        .get(base_type)
+                                        .cloned()
+                                })
+                                .unwrap_or_default();
+                            let args =
+                                VbcCodegen::split_generic_args(receiver_type);
+                            if !params.is_empty() && !args.is_empty() {
+                                return Some(
+                                    VbcCodegen::substitute_generic_params_in_type_name(
+                                        &after_self,
+                                        &params,
+                                        &args,
+                                    ),
+                                );
+                            }
+                            return Some(after_self);
                         }
                     }
                 }
@@ -17358,9 +17424,33 @@ impl VbcCodegen {
                             // Same defensive `Self` substitution as
                             // above — applies to non-Path receivers
                             // (chained method calls, field-receivers).
-                            return Some(VbcCodegen::substitute_self_in_type_name(
-                                ret_type_name, rt,
-                            ));
+                            let after_self =
+                                VbcCodegen::substitute_self_in_type_name(
+                                    ret_type_name, rt,
+                                );
+                            // Mirror the Path-receiver arm's generic-
+                            // param substitution (task #12 §B): when
+                            // the callee's ret_type_name contains a
+                            // generic param nested inside a wrapper
+                            // (`Shared<T>`, `Maybe<T>`, …), substitute
+                            // each param with the corresponding
+                            // concrete arg from `rt`.
+                            let params = self
+                                .collection_type_params
+                                .get(base_type)
+                                .cloned()
+                                .unwrap_or_default();
+                            let args = VbcCodegen::split_generic_args(rt);
+                            if !params.is_empty() && !args.is_empty() {
+                                return Some(
+                                    VbcCodegen::substitute_generic_params_in_type_name(
+                                        &after_self,
+                                        &params,
+                                        &args,
+                                    ),
+                                );
+                            }
+                            return Some(after_self);
                         }
                         // Pointer methods like offset/add/sub return the same type as receiver
                         if matches!(&*method.name, "offset" | "add" | "sub") {
