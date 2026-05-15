@@ -445,6 +445,39 @@ impl TypeChecker {
                 Ok(InferResult::new(expected.clone()))
             }
 
+            // Bare-path variant constructor (no Call wrapper) with expected
+            // variant type: `None`, `Less`, `Greater`, or any user-defined
+            // 0-arg variant.  When checking `None` against `Maybe<Int>`, the
+            // expected type expands to a Variant whose `None` entry has the
+            // `Unit` payload — bind the bare path to that variant of the
+            // expected type, not to whichever first-registered parent's
+            // `None` happens to win the arity-blind lookup (the canonical
+            // collision: `Maybe.None` vs `Backend.None` from the GPU enum).
+            //
+            // Mirrors the bidirectional Call arm below for arg-bearing
+            // variant constructors.  Stdlib-agnostic: every check fires off
+            // the user's expected type, not a hardcoded list.
+            Path(path)
+                if path.segments.len() == 1
+                    && let Some(verum_ast::ty::PathSegment::Name(ident)) =
+                        path.segments.first()
+                    && self
+                        .variant_constructor_parents
+                        .get(&Text::from(ident.name.as_str()))
+                        .is_some() =>
+            {
+                let constructor_name = ident.name.as_str();
+                let resolved_expected = self.unifier.apply(expected);
+                let expanded_expected = self.expand_generic_to_variant(&resolved_expected);
+                if let Type::Variant(ref variants) = expanded_expected
+                    && let Some(payload_ty) = variants.get(constructor_name)
+                    && matches!(payload_ty, Type::Unit)
+                {
+                    return Ok(InferResult::new(expected.clone()));
+                }
+                self.synth_and_check(expr, expected)
+            }
+
             // Variant constructor call with expected variant type:
             // When checking `Valid(42)` against `Validation<Text, Int>`, resolve the
             // constructor from the expected type's variants rather than the global scope.
@@ -472,8 +505,17 @@ impl TypeChecker {
                     if let Some(payload_ty) = variants.get(constructor_name) {
                         // The expected variant type has this constructor — use it
                         // Check call args against the payload type
-                        if call_args.len() == 1 && !matches!(payload_ty, Type::Unit) {
-                            // Single-payload variant: Valid(42) where Valid(A)
+                        if call_args.len() == 1 {
+                            // Single-payload variant.  Covers BOTH the
+                            // non-Unit case (`Valid(42)` where `Valid(A)`)
+                            // AND the explicit-Unit case (`Ok(())` where
+                            // `Result<Unit, E>.Ok(Unit)` payload is Unit).
+                            // Pre-fix this arm gated on `!Type::Unit` and
+                            // fell through to the arity-based synth path
+                            // — which then picked the first-registered
+                            // parent (typically a stdlib variant like
+                            // `ProveResult.Ok(Proof)`) and check-erred the
+                            // `()` arg against `Proof`.
                             self.check_expr(&call_args[0], payload_ty)?;
                             Ok(InferResult::new(expected.clone()))
                         } else if call_args.is_empty() && matches!(payload_ty, Type::Unit) {
