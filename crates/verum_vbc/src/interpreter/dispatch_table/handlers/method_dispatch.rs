@@ -2856,6 +2856,33 @@ pub(super) fn dispatch_primitive_method(
             // The inner value is a pointer - dispatch pointer methods on it
             return dispatch_primitive_method(state, &inner_val, method, args);
         }
+        // **Task #23 §B — primitive-deref recursion for ref receivers**.
+        //
+        // When the inner value is a primitive (Int / Float / Char /
+        // Bool / SmallString — anything that's not a heap pointer),
+        // the CBGR ref-specific match above missed and the caller's
+        // method is targeting the REFERENT, not the reference.
+        //
+        // Pre-fix the dispatch would fall through past this block to
+        // the `if receiver.is_int()` arm BELOW with `receiver` still
+        // pointing at the encoded CBGR ref (a large negative inline
+        // int — `is_int()` returns TRUE because the encoding IS an
+        // inline int).  Subsequent `v = receiver.as_i64()` extracted
+        // the *encoded* CBGR ref value, ran `(v as u8).to_ascii_lowercase()`
+        // on the low byte of the ref encoding, and returned garbage
+        // (e.g., 254 for an `&'A'.to_ascii_lowercase()` site whose ref
+        // encoding's low byte happened to be 0xFE).
+        //
+        // The fix recurses dispatch_primitive_method on `inner_val` for
+        // primitive referents — mirrors the pointer-recursion above
+        // and the architectural rule established in task #24: every
+        // reference-shape unwrap site must handle ALL referent shapes.
+        if inner_val.is_int() || inner_val.is_bool() || inner_val.is_unit()
+            || inner_val.try_as_f64().is_some()
+            || inner_val.is_small_string()
+        {
+            return dispatch_primitive_method(state, &inner_val, method, args);
+        }
     }
 
     // CBGR data pointer methods: methods on pointer-based references obtained from
@@ -8987,12 +9014,22 @@ pub(super) fn make_maybe_int(
 /// Layout (`[header][tag: u32][field_count: u32][payload: Value]`) is
 /// shared with the `MakeVariant` opcode handler — see
 /// [`alloc_variant_with_payload`].
+///
+/// The heap header carries `TypeId::MAYBE` (515) — the canonical
+/// well-known id for `Maybe<T>` — so `format_variant_for_print_depth`'s
+/// type-id-scoped lookup resolves "Some" via Maybe's descriptor in
+/// O(N_variants_of_Maybe = 2) instead of falling through the synthetic
+/// global tag-scan (which picks the first non-protocol descriptor with
+/// matching tag, surfacing as `JfAccessor(0)` when JsonFnKind precedes
+/// Maybe in `state.module.types`). `deep_value_eq` continues to
+/// recognise the value as a variant via `is_typed_sum_variant`.
 pub(super) fn make_some_value(
     state: &mut InterpreterState,
     value: Value,
 ) -> InterpreterResult<Value> {
     alloc_variant_with_payload(
         state,
+        TypeId::MAYBE,
         verum_common::well_known_types::maybe_success_tag(),
         value,
     )
@@ -9002,8 +9039,14 @@ pub(super) fn make_some_value(
 ///
 /// Tag is read from `MAYBE_VARIANT_LAYOUT` via [`maybe_none_tag`].
 /// Field count is zero (None is unit-shaped per the canonical layout).
+/// Header carries `TypeId::MAYBE` per the same rationale as
+/// [`make_some_value`].
 pub(super) fn make_none_value(state: &mut InterpreterState) -> InterpreterResult<Value> {
-    alloc_unit_variant(state, verum_common::well_known_types::maybe_none_tag())
+    alloc_unit_variant(
+        state,
+        TypeId::MAYBE,
+        verum_common::well_known_types::maybe_none_tag(),
+    )
 }
 
 /// Create a Result variant carrying `payload` with the given tag.
@@ -9015,33 +9058,43 @@ pub(super) fn make_none_value(state: &mut InterpreterState) -> InterpreterResult
 /// Layout matches `MakeVariant` (`pattern_matching::handle_make_variant`)
 /// and `make_some_value` / `make_none_value` above —
 /// `[ObjectHeader][tag: u32][field_count: u32][payload: Value]` — via
-/// the shared [`alloc_variant_with_payload`] helper.
+/// the shared [`alloc_variant_with_payload`] helper.  Header carries
+/// `TypeId::RESULT` (516) so `format_variant_for_print_depth` finds
+/// "Ok"/"Err" via Result's descriptor directly.
 pub(super) fn make_result_variant(
     state: &mut InterpreterState,
     tag: u32,
     payload: Value,
 ) -> InterpreterResult<Value> {
-    alloc_variant_with_payload(state, tag, payload)
+    alloc_variant_with_payload(state, TypeId::RESULT, tag, payload)
 }
 
-/// Allocate a 1-field variant with `tag` and `payload`.
+/// Allocate a 1-field variant with `tag` and `payload`, anchored to
+/// `parent_type_id` in the heap header.
 ///
-/// Uses the canonical synthetic-TypeId formula via
-/// `verum_common::layout::synthetic_variant_type_id` — matches
-/// `pattern_matching::alloc_variant_into` for `MakeVariant`, so values
-/// produced here are bit-equivalent to those from the canonical opcode
-/// path. The single shared implementation eliminates the parallel
-/// alloc-with-init blocks `make_some_value` / `make_result_variant`
-/// previously each carried.
+/// `parent_type_id` should be the canonical well-known id of the
+/// declaring sum type — `TypeId::MAYBE` for `Maybe<T>`, `TypeId::
+/// RESULT` for `Result<T, E>`, or a resolved user-type id obtained
+/// via `super::heap_helpers::lookup_type_id_by_name` — so that
+/// `format_variant_for_print_depth`'s type-id-scoped descriptor walk
+/// resolves the variant name in O(N_variants_of_type) directly.
+/// Callers that genuinely lack parent-type information may pass
+/// `TypeId(verum_common::layout::synthetic_variant_type_id(tag))` to
+/// fall back to the legacy synthetic-id shape — at the cost of
+/// Display rendering through the global tag-scan fallback.
+///
+/// Layout matches `pattern_matching::alloc_variant_into_with_type_id`
+/// for `MakeVariantTyped`, so values produced here are bit-equivalent
+/// to those from the canonical opcode path.
 #[inline]
 pub(super) fn alloc_variant_with_payload(
     state: &mut InterpreterState,
+    parent_type_id: TypeId,
     tag: u32,
     payload: Value,
 ) -> InterpreterResult<Value> {
     let data_size = 8 + std::mem::size_of::<Value>();
-    let type_id = TypeId(verum_common::layout::synthetic_variant_type_id(tag));
-    let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
+    let obj = state.heap.alloc_with_init(parent_type_id, data_size, |data| {
         // SAFETY: data is the variant data section (16 bytes total —
         // 8-byte (tag, fc) header + 8-byte payload). The helper
         // writes exactly 8 bytes at the start of `data`.
@@ -9055,20 +9108,22 @@ pub(super) fn alloc_variant_with_payload(
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
 }
 
-/// Allocate a 0-field (unit-shaped) variant with `tag`.
+/// Allocate a 0-field (unit-shaped) variant with `tag`, anchored to
+/// `parent_type_id`.
 ///
 /// Layout mirrors [`alloc_variant_with_payload`] but writes
-/// `field_count = 0`. Allocates the same 8-byte data slot as `MakeVariant
-/// (tag=N, field_count=0)` so `deep_value_eq` against an opcode-built
-/// counterpart matches bit-for-bit.
+/// `field_count = 0`.  See that function's doc comment for the
+/// `parent_type_id` contract — passing the well-known typed id
+/// instead of the synthetic 0x8000+tag form is what enables correct
+/// Display rendering through type-id-scoped descriptor walk.
 #[inline]
 pub(super) fn alloc_unit_variant(
     state: &mut InterpreterState,
+    parent_type_id: TypeId,
     tag: u32,
 ) -> InterpreterResult<Value> {
     let data_size = 8;
-    let type_id = TypeId(verum_common::layout::synthetic_variant_type_id(tag));
-    let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
+    let obj = state.heap.alloc_with_init(parent_type_id, data_size, |data| {
         // SAFETY: data is the 8-byte variant data section
         // (tag + field_count, no payload). The helper writes
         // exactly 8 bytes starting at `data`.
@@ -9120,7 +9175,16 @@ pub(super) fn make_ordering(
     ord: std::cmp::Ordering,
 ) -> InterpreterResult<Value> {
     let tag = verum_common::well_known_types::ordering_tag_for_std(ord);
-    alloc_unit_variant(state, tag)
+    // Resolve `Ordering`'s canonical TypeId from the loaded module
+    // (assigned via `alloc_user_type_id` at archive load — no
+    // well-known reserved id like Maybe/Result).  Fall back to the
+    // synthetic-id shape only if the descriptor is absent (e.g.
+    // ultra-minimal harnesses that don't link the stdlib's
+    // `core/base/ordering.vr`) — Display loses the name but
+    // pattern-matching/equality continue to work via tag alone.
+    let parent_type_id = super::heap_helpers::lookup_type_id_by_name(state, "Ordering")
+        .unwrap_or(TypeId(verum_common::layout::synthetic_variant_type_id(tag)));
+    alloc_unit_variant(state, parent_type_id, tag)
 }
 
 #[cfg(test)]
