@@ -1333,6 +1333,16 @@ impl VbcCodegen {
                 m.insert("PoisonError".to_string(), vec!["T".to_string()]);
                 m.insert("AtomicInt".to_string(), Vec::new());
                 m.insert("AtomicBool".to_string(), Vec::new());
+                // Core sum types — needed for `unwrap_or_else` /
+                // `unwrap_or` return-type substitution (task #15).
+                // `Result<T, E>.unwrap_or_else<F>(self, f: F) -> T`
+                // — substituting T against the receiver's generic args
+                // requires knowing Result's param names [T, E].
+                m.insert(
+                    "Result".to_string(),
+                    vec!["T".to_string(), "E".to_string()],
+                );
+                m.insert("Maybe".to_string(), vec!["T".to_string()]);
                 m
             },
             // Transparent wrapper types: bare wrapper without generic args falls through
