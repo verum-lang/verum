@@ -399,6 +399,15 @@ pub struct VbcCodegen {
     /// Used to emit correct type_id in New instructions for proper Drop dispatch.
     type_name_to_id: std::collections::HashMap<String, crate::types::TypeId>,
 
+    /// Archive-wide function-name → user-side FunctionId index (task #12).
+    /// Populated by `archive_ctx_loader::record_archive_function_name`
+    /// during archive load.  Used by Tier-2 cross-module Call resolution
+    /// to recover the right user-side FunctionId for cross-archive
+    /// dispatches whose target isn't in the user's mount set.
+    /// First-wins discipline mirrors `ctx.functions`.
+    pub(crate) archive_func_name_to_fid:
+        std::collections::HashMap<String, crate::module::FunctionId>,
+
     /// Collection type generic parameter name templates.
     /// Maps collection type name (e.g. "Map") to its generic parameter names (e.g. ["K", "V"]).
     /// Used by `resolve_generic_return_type` to map return type names to concrete types.
@@ -1178,6 +1187,7 @@ impl VbcCodegen {
             type_field_type_names: std::collections::HashMap::new(),
             // Pending constants for deferred compilation
             pending_constants: Vec::new(),
+            archive_func_name_to_fid: std::collections::HashMap::new(),
             // Type name to TypeId mapping for Drop dispatch.
             // Pre-populated with all well-known type names and their aliases so that
             // ast_type_to_type_ref and type_ref_for_type_kind can do a single lookup
@@ -4593,6 +4603,19 @@ impl VbcCodegen {
     #[doc(hidden)]
     pub fn intern_string_for_test(&mut self, s: &str) -> u32 {
         self.ctx.intern_string_raw(s)
+    }
+
+    /// Record archive-side function name → user-side FunctionId.
+    /// Populates the Tier-2 name-fallback index from
+    /// `archive_ctx_loader` for cross-module Call resolution.
+    pub fn record_archive_function_name(
+        &mut self,
+        name: &str,
+        fid: crate::module::FunctionId,
+    ) {
+        self.archive_func_name_to_fid
+            .entry(name.to_string())
+            .or_insert(fid);
     }
 
     /// Test-only: push a synthetic `TypeDescriptor` into the codegen's
@@ -15074,6 +15097,28 @@ impl VbcCodegen {
             return 0;
         }
 
+        // **Archive-wide name index population** (task #12 fix).
+        //
+        // Record (archive_function_name → user_fid) for EVERY function
+        // in this archive module, regardless of mount-set membership.
+        // Populates `archive_func_name_to_fid` which
+        // `ArchiveBodyRemap::map_function`'s Tier-2b fallback consults
+        // to resolve cross-module Calls whose target isn't in the
+        // user's mount-filtered `ctx.functions`.  First-wins: once a
+        // name is bound across the merge sequence, sibling archives
+        // can't rebind it — mirrors `ctx.functions`'s stdlib-bootstrap
+        // first-wins discipline.
+        for fn_desc in archive_module.functions.iter() {
+            if let Some(&user_fid) = func_id_remap.get(&fn_desc.id.0)
+                && let Some(name) = archive_module.strings.get(fn_desc.name)
+                && !name.is_empty()
+            {
+                self.archive_func_name_to_fid
+                    .entry(name.to_string())
+                    .or_insert(user_fid);
+            }
+        }
+
         // Cache of archive-side ids already in `self.functions` to
         // make this call idempotent.
         let already_emitted: std::collections::HashSet<u32> = self
@@ -15217,6 +15262,11 @@ impl VbcCodegen {
             .iter()
             .map(|(name, info)| (name.clone(), info.id))
             .collect();
+        // Snapshot the archive-wide name index so it doesn't keep
+        // `self` borrowed across the body-rewrite loop below (which
+        // needs `&mut self` for `remap_archive_string_operands`).
+        let archive_func_by_name_snapshot: HashMap<String, crate::module::FunctionId> =
+            self.archive_func_name_to_fid.clone();
 
         // ----- Walk archive functions and copy bodies -----
 
@@ -15226,6 +15276,7 @@ impl VbcCodegen {
             consts: &const_id_remap,
             archive_id_to_name: &archive_id_to_name,
             ctx_func_by_name: &ctx_func_by_name,
+            archive_func_by_name: &archive_func_by_name_snapshot,
         };
 
         let mut copied = 0usize;
@@ -15420,6 +15471,14 @@ struct ArchiveBodyRemap<'a> {
     /// Used by `map_function` to recover a cross-module Call target
     /// when the archive id isn't covered by the per-module remap.
     ctx_func_by_name: &'a std::collections::HashMap<String, crate::module::FunctionId>,
+    /// **Archive-wide cross-module name → user_fid index** (task #12).
+    /// Populated unconditionally by `archive_ctx_loader` for every
+    /// archive function regardless of the user's mount set.  Acts as
+    /// a Tier-2b fallback when `ctx_func_by_name` (mount-filtered) misses
+    /// — covers the transitive-cross-module case where stdlib body X's
+    /// `Call { func_id }` targets stdlib function Y whose home module
+    /// isn't directly mounted by the user.
+    archive_func_by_name: &'a std::collections::HashMap<String, crate::module::FunctionId>,
 }
 
 impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
@@ -15442,12 +15501,33 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
         if let Some(name) = self.archive_id_to_name.get(&src.0) {
             if let Some(&fid) = self.ctx_func_by_name.get(name) {
                 if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
-                    eprintln!("[remap-fallback] tier2 OK archive_id={} → name={:?} → user_fid={}", src.0, name, fid.0);
+                    eprintln!("[remap-fallback] tier2a OK archive_id={} → name={:?} → user_fid={}", src.0, name, fid.0);
+                }
+                return fid;
+            }
+            // **Tier-2b** (task #12): the user-facing `ctx.functions`
+            // table is filtered by the mount set (only names the user
+            // explicitly brought into scope are present).  Cross-module
+            // Calls inside transitively-loaded stdlib bodies frequently
+            // target functions whose home archive isn't directly mounted
+            // by the user — `ctx.functions` misses for them.  The
+            // archive-wide name index (populated unconditionally by
+            // `archive_ctx_loader` for every loaded archive function)
+            // catches that case.  Without this, the identity-fallback
+            // below silently dispatches the Call to whatever unrelated
+            // user-side function happens to occupy the raw archive id —
+            // canonical failure: `AsyncSemaphore.new` body's
+            // `Mutex.new(...)` Call landing on
+            // `Phaser.arrive_and_await$closure$4` because the user only
+            // mounted `core.async.semaphore.AsyncSemaphore`.
+            if let Some(&fid) = self.archive_func_by_name.get(name) {
+                if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
+                    eprintln!("[remap-fallback] tier2b OK archive_id={} → name={:?} → user_fid={} (archive-wide)", src.0, name, fid.0);
                 }
                 return fid;
             }
             if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
-                eprintln!("[remap-fallback] tier2 MISS archive_id={} archive_name={:?} not in ctx_func_by_name", src.0, name);
+                eprintln!("[remap-fallback] tier2 MISS archive_id={} archive_name={:?} not in ctx_func_by_name OR archive_func_by_name", src.0, name);
             }
         } else if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
             eprintln!("[remap-fallback] tier3 IDENTITY archive_id={} not in archive_id_to_name (Tier1 misses too)", src.0);
