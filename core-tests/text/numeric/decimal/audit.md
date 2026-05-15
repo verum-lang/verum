@@ -58,19 +58,55 @@ all green; `regression_a_decimal_neg_panic_pinned` un-`@ignore`d.
 Same fix unblocks `BigInt.neg(&self)` / `Rational.neg` and every
 user record method shaped like `Self { field: -self.field, ... }`.
 
-### §B — FunctionNotFound on parse_decimal / arithmetic
-**Symptom**: `parse_decimal(&"42")` panics with
-`FunctionNotFound(FunctionId(2374))`. Same shape for add / mul / div
-under specific arithmetic patterns.
-**Root cause**: function-id collision under archive remap (cross-
-module function-id namespaces). Same defect class as text/text §D.
-**Action**: closes when text/text §D closes.
+### §B — Cross-module record-layout loss in match destructure — **CLOSED 2026-05-15**
+**Symptom**: `match parse_X(&"...") { Ok(v) => v.field }` panics with
+"field access out of bounds: field index 4 (offset 32+8=40) exceeds
+object data size 16" for X ∈ {bigint, bigdecimal, rational}, fine
+for decimal.  Earlier audit (and earlier `[FunctionNotFound]`
+manifestation) was the same root cause.
 
-### §C — Arithmetic semantic failures (downstream of §A/§B)
-**Symptom**: tests like `mul 3 * 4 = 12` see the right shape but
-wrong coefficient. Likely consequence of Method Call dispatch
-reaching the wrong impl body when the function-id remap drifts.
-**Action**: closes when §B closes.
+**Root cause**: `archive_ctx_loader::primitive_typeid_name`
+hardcoded only the 16 numeric/scalar primitive TypeIds — `Result`
+(TypeId 516) / `Maybe` (515) / `List` (512) and other well-known
+GENERIC carriers were NOT recognised.  When a function's return
+type was `Result<X, E>`, `type_ref_simple_name` looked up
+`Result`'s TypeId in `module.types` (which only carries types
+DEFINED in THIS module) and got None.  The call's `return_type_name`
+was therefore `None`, even though `return_type_inner` correctly
+held `["X", "E"]`.  Downstream `extract_expr_type_name` couldn't
+form `"Result<X, E>"`, `compile_match` lost the scrutinee type, and
+`compile_pattern_bind`'s `Ok(v)` arm fell through to the global
+field-intern fallback for `v.field`, surfacing as
+`field index 4 (offset 32+8=40) exceeds object data size 16`.
+
+**Fix** (two-layer):
+1. `archive_ctx_loader::primitive_typeid_name`: added the 15
+   well-known generic-carrier TypeIds (Maybe, Result, List, Map,
+   Set, Deque, Channel, Range, Array, Heap, Shared, Tuple, Pi,
+   Sigma, Witness) so cross-module return types resolve their
+   base names regardless of which module's perspective the
+   archive is read from.
+2. `extract_expr_type_name`'s Call arm in `compile_unary`:
+   compose the canonical generic form
+   `format!("{}<{}>", ret_type, return_type_inner.join(", "))`
+   when inner args are present and ret_type lacks `<` — preserving
+   the full instantiation through type inference.
+
+**Architectural rule**: every TypeId reserved by the runtime
+that may appear as a function return type, field type, or
+parameter type MUST be recognised by `primitive_typeid_name`.
+Cross-module nominal identity must NOT depend on the module-local
+descriptor table being populated.
+
+**Validated**: 4-of-4 `test_parse_simple_int` instances (decimal,
+bigint, bigdecimal, rational) all green; `test_add` 13-of-19
+green (residual: Duration arithmetic — separate Time-module class).
+
+### §C — Arithmetic semantic failures (downstream of §A/§B) — **PARTIAL**
+**Status**: §A and §B closure unblocks the construction surface;
+some arithmetic tests pass.  Residual failures in `test_add` /
+`test_mul` chains concentrate on Duration / Time module (separate
+defect class — task #21).
 
 ---
 

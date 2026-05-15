@@ -55,10 +55,31 @@ fn regression_a_decimal_neg_panic_pinned() {
 }
 
 // =============================================================================
-// §B — FunctionNotFound on parse / add / mul / div paths
+// §B — Cross-module record-layout loss in match destructure — CLOSED 2026-05-15
+//
+// Pre-fix: `archive_ctx_loader::primitive_typeid_name` recognised only
+// the 16 numeric/scalar primitive TypeIds. Cross-module generic
+// carriers (Maybe, Result, List, …) had `return_type_name = None`
+// in their archive FunctionInfo because `type_ref_simple_name`
+// scanned only `module.types` (the module-local descriptor list).
+// `extract_expr_type_name` couldn't form `Result<X, E>`,
+// `compile_match` lost the scrutinee type, and `compile_pattern_bind`
+// fell through to the global field-intern fallback for the bound
+// variant payload — surfacing as "field access out of bounds: field
+// index 4 (offset 32+8=40) exceeds object data size 16" at every
+// `match parse_X(...) { Ok(v) => v.field }` site.
+//
+// Fix: extended `primitive_typeid_name` with the 15 well-known
+// generic-carrier TypeIds so cross-module names resolve regardless
+// of perspective; `extract_expr_type_name`'s Call arm composes the
+// full generic form from `(ret_type, return_type_inner)`.
+//
+// Architectural rule: every runtime-reserved TypeId that can appear
+// as a function return / field / parameter type MUST be recognised
+// by `primitive_typeid_name` — cross-module identity does not depend
+// on local descriptor tables.
 // =============================================================================
 
-@ignore
 @test
 fn regression_b_parse_simple_int_pinned() {
     match parse_decimal(&"42") {

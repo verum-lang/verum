@@ -809,6 +809,44 @@ fn primitive_typeid_name(tid: TypeId) -> Option<&'static str> {
         TypeId::F32 => "Float32",
         TypeId::PTR => "USize",
         TypeId::CHAR => "Char",
+        // **Task #20 §B — cross-module well-known generic carriers**.
+        //
+        // Variant/container TypeIds (`Maybe`, `Result`, `List`, `Map`,
+        // `Set`, `Deque`, `Channel`, `Range`, `Array`, `Heap`, `Shared`,
+        // `Tuple`, `Pi`, `Sigma`, `Witness`) are reserved in
+        // `verum_vbc::types::TypeId` but live in stdlib modules whose
+        // type descriptors are NOT present in EVERY consuming module's
+        // `module.types` list (cross-module return-type leakage).
+        //
+        // Pre-fix `type_ref_simple_name` returned `None` whenever a
+        // function's return type was `Result<X, Y>` and the calling
+        // module didn't directly import `Result`'s type descriptor —
+        // even though `return_type_inner` correctly carried
+        // `["X", "Y"]`.  The downstream
+        // `extract_expr_type_name` couldn't form `"Result<X, Y>"`,
+        // `compile_match` lost the scrutinee type, and the pattern
+        // binder fell through to the global field-intern fallback,
+        // surfacing as "field access out of bounds: field index N"
+        // at every `match parse_X(...) { Ok(v) => v.field }` site.
+        //
+        // Recognising these TypeIds directly here keeps the cross-module
+        // identity invariant: a Result is a Result regardless of which
+        // module's perspective we view it from.
+        TypeId::MAYBE => "Maybe",
+        TypeId::RESULT => "Result",
+        TypeId::LIST => "List",
+        TypeId::MAP => "Map",
+        TypeId::SET => "Set",
+        TypeId::DEQUE => "Deque",
+        TypeId::CHANNEL => "Channel",
+        TypeId::RANGE => "Range",
+        TypeId::ARRAY => "Array",
+        TypeId::HEAP => "Heap",
+        TypeId::SHARED => "Shared",
+        TypeId::TUPLE => "Tuple",
+        TypeId::PI => "Pi",
+        TypeId::SIGMA => "Sigma",
+        TypeId::WITNESS => "Witness",
         _ => return None,
     })
 }
@@ -1655,6 +1693,27 @@ impl ArchiveCtxCache {
         // round-trip discipline as the apply_lazy call site in
         // `pipeline/vbc_codegen.rs`.
         let next_id_ptr: *mut u32 = codegen.next_func_id_mut() as *mut u32;
+        // **Two-phase merge** (task #12 fix).
+        //
+        // Pre-fix this loop ran register → types → merge per archive
+        // in sequence, which meant the merge of archive A couldn't see
+        // archive B's name→fid bindings if B was processed after A.
+        // The Tier-2b cross-module name fallback in
+        // `ArchiveBodyRemap::map_function` (added in this task) needs
+        // every loaded archive's function names visible BEFORE the
+        // first body merge runs — otherwise A's body Calls into B's
+        // functions hit Tier-3 IDENTITY and silently miscompile.
+        //
+        // Phase 1: per archive — register_module_filtered (populates
+        //          ctx.functions for the wanted subset) + types import
+        //          (must precede merge so TypeId remap sees descriptors)
+        //          + populate archive_func_name_to_fid for EVERY
+        //          archive function (mount-set-independent).
+        // Phase 2: per archive — merge_archive_function_bodies, with
+        //          archive_func_name_to_fid fully populated across all
+        //          loaded archives.
+        let mut per_archive_remaps: Vec<(String, std::collections::HashMap<u32, verum_vbc::module::FunctionId>)> =
+            Vec::with_capacity(decoded.len());
         for (entry_name, module) in &decoded {
             // Function side first so Pass 4 (variant ctors) sees
             // the stable function-id namespace.
@@ -1679,24 +1738,42 @@ impl ArchiveCtxCache {
                 codegen.import_archive_module_types(module);
                 type_modules += 1;
             }
-            // Body merge — Phase 2 of the precompiled-stdlib epic.
-            // For every metadata-registered function, copy its archive
-            // bytecode body (with id remap) into `codegen.functions`.
-            // Without this, the finalize-time stub-emitter synthesises
-            // a `RetV` placeholder and every stdlib method call returns
-            // Unit at runtime.
-            //
-            // **Per-module remap is correct here**: archive function
-            // ids are per-module-local (each module's function table
-            // starts at 0), so unioning remaps across modules would
-            // collapse same-id entries from different modules. Cross-
-            // module calls are resolved at codegen-emit time via
-            // symbol-name lookup, not via raw bytecode `func_id`
-            // references inside archive bodies. The function-id-remap
-            // mismatch from task #118 root-causes to MISSING TRANSITIVE
-            // MODULES (callee's module not in `wanted_module_prefixes`),
-            // tracked separately.
-            codegen.merge_archive_function_bodies(module, &func_id_remap);
+            // Phase-1 tail: populate the archive-wide
+            // name → user_fid index for every function in this
+            // archive (regardless of mount-set membership).  Closes
+            // the cross-module name lookup gap pinned by task #12.
+            for fn_desc in module.functions.iter() {
+                if let Some(&user_fid) = func_id_remap.get(&fn_desc.id.0)
+                    && let Some(name) = module.strings.get(fn_desc.name)
+                    && !name.is_empty()
+                {
+                    codegen.record_archive_function_name(name, user_fid);
+                }
+            }
+            per_archive_remaps.push((entry_name.clone(), func_id_remap));
+        }
+        // Phase 2: body merges now see every loaded archive's name
+        // bindings in `archive_func_name_to_fid`, so cross-module
+        // Calls inside A's bodies resolve to B's functions via
+        // Tier-2b even when B isn't in the user's `wanted` mount set.
+        // Each archive_func_name_to_fid update is first-wins, so
+        // re-running this loop on top of Phase 1's registrations is
+        // idempotent.
+        //
+        // **Per-module remap is correct here**: archive function
+        // ids are per-module-local (each module's function table
+        // starts at 0), so unioning remaps across modules would
+        // collapse same-id entries from different modules. Cross-
+        // module calls are resolved at codegen-emit time via
+        // symbol-name lookup, not via raw bytecode `func_id`
+        // references inside archive bodies. The function-id-remap
+        // mismatch from task #118 root-causes to MISSING TRANSITIVE
+        // MODULES (callee's module not in `wanted_module_prefixes`),
+        // tracked separately.
+        for (entry_name, func_id_remap) in &per_archive_remaps {
+            if let Some((_, module)) = decoded.iter().find(|(n, _)| n == entry_name) {
+                codegen.merge_archive_function_bodies(module, func_id_remap);
+            }
         }
         // Unqualified-wanted second pass — same logic as apply_lazy's
         // tail block.  Module-prefix gate already filtered the
@@ -1813,6 +1890,19 @@ impl ArchiveCtxCache {
                 if !module.types.is_empty() {
                     codegen.import_archive_module_types(module);
                     type_modules += 1;
+                }
+                // Populate archive-wide name → user_fid index for THIS
+                // archive's functions before the body merge, so any
+                // cross-module Calls already inside `codegen.functions`
+                // (from the primary pass above) can resolve targets
+                // newly registered here via Tier-2b. (task #12)
+                for fn_desc in module.functions.iter() {
+                    if let Some(&user_fid) = func_id_remap.get(&fn_desc.id.0)
+                        && let Some(name) = module.strings.get(fn_desc.name)
+                        && !name.is_empty()
+                    {
+                        codegen.record_archive_function_name(name, user_fid);
+                    }
                 }
                 // Body merge for the unqualified-wanted second pass —
                 // same Phase 2 path as the primary pass above. See

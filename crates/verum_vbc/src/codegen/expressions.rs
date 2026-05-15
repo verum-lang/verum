@@ -6072,6 +6072,82 @@ impl VbcCodegen {
                 }
             }
 
+            // **Architectural rule — primitive poly-arith bare-call direct
+            // intrinsic emission (closes task #20 §A / §B class for binary
+            // ops; mirrors `compile_unary::Neg` direct-opcode rule)**.
+            //
+            // Stdlib primitive method bodies like
+            //   `implement Sub for Int { fn sub(self, rhs: Int) -> Int { sub(self, rhs) } }`
+            // expect the bare `sub(self, rhs)` to lower to a primitive
+            // `ArithExtended(PolySub)` opcode — that's the entire point
+            // of `@inline(always)` on the wrapper.  Pre-fix the bare
+            // `sub` resolved to `Int.sub` itself (registered under the
+            // bare name in the function table), emitting a
+            // self-recursive `Call(Int.sub)`.  At runtime this
+            // stack-overflowed at depth 16384 — surfaced canonically
+            // as `BigInt.add(a=zero, &nb)`'s `sub_magnitudes` → bare
+            // `Int.sub(av, bv)` infinite recursion.
+            //
+            // The intrinsic registry tags `add`/`sub`/`mul`/`div`/
+            // `rem`/`neg`/`bitand`/`bitor`/`bitxor`/`shl`/`shr` and
+            // `min`/`max`/`clamp`/`signum`/`abs_signed` as polymorphic
+            // arithmetic intrinsics with `ArithExtendedOpcode` strategy
+            // — the runtime dispatches int vs float based on the
+            // operand's NaN-box tag.  When the bare-call name matches
+            // one of these intrinsics AND every operand has a known
+            // primitive-numeric type, we emit the intrinsic directly.
+            //
+            // Conservative scope:
+            //   * Only the poly-arith subset (skipping `eq`/`ne`/`lt`/
+            //     `le`/`gt`/`ge` because their user-side `implement Eq`
+            //     bodies must remain reachable for record types).
+            //   * Only when EVERY arg has a known primitive-numeric type
+            //     (`Int` / `Int8..128` / `UInt8..128` / `Float` /
+            //     `Float32`/`Float64` and their canonical aliases) —
+            //     guards against accidentally intercepting user
+            //     `fn add(a: MyVec, b: MyVec) -> MyVec`.
+            //
+            // For non-poly-arith bare calls or non-primitive args, we
+            // fall through to the normal function-table lookup at
+            // `compile_call`'s `lookup_function` path below.
+            // Note: `min` / `max` already have dedicated arms above
+            // (lines 5631 / 5686) that lower to `CmpI` + select; they
+            // are kept in those arms because the user-visible
+            // `min(a, b)` accepts non-numeric `Ord`-implementing types
+            // and routes the comparison through `CompareOp::Lt`.  We
+            // intercept only the genuinely opcode-able poly-numeric
+            // arith / bitwise / unary-shape names.
+            "add" | "sub" | "mul" | "div" | "rem"
+            | "neg"
+            | "bitand" | "bitor" | "bitxor" | "shl" | "shr"
+            | "clamp" | "signum" | "abs_signed" => {
+                if let Some(intrinsic_info) = lookup_intrinsic(name)
+                    && args.len() == intrinsic_info.intrinsic.param_count as usize
+                {
+                    let all_primitive = args.iter().all(|arg| {
+                        let kind = self.infer_expr_type_kind(arg);
+                        let is_primitive_kind = matches!(
+                            kind,
+                            Some(verum_ast::ty::TypeKind::Int)
+                                | Some(verum_ast::ty::TypeKind::Float)
+                        );
+                        is_primitive_kind
+                            || self
+                                .extract_expr_type_name(arg)
+                                .as_deref()
+                                .is_some_and(|tn| {
+                                    type_names::is_integer_type(tn)
+                                        || type_names::is_float_type(tn)
+                                })
+                    });
+                    if all_primitive {
+                        let dst = self.compile_imported_intrinsic_call(&intrinsic_info, args)?;
+                        return Ok(Some(dst));
+                    }
+                }
+                Ok(None)
+            }
+
             _ => Ok(None), // Not a builtin
         }
     }
@@ -17376,18 +17452,6 @@ impl VbcCodegen {
                         // wrapper-identity class, plus every other
                         // user-fn/stdlib-fn arity collision that
                         // misroutes type inference at the call site.
-                        if std::env::var("VERUM_TRACE_TYPE_INFER").is_ok()
-                            && name.starts_with("parse_")
-                        {
-                            eprintln!(
-                                "[type-infer-call-entry] name={} args.len={} lookup_with_arity={} lookup_bare={} ret_type_name={:?} ret_type_inner={:?}",
-                                name, args.len(),
-                                self.ctx.lookup_function_with_arity(name, args.len()).is_some(),
-                                self.ctx.lookup_function(name).is_some(),
-                                self.ctx.lookup_function(name).and_then(|f| f.return_type_name.clone()),
-                                self.ctx.lookup_function(name).and_then(|f| f.return_type_inner.clone()),
-                            );
-                        }
                         if let Some(func_info) =
                             self.ctx.lookup_function_with_arity(name, args.len())
                         {
@@ -17444,12 +17508,6 @@ impl VbcCodegen {
                             // type correctly, hence the 2-of-3 split where
                             // explicit-annotation tests passed.
                             if let Some(ref ret_type) = func_info.return_type_name {
-                                if std::env::var("VERUM_TRACE_TYPE_INFER").is_ok() {
-                                    eprintln!(
-                                        "[type-infer-call] name={} ret_type={:?} inner={:?}",
-                                        name, ret_type, func_info.return_type_inner
-                                    );
-                                }
                                 if let Some(ref inner) = func_info.return_type_inner
                                     && !inner.is_empty()
                                     && !ret_type.contains('<')
