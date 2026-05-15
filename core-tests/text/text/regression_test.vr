@@ -558,6 +558,69 @@ fn regression_default_hasher_distinguishes_inputs() {
 }
 
 // =============================================================================
+// §V — Task #24 close: interior-field-ref auto-deref across function
+// boundaries.
+//
+// Pre-fix: `clone_nums(&self.field)` worked at the argument-passing
+// boundary, but inside the callee `src.len()` / `src[i]` dispatched
+// against the interior pointer's *parent record's* ObjectHeader
+// instead of the actual List.  Every cross-frame
+// reference-borrow of a record field surfaced as `length: 0` /
+// `IndexOutOfBounds(0, 0)`.
+//
+// Root cause: `RefField` (emitted by `&record.field`) lowers to a
+// `Value::from_ptr(field_ptr)` tracked in `state.cbgr_mutable_ptrs`.
+// `dispatch_method_call`, `handle_get_index`, and `handle_set_index`
+// each had `is_cbgr_ref` and `is_thin_ref` deref branches but lacked
+// the parallel branch for the heap-interior-pointer shape.  When the
+// receiver/array was Value::from_ptr-in-cbgr_mutable_ptrs, the
+// downstream dispatcher (`dispatch_array_method`, etc.) treated the
+// interior ptr as the object base and read the wrong header.
+//
+// Fix: add the third deref branch parallel to the existing two in
+// all three sites.  Architectural rule: every reference-shape unwrap
+// site MUST handle (a) CBGR-register-ref, (b) ThinRef, (c)
+// heap-interior-pointer-in-cbgr_mutable_ptrs.
+//
+// Blast radius: every method on every record type that takes
+// `&self.field` for a function call returning a value — `BigInt.abs`,
+// `BigInt.add`, `BigInt.neg`, etc., plus every analogous pattern in
+// user code.
+// =============================================================================
+
+type Holder is { flag: Bool, nums: List<Int> };
+
+implement Holder {
+    pub fn build() -> Holder {
+        let mut xs: List<Int> = List.with_capacity(3);
+        xs.push(7);
+        Holder { flag: false, nums: xs }
+    }
+}
+
+fn clone_nums(src: &List<Int>) -> List<Int> {
+    let n = src.len() as Int;
+    let mut out: List<Int> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n { out.push(src[i]); i = i + 1; }
+    out
+}
+
+@test
+fn regression_v_clone_field_via_ref_arg_len() {
+    let a = Holder.build();
+    let cn = clone_nums(&a.nums);
+    assert_eq(cn.len(), 1);
+}
+
+@test
+fn regression_v_clone_field_via_ref_arg_index() {
+    let a = Holder.build();
+    let cn = clone_nums(&a.nums);
+    assert_eq(cn[0], 7);
+}
+
+// =============================================================================
 // Entry point
 // =============================================================================
 

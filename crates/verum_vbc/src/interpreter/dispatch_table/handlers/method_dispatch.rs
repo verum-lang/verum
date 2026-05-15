@@ -409,6 +409,34 @@ pub(in super::super) fn handle_call_method(
         } else {
             receiver
         }
+    } else if receiver.is_ptr()
+        && !receiver.is_nil()
+        && state
+            .cbgr_mutable_ptrs
+            .contains(&(receiver.as_ptr::<u8>() as usize))
+    {
+        // **Task #24 — interior-field-ref auto-deref for method dispatch**.
+        //
+        // `RefField` (emitted by `&record.field`) stores a
+        // `Value::from_ptr(field_ptr)` and tracks `field_ptr` in
+        // `cbgr_mutable_ptrs`. The downstream dispatchers (`dispatch_array_method`,
+        // `dispatch_variant_method`) read `ObjectHeader` from `ptr` and
+        // treat the receiver as if `ptr` were the heap-object base.
+        // For an interior pointer the header read lands inside the
+        // *parent record's* header (or worse, mid-data) — every
+        // primitive-method dispatch on `&self.list_field` mis-routes:
+        // `(&self.nums).len()` reads `Holder`'s type_id instead of
+        // `List`'s, fails `is_array_dispatchable`, and falls through
+        // to "method not found".
+        //
+        // The deref here parallels the CBGR-register-ref and ThinRef
+        // arms above — same architectural rule: every reference shape
+        // that wraps a Value must be unwrapped at the method-dispatch
+        // boundary so the rest of the chain operates on the actual
+        // referent. Without this, `clone_nums(&self.nums)` calls work
+        // at the SetF boundary but fail INSIDE the callee when
+        // `src.len()` dispatches against the interior ptr.
+        unsafe { *(receiver.as_ptr::<Value>()) }
     } else {
         receiver
     };
