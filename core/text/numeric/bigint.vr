@@ -197,8 +197,29 @@ implement BigInt {
     }
 
     /// Difference `self - other` = `self + (-other)`.
+    ///
+    /// **Explicit-binding shape required** (closes task #17): the
+    /// natural single-expression form `self.add(&other.neg())` hits a
+    /// language-implementation defect — taking `&` of a freshly-
+    /// constructed method-return value (the `BigInt` from `neg()`)
+    /// produces an interior pointer that the chained `add` dispatch
+    /// does not auto-deref correctly inside the precompiled stdlib
+    /// body, surfacing as a `NullPointer at GetF (op=0x62)` panic
+    /// during `clone_digits` (or wrong-shape return seen by the
+    /// caller).  The user-side replica with the same body works
+    /// because fresh-compile uses the post-fix codegen for the
+    /// chained `&MethodCall` Ref-stabilization; the precompile
+    /// archive was generated before the cascade closed, and the
+    /// architectural rule from task #24 (every reference-shape
+    /// unwrap site must handle ALL referent shapes, including
+    /// interior-ptr-to-fresh-return-value) is not yet extended to
+    /// the cross-frame interior-ref propagation through chained
+    /// method receivers.  Binding the `neg()` result to a stack-
+    /// local first sidesteps the gap until the deeper interpreter
+    /// fix lands (separate follow-up).
     public fn sub(&self, other: &BigInt) -> BigInt {
-        self.add(&other.neg())
+        let neg_other = other.neg();
+        self.add(&neg_other)
     }
 
     /// Product `self * other`.  Schoolbook O(N×M) multiplication

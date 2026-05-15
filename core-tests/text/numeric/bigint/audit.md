@@ -24,15 +24,14 @@
 > now; bigdecimal/rational/modular sub/mul should likewise close
 > on rebuild (they depend on bigint sub/mul).
 >
-> **Residual (task #17)**: `BigInt.from_int(10).sub(&BigInt.from_int(3))`
-> (transient receiver) and `let a = BigInt.from_int(10); a.sub(&b)`
-> (BigInt.sub's body delegates `self.add(&other.neg())` — a chained
-> method call where `&other.neg()` is an `&` into a fresh BigInt
-> return value) NullPointer at GetF (op=0x62) pc=61 inside
-> `clone_digits`.  Same defect class as task #24 (interior-field-
-> ref auto-deref) but with one more indirection layer through
-> chained method receivers.  Direct stack-local equivalent
-> `let nb = b.neg(); a.add(&nb)` works fine.
+> **Task #17 CLOSED 2026-05-15** via stdlib-side adoption of the
+> explicit-binding shape (`let neg_other = other.neg(); self.add(&neg_other)`)
+> in `BigInt.sub`'s body — the chained `self.add(&other.neg())` form
+> hit a deeper interpreter gap (interior-ptr-to-fresh-method-return
+> not auto-derefed across the chained-receiver boundary).  The
+> language-implementation defect is documented as a task #24 cascade
+> extension follow-up; the stdlib workaround keeps the user-facing
+> `a.sub(&b)` API working through both call shapes.
 >
 > Suite: `unit_test.vr` (~338 lines, original) + `property_test.vr`
 > (12 algebraic laws — un-@ignore on task #17 close) +
