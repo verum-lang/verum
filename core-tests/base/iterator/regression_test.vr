@@ -1,0 +1,165 @@
+// =============================================================================
+// core-tests/base/iterator/regression_test.vr
+// =============================================================================
+//
+// Regression pins for bidirectional variant-constructor resolution defects
+// surfaced during the base/iterator test audit (task #5).  Two fundamental
+// language-level defects closed in `crates/verum_types/src/infer/expr.rs`'s
+// `check_expr_inner`:
+//
+// 1. **Ok(()) — Unit-payload Call gate** — the bidirectional Call arm in
+//    `check_expr_inner` gated single-payload variant constructor checks on
+//    `!matches!(payload_ty, Type::Unit)`, so `Ok(())` (1-arg call with Unit
+//    payload) fell through to the arity-only synth path.  Arity-1 matched
+//    multiple `Ok(_)` parents in `variant_constructor_parents` (canonical
+//    collision: `Result.Ok(T)` vs `core.security.zk.halo2.prover.ProveResult
+//    .Ok(Proof)`); first-registered-wins picked the wrong parent and
+//    check_expr against the wrong payload type ("expected Proof, found Unit").
+//    Fix: drop the `!Type::Unit` gate so single-payload always takes the
+//    bidirectional path regardless of payload type.
+//
+// 2. **Bare-path variant constructor — no Path arm in check_expr_inner** —
+//    bare `None`, `Less`, `Greater`, or any 0-arg variant constructor written
+//    without parens fell through to `synth_and_check`, which uses arity-blind
+//    `try_resolve_variant_constructor` and picks first-registered parent
+//    (canonical collision: `Maybe.None` vs `core.graphics.gpu.Backend.None`).
+//    The synthesised type was then unified against the user's expected type
+//    and failed.  Fix: new Path arm in `check_expr_inner` that, for any bare
+//    Path matching a registered variant-constructor name, expands the
+//    expected type to variant form and binds the bare path to the matching
+//    Unit-payload entry of THAT expected type — stdlib-agnostic; the user's
+//    expected type drives resolution, not first-registered-wins.
+//
+// Mirrors the architectural discipline pinned by tasks #22 / #24 / #25 /
+// #26 / #11: every site that resolves a variant constructor by simple name
+// MUST funnel through the user's expected-type context, not through an
+// arity-blind first-wins scan.  Pin: grep `try_resolve_variant_constructor`
+// in `crates/verum_types/src/infer/` — every call site outside the
+// expected-type-aware `check_expr_inner` arms is a candidate for similar
+// scoping.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+
+// =============================================================================
+// Defect 1: Ok(()) with explicit annotation
+// =============================================================================
+
+@test
+fn regression_ok_unit_annotation() {
+    // The minimal repro from task #5 audit: `Ok(())` lowers to
+    // `Result<Unit, _>.Ok(Unit)`.  Pre-fix the typechecker picked the
+    // first-registered parent of `Ok` (typically a stdlib variant with
+    // a non-Unit payload like `ProveResult.Ok(Proof)`) and emitted
+    // "expected Proof, found Unit".
+    let r: Result<(), Int> = Ok(());
+    assert(r is Ok);
+}
+
+@test
+fn regression_ok_unit_inferred() {
+    // Same defect without explicit annotation — relies on the
+    // bidirectional check at the `let` binding to discover Result.
+    // Currently still requires the annotation; this test pins the
+    // annotated form as the canonical pattern.
+    let r: Result<(), Text> = Ok(());
+    assert(r is Ok);
+    if r is Ok(_) { /* OK */ } else { assert(false) }
+}
+
+@test
+fn regression_ok_unit_inside_function_return() {
+    // Ok(()) as a function return — return-type drives the
+    // bidirectional check.
+    fn check_nonzero(n: Int) -> Result<(), Int> {
+        if n == 0 { Err(0) } else { Ok(()) }
+    }
+    assert(check_nonzero(1) is Ok);
+    assert(check_nonzero(0) is Err);
+}
+
+@test
+fn regression_advance_by_returns_ok_unit() {
+    // Pre-fix repro from core/base/iterator.vr's `advance_by`:
+    // `Result<(), Int>` with `Ok(())` for the no-op success path.
+    fn try_advance(remaining: Int) -> Result<(), Int> {
+        if remaining < 0 {
+            return Ok(());  // negative treated as no-op success
+        }
+        if remaining > 100 {
+            return Err(remaining);
+        }
+        Ok(())
+    }
+    assert(try_advance(-1) is Ok);
+    assert(try_advance(50) is Ok);
+    assert(try_advance(200) is Err);
+}
+
+// =============================================================================
+// Defect 2: Bare-path variant constructor — None / Less / Greater / etc.
+// =============================================================================
+
+@test
+fn regression_bare_none_with_annotation() {
+    // Pre-fix: bare `None` in let-binding RHS fell through to
+    // synth_and_check which picked `core.graphics.gpu.Backend.None`
+    // (first-registered) instead of `Maybe.None`, and the annotated
+    // `Maybe<Int>` then failed unification.
+    let m: Maybe<Int> = None;
+    assert(m is None);
+}
+
+@test
+fn regression_bare_none_in_if_else() {
+    // Bare `None` in else-branch of an if-expression with
+    // bidirectional expected type from the let annotation.
+    let m: Maybe<Int> = if 1 == 1 { Some(42) } else { None };
+    assert(m is Some);
+    let n: Maybe<Int> = if 1 == 0 { Some(42) } else { None };
+    assert(n is None);
+}
+
+@test
+fn regression_bare_less_with_annotation() {
+    // Bare `Less` — same architecture as None but for Ordering.
+    // Canonical collision with stdlib's `Ordering` variants Less /
+    // Equal / Greater across other types that may introduce
+    // same-named variants.
+    let ord: Ordering = Less;
+    assert(ord is Less);
+    let ord2: Ordering = Equal;
+    assert(ord2 is Equal);
+    let ord3: Ordering = Greater;
+    assert(ord3 is Greater);
+}
+
+@test
+fn regression_bare_none_function_return() {
+    // Bare `None` as function return — return-type drives the
+    // bidirectional check for the bare-path Maybe.None variant.
+    fn lookup(x: Int) -> Maybe<Int> {
+        if x > 0 { Some(x * 2) } else { None }
+    }
+    assert(lookup(5) is Some);
+    assert(lookup(0) is None);
+    assert(lookup(-1) is None);
+}
+
+@test
+fn regression_bare_none_in_closure_body() {
+    // The headline repro from base/iterator/unit_test.vr §
+    // `test_filter_map_basic`:  the closure body's bare-`None`
+    // resolves through bidirectional flow from List.filter_map's
+    // `F: fn(&T) -> Maybe<U>` signature.
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let ys: List<Int> = xs.filter_map(|x| {
+        if x % 2 == 0 { Some(x * 10) } else { None }
+    });
+    assert_eq(ys, [20, 40]);
+}
+
+fn main() {
+    // Tests run via @test annotations
+}
