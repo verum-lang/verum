@@ -12884,6 +12884,51 @@ impl VbcCodegen {
 
     fn resolve_field_index(&mut self, type_name: Option<&str>, field_name: &str) -> u32 {
         if let Some(tn) = type_name {
+            // **Architectural rule** (closes task #16 consumer side):
+            // resolve field index from the canonical TypeDescriptor's
+            // own field list BEFORE consulting `type_field_layouts`.
+            // The descriptor is the single source of truth (each type
+            // carries its own descriptor); the flat `type_field_layouts`
+            // cache has historically been polluted by sibling sum types
+            // whose record-style variants share the host record's simple
+            // name (`CompletionOp.Timeout` vs the host record
+            // `core.async.timer.Timeout<F>`).  Using the cache as the
+            // first source led to "field write out of bounds" panics
+            // when the literal's field `future` got resolved against
+            // the polluted layout `["ts"]` (variant payload), falling
+            // through to the global-scan fallback which then picked an
+            // unrelated wrong-offset field from another type.
+            //
+            // Stripping generic args first (e.g. `Timeout<ReadyFuture>`
+            // → `Timeout`) lets the descriptor lookup work for the
+            // canonical, non-parameterised type names that
+            // `type_name_to_id` is keyed by.
+            let stripped = match tn.find('<') {
+                Some(i) => &tn[..i],
+                None => tn,
+            };
+            if let Some(&tid) = self.type_name_to_id.get(stripped)
+                && let Some(td) = self.types.iter().find(|t| t.id == tid)
+                && matches!(td.kind, crate::types::TypeKind::Record)
+            {
+                let field_id = self.field_name_indices.get(field_name).copied();
+                for (idx, fd) in td.fields.iter().enumerate() {
+                    if Some(fd.name.0) == field_id {
+                        return idx as u32;
+                    }
+                }
+                // Also try lookup by interned name string — covers cases
+                // where field_name_indices race ahead of the descriptor's
+                // own name interning.
+                for (idx, fd) in td.fields.iter().enumerate() {
+                    if let Some(fname) =
+                        self.ctx.strings.get(fd.name.0 as usize)
+                        && fname == field_name
+                    {
+                        return idx as u32;
+                    }
+                }
+            }
             // Try exact match first
             if let Some(fields) = self.type_field_layouts.get(tn)
                 && let Some(pos) = fields.iter().position(|f| f == field_name)

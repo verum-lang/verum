@@ -15516,16 +15516,38 @@ impl VbcCodegen {
             } else {
                 // Look up TypeId for proper Drop dispatch
                 let type_name = format!("{}", path);
-                let type_id = self
-                    .type_name_to_id
-                    .get(&type_name)
-                    .map(|id| id.0)
-                    .unwrap_or(0);
+                let type_id_opt = self.type_name_to_id.get(&type_name).copied();
+                let type_id = type_id_opt.map(|id| id.0).unwrap_or(0);
 
-                // Use declared field count from type layout if available,
-                // otherwise fall back to the number of fields in the literal.
-                let alloc_slots = self
-                    .type_field_count(&type_name)
+                // **Architectural rule** (closes task #16 consumer side):
+                // resolve `field_count` from the canonical TypeDescriptor
+                // via `type_name_to_id → types[]` (the **TypeDescriptor's
+                // own `fields.len()`**) BEFORE falling back to the
+                // simple-name `type_field_layouts` cache.  The cache is
+                // a flat name→layout map that has historically been
+                // polluted by sibling sum-types whose record-style
+                // variants share the host record's simple name
+                // (`CompletionOp.Timeout { ts }` vs
+                // `core.async.timer.Timeout<F> { future, sleep,
+                // completed }`).  The TypeDescriptor lookup is the
+                // single source of truth: each type has its own
+                // descriptor, and a variant-payload field set never
+                // contaminates the parent record's descriptor.
+                //
+                // The fallback chain (most→least authoritative):
+                //   1. TypeDescriptor.fields.len() — declared field count
+                //      from the type's own descriptor
+                //   2. type_field_count(simple_name) — flat cache (cheap
+                //      lookup; may be wrong under pollution)
+                //   3. fields.len() — the literal's own field count
+                //      (correct for record construction but not declared
+                //      layout)
+                let alloc_slots = type_id_opt
+                    .and_then(|tid| self.types.iter().find(|t| t.id == tid))
+                    .filter(|td| matches!(td.kind, crate::types::TypeKind::Record))
+                    .filter(|td| !td.fields.is_empty())
+                    .map(|td| td.fields.len() as u32)
+                    .or_else(|| self.type_field_count(&type_name))
                     .unwrap_or(fields.len() as u32);
 
                 self.ctx.emit(Instruction::New {
