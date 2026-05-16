@@ -246,15 +246,16 @@ public mount .cap_audit_ring.{
 // =============================================================================
 // Constants
 // =============================================================================
-
-/// Initial generation value for new allocations.
-public const GEN_INITIAL: UInt32 = 1;
-
-/// Maximum generation value before wraparound.
-public const GEN_MAX: UInt32 = 0xFFFF_FFFE;
-
-/// Generation value indicating unallocated memory.
-public const GEN_UNALLOCATED: UInt32 = 0;
+//
+// Generation constants (`GEN_INITIAL`, `GEN_MAX`, `GEN_UNALLOCATED`)
+// are exported via the `public mount .header.{...}` declaration above
+// (line ~107).  The previous duplicate `public const` declarations
+// here collided with the re-export at AOT-tier typecheck — surfaced
+// as `WARN Failed to extract exports from 'mem': conflicting export:
+// 'GEN_INITIAL' already exported as type from ModuleId(648); both
+// sides resolve to the same name in the importing scope`.  Removed
+// to single-source through the header re-export, which is the
+// canonical home of the values.
 
 // =============================================================================
 // CBGR Error Types
