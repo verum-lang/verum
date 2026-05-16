@@ -167,16 +167,46 @@ fn regression_g_contains_present_pinned() {
 }
 
 // =============================================================================
-// §H — index_of / find_char wrong index (audit.md §H)
-// REGRESSION: aliases of find that exhibit the same defect class as §F.
+// §H — index_of / find_char wrong index — CLOSED transitively when §F
+// (Text.find KMP indexing) closed via commit f8d70e6ef.  Both aliases
+// (`index_of`, `find_char`) delegate to `find`, so the upstream close
+// flips them green automatically.  Verified 2026-05-16:
+// `"hello".index_of(&"ll")` returns `Some(2)`.  Active guard going
+// forward — re-introduction of the find-byte-index defect surfaces
+// here immediately.
 // =============================================================================
 
-@ignore
 @test
 fn regression_h_index_of_alias_pinned() {
     match "hello".index_of(&"ll") {
         Some(i) => assert_eq(i, 2),
         None => panic("index_of('ll') in 'hello' must be Some(2)"),
+    }
+}
+
+@test
+fn regression_h_index_of_empty_needle_pinned() {
+    // Empty needle convention: should match at position 0.
+    match "hello".index_of(&"") {
+        Some(i) => assert_eq(i, 0),
+        None => panic("index_of('') in 'hello' must be Some(0)"),
+    }
+}
+
+@test
+fn regression_h_index_of_absent_returns_none_pinned() {
+    match "hello".index_of(&"world") {
+        Some(_) => panic("index_of('world') in 'hello' must be None"),
+        None => {},
+    }
+}
+
+@test
+fn regression_h_index_of_first_occurrence_pinned() {
+    // Multiple occurrences — must return the FIRST byte offset.
+    match "ababab".index_of(&"ab") {
+        Some(i) => assert_eq(i, 0),
+        None => panic("index_of('ab') in 'ababab' must be Some(0)"),
     }
 }
 
