@@ -927,6 +927,54 @@ impl TypeChecker {
             }
         }
 
+        // **`__struct_fields_<name>` registration for non-transparent
+        // Record types** (task #8 / AOT field-type loss close).
+        //
+        // `type_descriptor_to_type` returns `Type::Named { path, args }`
+        // for Records — the canonical nominal-identity form — but
+        // doesn't carry the field-type map.  `lookup_field_type`
+        // (`infer/modules.rs:11132`) consults the `__struct_fields_<X>`
+        // key for Named-receiver field access; without this
+        // registration, every stdlib record's `.field` access fails
+        // typecheck with `Cannot access field 'X' on non-record type:
+        // Unit` (the Unit shape is from the `_` fallthrough arm in
+        // `infer_expr_field`'s match because `ctx.lookup_type` returns
+        // the bare Named that doesn't structurally encode the fields).
+        //
+        // Mirrors the source-decl path at `infer/decls.rs:1158`
+        // (`register_record_type_body`) which always writes
+        // `__struct_fields_<X>` alongside the nominal Named definition.
+        //
+        // ALWAYS runs (outside the `lookup_type(name).is_none()` gate)
+        // for the same idempotency rationale as the transparent-wrapper
+        // arm above — types registered by upstream pathways still need
+        // the field-type map populated.
+        //
+        // Skipped for transparent wrappers (handled by the
+        // `__newtype_inner_X` arm above — they have no record-shaped
+        // field access by definition; users write `.0` not `.field_name`).
+        if !type_desc.is_transparent_wrapper
+            && let crate::core_metadata::TypeDescriptorKind::Record { fields } = &type_desc.kind
+            && !fields.is_empty()
+        {
+            let struct_key_text =
+                verum_common::Text::from(format!("__struct_fields_{}", name).as_str());
+            if self.ctx.lookup_type(struct_key_text.as_str()).is_none() {
+                let mut field_map: indexmap::IndexMap<verum_common::Text, Type> =
+                    indexmap::IndexMap::new();
+                for f in fields.iter() {
+                    let field_ty = if f.ty.is_empty() {
+                        Type::Var(crate::ty::TypeVar::fresh())
+                    } else {
+                        parse_descriptor_type_string(f.ty.as_str())
+                    };
+                    field_map.insert(f.name.clone(), field_ty);
+                }
+                self.ctx
+                    .define_type(struct_key_text, Type::Record(field_map));
+            }
+        }
+
         // ALWAYS register inherent methods, even when the type
         // itself was already in ctx (e.g. primitives like Text,
         // List, Map registered via `register_builtins`).  Without
@@ -1981,6 +2029,35 @@ impl TypeChecker {
                 let inner_key = format!("__newtype_inner_{}", name);
                 self.ctx
                     .define_type(verum_common::Text::from(inner_key.as_str()), inner_ty);
+            }
+
+            // **`__struct_fields_<name>` for non-transparent Record
+            // types** — see commentary at the matching block in
+            // `ensure_stdlib_type_loaded` (task #8 close).  Eager loader
+            // needs the same key so non-AOT (interp) paths that bypass
+            // the lazy loader (full-stdlib bootstrap) still produce
+            // `lookup_field_type`-compatible Record entries for stdlib
+            // records like MemProt / MapFlags / OSError / etc.
+            if !type_desc.is_transparent_wrapper
+                && let TypeDescriptorKind::Record { fields } = &type_desc.kind
+                && !fields.is_empty()
+            {
+                let struct_key = format!("__struct_fields_{}", name);
+                let struct_key_text = verum_common::Text::from(struct_key.as_str());
+                if self.ctx.lookup_type(struct_key_text.as_str()).is_none() {
+                    let mut field_map: indexmap::IndexMap<verum_common::Text, Type> =
+                        indexmap::IndexMap::new();
+                    for f in fields.iter() {
+                        let field_ty = if f.ty.is_empty() {
+                            Type::Var(crate::ty::TypeVar::fresh())
+                        } else {
+                            parse_descriptor_type_string(f.ty.as_str())
+                        };
+                        field_map.insert(f.name.clone(), field_ty);
+                    }
+                    self.ctx
+                        .define_type(struct_key_text, Type::Record(field_map));
+                }
             }
         }
 
