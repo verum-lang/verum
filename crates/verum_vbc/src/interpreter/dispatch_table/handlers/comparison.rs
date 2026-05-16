@@ -176,42 +176,82 @@ pub(in super::super) fn handle_eqg(
     let va = state.get_reg(a);
     let vb = state.get_reg(b);
 
-    // If protocol_id is non-zero, dispatch to a custom Eq implementation.
-    // protocol_id encodes (string_table_index + 1) of the type name.
-    if protocol_id > 0 {
+    // **Eq dispatch chain** (most-specific → most-general):
+    //
+    // (1) **protocol_id != 0** — codegen knew the static type at the
+    //     callsite and encoded `<TypeName>.eq` directly.  Fast path.
+    //
+    // (2) **protocol_id == 0** with a heap receiver — codegen lost the
+    //     static type (typical inside a `<T: Eq>`-blanket impl body
+    //     like `<T: Eq> Eq for Maybe<T> { fn eq(&self, other) { match
+    //     (self,other) { (Some(a),Some(b)) => a == b, ... } } }`).  At
+    //     codegen time T is generic so the `a == b` emits
+    //     CmpG{protocol_id=0}; at runtime `a` and `b` carry a concrete
+    //     TypeId in their ObjectHeader.  Read it, look up the type's
+    //     name from `state.module.types`, and dispatch through
+    //     `<RuntimeType>.eq` so user-defined Eq impls (e.g. OSError.eq
+    //     which compares only `code`, ignoring `message`) are honoured
+    //     instead of the structural fallback below.
+    //
+    // (3) **Fallback** — `deep_value_eq` (recursive structural).  Used
+    //     for primitives, strings, variants without user Eq, and any
+    //     type whose runtime TypeId has no Eq impl in the module.
+    //
+    // This chain closes the entire "blanket-impl<T: Eq> on a record T
+    // calls deep_value_eq because static T is generic" class — every
+    // `Maybe<RecordType>.eq` / `Result<RecordType, _>.eq` /
+    // `List<RecordType>.eq` / user-blanket-impl-Eq site now honours
+    // the concrete type's `eq` semantics, not the field-by-field
+    // structural form.  Mirrors the architectural rule pinned for
+    // Display dispatch (task #9/#10): the runtime must dispatch
+    // through the concrete TypeId when the static path lost the type.
+    let resolved_type_name: Option<String> = if protocol_id > 0 {
         let type_name_idx = protocol_id - 1;
-        if let Some(type_name) = state.module.strings.get(StringId(type_name_idx)) {
-            // Use dot separator to match how impl methods are registered (e.g., "Point.eq")
-            let eq_func_name = format!("{}.eq", type_name);
-            // Search for the eq function in the module
-            let mut found_func_id: Option<FunctionId> = None;
-            for func in &state.module.functions {
-                let func_name = state.module.strings.get(func.name).unwrap_or("");
-                if func_name == eq_func_name {
-                    found_func_id = Some(func.id);
-                    break;
-                }
+        state
+            .module
+            .strings
+            .get(StringId(type_name_idx))
+            .map(|s| s.to_string())
+    } else {
+        // Fall-back inspection of the receiver's runtime TypeId.
+        // Only heap-allocated values carry an ObjectHeader → TypeId.
+        // We probe `va` first; if it is a primitive or carries an
+        // unknown TypeId we fall through to `deep_value_eq` below.
+        runtime_type_name_for_eq(&va, state)
+            .or_else(|| runtime_type_name_for_eq(&vb, state))
+    };
+
+    if let Some(type_name) = resolved_type_name.as_deref() {
+        // Use dot separator to match how impl methods are registered (e.g., "Point.eq")
+        let eq_func_name = format!("{}.eq", type_name);
+        // Search for the eq function in the module
+        let mut found_func_id: Option<FunctionId> = None;
+        for func in &state.module.functions {
+            let func_name = state.module.strings.get(func.name).unwrap_or("");
+            if func_name == eq_func_name {
+                found_func_id = Some(func.id);
+                break;
             }
+        }
 
-            if let Some(func_id) = found_func_id
-                && let Some(func) = state.module.get_function(func_id)
-            {
-                let reg_count = func.register_count;
-                let return_pc = state.pc();
+        if let Some(func_id) = found_func_id
+            && let Some(func) = state.module.get_function(func_id)
+        {
+            let reg_count = func.register_count;
+            let return_pc = state.pc();
 
-                let new_base = state
-                    .call_stack
-                    .push_frame(func_id, reg_count, return_pc, dst)?;
-                state.registers.push_frame(reg_count);
+            let new_base = state
+                .call_stack
+                .push_frame(func_id, reg_count, return_pc, dst)?;
+            state.registers.push_frame(reg_count);
 
-                // arg0 = self (va), arg1 = other (vb)
-                state.registers.set(new_base, Reg(0), va);
-                state.registers.set(new_base, Reg(1), vb);
+            // arg0 = self (va), arg1 = other (vb)
+            state.registers.set(new_base, Reg(0), va);
+            state.registers.set(new_base, Reg(1), vb);
 
-                state.set_pc(0);
-                state.record_call();
-                return Ok(DispatchResult::Continue);
-            }
+            state.set_pc(0);
+            state.record_call();
+            return Ok(DispatchResult::Continue);
         }
         // Fall through to structural comparison if function not found
     }
@@ -220,6 +260,45 @@ pub(in super::super) fn handle_eqg(
     let result = deep_value_eq(&va, &vb, state);
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
+}
+
+/// Read the runtime TypeId from a heap-allocated `Value`'s ObjectHeader
+/// and resolve it to the declared type name via `state.module.types`.
+/// Returns `None` for primitives (NaN-boxed ints, bools, floats,
+/// pointers without a valid header) and for TypeIds that aren't
+/// registered in the module's type table.
+///
+/// Used by `handle_eqg`'s protocol_id-0 fallback to dispatch through
+/// `<RuntimeType>.eq` when the codegen-side type was lost (typical
+/// inside `<T: Eq>` blanket-impl bodies — see the dispatch-chain
+/// comment in `handle_eqg`).
+fn runtime_type_name_for_eq(v: &Value, state: &InterpreterState) -> Option<String> {
+    use crate::interpreter::heap;
+    if !v.is_ptr() || v.is_nil() {
+        return None;
+    }
+    let ptr = v.as_ptr::<u8>();
+    if ptr.is_null() {
+        return None;
+    }
+    // Safety: any non-null pointer Value in a well-formed module
+    // points at a heap allocation whose first `OBJECT_HEADER_SIZE`
+    // bytes are an ObjectHeader.  `ref_or_stub` returns a benign
+    // stub header (type_id == INVALID) for pointers that don't
+    // satisfy the alignment / sentinel check, so the subsequent
+    // lookup naturally falls through to `None`.
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+    let raw_id = header.type_id.0;
+    if raw_id == 0 {
+        return None;
+    }
+    state
+        .module
+        .types
+        .iter()
+        .find(|td| td.id.0 == raw_id)
+        .and_then(|td| state.module.strings.get(td.name))
+        .map(|s| s.to_string())
 }
 
 /// CmpG (0x3D) - Generic comparison via Ord protocol.
