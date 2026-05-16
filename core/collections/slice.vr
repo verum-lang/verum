@@ -311,25 +311,29 @@ implement<T> [T] {
 
     /// Binary search for element in sorted slice.
     /// Returns Ok(index) if found, Err(insertion_point) if !found.
+    ///
+
+    /// IMPLEMENTATION NOTE: delegates to `binary_search_by` to avoid
+    /// the direct `*elem < *target` / `*elem > *target` comparison
+    /// chain that triggered a codegen SIGBUS on bare-Int receivers
+    /// (where-clause `T: Ord` monomorphisation emitted invalid
+    /// instruction sequence at the indexed deref site).  The
+    /// `binary_search_by` path routes through a closure which
+    /// avoids the generic-constrained deref-then-compare pattern.
+    /// Pinned in `core-tests/collections/slice/regression_test.vr` §E.
     fn binary_search(&self, target: &T) -> Result<Int, Int>
     where T: Ord
     {
-        let mut left = 0;
-        let mut right = self.len();
-
-        while left < right {
-            let mid = left + (right - left) / 2;
-            let elem: &T = &self[mid];
-            if *elem < *target {
-                left = mid + 1;
-            } else if *elem > *target {
-                right = mid;
+        self.binary_search_by(|elem| {
+            let v: &T = elem;
+            if *v < *target {
+                Ordering.Less
+            } else if *v > *target {
+                Ordering.Greater
             } else {
-                return Ok(mid);
+                Ordering.Equal
             }
-        }
-
-        Err(left)
+        })
     }
 
     /// Binary search with custom comparator.
