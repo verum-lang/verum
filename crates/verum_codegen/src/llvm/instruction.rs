@@ -19276,12 +19276,43 @@ fn lower_cbgr_extended<'ctx>(
                     .or_llvm_err()?;
                 ctx.set_register(dst, caps_i64.into());
             } else {
-                // Direct memory read fallback (original implementation)
+                // Direct memory read fallback (original implementation).
+                //
+                // **Dual-shape guard** (task #11): `src` may be either a
+                // PointerValue (canonical reference) OR an IntValue (the
+                // register slot reload `%r0 = load i64, ptr %r0_slot` —
+                // common when the const-loaded Record value sits in an i64
+                // slot and the codegen routes through GetEpochCaps without
+                // a prior ptr-tagging cast).  Mirror the pattern from
+                // task #23 (commit 56c9dee67): test `is_pointer_value()`
+                // first, fall back to `build_int_to_ptr` then
+                // `build_ptr_to_int` (no-op round-trip but yields a
+                // canonical IntValue suitable for the arithmetic below).
                 let header_offset = i64_ty.const_int(24u64.wrapping_neg(), true);
-                let base_int = ctx
-                    .builder()
-                    .build_ptr_to_int(src.into_pointer_value(), i64_ty, "src_int")
-                    .or_llvm_err()?;
+                let base_int = if src.is_pointer_value() {
+                    ctx.builder()
+                        .build_ptr_to_int(src.into_pointer_value(), i64_ty, "src_int")
+                        .or_llvm_err()?
+                } else if src.is_int_value() {
+                    // Already an int — use directly as the base address.
+                    src.into_int_value()
+                } else {
+                    return Err(LlvmLoweringError::internal(verum_common::Text::from(
+                        format!(
+                            "GetEpochCaps: src is neither PointerValue nor IntValue \
+                             (got {})",
+                            if src.is_struct_value() {
+                                "StructValue"
+                            } else if src.is_array_value() {
+                                "ArrayValue"
+                            } else if src.is_float_value() {
+                                "FloatValue"
+                            } else {
+                                "unknown"
+                            }
+                        )
+                    )));
+                };
                 let caps_ptr = ctx
                     .builder()
                     .build_int_to_ptr(
