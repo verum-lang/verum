@@ -1,0 +1,30 @@
+// =============================================================================
+// core-tests/collections/bloom/integration_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.bloom.{BloomConfig};
+
+// =============================================================================
+// Integration: config-only round-trip
+//
+// BloomFilter construction is gated on `fill_secure` (CSPRNG); see
+// regression_test.vr §A.  This file exercises only the configuration-
+// surface interoperability.
+// =============================================================================
+
+@test
+fn int_bloom_config_arithmetic_capacity_2_to_20() {
+    // 2^20 == 1_048_576 — the defaults capacity.
+    let target = 1_048_576;
+    let cfg = BloomConfig { capacity: target, fp_rate_ppm: 1000 };
+    assert_eq(cfg.capacity, target);
+}
+
+@test
+fn int_bloom_config_defaults_match_explicit_literal() {
+    let a = BloomConfig.defaults();
+    let b = BloomConfig { capacity: 1_048_576, fp_rate_ppm: 1000 };
+    assert_eq(a.capacity, b.capacity);
+    assert_eq(a.fp_rate_ppm, b.fp_rate_ppm);
+}

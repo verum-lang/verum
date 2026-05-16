@@ -1,0 +1,115 @@
+// =============================================================================
+// core-tests/collections/bloom/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.bloom.{BloomFilter, BloomConfig};
+
+// =============================================================================
+// §A — BloomFilter construction gated on fill_secure CSPRNG
+//
+// Every public constructor (`new`, `with_target`, `with_defaults`,
+// `try_new`, `try_with_target`) routes through `try_new` which
+// calls `fill_secure(&mut key[..])` to generate the HMAC-SHA256
+// key.  `fill_secure` lowers to `core.sys.common.random_bytes`
+// which is missing from the VBC dispatch table — same shape as the
+// closed Reservoir replacement-phase defect.
+//
+// Pre-fix surface: every test panics at construction with
+// "[lenient] BloomFilter.try_new compiled to panic-stub: undefined
+// function: fill_secure (in function BloomFilter.try_new)".
+//
+// Architectural fix path: register `core.sys.common.random_bytes`
+// in the VBC dispatch table (same intrinsic landing pad as
+// reservoir §1).  Once landed, every pin below flips active.
+// =============================================================================
+
+@ignore
+@test
+fn regression_bloom_with_target_constructible() {
+    let bf = BloomFilter.with_target(1024, 1000);
+    assert(bf.bits_len() > 0);
+    assert(bf.hash_count() > 0);
+}
+
+@ignore
+@test
+fn regression_bloom_new_constructible() {
+    let cfg = BloomConfig.defaults();
+    let bf = BloomFilter.new(cfg);
+    assert(bf.bits_len() > 0);
+}
+
+@ignore
+@test
+fn regression_bloom_with_defaults_constructible() {
+    let bf = BloomFilter.with_defaults();
+    assert(bf.bits_len() > 0);
+}
+
+@ignore
+@test
+fn regression_bloom_insert_contains_round_trip() {
+    let mut bf = BloomFilter.with_target(1024, 1000);
+    let key: [Byte; 4] = [1, 2, 3, 4];
+    bf.insert(&key);
+    assert(bf.contains(&key));
+}
+
+@ignore
+@test
+fn regression_bloom_check_and_set_idempotent() {
+    let mut bf = BloomFilter.with_target(1024, 1000);
+    let key: [Byte; 4] = [9, 8, 7, 6];
+    let was_present_first = bf.check_and_set(&key);
+    let was_present_second = bf.check_and_set(&key);
+    assert(!was_present_first);
+    assert(was_present_second);
+}
+
+@ignore
+@test
+fn regression_bloom_admitted_counter_increments_on_insert() {
+    let mut bf = BloomFilter.with_target(1024, 1000);
+    let a: [Byte; 2] = [1, 2];
+    let b: [Byte; 2] = [3, 4];
+    bf.insert(&a);
+    bf.insert(&b);
+    assert_eq(bf.admitted(), 2_u64);
+}
+
+@ignore
+@test
+fn regression_bloom_clear_resets_admitted_counter() {
+    let mut bf = BloomFilter.with_target(1024, 1000);
+    let a: [Byte; 2] = [1, 2];
+    bf.insert(&a);
+    assert_eq(bf.admitted(), 1_u64);
+    bf.clear();
+    assert_eq(bf.admitted(), 0_u64);
+}
+
+@ignore
+@test
+fn regression_bloom_try_with_target_invalid_fp_rate() {
+    let r = BloomFilter.try_with_target(1024, 0);
+    assert(r is Err(_));
+}
+
+// =============================================================================
+// §F — PASS-GUARD pins for the configuration surface (no constructor needed)
+// =============================================================================
+
+@test
+fn pass_guard_bloom_config_defaults_shape() {
+    let cfg = BloomConfig.defaults();
+    assert_eq(cfg.capacity, 1_048_576);
+    assert_eq(cfg.fp_rate_ppm, 1000);
+}
+
+@test
+fn pass_guard_bloom_config_literal_round_trip() {
+    let cfg = BloomConfig { capacity: 65536, fp_rate_ppm: 100 };
+    assert_eq(cfg.capacity, 65536);
+    assert_eq(cfg.fp_rate_ppm, 100);
+}
