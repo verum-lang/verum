@@ -12627,11 +12627,24 @@ fn lower_call_method<'ctx>(
             // Strategy 0's raw-value return broke Maybe<T> unwrap/match.
             "join" if args.count == 1 => {
                 // List<Text>.join(sep) — route to C verum_string_join
-                // Separator is a Text object — extract char* via verum_text_get_ptr
-                let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
+                // Separator is a Text object — extract char* via verum_text_get_ptr.
+                //
+                // Canonical signature for verum_string_join (per
+                // `syscall_registry::VERUM_RUNTIME_SYMBOLS`):
+                //   `verum_string_join(list_ptr: i64, sep: *i8) -> *i8`
+                //
+                // Pre-fix this site declared `(ptr, ptr) -> ptr` —
+                // conflicting with `runtime.rs::emit_verum_string_join`
+                // which uses `(i64, ptr) -> ptr`.  The runtime emitter
+                // had defensive code handling BOTH shapes (lines 7817-7824
+                // in runtime.rs) as a band-aid.  Routing through
+                // `get_or_declare_function` with the CANONICAL shape
+                // surfaces any future drift through the signature-
+                // mismatch registry.
                 let i64_type = ctx.types().i64_type();
                 let ptr_type = ctx.types().ptr_type();
                 let module = ctx.get_module();
+                let list_i64 = as_i64(ctx, ctx.get_register(receiver.0)?, "list_as_i64")?;
                 let text_get_ptr_fn = { let fn_type = ptr_type.fn_type(&[i64_type.into()], false); super::error::get_or_declare_function(module, "verum_text_get_ptr", fn_type) };
                 let sep_i64 = as_i64(ctx, ctx.get_register(args.start.0)?, "sep_i64")?;
                 let sep_ptr = ctx
@@ -12640,13 +12653,11 @@ fn lower_call_method<'ctx>(
                     .or_llvm_err()?
                     .basic_value_or("text_get_ptr: no value")?
                     .into_pointer_value();
-                let fn_type = ptr_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
-                let join_fn = module
-                    .get_function("verum_string_join")
-                    .unwrap_or_else(|| module.add_function("verum_string_join", fn_type, None));
+                let fn_type = ptr_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
+                let join_fn = super::error::get_or_declare_function(module, "verum_string_join", fn_type);
                 let char_result = ctx
                     .builder()
-                    .build_call(join_fn, &[list_ptr.into(), sep_ptr.into()], "str_join")
+                    .build_call(join_fn, &[list_i64.into(), sep_ptr.into()], "str_join")
                     .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
@@ -12747,30 +12758,51 @@ fn lower_call_method<'ctx>(
                 return Ok(());
             }
             "reverse" if args.count == 0 => {
-                // Reverse via LLVM IR helper (emitted by define_list_ir_helpers)
+                // Reverse via LLVM IR helper (emitted by define_list_ir_helpers
+                // in runtime.rs).  Canonical signature per
+                // `syscall_registry::VERUM_RUNTIME_SYMBOLS`:
+                //   `verum_list_reverse(list: ptr) -> void`
+                //
+                // Pre-fix this site declared `(ptr) -> ptr`, conflicting
+                // with the runtime emitter's `(ptr) -> void`.  Routing
+                // through `get_or_declare_function` with the canonical
+                // signature locks them in agreement.
                 let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
                 let i64_type = ctx.types().i64_type();
                 let ptr_type = ctx.types().ptr_type();
                 let module = ctx.get_module();
-                let fn_type = ptr_type.fn_type(&[ptr_type.into()], false);
-        let reverse_fn = super::error::get_or_declare_function(module, "verum_list_reverse", fn_type);
+                let void_type = ctx.types().void_type();
+                let fn_type = void_type.fn_type(&[ptr_type.into()], false);
+                let reverse_fn = super::error::get_or_declare_function(module, "verum_list_reverse", fn_type);
                 ctx.builder()
                     .build_call(reverse_fn, &[list_ptr.into()], "")
                     .or_llvm_err()?;
+                // reverse returns void — store a zero sentinel so the
+                // caller's return-register has a defined value.  The
+                // method-call wrapper at the source level returns Unit
+                // anyway.
                 ctx.set_register(dst.0, i64_type.const_zero().into());
                 return Ok(());
             }
             "swap" if args.count == 2 => {
                 // Swap via LLVM IR helper (emitted by define_list_ir_helpers)
                 let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
+                // Swap via LLVM IR helper.  Canonical signature per
+                // `syscall_registry::VERUM_RUNTIME_SYMBOLS`:
+                //   `verum_list_swap(list: ptr, i: i64, j: i64) -> void`
+                //
+                // Pre-fix this site declared `ptr(ptr, i64, i64) -> ptr`
+                // — conflicting with the void-returning runtime
+                // implementation.
                 let idx_a = as_i64(ctx, ctx.get_register(args.start.0)?, "swap_a")?;
                 let idx_b = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "swap_b")?;
                 let i64_type = ctx.types().i64_type();
                 let ptr_type = ctx.types().ptr_type();
+                let void_type = ctx.types().void_type();
                 let module = ctx.get_module();
-                let fn_type = ptr_type
+                let fn_type = void_type
                         .fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
-        let swap_fn = super::error::get_or_declare_function(module, "verum_list_swap", fn_type);
+                let swap_fn = super::error::get_or_declare_function(module, "verum_list_swap", fn_type);
                 ctx.builder()
                     .build_call(swap_fn, &[list_ptr.into(), idx_a.into(), idx_b.into()], "")
                     .or_llvm_err()?;
@@ -14425,20 +14457,40 @@ fn lower_call_method<'ctx>(
         match (method_type_prefix.unwrap_or(""), bare_method_early) {
             ("TcpStream", "connect") => {
                 // TcpStream.connect(addr) → verum_tcp_connect(host, port)
-                // For now, accept Text argument "host:port"
+                //
+                // Canonical signature per
+                // `syscall_registry::VERUM_RUNTIME_SYMBOLS`:
+                //   `verum_tcp_connect(host: ptr, port: i64) -> i64`
+                //
+                // Pre-fix this site declared `i64(i64, i64) -> i64`,
+                // conflicting with the canonical `i64(ptr, i64) -> i64`
+                // used at every other emit path.  The Verum addr
+                // register holds a Text-tagged i64 here — convert it
+                // back to a raw char* via verum_text_get_ptr to match
+                // the canonical first-arg shape.
                 let addr_val = if args.count > 0 {
                     ctx.get_register(args.start.0)?
                 } else {
                     i64_type.const_int(0, false).into()
                 };
-                let addr_i64 = coerce_value(ctx, addr_val, i64_type.into(), "tcp_addr")?;
+                let addr_i64 = coerce_value(ctx, addr_val, i64_type.into(), "tcp_addr_i64")?;
+                let text_get_ptr_fn = {
+                    let ft = ptr_type.fn_type(&[i64_type.into()], false);
+                    super::error::get_or_declare_function(module, "verum_text_get_ptr", ft)
+                };
+                let addr_ptr = ctx
+                    .builder()
+                    .build_call(text_get_ptr_fn, &[addr_i64.into()], "tcp_addr_cptr")
+                    .or_llvm_err()?
+                    .basic_value_or("text_get_ptr: no value")?
+                    .into_pointer_value();
                 // Pass host:port as text, port=0 (let C runtime parse)
-                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        let connect_fn = super::error::get_or_declare_function(module, "verum_tcp_connect", fn_type);
+                let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+                let connect_fn = super::error::get_or_declare_function(module, "verum_tcp_connect", fn_type);
                 let port = i64_type.const_int(0, false);
                 let fd = ctx
                     .builder()
-                    .build_call(connect_fn, &[addr_i64.into(), port.into()], "tcp_fd")
+                    .build_call(connect_fn, &[addr_ptr.into(), port.into()], "tcp_fd")
                     .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()
@@ -15454,20 +15506,25 @@ fn lower_call_method<'ctx>(
             }
             // repeat: REMOVED — compiled text.vr via Strategy 1/2.
             "join" if args.count == 1 => {
-                // List<Text>.join(sep) — receiver is a list, arg is separator string
+                // List<Text>.join(sep) — receiver is a list, arg is separator string.
+                //
+                // Canonical signature per `syscall_registry::VERUM_RUNTIME_SYMBOLS`:
+                //   `verum_string_join(list_ptr: i64, sep: *i8) -> *i8`
+                //
+                // Pre-fix this site declared `(ptr, ptr) -> ptr` —
+                // conflicting with the canonical `(i64, ptr) -> ptr`
+                // and triggering the signature-mismatch registry.
                 let i64_type = ctx.types().i64_type();
                 let ptr_type = ctx.types().ptr_type();
                 let module = ctx.get_module();
-                let fn_type = ptr_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
-                let join_fn = module
-                    .get_function("verum_string_join")
-                    .unwrap_or_else(|| module.add_function("verum_string_join", fn_type, None));
-                // receiver is a List, not a Text — use as_ptr directly (not extract_char_ptr)
-                let list_ptr = as_ptr(ctx, ctx.get_register(receiver.0)?, "list_ptr")?;
+                let fn_type = ptr_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
+                let join_fn = super::error::get_or_declare_function(module, "verum_string_join", fn_type);
+                // receiver is a List — pass as i64 (the registry-canonical first-arg shape)
+                let list_i64 = as_i64(ctx, ctx.get_register(receiver.0)?, "list_as_i64")?;
                 let sep_ptr = text_extract_cptr!(args.start.0, "join_sep");
                 let char_result = ctx
                     .builder()
-                    .build_call(join_fn, &[list_ptr.into(), sep_ptr.into()], "str_join")
+                    .build_call(join_fn, &[list_i64.into(), sep_ptr.into()], "str_join")
                     .or_llvm_err()?
                     .try_as_basic_value()
                     .basic()

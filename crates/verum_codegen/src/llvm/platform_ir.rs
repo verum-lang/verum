@@ -3943,11 +3943,19 @@ impl<'ctx> PlatformIR<'ctx> {
         let i32_type = ctx.i32_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
-        // verum_raw_open3(path: ptr, flags: i32, mode: i32) -> i64
-        // Thin C wrapper for open() — fixes variadic ABI on ARM64
-        if module.get_function("verum_raw_open3").is_none() {
-            let ft = i64_type.fn_type(&[ptr_type.into(), i32_type.into(), i32_type.into()], false);
-            module.add_function("verum_raw_open3", ft, None);
+        // verum_raw_open3(path: ptr, flags: i64, mode: i64) -> i64
+        //
+        // Thin C wrapper for open() — fixes variadic ABI on ARM64.
+        // Canonical signature per
+        // `syscall_registry::VERUM_RUNTIME_SYMBOLS` is i64-everywhere
+        // (matches Verum's i64-canonical ABI for POSIX-flavoured args).
+        // Pre-fix this site declared flags/mode as i32 — conflicting
+        // with the runtime-side i64 ABI and recorded by the signature
+        // mismatch gate.  Routed through `get_or_declare_function` so
+        // any future drift is logged into the registry.
+        {
+            let ft = i64_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
+            super::error::get_or_declare_function(module, "verum_raw_open3", ft);
         }
         // All POSIX syscalls declared with i64 types (Verum ABI convention)
         let decls: &[(&str, verum_llvm::types::FunctionType<'ctx>)] = &[
