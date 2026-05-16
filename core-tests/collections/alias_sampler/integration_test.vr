@@ -1,0 +1,16 @@
+// =============================================================================
+// core-tests/collections/alias_sampler/integration_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.alias_sampler.{AliasError};
+
+@test
+fn int_alias_error_pattern_match_carries_index() {
+    let err = AliasError.NegativeWeight(3);
+    let idx = match err {
+        NegativeWeight(i) => i,
+        _ => -1,
+    };
+    assert_eq(idx, 3);
+}

@@ -1,0 +1,68 @@
+// =============================================================================
+// core-tests/collections/adjacency_list/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.adjacency_list.{AdjacencyList};
+
+// =============================================================================
+// §A — AdjacencyList.add_edge field-write defect
+//
+// `add_edge(src, tgt, label)` panics at runtime with
+//   "field write out of bounds: field index 101 (offset 808+8 = 816)
+//    exceeds object data size 24"
+//
+// The huge field index (101) suggests a Map-internal write at the
+// wrong slot when the inner edge-Map's stdlib type-decl mismatches
+// runtime allocation.  Same architectural class as the closed
+// List / Map layout drift, but not yet closed for the edge-Map.
+//
+// Fix path: audit the inner edge-storage layout in adjacency_list.vr
+// against `crates/verum_vbc/.../method_dispatch.rs` Map intercepts.
+// =============================================================================
+
+@ignore
+@test
+fn regression_adj_add_edge_increments_edge_count() {
+    let mut g: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    g.add_vertex(1);
+    g.add_vertex(2);
+    g.add_edge(1, 2, ());
+    assert_eq(g.edge_count(), 1);
+}
+
+@ignore
+@test
+fn regression_adj_multiple_edges_count_correctly() {
+    let mut g: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    g.add_vertex(1);
+    g.add_vertex(2);
+    g.add_vertex(3);
+    g.add_edge(1, 2, ());
+    g.add_edge(2, 3, ());
+    g.add_edge(1, 3, ());
+    assert_eq(g.edge_count(), 3);
+}
+
+// =============================================================================
+// §F — PASS-GUARD pins for the working surface (vertices only)
+// =============================================================================
+
+@test
+fn pass_guard_adj_empty_zero_vertex_count() {
+    let g: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    assert_eq(g.vertex_count(), 0);
+}
+
+@test
+fn pass_guard_adj_empty_zero_edge_count() {
+    let g: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    assert_eq(g.edge_count(), 0);
+}
+
+@test
+fn pass_guard_adj_add_vertex_increments() {
+    let mut g: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    g.add_vertex(42);
+    assert_eq(g.vertex_count(), 1);
+}

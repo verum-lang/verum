@@ -1,0 +1,30 @@
+// =============================================================================
+// core-tests/collections/adjacency_list/integration_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.adjacency_list.{AdjacencyList};
+
+// Integration: vertex-only graph independence.
+@test
+fn int_adj_vertex_only_independent_instances() {
+    let mut a: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    let mut b: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    a.add_vertex(1);
+    a.add_vertex(2);
+    b.add_vertex(99);
+    assert_eq(a.vertex_count(), 2);
+    assert_eq(b.vertex_count(), 1);
+}
+
+// Integration: progressive vertex addition.
+@test
+fn int_adj_progressive_vertex_growth() {
+    let mut g: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    let mut i = 0;
+    while i < 5 {
+        g.add_vertex(i);
+        assert_eq(g.vertex_count(), i + 1);
+        i = i + 1;
+    }
+}

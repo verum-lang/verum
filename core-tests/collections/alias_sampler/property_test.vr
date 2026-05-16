@@ -1,0 +1,20 @@
+// =============================================================================
+// core-tests/collections/alias_sampler/property_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.alias_sampler.{AliasError};
+
+@test
+fn law_alias_error_variants_distinct() {
+    let e1: AliasError = AliasError.EmptyWeights;
+    let e2: AliasError = AliasError.NegativeWeight(0);
+    let e3: AliasError = AliasError.NonFiniteWeight(0);
+    // All three are constructible.  Discriminate via match.
+    let is_empty = match e1 { EmptyWeights => true, _ => false };
+    let is_neg   = match e2 { NegativeWeight(_) => true, _ => false };
+    let is_nfin  = match e3 { NonFiniteWeight(_) => true, _ => false };
+    assert(is_empty);
+    assert(is_neg);
+    assert(is_nfin);
+}

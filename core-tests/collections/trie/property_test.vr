@@ -1,0 +1,36 @@
+// =============================================================================
+// core-tests/collections/trie/property_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.trie.{Trie};
+
+// Law: empty trie has len=0, is_empty=true.
+@test
+fn law_trie_empty_invariants() {
+    let t: Trie<Int> = Trie.new();
+    assert(t.is_empty());
+    assert_eq(t.len(), 0);
+}
+
+// Law: get on absent key always None across multiple distinct keys.
+@test
+fn law_trie_empty_get_always_none() {
+    let t: Trie<Int> = Trie.new();
+    let keys: List<[Byte; 1]> = [[1], [2], [3], [4]];
+    let mut i = 0;
+    while i < keys.len() {
+        let k = keys[i];
+        let v: Maybe<Int> = t.get(&k);
+        assert(v is None);
+        i = i + 1;
+    }
+}
+
+// Law: contains on absent key always false.
+@test
+fn law_trie_empty_contains_always_false() {
+    let t: Trie<Int> = Trie.new();
+    let k: [Byte; 1] = [42];
+    assert(!t.contains(&k));
+}

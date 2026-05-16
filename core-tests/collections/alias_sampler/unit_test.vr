@@ -1,0 +1,21 @@
+// =============================================================================
+// core-tests/collections/alias_sampler/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.alias_sampler` — Vose's alias method
+// for weighted sampling.  Sampling routes through the CSPRNG; setup
+// (from_weights) is pure arithmetic and should be reachable.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.alias_sampler.{AliasSampler, AliasError};
+
+// =============================================================================
+// Section 1: AliasError variants constructible
+// =============================================================================
+
+@test
+fn test_alias_error_empty_weights_constructible() {
+    let _err: AliasError = AliasError.EmptyWeights;
+    assert(true);
+}

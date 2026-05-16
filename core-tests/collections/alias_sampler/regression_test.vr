@@ -1,0 +1,55 @@
+// =============================================================================
+// core-tests/collections/alias_sampler/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.alias_sampler.{AliasSampler, AliasError};
+
+// =============================================================================
+// §A — AliasSampler construction + sample gated on CSPRNG
+//
+// `sample()` calls into the secure RNG.  Construction itself
+// (`from_weights`) is pure arithmetic but the type's runtime layout
+// shares the wrapper-record class.  Pin both reachability paths.
+// =============================================================================
+
+@ignore
+@test
+fn regression_alias_from_weights_uniform_constructible() {
+    let weights: [Float; 4] = [0.25, 0.25, 0.25, 0.25];
+    let r = AliasSampler.from_weights(&weights);
+    assert(r is Ok(_));
+}
+
+@ignore
+@test
+fn regression_alias_from_weights_empty_returns_error() {
+    let weights: [Float; 0] = [];
+    let r = AliasSampler.from_weights(&weights);
+    assert(r is Err(_));
+}
+
+@ignore
+@test
+fn regression_alias_sample_within_bounds() {
+    let weights: [Float; 4] = [0.25, 0.25, 0.25, 0.25];
+    let s = match AliasSampler.from_weights(&weights) {
+        Ok(s) => s,
+        Err(_) => { panic("from_weights failed"); return; },
+    };
+    let i = s.sample();
+    assert(i >= 0);
+    assert(i < 4);
+}
+
+// =============================================================================
+// §F — PASS-GUARD pin for the error-type surface
+// =============================================================================
+
+@test
+fn pass_guard_alias_error_variants_constructible() {
+    let _e1: AliasError = AliasError.EmptyWeights;
+    let _e2: AliasError = AliasError.NegativeWeight(0);
+    let _e3: AliasError = AliasError.NonFiniteWeight(0);
+    assert(true);
+}

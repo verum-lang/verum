@@ -1,0 +1,59 @@
+// =============================================================================
+// core-tests/collections/count_min/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.count_min.{CountMinSketch, CountMinError};
+
+// =============================================================================
+// §A — CountMinSketch construction gated on fill_secure CSPRNG
+//
+// `CountMinSketch.new(width, depth)` / `with_target` calls
+// `fill_secure(&mut key[..])` which is gated on
+// `core.sys.common.random_bytes`.  Same defect class as Bloom /
+// HyperLogLog / Reservoir.
+// =============================================================================
+
+@ignore
+@test
+fn regression_cms_new_constructible() {
+    let cms = CountMinSketch.new(1024, 8);
+    assert(cms.width() == 1024);
+    assert(cms.depth() == 8);
+}
+
+@ignore
+@test
+fn regression_cms_with_target_constructible() {
+    let cms = CountMinSketch.with_target(0.001, 0.001);
+    assert(cms.width() > 0);
+}
+
+@ignore
+@test
+fn regression_cms_add_increments_total() {
+    let mut cms = CountMinSketch.new(1024, 8);
+    let item: [Byte; 4] = [1, 2, 3, 4];
+    let _ = cms.add(&item);
+    assert(cms.total() >= 1_u64);
+}
+
+@ignore
+@test
+fn regression_cms_estimate_non_negative() {
+    let cms = CountMinSketch.new(1024, 8);
+    let item: [Byte; 4] = [1, 2, 3, 4];
+    let est = cms.estimate(&item);
+    // Lower bound: zero for absent item.
+    assert(est >= 0_u64);
+}
+
+// =============================================================================
+// §F — PASS-GUARD pins for the error-type surface
+// =============================================================================
+
+@test
+fn pass_guard_cms_error_bad_parameters_constructible() {
+    let _err: CountMinError = CountMinError.BadParameters(Text.from("bad"));
+    assert(true);
+}

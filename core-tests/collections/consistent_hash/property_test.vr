@@ -1,0 +1,47 @@
+// =============================================================================
+// core-tests/collections/consistent_hash/property_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.consistent_hash.{ConsistentHashRing, DEFAULT_VIRTUAL_NODES};
+
+// Law: empty ring has zero nodes.
+@test
+fn law_ring_empty_zero_nodes() {
+    let r = ConsistentHashRing.new();
+    assert_eq(r.node_count(), 0);
+}
+
+// Law: empty ring has zero virtual positions.
+@test
+fn law_ring_empty_zero_positions() {
+    let r = ConsistentHashRing.new();
+    assert_eq(r.position_count(), 0);
+}
+
+// Law: with_virtual_nodes constructor preserves empty-state invariants.
+@test
+fn law_ring_with_virtual_nodes_still_empty() {
+    let r = ConsistentHashRing.with_virtual_nodes(160);
+    assert_eq(r.node_count(), 0);
+    assert_eq(r.position_count(), 0);
+}
+
+// Law: DEFAULT_VIRTUAL_NODES is a valid (positive) tuning value.
+@test
+fn law_ring_default_virtual_nodes_positive() {
+    assert(DEFAULT_VIRTUAL_NODES > 0);
+}
+
+// Law: nodes_for_key on empty returns 0-len list regardless of requested count.
+@test
+fn law_ring_nodes_for_key_empty_list() {
+    let r = ConsistentHashRing.new();
+    let key: [Byte; 1] = [42];
+    let mut i = 1;
+    while i <= 5 {
+        let n = r.nodes_for_key(&key, i);
+        assert_eq(n.len(), 0);
+        i = i + 1;
+    }
+}
