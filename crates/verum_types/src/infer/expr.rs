@@ -502,6 +502,119 @@ impl TypeChecker {
                 // Expand expected type to variant form
                 let resolved_expected_call = self.unifier.apply(expected);
                 let expanded_expected = self.expand_generic_to_variant(&resolved_expected_call);
+                // **Architectural fallback** (closes iterator §D / task #14
+                // §3.2): when `expand_generic_to_variant` doesn't produce a
+                // `Type::Variant` (because the type's registration shape is
+                // self-referential `Named { Same, args: [] }` rather than
+                // `Type::Variant`), fall back to
+                // `try_resolve_variant_constructor_with_arity` which builds
+                // a proper `fn(payload, ...) -> Variant<fresh_vars>` type
+                // with fresh TypeVars for parent's generic params, then
+                // unifies the constructor return type with the user's
+                // expected type so concrete args propagate to payload
+                // checking.
+                //
+                // Stdlib-agnostic: works for any variant whose parent type
+                // is registered in `variant_constructor_parents` — handles
+                // the lazy-loaded path (`ReduceResult<R>`) symmetrically
+                // with the eager-loaded path (`Maybe<T>` / `Result<T, E>`).
+                // Gate: only fire when the ORIGINAL expected type carries
+                // concrete generic args (e.g. `ReduceResult<Int>`) —
+                // signalling the user expressed a fully-instantiated type.
+                // When expanded_expected stays as `Type::Named { args: [] }`
+                // (precompile-eager-loaded variant types whose registration
+                // shape is self-referential), the fallback path resolves
+                // the constructor against fresh TypeVars and unifies
+                // return-type with the user's expected to bind them.
+                //
+                // When expected is a `Type::Var(_)` (unresolved unifier var
+                // — e.g. polymorphic `assert_eq<T>` first-arg binding
+                // pending), we MUST NOT eagerly resolve the constructor —
+                // that would pick first-registered parent and shadow the
+                // unifier's pending binding.
+                let expected_has_concrete_args = match &resolved_expected_call {
+                    Type::Named { args, .. } | Type::Generic { args, .. } => {
+                        !args.is_empty()
+                    }
+                    _ => false,
+                };
+                if !matches!(expanded_expected, Type::Variant(_))
+                    && expected_has_concrete_args
+                    && self
+                        .variant_constructor_parents
+                        .get(&Text::from(constructor_name))
+                        .is_some()
+                    && let Some(ctor_ty) = self.try_resolve_variant_constructor_with_arity(
+                        constructor_name,
+                        Some(call_args.len()),
+                    )
+                {
+                    if let Type::Function {
+                        params,
+                        return_type,
+                        ..
+                    } = ctor_ty
+                    {
+                        if params.len() == call_args.len() {
+                            // Extract concrete args from the user's expected
+                            // type.  These positionally bind the parent
+                            // variant's generic params.
+                            let concrete_args: List<Type> =
+                                match &resolved_expected_call {
+                                    Type::Named { args, .. }
+                                    | Type::Generic { args, .. } => args.clone(),
+                                    _ => List::new(),
+                                };
+                            // Collect bare-Named param names from the
+                            // constructor signature in positional order so
+                            // we can substitute the rigid `Named{R}`-style
+                            // payloads with the user's concrete args.
+                            let mut named_params: Vec<verum_common::Text> =
+                                Vec::new();
+                            for p in params.iter() {
+                                Self::collect_bare_named_param_names(
+                                    p,
+                                    &mut named_params,
+                                );
+                            }
+                            Self::collect_bare_named_param_names(
+                                &return_type,
+                                &mut named_params,
+                            );
+                            let mut subst: indexmap::IndexMap<
+                                verum_common::Text,
+                                Type,
+                            > = indexmap::IndexMap::new();
+                            for (i, name) in named_params.iter().enumerate() {
+                                if let Some(arg) = concrete_args.get(i) {
+                                    subst.insert(name.clone(), arg.clone());
+                                }
+                            }
+                            // Unify constructor's parent-instance return
+                            // type with the user's expected type — binds
+                            // parent generic-param TypeVars when the
+                            // constructor side carries them.
+                            let _ = self
+                                .unifier
+                                .unify(&return_type, expected, expr.span);
+                            // Now type-check each call argument against
+                            // the substituted param type (combines
+                            // user's concrete args + unifier's bindings).
+                            for (arg, param_ty) in
+                                call_args.iter().zip(params.iter())
+                            {
+                                let substituted =
+                                    Self::substitute_named_params_in_type(
+                                        param_ty, &subst,
+                                    );
+                                let resolved_param =
+                                    self.unifier.apply(&substituted);
+                                self.check_expr(arg, &resolved_param)?;
+                            }
+                            return Ok(InferResult::new(expected.clone()));
+                        }
+                    }
+                }
                 if let Type::Variant(ref variants) = expanded_expected {
                     if let Some(payload_ty) = variants.get(constructor_name) {
                         // The expected variant type has this constructor — use it

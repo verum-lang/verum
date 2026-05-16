@@ -1538,6 +1538,43 @@ impl TypeChecker {
                     // Mark as explicit import (single-path imports are explicit)
                     self.explicit_imports.insert(item_name.to_string());
 
+                    // §Y close: track the source module path under
+                    // `imported_names` so `lookup_record_type` can
+                    // prefer the mount-scoped qualified type over the
+                    // last-write-wins bare-name slot in `type_defs`.
+                    //
+                    // Previously `imported_names` was populated only by
+                    // the inline-module path
+                    // (`register_imported_item_from_inline_module`),
+                    // leaving every cross-file `mount foo.{Bar}` without
+                    // a recorded provenance.  This funnel makes the
+                    // mount-source visible to the bare-name resolver
+                    // regardless of whether `foo` is inline-declared or
+                    // file-backed.
+                    {
+                        let local_name = match (&import.tree.alias, &import.alias) {
+                            (Maybe::Some(a), _) => a.name.as_str(),
+                            (Maybe::None, Maybe::Some(a)) => a.name.as_str(),
+                            _ => item_name,
+                        };
+                        let name_text = verum_common::Text::from(local_name);
+                        let source = verum_common::Text::from(format!(
+                            "cog.{}",
+                            module_path.as_str()
+                        ));
+                        if let Some(sources) =
+                            self.imported_names.get_mut(&name_text)
+                        {
+                            if !sources.iter().any(|s| s == &source) {
+                                sources.push(source);
+                            }
+                        } else {
+                            let mut sources = List::new();
+                            sources.push(source);
+                            self.imported_names.insert(name_text, sources);
+                        }
+                    }
+
                     // Honour `mount X.Y as Z;` at the leaf level — the
                     // parser mirrors the outer `MountDecl.alias` onto
                     // `tree.alias` for the Path form so the alias is
@@ -1771,6 +1808,34 @@ impl TypeChecker {
                         // explicit import takes precedence.
                         let register_name = local_name.unwrap_or(item_name.as_str());
                         self.explicit_imports.insert(register_name.to_string());
+
+                        // §Y close: track the source module path for
+                        // `lookup_record_type` mount-scoped resolution.
+                        // Mirror of the population in the
+                        // `MountTreeKind::Path` arm above; the Nested arm
+                        // is the path that `mount X.{Item}` actually
+                        // takes after parsing.  Without this, every
+                        // braced import was invisible to the bare-name
+                        // resolver, leaving `type_defs` last-write-wins
+                        // as the only signal.
+                        {
+                            let name_text = verum_common::Text::from(register_name);
+                            let source = verum_common::Text::from(format!(
+                                "cog.{}",
+                                module_path.as_str()
+                            ));
+                            if let Some(sources) =
+                                self.imported_names.get_mut(&name_text)
+                            {
+                                if !sources.iter().any(|s| s == &source) {
+                                    sources.push(source);
+                                }
+                            } else {
+                                let mut sources = List::new();
+                                sources.push(source);
+                                self.imported_names.insert(name_text, sources);
+                            }
+                        }
 
                         let import_result = self.import_item_from_module_with_alias_and_span(
                             &module_path,
@@ -10817,7 +10882,8 @@ impl TypeChecker {
 
                     // Check for import ambiguity first
                     // Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Import Ambiguity
-                    if let Some(sources) = self.imported_names.get(&verum_common::Text::from(name))
+                    let mount_scoped_source = if let Some(sources) =
+                        self.imported_names.get(&verum_common::Text::from(name))
                     {
                         if sources.len() > 1 {
                             let sources_str = sources
@@ -10830,6 +10896,118 @@ impl TypeChecker {
                                 sources: verum_common::Text::from(sources_str),
                                 span,
                             });
+                        }
+                        // Exactly one source — record it so we can prefer the
+                        // mount-scoped type definition over the unqualified
+                        // last-write-wins entry in `type_defs`.
+                        sources.iter().next().cloned()
+                    } else {
+                        Option::None
+                    };
+
+                    // §Y close: mount-scoped name resolution.
+                    //
+                    // The unqualified `type_defs` map is last-write-wins
+                    // across the entire stdlib registration phase — two
+                    // modules that both define a public type with the
+                    // same bare name (e.g. `core.text.text.ParseError`
+                    // + `core.cli.error.ParseError`) overwrite each
+                    // other's bare-name slot, and whichever loads later
+                    // "wins" the unqualified lookup.  User code that
+                    // explicitly mounts one of them should always
+                    // resolve to the mounted one, regardless of
+                    // registration order.
+                    //
+                    // Every stdlib type is *also* registered under a
+                    // fully-qualified flat key `<actual_module_path>.<name>`
+                    // (see `define_type_in_current_module` in `env.rs`).
+                    // For a re-exporting mount like
+                    // `mount core.text.{ParseError}` (which surfaces a
+                    // type defined in the file-backed submodule
+                    // `core.text.text`), the importer's source path
+                    // (`core.text`) does NOT directly match the
+                    // qualified key (`core.text.text.ParseError`).  We
+                    // resolve that mismatch by walking the export
+                    // table on the source module — `ExportedItem`
+                    // carries the actual `source_module` ModuleId, so
+                    // we recover the canonical path of where the type
+                    // was originally declared and compose the lookup
+                    // key from THAT.
+                    //
+                    // On every miss we fall through to the bare-name
+                    // lookup so untracked / forward-declared /
+                    // synthetic types still resolve.
+                    if let Option::Some(source) = mount_scoped_source {
+                        let source_str = source.as_str();
+                        // Strip the "cog." prefix prepended by the
+                        // import-tracking funnel.
+                        let canonical = source_str
+                            .strip_prefix("cog.")
+                            .unwrap_or(source_str);
+                        if !canonical.is_empty() && canonical != "cog" {
+                            // First try a direct `<canonical>.<name>`
+                            // lookup — fast path for non-re-exporting
+                            // mounts (e.g. `mount core.cli.error.{ParseError}`
+                            // resolves to `core.cli.error.ParseError`).
+                            let direct_qualified = format!("{}.{}", canonical, name);
+                            if let Option::Some(ty) = self.ctx.lookup_type(&direct_qualified) {
+                                return Ok(ty.clone());
+                            }
+
+                            // Re-export hop: consult the source
+                            // module's export table to find where the
+                            // item was originally declared.
+                            let registry = self.module_registry.read();
+                            if let Maybe::Some(src_info) =
+                                registry.get_by_path_aliased(canonical)
+                            {
+                                let name_text =
+                                    verum_common::Text::from(name);
+                                if let Maybe::Some(item) =
+                                    src_info.exports.get(&name_text)
+                                {
+                                    let owning_module_id = item.source_module;
+                                    if let Maybe::Some(owning_info) =
+                                        registry.get(owning_module_id)
+                                    {
+                                        let owning_path = owning_info
+                                            .path
+                                            .to_string();
+                                        // Drop the `cog.` prefix if
+                                        // the registry's canonical
+                                        // form carries one (the
+                                        // type-defs side stores
+                                        // without it).
+                                        let owning_canonical = owning_path
+                                            .strip_prefix("cog.")
+                                            .unwrap_or(&owning_path)
+                                            .to_string();
+                                        drop(registry);
+                                        if !owning_canonical.is_empty() {
+                                            let owning_qualified = format!(
+                                                "{}.{}",
+                                                owning_canonical, name
+                                            );
+                                            if let Option::Some(ty) = self
+                                                .ctx
+                                                .lookup_type(&owning_qualified)
+                                            {
+                                                return Ok(ty.clone());
+                                            }
+                                            let owning_struct = format!(
+                                                "{}.__struct_fields_{}",
+                                                owning_canonical, name
+                                            );
+                                            if let Option::Some(ty) = self
+                                                .ctx
+                                                .lookup_type(&owning_struct)
+                                            {
+                                                return Ok(ty.clone());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -12148,9 +12326,9 @@ impl TypeChecker {
                                 Option::Some(Type::Record(params_map)) => Option::Some(params_map),
                                 _ => Option::None,
                             };
+                            let mut subst: indexmap::IndexMap<verum_common::Text, Type> =
+                                indexmap::IndexMap::new();
                             if let Option::Some(params_map) = params_map_opt {
-                                let mut subst: indexmap::IndexMap<verum_common::Text, Type> =
-                                    indexmap::IndexMap::new();
                                 for (i, (param_name, param_type)) in params_map.iter().enumerate() {
                                     if let Some(arg) = args.get(i) {
                                         subst.insert(param_name.clone(), arg.clone());
@@ -12161,35 +12339,52 @@ impl TypeChecker {
                                         }
                                     }
                                 }
-                                // Also extract free vars from the variant definition itself
-                                // and map them positionally to type args. This handles the case
-                                // where the variant definition has different TypeVar IDs than
-                                // the params record (e.g., after re-registration).
-                                let variant_type_ref = Type::Variant(variants.clone());
-                                let free_vars = variant_type_ref.free_vars();
-                                let mut free_vars_sorted: Vec<TypeVar> =
-                                    free_vars.into_iter().collect();
-                                free_vars_sorted.sort_by_key(|tv| tv.id());
-                                // Map free vars from the variant body to type args.
-                                // Only add entries for vars NOT already covered by params_map,
-                                // to avoid overriding the correct declaration-order mapping.
-                                for (i, tv) in free_vars_sorted.iter().enumerate() {
-                                    if let Some(arg) = args.get(i) {
-                                        let var_key: verum_common::Text =
-                                            format!("T{}", tv.id()).into();
-                                        if !subst.contains_key(&var_key) {
-                                            subst.insert(var_key, arg.clone());
-                                        }
+                            }
+                            // Always extract free TypeVars + bare-Named param names
+                            // for positional substitution.  Mirror of the same
+                            // robust-substitution discipline applied to the
+                            // `Type::Named` branch below (task #14 / iterator §D).
+                            let variant_type_ref = Type::Variant(variants.clone());
+                            let free_vars = variant_type_ref.free_vars();
+                            let mut free_vars_sorted: Vec<TypeVar> =
+                                free_vars.into_iter().collect();
+                            free_vars_sorted.sort_by_key(|tv| tv.id());
+                            for (i, tv) in free_vars_sorted.iter().enumerate() {
+                                if let Some(arg) = args.get(i) {
+                                    let var_key: verum_common::Text =
+                                        format!("T{}", tv.id()).into();
+                                    if !subst.contains_key(&var_key) {
+                                        subst.insert(var_key, arg.clone());
                                     }
                                 }
+                            }
+                            // Bare-Named param name collection — uniform with the
+                            // Named-branch helper.  Inlined here because the helper
+                            // is declared as a local `fn` in the Named branch.
+                            let mut named_params_ordered: Vec<verum_common::Text> =
+                                Vec::new();
+                            for payload_ty in variants.values() {
+                                Self::collect_bare_named_param_names(
+                                    payload_ty,
+                                    &mut named_params_ordered,
+                                );
+                            }
+                            for (i, name) in named_params_ordered.iter().enumerate() {
+                                if let Some(arg) = args.get(i) {
+                                    if !subst.contains_key(name) {
+                                        subst.insert(name.clone(), arg.clone());
+                                    }
+                                }
+                            }
+                            if subst.is_empty() {
+                                Type::Variant(variants.clone())
+                            } else {
                                 let mut substituted_variants = indexmap::IndexMap::new();
                                 for (tag, payload_ty) in variants.iter() {
                                     let subst_ty = self.substitute_type_params(payload_ty, &subst);
                                     substituted_variants.insert(tag.clone(), subst_ty);
                                 }
                                 Type::Variant(substituted_variants)
-                            } else {
-                                Type::Variant(variants.clone())
                             }
                         } else {
                             Type::Variant(variants.clone())
@@ -12232,9 +12427,9 @@ impl TypeChecker {
                                         }
                                         _ => Option::None,
                                     };
+                                let mut subst: indexmap::IndexMap<verum_common::Text, Type> =
+                                    indexmap::IndexMap::new();
                                 if let Option::Some(params_map) = params_map_opt {
-                                    let mut subst: indexmap::IndexMap<verum_common::Text, Type> =
-                                        indexmap::IndexMap::new();
                                     for (i, (param_name, param_type)) in
                                         params_map.iter().enumerate()
                                     {
@@ -12247,31 +12442,67 @@ impl TypeChecker {
                                             }
                                         }
                                     }
-                                    // Also extract free vars from variant def for TypeVar ID mismatch resilience
-                                    // Only add for TypeVars not already covered by params_map
-                                    let variant_type_ref = Type::Variant(variants.clone());
-                                    let free_vars = variant_type_ref.free_vars();
-                                    let mut free_vars_sorted: Vec<TypeVar> =
-                                        free_vars.into_iter().collect();
-                                    free_vars_sorted.sort_by_key(|tv| tv.id());
-                                    for (i, tv) in free_vars_sorted.iter().enumerate() {
-                                        if let Some(arg) = args.get(i) {
-                                            let var_key: verum_common::Text =
-                                                format!("T{}", tv.id()).into();
-                                            if !subst.contains_key(&var_key) {
-                                                subst.insert(var_key, arg.clone());
-                                            }
+                                }
+                                // Always extract free TypeVars + bare-Named param names
+                                // from the variant definition.  This makes substitution
+                                // robust even when `__type_params_<Name>` is not
+                                // registered (the case for variant types loaded purely
+                                // via metadata's eager path — e.g. `ReduceResult<R>` in
+                                // `core/base/iterator.vr`).
+                                //
+                                // **Architectural rule** (closes iterator §D / task #14):
+                                // every variant payload carries its own generic-param
+                                // bindings — either as `Type::Var(tv)` (source-driven
+                                // path) OR as `Type::Named { path: "R", args: [] }`
+                                // (metadata-eager path with rigid Named placeholders).
+                                // Positional substitution must work uniformly across
+                                // BOTH shapes so user code like `let r:
+                                // ReduceResult<Int> = Reduced(99)` round-trips
+                                // correctly regardless of registration path.
+                                let variant_type_ref = Type::Variant(variants.clone());
+                                let free_vars = variant_type_ref.free_vars();
+                                let mut free_vars_sorted: Vec<TypeVar> =
+                                    free_vars.into_iter().collect();
+                                free_vars_sorted.sort_by_key(|tv| tv.id());
+                                for (i, tv) in free_vars_sorted.iter().enumerate() {
+                                    if let Some(arg) = args.get(i) {
+                                        let var_key: verum_common::Text =
+                                            format!("T{}", tv.id()).into();
+                                        if !subst.contains_key(&var_key) {
+                                            subst.insert(var_key, arg.clone());
                                         }
                                     }
-                                    let mut substituted_variants = indexmap::IndexMap::new();
+                                }
+                                // Extract bare-Named param names (e.g. "R" in
+                                // `Named { path: "R", args: [] }`) in first-occurrence
+                                // order across variant payloads.  Positional binding
+                                // to the user's concrete args list.
+                                let mut named_params_ordered: Vec<verum_common::Text> =
+                                    Vec::new();
+                                for payload_ty in variants.values() {
+                                    Self::collect_bare_named_param_names(
+                                        payload_ty,
+                                        &mut named_params_ordered,
+                                    );
+                                }
+                                for (i, name) in named_params_ordered.iter().enumerate() {
+                                    if let Some(arg) = args.get(i) {
+                                        if !subst.contains_key(name) {
+                                            subst.insert(name.clone(), arg.clone());
+                                        }
+                                    }
+                                }
+                                if subst.is_empty() {
+                                    Type::Variant(variants.clone())
+                                } else {
+                                    let mut substituted_variants =
+                                        indexmap::IndexMap::new();
                                     for (tag, payload_ty) in variants.iter() {
                                         let subst_ty =
                                             self.substitute_type_params(payload_ty, &subst);
                                         substituted_variants.insert(tag.clone(), subst_ty);
                                     }
                                     Type::Variant(substituted_variants)
-                                } else {
-                                    Type::Variant(variants.clone())
                                 }
                             } else {
                                 Type::Variant(variants.clone())
@@ -12687,6 +12918,70 @@ impl TypeChecker {
     /// payload-substitution path in `register_variant_signature_for_lazy`)
     /// to swap rigid named-T type-parameter placeholders for fresh
     /// per-call-site TypeVars.
+    /// Collect bare-Named generic-param names from a type tree in
+    /// first-occurrence order.  Used by `expand_generic_to_variant`
+    /// to extract positional generic params from a variant's rigid
+    /// payload form (`Named { path: "R", args: [] }` shape) when
+    /// `__type_params_<TypeName>` is not registered (metadata-eager
+    /// path with rigid Named placeholders).
+    ///
+    /// **Heuristic** — a bare `Named { args: [] }` qualifies as a
+    /// generic param IFF its single path segment is ≤ 2 chars AND
+    /// starts with an uppercase ASCII letter.  Avoids capturing
+    /// concrete type names like `"Int"` / `"Bool"` / `"Text"`.
+    /// Single-letter convention (T / R / E / B / K / V / …) holds
+    /// across the entire stdlib by convention.
+    pub(crate) fn collect_bare_named_param_names(
+        ty: &Type,
+        out: &mut Vec<verum_common::Text>,
+    ) {
+        match ty {
+            Type::Named { path, args } if args.is_empty() => {
+                if path.segments.len() == 1 {
+                    if let Some(verum_ast::ty::PathSegment::Name(ident)) =
+                        path.segments.first()
+                    {
+                        let name = ident.name.clone();
+                        let first = name.as_str().chars().next();
+                        let is_param = first
+                            .map(|c| c.is_ascii_uppercase())
+                            .unwrap_or(false)
+                            && name.as_str().len() <= 2;
+                        if is_param && !out.contains(&name) {
+                            out.push(name);
+                        }
+                    }
+                }
+            }
+            Type::Named { args, .. } | Type::Generic { args, .. } => {
+                for a in args.iter() {
+                    Self::collect_bare_named_param_names(a, out);
+                }
+            }
+            Type::Tuple(parts) => {
+                for p in parts.iter() {
+                    Self::collect_bare_named_param_names(p, out);
+                }
+            }
+            Type::Function {
+                params,
+                return_type,
+                ..
+            } => {
+                for p in params.iter() {
+                    Self::collect_bare_named_param_names(p, out);
+                }
+                Self::collect_bare_named_param_names(return_type, out);
+            }
+            Type::Reference { inner, .. }
+            | Type::CheckedReference { inner, .. }
+            | Type::UnsafeReference { inner, .. } => {
+                Self::collect_bare_named_param_names(inner, out);
+            }
+            _ => {}
+        }
+    }
+
     pub(crate) fn substitute_named_params_in_type(
         ty: &Type,
         subst: &indexmap::IndexMap<verum_common::Text, Type>,
