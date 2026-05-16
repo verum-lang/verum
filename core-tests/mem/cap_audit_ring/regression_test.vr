@@ -50,7 +50,7 @@ fn regression_recent_zero_returns_empty() {
     record_revoke(
         0x1 as UInt64,
         1 as UInt32, 2 as UInt32,
-        CAP_OWNED, 0 as UInt16,
+        CAP_OWNED,
         0 as UInt64,
     );
     let r = recent(0);
@@ -70,7 +70,7 @@ fn regression_disabled_record_does_not_advance_count() {
     record_revoke(
         0xDEAD as UInt64,
         1 as UInt32, 2 as UInt32,
-        CAP_OWNED, 0 as UInt16,
+        CAP_OWNED,
         0 as UInt64,
     );
     let after = count();

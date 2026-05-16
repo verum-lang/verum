@@ -14,11 +14,11 @@
 mount core.prelude.*;
 mount core.mem.cap_audit.{
     CapEventKind, CapEvent,
-    Revoke, Attenuate, RefIncr, RefDecr, GenBump, EpochAdvance,
+    // Variants accessed via CapEventKind.X qualified form (Revoke collides with Capability.Revoke)
 };
 
 fn all_kinds() -> List<CapEventKind> {
-    [Revoke, Attenuate, RefIncr, RefDecr, GenBump, EpochAdvance]
+    [CapEventKind.Revoke, CapEventKind.Attenuate, CapEventKind.RefIncr, CapEventKind.RefDecr, CapEventKind.GenBump, CapEventKind.EpochAdvance]
 }
 
 // =============================================================================
@@ -68,12 +68,12 @@ fn law_eq_distinct_variants_unequal_exhaustive() {
 @test
 fn law_bumped_generation_is_revoke_or_gen_bump_only() {
     let cases: List<(CapEventKind, Bool)> = [
-        (Revoke, true),
-        (Attenuate, false),
-        (RefIncr, false),
-        (RefDecr, false),
-        (GenBump, true),
-        (EpochAdvance, false),
+        (CapEventKind.Revoke, true),
+        (CapEventKind.Attenuate, false),
+        (CapEventKind.RefIncr, false),
+        (CapEventKind.RefDecr, false),
+        (CapEventKind.GenBump, true),
+        (CapEventKind.EpochAdvance, false),
     ];
     for case in cases.iter() {
         let event = CapEvent.new(
@@ -94,13 +94,13 @@ fn law_bumped_generation_is_revoke_or_gen_bump_only() {
 @test
 fn law_constructor_round_trip_pinned() {
     let event = CapEvent.new(
-        Attenuate,
+        CapEventKind.Attenuate,
         0x12345678 as UInt64,
         100 as UInt32, 100 as UInt32,
         0x00FF as UInt16, 0x0001 as UInt16,
         1234567890 as UInt64,
     );
-    assert(event.kind is Attenuate);
+    assert(event.kind is CapEventKind.Attenuate);
     assert_eq(event.ptr_id, 0x12345678 as UInt64);
     assert_eq(event.generation_before, 100 as UInt32);
     assert_eq(event.generation_after, 100 as UInt32);
