@@ -1,0 +1,41 @@
+// =============================================================================
+// core-tests/mem/heap/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.mem.heap` static-shape surface.
+//
+//   §A  DIRECT_LOOKUP_SIZE = 129.  Pre-fix some drafts used 128 (off
+//       by one — missing the wsize=128 entry that maps to bin 23).
+//   §B  PAGE_HEADER_SIZE = 128.  Drift surface vs size_class.vr
+//       `blocks_per_page` which uses 64 — pinned for awareness
+//       (see size_class audit §3.4).
+//   §C  PAGE_FLAG_* values are 0x0001 / 0x0002 / 0x0004 (consecutive
+//       single bits).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.heap.{
+    DIRECT_LOOKUP_SIZE, PAGE_HEADER_SIZE,
+    PAGE_FLAG_IN_FULL_QUEUE, PAGE_FLAG_HAS_ALIGNED, PAGE_FLAG_ZERO_INIT,
+};
+
+@test
+fn regression_direct_lookup_size_is_129() {
+    assert_eq(DIRECT_LOOKUP_SIZE, 129);
+}
+
+@test
+fn regression_page_header_size_is_128() {
+    assert_eq(PAGE_HEADER_SIZE, 128);
+}
+
+@test
+fn regression_page_flag_values_pinned() {
+    assert_eq(PAGE_FLAG_IN_FULL_QUEUE, 0x0001 as UInt16);
+    assert_eq(PAGE_FLAG_HAS_ALIGNED, 0x0002 as UInt16);
+    assert_eq(PAGE_FLAG_ZERO_INIT, 0x0004 as UInt16);
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

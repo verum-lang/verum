@@ -1,0 +1,86 @@
+// =============================================================================
+// core-tests/mem/allocator/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.mem.allocator`.
+//
+//   §A  align_up(x, a) >= x  (no shrinking)
+//   §B  align_up(x, a) % a == 0  (result is aligned)
+//   §C  align_down(x, a) <= x  (no growing)
+//   §D  align_down(x, a) % a == 0
+//   §E  align_up(align_up(x, a), a) == align_up(x, a) (idempotent)
+//   §F  size_class_index → size_class_to_size round-trip
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.allocator.{
+    SIZE_CLASSES, SIZE_CLASS_COUNT,
+    align_up, align_down,
+    size_class_index, size_class_to_size,
+};
+
+@test
+fn law_align_up_no_shrink_exhaustive() {
+    let aligns: List<Int> = [1, 2, 4, 8, 16, 32, 64, 128];
+    let sizes: List<Int> = [0, 1, 7, 8, 15, 16, 100, 1000, 65536];
+    for a in aligns.iter() {
+        for s in sizes.iter() {
+            let result = align_up(*s, *a);
+            assert(result >= *s);
+            assert_eq(result % *a, 0);
+        }
+    }
+}
+
+@test
+fn law_align_down_no_grow_exhaustive() {
+    let aligns: List<Int> = [1, 2, 4, 8, 16, 32, 64, 128];
+    let sizes: List<Int> = [0, 1, 7, 8, 15, 16, 100, 1000, 65536];
+    for a in aligns.iter() {
+        for s in sizes.iter() {
+            let result = align_down(*s, *a);
+            assert(result <= *s);
+            assert_eq(result % *a, 0);
+        }
+    }
+}
+
+@test
+fn law_align_up_idempotent() {
+    let aligns: List<Int> = [1, 2, 4, 8, 16];
+    let sizes: List<Int> = [0, 1, 7, 100, 1000];
+    for a in aligns.iter() {
+        for s in sizes.iter() {
+            let once = align_up(*s, *a);
+            let twice = align_up(once, *a);
+            assert_eq(twice, once);
+        }
+    }
+}
+
+@test
+fn law_align_down_idempotent() {
+    let aligns: List<Int> = [1, 2, 4, 8, 16];
+    let sizes: List<Int> = [0, 1, 7, 100, 1000];
+    for a in aligns.iter() {
+        for s in sizes.iter() {
+            let once = align_down(*s, *a);
+            let twice = align_down(once, *a);
+            assert_eq(twice, once);
+        }
+    }
+}
+
+@test
+fn law_size_class_round_trip_exhaustive() {
+    for i in 0..SIZE_CLASS_COUNT {
+        let s = size_class_to_size(i);
+        let r = size_class_index(s);
+        assert(r.is_some());
+        assert_eq(r.unwrap(), i);
+    }
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

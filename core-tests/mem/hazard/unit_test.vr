@@ -1,0 +1,84 @@
+// =============================================================================
+// core-tests/mem/hazard/unit_test.vr
+// =============================================================================
+//
+// Per-API tests for `core.mem.hazard` — hazard pointer system for
+// concurrent-safe dereferences.  Tests pin constants + the read-only
+// `hazard_stats` and `cleanup_thread_hazards` surface; live
+// acquire_hazard / retire_hazard round-trip is covered in
+// `core-tests/base/memory/cbgr_test.vr`.
+//
+// Companion files:
+//   property_test.vr     — constant relationships
+//   integration_test.vr  — composition with capability
+//   regression_test.vr   — pinned defects
+//   audit.md             — drift surfaces & action items
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.hazard.{
+    HAZARD_POINTERS_PER_THREAD, RETIRED_THRESHOLD, MAX_THREADS,
+    HazardStats,
+    hazard_stats, force_reclaim_all, cleanup_thread_hazards,
+};
+
+// =============================================================================
+// Section 1: Hazard constants
+// =============================================================================
+
+@test
+fn test_hazard_pointers_per_thread_is_8() {
+    // Each thread reserves 8 hazard slots — sufficient for typical
+    // concurrent-deref patterns.
+    assert_eq(HAZARD_POINTERS_PER_THREAD, 8);
+}
+
+@test
+fn test_retired_threshold_is_64() {
+    // Reclamation triggers when a thread accumulates 64 retired refs.
+    assert_eq(RETIRED_THRESHOLD, 64);
+}
+
+@test
+fn test_max_threads_is_256() {
+    // Hazard domain supports up to 256 threads.
+    assert_eq(MAX_THREADS, 256);
+}
+
+// =============================================================================
+// Section 2: hazard_stats — read-only stats surface
+// =============================================================================
+
+@test
+fn test_hazard_stats_returns_value() {
+    let _stats: HazardStats = hazard_stats();
+    assert(true);
+}
+
+// =============================================================================
+// Section 3: force_reclaim_all — fire-and-forget
+// =============================================================================
+
+@test
+fn test_force_reclaim_all_returns_unit() {
+    force_reclaim_all();
+    assert(true);
+}
+
+// =============================================================================
+// Section 4: cleanup_thread_hazards — fire-and-forget
+// =============================================================================
+
+@test
+fn test_cleanup_thread_hazards_returns_unit() {
+    cleanup_thread_hazards();
+    assert(true);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

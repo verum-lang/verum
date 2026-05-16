@@ -1,0 +1,163 @@
+// =============================================================================
+// core-tests/mem/allocator/unit_test.vr
+// =============================================================================
+//
+// Per-API tests for `core.mem.allocator` — the CBGR-aware allocator
+// stack.  Tests pin constants + `Layout` record + `AllocError` variants
+// + `align_up` / `align_down` arithmetic.  Live `cbgr_alloc` /
+// `cbgr_dealloc` / `cbgr_realloc` round-trip tests live in
+// `core-tests/base/memory/cbgr_test.vr` because they require a
+// complete CBGR header lifecycle.
+//
+// Companion files:
+//   property_test.vr     — alignment laws
+//   integration_test.vr  — composition with size_class
+//   regression_test.vr   — pinned defects
+//   audit.md             — drift surfaces & action items
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.allocator.{
+    SIZE_CLASSES, SIZE_CLASS_COUNT,
+    PAGE_SIZE, CHUNK_SIZE, LARGE_THRESHOLD,
+    MAX_SLOTS_PER_PAGE, GUARD_PAGE_SIZE,
+    Layout, AllocError,
+    align_up, align_down,
+    size_class_index, size_class_to_size,
+    AllocStats,
+};
+
+// =============================================================================
+// Section 1: Allocator constants
+// =============================================================================
+
+@test
+fn test_size_class_count_is_11() {
+    // 11 size classes (mimalloc-style basic tier).
+    assert_eq(SIZE_CLASS_COUNT, 11);
+}
+
+@test
+fn test_size_classes_table_strictly_monotonic() {
+    for i in 1..SIZE_CLASS_COUNT {
+        assert(SIZE_CLASSES[i] > SIZE_CLASSES[i - 1]);
+    }
+}
+
+@test
+fn test_size_classes_first_is_16() {
+    assert_eq(SIZE_CLASSES[0], 16);
+}
+
+@test
+fn test_size_classes_last_is_2048() {
+    assert_eq(SIZE_CLASSES[10], 2048);
+}
+
+@test
+fn test_page_size_is_64_kib() {
+    assert_eq(PAGE_SIZE, 65536);
+}
+
+@test
+fn test_chunk_size_is_2_mib() {
+    assert_eq(CHUNK_SIZE, 2 * 1024 * 1024);
+}
+
+@test
+fn test_large_threshold_is_2048() {
+    assert_eq(LARGE_THRESHOLD, 2048);
+}
+
+@test
+fn test_max_slots_per_page_is_512() {
+    assert_eq(MAX_SLOTS_PER_PAGE, 512);
+}
+
+@test
+fn test_guard_page_size_is_4_kib() {
+    // 4 KiB guard pages between large allocations.
+    assert_eq(GUARD_PAGE_SIZE, 4096);
+}
+
+// =============================================================================
+// Section 2: align_up / align_down
+// =============================================================================
+
+@test
+fn test_align_up_already_aligned_identity() {
+    assert_eq(align_up(0, 8), 0);
+    assert_eq(align_up(8, 8), 8);
+    assert_eq(align_up(16, 8), 16);
+}
+
+@test
+fn test_align_up_below_boundary_rounds_up() {
+    assert_eq(align_up(1, 8), 8);
+    assert_eq(align_up(7, 8), 8);
+    assert_eq(align_up(9, 8), 16);
+}
+
+@test
+fn test_align_down_already_aligned_identity() {
+    assert_eq(align_down(0, 8), 0);
+    assert_eq(align_down(8, 8), 8);
+    assert_eq(align_down(16, 8), 16);
+}
+
+@test
+fn test_align_down_below_boundary_rounds_down() {
+    assert_eq(align_down(7, 8), 0);
+    assert_eq(align_down(15, 8), 8);
+    assert_eq(align_down(17, 8), 16);
+}
+
+// =============================================================================
+// Section 3: Layout record
+// =============================================================================
+
+@test
+fn test_layout_record_construction() {
+    let layout: Layout = Layout {
+        size: 100,
+        align: 8,
+    };
+    assert_eq(layout.size, 100);
+    assert_eq(layout.align, 8);
+}
+
+// =============================================================================
+// Section 4: size_class_index round-trip
+// =============================================================================
+
+@test
+fn test_size_class_index_for_first_class() {
+    // sizes ≤ 16 → class 0
+    let r = size_class_index(16);
+    assert(r.is_some());
+    assert_eq(r.unwrap(), 0);
+}
+
+@test
+fn test_size_class_index_above_max_returns_none() {
+    // Anything > LARGE_THRESHOLD has no size class index.
+    let r = size_class_index(LARGE_THRESHOLD + 1);
+    assert(r.is_none());
+}
+
+@test
+fn test_size_class_to_size_round_trip() {
+    // For each class index, size_class_to_size(i) returns
+    // SIZE_CLASSES[i].
+    for i in 0..SIZE_CLASS_COUNT {
+        assert_eq(size_class_to_size(i), SIZE_CLASSES[i]);
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

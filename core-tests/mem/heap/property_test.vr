@@ -1,0 +1,53 @@
+// =============================================================================
+// core-tests/mem/heap/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.mem.heap`.
+//   §A  PAGE_HEADER_SIZE is a multiple of 64 (cache-line aligned).
+//   §B  Every PAGE_FLAG_* is a power of 2 + pairwise disjoint.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.heap.{
+    PAGE_HEADER_SIZE,
+    PAGE_FLAG_IN_FULL_QUEUE, PAGE_FLAG_HAS_ALIGNED, PAGE_FLAG_ZERO_INIT,
+};
+
+@test
+fn law_page_header_cache_aligned() {
+    // 128-byte header = 2 cache lines on most arches.
+    assert_eq(PAGE_HEADER_SIZE % 64, 0);
+}
+
+@test
+fn law_page_flags_powers_of_two() {
+    let flags: List<UInt16> = [
+        PAGE_FLAG_IN_FULL_QUEUE,
+        PAGE_FLAG_HAS_ALIGNED,
+        PAGE_FLAG_ZERO_INIT,
+    ];
+    for f in flags.iter() {
+        assert(*f > 0 as UInt16);
+        assert((*f & (*f - 1 as UInt16)) == 0 as UInt16);
+    }
+}
+
+@test
+fn law_page_flags_pairwise_disjoint_exhaustive() {
+    let flags: List<UInt16> = [
+        PAGE_FLAG_IN_FULL_QUEUE,
+        PAGE_FLAG_HAS_ALIGNED,
+        PAGE_FLAG_ZERO_INIT,
+    ];
+    for i in 0..flags.len() {
+        for j in 0..flags.len() {
+            if i != j {
+                assert((flags[i] & flags[j]) == 0 as UInt16);
+            }
+        }
+    }
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

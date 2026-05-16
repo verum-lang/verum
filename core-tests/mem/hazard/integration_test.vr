@@ -1,0 +1,41 @@
+// =============================================================================
+// core-tests/mem/hazard/integration_test.vr
+// =============================================================================
+//
+// Integration tests: hazard pointer system composed with CBGR
+// dereference path.  Live concurrent-safety tests require spawn —
+// deferred.  These tests pin the dimensions of the global hazard
+// table for sizing assertions.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.hazard.{
+    HAZARD_POINTERS_PER_THREAD, RETIRED_THRESHOLD, MAX_THREADS,
+    HazardStats, hazard_stats,
+};
+
+// -----------------------------------------------------------------------------
+// §1  Hazard table dimensions are reasonable
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_hazard_table_total_capacity() {
+    // 8 hazard pointers × 256 threads = 2048 hazard slots
+    // (~16 KiB at 8 bytes each).
+    let total_hazards: Int = HAZARD_POINTERS_PER_THREAD * MAX_THREADS;
+    assert_eq(total_hazards, 2048);
+}
+
+// -----------------------------------------------------------------------------
+// §2  hazard_stats observable from any thread
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_hazard_stats_observable() {
+    let _stats: HazardStats = hazard_stats();
+    assert(true);
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

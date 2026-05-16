@@ -1,0 +1,43 @@
+// =============================================================================
+// core-tests/mem/heap/integration_test.vr
+// =============================================================================
+//
+// Integration tests: heap constants composed with allocator + size_class.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.heap.{DIRECT_LOOKUP_SIZE, PAGE_HEADER_SIZE};
+mount core.mem.size_class.{SMALL_SIZE_MAX, WORD_SIZE};
+
+// -----------------------------------------------------------------------------
+// §1  DIRECT_LOOKUP_SIZE covers wsize range that maps to SMALL_SIZE_MAX
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_direct_lookup_covers_small_range() {
+    // DIRECT_LOOKUP_SIZE = 129 → covers wsize 0..128 → byte range 0..1024.
+    // SMALL_SIZE_MAX = 8 KiB → bytes 0..8192 → wsize 0..1024.
+    // The direct-lookup window is the FAST PATH for sizes ≤ 1024 bytes;
+    // sizes 1025..SMALL_SIZE_MAX still classify as "small" but use the
+    // bit-arithmetic slow path.
+    let direct_max_bytes = (DIRECT_LOOKUP_SIZE - 1) * WORD_SIZE;
+    assert_eq(direct_max_bytes, 1024);
+    assert(direct_max_bytes < SMALL_SIZE_MAX);
+}
+
+// -----------------------------------------------------------------------------
+// §2  PAGE_HEADER_SIZE leaves room for a reasonable number of blocks
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_page_header_leaves_room() {
+    // A 64 KiB page minus a 128-byte header = 65408 usable bytes.
+    let page_size: Int = 65536;
+    let usable: Int = page_size - PAGE_HEADER_SIZE;
+    assert(usable > 65000);
+    assert_eq(usable, 65408);
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

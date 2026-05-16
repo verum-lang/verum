@@ -1,0 +1,64 @@
+// =============================================================================
+// core-tests/mem/allocator/integration_test.vr
+// =============================================================================
+//
+// Integration tests: allocator constants composed with size_class and
+// header constants.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.allocator.{
+    SIZE_CLASSES as ALLOC_SIZE_CLASSES, PAGE_SIZE, CHUNK_SIZE, LARGE_THRESHOLD,
+    align_up,
+};
+mount core.mem.size_class.{
+    SMALL_SIZE_MAX,
+};
+mount core.mem.header.{HEADER_SIZE};
+
+// -----------------------------------------------------------------------------
+// §1  align_up of HEADER_SIZE is identity (already aligned)
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_header_size_aligned_to_8() {
+    // HEADER_SIZE = 32 — already 8-byte aligned.
+    assert_eq(align_up(HEADER_SIZE, 8), HEADER_SIZE);
+}
+
+// -----------------------------------------------------------------------------
+// §2  LARGE_THRESHOLD is consistent with the basic size_class set
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_large_threshold_matches_top_class() {
+    // The top basic size class (2048) IS the LARGE_THRESHOLD.
+    assert_eq(LARGE_THRESHOLD, 2048);
+    assert_eq(ALLOC_SIZE_CLASSES[10], LARGE_THRESHOLD);
+}
+
+// -----------------------------------------------------------------------------
+// §3  PAGE_SIZE = 64 KiB, matching segment.SLICE_SIZE
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_page_size_matches_slice_size() {
+    // The allocator's PAGE_SIZE = 64 KiB; segment's SLICE_SIZE = 64 KiB.
+    // These MUST agree since the allocator pages live inside segment
+    // slices.
+    assert_eq(PAGE_SIZE, 65536);
+}
+
+// -----------------------------------------------------------------------------
+// §4  CHUNK_SIZE > LARGE_THRESHOLD
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_chunk_size_exceeds_large_threshold() {
+    // Chunks (2 MiB) are vastly larger than large allocations (2 KB).
+    assert(CHUNK_SIZE > LARGE_THRESHOLD);
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

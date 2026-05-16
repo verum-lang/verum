@@ -1,0 +1,50 @@
+// =============================================================================
+// core-tests/mem/allocator/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.mem.allocator` static-shape surface.
+//
+//   §A  align_up(0, a) = 0 for any a > 0 — pin the zero-base case.
+//   §B  size_class_index(LARGE_THRESHOLD + 1) returns None.
+//   §C  size_class_index round-trip is exact (no off-by-one).
+//   §D  SIZE_CLASS_COUNT = 11 (basic-tier mimalloc).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.allocator.{
+    SIZE_CLASS_COUNT, LARGE_THRESHOLD,
+    align_up,
+    size_class_index, size_class_to_size,
+};
+
+@test
+fn regression_align_up_zero_is_zero() {
+    for a in 1..16 {
+        assert_eq(align_up(0, a), 0);
+    }
+}
+
+@test
+fn regression_size_class_index_above_threshold_is_none() {
+    let r = size_class_index(LARGE_THRESHOLD + 1);
+    assert(r.is_none());
+}
+
+@test
+fn regression_size_class_round_trip_exact() {
+    for i in 0..SIZE_CLASS_COUNT {
+        let s = size_class_to_size(i);
+        let r = size_class_index(s);
+        assert(r.is_some());
+        assert_eq(r.unwrap(), i);
+    }
+}
+
+@test
+fn regression_size_class_count_is_11() {
+    assert_eq(SIZE_CLASS_COUNT, 11);
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

@@ -1,0 +1,38 @@
+// =============================================================================
+// core-tests/mem/arena/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.mem.arena`.
+//
+//   §A  DEFAULT_ARENA_CAPACITY = 64 KiB.  Pre-fix some drafts used
+//       4 KiB (single page) which made the default arena too small
+//       for typical AST / per-request scenarios.
+//   §B  MAX_ARENA_CAPACITY = 256 MiB.  Hard cap to prevent unbounded
+//       memory growth.
+//   §C  ARENA_ALIGNMENT = 8 (64-bit word).  Pre-fix some drafts used
+//       4 (32-bit) which broke alignment for u64 / pointer fields.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.arena.{
+    DEFAULT_ARENA_CAPACITY, MAX_ARENA_CAPACITY, ARENA_ALIGNMENT,
+};
+
+@test
+fn regression_default_capacity_is_64_kib() {
+    assert_eq(DEFAULT_ARENA_CAPACITY, 65536);
+}
+
+@test
+fn regression_max_capacity_is_256_mib() {
+    assert_eq(MAX_ARENA_CAPACITY, 268435456);
+}
+
+@test
+fn regression_alignment_is_8_bytes() {
+    assert_eq(ARENA_ALIGNMENT, 8);
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

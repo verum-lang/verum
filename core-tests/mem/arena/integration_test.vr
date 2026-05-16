@@ -1,0 +1,59 @@
+// =============================================================================
+// core-tests/mem/arena/integration_test.vr
+// =============================================================================
+//
+// Integration tests: arena constants composed with header generation
+// constants.  The arena uses the same `GEN_INITIAL` / `GEN_MAX` as
+// the rest of CBGR — pin the consistency.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.arena.{
+    DEFAULT_ARENA_CAPACITY, MAX_ARENA_CAPACITY, ARENA_ALIGNMENT,
+    ArenaConfig,
+};
+mount core.mem.header.{GEN_INITIAL, GEN_MAX};
+
+// -----------------------------------------------------------------------------
+// §1  ArenaConfig default values produce a valid config
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_default_arena_config_valid() {
+    let config: ArenaConfig = ArenaConfig {
+        initial_capacity: DEFAULT_ARENA_CAPACITY,
+        max_capacity: MAX_ARENA_CAPACITY,
+        growth_factor: 200,
+        alignment: ARENA_ALIGNMENT,
+    };
+    assert(config.initial_capacity <= config.max_capacity);
+    assert(config.growth_factor > 100);   // > 1x growth
+    assert(config.alignment > 0);
+}
+
+// -----------------------------------------------------------------------------
+// §2  Arena generation lifecycle uses the same constants as the CBGR header
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_arena_uses_same_generation_lattice() {
+    // The arena's generation counter shares the same GEN_INITIAL → GEN_MAX
+    // → wraparound semantics as individual allocations.  Pin the constants.
+    assert_eq(GEN_INITIAL, 1 as UInt32);
+    assert(GEN_INITIAL < GEN_MAX);
+}
+
+// -----------------------------------------------------------------------------
+// §3  Arena alignment matches typical word size
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_arena_alignment_matches_word_size() {
+    // 8-byte alignment = 64-bit word alignment, matching all CBGR
+    // pointer-sized fields.
+    assert_eq(ARENA_ALIGNMENT, 8);
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

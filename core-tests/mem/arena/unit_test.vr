@@ -1,0 +1,78 @@
+// =============================================================================
+// core-tests/mem/arena/unit_test.vr
+// =============================================================================
+//
+// Per-API tests for `core.mem.arena` — generational arena allocator
+// with O(1) mass invalidation.  This file pins the constants + value-
+// level shapes (ArenaConfig, ArenaError, ArenaSnapshot) WITHOUT
+// touching live allocations.
+//
+// Companion files:
+//   property_test.vr     — constant relationships
+//   integration_test.vr  — composition with header (generation lifecycle)
+//   regression_test.vr   — pinned defects
+//   audit.md             — drift surfaces & action items
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.arena.{
+    DEFAULT_ARENA_CAPACITY, MAX_ARENA_CAPACITY,
+    ARENA_ALIGNMENT,
+    ArenaConfig, ArenaError,
+};
+
+// =============================================================================
+// Section 1: Arena constants
+// =============================================================================
+
+@test
+fn test_default_arena_capacity_is_64_kib() {
+    // 65536 = 64 KiB — sensible default for AST/per-request arenas.
+    assert_eq(DEFAULT_ARENA_CAPACITY, 65536);
+    assert_eq(DEFAULT_ARENA_CAPACITY, 64 * 1024);
+}
+
+@test
+fn test_max_arena_capacity_is_256_mib() {
+    // 268435456 = 256 MiB — upper bound to prevent unbounded growth.
+    assert_eq(MAX_ARENA_CAPACITY, 268435456);
+    assert_eq(MAX_ARENA_CAPACITY, 256 * 1024 * 1024);
+}
+
+@test
+fn test_arena_alignment_is_8() {
+    // 64-bit word alignment for arena allocations.
+    assert_eq(ARENA_ALIGNMENT, 8);
+}
+
+@test
+fn test_arena_capacity_relationship() {
+    // DEFAULT < MAX
+    assert(DEFAULT_ARENA_CAPACITY < MAX_ARENA_CAPACITY);
+}
+
+// =============================================================================
+// Section 2: ArenaConfig record construction
+// =============================================================================
+
+@test
+fn test_arena_config_construction_via_record_literal() {
+    let config: ArenaConfig = ArenaConfig {
+        initial_capacity: DEFAULT_ARENA_CAPACITY,
+        max_capacity: MAX_ARENA_CAPACITY,
+        growth_factor: 200,
+        alignment: ARENA_ALIGNMENT,
+    };
+    assert_eq(config.initial_capacity, DEFAULT_ARENA_CAPACITY);
+    assert_eq(config.max_capacity, MAX_ARENA_CAPACITY);
+    assert_eq(config.growth_factor, 200);
+    assert_eq(config.alignment, ARENA_ALIGNMENT);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

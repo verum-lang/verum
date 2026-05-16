@@ -1,0 +1,38 @@
+// =============================================================================
+// core-tests/mem/hazard/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.mem.hazard`.
+//   §A  HAZARD_POINTERS_PER_THREAD is a power of 2 (efficient mod via &)
+//   §B  RETIRED_THRESHOLD > HAZARD_POINTERS_PER_THREAD (reclamation
+//       triggers after enough events to amortise the scan cost)
+//   §C  MAX_THREADS × HAZARD_POINTERS_PER_THREAD fits in 32 bits
+//       (global hazard table sizing)
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.hazard.{
+    HAZARD_POINTERS_PER_THREAD, RETIRED_THRESHOLD, MAX_THREADS,
+};
+
+@test
+fn law_hazards_per_thread_power_of_two() {
+    assert(HAZARD_POINTERS_PER_THREAD > 0);
+    assert((HAZARD_POINTERS_PER_THREAD & (HAZARD_POINTERS_PER_THREAD - 1)) == 0);
+}
+
+@test
+fn law_retired_threshold_dominates_per_thread() {
+    assert(RETIRED_THRESHOLD > HAZARD_POINTERS_PER_THREAD);
+}
+
+@test
+fn law_global_table_fits_in_32_bits() {
+    let total = MAX_THREADS * HAZARD_POINTERS_PER_THREAD;
+    assert(total > 0);
+    assert(total < (1 << 32));
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
