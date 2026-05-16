@@ -258,6 +258,14 @@ implement<T> [T] {
     }
 
     /// Check if starts with given slice.
+    ///
+
+    /// IMPLEMENTATION NOTE: routes through `.get(i)` which auto-derefs
+    /// uniformly across self-slice and parameter-slice receivers,
+    /// instead of the bare `&self[i]` / `*a == *b` form that compares
+    /// pointer addresses when self and prefix arrive with different
+    /// runtime ref shapes.  Pinned in
+    /// `core-tests/collections/slice/regression_test.vr` §B.2.
     fn starts_with(&self, prefix: &[T]) -> Bool
     where T: Eq
     {
@@ -265,16 +273,20 @@ implement<T> [T] {
             return false;
         }
         for i in range(0, prefix.len()) {
-            let a: &T = &self[i];
-            let b: &T = &prefix[i];
-            if !(*a == *b) {
-                return false;
+            match (self.get(i), prefix.get(i)) {
+                (Some(a), Some(b)) => {
+                    if !(*a == *b) { return false; }
+                },
+                _ => return false,
             }
         }
         true
     }
 
     /// Check if ends with given slice.
+    ///
+
+    /// Same `.get(i)` routing as `starts_with` — see §B.2 pin.
     fn ends_with(&self, suffix: &[T]) -> Bool
     where T: Eq
     {
@@ -283,10 +295,11 @@ implement<T> [T] {
         }
         let offset = self.len() - suffix.len();
         for i in range(0, suffix.len()) {
-            let a: &T = &self[offset + i];
-            let b: &T = &suffix[i];
-            if !(*a == *b) {
-                return false;
+            match (self.get(offset + i), suffix.get(i)) {
+                (Some(a), Some(b)) => {
+                    if !(*a == *b) { return false; }
+                },
+                _ => return false,
             }
         }
         true
@@ -423,6 +436,10 @@ implement<T> [T] {
     // =========================================================================
 
     /// Check equality with another slice.
+    ///
+
+    /// Routes through `.get(i)` — same defensive pattern as
+    /// `starts_with`/`ends_with`.
     fn eq_slice(&self, other: &[T]) -> Bool
     where T: Eq
     {
@@ -430,29 +447,36 @@ implement<T> [T] {
             return false;
         }
         for i in range(0, self.len()) {
-            let a: &T = &self[i];
-            let b: &T = &other[i];
-            if !(*a == *b) {
-                return false;
+            match (self.get(i), other.get(i)) {
+                (Some(a), Some(b)) => {
+                    if !(*a == *b) { return false; }
+                },
+                _ => return false,
             }
         }
         true
     }
 
     /// Lexicographic comparison.
+    ///
+
+    /// Routes through `.get(i)` — same defensive pattern as
+    /// `starts_with`/`ends_with`.
     fn cmp_slice(&self, other: &[T]) -> Ordering
     where T: Ord
     {
         let min_len = self.len().min(other.len());
         for i in range(0, min_len) {
-            let a: &T = &self[i];
-            let b: &T = &other[i];
-            if *a < *b {
-                return Ordering.Less;
-            } else if *a > *b {
-                return Ordering.Greater;
+            match (self.get(i), other.get(i)) {
+                (Some(a), Some(b)) => {
+                    if *a < *b {
+                        return Ordering.Less;
+                    } else if *a > *b {
+                        return Ordering.Greater;
+                    }
+                },
+                _ => break,
             }
-            // Ordering.Equal, continue
         }
         // Compare lengths
         let self_len = self.len();
@@ -467,6 +491,15 @@ implement<T> [T] {
     // =========================================================================
 
     /// Check if slice is sorted in ascending order.
+    ///
+
+    /// IMPLEMENTATION NOTE: uses the explicit `&self[i]; *elem` deref
+    /// pattern (same as `min`/`max`/`contains`) rather than bare
+    /// `self[i] > self[i-1]`.  The bare form compares pointer
+    /// addresses on slice receivers because slice indexing yields a
+    /// reference shape that the value-comparison operators do not
+    /// auto-deref through.  Pinned in
+    /// `core-tests/collections/slice/regression_test.vr` §B.1.
     fn is_sorted(&self) -> Bool
     where T: Ord
     {
@@ -474,7 +507,9 @@ implement<T> [T] {
             return true;
         }
         for i in range(1, self.len()) {
-            if self[i - 1] > self[i] {
+            let prev: &T = &self[i - 1];
+            let cur:  &T = &self[i];
+            if *prev > *cur {
                 return false;
             }
         }
@@ -487,7 +522,9 @@ implement<T> [T] {
             return true;
         }
         for i in range(1, self.len()) {
-            if compare(&self[i - 1], &self[i]) is Ordering.Greater {
+            let prev: &T = &self[i - 1];
+            let cur:  &T = &self[i];
+            if compare(prev, cur) is Ordering.Greater {
                 return false;
             }
         }
@@ -500,8 +537,10 @@ implement<T> [T] {
             return true;
         }
         for i in range(1, self.len()) {
-            let ka: K = key(&self[i - 1]);
-            let kb: K = key(&self[i]);
+            let prev: &T = &self[i - 1];
+            let cur:  &T = &self[i];
+            let ka: K = key(prev);
+            let kb: K = key(cur);
             if ka > kb {
                 return false;
             }
@@ -553,7 +592,11 @@ implement<T> [T] {
 
         while left < right {
             let mid = left + (right - left) / 2;
-            if predicate(&self[mid]) {
+            // Bind the indexed reference to a let — same shape as
+            // `min`/`max`'s working pattern.  Pinned in
+            // `core-tests/collections/slice/regression_test.vr` §B.3.
+            let elem: &T = &self[mid];
+            if predicate(elem) {
                 left = mid + 1;
             } else {
                 right = mid;
