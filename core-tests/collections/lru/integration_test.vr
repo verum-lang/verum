@@ -1,0 +1,117 @@
+// =============================================================================
+// core-tests/collections/lru/integration_test.vr
+// =============================================================================
+//
+// Cross-type scenarios — LruCache composing with List<T> as a
+// real-world memoisation workload.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.lru.LruCache;
+
+// =============================================================================
+// Integration: memoize a function call
+// =============================================================================
+
+@test
+fn int_lru_memoise_value_round_trip() {
+    let mut cache: LruCache<Int, Int> = LruCache.new(64);
+
+    // Simulated workload: square every i in [0..20).
+    let mut i = 0;
+    while i < 20 {
+        cache.insert(i, i * i);
+        i = i + 1;
+    }
+
+    // Read back: every key should yield its square.
+    let mut j = 0;
+    while j < 20 {
+        let v = cache.get(&j);
+        assert_eq(v, Some(j * j));
+        j = j + 1;
+    }
+
+    // Stats should reflect all 20 hits, 0 misses.
+    let s = cache.stats();
+    assert_eq(s.hits, 20_u64);
+    assert_eq(s.misses, 0_u64);
+}
+
+// =============================================================================
+// Integration: capacity-bounded growth
+// =============================================================================
+
+@test
+fn int_lru_capacity_bounded_growth() {
+    let cap = 8;
+    let mut cache: LruCache<Int, Int> = LruCache.new(cap);
+    let mut i = 0;
+    while i < 100 {
+        cache.insert(i, i);
+        assert(cache.len() <= cap);
+        i = i + 1;
+    }
+    assert_eq(cache.len(), cap);
+    let s = cache.stats();
+    assert_eq(s.evicted, 92_u64);
+}
+
+// =============================================================================
+// Integration: hit/miss ratio tracks workload
+// =============================================================================
+
+@test
+fn int_lru_hit_miss_ratio_tracking() {
+    let mut cache: LruCache<Int, Int> = LruCache.new(4);
+    cache.insert(1, 100);
+    cache.insert(2, 200);
+
+    let _ = cache.get(&1);   // hit
+    let _ = cache.get(&2);   // hit
+    let _ = cache.get(&3);   // miss
+    let _ = cache.get(&4);   // miss
+    let _ = cache.get(&1);   // hit
+
+    let s = cache.stats();
+    assert_eq(s.hits, 3_u64);
+    assert_eq(s.misses, 2_u64);
+}
+
+// =============================================================================
+// Integration: replace + remove round-trip
+// =============================================================================
+
+@test
+fn int_lru_replace_then_remove() {
+    let mut cache: LruCache<Int, Int> = LruCache.new(4);
+    let p0 = cache.insert(7, 100);
+    assert(p0 is None);
+    let p1 = cache.insert(7, 200);
+    assert_eq(p1, Some(100));
+    let r = cache.remove(&7);
+    assert_eq(r, Some(200));
+    let v_after: Maybe<Int> = cache.get(&7);
+    assert(v_after is None);
+}
+
+// =============================================================================
+// Integration: clear after population restores fresh
+// =============================================================================
+
+@test
+fn int_lru_clear_after_population_resets() {
+    let mut cache: LruCache<Int, Int> = LruCache.new(8);
+    let mut i = 0;
+    while i < 5 {
+        cache.insert(i, i * 10);
+        i = i + 1;
+    }
+    assert_eq(cache.len(), 5);
+    cache.clear();
+    assert(cache.is_empty());
+
+    // Post-clear we can repopulate.
+    cache.insert(42, 4200);
+    assert_eq(cache.get(&42), Some(4200));
+}

@@ -1,0 +1,62 @@
+// =============================================================================
+// core-tests/collections/lru/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.lru.LruCache;
+
+// =============================================================================
+// §F — PASS-GUARD pins for the working surface
+// =============================================================================
+
+@test
+fn pass_guard_lru_new_is_empty_capacity_preserved() {
+    let c: LruCache<Int, Int> = LruCache.new(8);
+    assert(c.is_empty());
+    assert_eq(c.capacity(), 8);
+}
+
+@test
+fn pass_guard_lru_insert_get_round_trip() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    c.insert(1, 100);
+    assert_eq(c.get(&1), Some(100));
+}
+
+@test
+fn pass_guard_lru_evict_oldest_at_capacity() {
+    let mut c: LruCache<Int, Int> = LruCache.new(2);
+    c.insert(1, 100);
+    c.insert(2, 200);
+    c.insert(3, 300);    // evicts 1
+    let v1: Maybe<Int> = c.get(&1);
+    assert(v1 is None);
+    assert_eq(c.get(&2), Some(200));
+    assert_eq(c.get(&3), Some(300));
+}
+
+@test
+fn pass_guard_lru_touch_on_get_changes_lru_order() {
+    let mut c: LruCache<Int, Int> = LruCache.new(2);
+    c.insert(1, 100);
+    c.insert(2, 200);
+    let _ = c.get(&1);   // touch 1 → 2 is LRU
+    c.insert(3, 300);    // evicts 2
+    assert_eq(c.get(&1), Some(100));
+    let v2: Maybe<Int> = c.get(&2);
+    assert(v2 is None);
+}
+
+@test
+fn pass_guard_lru_stats_basic_round_trip() {
+    let mut c: LruCache<Int, Int> = LruCache.new(2);
+    c.insert(1, 100);
+    let _ = c.get(&1);     // hit
+    let _ = c.get(&999);   // miss
+    c.insert(2, 200);
+    c.insert(3, 300);      // evict
+    let s = c.stats();
+    assert(s.hits >= 1_u64);
+    assert(s.misses >= 1_u64);
+    assert(s.evicted >= 1_u64);
+}

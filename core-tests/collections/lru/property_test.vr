@@ -1,0 +1,156 @@
+// =============================================================================
+// core-tests/collections/lru/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for the LruCache<K, V> surface.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.lru.LruCache;
+
+// =============================================================================
+// Law: len(c) <= capacity(c) at all times
+// =============================================================================
+
+@test
+fn law_lru_len_bounded_by_capacity() {
+    let mut c: LruCache<Int, Int> = LruCache.new(3);
+    let mut i = 0;
+    while i < 10 {
+        c.insert(i, i * 10);
+        assert(c.len() <= c.capacity());
+        i = i + 1;
+    }
+    assert_eq(c.len(), 3);
+}
+
+// =============================================================================
+// Law: capacity is preserved across insert / remove / clear
+// =============================================================================
+
+@test
+fn law_lru_capacity_invariant() {
+    let mut c: LruCache<Int, Int> = LruCache.new(5);
+    let cap_initial = c.capacity();
+    c.insert(1, 100);
+    assert_eq(c.capacity(), cap_initial);
+    c.insert(2, 200);
+    assert_eq(c.capacity(), cap_initial);
+    c.remove(&1);
+    assert_eq(c.capacity(), cap_initial);
+    c.clear();
+    assert_eq(c.capacity(), cap_initial);
+}
+
+// =============================================================================
+// Law: insert/remove inverse on count
+// =============================================================================
+
+@test
+fn law_lru_insert_remove_inverse() {
+    let mut c: LruCache<Int, Int> = LruCache.new(8);
+    c.insert(1, 100);
+    assert_eq(c.len(), 1);
+    let v = c.remove(&1);
+    assert_eq(v, Some(100));
+    assert_eq(c.len(), 0);
+}
+
+// =============================================================================
+// Law: stats are monotone (never decrease)
+// =============================================================================
+
+@test
+fn law_lru_stats_monotone() {
+    let mut c: LruCache<Int, Int> = LruCache.new(2);
+    let s0 = c.stats();
+    let _ = c.get(&1);   // miss
+    let s1 = c.stats();
+    assert(s1.misses >= s0.misses);
+
+    c.insert(1, 100);
+    let _ = c.get(&1);   // hit
+    let s2 = c.stats();
+    assert(s2.hits >= s1.hits);
+
+    c.insert(2, 200);
+    c.insert(3, 300);   // evict 1
+    let s3 = c.stats();
+    assert(s3.evicted >= s2.evicted);
+}
+
+// =============================================================================
+// Law: peek doesn't affect stats (no hit/miss increments)
+// =============================================================================
+
+@test
+fn law_lru_peek_no_stats_change() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    c.insert(1, 100);
+    let s0 = c.stats();
+    let _ = c.peek(&1);
+    let _ = c.peek(&999);
+    let s1 = c.stats();
+    assert_eq(s0.hits, s1.hits);
+    assert_eq(s0.misses, s1.misses);
+}
+
+// =============================================================================
+// Law: clear restores to fresh-new() state (capacity preserved)
+// =============================================================================
+
+@test
+fn law_lru_clear_restores_to_empty() {
+    let mut c: LruCache<Int, Int> = LruCache.new(8);
+    let cap = c.capacity();
+    c.insert(1, 100);
+    c.insert(2, 200);
+    c.clear();
+    assert(c.is_empty());
+    assert_eq(c.len(), 0);
+    assert_eq(c.capacity(), cap);
+}
+
+// =============================================================================
+// Law: contains <=> get yields Some
+// =============================================================================
+
+@test
+fn law_lru_contains_iff_get_some() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    c.insert(1, 100);
+
+    assert(c.contains(&1));
+    let v1: Maybe<Int> = c.peek(&1);
+    assert(v1 is Some(_));
+
+    assert(!c.contains(&999));
+    let v2: Maybe<Int> = c.peek(&999);
+    assert(v2 is None);
+}
+
+// =============================================================================
+// Law: insert is idempotent under same value
+// =============================================================================
+
+@test
+fn law_lru_insert_same_value_idempotent_on_len() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    c.insert(1, 100);
+    let len_after_1 = c.len();
+    c.insert(1, 100);   // same key, same value
+    assert_eq(c.len(), len_after_1);
+    assert_eq(c.get(&1), Some(100));
+}
+
+// =============================================================================
+// Law: insert returns prior value (Maybe round-trip)
+// =============================================================================
+
+@test
+fn law_lru_insert_prior_value_roundtrip() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    assert(c.insert(1, 100) is None);    // first insert
+    assert_eq(c.insert(1, 200), Some(100));  // overwrite returns prior
+    assert_eq(c.insert(1, 300), Some(200));  // again
+}
