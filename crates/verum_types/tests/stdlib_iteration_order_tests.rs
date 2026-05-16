@@ -29,11 +29,13 @@ fn variant_type_with_ok_err(name: &str) -> TypeDescriptor {
                 name: "T".into(),
                 bounds: List::new(),
                 default: Maybe::None,
+            type_bounds: List::new(),
             },
             GenericParam {
                 name: "E".into(),
                 bounds: List::new(),
                 default: Maybe::None,
+            type_bounds: List::new(),
             },
         ]),
         kind: TypeDescriptorKind::Variant {

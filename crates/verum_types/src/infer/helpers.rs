@@ -1554,6 +1554,62 @@ pub(crate) fn parse_descriptor_type_string(raw: &str) -> Type {
             mutable: false,
         };
     }
+    // **Function-type spelling** (`fn(arg1, arg2, ...) -> ret`) — must
+    // be parsed BEFORE the generic-instantiation `<>` check below, since
+    // `fn(A) -> Maybe<T>` ends with `>` and would otherwise be mis-
+    // captured as `Type::Named { path: "fn(A) -> Maybe", args: [T] }`.
+    //
+    // Serialised by `archive_metadata::type_ref_to_text_with_params`'s
+    // `TypeRef::Function` arm (around line ~1059) using the form
+    // `fn(<args>) -> <ret>`.  Required for stdlib HOF metadata-side
+    // `F: fn(A) -> B` bound recovery (task #5/#13 §F).
+    //
+    // Parse shape: find the matching `)` at depth 0, split args at
+    // top-level commas, parse args + return-type recursively.
+    if let Some(rest) = trimmed.strip_prefix("fn(") {
+        let bytes = rest.as_bytes();
+        let mut depth = 1usize;
+        let mut close_idx: Option<usize> = None;
+        for (i, &b) in bytes.iter().enumerate() {
+            match b {
+                b'(' | b'<' | b'[' => depth += 1,
+                b')' if depth == 1 => {
+                    close_idx = Some(i);
+                    break;
+                }
+                b')' | b'>' | b']' => depth -= 1,
+                _ => {}
+            }
+        }
+        if let Some(close) = close_idx {
+            let args_text = &rest[..close];
+            let after = rest[close + 1..].trim_start();
+            let ret_text = after
+                .strip_prefix("->")
+                .map(|s| s.trim_start())
+                .unwrap_or("");
+            let params: List<Type> = if args_text.trim().is_empty() {
+                List::new()
+            } else {
+                split_top_level_commas(args_text)
+                    .into_iter()
+                    .map(|s| parse_descriptor_type_string(s.trim()))
+                    .collect()
+            };
+            let return_type = if ret_text.is_empty() {
+                Type::Unit
+            } else {
+                parse_descriptor_type_string(ret_text)
+            };
+            return Type::Function {
+                params,
+                return_type: Box::new(return_type),
+                contexts: None,
+                type_params: List::new(),
+                properties: None,
+            };
+        }
+    }
     // Generic instantiation: "Base<arg1, arg2, ...>".
     //
     // Task #25 — canonical form is `Type::Named { path, args }`, NOT

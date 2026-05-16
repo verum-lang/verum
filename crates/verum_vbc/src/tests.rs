@@ -188,6 +188,7 @@ fn test_roundtrip_sum_type() {
             bounds: smallvec::smallvec![],
             default: None,
             variance: Variance::Covariant,
+            type_bounds: smallvec::SmallVec::new(),
         }],
         fields: smallvec::smallvec![],
         variants: smallvec::smallvec![

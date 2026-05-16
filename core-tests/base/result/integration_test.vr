@@ -83,13 +83,12 @@ fn integration_q_chain_short_circuits_on_second_error() {
 // -----------------------------------------------------------------------------
 
 fn maybe_inside_result(m: Maybe<Int>) -> Result<Int, Text> {
-    // **Cross-type `?` workaround** — the stdlib defines
-    // `implement<T, E: Default> FromResidual<Maybe<Never>> for Result<T, E>`
-    // but the typechecker's `can_convert_residual` lookup doesn't
-    // currently match this impl when E has the `Default` bound (likely
-    // a bound-resolution gap in `protocol::can_convert_residual` —
-    // tracked in audit.md §A).  Use explicit `ok_or` until the
-    // protocol-bound resolution lands.
+    // Cross-type `?` (Maybe → Result) — bound-aware can_convert_residual
+    // logic landed in L1.1 (`where_clauses_satisfied_under`), but the
+    // upstream impl `<T, E: Default> FromResidual<Maybe<Never>> for
+    // Result<T, E>` is rejected by overlap-rule at precompile-load
+    // time (only 2 of 5 stdlib FromResidual impls register).  Separate
+    // task — impl-registration overlap discipline.
     let v = m.ok_or("none")?;
     Ok(v + 1)
 }
@@ -110,12 +109,9 @@ fn integration_maybe_in_result_none_becomes_err() {
 // -----------------------------------------------------------------------------
 
 fn result_inside_maybe(r: Result<Int, Text>) -> Maybe<Int> {
-    // **Cross-type `?` workaround** — see `maybe_inside_result` above.
-    // Same `can_convert_residual` bound-resolution gap blocks the
-    // `Result<T, E> → Maybe<T>` direction (stdlib provides
-    // `FromResidual<Result<Never, E>> for Maybe<T>` in
-    // `core/base/maybe.vr:606`).  Use explicit `.ok()` until the
-    // protocol-bound resolution lands.
+    // Cross-type `?` (Result → Maybe) — same upstream
+    // overlap-rule gap; workaround via `.ok()` until impl-
+    // registration is fixed.
     let v = r.ok()?;
     Some(v * 2)
 }

@@ -233,6 +233,11 @@ fn convert_type_descriptor(
                 .as_ref()
                 .map(|d| type_ref_to_text(d, module))
                 .into(),
+            type_bounds: tp
+                .type_bounds
+                .iter()
+                .map(|tr| type_ref_to_text(tr, module))
+                .collect(),
         })
         .collect();
 
@@ -360,6 +365,11 @@ fn convert_to_protocol_descriptor(
                 .as_ref()
                 .map(|d| type_ref_to_text(d, module))
                 .into(),
+            type_bounds: tp
+                .type_bounds
+                .iter()
+                .map(|tr| type_ref_to_text(tr, module))
+                .collect(),
         })
         .collect();
 
@@ -527,6 +537,11 @@ fn convert_function_descriptor(
                 .as_ref()
                 .map(|d| type_ref_to_text(d, module))
                 .into(),
+            type_bounds: tp
+                .type_bounds
+                .iter()
+                .map(|tr| type_ref_to_text(tr, module))
+                .collect(),
         })
         .collect();
 

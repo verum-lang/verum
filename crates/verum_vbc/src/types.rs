@@ -802,6 +802,22 @@ pub struct TypeParamDescriptor {
     pub default: Option<TypeRef>,
     /// Variance.
     pub variance: Variance,
+    /// **Function-type bounds** (`F: fn(A) -> B`-style closure-shape
+    /// constraints).  Distinct from `bounds: ProtocolId` because the
+    /// payload is a structural `TypeRef`, not a nominal protocol ID.
+    /// Pre-existing serialised metadata defaults to empty via
+    /// `#[serde(default)]`.
+    ///
+    /// **Why this exists**: `from_fn<T, F: fn() -> Maybe<T>>` and every
+    /// other stdlib HOF carries a closure-shape constraint on its
+    /// type parameter F.  Without serialising the constraint through
+    /// the precompile path, call-site closure-shape inference can't
+    /// recover `Maybe<T>` as the closure body's expected return type
+    /// — the canonical `Backend.None` / `Maybe.None` collision
+    /// surfaces at every test site of the form
+    /// `from_fn(|| if cond { Some(x) } else { None })`.
+    #[serde(default)]
+    pub type_bounds: SmallVec<[TypeRef; 1]>,
 }
 
 impl Default for TypeParamDescriptor {
@@ -812,6 +828,7 @@ impl Default for TypeParamDescriptor {
             bounds: SmallVec::new(),
             default: None,
             variance: Variance::Invariant,
+            type_bounds: SmallVec::new(),
         }
     }
 }
@@ -1868,6 +1885,7 @@ mod tests {
             bounds: SmallVec::new(),
             default: None,
             variance: Variance::Covariant,
+            type_bounds: smallvec::SmallVec::new(),
         });
         assert_eq!(td.type_params.len(), 1);
     }

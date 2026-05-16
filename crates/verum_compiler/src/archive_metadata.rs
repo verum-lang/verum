@@ -942,6 +942,19 @@ fn convert_generic_params(
     src: &[verum_vbc::types::TypeParamDescriptor],
     module: &VbcModule,
 ) -> List<GenericParam> {
+    // **Type-id → name index** (used for function-type bound
+    // serialisation).  Built once per metadata pass; the per-param
+    // type_bounds list is sparse (only HOFs carry any), so the
+    // overhead is paid only when needed.
+    let type_id_to_name: HashMap<u32, String> = module
+        .types
+        .iter()
+        .filter_map(|t| module.strings.get(t.name).map(|n| (t.id.0, n.to_string())))
+        .collect();
+    let param_id_to_name: HashMap<u16, String> = src
+        .iter()
+        .filter_map(|tp| module.strings.get(tp.name).map(|n| (tp.id.0, n.to_string())))
+        .collect();
     src.iter()
         .map(|tp| GenericParam {
             name: module
@@ -951,6 +964,17 @@ fn convert_generic_params(
                 .unwrap_or_default(),
             bounds: List::new(),
             default: Maybe::None,
+            type_bounds: tp
+                .type_bounds
+                .iter()
+                .map(|tr| {
+                    Text::from(type_ref_to_text_with_params(
+                        tr,
+                        &type_id_to_name,
+                        &param_id_to_name,
+                    ))
+                })
+                .collect(),
         })
         .collect()
 }

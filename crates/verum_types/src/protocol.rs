@@ -8527,9 +8527,8 @@ impl ProtocolChecker {
                         &residual_type_normalized,
                     )
                     .is_some()
+                    && self.where_clauses_satisfied_under(impl_, &for_type_subst)
                 {
-                    // #[cfg(debug_assertions)]
-                    // eprintln!("[DEBUG can_convert_residual] SUCCESS! residual matched");
                     return true;
                 }
 
@@ -8537,13 +8536,10 @@ impl ProtocolChecker {
                 if self
                     .try_match_type(&impl_residual_normalized, &residual_type_normalized)
                     .is_some()
+                    && self.where_clauses_satisfied_under(impl_, &for_type_subst)
                 {
-                    // #[cfg(debug_assertions)]
-                    // eprintln!("[DEBUG can_convert_residual] SUCCESS! raw impl_residual matched");
                     return true;
                 }
-                // #[cfg(debug_assertions)]
-                // eprintln!("[DEBUG can_convert_residual] residual did not match");
             }
         }
 
@@ -8563,10 +8559,13 @@ impl ProtocolChecker {
                         if self
                             .try_match_type(&impl_residual_instantiated, residual_type)
                             .is_some()
+                            && self.where_clauses_satisfied_under(impl_, &for_type_subst)
                         {
                             return true;
                         }
-                        if self.try_match_type(impl_residual, residual_type).is_some() {
+                        if self.try_match_type(impl_residual, residual_type).is_some()
+                            && self.where_clauses_satisfied_under(impl_, &for_type_subst)
+                        {
                             return true;
                         }
                     }
@@ -8575,6 +8574,41 @@ impl ProtocolChecker {
         }
 
         false
+    }
+
+    /// Verify that a `ProtocolImpl`'s where-clause bounds are satisfied
+    /// under the substitution produced by structural type-matching.
+    ///
+    /// **Architectural rationale** — `try_match_type` is purely structural:
+    /// it produces a `Map<TypeVar, Type>` substitution but doesn't consult
+    /// the impl's `where_clauses: List<WhereClause>`.  For impls like
+    /// `implement<T, E: Default> FromResidual<Maybe<Never>> for Result<T,
+    /// E>` the structural match against `Result<Int, Text>` produces
+    /// `{T → Int, E → Text}` — `E: Default` is dropped.
+    ///
+    /// This helper applies the substitution to every where-clause's
+    /// `ty` and verifies the resolved type satisfies the clause's
+    /// `bounds: List<ProtocolBound>` via `check_bounds`.  If ANY clause
+    /// fails, the impl doesn't apply.  Empty where-clause list trivially
+    /// satisfied.
+    ///
+    /// Stdlib-agnostic: every input flows from the impl's own AST-
+    /// derived metadata + the user's expected types at the call site.
+    fn where_clauses_satisfied_under(
+        &self,
+        impl_: &ProtocolImpl,
+        subst: &Map<Text, Type>,
+    ) -> bool {
+        if impl_.where_clauses.is_empty() {
+            return true;
+        }
+        for clause in impl_.where_clauses.iter() {
+            let resolved_ty = self.apply_substitution(&clause.ty, subst);
+            if self.check_bounds(&resolved_ty, &clause.bounds).is_err() {
+                return false;
+            }
+        }
+        true
     }
 
     /// Normalize a Variant type to its Generic equivalent if registered.

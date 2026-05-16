@@ -917,6 +917,7 @@ impl<'a> Deserializer<'a> {
  bounds,
  default,
  variance,
+     type_bounds: smallvec::SmallVec::new(),
  })
  }
 

@@ -1750,6 +1750,7 @@ impl<'s> CompilationPipeline<'s> {
                 name: Text::from(name),
                 bounds,
                 default: Maybe::None,
+                type_bounds: List::new(),
             });
         }
 
