@@ -1,0 +1,310 @@
+// =============================================================================
+// core-tests/collections/slice/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect.  Each entry names the defect; @ignore'd
+// pins reproduce the failing shape without blocking the green suite.
+// Tracked in audit.md §3-§4.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+
+// =============================================================================
+// §A — Slice-only methods panic via CallM with runtime kind = List
+// =============================================================================
+
+// REGRESSION (§A.1): `slice.eq_slice(&other)` panics —
+//   "method 'List.eq_slice' not found on receiver of runtime kind `List`"
+//
+// Root cause: `xs.as_slice()` returns a `&[T]` typed at the source level,
+// but at the VBC runtime the receiver carries a `List` kind (slices are
+// not yet a distinct kind). Dispatch routes CallM("eq_slice", recv) to
+// the List method table, which has no `eq_slice`, panicking with the
+// "method not found" surface.
+//
+// Architecturally the fix is one of:
+//   (a) codegen — when the receiver's static type is `&[T]`, emit a
+//       direct `Call(Slice.<method>_fid)` rather than a `CallM`;
+//   (b) dispatch — on CallM miss against List, fall through to look in
+//       the Slice impl block's method table before panicking;
+//   (c) runtime kind — split `Slice` from `List` so dispatch tables
+//       can be addressed independently.
+@ignore
+@test
+fn regression_slice_eq_slice_dispatch_panic() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2, 3];
+    let sa: &[Int] = a.as_slice();
+    let sb: &[Int] = b.as_slice();
+    assert(sa.eq_slice(sb));
+}
+
+// REGRESSION (§A.2): same dispatch defect for `to_list()`.
+@ignore
+@test
+fn regression_slice_to_list_dispatch_panic() {
+    let xs: List<Int> = [1, 2, 3];
+    let s: &[Int] = xs.as_slice();
+    let out: List<Int> = s.to_list();
+    assert_eq(out.len(), 3);
+}
+
+// REGRESSION (§A.3): same dispatch defect for `cmp_slice()`.
+@ignore
+@test
+fn regression_slice_cmp_slice_dispatch_panic() {
+    let a: List<Int> = [1, 2, 3];
+    let b: List<Int> = [1, 2, 4];
+    let sa: &[Int] = a.as_slice();
+    let sb: &[Int] = b.as_slice();
+    let ord: Ordering = sa.cmp_slice(sb);
+    assert(ord is Less);
+}
+
+// =============================================================================
+// §B — Slice methods that pass through the source-level interpreter and
+// dispatch correctly but produce a wrong value
+// =============================================================================
+
+// REGRESSION (§B.1): `slice.is_sorted()` returns false on an in-order slice.
+//
+// Body: `for i in range(1, self.len()) { if self[i-1] > self[i] { return false; } }`.
+// At runtime, `self[i]` on a slice receiver yields the raw bit-pattern of
+// the indexed slot (not a value through auto-deref), so `>` compares
+// reference handles rather than Int values. Sister methods (`min`/`max`)
+// that explicitly bind `&self[i]` then compare `*elem` work correctly —
+// the working pattern is to bind, deref, and compare.
+//
+// Cross-reference: same shape as the closed `List.is_sorted` defect in
+// `core-tests/collections/list/regression_test.vr` §D.
+@ignore
+@test
+fn regression_slice_is_sorted_false_on_sorted_input() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let s: &[Int] = xs.as_slice();
+    assert(s.is_sorted());
+}
+
+// REGRESSION (§B.2): `slice.starts_with(&prefix)` returns false on a true
+// prefix despite explicit `*a == *b` deref in body.  Suggests the
+// indexing-into-prefix slice (`&prefix[i]`) yields a different ref-shape
+// from the indexing-into-self path, so `*` deref on one of the two
+// references doesn't normalise to the underlying Int value.
+@ignore
+@test
+fn regression_slice_starts_with_returns_false_on_true_prefix() {
+    let xs: List<Int> = [1, 2, 3, 4];
+    let ys: List<Int> = [1, 2];
+    let s: &[Int] = xs.as_slice();
+    let p: &[Int] = ys.as_slice();
+    assert(s.starts_with(p));
+}
+
+// REGRESSION (§B.3): `slice.partition_point(predicate)` returns wrong index.
+// The body uses `predicate(&self[mid])`, dispatch through the closure
+// likely receives the wrong-shape argument so the predicate's branch
+// computes against unexpected bits.
+@ignore
+@test
+fn regression_slice_partition_point_returns_wrong_index() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let s: &[Int] = xs.as_slice();
+    let p = s.partition_point(|x| *x < 3);
+    assert_eq(p, 2);
+}
+
+// =============================================================================
+// §C — Iterator/closure-argument dispatch defects
+// =============================================================================
+
+// REGRESSION (§C.1): `slice.position(&value)` runtime panics with
+//   TypeMismatch { expected: "closure", got: "non-pointer", op: "call_closure_sync" }
+//
+// Hypothesis: method-name `position` is registered in two distinct
+// signatures stdlib-wide — `Slice.position(&self, value: &T)` (value
+// form, slice.vr:211) and `Iterator.position<P>(&mut self, P)` (closure
+// form, iterator.vr:455). At call site `s.position(&v)`, the
+// monomorphiser binds to the Iterator default (which expects a closure
+// argument); at runtime the &v reference is unwrapped and dispatched
+// as if it were a closure, hitting the TypeMismatch in call_closure_sync.
+//
+// Architectural rule: when an inherent impl-block method on `[T]`
+// exists with the same name as an Iterator protocol default, the
+// inherent slice version MUST win at method resolution.  The same
+// defect closed in `core-tests/collections/list` long ago by renaming
+// the value-form to a distinct symbol (`list.rs` uses `position` (value)
+// and `position_by` (predicate)) — the slice surface needs the parallel
+// fix.
+@ignore
+@test
+fn regression_slice_position_misdispatches_to_iterator_predicate_form() {
+    let xs: List<Int> = [10, 20, 30];
+    let s: &[Int] = xs.as_slice();
+    let p: Maybe<Int> = s.position(&20);
+    assert_eq(p, Some(1));
+}
+
+// REGRESSION (§C.2): same shape for `rposition(&value)`.
+@ignore
+@test
+fn regression_slice_rposition_misdispatches() {
+    let xs: List<Int> = [10, 20, 30, 20];
+    let s: &[Int] = xs.as_slice();
+    let p: Maybe<Int> = s.rposition(&20);
+    assert_eq(p, Some(3));
+}
+
+// =============================================================================
+// §D — Slice-specific iterator types (Chunks / Windows) fail dispatch
+// =============================================================================
+
+// REGRESSION (§D.1): `slice.chunks(n).next()` panics —
+//   "method 'List.next' not found on receiver of runtime kind `List`"
+//
+// `chunks(n)` constructs a `Chunks<T>` struct literal which the runtime
+// boxes into a generic Object whose runtime kind is reported as `List`
+// (likely because Chunks contains a `slice: &[T]` field at offset 0).
+// CallM("next", recv) then dispatches against List and fails.  Same
+// fundamental architectural class as §A — slice-derived wrapper types
+// need their own runtime kind, OR codegen needs to emit `Call` rather
+// than `CallM` for these closed-universe types.
+@ignore
+@test
+fn regression_slice_chunks_next_dispatch_panic() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let s: &[Int] = xs.as_slice();
+    let mut iter = s.chunks(2);
+    let mut count = 0;
+    loop {
+        match iter.next() {
+            Some(_) => { count = count + 1; },
+            None => break,
+        }
+    }
+    assert_eq(count, 3);
+}
+
+// REGRESSION (§D.2): same shape for `windows(n).next()`.
+@ignore
+@test
+fn regression_slice_windows_next_dispatch_panic() {
+    let xs: List<Int> = [1, 2, 3, 4];
+    let s: &[Int] = xs.as_slice();
+    let mut iter = s.windows(2);
+    let mut count = 0;
+    loop {
+        match iter.next() {
+            Some(_) => { count = count + 1; },
+            None => break,
+        }
+    }
+    assert_eq(count, 3);
+}
+
+// =============================================================================
+// §E — Compiler crashes (ICE)
+// =============================================================================
+
+// REGRESSION (§E.1): `slice.binary_search(&target)` crashes the compiler
+// with SIGBUS.  Trigger: any single test file with one @test calling
+// `binary_search(&v)` against a sorted `&[Int]`.  Crash report locations:
+//   ~/.verum/crashes/verum-2026-05-16T12-50-21-*.json
+//
+// Backtrace localises to interpreter machinery (libsystem semaphore wait).
+// The crash is deterministic and reproduces under a single-test run, so
+// it is independent of parallel-test scheduling.  Likely class: a
+// codegen path emits an invalid instruction sequence for the
+// `where T: Ord` constraint when monomorphising against `Int`, and the
+// instruction-pointer derefs into an unmapped page mid-dispatch.
+@ignore
+@test
+fn regression_slice_binary_search_compiler_sigbus() {
+    let xs: List<Int> = [1, 3, 5, 7, 9];
+    let s: &[Int] = xs.as_slice();
+    let r: Result<Int, Int> = s.binary_search(&5);
+    assert(r is Ok(_));
+}
+
+// REGRESSION (§D.3): `contains(&v)` on a sub-slice obtained via
+// `s.split_at(k).0` or `s.slice(a, b)` returns false even though the
+// value is present in the parent slice.  Hypothesis: sub-slice has
+// a different runtime header layout from a top-level `as_slice()`
+// result, and `contains`'s body-level `*item == *value` deref shapes
+// don't agree on what the underlying value is.
+//
+// Reproducer: `xs = [5, 3, 8, 1, 7, 2, 9, 4]; s.min() = Some(&1);
+// (lhs, rhs) = s.split_at(4); lhs.contains(&1) = false`.
+// Closing §A.1 / §B together is expected to close this transitively.
+@ignore
+@test
+fn regression_slice_contains_on_subslice_returns_false() {
+    let xs: List<Int> = [5, 3, 8, 1, 7, 2, 9, 4];
+    let s: &[Int] = xs.as_slice();
+    let (lhs, _) = s.split_at(4);
+    // lhs is [5, 3, 8, 1].  contains(&1) must be true.
+    assert(lhs.contains(&1));
+}
+
+// =============================================================================
+// §F — PASS-GUARD pins for the working surface
+//
+// These are not @ignore'd — they exist to detect regressions in the
+// surface we currently rely on.  Any future change to slice.vr,
+// list.as_slice(), or the Slice runtime dispatch path MUST keep these
+// green.
+// =============================================================================
+
+@test
+fn pass_guard_slice_len_first_last() {
+    let xs: List<Int> = [10, 20, 30];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.len(), 3);
+    assert_eq(s.first(), Some(&10));
+    assert_eq(s.last(), Some(&30));
+}
+
+@test
+fn pass_guard_slice_get_bounded() {
+    let xs: List<Int> = [10, 20, 30];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.get(0), Some(&10));
+    let v: Maybe<&Int> = s.get(99);
+    assert(v is None);
+}
+
+@test
+fn pass_guard_slice_subrange_and_split_at() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let s: &[Int] = xs.as_slice();
+    let sub: &[Int] = s.slice(1, 4);
+    assert_eq(sub.len(), 3);
+    let (lhs, rhs) = s.split_at(2);
+    assert_eq(lhs.len(), 2);
+    assert_eq(rhs.len(), 3);
+}
+
+@test
+fn pass_guard_slice_min_max_contains() {
+    let xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.min(), Some(&1));
+    assert_eq(s.max(), Some(&9));
+    assert(s.contains(&5));
+    assert(!s.contains(&999));
+}
+
+@test
+fn pass_guard_slice_iter_basic_round_trip() {
+    let xs: List<Int> = [10, 20, 30];
+    let s: &[Int] = xs.as_slice();
+    let mut iter = s.iter();
+    let mut total = 0;
+    loop {
+        match iter.next() {
+            Some(v) => { total = total + *v; },
+            None => break,
+        }
+    }
+    assert_eq(total, 60);
+}
