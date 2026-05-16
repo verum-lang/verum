@@ -130,3 +130,203 @@ enum CaseKind {
     Upper,
     Lower,
 }
+
+// =====================================================================
+// `Char.encode_utf8` / `Char.encode_utf16` CallM-path intercept
+// (audit text/text §B)
+//
+// Closes the architectural class where a `ch.encode_utf8(&mut buf)`
+// call dispatched from a Verum body (e.g. `Text.insert`) reaches
+// `handle_call_method` with `receiver_kind = Int` — Char is NaN-boxed
+// into `Value::Int` for storage, but the CallM lookup keyed on the
+// receiver's runtime kind has no entry for "Char" → fails with
+// `method 'Char.encode_utf8' not found on receiver of runtime kind
+// 'Int'`.  The user-side body in `core/text/char.vr::encode_utf8`
+// (lines 296-322) exists and is correct; the failure is purely in
+// the dispatch path's inability to recognise an `Int`-shaped Char.
+//
+// Fix shape: a Tier-0 intercept that consumes the Char codepoint
+// from the receiver and writes the UTF-8 / UTF-16 bytes into the
+// caller's buffer through the canonical three-shape resolver
+// (BYTE_LIST / LIST / direct byte array, plus ThinRef).  Mirrors the
+// existing `CharSubOpcode::EncodeUtf8` intrinsic handler in
+// `char_extended.rs` — the encoding logic is identical, only the
+// register-decoding wrapper differs.
+//
+// The intercept is a no-op (returns `None`) when the receiver is
+// not Int-shaped — e.g. when the dispatch already resolved via the
+// intrinsic-opcode path or when the receiver is some other type
+// with an unrelated `encode_utf8` method.
+//
+// # Returns
+//
+// `Some(Value::from_i64(n_bytes))` on hit; `None` to defer to the
+// regular dispatch path (compiled body / "method not found").
+pub(in super::super) fn try_intercept_char_encode(
+    state: &mut InterpreterState,
+    bare_method_name: &str,
+    receiver: Value,
+    buf_reg: Reg,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let kind = match bare_method_name {
+        "encode_utf8" => EncodeKind::Utf8,
+        "encode_utf16" => EncodeKind::Utf16,
+        _ => return Ok(None),
+    };
+
+    // Receiver must be an Int-shaped Char NaN-box.  Auto-deref one
+    // level of CBGR-ref / ThinRef so that `(&ch).encode_utf8(...)`
+    // also reaches us — same pattern as the existing intercept
+    // siblings.  `resolve_arg_value` collapses all three reference
+    // shapes; for a non-reference value it's a no-op.
+    let receiver_resolved = super::cbgr_helpers::resolve_arg_value(state, receiver);
+    let codepoint = if receiver_resolved.is_int() {
+        receiver_resolved.as_i64()
+    } else if is_cbgr_ref(&receiver_resolved) {
+        let (abs_index, _) = decode_cbgr_ref(receiver_resolved.as_i64());
+        let inner = state.registers.get_absolute(abs_index);
+        if !inner.is_int() {
+            return Ok(None);
+        }
+        inner.as_i64()
+    } else {
+        return Ok(None);
+    };
+
+    let c = match char::from_u32(codepoint as u32) {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+
+    // Resolve the buf argument through the canonical helper so all
+    // three Verum reference shapes (CBGR register-ref, heap-interior
+    // pointer, ThinRef) collapse to the underlying heap value first.
+    let buf_val_raw = state.registers.get(caller_base, buf_reg);
+    let buf_val = super::cbgr_helpers::resolve_arg_value(state, buf_val_raw);
+
+    match kind {
+        EncodeKind::Utf8 => {
+            let mut tmp = [0u8; 4];
+            let encoded = c.encode_utf8(&mut tmp);
+            let n_bytes = encoded.len();
+            write_utf8_bytes_to_buf(buf_val, &tmp, n_bytes);
+            state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
+            Ok(Some(Value::from_i64(n_bytes as i64)))
+        }
+        EncodeKind::Utf16 => {
+            let mut tmp = [0u16; 2];
+            let encoded = c.encode_utf16(&mut tmp);
+            let n_units = encoded.len();
+            write_utf16_units_to_buf(buf_val, &tmp, n_units);
+            state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
+            Ok(Some(Value::from_i64(n_units as i64)))
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum EncodeKind {
+    Utf8,
+    Utf16,
+}
+
+fn write_utf8_bytes_to_buf(buf_val: Value, src: &[u8; 4], n_bytes: usize) {
+    if !buf_val.is_ptr() || buf_val.is_nil() {
+        if buf_val.is_thin_ref() {
+            let thin = buf_val.as_thin_ref();
+            if !thin.ptr.is_null() {
+                for (i, b) in src.iter().enumerate().take(n_bytes) {
+                    unsafe {
+                        *thin.ptr.add(i) = *b;
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    let buf_ptr = buf_val.as_ptr::<u8>();
+    let header =
+        unsafe { super::super::super::heap::ObjectHeader::ref_or_stub(buf_ptr) };
+    let header_data = unsafe {
+        buf_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE) as *mut Value
+    };
+    if header.type_id == crate::types::TypeId::BYTE_LIST {
+        let backing_ptr = unsafe { (*header_data.add(2)).as_ptr::<u8>() };
+        let dst_bytes = unsafe {
+            backing_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE) as *mut u8
+        };
+        for (i, b) in src.iter().enumerate().take(n_bytes) {
+            unsafe {
+                *dst_bytes.add(i) = *b;
+            }
+        }
+    } else if header.type_id == crate::types::TypeId::LIST {
+        let backing_ptr = unsafe { (*header_data.add(2)).as_ptr::<u8>() };
+        let dst_vals = unsafe {
+            backing_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE)
+                as *mut Value
+        };
+        for (i, b) in src.iter().enumerate().take(n_bytes) {
+            unsafe {
+                *dst_vals.add(i) = Value::from_i64(*b as i64);
+            }
+        }
+    } else {
+        let dst_bytes = unsafe {
+            buf_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE) as *mut u8
+        };
+        for (i, b) in src.iter().enumerate().take(n_bytes) {
+            unsafe {
+                *dst_bytes.add(i) = *b;
+            }
+        }
+    }
+}
+
+fn write_utf16_units_to_buf(buf_val: Value, src: &[u16; 2], n_units: usize) {
+    if !buf_val.is_ptr() || buf_val.is_nil() {
+        if buf_val.is_thin_ref() {
+            let thin = buf_val.as_thin_ref();
+            if !thin.ptr.is_null() {
+                for (i, u) in src.iter().enumerate().take(n_units) {
+                    unsafe {
+                        *(thin.ptr as *mut u16).add(i) = *u;
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    let buf_ptr = buf_val.as_ptr::<u8>();
+    let header =
+        unsafe { super::super::super::heap::ObjectHeader::ref_or_stub(buf_ptr) };
+    let header_data = unsafe {
+        buf_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE) as *mut Value
+    };
+    if header.type_id == crate::types::TypeId::LIST {
+        // Verum-side `&mut [Int]`: NaN-boxed Value per element.
+        let backing_ptr = unsafe { (*header_data.add(2)).as_ptr::<u8>() };
+        let dst_vals = unsafe {
+            backing_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE)
+                as *mut Value
+        };
+        for (i, u) in src.iter().enumerate().take(n_units) {
+            unsafe {
+                *dst_vals.add(i) = Value::from_i64(*u as i64);
+            }
+        }
+    } else {
+        // Fixed-size [Int; 2] array — payload is Value-per-elem.
+        let dst_vals = unsafe {
+            buf_ptr.add(super::super::super::heap::OBJECT_HEADER_SIZE) as *mut Value
+        };
+        for (i, u) in src.iter().enumerate().take(n_units) {
+            unsafe {
+                *dst_vals.add(i) = Value::from_i64(*u as i64);
+            }
+        }
+    }
+}
