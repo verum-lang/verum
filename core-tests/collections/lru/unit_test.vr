@@ -1,0 +1,232 @@
+// =============================================================================
+// core-tests/collections/lru/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.lru` — `LruCache<K, V>`, capacity-bounded
+// LRU cache. Backed by `Map<K, V>` for O(1) lookup + `List<K>` for
+// LRU order tracking.
+//
+// One axis of behaviour per `@test`; section banners group tests by
+// public method.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.lru.LruCache;
+
+// =============================================================================
+// Section 1: Construction
+// =============================================================================
+
+@test
+fn test_lru_new_is_empty() {
+    let c: LruCache<Int, Int> = LruCache.new(8);
+    assert(c.is_empty());
+    assert_eq(c.len(), 0);
+    assert_eq(c.capacity(), 8);
+}
+
+@test
+fn test_lru_new_zero_capacity_clamps_to_one() {
+    let c: LruCache<Int, Int> = LruCache.new(0);
+    assert_eq(c.capacity(), 1);
+}
+
+@test
+fn test_lru_new_negative_capacity_clamps_to_one() {
+    let c: LruCache<Int, Int> = LruCache.new(-5);
+    assert_eq(c.capacity(), 1);
+}
+
+// =============================================================================
+// Section 2: insert returns prior value
+// =============================================================================
+
+@test
+fn test_lru_insert_new_returns_none() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    let prev = c.insert(1, 100);
+    assert(prev is None);
+    assert_eq(c.len(), 1);
+}
+
+@test
+fn test_lru_insert_existing_returns_prior_value() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    c.insert(1, 100);
+    let prev = c.insert(1, 200);
+    assert_eq(prev, Some(100));
+    assert_eq(c.len(), 1);
+}
+
+// =============================================================================
+// Section 3: get / peek / contains
+// =============================================================================
+
+@test
+fn test_lru_get_present_returns_some() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    c.insert(1, 100);
+    let v = c.get(&1);
+    assert_eq(v, Some(100));
+}
+
+@test
+fn test_lru_get_absent_returns_none() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    let v: Maybe<Int> = c.get(&999);
+    assert(v is None);
+}
+
+@test
+fn test_lru_peek_present_returns_some() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    c.insert(1, 100);
+    let v = c.peek(&1);
+    assert_eq(v, Some(100));
+}
+
+@test
+fn test_lru_contains_present_true() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    c.insert(1, 100);
+    assert(c.contains(&1));
+}
+
+@test
+fn test_lru_contains_absent_false() {
+    let c: LruCache<Int, Int> = LruCache.new(4);
+    assert(!c.contains(&999));
+}
+
+// =============================================================================
+// Section 4: remove
+// =============================================================================
+
+@test
+fn test_lru_remove_present_returns_value() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    c.insert(1, 100);
+    let r = c.remove(&1);
+    assert_eq(r, Some(100));
+    assert_eq(c.len(), 0);
+}
+
+@test
+fn test_lru_remove_absent_returns_none() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    let r: Maybe<Int> = c.remove(&999);
+    assert(r is None);
+}
+
+// =============================================================================
+// Section 5: clear
+// =============================================================================
+
+@test
+fn test_lru_clear_drops_all_entries() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    c.insert(1, 100);
+    c.insert(2, 200);
+    c.insert(3, 300);
+    c.clear();
+    assert(c.is_empty());
+    assert_eq(c.len(), 0);
+}
+
+@test
+fn test_lru_clear_preserves_capacity() {
+    let mut c: LruCache<Int, Int> = LruCache.new(8);
+    c.insert(1, 100);
+    c.clear();
+    assert_eq(c.capacity(), 8);
+}
+
+// =============================================================================
+// Section 6: eviction at capacity
+// =============================================================================
+
+@test
+fn test_lru_eviction_at_capacity_drops_oldest() {
+    let mut c: LruCache<Int, Int> = LruCache.new(2);
+    c.insert(1, 100);
+    c.insert(2, 200);
+    c.insert(3, 300);    // evicts 1
+    assert_eq(c.len(), 2);
+    let v1: Maybe<Int> = c.get(&1);
+    assert(v1 is None);
+    assert_eq(c.get(&2), Some(200));
+    assert_eq(c.get(&3), Some(300));
+}
+
+@test
+fn test_lru_eviction_does_not_drop_recently_accessed() {
+    let mut c: LruCache<Int, Int> = LruCache.new(2);
+    c.insert(1, 100);
+    c.insert(2, 200);
+    let _ = c.get(&1);   // touch 1 → 2 is now LRU
+    c.insert(3, 300);    // evicts 2 (LRU)
+    assert_eq(c.get(&1), Some(100));
+    let v2: Maybe<Int> = c.get(&2);
+    assert(v2 is None);
+    assert_eq(c.get(&3), Some(300));
+}
+
+// =============================================================================
+// Section 7: stats — hits / misses / evicted
+// =============================================================================
+
+@test
+fn test_lru_stats_size_tracks_len() {
+    let mut c: LruCache<Int, Int> = LruCache.new(8);
+    c.insert(1, 100);
+    c.insert(2, 200);
+    let s = c.stats();
+    assert_eq(s.size, 2);
+}
+
+@test
+fn test_lru_stats_hits_incremented_on_get_hit() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    c.insert(1, 100);
+    let _ = c.get(&1);
+    let _ = c.get(&1);
+    let s = c.stats();
+    assert_eq(s.hits, 2_u64);
+}
+
+@test
+fn test_lru_stats_misses_incremented_on_get_miss() {
+    let mut c: LruCache<Int, Int> = LruCache.new(4);
+    let _ = c.get(&1);
+    let _ = c.get(&2);
+    let _ = c.get(&3);
+    let s = c.stats();
+    assert_eq(s.misses, 3_u64);
+}
+
+@test
+fn test_lru_stats_evicted_incremented_on_capacity_drop() {
+    let mut c: LruCache<Int, Int> = LruCache.new(2);
+    c.insert(1, 100);
+    c.insert(2, 200);
+    c.insert(3, 300);    // evicts 1
+    let s = c.stats();
+    assert_eq(s.evicted, 1_u64);
+}
+
+// =============================================================================
+// Section 8: peek does not affect LRU order
+// =============================================================================
+
+@test
+fn test_lru_peek_does_not_touch_order() {
+    let mut c: LruCache<Int, Int> = LruCache.new(2);
+    c.insert(1, 100);
+    c.insert(2, 200);
+    let _ = c.peek(&1);   // peek 1, but order should still have 1 as LRU
+    c.insert(3, 300);     // should evict 1, not 2
+    let v1: Maybe<Int> = c.get(&1);
+    assert(v1 is None);
+    assert_eq(c.get(&2), Some(200));
+    assert_eq(c.get(&3), Some(300));
+}
