@@ -7,7 +7,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.ulid.{Ulid, UlidError, parse};
+mount core.base.ulid.{Ulid, UlidError, parse, from_parts};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -110,14 +110,14 @@ fn test_parse_uppercase_equals_original() {
 
 @test
 fn test_from_parts_timestamp_zero() {
-    let id = Ulid.from_parts(0, 0);
+    let id = from_parts(0, 0);
     assert_eq(id.timestamp_ms(), 0);
 }
 
 @test
 fn test_from_parts_max_timestamp() {
     let max_ts: Int = 281474976710655;   // 2^48 - 1
-    let id = Ulid.from_parts(max_ts, 0);
+    let id = from_parts(max_ts, 0);
     assert_eq(id.timestamp_ms(), max_ts);
 }
 
