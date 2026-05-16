@@ -85,8 +85,8 @@ fn test_memory_flags_in_list_filter() {
     ];
     let raw: List<UInt32> = flags.iter().map(|f| (*f).0).collect();
     assert_eq(raw.len(), 4);
-    let sum: UInt32 = (*raw.get(0 as USize)) + (*raw.get(1 as USize))
-                    + (*raw.get(2 as USize)) + (*raw.get(3 as USize));
+    let sum: UInt32 = (raw.get(0 as USize).unwrap()) + (raw.get(1 as USize).unwrap())
+                    + (raw.get(2 as USize).unwrap()) + (raw.get(3 as USize).unwrap());
     assert_eq(sum, 15 as UInt32);
 }
 

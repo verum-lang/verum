@@ -162,8 +162,8 @@ fn test_memory_flags_disjoint_under_bitwise_and() {
     while i < n {
         let mut j: Int = i + 1;
         while j < n {
-            let fi = *flags.get(i as USize);
-            let fj = *flags.get(j as USize);
+            let fi = flags.get(i as USize).unwrap();
+            let fj = flags.get(j as USize).unwrap();
             assert_eq(fi & fj, 0 as UInt32);
             j = j + 1;
         }

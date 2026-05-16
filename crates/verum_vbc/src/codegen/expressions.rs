@@ -1950,39 +1950,52 @@ impl VbcCodegen {
             || matches!(right_type, Some(verum_ast::ty::TypeKind::Text))
             || left_type_name.as_deref() == Some("Text")
             || right_type_name.as_deref() == Some("Text");
-        // Check if both types are known primitives (Int, Bool, Char)
-        // For unknown types (Maybe<T>, Result<T, E>, etc.), use generic comparison
-        let is_primitive = matches!(
-            left_type,
-            Some(
-                verum_ast::ty::TypeKind::Int
-                    | verum_ast::ty::TypeKind::Bool
-                    | verum_ast::ty::TypeKind::Char
+        // Check if both types are known primitives (Int, Bool, Char,
+        // and any sized integer alias: Int8..Int128 / UInt8..UInt128 /
+        // ISize / USize / Byte plus legacy / Rust-style spellings).
+        //
+        // Architectural rule (task #20 §A): every primitive comparison
+        // op MUST emit the direct `CmpI` / `CmpF` opcode for primitive
+        // operands instead of routing through method dispatch. Routing
+        // sized-integer `==` / `!=` through CmpG → CallM(`Int16.ne`)
+        // recurses through the default `PartialEq.ne` body when the
+        // method-table entry is the auto-generated `!self.eq(other)`
+        // wrapper materialised by `assert_eq<T: Eq>`, producing the
+        // depth-16384 stack overflow surfaced in
+        // `test_fcntl_lock_tags_pairwise_distinct`.
+        //
+        // The TypeKind enum only carries the canonical `Int`/`Float`
+        // primitives; sized aliases land as `TypeKind::Path("Int16")`
+        // etc.  Consult `verum_common::well_known_types::type_names`
+        // (the canonical NUMERIC_ALIAS_MATRIX-pinned registry) for
+        // name-driven classification.
+        let is_primitive_typekind = |tk: &Option<verum_ast::ty::TypeKind>| {
+            matches!(
+                tk,
+                Some(
+                    verum_ast::ty::TypeKind::Int
+                        | verum_ast::ty::TypeKind::Bool
+                        | verum_ast::ty::TypeKind::Char
+                )
             )
-        ) && matches!(
-            right_type,
-            Some(
-                verum_ast::ty::TypeKind::Int
-                    | verum_ast::ty::TypeKind::Bool
-                    | verum_ast::ty::TypeKind::Char
-            )
-        ) || (matches!(
-            left_type,
-            Some(
-                verum_ast::ty::TypeKind::Int
-                    | verum_ast::ty::TypeKind::Bool
-                    | verum_ast::ty::TypeKind::Char
-            )
-        ) && right_type.is_none())
-            || (left_type.is_none()
-                && matches!(
-                    right_type,
-                    Some(
-                        verum_ast::ty::TypeKind::Int
-                            | verum_ast::ty::TypeKind::Bool
-                            | verum_ast::ty::TypeKind::Char
-                    )
-                ));
+        };
+        let is_primitive_name = |name: &Option<String>| {
+            name.as_deref()
+                .map(|n| {
+                    verum_common::well_known_types::type_names::is_numeric_type(n)
+                        || n == "Bool"
+                        || n == "Char"
+                })
+                .unwrap_or(false)
+        };
+        let left_is_prim = is_primitive_typekind(&left_type) || is_primitive_name(&left_type_name);
+        let right_is_prim =
+            is_primitive_typekind(&right_type) || is_primitive_name(&right_type_name);
+        let left_unknown = left_type.is_none() && left_type_name.is_none();
+        let right_unknown = right_type.is_none() && right_type_name.is_none();
+        let is_primitive = (left_is_prim && right_is_prim)
+            || (left_is_prim && right_unknown)
+            || (left_unknown && right_is_prim);
         // Check if either operand is unsigned — ordering comparisons need CmpU
         let is_unsigned = self.infer_expr_is_unsigned(left) || self.infer_expr_is_unsigned(right);
 
@@ -17193,10 +17206,28 @@ impl VbcCodegen {
                             // For uppercase names, check if this is a variant constructor
                             // and return the parent type name instead (e.g., Nothing → Maybe)
                             if ident.name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                                if let Some(func_info) = self.ctx.lookup_function(&ident.name)
-                                    && let Some(ref parent_type) = func_info.parent_type_name
-                                {
-                                    return Some(parent_type.clone());
+                                if let Some(func_info) = self.ctx.lookup_function(&ident.name) {
+                                    if let Some(ref parent_type) = func_info.parent_type_name {
+                                        return Some(parent_type.clone());
+                                    }
+                                    // **Const declarations** are stored as zero-arg
+                                    // functions with `is_const = true` and a populated
+                                    // `return_type_name` (e.g. `public const F_RDLCK:
+                                    // Int16 = 0;` registers `F_RDLCK` with
+                                    // `return_type_name = Some("Int16")`).  Without
+                                    // this arm `extract_expr_type_name(F_RDLCK)`
+                                    // returns `None`, leaving `compile_binary`'s
+                                    // primitive-name probe in the dark and forcing
+                                    // `F_RDLCK != F_WRLCK` through CmpG → method
+                                    // dispatch → the `assert_eq<T: Eq>`-materialised
+                                    // `!self.eq(other)` wrapper that self-recurses
+                                    // (depth-16384 StackOverflow surfaced by
+                                    // `test_fcntl_lock_tags_pairwise_distinct`).
+                                    if func_info.is_const
+                                        && let Some(ref ret_name) = func_info.return_type_name
+                                    {
+                                        return Some(ret_name.clone());
+                                    }
                                 }
                                 // Simple lookup failed (collision set) — try qualified search
                                 if let Some(parent_type) =

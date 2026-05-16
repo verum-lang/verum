@@ -78,8 +78,8 @@ fn law_page_align_up_monotone() {
     let mut i: Int = 0;
     let n = samples.len();
     while i + 1 < n {
-        let xi: USize = *samples.get(i as USize);
-        let xj: USize = *samples.get((i + 1) as USize);
+        let xi: USize = samples.get(i as USize).unwrap();
+        let xj: USize = samples.get((i + 1) as USize).unwrap();
         assert(xi <= xj);
         let ai = page_align_up(xi);
         let aj = page_align_up(xj);
@@ -153,8 +153,8 @@ fn law_page_align_down_monotone() {
     let mut i: Int = 0;
     let n = samples.len();
     while i + 1 < n {
-        let xi: USize = *samples.get(i as USize);
-        let xj: USize = *samples.get((i + 1) as USize);
+        let xi: USize = samples.get(i as USize).unwrap();
+        let xj: USize = samples.get((i + 1) as USize).unwrap();
         let ai = page_align_down(xi);
         let aj = page_align_down(xj);
         assert(ai <= aj);
@@ -335,8 +335,8 @@ fn law_oserror_would_block_three_known_codes() {
     let mut i: Int = 0;
     let n = codes.len();
     while i < n {
-        let c = *codes.get(i as USize);
-        let exp = *expected.get(i as USize);
+        let c = codes.get(i as USize).unwrap();
+        let exp = expected.get(i as USize).unwrap();
         let e = OSError.new(c, "x".clone());
         assert_eq(e.would_block(), exp);
         i = i + 1;
@@ -486,8 +486,8 @@ fn law_sys_memory_ordering_to_opcode_distinct() {
     while i < n {
         let mut j: Int = i + 1;
         while j < n {
-            let ci = *codes.get(i as USize);
-            let cj = *codes.get(j as USize);
+            let ci = codes.get(i as USize).unwrap();
+            let cj = codes.get(j as USize).unwrap();
             assert(ci != cj);
             j = j + 1;
         }

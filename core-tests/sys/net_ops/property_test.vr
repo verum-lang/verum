@@ -64,8 +64,8 @@ fn law_connect_to_unroutable_yields_none() {
     let mut i: Int = 0;
     let n = hosts.len();
     while i < n {
-        let host = *hosts.get(i as USize);
-        let port = *ports.get(i as USize);
+        let host = hosts.get(i as USize).unwrap();
+        let port = ports.get(i as USize).unwrap();
         let r = RawTcpStream.connect(host, port);
         match r {
             Some(_) => panic("unroutable connect must yield None"),

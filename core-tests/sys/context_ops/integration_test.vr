@@ -125,13 +125,13 @@ fn integration_tls_slot_range_saturating_sweep() {
     let mut i: Int = 0;
     let n = slots.len();
     while i < n {
-        let s = *slots.get(i as USize);
+        let s = slots.get(i as USize).unwrap();
         tls_set(s, s * 7);
         i = i + 1;
     }
     let mut j: Int = 0;
     while j < n {
-        let s = *slots.get(j as USize);
+        let s = slots.get(j as USize).unwrap();
         let v = tls_get(s);
         assert_eq(v, s * 7);
         j = j + 1;
