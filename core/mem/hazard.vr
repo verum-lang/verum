@@ -241,9 +241,23 @@ implement HazardDomain {
 
     /// Returns a sorted list of all currently protected pointers.
     /// Used during reclamation to determine which retired nodes are safe.
+    ///
+    /// Empty-state early-return: when no threads have registered yet
+    /// (`thread_count == 0` and `head` is null), returns an empty list
+    /// without touching `List.with_capacity(0)` / the empty-list `sort`+
+    /// `dedup` pair.  Pre-fix this path null-derefed at pc=120 in the
+    /// empty-capacity list-manipulation sequence on every fresh process
+    /// that invoked `force_reclaim_all()` before any thread registered.
+    /// Pinned by `core-tests/mem/hazard/test_force_reclaim_all_returns_unit`.
     fn scan_hazards(&self) -> List<&unsafe Byte> {
-        let capacity = atomic_load_int(&self.thread_count, ORDERING_RELAXED)
-            * HAZARD_POINTERS_PER_THREAD;
+        let thread_count = atomic_load_int(&self.thread_count, ORDERING_RELAXED);
+        if thread_count == 0 {
+            // No registered threads → nothing protected.  Skip the
+            // List.with_capacity(0) + sort/dedup that triggered the
+            // null-deref in the original code.
+            return List.new();
+        }
+        let capacity = thread_count * HAZARD_POINTERS_PER_THREAD;
         let mut protected = List.with_capacity(capacity);
 
         // Walk the thread record list
