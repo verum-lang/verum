@@ -1,0 +1,207 @@
+// =============================================================================
+// core-tests/collections/btree/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.btree.{BTreeMap};
+
+// =============================================================================
+// §A — BTreeMap field-access defect on populated map
+//
+// Every method that reads `self.<field>` on a populated BTreeMap
+// panics at runtime with:
+//   "field access out of bounds: field index 0 (offset 0+8 = 8)
+//    exceeds object data size 0"
+//
+// Hypothesis (same architectural class as the closed list / map
+// layout drift): the stdlib `type BTreeMap<K,V> is { ... }` field
+// order doesn't match the runtime intercept allocation slots, OR
+// the runtime allocates 0 data slots for the BTreeMap envelope and
+// expects the body to allocate the inner tree on first insert.
+//
+// Either way, the symptom is identical for every consumer of
+// `self.<field>` past the empty state.  Architectural fix path:
+// audit `crates/verum_vbc/.../method_dispatch.rs` for BTreeMap
+// intercepts (likely absent) and reconcile the stdlib type-decl
+// field order with the runtime allocation; same playbook as the
+// closed list / map fixes.
+// =============================================================================
+
+@ignore
+@test
+fn regression_btreemap_insert_returns_prior_on_replacement() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(1, 100);
+    let prev = m.insert(1, 200);
+    assert_eq(prev, Some(100));
+}
+
+@ignore
+@test
+fn regression_btreemap_get_present_returns_some() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(1, 100);
+    assert_eq(m.get(&1), Some(100));
+}
+
+@ignore
+@test
+fn regression_btreemap_contains_key_present_returns_true() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(1, 100);
+    assert(m.contains_key(&1));
+}
+
+@ignore
+@test
+fn regression_btreemap_remove_present_returns_value() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(1, 100);
+    let r = m.remove(&1);
+    assert_eq(r, Some(100));
+}
+
+@ignore
+@test
+fn regression_btreemap_clear_after_population() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+    m.clear();
+    assert(m.is_empty());
+}
+
+@ignore
+@test
+fn regression_btreemap_first_key_value_returns_min() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(5, 50);
+    m.insert(1, 10);
+    m.insert(3, 30);
+    match m.first_key_value() {
+        Some((k, _)) => { assert_eq(*k, 1); },
+        None         => { panic("first_key_value None"); },
+    }
+}
+
+@ignore
+@test
+fn regression_btreemap_last_key_value_returns_max() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(5, 50);
+    m.insert(1, 10);
+    match m.last_key_value() {
+        Some((k, _)) => { assert_eq(*k, 5); },
+        None         => { panic("last_key_value None"); },
+    }
+}
+
+@ignore
+@test
+fn regression_btreemap_pop_first_yields_min() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(5, 50);
+    m.insert(1, 10);
+    match m.pop_first() {
+        Some((k, v)) => {
+            assert_eq(k, 1);
+            assert_eq(v, 10);
+        },
+        None => { panic("pop_first None"); },
+    }
+}
+
+@ignore
+@test
+fn regression_btreemap_pop_last_yields_max() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(5, 50);
+    m.insert(1, 10);
+    match m.pop_last() {
+        Some((k, v)) => {
+            assert_eq(k, 5);
+            assert_eq(v, 50);
+        },
+        None => { panic("pop_last None"); },
+    }
+}
+
+@ignore
+@test
+fn regression_btreemap_len_tracks_insertions() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(1, 100);
+    m.insert(2, 200);
+    m.insert(3, 300);
+    assert_eq(m.len(), 3);
+}
+
+@ignore
+@test
+fn regression_btreemap_get_or_default_present() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(1, 100);
+    let v = m.get_or_default(&1, -1);
+    assert_eq(v, 100);
+}
+
+// =============================================================================
+// §B — Empty-state pop_first_on_empty / first_last_none_on_empty
+// dispatch panic on Maybe<(&K,&V)>'s `is None` check
+//
+// `match m.first_key_value() { ... }` on an empty BTreeMap panics
+// with "method 'deref' not found on receiver of runtime kind `Float`"
+// — suggests the empty-state implementation returns a sentinel that
+// the Maybe<(&K,&V)>::deref / is-None dispatch doesn't recognise.
+//
+// Likely cascades from §A.
+// =============================================================================
+
+@ignore
+@test
+fn regression_btreemap_pop_first_on_empty_returns_none() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    let r: Maybe<(Int, Int)> = m.pop_first();
+    assert(r is None);
+}
+
+@ignore
+@test
+fn regression_btreemap_first_last_none_on_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let f: Maybe<(&Int, &Int)> = m.first_key_value();
+    let l: Maybe<(&Int, &Int)> = m.last_key_value();
+    assert(f is None);
+    assert(l is None);
+}
+
+// =============================================================================
+// §F — PASS-GUARD pins for the working empty-state surface
+// =============================================================================
+
+@test
+fn pass_guard_btreemap_new_is_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    assert(m.is_empty());
+    assert_eq(m.len(), 0);
+}
+
+@test
+fn pass_guard_btreemap_get_absent_returns_none() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let v: Maybe<Int> = m.get(&1);
+    assert(v is None);
+}
+
+@test
+fn pass_guard_btreemap_contains_key_absent_returns_false() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    assert(!m.contains_key(&1));
+}
+
+@test
+fn pass_guard_btreemap_remove_absent_returns_none() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    let r: Maybe<Int> = m.remove(&1);
+    assert(r is None);
+}

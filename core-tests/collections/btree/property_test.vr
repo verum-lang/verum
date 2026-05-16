@@ -1,0 +1,80 @@
+// =============================================================================
+// core-tests/collections/btree/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over the empty-state BTreeMap surface.  The
+// populated-state surface (insert/get/etc.) panics with a layout-
+// drift defect — see regression_test.vr §A.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.btree.{BTreeMap};
+
+// =============================================================================
+// Law: fresh BTreeMap is empty, len = 0
+// =============================================================================
+
+@test
+fn law_btreemap_new_is_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    assert(m.is_empty());
+    assert_eq(m.len(), 0);
+}
+
+// =============================================================================
+// Law: get on absent key is None across multiple probes
+// =============================================================================
+
+@test
+fn law_btreemap_empty_get_is_always_none() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let mut i = 0;
+    while i < 10 {
+        let v: Maybe<Int> = m.get(&i);
+        assert(v is None);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Law: contains_key on absent key is always false
+// =============================================================================
+
+@test
+fn law_btreemap_empty_contains_is_always_false() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let mut i = -5;
+    while i <= 5 {
+        assert(!m.contains_key(&i));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Law: remove on empty is None and idempotent
+// =============================================================================
+
+@test
+fn law_btreemap_empty_remove_idempotent() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    let r1 = m.remove(&1);
+    let r2 = m.remove(&1);
+    assert(r1 is None);
+    assert(r2 is None);
+    assert(m.is_empty());
+}
+
+// =============================================================================
+// Law: get_or_default on empty returns default for any key
+// =============================================================================
+
+@test
+fn law_btreemap_empty_get_or_default_returns_default() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let mut i = 0;
+    while i < 5 {
+        let v = m.get_or_default(&i, -42);
+        assert_eq(v, -42);
+        i = i + 1;
+    }
+}
