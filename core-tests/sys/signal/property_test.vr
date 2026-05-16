@@ -51,8 +51,8 @@ fn law_signal_to_raw_pairwise_distinct() {
     while i < n {
         let mut j: Int = i + 1;
         while j < n {
-            let ri = *raws.get(i as USize);
-            let rj = *raws.get(j as USize);
+            let ri = raws.get(i as USize).unwrap();
+            let rj = raws.get(j as USize).unwrap();
             assert(ri != rj);
             j = j + 1;
         }

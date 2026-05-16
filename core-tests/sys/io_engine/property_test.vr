@@ -106,8 +106,8 @@ fn law_saturating_add_commutative() {
     while i < n {
         let mut j: Int = i;
         while j < n {
-            let a = EngineDuration.from_nanos(*samples.get(i as USize));
-            let b = EngineDuration.from_nanos(*samples.get(j as USize));
+            let a = EngineDuration.from_nanos(samples.get(i as USize).unwrap());
+            let b = EngineDuration.from_nanos(samples.get(j as USize).unwrap());
             let ab = a.saturating_add(b);
             let ba = b.saturating_add(a);
             assert_eq(ab.as_nanos(), ba.as_nanos());

@@ -53,8 +53,8 @@ fn integration_openmode_flag_set_through_list() {
     while i < n {
         let mut j: Int = i + 1;
         while j < n {
-            let fi = *flags.get(i as USize);
-            let fj = *flags.get(j as USize);
+            let fi = flags.get(i as USize).unwrap();
+            let fj = flags.get(j as USize).unwrap();
             assert(fi != fj);
             j = j + 1;
         }

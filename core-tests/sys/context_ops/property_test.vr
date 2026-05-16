@@ -57,7 +57,7 @@ fn law_tls_write_then_read_identity() {
     let mut i: Int = 0;
     let n = slots.len();
     while i < n {
-        let s = *slots.get(i as USize);
+        let s = slots.get(i as USize).unwrap();
         for v in samples.iter() {
             tls_set(s, *v);
             let read = tls_get(s);
@@ -76,8 +76,8 @@ fn law_tls_distinct_slots_pairwise_independent() {
     while i < n {
         let mut j: Int = 0;
         while j < n {
-            let si = *slots.get(i as USize);
-            let sj = *slots.get(j as USize);
+            let si = slots.get(i as USize).unwrap();
+            let sj = slots.get(j as USize).unwrap();
             if si != sj {
                 tls_set(si, 0);
                 tls_set(sj, 0);
@@ -124,7 +124,7 @@ fn law_context_provide_then_get_identity() {
     let mut i: Int = 0;
     let n = tids.len();
     while i < n {
-        let tid = *tids.get(i as USize);
+        let tid = tids.get(i as USize).unwrap();
         for v in samples.iter() {
             context_provide(tid, *v);
             let read = context_get(tid);
@@ -143,8 +143,8 @@ fn law_context_distinct_type_ids_pairwise_independent() {
     while i < n {
         let mut j: Int = 0;
         while j < n {
-            let ti = *tids.get(i as USize);
-            let tj = *tids.get(j as USize);
+            let ti = tids.get(i as USize).unwrap();
+            let tj = tids.get(j as USize).unwrap();
             if ti != tj {
                 context_provide(ti, 111);
                 context_provide(tj, 222);
