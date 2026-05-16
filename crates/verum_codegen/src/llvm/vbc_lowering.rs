@@ -4042,49 +4042,22 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             false
         );
 
-        // pthread key (TLS) functions
-        declare_fn!(
-            "pthread_key_create",
-            i32_type,
-            &[ptr_type.into(), ptr_type.into()],
-            false
-        );
-        declare_fn!("pthread_getspecific", ptr_type, &[i32_type.into()], false);
-        declare_fn!(
-            "pthread_setspecific",
-            i32_type,
-            &[i32_type.into(), ptr_type.into()],
-            false
-        );
-
-        // POSIX semaphore (used by Semaphore.vr)
-        // macOS uses dispatch_semaphore, Linux uses sem_t
-        declare_fn!(
-            "sem_init",
-            i32_type,
-            &[ptr_type.into(), i32_type.into(), i32_type.into()],
-            false
-        );
-        declare_fn!("sem_wait", i32_type, &[ptr_type.into()], false);
-        declare_fn!("sem_post", i32_type, &[ptr_type.into()], false);
-        declare_fn!("sem_destroy", i32_type, &[ptr_type.into()], false);
-
-        // Process management (used by platform_ir.rs verum_process_spawn)
-        declare_fn!("pipe", i32_type, &[ptr_type.into()], false);
-        declare_fn!("fork", i64_type, &[], false);
-        declare_fn!("dup2", i64_type, &[i64_type.into(), i64_type.into()], false);
-        declare_fn!(
-            "execvp",
-            i64_type,
-            &[ptr_type.into(), ptr_type.into()],
-            false
-        );
-        declare_fn!(
-            "waitpid",
-            i64_type,
-            &[i64_type.into(), ptr_type.into(), i64_type.into()],
-            false
-        );
+        // pthread TLS / semaphore / process-management symbols moved
+        // to the canonical `syscall_registry::POSIX_SYSCALLS` registry
+        // (`predeclare_all` runs in Phase 0.4 — before this Phase 0.6
+        // declaration pass).  Pre-fix this site re-declared them with
+        // the C `int`-everywhere (i32) ABI, conflicting with the
+        // `platform_ir.rs::get_or_declare_fn` declarations using the
+        // Verum-canonical i64-everywhere ABI.  The loser's
+        // FunctionValue was returned to wrappers like
+        // `call_native_i64`, producing wrong-arity / "callee returns
+        // void" errors thousands of instructions later.
+        //
+        // Single source of truth: `verum_codegen/llvm/syscall_registry.rs`.
+        // To add a new POSIX symbol, extend `POSIX_SYSCALLS` there —
+        // the predeclare pass guarantees the canonical signature
+        // lands first, and every subsequent `get_function(name)` lookup
+        // in this module returns the canonical FunctionValue.
 
         // Memory functions
         declare_fn!(

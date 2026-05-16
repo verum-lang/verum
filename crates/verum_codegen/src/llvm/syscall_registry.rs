@@ -240,14 +240,133 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
         args: &[AbiTy::I64, AbiTy::Ptr, AbiTy::I64],
         ret: AbiTy::I64,
     },
+    // ── pthread TLS (used by core/mem/epoch + verum_runtime tls) ────
+    //
+    // Each pthread symbol was declared at TWO sites with conflicting
+    // ABIs: `vbc_lowering.rs:declare_fn!` used the C `int` (i32) ABI;
+    // `platform_ir.rs::get_or_declare_fn` used the Verum-canonical i64
+    // ABI.  The loser's `FunctionValue` was returned, producing
+    // wrong-arity `call_native_i64` errors thousands of instructions
+    // later.
+    //
+    // The i64-everywhere ABI is correct for Verum codegen — pthread_key_t
+    // is `unsigned long` (8 bytes) on every 64-bit POSIX target; the i32
+    // declarations were copy-paste from the C header without considering
+    // the actual ABI width.
+    // C: int pthread_key_create(pthread_key_t*, void (*)(void*))
+    SyscallSig {
+        name: "pthread_key_create",
+        args: &[AbiTy::Ptr, AbiTy::Ptr],
+        ret: AbiTy::I64,
+    },
+    // C: int pthread_key_delete(pthread_key_t)
+    SyscallSig {
+        name: "pthread_key_delete",
+        args: &[AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+    // C: void* pthread_getspecific(pthread_key_t) — Verum codegen
+    // treats the returned pointer as i64 (bitcast back at call site).
+    SyscallSig {
+        name: "pthread_getspecific",
+        args: &[AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+    // C: int pthread_setspecific(pthread_key_t, const void*)
+    SyscallSig {
+        name: "pthread_setspecific",
+        args: &[AbiTy::I64, AbiTy::Ptr],
+        ret: AbiTy::I64,
+    },
+    // ── POSIX semaphores (used by core/sync/semaphore) ──────────────
+    SyscallSig { name: "sem_init",    args: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I64], ret: AbiTy::I64 },
+    SyscallSig { name: "sem_wait",    args: &[AbiTy::Ptr], ret: AbiTy::I64 },
+    SyscallSig { name: "sem_post",    args: &[AbiTy::Ptr], ret: AbiTy::I64 },
+    SyscallSig { name: "sem_destroy", args: &[AbiTy::Ptr], ret: AbiTy::I64 },
+    // ── Process management (core/sys/process) ───────────────────────
+    SyscallSig { name: "pipe",   args: &[AbiTy::Ptr], ret: AbiTy::I64 },
+    SyscallSig { name: "fork",   args: &[], ret: AbiTy::I64 },
+    SyscallSig { name: "dup2",   args: &[AbiTy::I64, AbiTy::I64], ret: AbiTy::I64 },
+    SyscallSig { name: "execvp", args: &[AbiTy::Ptr, AbiTy::Ptr], ret: AbiTy::I64 },
 ];
 
-/// Look up a syscall's canonical Verum-ABI signature. `None` for names
-/// not in the registry — callers should fall back to a custom
-/// declaration, or extend [`POSIX_SYSCALLS`] if the syscall is
-/// genuinely platform-portable.
+// =============================================================================
+// Verum-runtime symbols — internal helpers emitted by the LLVM runtime
+// layer.  Distinct from POSIX_SYSCALLS because these are NOT platform
+// syscalls — they're stdlib runtime functions implemented in LLVM IR
+// (some inline, some as opaque imports satisfied by
+// `verum_runtime_stubs.o`).
+//
+// Pre-fix these were declared at multiple emit paths with conflicting
+// signatures (`verum_string_join` ptr-vs-i64 first param,
+// `verum_list_reverse` void-vs-ptr return type, etc).  The runtime
+// emitter at `runtime.rs::emit_verum_string_join` even had defensive
+// code handling BOTH shapes — a band-aid for the underlying root cause
+// this registry eliminates.
+//
+// Pinned by `crates/verum_codegen/src/llvm/error.rs::take_signature_mismatches`
+// — every emit site that fails to route through this registry surfaces
+// the mismatch into the lowering pipeline's diagnostic stream.
+// =============================================================================
+
+const VERUM_RUNTIME_SYMBOLS: &[SyscallSig] = &[
+    // Text helpers.
+    // verum_string_join(list_ptr: i64, sep: *i8) -> *i8
+    SyscallSig {
+        name: "verum_string_join",
+        args: &[AbiTy::I64, AbiTy::Ptr],
+        ret: AbiTy::Ptr,
+    },
+    // List in-place reversal — mutates the list buffer in place.
+    // Canonical signature matches `runtime.rs::define_list_ir_helpers`
+    // (line ~13463) which returns void.  Pre-fix a separate emit path
+    // in `instruction.rs` declared it `ptr(ptr) -> ptr` while the
+    // runtime emitter used `void(ptr) -> void` — recorded as a
+    // signature-mismatch by the registry gate.  Canonical: void
+    // return (in-place mutation, no chaining required).
+    // verum_list_reverse(list: ptr) -> void
+    SyscallSig {
+        name: "verum_list_reverse",
+        args: &[AbiTy::Ptr],
+        ret: AbiTy::Void,
+    },
+    // List in-place pairwise swap — same in-place mutation pattern.
+    // verum_list_swap(list: ptr, i: i64, j: i64) -> void
+    SyscallSig {
+        name: "verum_list_swap",
+        args: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I64],
+        ret: AbiTy::Void,
+    },
+    // C wrapper for open(3) — avoids ARM64 variadic issues.
+    // verum_raw_open3(path: *i8, flags: i64, mode: i64) -> i64
+    SyscallSig {
+        name: "verum_raw_open3",
+        args: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+    // TCP connect helper.
+    // verum_tcp_connect(host: *i8, port: i64) -> i64
+    SyscallSig {
+        name: "verum_tcp_connect",
+        args: &[AbiTy::Ptr, AbiTy::I64],
+        ret: AbiTy::I64,
+    },
+];
+
+/// Look up a syscall or Verum-runtime symbol's canonical signature.
+/// `None` for names not in either registry — callers should fall back
+/// to a custom declaration, or extend [`POSIX_SYSCALLS`] /
+/// [`VERUM_RUNTIME_SYMBOLS`] if the symbol is genuinely cross-emit-path.
+///
+/// The two registries are searched in order (POSIX first, then Verum
+/// runtime) — names are guaranteed unique across both by manual audit
+/// at registry-extension time.  Adding a duplicate causes the first
+/// hit to win, which is the safe default.
 fn lookup(name: &str) -> Option<&'static SyscallSig> {
-    POSIX_SYSCALLS.iter().find(|s| s.name == name)
+    POSIX_SYSCALLS
+        .iter()
+        .chain(VERUM_RUNTIME_SYMBOLS.iter())
+        .find(|s| s.name == name)
 }
 
 /// Get-or-declare `name` under its canonical Verum-ABI signature.
@@ -284,15 +403,19 @@ pub fn get_or_declare<'ctx>(
     Some(module.add_function(name, canonical_ty, None))
 }
 
-/// Pre-declare every entry in [`POSIX_SYSCALLS`] into `module`. Call
-/// this **before** any other emit path can race to declare a syscall
-/// with the wrong signature. The canonical declarations land first,
-/// and any subsequent `module.get_function(name)` lookup throughout
-/// VBC lowering returns the canonical FunctionValue with the right
+/// Pre-declare every entry in [`POSIX_SYSCALLS`] AND
+/// [`VERUM_RUNTIME_SYMBOLS`] into `module`. Call this **before** any
+/// other emit path can race to declare a symbol with the wrong
+/// signature. The canonical declarations land first, and any
+/// subsequent `module.get_function(name)` lookup throughout VBC
+/// lowering returns the canonical FunctionValue with the right
 /// fn_type. This eliminates the entire "first declaration wins"
-/// defect class for POSIX syscalls at codegen time.
+/// defect class at codegen time.
 pub fn predeclare_all<'ctx>(module: &Module<'ctx>, ctx: &'ctx Context) {
     for sig in POSIX_SYSCALLS {
+        let _ = get_or_declare(module, ctx, sig.name);
+    }
+    for sig in VERUM_RUNTIME_SYMBOLS {
         let _ = get_or_declare(module, ctx, sig.name);
     }
 }
