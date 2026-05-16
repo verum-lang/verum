@@ -61,8 +61,19 @@ fn regression_b_eq_ignore_ascii_case_pinned() {
 
 // =============================================================================
 // §C — Char.from_digit hex returns wrong char (audit.md §C)
-// REGRESSION: `Char.from_digit(10, 16)` should return Some('a') — observed
-// to return a different char.
+// REGRESSION: `Char.from_digit(10, 16)` returns 'A' (codepoint 65)
+// instead of 'a' (codepoint 97).  The user-side body at
+// `core/text/char.vr::from_digit` correctly uses `'a' as Int + digit - 10`
+// for digit >= 10, and the Tier-0 dispatch_primitive_method intercept
+// at `crates/verum_vbc/.../method_dispatch.rs:3412` uses Rust's
+// `char::from_digit` which returns lowercase — yet the runtime path
+// surfaces uppercase.  Empirically confirmed 2026-05-16 against the
+// freshly-built binary embedding the latest precompiled stdlib
+// archive.  Root cause is *higher* in the dispatch chain — likely an
+// embedded-archive code-gen path that bypasses both the intercept
+// and the source-level body, producing the uppercase offset.
+// Tracked as task §Y-ALT: dispatch-routing audit for
+// `Char.from_digit`.
 // =============================================================================
 
 @ignore
@@ -71,6 +82,34 @@ fn regression_c_from_digit_hex_pinned() {
     match Char.from_digit(10, 16) {
         Some(c) => assert_eq(c, 'a'),
         None => panic("from_digit(10, 16) should be Some('a')"),
+    }
+}
+
+@ignore
+@test
+fn regression_c_from_digit_hex_boundary_pinned() {
+    // Full boundary sweep: digit 0..36 in base 36 with lowercase-letter
+    // convention for digit >= 10.
+    match Char.from_digit(15, 16) {
+        Some(c) => assert_eq(c, 'f'),
+        None => panic("from_digit(15, 16) should be Some('f')"),
+    }
+    match Char.from_digit(35, 36) {
+        Some(c) => assert_eq(c, 'z'),
+        None => panic("from_digit(35, 36) should be Some('z')"),
+    }
+    match Char.from_digit(0, 10) {
+        Some(c) => assert_eq(c, '0'),
+        None => panic("from_digit(0, 10) should be Some('0')"),
+    }
+    match Char.from_digit(9, 10) {
+        Some(c) => assert_eq(c, '9'),
+        None => panic("from_digit(9, 10) should be Some('9')"),
+    }
+    // Out-of-range — must return None
+    match Char.from_digit(16, 16) {
+        Some(_) => panic("from_digit(16, 16) must be None"),
+        None => {},
     }
 }
 
