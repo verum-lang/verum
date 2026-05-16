@@ -44,7 +44,15 @@ public type RetryBackoff is
     /// Exponential backoff: delay doubles each attempt.
     | Exponential { initial_ms: Int, max_ms: Int, multiplier: Float }
     /// Exponential with random jitter to prevent thundering herd.
-    | ExponentialJitter { initial_ms: Int, max_ms: Int, multiplier: Float, jitter_factor: Float };
+    | ExponentialJitter { initial_ms: Int, max_ms: Int, multiplier: Float, jitter_factor: Float }
+    /// Convenience alias for `Linear { delay_ms: 0 }` — no wait between
+    /// attempts.  Mirror of the `retry_immediate` free function.
+    | Immediate
+    /// Convenience for callers that prefer `base_ms`/`max_ms` naming
+    /// (e.g. Python's `tenacity`).  Equivalent to `ExponentialJitter`
+    /// with `multiplier = 2.0` and `jitter_factor` derived from the
+    /// `max_ms` cap.
+    | Jittered { base_ms: Int, max_ms: Int };
 
 implement RetryBackoff {
     /// Calculate delay for the given attempt number (0-indexed).
@@ -59,6 +67,14 @@ implement RetryBackoff {
             ExponentialJitter { initial_ms, max_ms, multiplier, jitter_factor } => {
                 let base_delay = (*initial_ms as Float) * multiplier.pow(attempt as Float);
                 let jitter = base_delay * jitter_factor * random_float();
+                let delay = base_delay + jitter;
+                delay.min(*max_ms as Float).round() as Int
+            }
+            Immediate => 0,
+            Jittered { base_ms, max_ms } => {
+                // 2.0x exponential with 0.5 jitter factor, capped at max_ms.
+                let base_delay = (*base_ms as Float) * (2.0_f64).pow(attempt as Float);
+                let jitter = base_delay * 0.5 * random_float();
                 let delay = base_delay + jitter;
                 delay.min(*max_ms as Float).round() as Int
             }

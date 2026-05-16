@@ -44,7 +44,7 @@ fn law_cmp_reflexive() {
     ];
     for s in cases.iter() {
         let v = parse(s).unwrap();
-        assert_eq(cmp(&v, &v), 0);
+        assert(cmp(&v, &v).is_equal());
     }
 }
 
@@ -67,9 +67,9 @@ fn law_cmp_anti_symmetric() {
         let ab = cmp(&a, &b);
         let ba = cmp(&b, &a);
         // sign(ab) == -sign(ba)
-        if ab < 0 { assert(ba > 0); }
-        if ab > 0 { assert(ba < 0); }
-        if ab == 0 { assert_eq(ba, 0); }
+        if ab.is_less() { assert(ba.is_greater()); }
+        if ab.is_greater() { assert(ba.is_less()); }
+        if ab.is_equal() { assert(ba.is_equal()); }
     }
 }
 
@@ -82,7 +82,7 @@ fn law_cmp_transitive() {
     let a = parse(&"1.0.0".to_text()).unwrap();
     let b = parse(&"1.0.1".to_text()).unwrap();
     let c = parse(&"1.0.2".to_text()).unwrap();
-    if cmp(&a, &b) < 0 && cmp(&b, &c) < 0 { assert(cmp(&a, &c) < 0); }
+    if cmp(&a, &b).is_less() && cmp(&b, &c).is_less() { assert(cmp(&a, &c).is_less()); }
 }
 
 // =============================================================================
@@ -93,14 +93,14 @@ fn law_cmp_transitive() {
 fn law_major_dominates_minor() {
     let a = parse(&"2.0.0".to_text()).unwrap();
     let b = parse(&"1.99.99".to_text()).unwrap();
-    assert(cmp(&a, &b) > 0);
+    assert(cmp(&a, &b).is_greater());
 }
 
 @test
 fn law_minor_dominates_patch() {
     let a = parse(&"1.2.0".to_text()).unwrap();
     let b = parse(&"1.1.99".to_text()).unwrap();
-    assert(cmp(&a, &b) > 0);
+    assert(cmp(&a, &b).is_greater());
 }
 
 // =============================================================================
@@ -118,9 +118,9 @@ fn parametrised_prerelease_ordering(a_s: Text, b_s: Text, expected_sign: Int) {
     let a = parse(&a_s).unwrap();
     let b = parse(&b_s).unwrap();
     let n = cmp(&a, &b);
-    if expected_sign < 0 { assert(n < 0); }
-    else if expected_sign > 0 { assert(n > 0); }
-    else { assert_eq(n, 0); }
+    if expected_sign < 0 { assert(n.is_less()); }
+    else if expected_sign > 0 { assert(n.is_greater()); }
+    else { assert(n.is_equal()); }
 }
 
 // =============================================================================
@@ -131,21 +131,21 @@ fn parametrised_prerelease_ordering(a_s: Text, b_s: Text, expected_sign: Int) {
 fn law_build_metadata_ignored_in_comparison() {
     let a = parse(&"1.0.0+build.1".to_text()).unwrap();
     let b = parse(&"1.0.0+build.2".to_text()).unwrap();
-    assert_eq(cmp(&a, &b), 0);
+    assert(cmp(&a, &b).is_equal());
 }
 
 @test
 fn law_prerelease_with_build_lt_release_with_build() {
     let pre = parse(&"1.0.0-alpha+001".to_text()).unwrap();
     let release = parse(&"1.0.0+build.1".to_text()).unwrap();
-    assert(cmp(&pre, &release) < 0);
+    assert(cmp(&pre, &release).is_less());
 }
 
 @test
 fn law_two_releases_with_different_build_metadata_equal() {
     let a = parse(&"2.3.4+sha.aabbcc".to_text()).unwrap();
     let b = parse(&"2.3.4+sha.ddeeff".to_text()).unwrap();
-    assert_eq(cmp(&a, &b), 0);
+    assert(cmp(&a, &b).is_equal());
 }
 
 // =============================================================================
@@ -160,9 +160,9 @@ fn parametrised_additional_fixtures(a_s: Text, b_s: Text, expected_sign: Int) {
     let a = parse(&a_s).unwrap();
     let b = parse(&b_s).unwrap();
     let n = cmp(&a, &b);
-    if expected_sign < 0 { assert(n < 0); }
-    else if expected_sign > 0 { assert(n > 0); }
-    else { assert_eq(n, 0); }
+    if expected_sign < 0 { assert(n.is_less()); }
+    else if expected_sign > 0 { assert(n.is_greater()); }
+    else { assert(n.is_equal()); }
 }
 
 fn main() {}

@@ -34,8 +34,9 @@ fn law_retry_max_attempts_cap() {
 @test
 fn law_exponential_backoff_monotonic() {
     let backoff: RetryBackoff = RetryBackoff.Exponential {
-        base_ms: 10,
-        factor: 2,
+        initial_ms: 10,
+        max_ms: 100000,
+        multiplier: 2.0,
     };
     let mut prev = -1;
     let mut i = 1;
@@ -50,7 +51,7 @@ fn law_exponential_backoff_monotonic() {
 @test
 fn law_linear_backoff_monotonic() {
     let backoff: RetryBackoff = RetryBackoff.Linear {
-        base_ms: 100,
+        delay_ms: 100,
     };
     let mut prev = -1;
     let mut i = 1;
@@ -113,10 +114,10 @@ fn prop_abort_on_permanent_error_calls_once() {
     let opts: RetryOptions<Text> = RetryOptions.simple(10)
         .with_should_retry(|_: &Text| false);
     let mut counter = 0;
-    let _: Result<Int, Text> = retry_with_strategy(opts, || {
+    let _: Result<Int, Text> = retry_with_strategy(|| {
         counter = counter + 1;
         Err("permanent".to_text())
-    });
+    }, opts);
     assert_eq(counter, 1);
 }
 
@@ -139,7 +140,7 @@ fn test_jittered_delay_bounded_by_max_ms(attempt: Int) {
 
 @test
 fn prop_linear_backoff_is_non_decreasing() {
-    let backoff = RetryBackoff.Linear { base_ms: 10 };
+    let backoff = RetryBackoff.Linear { delay_ms: 10 };
     let d0 = backoff.delay_for_attempt(0);
     let d1 = backoff.delay_for_attempt(1);
     let d2 = backoff.delay_for_attempt(2);

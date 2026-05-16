@@ -11,7 +11,7 @@ mount core.prelude.*;
 mount core.base.string_distance.{
     levenshtein, levenshtein_bounded,
     jaro, jaro_winkler,
-    closest, closest_n,
+    closest_text, closest_n,
     StringDistanceOptions,
 };
 mount core.collections.list.List;
@@ -25,7 +25,7 @@ fn test_closest_finds_best_match() {
     let candidates: List<Text> = [
         "hello", "world", "help", "held", "helm",
     ].map(|s| s.to_text()).collect();
-    let result = closest("helo".to_text(), &candidates);
+    let result = closest_text("helo".to_text(), &candidates);
     assert(result.is_some());
     // "hello" or "help" — both distance 1 from "helo"
     let best = result.unwrap();
@@ -35,14 +35,14 @@ fn test_closest_finds_best_match() {
 @test
 fn test_closest_returns_none_for_empty_candidates() {
     let empty: List<Text> = [];
-    assert(closest("query".to_text(), &empty).is_none());
+    assert(closest_text("query".to_text(), &empty).is_none());
 }
 
 @test
 fn test_closest_exact_match_wins() {
     let candidates: List<Text> = ["cat", "car", "cart", "care"]
         .map(|s| s.to_text()).collect();
-    let result = closest("car".to_text(), &candidates);
+    let result = closest_text("car".to_text(), &candidates);
     assert_eq(result, Some("car".to_text()));
 }
 
@@ -116,7 +116,7 @@ fn test_spellcheck_dictionary_lookup() {
     ].map(|(t, e)| (t.to_text(), e.to_text())).collect();
 
     for (typo, expected) in typos {
-        let suggestion = closest(typo.clone(), &dictionary);
+        let suggestion = closest_text(typo.clone(), &dictionary);
         assert(suggestion.is_some(), f"no suggestion for '{typo}'");
         assert_eq(suggestion.unwrap(), expected,
             f"wrong suggestion for '{typo}'");

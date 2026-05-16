@@ -7,7 +7,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.string_distance.{levenshtein, levenshtein_bounded, jaro, jaro_winkler, closest};
+mount core.base.string_distance.{levenshtein, levenshtein_bounded, jaro, jaro_winkler, closest_text};
 mount core.collections.list.List;
 
 fn bytes(s: &str) -> List<Byte> {
@@ -111,13 +111,13 @@ fn test_jaro_winkler_identical_returns_one() {
 @test
 fn test_closest_returns_exact_match() {
     let dict: List<Text> = ["cat", "car", "bar"].map(|s| s.to_text()).collect();
-    assert_eq(closest("car".to_text(), &dict), Some("car".to_text()));
+    assert_eq(closest_text("car".to_text(), &dict), Some("car".to_text()));
 }
 
 @test
 fn test_closest_finds_nearest_by_levenshtein() {
     let dict: List<Text> = ["hello", "world", "help"].map(|s| s.to_text()).collect();
-    let result = closest("helo".to_text(), &dict);
+    let result = closest_text("helo".to_text(), &dict);
     assert(result.is_some());
     // distance("helo","hello")=1, distance("helo","world")=4, distance("helo","help")=1
     let best = result.unwrap();
@@ -127,7 +127,7 @@ fn test_closest_finds_nearest_by_levenshtein() {
 @test
 fn test_closest_empty_candidates_returns_none() {
     let dict: List<Text> = [];
-    assert(closest("query".to_text(), &dict).is_none());
+    assert(closest_text("query".to_text(), &dict).is_none());
 }
 
 // =============================================================================
