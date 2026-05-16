@@ -2803,10 +2803,23 @@ implement Text {
     }
 
     /// Consume this text and return its bytes as an owned list.
+    ///
+    /// Uses the canonical indexed-while pattern over `as_bytes()` to side-step
+    /// the cross-module `List.extend_from_slice` dispatch dependency (audit
+    /// §N / §D function-id collision class). See the architectural rule in
+    /// `core-tests/text/text/audit.md` §4: every stdlib body that iterates
+    /// `&[T]` MUST use `let n = slice.len(); while i < n` rather than `for x
+    /// in slice` or `extend_from_slice` — both depend on dispatch surfaces
+    /// that have hit precompile-time function-id collisions historically.
     public fn into_bytes(self) -> List<Byte> {
         let bytes = self.as_bytes();
-        let mut result: List<Byte> = List.with_capacity(bytes.len());
-        result.extend_from_slice(bytes);
+        let n = bytes.len();
+        let mut result: List<Byte> = List.with_capacity(n);
+        let mut i: Int = 0;
+        while i < n {
+            result.push(bytes[i]);
+            i = i + 1;
+        }
         result
     }
 
