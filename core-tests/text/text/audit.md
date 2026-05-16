@@ -243,15 +243,26 @@ converting to Text and NEVER validating UTF-8.
 `std::str::from_utf8`, allocate a real Text from the validated bytes,
 and wrap in `Result.Ok`. Invalid UTF-8 → `Result.Err(Utf8Error { valid_up_to })`.
 
-### §N — Text.into_bytes — List.extend_from_slice missing
-**Symptom**: `Text.into_bytes()` panics with
-`List.extend_from_slice not found on receiver of runtime kind 'Object'`.
-Cross-module defect — needs `core/collections/list.vr` to expose
-`extend_from_slice` (or for Text.into_bytes to be rewritten to use
-push in a loop).
-**Action**: add `extend_from_slice` to `core/collections/list.vr` (a
-List task, not a Text task) OR rewrite `Text.into_bytes` to push
-byte-by-byte in a loop.
+### §N — Text.into_bytes — **CLOSED 2026-05-16**
+**Status**: CLOSED — `core/text/text.vr::into_bytes` rewritten to the
+canonical indexed-while push pattern over `self.as_bytes()`.
+**Root cause**: cross-module `List.extend_from_slice` dispatch (the
+method exists in `core/collections/list.vr:1300` but the call site
+hit either the audit-§D function-id collision class OR the
+"method not found on receiver kind 'Object'" lenient-skip class.
+**Fix**: removed the cross-module dispatch dependency on the caller
+side; `Text.into_bytes` now uses the indexed-while pattern (audit
+§4 architectural rule) which routes through primitive `List.push`
+and `List.with_capacity` — both of which have been validated by
+existing tests. The architectural improvement: every stdlib body
+that produces a `List<T>` from a slice-shape source should default
+to this pattern UNTIL the cross-module dispatch surface has been
+hardened (post-§D fix).
+**Validation**: `core-tests/text/text/regression_test.vr::
+regression_n_into_bytes_{ascii,empty,unicode_two_byte,unicode_three_byte}` +
+the existing `unit_test.vr::test_into_bytes_{ascii,empty,single_ascii,
+round_trip_utf8}` cover ASCII, empty, single-char, 2-byte and 3-byte
+UTF-8 — round-trip coverage of the byte boundary cases.
 
 ### §O — Text.from_int FunctionNotFound
 **Status**: **CLOSED 2026-05-13 — commit `73b9db0d0`.** Bypassed the
@@ -307,12 +318,20 @@ the `Int` direct return or the `count` alias).
   `obj.method()` MUST live in `dispatch_primitive_method`, NOT
   `try_intercept_text_static_runtime`.
 
-### Deferred — ranked by leverage (updated 2026-05-14, second pass)
+### Deferred — ranked by leverage (updated 2026-05-16, third pass)
 | # | Item | Estimated effort | Tests unblocked |
 |---|------|-----:|------:|
 | 1 | §B close — Char.encode_utf8 receiver-kind classification | medium | ~5 |
 | 2 | §D close — function-id collision (CallM migration OR global next_func_id) | multi-session | ~10 (§O included) |
-| 3 | §N close — List.extend_from_slice | small (List task) | ~1 |
+
+Closed since the previous pass:
+- §N — Text.into_bytes (indexed-while push rewrite, 2026-05-16).
+  The §N close came in as a `Text`-side fundamental fix instead of a
+  `List.extend_from_slice` dispatch fix: pushing the cross-module
+  dispatch dependency out of the conversion path closes the immediate
+  test failure AND establishes the indexed-while pattern as the
+  canonical idiom for slice-to-List conversion until the cross-module
+  dispatch surface has been hardened (post-§D).
 
 Closed this session (2026-05-14):
 - §A — `Text.rfind` LLVM `SmallVectorBase::grow_pod` SIGSEGV

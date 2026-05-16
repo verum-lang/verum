@@ -1245,6 +1245,35 @@ fn test_into_bytes_ascii() {
 }
 
 @test
+fn test_into_bytes_empty() {
+    let s: Text = "";
+    let bs = s.into_bytes();
+    assert_eq(bs.len(), 0);
+}
+
+@test
+fn test_into_bytes_single_ascii() {
+    let s: Text = "Z";
+    let bs = s.into_bytes();
+    assert_eq(bs.len(), 1);
+    assert_eq(bs[0] as Int, 90);
+}
+
+@test
+fn test_into_bytes_round_trip_utf8() {
+    let s: Text = "héllo";
+    let bs = s.into_bytes();
+    // 'h' + 'é' (C3 A9) + 'l' + 'l' + 'o' = 6 bytes
+    assert_eq(bs.len(), 6);
+    assert_eq(bs[0] as Int, 104);
+    assert_eq(bs[1] as Int, 0xC3);
+    assert_eq(bs[2] as Int, 0xA9);
+    assert_eq(bs[3] as Int, 108);
+    assert_eq(bs[4] as Int, 108);
+    assert_eq(bs[5] as Int, 111);
+}
+
+@test
 fn test_encode_utf16_ascii() {
     let s: Text = "AB";
     let units = s.encode_utf16();

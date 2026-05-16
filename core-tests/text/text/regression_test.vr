@@ -265,17 +265,57 @@ fn regression_m_from_utf8_invalid_returns_err_pinned() {
 }
 
 // =============================================================================
-// §N — Text.into_bytes missing dependency on List.extend_from_slice (audit.md §N)
-// REGRESSION: `Text.into_bytes()` panics with "List.extend_from_slice not
-// found". The List API is missing this method (or it was lenient-skipped).
+// §N — Text.into_bytes — CLOSED 2026-05-16
+// Was: `Text.into_bytes()` panicked with "List.extend_from_slice not found
+// on receiver of runtime kind 'Object'" — cross-module dispatch collapse,
+// same class as §D (function-id collision in archive remap).
+//
+// Fundamental fix: `core/text/text.vr::into_bytes` now uses the canonical
+// indexed-while push pattern over `self.as_bytes()` (audit §4 architectural
+// rule for slice iteration in stdlib bodies). No dependency on the
+// cross-module `List.extend_from_slice` dispatch — eliminates the whole
+// failure class for `Text → List<Byte>` conversion.
+//
+// Active guard: this test stays alive forever so a re-introduction of the
+// extend_from_slice idiom (or any reversion of the dispatch fix) surfaces
+// immediately as a regression failure.
 // =============================================================================
 
-@ignore
 @test
-fn regression_n_into_bytes_pinned() {
+fn regression_n_into_bytes_ascii() {
     let s: Text = "AB";
     let bs = s.into_bytes();
     assert_eq(bs.len(), 2);
+    assert_eq(bs[0] as Int, 65);
+    assert_eq(bs[1] as Int, 66);
+}
+
+@test
+fn regression_n_into_bytes_empty() {
+    let s: Text = "";
+    let bs = s.into_bytes();
+    assert_eq(bs.len(), 0);
+}
+
+@test
+fn regression_n_into_bytes_unicode_two_byte() {
+    // 'é' = U+00E9 → C3 A9
+    let s: Text = "é";
+    let bs = s.into_bytes();
+    assert_eq(bs.len(), 2);
+    assert_eq(bs[0] as Int, 0xC3);
+    assert_eq(bs[1] as Int, 0xA9);
+}
+
+@test
+fn regression_n_into_bytes_unicode_three_byte() {
+    // '€' = U+20AC → E2 82 AC
+    let s: Text = "€";
+    let bs = s.into_bytes();
+    assert_eq(bs.len(), 3);
+    assert_eq(bs[0] as Int, 0xE2);
+    assert_eq(bs[1] as Int, 0x82);
+    assert_eq(bs[2] as Int, 0xAC);
 }
 
 // =============================================================================
@@ -618,6 +658,70 @@ fn regression_v_clone_field_via_ref_arg_index() {
     let a = Holder.build();
     let cn = clone_nums(&a.nums);
     assert_eq(cn[0], 7);
+}
+
+// =============================================================================
+// §W — Char method dispatch through &Char auto-deref (CLOSED 2026-05-16)
+// Two probe shapes that previously surfaced "method not found on receiver of
+// runtime kind Int" because `&Char` auto-deref to Char NaN-box was racing
+// the dispatch-table lookup. Both shapes confirmed green 2026-05-16 by
+// promotion from `_diag_char_eqic.vr`. Keep these as permanent guards
+// against re-regression of the auto-deref normalisation path.
+// =============================================================================
+
+@test
+fn regression_w_char_method_on_ref_via_explicit_deref() {
+    let a: Char = 'A';
+    let r: &Char = &a;
+    let v: Char = *r;
+    let lc = v.to_ascii_lowercase();
+    assert_eq(lc as Int, 97);
+}
+
+@test
+fn regression_w_char_method_on_ref_direct_dispatch() {
+    let a: Char = 'A';
+    let r: &Char = &a;
+    let lc = r.to_ascii_lowercase();
+    assert_eq(lc as Int, 97);
+}
+
+// =============================================================================
+// §X — Result<Bool, Text> destructure (CLOSED 2026-05-16)
+// Cross-payload-type variant-arm routing: the previous defect class kept
+// surfacing as Ok(Bool) taking the Err arm because the destructure path
+// resolved payload type from the first-registered variant rather than the
+// expected scrutinee type (closed by task #5 §3.1 — bidirectional variant
+// constructor resolution, commit 6cac007b1). These three tests pin all
+// three Bool literal sub-cases and the Int-payload baseline. Promoted
+// from `_diag_result_bool.vr`.
+// =============================================================================
+
+@test
+fn regression_x_result_int_ok_destructure() {
+    let r: Result<Int, Text> = Ok(42);
+    match r {
+        Ok(n) => assert_eq(n, 42),
+        Err(_) => panic("Int Ok must take Ok arm"),
+    }
+}
+
+@test
+fn regression_x_result_bool_ok_true_destructure() {
+    let r: Result<Bool, Text> = Ok(true);
+    match r {
+        Ok(b) => assert(b),
+        Err(_) => panic("Bool Ok(true) must take Ok arm"),
+    }
+}
+
+@test
+fn regression_x_result_bool_ok_false_destructure() {
+    let r: Result<Bool, Text> = Ok(false);
+    match r {
+        Ok(b) => assert(!b),
+        Err(_) => panic("Bool Ok(false) must take Ok arm"),
+    }
 }
 
 // =============================================================================
