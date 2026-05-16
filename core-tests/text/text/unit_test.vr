@@ -1303,8 +1303,13 @@ fn test_utf8_error_eq_reflexive() {
 
 @test
 fn test_parse_error_eq_message() {
-    let a = ParseError { message: "x" };
-    let b = ParseError { message: "x" };
+    // Use the ParseError.new constructor — bare struct literal
+    // `ParseError { message: "x" }` is currently ambiguous in AOT
+    // mode because `core.cli.error.ParseError` (5 fields) shadows
+    // the mount-scoped `core.text.ParseError` (1 field) in the AOT
+    // typechecker's name-resolution path.  Tracked as task §Y.
+    let a = ParseError.new(&"x");
+    let b = ParseError.new(&"x");
     assert(a == b);
 }
 
