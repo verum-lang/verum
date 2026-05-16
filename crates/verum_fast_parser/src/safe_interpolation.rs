@@ -292,11 +292,19 @@ fn wrap_with_format_spec(expr: Expr, spec: &str) -> ParseResult<Expr> {
         Some('x') | Some('X') => method_call_no_args(expr, "to_hex", span),
         Some('o') => method_call_no_args(expr, "to_octal", span),
         Some('b') => method_call_no_args(expr, "to_binary", span),
-        // 's' / '?' / None all default to the canonical to_string path,
-        // which is what the InterpolatedString codegen does anyway via
+        // §J close: `?` routes through `format_debug(&expr)` (the
+        // canonical `Debug.fmt_debug` dispatch surface) — NOT through
+        // `to_string` which goes through Display.  Pre-fix every
+        // `f"{x:?}"` site silently routed to Display, so e.g.
+        // `f"{"hi":?}"` produced `hi` (Display) instead of `"hi"`
+        // (Debug with quotes and `\n` / `\t` escapes).  Pinned by
+        // `core-tests/text/text/regression_test.vr::regression_j_*`.
+        Some('?') => format_debug_call(expr, span),
+        // 's' / None default to the canonical to_string path, which
+        // is what the InterpolatedString codegen does anyway via
         // Instruction::ToString. Skip the redundant method call when
         // there is no width/align spec either, so the common
-        // `f"{x}"` and `f"{x:?}"` paths remain a single ToString op.
+        // `f"{x}"` path remains a single ToString op.
         _ => {
             if parsed.width == 0 && !parsed.upper {
                 return Ok(expr);
@@ -435,6 +443,41 @@ fn method_call_no_args(receiver: Expr, name: &str, span: verum_ast::Span) -> Exp
             method: verum_ast::Ident::new(name, span),
             type_args: List::new(),
             args: List::new(),
+        },
+        span,
+    )
+}
+
+/// Build `format_debug(&expr)` — the canonical Debug-format surface
+/// for `f"{x:?}"`.  `format_debug` is `format_debug<T: Debug>(value:
+/// &T) -> Text` in `core/text/format.vr`; routing the `?` type-hint
+/// through this call dispatches the user-defined `Debug.fmt_debug`
+/// impl for the value's static type (with the Text wrap for
+/// quoting / escape semantics).  Closes audit §J.
+fn format_debug_call(expr: Expr, span: verum_ast::Span) -> Expr {
+    // `&expr`
+    let ref_expr = Expr::new(
+        ExprKind::Unary {
+            op: verum_ast::expr::UnOp::Ref,
+            expr: verum_common::Heap::new(expr),
+        },
+        span,
+    );
+    // `format_debug` as a Path expression
+    let callee = Expr::new(
+        ExprKind::Path(verum_ast::ty::Path::new(
+            verum_common::List::from(vec![
+                verum_ast::ty::PathSegment::Name(verum_ast::Ident::new("format_debug", span)),
+            ]),
+            span,
+        )),
+        span,
+    );
+    Expr::new(
+        ExprKind::Call {
+            func: verum_common::Heap::new(callee),
+            type_args: List::new(),
+            args: verum_common::List::from(vec![ref_expr]),
         },
         span,
     )
