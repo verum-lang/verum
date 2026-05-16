@@ -1,0 +1,49 @@
+// =============================================================================
+// core-tests/collections/bloom/property_test.vr
+// =============================================================================
+//
+// Algebraic laws limited to the configuration surface — the
+// BloomFilter constructor surface is gated on the CSPRNG defect
+// (see regression_test.vr §A).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.bloom.{BloomConfig};
+
+// =============================================================================
+// Law: BloomConfig.defaults yields a non-degenerate workload
+// =============================================================================
+
+@test
+fn law_bloom_config_defaults_capacity_positive() {
+    let cfg = BloomConfig.defaults();
+    assert(cfg.capacity > 0);
+}
+
+@test
+fn law_bloom_config_defaults_fp_rate_in_range() {
+    let cfg = BloomConfig.defaults();
+    assert(cfg.fp_rate_ppm > 0);
+    assert(cfg.fp_rate_ppm <= 1_000_000);
+}
+
+// =============================================================================
+// Law: BloomConfig literal preserves both fields
+// =============================================================================
+
+@test
+fn law_bloom_config_literal_preserves_fields() {
+    let cases: List<(Int, Int)> = [
+        (1024, 100),
+        (16384, 1000),
+        (1_048_576, 10_000),
+    ];
+    let mut i = 0;
+    while i < cases.len() {
+        let (cap, fp) = cases[i];
+        let cfg = BloomConfig { capacity: cap, fp_rate_ppm: fp };
+        assert_eq(cfg.capacity, cap);
+        assert_eq(cfg.fp_rate_ppm, fp);
+        i = i + 1;
+    }
+}

@@ -1,0 +1,48 @@
+// =============================================================================
+// core-tests/collections/bloom/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.bloom` — `BloomFilter`, classic Bloom
+// filter with HMAC-SHA256 keyed Kirsch-Mitzenmacher double hashing.
+//
+// Architectural caveat: every BloomFilter constructor routes through
+// `fill_secure` (the CSPRNG-backed HMAC-key generator) which is gated
+// on `core.sys.common.random_bytes` — that intrinsic is missing from
+// the VBC dispatch table (same shape as the Reservoir replacement-
+// phase defect).  Until the intrinsic lands, every BloomFilter test
+// panics at construction with:
+//
+//     [lenient] BloomFilter.try_new compiled to panic-stub:
+//     undefined function: fill_secure (in function BloomFilter.try_new)
+//
+// The pinned regressions in regression_test.vr §A reproduce this
+// surface across every public constructor path; this file is empty by
+// design — the no-construction surface is BloomConfig.defaults().
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.bloom.{BloomConfig};
+
+// =============================================================================
+// Section 1: BloomConfig.defaults — capacity + fp_rate plumbing
+// =============================================================================
+
+@test
+fn test_bloom_config_defaults_capacity_2m20() {
+    let cfg = BloomConfig.defaults();
+    // 2^20 == 1_048_576
+    assert_eq(cfg.capacity, 1_048_576);
+}
+
+@test
+fn test_bloom_config_defaults_fp_rate_1000ppm() {
+    let cfg = BloomConfig.defaults();
+    assert_eq(cfg.fp_rate_ppm, 1000);
+}
+
+@test
+fn test_bloom_config_construct_with_capacity_and_fp_rate() {
+    let cfg = BloomConfig { capacity: 16384, fp_rate_ppm: 100 };
+    assert_eq(cfg.capacity, 16384);
+    assert_eq(cfg.fp_rate_ppm, 100);
+}
