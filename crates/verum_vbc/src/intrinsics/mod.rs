@@ -199,6 +199,45 @@ pub fn lookup_intrinsic(name: &str) -> Option<IntrinsicInfo> {
             "atomicrmw_or" => "atomic_fetch_or_u64",
             "atomicrmw_xor" => "atomic_fetch_xor_u64",
             "cmpxchg" | "cmpxchg_weak" => "atomic_cas_u64",
+            // LLVM-canonical names for bit-manipulation intrinsics.
+            //
+            // `core/intrinsics/bitwise.vr` declares the public surface
+            // (`clz<T>`, `clz_u32`, `clz_u64`, etc.) with bodies that call
+            // `@intrinsic("ctlz", x)` — the LLVM-style name.  Without these
+            // aliases, the lookup fails and `compile_intrinsic_call` emits
+            // `LoadNil`, silently returning `nil` to the caller.  The
+            // resulting bytecode then propagates the nil through the rest
+            // of the calling expression, producing nonsense bit-arithmetic
+            // (e.g. `clz_u64(1791) = nil` → `63 - 0 = 63` → wrong bsr →
+            // `size_to_bin_large` mis-classifies every allocation above
+            // 1024 bytes).  Discovered via
+            // `core-tests/mem/size_class/property_test::law_round_trip_full_table_exhaustive`.
+            //
+            // Width is irrelevant for these inline-sequence intrinsics —
+            // the interpreter dispatches `ArithSubOpcode::Clz / Ctz /
+            // Popcnt / Bswap / BitReverse` against the 64-bit canonical
+            // form regardless of the caller's declared parameter width.
+            // Callers that need narrower-width semantics either bit-mask
+            // before / after, or — for the typed-suffix surface (clz_u32,
+            // popcnt_u32, etc.) — route through their own registry
+            // entries above (lines 2948-2998).
+            "ctlz" => "clz",
+            "cttz" => "ctz",
+            "ctpop" => "popcnt",
+            // Funnel shifts.  Verum's `rotl<T>(x, n)` is defined as
+            // `@intrinsic("fshl", x, x, n)` — degenerate funnel shift
+            // with the same operand on both halves.  The interpreter's
+            // rotate dispatch only consumes (value, amount), so map
+            // `fshl` → `rotate_left` and `fshr` → `rotate_right`.
+            // Note: this collapses the 3-operand funnel into a 2-operand
+            // rotation — correct ONLY when the first two operands are
+            // identical, which is the case for the rotl/rotr wrappers
+            // but NOT for the public `fshl<T>(a, b, c)` surface.  The
+            // 3-operand path is intentionally left broken until a
+            // dedicated funnel-shift opcode lands; pin a test that
+            // calls `fshl(x, y, n)` with x ≠ y to surface the gap.
+            "fshl" => "rotate_left",
+            "fshr" => "rotate_right",
             _ => {
                 // Strip common prefixes used in import aliases
                 // e.g., intrinsic_memcpy → memcpy, intrinsic_slice_from_raw_parts_mut → slice_from_raw_parts_mut

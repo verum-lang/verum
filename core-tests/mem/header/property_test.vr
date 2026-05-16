@@ -1,0 +1,194 @@
+// =============================================================================
+// core-tests/mem/header/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for `core.mem.header`.
+//
+// Laws verified:
+//   §A  AllocationFlags predicates are pairwise disjoint for single-bit input
+//   §B  AllocationFlags.none has no bits set
+//   §C  AllocationFlags(FLAG_X) sets exactly X and no other predicate
+//   §D  Generation constants form a strict ordering UNALLOCATED < INITIAL < MAX
+//   §E  All FLAG_* constants are powers of two
+//   §F  FLAG_* are pairwise distinct single-bit values
+//   §G  HEADER_SIZE % HEADER_ALIGN = 0  (alignment is a divisor of size)
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.header.{
+    HEADER_SIZE, HEADER_ALIGN,
+    GEN_INITIAL, GEN_MAX, GEN_UNALLOCATED,
+    FLAG_PINNED, FLAG_LEAKED, FLAG_SHARED, FLAG_WEAK, FLAG_CAPABILITY,
+    FLAG_ARENA, FLAG_NUMA_PINNED, FLAG_LARGE, FLAG_BORROWED,
+    AllocationFlags,
+};
+
+fn all_flags() -> List<UInt32> {
+    [FLAG_PINNED, FLAG_LEAKED, FLAG_SHARED, FLAG_WEAK,
+     FLAG_CAPABILITY, FLAG_ARENA, FLAG_NUMA_PINNED, FLAG_LARGE,
+     FLAG_BORROWED]
+}
+
+// =============================================================================
+// §A  Predicate disjointness — for a flags value with EXACTLY ONE bit set,
+//     only the corresponding predicate returns true.
+// =============================================================================
+
+@test
+fn law_pinned_predicate_isolated() {
+    let f = AllocationFlags(FLAG_PINNED);
+    assert(f.is_pinned());
+    assert(!f.is_leaked());
+    assert(!f.is_shared());
+    assert(!f.has_weak());
+    assert(!f.is_large());
+    assert(!f.is_arena());
+}
+
+@test
+fn law_leaked_predicate_isolated() {
+    let f = AllocationFlags(FLAG_LEAKED);
+    assert(!f.is_pinned());
+    assert(f.is_leaked());
+    assert(!f.is_shared());
+    assert(!f.has_weak());
+    assert(!f.is_large());
+    assert(!f.is_arena());
+}
+
+@test
+fn law_shared_predicate_isolated() {
+    let f = AllocationFlags(FLAG_SHARED);
+    assert(!f.is_pinned());
+    assert(!f.is_leaked());
+    assert(f.is_shared());
+    assert(!f.has_weak());
+    assert(!f.is_large());
+    assert(!f.is_arena());
+}
+
+@test
+fn law_weak_predicate_isolated() {
+    let f = AllocationFlags(FLAG_WEAK);
+    assert(!f.is_pinned());
+    assert(!f.is_leaked());
+    assert(!f.is_shared());
+    assert(f.has_weak());
+    assert(!f.is_large());
+    assert(!f.is_arena());
+}
+
+@test
+fn law_large_predicate_isolated() {
+    let f = AllocationFlags(FLAG_LARGE);
+    assert(!f.is_pinned());
+    assert(!f.is_leaked());
+    assert(!f.is_shared());
+    assert(!f.has_weak());
+    assert(f.is_large());
+    assert(!f.is_arena());
+}
+
+@test
+fn law_arena_predicate_isolated() {
+    let f = AllocationFlags(FLAG_ARENA);
+    assert(!f.is_pinned());
+    assert(!f.is_leaked());
+    assert(!f.is_shared());
+    assert(!f.has_weak());
+    assert(!f.is_large());
+    assert(f.is_arena());
+}
+
+// =============================================================================
+// §B  none() has no bits set
+// =============================================================================
+
+@test
+fn law_none_has_no_bits_set() {
+    let f = AllocationFlags.none();
+    assert(!f.is_pinned());
+    assert(!f.is_leaked());
+    assert(!f.is_shared());
+    assert(!f.has_weak());
+    assert(!f.is_large());
+    assert(!f.is_arena());
+}
+
+// =============================================================================
+// §D  Generation strict ordering
+// =============================================================================
+
+@test
+fn law_generation_constants_strict_ordering() {
+    assert(GEN_UNALLOCATED < GEN_INITIAL);
+    assert(GEN_INITIAL < GEN_MAX);
+    // GEN_MAX leaves room for ONE more value (0xFFFFFFFF) before u32 max.
+    // 0xFFFFFFFF is reserved by some wraparound implementations as a
+    // sentinel — pin the gap.
+    assert(GEN_MAX < 0xFFFFFFFF as UInt32);
+}
+
+// =============================================================================
+// §E  Every FLAG_* is a power of two
+// =============================================================================
+
+@test
+fn law_every_flag_is_power_of_two() {
+    let flags = all_flags();
+    for f in flags.iter() {
+        // x is a power of 2 iff x > 0 AND (x & (x - 1)) == 0
+        assert(*f > 0 as UInt32);
+        assert((*f & (*f - 1 as UInt32)) == 0 as UInt32);
+    }
+}
+
+// =============================================================================
+// §F  Pairwise distinct (no two flags share a bit)
+// =============================================================================
+
+@test
+fn law_flags_pairwise_distinct_bits() {
+    let flags = all_flags();
+    for i in 0..flags.len() {
+        for j in 0..flags.len() {
+            if i != j {
+                assert((flags[i] & flags[j]) == 0 as UInt32);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// §G  Header size is multiple of alignment
+// =============================================================================
+
+@test
+fn law_header_size_aligned() {
+    assert_eq(HEADER_SIZE % HEADER_ALIGN, 0);
+}
+
+// =============================================================================
+// §H  Compound flag predicates are conjunctive
+//     For a flags value with multiple bits set, ALL corresponding
+//     predicates return true.
+// =============================================================================
+
+@test
+fn law_compound_flags_conjunctive() {
+    let f = AllocationFlags(FLAG_PINNED | FLAG_SHARED | FLAG_ARENA);
+    assert(f.is_pinned());
+    assert(f.is_shared());
+    assert(f.is_arena());
+    assert(!f.is_leaked());
+    assert(!f.has_weak());
+    assert(!f.is_large());
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

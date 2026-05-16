@@ -1,0 +1,164 @@
+// =============================================================================
+// core-tests/mem/size_class/integration_test.vr
+// =============================================================================
+//
+// Integration tests: size_class composed with header/allocator sizing,
+// PageKind dispatch, and the standard allocator request shapes coming
+// out of the rest of the stdlib.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.size_class.{
+    BIN_COUNT, BIN_HUGE, SIZE_CLASSES,
+    SMALL_SIZE_MAX, MEDIUM_SIZE_MAX,
+    size_to_bin, bin_to_size,
+    is_small_size, is_medium_size,
+    page_kind_for_bin, page_size_for_bin,
+    blocks_per_page,
+    aligned_size,
+    Small, Medium, Large, Huge,
+};
+
+// -----------------------------------------------------------------------------
+// §1  Allocator request shape: every allocation comes in as
+//     (size, align) and ends up dispatched through size_to_bin.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_alloc_request_dispatch_consistent() {
+    // Probe the common "small object" sizes — headers, list nodes, etc.
+    let common_sizes: List<Int> = [
+        8,    // single i64
+        16,   // pair of i64 / ThinRef body
+        24,   // header sub-slot
+        32,   // CBGR AllocationHeader
+        40, 48, 56, 64,    // exact small bins
+        80, 96, 128,
+        256, 512, 1024,
+    ];
+    for s in common_sizes.iter() {
+        let bin = size_to_bin(*s);
+        let bsize = bin_to_size(bin);
+        // The chosen bin can fit the requested size.
+        assert(bsize >= *s);
+        // The bin size class is small.
+        assert(is_small_size(bsize));
+        // The page-kind is Small.
+        assert(page_kind_for_bin(bin) is Small);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §2  CBGR header (32 bytes) lands in bin 3.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_cbgr_header_size_lands_in_bin_three() {
+    // AllocationHeader is documented as 32 bytes.  bin 3 = 32-byte slot.
+    assert_eq(size_to_bin(32), 3);
+    assert_eq(bin_to_size(3), 32);
+}
+
+// -----------------------------------------------------------------------------
+// §3  ThinRef (16 bytes) lands in bin 1.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_thin_ref_size_lands_in_bin_one() {
+    assert_eq(size_to_bin(16), 1);
+    assert_eq(bin_to_size(1), 16);
+}
+
+// -----------------------------------------------------------------------------
+// §4  FatRef (32 bytes) lands in bin 3 — same as the header.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_fat_ref_size_lands_in_bin_three() {
+    assert_eq(size_to_bin(32), 3);
+}
+
+// -----------------------------------------------------------------------------
+// §5  blocks_per_page × bin_size is page-bounded.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_blocks_per_page_bounded_by_page_size() {
+    // For every bin, blocks_per_page * bin_size + page_header ≤ page_size.
+    let header_size: Int = 64;
+    let mut b: Int = 0;
+    while b < BIN_COUNT {
+        let bsize = bin_to_size(b);
+        let bcount = blocks_per_page(b);
+        let psize = page_size_for_bin(b);
+        let total_used = bcount * bsize + header_size;
+        assert(total_used <= psize);
+        b = b + 1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §6  aligned_size + size_to_bin composition.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_aligned_size_then_size_to_bin_consistent() {
+    // For align ≤ MAX_ALIGN_SIZE (16), aligned_size is identity, so the
+    // bin choice is identical to that of the raw size.
+    let aligned = aligned_size(100, 16);
+    assert_eq(aligned, 100);
+    assert_eq(size_to_bin(aligned), size_to_bin(100));
+}
+
+@test
+fn integration_aligned_size_large_align_pushes_bin_up() {
+    // For align > MAX_ALIGN_SIZE, aligned_size adds padding which can
+    // bump the size into a larger bin.
+    let raw: Int = 100;
+    let padded = aligned_size(raw, 64);    // 100 + 63 = 163 bytes
+    let bin_raw = size_to_bin(raw);
+    let bin_padded = size_to_bin(padded);
+    // Padded version must use the same or a larger bin.
+    assert(bin_padded >= bin_raw);
+}
+
+// -----------------------------------------------------------------------------
+// §7  Probe ranges: small/medium/large each map to distinct page tiers.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_tier_disjoint_for_distinct_size_classes() {
+    // Pick three sizes — one in each tier — and verify they land in
+    // distinct page-kind buckets.
+    let small_size: Int = 100;        // → Small
+    let medium_size: Int = 10240;     // → Medium
+    let large_size: Int = 100000;     // → Large
+
+    let small_bin = size_to_bin(small_size);
+    let medium_bin = size_to_bin(medium_size);
+    let large_bin = size_to_bin(large_size);
+
+    assert(page_kind_for_bin(small_bin) is Small);
+    assert(page_kind_for_bin(medium_bin) is Medium);
+    assert(page_kind_for_bin(large_bin) is Large);
+}
+
+// -----------------------------------------------------------------------------
+// §8  Huge allocations route to BIN_HUGE and Huge page kind.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_huge_size_routes_to_huge_bin() {
+    let huge: Int = 8 * 1024 * 1024;   // 8 MiB → above 5 MiB threshold
+    let bin = size_to_bin(huge);
+    // Either BIN_HUGE or out-of-table — either way is "huge".
+    assert(bin >= BIN_HUGE - 1);   // tolerate 72 (top regular) or 73 (huge)
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

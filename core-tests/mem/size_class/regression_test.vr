@@ -1,0 +1,151 @@
+// =============================================================================
+// core-tests/mem/size_class/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions — one @test per past defect.  Tests are NEVER deleted
+// even after the underlying bug is fixed; they become guardrails against
+// re-regression.
+//
+// Pinned regressions:
+//   §A  `size_to_bin_large` formula was off by ~8 across the entire
+//       large range.  Pre-fix `((b - 3) << 2) + sub` over wsize (no
+//       `wsize - 1` alignment) returned bin 16 for wsize=129 (1032
+//       bytes) when the correct bin is 24 (1280 bytes).  Every
+//       allocation > 1024 bytes was getting an undersized bin —
+//       writes could overrun the slot into the next block.  No
+//       test exercised the large path so the bug went unnoticed.
+//       Closed by the canonical mimalloc-style rewrite
+//       `(b << 2) + sub - 4` over `wsize - 1`.
+//       audit.md §3.1.
+//   §B  `bin_to_size(b)` for b ≥ BIN_COUNT returned the last table
+//       entry (undefined-behaviour read on the SIZE_CLASSES array)
+//       before the bounds check was added.  Pin the 0-sentinel
+//       return for out-of-range bins.
+//   §C  `size_to_bin(0)` had previously panicked on the wsize
+//       computation when integer divide rounded 0 below 0.  Pin
+//       the 0-defensive path.
+//   §D  `is_huge_size` uses HUGE_SIZE_THRESHOLD = 5 MiB which is
+//       INTENTIONALLY less than LARGE_SIZE_MAX = 16 MiB.  The
+//       overlap is real and intentional — pin it so a future
+//       cleanup attempt to "fix" the apparent discrepancy
+//       doesn't accidentally narrow the huge predicate.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.size_class.{
+    BIN_COUNT, BIN_HUGE,
+    SIZE_CLASSES,
+    SMALL_SIZE_MAX, MEDIUM_SIZE_MAX, LARGE_SIZE_MAX, HUGE_SIZE_THRESHOLD,
+    size_to_bin, bin_to_size,
+    is_huge_size, is_large_size,
+};
+
+// -----------------------------------------------------------------------------
+// §A — size_to_bin_large off-by-8 (pre-#100 fix)
+// -----------------------------------------------------------------------------
+//
+// The canonical mimalloc-style formula is:
+//
+//   w   = wsize - 1
+//   b   = bsr(w)
+//   sub = (w >> (b - 2)) & 0x03
+//   bin = (b << 2) + sub - 4
+//
+// Pre-fix, the formula omitted `wsize - 1` and computed
+// `((b - 3) << 2) + sub` over wsize directly, which mis-mapped every
+// large bin by an entire family.  The fixtures below probe boundary
+// points where the off-by-8 bug would have produced a strictly smaller
+// bin index.
+
+@test
+fn regression_size_to_bin_large_wsize_129_returns_bin_24() {
+    // wsize = 129 (size = 1025..1032).  Bin 24 is the 1280-byte family.
+    // Pre-fix returned bin 16 (320 bytes) — a 4x undersize.
+    assert_eq(size_to_bin(1025), 24);
+}
+
+@test
+fn regression_size_to_bin_large_exact_1280_returns_bin_24() {
+    // The "exact" hit for bin 24 — must round-trip cleanly.
+    assert_eq(size_to_bin(1280), 24);
+}
+
+@test
+fn regression_size_to_bin_large_exact_4096_returns_bin_31() {
+    // Power-of-2 boundary: 4096 → bin 31 (4096 byte family).
+    assert_eq(size_to_bin(4096), 31);
+}
+
+@test
+fn regression_size_to_bin_large_post_8192_jumps_to_medium_tier() {
+    // Crossing the small/medium boundary: 8192 → bin 35 (last small bin).
+    assert_eq(size_to_bin(8192), 35);
+    // Just past: 8193 → next bin family
+    let bin = size_to_bin(8193);
+    assert(bin > 35);
+}
+
+@test
+fn regression_size_to_bin_large_top_of_table() {
+    // SIZE_CLASSES[72] = 5 MiB exactly → bin 72.
+    assert_eq(size_to_bin(SIZE_CLASSES[72]), 72);
+}
+
+// -----------------------------------------------------------------------------
+// §B — bin_to_size bounds-check returns 0 sentinel
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_bin_to_size_above_bin_count_returns_zero() {
+    assert_eq(bin_to_size(BIN_COUNT), 0);
+    assert_eq(bin_to_size(BIN_COUNT + 1), 0);
+    assert_eq(bin_to_size(1000), 0);
+}
+
+// -----------------------------------------------------------------------------
+// §C — size_to_bin(0) defensive path
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_size_to_bin_zero_returns_bin_zero() {
+    assert_eq(size_to_bin(0), 0);
+}
+
+@test
+fn regression_size_to_bin_negative_returns_bin_zero() {
+    // Negative size is invalid, but the function must not panic — it
+    // routes to bin 0 by convention.
+    assert_eq(size_to_bin(-1), 0);
+    assert_eq(size_to_bin(-1000), 0);
+}
+
+// -----------------------------------------------------------------------------
+// §D — huge/large intentional overlap
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_huge_threshold_overlaps_large_max() {
+    // 5 MiB < s ≤ 16 MiB is both "large" (page tier) AND "huge"
+    // (allocation policy) — intentional design.
+    let s: Int = 8 * 1024 * 1024;   // 8 MiB
+    assert(is_huge_size(s));
+    assert(is_large_size(s));
+}
+
+@test
+fn regression_huge_threshold_constants_documented_relationship() {
+    // HUGE_SIZE_THRESHOLD is documented as < LARGE_SIZE_MAX.  Pin the
+    // ordering so a future refactor that swaps the constants surfaces
+    // immediately.
+    assert(HUGE_SIZE_THRESHOLD < LARGE_SIZE_MAX);
+    assert(MEDIUM_SIZE_MAX < HUGE_SIZE_THRESHOLD);
+    assert(SMALL_SIZE_MAX < MEDIUM_SIZE_MAX);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

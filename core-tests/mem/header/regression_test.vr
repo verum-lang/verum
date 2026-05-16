@@ -1,0 +1,123 @@
+// =============================================================================
+// core-tests/mem/header/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.mem.header`.  Tests are NEVER deleted even
+// after the underlying bug is fixed; they become guardrails against
+// re-regression.
+//
+// Pinned regressions:
+//   §A  HEADER_SIZE = 32 — pin the literal so the 4 sites in
+//       `core/base/memory.vr` that do `ptr - 32` cannot silently drift
+//       from this canonical value.  Audited as `base/memory/audit.md §3.2`.
+//   §B  GEN_UNALLOCATED MUST be 0 — every `is_valid` check tests for
+//       `actual_gen != GEN_UNALLOCATED`.  If GEN_UNALLOCATED becomes
+//       non-zero, every freshly-allocated header would report invalid.
+//   §C  GEN_MAX MUST be strictly less than `UInt32.MAX` — leaves room for
+//       a single sentinel value (`0xFFFFFFFF`) used by some wraparound
+//       implementations as the "in-transition" marker.
+//   §D  AllocationFlags is a (UInt32) newtype — variant tag MUST round-trip
+//       through field-zero access (`.0`).  Pre-fix some user-side
+//       newtypes had ambiguous tag inference under `is`-pattern matching.
+//   §E  MemValidationError variants resolve via bare-name construction
+//       (`MemValidationError.GenerationMismatch { ... }`).  Task #5
+//       §3.1 fix landed via commit 6cac007b1.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.header.{
+    HEADER_SIZE, HEADER_ALIGN,
+    GEN_INITIAL, GEN_MAX, GEN_UNALLOCATED,
+    FLAG_PINNED, FLAG_SHARED,
+    AllocationFlags,
+    MemValidationError,
+};
+
+// -----------------------------------------------------------------------------
+// §A — HEADER_SIZE = 32 literal pin
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_header_size_pinned_at_32_bytes() {
+    // CRITICAL: every Verum-side site that computes `ptr - 32` to recover
+    // the header pointer relies on this constant.  Drift here corrupts
+    // every CBGR validity check.
+    assert_eq(HEADER_SIZE, 32);
+    assert_eq(HEADER_ALIGN, 32);
+}
+
+// -----------------------------------------------------------------------------
+// §B — GEN_UNALLOCATED MUST be 0
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_gen_unallocated_is_zero_sentinel() {
+    // `is_valid(self)` checks `actual_gen != GEN_UNALLOCATED`.  If
+    // UNALLOCATED is non-zero, every fresh allocation (which starts with
+    // gen=0 via memset) would be reported "valid" when in fact the header
+    // hasn't been initialised yet.
+    assert_eq(GEN_UNALLOCATED, 0 as UInt32);
+}
+
+// -----------------------------------------------------------------------------
+// §C — GEN_MAX < UInt32.MAX (one slot of headroom)
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_gen_max_leaves_room_for_sentinel() {
+    // GEN_MAX = 0xFFFFFFFE — leaves 0xFFFFFFFF as a future sentinel for
+    // "wraparound-in-progress" use.
+    assert_eq(GEN_MAX, 0xFFFFFFFE as UInt32);
+    assert(GEN_MAX < 0xFFFFFFFF as UInt32);
+}
+
+// -----------------------------------------------------------------------------
+// §D — AllocationFlags newtype tag pattern
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_allocation_flags_newtype_field_zero_access() {
+    // AllocationFlags is a (UInt32) newtype — the inner value is
+    // accessible via `.0`.  Pin the field-zero round-trip.
+    let f = AllocationFlags(FLAG_PINNED | FLAG_SHARED);
+    let raw: UInt32 = f.0;
+    assert_eq(raw & FLAG_PINNED, FLAG_PINNED);
+    assert_eq(raw & FLAG_SHARED, FLAG_SHARED);
+}
+
+// -----------------------------------------------------------------------------
+// §E — MemValidationError construction via qualified path
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_validation_error_qualified_construction_resolves() {
+    // Both bidirectional Path resolution AND the constructor helper must
+    // produce the same variant shape.
+    let from_path = MemValidationError.GenerationMismatch {
+        expected: 1 as UInt32,
+        actual: 2 as UInt32,
+    };
+    let from_ctor = MemValidationError.generation_mismatch(1 as UInt32, 2 as UInt32);
+    match from_path {
+        MemValidationError.GenerationMismatch { expected, actual } => {
+            assert_eq(expected, 1 as UInt32);
+            assert_eq(actual, 2 as UInt32);
+        }
+        _ => assert(false),
+    }
+    match from_ctor {
+        MemValidationError.GenerationMismatch { expected, actual } => {
+            assert_eq(expected, 1 as UInt32);
+            assert_eq(actual, 2 as UInt32);
+        }
+        _ => assert(false),
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

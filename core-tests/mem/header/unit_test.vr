@@ -1,0 +1,288 @@
+// =============================================================================
+// core-tests/mem/header/unit_test.vr
+// =============================================================================
+//
+// Per-API tests for `core.mem.header` — the 32-byte CBGR allocation header
+// prepended to every heap allocation.  This file pins the public-surface
+// constants, the AllocationFlags newtype, MemValidationError variants, and
+// the ValidationError alias.
+//
+// Tests here do NOT touch actual allocations — for that, see the
+// allocator/ and arena/ test directories.  The header tests pin the
+// value-level shape so that drift between Verum-side and Rust-side
+// (`verum_cbgr::header::*`) is detectable from Verum's own test suite.
+//
+// Companion files:
+//   property_test.vr     — flag-set laws, generation/epoch wraparound
+//   integration_test.vr  — composition with allocator + arena
+//   regression_test.vr   — pinned defects (32-byte literal, type alias)
+//   audit.md             — drift surfaces & action items
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.header.{
+    HEADER_SIZE, HEADER_ALIGN,
+    GEN_INITIAL, GEN_MAX, GEN_UNALLOCATED,
+    FLAG_PINNED, FLAG_LEAKED, FLAG_SHARED, FLAG_WEAK, FLAG_CAPABILITY,
+    FLAG_ARENA, FLAG_NUMA_PINNED, FLAG_LARGE, FLAG_BORROWED,
+    AllocationFlags,
+    MemValidationError, ValidationError,
+};
+
+// =============================================================================
+// Section 1: Header layout constants
+// =============================================================================
+
+@test
+fn test_header_size_is_32_bytes() {
+    // The CBGR allocation header is 32 bytes — half-cache-line aligned.
+    // EVERY site that does `header_addr = ptr - 32` (4 sites in
+    // core/base/memory.vr lines 263/372/383/406/415/443) depends on
+    // this constant.  Drift here corrupts every is_valid / is_freed /
+    // current_epoch / capabilities call.
+    assert_eq(HEADER_SIZE, 32);
+}
+
+@test
+fn test_header_align_matches_header_size() {
+    // Header is 32-byte aligned — same as the size, because the header
+    // sits at the start of an aligned allocation block.
+    assert_eq(HEADER_ALIGN, HEADER_SIZE);
+}
+
+// =============================================================================
+// Section 2: Generation constants
+// =============================================================================
+
+@test
+fn test_gen_initial_is_one() {
+    // Generation 0 is the "unallocated" sentinel.  Every fresh allocation
+    // starts at generation 1.
+    assert_eq(GEN_INITIAL, 1 as UInt32);
+}
+
+@test
+fn test_gen_unallocated_is_zero() {
+    assert_eq(GEN_UNALLOCATED, 0 as UInt32);
+}
+
+@test
+fn test_gen_max_is_0xfffffffe() {
+    // Maximum generation BEFORE wraparound.  After GEN_MAX, the next
+    // bump wraps to GEN_INITIAL (1) — NOT to 0 (which would alias the
+    // unallocated state and break use-after-free detection).
+    assert_eq(GEN_MAX, 0xFFFF_FFFE as UInt32);
+}
+
+@test
+fn test_gen_constants_strictly_ordered() {
+    // GEN_UNALLOCATED < GEN_INITIAL < GEN_MAX must hold strictly so
+    // wraparound logic is unambiguous.
+    assert(GEN_UNALLOCATED < GEN_INITIAL);
+    assert(GEN_INITIAL < GEN_MAX);
+}
+
+// =============================================================================
+// Section 3: Allocation flag bit positions
+// =============================================================================
+
+@test
+fn test_flag_pinned_is_bit_zero() {
+    assert_eq(FLAG_PINNED, 1 as UInt32);
+}
+
+@test
+fn test_flag_leaked_is_bit_one() {
+    assert_eq(FLAG_LEAKED, 2 as UInt32);
+}
+
+@test
+fn test_flag_shared_is_bit_two() {
+    assert_eq(FLAG_SHARED, 4 as UInt32);
+}
+
+@test
+fn test_flag_weak_is_bit_three() {
+    assert_eq(FLAG_WEAK, 8 as UInt32);
+}
+
+@test
+fn test_flag_capability_is_bit_four() {
+    assert_eq(FLAG_CAPABILITY, 16 as UInt32);
+}
+
+@test
+fn test_flag_arena_is_bit_five() {
+    assert_eq(FLAG_ARENA, 32 as UInt32);
+}
+
+@test
+fn test_flag_numa_pinned_is_bit_six() {
+    assert_eq(FLAG_NUMA_PINNED, 64 as UInt32);
+}
+
+@test
+fn test_flag_large_is_bit_seven() {
+    assert_eq(FLAG_LARGE, 128 as UInt32);
+}
+
+@test
+fn test_flag_borrowed_is_bit_eight() {
+    assert_eq(FLAG_BORROWED, 256 as UInt32);
+}
+
+@test
+fn test_all_flags_pairwise_distinct() {
+    let flags: List<UInt32> = [
+        FLAG_PINNED, FLAG_LEAKED, FLAG_SHARED, FLAG_WEAK,
+        FLAG_CAPABILITY, FLAG_ARENA, FLAG_NUMA_PINNED, FLAG_LARGE,
+        FLAG_BORROWED,
+    ];
+    for i in 0..9 {
+        for j in 0..9 {
+            if i != j {
+                assert((flags[i] & flags[j]) == 0 as UInt32);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Section 4: AllocationFlags newtype — construction
+// =============================================================================
+
+@test
+fn test_allocation_flags_none_is_empty() {
+    let f = AllocationFlags.none();
+    assert(!f.is_pinned());
+    assert(!f.is_leaked());
+    assert(!f.is_shared());
+    assert(!f.has_weak());
+    assert(!f.is_large());
+    assert(!f.is_arena());
+}
+
+@test
+fn test_allocation_flags_pinned_only() {
+    let f = AllocationFlags(FLAG_PINNED);
+    assert(f.is_pinned());
+    assert(!f.is_leaked());
+    assert(!f.is_shared());
+    assert(!f.has_weak());
+    assert(!f.is_large());
+    assert(!f.is_arena());
+}
+
+@test
+fn test_allocation_flags_leaked_only() {
+    let f = AllocationFlags(FLAG_LEAKED);
+    assert(!f.is_pinned());
+    assert(f.is_leaked());
+    assert(!f.is_shared());
+}
+
+@test
+fn test_allocation_flags_shared_only() {
+    let f = AllocationFlags(FLAG_SHARED);
+    assert(!f.is_pinned());
+    assert(!f.is_leaked());
+    assert(f.is_shared());
+    assert(!f.has_weak());
+}
+
+@test
+fn test_allocation_flags_weak_only() {
+    let f = AllocationFlags(FLAG_WEAK);
+    assert(!f.is_shared());
+    assert(f.has_weak());
+}
+
+@test
+fn test_allocation_flags_large_only() {
+    let f = AllocationFlags(FLAG_LARGE);
+    assert(f.is_large());
+    assert(!f.is_arena());
+}
+
+@test
+fn test_allocation_flags_arena_only() {
+    let f = AllocationFlags(FLAG_ARENA);
+    assert(f.is_arena());
+    assert(!f.is_large());
+}
+
+@test
+fn test_allocation_flags_compound() {
+    // SHARED | WEAK | LARGE — common shape for a heap-allocated shared
+    // collection with weak observers and a backing buffer.
+    let f = AllocationFlags(FLAG_SHARED | FLAG_WEAK | FLAG_LARGE);
+    assert(f.is_shared());
+    assert(f.has_weak());
+    assert(f.is_large());
+    assert(!f.is_pinned());
+    assert(!f.is_leaked());
+    assert(!f.is_arena());
+}
+
+// =============================================================================
+// Section 5: MemValidationError — construction + variant matching
+// =============================================================================
+
+@test
+fn test_validation_error_generation_mismatch_construction() {
+    let err = MemValidationError.generation_mismatch(5 as UInt32, 7 as UInt32);
+    match err {
+        MemValidationError.GenerationMismatch { expected, actual } => {
+            assert_eq(expected, 5 as UInt32);
+            assert_eq(actual, 7 as UInt32);
+        }
+        _ => assert(false),
+    }
+}
+
+@test
+fn test_validation_error_epoch_mismatch_construction() {
+    let err = MemValidationError.epoch_mismatch(1 as UInt16, 2 as UInt16);
+    match err {
+        MemValidationError.EpochMismatch { expected, actual } => {
+            assert_eq(expected, 1 as UInt16);
+            assert_eq(actual, 2 as UInt16);
+        }
+        _ => assert(false),
+    }
+}
+
+@test
+fn test_validation_error_variants_pairwise_distinct() {
+    let gen_err = MemValidationError.generation_mismatch(1 as UInt32, 2 as UInt32);
+    let epoch_err = MemValidationError.epoch_mismatch(1 as UInt16, 2 as UInt16);
+    assert(gen_err is GenerationMismatch);
+    assert(epoch_err is EpochMismatch);
+    assert(!(gen_err is EpochMismatch));
+    assert(!(epoch_err is GenerationMismatch));
+}
+
+// =============================================================================
+// Section 6: ValidationError alias points to MemValidationError
+// =============================================================================
+//
+// `ValidationError` is a type alias added for the canonical short name.
+// Constructing one shape via the alias and matching via the underlying
+// must work — this is the alias-soundness pin.
+
+@test
+fn test_validation_error_alias_compatible() {
+    let err: ValidationError = MemValidationError.generation_mismatch(0 as UInt32, 1 as UInt32);
+    match err {
+        MemValidationError.GenerationMismatch { expected: _, actual: _ } => assert(true),
+        _ => assert(false),
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
