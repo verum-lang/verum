@@ -2194,30 +2194,88 @@ pub(in super::super) fn handle_call_method(
     //      match.  Works for stdlib types whose
     //      TypeDescriptors aren't in the user module but whose
     //      methods are.
-    if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() && !method_name.contains('.') {
-        let ptr = dispatch_receiver.as_ptr::<u8>();
-        let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
-        let recv_type_id = header.type_id;
-        // Strategy 1: TypeId-aware exact qualified lookup.
-        let mut found: Option<crate::module::FunctionId> = state
-            .module
-            .find_method_by_receiver_type(recv_type_id, &bare_method_name);
-        // Strategy 2: unique bare-suffix match.
-        if found.is_none() {
-            found = state
+    // FUNDAMENTAL: the safety net now fires for BOTH unqualified and
+    // qualified-but-not-found method names.  The qualified-but-not-
+    // found branch closes the slice §A / §D / multiset §B / trie §A
+    // dispatch class: when the typechecker stamps a slice receiver
+    // call as `List.eq_slice` (because the slice's runtime kind is
+    // `List`) but the actual stdlib body lives under `Slice.eq_slice`,
+    // the bare-suffix search finds the right function and routes the
+    // call there instead of panicking with "method 'List.eq_slice'
+    // not found".  Same shape for wrapper-iterator types (`Chunks`,
+    // `Windows`, `MultisetIter`) whose runtime kind is the inner
+    // container's but whose `.next()` lives on the wrapper type.
+    //
+    // The original `!method_name.contains('.')` gate is preserved as
+    // a fast-path for bare-name calls.  The new qualified-form branch
+    // ADDITIONALLY checks that the prefixed qualified name doesn't
+    // exist in the module — so we never override an explicit
+    // qualified-name match.  Pinned in
+    // `core-tests/collections/slice/regression_test.vr` §A.
+    if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
+        let try_safety_net = if method_name.contains('.') {
+            // Qualified — only fire when the qualified form doesn't
+            // exist (otherwise prefer the exact qualified match).
+            state.module.find_function_by_name(&method_name).is_none()
+        } else {
+            true
+        };
+        if try_safety_net {
+            let ptr = dispatch_receiver.as_ptr::<u8>();
+            let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+            let recv_type_id = header.type_id;
+            // Strategy 1: TypeId-aware exact qualified lookup.
+            let mut found: Option<crate::module::FunctionId> = state
                 .module
-                .find_function_by_unique_bare_suffix(&bare_method_name);
-        }
-        if let Some(func_id) = found {
-            let caller_base = state.reg_base();
-            let mut call_args: Vec<Value> = Vec::with_capacity(args.count as usize + 1);
-            call_args.push(dispatch_receiver);
-            for i in 0..args.count {
-                call_args.push(state.registers.get(caller_base, Reg(args.start.0 + i as u16)));
+                .find_method_by_receiver_type(recv_type_id, &bare_method_name);
+            // Strategy 1b: shared-runtime-kind static-prefix overrides.
+            //
+            // Several stdlib types share a runtime kind with another
+            // type (e.g. `&[T]` shares `List` runtime kind; the
+            // wrapper-iterator types `Chunks<T>` / `Windows<T>` also
+            // box into `List`-tagged heap objects).  When method
+            // dispatch lands on the host-kind's qualified form (e.g.
+            // `List.<bare>`) but the actual stdlib body lives under
+            // the static-source qualifier (e.g. `Slice.<bare>`),
+            // bare-suffix search refuses ambiguous matches.  This
+            // priority-ordered lookup is the architectural bridge:
+            // when receiver TypeId == LIST, try `Slice.<bare>` before
+            // the ambiguous-suffix fallback.  Pinned in
+            // `core-tests/collections/slice/regression_test.vr` §A / §D.
+            if found.is_none() && recv_type_id == crate::types::TypeId::LIST {
+                // Match by suffix to tolerate module prefixes
+                // (`core.collections.slice.Slice.to_list` is just as
+                // valid a registration as bare `Slice.to_list`).  The
+                // suffix `.Slice.<bare>` AND the bare `Slice.<bare>`
+                // form both need to be probed.
+                let bare_qualified = format!("Slice.{}", bare_method_name);
+                let dotted_qualified = format!(".Slice.{}", bare_method_name);
+                for (idx, desc) in state.module.functions.iter().enumerate() {
+                    if let Some(fname) = state.module.strings.get(desc.name)
+                        && (fname == bare_qualified || fname.ends_with(&dotted_qualified))
+                    {
+                        found = Some(crate::module::FunctionId(idx as u32));
+                        break;
+                    }
+                }
             }
-            let result = call_function_sync(state, func_id, &call_args)?;
-            state.set_reg(dst, result);
-            return Ok(DispatchResult::Continue);
+            // Strategy 2: unique bare-suffix match.
+            if found.is_none() {
+                found = state
+                    .module
+                    .find_function_by_unique_bare_suffix(&bare_method_name);
+            }
+            if let Some(func_id) = found {
+                let caller_base = state.reg_base();
+                let mut call_args: Vec<Value> = Vec::with_capacity(args.count as usize + 1);
+                call_args.push(dispatch_receiver);
+                for i in 0..args.count {
+                    call_args.push(state.registers.get(caller_base, Reg(args.start.0 + i as u16)));
+                }
+                let result = call_function_sync(state, func_id, &call_args)?;
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
         }
     }
 
