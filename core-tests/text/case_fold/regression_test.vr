@@ -26,21 +26,18 @@ mount core.base.ordering.{Ordering, Less, Equal, Greater};
 //      fails because `Text.eq` is broken in this branch (text/text §I).
 // =============================================================================
 
-@ignore
 @test
 fn regression_a_fold_text_eq_literal_pinned() {
     let s: Text = "HELLO";
     assert_eq(fold_text_ascii(&s), "hello");
 }
 
-@ignore
 @test
 fn regression_a_fold_text_empty_eq_literal_pinned() {
     let s: Text = "";
     assert_eq(fold_text_ascii(&s), "");
 }
 
-@ignore
 @test
 fn regression_a_fold_text_digits_eq_literal_pinned() {
     let s: Text = "12345";
