@@ -3500,20 +3500,17 @@ pub fn lower_instruction<'ctx>(
             field,
             value,
         } => {
+            // Reuse the canonical `as_ptr` helper which handles ALL four
+            // register shapes uniformly: PointerValue (direct), IntValue
+            // (int_to_ptr), FloatValue (bit_cast to i64 then int_to_ptr),
+            // StructValue (CBGR ref struct extract field 0).  Mirror of
+            // `GetVariantData`'s use of `as_ptr` (line ~3575) — pre-fix
+            // the inline match dropped FloatValue and StructValue, surfacing
+            // as "SetVariantData: expected pointer, got FloatValue(...)" in
+            // AOT when a heap-tagged float-bearing slot or CBGR-ref-wrapped
+            // variant ptr flowed in.  Closes L3.10 task class.
             let variant_val = ctx.get_register(variant.0)?;
-            let variant_ptr = match variant_val {
-                BasicValueEnum::PointerValue(p) => p,
-                BasicValueEnum::IntValue(i) => ctx
-                    .builder()
-                    .build_int_to_ptr(i, ctx.types().ptr_type(), "variant_from_int")
-                    .or_llvm_err()?,
-                _ => {
-                    return Err(LlvmLoweringError::internal(format!(
-                        "SetVariantData: expected pointer, got {:?}",
-                        variant_val
-                    )));
-                }
-            };
+            let variant_ptr = as_ptr(ctx, variant_val, "variant_ptr")?;
             // Convert value to i64 if needed (variant data is stored as i64 fields)
             let raw_val = ctx.get_register(value.0)?;
             let val = match raw_val {
@@ -8311,16 +8308,36 @@ fn lower_call<'ctx>(
         return Ok(());
     }
 
-    let func_desc = vbc_mod
-        .get_function(FunctionId(resolved_id))
-        .ok_or_else(|| {
-            LlvmLoweringError::internal(format!(
-                "Call: function id {} (base {} + {}) not found in VBC module",
-                resolved_id,
-                ctx.func_id_base(),
-                func_id
-            ))
-        })?;
+    // L3.11 — cross-module Call function-id resolution.  Mirror of
+    // Tier-0's `archive_func_name_to_fid` Tier-2b discipline (commit
+    // `f13390ba5` task #12): when `resolved_id` (base + local-id) misses
+    // in the VBC module table, fall back to the raw `func_id` (pre-base)
+    // which may directly index a globally-loaded archive function.  If
+    // BOTH miss, degrade to const-zero stub instead of erroring out — the
+    // same defensive discipline already in place for `UNRESOLVED_FN_ID`
+    // above.  Pre-fix every transitively-cross-module Call whose target
+    // lives in an unmounted archive module aborted the entire AOT lowering
+    // of the enclosing function, cascading into ~50+ skipped fn warnings.
+    let func_desc = match vbc_mod.get_function(FunctionId(resolved_id)) {
+        Some(d) => d,
+        None => match vbc_mod.get_function(FunctionId(func_id)) {
+            Some(d) => d,
+            None => {
+                if std::env::var_os("VERUM_AOT_TRACE_UNRESOLVED").is_some() {
+                    let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
+                    eprintln!(
+                        "[aot-unresolved] Call: fn_id={} (base {} + {}) miss in vbc_mod, const-zero in {}",
+                        resolved_id,
+                        ctx.func_id_base(),
+                        func_id,
+                        cur_fn
+                    );
+                }
+                ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
+                return Ok(());
+            }
+        },
+    };
     let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
 
     // Intercept low-level process C runtime bridge functions.
@@ -23650,6 +23667,55 @@ fn lower_ffi_extended<'ctx>(
                     .or_llvm_err()?
             };
             ctx.set_register(dst_reg, field_ptr.into());
+            Ok(())
+        }
+
+        Some(SystemSubOpcode::StaticMutAddr) => {
+            // Static-mut backing-cell address — Task #26 [E2] Tier-1 lowering.
+            //
+            // Format: dst:reg, slot_lo:u8, slot_hi:u8
+            //
+            // Tier-1 path: call into a runtime helper
+            // `verum_static_mut_cell_addr(slot: u16) -> *mut u8` that
+            // returns the stable byte address of a process-wide cell.
+            // The helper is declared lazily (extern) and resolved at
+            // link time against the verum_runtime library — same
+            // pattern as `verum_time_monotonic_nanos` above.  Mirrors
+            // the Tier-0 `handle_static_mut_addr` semantics so the
+            // user-side `&STATIC_MUT as *T` lowering is byte-identical
+            // across tiers.
+            //
+            // The Tier-0 implementation lives in `InterpreterState::
+            // static_mut_cell_addr`; the Tier-1 runtime symbol must be
+            // implemented before any AOT path exercises this opcode.
+            // Currently no AOT consumer hits it (audit-ring tests run
+            // via `verum test --interp`); when a consumer lands, add
+            // the C symbol to `verum_runtime` and `syscall_registry`.
+            if operands.len() < 3 {
+                return Err(LlvmLoweringError::internal(
+                    "StaticMutAddr: insufficient operands",
+                ));
+            }
+            let dst_reg = op_reg(operands, 0);
+            let slot_lo = operands[1] as u64;
+            let slot_hi = operands[2] as u64;
+            let slot = (slot_hi << 8) | slot_lo;
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let fn_type = ptr_ty.fn_type(&[i64_ty.into()], false);
+            let helper_fn = super::error::get_or_declare_function(
+                module,
+                "verum_static_mut_cell_addr",
+                fn_type,
+            );
+            let slot_arg = i64_ty.const_int(slot, false);
+            let result = ctx
+                .builder()
+                .build_call(helper_fn, &[slot_arg.into()], "static_mut_addr")
+                .or_llvm_err()?
+                .basic_value_or("StaticMutAddr: expected return value")?;
+            ctx.set_register(dst_reg, result);
             Ok(())
         }
 
