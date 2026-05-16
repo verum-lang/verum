@@ -1,0 +1,156 @@
+// =============================================================================
+// core-tests/mem/header/integration_test.vr
+// =============================================================================
+//
+// Integration tests: header composed with capability flags + epoch
+// packing.  The header's `epoch_and_caps` field stores a packed UInt32
+// produced by `pack_epoch_caps(epoch, caps)` from `core.mem.capability` —
+// this file pins that the packing semantics from capability.vr match
+// the field-layout expectations of header.vr.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.header.{
+    HEADER_SIZE, HEADER_ALIGN,
+    GEN_INITIAL, GEN_MAX,
+    FLAG_PINNED, FLAG_LEAKED, FLAG_SHARED, FLAG_LARGE, FLAG_ARENA,
+    AllocationFlags,
+    MemValidationError, ValidationError,
+};
+mount core.mem.capability.{
+    CAP_READ, CAP_WRITE, CAP_OWNED, CAP_READ_ONLY,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+};
+
+// -----------------------------------------------------------------------------
+// §1  Header size = 32 bytes = expected CBGR layout (4+4+4+4+4+4+4+4).
+//     Pin the byte-for-byte breakdown documented in header.vr lines 16-29.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_header_size_matches_eight_uint32_fields() {
+    // 8 × UInt32 (4 bytes each) = 32 bytes total.
+    let expected_field_count: Int = 8;
+    let uint32_size: Int = 4;
+    assert_eq(HEADER_SIZE, expected_field_count * uint32_size);
+}
+
+@test
+fn integration_header_alignment_is_cache_line_half() {
+    // 32-byte alignment = half cache line on most architectures.
+    // Pinned at HEADER_SIZE so the header naturally aligns its first
+    // field (generation) at offset 0 of every allocation.
+    assert_eq(HEADER_ALIGN, 32);
+}
+
+// -----------------------------------------------------------------------------
+// §2  pack_epoch_caps from capability.vr returns a value compatible
+//     with the header's `epoch_and_caps` field.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_pack_epoch_caps_through_owned() {
+    // CAP_OWNED is the canonical capability set for heap-owned allocations.
+    // The header initialisation packs epoch=0 + caps=CAP_OWNED at allocation
+    // time.
+    let initial_epoch: UInt16 = 0 as UInt16;
+    let packed = pack_epoch_caps(initial_epoch, CAP_OWNED);
+    assert_eq(unpack_epoch(packed), initial_epoch);
+    assert_eq(unpack_caps(packed), CAP_OWNED);
+}
+
+@test
+fn integration_pack_epoch_caps_through_read_only_borrow() {
+    // After a sub-reference is created with CAP_READ_ONLY, the borrowed
+    // reference packs the parent's epoch but only the read capability.
+    let parent_epoch: UInt16 = 42 as UInt16;
+    let parent_packed = pack_epoch_caps(parent_epoch, CAP_OWNED);
+    let child_caps = unpack_caps(parent_packed) & CAP_READ;
+    let child_packed = pack_epoch_caps(unpack_epoch(parent_packed), child_caps);
+    assert_eq(unpack_epoch(child_packed), parent_epoch);
+    assert_eq(unpack_caps(child_packed), CAP_READ);
+}
+
+// -----------------------------------------------------------------------------
+// §3  AllocationFlags composition with common allocation shapes
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_flags_for_shared_heap_allocation() {
+    // A Shared<T> heap allocation: shared bit + (optionally) large flag.
+    let f = AllocationFlags(FLAG_SHARED);
+    assert(f.is_shared());
+    assert(!f.is_pinned());
+    assert(!f.is_arena());
+}
+
+@test
+fn integration_flags_for_pinned_large_arena_allocation() {
+    // Pinned + large + arena — represents a memory-mapped, large,
+    // arena-managed allocation (e.g., a backing-store mmap region).
+    let f = AllocationFlags(FLAG_PINNED | FLAG_LARGE | FLAG_ARENA);
+    assert(f.is_pinned());
+    assert(f.is_large());
+    assert(f.is_arena());
+    assert(!f.is_shared());
+    assert(!f.is_leaked());
+}
+
+@test
+fn integration_flags_for_static_leaked_allocation() {
+    // FLAG_LEAKED — used for permanent allocations that never call free.
+    let f = AllocationFlags(FLAG_LEAKED);
+    assert(f.is_leaked());
+    assert(!f.is_pinned());
+}
+
+// -----------------------------------------------------------------------------
+// §4  MemValidationError shape — both variants observable post-fix
+//     (task #5 §3.1 bare-variant resolution + sum-type matching).
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_validation_error_dispatch_by_variant() {
+    let errs: List<MemValidationError> = [
+        MemValidationError.generation_mismatch(GEN_INITIAL, GEN_MAX),
+        MemValidationError.epoch_mismatch(0 as UInt16, 7 as UInt16),
+    ];
+    let mut gen_seen: Int = 0;
+    let mut epoch_seen: Int = 0;
+    for e in errs.iter() {
+        match e {
+            MemValidationError.GenerationMismatch { expected: _, actual: _ } => {
+                gen_seen = gen_seen + 1;
+            }
+            MemValidationError.EpochMismatch { expected: _, actual: _ } => {
+                epoch_seen = epoch_seen + 1;
+            }
+        }
+    }
+    assert_eq(gen_seen, 1);
+    assert_eq(epoch_seen, 1);
+}
+
+// -----------------------------------------------------------------------------
+// §5  ValidationError alias accepts MemValidationError values.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_validation_error_alias_round_trip() {
+    let err: ValidationError = MemValidationError.generation_mismatch(GEN_INITIAL, GEN_MAX);
+    match err {
+        MemValidationError.GenerationMismatch { expected, actual } => {
+            assert_eq(expected, GEN_INITIAL);
+            assert_eq(actual, GEN_MAX);
+        }
+        _ => assert(false),
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

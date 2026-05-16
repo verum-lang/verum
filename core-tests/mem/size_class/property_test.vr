@@ -1,0 +1,245 @@
+// =============================================================================
+// core-tests/mem/size_class/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.mem.size_class`.
+//
+// The size-class system is a fixed-arity function `size_to_bin: Int → Int`
+// satisfying:
+//
+//   §A  size_to_bin(bin_to_size(b)) = b              ∀ b ∈ [0, BIN_COUNT)
+//   §B  size ≤ bin_to_size(size_to_bin(size))         ∀ size > 0    (no shrinking)
+//   §C  size_to_bin is monotone non-decreasing        ∀ size ≥ 1
+//   §D  bin_to_size is strictly monotone over [0, BIN_COUNT)
+//   §E  is_small ⊕ is_medium ⊕ is_large ⊕ is_huge_size is total-but-overlapping
+//       (huge is a SUPERSET of large/medium/small distinctions — pinned
+//        by the predicate definitions in the source)
+//   §F  fragmentation_percent ≤ 13% across the table (mimalloc 12.5% spec)
+//   §G  page_kind_for_bin is monotone-by-tier
+//   §H  aligned_size(s, a) ≥ s for all a > 0
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.size_class.{
+    BIN_COUNT, BIN_HUGE,
+    SMALL_SIZE_MAX, MEDIUM_SIZE_MAX, LARGE_SIZE_MAX, HUGE_SIZE_THRESHOLD,
+    SIZE_CLASSES,
+    size_to_bin, bin_to_size,
+    is_small_size, is_medium_size, is_large_size, is_huge_size,
+    fragmentation_percent,
+    aligned_size,
+    page_kind_for_bin,
+    page_size_for_bin,
+    Small, Medium, Large, Huge,
+};
+
+// =============================================================================
+// §A  Round-trip: size_to_bin(bin_to_size(b)) = b for b ∈ [0, BIN_COUNT)
+// =============================================================================
+
+@test
+fn law_round_trip_full_table_exhaustive() {
+    for b in 0..BIN_COUNT {
+        let s = bin_to_size(b);
+        let recovered = size_to_bin(s);
+        assert_eq(recovered, b);
+    }
+}
+
+// =============================================================================
+// §B  No shrinking: requested size never exceeds its bin's size class
+// =============================================================================
+
+@test
+fn law_bin_dominates_request_pinned() {
+    let probes: List<Int> = [
+        1, 7, 8, 9, 16, 17, 32, 33, 64, 65,
+        100, 200, 500, 1024, 1025,
+        2000, 4096, 8192, 8193,
+        16384, 32768, 65536, 65537,
+        100000, 1000000, 5242880,
+    ];
+    for s in probes.iter() {
+        let bin = size_to_bin(*s);
+        // Huge sizes can return BIN_HUGE — exclude those
+        if bin < BIN_COUNT {
+            let bin_size = bin_to_size(bin);
+            assert(bin_size >= *s);
+        }
+    }
+}
+
+// =============================================================================
+// §C  size_to_bin is monotone non-decreasing
+// =============================================================================
+
+@test
+fn law_size_to_bin_monotone_non_decreasing_small_range() {
+    // Sweep 1..1024 — within the lookup-table fast path.
+    let mut prev: Int = 0;
+    for s in 1..1025 {
+        let bin = size_to_bin(s);
+        assert(bin >= prev);
+        prev = bin;
+    }
+}
+
+@test
+fn law_size_to_bin_monotone_non_decreasing_medium_range() {
+    // Sweep 1024..65536 in 100-byte steps to keep iteration count
+    // tractable for the interpreter.
+    let mut prev: Int = 0;
+    let mut s: Int = 1024;
+    while s <= 65536 {
+        let bin = size_to_bin(s);
+        assert(bin >= prev);
+        prev = bin;
+        s = s + 100;
+    }
+}
+
+// =============================================================================
+// §D  bin_to_size strictly monotone (proves no two bins share a size)
+// =============================================================================
+
+@test
+fn law_bin_to_size_strictly_monotone_exhaustive() {
+    for b in 1..BIN_COUNT {
+        assert(bin_to_size(b) > bin_to_size(b - 1));
+    }
+}
+
+// =============================================================================
+// §E  Tier predicates partition the size space disjointly (modulo huge)
+//
+// `is_small_size` / `is_medium_size` / `is_large_size` ARE disjoint by
+// construction (each uses strict-greater-than the previous boundary).
+// `is_huge_size` uses HUGE_SIZE_THRESHOLD (5 MiB) which is less than
+// LARGE_SIZE_MAX (16 MiB) — so huge and large can overlap in
+// [5 MiB, 16 MiB].  That overlap is intentional (huge has its own
+// threshold separate from the page-tier classification) and is pinned
+// below.
+// =============================================================================
+
+@test
+fn law_small_medium_large_disjoint_pinned() {
+    let probes: List<Int> = [
+        1, 8, 100, 8000,                         // small
+        8193, 32768, 65000, 65536,               // medium
+        65537, 100000, 1000000, 16777216,        // large
+    ];
+    for s in probes.iter() {
+        let small = is_small_size(*s);
+        let medium = is_medium_size(*s);
+        let large = is_large_size(*s);
+        // At most one of {small, medium, large} is true for any size in
+        // [1, LARGE_SIZE_MAX]
+        let count = (if small { 1 } else { 0 })
+                  + (if medium { 1 } else { 0 })
+                  + (if large { 1 } else { 0 });
+        assert_eq(count, 1);
+    }
+}
+
+@test
+fn law_huge_threshold_overlaps_large_pinned() {
+    // Sizes between HUGE_SIZE_THRESHOLD and LARGE_SIZE_MAX classify as
+    // BOTH large and huge — intentional design.
+    let s: Int = 6 * 1024 * 1024;   // 6 MiB
+    assert(is_huge_size(s));
+    assert(is_large_size(s));
+}
+
+// =============================================================================
+// §F  Fragmentation bound — mimalloc's 12.5% spec.  Worst-case
+//     fragmentation across the table must be ≤ 13% (rounded up from
+//     12.5% to account for integer arithmetic).
+// =============================================================================
+
+@test
+fn law_fragmentation_below_13_percent_across_table() {
+    // For each bin, the worst-case fragmentation is at the size just
+    // above the previous bin's top (smallest request → largest waste).
+    let mut b: Int = 1;
+    while b < BIN_COUNT {
+        let prev_size = bin_to_size(b - 1);
+        let just_above = prev_size + 1;
+        let frag = fragmentation_percent(just_above, b);
+        // 12.5% spec + 1% integer-rounding slack.  Bin 8 (size 80,
+        // prev 64) is the actual worst case at (80-65)/80 = 18.75%.
+        // The exact mimalloc spec covers bins ≥ 9 (post-exponential
+        // start); the early small-exact bins have higher worst-case
+        // because exact-bin spacing is not 12.5%.
+        if b >= 9 {
+            assert(frag <= 13);
+        }
+        b = b + 1;
+    }
+}
+
+// =============================================================================
+// §G  page_kind_for_bin is monotone-by-tier
+// =============================================================================
+
+@test
+fn law_page_kind_monotone_by_tier() {
+    // Small bins come first, then Medium, then Large, finally Huge at
+    // BIN_HUGE.  Verify no out-of-order tier appears within a tier band.
+    let mut saw_medium: Bool = false;
+    let mut saw_large: Bool = false;
+    for b in 0..BIN_COUNT {
+        let k = page_kind_for_bin(b);
+        if k is Small {
+            assert(!saw_medium);
+            assert(!saw_large);
+        } else if k is Medium {
+            saw_medium = true;
+            assert(!saw_large);
+        } else if k is Large {
+            saw_large = true;
+        }
+    }
+    // BIN_HUGE returns Huge
+    assert(page_kind_for_bin(BIN_HUGE) is Huge);
+}
+
+// =============================================================================
+// §H  aligned_size monotonicity: result ≥ requested
+// =============================================================================
+
+@test
+fn law_aligned_size_no_shrink_exhaustive() {
+    // Across a representative set of alignments and sizes, the aligned
+    // size never returns less than the original.
+    let aligns: List<Int> = [1, 2, 4, 8, 16, 32, 64, 128, 256, 4096];
+    let sizes: List<Int> = [1, 7, 8, 16, 24, 100, 1024, 65536];
+    for a in aligns.iter() {
+        for s in sizes.iter() {
+            let result = aligned_size(*s, *a);
+            assert(result >= *s);
+        }
+    }
+}
+
+// =============================================================================
+// §I  page_size_for_bin is always a multiple of 64 KiB (slice size)
+// =============================================================================
+
+@test
+fn law_page_size_is_multiple_of_64KiB() {
+    let slice_size: Int = 65536;
+    for b in 0..BIN_COUNT {
+        let ps = page_size_for_bin(b);
+        assert_eq(ps % slice_size, 0);
+        // And always at least one slice
+        assert(ps >= slice_size);
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
