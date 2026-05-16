@@ -1,0 +1,85 @@
+// =============================================================================
+// core-tests/mem/epoch/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.mem.epoch` — monotonicity of current_epoch,
+// wraparound_count, the cache-trail invariant.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.epoch.{
+    EPOCH_MAX, DEFAULT_SYNC_INTERVAL,
+    current_epoch, cached_epoch, wraparound_count,
+    invalidate_epoch_cache,
+};
+
+// =============================================================================
+// §A  current_epoch is monotone non-decreasing within a single thread.
+//     Without explicit advances, two reads with no intervening write
+//     should be ≤.
+// =============================================================================
+
+@test
+fn law_current_epoch_monotone_non_decreasing() {
+    let samples: List<UInt64> = [
+        current_epoch(),
+        current_epoch(),
+        current_epoch(),
+        current_epoch(),
+        current_epoch(),
+    ];
+    for i in 1..samples.len() {
+        assert(samples[i] >= samples[i - 1]);
+    }
+}
+
+// =============================================================================
+// §B  cached_epoch ≤ current_epoch  (cache trails the global)
+// =============================================================================
+
+@test
+fn law_cached_epoch_trails_current_invariant() {
+    // Repeatedly invalidate + reread.  Cache should always re-load to
+    // current_epoch.
+    for _ in 0..10 {
+        invalidate_epoch_cache();
+        let cached = cached_epoch();
+        let current = current_epoch();
+        assert(cached <= current);
+    }
+}
+
+// =============================================================================
+// §C  wraparound_count is non-negative and monotone
+// =============================================================================
+
+@test
+fn law_wraparound_count_monotone() {
+    let w1 = wraparound_count();
+    let w2 = wraparound_count();
+    // Without an explicit wraparound trigger, these match.
+    assert_eq(w1, w2);
+    assert(w1 >= 0);
+}
+
+// =============================================================================
+// §D  Constants relationships — EPOCH_MAX < 2^16  and
+//     DEFAULT_SYNC_INTERVAL > 0
+// =============================================================================
+
+@test
+fn law_constants_in_valid_range() {
+    assert_eq(EPOCH_MAX, 0xFFFF as UInt16);
+    assert(DEFAULT_SYNC_INTERVAL > 0);
+    // DEFAULT_SYNC_INTERVAL should be at least 1 — a 0 value would
+    // make the cache useless.
+    assert(DEFAULT_SYNC_INTERVAL >= 1);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

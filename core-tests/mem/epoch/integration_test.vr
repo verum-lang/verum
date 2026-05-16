@@ -1,0 +1,77 @@
+// =============================================================================
+// core-tests/mem/epoch/integration_test.vr
+// =============================================================================
+//
+// Integration tests: epoch values composed with capability-packing.
+// The ThinRef.epoch_and_caps field's low-16-bit half stores the
+// CURRENT epoch at allocation time; the CBGR check fails if the
+// global has advanced.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.epoch.{EPOCH_MAX, current_epoch};
+mount core.mem.capability.{
+    CAP_OWNED,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+};
+
+// -----------------------------------------------------------------------------
+// §1  Epoch fits in UInt16 (low half of packed field).
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_epoch_fits_in_uint16() {
+    // The global epoch counter is UInt64 internally for monotonic
+    // overflow safety, but the per-reference field is UInt16.  The
+    // truncation must be lossless within the 65536-step window.
+    let e: UInt64 = current_epoch();
+    // The UInt16 representation of the lower 16 bits of the global.
+    let truncated: UInt16 = (e & 0xFFFF as UInt64) as UInt16;
+    let packed = pack_epoch_caps(truncated, CAP_OWNED);
+    assert_eq(unpack_epoch(packed), truncated);
+}
+
+// -----------------------------------------------------------------------------
+// §2  EPOCH_MAX boundary — packing the maximum epoch round-trips.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_max_epoch_packs_cleanly() {
+    let packed = pack_epoch_caps(EPOCH_MAX, CAP_OWNED);
+    assert_eq(unpack_epoch(packed), EPOCH_MAX);
+    assert_eq(unpack_caps(packed), CAP_OWNED);
+}
+
+// -----------------------------------------------------------------------------
+// §3  Distinct epochs produce distinct packed values (same caps).
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_distinct_epochs_distinguish_refs() {
+    let p1 = pack_epoch_caps(0 as UInt16, CAP_OWNED);
+    let p2 = pack_epoch_caps(1 as UInt16, CAP_OWNED);
+    let p3 = pack_epoch_caps(EPOCH_MAX, CAP_OWNED);
+    assert(p1 != p2);
+    assert(p2 != p3);
+    assert(p1 != p3);
+}
+
+// -----------------------------------------------------------------------------
+// §4  Epoch advances over the lifetime of a verum test process MAY be
+//     observable.  We don't trigger a wraparound here — just pin the
+//     read-only surface.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_current_epoch_observable_from_test_process() {
+    let e: UInt64 = current_epoch();
+    assert(e >= 0 as UInt64);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

@@ -1,0 +1,77 @@
+// =============================================================================
+// core-tests/mem/epoch/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.mem.epoch`.  Tests are NEVER deleted
+// even after the underlying bug is fixed.
+//
+// Pinned regressions:
+//   §A  EPOCH_MAX is 0xFFFF (UInt16.MAX) — pre-fix some bootstrap
+//       paths used 0x7FFF (UInt15) by accident, halving the wraparound
+//       window.  Pin the full 16-bit width.
+//   §B  current_epoch / cached_epoch / wraparound_count all return
+//       valid types (UInt64 / UInt64 / Int respectively).  A type
+//       drift here would be invisible at compile time if the
+//       intrinsic dispatch fell through to a default integer
+//       coercion path.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.epoch.{
+    EPOCH_MAX, DEFAULT_SYNC_INTERVAL,
+    current_epoch, cached_epoch, wraparound_count,
+};
+
+// -----------------------------------------------------------------------------
+// §A — EPOCH_MAX is 0xFFFF, not 0x7FFF or 0xFF
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_epoch_max_uses_full_16_bit_width() {
+    // 0xFFFF = 65535. Pre-fix some bootstrap paths used 0x7FFF (32767)
+    // which halved the wraparound window.
+    assert_eq(EPOCH_MAX, 0xFFFF as UInt16);
+    assert_eq(EPOCH_MAX, 65535 as UInt16);
+}
+
+// -----------------------------------------------------------------------------
+// §B — current_epoch returns UInt64 (not Int / UInt32)
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_current_epoch_returns_uint64() {
+    let e: UInt64 = current_epoch();
+    // The type-annotation alone enforces the contract — if
+    // current_epoch returned Int or UInt32, this would fail at
+    // compile time.
+    assert(e >= 0 as UInt64);
+}
+
+// -----------------------------------------------------------------------------
+// §C — wraparound_count returns Int (not UInt32)
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_wraparound_count_returns_int() {
+    let w: Int = wraparound_count();
+    assert(w >= 0);
+}
+
+// -----------------------------------------------------------------------------
+// §D — DEFAULT_SYNC_INTERVAL is 1000 (not 0 or 1)
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_default_sync_interval_is_1000() {
+    // A 0 sync interval would make every cache access reload the
+    // global counter — useless.  Pin the 1000-check window.
+    assert_eq(DEFAULT_SYNC_INTERVAL, 1000);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
