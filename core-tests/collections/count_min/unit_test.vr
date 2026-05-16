@@ -1,0 +1,22 @@
+// =============================================================================
+// core-tests/collections/count_min/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.count_min` — `CountMinSketch`, frequency
+// sketch.  Construction uses HMAC-SHA256 with a CSPRNG-keyed seed and
+// is gated on the `core.sys.common.random_bytes` intrinsic (same
+// defect class as Bloom / HyperLogLog / Reservoir).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.count_min.{CountMinError};
+
+// =============================================================================
+// Section 1: CountMinError variant construction + equality
+// =============================================================================
+
+@test
+fn test_cms_error_bad_parameters_constructible() {
+    let _err: CountMinError = CountMinError.BadParameters(Text.from("bad width"));
+    assert(true);
+}

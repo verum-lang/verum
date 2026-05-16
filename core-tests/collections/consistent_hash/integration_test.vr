@@ -1,0 +1,34 @@
+// =============================================================================
+// core-tests/collections/consistent_hash/integration_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.consistent_hash.{ConsistentHashRing};
+
+// Integration: read-only ops on empty ring.
+@test
+fn int_ring_empty_read_only_ops_compose() {
+    let r = ConsistentHashRing.new();
+    let key: [Byte; 4] = [1, 2, 3, 4];
+
+    let n: Maybe<Text> = r.node_for_key(&key);
+    assert(n is None);
+
+    let nodes = r.nodes_for_key(&key, 3);
+    assert_eq(nodes.len(), 0);
+
+    assert_eq(r.node_count(), 0);
+    assert_eq(r.position_count(), 0);
+}
+
+// Integration: vnode count parameterised construction.
+@test
+fn int_ring_with_virtual_nodes_variants() {
+    let r1 = ConsistentHashRing.with_virtual_nodes(40);
+    let r2 = ConsistentHashRing.with_virtual_nodes(160);
+    let r3 = ConsistentHashRing.with_virtual_nodes(320);
+    // All three start empty.
+    assert_eq(r1.node_count(), 0);
+    assert_eq(r2.node_count(), 0);
+    assert_eq(r3.node_count(), 0);
+}

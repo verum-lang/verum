@@ -1,0 +1,45 @@
+// =============================================================================
+// core-tests/collections/adjacency_list/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over the working AdjacencyList vertex-only surface.
+// Edge-addition surface is gated on regression_test.vr §A.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.adjacency_list.{AdjacencyList};
+
+// Law: empty graph has zero vertices and zero edges.
+@test
+fn law_adj_empty_zero_counts() {
+    let g: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    assert_eq(g.vertex_count(), 0);
+    assert_eq(g.edge_count(), 0);
+}
+
+// Law: vertex_count is monotone under add_vertex.
+@test
+fn law_adj_vertex_count_monotone() {
+    let mut g: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    let mut prev = g.vertex_count();
+    let mut i = 0;
+    while i < 8 {
+        g.add_vertex(i);
+        let cur = g.vertex_count();
+        assert(cur >= prev);
+        prev = cur;
+        i = i + 1;
+    }
+}
+
+// Law: empty graph remains zero-edged regardless of vertex count.
+@test
+fn law_adj_edge_count_remains_zero_without_add_edge() {
+    let mut g: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    let mut i = 0;
+    while i < 5 {
+        g.add_vertex(i);
+        assert_eq(g.edge_count(), 0);
+        i = i + 1;
+    }
+}

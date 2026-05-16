@@ -1,0 +1,55 @@
+// =============================================================================
+// core-tests/collections/consistent_hash/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.consistent_hash` — `ConsistentHashRing`,
+// Ketama-compatible virtual-node hash ring.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.consistent_hash.{ConsistentHashRing, DEFAULT_VIRTUAL_NODES};
+
+// =============================================================================
+// Section 1: empty ring construction
+// =============================================================================
+
+@test
+fn test_ring_new_zero_nodes() {
+    let r = ConsistentHashRing.new();
+    assert_eq(r.node_count(), 0);
+}
+
+@test
+fn test_ring_with_virtual_nodes_zero_nodes() {
+    let r = ConsistentHashRing.with_virtual_nodes(80);
+    assert_eq(r.node_count(), 0);
+}
+
+// =============================================================================
+// Section 2: node_for_key on empty ring is None
+// =============================================================================
+
+@test
+fn test_ring_node_for_key_empty_is_none() {
+    let r = ConsistentHashRing.new();
+    let key: [Byte; 4] = [1, 2, 3, 4];
+    let n: Maybe<Text> = r.node_for_key(&key);
+    assert(n is None);
+}
+
+@test
+fn test_ring_nodes_for_key_empty_returns_empty_list() {
+    let r = ConsistentHashRing.new();
+    let key: [Byte; 4] = [1, 2, 3, 4];
+    let n = r.nodes_for_key(&key, 3);
+    assert_eq(n.len(), 0);
+}
+
+// =============================================================================
+// Section 3: DEFAULT_VIRTUAL_NODES sanity
+// =============================================================================
+
+@test
+fn test_ring_default_virtual_nodes_positive() {
+    assert(DEFAULT_VIRTUAL_NODES > 0);
+}

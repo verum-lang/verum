@@ -1,0 +1,52 @@
+// =============================================================================
+// core-tests/collections/adjacency_list/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.adjacency_list` — `AdjacencyList<V, L>`.
+//
+// Architectural caveat: `add_edge` panics with the same field-layout-
+// drift class as BTreeMap (see regression_test.vr §A).  `add_vertex`
+// works; `add_edge` panics with
+//   "field write out of bounds: field index 101 (offset 808+8 = 816)
+//    exceeds object data size 24"
+// — wildly out-of-range field index suggests a Map-internal write at
+// the wrong slot when the edge-Map's stdlib type-decl mismatches
+// runtime allocation.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.adjacency_list.{AdjacencyList};
+
+// =============================================================================
+// Section 1: empty / add_vertex
+// =============================================================================
+
+@test
+fn test_adj_empty_no_vertices() {
+    let g: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    assert_eq(g.vertex_count(), 0);
+    assert_eq(g.edge_count(), 0);
+}
+
+@test
+fn test_adj_add_vertex_increments_count() {
+    let mut g: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    g.add_vertex(1);
+    assert_eq(g.vertex_count(), 1);
+    g.add_vertex(2);
+    assert_eq(g.vertex_count(), 2);
+    g.add_vertex(3);
+    assert_eq(g.vertex_count(), 3);
+}
+
+@test
+fn test_adj_vertex_count_zero_after_empty_construction() {
+    let g: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    assert_eq(g.vertex_count(), 0);
+}
+
+@test
+fn test_adj_edge_count_zero_after_empty_construction() {
+    let g: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    assert_eq(g.edge_count(), 0);
+}

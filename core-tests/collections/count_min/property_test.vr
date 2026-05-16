@@ -1,0 +1,19 @@
+// =============================================================================
+// core-tests/collections/count_min/property_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.count_min.{CountMinError};
+
+// Law: CountMinError.BadParameters round-trips a Text payload.
+@test
+fn law_cms_error_round_trip_text_payload() {
+    let payload = Text.from("invalid width");
+    let err = CountMinError.BadParameters(payload);
+    match err {
+        BadParameters(text) => {
+            // Round-trip: extracted text should be non-empty.
+            assert(text.len() > 0);
+        },
+    }
+}

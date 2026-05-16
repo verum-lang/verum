@@ -1,0 +1,34 @@
+// =============================================================================
+// core-tests/collections/hyperloglog/property_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.hyperloglog.{
+    MIN_PRECISION, MAX_PRECISION, DEFAULT_PRECISION, HllError,
+};
+
+@test
+fn law_hll_precision_constants_ordered() {
+    assert(MIN_PRECISION <= DEFAULT_PRECISION);
+    assert(DEFAULT_PRECISION <= MAX_PRECISION);
+    assert(MIN_PRECISION <= MAX_PRECISION);
+}
+
+@test
+fn law_hll_precision_min_at_least_4() {
+    // HLL convention: minimum precision p=4 (m=16 registers).
+    assert(MIN_PRECISION >= 4);
+}
+
+@test
+fn law_hll_precision_max_at_most_18() {
+    // HLL convention: maximum precision p=16 (m=65536 registers) is the
+    // Redis PFCOUNT cap; p=18 is the absolute upper bound for u32 hashes.
+    assert(MAX_PRECISION <= 18);
+}
+
+@test
+fn law_hll_error_variant_constructible() {
+    let _err: HllError = HllError.PrecisionMismatch;
+    assert(true);
+}

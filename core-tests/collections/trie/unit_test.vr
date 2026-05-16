@@ -1,0 +1,45 @@
+// =============================================================================
+// core-tests/collections/trie/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.trie` — `Trie<V>`, prefix tree
+// (Map<&Text, V>-shaped) with O(|key|) access.  Keys are byte slices.
+//
+// Architectural caveat: `Trie.remove` dispatches `Map.get_mut` which
+// fails with the wrapper-iter / Map-method dispatch defect class
+// (see regression_test.vr §A).  This file covers only the empty-
+// state surface that doesn't traverse Map's mutator path.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.trie.{Trie};
+
+// =============================================================================
+// Section 1: construction
+// =============================================================================
+
+@test
+fn test_trie_new_is_empty() {
+    let t: Trie<Int> = Trie.new();
+    assert(t.is_empty());
+    assert_eq(t.len(), 0);
+}
+
+// =============================================================================
+// Section 2: queries on empty
+// =============================================================================
+
+@test
+fn test_trie_get_absent_returns_none() {
+    let t: Trie<Int> = Trie.new();
+    let key: [Byte; 3] = [1, 2, 3];
+    let v: Maybe<Int> = t.get(&key);
+    assert(v is None);
+}
+
+@test
+fn test_trie_contains_absent_returns_false() {
+    let t: Trie<Int> = Trie.new();
+    let key: [Byte; 3] = [1, 2, 3];
+    assert(!t.contains(&key));
+}

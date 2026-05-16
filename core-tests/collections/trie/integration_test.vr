@@ -1,0 +1,30 @@
+// =============================================================================
+// core-tests/collections/trie/integration_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.trie.{Trie};
+
+// Integration: read-only ops on empty trie compose.
+@test
+fn int_trie_empty_read_only_ops_compose() {
+    let t: Trie<Int> = Trie.new();
+    let k: [Byte; 3] = [1, 2, 3];
+    let v: Maybe<Int> = t.get(&k);
+    assert(v is None);
+    assert(!t.contains(&k));
+    assert(t.is_empty());
+    assert_eq(t.len(), 0);
+}
+
+// Integration: distinct tries are independent.
+@test
+fn int_trie_independent_instances() {
+    let a: Trie<Int> = Trie.new();
+    let b: Trie<Text> = Trie.new();
+    assert(a.is_empty());
+    assert(b.is_empty());
+    let k: [Byte; 2] = [1, 2];
+    let v: Maybe<Int> = a.get(&k);
+    assert(v is None);
+}

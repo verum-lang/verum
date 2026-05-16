@@ -1,0 +1,44 @@
+// =============================================================================
+// core-tests/collections/consistent_hash/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.consistent_hash.{ConsistentHashRing};
+
+// =============================================================================
+// §F — PASS-GUARD pins
+// =============================================================================
+
+@test
+fn pass_guard_ring_new_empty() {
+    let r = ConsistentHashRing.new();
+    assert_eq(r.node_count(), 0);
+}
+
+@test
+fn pass_guard_ring_node_for_key_empty_none() {
+    let r = ConsistentHashRing.new();
+    let k: [Byte; 4] = [1, 2, 3, 4];
+    let n: Maybe<Text> = r.node_for_key(&k);
+    assert(n is None);
+}
+
+@test
+fn pass_guard_ring_nodes_for_key_empty_list() {
+    let r = ConsistentHashRing.new();
+    let k: [Byte; 4] = [1, 2, 3, 4];
+    let n = r.nodes_for_key(&k, 3);
+    assert_eq(n.len(), 0);
+}
+
+// =============================================================================
+// §A — Node add/remove gated on Text construction (Text.from issues)
+// =============================================================================
+
+@ignore
+@test
+fn regression_ring_add_node_increments_count() {
+    let mut r = ConsistentHashRing.new();
+    r.add_node(Text.from("cache-a"));
+    assert_eq(r.node_count(), 1);
+}

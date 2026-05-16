@@ -1,0 +1,16 @@
+// =============================================================================
+// core-tests/collections/count_min/integration_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.count_min.{CountMinError};
+
+// Integration: CountMinError discriminates BadParameters payload.
+@test
+fn int_cms_error_pattern_match() {
+    let err = CountMinError.BadParameters(Text.from("zero width"));
+    let is_bad = match err {
+        BadParameters(_) => true,
+    };
+    assert(is_bad);
+}

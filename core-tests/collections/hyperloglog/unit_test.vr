@@ -1,0 +1,44 @@
+// =============================================================================
+// core-tests/collections/hyperloglog/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.hyperloglog` — `HyperLogLog`, cardinality
+// estimator.  Construction routes through `fill_secure` for the HMAC
+// key and is gated on the `core.sys.common.random_bytes` intrinsic
+// (same defect class as Bloom / Count-Min / Reservoir).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.hyperloglog.{
+    MIN_PRECISION, MAX_PRECISION, DEFAULT_PRECISION, HllError,
+};
+
+// =============================================================================
+// Section 1: precision constants — value-only surface
+// =============================================================================
+
+@test
+fn test_hll_min_precision_positive() {
+    assert(MIN_PRECISION > 0);
+}
+
+@test
+fn test_hll_max_precision_ge_min() {
+    assert(MAX_PRECISION >= MIN_PRECISION);
+}
+
+@test
+fn test_hll_default_precision_within_range() {
+    assert(DEFAULT_PRECISION >= MIN_PRECISION);
+    assert(DEFAULT_PRECISION <= MAX_PRECISION);
+}
+
+// =============================================================================
+// Section 2: error variant constructibility
+// =============================================================================
+
+@test
+fn test_hll_error_variant_constructible() {
+    let _err: HllError = HllError.PrecisionMismatch;
+    assert(true);
+}

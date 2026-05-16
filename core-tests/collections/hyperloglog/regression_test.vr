@@ -1,0 +1,62 @@
+// =============================================================================
+// core-tests/collections/hyperloglog/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.hyperloglog.{
+    HyperLogLog, HllError, DEFAULT_PRECISION,
+};
+
+// =============================================================================
+// §A — HyperLogLog construction gated on fill_secure CSPRNG
+//
+// `HyperLogLog.new(p)` calls `fill_secure(&mut key[..])` for the
+// HMAC-SHA256 keyed hash.  Missing `core.sys.common.random_bytes`
+// intrinsic blocks construction — same defect class as Bloom /
+// CountMin / Reservoir.
+// =============================================================================
+
+@ignore
+@test
+fn regression_hll_new_constructible() {
+    let hll = HyperLogLog.new(DEFAULT_PRECISION);
+    assert(hll.register_count() > 0);
+    assert(hll.precision() == DEFAULT_PRECISION);
+}
+
+@ignore
+@test
+fn regression_hll_estimate_on_empty_is_zero() {
+    let hll = HyperLogLog.new(DEFAULT_PRECISION);
+    assert_eq(hll.estimate(), 0_u64);
+}
+
+@ignore
+@test
+fn regression_hll_add_then_estimate_at_least_one() {
+    let mut hll = HyperLogLog.new(DEFAULT_PRECISION);
+    let item: [Byte; 4] = [1, 2, 3, 4];
+    hll.add(&item);
+    assert(hll.estimate() >= 1_u64);
+}
+
+@ignore
+@test
+fn regression_hll_merge_precision_mismatch() {
+    let a = HyperLogLog.new(10);
+    let b = HyperLogLog.new(12);
+    // Distinct precisions cannot merge — should return Err(PrecisionMismatch).
+    let mut a_mut = a;
+    let r = a_mut.merge(&b);
+    assert(r is Err(_));
+}
+
+// =============================================================================
+// §F — PASS-GUARD pins for the constants surface
+// =============================================================================
+
+@test
+fn pass_guard_hll_constants_constructible() {
+    assert(DEFAULT_PRECISION > 0);
+    let _err: HllError = HllError.PrecisionMismatch;
+}
