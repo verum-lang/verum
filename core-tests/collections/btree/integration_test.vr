@@ -1,0 +1,44 @@
+// =============================================================================
+// core-tests/collections/btree/integration_test.vr
+// =============================================================================
+//
+// Cross-type scenarios on the empty-state BTreeMap surface.
+// Populated-state integrations are pinned in regression_test.vr §A.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.btree.{BTreeMap};
+
+// =============================================================================
+// Integration: read-only ops on empty cache compose
+// =============================================================================
+
+@test
+fn int_btreemap_empty_read_only_ops_compose() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+
+    let v: Maybe<Int> = m.get(&1);
+    assert(v is None);
+
+    assert(!m.contains_key(&1));
+    let r: Maybe<Int> = m.remove(&1);
+    assert(r is None);
+
+    assert_eq(m.get_or_default(&1, -1), -1);
+    assert(m.is_empty());
+    assert_eq(m.len(), 0);
+}
+
+// =============================================================================
+// Integration: multiple independent BTreeMap instances
+// =============================================================================
+
+@test
+fn int_btreemap_independent_instances() {
+    let a: BTreeMap<Int, Int> = BTreeMap.new();
+    let b: BTreeMap<Int, Text> = BTreeMap.new();
+    assert(a.is_empty());
+    assert(b.is_empty());
+    assert(!a.contains_key(&1));
+    assert(!b.contains_key(&1));
+}

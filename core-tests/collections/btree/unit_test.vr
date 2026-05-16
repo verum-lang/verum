@@ -1,0 +1,76 @@
+// =============================================================================
+// core-tests/collections/btree/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.btree` — `BTreeMap<K: Ord, V>` and
+// `BTreeSet<T: Ord>`.  Most of the surface is gated on a fundamental
+// architectural defect: every method that reads `self.<field>` on a
+// populated BTreeMap panics with
+//   "field access out of bounds: field index 0 (offset 0+8 = 8)
+//    exceeds object data size 0"
+//
+// The stdlib `type BTreeMap<K,V> is { ... }` declaration's runtime
+// allocation evidently yields a 0-byte data area despite the field
+// declarations.  Same architectural class as the closed `List` layout
+// drift (see `core-tests/collections/list/audit.md` §2) but here the
+// defect is not yet closed.  Pinned in regression_test.vr §A.
+//
+// This file holds only the empty-state surface (construction + queries
+// on an empty map) that doesn't traverse field-access paths against
+// allocated nodes.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.btree.{BTreeMap};
+
+// =============================================================================
+// Section 1: BTreeMap.new — construction
+// =============================================================================
+
+@test
+fn test_btreemap_new_is_empty() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    assert(m.is_empty());
+    assert_eq(m.len(), 0);
+}
+
+// =============================================================================
+// Section 2: Queries on empty BTreeMap — None / false fall-throughs
+// =============================================================================
+
+@test
+fn test_btreemap_get_absent_returns_none() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let v: Maybe<Int> = m.get(&999);
+    assert(v is None);
+}
+
+@test
+fn test_btreemap_contains_key_absent_returns_false() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    assert(!m.contains_key(&999));
+}
+
+@test
+fn test_btreemap_remove_absent_returns_none() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    let r: Maybe<Int> = m.remove(&999);
+    assert(r is None);
+}
+
+@test
+fn test_btreemap_get_or_default_absent_returns_default() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    let v = m.get_or_default(&999, -1);
+    assert_eq(v, -1);
+}
+
+// =============================================================================
+// Section 3: Sanity on len/is_empty coherence
+// =============================================================================
+
+@test
+fn test_btreemap_is_empty_iff_len_zero() {
+    let m: BTreeMap<Int, Int> = BTreeMap.new();
+    assert_eq(m.is_empty(), m.len() == 0);
+}
