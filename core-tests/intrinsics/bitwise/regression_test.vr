@@ -64,43 +64,42 @@ fn regression_popcnt_u64_basic() {
 }
 
 // -----------------------------------------------------------------------------
-// §B — rotl / rotr (RESIDUAL DEFECT after B2 funnel-shift opcode fix)
+// §B — rotl / rotr (E3 CLOSED 2026-05-17)
 //
-// The generic `rotl<T>(x, n)` / `rotr<T>(x, n)` wrappers in
-// `core/intrinsics/bitwise.vr` return Unit at user-call sites instead
-// of the rotation result.  Direct `@intrinsic("rotate_left", x, n)` AND
-// `@intrinsic("fshl", x, x, n)` BOTH return the correct value — proving
-// the underlying opcodes (RotateLeft, FunnelShiftLeft) are correct.
+// Three-part fix:
+//   (1) Removed `clz/ctz/bswap/bitreverse/rotl/rotr` from
+//       `crates/verum_vbc/src/codegen/mod.rs::register_stdlib_intrinsics`
+//       — the body `@intrinsic` macro is authoritative.
+//   (2) Rewrote `core/intrinsics/bitwise.vr::rotl/rotr` bodies to use the
+//       canonical 2-arg `@intrinsic("rotate_left"/"rotate_right", x, n)`
+//       matching `InlineSequenceId::RotateLeft/RotateRight` (2-operand
+//       `ArithSubOpcode::RotateLeft = 0x55`) — was 3-arg `fshl(x, x, n)`
+//       whose arity mismatched user-side call sites.
+//   (3) Added LLVM-canonical aliases (`llvm.ctlz.i64`, `llvm.cttz.i64`,
+//       `llvm.ctpop.i64`, `llvm.bswap.i64`, `llvm.bitreverse.i64`, plus i32
+//       siblings) to `lookup_intrinsic` so the bodyless
+//       `core/math/bits.vr::clz(x: UInt64) -> UInt32` declarations resolve
+//       to the correct registry entries regardless of which decl wins the
+//       simple-name slot.
 //
-// Root-cause hypothesis: the GENERIC-FUNCTION-DISPATCH path for stdlib
-// intrinsic wrappers fails to propagate the dest register's type
-// binding back to the let-binding at the call site, leaving it nil.
-// Affects every generic stdlib wrapper around an intrinsic.
-// TYPED-WIDTH variants (clz_u64 etc.) work — they're declared with
-// concrete types and bypass generic specialisation.
-//
-// Tracked as `language-defect: generic-stdlib-intrinsic-monomorphisation`.
-// Workaround pinned in PASS-GUARDs below.
+// Validated paired-call test: `clz(1)=63 ctz(8)=3 bswap=0x0807060504030201
+// popcnt(0xF)=4 rotl(1,3)=8 rotr(8,3)=1`.
 
-@ignore
 @test
 fn regression_rotl_u64_left_one() {
     assert_eq(rotl(1 as UInt64, 3 as UInt32), 8 as UInt64);
 }
 
-@ignore
 @test
 fn regression_rotl_u64_msb_wraps() {
     assert_eq(rotl(0x8000000000000000 as UInt64, 1 as UInt32), 1 as UInt64);
 }
 
-@ignore
 @test
 fn regression_rotr_u64_basic() {
     assert_eq(rotr(8 as UInt64, 3 as UInt32), 1 as UInt64);
 }
 
-@ignore
 @test
 fn regression_rotr_u64_low_wraps() {
     assert_eq(rotr(1 as UInt64, 1 as UInt32), 0x8000000000000000 as UInt64);
@@ -163,15 +162,9 @@ fn regression_fshr_u64_zero_amount_returns_lo() {
     assert_eq(result, 99 as UInt64);
 }
 
-// Gated on the rotl wrapper defect — once `language-defect:
-// generic-stdlib-intrinsic-monomorphisation` is closed, un-ignore.
-@ignore
+// E3 CLOSED — degenerate `fshl(x, x, n)` matches `rotl(x, n)`.
 @test
 fn regression_fshl_u64_equivalent_to_rotl_when_hi_eq_lo() {
-    // The degenerate case `fshl(x, x, n)` MUST equal `rotl(x, n)`.
-    // Currently `rotl` wrapper returns Unit (see §B residual defect),
-    // so this test fails not because of the funnel-shift opcode but
-    // because of the wrapper-dispatch defect.
     let x: UInt64 = 0xDEADBEEFCAFEBABE as UInt64;
     let n: UInt32 = 7 as UInt32;
     assert_eq(fshl(x, x, n), rotl(x, n));

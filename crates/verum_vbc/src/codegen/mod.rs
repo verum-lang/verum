@@ -2539,12 +2539,30 @@ impl VbcCodegen {
             ("gt", 2, "gt"),
             ("ge", 2, "ge"),
             // Bitwise intrinsics (core/intrinsics/bitwise.vr)
-            ("clz", 1, "clz"),
-            ("ctz", 1, "ctz"),
-            ("bswap", 1, "bswap"),
-            ("bitreverse", 1, "bitreverse"),
-            ("rotl", 2, "rotl"),
-            ("rotr", 2, "rotr"),
+            //
+            // **REMOVED entries with `InlineSequence` strategy** (clz, ctz, bswap,
+            // bitreverse, rotl, rotr) — their bodies in `core/intrinsics/bitwise.vr`
+            // already declare `@intrinsic("ctlz" / "cttz" / "bswap" / "bitreverse"
+            // / "rotate_left" / "rotate_right", …)` via the macro form, which
+            // `extract_intrinsic_name` picks up and propagates as the canonical
+            // dispatch identity.
+            //
+            // Pre-removal these entries created a SECOND `FunctionInfo` (via the
+            // "Otherwise register a new function" branch below) with stub-shape
+            // body but `intrinsic_name = "<bare>"`.  The bare name shadowed the
+            // body-extracted LLVM-canonical name, and the user-side
+            // `compile_imported_intrinsic_call` intercept emitted the inline
+            // sequence to a register that the surrounding bind/print path
+            // dispatched as Unit — symptom: `clz(1 as UInt64) = ()` instead of 63.
+            // The matched-arity body-path entries (`popcnt`, `clz_u64`, etc.)
+            // were always correct because they only travelled through the body
+            // `@intrinsic` macro — which is the right path for every inline
+            // bit-manipulation primitive.
+            //
+            // `DirectOpcode`-strategy bitwise intrinsics (bitand, bitor, bitxor,
+            // bitnot, shl, shr) remain in the table because their bodies route
+            // through a different opcode-direct emit that is not affected by the
+            // InlineSequence dispatch path defect.
             ("bitand", 2, "bitand"),
             ("bitor", 2, "bitor"),
             ("bitxor", 2, "bitxor"),

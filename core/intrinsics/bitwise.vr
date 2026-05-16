@@ -66,10 +66,19 @@ public fn ashr<T>(x: T, n: UInt32) -> T { @intrinsic("ashr", x, n) }
 // =============================================================================
 
 /// Rotate left
-public fn rotl<T>(x: T, n: UInt32) -> T { @intrinsic("fshl", x, x, n) }
+///
+/// Routed through the canonical 2-arg `@intrinsic("rotate_left", x, n)`
+/// which maps to `InlineSequenceId::RotateLeft` (2-operand
+/// `ArithSubOpcode::RotateLeft` at 0x55).  Pre-fix the body used
+/// `@intrinsic("fshl", x, x, n)` (3-operand funnel-shift), which made
+/// the user-side `compile_imported_intrinsic_call` arity-mismatch path
+/// silently drop the third argument and return Unit instead of the
+/// expected rotation.  The dedicated 2-op rotation primitive avoids
+/// the funnel-shift detour for the degenerate `hi == lo` case.
+public fn rotl<T>(x: T, n: UInt32) -> T { @intrinsic("rotate_left", x, n) }
 
-/// Rotate right
-public fn rotr<T>(x: T, n: UInt32) -> T { @intrinsic("fshr", x, x, n) }
+/// Rotate right — symmetric counterpart to `rotl`.
+public fn rotr<T>(x: T, n: UInt32) -> T { @intrinsic("rotate_right", x, n) }
 
 /// Funnel shift left (fshl(a, b, c) = (a << c) | (b >> (bits - c)))
 public fn fshl<T>(a: T, b: T, c: UInt32) -> T { @intrinsic("fshl", a, b, c) }
