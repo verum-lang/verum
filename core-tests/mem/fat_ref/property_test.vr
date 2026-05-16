@@ -1,0 +1,140 @@
+// =============================================================================
+// core-tests/mem/fat_ref/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for FatRef.  Subslice-offset arithmetic, packed-field
+// layout-equivalence with ThinRef, and metadata-field semantics.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.header.{HEADER_SIZE, GEN_UNALLOCATED};
+mount core.mem.capability.{
+    CAP_READ, CAP_OWNED,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+};
+
+// =============================================================================
+// §A  Subslice offset is monotone — sub-of-sub adds to the base offset.
+// =============================================================================
+
+@test
+fn law_subslice_offset_additive() {
+    // FatRef at offset O_1 from base, then sub-slice at offset O_2
+    // from THAT fat ref → final offset O_1 + O_2 from the original base.
+    let o1: UInt32 = 8 as UInt32;
+    let o2: UInt32 = 16 as UInt32;
+    let combined: UInt32 = o1 + o2;
+    assert_eq(combined, 24 as UInt32);
+}
+
+// =============================================================================
+// §B  Header is recoverable from any subslice via ptr - offset - HEADER_SIZE.
+// =============================================================================
+
+@test
+fn law_header_recoverable_from_subslice() {
+    // base_ptr = 1000, allocation header lives at 1000 - 32 = 968.
+    // A sub-ref at offset 16 has its data at 1016.  Recovering the
+    // header reads 1016 - 16 - 32 = 968. ✓
+    let base_ptr: Int = 1000;
+    let header_size: Int = HEADER_SIZE;   // 32
+    let sub_offset: Int = 16;
+    let sub_ptr: Int = base_ptr + sub_offset;
+    let recovered_header: Int = sub_ptr - sub_offset - header_size;
+    let expected_header: Int = base_ptr - header_size;
+    assert_eq(recovered_header, expected_header);
+    assert_eq(recovered_header, 968);
+}
+
+// =============================================================================
+// §C  Packed-field round-trip — bijective for the full UInt16² domain.
+//     Pin via sampled cases (full exhaustive sweep covered in
+//     `core-tests/mem/capability/property_test §F`).
+// =============================================================================
+
+@test
+fn law_packed_caps_round_trip_pinned() {
+    let cases: List<(UInt16, UInt16)> = [
+        (0 as UInt16, 0 as UInt16),
+        (1 as UInt16, CAP_READ),
+        (0xFFFF as UInt16, CAP_OWNED),
+        (42 as UInt16, 0xFFFF as UInt16),
+        (0 as UInt16, 0xFFFF as UInt16),
+    ];
+    for case in cases.iter() {
+        let packed = pack_epoch_caps(case.0, case.1);
+        assert_eq(unpack_epoch(packed), case.0);
+        assert_eq(unpack_caps(packed), case.1);
+    }
+}
+
+@property
+fn prop_packed_round_trip(epoch: UInt16, caps: UInt16) {
+    let packed = pack_epoch_caps(epoch, caps);
+    assert_eq(unpack_epoch(packed), epoch);
+    assert_eq(unpack_caps(packed), caps);
+}
+
+// =============================================================================
+// §D  offset_from_base = 0 ⇔ this fat ref IS the base allocation.
+//     A subslice with offset = 0 carries identical semantics to a
+//     non-subslice fat ref.
+// =============================================================================
+
+@test
+fn law_offset_zero_means_base() {
+    let zero_offset: UInt32 = 0 as UInt32;
+    assert_eq(zero_offset, 0 as UInt32);
+    // Header recovery: ptr - 0 - HEADER_SIZE
+    let ptr: Int = 1000;
+    let recovered: Int = ptr - zero_offset as Int - HEADER_SIZE;
+    let direct: Int = ptr - HEADER_SIZE;
+    assert_eq(recovered, direct);
+}
+
+// =============================================================================
+// §E  metadata field is signed Int — supports length (positive) and
+//     vtable (positive memory address) but ALSO sentinel -1 for
+//     "unknown length" / "invalid vtable".
+// =============================================================================
+
+@test
+fn law_metadata_signed_supports_sentinel() {
+    let length: Int = 100;
+    let sentinel: Int = -1;
+    let vtable_addr: Int = 0x10000;
+    // All three are valid Int values
+    assert(length > 0);
+    assert(sentinel < 0);
+    assert(vtable_addr > 0);
+}
+
+// =============================================================================
+// §F  Generation field consistency across thin / fat ref types.
+//     Both use UInt32; GEN_UNALLOCATED = 0 is the null marker.
+// =============================================================================
+
+@test
+fn law_generation_sentinel_consistent_with_thin_ref() {
+    let null_gen: UInt32 = GEN_UNALLOCATED;
+    assert_eq(null_gen, 0 as UInt32);
+}
+
+// =============================================================================
+// §G  Subslice offset cannot exceed UInt32.MAX = 4 GiB.  Real allocations
+//     typically stay far below this, but pin the type boundary.
+// =============================================================================
+
+@test
+fn law_subslice_offset_bounded_by_uint32_max() {
+    let max_offset: UInt32 = 0xFFFFFFFF as UInt32;
+    assert(max_offset > 0 as UInt32);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

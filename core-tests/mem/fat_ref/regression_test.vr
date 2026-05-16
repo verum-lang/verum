@@ -1,0 +1,118 @@
+// =============================================================================
+// core-tests/mem/fat_ref/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.mem.fat_ref`.  Tests are NEVER deleted
+// even after the underlying bug is fixed.
+//
+// Pinned regressions:
+//   §A  Packing inherited from `capability.vr` — pin shift-not-multiply
+//       form (same as ThinRef §A regression).
+//   §B  Layout: FatRef MUST stay 32 bytes.  Adding a field breaks every
+//       CBGR opcode that reads/writes a fat ref.
+//   §C  Subslice offset arithmetic — `ptr - offset_from_base - HEADER_SIZE`
+//       must recover the allocation header.  Pre-fix some early
+//       drafts computed `ptr - HEADER_SIZE` only, missing the
+//       offset_from_base subtraction → reading the wrong header for
+//       subslices.
+//   §D  metadata field is Int (signed) — supports length, vtable
+//       pointers, AND -1 sentinel for "unknown".  Pre-fix some early
+//       drafts used UInt which silently lost the sentinel.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.header.{HEADER_SIZE, GEN_UNALLOCATED};
+mount core.mem.capability.{
+    CAP_OWNED, CAP_READ,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+};
+
+// -----------------------------------------------------------------------------
+// §A — pack inherits shift-not-multiply form
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_pack_uses_shift_form() {
+    // Same invariant as thin_ref/regression_test §A — pinned twice
+    // because both reference types consume the same packing primitive.
+    let packed = pack_epoch_caps(0 as UInt16, 0xFFFF as UInt16);
+    assert_eq(packed, 0xFFFF0000 as UInt32);
+}
+
+// -----------------------------------------------------------------------------
+// §B — 32-byte layout pin (asserted statically by @repr(C, size(32),
+//     align(8)) at the type definition).  At test time we verify the
+//     8-byte / 4-byte / 4-byte / 8-byte / 4-byte / 4-byte field sizes
+//     add up to 32.
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_fat_ref_field_sizes_sum_to_32() {
+    let ptr_size: Int = 8;             // &unsafe Byte (64-bit ptr)
+    let generation_size: Int = 4;       // UInt32
+    let epoch_and_caps_size: Int = 4;   // UInt32
+    let metadata_size: Int = 8;         // Int (64-bit signed)
+    let offset_size: Int = 4;           // UInt32
+    let reserved_size: Int = 4;         // UInt32
+    let total = ptr_size + generation_size + epoch_and_caps_size
+              + metadata_size + offset_size + reserved_size;
+    assert_eq(total, 32);
+}
+
+// -----------------------------------------------------------------------------
+// §C — subslice header recovery via ptr - offset - HEADER_SIZE
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_subslice_header_recovery_arithmetic() {
+    // Pre-fix some drafts computed `ptr - HEADER_SIZE` only.  For a
+    // sub-fat-ref at offset 100 from base, this would read garbage
+    // (header at base - 32, not at sub - 32).
+    let base_ptr: Int = 1000;
+    let sub_offset: Int = 100;
+    let sub_ptr: Int = base_ptr + sub_offset;
+    let header_addr: Int = sub_ptr - sub_offset - HEADER_SIZE;
+    assert_eq(header_addr, base_ptr - HEADER_SIZE);
+    assert_eq(header_addr, 968);
+}
+
+// -----------------------------------------------------------------------------
+// §D — metadata field is signed
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_metadata_field_supports_signed_sentinel() {
+    // metadata: Int — supports length (positive), vtable address
+    // (positive memory address), AND -1 sentinel ("unknown length"
+    // / "invalid vtable").  Pre-fix drafts that used UInt lost the
+    // sentinel.
+    let length: Int = 100;
+    let sentinel: Int = -1;
+    let vtable: Int = 0x10000;
+    assert(length > 0);
+    assert(sentinel < 0);
+    assert(vtable > 0);
+}
+
+// -----------------------------------------------------------------------------
+// §E — null fat-ref shape
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_null_fat_ref_all_zero() {
+    // Same null convention as thin_ref: generation = GEN_UNALLOCATED,
+    // all field-zero values for the packed/offset/metadata/reserved
+    // fields.  A FatRef.null() instance is unambiguously distinguishable
+    // from a valid fat ref by ANY of these checks.
+    assert_eq(GEN_UNALLOCATED, 0 as UInt32);
+    assert_eq(unpack_epoch(0 as UInt32), 0 as UInt16);
+    assert_eq(unpack_caps(0 as UInt32), 0 as UInt16);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

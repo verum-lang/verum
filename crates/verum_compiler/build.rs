@@ -1219,7 +1219,8 @@ fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
 /// so source-only changes invalidate as before AND schema changes
 /// invalidate independently of source.  Format: free-form ASCII;
 /// readable strings make `git log` of this constant tell the story.
-const PRECOMPILE_SCHEMA_VERSION: &str = "v9-2026-05-09-source_blake3_in_metadata";
+const PRECOMPILE_SCHEMA_VERSION: &str =
+    "v10-2026-05-16-codegen_paths_in_cache_key";
 
 /// T3: blake3 hash of every `core/**/*.vr` file's content, sorted
 /// by relative path, mixed with [`PRECOMPILE_SCHEMA_VERSION`].
@@ -1237,6 +1238,62 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
     hasher.update(b"schema:");
     hasher.update(PRECOMPILE_SCHEMA_VERSION.as_bytes());
     hasher.update(b"\0");
+    // Mix in the codegen-path source files so a Rust-side change to
+    // VBC codegen / intrinsic dispatch invalidates the precompile
+    // cache. Without this, a change to e.g.
+    // `crates/verum_vbc/src/intrinsics/mod.rs::lookup_intrinsic` —
+    // which determines how `@intrinsic("ctlz", ...)` lowers to
+    // bytecode — produces a fresh `verum` binary that embeds a
+    // STALE `runtime.vbca` compiled by an older codegen. The
+    // resulting cross-tier divergence is invisible at the cargo
+    // dependency level (cargo sees verum_vbc as a dep of
+    // verum_compiler and rebuilds them; build.rs sees no `.vr`
+    // source changes and reuses the cached vbca). Discovered via
+    // `core-tests/mem/size_class/property_test::law_round_trip_full_table_exhaustive`
+    // — a fix to `lookup_intrinsic` was correctly in the binary but
+    // not reflected in the embedded stdlib.
+    //
+    // The mixed-in files MUST be the source-of-truth for codegen
+    // strategies, intrinsic dispatch, and lowering — anything that
+    // affects what the stdlib precompiler emits.
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .expect("CARGO_MANIFEST_DIR is always set by cargo");
+    let project_root = std::path::Path::new(&manifest_dir)
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("crates/verum_compiler is always two levels below project root");
+    let codegen_paths: &[&str] = &[
+        "crates/verum_vbc/src/intrinsics/mod.rs",
+        "crates/verum_vbc/src/intrinsics/registry.rs",
+        "crates/verum_vbc/src/intrinsics/codegen.rs",
+        "crates/verum_vbc/src/intrinsics/lowering.rs",
+        "crates/verum_vbc/src/codegen/expressions.rs",
+        "crates/verum_vbc/src/codegen/statements.rs",
+    ];
+    hasher.update(b"codegen:");
+    for rel in codegen_paths {
+        let abs = project_root.join(rel);
+        // Tell cargo to rerun build.rs when ANY of these files change —
+        // belt-and-braces alongside the hash invalidation, since cargo
+        // already rebuilds the crate but doesn't re-run a build script
+        // for upstream-only changes.
+        println!("cargo:rerun-if-changed={}", abs.display());
+        match std::fs::read(&abs) {
+            Ok(bytes) => {
+                hasher.update(rel.as_bytes());
+                hasher.update(b"\0");
+                hasher.update(&bytes);
+                hasher.update(b"\0");
+            }
+            Err(_) => {
+                // File missing — record the path so the cache invalidates
+                // when the file is added.
+                hasher.update(rel.as_bytes());
+                hasher.update(b":missing\0");
+            }
+        }
+    }
+    hasher.update(b"core:");
     let mut sorted: Vec<&(String, Vec<u8>)> = files.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(&b.0));
     for (rel_path, bytes) in sorted {
