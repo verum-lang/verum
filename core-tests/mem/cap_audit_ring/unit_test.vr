@@ -1,0 +1,184 @@
+// =============================================================================
+// core-tests/mem/cap_audit_ring/unit_test.vr
+// =============================================================================
+//
+// Per-API tests for `core.mem.cap_audit_ring` — the lock-free SPMC ring
+// buffer that stores CapEvent records for forensic observers.
+//
+// Companion files:
+//   property_test.vr     — ring-buffer monotonicity & ordering laws
+//   integration_test.vr  — composition with the record_* writers
+//   regression_test.vr   — pinned defects
+//   audit.md             — drift surfaces & action items
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.cap_audit_ring.{
+    CAP_AUDIT_RING_CAPACITY,
+    commit, recent, count, enable, disable, is_enabled,
+    reset_for_tests,
+    record_revoke, record_attenuate, record_ref_incr, record_ref_decr,
+    record_gen_bump, record_epoch_advance,
+};
+mount core.mem.cap_audit.{CapEvent, Revoke, Attenuate};
+
+// =============================================================================
+// Section 1: Module constants
+// =============================================================================
+
+@test
+fn test_cap_audit_ring_capacity_is_256() {
+    // 256 slots × ~64-byte CapEvent ≈ 16 KiB ring.  Pin the size so
+    // observers and forensic tools that hardcode the window-size
+    // assumption cannot drift.
+    assert_eq(CAP_AUDIT_RING_CAPACITY, 256);
+}
+
+// =============================================================================
+// Section 2: enable / disable / is_enabled state machine
+// =============================================================================
+
+@test
+fn test_audit_enable_disable_toggles_state() {
+    // Default state may be either — record it, mutate, restore.
+    let initial = is_enabled();
+    enable();
+    assert(is_enabled());
+    disable();
+    assert(!is_enabled());
+    // Restore prior state to avoid leaking state into other tests.
+    if initial { enable(); } else { disable(); }
+}
+
+@test
+fn test_audit_disable_after_enable_is_disabled() {
+    enable();
+    disable();
+    assert(!is_enabled());
+}
+
+@test
+fn test_audit_enable_after_disable_is_enabled() {
+    disable();
+    enable();
+    assert(is_enabled());
+    disable();   // restore
+}
+
+// =============================================================================
+// Section 3: reset_for_tests — test-isolation primitive
+// =============================================================================
+
+@test
+fn test_reset_for_tests_returns_unit() {
+    // Fire-and-forget — verify no panic.
+    reset_for_tests();
+    assert(true);
+}
+
+// =============================================================================
+// Section 4: count — monotonic event counter
+// =============================================================================
+
+@test
+fn test_count_returns_uint64() {
+    let c: UInt64 = count();
+    assert(c >= 0 as UInt64);
+}
+
+// =============================================================================
+// Section 5: recent(n) — returns at most n events
+// =============================================================================
+
+@test
+fn test_recent_returns_at_most_n_events() {
+    let events = recent(10);
+    assert(events.len() <= 10);
+}
+
+@test
+fn test_recent_zero_returns_empty_list() {
+    let events = recent(0);
+    assert_eq(events.len(), 0);
+}
+
+@test
+fn test_recent_negative_returns_empty_list() {
+    // Defensive: negative n must not panic.
+    let events = recent(-1);
+    assert_eq(events.len(), 0);
+}
+
+// =============================================================================
+// Section 6: record_* writers — accept arguments and return Unit
+// =============================================================================
+
+@test
+fn test_record_revoke_accepts_full_args() {
+    reset_for_tests();
+    enable();
+    record_revoke(
+        0x10000000 as UInt64,    // ptr_id
+        5 as UInt32,             // gen_before
+        6 as UInt32,             // gen_after
+        0xFF as UInt16,          // caps_before
+        0 as UInt16,             // caps_after
+        0 as UInt64,             // timestamp_ns (zero = unsupported)
+    );
+    disable();
+    // No assertion on count() because record_* may short-circuit
+    // depending on enabled-state at call time; the test verifies the
+    // call returns without panic.
+    assert(true);
+}
+
+@test
+fn test_record_attenuate_accepts_full_args() {
+    reset_for_tests();
+    enable();
+    record_attenuate(
+        0x10000000 as UInt64,
+        5 as UInt32,
+        0xFF as UInt16,
+        0x01 as UInt16,
+        0 as UInt64,
+    );
+    disable();
+    assert(true);
+}
+
+@test
+fn test_record_ref_incr_accepts_full_args() {
+    reset_for_tests();
+    enable();
+    record_ref_incr(
+        0x10000000 as UInt64,
+        5 as UInt32,
+        0xFF as UInt16,
+        0 as UInt64,
+    );
+    disable();
+    assert(true);
+}
+
+@test
+fn test_record_gen_bump_accepts_full_args() {
+    reset_for_tests();
+    enable();
+    record_gen_bump(
+        0x10000000 as UInt64,
+        5 as UInt32,
+        6 as UInt32,
+        0 as UInt64,
+    );
+    disable();
+    assert(true);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

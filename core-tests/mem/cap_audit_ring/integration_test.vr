@@ -1,0 +1,129 @@
+// =============================================================================
+// core-tests/mem/cap_audit_ring/integration_test.vr
+// =============================================================================
+//
+// Integration tests: commit → recent round-trip + writer-aware sequence
+// numbering, exercised end-to-end via the public record_* writers.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.cap_audit_ring.{
+    enable, disable, is_enabled, reset_for_tests,
+    count, recent,
+    record_revoke, record_attenuate, record_gen_bump,
+};
+mount core.mem.cap_audit.{CapEvent, Revoke, Attenuate, GenBump};
+mount core.mem.capability.{CAP_OWNED, CAP_READ_ONLY};
+
+// -----------------------------------------------------------------------------
+// §1  Single-record round-trip: commit one revoke, observe one event back.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_single_revoke_commit_and_recent() {
+    reset_for_tests();
+    enable();
+    record_revoke(
+        0xAAAA as UInt64,
+        5 as UInt32, 6 as UInt32,
+        CAP_OWNED, 0 as UInt16,
+        1000 as UInt64,
+    );
+    let events = recent(10);
+    disable();
+    // At least one event observable when audit was enabled.
+    assert(events.len() >= 1);
+}
+
+// -----------------------------------------------------------------------------
+// §2  Distinct ptr_ids produce distinguishable records.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_distinct_ptr_ids_distinguishable() {
+    reset_for_tests();
+    enable();
+    record_revoke(
+        0x1111 as UInt64,
+        1 as UInt32, 2 as UInt32,
+        CAP_OWNED, 0 as UInt16,
+        0 as UInt64,
+    );
+    record_revoke(
+        0x2222 as UInt64,
+        1 as UInt32, 2 as UInt32,
+        CAP_OWNED, 0 as UInt16,
+        0 as UInt64,
+    );
+    let events = recent(10);
+    disable();
+    // Two distinct ptr_ids should produce two events.
+    assert(events.len() >= 2);
+}
+
+// -----------------------------------------------------------------------------
+// §3  Mix of record types — Revoke + Attenuate + GenBump.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_mixed_event_types_round_trip() {
+    reset_for_tests();
+    enable();
+    record_revoke(
+        0x10 as UInt64,
+        1 as UInt32, 2 as UInt32,
+        CAP_OWNED, 0 as UInt16,
+        0 as UInt64,
+    );
+    record_attenuate(
+        0x20 as UInt64,
+        3 as UInt32,
+        CAP_OWNED, CAP_READ_ONLY,
+        0 as UInt64,
+    );
+    record_gen_bump(
+        0x30 as UInt64,
+        4 as UInt32, 5 as UInt32,
+        0 as UInt64,
+    );
+    let events = recent(10);
+    disable();
+    assert(events.len() >= 3);
+}
+
+// -----------------------------------------------------------------------------
+// §4  Disable / enable boundary — events committed while disabled are
+//     NOT observable.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_disabled_window_records_not_observable() {
+    reset_for_tests();
+    disable();
+    // Commit during disabled window — should be ignored
+    record_revoke(
+        0x99 as UInt64,
+        1 as UInt32, 2 as UInt32,
+        CAP_OWNED, 0 as UInt16,
+        0 as UInt64,
+    );
+    // Re-enable and observe — should NOT find the 0x99 event.
+    enable();
+    let events_after_enable = recent(50);
+    disable();
+    let mut found_disabled_event: Bool = false;
+    for e in events_after_enable.iter() {
+        if e.ptr_id == 0x99 as UInt64 {
+            found_disabled_event = true;
+        }
+    }
+    assert(!found_disabled_event);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

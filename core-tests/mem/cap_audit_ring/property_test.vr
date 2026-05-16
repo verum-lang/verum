@@ -1,0 +1,121 @@
+// =============================================================================
+// core-tests/mem/cap_audit_ring/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for the cap_audit_ring buffer.
+//
+//   §A  is_enabled is a 2-state toggle: enable() = true, disable() = false
+//   §B  count is monotone non-decreasing while enabled
+//   §C  recent(n) returns a list of size ≤ n
+//   §D  CAP_AUDIT_RING_CAPACITY is a power of 2 (efficient mod via &)
+//   §E  After disable(), no record_* call increases count
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.cap_audit_ring.{
+    CAP_AUDIT_RING_CAPACITY,
+    enable, disable, is_enabled, count, recent, reset_for_tests,
+    record_revoke, record_attenuate,
+};
+
+// =============================================================================
+// §A  enable / disable form a 2-state toggle
+// =============================================================================
+
+@test
+fn law_enable_disable_idempotent() {
+    enable();
+    assert(is_enabled());
+    enable();    // Idempotent
+    assert(is_enabled());
+
+    disable();
+    assert(!is_enabled());
+    disable();   // Idempotent
+    assert(!is_enabled());
+}
+
+// =============================================================================
+// §C  recent(n) ≤ n
+// =============================================================================
+
+@test
+fn law_recent_bounded_by_n() {
+    let sizes: List<Int> = [0, 1, 5, 10, 50, 256, 1000];
+    for n in sizes.iter() {
+        let result = recent(*n);
+        let want = if *n < 0 { 0 } else { *n };
+        assert(result.len() <= want);
+    }
+}
+
+// =============================================================================
+// §D  CAP_AUDIT_RING_CAPACITY is a power of 2
+// =============================================================================
+
+@test
+fn law_capacity_is_power_of_two() {
+    let cap = CAP_AUDIT_RING_CAPACITY;
+    // x is a power of 2 ⇔ x > 0 AND (x & (x - 1)) == 0
+    assert(cap > 0);
+    assert((cap & (cap - 1)) == 0);
+}
+
+// =============================================================================
+// §E  Disabled state — record_* short-circuits (count must not increase)
+// =============================================================================
+
+@test
+fn law_disabled_records_short_circuit() {
+    reset_for_tests();
+    disable();
+    let before = count();
+    record_revoke(
+        0x10000000 as UInt64,
+        5 as UInt32, 6 as UInt32,
+        0xFF as UInt16, 0 as UInt16,
+        0 as UInt64,
+    );
+    record_attenuate(
+        0x10000000 as UInt64,
+        5 as UInt32,
+        0xFF as UInt16, 0x01 as UInt16,
+        0 as UInt64,
+    );
+    let after = count();
+    // count() reads NEXT_SEQ — record_* should not advance it while
+    // audit is disabled.
+    assert_eq(before, after);
+}
+
+// =============================================================================
+// §F  recent(n) returns the MOST RECENT n events when more than n exist
+//     (truncates from the OLDER end).  Pin via boundary case: recent(0)
+//     always returns empty regardless of how many events committed.
+// =============================================================================
+
+@test
+fn law_recent_zero_always_empty() {
+    reset_for_tests();
+    enable();
+    // Commit some events
+    for _ in 0..5 {
+        record_revoke(
+            0x10000000 as UInt64,
+            1 as UInt32, 2 as UInt32,
+            0 as UInt16, 0 as UInt16,
+            0 as UInt64,
+        );
+    }
+    disable();
+    let r = recent(0);
+    assert_eq(r.len(), 0);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

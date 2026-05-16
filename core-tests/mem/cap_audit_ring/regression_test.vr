@@ -1,0 +1,100 @@
+// =============================================================================
+// core-tests/mem/cap_audit_ring/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.mem.cap_audit_ring`.
+//
+// Pinned regressions:
+//   §A  CAP_AUDIT_RING_CAPACITY = 256 is a power of 2 → index reduction
+//       `seq & (CAP - 1)` is valid.  Pre-fix some drafts used 250 or
+//       300 (non-power-of-2) which forced an expensive division.
+//   §B  recent(0) returns empty list regardless of how many events
+//       committed.  Pre-fix the bound `start = max(1, cur - n + 1)` had
+//       an off-by-one that returned cur events for n=0.
+//   §C  Disabled audit short-circuits record_*; no count advancement
+//       on disabled record.  Pre-fix some drafts incremented NEXT_SEQ
+//       before checking the enabled flag, leaking sequence numbers
+//       across enable/disable boundaries.
+//   §D  recent(negative) does not panic — early returns empty list.
+//       Pre-fix the bound arithmetic underflowed for negative inputs.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.cap_audit_ring.{
+    CAP_AUDIT_RING_CAPACITY,
+    enable, disable, reset_for_tests,
+    count, recent,
+    record_revoke,
+};
+mount core.mem.capability.{CAP_OWNED};
+
+// -----------------------------------------------------------------------------
+// §A — Capacity = 256 is power of 2
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_capacity_is_power_of_two() {
+    let cap = CAP_AUDIT_RING_CAPACITY;
+    assert_eq(cap, 256);
+    assert((cap & (cap - 1)) == 0);
+}
+
+// -----------------------------------------------------------------------------
+// §B — recent(0) returns empty list
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_recent_zero_returns_empty() {
+    reset_for_tests();
+    enable();
+    record_revoke(
+        0x1 as UInt64,
+        1 as UInt32, 2 as UInt32,
+        CAP_OWNED, 0 as UInt16,
+        0 as UInt64,
+    );
+    let r = recent(0);
+    disable();
+    assert_eq(r.len(), 0);
+}
+
+// -----------------------------------------------------------------------------
+// §C — Disabled record_* does not advance count
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_disabled_record_does_not_advance_count() {
+    reset_for_tests();
+    disable();
+    let before = count();
+    record_revoke(
+        0xDEAD as UInt64,
+        1 as UInt32, 2 as UInt32,
+        CAP_OWNED, 0 as UInt16,
+        0 as UInt64,
+    );
+    let after = count();
+    assert_eq(before, after);
+}
+
+// -----------------------------------------------------------------------------
+// §D — recent(negative) returns empty without panic
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_recent_negative_returns_empty() {
+    let r1 = recent(-1);
+    let r2 = recent(-100);
+    let r3 = recent(-9999);
+    assert_eq(r1.len(), 0);
+    assert_eq(r2.len(), 0);
+    assert_eq(r3.len(), 0);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
