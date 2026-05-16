@@ -7,6 +7,7 @@
 // =============================================================================
 
 mount core.prelude.*;
+mount core.base.panic.{catch_unwind, PanicInfo};
 mount core.collections.list.List;
 
 // -----------------------------------------------------------------------------
