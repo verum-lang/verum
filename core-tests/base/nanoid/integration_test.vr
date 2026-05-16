@@ -21,7 +21,7 @@ mount core.collections.set.Set;
 @test
 fn test_custom_alphabet_hex_lowercase() {
     let hex_alpha = "0123456789abcdef";
-    let id = generate_with_alphabet(16, hex_alpha);
+    let id = generate_with_alphabet(hex_alpha.as_bytes(), 16);
     assert_eq(id.len(), 16);
     for ch in id.chars() {
         assert(hex_alpha.contains_char(ch),
@@ -32,7 +32,7 @@ fn test_custom_alphabet_hex_lowercase() {
 @test
 fn test_custom_alphabet_uppercase_letters_only() {
     let alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    let id = generate_with_alphabet(10, alpha);
+    let id = generate_with_alphabet(alpha.as_bytes(), 10);
     assert_eq(id.len(), 10);
     for ch in id.chars() {
         assert(ch >= 'A' && ch <= 'Z');
@@ -42,7 +42,7 @@ fn test_custom_alphabet_uppercase_letters_only() {
 @test
 fn test_custom_alphabet_numeric_only() {
     let alpha = "0123456789";
-    let id = generate_with_alphabet(12, alpha);
+    let id = generate_with_alphabet(alpha.as_bytes(), 12);
     assert_eq(id.len(), 12);
     for ch in id.chars() {
         assert(ch >= '0' && ch <= '9');
@@ -55,7 +55,7 @@ fn test_custom_alphabet_uniqueness_over_100_samples() {
     let mut ids: Set<Text> = Set.new();
     let mut i = 0;
     while i < 100 {
-        ids.insert(generate_with_alphabet(21, alpha));
+        ids.insert(generate_with_alphabet(alpha.as_bytes(), 21));
         i = i + 1;
     }
     assert_eq(ids.len(), 100);

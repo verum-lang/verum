@@ -890,6 +890,15 @@ implement Text {
         None
     }
 
+    /// True iff this text contains the given character.
+    ///
+    /// O(n) scan; mirror of `contains(&Text)` for char-typed needles.
+    /// Used by `core-tests/base/nanoid/` and similar alphabet-membership
+    /// checks where the haystack is a Text but the predicate is char-wise.
+    public fn contains_char(&self, ch: Char) -> Bool {
+        self.find_char(ch).is_some()
+    }
+
     // =========================================================================
     // Modification (returns new Text)
     // =========================================================================

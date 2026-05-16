@@ -241,6 +241,28 @@ public fn from_parts(timestamp_ms: Int, rand_seed: Int) -> Ulid {
     Ulid.from_parts_seeded(ts, seed)
 }
 
+/// Generate a fresh ULID using the current wall-clock millisecond
+/// timestamp + a 80-bit random seed (sourced from
+/// `core.sys.common.random_bytes`).  Mirror of `Uuid.v7()` /
+/// `Snowflake.generate()` discipline — convenience builder for
+/// callers that don't need to thread an explicit seed.
+public fn generate() -> Ulid {
+    let now = SystemTime.now();
+    let ts_ms = now.duration_since_epoch().as_millis();
+    // Two 64-bit values give us > 80 bits of entropy; truncated to
+    // 80 bits inside `Ulid.from_parts_seeded`.  Stdlib-agnostic
+    // RNG via `sys.common.random_bytes`.
+    let mut seed_bytes: List<Byte> = List.with_capacity(16);
+    let _ = sys_random_bytes(&mut seed_bytes, 16);
+    let mut seed: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < 8 && i < seed_bytes.len() {
+        seed = (seed << 8_u64) | (seed_bytes[i] as UInt64);
+        i = i + 1;
+    }
+    from_parts(ts_ms, seed as Int)
+}
+
 /// Parse a 26-char Crockford-Base32 ULID.
 public fn parse(s: &Text) -> Result<Ulid, UlidError> {
     let b = s.as_bytes();
