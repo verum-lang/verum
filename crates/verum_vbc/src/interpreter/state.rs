@@ -594,6 +594,31 @@ pub struct InterpreterState {
     /// the context system and other thread-local state.
     pub tls_slots: HashMap<usize, Value>,
 
+    /// Process-wide backing cells for `static mut X: T = init;` declarations.
+    /// Task #26 [E2] enabler — gives `&STATIC_MUT as *mut T` a stable byte-
+    /// addressable storage with a real address.
+    ///
+    /// Indexed by the same `slot` id as `tls_slots` (the TLS-slot mechanism
+    /// reuses its id-allocation here). `Box<UnsafeCell<u64>>` is used because
+    /// (a) Box's heap allocation gives a stable address for the cell's
+    /// lifetime — HashMap rehashes don't move the Box's contents, and (b)
+    /// `UnsafeCell<u64>` is exactly 8 bytes aligned-to-8, which is enough for
+    /// every primitive `static mut` (UInt8/16/32/64/Bool/Int/Float) and the
+    /// alignment guarantees correct atomic op semantics across byte/word
+    /// access patterns. Statics whose declared type is wider than 8 bytes
+    /// (arrays / records — e.g. `static mut SIGNAL_HANDLERS: [Int; 64]`)
+    /// continue to use TLS storage; the codegen helper
+    /// `try_compile_static_mut_addr` only fires for scalar `&STATIC as *T`
+    /// patterns.
+    ///
+    /// Allocated lazily by `handle_static_mut_addr` on first read, defaults
+    /// to zero — matching the canonical init for every audit-ring / allocator
+    /// flag/counter static (CAP_AUDIT_ENABLED = 0, CAP_AUDIT_NEXT_SEQ = 0,
+    /// PAGE_MANAGER_LOCK = 0). Non-zero initializers for scalars need a
+    /// codegen extension (emit `StaticMutAddr` + `DerefMutRaw` in the
+    /// `__tls_init_<X>` ctor) — not required for the audit-ring closure.
+    pub static_mut_cells: HashMap<u16, Box<std::cell::UnsafeCell<u64>>>,
+
     /// Current CBGR epoch for capability-based generational reference tracking.
     ///
 
@@ -2519,6 +2544,7 @@ impl InterpreterState {
             awaiting_task: None,
             runtime_ctx_initialized: false,
             tls_slots: HashMap::new(),
+            static_mut_cells: HashMap::new(),
             cbgr_epoch: 1,
             cbgr_bypass_depth: 0,
             cbgr_allocations: HashSet::new(),
@@ -2701,6 +2727,12 @@ impl InterpreterState {
         self.awaiting_task = None;
         self.nurseries.clear();
         self.tls_slots.clear();
+        // Drop process-wide static-mut cells alongside TLS — they share
+        // the same slot-id namespace and per-interpreter lifetime
+        // (Task #26 [E2]).  Freeing them on reset keeps test isolation
+        // honest: every test starts with cell-default zero instead of
+        // whatever the previous test left behind.
+        self.static_mut_cells.clear();
         self.cbgr_epoch = 1;
         self.cbgr_bypass_depth = 0;
         self.cbgr_allocations.clear();
@@ -2778,6 +2810,28 @@ impl InterpreterState {
     #[inline]
     pub fn tls_set(&mut self, slot: usize, value: Value) {
         self.tls_slots.insert(slot, value);
+    }
+
+    /// Returns the stable byte address of the process-wide cell backing
+    /// `static mut` slot `slot`.  Task #26 [E2] enabler.  Lazily allocates
+    /// a `Box<UnsafeCell<u64>>` on first call, zero-initialised.  The Box
+    /// keeps the cell's address stable across `HashMap` rehashes for the
+    /// lifetime of the `InterpreterState`, so callers can hand the address
+    /// out to atomic load / store dispatch which dereferences it.
+    ///
+    /// # Safety
+    /// The returned address is valid for the lifetime of `self`.  Callers
+    /// — the `StaticMutAddr` dispatch handler — must not mutate
+    /// `self.static_mut_cells` between obtaining the address and using
+    /// it; the dispatch helper does both in a single call so this is
+    /// trivially satisfied.
+    #[inline]
+    pub fn static_mut_cell_addr(&mut self, slot: u16) -> *mut u8 {
+        let cell = self
+            .static_mut_cells
+            .entry(slot)
+            .or_insert_with(|| Box::new(std::cell::UnsafeCell::new(0u64)));
+        cell.get() as *mut u8
     }
 
     // ==================== FFI Runtime (libffi-based) ====================
