@@ -106,7 +106,15 @@ implement<K: Hash + Eq, V> TtlCache<K, V> {
     /// Insert with a per-entry TTL override.
     public fn insert_with_ttl(&mut self, key: K, value: V, ttl: Duration) {
         let now = Instant.now();
-        let exp = now.add_duration(ttl);
+        // Use `checked_add` (the inherent method on Instant) rather than
+        // the non-existent `add_duration` alias — see Instant impl block
+        // in `core/time/instant.vr:179`.  Overflow saturates at
+        // `Instant.now()` (current instant — entries inserted at that
+        // boundary expire immediately, which is the safest fail-mode).
+        let exp = match now.checked_add(ttl) {
+            Some(t) => t,
+            None    => Instant.now(),
+        };
 
         // Evict LRU if full (unless overwriting an existing key).
         let already_present = self.store.contains_key(key.clone());
