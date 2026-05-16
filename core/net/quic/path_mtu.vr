@@ -135,7 +135,14 @@ implement PmtuTracker {
         // After a successful probe the tracker can either continue
         // searching up (if below MAX) or settle at SearchComplete
         // with RAISE_TIMER to retry later.
-        let raise_at = now.add_duration(Duration.from_secs(RAISE_TIMER_SECS as UInt64));
+        // Use `checked_add` (the inherent method on Instant) rather than
+        // the non-existent `add_duration` alias.  Overflow saturates to
+        // `now`, which here means "retry immediately on the next tick"
+        // — the safest fail-mode for path-MTU raise scheduling.
+        let raise_at = match now.checked_add(Duration.from_secs(RAISE_TIMER_SECS as UInt64)) {
+            Some(t) => t,
+            None    => now,
+        };
         self.state = PmtuState.SearchComplete { raise_after: raise_at };
     }
 

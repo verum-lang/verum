@@ -1,0 +1,147 @@
+// =============================================================================
+// core-tests/collections/ttl_cache/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.ttl_cache.{TtlCache, TtlCacheConfig};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// §A — TtlCache insert path panics on Instant.add_duration
+//
+// Pre-fix: `core/collections/ttl_cache.vr:109` called
+// `now.add_duration(ttl)` and `core/net/quic/path_mtu.vr:138` called
+// `now.add_duration(...)`.  Neither method exists on `Instant`; the
+// inherent impl declares `checked_add(&self, Duration) -> Maybe<Instant>`
+// (instant.vr:179).  Source fix landed in this branch — both call
+// sites now use `match now.checked_add(ttl) { Some(t) => t, None =>
+// fallback }`.
+//
+// Until a fresh `cargo build --release` rebuilds the precompiled
+// stdlib embedded in the `verum` binary, the CallM operand in the
+// binary's archive still references `Instant.add_duration`, so every
+// TtlCache insert/insert_with_ttl panics at runtime.  These pins
+// reproduce the failing shape and flip green on the next binary
+// rebuild.
+// =============================================================================
+
+@ignore
+@test
+fn regression_ttl_insert_routes_through_checked_add() {
+    let cfg = TtlCacheConfig {
+        capacity: 8,
+        default_ttl: Duration.from_secs(3600),
+    };
+    let mut c: TtlCache<Int, Int> = TtlCache.new(cfg);
+    c.insert(1, 100);
+    match c.get(&1) {
+        Some(v) => { assert_eq(*v, 100); },
+        None    => { panic("insert/get within TTL must round-trip"); },
+    }
+}
+
+@ignore
+@test
+fn regression_ttl_insert_with_ttl_uses_override() {
+    let cfg = TtlCacheConfig {
+        capacity: 8,
+        default_ttl: Duration.from_secs(3600),
+    };
+    let mut c: TtlCache<Int, Int> = TtlCache.new(cfg);
+    c.insert_with_ttl(1, 100, Duration.from_secs(7200));
+    let v: Maybe<&Int> = c.get(&1);
+    assert(v is Some(_));
+}
+
+@ignore
+@test
+fn regression_ttl_capacity_eviction_drops_lru() {
+    let cfg = TtlCacheConfig {
+        capacity: 2,
+        default_ttl: Duration.from_secs(3600),
+    };
+    let mut c: TtlCache<Int, Int> = TtlCache.new(cfg);
+    c.insert(1, 100);
+    c.insert(2, 200);
+    c.insert(3, 300);
+    let v1: Maybe<&Int> = c.get(&1);
+    assert(v1 is None);
+    let s = c.stats();
+    assert_eq(s.evicted, 1_u64);
+}
+
+@ignore
+@test
+fn regression_ttl_remove_returns_bool() {
+    let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    c.insert(1, 100);
+    assert(c.remove(&1));
+    assert(!c.remove(&1));
+}
+
+@ignore
+@test
+fn regression_ttl_stats_hits_on_get_hit() {
+    let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    c.insert(1, 100);
+    let _ = c.get(&1);
+    let _ = c.get(&1);
+    let s = c.stats();
+    assert_eq(s.hits, 2_u64);
+}
+
+@ignore
+@test
+fn regression_ttl_clear_drops_all_entries() {
+    let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    c.insert(1, 100);
+    c.insert(2, 200);
+    c.clear();
+    assert(c.is_empty());
+}
+
+@ignore
+@test
+fn regression_ttl_purge_zero_on_fresh() {
+    let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    c.insert(1, 100);
+    let r = c.purge_expired();
+    assert_eq(r, 0);
+    assert_eq(c.len(), 1);
+}
+
+// =============================================================================
+// §F — PASS-GUARD pins for the working surface
+// =============================================================================
+
+@test
+fn pass_guard_ttl_new_is_empty() {
+    let cfg = TtlCacheConfig {
+        capacity: 8,
+        default_ttl: Duration.from_secs(3600),
+    };
+    let c: TtlCache<Int, Int> = TtlCache.new(cfg);
+    assert(c.is_empty());
+    assert_eq(c.len(), 0);
+}
+
+@test
+fn pass_guard_ttl_with_defaults_zero_stats() {
+    let c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    let s = c.stats();
+    assert_eq(s.size, 0);
+    assert_eq(s.hits, 0_u64);
+    assert_eq(s.misses, 0_u64);
+}
+
+@test
+fn pass_guard_ttl_remove_absent_false() {
+    let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    assert(!c.remove(&999));
+}
+
+@test
+fn pass_guard_ttl_purge_on_empty_zero() {
+    let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    assert_eq(c.purge_expired(), 0);
+}

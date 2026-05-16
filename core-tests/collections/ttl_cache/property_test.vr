@@ -1,0 +1,82 @@
+// =============================================================================
+// core-tests/collections/ttl_cache/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over the working ttl_cache surface (no insert path).
+// Insert-path laws live in regression_test.vr §A as @ignore'd pins
+// awaiting the precompiled-stdlib rebuild.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.ttl_cache.{TtlCache, TtlCacheConfig};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Law: with_defaults state is canonical (size=hits=misses=evicted=expired=0)
+// =============================================================================
+
+@test
+fn law_ttl_with_defaults_zero_initial() {
+    let c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    let s = c.stats();
+    assert_eq(s.size, 0);
+    assert_eq(s.hits, 0_u64);
+    assert_eq(s.misses, 0_u64);
+    assert_eq(s.evicted, 0_u64);
+    assert_eq(s.expired, 0_u64);
+}
+
+// =============================================================================
+// Law: miss counter monotone under multiple gets
+// =============================================================================
+
+@test
+fn law_ttl_miss_counter_monotone() {
+    let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    let mut prev: UInt64 = 0_u64;
+    let mut i = 0;
+    while i < 5 {
+        let _ = c.get(&i);
+        let s = c.stats();
+        assert(s.misses >= prev);
+        prev = s.misses;
+        i = i + 1;
+    }
+    let final_s = c.stats();
+    assert_eq(final_s.misses, 5_u64);
+}
+
+// =============================================================================
+// Law: purge_expired on empty cache returns 0
+// =============================================================================
+
+@test
+fn law_ttl_purge_on_empty_is_zero() {
+    let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    let r = c.purge_expired();
+    assert_eq(r, 0);
+}
+
+// =============================================================================
+// Law: remove on absent key returns false
+// =============================================================================
+
+@test
+fn law_ttl_remove_absent_false_idempotent() {
+    let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    let r1 = c.remove(&1);
+    let r2 = c.remove(&1);
+    assert(!r1);
+    assert(!r2);
+}
+
+// =============================================================================
+// Law: is_empty iff len == 0
+// =============================================================================
+
+@test
+fn law_ttl_is_empty_iff_len_zero() {
+    let c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    assert_eq(c.is_empty(), c.len() == 0);
+    assert(c.is_empty());
+}
