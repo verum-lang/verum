@@ -307,3 +307,24 @@ public fn closest_text(query: &Text, candidates: &List<Text>, max_distance: Int 
         None
     }
 }
+
+/// `closest_n` for Text inputs — top-`n` candidates by Levenshtein
+/// distance, sorted ascending by distance, ties broken by candidate
+/// order.  Returns a list of `(candidate, distance)` pairs.
+public fn closest_n(query: &Text, candidates: &List<Text>, n: Int) -> List<(Text, Int)> {
+    let q_bytes = query.as_bytes();
+    let mut scored: List<(Text, Int)> = List.with_capacity(candidates.len());
+    let mut i = 0;
+    while i < candidates.len() {
+        let d = levenshtein(q_bytes, candidates[i].as_bytes());
+        scored.push((candidates[i].clone(), d));
+        i = i + 1;
+    }
+    scored.sort_by(|a, b| {
+        if a.1 < b.1 { Less } else if a.1 > b.1 { Greater } else { Equal }
+    });
+    if scored.len() > n {
+        scored.truncate(n);
+    }
+    scored
+}

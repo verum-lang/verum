@@ -25,6 +25,7 @@
 // =============================================================================
 
 mount core.prelude.*;
+mount core.base.panic.{assert_panics, catch_unwind};
 mount core.collections.list.List;
 
 // -----------------------------------------------------------------------------

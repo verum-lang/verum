@@ -7,7 +7,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.string_distance.{levenshtein, levenshtein_bounded, jaro, jaro_winkler, closest_text};
+mount core.base.string_distance.{levenshtein, levenshtein_bounded, levenshtein_text, jaro, jaro_winkler, closest_text};
 mount core.collections.list.List;
 
 fn bytes(s: &str) -> List<Byte> {
@@ -137,17 +137,13 @@ fn test_closest_empty_candidates_returns_none() {
 @test
 fn test_ascii_byte_distance_equals_char_distance() {
     // For pure ASCII, byte-level distance = character-level distance
-    let a: Bytes = "abc".bytes();
-    let b: Bytes = "abd".bytes();
-    assert_eq(levenshtein(&a, &b), 1);
+    assert_eq(levenshtein_text(&"abc".to_text(), &"abd".to_text()), 1);
 }
 
 @test
 fn test_empty_vs_nonempty_distance_is_length() {
-    let empty: Bytes = [].to_bytes();
-    let s: Bytes = "hello".bytes();
-    assert_eq(levenshtein(&empty, &s), 5);
-    assert_eq(levenshtein(&s, &empty), 5);
+    assert_eq(levenshtein_text(&"".to_text(), &"hello".to_text()), 5);
+    assert_eq(levenshtein_text(&"hello".to_text(), &"".to_text()), 5);
 }
 
 fn main() {}
