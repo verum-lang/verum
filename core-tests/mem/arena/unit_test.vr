@@ -57,16 +57,23 @@ fn test_arena_capacity_relationship() {
 
 @test
 fn test_arena_config_construction_via_record_literal() {
+    // ArenaConfig has 3 fields per `core/mem/arena.vr` lines 152-159:
+    //   initial_capacity / max_capacity / growth_factor.
+    // No `alignment` field — alignment lives on the GenerationalArena
+    // record itself, sourced from the `ARENA_ALIGNMENT` constant at
+    // arena creation time.
     let config: ArenaConfig = ArenaConfig {
         initial_capacity: DEFAULT_ARENA_CAPACITY,
         max_capacity: MAX_ARENA_CAPACITY,
         growth_factor: 200,
-        alignment: ARENA_ALIGNMENT,
     };
     assert_eq(config.initial_capacity, DEFAULT_ARENA_CAPACITY);
     assert_eq(config.max_capacity, MAX_ARENA_CAPACITY);
     assert_eq(config.growth_factor, 200);
-    assert_eq(config.alignment, ARENA_ALIGNMENT);
+    // ARENA_ALIGNMENT is a module-level constant, separate from the
+    // ArenaConfig record fields.  Pin its value here to cover the
+    // alignment surface that was originally misplaced in this record.
+    assert_eq(ARENA_ALIGNMENT, 8);
 }
 
 // =============================================================================
