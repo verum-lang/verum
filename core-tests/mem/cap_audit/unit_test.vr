@@ -21,8 +21,12 @@
 mount core.prelude.*;
 mount core.mem.cap_audit.{
     CapEventKind, CapEvent,
-    Revoke, Attenuate, RefIncr, RefDecr, GenBump, EpochAdvance,
 };
+// `Revoke`/`Attenuate`/`RefIncr`/`RefDecr`/`GenBump`/`EpochAdvance`
+// are NOT imported by bare name because `Revoke` collides with
+// `core.mem.capability.Capability.Revoke` (a separate single-bit
+// capability flag — same variant name, different type).  Use the
+// qualified `CapEventKind.Variant` form throughout the test body.
 
 // =============================================================================
 // Section 1: CapEventKind variant construction
@@ -30,55 +34,55 @@ mount core.mem.cap_audit.{
 
 @test
 fn test_cap_event_kind_revoke_construction() {
-    let k: CapEventKind = Revoke;
-    assert(k is Revoke);
+    let k: CapEventKind = CapEventKind.Revoke;
+    assert(k is CapEventKind.Revoke);
 }
 
 @test
 fn test_cap_event_kind_attenuate_construction() {
-    let k: CapEventKind = Attenuate;
-    assert(k is Attenuate);
+    let k: CapEventKind = CapEventKind.Attenuate;
+    assert(k is CapEventKind.Attenuate);
 }
 
 @test
 fn test_cap_event_kind_ref_incr_construction() {
-    let k: CapEventKind = RefIncr;
-    assert(k is RefIncr);
+    let k: CapEventKind = CapEventKind.RefIncr;
+    assert(k is CapEventKind.RefIncr);
 }
 
 @test
 fn test_cap_event_kind_ref_decr_construction() {
-    let k: CapEventKind = RefDecr;
-    assert(k is RefDecr);
+    let k: CapEventKind = CapEventKind.RefDecr;
+    assert(k is CapEventKind.RefDecr);
 }
 
 @test
 fn test_cap_event_kind_gen_bump_construction() {
-    let k: CapEventKind = GenBump;
-    assert(k is GenBump);
+    let k: CapEventKind = CapEventKind.GenBump;
+    assert(k is CapEventKind.GenBump);
 }
 
 @test
 fn test_cap_event_kind_epoch_advance_construction() {
-    let k: CapEventKind = EpochAdvance;
-    assert(k is EpochAdvance);
+    let k: CapEventKind = CapEventKind.EpochAdvance;
+    assert(k is CapEventKind.EpochAdvance);
 }
 
 @test
 fn test_cap_event_kind_variants_pairwise_distinct() {
-    let revoke: CapEventKind = Revoke;
-    let attenuate: CapEventKind = Attenuate;
-    let ref_incr: CapEventKind = RefIncr;
-    let ref_decr: CapEventKind = RefDecr;
-    let gen_bump: CapEventKind = GenBump;
-    let epoch_adv: CapEventKind = EpochAdvance;
+    let revoke: CapEventKind = CapEventKind.Revoke;
+    let attenuate: CapEventKind = CapEventKind.Attenuate;
+    let ref_incr: CapEventKind = CapEventKind.RefIncr;
+    let ref_decr: CapEventKind = CapEventKind.RefDecr;
+    let gen_bump: CapEventKind = CapEventKind.GenBump;
+    let epoch_adv: CapEventKind = CapEventKind.EpochAdvance;
     // Each variant matches only itself
-    assert(!(revoke is Attenuate));
-    assert(!(attenuate is Revoke));
-    assert(!(ref_incr is RefDecr));
-    assert(!(ref_decr is RefIncr));
-    assert(!(gen_bump is EpochAdvance));
-    assert(!(epoch_adv is GenBump));
+    assert(!(revoke is CapEventKind.Attenuate));
+    assert(!(attenuate is CapEventKind.Revoke));
+    assert(!(ref_incr is CapEventKind.RefDecr));
+    assert(!(ref_decr is CapEventKind.RefIncr));
+    assert(!(gen_bump is CapEventKind.EpochAdvance));
+    assert(!(epoch_adv is CapEventKind.GenBump));
 }
 
 // =============================================================================
@@ -87,15 +91,15 @@ fn test_cap_event_kind_variants_pairwise_distinct() {
 
 @test
 fn test_cap_event_kind_eq_same_variant_returns_true() {
-    let a: CapEventKind = Revoke;
-    let b: CapEventKind = Revoke;
+    let a: CapEventKind = CapEventKind.Revoke;
+    let b: CapEventKind = CapEventKind.Revoke;
     assert(a.eq(&b));
 }
 
 @test
 fn test_cap_event_kind_eq_different_variants_returns_false() {
-    let a: CapEventKind = Revoke;
-    let b: CapEventKind = Attenuate;
+    let a: CapEventKind = CapEventKind.Revoke;
+    let b: CapEventKind = CapEventKind.Attenuate;
     assert(!a.eq(&b));
 }
 
@@ -106,7 +110,7 @@ fn test_cap_event_kind_eq_different_variants_returns_false() {
 @test
 fn test_cap_event_new_records_kind() {
     let event = CapEvent.new(
-        Revoke,
+        CapEventKind.Revoke,
         100 as UInt64,    // ptr_id
         5 as UInt32,      // gen_before
         6 as UInt32,      // gen_after
@@ -114,13 +118,13 @@ fn test_cap_event_new_records_kind() {
         0 as UInt16,      // caps_after
         0 as UInt64,      // timestamp_ns
     );
-    assert(event.kind is Revoke);
+    assert(event.kind is CapEventKind.Revoke);
 }
 
 @test
 fn test_cap_event_new_records_ptr_id() {
     let event = CapEvent.new(
-        Revoke,
+        CapEventKind.Revoke,
         0xABCDEF as UInt64,
         1 as UInt32, 2 as UInt32,
         0 as UInt16, 0 as UInt16,
@@ -132,7 +136,7 @@ fn test_cap_event_new_records_ptr_id() {
 @test
 fn test_cap_event_new_records_generation_range() {
     let event = CapEvent.new(
-        GenBump,
+        CapEventKind.GenBump,
         100 as UInt64,
         42 as UInt32, 43 as UInt32,
         0 as UInt16, 0 as UInt16,
@@ -145,7 +149,7 @@ fn test_cap_event_new_records_generation_range() {
 @test
 fn test_cap_event_new_records_capability_range() {
     let event = CapEvent.new(
-        Attenuate,
+        CapEventKind.Attenuate,
         100 as UInt64,
         1 as UInt32, 1 as UInt32,
         0xFF as UInt16, 0x01 as UInt16,
@@ -158,7 +162,7 @@ fn test_cap_event_new_records_capability_range() {
 @test
 fn test_cap_event_new_seq_is_zero_for_uncommitted() {
     let event = CapEvent.new(
-        Revoke,
+        CapEventKind.Revoke,
         100 as UInt64,
         1 as UInt32, 2 as UInt32,
         0 as UInt16, 0 as UInt16,
@@ -175,7 +179,7 @@ fn test_cap_event_new_seq_is_zero_for_uncommitted() {
 @test
 fn test_bumped_generation_true_for_revoke() {
     let event = CapEvent.new(
-        Revoke,
+        CapEventKind.Revoke,
         100 as UInt64,
         5 as UInt32, 6 as UInt32,
         0xFF as UInt16, 0 as UInt16,
@@ -187,7 +191,7 @@ fn test_bumped_generation_true_for_revoke() {
 @test
 fn test_bumped_generation_true_for_gen_bump() {
     let event = CapEvent.new(
-        GenBump,
+        CapEventKind.GenBump,
         100 as UInt64,
         5 as UInt32, 6 as UInt32,
         0 as UInt16, 0 as UInt16,
@@ -199,7 +203,7 @@ fn test_bumped_generation_true_for_gen_bump() {
 @test
 fn test_bumped_generation_false_for_attenuate() {
     let event = CapEvent.new(
-        Attenuate,
+        CapEventKind.Attenuate,
         100 as UInt64,
         5 as UInt32, 5 as UInt32,     // gen unchanged
         0xFF as UInt16, 0x01 as UInt16,
@@ -211,7 +215,7 @@ fn test_bumped_generation_false_for_attenuate() {
 @test
 fn test_bumped_generation_false_for_ref_incr() {
     let event = CapEvent.new(
-        RefIncr,
+        CapEventKind.RefIncr,
         100 as UInt64,
         5 as UInt32, 5 as UInt32,
         0 as UInt16, 0 as UInt16,

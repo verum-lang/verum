@@ -20,7 +20,7 @@ mount core.mem.cap_audit_ring.{
     record_revoke, record_attenuate, record_ref_incr, record_ref_decr,
     record_gen_bump, record_epoch_advance,
 };
-mount core.mem.cap_audit.{CapEvent, Revoke, Attenuate};
+mount core.mem.cap_audit.{CapEventKind, CapEvent};
 
 // =============================================================================
 // Section 1: Module constants
@@ -121,8 +121,7 @@ fn test_record_revoke_accepts_full_args() {
         0x10000000 as UInt64,    // ptr_id
         5 as UInt32,             // gen_before
         6 as UInt32,             // gen_after
-        0xFF as UInt16,          // caps_before
-        0 as UInt16,             // caps_after
+        0xFF as UInt16,          // capabilities (cleared on revoke)
         0 as UInt64,             // timestamp_ns (zero = unsupported)
     );
     disable();
@@ -169,6 +168,7 @@ fn test_record_gen_bump_accepts_full_args() {
         0x10000000 as UInt64,
         5 as UInt32,
         6 as UInt32,
+        0xFF as UInt16,          // capabilities
         0 as UInt64,
     );
     disable();

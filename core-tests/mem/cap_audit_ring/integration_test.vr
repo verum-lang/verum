@@ -12,7 +12,7 @@ mount core.mem.cap_audit_ring.{
     count, recent,
     record_revoke, record_attenuate, record_gen_bump,
 };
-mount core.mem.cap_audit.{CapEvent, Revoke, Attenuate, GenBump};
+mount core.mem.cap_audit.{CapEventKind, CapEvent};
 mount core.mem.capability.{CAP_OWNED, CAP_READ_ONLY};
 
 // -----------------------------------------------------------------------------
@@ -26,7 +26,7 @@ fn integration_single_revoke_commit_and_recent() {
     record_revoke(
         0xAAAA as UInt64,
         5 as UInt32, 6 as UInt32,
-        CAP_OWNED, 0 as UInt16,
+        CAP_OWNED,
         1000 as UInt64,
     );
     let events = recent(10);
@@ -46,13 +46,13 @@ fn integration_distinct_ptr_ids_distinguishable() {
     record_revoke(
         0x1111 as UInt64,
         1 as UInt32, 2 as UInt32,
-        CAP_OWNED, 0 as UInt16,
+        CAP_OWNED,
         0 as UInt64,
     );
     record_revoke(
         0x2222 as UInt64,
         1 as UInt32, 2 as UInt32,
-        CAP_OWNED, 0 as UInt16,
+        CAP_OWNED,
         0 as UInt64,
     );
     let events = recent(10);
@@ -72,7 +72,7 @@ fn integration_mixed_event_types_round_trip() {
     record_revoke(
         0x10 as UInt64,
         1 as UInt32, 2 as UInt32,
-        CAP_OWNED, 0 as UInt16,
+        CAP_OWNED,
         0 as UInt64,
     );
     record_attenuate(
@@ -81,10 +81,7 @@ fn integration_mixed_event_types_round_trip() {
         CAP_OWNED, CAP_READ_ONLY,
         0 as UInt64,
     );
-    record_gen_bump(
-        0x30 as UInt64,
-        4 as UInt32, 5 as UInt32,
-        0 as UInt64,
+    record_gen_bump(0x30 as UInt64, 4 as UInt32, 5 as UInt32, 0xFF as UInt16, 0 as UInt64,
     );
     let events = recent(10);
     disable();
@@ -104,7 +101,7 @@ fn integration_disabled_window_records_not_observable() {
     record_revoke(
         0x99 as UInt64,
         1 as UInt32, 2 as UInt32,
-        CAP_OWNED, 0 as UInt16,
+        CAP_OWNED,
         0 as UInt64,
     );
     // Re-enable and observe — should NOT find the 0x99 event.

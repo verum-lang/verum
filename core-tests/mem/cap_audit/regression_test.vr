@@ -22,7 +22,7 @@
 mount core.prelude.*;
 mount core.mem.cap_audit.{
     CapEventKind, CapEvent,
-    Revoke, Attenuate, RefIncr, RefDecr, GenBump, EpochAdvance,
+    // Variants accessed via CapEventKind.X qualified form (Revoke collides with Capability.Revoke)
 };
 
 // -----------------------------------------------------------------------------
@@ -32,7 +32,7 @@ mount core.mem.cap_audit.{
 @test
 fn regression_cap_event_new_seq_zero() {
     let event = CapEvent.new(
-        Revoke,
+        CapEventKind.Revoke,
         100 as UInt64,
         1 as UInt32, 2 as UInt32,
         0 as UInt16, 0 as UInt16,
@@ -48,12 +48,12 @@ fn regression_cap_event_new_seq_zero() {
 @test
 fn regression_bumped_generation_matrix() {
     let cases: List<(CapEventKind, Bool)> = [
-        (Revoke, true),
-        (Attenuate, false),
-        (RefIncr, false),
-        (RefDecr, false),
-        (GenBump, true),
-        (EpochAdvance, false),
+        (CapEventKind.Revoke, true),
+        (CapEventKind.Attenuate, false),
+        (CapEventKind.RefIncr, false),
+        (CapEventKind.RefDecr, false),
+        (CapEventKind.GenBump, true),
+        (CapEventKind.EpochAdvance, false),
     ];
     for case in cases.iter() {
         let event = CapEvent.new(
@@ -78,11 +78,11 @@ fn regression_cap_event_kind_eq_variant_identity() {
     // silently, this would still pass (Eq is identity-of-tag).
     // The variant order is pinned in unit_test by checking each is's
     // own variant marker via `is`-pattern.
-    let r1: CapEventKind = Revoke;
-    let r2: CapEventKind = Revoke;
+    let r1: CapEventKind = CapEventKind.Revoke;
+    let r2: CapEventKind = CapEventKind.Revoke;
     assert(r1.eq(&r2));
-    let a1: CapEventKind = Attenuate;
-    let a2: CapEventKind = Attenuate;
+    let a1: CapEventKind = CapEventKind.Attenuate;
+    let a2: CapEventKind = CapEventKind.Attenuate;
     assert(a1.eq(&a2));
     assert(!r1.eq(&a1));
 }
@@ -97,13 +97,13 @@ fn regression_cap_event_field_count_eight() {
     // compile if a field is removed; it passes value reads on each so
     // a field rename or type change surfaces.
     let event = CapEvent.new(
-        EpochAdvance,
+        CapEventKind.EpochAdvance,
         1 as UInt64, 2 as UInt32, 3 as UInt32,
         4 as UInt16, 5 as UInt16, 6 as UInt64,
     );
     // 8 field reads — kind, seq, ptr_id, gen_before, gen_after,
     // caps_before, caps_after, timestamp_ns.
-    assert(event.kind is EpochAdvance);
+    assert(event.kind is CapEventKind.EpochAdvance);
     assert_eq(event.seq, 0 as UInt64);
     assert_eq(event.ptr_id, 1 as UInt64);
     assert_eq(event.generation_before, 2 as UInt32);
