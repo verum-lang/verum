@@ -11871,8 +11871,30 @@ impl<'ctx> PlatformIR<'ctx> {
             "verum_dealloc",
             void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
         );
+        // **Canonical ABI** (task #12): route through
+        // `syscall_registry::get_or_declare` so `sched_yield` gets the
+        // canonical Verum i64-everywhere signature (matches the rest
+        // of the codebase including the Linux/macOS direct-syscall
+        // wrappers in `runtime.rs:8927`).  Pre-fix the ad-hoc
+        // `get_or_declare_fn(...)` declared `sched_yield` as `i32 ()`
+        // here while the registry / direct-syscall sites used `i64 ()`,
+        // tripping LLVM verification:
+        //   Call parameter type does not match function signature!
+        //     i32 declared vs i64 callsite (or vice versa)
+        // Architectural rule: every POSIX/libc symbol MUST flow through
+        // the canonical `syscall_registry::get_or_declare` so the
+        // process-wide SIGNATURE_MISMATCH_REGISTRY catches drift at
+        // declaration time, not at LLVM verify time thousands of
+        // instructions later.
         let sched_yield_fn =
-            self.get_or_declare_fn(module, "sched_yield", i32_type.fn_type(&[], false));
+            super::syscall_registry::get_or_declare(module, ctx, "sched_yield")
+                .ok_or_else(|| {
+                    crate::llvm::error::LlvmLoweringError::internal(
+                        verum_common::Text::from(
+                            "syscall_registry missing sched_yield signature",
+                        ),
+                    )
+                })?;
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");

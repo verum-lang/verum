@@ -6021,17 +6021,38 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 ]);
 
                 // Use verum_raw_open3 C wrapper to avoid ARM64 variadic
-                // calling convention issues with libc open()
+                // calling convention issues with libc open().
+                //
+                // **Canonical ABI** (task #12): flags/mode declared as i64
+                // matching the canonical signature in
+                // `syscall_registry::VERUM_RUNTIME_SYMBOLS` ("verum_raw_open3"
+                // — `i64 (ptr, i64, i64) -> i64`).  Pre-fix this site
+                // declared them as i32, conflicting with the registry's
+                // i64-everywhere ABI and tripping LLVM `Call parameter
+                // type does not match function signature!`.  The PHI
+                // node above remains i32 — we zext to i64 at the call
+                // boundary to satisfy the canonical ABI.  Architectural
+                // rule: every emit path declaring a POSIX/runtime symbol
+                // MUST match the `syscall_registry` canonical signature;
+                // call-site value widths get adapted at the boundary,
+                // not the declaration.
                 let ft = i64_type
-                        .fn_type(&[ptr_type.into(), i32_type.into(), i32_type.into()], false);
-        let raw_open_fn = super::error::get_or_declare_function(module, "verum_raw_open3", ft);
+                        .fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false);
+                let raw_open_fn = super::error::get_or_declare_function(module, "verum_raw_open3", ft);
+                let flags_i64 = builder
+                    .build_int_z_extend(
+                        flags_phi.as_basic_value().into_int_value(),
+                        i64_type,
+                        "flags_i64",
+                    )
+                    .or_llvm_err()?;
                 let fd = builder
                     .build_call(
                         raw_open_fn,
                         &[
                             path.into(),
-                            flags_phi.as_basic_value().into(),
-                            i32_type.const_int(0o644, false).into(),
+                            flags_i64.into(),
+                            i64_type.const_int(0o644, false).into(),
                         ],
                         "fd",
                     )
