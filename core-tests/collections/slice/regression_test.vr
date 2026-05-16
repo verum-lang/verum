@@ -102,40 +102,28 @@ fn regression_slice_partition_point_returns_wrong_index() {
 // §C — Iterator/closure-argument dispatch defects
 // =============================================================================
 
-// REGRESSION (§C.1): `slice.position(&value)` runtime panics with
-//   TypeMismatch { expected: "closure", got: "non-pointer", op: "call_closure_sync" }
-//
-// Hypothesis: method-name `position` is registered in two distinct
-// signatures stdlib-wide — `Slice.position(&self, value: &T)` (value
-// form, slice.vr:211) and `Iterator.position<P>(&mut self, P)` (closure
-// form, iterator.vr:455). At call site `s.position(&v)`, the
-// monomorphiser binds to the Iterator default (which expects a closure
-// argument); at runtime the &v reference is unwrapped and dispatched
-// as if it were a closure, hitting the TypeMismatch in call_closure_sync.
-//
-// Architectural rule: when an inherent impl-block method on `[T]`
-// exists with the same name as an Iterator protocol default, the
-// inherent slice version MUST win at method resolution.  The same
-// defect closed in `core-tests/collections/list` long ago by renaming
-// the value-form to a distinct symbol (`list.rs` uses `position` (value)
-// and `position_by` (predicate)) — the slice surface needs the parallel
-// fix.
-@ignore
+// REGRESSION (§C.1): `slice.position(&value)` → CLOSED via rename.
+// The value-form was renamed to `index_of` to avoid the name
+// collision with the Iterator protocol's `position<P>(&mut self,
+// predicate: P)` (closure form).  Pre-rename, the typechecker
+// resolved the bare `position` call to Iterator's closure form,
+// then runtime panicked with `TypeMismatch { expected: "closure",
+// got: "non-pointer" }`.  Now active PASS-GUARD using the new name.
 @test
 fn regression_slice_position_misdispatches_to_iterator_predicate_form() {
     let xs: List<Int> = [10, 20, 30];
     let s: &[Int] = xs.as_slice();
-    let p: Maybe<Int> = s.position(&20);
+    let p: Maybe<Int> = s.index_of(&20);
     assert_eq(p, Some(1));
 }
 
-// REGRESSION (§C.2): same shape for `rposition(&value)`.
-@ignore
+// REGRESSION (§C.2): same shape for `rposition(&value)` —
+// renamed to `rindex_of`.
 @test
 fn regression_slice_rposition_misdispatches() {
     let xs: List<Int> = [10, 20, 30, 20];
     let s: &[Int] = xs.as_slice();
-    let p: Maybe<Int> = s.rposition(&20);
+    let p: Maybe<Int> = s.rindex_of(&20);
     assert_eq(p, Some(3));
 }
 
