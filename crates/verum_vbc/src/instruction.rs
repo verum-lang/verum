@@ -5260,6 +5260,39 @@ pub enum SystemSubOpcode {
     /// Frees resources associated with callback.
     FreeCallback = 0x51,
 
+    /// Static-mut backing-cell address — Task #26 [E2] enabler.
+    ///
+
+    /// Format: `dst:reg, slot_lo:u8, slot_hi:u8`
+    /// Returns: dst = stable u64 pointer to the process-wide cell backing
+    /// the `static mut` named by `slot` (the same id used by `TlsGet/TlsSet`).
+    ///
+
+    /// Codegen sibling of `StructFieldAddr`: the existing
+    /// `compile_cast::try_compile_struct_field_addr` handles `&recv.field
+    /// as *T`, this opcode is the bottom of the parallel
+    /// `try_compile_static_mut_addr` chain that handles `&STATIC_MUT as
+    /// *T`. Without it, `compile_cast` falls through to the generic
+    /// pass-through arm and returns a register-encoded CBGR-Ref
+    /// bit-pattern that `handle_atomic_store`'s `as_i64() as usize`
+    /// dereferences as a meaningless ~0xFFFFFFFD_FFFFFFFD garbage
+    /// address — every Tier-0 atomic op on a static mut SIGSEGVs.
+    ///
+
+    /// The runtime allocates a `Box<UnsafeCell<u64>>` on first dispatch
+    /// (lazy, keyed by `slot`) — Box's heap allocation gives a stable
+    /// process-wide address for the cell's lifetime. The cell starts at
+    /// zero; non-zero `static mut` initializers should write through
+    /// the cell via `DerefMutRaw` in the `__tls_init_<X>` ctor (follow-up).
+    ///
+
+    /// # Safety
+    /// The returned pointer is valid for the lifetime of the
+    /// `InterpreterState` and properly aligned for `u64`. Callers must
+    /// use it only for atomic / raw-pointer ops on bytes within the
+    /// 8-byte cell.
+    StaticMutAddr = 0x52,
+
     // ========================================================================
     // Raw Pointer Operations (0x60-0x6F)
     // ========================================================================
@@ -5953,6 +5986,7 @@ impl SystemSubOpcode {
             // Callback Support
             0x50 => Some(Self::CreateCallback),
             0x51 => Some(Self::FreeCallback),
+            0x52 => Some(Self::StaticMutAddr),
             // Raw Pointer Operations
             0x60 => Some(Self::DerefRaw),
             0x61 => Some(Self::DerefMutRaw),
@@ -6095,6 +6129,7 @@ impl SystemSubOpcode {
             // ===== Callback Support (0x50-0x5F) =====
             Self::CreateCallback         => m!("FFI_CREATE_CALLBACK",        CallbackSupport,          call=false, marshal=false, alloc=true,  dealloc=false),
             Self::FreeCallback           => m!("FFI_FREE_CALLBACK",          CallbackSupport,          call=false, marshal=false, alloc=false, dealloc=true),
+            Self::StaticMutAddr          => m!("FFI_STATIC_MUT_ADDR",        MemoryOperations,         call=false, marshal=false, alloc=true,  dealloc=false),
 
             // ===== Raw Pointer Operations (0x60-0x6F) =====
             Self::DerefRaw               => m!("FFI_DEREF_RAW",              RawPointerOperations,     call=false, marshal=false, alloc=false, dealloc=false),

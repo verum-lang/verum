@@ -775,6 +775,37 @@ pub(in super::super) fn handle_ffi_extended(
         }
 
         // ================================================================
+        // Static-Mut Backing Cell Address — Task #26 [E2] enabler.
+        // ================================================================
+        //
+        // Returns the stable byte address of the process-wide cell
+        // backing a `static mut X: T = init;` declaration.
+        //
+        // Format: dst:reg, slot_lo:u8, slot_hi:u8
+        // Returns: dst = Value::from_ptr(&self.static_mut_cells[slot])
+        //
+        // Sibling of `StructFieldAddr` (just above) — same architectural
+        // pattern: the cast `&STATIC_MUT as *T` lowers to this opcode,
+        // not the generic CBGR-Ref pass-through that produces a
+        // register-encoded bit-pattern.  Closes the
+        // `cap_audit_ring::enable()` SIGSEGV class where every Tier-0
+        // atomic op on a static mut dereferenced 0xfffffffdfffffffd
+        // because the bit-pattern decode in `handle_atomic_store` had
+        // no valid address to extract.
+        Some(SystemSubOpcode::StaticMutAddr) => {
+            let dst = read_reg(state)?;
+            let slot_lo = read_u8(state)? as u16;
+            let slot_hi = read_u8(state)? as u16;
+            let slot = (slot_hi << 8) | slot_lo;
+            // Lazy allocation — first read of any static-mut slot in
+            // this interpreter allocates a zero-initialised cell.
+            // Subsequent reads return the same stable address.
+            let cell_addr = state.static_mut_cell_addr(slot);
+            state.set_reg(dst, Value::from_ptr::<u8>(cell_addr));
+            Ok(DispatchResult::Continue)
+        }
+
+        // ================================================================
         // Struct Field Address (#37 — atomic-stdlib runtime enabler)
         // ================================================================
         Some(SystemSubOpcode::StructFieldAddr) => {
