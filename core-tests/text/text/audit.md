@@ -313,11 +313,73 @@ the `Int` direct return or the `count` alias).
   `obj.method()` MUST live in `dispatch_primitive_method`, NOT
   `try_intercept_text_static_runtime`.
 
-### Deferred — ranked by leverage (updated 2026-05-16, fourth pass)
+### Deferred — ranked by leverage (updated 2026-05-16, fifth pass)
 | # | Item | Estimated effort | Tests unblocked |
 |---|------|-----:|------:|
 | 1 | §D close — function-id collision (CallM migration OR global next_func_id) | multi-session | ~10 (§O included) |
-| 2 | §Y close — AOT typechecker mount-scoped name resolution for `ParseError` (cli vs text collision) | medium (verum_types/infer/modules) | 1 (unit_test::test_parse_error_eq_message under AOT) + unknown others |
+| 2 | §Y full close — propagate mount-scoped resolver to every probe site (see §Y section above) | medium | 1 active + unknown others |
+
+### §Y — AOT typechecker mount-scoped name resolution (PARTIAL CLOSE 2026-05-16)
+
+**Symptom**: in AOT mode, the bare struct literal
+`ParseError { message: "x" }` (after `mount core.text.{ParseError}`)
+fails with `field 'message' not found in type 'ParseError'` because
+the AOT typechecker resolves the bare name to
+`core.cli.error.ParseError` (5-field record) rather than the
+mount-scoped `core.text.text.ParseError` (1-field).  Works in
+interp because the bare-name slot in `type_defs` happens to be
+last-write-wins to the text variant under the interp loading
+order, but the AOT loading order produces the opposite slot value.
+
+**Root cause**: every name-resolution site in `verum_types` that
+probes `type_defs[<bare-name>]` (or `__struct_fields_<bare-name>`)
+is last-write-wins across stdlib modules.  When two modules
+export records with the same simple name, the user's mount
+provenance is dropped at the unqualified-key probe.
+
+**Partial fix (commit `7bece3ab1`)**: mount-scoped resolution
+funnel added at TWO levels:
+1. `crates/verum_types/src/infer/modules.rs::lookup_record_type`
+   now consults `imported_names` for the bare name, recovers the
+   source-module via `ModuleRegistry`, walks the `ExportTable` to
+   find the canonical owning module's path (handling re-export
+   hops), and probes the qualified `type_defs[<owning>.<name>]`
+   key before falling back to the bare slot.
+2. `process_import_tree`'s `MountTreeKind::Path` /
+   `MountTreeKind::Nested` arms now populate `imported_names`
+   for cross-file mounts (previously only the inline-module
+   path did this), so the resolver upstream sees a real source
+   provenance for every explicit user mount.
+
+**Remaining work (open in this audit)** — same mount-scoped
+funnel must be applied to **every other** unqualified-name probe
+in `verum_types/src/infer`:
+
+| Site | File | Why it matters |
+|---|---|---|
+| `check_record_expr` | `infer/expr.rs:1267` | The AOT pipeline's bidirectional-check path for record literals; the call that surfaces the §Y failure on `let a = ParseError { message: "x" };`. |
+| variant-vs-record disambiguator | `infer/expr.rs:8088-8156` | Decides whether `Foo { a, b }` is a record literal or a variant constructor based on a direct `__struct_fields_Foo` probe. |
+| field access on `Type::Named` | `infer/env.rs:1879-1916` | `obj.field` codegen route — same last-write-wins shape on the struct-fields probe. |
+| pattern destructure | `infer/patterns.rs:653, 3101` | Same probe shape in pattern matching. |
+
+The architectural pattern is fixed in `lookup_record_type` —
+each remaining site needs to replicate the same `imported_names →
+ModuleRegistry → ExportTable.source_module → qualified-key` chain,
+ideally factored into a single helper on `Infer` (e.g.
+`fn lookup_record_mount_scoped(&self, name: &str) -> Option<&Type>`)
+and threaded through every probe site.  Once that helper exists,
+the `type_defs[<bare-name>]` shape becomes a strict fallback for
+non-mounted names and last-write-wins is no longer reachable for
+explicitly-mounted types.
+
+**Workaround until full close**: replace bare struct literals
+with the type's named constructor where one exists
+(`ParseError.new(&"x")` instead of `ParseError { message: "x" }`).
+The constructor is a regular function bound at the per-module
+qualified env layer and is unaffected by the bare-name shadow.
+The `test_parse_error_eq_message` test in
+`core-tests/text/text/unit_test.vr` uses this workaround with
+an in-line comment pointing back to this audit section.
 
 Closed since the previous pass:
 - §B — Char.encode_utf8 CallM intercept (2026-05-16).
