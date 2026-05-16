@@ -1,0 +1,34 @@
+// =============================================================================
+// core-tests/mem/hazard/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.mem.hazard`.
+//
+//   §A  HAZARD_POINTERS_PER_THREAD = 8 (power of 2 for efficient mod)
+//   §B  RETIRED_THRESHOLD = 64 (amortises scan cost over reclamation)
+//   §C  MAX_THREADS = 256 (typical thread cap for the hazard table)
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.hazard.{
+    HAZARD_POINTERS_PER_THREAD, RETIRED_THRESHOLD, MAX_THREADS,
+};
+
+@test
+fn regression_hazards_per_thread_pinned_at_8() {
+    assert_eq(HAZARD_POINTERS_PER_THREAD, 8);
+}
+
+@test
+fn regression_retired_threshold_pinned_at_64() {
+    assert_eq(RETIRED_THRESHOLD, 64);
+}
+
+@test
+fn regression_max_threads_pinned_at_256() {
+    assert_eq(MAX_THREADS, 256);
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

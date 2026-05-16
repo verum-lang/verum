@@ -1,0 +1,89 @@
+// =============================================================================
+// core-tests/mem/heap/unit_test.vr
+// =============================================================================
+//
+// Per-API tests for `core.mem.heap` — thread-local heap with lock-free
+// fast path.  Tests pin constants + the read-only `get_heap_stats`
+// surface; live `heap_alloc` / `heap_free` round-trip is covered in
+// `core-tests/base/memory/cbgr_test.vr`.
+//
+// Companion files:
+//   property_test.vr     — constant relationships
+//   integration_test.vr  — composition with allocator constants
+//   regression_test.vr   — pinned defects
+//   audit.md             — drift surfaces & action items
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.heap.{
+    DIRECT_LOOKUP_SIZE, PAGE_HEADER_SIZE,
+    PAGE_FLAG_IN_FULL_QUEUE, PAGE_FLAG_HAS_ALIGNED, PAGE_FLAG_ZERO_INIT,
+    HeapStats, HeapError,
+    get_heap_stats,
+};
+
+// =============================================================================
+// Section 1: Heap constants
+// =============================================================================
+
+@test
+fn test_direct_lookup_size_is_129() {
+    // Direct lookup covers wsize 0..128 (129 entries).
+    assert_eq(DIRECT_LOOKUP_SIZE, 129);
+}
+
+@test
+fn test_page_header_size_is_128() {
+    // 128-byte page header — cache line aligned for the heap.vr
+    // `HeapPageHeader` record.
+    assert_eq(PAGE_HEADER_SIZE, 128);
+}
+
+@test
+fn test_page_flag_in_full_queue() {
+    assert_eq(PAGE_FLAG_IN_FULL_QUEUE, 0x0001 as UInt16);
+}
+
+@test
+fn test_page_flag_has_aligned() {
+    assert_eq(PAGE_FLAG_HAS_ALIGNED, 0x0002 as UInt16);
+}
+
+@test
+fn test_page_flag_zero_init() {
+    assert_eq(PAGE_FLAG_ZERO_INIT, 0x0004 as UInt16);
+}
+
+@test
+fn test_page_flags_pairwise_distinct() {
+    let flags: List<UInt16> = [
+        PAGE_FLAG_IN_FULL_QUEUE,
+        PAGE_FLAG_HAS_ALIGNED,
+        PAGE_FLAG_ZERO_INIT,
+    ];
+    for i in 0..flags.len() {
+        for j in 0..flags.len() {
+            if i != j {
+                assert((flags[i] & flags[j]) == 0 as UInt16);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Section 2: get_heap_stats — read-only stats surface
+// =============================================================================
+
+@test
+fn test_get_heap_stats_returns_value() {
+    let _stats: HeapStats = get_heap_stats();
+    assert(true);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

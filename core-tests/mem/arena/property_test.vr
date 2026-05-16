@@ -1,0 +1,40 @@
+// =============================================================================
+// core-tests/mem/arena/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.mem.arena` — constant relationships.
+//   §A  DEFAULT_ARENA_CAPACITY < MAX_ARENA_CAPACITY
+//   §B  ARENA_ALIGNMENT is a power of 2
+//   §C  DEFAULT_ARENA_CAPACITY is a multiple of ARENA_ALIGNMENT
+//   §D  MAX_ARENA_CAPACITY is a multiple of ARENA_ALIGNMENT
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.arena.{
+    DEFAULT_ARENA_CAPACITY, MAX_ARENA_CAPACITY, ARENA_ALIGNMENT,
+};
+
+@test
+fn law_default_less_than_max() {
+    assert(DEFAULT_ARENA_CAPACITY < MAX_ARENA_CAPACITY);
+}
+
+@test
+fn law_arena_alignment_power_of_two() {
+    assert(ARENA_ALIGNMENT > 0);
+    assert((ARENA_ALIGNMENT & (ARENA_ALIGNMENT - 1)) == 0);
+}
+
+@test
+fn law_default_capacity_aligned() {
+    assert_eq(DEFAULT_ARENA_CAPACITY % ARENA_ALIGNMENT, 0);
+}
+
+@test
+fn law_max_capacity_aligned() {
+    assert_eq(MAX_ARENA_CAPACITY % ARENA_ALIGNMENT, 0);
+}
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
