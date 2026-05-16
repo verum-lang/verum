@@ -1,0 +1,179 @@
+// =============================================================================
+// core-tests/collections/multiset/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for Multiset<T>, following Knuth (TAOCP §4.6.3) and the
+// unique-extension property of (ℕ, +, max, min).
+//
+// Per-element semantics:
+//   union(A, B):        max(count_A, count_B)
+//   intersection(A,B):  min(count_A, count_B)
+//   sum(A, B):          count_A + count_B
+//   difference(A, B):   max(0, count_A - count_B)
+//
+// Identities pinned:
+//   * cardinality coherence: cardinality == Σ count(k) for k ∈ support
+//   * insert/remove inverse on a count-1 binding
+//   * remove_all idempotent
+//   * insert_n(_, 0) is a no-op
+//   * remove_n saturation: remove_n(x, k) where k > count(x) → count(x) = 0
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.multiset.Multiset;
+
+// =============================================================================
+// Law: cardinality coherence after sequences of insertions/removals
+// =============================================================================
+
+@test
+fn law_multiset_cardinality_matches_count_sum() {
+    let mut m: Multiset<Int> = Multiset.new();
+    m.insert_n(1, 5);
+    m.insert_n(2, 3);
+    m.insert_n(3, 7);
+    let sum_check = m.count(&1) + m.count(&2) + m.count(&3);
+    assert_eq(m.cardinality(), sum_check);
+    assert_eq(m.cardinality(), 15);
+    assert_eq(m.distinct_len(), 3);
+}
+
+// =============================================================================
+// Law: insert_n(_, 0) is a no-op (returns existing count, no state change)
+// =============================================================================
+
+@test
+fn law_multiset_insert_n_zero_no_op() {
+    let mut m: Multiset<Int> = Multiset.new();
+    m.insert_n(7, 3);
+    let before = m.cardinality();
+    let r = m.insert_n(7, 0);
+    assert_eq(r, 3);
+    assert_eq(m.cardinality(), before);
+}
+
+// =============================================================================
+// Law: insert and remove inverse on a count-1 binding
+// =============================================================================
+
+@test
+fn law_multiset_insert_remove_inverse() {
+    let mut m: Multiset<Int> = Multiset.new();
+    m.insert(42);
+    assert_eq(m.count(&42), 1);
+    let r = m.remove(&42);
+    assert_eq(r, 0);
+    assert(!m.contains(&42));
+}
+
+// =============================================================================
+// Law: remove_all idempotent
+// =============================================================================
+
+@test
+fn law_multiset_remove_all_idempotent() {
+    let mut m: Multiset<Int> = Multiset.new();
+    m.insert_n(7, 5);
+    let r1 = m.remove_all(&7);
+    let r2 = m.remove_all(&7);
+    assert_eq(r1, 5);
+    assert_eq(r2, 0);
+    assert(!m.contains(&7));
+}
+
+// =============================================================================
+// Law: remove_n saturates at zero
+// =============================================================================
+
+@test
+fn law_multiset_remove_n_saturates() {
+    let mut m: Multiset<Int> = Multiset.new();
+    m.insert_n(7, 3);
+    let r = m.remove_n(&7, 99);
+    assert_eq(r, 0);
+    assert(!m.contains(&7));
+    assert_eq(m.count(&7), 0);
+}
+
+// =============================================================================
+// Law: clear restores to identity state
+// =============================================================================
+
+@test
+fn law_multiset_clear_zeroes_everything() {
+    let mut m: Multiset<Int> = Multiset.new();
+    m.insert_n(1, 3);
+    m.insert_n(2, 4);
+    m.insert_n(3, 5);
+    m.clear();
+    assert(m.is_empty());
+    assert_eq(m.distinct_len(), 0);
+    assert_eq(m.cardinality(), 0);
+}
+
+// =============================================================================
+// Law: distinct_len reflects support set, not cardinality
+// =============================================================================
+
+@test
+fn law_multiset_distinct_len_independent_of_multiplicity() {
+    let mut m: Multiset<Int> = Multiset.new();
+    m.insert_n(1, 1);
+    m.insert_n(2, 1000);
+    m.insert_n(3, 1);
+    assert_eq(m.distinct_len(), 3);
+    assert_eq(m.cardinality(), 1002);
+}
+
+// =============================================================================
+// Law: count is 0 iff !contains
+// =============================================================================
+
+@test
+fn law_multiset_count_zero_iff_not_contains() {
+    let mut m: Multiset<Int> = Multiset.new();
+    m.insert_n(1, 2);
+    m.insert_n(2, 3);
+
+    assert(m.contains(&1));
+    assert(m.count(&1) > 0);
+
+    assert(!m.contains(&999));
+    assert_eq(m.count(&999), 0);
+}
+
+// =============================================================================
+// Law: insert is just insert_n with n=1 (relation between methods)
+// =============================================================================
+
+@test
+fn law_multiset_insert_eq_insert_n_one() {
+    let mut a: Multiset<Int> = Multiset.new();
+    let mut b: Multiset<Int> = Multiset.new();
+    a.insert(7);
+    b.insert_n(7, 1);
+    assert_eq(a.cardinality(), b.cardinality());
+    assert_eq(a.count(&7), b.count(&7));
+}
+
+// =============================================================================
+// Law: cardinality is non-negative and monotone under insert
+// =============================================================================
+
+@test
+fn law_multiset_cardinality_monotone_under_insert() {
+    let mut m: Multiset<Int> = Multiset.new();
+    let c0 = m.cardinality();
+    m.insert(1);
+    let c1 = m.cardinality();
+    m.insert(1);
+    let c2 = m.cardinality();
+    m.insert(2);
+    let c3 = m.cardinality();
+
+    assert(c0 <= c1);
+    assert(c1 <= c2);
+    assert(c2 <= c3);
+    assert_eq(c0, 0);
+    assert_eq(c3, 3);
+}

@@ -1,0 +1,196 @@
+// =============================================================================
+// core-tests/collections/multiset/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect.  Each entry names the defect; @ignore'd
+// pins reproduce the failing shape without blocking the green suite.
+// Tracked in audit.md §3-§4.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.multiset.Multiset;
+
+// =============================================================================
+// §A — Multiset.from / from_counts cross-module name resolution
+// =============================================================================
+
+// REGRESSION (§A.1): `Multiset.from([...])` raises
+//   CodegenError::UndefinedFunction("Multiset.from")
+// at every user-side call site despite the body compiling cleanly
+// inside the stdlib.  Same shape as the closed task #24/#25/#26
+// cross-module Call name-table cascade — `from` is a constructor
+// not picked up by the user-side function-id remap.
+//
+// Workaround: build via `Multiset.new()` + insertion loop.
+@ignore
+@test
+fn regression_multiset_from_array_literal_undefined() {
+    let m: Multiset<Int> = Multiset.from([1, 2, 2, 3, 3, 3]);
+    assert_eq(m.distinct_len(), 3);
+    assert_eq(m.cardinality(), 6);
+}
+
+// REGRESSION (§A.2): same shape for `Multiset.from_counts([(k, v), ...])`.
+@ignore
+@test
+fn regression_multiset_from_counts_undefined() {
+    let m: Multiset<Int> = Multiset.from_counts([(1, 1), (2, 2), (3, 3)]);
+    assert_eq(m.distinct_len(), 3);
+    assert_eq(m.cardinality(), 6);
+    assert_eq(m.count(&2), 2);
+    assert_eq(m.count(&3), 3);
+}
+
+// =============================================================================
+// §B — Multiset.iter() yields no elements
+//
+// Every algebraic operation (union / intersection / sum / difference)
+// uses the `let mut iter = other.iter(); while let Some((k,v)) =
+// iter.next()` pattern.  At runtime the loop body never runs — the
+// iter is empty on the first call.  `is_subset` follows the same
+// pattern but the with-empty / cardinality early-exit makes its
+// surface pass tests "accidentally" (no loop body required when
+// `self.cardinality > other.cardinality` triggers the early exit).
+//
+// Root cause: `Multiset.iter()` wraps `Map.iter()`; the Map-side
+// iterator dispatch hits a similar class of defect as the slice
+// Chunks/Windows iter (see core-tests/collections/slice §D).
+// Wrapper-type iterators inherit the `Map` runtime kind, and
+// CallM("next", iter) dispatches against Map's method table, where
+// `next` is not present.
+//
+// Fix path: same as slice §A close-out (codegen-side static
+// dispatch when receiver's static type carries an Iterator impl).
+@ignore
+@test
+fn regression_multiset_union_per_element_max() {
+    let mut a: Multiset<Int> = Multiset.new();
+    a.insert_n(1, 2);
+    a.insert_n(2, 5);
+
+    let mut b: Multiset<Int> = Multiset.new();
+    b.insert_n(1, 4);
+    b.insert_n(3, 1);
+
+    let u: Multiset<Int> = a.union(&b);
+    assert_eq(u.count(&1), 4);   // max(2, 4)
+    assert_eq(u.count(&2), 5);
+    assert_eq(u.count(&3), 1);
+    assert_eq(u.cardinality(), 10);
+}
+
+@ignore
+@test
+fn regression_multiset_intersection_per_element_min() {
+    let mut a: Multiset<Int> = Multiset.new();
+    a.insert_n(1, 2);
+    a.insert_n(2, 5);
+
+    let mut b: Multiset<Int> = Multiset.new();
+    b.insert_n(1, 4);
+    b.insert_n(2, 1);
+
+    let i: Multiset<Int> = a.intersection(&b);
+    assert_eq(i.count(&1), 2);   // min(2, 4)
+    assert_eq(i.count(&2), 1);   // min(5, 1)
+    assert_eq(i.cardinality(), 3);
+}
+
+@ignore
+@test
+fn regression_multiset_sum_per_element_addition() {
+    let mut a: Multiset<Int> = Multiset.new();
+    a.insert_n(1, 2);
+    a.insert_n(2, 3);
+
+    let mut b: Multiset<Int> = Multiset.new();
+    b.insert_n(1, 4);
+    b.insert_n(3, 5);
+
+    let s: Multiset<Int> = a.sum(&b);
+    assert_eq(s.count(&1), 6);
+    assert_eq(s.count(&2), 3);
+    assert_eq(s.count(&3), 5);
+    assert_eq(s.cardinality(), 14);
+}
+
+@ignore
+@test
+fn regression_multiset_difference_per_element_saturating() {
+    let mut a: Multiset<Int> = Multiset.new();
+    a.insert_n(1, 5);
+    a.insert_n(2, 3);
+
+    let mut b: Multiset<Int> = Multiset.new();
+    b.insert_n(1, 2);
+    b.insert_n(2, 5);
+
+    let d: Multiset<Int> = a.difference(&b);
+    assert_eq(d.count(&1), 3);   // max(0, 5-2)
+    assert_eq(d.count(&2), 0);
+    assert_eq(d.cardinality(), 3);
+}
+
+@ignore
+@test
+fn regression_multiset_iter_yields_elements() {
+    let mut m: Multiset<Int> = Multiset.new();
+    m.insert_n(1, 3);
+    m.insert_n(2, 5);
+    let mut iter = m.iter();
+    let mut total_visited = 0;
+    while let Some((_k, _v)) = iter.next() {
+        total_visited = total_visited + 1;
+    }
+    // 2 distinct elements MUST be visited.
+    assert_eq(total_visited, 2);
+}
+
+// =============================================================================
+// §F — PASS-GUARD pins for the working surface
+//
+// These are not @ignore'd — they exist to detect regressions in the
+// surface we currently rely on.  Any future change to multiset.vr
+// MUST keep these green.
+// =============================================================================
+
+@test
+fn pass_guard_multiset_new_is_empty() {
+    let m: Multiset<Int> = Multiset.new();
+    assert(m.is_empty());
+    assert_eq(m.distinct_len(), 0);
+    assert_eq(m.cardinality(), 0);
+}
+
+@test
+fn pass_guard_multiset_insert_remove_roundtrip() {
+    let mut m: Multiset<Int> = Multiset.new();
+    m.insert_n(7, 5);
+    assert_eq(m.count(&7), 5);
+    let r = m.remove_n(&7, 5);
+    assert_eq(r, 0);
+    assert(!m.contains(&7));
+}
+
+@test
+fn pass_guard_multiset_two_counter_invariant() {
+    let mut m: Multiset<Int> = Multiset.new();
+    m.insert_n(1, 3);
+    m.insert_n(2, 5);
+    m.insert_n(3, 7);
+    // Invariant: cardinality == Σ count(k) over distinct keys.
+    assert_eq(m.cardinality(),
+              m.count(&1) + m.count(&2) + m.count(&3));
+    assert_eq(m.distinct_len(), 3);
+}
+
+@test
+fn pass_guard_multiset_clear_restores_state() {
+    let mut m: Multiset<Int> = Multiset.new();
+    m.insert_n(1, 100);
+    m.insert_n(2, 200);
+    m.clear();
+    assert(m.is_empty());
+    assert_eq(m.cardinality(), 0);
+    assert_eq(m.distinct_len(), 0);
+}
