@@ -265,7 +265,7 @@ public fn assert_contains<T: Eq>(list: &List<T>, needle: &T, msg: Text = "assert
 
 /// Implemented via the `catch_unwind` intrinsic — panics that escape
 /// `f` are captured; normal returns fail the assertion.
-public fn assert_panics<T>(f: fn() -> T, msg: Text = "assertion failed: expected panic, function returned normally") {
+public fn assert_panics(f: fn() -> Unit, msg: Text = "assertion failed: expected panic, function returned normally") {
     match catch_unwind(f) {
         Ok(_) => panic(msg),
         Err(_) => {},
