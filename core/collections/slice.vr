@@ -207,29 +207,44 @@ implement<T> [T] {
         false
     }
 
-    /// Find first index of element.
-    fn position(&self, value: &T) -> Maybe<Int>
+    /// Find first index of element matching `value` (by value-equality).
+    ///
+
+    /// IMPLEMENTATION NOTE: named `index_of` (not `position`) to avoid
+    /// name collision with the Iterator protocol's `position<P>(&mut
+    /// self, predicate: P) -> Maybe<Int>` (closure form).  When both
+    /// methods share the same simple name, the typechecker may resolve
+    /// `slice.position(&value)` to Iterator's predicate form, then
+    /// runtime panics with `TypeMismatch { expected: "closure", got:
+    /// "non-pointer" }` because `&value` is dispatched as if it were a
+    /// closure.  Mirror this naming on `rindex_of`.  Pinned in
+    /// `core-tests/collections/slice/regression_test.vr` §C.
+    fn index_of(&self, value: &T) -> Maybe<Int>
     where T: Eq
     {
         for i in range(0, self.len()) {
-            let item: &T = &self[i];
-            if *item == *value {
-                return Some(i);
+            match self.get(i) {
+                Some(item) => {
+                    if *item == *value { return Some(i); }
+                },
+                None => return None,
             }
         }
         None
     }
 
-    /// Find last index of element.
-    fn rposition(&self, value: &T) -> Maybe<Int>
+    /// Find last index of element matching `value`.
+    fn rindex_of(&self, value: &T) -> Maybe<Int>
     where T: Eq
     {
         let mut i = self.len();
         while i > 0 {
             i = i - 1;
-            let item: &T = &self[i];
-            if *item == *value {
-                return Some(i);
+            match self.get(i) {
+                Some(item) => {
+                    if *item == *value { return Some(i); }
+                },
+                None => return None,
             }
         }
         None
