@@ -1,0 +1,491 @@
+// =============================================================================
+// core-tests/mem/capability/unit_test.vr
+// =============================================================================
+//
+// Per-API tests for `core.mem.capability` — the most fundamental layer of the
+// CBGR memory-safety system. Pure UInt16 bit-flag operations with no
+// allocator dependency.
+//
+// Companion files:
+//   property_test.vr     — algebraic laws over the 8-bit capability lattice
+//   integration_test.vr  — capability composition with epoch packing
+//   regression_test.vr   — pinned defects (e.g. monotonic attenuation)
+//   audit.md             — drift surfaces & action items
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.capability.{
+    Capability,
+    Read, Write, Execute, Delegate, Revoke, Borrowed, Mutable, NoEscape,
+    CAP_READ, CAP_WRITE, CAP_EXECUTE, CAP_DELEGATE, CAP_REVOKE,
+    CAP_BORROWED, CAP_MUTABLE, CAP_NO_ESCAPE,
+    CAP_ALL, CAP_READ_ONLY, CAP_READ_WRITE, CAP_OWNED,
+    CAP_BORROW_SHARED, CAP_BORROW_MUT, CAP_EXECUTABLE,
+    has_capability, has_all_capabilities,
+    attenuate, remove_capability,
+    can_delegate, can_revoke, is_borrowed, can_mutate, can_execute,
+    delegate_capability, revoke_capability,
+    owned_capabilities, shared_borrow_capabilities, mutable_borrow_capabilities,
+    validate_read, validate_write, validate_execute,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+};
+
+// =============================================================================
+// Section 1: Capability flag bit positions
+// =============================================================================
+
+@test
+fn test_cap_read_is_bit_zero() {
+    assert_eq(CAP_READ, 1 as UInt16);
+}
+
+@test
+fn test_cap_write_is_bit_one() {
+    assert_eq(CAP_WRITE, 2 as UInt16);
+}
+
+@test
+fn test_cap_execute_is_bit_two() {
+    assert_eq(CAP_EXECUTE, 4 as UInt16);
+}
+
+@test
+fn test_cap_delegate_is_bit_three() {
+    assert_eq(CAP_DELEGATE, 8 as UInt16);
+}
+
+@test
+fn test_cap_revoke_is_bit_four() {
+    assert_eq(CAP_REVOKE, 16 as UInt16);
+}
+
+@test
+fn test_cap_borrowed_is_bit_five() {
+    assert_eq(CAP_BORROWED, 32 as UInt16);
+}
+
+@test
+fn test_cap_mutable_is_bit_six() {
+    assert_eq(CAP_MUTABLE, 64 as UInt16);
+}
+
+@test
+fn test_cap_no_escape_is_bit_seven() {
+    assert_eq(CAP_NO_ESCAPE, 128 as UInt16);
+}
+
+@test
+fn test_all_caps_are_pairwise_distinct() {
+    // 8 single-bit flags MUST be pairwise distinct — any collision is a
+    // soundness incident because two semantic capabilities would share a
+    // bit, making attenuation lose information.
+    let bits: List<UInt16> = [
+        CAP_READ, CAP_WRITE, CAP_EXECUTE, CAP_DELEGATE,
+        CAP_REVOKE, CAP_BORROWED, CAP_MUTABLE, CAP_NO_ESCAPE,
+    ];
+    for i in 0..8 {
+        for j in 0..8 {
+            if i != j {
+                assert((bits[i] & bits[j]) == 0 as UInt16);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Section 2: Capability presets
+// =============================================================================
+
+@test
+fn test_cap_all_is_low_byte_mask() {
+    assert_eq(CAP_ALL, 0x00FF as UInt16);
+}
+
+@test
+fn test_cap_read_only_is_just_read() {
+    assert_eq(CAP_READ_ONLY, CAP_READ);
+}
+
+@test
+fn test_cap_read_write_is_read_or_write() {
+    assert_eq(CAP_READ_WRITE, CAP_READ | CAP_WRITE);
+}
+
+@test
+fn test_cap_owned_includes_mutation_set() {
+    let expected: UInt16 = CAP_READ | CAP_WRITE | CAP_DELEGATE | CAP_REVOKE | CAP_MUTABLE;
+    assert_eq(CAP_OWNED, expected);
+}
+
+@test
+fn test_cap_borrow_shared_is_read_and_borrowed() {
+    assert_eq(CAP_BORROW_SHARED, CAP_READ | CAP_BORROWED);
+}
+
+@test
+fn test_cap_borrow_mut_includes_mutation() {
+    let expected: UInt16 = CAP_READ | CAP_WRITE | CAP_BORROWED | CAP_MUTABLE;
+    assert_eq(CAP_BORROW_MUT, expected);
+}
+
+@test
+fn test_cap_executable_is_read_and_execute() {
+    assert_eq(CAP_EXECUTABLE, CAP_READ | CAP_EXECUTE);
+}
+
+// =============================================================================
+// Section 3: has_capability / has_all_capabilities
+// =============================================================================
+
+@test
+fn test_has_capability_present_returns_true() {
+    let flags: UInt16 = CAP_READ | CAP_WRITE;
+    assert(has_capability(flags, CAP_READ));
+    assert(has_capability(flags, CAP_WRITE));
+}
+
+@test
+fn test_has_capability_absent_returns_false() {
+    let flags: UInt16 = CAP_READ;
+    assert(!has_capability(flags, CAP_WRITE));
+}
+
+@test
+fn test_has_capability_empty_flags_returns_false_for_any() {
+    let flags: UInt16 = 0 as UInt16;
+    assert(!has_capability(flags, CAP_READ));
+    assert(!has_capability(flags, CAP_WRITE));
+    assert(!has_capability(flags, CAP_EXECUTE));
+}
+
+@test
+fn test_has_all_capabilities_subset_returns_true() {
+    let flags: UInt16 = CAP_READ | CAP_WRITE | CAP_EXECUTE;
+    assert(has_all_capabilities(flags, CAP_READ));
+    assert(has_all_capabilities(flags, CAP_READ | CAP_WRITE));
+    assert(has_all_capabilities(flags, flags));
+}
+
+@test
+fn test_has_all_capabilities_superset_returns_false() {
+    let flags: UInt16 = CAP_READ;
+    assert(!has_all_capabilities(flags, CAP_READ | CAP_WRITE));
+}
+
+// =============================================================================
+// Section 4: attenuate / remove_capability
+// =============================================================================
+
+@test
+fn test_attenuate_with_full_mask_is_identity() {
+    let flags: UInt16 = CAP_OWNED;
+    assert_eq(attenuate(flags, CAP_ALL), flags);
+}
+
+@test
+fn test_attenuate_with_zero_mask_strips_all() {
+    let flags: UInt16 = CAP_OWNED;
+    assert_eq(attenuate(flags, 0 as UInt16), 0 as UInt16);
+}
+
+@test
+fn test_attenuate_to_read_only_keeps_only_read() {
+    let flags: UInt16 = CAP_OWNED;
+    assert_eq(attenuate(flags, CAP_READ), CAP_READ);
+}
+
+@test
+fn test_remove_capability_strips_named_bit() {
+    let flags: UInt16 = CAP_READ | CAP_WRITE;
+    assert_eq(remove_capability(flags, CAP_WRITE), CAP_READ);
+}
+
+@test
+fn test_remove_capability_absent_bit_is_noop() {
+    let flags: UInt16 = CAP_READ;
+    assert_eq(remove_capability(flags, CAP_WRITE), CAP_READ);
+}
+
+// =============================================================================
+// Section 5: can_delegate / can_revoke / is_borrowed / can_mutate / can_execute
+// =============================================================================
+
+@test
+fn test_can_delegate_true_when_delegate_bit_set() {
+    assert(can_delegate(CAP_DELEGATE));
+    assert(can_delegate(CAP_OWNED));
+}
+
+@test
+fn test_can_delegate_false_when_unset() {
+    assert(!can_delegate(CAP_READ));
+    assert(!can_delegate(0 as UInt16));
+}
+
+@test
+fn test_can_revoke_true_when_revoke_bit_set() {
+    assert(can_revoke(CAP_REVOKE));
+    assert(can_revoke(CAP_OWNED));
+}
+
+@test
+fn test_can_revoke_false_when_unset() {
+    assert(!can_revoke(CAP_READ_WRITE));
+}
+
+@test
+fn test_is_borrowed_true_for_borrow_presets() {
+    assert(is_borrowed(CAP_BORROW_SHARED));
+    assert(is_borrowed(CAP_BORROW_MUT));
+}
+
+@test
+fn test_is_borrowed_false_for_owned() {
+    assert(!is_borrowed(CAP_OWNED));
+}
+
+@test
+fn test_can_mutate_requires_both_write_and_mutable() {
+    // Both bits set → true
+    assert(can_mutate(CAP_WRITE | CAP_MUTABLE));
+    // Only one bit set → false (must be conjunctive)
+    assert(!can_mutate(CAP_WRITE));
+    assert(!can_mutate(CAP_MUTABLE));
+}
+
+@test
+fn test_can_execute_only_needs_execute_bit() {
+    assert(can_execute(CAP_EXECUTE));
+    assert(can_execute(CAP_EXECUTABLE));
+    assert(!can_execute(CAP_READ));
+}
+
+// =============================================================================
+// Section 6: delegate_capability — monotonic attenuation
+// =============================================================================
+
+@test
+fn test_delegate_returns_none_without_delegate_bit() {
+    let parent: UInt16 = CAP_READ_WRITE;   // no CAP_DELEGATE
+    let req: UInt16 = CAP_READ;
+    let r = delegate_capability(parent, req);
+    assert(r.is_none());
+}
+
+@test
+fn test_delegate_returns_none_for_request_exceeding_parent() {
+    let parent: UInt16 = CAP_READ | CAP_DELEGATE;
+    let req: UInt16 = CAP_READ | CAP_WRITE;   // parent has no write
+    let r = delegate_capability(parent, req);
+    assert(r.is_none());
+}
+
+@test
+fn test_delegate_returns_request_when_subset_of_parent() {
+    let parent: UInt16 = CAP_OWNED;
+    let req: UInt16 = CAP_READ;
+    let r = delegate_capability(parent, req);
+    assert_eq(r.unwrap(), req);
+}
+
+@test
+fn test_delegate_identity_returns_parent() {
+    let parent: UInt16 = CAP_OWNED;
+    let r = delegate_capability(parent, parent);
+    assert_eq(r.unwrap(), parent);
+}
+
+// =============================================================================
+// Section 7: revoke_capability
+// =============================================================================
+
+@test
+fn test_revoke_returns_none_without_revoke_bit() {
+    let caps: UInt16 = CAP_READ_WRITE;   // no CAP_REVOKE
+    let r = revoke_capability(caps, CAP_WRITE);
+    assert(r.is_none());
+}
+
+@test
+fn test_revoke_strips_named_bits() {
+    let caps: UInt16 = CAP_OWNED;        // has CAP_REVOKE
+    let r = revoke_capability(caps, CAP_WRITE);
+    assert(r.unwrap() & CAP_WRITE == 0 as UInt16);
+    // Other bits preserved
+    assert(r.unwrap() & CAP_READ == CAP_READ);
+}
+
+@test
+fn test_revoke_all_yields_empty() {
+    let caps: UInt16 = CAP_OWNED;
+    let r = revoke_capability(caps, CAP_ALL);
+    assert_eq(r.unwrap(), 0 as UInt16);
+}
+
+// =============================================================================
+// Section 8: Preset constructors
+// =============================================================================
+
+@test
+fn test_owned_capabilities_matches_const() {
+    assert_eq(owned_capabilities(), CAP_OWNED);
+}
+
+@test
+fn test_shared_borrow_capabilities_matches_const() {
+    assert_eq(shared_borrow_capabilities(), CAP_BORROW_SHARED);
+}
+
+@test
+fn test_mutable_borrow_capabilities_matches_const() {
+    assert_eq(mutable_borrow_capabilities(), CAP_BORROW_MUT);
+}
+
+// =============================================================================
+// Section 9: validate_read / validate_write / validate_execute
+// =============================================================================
+
+@test
+fn test_validate_read_requires_read_bit() {
+    assert(validate_read(CAP_READ));
+    assert(validate_read(CAP_OWNED));
+    assert(!validate_read(CAP_WRITE));   // write alone without read → no read
+}
+
+@test
+fn test_validate_write_requires_write_and_mutable() {
+    assert(validate_write(CAP_WRITE | CAP_MUTABLE));
+    assert(validate_write(CAP_OWNED));
+    assert(!validate_write(CAP_WRITE));    // missing CAP_MUTABLE
+    assert(!validate_write(CAP_MUTABLE));  // missing CAP_WRITE
+}
+
+@test
+fn test_validate_execute_requires_execute_bit() {
+    assert(validate_execute(CAP_EXECUTE));
+    assert(validate_execute(CAP_EXECUTABLE));
+    assert(!validate_execute(CAP_READ));
+}
+
+// =============================================================================
+// Section 10: pack_epoch_caps / unpack_epoch / unpack_caps
+// =============================================================================
+
+@test
+fn test_pack_and_unpack_round_trip_zero() {
+    let packed = pack_epoch_caps(0 as UInt16, 0 as UInt16);
+    assert_eq(unpack_epoch(packed), 0 as UInt16);
+    assert_eq(unpack_caps(packed), 0 as UInt16);
+}
+
+@test
+fn test_pack_and_unpack_round_trip_max() {
+    let packed = pack_epoch_caps(0xFFFF as UInt16, 0xFFFF as UInt16);
+    assert_eq(unpack_epoch(packed), 0xFFFF as UInt16);
+    assert_eq(unpack_caps(packed), 0xFFFF as UInt16);
+}
+
+@test
+fn test_pack_caps_in_upper_16_bits() {
+    let packed = pack_epoch_caps(0 as UInt16, 0xABCD as UInt16);
+    assert_eq(packed, 0xABCD0000 as UInt32);
+}
+
+@test
+fn test_pack_epoch_in_lower_16_bits() {
+    let packed = pack_epoch_caps(0x1234 as UInt16, 0 as UInt16);
+    assert_eq(packed, 0x00001234 as UInt32);
+}
+
+@test
+fn test_pack_distinct_epoch_and_caps_extract_distinctly() {
+    let packed = pack_epoch_caps(0x1234 as UInt16, 0xABCD as UInt16);
+    assert_eq(unpack_epoch(packed), 0x1234 as UInt16);
+    assert_eq(unpack_caps(packed), 0xABCD as UInt16);
+}
+
+// =============================================================================
+// Section 11: Capability type — to_bit + is_present
+// =============================================================================
+
+@test
+fn test_capability_to_bit_matches_constant_read() {
+    let c: Capability = Read;
+    assert_eq(c.to_bit(), CAP_READ);
+}
+
+@test
+fn test_capability_to_bit_matches_constant_write() {
+    let c: Capability = Write;
+    assert_eq(c.to_bit(), CAP_WRITE);
+}
+
+@test
+fn test_capability_to_bit_matches_constant_execute() {
+    let c: Capability = Execute;
+    assert_eq(c.to_bit(), CAP_EXECUTE);
+}
+
+@test
+fn test_capability_to_bit_matches_constant_delegate() {
+    let c: Capability = Delegate;
+    assert_eq(c.to_bit(), CAP_DELEGATE);
+}
+
+@test
+fn test_capability_to_bit_matches_constant_revoke() {
+    let c: Capability = Revoke;
+    assert_eq(c.to_bit(), CAP_REVOKE);
+}
+
+@test
+fn test_capability_to_bit_matches_constant_borrowed() {
+    let c: Capability = Borrowed;
+    assert_eq(c.to_bit(), CAP_BORROWED);
+}
+
+@test
+fn test_capability_to_bit_matches_constant_mutable() {
+    let c: Capability = Mutable;
+    assert_eq(c.to_bit(), CAP_MUTABLE);
+}
+
+@test
+fn test_capability_to_bit_matches_constant_no_escape() {
+    let c: Capability = NoEscape;
+    assert_eq(c.to_bit(), CAP_NO_ESCAPE);
+}
+
+@test
+fn test_capability_is_present_in_owned_set() {
+    let owned: UInt16 = CAP_OWNED;
+    let read: Capability = Read;
+    let write: Capability = Write;
+    let delegate: Capability = Delegate;
+    let revoke: Capability = Revoke;
+    let mutable: Capability = Mutable;
+    assert(read.is_present(owned));
+    assert(write.is_present(owned));
+    assert(delegate.is_present(owned));
+    assert(revoke.is_present(owned));
+    assert(mutable.is_present(owned));
+}
+
+@test
+fn test_capability_is_present_absent_in_read_only() {
+    let ro: UInt16 = CAP_READ_ONLY;
+    let read: Capability = Read;
+    let write: Capability = Write;
+    let delegate: Capability = Delegate;
+    assert(read.is_present(ro));
+    assert(!write.is_present(ro));
+    assert(!delegate.is_present(ro));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

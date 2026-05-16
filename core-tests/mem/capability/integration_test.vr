@@ -1,0 +1,141 @@
+// =============================================================================
+// core-tests/mem/capability/integration_test.vr
+// =============================================================================
+//
+// Integration tests: capability flags composed with the epoch-packing
+// scheme used by ThinRef / FatRef. These laws are the static-shape
+// portion of the CBGR reference protocol — they pin the (epoch, caps)
+// packing format and the monotonic-attenuation invariant that every
+// CBGR-reference field-write must preserve.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.capability.{
+    CAP_READ, CAP_WRITE, CAP_DELEGATE, CAP_REVOKE,
+    CAP_MUTABLE, CAP_BORROWED,
+    CAP_ALL, CAP_OWNED, CAP_READ_ONLY, CAP_READ_WRITE,
+    CAP_BORROW_SHARED, CAP_BORROW_MUT,
+    has_capability, has_all_capabilities, attenuate,
+    delegate_capability, revoke_capability,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+};
+
+// -----------------------------------------------------------------------------
+// §1  Delegate-then-attenuate chain — sub-reference creation as it
+//     actually fires inside `ThinRef.clone_borrowed`.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_delegate_then_attenuate_chain() {
+    // Parent owns everything; spawn a borrowed read-only child.
+    let parent: UInt16 = CAP_OWNED;
+    let read_only = delegate_capability(parent, CAP_READ);
+    assert(read_only.is_some());
+    let child = read_only.unwrap();
+    assert(has_capability(child, CAP_READ));
+    assert(!has_capability(child, CAP_WRITE));
+
+    // Further attenuate down to nothing — no read either.
+    let stripped = attenuate(child, 0 as UInt16);
+    assert_eq(stripped, 0 as UInt16);
+}
+
+// -----------------------------------------------------------------------------
+// §2  Capability flow through pack/unpack — the round-trip survives a
+//     full CBGR-reference field-write boundary.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_pack_unpack_through_owned_caps() {
+    let epoch: UInt16 = 7 as UInt16;
+    let caps: UInt16 = CAP_OWNED;
+    let packed = pack_epoch_caps(epoch, caps);
+    assert_eq(unpack_epoch(packed), epoch);
+    assert_eq(unpack_caps(packed), caps);
+
+    // Attenuate inside the packed shape — must yield the same as attenuating
+    // BEFORE packing (this is the invariant CBGR write paths rely on).
+    let attenuated = attenuate(unpack_caps(packed), CAP_READ_ONLY);
+    let repacked = pack_epoch_caps(unpack_epoch(packed), attenuated);
+    assert_eq(unpack_caps(repacked), CAP_READ_ONLY);
+    assert_eq(unpack_epoch(repacked), epoch);
+}
+
+// -----------------------------------------------------------------------------
+// §3  Revoke chain through a packed field.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_revoke_through_packed_caps() {
+    let epoch: UInt16 = 42 as UInt16;
+    let packed = pack_epoch_caps(epoch, CAP_OWNED);
+    let caps = unpack_caps(packed);
+    let revoked = revoke_capability(caps, CAP_WRITE);
+    assert(revoked.is_some());
+    let next_packed = pack_epoch_caps(epoch, revoked.unwrap());
+    assert(!has_capability(unpack_caps(next_packed), CAP_WRITE));
+    assert(has_capability(unpack_caps(next_packed), CAP_READ));
+}
+
+// -----------------------------------------------------------------------------
+// §4  Sharing semantics — three child sub-references all see the same
+//     packed-form bits when they request identical capabilities.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_three_children_observe_same_capabilities() {
+    let parent: UInt16 = CAP_OWNED;
+    let r1 = delegate_capability(parent, CAP_READ_ONLY).unwrap();
+    let r2 = delegate_capability(parent, CAP_READ_ONLY).unwrap();
+    let r3 = delegate_capability(parent, CAP_READ_ONLY).unwrap();
+    assert_eq(r1, r2);
+    assert_eq(r2, r3);
+
+    let e: UInt16 = 1 as UInt16;
+    let p1 = pack_epoch_caps(e, r1);
+    let p2 = pack_epoch_caps(e, r2);
+    let p3 = pack_epoch_caps(e, r3);
+    assert_eq(p1, p2);
+    assert_eq(p2, p3);
+}
+
+// -----------------------------------------------------------------------------
+// §5  CAP_ALL boundary — 0x00FF, never spills into upper byte
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_cap_all_does_not_spill_into_upper_byte() {
+    // CAP_ALL fits in low byte. Packed form must keep epoch in low 16,
+    // caps in high 16 — no aliasing.
+    let packed = pack_epoch_caps(0xFFFF as UInt16, CAP_ALL);
+    assert_eq(unpack_epoch(packed), 0xFFFF as UInt16);
+    assert_eq(unpack_caps(packed), CAP_ALL);
+    // Upper 8 bits of the caps half must be zero.
+    let upper_caps_bits = unpack_caps(packed) & 0xFF00 as UInt16;
+    assert_eq(upper_caps_bits, 0 as UInt16);
+}
+
+// -----------------------------------------------------------------------------
+// §6  Borrow-shared cannot be promoted via delegate.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_borrow_shared_cannot_be_promoted_to_write() {
+    // CAP_BORROW_SHARED = CAP_READ | CAP_BORROWED — no CAP_DELEGATE,
+    // no CAP_WRITE, no CAP_MUTABLE.  Trying to delegate anything beyond
+    // it must fail.
+    let bs: UInt16 = CAP_BORROW_SHARED;
+    let try_write = delegate_capability(bs, CAP_WRITE);
+    assert(try_write.is_none());
+    let try_read = delegate_capability(bs, CAP_READ);
+    // No DELEGATE bit on parent → also fails
+    assert(try_read.is_none());
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
