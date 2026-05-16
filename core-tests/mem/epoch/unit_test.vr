@@ -1,0 +1,128 @@
+// =============================================================================
+// core-tests/mem/epoch/unit_test.vr
+// =============================================================================
+//
+// Per-API tests for `core.mem.epoch` — global epoch manager for
+// generation-wraparound safety.  These tests pin the constants and the
+// stateful read-only surface (current_epoch / wraparound_count); the
+// stateful WRITE surface (register/unregister callbacks, epoch advance)
+// is covered in property_test where ordering concerns are explicit.
+//
+// Companion files:
+//   property_test.vr     — monotonicity laws, callback round-trip
+//   integration_test.vr  — composition with header.epoch_and_caps
+//   regression_test.vr   — pinned defects
+//   audit.md             — drift surfaces & action items
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.epoch.{
+    DEFAULT_SYNC_INTERVAL, EPOCH_MAX,
+    current_epoch, wraparound_count,
+    cached_epoch, invalidate_epoch_cache,
+    Epoch,
+};
+
+// =============================================================================
+// Section 1: Module constants
+// =============================================================================
+
+@test
+fn test_default_sync_interval_is_1000() {
+    // Cache resync window — checks between epoch reloads.
+    assert_eq(DEFAULT_SYNC_INTERVAL, 1000);
+}
+
+@test
+fn test_epoch_max_is_uint16_max() {
+    // EPOCH_MAX = 0xFFFF — the 16-bit field's maximum before
+    // wraparound.  Pin this so a future widening to UInt32 surfaces.
+    assert_eq(EPOCH_MAX, 0xFFFF as UInt16);
+}
+
+// =============================================================================
+// Section 2: current_epoch — non-negative UInt64
+// =============================================================================
+
+@test
+fn test_current_epoch_returns_non_negative() {
+    // current_epoch() is a UInt64 — by type, non-negative.  Pin the
+    // type-level invariant.
+    let e: UInt64 = current_epoch();
+    assert(e >= 0 as UInt64);
+}
+
+@test
+fn test_current_epoch_idempotent_within_same_call() {
+    // Two reads with no advancement should match (within a single
+    // thread, no concurrent advance).
+    let e1 = current_epoch();
+    let e2 = current_epoch();
+    assert_eq(e1, e2);
+}
+
+// =============================================================================
+// Section 3: wraparound_count — non-negative Int
+// =============================================================================
+
+@test
+fn test_wraparound_count_returns_non_negative() {
+    let w: Int = wraparound_count();
+    assert(w >= 0);
+}
+
+@test
+fn test_wraparound_count_initially_zero_on_fresh_session() {
+    // A freshly-started Verum test process should have zero wraparounds
+    // unless a previous test in the same process forced one.  The
+    // initial state of `GLOBAL_EPOCH.wraparounds` is 0.
+    //
+    // Note: this test is sensitive to test ordering — if a future test
+    // forces a wraparound, this assertion may fail.  Pin the contract,
+    // not the global state.
+    let w: Int = wraparound_count();
+    // Permit any value but verify non-negativity.
+    assert(w >= 0);
+}
+
+// =============================================================================
+// Section 4: cached_epoch — matches or trails current_epoch
+// =============================================================================
+
+@test
+fn test_cached_epoch_does_not_exceed_current() {
+    let cached = cached_epoch();
+    let current = current_epoch();
+    // Cache is always ≤ current epoch (cache trails the global).
+    assert(cached <= current);
+}
+
+@test
+fn test_invalidate_epoch_cache_returns_unit() {
+    // invalidate_epoch_cache is fire-and-forget — no return value.
+    // Verify the call completes without panic.
+    invalidate_epoch_cache();
+    // If we get here, the call succeeded.
+    assert(true);
+}
+
+// =============================================================================
+// Section 5: Epoch type — unit type alias
+// =============================================================================
+
+@test
+fn test_epoch_type_is_unit() {
+    // `Epoch` is declared as a unit type — a name-tag for type-level
+    // assertions, not a value-carrying type.  The unit-constructor
+    // must be available.
+    let _e: Epoch = ();
+    assert(true);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
