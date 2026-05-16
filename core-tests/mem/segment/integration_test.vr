@@ -1,0 +1,82 @@
+// =============================================================================
+// core-tests/mem/segment/integration_test.vr
+// =============================================================================
+//
+// Integration tests: segment constants composed with size_class boundaries.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.segment.{
+    SEGMENT_SIZE, SLICE_SIZE, SLICES_PER_SEGMENT,
+    SMALL_PAGE_SIZE, MEDIUM_PAGE_SIZE,
+};
+mount core.mem.size_class.{
+    SMALL_SIZE_MAX, MEDIUM_SIZE_MAX,
+    page_size_for_bin, slices_for_bin,
+    BIN_COUNT,
+};
+
+// -----------------------------------------------------------------------------
+// §1  Allocations ≤ SMALL_SIZE_MAX fit in a small page (1 slice = 64 KiB).
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_small_alloc_fits_in_small_page() {
+    // SMALL_SIZE_MAX = 8 KiB.  A small page is 64 KiB → 8x headroom
+    // for header + alignment.
+    assert(SMALL_SIZE_MAX <= SMALL_PAGE_SIZE);
+    // SMALL_PAGE_SIZE = 1 × SLICE_SIZE
+    assert_eq(SMALL_PAGE_SIZE, SLICE_SIZE);
+}
+
+// -----------------------------------------------------------------------------
+// §2  Medium allocations fit in a medium page (8 slices = 512 KiB).
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_medium_alloc_fits_in_medium_page() {
+    // MEDIUM_SIZE_MAX = 64 KiB.  Medium page = 512 KiB → 8x headroom.
+    assert(MEDIUM_SIZE_MAX <= MEDIUM_PAGE_SIZE);
+}
+
+// -----------------------------------------------------------------------------
+// §3  Every bin's page_size_for_bin is a multiple of SLICE_SIZE.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_page_size_multiple_of_slice() {
+    for b in 0..BIN_COUNT {
+        let ps = page_size_for_bin(b);
+        assert_eq(ps % SLICE_SIZE, 0);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §4  slices_for_bin × SLICE_SIZE = page_size_for_bin.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_slice_count_times_slice_size_is_page_size() {
+    for b in 0..BIN_COUNT {
+        let slices = slices_for_bin(b);
+        let ps = page_size_for_bin(b);
+        assert_eq(slices * SLICE_SIZE, ps);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §5  SLICES_PER_SEGMENT × SLICE_SIZE = SEGMENT_SIZE — full coverage.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_segment_fully_covered_by_slices() {
+    assert_eq(SLICES_PER_SEGMENT * SLICE_SIZE, SEGMENT_SIZE);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

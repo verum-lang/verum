@@ -1,0 +1,116 @@
+// =============================================================================
+// core-tests/mem/segment/unit_test.vr
+// =============================================================================
+//
+// Per-API tests for `core.mem.segment` — mimalloc-style 32 MiB virtual
+// memory segments divided into 512 × 64 KiB slices.
+//
+// Tests pin the constants and the read-only surface; live segment
+// allocation (segment_alloc → segment_free round-trip) requires
+// the OS mmap fast path and is deferred to `core-tests/mem/allocator/`.
+//
+// Companion files:
+//   property_test.vr     — constant relationships, page-tier partition
+//   integration_test.vr  — composition with size_class
+//   regression_test.vr   — pinned defects
+//   audit.md             — drift surfaces & action items
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.segment.{
+    SEGMENT_SIZE, SLICE_SIZE, SLICES_PER_SEGMENT,
+    SMALL_PAGE_SIZE, MEDIUM_PAGE_SIZE, LARGE_PAGE_THRESHOLD,
+    SEGMENT_NORMAL, SEGMENT_HUGE,
+    SegmentError, SegmentStats,
+    get_segment_stats,
+};
+
+// =============================================================================
+// Section 1: Segment-layout constants
+// =============================================================================
+
+@test
+fn test_segment_size_is_32_MiB() {
+    // mimalloc-style 32 MiB segments.
+    assert_eq(SEGMENT_SIZE, 32 * 1024 * 1024);
+    assert_eq(SEGMENT_SIZE, 33554432);
+}
+
+@test
+fn test_slice_size_is_64_KiB() {
+    assert_eq(SLICE_SIZE, 64 * 1024);
+    assert_eq(SLICE_SIZE, 65536);
+}
+
+@test
+fn test_slices_per_segment_is_512() {
+    // 32 MiB / 64 KiB = 512 slices per segment.
+    assert_eq(SLICES_PER_SEGMENT, 512);
+}
+
+@test
+fn test_segment_size_consistency() {
+    // SEGMENT_SIZE = SLICES_PER_SEGMENT × SLICE_SIZE
+    assert_eq(SEGMENT_SIZE, SLICES_PER_SEGMENT * SLICE_SIZE);
+}
+
+// =============================================================================
+// Section 2: Page-tier constants
+// =============================================================================
+
+@test
+fn test_small_page_size_matches_slice() {
+    // Small pages = 1 slice = 64 KiB.
+    assert_eq(SMALL_PAGE_SIZE, SLICE_SIZE);
+}
+
+@test
+fn test_medium_page_size_is_8_slices() {
+    // Medium pages = 8 slices = 512 KiB.
+    assert_eq(MEDIUM_PAGE_SIZE, 8 * SLICE_SIZE);
+    assert_eq(MEDIUM_PAGE_SIZE, 524288);
+}
+
+@test
+fn test_large_page_threshold_matches_medium() {
+    // Large pages start where medium ends.
+    assert_eq(LARGE_PAGE_THRESHOLD, MEDIUM_PAGE_SIZE);
+}
+
+// =============================================================================
+// Section 3: Segment-kind constants
+// =============================================================================
+
+@test
+fn test_segment_normal_is_zero() {
+    assert_eq(SEGMENT_NORMAL, 0 as UInt8);
+}
+
+@test
+fn test_segment_huge_is_one() {
+    assert_eq(SEGMENT_HUGE, 1 as UInt8);
+}
+
+@test
+fn test_segment_kinds_distinct() {
+    assert(SEGMENT_NORMAL != SEGMENT_HUGE);
+}
+
+// =============================================================================
+// Section 4: get_segment_stats — read-only stats surface
+// =============================================================================
+
+@test
+fn test_get_segment_stats_returns_value() {
+    // The function must not panic; the value has fields we can read.
+    let _stats: SegmentStats = get_segment_stats();
+    assert(true);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

@@ -1,0 +1,77 @@
+// =============================================================================
+// core-tests/mem/segment/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.mem.segment`.
+//
+//   §A  SEGMENT_SIZE = 32 MiB exactly.  Pre-fix some drafts used 16 MiB
+//       (half mimalloc's spec) or 64 MiB (double).
+//   §B  SLICE_SIZE = 64 KiB exactly.  This is the unit of OS mmap
+//       granularity assumption.
+//   §C  SLICES_PER_SEGMENT = SEGMENT_SIZE / SLICE_SIZE.  Pre-fix some
+//       drafts had a literal `512` that drifted when one of the
+//       parents changed.
+//   §D  SMALL_PAGE_SIZE = SLICE_SIZE.  A small page IS one slice.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.segment.{
+    SEGMENT_SIZE, SLICE_SIZE, SLICES_PER_SEGMENT,
+    SMALL_PAGE_SIZE, MEDIUM_PAGE_SIZE,
+};
+
+// -----------------------------------------------------------------------------
+// §A — SEGMENT_SIZE pin
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_segment_size_is_32_mib() {
+    assert_eq(SEGMENT_SIZE, 33554432);
+    assert_eq(SEGMENT_SIZE, 32 * 1024 * 1024);
+}
+
+// -----------------------------------------------------------------------------
+// §B — SLICE_SIZE pin
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_slice_size_is_64_kib() {
+    assert_eq(SLICE_SIZE, 65536);
+    assert_eq(SLICE_SIZE, 64 * 1024);
+}
+
+// -----------------------------------------------------------------------------
+// §C — Derived consistency
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_slices_per_segment_derived_consistency() {
+    assert_eq(SLICES_PER_SEGMENT * SLICE_SIZE, SEGMENT_SIZE);
+    assert_eq(SLICES_PER_SEGMENT, 512);
+}
+
+// -----------------------------------------------------------------------------
+// §D — Small page is one slice
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_small_page_is_one_slice() {
+    assert_eq(SMALL_PAGE_SIZE, SLICE_SIZE);
+}
+
+// -----------------------------------------------------------------------------
+// §E — Medium page is eight slices
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_medium_page_is_eight_slices() {
+    assert_eq(MEDIUM_PAGE_SIZE, 8 * SLICE_SIZE);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
