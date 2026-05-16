@@ -487,6 +487,15 @@ public module prelude {
     public mount super.io.File;
     public mount super.io.read_to_string;
 
+    // From text.format — `f"{x:?}"` lowers to `format_debug(&x)` and
+    // `f"{x}"` may lower to `format_display(&x)` (see
+    // `crates/verum_fast_parser/src/safe_interpolation.rs::wrap_with_format_spec`,
+    // §J close).  Surfacing them at the prelude makes f-string Debug
+    // dispatch work transparently in user code without requiring an
+    // explicit `mount core.text.format.{...}`.
+    public mount super.text.format.format_debug;
+    public mount super.text.format.format_display;
+
     // From sync (common primitives)
     public mount super.sync.Mutex;
     public mount super.sync.RwLock;
