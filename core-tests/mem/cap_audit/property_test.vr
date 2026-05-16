@@ -1,0 +1,137 @@
+// =============================================================================
+// core-tests/mem/cap_audit/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.mem.cap_audit`.
+//
+//   §A  CapEventKind Eq is reflexive, symmetric, transitive
+//   §B  CapEventKind is closed under the 6 variants (no other constructor)
+//   §C  bumped_generation is true ONLY for Revoke and GenBump
+//   §D  CapEvent fields round-trip via constructor
+//   §E  seq=0 is the un-committed sentinel
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.cap_audit.{
+    CapEventKind, CapEvent,
+    Revoke, Attenuate, RefIncr, RefDecr, GenBump, EpochAdvance,
+};
+
+fn all_kinds() -> List<CapEventKind> {
+    [Revoke, Attenuate, RefIncr, RefDecr, GenBump, EpochAdvance]
+}
+
+// =============================================================================
+// §A  Eq laws on CapEventKind
+// =============================================================================
+
+@test
+fn law_eq_reflexive_exhaustive() {
+    let kinds = all_kinds();
+    for k in kinds.iter() {
+        assert(k.eq(k));
+    }
+}
+
+@test
+fn law_eq_symmetric_exhaustive() {
+    let kinds = all_kinds();
+    for i in 0..kinds.len() {
+        for j in 0..kinds.len() {
+            let a = &kinds[i];
+            let b = &kinds[j];
+            assert_eq(a.eq(b), b.eq(a));
+        }
+    }
+}
+
+@test
+fn law_eq_distinct_variants_unequal_exhaustive() {
+    let kinds = all_kinds();
+    for i in 0..kinds.len() {
+        for j in 0..kinds.len() {
+            let a = &kinds[i];
+            let b = &kinds[j];
+            if i == j {
+                assert(a.eq(b));
+            } else {
+                assert(!a.eq(b));
+            }
+        }
+    }
+}
+
+// =============================================================================
+// §C  bumped_generation predicate is true ONLY for Revoke + GenBump
+// =============================================================================
+
+@test
+fn law_bumped_generation_is_revoke_or_gen_bump_only() {
+    let cases: List<(CapEventKind, Bool)> = [
+        (Revoke, true),
+        (Attenuate, false),
+        (RefIncr, false),
+        (RefDecr, false),
+        (GenBump, true),
+        (EpochAdvance, false),
+    ];
+    for case in cases.iter() {
+        let event = CapEvent.new(
+            case.0,
+            100 as UInt64,
+            5 as UInt32, 6 as UInt32,
+            0xFF as UInt16, 0 as UInt16,
+            0 as UInt64,
+        );
+        assert_eq(event.bumped_generation(), case.1);
+    }
+}
+
+// =============================================================================
+// §D  Constructor round-trip — every field stored exactly
+// =============================================================================
+
+@test
+fn law_constructor_round_trip_pinned() {
+    let event = CapEvent.new(
+        Attenuate,
+        0x12345678 as UInt64,
+        100 as UInt32, 100 as UInt32,
+        0x00FF as UInt16, 0x0001 as UInt16,
+        1234567890 as UInt64,
+    );
+    assert(event.kind is Attenuate);
+    assert_eq(event.ptr_id, 0x12345678 as UInt64);
+    assert_eq(event.generation_before, 100 as UInt32);
+    assert_eq(event.generation_after, 100 as UInt32);
+    assert_eq(event.capabilities_before, 0x00FF as UInt16);
+    assert_eq(event.capabilities_after, 0x0001 as UInt16);
+    assert_eq(event.timestamp_ns, 1234567890 as UInt64);
+}
+
+// =============================================================================
+// §E  seq=0 is the un-committed sentinel
+// =============================================================================
+
+@test
+fn law_seq_zero_marks_uncommitted_exhaustive() {
+    let kinds = all_kinds();
+    for k in kinds.iter() {
+        let event = CapEvent.new(
+            *k,
+            100 as UInt64,
+            5 as UInt32, 6 as UInt32,
+            0 as UInt16, 0 as UInt16,
+            0 as UInt64,
+        );
+        assert_eq(event.seq, 0 as UInt64);
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

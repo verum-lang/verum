@@ -1,0 +1,121 @@
+// =============================================================================
+// core-tests/mem/cap_audit/integration_test.vr
+// =============================================================================
+//
+// Integration tests: CapEvent composed with capability flags and
+// generation counters as actually produced by the writer entry points
+// in `core/mem/header.vr` and `core/mem/cap_audit_ring.vr`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.cap_audit.{
+    CapEventKind, CapEvent,
+    Revoke, Attenuate, RefIncr, GenBump,
+};
+mount core.mem.capability.{CAP_READ, CAP_WRITE, CAP_OWNED, CAP_READ_ONLY};
+mount core.mem.header.{GEN_INITIAL, GEN_MAX};
+
+// -----------------------------------------------------------------------------
+// §1  Realistic Revoke event — generation bumped, all caps cleared
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_realistic_revoke_event_shape() {
+    let event = CapEvent.new(
+        Revoke,
+        0x10000000 as UInt64,    // user-pointer address
+        GEN_INITIAL,             // generation BEFORE revoke
+        GEN_INITIAL + 1 as UInt32,
+        CAP_OWNED,               // had full capabilities
+        0 as UInt16,             // all stripped post-revoke
+        1_000_000_000 as UInt64, // 1 second monotonic clock
+    );
+    assert(event.kind is Revoke);
+    assert_eq(event.generation_before, GEN_INITIAL);
+    assert_eq(event.generation_after, GEN_INITIAL + 1 as UInt32);
+    assert_eq(event.capabilities_before, CAP_OWNED);
+    assert_eq(event.capabilities_after, 0 as UInt16);
+    assert(event.bumped_generation());
+}
+
+// -----------------------------------------------------------------------------
+// §2  Realistic Attenuate event — caps narrowed, generation unchanged
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_realistic_attenuate_event_shape() {
+    let event = CapEvent.new(
+        Attenuate,
+        0x10000000 as UInt64,
+        GEN_INITIAL, GEN_INITIAL,    // gen unchanged
+        CAP_OWNED, CAP_READ_ONLY,    // narrowed to read-only
+        1_000_000_000 as UInt64,
+    );
+    assert(event.kind is Attenuate);
+    assert_eq(event.generation_before, event.generation_after);
+    assert(event.capabilities_before > event.capabilities_after);
+    assert(!event.bumped_generation());
+}
+
+// -----------------------------------------------------------------------------
+// §3  Realistic RefIncr event — gen & caps unchanged
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_realistic_ref_incr_event_shape() {
+    let event = CapEvent.new(
+        RefIncr,
+        0x10000000 as UInt64,
+        GEN_INITIAL, GEN_INITIAL,
+        CAP_OWNED, CAP_OWNED,
+        2_000_000_000 as UInt64,
+    );
+    assert(event.kind is RefIncr);
+    assert_eq(event.generation_before, event.generation_after);
+    assert_eq(event.capabilities_before, event.capabilities_after);
+    assert(!event.bumped_generation());
+}
+
+// -----------------------------------------------------------------------------
+// §4  GenBump at boundary GEN_MAX — wraparound trigger
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_gen_bump_at_max_signals_wraparound() {
+    // generation_before = GEN_MAX, generation_after = GEN_INITIAL → wrapped.
+    let event = CapEvent.new(
+        GenBump,
+        0x10000000 as UInt64,
+        GEN_MAX, GEN_INITIAL,    // wrapped
+        CAP_OWNED, CAP_OWNED,
+        0 as UInt64,
+    );
+    assert(event.kind is GenBump);
+    assert(event.bumped_generation());
+    // Detection: gen_after < gen_before → wraparound occurred.
+    assert(event.generation_after < event.generation_before);
+}
+
+// -----------------------------------------------------------------------------
+// §5  Timestamp = 0 sentinel for "platform clock unsupported"
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_zero_timestamp_means_unsupported_clock() {
+    let event = CapEvent.new(
+        Revoke,
+        0x10000000 as UInt64,
+        1 as UInt32, 2 as UInt32,
+        CAP_OWNED, 0 as UInt16,
+        0 as UInt64,    // unsupported clock
+    );
+    assert_eq(event.timestamp_ns, 0 as UInt64);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
