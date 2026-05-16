@@ -16988,7 +16988,20 @@ fn lower_arith_extended<'ctx>(
             let dst = op_reg(operands, 0);
             let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
-            let result = build_binary_intrinsic(ctx, "llvm.fshl.i64", a, b, "rotl")?;
+            // LLVM funnel-shift-left intrinsic is strictly 3-operand:
+            // `llvm.fshl.iN(hi, lo, shift)` produces
+            // `(concat(hi, lo) << shift) >> N` (taking the high N bits).
+            // For a SIMPLE rotate-left, the identity is
+            // `rotl(a, n) = fshl(a, a, n)` — passing the same value as
+            // both halves of the funnel reduces to a circular shift.
+            // Pre-fix this site called `build_binary_intrinsic(..., a, b)`
+            // which declared the intrinsic with 2 operands, conflicting
+            // with the 3-operand FunnelShiftLeft path below and
+            // tripping the `SIGNATURE_MISMATCH_REGISTRY` (`llvm.fshl.i64`:
+            // existing `i64 (i64, i64)` vs requested `i64 (i64, i64, i64)`).
+            // Routed through the canonical 3-arg builder so every LLVM
+            // intrinsic call site honours its IR-spec arity.
+            let result = build_ternary_intrinsic(ctx, "llvm.fshl.i64", a, a, b, "rotl")?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
@@ -16999,7 +17012,10 @@ fn lower_arith_extended<'ctx>(
             let dst = op_reg(operands, 0);
             let a = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "a")?;
             let b = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "b")?;
-            let result = build_binary_intrinsic(ctx, "llvm.fshr.i64", a, b, "rotr")?;
+            // Symmetric counterpart of RotateLeft —
+            // `rotr(a, n) = fshr(a, a, n)`.  Same arity-drift fix
+            // as RotateLeft above.
+            let result = build_ternary_intrinsic(ctx, "llvm.fshr.i64", a, a, b, "rotr")?;
             ctx.set_register(dst, result.into());
             Ok(())
         }
