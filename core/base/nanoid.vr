@@ -91,6 +91,13 @@ fn fill_random(buf: &mut [Byte]) {
 // Defaults
 // =============================================================================
 
+/// Default ID length per the Nano ID spec (21 chars ≈ 126 bits of entropy).
+public const NANOID_DEFAULT_LENGTH: Int = 21;
+
+/// Alias for `NANOID_ALPHABET` — the canonical default URL-safe alphabet.
+/// Provided for naming-parity with `NANOID_DEFAULT_LENGTH`.
+public const NANOID_DEFAULT_ALPHABET: &[Byte; 64] = &NANOID_ALPHABET;
+
 /// URL-safe alphabet: A-Z a-z 0-9 _ - (64 chars).
 public const NANOID_ALPHABET: [Byte; 64] = [
     0x41_u8, 0x42_u8, 0x43_u8, 0x44_u8, 0x45_u8, 0x46_u8, 0x47_u8, 0x48_u8,  // A-H
