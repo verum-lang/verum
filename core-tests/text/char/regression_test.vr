@@ -44,18 +44,43 @@ fn regression_a_make_ascii_lowercase_pinned() {
 }
 
 // =============================================================================
-// §B — eq_ignore_ascii_case false negative on letter pair (audit.md §B)
-// REGRESSION: `'A'.eq_ignore_ascii_case(&'a')` returns false. The body
-// downcases both sides and compares — but the equality returns wrong.
-// Likely downstream of §A (the underlying to_ascii_lowercase mutates a
-// local copy that's then compared incorrectly).
+// §B — eq_ignore_ascii_case CLOSED transitively when §A
+// (`Char.make_ascii_uppercase` / `make_ascii_lowercase` via the
+// char_runtime intercept) closed.  `eq_ignore_ascii_case`'s body is
+// `self.to_ascii_lowercase() == other.to_ascii_lowercase()` —
+// both sides go through the pure-conversion path (no `&mut self`),
+// which has always worked once the dispatch surface for Char
+// methods on Int-shaped receivers was widened (audit char §A).
+// Verified 2026-05-17 green under `--interp`.  Active guard going
+// forward.
 // =============================================================================
 
-@ignore
 @test
 fn regression_b_eq_ignore_ascii_case_pinned() {
     let a: Char = 'A';
     let b: Char = 'a';
+    assert(a.eq_ignore_ascii_case(&b));
+}
+
+@test
+fn regression_b_eq_ignore_ascii_case_symmetric_pinned() {
+    let a: Char = 'a';
+    let b: Char = 'A';
+    assert(a.eq_ignore_ascii_case(&b));
+}
+
+@test
+fn regression_b_eq_ignore_ascii_case_distinct_letters_pinned() {
+    let a: Char = 'A';
+    let b: Char = 'B';
+    assert(!a.eq_ignore_ascii_case(&b));
+}
+
+@test
+fn regression_b_eq_ignore_ascii_case_non_letter_pinned() {
+    // Non-letters compare bit-equal; case folding is identity outside [A-Z]/[a-z].
+    let a: Char = '5';
+    let b: Char = '5';
     assert(a.eq_ignore_ascii_case(&b));
 }
 
