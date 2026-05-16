@@ -3583,7 +3583,7 @@ impl VbcCodegen {
         // → Ref` path, which routes through compile_field_access →
         // compile_variant_constructor_with_tag_named_and_parent and
         // produces a proper variant value before referencing.
-        let inner_is_variant_ctor_chain = matches!(op, UnOp::Ref | UnOp::RefMut)
+        let inner_is_type_namespace_chain = matches!(op, UnOp::Ref | UnOp::RefMut)
             && {
                 if let ExprKind::Field {
                     expr: receiver,
@@ -3611,13 +3611,29 @@ impl VbcCodegen {
                                 )));
                         // Variant shape: the `Type.field` qualified name
                         // resolves to a function with `variant_tag` set.
+                        // Const shape: the `Type.field` qualified name
+                        // resolves to a function with `is_const = true` —
+                        // this catches `&FileDesc.STDIN` etc. where STDIN
+                        // is an associated `const` (parses identically to
+                        // `&record.field`).  Pre-fix this hit the indis-
+                        // criminate RefField branch which called
+                        // `resolve_field_index("FileDesc", "STDIN")` →
+                        // garbage offset (1) → runtime panic `RefField:
+                        // field 1 (offset 8+8=16) exceeds object data
+                        // size 8` on the transparent-wrapper FileDesc
+                        // (single 8-byte Int payload).  Same class as
+                        // Task #25 (`&Signal.Kill` variant-ctor exclusion).
                         let qualified = format!("{}.{}", type_name, field.name);
-                        let is_variant = self
-                            .ctx
-                            .lookup_function(&qualified)
+                        let qualified_info = self.ctx.lookup_function(&qualified);
+                        let is_variant = qualified_info
+                            .as_ref()
                             .and_then(|fi| fi.variant_tag)
                             .is_some();
-                        is_type && is_variant
+                        let is_assoc_const = qualified_info
+                            .as_ref()
+                            .map(|fi| fi.is_const)
+                            .unwrap_or(false);
+                        is_type && (is_variant || is_assoc_const)
                     } else {
                         false
                     }
@@ -3627,7 +3643,7 @@ impl VbcCodegen {
             };
 
         if matches!(op, UnOp::Ref | UnOp::RefMut)
-            && !inner_is_variant_ctor_chain
+            && !inner_is_type_namespace_chain
             && let ExprKind::Field {
                 expr: receiver,
                 field,
@@ -16573,6 +16589,18 @@ impl VbcCodegen {
             return Ok(Some(result));
         }
 
+        // Check for `&STATIC_MUT as *const T` / `&mut STATIC_MUT as *mut T`
+        // (static-mut backing-cell address — Task #26 [E2] enabler for the
+        // audit-ring / allocator atomic state machines).  Same fall-through
+        // hazard as the struct-field case: without this, every Tier-0
+        // atomic op on a `static mut` SIGSEGV'd dereferencing the CBGR-Ref
+        // bit-pattern as an address (0xFFFFFFFD_FFFFFFFD garbage).
+        if let TypeKind::Pointer { .. } = &ty.kind
+            && let Some(result) = self.try_compile_static_mut_addr(inner)?
+        {
+            return Ok(Some(result));
+        }
+
         // Compile the source expression
         let src_reg = self
             .compile_expr(inner)?
@@ -16890,6 +16918,86 @@ impl VbcCodegen {
         self.ctx.free_temp(recv_reg);
         self.ctx.mark_raw_pointer(dst);
 
+        Ok(Some(dst))
+    }
+
+    /// Tries to compile a static-mut address pattern: `&STATIC_MUT as *const T`
+    /// (or `&mut STATIC_MUT as *mut T`).  Task #26 [E2] enabler.
+    ///
+    /// Sibling of `try_compile_struct_field_addr` — same architectural
+    /// rationale: without this, the cast falls through the generic _ arm
+    /// in `compile_cast` (a passthrough), producing a register-encoded
+    /// CBGR-Ref bit-pattern that `handle_atomic_store`'s `as_i64() as
+    /// usize` dereferences as a meaningless ~0xFFFFFFFD_FFFFFFFD garbage
+    /// address — every Tier-0 atomic op on a static mut SIGSEGVs.
+    ///
+    /// Lowers to `SystemSubOpcode::StaticMutAddr` which returns the
+    /// stable byte address of a process-wide `Box<UnsafeCell<u64>>`
+    /// cell allocated lazily on first access (see
+    /// `InterpreterState::static_mut_cell_addr`).
+    ///
+    /// Detection: `&IDENT` or `&mut IDENT` where IDENT is a bare
+    /// single-segment path resolving to a name registered in
+    /// `ctx.thread_local_vars` (the `static mut` slot table).  Bare
+    /// references through fields, method calls, or qualified paths
+    /// fall through to the existing helpers.
+    fn try_compile_static_mut_addr(&mut self, expr: &Expr) -> CodegenResult<Option<Reg>> {
+        use crate::instruction::SystemSubOpcode;
+
+        // Unwrap parenthesized expressions.
+        let expr = {
+            let mut e = expr;
+            while let ExprKind::Paren(inner) = &e.kind {
+                e = inner.as_ref();
+            }
+            e
+        };
+
+        // Pattern: `&IDENT` or `&mut IDENT`.  Reject all other shapes —
+        // the array-element / struct-field / generic paths handle them.
+        let ident_expr = match &expr.kind {
+            ExprKind::Unary {
+                op: UnOp::Ref,
+                expr: inner,
+            } => inner.as_ref(),
+            ExprKind::Unary {
+                op: UnOp::RefMut,
+                expr: inner,
+            } => inner.as_ref(),
+            _ => return Ok(None),
+        };
+
+        // Bare single-segment path required.
+        let name = match &ident_expr.kind {
+            ExprKind::Path(path) if path.segments.len() == 1 => {
+                match &path.segments[0] {
+                    verum_ast::PathSegment::Name(ident) => ident.name.as_str().to_string(),
+                    _ => return Ok(None),
+                }
+            }
+            _ => return Ok(None),
+        };
+
+        // The name must be a registered `static mut` slot.  Local
+        // variables, function parameters, and ordinary const-statics
+        // never enter `thread_local_vars`, so the lookup cleanly
+        // disambiguates without a separate predicate.
+        let slot = match self.ctx.thread_local_vars.get(&name).copied() {
+            Some(slot) => slot,
+            None => return Ok(None),
+        };
+
+        // Emit FfiExtended { StaticMutAddr, operands: [dst, slot_lo, slot_hi] }.
+        let dst = self.ctx.alloc_temp();
+        let mut operands = Vec::<u8>::with_capacity(4);
+        Self::write_reg(&mut operands, dst.0);
+        operands.push((slot & 0xFF) as u8);
+        operands.push(((slot >> 8) & 0xFF) as u8);
+        self.ctx.emit(Instruction::FfiExtended {
+            sub_op: SystemSubOpcode::StaticMutAddr.to_byte(),
+            operands,
+        });
+        self.ctx.mark_raw_pointer(dst);
         Ok(Some(dst))
     }
 
