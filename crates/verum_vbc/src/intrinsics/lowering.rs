@@ -897,6 +897,25 @@ impl IntrinsicLowering {
                 operands: operands.to_vec(),
                 region: None,
             }),
+            // Funnel shift — 3-operand `(hi, lo, amount)`.  Lowers to
+            // the same LLVM intrinsic as rotate (it IS llvm.fshl /
+            // llvm.fshr) but with all three operands intact.  Rotate
+            // is the degenerate `hi == lo` case; the 3-operand form is
+            // the load-bearing primitive for crypto (SHA-512, BLAKE3).
+            InlineSequenceId::Fshl => self.emit(MlirOp {
+                name: "llvm.intr.fshl".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
+            InlineSequenceId::Fshr => self.emit(MlirOp {
+                name: "llvm.intr.fshr".to_string(),
+                attrs: vec![],
+                result_types: vec![MlirType::I64],
+                operands: operands.to_vec(),
+                region: None,
+            }),
             InlineSequenceId::CheckedAdd => self.emit(MlirOp {
                 name: "llvm.intr.sadd.with.overflow".to_string(),
                 attrs: vec![],

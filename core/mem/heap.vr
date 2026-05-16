@@ -65,6 +65,12 @@ mount super.size_class.{
     BIN_COUNT, BIN_HUGE, BIN_FULL, QUEUE_COUNT,
     SIZE_CLASSES, SMALL_SIZE_MAX, MEDIUM_SIZE_MAX,
     size_to_bin, bin_to_size, slices_for_bin, blocks_per_page, PageKind, page_kind_for_bin,
+    // PAGE_HEADER_SIZE lives in size_class.vr — the lowest module that
+    // needs to know about the heap page-header byte budget for the
+    // blocks_per_page accounting.  heap.vr's HeapPageHeader record is
+    // sized to fit in exactly this many bytes; cross-module pin via
+    // `core-tests/mem/heap/regression_page_header_size_is_128`.
+    PAGE_HEADER_SIZE,
 };
 mount super.epoch.{GLOBAL_EPOCH};
 mount super.capability.{CAP_READ, CAP_WRITE, CAP_OWNED};
@@ -97,8 +103,13 @@ mount core.intrinsics.atomic.{
 /// Maximum word count for direct lookup (1024 bytes / 8 = 128 words)
 public const DIRECT_LOOKUP_SIZE: Int = 129;
 
-/// Page header size (cache-line aligned)
-public const PAGE_HEADER_SIZE: Int = 128;
+// PAGE_HEADER_SIZE moved to `core/mem/size_class.vr` where the canonical
+// page-layout constants live.  `blocks_per_page` there subtracts it
+// from the page size to compute available block slots — keeping the
+// constant at the lowest-used layer eliminates the size_class↔heap
+// drift surface that previously had blocks_per_page use 64 while
+// HeapPageHeader was sized for 128.  Imported above via `mount
+// super.size_class.{... PAGE_HEADER_SIZE}`.
 
 /// Flags for page state
 public const PAGE_FLAG_IN_FULL_QUEUE: UInt16 = 0x0001;

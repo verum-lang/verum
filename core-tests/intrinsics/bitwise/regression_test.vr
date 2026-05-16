@@ -1,0 +1,154 @@
+// =============================================================================
+// core-tests/intrinsics/bitwise/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core/intrinsics/bitwise.vr`.  These pin the
+// dispatch-layer defects discovered while building out the mem/* test
+// suites — every regression has a corresponding fundamental fix in the
+// `crates/verum_vbc/src/` codegen + interpreter.
+//
+// Pinned regressions:
+//   §A  `clz_u64(x)` returned `nil` for every input because
+//       `@intrinsic("ctlz", x)` in the body looked up a name missing
+//       from BOTH the registry AND the alias table.  Fix: extended
+//       `lookup_intrinsic` with LLVM-canonical aliases.  Closed by
+//       commits in this branch.
+//   §B  `fshl<T>(a, b, c)` and `rotl<T>(x, n)` silently produced wrong
+//       results because the body `@intrinsic("fshl", a, b, c)` aliased
+//       to `rotate_left` (2-operand) which DROPPED the third argument.
+//       Fix: dedicated `FunnelShiftLeft` (0x57) / `FunnelShiftRight`
+//       (0x58) ArithSubOpcodes with proper 3-operand encoding.  The
+//       degenerate `rotl(x, n) = fshl(x, x, n)` case now produces the
+//       canonical `(x << n) | (x >> (64-n))`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.intrinsics.bitwise.{
+    clz, ctz, popcnt,
+    clz_u64, ctz_u64, popcnt_u64,
+    rotl, rotr, fshl, fshr,
+};
+
+// -----------------------------------------------------------------------------
+// §A — clz_u64 returns the correct count of leading zeros
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_clz_u64_basic() {
+    // 1791 = 0b11011111111 — 11 bits set in lower half, 53 leading zeros.
+    assert_eq(clz_u64(1791 as UInt64), 53);
+}
+
+@test
+fn regression_clz_u64_one() {
+    // 1 has 63 leading zeros (only bit 0 set).
+    assert_eq(clz_u64(1 as UInt64), 63);
+}
+
+@test
+fn regression_clz_u64_max() {
+    // All-ones has 0 leading zeros.
+    assert_eq(clz_u64(0xFFFFFFFFFFFFFFFF as UInt64), 0);
+}
+
+@test
+fn regression_ctz_u64_basic() {
+    // 8 = 0b1000 — 3 trailing zeros.
+    assert_eq(ctz_u64(8 as UInt64), 3);
+}
+
+@test
+fn regression_popcnt_u64_basic() {
+    // 0xF = 4 set bits.
+    assert_eq(popcnt_u64(0xF as UInt64), 4);
+}
+
+// -----------------------------------------------------------------------------
+// §B — rotl / rotr work correctly (degenerate funnel-shift)
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_rotl_u64_left_one() {
+    // rotl(1, 3) = 8 (binary 0001 → 1000)
+    assert_eq(rotl(1 as UInt64, 3 as UInt32), 8 as UInt64);
+}
+
+@test
+fn regression_rotl_u64_msb_wraps() {
+    // rotl(MSB, 1) = 1 (high bit wraps to bit 0)
+    assert_eq(rotl(0x8000000000000000 as UInt64, 1 as UInt32), 1 as UInt64);
+}
+
+@test
+fn regression_rotr_u64_basic() {
+    // rotr(8, 3) = 1
+    assert_eq(rotr(8 as UInt64, 3 as UInt32), 1 as UInt64);
+}
+
+@test
+fn regression_rotr_u64_low_wraps() {
+    // rotr(1, 1) = MSB
+    assert_eq(rotr(1 as UInt64, 1 as UInt32), 0x8000000000000000 as UInt64);
+}
+
+// -----------------------------------------------------------------------------
+// §B — fshl / fshr with a≠b (3-operand funnel shift; load-bearing for crypto)
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_fshl_u64_three_operand_distinct() {
+    // fshl(0xAAAA_AAAA_AAAA_AAAA, 0x5555_5555_5555_5555, 4)
+    // = high 64 bits of (hi:lo << 4)
+    // = (hi << 4) | (lo >> 60)
+    // = 0xAAAA_AAAA_AAAA_AAA0 | 0x0000_0000_0000_0005
+    // = 0xAAAA_AAAA_AAAA_AAA5
+    let hi: UInt64 = 0xAAAAAAAAAAAAAAAA as UInt64;
+    let lo: UInt64 = 0x5555555555555555 as UInt64;
+    let result = fshl(hi, lo, 4 as UInt32);
+    assert_eq(result, 0xAAAAAAAAAAAAAAA5 as UInt64);
+}
+
+@test
+fn regression_fshr_u64_three_operand_distinct() {
+    // fshr(0xAAAA..., 0x5555..., 4) — low 64 bits of (hi:lo >> 4)
+    // = (hi << 60) | (lo >> 4)
+    // = 0xA000_0000_0000_0000 | 0x0555_5555_5555_5555
+    // = 0xA555_5555_5555_5555
+    let hi: UInt64 = 0xAAAAAAAAAAAAAAAA as UInt64;
+    let lo: UInt64 = 0x5555555555555555 as UInt64;
+    let result = fshr(hi, lo, 4 as UInt32);
+    assert_eq(result, 0xA555555555555555 as UInt64);
+}
+
+@test
+fn regression_fshl_u64_zero_amount_returns_hi() {
+    // Degenerate n=0 case — fshl(a, b, 0) returns a (no shift).
+    let result = fshl(42 as UInt64, 99 as UInt64, 0 as UInt32);
+    assert_eq(result, 42 as UInt64);
+}
+
+@test
+fn regression_fshr_u64_zero_amount_returns_lo() {
+    let result = fshr(42 as UInt64, 99 as UInt64, 0 as UInt32);
+    assert_eq(result, 99 as UInt64);
+}
+
+@test
+fn regression_fshl_u64_equivalent_to_rotl_when_hi_eq_lo() {
+    // The degenerate case `fshl(x, x, n)` MUST equal `rotl(x, n)`.
+    // Pre-fix this held only by accident because the funnel-shift
+    // alias dropped the third arg.  Now it holds because both go
+    // through the proper 3-operand opcode (rotl wraps as a 2-arg
+    // convenience).
+    let x: UInt64 = 0xDEADBEEFCAFEBABE as UInt64;
+    let n: UInt32 = 7 as UInt32;
+    assert_eq(fshl(x, x, n), rotl(x, n));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

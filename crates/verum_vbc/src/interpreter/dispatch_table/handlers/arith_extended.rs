@@ -709,6 +709,58 @@ pub(in super::super) fn handle_arith_extended(
             Ok(DispatchResult::Continue)
         }
 
+        // Funnel shift left — 3-operand bit-concatenation shift.
+        //
+        // Conceptually: concatenate `hi:lo` into a 128-bit value, shift
+        // left by `amount mod 64`, take the high 64 bits.  Equivalent to
+        // `(hi << n) | (lo >> (64 - n))` with degenerate-`n=0` case
+        // returning `hi` (no shift).  When `hi == lo` this reduces to
+        // `hi.rotate_left(n)`.
+        //
+        // Pre-fix the `@intrinsic("fshl", a, b, c)` macro silently
+        // aliased to RotateLeft which dropped the third argument.
+        // Closes `core-tests/mem/size_class/audit.md §3.X` and the
+        // partial-correctness funnel-shift gap pinned by the audit.
+        Some(ArithSubOpcode::FunnelShiftLeft) => {
+            let dst = read_reg(state)?;
+            let hi_reg = read_reg(state)?;
+            let lo_reg = read_reg(state)?;
+            let amount_reg = read_reg(state)?;
+            let hi = state.get_reg(hi_reg).as_i64() as u64;
+            let lo = state.get_reg(lo_reg).as_i64() as u64;
+            let n = (state.get_reg(amount_reg).as_i64() as u32) & 63;
+            let result = if n == 0 {
+                hi
+            } else {
+                (hi << n) | (lo >> (64 - n))
+            };
+            state.set_reg(dst, Value::from_i64(result as i64));
+            Ok(DispatchResult::Continue)
+        }
+
+        // Funnel shift right — symmetric counterpart.
+        //
+        // Concatenates `hi:lo` into 128 bits, shifts right by `amount
+        // mod 64`, returns the low 64 bits.  Equivalent to
+        // `(hi << (64 - n)) | (lo >> n)` with degenerate-`n=0`
+        // returning `lo`.
+        Some(ArithSubOpcode::FunnelShiftRight) => {
+            let dst = read_reg(state)?;
+            let hi_reg = read_reg(state)?;
+            let lo_reg = read_reg(state)?;
+            let amount_reg = read_reg(state)?;
+            let hi = state.get_reg(hi_reg).as_i64() as u64;
+            let lo = state.get_reg(lo_reg).as_i64() as u64;
+            let n = (state.get_reg(amount_reg).as_i64() as u32) & 63;
+            let result = if n == 0 {
+                lo
+            } else {
+                (hi << (64 - n)) | (lo >> n)
+            };
+            state.set_reg(dst, Value::from_i64(result as i64));
+            Ok(DispatchResult::Continue)
+        }
+
         // ================================================================
         // Binary Float Operations (0x60-0x67)
         // ================================================================

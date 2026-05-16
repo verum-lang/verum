@@ -63,7 +63,7 @@ mount core.intrinsics.atomic.{ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEA
 module core.mem.epoch;
 mount core.intrinsics.{
     spin_hint,
-    atomic_load_u64, atomic_fetch_add_u64,
+    atomic_load_u64, atomic_store_u64, atomic_fetch_add_u64,
     atomic_load_int, atomic_fetch_add_int, atomic_store_int, atomic_cmpxchg_int,
 };
 
@@ -623,6 +623,40 @@ public fn current_epoch() -> UInt64 {
 @inline
 public fn wraparound_count() -> Int {
     unsafe { GLOBAL_EPOCH.wraparound_count() }
+}
+
+/// Test-only — force the global epoch counter back to a known state.
+///
+/// Resets `epoch` and `wraparounds` to zero so successive `current_epoch()`
+/// / `wraparound_count()` reads start from a deterministic baseline. Must
+/// NOT be called from production code — concurrent readers will observe
+/// an apparent backwards jump, which the CBGR validity check treats as a
+/// soundness incident.
+///
+/// This is the deterministic-advance API the audit deferred in
+/// `core-tests/mem/epoch/audit.md §B-§C`: tests calling
+/// `reset_for_tests()` → `increment_epoch_for_tests()` → `current_epoch()`
+/// can pin every transition without depending on global cumulative state
+/// from earlier tests in the same process.
+///
+/// Symmetric counterpart to `cap_audit_ring::reset_for_tests`.
+public fn reset_for_tests() {
+    unsafe {
+        atomic_store_u64(&mut GLOBAL_EPOCH.epoch, 0, ORDERING_RELEASE);
+        atomic_store_int(&mut GLOBAL_EPOCH.wraparounds, 0, ORDERING_RELEASE);
+    }
+}
+
+/// Test-only — force the global epoch counter forward by one increment.
+///
+/// Wraps `EpochManager.increment_epoch()` for the static facade so tests
+/// can deterministically advance and observe the result via
+/// `current_epoch()`.  Production callers bump the epoch through
+/// `EpochManager.on_wraparound` from inside the CBGR
+/// `increment_generation` path; this entry-point exists exclusively to
+/// make the write-surface observable from test scope.
+public fn increment_epoch_for_tests() -> UInt64 {
+    unsafe { GLOBAL_EPOCH.increment_epoch() }
 }
 
 // =============================================================================

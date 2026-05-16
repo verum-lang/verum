@@ -311,6 +311,16 @@ pub enum InlineSequenceId {
     RotateLeft,
     /// rotate_right: bit rotation
     RotateRight,
+    /// fshl: funnel shift left — 3-operand bit-concatenation shift.
+    /// Conceptually `((hi:lo) << n)[127..64]`.  When `hi == lo` reduces
+    /// to `rotate_left`.  Load-bearing primitive for crypto/hashing
+    /// routines (SHA-512, BLAKE3).  Emitted via the dedicated
+    /// `FunnelShiftLeft` ArithSubOpcode (0x57).
+    Fshl,
+    /// fshr: funnel shift right — symmetric counterpart.
+    /// `((hi:lo) >> n)[63..0]`.  When `hi == lo` reduces to
+    /// `rotate_right`.  Emitted via `FunnelShiftRight` (0x58).
+    Fshr,
     /// sin_f64: polynomial approximation
     SinF64,
     /// cos_f64: polynomial approximation
@@ -2914,6 +2924,60 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RotateRight),
         mlir_op: Some("llvm.intr.fshr"),
         doc: "Rotate bits right",
+    },
+    // Funnel shift left — 3-operand `(hi, lo, amount)`.  Distinct from
+    // rotate_left because it takes TWO 64-bit source halves; the public
+    // surface is `core/intrinsics/bitwise.vr::fshl<T>(a, b, c)`.  Maps
+    // to LLVM's `llvm.fshl.i64` and the Tier-0 `FunnelShiftLeft` (0x57)
+    // ArithSubOpcode dispatch.  Both width-generic `fshl` and
+    // width-suffixed `fshl_u64` route to the same opcode.
+    Intrinsic {
+        name: "fshl",
+        category: IntrinsicCategory::BitManip,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Fshl),
+        mlir_op: Some("llvm.intr.fshl"),
+        doc: "Funnel shift left (3-operand)",
+    },
+    Intrinsic {
+        name: "fshl_u64",
+        category: IntrinsicCategory::BitManip,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Fshl),
+        mlir_op: Some("llvm.intr.fshl"),
+        doc: "Funnel shift left (u64)",
+    },
+    Intrinsic {
+        name: "fshr",
+        category: IntrinsicCategory::BitManip,
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Fshr),
+        mlir_op: Some("llvm.intr.fshr"),
+        doc: "Funnel shift right (3-operand)",
+    },
+    Intrinsic {
+        name: "fshr_u64",
+        category: IntrinsicCategory::BitManip,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline],
+        param_count: 3,
+        return_count: 1,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Fshr),
+        mlir_op: Some("llvm.intr.fshr"),
+        doc: "Funnel shift right (u64)",
     },
     Intrinsic {
         name: "rotl",

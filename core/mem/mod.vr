@@ -70,16 +70,45 @@ module mem;
 // =============================================================================
 
 /// Capability flags for access control.
+///
+/// Full surface re-exported here so consumers can `mount core.mem.{...}`
+/// without reaching into `core.mem.capability.{...}` directly.  This is
+/// the load-bearing capability lattice — every single-bit flag, every
+/// preset, every operation, plus the packed (epoch, caps) encoding
+/// shared with ThinRef / FatRef.  Drift between this surface and the
+/// `capability.vr` declarations is pinned by
+/// `core-tests/mem/capability/`.
 public mount .capability.{
-    Capability, CAP_READ, CAP_WRITE, CAP_EXECUTE, CAP_DELEGATE, CAP_REVOKE,
-    CAP_BORROWED, CAP_MUTABLE, CAP_NO_ESCAPE, CAP_ALL, CAP_READ_ONLY,
-    CAP_READ_WRITE, has_capability, can_delegate, can_revoke,
+    Capability,
+    // Single-bit flags (UInt16, bits 0-7)
+    CAP_READ, CAP_WRITE, CAP_EXECUTE, CAP_DELEGATE, CAP_REVOKE,
+    CAP_BORROWED, CAP_MUTABLE, CAP_NO_ESCAPE,
+    // Preset masks
+    CAP_ALL, CAP_READ_ONLY, CAP_READ_WRITE, CAP_OWNED,
+    CAP_BORROW_SHARED, CAP_BORROW_MUT, CAP_EXECUTABLE,
+    // Containment + attenuation
+    has_capability, has_all_capabilities,
+    attenuate, remove_capability,
+    // Predicates over flag sets
+    can_delegate, can_revoke, is_borrowed, can_mutate, can_execute,
+    // Sub-reference creation + revocation
+    delegate_capability, revoke_capability,
+    // Preset constructors
+    owned_capabilities, shared_borrow_capabilities, mutable_borrow_capabilities,
+    // Validation predicates (consumed by CBGR write paths)
+    validate_read, validate_write, validate_execute,
+    // Packed (epoch, caps) UInt32 encoding shared by ThinRef / FatRef
+    pack_epoch_caps, unpack_epoch, unpack_caps,
 };
 
 /// Allocation header (32 bytes, cache-aligned).
 public mount .header.{
-    AllocationHeader, HEADER_SIZE, AllocationFlags,
+    AllocationHeader, HEADER_SIZE, HEADER_ALIGN,
+    GEN_INITIAL, GEN_MAX, GEN_UNALLOCATED,
+    AllocationFlags,
     FLAG_PINNED, FLAG_LEAKED, FLAG_SHARED, FLAG_WEAK, FLAG_CAPABILITY,
+    FLAG_ARENA, FLAG_NUMA_PINNED, FLAG_LARGE, FLAG_BORROWED,
+    MemValidationError, ValidationError,
 };
 
 /// ThinRef for sized types (16 bytes).
@@ -99,6 +128,11 @@ public mount .epoch.{
     EpochManager, EpochCache, GLOBAL_EPOCH,
     register_epoch_callback, unregister_epoch_callback,
     register_revocation_callback, unregister_revocation_callback,
+    current_epoch, cached_epoch, wraparound_count, invalidate_epoch_cache,
+    Epoch, EPOCH_MAX, DEFAULT_SYNC_INTERVAL,
+    // Test-only deterministic-advance API (closes the
+    // `core-tests/mem/epoch/audit.md §A-§C` deferral)
+    reset_for_tests, increment_epoch_for_tests,
 };
 
 /// CBGR-aware allocator.
@@ -147,6 +181,7 @@ public mount .size_class.{
     is_small_size, is_medium_size, is_large_size, is_huge_size,
     page_kind_for_bin, optimal_bin, fragmentation_percent,
     PageKind, SizeClassStats,
+    PAGE_HEADER_SIZE,
     BIN_COUNT, BIN_HUGE, BIN_FULL, QUEUE_COUNT,
     SIZE_CLASSES, SMALL_SIZE_MAX, MEDIUM_SIZE_MAX,
     LARGE_SIZE_MAX, HUGE_SIZE_THRESHOLD,
@@ -164,7 +199,12 @@ public mount .heap.{
     get_heap, init_thread_heap, shutdown_thread_heap,
     heap_alloc, heap_alloc_zeroed, heap_free, heap_free_validated,
     get_heap_stats,
-    PAGE_HEADER_SIZE, DIRECT_LOOKUP_SIZE,
+    // PAGE_HEADER_SIZE now lives in `core.mem.size_class` (re-exported
+    // via the .size_class.{...} mount above).  Pre-fix it was declared
+    // in heap.vr but `size_class.vr::blocks_per_page` silently
+    // hardcoded 64 — fixed by hoisting the constant down to the
+    // lowest-used layer.
+    DIRECT_LOOKUP_SIZE,
 };
 
 /// Read-only introspection surface for CBGR-managed allocations.

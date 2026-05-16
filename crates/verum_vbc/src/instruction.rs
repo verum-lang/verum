@@ -6603,6 +6603,34 @@ pub enum ArithSubOpcode {
     /// wrap around to the left.
     RotateRight = 0x56,
 
+    /// Funnel shift left — 3-operand bit-concatenation shift.
+    ///
+
+    /// Format: `dst:reg, hi:reg, lo:reg, amount:reg`
+    ///
+
+    /// Conceptually concatenates `hi:lo` into a 128-bit value, shifts
+    /// left by `amount mod 64`, returns the high 64 bits.  Tier-0:
+    /// `(hi << n) | (lo >> (64 - n))` with degenerate-`n=0` returning
+    /// `hi`.  When `hi == lo` reduces to `rotate_left(hi, n)`.  The
+    /// 3-operand form is load-bearing for crypto / hashing routines
+    /// (SHA-512, BLAKE3) that funnel-shift across word boundaries.
+    ///
+    /// Pre-fix the `@intrinsic("fshl", a, b, c)` macro in
+    /// `core/intrinsics/bitwise.vr` aliased to `rotate_left` which
+    /// dropped the third argument — silently wrong.
+    FunnelShiftLeft = 0x57,
+
+    /// Funnel shift right — 3-operand bit-concatenation shift.
+    ///
+
+    /// Format: `dst:reg, hi:reg, lo:reg, amount:reg`
+    ///
+
+    /// Concatenates `hi:lo` into 128 bits, shifts right by `amount mod 64`,
+    /// returns the low 64 bits.  Symmetric counterpart to `FunnelShiftLeft`.
+    FunnelShiftRight = 0x58,
+
     // ========================================================================
     // Binary Float Operations (0x60-0x6F) - Two-argument float functions
     // ========================================================================
@@ -6916,6 +6944,8 @@ impl ArithSubOpcode {
             0x54 => Some(Self::BitReverse),
             0x55 => Some(Self::RotateLeft),
             0x56 => Some(Self::RotateRight),
+            0x57 => Some(Self::FunnelShiftLeft),
+            0x58 => Some(Self::FunnelShiftRight),
             // Binary Float Operations
             0x60 => Some(Self::Atan2),
             0x61 => Some(Self::Hypot),
@@ -7039,6 +7069,8 @@ impl ArithSubOpcode {
             Self::BitReverse        => m!("BIT_REVERSE",        BitCounting,           ck=false, ov=false, poly=false, bf=false, oc=1),
             Self::RotateLeft        => m!("ROTATE_LEFT",        BitCounting,           ck=false, ov=false, poly=false, bf=false, oc=2),
             Self::RotateRight       => m!("ROTATE_RIGHT",       BitCounting,           ck=false, ov=false, poly=false, bf=false, oc=2),
+            Self::FunnelShiftLeft   => m!("FUNNEL_SHIFT_LEFT",  BitCounting,           ck=false, ov=false, poly=false, bf=false, oc=3),
+            Self::FunnelShiftRight  => m!("FUNNEL_SHIFT_RIGHT", BitCounting,           ck=false, ov=false, poly=false, bf=false, oc=3),
 
             // ===== Binary Float (0x60-0x6F) =====
             // is_binary_float=true uniformly across the band.

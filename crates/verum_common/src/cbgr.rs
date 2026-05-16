@@ -71,6 +71,100 @@
 use core::sync::atomic::{AtomicU16, AtomicU32, AtomicU64, Ordering};
 
 // =============================================================================
+// Drift-pinning compile-time assertions (B5 — Rust↔Verum mem constants)
+// =============================================================================
+//
+// The Verum-side `core/mem/header.vr` / `core/mem/capability.vr` declare
+// the canonical values for CBGR layout constants.  This file mirrors
+// those values on the Rust side.  The asserts below FORCE compile-time
+// agreement between the two layers — drift becomes a compilation
+// failure, not a silent runtime divergence.
+//
+// Pinned by `core-tests/mem/{header,capability}/regression_test.vr` on
+// the Verum side and by the asserts here on the Rust side.  Both layers
+// must agree or the project does not build.
+//
+// To add a new constant pin: declare the value here, mirror it from
+// the canonical .vr declaration, add a `const _: () = assert!(...)`
+// below.  Same pattern as `verum_common::layout`'s drift contract.
+const _: () = assert!(
+    GEN_UNALLOCATED == 0,
+    "GEN_UNALLOCATED must be 0 (the null sentinel); \
+     core/mem/header.vr declares GEN_UNALLOCATED: UInt32 = 0",
+);
+const _: () = assert!(
+    GEN_INITIAL == 1,
+    "GEN_INITIAL must be 1 (one past the unallocated sentinel); \
+     core/mem/header.vr declares GEN_INITIAL: UInt32 = 1",
+);
+const _: () = assert!(
+    GEN_MAX == 0xFFFF_FFFE,
+    "GEN_MAX must be UInt32::MAX - 1 (leaves 0xFFFFFFFF as future \
+     in-transition sentinel); core/mem/header.vr declares \
+     GEN_MAX: UInt32 = 0xFFFF_FFFE",
+);
+const _: () = assert!(
+    GEN_UNALLOCATED < GEN_INITIAL && GEN_INITIAL < GEN_MAX,
+    "Generation lifecycle must form strict ordering \
+     UNALLOCATED < INITIAL < MAX; pin core-tests/mem/header §C",
+);
+// Capability bit positions — `core/mem/capability.vr` declares
+// CAP_READ = 1 << 0, CAP_WRITE = 1 << 1, etc.  Rust-side mirrors in
+// `caps::READ`/`WRITE`/.../`NO_ESCAPE` must agree bit-for-bit, otherwise
+// CBGR validation reads through a reference with the wrong capability
+// mask interpretation.
+const _: () = assert!(
+    caps::READ      == 1 << 0
+        && caps::WRITE     == 1 << 1
+        && caps::EXECUTE   == 1 << 2
+        && caps::DELEGATE  == 1 << 3
+        && caps::REVOKE    == 1 << 4
+        && caps::BORROWED  == 1 << 5
+        && caps::MUTABLE   == 1 << 6
+        && caps::NO_ESCAPE == 1 << 7,
+    "Capability bits must match core/mem/capability.vr — single-bit \
+     positions 0..7 for READ/WRITE/EXECUTE/DELEGATE/REVOKE/BORROWED/ \
+     MUTABLE/NO_ESCAPE in that exact order.  Drift = silent corruption \
+     of every CBGR validity check.",
+);
+const _: () = assert!(
+    caps::ALL == 0x00FF,
+    "caps::ALL must mask all 8 single-bit positions (0x00FF); \
+     core/mem/capability.vr declares CAP_ALL: UInt16 = 0x00FF",
+);
+const _: () = assert!(
+    caps::MASK == 0xFFFF,
+    "caps::MASK is the lower 16 bits of the packed epoch_and_caps field; \
+     core/mem/capability.vr packing puts caps in the lower half via \
+     `pack_epoch_caps(epoch, caps) = (caps << 16) | epoch`.  Cross-pin \
+     with verum_common::layout::EPOCH_BITS = 16 (epoch occupies upper 16).",
+);
+// Allocation flag bits — `core/mem/header.vr` FLAG_PINNED=1<<0 etc.
+// Rust-side `flags::FREED` / `flags::REVOKED` use bits 0 / 1 from the
+// same UInt32 field — drift would corrupt allocation-state tracking.
+const _: () = assert!(
+    flags::FREED == 0x01 && flags::REVOKED == 0x02,
+    "flags::FREED / flags::REVOKED must occupy bits 0 / 1 — pinned by \
+     Tier-0 interpreter's `flags & 1` test in cbgr handlers.",
+);
+// AllocationHeader byte-size must agree with the codegen-side mirror in
+// `verum_common::layout::ALLOCATION_HEADER_SIZE`.  Codegen back-pointer
+// arithmetic (`user_ptr - ALLOCATION_HEADER_SIZE`) recovers the header
+// from a data pointer; drift here corrupts every CBGR validity check.
+const _: () = assert!(
+    AllocationHeader::SIZE as u64 == crate::layout::ALLOCATION_HEADER_SIZE,
+    "AllocationHeader::SIZE must match verum_common::layout::ALLOCATION_HEADER_SIZE; \
+     core/mem/header.vr declares HEADER_SIZE: Int = 32 — this is the \
+     single source of truth shared across cbgr.rs / layout.rs / \
+     core/mem/header.vr / core/base/memory.vr",
+);
+const _: () = assert!(
+    AllocationHeader::SIZE == AllocationHeader::ALIGN,
+    "Header is self-aligned — SIZE == ALIGN keeps the natural placement \
+     at the start of every CBGR allocation block (32 bytes, half cache line)",
+);
+
+// =============================================================================
 // Constants (MUST match core/mem/header.vr)
 // =============================================================================
 
