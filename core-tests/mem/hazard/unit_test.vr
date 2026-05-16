@@ -59,15 +59,14 @@ fn test_hazard_stats_returns_value() {
 // Section 3: force_reclaim_all — fire-and-forget
 // =============================================================================
 //
-// RESIDUAL DEFECT: `force_reclaim_all()` panics with
+// Pre-fix `force_reclaim_all()` panicked with
 //   `NullPointerAt { op: "opcode 0x62", site: "HazardDomain.scan_hazards", pc: 120 }`
-// on a fresh process — the global HazardDomain.thread_records is null
-// before any thread registers, and `scan_hazards` doesn't null-check
-// before dereferencing.  This is a stdlib-side defect in
-// `core/mem/hazard.vr::HazardDomain.scan_hazards`.  Pinned with @ignore;
-// the stdlib fix is to early-return when `thread_records` is null.
+// on a fresh process — the global `HazardDomain.head` was null before
+// any thread registered, and `scan_hazards` did `List.with_capacity(0)`
+// + `sort`/`dedup` on the resulting empty list which triggered the
+// null-deref.  Fixed by E1: empty-state early-return in scan_hazards
+// when `thread_count == 0`.
 
-@ignore
 @test
 fn test_force_reclaim_all_returns_unit() {
     force_reclaim_all();
