@@ -14,23 +14,9 @@ mount core.base.ordering.{Ordering, Less, Equal, Greater};
 // §A — Slice-only methods panic via CallM with runtime kind = List
 // =============================================================================
 
-// REGRESSION (§A.1): `slice.eq_slice(&other)` panics —
-//   "method 'List.eq_slice' not found on receiver of runtime kind `List`"
-//
-// Root cause: `xs.as_slice()` returns a `&[T]` typed at the source level,
-// but at the VBC runtime the receiver carries a `List` kind (slices are
-// not yet a distinct kind). Dispatch routes CallM("eq_slice", recv) to
-// the List method table, which has no `eq_slice`, panicking with the
-// "method not found" surface.
-//
-// Architecturally the fix is one of:
-//   (a) codegen — when the receiver's static type is `&[T]`, emit a
-//       direct `Call(Slice.<method>_fid)` rather than a `CallM`;
-//   (b) dispatch — on CallM miss against List, fall through to look in
-//       the Slice impl block's method table before panicking;
-//   (c) runtime kind — split `Slice` from `List` so dispatch tables
-//       can be addressed independently.
-@ignore
+// REGRESSION (§A.1): `slice.eq_slice(&other)` — CLOSED via dispatch
+// fix `f04ae25f4` (Strategy 1b in method_dispatch.rs).  Now active
+// PASS-GUARD against re-regression.
 @test
 fn regression_slice_eq_slice_dispatch_panic() {
     let a: List<Int> = [1, 2, 3];
@@ -40,8 +26,7 @@ fn regression_slice_eq_slice_dispatch_panic() {
     assert(sa.eq_slice(sb));
 }
 
-// REGRESSION (§A.2): same dispatch defect for `to_list()`.
-@ignore
+// REGRESSION (§A.2): `slice.to_list()` — CLOSED via dispatch fix.
 @test
 fn regression_slice_to_list_dispatch_panic() {
     let xs: List<Int> = [1, 2, 3];
@@ -50,8 +35,7 @@ fn regression_slice_to_list_dispatch_panic() {
     assert_eq(out.len(), 3);
 }
 
-// REGRESSION (§A.3): same dispatch defect for `cmp_slice()`.
-@ignore
+// REGRESSION (§A.3): `slice.cmp_slice(&other)` — CLOSED via dispatch fix.
 @test
 fn regression_slice_cmp_slice_dispatch_panic() {
     let a: List<Int> = [1, 2, 3];
