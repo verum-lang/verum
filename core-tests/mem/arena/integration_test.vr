@@ -24,11 +24,11 @@ fn integration_default_arena_config_valid() {
         initial_capacity: DEFAULT_ARENA_CAPACITY,
         max_capacity: MAX_ARENA_CAPACITY,
         growth_factor: 200,
-        alignment: ARENA_ALIGNMENT,
     };
     assert(config.initial_capacity <= config.max_capacity);
     assert(config.growth_factor > 100);   // > 1x growth
-    assert(config.alignment > 0);
+    // Alignment is a module constant, not a config field — pin separately.
+    assert(ARENA_ALIGNMENT > 0);
 }
 
 // -----------------------------------------------------------------------------
