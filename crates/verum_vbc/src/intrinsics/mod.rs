@@ -224,20 +224,33 @@ pub fn lookup_intrinsic(name: &str) -> Option<IntrinsicInfo> {
             "ctlz" => "clz",
             "cttz" => "ctz",
             "ctpop" => "popcnt",
-            // Funnel shifts.  Verum's `rotl<T>(x, n)` is defined as
-            // `@intrinsic("fshl", x, x, n)` — degenerate funnel shift
-            // with the same operand on both halves.  The interpreter's
-            // rotate dispatch only consumes (value, amount), so map
-            // `fshl` → `rotate_left` and `fshr` → `rotate_right`.
-            // Note: this collapses the 3-operand funnel into a 2-operand
-            // rotation — correct ONLY when the first two operands are
-            // identical, which is the case for the rotl/rotr wrappers
-            // but NOT for the public `fshl<T>(a, b, c)` surface.  The
-            // 3-operand path is intentionally left broken until a
-            // dedicated funnel-shift opcode lands; pin a test that
-            // calls `fshl(x, y, n)` with x ≠ y to surface the gap.
-            "fshl" => "rotate_left",
-            "fshr" => "rotate_right",
+            // Funnel shifts — `fshl(a, b, c)` and `fshr(a, b, c)` are
+            // 3-operand: concatenate `a:b` into a 128-bit value, shift
+            // left/right by `c`, return the appropriate half.
+            //
+            // Pre-fix this dispatched through `rotate_left` / `rotate_right`
+            // (2-operand) — silently wrong because emit_arith_extended_binary
+            // takes args[0]/args[1] only, DROPPING the third argument.
+            // For `rotl<T>(x, n) = @intrinsic("fshl", x, x, n)` callers
+            // this meant the amount-of-rotation was passed AS the
+            // rotation-amount-input (args[1] = x, args[2] = n was dropped).
+            //
+            // The fix is twofold:
+            //   1. The Tier-0 interpreter gained a dedicated `Fshl` /
+            //      `Fshr` ArithSubOpcode (3-operand `hi, lo, amount`).
+            //   2. `core/intrinsics/bitwise.vr::rotl` / `rotr` rewritten
+            //      to use the canonical 2-arg `@intrinsic("rotate_left",
+            //      x, n)` directly — avoiding the funnel-shift detour
+            //      for the degenerate case.
+            //   3. `core/intrinsics/bitwise.vr::fshl<T>(a, b, c)` and
+            //      `fshr` route to the new 3-operand opcode via
+            //      `InlineSequenceId::Fshl` / `Fshr` registered below.
+            //
+            // The aliases below stay for backward-compat in case any
+            // external caller used the LLVM-canonical names, now
+            // routing through the CORRECT 3-operand registry entries.
+            "fshl" => "fshl_u64",
+            "fshr" => "fshr_u64",
             _ => {
                 // Strip common prefixes used in import aliases
                 // e.g., intrinsic_memcpy → memcpy, intrinsic_slice_from_raw_parts_mut → slice_from_raw_parts_mut

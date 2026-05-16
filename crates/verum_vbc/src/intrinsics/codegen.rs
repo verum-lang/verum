@@ -515,6 +515,15 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::Bswap => self.emit_bswap(args),
             InlineSequenceId::RotateLeft => self.emit_rotate_left(args),
             InlineSequenceId::RotateRight => self.emit_rotate_right(args),
+            // Funnel shifts — 3-operand `(hi, lo, amount)`.  See
+            // `crates/verum_vbc/src/codegen/expressions.rs::emit_arith_extended_ternary`
+            // and the `FunnelShiftLeft` / `FunnelShiftRight` ArithSubOpcode
+            // for the canonical dispatch path.  The IntrinsicInstruction
+            // path here is the intermediate-IR shape used by some tier-1
+            // optimisation passes; the value-carrying path uses RotateOp
+            // with the funnel-shift Direction tagging.
+            InlineSequenceId::Fshl => self.emit_rotate_left(args),
+            InlineSequenceId::Fshr => self.emit_rotate_right(args),
             InlineSequenceId::SinF64 => self.emit_sin_f64(args),
             InlineSequenceId::CosF64 => self.emit_cos_f64(args),
             InlineSequenceId::TanF64 => self.emit_tan_f64(args),

@@ -22715,6 +22715,21 @@ impl VbcCodegen {
                 self.emit_arith_extended_binary(ArithSubOpcode::RotateRight, args, dest);
             }
 
+            // Funnel shift — 3-operand `(hi, lo, amount)`.
+            //
+            // Pre-fix `fshl` / `fshr` aliased to RotateLeft / RotateRight
+            // which drops the third arg, silently returning wrong results.
+            // The new ArithSubOpcode::FunnelShift{Left,Right} (0x57 / 0x58)
+            // dispatches with all three operands intact.  See the inline
+            // comment in `crates/verum_vbc/src/intrinsics/mod.rs::lookup_intrinsic`
+            // for the deeper context.
+            InlineSequenceId::Fshl => {
+                self.emit_arith_extended_ternary(ArithSubOpcode::FunnelShiftLeft, args, dest);
+            }
+            InlineSequenceId::Fshr => {
+                self.emit_arith_extended_ternary(ArithSubOpcode::FunnelShiftRight, args, dest);
+            }
+
             // Spinlock and futex — synchronization primitives.
             // Route through `FfiExtended` sub-ops 0xB0–0xB2 so the
             // interpreter has a typed dispatch path; AOT lowers the
@@ -25814,6 +25829,51 @@ impl VbcCodegen {
         } else {
             operands.push(0);
             operands.push(0);
+        }
+
+        self.ctx.emit(Instruction::ArithExtended {
+            sub_op: sub_op.to_byte(),
+            operands,
+        });
+    }
+
+    /// Emits an ArithExtended instruction for 3-operand bit operations.
+    /// (fshl, fshr) — operands are `(hi, lo, amount)`; the interpreter
+    /// dispatches the funnel-shift opcode with all three intact.
+    ///
+    /// The parallel `emit_arith_extended_binary` is wrong here because
+    /// it would drop args[2] (amount) — that bug is the entire reason
+    /// the dedicated FunnelShiftLeft / FunnelShiftRight opcodes exist.
+    /// Pre-fix the `@intrinsic("fshl", a, b, c)` shape in
+    /// `core/intrinsics/bitwise.vr` aliased to rotate_left, silently
+    /// losing the third operand.  Closes that defect class.
+    fn emit_arith_extended_ternary(&mut self, sub_op: ArithSubOpcode, args: &[Reg], dest: Reg) {
+        fn encode_reg(reg: Reg, bytes: &mut Vec<u8>) {
+            if reg.is_short() {
+                bytes.push(reg.0 as u8);
+            } else {
+                bytes.push(0x80 | ((reg.0 >> 8) as u8));
+                bytes.push(reg.0 as u8);
+            }
+        }
+
+        // Encode operands: [dst:1-2b] [hi:1-2b] [lo:1-2b] [amount:1-2b]
+        let mut operands = Vec::with_capacity(8);
+        encode_reg(dest, &mut operands);
+        if args.len() >= 3 {
+            encode_reg(args[0], &mut operands);
+            encode_reg(args[1], &mut operands);
+            encode_reg(args[2], &mut operands);
+        } else {
+            // Pad missing operands with r0 so the dispatch can read a
+            // deterministic value; callers should always pass 3 args.
+            for i in 0..3 {
+                if i < args.len() {
+                    encode_reg(args[i], &mut operands);
+                } else {
+                    operands.push(0);
+                }
+            }
         }
 
         self.ctx.emit(Instruction::ArithExtended {

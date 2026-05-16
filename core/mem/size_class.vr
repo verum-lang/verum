@@ -76,6 +76,18 @@ public const WORD_SIZE: Int = 8;
 /// Maximum alignment for small objects
 public const MAX_ALIGN_SIZE: Int = 16;
 
+/// Size of the per-page metadata header for heap-allocated pages
+/// (cache-line aligned).  The HeapPageHeader record in `core/mem/heap.vr`
+/// is laid out to fit in exactly this many bytes; `blocks_per_page` here
+/// subtracts the same value from page_size_for_bin to compute available
+/// blocks.  Cross-module pin: drift between this constant and the actual
+/// HeapPageHeader byte size is a real defect — `blocks_per_page` would
+/// over-count available slots, causing block writes to overrun into the
+/// next page's metadata.  Pinned by
+/// `core-tests/mem/size_class/regression_test §...` and
+/// `core-tests/mem/heap/regression_test.regression_page_header_size_is_128`.
+public const PAGE_HEADER_SIZE: Int = 128;
+
 // =============================================================================
 // Size Class Table
 // =============================================================================
@@ -315,9 +327,12 @@ public fn blocks_per_page(bin: Int) -> Int {
     let block_size = SIZE_CLASSES[bin];
     let page_size = page_size_for_bin(bin);
 
-    // Account for page header (64 bytes) and metadata
-    let header_size = 64;
-    let usable = page_size - header_size;
+    // Account for the per-page metadata header.  Uses the canonical
+    // constant so size_class.vr and heap.vr cannot drift on the
+    // available-block accounting — pre-fix this site hardcoded 64
+    // while heap.vr declared 128, silently overcounting blocks by ~64
+    // bytes / page and risking block-write overruns into page metadata.
+    let usable = page_size - PAGE_HEADER_SIZE;
 
     usable / block_size
 }

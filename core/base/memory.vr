@@ -30,7 +30,13 @@ mount super.super.mem.allocator.{
     cbgr_alloc, cbgr_alloc_zeroed, cbgr_dealloc, cbgr_realloc,
     get_header_from_ptr, AllocError,
 };
-mount super.super.mem.header.{AllocationHeader};
+// HEADER_SIZE is the byte offset from a CBGR user-pointer to its
+// AllocationHeader.  Pre-fix this file hardcoded `- 32` at 7 sites
+// (is_valid / is_allocated / is_freed / current_epoch / capabilities /
+// header_generation / header_size); any future change to the header
+// layout would silently corrupt every validity check.  Import the
+// canonical value from `core.mem.header`.
+mount super.super.mem.header.{AllocationHeader, HEADER_SIZE};
 mount core.intrinsics.atomic.{
     MemoryOrder,
     ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE,
@@ -260,7 +266,7 @@ implement<T> Heap<T> {
     /// threads. Panics on mismatch (use-after-free detected). Cost: ~15ns.
     @inline(always)
     fn validate_cbgr(&self) {
-        let header_addr = self.ptr as Int - 32;
+        let header_addr = self.ptr as Int - HEADER_SIZE;
         // Atomic load of generation counter (Acquire ordering for cross-thread visibility)
         let actual_gen = atomic_load_u32(header_addr as *const UInt32, ORDERING_ACQUIRE);
         if actual_gen != self.generation {
@@ -369,7 +375,7 @@ implement<T> Heap<T> {
     /// This reads the actual generation from the heap header (not the cached
     /// value stored in the Heap struct). Useful for CBGR introspection tests.
     public fn header_generation(&self) -> UInt32 {
-        let header_addr = self.ptr as Int - 32;
+        let header_addr = self.ptr as Int - HEADER_SIZE;
         atomic_load_u32(header_addr as *const UInt32, ORDERING_ACQUIRE)
     }
 
@@ -379,7 +385,7 @@ implement<T> Heap<T> {
     /// This reads the actual epoch from the heap header. The epoch tracks
     /// the allocation era for generational memory safety.
     public fn current_epoch(&self) -> UInt16 {
-        let header_addr = self.ptr as Int - 32;
+        let header_addr = self.ptr as Int - HEADER_SIZE;
         let epoch_and_caps = atomic_load_u32((header_addr + 4) as *const UInt32, ORDERING_ACQUIRE);
         (epoch_and_caps & 0xFFFF) as UInt16
     }
@@ -390,7 +396,7 @@ implement<T> Heap<T> {
     /// A generation of 0 indicates the memory has been freed. This is
     /// a lightweight check that does not validate epoch consistency.
     public fn is_allocated(&self) -> Bool {
-        let header_addr = self.ptr as Int - 32;
+        let header_addr = self.ptr as Int - HEADER_SIZE;
         let actual_gen = atomic_load_u32(header_addr as *const UInt32, ORDERING_ACQUIRE);
         actual_gen != 0
     }
@@ -402,7 +408,7 @@ implement<T> Heap<T> {
     /// past the stored generation value, indicating the memory was freed and
     /// potentially reused.
     public fn is_freed(&self) -> Bool {
-        let header_addr = self.ptr as Int - 32;
+        let header_addr = self.ptr as Int - HEADER_SIZE;
         let actual_gen = atomic_load_u32(header_addr as *const UInt32, ORDERING_ACQUIRE);
         actual_gen != self.generation
     }
@@ -412,7 +418,7 @@ implement<T> Heap<T> {
 
     /// Alias for `current_epoch()` — provided for symmetry with `header_generation()`.
     public fn header_epoch(&self) -> UInt32 {
-        let header_addr = self.ptr as Int - 32;
+        let header_addr = self.ptr as Int - HEADER_SIZE;
         let epoch_and_caps = atomic_load_u32((header_addr + 4) as *const UInt32, ORDERING_ACQUIRE);
         epoch_and_caps & 0xFFFF
     }
@@ -429,7 +435,7 @@ implement<T> Heap<T> {
 
     /// Get the CBGR capability flags from the allocation header.
     public fn capabilities(&self) -> UInt16 {
-        let header_addr = self.ptr as Int - 32;
+        let header_addr = self.ptr as Int - HEADER_SIZE;
         let epoch_and_caps = atomic_load_u32((header_addr + 4) as *const UInt32, ORDERING_ACQUIRE);
         ((epoch_and_caps >> 16) & 0xFFFF) as UInt16
     }

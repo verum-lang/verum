@@ -16930,6 +16930,41 @@ fn lower_arith_extended<'ctx>(
             Ok(())
         }
 
+        // Funnel shift left — 3-operand `(hi, lo, amount)`.
+        //
+        // Lowers to LLVM's canonical `llvm.fshl.i64` intrinsic, which is
+        // a 3-operand instruction.  Pre-fix the rotate path called the
+        // same intrinsic with only 2 args (the degenerate case), but the
+        // proper funnel-shift needs all three.  See
+        // `crates/verum_vbc/src/intrinsics/mod.rs::lookup_intrinsic` for
+        // the source-level provenance.
+        Some(ArithSubOpcode::FunnelShiftLeft) => {
+            if operands.len() < 4 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let hi = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "fshl_hi")?;
+            let lo = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "fshl_lo")?;
+            let n = as_i64(ctx, ctx.get_register(op_reg(operands, 3))?, "fshl_n")?;
+            let result = build_ternary_intrinsic(ctx, "llvm.fshl.i64", hi, lo, n, "fshl")?;
+            ctx.set_register(dst, result.into());
+            Ok(())
+        }
+
+        // Funnel shift right — symmetric counterpart to FunnelShiftLeft.
+        Some(ArithSubOpcode::FunnelShiftRight) => {
+            if operands.len() < 4 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let hi = as_i64(ctx, ctx.get_register(op_reg(operands, 1))?, "fshr_hi")?;
+            let lo = as_i64(ctx, ctx.get_register(op_reg(operands, 2))?, "fshr_lo")?;
+            let n = as_i64(ctx, ctx.get_register(op_reg(operands, 3))?, "fshr_n")?;
+            let result = build_ternary_intrinsic(ctx, "llvm.fshr.i64", hi, lo, n, "fshr")?;
+            ctx.set_register(dst, result.into());
+            Ok(())
+        }
+
         // ==== Type Conversions ====
         Some(ArithSubOpcode::SextI) => {
             if operands.len() < 2 {
@@ -21790,6 +21825,29 @@ fn build_binary_intrinsic_f64<'ctx>(
 /// (rather than FloatValue) because some callers store the result
 /// directly via `ctx.set_register(dst, result)` rather than
 /// converting to FloatValue first.
+/// Build a call to a ternary LLVM integer intrinsic (e.g., llvm.fshl.i64,
+/// llvm.fshr.i64).  These intrinsics take three i64 operands and return
+/// an i64 result.  Used by the FunnelShiftLeft / FunnelShiftRight VBC
+/// opcodes — the rotate operations are degenerate cases of these.
+fn build_ternary_intrinsic<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    intrinsic_name: &str,
+    a: verum_llvm::values::IntValue<'ctx>,
+    b: verum_llvm::values::IntValue<'ctx>,
+    c: verum_llvm::values::IntValue<'ctx>,
+    name: &str,
+) -> Result<verum_llvm::values::IntValue<'ctx>> {
+    let i64_ty = ctx.types().i64_type();
+    let fn_type = i64_ty.fn_type(&[i64_ty.into(), i64_ty.into(), i64_ty.into()], false);
+    let func = super::error::get_or_declare_function(ctx.get_module(), intrinsic_name, fn_type);
+    let result = ctx
+        .builder()
+        .build_call(func, &[a.into(), b.into(), c.into()], name)
+        .or_llvm_err()?
+        .basic_value_or_else(|| format!("{}: expected return value", intrinsic_name))?;
+    Ok(result.into_int_value())
+}
+
 fn build_ternary_intrinsic_f64<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     intrinsic_name: &str,
