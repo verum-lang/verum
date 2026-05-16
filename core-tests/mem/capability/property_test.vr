@@ -1,0 +1,269 @@
+// =============================================================================
+// core-tests/mem/capability/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for `core.mem.capability`.
+//
+// The capability set forms a Boolean lattice over the 8-bit universe
+// {Read, Write, Execute, Delegate, Revoke, Borrowed, Mutable, NoEscape}.
+// The laws below pin the lattice operations to that algebraic structure.
+//
+// Laws verified:
+//   §A  attenuate is idempotent: attenuate(attenuate(x, m), m) == attenuate(x, m)
+//   §B  attenuate is commutative in the mask: attenuate(x, m1 & m2) ==
+//         attenuate(attenuate(x, m1), m2)
+//   §C  attenuate is monotone: attenuate(x, m) ⊆ x  (no bit gained)
+//   §D  remove_capability is involutive on the chosen bits:
+//         remove_capability(remove_capability(x, k), k) == remove_capability(x, k)
+//   §E  has_capability(x, k) ⇔ has_all_capabilities(x, k) for single-bit k
+//   §F  pack/unpack round-trip is identity for any (epoch, caps) ∈ UInt16²
+//   §G  delegate_capability respects monotonic-attenuation:
+//         delegate(p, r) = Some(r) ⇒ r ⊆ p
+//   §H  revoke_capability is monotone: revoke(x, k) ⊆ x  (no bit gained)
+//   §I  De Morgan: !(a | b) == !a & !b within the 8-bit universe
+//   §J  validate_write ⇒ has CAP_WRITE  AND  has CAP_MUTABLE  (conjunctive)
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.capability.{
+    CAP_READ, CAP_WRITE, CAP_EXECUTE, CAP_DELEGATE, CAP_REVOKE,
+    CAP_BORROWED, CAP_MUTABLE, CAP_NO_ESCAPE,
+    CAP_ALL, CAP_OWNED, CAP_READ_ONLY, CAP_READ_WRITE,
+    has_capability, has_all_capabilities,
+    attenuate, remove_capability,
+    delegate_capability, revoke_capability,
+    validate_read, validate_write, validate_execute,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+};
+
+// -----------------------------------------------------------------------------
+// Domain — every flag set inside the 8-bit universe is enumerable (256
+// values). Most laws below sweep the full domain exhaustively.
+// -----------------------------------------------------------------------------
+
+fn all_single_bits() -> List<UInt16> {
+    [CAP_READ, CAP_WRITE, CAP_EXECUTE, CAP_DELEGATE,
+     CAP_REVOKE, CAP_BORROWED, CAP_MUTABLE, CAP_NO_ESCAPE]
+}
+
+// =============================================================================
+// §A  attenuate idempotence
+// =============================================================================
+
+@test
+fn law_attenuate_idempotent_exhaustive() {
+    let bits = all_single_bits();
+    for x_int in 0..256 {
+        let x: UInt16 = x_int as UInt16;
+        for m in bits.iter() {
+            let once = attenuate(x, *m);
+            let twice = attenuate(once, *m);
+            assert_eq(twice, once);
+        }
+    }
+}
+
+// =============================================================================
+// §B  attenuate mask-commutativity
+// =============================================================================
+
+@test
+fn law_attenuate_mask_commutative_exhaustive() {
+    let bits = all_single_bits();
+    for x_int in 0..256 {
+        let x: UInt16 = x_int as UInt16;
+        for m1 in bits.iter() {
+            for m2 in bits.iter() {
+                let lhs = attenuate(x, *m1 & *m2);
+                let rhs = attenuate(attenuate(x, *m1), *m2);
+                assert_eq(lhs, rhs);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// §C  attenuate monotone (no bit gained)
+// =============================================================================
+
+@test
+fn law_attenuate_monotone_exhaustive() {
+    let bits = all_single_bits();
+    for x_int in 0..256 {
+        let x: UInt16 = x_int as UInt16;
+        for m in bits.iter() {
+            let after = attenuate(x, *m);
+            // Every bit in `after` must have been in `x`
+            assert_eq(after & x, after);
+        }
+    }
+}
+
+// =============================================================================
+// §D  remove_capability idempotent
+// =============================================================================
+
+@test
+fn law_remove_capability_idempotent_exhaustive() {
+    let bits = all_single_bits();
+    for x_int in 0..256 {
+        let x: UInt16 = x_int as UInt16;
+        for k in bits.iter() {
+            let once = remove_capability(x, *k);
+            let twice = remove_capability(once, *k);
+            assert_eq(twice, once);
+            // After removal, the bit MUST be absent
+            assert_eq(once & *k, 0 as UInt16);
+        }
+    }
+}
+
+// =============================================================================
+// §E  has_capability ⇔ has_all_capabilities for single-bit checks
+// =============================================================================
+
+@test
+fn law_has_capability_equiv_has_all_for_single_bit_exhaustive() {
+    let bits = all_single_bits();
+    for x_int in 0..256 {
+        let x: UInt16 = x_int as UInt16;
+        for k in bits.iter() {
+            assert_eq(has_capability(x, *k), has_all_capabilities(x, *k));
+        }
+    }
+}
+
+// =============================================================================
+// §F  pack / unpack round-trip
+// =============================================================================
+
+@test
+fn law_pack_unpack_round_trip_pinned() {
+    let cases: List<(UInt16, UInt16)> = [
+        (0 as UInt16, 0 as UInt16),
+        (1 as UInt16, 1 as UInt16),
+        (0xFFFF as UInt16, 0xFFFF as UInt16),
+        (0x1234 as UInt16, 0xABCD as UInt16),
+        (0 as UInt16, 0xFF as UInt16),
+        (0xFFFF as UInt16, 0 as UInt16),
+    ];
+    for case in cases.iter() {
+        let epoch = case.0;
+        let caps = case.1;
+        let packed = pack_epoch_caps(epoch, caps);
+        assert_eq(unpack_epoch(packed), epoch);
+        assert_eq(unpack_caps(packed), caps);
+    }
+}
+
+@property
+fn prop_pack_unpack_round_trip(epoch: UInt16, caps: UInt16) {
+    let packed = pack_epoch_caps(epoch, caps);
+    assert_eq(unpack_epoch(packed), epoch);
+    assert_eq(unpack_caps(packed), caps);
+}
+
+// =============================================================================
+// §G  delegate_capability is monotonic-attenuating
+// =============================================================================
+
+@test
+fn law_delegate_respects_monotonic_attenuation() {
+    // For parent = CAP_OWNED (has CAP_DELEGATE), every subset of parent
+    // must succeed and the result must be exactly the requested subset.
+    let parent: UInt16 = CAP_OWNED;
+    let subsets: List<UInt16> = [
+        CAP_READ,
+        CAP_READ | CAP_WRITE,
+        CAP_READ | CAP_WRITE | CAP_MUTABLE,
+        CAP_DELEGATE,
+        CAP_REVOKE,
+        parent,
+    ];
+    for r in subsets.iter() {
+        let result = delegate_capability(parent, *r);
+        assert(result.is_some());
+        let granted = result.unwrap();
+        assert_eq(granted, *r);
+        // Granted must be ⊆ parent
+        assert_eq(granted & parent, granted);
+    }
+}
+
+// =============================================================================
+// §H  revoke_capability is monotone (only removes bits)
+// =============================================================================
+
+@test
+fn law_revoke_monotone_exhaustive() {
+    let bits = all_single_bits();
+    // Parent must have CAP_REVOKE to revoke at all.
+    for x_int in 0..256 {
+        let x: UInt16 = (x_int as UInt16) | CAP_REVOKE;
+        for k in bits.iter() {
+            let result = revoke_capability(x, *k);
+            assert(result.is_some());
+            let after = result.unwrap();
+            // No bit added
+            assert_eq(after & x, after);
+            // The named bit is gone
+            assert_eq(after & *k, 0 as UInt16);
+        }
+    }
+}
+
+// =============================================================================
+// §I  De Morgan within the 8-bit universe
+// =============================================================================
+
+@test
+fn law_de_morgan_8bit_pinned() {
+    let bits = all_single_bits();
+    for a in bits.iter() {
+        for b in bits.iter() {
+            let lhs = ~(*a | *b) & CAP_ALL;
+            let rhs = (~*a & ~*b) & CAP_ALL;
+            assert_eq(lhs, rhs);
+        }
+    }
+}
+
+// =============================================================================
+// §J  validate_write requires BOTH CAP_WRITE and CAP_MUTABLE
+// =============================================================================
+
+@test
+fn law_validate_write_is_conjunctive_exhaustive() {
+    for x_int in 0..256 {
+        let x: UInt16 = x_int as UInt16;
+        let expect = (x & CAP_WRITE != 0 as UInt16)
+                  && (x & CAP_MUTABLE != 0 as UInt16);
+        assert_eq(validate_write(x), expect);
+    }
+}
+
+@test
+fn law_validate_read_matches_read_bit_exhaustive() {
+    for x_int in 0..256 {
+        let x: UInt16 = x_int as UInt16;
+        let expect = x & CAP_READ != 0 as UInt16;
+        assert_eq(validate_read(x), expect);
+    }
+}
+
+@test
+fn law_validate_execute_matches_execute_bit_exhaustive() {
+    for x_int in 0..256 {
+        let x: UInt16 = x_int as UInt16;
+        let expect = x & CAP_EXECUTE != 0 as UInt16;
+        assert_eq(validate_execute(x), expect);
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

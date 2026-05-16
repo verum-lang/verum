@@ -1,0 +1,139 @@
+// =============================================================================
+// core-tests/mem/capability/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions — one @test per past defect.  Tests are NEVER deleted
+// even after the underlying bug is fixed; they become guardrails against
+// re-regression.
+//
+// Pinned regressions:
+//   §A  `delegate_capability` previously used an obfuscated bit-twiddle
+//       `Some(req & !CAP_DELEGATE | (req & CAP_DELEGATE))` that was
+//       algebraically equivalent to `Some(req)`.  The current form
+//       returns `Some(requested)` directly — pin the actual semantics
+//       to defend against re-introduction of the obfuscated form.
+//       audit.md §3.1.
+//   §B  pack_epoch_caps had been written as `(caps as UInt32) * 65536 |
+//       (epoch as UInt32)` — algebraically equivalent to the canonical
+//       shift form but routed `*` through the overflow-checked
+//       multiplication path on some backends.  Pin the bit-shift
+//       semantics that the canonical implementation now uses.
+//       audit.md §3.2.
+//   §C  Bare-name variant constructors (`Read`, `Write`, … instead of
+//       `Capability.Read`) — the qualified form `Capability.Read`
+//       failed to resolve at compile-time because variant lookup on the
+//       sum type went through bidirectional Path dispatch which had no
+//       fallback to the parent enum.  Pin the workaround: every
+//       Capability-typed binding uses the bare-name form.  Tracked
+//       by MEMORY task #5 §3.1 (closed via commit 6cac007b1).
+//   §D  has_all_capabilities(x, 0) is `(x & 0) == 0` ⇒ true — the empty
+//       set is vacuously a subset of every flag-set.  Pin this corner
+//       case so a future code-gen change doesn't accidentally invert it.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.capability.{
+    Capability,
+    Read, Write, Execute, Delegate, Revoke, Borrowed, Mutable, NoEscape,
+    CAP_READ, CAP_WRITE, CAP_DELEGATE, CAP_REVOKE, CAP_MUTABLE,
+    CAP_ALL, CAP_OWNED, CAP_READ_ONLY,
+    has_all_capabilities,
+    delegate_capability,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+};
+
+// -----------------------------------------------------------------------------
+// §A — delegate returns Some(requested) when parent dominates
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_delegate_returns_requested_subset_directly() {
+    let parent: UInt16 = CAP_OWNED;
+    let request: UInt16 = CAP_READ;
+    let result = delegate_capability(parent, request).unwrap();
+    // The canonical form returns the request UNCHANGED — no Delegate
+    // stripping, no re-bit-twiddling.  Pre-fix the obfuscated form was
+    // algebraically equivalent to this but obscured the semantics from
+    // review.
+    assert_eq(result, request);
+}
+
+@test
+fn regression_delegate_full_parent_returns_full_parent() {
+    let parent: UInt16 = CAP_OWNED;
+    let result = delegate_capability(parent, parent).unwrap();
+    assert_eq(result, parent);
+}
+
+// -----------------------------------------------------------------------------
+// §B — pack_epoch_caps uses shift, not multiply
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_pack_uses_shift_not_overflow_checked_mul() {
+    // The canonical form is `(caps as UInt32) << 16 | (epoch as UInt32)`.
+    // Verify the bit-pattern matches what shift would produce for
+    // caps = 0xFFFF (max UInt16). Pre-fix the multiply form `* 65536`
+    // could route through overflow-checked dispatch on some backends.
+    let packed = pack_epoch_caps(0 as UInt16, 0xFFFF as UInt16);
+    // 0xFFFF << 16 = 0xFFFF0000 — exact bit pattern
+    assert_eq(packed, 0xFFFF0000 as UInt32);
+}
+
+@test
+fn regression_pack_no_overlap_between_epoch_and_caps_max() {
+    // Maximum-value packing — neither half should bleed into the other.
+    let packed = pack_epoch_caps(0xFFFF as UInt16, 0xFFFF as UInt16);
+    assert_eq(packed, 0xFFFFFFFF as UInt32);
+    assert_eq(unpack_epoch(packed), 0xFFFF as UInt16);
+    assert_eq(unpack_caps(packed), 0xFFFF as UInt16);
+}
+
+// -----------------------------------------------------------------------------
+// §C — bare-name variant constructors must resolve in the presence of
+//      Maybe.None / Result.Err / OtherEnum.Read collisions across stdlib
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_bare_variant_construction_resolves() {
+    // Pre-task-#5-§3.1, bare-name `Read` could collide with another
+    // stdlib enum's `Read` constructor.  Bidirectional Path-arm resolution
+    // routes bare variants through the expected type context.
+    let read: Capability = Read;
+    let write: Capability = Write;
+    let execute: Capability = Execute;
+    let delegate: Capability = Delegate;
+    let revoke: Capability = Revoke;
+    let borrowed: Capability = Borrowed;
+    let mutable: Capability = Mutable;
+    let no_escape: Capability = NoEscape;
+    assert_eq(read.to_bit(), CAP_READ);
+    assert_eq(write.to_bit(), CAP_WRITE);
+    assert_eq(execute.to_bit(), 4 as UInt16);
+    assert_eq(delegate.to_bit(), CAP_DELEGATE);
+    assert_eq(revoke.to_bit(), CAP_REVOKE);
+    assert_eq(borrowed.to_bit(), 32 as UInt16);
+    assert_eq(mutable.to_bit(), CAP_MUTABLE);
+    assert_eq(no_escape.to_bit(), 128 as UInt16);
+}
+
+// -----------------------------------------------------------------------------
+// §D — has_all_capabilities(x, 0) is vacuously true
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_has_all_capabilities_empty_set_vacuous() {
+    // The empty set is a subset of every flag-set — must hold even when
+    // x is empty.
+    assert(has_all_capabilities(0 as UInt16, 0 as UInt16));
+    assert(has_all_capabilities(CAP_OWNED, 0 as UInt16));
+    assert(has_all_capabilities(CAP_ALL, 0 as UInt16));
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
