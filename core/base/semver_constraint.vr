@@ -163,6 +163,12 @@ public fn matches_default(c: &SemVerConstraint, v: &SemVer) -> Bool {
     matches_impl(c, v, &match_options_default())
 }
 
+/// Test allowing pre-release versions to match — convenience wrapper
+/// over `matches(c, v, &match_options_allow_prerelease())`.
+public fn matches_allow_prerelease(c: &SemVerConstraint, v: &SemVer) -> Bool {
+    matches_impl(c, v, &match_options_allow_prerelease())
+}
+
 /// Render a constraint back to canonical text form.
 public fn format_constraint(c: &SemVerConstraint) -> Text {
     format_impl(c)

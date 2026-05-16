@@ -7,7 +7,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.semver.{SemVer, parse, format as semver_format};
+mount core.base.semver.{SemVer, parse, format as semver_format, cmp};
 mount core.base.{VERSION};
 mount core.collections.list.List;
 
@@ -29,7 +29,7 @@ mount core.collections.list.List;
 fn test_rfc_precedence_fixture(a_str: Text, b_str: Text, expected: Ordering) {
     let a = parse(a_str).unwrap();
     let b = parse(b_str).unwrap();
-    let actual = Ordering.from_int(a.cmp(&b));
+    let actual = cmp(&a, &b);
     assert_eq(actual, expected,
         f"expected {a_str} {expected:?} {b_str}");
 }
@@ -43,7 +43,7 @@ fn test_build_metadata_ignored_in_comparison() {
     let a = parse("1.0.0+build.1").unwrap();
     let b = parse("1.0.0+build.2").unwrap();
     // a and b have the same precedence — build metadata must not change ordering
-    assert_eq(Ordering.from_int(a.cmp(&b)), Ordering.Equal);
+    assert_eq(cmp(&a, &b), Ordering.Equal);
 }
 
 @test
@@ -51,7 +51,7 @@ fn test_prerelease_with_build_metadata_lower_than_release() {
     let pre = parse("1.0.0-alpha+001").unwrap();
     let release = parse("1.0.0+build.1").unwrap();
     // prerelease < release, regardless of build metadata
-    assert_eq(Ordering.from_int(pre.cmp(&release)), Ordering.Less);
+    assert_eq(cmp(&pre, &release), Ordering.Less);
 }
 
 // =============================================================================
@@ -74,7 +74,7 @@ fn test_sort_versions_ascending() {
         "2.0.0", "1.0.0", "1.2.0", "1.1.0", "2.1.0",
     ];
     let mut parsed: List<SemVer> = versions.map(|s| parse(s).unwrap()).collect();
-    parsed.sort_by(|a, b| Ordering.from_int(a.cmp(b)));
+    parsed.sort_by(|a, b| cmp(a, b));
     let strs: List<Text> = parsed.map(|v| semver_format(&v)).collect();
     assert_eq(strs, ["1.0.0", "1.1.0", "1.2.0", "2.0.0", "2.1.0"]);
 }

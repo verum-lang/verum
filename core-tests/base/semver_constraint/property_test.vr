@@ -13,7 +13,8 @@ mount core.prelude.*;
 mount core.base.semver.{SemVer, parse as parse_ver};
 mount core.base.semver_constraint.{
     SemVerConstraint, exact, caret, tilde,
-    matches_default,
+    matches_default, matches_allow_prerelease,
+    parse as parse_constraint,
 };
 mount core.collections.list.List;
 

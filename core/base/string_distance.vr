@@ -260,3 +260,50 @@ fn min3(a: Int, b: Int, c: Int) -> Int {
 fn abs_diff(a: Int, b: Int) -> Int {
     if a > b { a - b } else { b - a }
 }
+
+// =============================================================================
+// Text-typed wrappers (convenience for callers with Text input)
+// =============================================================================
+
+/// `levenshtein` over Text — delegates to byte-slice version via `as_bytes()`.
+public fn levenshtein_text(a: &Text, b: &Text) -> Int {
+    levenshtein(a.as_bytes(), b.as_bytes())
+}
+
+/// `jaro` over Text — see byte-slice version for semantics.
+public fn jaro_text(a: &Text, b: &Text) -> Float {
+    jaro(a.as_bytes(), b.as_bytes())
+}
+
+/// `jaro_winkler` over Text — see byte-slice version for semantics.
+public fn jaro_winkler_text(a: &Text, b: &Text) -> Float {
+    jaro_winkler(a.as_bytes(), b.as_bytes())
+}
+
+/// `closest` for Text inputs — wraps the byte-slice version.
+/// Returns the best-match candidate Text or None if no candidate is
+/// within `max_distance` Levenshtein distance.
+public fn closest_text(query: &Text, candidates: &List<Text>, max_distance: Int = 3) -> Maybe<Text> {
+    let mut best_idx: Int = -1;
+    let mut best_d: Int = max_distance + 1;
+    let q_bytes = query.as_bytes();
+    let mut i = 0;
+    while i < candidates.len() {
+        let cand_bytes = candidates[i].as_bytes();
+        match levenshtein_bounded(q_bytes, cand_bytes, max_distance) {
+            Some(d) => {
+                if d < best_d {
+                    best_d = d;
+                    best_idx = i;
+                }
+            }
+            None => {}
+        }
+        i = i + 1;
+    }
+    if best_idx >= 0 {
+        Some(candidates[best_idx].clone())
+    } else {
+        None
+    }
+}

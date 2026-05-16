@@ -8,7 +8,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.semver.{SemVer, parse as parse_version};
+mount core.base.semver.{SemVer, parse as parse_version, cmp};
 mount core.base.semver_constraint.{
     SemVerConstraint, parse as parse_constraint,
     MatchOptions,
@@ -112,7 +112,7 @@ fn test_resolve_latest_compatible() {
     assert_eq(compatible.len(), 3);
     // Sort and pick highest
     let mut sorted = compatible.clone();
-    sorted.sort_by(|a, b| Ordering.from_int(b.cmp(a)));  // descending
+    sorted.sort_by(|a, b| cmp(b, a));  // descending
     let latest = sorted.get(0).unwrap();
     assert_eq(latest.minor, 2);
 }

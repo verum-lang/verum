@@ -22,10 +22,10 @@ fn test_abort_on_permanent_error_stops_immediately() {
     let mut call_count = 0;
     let opts: RetryOptions<Text> = RetryOptions.simple(5)
         .with_should_retry(|e: &Text| { *e != "permanent" });
-    let r: Result<Int, Text> = retry_with_strategy(opts, || {
+    let r: Result<Int, Text> = retry_with_strategy(|| {
         call_count = call_count + 1;
         Err("permanent".to_text())
-    });
+    }, opts);
     assert(r.is_err());
     assert_eq(call_count, 1);   // stopped immediately — permanent error
 }
@@ -35,14 +35,14 @@ fn test_retries_transient_but_aborts_permanent() {
     let mut call_count = 0;
     let opts: RetryOptions<Text> = RetryOptions.simple(10)
         .with_should_retry(|e: &Text| { *e == "transient" });
-    let r: Result<Int, Text> = retry_with_strategy(opts, || {
+    let r: Result<Int, Text> = retry_with_strategy(|| {
         call_count = call_count + 1;
         if call_count < 3 {
             Err("transient".to_text())
         } else {
             Err("permanent".to_text())
         }
-    });
+    }, opts);
     assert(r.is_err());
     assert_eq(call_count, 3);   // 2 transient retries then permanent
 }
@@ -96,10 +96,10 @@ fn test_linear_backoff_attempt_count_bounded() {
     let opts: RetryOptions<Text> = RetryOptions.simple(3)
         .with_backoff(RetryBackoff.Linear { base_ms: 0 });
     let mut call_count = 0;
-    let r: Result<Int, Text> = retry_with_strategy(opts, || {
+    let r: Result<Int, Text> = retry_with_strategy(|| {
         call_count = call_count + 1;
         Err("always".to_text())
-    });
+    }, opts);
     assert(r.is_err());
     assert_eq(call_count, 3);
 }
