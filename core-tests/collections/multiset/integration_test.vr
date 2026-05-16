@@ -1,0 +1,120 @@
+// =============================================================================
+// core-tests/collections/multiset/integration_test.vr
+// =============================================================================
+//
+// Cross-type scenarios for Multiset<T> with the rest of stdlib.
+// Multisets shine as frequency counters / bag-statistics, so the
+// integration value is in how they compose with iteration pipelines
+// and with `List<T>` as the source of incoming elements.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.multiset.Multiset;
+
+// =============================================================================
+// Integration: count occurrences across a List<T> stream
+// =============================================================================
+
+@test
+fn int_multiset_word_frequency_from_list() {
+    let words: List<Int> = [1, 2, 1, 3, 2, 1, 4, 2, 1];
+    let mut m: Multiset<Int> = Multiset.new();
+    let mut i = 0;
+    while i < words.len() {
+        m.insert(words[i]);
+        i = i + 1;
+    }
+    assert_eq(m.count(&1), 4);
+    assert_eq(m.count(&2), 3);
+    assert_eq(m.count(&3), 1);
+    assert_eq(m.count(&4), 1);
+    assert_eq(m.cardinality(), 9);
+    assert_eq(m.distinct_len(), 4);
+}
+
+// =============================================================================
+// Integration: List<Int> → Multiset → drain via remove_all
+// =============================================================================
+
+@test
+fn int_multiset_remove_all_drains_one_key_at_a_time() {
+    let mut m: Multiset<Int> = Multiset.new();
+    m.insert_n(1, 3);
+    m.insert_n(2, 5);
+    m.insert_n(3, 2);
+    assert_eq(m.cardinality(), 10);
+
+    m.remove_all(&1);
+    assert_eq(m.distinct_len(), 2);
+    assert_eq(m.cardinality(), 7);
+
+    m.remove_all(&2);
+    assert_eq(m.distinct_len(), 1);
+    assert_eq(m.cardinality(), 2);
+
+    m.remove_all(&3);
+    assert(m.is_empty());
+}
+
+// =============================================================================
+// Integration: roundtrip with explicit insertion
+// =============================================================================
+
+@test
+fn int_multiset_alternating_insert_remove_balances() {
+    let mut m: Multiset<Int> = Multiset.new();
+    let mut i = 0;
+    while i < 10 {
+        m.insert(7);
+        i = i + 1;
+    }
+    let mut j = 0;
+    while j < 10 {
+        m.remove(&7);
+        j = j + 1;
+    }
+    assert(m.is_empty());
+    assert_eq(m.count(&7), 0);
+}
+
+// =============================================================================
+// Integration: cardinality unchanged across no-op operations
+// =============================================================================
+
+@test
+fn int_multiset_no_op_operations_preserve_state() {
+    let mut m: Multiset<Int> = Multiset.new();
+    m.insert_n(1, 5);
+    m.insert_n(2, 3);
+    let before = m.cardinality();
+    let distinct_before = m.distinct_len();
+
+    let _ = m.insert_n(99, 0);    // zero count = no-op
+    let _ = m.insert_n(99, -7);   // negative = no-op
+    let _ = m.remove(&999);       // absent = no-op
+    let _ = m.remove_all(&999);   // absent = no-op
+
+    assert_eq(m.cardinality(), before);
+    assert_eq(m.distinct_len(), distinct_before);
+}
+
+// =============================================================================
+// Integration: clear restores to fresh-new state
+// =============================================================================
+
+@test
+fn int_multiset_clear_restores_to_fresh() {
+    let mut m: Multiset<Int> = Multiset.new();
+    m.insert_n(1, 3);
+    m.insert_n(2, 4);
+    m.clear();
+
+    let fresh: Multiset<Int> = Multiset.new();
+    assert_eq(m.is_empty(), fresh.is_empty());
+    assert_eq(m.distinct_len(), fresh.distinct_len());
+    assert_eq(m.cardinality(), fresh.cardinality());
+
+    // Post-clear we can still use the multiset.
+    m.insert(42);
+    assert_eq(m.count(&42), 1);
+}
