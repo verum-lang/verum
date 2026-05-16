@@ -98,7 +98,85 @@ one cross-cutting protocol; it's tested implicitly via every
   Pinned here so any future re-introduction of the dispatch race
   surfaces immediately.
 
-### 3.4 `IntCoercible` propagation through `mount X.{Type}`
+### 3.4 Sized-integer `==/!=` recursing through method dispatch (closed in this branch)
+
+* **Symptom (pre-fix)**: a file with both `assert_eq(F_RDLCK, 0 as
+  Int16)` and `assert(F_RDLCK != F_WRLCK)` would crash the second
+  assert with `StackOverflow { depth: 16384 }`. The pattern
+  generalises to ANY sized-integer comparison (`Int8/Int16/Int32/
+  Int64/UInt8..UInt128/USize/ISize/Byte`) on cross-module-const
+  operands when an Eq-instantiating context is present in the same
+  compilation unit.
+* **Root cause**: `compile_binary` (`verum_vbc/src/codegen/
+  expressions.rs:~1953`) tested `is_primitive` against ONLY the
+  three TypeKind primitives (`Int`, `Bool`, `Char`). Sized aliases
+  carry `TypeKind::Path("Int16")` etc., so the test missed them and
+  routed `==/!=` through `CmpG` → method dispatch. The
+  `assert_eq<T: Eq>` instantiation materialises an `Int16.eq`
+  wrapper that captures the default `PartialEq.ne` body's
+  `!self.eq(other)`; the subsequent `Int16 != Int16` recursed into
+  the wrapper's `self.eq(other)` arm.
+* **Two-arm fix landed in commit `0b17c7579`**:
+    1. `is_primitive` now consults
+       `verum_common::well_known_types::type_names::is_numeric_type`
+       (NUMERIC_ALIAS_MATRIX-pinned) so all sized aliases route
+       through direct `CmpI` / `CmpF` opcodes;
+    2. `extract_expr_type_name(Path)` now probes `func_info.is_const
+       + return_type_name` for const declarations so cross-module
+       const operands propagate their declared primitive type up
+       through the primitive-name probe.
+* **Architectural rule pinned**: every primitive comparison op MUST
+  emit the direct opcode for primitive operands; every Path
+  expression resolving to a const declaration MUST propagate the
+  declared type through `extract_expr_type_name`.
+
+### 3.5 EqG protocol_id=0 falling through to deep_value_eq (closed in this branch)
+
+* **Symptom (pre-fix)**: `Some(OSError(2, "X")).eq(&Some(OSError(2,
+  "Y")))` returned FALSE even though `OSError.eq` compares only
+  `code` (ignoring `message`). Caused `test_oserror_list_count_
+  distinct_codes` to fail with `AssertionFailed`. Generalises to
+  every `Maybe<Record>.eq` / `Result<Record, _>.eq` / `List<Record>
+  .eq` / `Map<K, Record>.eq` / `Set<Record>.eq` site whose record
+  type overrides field-by-field equality.
+* **Root cause**: blanket-impl bodies like `<T: Eq> Eq for Maybe<T>
+  { fn eq(&self, other) { match (self,other) { (Some(a),Some(b)) =>
+  a == b, ... } } }` emit `a == b` as `CmpG { protocol_id: 0 }`
+  because T is generic at codegen time. `handle_eqg` (`verum_vbc/
+  src/interpreter/dispatch_table/handlers/comparison.rs:168`) fell
+  through to `deep_value_eq` (recursive structural comparison) when
+  protocol_id == 0, ignoring the receiver's runtime TypeId.
+* **Fix landed in commit `c8e39850c`**: new
+  `runtime_type_name_for_eq(Value, &State) -> Option<String>`
+  helper reads heap `ObjectHeader.type_id`, looks up the type's
+  name in `state.module.types`, and dispatches through
+  `<TypeName>.eq` if such a function exists. Only falls back to
+  `deep_value_eq` when no Eq impl is registered for the runtime
+  TypeId. Mirrors the architectural rule pinned for Display
+  dispatch (task #9 / #10) but for runtime equality dispatch.
+* **Architectural rule pinned**: every runtime dispatch site that
+  receives a generic-typed value MUST consult the heap
+  ObjectHeader to recover the concrete TypeId before falling back
+  to structural comparison. Same pattern applies to Ord/Hash
+  blanket impls if their dispatch chains regress.
+
+### 3.6 `*list.get(i)` broken idiom — test migration
+
+* **Symptom**: `let xi: USize = *samples.get(i as USize);` silently
+  compiles (Maybe declares `Deref<Target=T>` so the type-checker
+  accepts) but at runtime `*Maybe<T>` returns identity (per
+  `interpreter/dispatch_table/handlers/cbgr.rs:244` — auto-unwrap
+  would break `match *self` for sum types like IpAddr).
+  `IntCoercible` accepts the assignment regardless, silently
+  corrupting test data.
+* **Status**: language-level fix tracked as task #5 (deeper
+  `*Maybe<T>` codegen alignment with the user-declared Deref impl
+  required). Test idiom migration landed in this branch — 30 sites
+  across 10 sys-test files migrated to canonical
+  `list.get(i).unwrap()` / `list[i]`. Closes the `law_page_align_
+  up_monotone` / `law_page_align_down_monotone` failures.
+
+### 3.4 `IntCoercible` propagation through `mount X.{Type}` (legacy)
 
 * **Symptom**: the `IntCoercible` marker on FileDesc / MemProt /
   MapFlags must propagate through the selective-mount form so the
