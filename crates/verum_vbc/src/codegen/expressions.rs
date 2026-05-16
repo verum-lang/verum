@@ -4071,14 +4071,35 @@ impl VbcCodegen {
                             .map(|f| f.id.0)
                     })
                 {
-                    // Emit CallM(dst, receiver=inner, method_id="…deref", args=[])
-                    // and let the runtime dispatch handle the rest.
-                    // Using CallM (not Call) so the method-dispatcher's
-                    // existing receiver-aware passes get a chance to
-                    // find the body even if its qualified form differs.
+                    // Emit CallM(tmp, receiver=inner, method_id="…deref",
+                    // args=[]) to invoke the user's `deref(&self) -> &T`
+                    // body, then a follow-up `Deref` opcode that loads the
+                    // pointed-to T into `dest`.
+                    //
+                    // **Architectural rule pinned (task #5 close)**: every
+                    // user-defined `Deref` impl returns `&T` per the
+                    // `Deref` protocol contract (target type
+                    // `type Target = T; fn deref(&self) -> &T`).  The
+                    // `Type::Deref(*x) -> T` typing in the type checker is
+                    // sugar for "call deref, then dereference once more
+                    // to land on T".  Pre-fix `compile_unary` emitted ONE
+                    // CallM that stored `&T` into `dest`, leaving the
+                    // register at a reference rather than the value the
+                    // surrounding code expects (`let x: T = *m;` typed
+                    // `x : T` but stored `&T`, surfacing as Display showing
+                    // the wrapper variant and arithmetic / comparison
+                    // sites mis-reading the reference as the raw value).
+                    //
+                    // The two-instruction shape mirrors how
+                    // primitive-reference deref works at the runtime
+                    // layer (handle_deref reads through the ref and
+                    // returns the pointed-to Value), so the resulting
+                    // semantics match user expectation: `*m` yields T
+                    // for any type that opts into `Deref<Target = T>`.
+                    let tmp_ref = self.ctx.alloc_temp();
                     let method_id_str = self.ctx.intern_string_raw("deref");
                     self.ctx.emit(Instruction::CallM {
-                        dst: dest,
+                        dst: tmp_ref,
                         receiver: inner_reg,
                         method_id: method_id_str,
                         args: crate::instruction::RegRange {
@@ -4086,6 +4107,11 @@ impl VbcCodegen {
                             count: 0,
                         },
                     });
+                    self.ctx.emit(Instruction::Deref {
+                        dst: dest,
+                        ref_reg: tmp_ref,
+                    });
+                    self.ctx.free_temp(tmp_ref);
                     // `deref_method_id` is intentionally unused here —
                     // the runtime dispatch resolves the actual function
                     // id via the receiver-type-aware lookup. Holding

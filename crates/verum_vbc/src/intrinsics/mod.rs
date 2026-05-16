@@ -224,6 +224,28 @@ pub fn lookup_intrinsic(name: &str) -> Option<IntrinsicInfo> {
             "ctlz" => "clz",
             "cttz" => "ctz",
             "ctpop" => "popcnt",
+            // LLVM canonical i64/i32 spellings — `core/math/bits.vr`
+            // declares bodyless wrappers tagged
+            // `@intrinsic("llvm.ctlz.i64")` / `llvm.cttz.i64` /
+            // `llvm.ctpop.i64` / `llvm.bswap.i64` (and i32 siblings).
+            // Without these aliases, the user-side `compile_call`
+            // intercept at `expressions.rs:4592` resolved the
+            // intrinsic-name lookup to None and fell through to a
+            // raw `Call` to the bodyless function → executed an
+            // empty body → returned `Value::default() = Unit`,
+            // surfacing as `clz(1 as UInt64) = ()` instead of 63.
+            // The sister `popcnt` only worked because
+            // `core/base/primitives.vr` provides a LOCAL bodied
+            // wrapper `fn popcnt<T>(x: T) -> T { @intrinsic("ctpop",
+            // x) }` whose `"ctpop"` alias was already wired above —
+            // an asymmetry between `mount`-imported vs locally-
+            // defined intrinsic wrappers that the symmetric alias
+            // map below now closes.  Task #25 [E3] CLOSED.
+            "llvm.ctlz.i64" | "llvm.ctlz.i32" => "clz",
+            "llvm.cttz.i64" | "llvm.cttz.i32" => "ctz",
+            "llvm.ctpop.i64" | "llvm.ctpop.i32" => "popcnt",
+            "llvm.bswap.i64" | "llvm.bswap.i32" | "llvm.bswap.i16" => "bswap",
+            "llvm.bitreverse.i64" | "llvm.bitreverse.i32" => "bitreverse",
             // Funnel shifts — `fshl(a, b, c)` and `fshr(a, b, c)` are
             // 3-operand: concatenate `a:b` into a 128-bit value, shift
             // left/right by `c`, return the appropriate half.
