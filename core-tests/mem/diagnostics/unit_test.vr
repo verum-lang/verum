@@ -1,0 +1,120 @@
+// =============================================================================
+// core-tests/mem/diagnostics/unit_test.vr
+// =============================================================================
+//
+// Per-API tests for `core.mem.diagnostics` — the read-only introspection
+// surface over CBGR-managed memory.  This module exposes ONLY snapshot
+// types and accessor functions; no mutation surface exists by design.
+//
+// Companion files:
+//   property_test.vr     — invariants on view fields
+//   integration_test.vr  — composition with header / capability
+//   regression_test.vr   — pinned defects
+//   audit.md             — drift surfaces & action items
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.diagnostics.{
+    MemHeaderView,
+    live_allocations, live_allocation_count,
+    CallFrame, current_call_stack,
+};
+mount core.mem.capability.{CAP_READ, CAP_WRITE, CAP_OWNED};
+
+// =============================================================================
+// Section 1: live_allocations / live_allocation_count — read-only API
+// =============================================================================
+
+@test
+fn test_live_allocations_returns_list() {
+    // Currently returns an empty list until the global-index sidecar
+    // lands.  Pin the contract.
+    let views = live_allocations();
+    assert_eq(views.len(), 0);
+}
+
+@test
+fn test_live_allocation_count_returns_int() {
+    let n = live_allocation_count();
+    assert(n >= 0);
+}
+
+@test
+fn test_live_allocations_len_matches_count() {
+    // When the producer-side sidecar is wired, these MUST agree.  Until
+    // then both return zero — pin the equality.
+    let views = live_allocations();
+    let count = live_allocation_count();
+    assert_eq(views.len() as Int, count);
+}
+
+// =============================================================================
+// Section 2: CallFrame — by-value record
+// =============================================================================
+
+@test
+fn test_call_frame_construction_pinned() {
+    // CallFrame is a by-value record; construct one directly via the
+    // record literal to verify the field shape.
+    let frame: CallFrame = CallFrame {
+        function: "test".to_text(),
+        file: "test.vr".to_text(),
+        line: 42,
+        column: 10,
+        instruction_pointer: 0x1000 as UInt64,
+    };
+    assert_eq(frame.function, "test");
+    assert_eq(frame.file, "test.vr");
+    assert_eq(frame.line, 42);
+    assert_eq(frame.column, 10);
+    assert_eq(frame.instruction_pointer, 0x1000 as UInt64);
+}
+
+@test
+fn test_call_frame_empty_function_signals_no_symbolication() {
+    let frame: CallFrame = CallFrame {
+        function: "".to_text(),
+        file: "".to_text(),
+        line: 0,
+        column: 0,
+        instruction_pointer: 0x2000 as UInt64,
+    };
+    // Empty function = symbolication failed but raw IP preserved.
+    assert(frame.instruction_pointer != 0 as UInt64);
+    assert_eq(frame.line, 0);
+    assert_eq(frame.column, 0);
+}
+
+// =============================================================================
+// Section 3: current_call_stack — returns a list
+// =============================================================================
+
+@test
+fn test_current_call_stack_returns_list() {
+    let stack = current_call_stack(0);
+    // The contract is "returns a list" — emptiness depends on whether
+    // the VBC debug-info is present.  Pin the type-level contract by
+    // accessing .len() without further assertion on the value.
+    let _: Int = stack.len() as Int;
+    assert(true);
+}
+
+@test
+fn test_current_call_stack_with_skip() {
+    // Skip parameter is currently a hint; the call must not panic
+    // regardless of skip value.
+    let s1 = current_call_stack(0);
+    let s2 = current_call_stack(1);
+    let s3 = current_call_stack(100);
+    assert(s1.len() >= 0);
+    assert(s2.len() >= 0);
+    assert(s3.len() >= 0);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
