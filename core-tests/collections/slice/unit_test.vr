@@ -1,0 +1,313 @@
+// =============================================================================
+// core-tests/collections/slice/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.collections.slice` — `&[T]` / `&mut [T]` views over
+// contiguous memory.  One axis of behaviour per `@test`; section banners
+// group tests by the public method under test.
+//
+// Construction: every test obtains `&[T]` via `xs.as_slice()` on a `List<T>`
+// constructed through the array-literal coercion path (`ArrayCoercible for
+// List<T>`).  This is the canonical entry point — the bulk of stdlib slice
+// consumers obtain slices either through `List.as_slice()` or via auto-
+// coercion at function boundaries.
+//
+// Architectural note: at the VBC runtime, slice receivers carry a `List`
+// runtime kind (slices are not yet a distinct kind from List).  Methods
+// declared inside `implement<T> [T] { ... }` blocks dispatch through CallM
+// at the call site; the runtime then walks the receiver's method table.
+// When a slice-only method (e.g. `eq_slice` / `to_list` / `cmp_slice`) is
+// not present in List's table, dispatch panics with "method not found".
+// The defects this surfaces are pinned in `regression_test.vr` §A.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+
+// =============================================================================
+// Section 1: Properties — len / is_empty / first / last
+// =============================================================================
+
+@test
+fn test_slice_len_via_as_slice() {
+    let xs: List<Int> = [1, 2, 3];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.len(), 3);
+}
+
+@test
+fn test_slice_len_empty() {
+    let xs: List<Int> = [];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.len(), 0);
+}
+
+@test
+fn test_slice_is_empty_true_on_empty() {
+    let xs: List<Int> = [];
+    let s: &[Int] = xs.as_slice();
+    assert(s.is_empty());
+}
+
+@test
+fn test_slice_is_empty_false_on_one_element() {
+    let xs: List<Int> = [42];
+    let s: &[Int] = xs.as_slice();
+    assert(!s.is_empty());
+}
+
+@test
+fn test_slice_first_some_on_nonempty() {
+    let xs: List<Int> = [10, 20, 30];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.first(), Some(&10));
+}
+
+@test
+fn test_slice_first_none_on_empty() {
+    let xs: List<Int> = [];
+    let s: &[Int] = xs.as_slice();
+    let f: Maybe<&Int> = s.first();
+    assert(f is None);
+}
+
+@test
+fn test_slice_last_some_on_nonempty() {
+    let xs: List<Int> = [10, 20, 30];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.last(), Some(&30));
+}
+
+@test
+fn test_slice_last_none_on_empty() {
+    let xs: List<Int> = [];
+    let s: &[Int] = xs.as_slice();
+    let l: Maybe<&Int> = s.last();
+    assert(l is None);
+}
+
+// =============================================================================
+// Section 2: Element access — get
+// =============================================================================
+
+@test
+fn test_slice_get_in_bounds() {
+    let xs: List<Int> = [10, 20, 30];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.get(0), Some(&10));
+    assert_eq(s.get(1), Some(&20));
+    assert_eq(s.get(2), Some(&30));
+}
+
+@test
+fn test_slice_get_negative_returns_none() {
+    let xs: List<Int> = [10, 20, 30];
+    let s: &[Int] = xs.as_slice();
+    let v: Maybe<&Int> = s.get(-1);
+    assert(v is None);
+}
+
+@test
+fn test_slice_get_past_end_returns_none() {
+    let xs: List<Int> = [10, 20, 30];
+    let s: &[Int] = xs.as_slice();
+    let v: Maybe<&Int> = s.get(99);
+    assert(v is None);
+}
+
+@test
+fn test_slice_get_on_empty_returns_none() {
+    let xs: List<Int> = [];
+    let s: &[Int] = xs.as_slice();
+    let v: Maybe<&Int> = s.get(0);
+    assert(v is None);
+}
+
+// =============================================================================
+// Section 3: Slicing — slice(a, b) / slice_from / slice_to / split_at
+// =============================================================================
+
+@test
+fn test_slice_subrange_middle() {
+    let xs: List<Int> = [10, 20, 30, 40, 50];
+    let s: &[Int] = xs.as_slice();
+    let sub: &[Int] = s.slice(1, 4);
+    assert_eq(sub.len(), 3);
+    assert_eq(sub.get(0), Some(&20));
+    assert_eq(sub.get(1), Some(&30));
+    assert_eq(sub.get(2), Some(&40));
+}
+
+@test
+fn test_slice_subrange_full() {
+    let xs: List<Int> = [1, 2, 3];
+    let s: &[Int] = xs.as_slice();
+    let sub: &[Int] = s.slice(0, s.len());
+    assert_eq(sub.len(), 3);
+}
+
+@test
+fn test_slice_subrange_empty() {
+    let xs: List<Int> = [1, 2, 3];
+    let s: &[Int] = xs.as_slice();
+    let sub: &[Int] = s.slice(1, 1);
+    assert_eq(sub.len(), 0);
+    assert(sub.is_empty());
+}
+
+@test
+fn test_slice_split_at_yields_correct_lengths() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let s: &[Int] = xs.as_slice();
+    let (lhs, rhs) = s.split_at(2);
+    assert_eq(lhs.len(), 2);
+    assert_eq(rhs.len(), 3);
+}
+
+@test
+fn test_slice_split_at_zero() {
+    let xs: List<Int> = [1, 2, 3];
+    let s: &[Int] = xs.as_slice();
+    let (lhs, rhs) = s.split_at(0);
+    assert_eq(lhs.len(), 0);
+    assert_eq(rhs.len(), 3);
+}
+
+@test
+fn test_slice_split_at_end() {
+    let xs: List<Int> = [1, 2, 3];
+    let s: &[Int] = xs.as_slice();
+    let (lhs, rhs) = s.split_at(s.len());
+    assert_eq(lhs.len(), 3);
+    assert_eq(rhs.len(), 0);
+}
+
+// =============================================================================
+// Section 4: Searching — contains
+// =============================================================================
+
+@test
+fn test_slice_contains_present() {
+    let xs: List<Int> = [10, 20, 30];
+    let s: &[Int] = xs.as_slice();
+    assert(s.contains(&20));
+}
+
+@test
+fn test_slice_contains_absent() {
+    let xs: List<Int> = [10, 20, 30];
+    let s: &[Int] = xs.as_slice();
+    assert(!s.contains(&999));
+}
+
+@test
+fn test_slice_contains_empty() {
+    let xs: List<Int> = [];
+    let s: &[Int] = xs.as_slice();
+    assert(!s.contains(&0));
+}
+
+@test
+fn test_slice_contains_first_element() {
+    let xs: List<Int> = [42, 7, 13];
+    let s: &[Int] = xs.as_slice();
+    assert(s.contains(&42));
+}
+
+@test
+fn test_slice_contains_last_element() {
+    let xs: List<Int> = [7, 13, 42];
+    let s: &[Int] = xs.as_slice();
+    assert(s.contains(&42));
+}
+
+// =============================================================================
+// Section 5: Aggregation — min / max
+// =============================================================================
+
+@test
+fn test_slice_min_single() {
+    let xs: List<Int> = [42];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.min(), Some(&42));
+}
+
+@test
+fn test_slice_max_single() {
+    let xs: List<Int> = [42];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.max(), Some(&42));
+}
+
+@test
+fn test_slice_min_many() {
+    let xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.min(), Some(&1));
+}
+
+@test
+fn test_slice_max_many() {
+    let xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.max(), Some(&9));
+}
+
+@test
+fn test_slice_min_empty_none() {
+    let xs: List<Int> = [];
+    let s: &[Int] = xs.as_slice();
+    let m: Maybe<&Int> = s.min();
+    assert(m is None);
+}
+
+@test
+fn test_slice_max_empty_none() {
+    let xs: List<Int> = [];
+    let s: &[Int] = xs.as_slice();
+    let m: Maybe<&Int> = s.max();
+    assert(m is None);
+}
+
+// =============================================================================
+// Section 6: Iteration — iter / SliceIter::next
+// =============================================================================
+
+@test
+fn test_slice_iter_sum() {
+    let xs: List<Int> = [10, 20, 30];
+    let s: &[Int] = xs.as_slice();
+    let mut iter = s.iter();
+    let mut sum = 0;
+    loop {
+        match iter.next() {
+            Some(x) => { sum = sum + *x; },
+            None => break,
+        }
+    }
+    assert_eq(sum, 60);
+}
+
+@test
+fn test_slice_iter_empty() {
+    let xs: List<Int> = [];
+    let s: &[Int] = xs.as_slice();
+    let mut iter = s.iter();
+    let n: Maybe<&Int> = iter.next();
+    assert(n is None);
+}
+
+@test
+fn test_slice_iter_count_elements() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let s: &[Int] = xs.as_slice();
+    let mut iter = s.iter();
+    let mut count = 0;
+    loop {
+        match iter.next() {
+            Some(_) => { count = count + 1; },
+            None => break,
+        }
+    }
+    assert_eq(count, 5);
+}

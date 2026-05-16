@@ -1,0 +1,104 @@
+// =============================================================================
+// core-tests/collections/slice/integration_test.vr
+// =============================================================================
+//
+// Cross-type interactions exercised through slices.  Slices are inert
+// views — the integration value is in how they compose with `List<T>`,
+// the iteration protocols, and `Maybe<&T>` plumbing.
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// Integration: List.as_slice() round-trip with iter().sum
+// =============================================================================
+
+@test
+fn int_slice_list_as_slice_iter_sum() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let s: &[Int] = xs.as_slice();
+    let mut total = 0;
+    let mut iter = s.iter();
+    loop {
+        match iter.next() {
+            Some(v) => { total = total + *v; },
+            None => break,
+        }
+    }
+    assert_eq(total, 15);
+}
+
+// =============================================================================
+// Integration: subrange retains correct elements
+// =============================================================================
+
+@test
+fn int_slice_subrange_round_trip() {
+    let xs: List<Int> = [10, 20, 30, 40, 50];
+    let s: &[Int] = xs.as_slice();
+    let sub: &[Int] = s.slice(1, 4);
+    let mut iter = sub.iter();
+    let mut collected: List<Int> = [];
+    loop {
+        match iter.next() {
+            Some(v) => { collected.push(*v); },
+            None => break,
+        }
+    }
+    assert_eq(collected.len(), 3);
+    assert_eq(collected.get(0), Some(20));
+    assert_eq(collected.get(1), Some(30));
+    assert_eq(collected.get(2), Some(40));
+}
+
+// =============================================================================
+// Integration: split_at half lengths sum to whole
+// =============================================================================
+
+@test
+fn int_slice_split_at_lengths_sum() {
+    let xs: List<Int> = [5, 3, 8, 1, 7, 2, 9, 4];
+    let s: &[Int] = xs.as_slice();
+    let (lhs, rhs) = s.split_at(3);
+    assert_eq(lhs.len() + rhs.len(), s.len());
+    assert_eq(lhs.len(), 3);
+    assert_eq(rhs.len(), 5);
+}
+
+// =============================================================================
+// Integration: empty-slice projections compose
+// =============================================================================
+
+@test
+fn int_slice_empty_chain_is_empty() {
+    let xs: List<Int> = [];
+    let s: &[Int] = xs.as_slice();
+    let sub: &[Int] = s.slice(0, 0);
+    assert(sub.is_empty());
+    let mut iter = sub.iter();
+    let n: Maybe<&Int> = iter.next();
+    assert(n is None);
+}
+
+// =============================================================================
+// Integration: contains as discriminator over List → slice
+// =============================================================================
+
+@test
+fn int_slice_contains_filters_list_to_subset() {
+    let universe: List<Int> = [1, 2, 3, 4, 5, 6];
+    let filter:   List<Int> = [2, 4, 6];
+
+    let u: &[Int] = universe.as_slice();
+    let f: &[Int] = filter.as_slice();
+
+    let mut kept = 0;
+    let mut iter = u.iter();
+    loop {
+        match iter.next() {
+            Some(v) => { if f.contains(v) { kept = kept + 1; } },
+            None => break,
+        }
+    }
+    assert_eq(kept, 3);
+}

@@ -1,0 +1,244 @@
+// =============================================================================
+// core-tests/collections/slice/property_test.vr
+// =============================================================================
+//
+// Algebraic laws pinned over the working slice surface.  Slices are views
+// into contiguous memory and inherit the structural laws of their backing
+// container, but the slice API restates them as a contract independent of
+// how the slice was obtained.
+//
+// Sweep ranges are chosen to exercise boundary cases (len 0, 1, 2, n>1):
+//   - empty:        explicit []
+//   - singleton:    [42]
+//   - many:         varied content for non-trivial cmp / min / max chains
+// =============================================================================
+
+mount core.prelude.*;
+
+// =============================================================================
+// Law: |s.slice(0, s.len())| = |s|   (identity slice round-trip)
+// =============================================================================
+
+@test
+fn law_slice_identity_preserves_len() {
+    let inputs: List<List<Int>> = [
+        [],
+        [1],
+        [1, 2],
+        [1, 2, 3, 4, 5],
+    ];
+    let mut i = 0;
+    while i < inputs.len() {
+        let xs: List<Int> = inputs[i].clone();
+        let s: &[Int] = xs.as_slice();
+        let identity: &[Int] = s.slice(0, s.len());
+        assert_eq(identity.len(), s.len());
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Law: split_at concatenation
+//   |split_at(i).0| + |split_at(i).1| = |s|
+//   |split_at(i).0| = i
+// =============================================================================
+
+@test
+fn law_slice_split_at_concat_len() {
+    let xs: List<Int> = [1, 2, 3, 4, 5, 6, 7];
+    let s: &[Int] = xs.as_slice();
+    let mut i = 0;
+    while i <= s.len() {
+        let (lhs, rhs) = s.split_at(i);
+        assert_eq(lhs.len(), i);
+        assert_eq(lhs.len() + rhs.len(), s.len());
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Law: get(i) coherence with iter().nth-style enumeration
+// =============================================================================
+
+@test
+fn law_slice_get_at_each_index_matches_iter() {
+    let xs: List<Int> = [10, 20, 30, 40, 50];
+    let s: &[Int] = xs.as_slice();
+    let mut iter = s.iter();
+    let mut i = 0;
+    loop {
+        match iter.next() {
+            Some(x) => {
+                let g: Maybe<&Int> = s.get(i);
+                match g {
+                    Some(y) => { assert_eq(*x, *y); },
+                    None => { panic("iter outpaced get"); },
+                }
+                i = i + 1;
+            },
+            None => break,
+        }
+    }
+    assert_eq(i, s.len());
+}
+
+// =============================================================================
+// Law: min and max relationship
+//   min(s) <= max(s) for non-empty s
+//   min(s) is None iff s is empty
+//   max(s) is None iff s is empty
+// =============================================================================
+
+@test
+fn law_slice_min_le_max() {
+    let cases: List<List<Int>> = [
+        [42],
+        [1, 2],
+        [2, 1],
+        [3, 1, 4, 1, 5, 9, 2, 6],
+        [100, -100],
+    ];
+    let mut i = 0;
+    while i < cases.len() {
+        let xs: List<Int> = cases[i].clone();
+        let s: &[Int] = xs.as_slice();
+        match s.min() {
+            Some(mn) => {
+                match s.max() {
+                    Some(mx) => { assert(*mn <= *mx); },
+                    None => { panic("max None while min Some"); },
+                }
+            },
+            None => {
+                let mx_check: Maybe<&Int> = s.max();
+                assert(mx_check is None);
+            },
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn law_slice_min_none_iff_empty() {
+    let empty: List<Int> = [];
+    let s_empty: &[Int] = empty.as_slice();
+    let m_e: Maybe<&Int> = s_empty.min();
+    assert(m_e is None);
+
+    let nonempty: List<Int> = [1];
+    let s_one: &[Int] = nonempty.as_slice();
+    let m_one: Maybe<&Int> = s_one.min();
+    assert(m_one is Some(_));
+}
+
+// =============================================================================
+// Law: contains and iter() — present element findable via iter
+// =============================================================================
+
+@test
+fn law_slice_contains_iff_iter_finds() {
+    let xs: List<Int> = [10, 20, 30];
+    let s: &[Int] = xs.as_slice();
+
+    // Every element in the slice must be reported by contains.
+    let mut iter = s.iter();
+    loop {
+        match iter.next() {
+            Some(x) => { assert(s.contains(x)); },
+            None => break,
+        }
+    }
+
+    // A value not in the slice must not be reported.
+    assert(!s.contains(&999));
+}
+
+// =============================================================================
+// Law: first/last coherence
+//   s.first() == s.get(0)
+//   s.last()  == s.get(s.len() - 1) when non-empty
+// =============================================================================
+
+@test
+fn law_slice_first_eq_get_zero() {
+    let cases: List<List<Int>> = [
+        [42],
+        [1, 2, 3],
+        [100, -1, 0, 50],
+    ];
+    let mut i = 0;
+    while i < cases.len() {
+        let xs: List<Int> = cases[i].clone();
+        let s: &[Int] = xs.as_slice();
+        let f: Maybe<&Int> = s.first();
+        let g: Maybe<&Int> = s.get(0);
+        match f {
+            Some(a) => {
+                match g {
+                    Some(b) => { assert_eq(*a, *b); },
+                    None => { panic("first Some but get(0) None"); },
+                }
+            },
+            None => {
+                let chk: Maybe<&Int> = g;
+                assert(chk is None);
+            },
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn law_slice_last_eq_get_last_idx() {
+    let xs: List<Int> = [1, 2, 3, 4];
+    let s: &[Int] = xs.as_slice();
+    let l: Maybe<&Int> = s.last();
+    let g: Maybe<&Int> = s.get(s.len() - 1);
+    match l {
+        Some(a) => {
+            match g {
+                Some(b) => { assert_eq(*a, *b); },
+                None => { panic("last/get last_idx mismatch"); },
+            }
+        },
+        None => { panic("non-empty slice but last None"); },
+    }
+}
+
+// =============================================================================
+// Law: subrange of subrange = single subrange
+//   slice(a, b).slice(0, b-a) has same len as slice(a, b)
+// =============================================================================
+
+@test
+fn law_slice_subrange_idempotent_via_identity() {
+    let xs: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8];
+    let s: &[Int] = xs.as_slice();
+    let a = 2;
+    let b = 6;
+    let sub: &[Int] = s.slice(a, b);
+    let sub2: &[Int] = sub.slice(0, sub.len());
+    assert_eq(sub.len(), sub2.len());
+    assert_eq(sub.len(), b - a);
+}
+
+// =============================================================================
+// Law: is_empty iff len == 0
+// =============================================================================
+
+@test
+fn law_slice_is_empty_iff_len_zero() {
+    let cases: List<List<Int>> = [
+        [],
+        [1],
+        [1, 2],
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    ];
+    let mut i = 0;
+    while i < cases.len() {
+        let xs: List<Int> = cases[i].clone();
+        let s: &[Int] = xs.as_slice();
+        assert_eq(s.is_empty(), s.len() == 0);
+        i = i + 1;
+    }
+}
