@@ -1,0 +1,92 @@
+// =============================================================================
+// core-tests/mem/segment/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.mem.segment` — relationships between the
+// SEGMENT_SIZE / SLICE_SIZE / SLICES_PER_SEGMENT constants and the
+// SMALL/MEDIUM/LARGE page-tier boundaries.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.segment.{
+    SEGMENT_SIZE, SLICE_SIZE, SLICES_PER_SEGMENT,
+    SMALL_PAGE_SIZE, MEDIUM_PAGE_SIZE, LARGE_PAGE_THRESHOLD,
+    SEGMENT_NORMAL, SEGMENT_HUGE,
+};
+
+// =============================================================================
+// §A  SEGMENT_SIZE = SLICES_PER_SEGMENT × SLICE_SIZE
+// =============================================================================
+
+@test
+fn law_segment_size_partition() {
+    assert_eq(SEGMENT_SIZE, SLICES_PER_SEGMENT * SLICE_SIZE);
+}
+
+// =============================================================================
+// §B  Every size is a power of 2
+// =============================================================================
+
+@test
+fn law_segment_constants_powers_of_two() {
+    let sizes: List<Int> = [
+        SEGMENT_SIZE,
+        SLICE_SIZE,
+        SLICES_PER_SEGMENT,
+        SMALL_PAGE_SIZE,
+        MEDIUM_PAGE_SIZE,
+    ];
+    for s in sizes.iter() {
+        assert(*s > 0);
+        // x is power of 2 ⇔ x & (x-1) == 0
+        assert((*s & (*s - 1)) == 0);
+    }
+}
+
+// =============================================================================
+// §C  Page-tier strict ordering: SMALL ≤ MEDIUM
+// =============================================================================
+
+@test
+fn law_page_tier_ordering() {
+    assert(SMALL_PAGE_SIZE <= MEDIUM_PAGE_SIZE);
+    assert_eq(LARGE_PAGE_THRESHOLD, MEDIUM_PAGE_SIZE);
+}
+
+// =============================================================================
+// §D  SMALL_PAGE_SIZE = SLICE_SIZE (a small page is one slice)
+// =============================================================================
+
+@test
+fn law_small_page_is_one_slice() {
+    assert_eq(SMALL_PAGE_SIZE, SLICE_SIZE);
+}
+
+// =============================================================================
+// §E  MEDIUM_PAGE_SIZE = 8 × SLICE_SIZE
+// =============================================================================
+
+@test
+fn law_medium_page_is_eight_slices() {
+    assert_eq(MEDIUM_PAGE_SIZE, 8 * SLICE_SIZE);
+}
+
+// =============================================================================
+// §F  Segment-kind values are distinct
+// =============================================================================
+
+@test
+fn law_segment_kinds_pairwise_distinct() {
+    assert(SEGMENT_NORMAL != SEGMENT_HUGE);
+    // Both fit in UInt8
+    assert(SEGMENT_NORMAL <= 0xFF as UInt8);
+    assert(SEGMENT_HUGE <= 0xFF as UInt8);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
