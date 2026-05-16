@@ -744,6 +744,34 @@ pub(in super::super) fn handle_call_method(
         }
     }
 
+    // `Char.encode_utf8(&mut buf)` / `Char.encode_utf16(&mut buf)`
+    // CallM-path intercept — audit text/text §B.  Char is NaN-boxed
+    // as Int at runtime; the regular CallM dispatch looks up by
+    // receiver-kind and finds no `Char` table for an Int-shaped
+    // receiver → "method 'Char.encode_utf8' not found on receiver of
+    // runtime kind 'Int'".  Same architectural class as the
+    // `make_ascii_*` intercept above, but the receiver is by-value
+    // (not `&mut self`) and the buf argument is what receives the
+    // mutation.  Closes audit text/text §B (Text.insert + the four
+    // remaining Text-side call sites that go through CallM rather
+    // than the intrinsic CharSubOpcode::EncodeUtf8 lowering).
+    if (bare_method_name == "encode_utf8" || bare_method_name == "encode_utf16")
+        && args.count == 1
+    {
+        let caller_base = state.reg_base();
+        let buf_reg = crate::instruction::Reg(args.start.0);
+        if let Some(result) = super::char_runtime::try_intercept_char_encode(
+            state,
+            &bare_method_name,
+            receiver,
+            buf_reg,
+            caller_base,
+        )? {
+            state.set_reg(dst, result);
+            return Ok(DispatchResult::Continue);
+        }
+    }
+
     // Path/PathBuf inherent-method intercept.  Stdlib bodies for
     // `core.io.path.{Path, PathBuf}` aren't loaded into the user
     // module — `emit_missing_stub_descriptors` only registers `RetV`

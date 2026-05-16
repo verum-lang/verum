@@ -75,21 +75,16 @@ after a method block, remove it; otherwise add a drift-pin at
 `crates/verum_compiler/src/precompile.rs` that probes the archive for
 `Text.rfind` with non-zero `bytecode_length`.
 
-### §B — `Char.encode_utf8` dispatched on `Int` receiver
-**Symptom**: `Text.insert(idx, ch)` panics with
-`method 'Char.encode_utf8' not found on receiver of runtime kind 'Int'`.
-Same shape as the SelfValue `is_type_param` gate (commit `90b94e68b`)
-but on the OPPOSITE side — here the runtime receiver kind is
-classified as `Int` when the static type is `Char`.
-**Root cause hypothesis**: `Char` is a 4-byte primitive that the
-runtime collapses to `Value::Int` for storage; the dispatch table
-indexes by static type during codegen but the receiver kind at runtime
-loses the `Char`-vs-`Int` distinction. Likely fix: stamp `Char` into
-the dispatch key at codegen time the same way Int / UInt are stamped,
-not at receiver-kind classification.
-**Action**: open a verum-vbc report; add a regression test in
-`crates/verum_vbc/src/codegen/tests/` that constructs a `Char` and
-calls `encode_utf8` through CallM dispatch.
+### §B — `Char.encode_utf8` dispatched on `Int` receiver — **CLOSED 2026-05-16**
+**Status**: CLOSED via `crates/verum_vbc/src/interpreter/dispatch_table/handlers/{char_runtime,method_dispatch}.rs` — added a Tier-0 CallM-path intercept for `Char.encode_utf8(&mut buf) -> Int` and `Char.encode_utf16(&mut buf) -> Int`, parallel to the existing `Char.make_ascii_uppercase`/`make_ascii_lowercase` intercept landed at task #14.
+
+**Root cause confirmed**: Char is NaN-boxed into `Value::Int` for storage, so the CallM dispatcher keyed on `receiver_kind = Int` had no entry pointing at the user-side `core/text/char.vr::Char.encode_utf8` body. The intrinsic-opcode path (`CharSubOpcode::EncodeUtf8` in `char_extended.rs`) only fires for callers emitting the explicit `@intrinsic("verum_char_encode_utf8")` lowering — `Text.insert`'s `ch.encode_utf8(&mut buf)` was lowering to CallM and missing the intercept surface entirely.
+
+**Fix shape (commit pending)**:
+1. New `try_intercept_char_encode` in `char_runtime.rs` extracts the codepoint from the receiver (auto-derefs CBGR-ref / heap-interior-pointer / ThinRef via `cbgr_helpers::resolve_arg_value`), encodes UTF-8/UTF-16 into the caller's buf via the canonical three-shape writeback (BYTE_LIST / LIST / direct-byte-array / ThinRef), returns the byte/unit count as Int.
+2. CallM dispatcher in `method_dispatch.rs` calls the intercept after the `make_ascii_*` intercept for any `encode_utf8` / `encode_utf16` method name with `args.count == 1`.
+
+**Validation**: `regression_b_text_insert_uses_encode_utf8_pinned` now PASSES under `--interp` (previously panicked). All 13 `test_insert*` unit tests including `test_insert_at_start` / `test_insert_at_end` / `test_insert_str_in_middle` green. Architectural rule pinned: every primitive type that NaN-boxes to a foreign-kind Value (Char → Int) MUST have a CallM-path intercept registered for every `&mut`-arg method whose intrinsic-opcode lowering does NOT fire from regular user-side method-call sites.
 
 ### §C — Iterator `next` not found on `Object` for Chars/ByteIter/CharIndices/Lines
 **Status**: **CLOSED 2026-05-13 — commit 48a76117f.** Three architectural
@@ -318,13 +313,20 @@ the `Int` direct return or the `count` alias).
   `obj.method()` MUST live in `dispatch_primitive_method`, NOT
   `try_intercept_text_static_runtime`.
 
-### Deferred — ranked by leverage (updated 2026-05-16, third pass)
+### Deferred — ranked by leverage (updated 2026-05-16, fourth pass)
 | # | Item | Estimated effort | Tests unblocked |
 |---|------|-----:|------:|
-| 1 | §B close — Char.encode_utf8 receiver-kind classification | medium | ~5 |
-| 2 | §D close — function-id collision (CallM migration OR global next_func_id) | multi-session | ~10 (§O included) |
+| 1 | §D close — function-id collision (CallM migration OR global next_func_id) | multi-session | ~10 (§O included) |
+| 2 | §Y close — AOT typechecker mount-scoped name resolution for `ParseError` (cli vs text collision) | medium (verum_types/infer/modules) | 1 (unit_test::test_parse_error_eq_message under AOT) + unknown others |
 
 Closed since the previous pass:
+- §B — Char.encode_utf8 CallM intercept (2026-05-16).
+  Two-file addition: `try_intercept_char_encode` in
+  `char_runtime.rs` + dispatcher hook in `method_dispatch.rs`.
+  Covers UTF-8 + UTF-16 with all three reference shapes (CBGR-register-ref,
+  heap-interior-pointer, ThinRef).  Validates: `regression_b_text_insert`
+  + 13 `test_insert*` unit tests + the downstream Text.push_char /
+  Text.make_ascii_* dispatch chain that depends on encode_utf8.
 - §N — Text.into_bytes (indexed-while push rewrite, 2026-05-16).
   The §N close came in as a `Text`-side fundamental fix instead of a
   `List.extend_from_slice` dispatch fix: pushing the cross-module
