@@ -171,9 +171,13 @@ fn test_size_to_bin_just_over_small_boundaries() {
 
 @test
 fn test_size_to_bin_medium_pinned_values() {
-    assert_eq(size_to_bin(100), 9);    // → 96 byte bin
-    assert_eq(size_to_bin(200), 13);   // → 192 byte bin
-    assert_eq(size_to_bin(1000), 23);  // → 1024 byte bin
+    // size_to_bin returns the smallest bin that FITS the request.
+    // For non-exact sizes, the bin choice is the next-up.
+    assert_eq(size_to_bin(100), 10);   // 100 > 96, fits in bin 10 (112)
+    assert_eq(size_to_bin(96), 9);     // exact 96 → bin 9
+    assert_eq(size_to_bin(200), 14);   // 200 > 192, fits in bin 14 (224)
+    assert_eq(size_to_bin(192), 13);   // exact 192 → bin 13
+    assert_eq(size_to_bin(1000), 23);  // 1000 fits in bin 23 (1024)
     assert_eq(size_to_bin(1024), 23);  // exact 1024 → bin 23
 }
 
