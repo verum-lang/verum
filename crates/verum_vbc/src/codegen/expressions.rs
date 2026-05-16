@@ -15011,7 +15011,40 @@ impl VbcCodegen {
             // intent-to-be-rooted information is lost.
             let is_qualified_module_path = self.path_was_rooted_module_path(base);
 
-            if !is_qualified_module_path {
+            // **Type.CONST.field bypass** — when `parts[0]` is a registered
+            // type name AND `parts[0].parts[1]` resolves to a function with
+            // `is_const = true`, this is a `Type.CONST.field` chain (e.g.
+            // `MemProt.READ.read`).  The simple-name fallback below
+            // (`lookup_function(field)`) would match an unrelated function
+            // (any `<X>.read` registered in the function table — Read.read,
+            // BufRead.read, etc.) and emit a Call returning junk integer
+            // (e.g. `20`) for what the user expects to be `MemProt.READ.read
+            // = true`.  Skip the fallback and let the general
+            // `compile_expr(base) + GetF` path at the bottom of this
+            // function evaluate the const value and project the field.
+            //
+            // Same class as task #25 (`&Type.Variant`) and the sister fix
+            // for `&Type.CONST` (`inner_is_type_namespace_chain` in
+            // `compile_unary`) — every codegen site walking a `Type.X.Y`
+            // chain MUST gate the "Type.CONST" segment against `is_const`
+            // before falling into bare-name lookups.
+            let is_type_const_chain = parts.len() >= 3 && {
+                let type_seg = &parts[0];
+                let const_seg = &parts[1];
+                let is_type = self.type_name_to_id.contains_key(type_seg.as_str())
+                    || self
+                        .ctx
+                        .has_functions_with_prefix(&format!("{}.", type_seg));
+                let qualified_const = format!("{}.{}", type_seg, const_seg);
+                let is_assoc_const = self
+                    .ctx
+                    .lookup_function(&qualified_const)
+                    .map(|fi| fi.is_const)
+                    .unwrap_or(false);
+                is_type && is_assoc_const
+            };
+
+            if !is_qualified_module_path && !is_type_const_chain {
                 // Try just the last segment (function name) as a simple function lookup.
                 // This handles cases where imports have already resolved the module path.
                 if let Some(func_info) = self.ctx.lookup_function(field).cloned() {
