@@ -41,7 +41,6 @@ fn regression_a_is_match_anchor_start_pinned() {
     assert(r.is_match("hello world"));
 }
 
-@ignore
 @test
 fn regression_a_is_match_absent_pinned() {
     let r = Regex.new("xyz").unwrap();
@@ -56,7 +55,6 @@ fn regression_a_is_match_absent_pinned() {
 // intrinsic returns its result list.
 // =============================================================================
 
-@ignore
 @test
 fn regression_b_find_all_returns_each_pinned() {
     let r = Regex.new("ab").unwrap();
@@ -64,7 +62,6 @@ fn regression_b_find_all_returns_each_pinned() {
     assert_eq(matches.len(), 2);
 }
 
-@ignore
 @test
 fn regression_b_find_all_empty_pinned() {
     let r = Regex.new("xyz").unwrap();
@@ -78,7 +75,6 @@ fn regression_b_find_all_empty_pinned() {
 // returns a List<Text> that triggers a null write when populating.
 // =============================================================================
 
-@ignore
 @test
 fn regression_c_split_simple_pinned() {
     let r = Regex.new(",").unwrap();
@@ -94,7 +90,6 @@ fn regression_c_split_simple_pinned() {
 // (count_matches "Expected int, got Some(3)").
 // =============================================================================
 
-@ignore
 @test
 fn regression_d_find_present_pinned() {
     let r = Regex.new("ll").unwrap();
@@ -119,7 +114,6 @@ fn regression_d_find_absent_pinned() {
 // input unchanged or with only some matches replaced.
 // =============================================================================
 
-@ignore
 @test
 fn regression_e_replace_all_every_match_pinned() {
     let r = Regex.new("ab").unwrap();
