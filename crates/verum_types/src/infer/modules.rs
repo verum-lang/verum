@@ -10867,6 +10867,120 @@ impl TypeChecker {
         &mut self.ctx
     }
 
+    /// Resolve a bare type name to its mount-scoped definition.
+    ///
+    /// Walks user-side `imported_names` for the bare name, recovers
+    /// the source-module via the [`ModuleRegistry`], follows
+    /// re-export hops via [`ExportTable::source_module`], and
+    /// probes the `type_defs` slot under the owning module's
+    /// canonical qualified key.  Returns `None` when:
+    /// * the name is not explicitly mounted (caller falls back to
+    ///   the bare-name `type_defs` slot),
+    /// * the mount is ambiguous (multiple sources — caller may
+    ///   surface an `AmbiguousName` error first),
+    /// * the qualified slot doesn't exist (caller falls back).
+    ///
+    /// `key_prefix` lets callers also resolve
+    /// `__struct_fields_<name>` (or any other prefixed key) without
+    /// duplicating the resolver logic.  Pass `""` for plain type
+    /// lookup, `"__struct_fields_"` for record-fields lookup, etc.
+    ///
+    /// §Y close — every name-resolution probe site in
+    /// `verum_types/src/infer` that probed `type_defs[<bare-name>]`
+    /// directly is now last-write-wins-immune: each one routes
+    /// through this helper first.  See `audit.md §Y` in the
+    /// `core-tests/text/text/` directory for the architectural
+    /// rationale + the catalogue of affected probe sites.
+    pub(crate) fn lookup_type_mount_scoped(
+        &self,
+        name: &str,
+        key_prefix: &str,
+    ) -> Option<Type> {
+        let name_text = verum_common::Text::from(name);
+        let sources = self.imported_names.get(&name_text)?;
+        // Ambiguous mount — caller decides whether to surface an
+        // `AmbiguousName` error; we just decline.
+        if sources.len() != 1 {
+            return None;
+        }
+        let source = sources.iter().next()?;
+        let source_str = source.as_str();
+        let canonical = source_str
+            .strip_prefix("cog.")
+            .unwrap_or(source_str);
+        if canonical.is_empty() || canonical == "cog" {
+            return None;
+        }
+        // Fast path: direct `<canonical>.<prefix><name>` probe.
+        // Covers the non-re-exporting case where the mount path
+        // matches the owning module's path (e.g.
+        // `mount core.cli.error.{ParseError}` →
+        // `core.cli.error.ParseError`).
+        let direct_qualified =
+            format!("{}.{}{}", canonical, key_prefix, name);
+        if let Option::Some(ty) = self.ctx.lookup_type(&direct_qualified) {
+            return Some(ty.clone());
+        }
+        // Re-export hop: consult the source module's export table
+        // to find the canonical owning module.  Handles mounts that
+        // surface a type re-exported from a child file-backed module
+        // (e.g. `mount core.text.{ParseError}` → text re-exports
+        // from `core.text.text`, owning module's path is
+        // `core.text.text`).
+        let registry = self.module_registry.read();
+        let src_info = match registry.get_by_path_aliased(canonical) {
+            Maybe::Some(info) => info,
+            Maybe::None => return None,
+        };
+        let item = match src_info.exports.get(&name_text) {
+            Maybe::Some(it) => it,
+            Maybe::None => return None,
+        };
+        let owning_module_id = item.source_module;
+        let owning_info = match registry.get(owning_module_id) {
+            Maybe::Some(info) => info,
+            Maybe::None => return None,
+        };
+        let owning_path = owning_info.path.to_string();
+        let owning_canonical = owning_path
+            .strip_prefix("cog.")
+            .unwrap_or(&owning_path)
+            .to_string();
+        drop(registry);
+        if owning_canonical.is_empty() {
+            return None;
+        }
+        let owning_qualified =
+            format!("{}.{}{}", owning_canonical, key_prefix, name);
+        if let Some(ty) = self.ctx.lookup_type(&owning_qualified) {
+            return Some(ty.clone());
+        }
+        // Fallback: when the export table's `source_module` points
+        // at a re-exporter (e.g. `core.text` mod.vr exporting
+        // ParseError but the type is actually declared in
+        // `core.text.text`), the canonical-key probe above misses.
+        // Walk the registry one extra hop, scanning child modules of
+        // the resolved owning module whose path is `<owning>.X`
+        // — the first such submodule whose qualified key exists is
+        // the actual definer.
+        let prefix = format!("{}.", owning_canonical);
+        let suffix = format!(".{}{}", key_prefix, name);
+        let registry = self.module_registry.read();
+        for (_, info_shared) in registry.all_modules() {
+            let path = info_shared.path.to_string();
+            let canonical_path = path
+                .strip_prefix("cog.")
+                .unwrap_or(&path);
+            if canonical_path.starts_with(&prefix) {
+                let candidate = format!("{}{}", canonical_path, suffix);
+                if let Some(ty) = self.ctx.lookup_type(&candidate) {
+                    return Some(ty.clone());
+                }
+            }
+        }
+        None
+    }
+
     /// Lookup a record type from a path.
     ///
 
@@ -10907,109 +11021,34 @@ impl TypeChecker {
 
                     // §Y close: mount-scoped name resolution.
                     //
-                    // The unqualified `type_defs` map is last-write-wins
-                    // across the entire stdlib registration phase — two
-                    // modules that both define a public type with the
-                    // same bare name (e.g. `core.text.text.ParseError`
+                    // The unqualified `type_defs` map is last-write-
+                    // wins across the entire stdlib registration phase —
+                    // two modules that both define a public type with
+                    // the same bare name (e.g. `core.text.text.ParseError`
                     // + `core.cli.error.ParseError`) overwrite each
-                    // other's bare-name slot, and whichever loads later
-                    // "wins" the unqualified lookup.  User code that
-                    // explicitly mounts one of them should always
+                    // other's bare-name slot, and whichever loads
+                    // later "wins" the unqualified lookup.  User code
+                    // that explicitly mounts one of them should always
                     // resolve to the mounted one, regardless of
-                    // registration order.
-                    //
-                    // Every stdlib type is *also* registered under a
-                    // fully-qualified flat key `<actual_module_path>.<name>`
-                    // (see `define_type_in_current_module` in `env.rs`).
-                    // For a re-exporting mount like
-                    // `mount core.text.{ParseError}` (which surfaces a
-                    // type defined in the file-backed submodule
-                    // `core.text.text`), the importer's source path
-                    // (`core.text`) does NOT directly match the
-                    // qualified key (`core.text.text.ParseError`).  We
-                    // resolve that mismatch by walking the export
-                    // table on the source module — `ExportedItem`
-                    // carries the actual `source_module` ModuleId, so
-                    // we recover the canonical path of where the type
-                    // was originally declared and compose the lookup
-                    // key from THAT.
-                    //
-                    // On every miss we fall through to the bare-name
-                    // lookup so untracked / forward-declared /
-                    // synthetic types still resolve.
-                    if let Option::Some(source) = mount_scoped_source {
-                        let source_str = source.as_str();
-                        // Strip the "cog." prefix prepended by the
-                        // import-tracking funnel.
-                        let canonical = source_str
-                            .strip_prefix("cog.")
-                            .unwrap_or(source_str);
-                        if !canonical.is_empty() && canonical != "cog" {
-                            // First try a direct `<canonical>.<name>`
-                            // lookup — fast path for non-re-exporting
-                            // mounts (e.g. `mount core.cli.error.{ParseError}`
-                            // resolves to `core.cli.error.ParseError`).
-                            let direct_qualified = format!("{}.{}", canonical, name);
-                            if let Option::Some(ty) = self.ctx.lookup_type(&direct_qualified) {
-                                return Ok(ty.clone());
-                            }
-
-                            // Re-export hop: consult the source
-                            // module's export table to find where the
-                            // item was originally declared.
-                            let registry = self.module_registry.read();
-                            if let Maybe::Some(src_info) =
-                                registry.get_by_path_aliased(canonical)
-                            {
-                                let name_text =
-                                    verum_common::Text::from(name);
-                                if let Maybe::Some(item) =
-                                    src_info.exports.get(&name_text)
-                                {
-                                    let owning_module_id = item.source_module;
-                                    if let Maybe::Some(owning_info) =
-                                        registry.get(owning_module_id)
-                                    {
-                                        let owning_path = owning_info
-                                            .path
-                                            .to_string();
-                                        // Drop the `cog.` prefix if
-                                        // the registry's canonical
-                                        // form carries one (the
-                                        // type-defs side stores
-                                        // without it).
-                                        let owning_canonical = owning_path
-                                            .strip_prefix("cog.")
-                                            .unwrap_or(&owning_path)
-                                            .to_string();
-                                        drop(registry);
-                                        if !owning_canonical.is_empty() {
-                                            let owning_qualified = format!(
-                                                "{}.{}",
-                                                owning_canonical, name
-                                            );
-                                            if let Option::Some(ty) = self
-                                                .ctx
-                                                .lookup_type(&owning_qualified)
-                                            {
-                                                return Ok(ty.clone());
-                                            }
-                                            let owning_struct = format!(
-                                                "{}.__struct_fields_{}",
-                                                owning_canonical, name
-                                            );
-                                            if let Option::Some(ty) = self
-                                                .ctx
-                                                .lookup_type(&owning_struct)
-                                            {
-                                                return Ok(ty.clone());
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    // registration order.  The
+                    // `lookup_type_mount_scoped` helper handles the
+                    // re-export-hop chain via `ExportTable.source_module`
+                    // — see its doc-comment for the architectural
+                    // rationale.  Probe the plain type slot first,
+                    // then the `__struct_fields_` variant for
+                    // record-payload variants.
+                    if let Some(ty) = self.lookup_type_mount_scoped(name, "") {
+                        return Ok(ty);
                     }
+                    if let Some(ty) = self
+                        .lookup_type_mount_scoped(name, "__struct_fields_")
+                    {
+                        return Ok(ty);
+                    }
+                    // Guard `mount_scoped_source` use; we only consult
+                    // it above to short-circuit the ambiguity branch,
+                    // so suppress the unused warning here.
+                    let _ = mount_scoped_source;
 
                     // Look up in type definitions
                     match self.ctx.lookup_type(name) {
@@ -11641,6 +11680,23 @@ impl TypeChecker {
                     return None;
                 }
                 visited.insert(name.clone());
+
+                // §Y close: mount-scoped probe FIRST so user mounts
+                // take precedence over the last-write-wins bare slot.
+                // Covers pattern-record destructure and every other
+                // caller of `resolve_to_record_type`.
+                if let Some(Type::Record(field_types)) = self
+                    .lookup_type_mount_scoped(name.as_str(), "__struct_fields_")
+                {
+                    return Some(field_types);
+                }
+                if let Some(ty) = self.lookup_type_mount_scoped(name.as_str(), "") {
+                    if let Some(rec) = self
+                        .resolve_to_record_type_with_visited(&ty, visited)
+                    {
+                        return Some(rec);
+                    }
+                }
 
                 // First try __struct_fields_Name convention
                 let struct_key = format!("__struct_fields_{}", name);

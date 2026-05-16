@@ -1303,19 +1303,8 @@ fn test_utf8_error_eq_reflexive() {
 
 @test
 fn test_parse_error_eq_message() {
-    // §Y workaround: in AOT mode the bare struct literal
-    // `ParseError { message: "x" }` collides with
-    // `core.cli.error.ParseError` (5-field record) at the
-    // `__struct_fields_ParseError` lookup site — the AOT
-    // typechecker probes the unqualified slot directly from
-    // multiple sites (`check_record_expr` in `infer/expr.rs:1267`,
-    // `lookup_record_type` in `infer/modules.rs`, the variant-vs-
-    // record disambiguator at `expr.rs:8088`) and the last-write-
-    // wins `type_defs` slot has the cli-shape after stdlib bootstrap.
-    // `ParseError.new(&"x")` constructor goes through the env-level
-    // function table (per-module qualified) and is unambiguous.
-    let a = ParseError.new(&"x");
-    let b = ParseError.new(&"x");
+    let a = ParseError { message: "x" };
+    let b = ParseError { message: "x" };
     assert(a == b);
 }
 

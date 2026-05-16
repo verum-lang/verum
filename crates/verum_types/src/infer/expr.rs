@@ -1264,23 +1264,44 @@ impl TypeChecker {
                 }
 
                 // Get the stored field types (may contain type variables like T)
-                let stored_fields = match self.ctx.lookup_type(struct_key.as_str()) {
-                    Option::Some(Type::Record(field_types)) => Some(field_types.clone()),
-                    _ => match self.ctx.lookup_type(type_name.as_str()) {
-                        Option::Some(Type::Record(field_types)) => Some(field_types.clone()),
-                        _ => {
-                            if let Type::Variant(variants) = expected {
-                                variants.get(type_name.as_str()).and_then(|payload| {
-                                    if let Type::Record(field_types) = payload {
-                                        Some(field_types.clone())
+                //
+                // §Y close: every probe of an unqualified type key is
+                // last-write-wins across stdlib modules.  We route the
+                // mount-scoped probes through `lookup_type_mount_scoped`
+                // FIRST so explicit user mounts take precedence over
+                // whichever module's `define_type` happened to land
+                // last.  See `lookup_type_mount_scoped` doc-comment +
+                // audit.md §Y for the architectural rationale.
+                let mount_struct = self
+                    .lookup_type_mount_scoped(
+                        type_name.as_str(),
+                        "__struct_fields_",
+                    );
+                let mount_plain = self
+                    .lookup_type_mount_scoped(type_name.as_str(), "");
+                let stored_fields = match mount_struct {
+                    Some(Type::Record(field_types)) => Some(field_types),
+                    _ => match mount_plain {
+                        Some(Type::Record(field_types)) => Some(field_types),
+                        _ => match self.ctx.lookup_type(struct_key.as_str()) {
+                            Option::Some(Type::Record(field_types)) => Some(field_types.clone()),
+                            _ => match self.ctx.lookup_type(type_name.as_str()) {
+                                Option::Some(Type::Record(field_types)) => Some(field_types.clone()),
+                                _ => {
+                                    if let Type::Variant(variants) = expected {
+                                        variants.get(type_name.as_str()).and_then(|payload| {
+                                            if let Type::Record(field_types) = payload {
+                                                Some(field_types.clone())
+                                            } else {
+                                                None
+                                            }
+                                        })
                                     } else {
                                         None
                                     }
-                                })
-                            } else {
-                                None
-                            }
-                        }
+                                }
+                            },
+                        },
                     },
                 };
 
@@ -8086,8 +8107,17 @@ impl TypeChecker {
             //  - Variant present but fields don't cover exactly → fall
             //  through to variant constructor.
             let struct_key = format!("__struct_fields_{}", variant_name);
+            // §Y close: mount-scoped probe FIRST so an explicit
+            // `mount A.{Foo}` overrides whichever sibling module's
+            // `Foo` happened to land later in the unqualified slot.
+            let mount_scoped_struct = self
+                .lookup_type_mount_scoped(variant_name, "__struct_fields_");
+            let resolved_struct_lookup = match mount_scoped_struct {
+                Some(ref ty) => Some(ty.clone()),
+                None => self.ctx.lookup_type(struct_key.as_str()).cloned(),
+            };
             let has_matching_struct = if let Option::Some(Type::Record(struct_fields)) =
-                self.ctx.lookup_type(struct_key.as_str())
+                resolved_struct_lookup
             {
                 let all_provided_valid = fields
                     .iter()

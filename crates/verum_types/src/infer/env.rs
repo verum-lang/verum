@@ -1899,9 +1899,22 @@ impl TypeChecker {
                             param_subst.insert(param_name.clone(), arg_ty.clone());
                         }
 
-                        if let Option::Some(Type::Record(fields)) =
-                            self.ctx.lookup_type(&struct_key)
-                        {
+                        // §Y close: mount-scoped probe FIRST so an
+                        // explicit user mount overrides whichever
+                        // sibling module's same-named record happened
+                        // to land last in the unqualified slot.  Falls
+                        // through to the plain unqualified probe when
+                        // the type is not explicitly mounted (built-in
+                        // types, locally-declared types, etc.).
+                        let resolved_record = match self
+                            .lookup_type_mount_scoped(
+                                type_name.as_str(),
+                                "__struct_fields_",
+                            ) {
+                            Some(ty) => Some(ty),
+                            None => self.ctx.lookup_type(&struct_key).cloned(),
+                        };
+                        if let Option::Some(Type::Record(fields)) = resolved_record {
                             if let Some(field_ty) = fields.get(&field_name) {
                                 // Apply type parameter substitution to get concrete field type
                                 let resolved_ty =
