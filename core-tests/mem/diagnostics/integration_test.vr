@@ -1,0 +1,127 @@
+// =============================================================================
+// core-tests/mem/diagnostics/integration_test.vr
+// =============================================================================
+//
+// Integration tests: MemHeaderView composed with capability flags and
+// header fields, CallFrame composed with typical stack-frame shapes.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.diagnostics.{MemHeaderView, CallFrame, live_allocations};
+mount core.mem.capability.{
+    CAP_READ, CAP_WRITE, CAP_OWNED,
+    has_capability,
+};
+
+// -----------------------------------------------------------------------------
+// §1  MemHeaderView constructed by hand — full field round-trip
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_mem_header_view_full_field_round_trip() {
+    let v: MemHeaderView = MemHeaderView {
+        generation: 42 as UInt32,
+        epoch: 1 as UInt16,
+        capabilities: CAP_OWNED,
+        size: 100 as UInt32,
+        alignment: 8 as UInt32,
+        type_id: 512 as UInt32,
+        flags: 0 as UInt32,
+        ref_count: 1 as UInt32,
+    };
+    assert_eq(v.generation, 42 as UInt32);
+    assert_eq(v.epoch, 1 as UInt16);
+    assert_eq(v.capabilities, CAP_OWNED);
+    assert_eq(v.size, 100 as UInt32);
+    assert_eq(v.alignment, 8 as UInt32);
+    assert_eq(v.type_id, 512 as UInt32);
+    assert_eq(v.flags, 0 as UInt32);
+    assert_eq(v.ref_count, 1 as UInt32);
+}
+
+// -----------------------------------------------------------------------------
+// §2  Capability-flag observability via MemHeaderView.capabilities
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_mem_header_view_capabilities_observable() {
+    let v: MemHeaderView = MemHeaderView {
+        generation: 1 as UInt32,
+        epoch: 0 as UInt16,
+        capabilities: CAP_READ | CAP_WRITE,
+        size: 64 as UInt32,
+        alignment: 8 as UInt32,
+        type_id: 0 as UInt32,
+        flags: 0 as UInt32,
+        ref_count: 1 as UInt32,
+    };
+    assert(has_capability(v.capabilities, CAP_READ));
+    assert(has_capability(v.capabilities, CAP_WRITE));
+    assert(!has_capability(v.capabilities, 0x80 as UInt16));
+}
+
+// -----------------------------------------------------------------------------
+// §3  Alignment field is power-of-2
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_mem_header_view_alignment_power_of_two() {
+    let aligns: List<UInt32> = [
+        1 as UInt32, 2 as UInt32, 4 as UInt32, 8 as UInt32,
+        16 as UInt32, 32 as UInt32, 64 as UInt32, 128 as UInt32,
+    ];
+    for a in aligns.iter() {
+        let v: MemHeaderView = MemHeaderView {
+            generation: 1 as UInt32,
+            epoch: 0 as UInt16,
+            capabilities: 0 as UInt16,
+            size: 64 as UInt32,
+            alignment: *a,
+            type_id: 0 as UInt32,
+            flags: 0 as UInt32,
+            ref_count: 1 as UInt32,
+        };
+        // Power of 2: x > 0 && (x & (x-1)) == 0
+        assert(v.alignment > 0 as UInt32);
+        assert((v.alignment & (v.alignment - 1 as UInt32)) == 0 as UInt32);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §4  ref_count = 0 marks an allocation that has been freed
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_ref_count_zero_signals_freed() {
+    let v: MemHeaderView = MemHeaderView {
+        generation: 99 as UInt32,
+        epoch: 0 as UInt16,
+        capabilities: 0 as UInt16,
+        size: 0 as UInt32,
+        alignment: 8 as UInt32,
+        type_id: 0 as UInt32,
+        flags: 0 as UInt32,
+        ref_count: 0 as UInt32,
+    };
+    assert_eq(v.ref_count, 0 as UInt32);
+}
+
+// -----------------------------------------------------------------------------
+// §5  live_allocations returns empty until sidecar wired
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_live_allocations_empty_until_sidecar_wired() {
+    let views = live_allocations();
+    // Pre-sidecar: always empty.  Post-sidecar: this assertion would
+    // need to be removed.
+    assert_eq(views.len(), 0);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

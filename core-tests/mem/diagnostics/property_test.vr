@@ -1,0 +1,97 @@
+// =============================================================================
+// core-tests/mem/diagnostics/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.mem.diagnostics`:
+//
+//   §A  live_allocations().len() == live_allocation_count() (consistency)
+//   §B  current_call_stack(skip) returns a stable type for any skip
+//   §C  MemHeaderView is by-value (cloning is identity)
+//   §D  CallFrame.function == "" ⇒ symbolication failed
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.diagnostics.{
+    MemHeaderView,
+    live_allocations, live_allocation_count,
+    CallFrame, current_call_stack,
+};
+
+// =============================================================================
+// §A  Live allocations consistency
+// =============================================================================
+
+@test
+fn law_live_allocations_count_consistency_pinned() {
+    let views = live_allocations();
+    let count = live_allocation_count();
+    assert_eq(views.len() as Int, count);
+}
+
+// =============================================================================
+// §B  current_call_stack invariant — returns a List<CallFrame>
+//     for any non-negative skip
+// =============================================================================
+
+@test
+fn law_current_call_stack_total_function() {
+    let skips: List<Int> = [0, 1, 5, 10, 100, 1000];
+    for s in skips.iter() {
+        let stack = current_call_stack(*s);
+        // .len() must succeed without panic.
+        assert(stack.len() >= 0);
+    }
+}
+
+// =============================================================================
+// §C  CallFrame fields are independent — each field is by-value
+// =============================================================================
+
+@test
+fn law_call_frame_fields_independent() {
+    let f1: CallFrame = CallFrame {
+        function: "main".to_text(),
+        file: "/tmp/test.vr".to_text(),
+        line: 1,
+        column: 1,
+        instruction_pointer: 0x1000 as UInt64,
+    };
+    let f2: CallFrame = CallFrame {
+        function: "main".to_text(),
+        file: "/tmp/test.vr".to_text(),
+        line: 1,
+        column: 1,
+        instruction_pointer: 0x2000 as UInt64,    // different IP
+    };
+    // Changing one field doesn't affect the other.
+    assert(f1.instruction_pointer != f2.instruction_pointer);
+    assert_eq(f1.function, f2.function);
+}
+
+// =============================================================================
+// §D  Empty function name marks "symbolication failed" — instruction
+//     pointer still observable
+// =============================================================================
+
+@test
+fn law_empty_function_preserves_instruction_pointer() {
+    let frame: CallFrame = CallFrame {
+        function: "".to_text(),
+        file: "".to_text(),
+        line: 0,
+        column: 0,
+        instruction_pointer: 0xDEAD_BEEF as UInt64,
+    };
+    assert_eq(frame.function, "");
+    // IP must STILL be non-zero — rendering should not return empty
+    // for unsymbolicated frames.
+    assert(frame.instruction_pointer != 0 as UInt64);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

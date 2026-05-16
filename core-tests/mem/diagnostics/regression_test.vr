@@ -1,0 +1,103 @@
+// =============================================================================
+// core-tests/mem/diagnostics/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.mem.diagnostics`.
+//
+//   §A  MemHeaderView has 8 fields (generation, epoch, capabilities, size,
+//       alignment, type_id, flags, ref_count).  Pin the field count via
+//       field-read assertions so a removal surfaces at compile time.
+//   §B  live_allocations / live_allocation_count return non-negative
+//       List / Int respectively (no underflow).
+//   §C  current_call_stack accepts arbitrary skip values without panic.
+//   §D  CallFrame has 5 fields (function, file, line, column,
+//       instruction_pointer).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.diagnostics.{
+    MemHeaderView,
+    live_allocations, live_allocation_count,
+    CallFrame, current_call_stack,
+};
+
+// -----------------------------------------------------------------------------
+// §A — MemHeaderView field count = 8
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_mem_header_view_eight_fields() {
+    let v: MemHeaderView = MemHeaderView {
+        generation: 1 as UInt32,
+        epoch: 2 as UInt16,
+        capabilities: 3 as UInt16,
+        size: 4 as UInt32,
+        alignment: 8 as UInt32,
+        type_id: 5 as UInt32,
+        flags: 6 as UInt32,
+        ref_count: 7 as UInt32,
+    };
+    // 8 reads — any removed field would fail to compile.
+    assert_eq(v.generation, 1 as UInt32);
+    assert_eq(v.epoch, 2 as UInt16);
+    assert_eq(v.capabilities, 3 as UInt16);
+    assert_eq(v.size, 4 as UInt32);
+    assert_eq(v.alignment, 8 as UInt32);
+    assert_eq(v.type_id, 5 as UInt32);
+    assert_eq(v.flags, 6 as UInt32);
+    assert_eq(v.ref_count, 7 as UInt32);
+}
+
+// -----------------------------------------------------------------------------
+// §B — live_allocations / live_allocation_count consistency
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_live_allocations_count_non_negative() {
+    let views = live_allocations();
+    let count = live_allocation_count();
+    assert(views.len() >= 0);
+    assert(count >= 0);
+    assert_eq(views.len() as Int, count);
+}
+
+// -----------------------------------------------------------------------------
+// §C — current_call_stack accepts any skip without panic
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_current_call_stack_handles_arbitrary_skip() {
+    let skips: List<Int> = [-1, 0, 1, 100, 10000];
+    for s in skips.iter() {
+        let _ = current_call_stack(*s);
+    }
+    assert(true);
+}
+
+// -----------------------------------------------------------------------------
+// §D — CallFrame field count = 5
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_call_frame_five_fields() {
+    let f: CallFrame = CallFrame {
+        function: "test".to_text(),
+        file: "test.vr".to_text(),
+        line: 1,
+        column: 2,
+        instruction_pointer: 0x1000 as UInt64,
+    };
+    assert_eq(f.function, "test");
+    assert_eq(f.file, "test.vr");
+    assert_eq(f.line, 1);
+    assert_eq(f.column, 2);
+    assert_eq(f.instruction_pointer, 0x1000 as UInt64);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
