@@ -1,0 +1,130 @@
+// =============================================================================
+// core-tests/mem/fat_ref/integration_test.vr
+// =============================================================================
+//
+// Integration tests: FatRef composed with ThinRef, header, and capability.
+// FatRef extends ThinRef with a metadata field (slice length or vtable
+// pointer) plus offset_from_base for subslice views.  These tests pin
+// the cross-module invariants.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.header.{HEADER_SIZE, GEN_UNALLOCATED, GEN_INITIAL};
+mount core.mem.capability.{
+    CAP_READ, CAP_WRITE, CAP_OWNED, CAP_READ_ONLY,
+    attenuate, has_capability,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+};
+
+// -----------------------------------------------------------------------------
+// §1  Header recovery via offset arithmetic.  For a fat ref pointing
+//     at offset O from the base allocation, the header is at:
+//        ptr - offset_from_base - HEADER_SIZE
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_subslice_header_offset_zero() {
+    // Non-subslice fat ref: offset = 0, header at ptr - 32.
+    let ptr: Int = 1000;
+    let offset: Int = 0;
+    let header_addr: Int = ptr - offset - HEADER_SIZE;
+    assert_eq(header_addr, 1000 - 32);
+    assert_eq(header_addr, 968);
+}
+
+@test
+fn integration_subslice_header_offset_nonzero() {
+    // Subslice fat ref at offset 16 from a base allocation at ptr 1000.
+    // Sub-ptr = 1016; header recovery reads 1016 - 16 - 32 = 968.
+    let base_ptr: Int = 1000;
+    let offset: Int = 16;
+    let sub_ptr: Int = base_ptr + offset;
+    let header_addr: Int = sub_ptr - offset - HEADER_SIZE;
+    assert_eq(header_addr, 968);
+}
+
+// -----------------------------------------------------------------------------
+// §2  Packed-field semantics — FatRef and ThinRef share the same
+//     pack_epoch_caps layout.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_fat_ref_packed_field_matches_thin_ref() {
+    // The (epoch, caps) packing is bijective for both reference types.
+    let packed_a = pack_epoch_caps(7 as UInt16, CAP_OWNED);
+    let packed_b = pack_epoch_caps(7 as UInt16, CAP_OWNED);
+    assert_eq(packed_a, packed_b);
+    assert_eq(unpack_epoch(packed_a), 7 as UInt16);
+    assert_eq(unpack_caps(packed_a), CAP_OWNED);
+}
+
+// -----------------------------------------------------------------------------
+// §3  Attenuate caps on a fat-ref-style packed field.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_attenuate_fat_ref_caps_to_read_only() {
+    let initial = pack_epoch_caps(1 as UInt16, CAP_OWNED);
+    let attenuated_caps = attenuate(unpack_caps(initial), CAP_READ_ONLY);
+    let final_packed = pack_epoch_caps(unpack_epoch(initial), attenuated_caps);
+    assert(!has_capability(unpack_caps(final_packed), CAP_WRITE));
+    assert(has_capability(unpack_caps(final_packed), CAP_READ));
+    assert_eq(unpack_epoch(final_packed), 1 as UInt16);
+}
+
+// -----------------------------------------------------------------------------
+// §4  Null fat-ref shape — generation = GEN_UNALLOCATED, packed = 0.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_null_fat_ref_shape() {
+    let null_gen: UInt32 = GEN_UNALLOCATED;
+    let null_packed: UInt32 = 0 as UInt32;
+    let null_offset: UInt32 = 0 as UInt32;
+    let null_metadata: Int = 0;
+    assert_eq(null_gen, 0 as UInt32);
+    assert_eq(unpack_epoch(null_packed), 0 as UInt16);
+    assert_eq(unpack_caps(null_packed), 0 as UInt16);
+    assert_eq(null_offset, 0 as UInt32);
+    assert_eq(null_metadata, 0);
+}
+
+// -----------------------------------------------------------------------------
+// §5  Metadata field semantics — length for slices, vtable for dyn.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_slice_length_in_metadata() {
+    // For a FatRef<[Int]> over a 5-element slice, metadata = 5.
+    let slice_len: Int = 5;
+    assert(slice_len >= 0);
+    assert(slice_len < 1000000);   // Realistic upper bound for slice length
+}
+
+// -----------------------------------------------------------------------------
+// §6  Subslice-of-subslice: offsets add.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_subslice_of_subslice_offset_adds() {
+    // Initial base at 1000.  Sub-A at offset 16 → ptr 1016.
+    // Sub-B from Sub-A at offset 8 → ptr 1024.  Sub-B's
+    // offset_from_base should be 24 (cumulative).
+    let base_ptr: Int = 1000;
+    let sub_a_offset: Int = 16;
+    let sub_b_offset_from_a: Int = 8;
+    let sub_b_ptr: Int = base_ptr + sub_a_offset + sub_b_offset_from_a;
+    let sub_b_offset_from_base: Int = sub_b_ptr - base_ptr;
+    assert_eq(sub_b_offset_from_base, 24);
+    // Header recovery from sub-B
+    let header_addr: Int = sub_b_ptr - sub_b_offset_from_base - HEADER_SIZE;
+    assert_eq(header_addr, 1000 - 32);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

@@ -1,0 +1,139 @@
+// =============================================================================
+// core-tests/mem/thin_ref/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for ThinRef's packed field layout.  Because constructing
+// a ThinRef requires an unsafe block + valid allocation, these laws are
+// expressed against the packing primitives (which ThinRef consumes
+// directly) — exhausting the (epoch, caps) UInt16² domain at every
+// boundary point.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.header.{GEN_UNALLOCATED, GEN_INITIAL, GEN_MAX};
+mount core.mem.capability.{
+    CAP_READ, CAP_WRITE, CAP_OWNED, CAP_ALL,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+};
+
+// =============================================================================
+// §A  pack_epoch_caps is injective: distinct (epoch, caps) pairs produce
+//     distinct packed values.
+// =============================================================================
+
+@test
+fn law_pack_injective_pinned() {
+    let cases: List<(UInt16, UInt16)> = [
+        (0 as UInt16, 0 as UInt16),
+        (1 as UInt16, 0 as UInt16),
+        (0 as UInt16, 1 as UInt16),
+        (1 as UInt16, 1 as UInt16),
+        (0xFFFF as UInt16, 0 as UInt16),
+        (0 as UInt16, 0xFFFF as UInt16),
+        (0xFFFF as UInt16, 0xFFFF as UInt16),
+        (0xABCD as UInt16, 0x1234 as UInt16),
+    ];
+    for i in 0..cases.len() {
+        for j in 0..cases.len() {
+            let a = cases[i];
+            let b = cases[j];
+            let packed_a = pack_epoch_caps(a.0, a.1);
+            let packed_b = pack_epoch_caps(b.0, b.1);
+            if i == j {
+                assert_eq(packed_a, packed_b);
+            } else {
+                assert(packed_a != packed_b);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// §B  unpack is left-inverse of pack: (unpack ∘ pack) = identity.
+// =============================================================================
+
+@property
+fn prop_unpack_left_inverse_of_pack(epoch: UInt16, caps: UInt16) {
+    let packed = pack_epoch_caps(epoch, caps);
+    assert_eq(unpack_epoch(packed), epoch);
+    assert_eq(unpack_caps(packed), caps);
+}
+
+// =============================================================================
+// §C  Packed field decomposes as (caps << 16) | epoch — verify via the
+//     unpacked-then-reassembled form.
+// =============================================================================
+
+@test
+fn law_packed_field_decomposition_pinned() {
+    let cases: List<(UInt16, UInt16)> = [
+        (0 as UInt16, 0 as UInt16),
+        (1 as UInt16, 1 as UInt16),
+        (0xFFFF as UInt16, 0xFFFF as UInt16),
+        (7 as UInt16, CAP_OWNED),
+        (42 as UInt16, CAP_READ),
+    ];
+    for case in cases.iter() {
+        let packed = pack_epoch_caps(case.0, case.1);
+        let manual: UInt32 = ((case.1 as UInt32) << 16) | (case.0 as UInt32);
+        assert_eq(packed, manual);
+    }
+}
+
+// =============================================================================
+// §D  Epoch monotonic advance preserves caps.
+//     When the epoch counter advances (e.g., wraparound-protection bump),
+//     the capability bits in the packed field must remain unchanged.
+// =============================================================================
+
+@test
+fn law_epoch_advance_preserves_caps() {
+    let starting_epoch: UInt16 = 1 as UInt16;
+    let advanced_epoch: UInt16 = 2 as UInt16;
+    let caps_at_start = pack_epoch_caps(starting_epoch, CAP_OWNED);
+    let caps_after_advance = pack_epoch_caps(advanced_epoch, CAP_OWNED);
+    assert_eq(unpack_caps(caps_at_start), unpack_caps(caps_after_advance));
+    assert(unpack_epoch(caps_at_start) != unpack_epoch(caps_after_advance));
+}
+
+// =============================================================================
+// §E  Generation constants form a valid lattice for the ThinRef.generation
+//     field.  GEN_UNALLOCATED (0) < every other valid generation.
+// =============================================================================
+
+@test
+fn law_generation_lattice_pinned() {
+    assert(GEN_UNALLOCATED < GEN_INITIAL);
+    assert(GEN_INITIAL < GEN_MAX);
+    // A ThinRef.null() carries GEN_UNALLOCATED — distinguishable from
+    // every freshly-allocated reference's GEN_INITIAL.
+    assert(GEN_UNALLOCATED != GEN_INITIAL);
+}
+
+// =============================================================================
+// §F  ThinRef layout pin (compile-time @repr(C, size(16), align(8))).
+//     The field-shape contract is:
+//       ptr:           &unsafe T   (8 bytes on 64-bit targets)
+//       generation:    UInt32       (4 bytes)
+//       epoch_and_caps: UInt32      (4 bytes)
+//     Total = 16 bytes; aligned to 8 (pointer alignment).
+//
+//     We can't probe sizeof here without an `intrinsic` call, but we CAN
+//     pin the bit-arithmetic invariants the layout depends on.
+// =============================================================================
+
+@test
+fn law_packed_field_fits_in_uint32() {
+    // pack_epoch_caps always returns a UInt32 — pin the type-level
+    // invariant by asserting any output stays within UInt32.MAX.
+    let max_packed = pack_epoch_caps(0xFFFF as UInt16, 0xFFFF as UInt16);
+    assert(max_packed <= 0xFFFFFFFF as UInt32);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

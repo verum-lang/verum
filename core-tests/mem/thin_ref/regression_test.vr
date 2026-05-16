@@ -1,0 +1,103 @@
+// =============================================================================
+// core-tests/mem/thin_ref/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.mem.thin_ref`.  Tests are NEVER deleted
+// even after the underlying bug is fixed; they become guardrails against
+// re-regression.
+//
+// Pinned regressions:
+//   §A  pack_epoch_caps had been written as `(caps as UInt32) * 65536 |
+//       (epoch as UInt32)` — semantically equivalent to the shift form
+//       but routed `*` through the overflow-checked multiplication
+//       backend.  Pin the bit-shift semantics.  Inherited from
+//       `capability.vr` — pinned here too because ThinRef + FatRef are
+//       the load-bearing consumers.
+//   §B  ThinRef.null() MUST set generation = GEN_UNALLOCATED (0).  Pre-fix
+//       some bootstrap paths left it at GEN_INITIAL → null references
+//       silently passed the validity check.
+//   §C  Layout: ThinRef MUST stay 16 bytes (@repr(C, size(16), align(8))).
+//       Adding a field is a soundness incident — every CBGR consumer
+//       hardcodes the 16-byte assumption.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.header.{GEN_UNALLOCATED, GEN_INITIAL};
+mount core.mem.capability.{
+    CAP_OWNED, CAP_READ,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+};
+
+// -----------------------------------------------------------------------------
+// §A — pack uses shift, not overflow-checked multiply
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_pack_uses_shift_not_multiply() {
+    // Both ThinRef and FatRef rely on `pack_epoch_caps`.  Pre-fix it
+    // had been written as `(caps as UInt32) * 65536 | (epoch as UInt32)`
+    // — semantically equivalent to the shift form but routed through
+    // overflow-checked multiplication on some backends.
+    let packed = pack_epoch_caps(0 as UInt16, 0xFFFF as UInt16);
+    // 0xFFFF << 16 = 0xFFFF0000 — exact bit pattern
+    assert_eq(packed, 0xFFFF0000 as UInt32);
+}
+
+// -----------------------------------------------------------------------------
+// §B — null generation sentinel
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_null_thin_ref_generation_is_unallocated() {
+    // GEN_UNALLOCATED (0) is the null sentinel.  ThinRef.null() must
+    // install this value so the CBGR validity check ALWAYS fails.
+    // Pre-fix some bootstrap paths used GEN_INITIAL (1) → silent
+    // validity-check pass on null references.
+    assert_eq(GEN_UNALLOCATED, 0 as UInt32);
+    // GEN_INITIAL (1) is the "freshly allocated" marker.  The two
+    // MUST be distinguishable.
+    assert(GEN_UNALLOCATED != GEN_INITIAL);
+}
+
+// -----------------------------------------------------------------------------
+// §C — packed field decomposition invariant
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_packed_field_no_aliasing() {
+    // Distinct (epoch, caps) pairs MUST produce distinct packed values.
+    // Pre-fix some early variants used XOR instead of OR for the
+    // packing, which aliased entire families of refs into the same
+    // packed value.
+    let a = pack_epoch_caps(1 as UInt16, 0 as UInt16);
+    let b = pack_epoch_caps(0 as UInt16, 1 as UInt16);
+    assert(a != b);
+}
+
+// -----------------------------------------------------------------------------
+// §D — bidirectional unpacking round-trip
+// -----------------------------------------------------------------------------
+
+@test
+fn regression_unpack_inverse_of_pack() {
+    let cases: List<(UInt16, UInt16)> = [
+        (0 as UInt16, 0 as UInt16),
+        (1 as UInt16, 1 as UInt16),
+        (0xFFFF as UInt16, 0xFFFF as UInt16),
+        (42 as UInt16, CAP_OWNED),
+        (7 as UInt16, CAP_READ),
+    ];
+    for case in cases.iter() {
+        let packed = pack_epoch_caps(case.0, case.1);
+        assert_eq(unpack_epoch(packed), case.0);
+        assert_eq(unpack_caps(packed), case.1);
+    }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

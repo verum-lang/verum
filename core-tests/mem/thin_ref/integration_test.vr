@@ -1,0 +1,127 @@
+// =============================================================================
+// core-tests/mem/thin_ref/integration_test.vr
+// =============================================================================
+//
+// Integration tests: ThinRef's packed field layout composed with
+// header constants and capability operations.  These tests pin the
+// invariants the CBGR write path relies on whenever a ThinRef is
+// constructed, cloned, or attenuated.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.header.{GEN_UNALLOCATED, GEN_INITIAL, GEN_MAX};
+mount core.mem.capability.{
+    CAP_READ, CAP_WRITE, CAP_OWNED, CAP_READ_ONLY,
+    attenuate, has_capability,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+};
+
+// -----------------------------------------------------------------------------
+// §1  Construction-time invariant: a fresh ThinRef carries
+//     (generation = GEN_INITIAL, epoch = 0, caps = CAP_OWNED).
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_fresh_thin_ref_shape() {
+    let gen: UInt32 = GEN_INITIAL;
+    let epoch: UInt16 = 0 as UInt16;
+    let caps: UInt16 = CAP_OWNED;
+    let packed = pack_epoch_caps(epoch, caps);
+    assert_eq(unpack_epoch(packed), epoch);
+    assert_eq(unpack_caps(packed), caps);
+    // Generation is independent from packed — pinned separately.
+    assert_eq(gen, GEN_INITIAL);
+}
+
+// -----------------------------------------------------------------------------
+// §2  Sub-reference creation (e.g., `as_read_only()`) — attenuate caps
+//     in place; epoch and generation carry through.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_attenuate_caps_in_packed_field() {
+    let initial_packed = pack_epoch_caps(7 as UInt16, CAP_OWNED);
+    let attenuated_caps = attenuate(unpack_caps(initial_packed), CAP_READ_ONLY);
+    let new_packed = pack_epoch_caps(unpack_epoch(initial_packed), attenuated_caps);
+    assert_eq(unpack_epoch(new_packed), 7 as UInt16);
+    assert_eq(unpack_caps(new_packed), CAP_READ_ONLY);
+    // The new ref's caps are STRICTLY a subset of the parent.
+    assert(!has_capability(unpack_caps(new_packed), CAP_WRITE));
+}
+
+// -----------------------------------------------------------------------------
+// §3  Null reference shape — every field has a deterministic null
+//     sentinel.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_null_thin_ref_shape() {
+    let null_gen: UInt32 = GEN_UNALLOCATED;
+    let null_packed: UInt32 = 0 as UInt32;
+    assert_eq(null_gen, 0 as UInt32);
+    assert_eq(unpack_epoch(null_packed), 0 as UInt16);
+    assert_eq(unpack_caps(null_packed), 0 as UInt16);
+}
+
+// -----------------------------------------------------------------------------
+// §4  Wraparound: when generation hits GEN_MAX, the next bump wraps to
+//     GEN_INITIAL (1).  The epoch advance is what catches the alias.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_generation_wraparound_protected_by_epoch() {
+    // Two ThinRef shapes — one at GEN_MAX, one at GEN_INITIAL after
+    // wraparound — must be distinguishable via the epoch field.
+    let pre_wrap_gen: UInt32 = GEN_MAX;
+    let pre_wrap_epoch: UInt16 = 5 as UInt16;
+    let pre_wrap_packed = pack_epoch_caps(pre_wrap_epoch, CAP_OWNED);
+
+    let post_wrap_gen: UInt32 = GEN_INITIAL;
+    let post_wrap_epoch: UInt16 = 6 as UInt16;
+    let post_wrap_packed = pack_epoch_caps(post_wrap_epoch, CAP_OWNED);
+
+    // Epoch differs → references are distinct even if generation alias.
+    assert(unpack_epoch(pre_wrap_packed) != unpack_epoch(post_wrap_packed));
+    assert(pre_wrap_gen != post_wrap_gen);
+}
+
+// -----------------------------------------------------------------------------
+// §5  Three sub-references with identical caps share the packed-field
+//     value (deterministic packing).
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_three_sub_refs_share_packed_field() {
+    let e: UInt16 = 3 as UInt16;
+    let c: UInt16 = CAP_READ_ONLY;
+    let p1 = pack_epoch_caps(e, c);
+    let p2 = pack_epoch_caps(e, c);
+    let p3 = pack_epoch_caps(e, c);
+    assert_eq(p1, p2);
+    assert_eq(p2, p3);
+}
+
+// -----------------------------------------------------------------------------
+// §6  FatRef shares the SAME packed-field layout as ThinRef.
+//     This is the integration contract: every place that reads
+//     `epoch_and_caps` from EITHER reference type goes through the
+//     same `pack_epoch_caps` / `unpack_*` pair from `capability.vr`.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_packed_layout_shared_with_fat_ref() {
+    // Pin: the (epoch, caps) → UInt32 packing is bijective for the full
+    // UInt16² domain — both ThinRef and FatRef can round-trip through
+    // the same primitives without loss.
+    let packed = pack_epoch_caps(0xABCD as UInt16, CAP_OWNED);
+    assert_eq(unpack_epoch(packed), 0xABCD as UInt16);
+    assert_eq(unpack_caps(packed), CAP_OWNED);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}

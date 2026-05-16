@@ -1,0 +1,142 @@
+// =============================================================================
+// core-tests/mem/thin_ref/unit_test.vr
+// =============================================================================
+//
+// Per-API tests for `core.mem.thin_ref` — the 16-byte CBGR generational
+// reference for sized types.  This file pins the layout-level shape
+// (size, alignment, field offsets), the null-construction path, and
+// the packing semantics shared with `core.mem.capability`.
+//
+// Live-reference dereferencing tests (which require a real allocation +
+// allocation header) live in `core-tests/base/memory/cbgr_test.vr` and
+// `core-tests/mem/allocator/` — the unit tests here pin the static
+// surface only.
+//
+// Companion files:
+//   property_test.vr     — packing-layout laws
+//   integration_test.vr  — composition with header / capability
+//   regression_test.vr   — pinned defects (null-pointer construction)
+//   audit.md             — drift surfaces & action items
+// =============================================================================
+
+mount core.prelude.*;
+mount core.mem.header.{GEN_UNALLOCATED, GEN_INITIAL};
+mount core.mem.capability.{
+    CAP_READ, CAP_WRITE, CAP_OWNED, CAP_READ_ONLY,
+    pack_epoch_caps, unpack_epoch, unpack_caps,
+};
+
+// =============================================================================
+// Section 1: Layout pin — `@repr(C, size(16), align(8))` is asserted
+// statically by the compiler.  At test time we verify the implied
+// invariants on the packed `epoch_and_caps` field.
+// =============================================================================
+
+@test
+fn test_thin_ref_packed_caps_field_round_trip_zero() {
+    // epoch=0, caps=0 → packed=0 → unpacks identically.
+    let packed = pack_epoch_caps(0 as UInt16, 0 as UInt16);
+    assert_eq(unpack_epoch(packed), 0 as UInt16);
+    assert_eq(unpack_caps(packed), 0 as UInt16);
+}
+
+@test
+fn test_thin_ref_packed_caps_field_round_trip_max() {
+    // Maximum 32-bit packed value.
+    let packed = pack_epoch_caps(0xFFFF as UInt16, 0xFFFF as UInt16);
+    assert_eq(unpack_epoch(packed), 0xFFFF as UInt16);
+    assert_eq(unpack_caps(packed), 0xFFFF as UInt16);
+    assert_eq(packed, 0xFFFFFFFF as UInt32);
+}
+
+@test
+fn test_thin_ref_packed_caps_field_round_trip_typical() {
+    // Realistic CBGR shape: a Heap<T> creates ThinRef with
+    // epoch=current and caps=CAP_OWNED.
+    let packed = pack_epoch_caps(7 as UInt16, CAP_OWNED);
+    assert_eq(unpack_epoch(packed), 7 as UInt16);
+    assert_eq(unpack_caps(packed), CAP_OWNED);
+}
+
+// =============================================================================
+// Section 2: Generation initialisation constants
+// =============================================================================
+
+@test
+fn test_thin_ref_null_generation_is_gen_unallocated() {
+    // `ThinRef.null()` sets generation = GEN_UNALLOCATED (sentinel).
+    // The CBGR check then ALWAYS fails for null references.
+    assert_eq(GEN_UNALLOCATED, 0 as UInt32);
+}
+
+@test
+fn test_thin_ref_freshly_allocated_uses_gen_initial() {
+    // A freshly-allocated reference must record generation = GEN_INITIAL
+    // matching the header's initial value, never 0.
+    assert_eq(GEN_INITIAL, 1 as UInt32);
+}
+
+// =============================================================================
+// Section 3: Capability bit assignments in packed field
+// =============================================================================
+
+@test
+fn test_thin_ref_caps_high_16_bits() {
+    // Capabilities live in the UPPER 16 bits of the 32-bit packed field.
+    let packed = pack_epoch_caps(0 as UInt16, CAP_OWNED);
+    // Lower 16 bits must be zero
+    assert_eq(packed & 0xFFFF as UInt32, 0 as UInt32);
+    // Upper 16 bits encode CAP_OWNED
+    let caps_extracted = (packed >> 16) as UInt16;
+    assert_eq(caps_extracted, CAP_OWNED);
+}
+
+@test
+fn test_thin_ref_epoch_low_16_bits() {
+    // Epoch lives in the LOWER 16 bits of the 32-bit packed field.
+    let packed = pack_epoch_caps(0xABCD as UInt16, 0 as UInt16);
+    // Upper 16 bits must be zero
+    assert_eq(packed & 0xFFFF0000 as UInt32, 0 as UInt32);
+    // Lower 16 bits encode the epoch
+    let epoch_extracted = (packed & 0xFFFF as UInt32) as UInt16;
+    assert_eq(epoch_extracted, 0xABCD as UInt16);
+}
+
+@test
+fn test_thin_ref_epoch_and_caps_no_overlap() {
+    // Setting epoch only must not affect caps; vice versa.
+    let epoch_only = pack_epoch_caps(7 as UInt16, 0 as UInt16);
+    let caps_only = pack_epoch_caps(0 as UInt16, CAP_READ);
+    let both = pack_epoch_caps(7 as UInt16, CAP_READ);
+    assert_eq(epoch_only | caps_only, both);
+    assert_eq(epoch_only & caps_only, 0 as UInt32);
+}
+
+// =============================================================================
+// Section 4: Common capability shapes carried by ThinRef
+// =============================================================================
+
+@test
+fn test_thin_ref_owned_caps_have_full_set() {
+    let packed = pack_epoch_caps(1 as UInt16, CAP_OWNED);
+    let caps = unpack_caps(packed);
+    // CAP_OWNED includes READ, WRITE, MUTABLE, DELEGATE, REVOKE
+    assert((caps & CAP_READ) != 0 as UInt16);
+    assert((caps & CAP_WRITE) != 0 as UInt16);
+}
+
+@test
+fn test_thin_ref_read_only_caps_exclude_write() {
+    let packed = pack_epoch_caps(1 as UInt16, CAP_READ_ONLY);
+    let caps = unpack_caps(packed);
+    assert((caps & CAP_READ) != 0 as UInt16);
+    assert((caps & CAP_WRITE) == 0 as UInt16);
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+fn main() {
+    // `verum test` synthesises a per-test main.
+}
