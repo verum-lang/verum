@@ -214,6 +214,23 @@ pub struct GenericParam {
 
     /// Default type (if any)
     pub default: Maybe<Text>,
+
+    /// **Function-type bounds** (`F: fn(A) -> B`-style closure-shape
+    /// constraints).  Distinct from `bounds: List<Text>` (which holds
+    /// nominal protocol names like "Eq", "Hash") because the payload
+    /// is a structural type rendered as `fn(arg1, ...) -> ret` text.
+    /// Empty for non-HOF generic params.
+    ///
+    /// Serialised by `archive_metadata::convert_generic_params` from
+    /// VBC `TypeParamDescriptor.type_bounds` via
+    /// `type_ref_to_text_with_params`; parsed back into
+    /// `Type::Function { ... }` at `parse_descriptor_type_string`'s
+    /// `fn(...)` arm.  Enables closure-shape-driven bidirectional
+    /// type-check for stdlib HOFs (`from_fn` / `unfold` /
+    /// `successors` / `Iterator.filter_map` / …) loaded purely from
+    /// precompiled CoreMetadata.
+    #[serde(default)]
+    pub type_bounds: List<Text>,
 }
 
 /// Kind of type descriptor

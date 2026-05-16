@@ -126,6 +126,7 @@ mod tests {
             bounds: Default::default(),
             variance: Variance::Invariant,
             default: None,
+            type_bounds: smallvec::SmallVec::new(),
         }];
         let args = vec![TypeRef::Concrete(TypeId::INT)];
 
@@ -145,6 +146,7 @@ mod tests {
             bounds: Default::default(),
             variance: Variance::Invariant,
             default: None,
+            type_bounds: smallvec::SmallVec::new(),
         }];
         let args = vec![TypeRef::Concrete(TypeId::INT)];
 

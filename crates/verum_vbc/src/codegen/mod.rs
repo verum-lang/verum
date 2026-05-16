@@ -9513,6 +9513,7 @@ impl VbcCodegen {
                             bounds: smallvec::SmallVec::new(),
                             default: None,
                             variance: crate::types::Variance::Invariant,
+                            type_bounds: smallvec::SmallVec::new(),
                         });
                         sum_generic_param_map
                             .insert(gname.name.to_string(), idx as u16);
@@ -10082,6 +10083,7 @@ impl VbcCodegen {
                             bounds: smallvec::SmallVec::new(),
                             default: None,
                             variance: crate::types::Variance::Invariant,
+                            type_bounds: smallvec::SmallVec::new(),
                         });
                     }
                 }
@@ -14745,6 +14747,7 @@ impl VbcCodegen {
                 bounds: tp.bounds.clone(),
                 default: tp.default.clone(),
                 variance: tp.variance,
+                type_bounds: smallvec::SmallVec::new(),
             });
         }
 
