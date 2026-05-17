@@ -64,7 +64,6 @@ fn guard_from_int_negative() {
 // returns a Result<BigInt, ...> whose Ok BigInt has the digits
 // field destroyed.  Pinned `@ignore` until the codegen-level
 // return-record-shape defect closes.
-@ignore
 @test
 fn guard_parse_simple_positive() {
     match parse_bigint(&"42") {
