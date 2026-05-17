@@ -18192,6 +18192,47 @@ impl VbcCodegen {
                             {
                                 return info.return_type_name.clone();
                             }
+                            // Zero-arity variant constructor (`Equal` /
+                            // `None` / `Less` / `Some` as a bare path) —
+                            // surface the parent type so f-string
+                            // dispatch can route `f"{Equal}"` through
+                            // `Ordering.fmt` instead of falling through
+                            // to the generic ToString.
+                            //
+                            // §J close-out for the inline-constructor
+                            // f-string shape — pre-fix `f"{Equal}"`
+                            // returned "Equal" (Debug-style) because
+                            // `infer_expr_type_name` returned None and
+                            // `try_emit_display_dispatch` short-circuited
+                            // without finding `<Type>.fmt`.
+                            //
+                            // Variants are registered ONLY under qualified
+                            // `<Parent>.<Variant>` (archive_ctx_loader
+                            // pass-4 deliberately skips bare registration
+                            // to avoid cross-type collision).  Scan for a
+                            // UNIQUE variant whose key ends in
+                            // `.<ident>` — uniqueness is the safety gate.
+                            let dot_suffix = format!(".{}", ident.name.as_str());
+                            let mut variant_parent: Option<String> = None;
+                            let mut ambiguous = false;
+                            for (key, info) in self.ctx.functions.iter() {
+                                if info.variant_tag.is_some()
+                                    && info.param_count == 0
+                                    && key.ends_with(&dot_suffix)
+                                    && let Some(parent) = info.parent_type_name.as_ref()
+                                {
+                                    if variant_parent.is_some()
+                                        && variant_parent.as_deref() != Some(parent.as_str())
+                                    {
+                                        ambiguous = true;
+                                        break;
+                                    }
+                                    variant_parent = Some(parent.clone());
+                                }
+                            }
+                            if !ambiguous && variant_parent.is_some() {
+                                return variant_parent;
+                            }
                             None
                         }
                         PathSegment::SelfValue => self.ctx.variable_type_names.get("self").cloned(),
