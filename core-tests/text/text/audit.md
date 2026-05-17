@@ -313,13 +313,27 @@ the `Int` direct return or the `count` alias).
   `obj.method()` MUST live in `dispatch_primitive_method`, NOT
   `try_intercept_text_static_runtime`.
 
-### Deferred — ranked by leverage (updated 2026-05-17, sixth pass)
+### Deferred — ranked by leverage (updated 2026-05-17, seventh pass)
 | # | Item | Estimated effort | Tests unblocked |
 |---|------|-----:|------:|
 | 1 | §D close — function-id collision (CallM migration OR global next_func_id) | multi-session | ~10 (§O included) |
-| 2 | §J runtime — Debug protocol dispatch `format_debug → fmt_debug` Text-writeback doesn't propagate formatter writes back to the buffer in user-side `format_debug(&value)` — parser-level routing closed in commit `504031af4`, runtime-dispatch defect remains | medium | 2 (§J pins) |
+| 2 | §J runtime — Debug protocol dispatch `format_debug → fmt_debug` Text-writeback doesn't propagate formatter writes back to the buffer in user-side `format_debug(&value)` — parser-level routing closed in commit `504031af4`, archive-harvest gap closed in commit `6dc04cab0`, runtime-dispatch defect remains | medium | 2 (§J pins) |
 | 3 | §Y AOT path — architectural helper (commit `bb488e17a`) reaches the interp path but not the AOT path; AOT name-resolution uses a sibling probe site that doesn't go through `lookup_type_mount_scoped` | medium | 1 active (test_parse_error_eq_message under AOT) |
-| 4 | Prelude shadowing — explicit `mount X.{...}` statements suppress the auto-import of `core.prelude.*` items in some test contexts (regression_test.vr surfaces this — diag with single explicit mount in the same dir sees prelude items, regression with several explicit mounts doesn't) | medium | unknown breadth |
+
+Closed since the previous pass:
+- **#11 — archive-harvest f-string / literal gap (commit `6dc04cab0`)**.
+  `crates/verum_compiler/src/archive_ctx_loader.rs::harvest_names_in_expr`
+  had a catch-all `_ => {}` that silently dropped
+  `ExprKind::InterpolatedString`, `TensorLiteral`, `MapLiteral`,
+  `SetLiteral`, `Array(ArrayExpr::{List, Repeat})`.  Result:
+  every user file whose ONLY stdlib-fn reference lived inside
+  one of those literal-shape expressions failed
+  `register_module_filtered`'s prefix gate, did not load the
+  function's defining module, and surfaced as
+  `UndefinedFunction("…")` at codegen — even though the
+  function was reachable via the prelude.  Fix recurses into
+  every embedded expression in those five shapes; closes the
+  entire literal-shape archive-load gap (not just f-strings).
 
 ### §Y — AOT typechecker mount-scoped name resolution (PARTIAL CLOSE 2026-05-16)
 
