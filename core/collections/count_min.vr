@@ -108,7 +108,10 @@ public type CountMinSketch is {
     depth:      Int,       // rows
     /// Flat `depth × width` matrix in row-major order.
     cells:      List<UInt32>,
-    key:        [Byte; 32],
+    /// `List<Byte>` of 32 elements rather than `[Byte; 32]` — see
+    /// `bloom.vr` for the codegen rationale (fixed-array inline form
+    /// mis-allocates record slot space).
+    key:        List<Byte>,
     total:      UInt64,
 };
 
@@ -120,7 +123,9 @@ implement CountMinSketch {
         let mut cells: List<UInt32> = [];
         let mut i: Int = 0;
         while i < w * d { cells.push(0_u32); i = i + 1; }
-        let mut key: [Byte; 32] = [0_u8; 32];
+        let mut key: List<Byte> = [];
+        let mut ki: Int = 0;
+        while ki < 32 { key.push(0_u8); ki = ki + 1; }
         fill_secure(&mut key);
         CountMinSketch {
             width: w, depth: d, cells: cells, key: key, total: 0_u64,
@@ -232,7 +237,7 @@ implement CountMinSketch {
             input.push(((counter >> 16_u32) & 0xFF_u32) as Byte);
             input.push(((counter >>  8_u32) & 0xFF_u32) as Byte);
             input.push((counter & 0xFF_u32) as Byte);
-            let digest = hmac_sha256(&self.key[..], input.as_slice());
+            let digest = hmac_sha256(self.key.as_slice(), input.as_slice());
             // Four u64 halves out of the 32-byte digest.
             let mut half: Int = 0;
             while half < 4 && out.len() < self.depth {

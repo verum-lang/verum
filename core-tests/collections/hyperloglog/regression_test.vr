@@ -16,7 +16,6 @@ mount core.collections.hyperloglog.{
 // CountMin / Reservoir.
 // =============================================================================
 
-@ignore
 @test
 fn regression_hll_new_constructible() {
     let hll = HyperLogLog.new(DEFAULT_PRECISION);
@@ -24,13 +23,15 @@ fn regression_hll_new_constructible() {
     assert(hll.precision() == DEFAULT_PRECISION);
 }
 
-@ignore
 @test
 fn regression_hll_estimate_on_empty_is_zero() {
     let hll = HyperLogLog.new(DEFAULT_PRECISION);
     assert_eq(hll.estimate(), 0_u64);
 }
 
+// REGRESSION (§B.1): `hll.add(&item)` routes through `hash64`
+// which uses `hmac_sha256` — gated on the IndexOutOfBounds {64,64}
+// defect in hmac/sha256 block processing.  Same shape as Bloom §B.
 @ignore
 @test
 fn regression_hll_add_then_estimate_at_least_one() {
@@ -40,7 +41,6 @@ fn regression_hll_add_then_estimate_at_least_one() {
     assert(hll.estimate() >= 1_u64);
 }
 
-@ignore
 @test
 fn regression_hll_merge_precision_mismatch() {
     let a = HyperLogLog.new(10);
