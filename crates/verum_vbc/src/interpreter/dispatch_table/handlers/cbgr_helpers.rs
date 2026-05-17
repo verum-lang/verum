@@ -62,6 +62,31 @@ pub(super) fn strip_cbgr_ref_mutability(encoded: i64) -> i64 {
     }
 }
 
+/// Upper bound for a legitimately-decoded CBGR register index.
+///
+/// A real CBGR ref's `abs_index` is bounded by the interpreter's register
+/// file size (`Registers::top`, typically 1024 with bumps).  A decoded
+/// abs_index that exceeds this ceiling is essentially guaranteed to be a
+/// false-positive from the negative-int range overlap (see Task #13 [A1]
+/// panic: `index out of bounds: the len is 1024 but the index is
+/// 1420103679`).  We pick a generous 1 << 24 = 16M slot ceiling — any
+/// real interpreter that wants more registers is architectural-territory
+/// (not "default-recursion-deep") and should bump the bound here in lock-
+/// step with the register-file capacity.
+///
+/// Pin: every dispatch handler that decodes a CBGR ref via
+/// `decode_cbgr_ref(val.as_i64())` MUST gate the decode through
+/// `is_cbgr_ref` so the abs_index bound check fires — otherwise large
+/// negative `Int` values from user code (e.g. `-10_000_000_000` or a
+/// miscompiled arg-register) decode to garbage 32-bit indices and the
+/// `Registers::get_absolute` debug_assert panics.  The intent of the
+/// CBGR-ref encoding is "always negative" — `encode_cbgr_ref` packs
+/// `(abs_index, generation)` into the low / high 32 bits.  Generation
+/// starts at 1 so legitimate encoded values are always `<= -(1 << 32) -
+/// 1`, but the range `(-2^47, -2^32)` overlaps with user-code negative
+/// integers; the abs_index bound disambiguates.
+const CBGR_REF_ABS_INDEX_MAX: u32 = 1 << 24;
+
 /// Checks if a Value is a CBGR register-based reference.
 ///
 
@@ -73,9 +98,27 @@ pub(super) fn strip_cbgr_ref_mutability(encoded: i64) -> i64 {
 /// Uses `is_inline_int()` rather than `is_int()` because CBGR refs always
 /// fit in the 48-bit inline range. Boxed ints (e.g., i64::MIN) must not
 /// be misidentified as CBGR references.
+///
+
+/// Tighter sanity bound (Task #13 [A1] root-cause fix): the negative-int
+/// range `(-2^47, -2^32)` overlaps with legitimate user-code values like
+/// `-10_000_000_000`.  Pre-fix `is_cbgr_ref` returned `true` for any such
+/// value, and downstream `decode_cbgr_ref` extracted garbage abs_index
+/// that crashed `Registers::get_absolute`.  The post-fix guard rejects
+/// any encoded value whose decoded abs_index exceeds
+/// `CBGR_REF_ABS_INDEX_MAX` — a real CBGR ref's index is always small
+/// (bounded by the register-file capacity).
 #[inline(always)]
 pub(super) fn is_cbgr_ref(val: &Value) -> bool {
-    val.is_inline_int() && val.as_i64() < -(1i64 << 32)
+    if !val.is_inline_int() {
+        return false;
+    }
+    let encoded = val.as_i64();
+    if encoded >= -(1i64 << 32) {
+        return false;
+    }
+    let (abs_index, _) = decode_cbgr_ref(encoded);
+    abs_index <= CBGR_REF_ABS_INDEX_MAX
 }
 
 /// Resolve a method-call argument Value to its underlying scalar Value,
