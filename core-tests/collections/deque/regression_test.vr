@@ -22,22 +22,19 @@ mount core.collections.deque.Deque;
 //   user-side function-id remap.
 // =============================================================================
 
-@ignore
+// CLOSED 2026-05-17 — Deque.with_capacity dispatches correctly under
+// --interp.  Was: codegen raised UndefinedFunction.
 @test
 fn regression_deque_with_capacity_undefined_function() {
-    // Expected: Deque.with_capacity(16) creates a Deque<Int> with cap >= 16.
-    // Actual: pre-fix, codegen raises UndefinedFunction("Deque.with_capacity").
     let d: Deque<Int> = Deque.with_capacity(16);
     assert_eq(d.len(), 0);
     assert(d.capacity() >= 16);
 }
 
-@ignore
+// CLOSED 2026-05-17 — Deque.from_list dispatches correctly under
+// --interp.  Was: function-id remap dropped the entry.
 @test
 fn regression_deque_from_list_undefined_function() {
-    // Expected: Deque.from_list builds a Deque from a List in FIFO order.
-    // Actual: not in any user-side body Call instruction, so the function-
-    // id remap drops the entry — UndefinedFunction at every user-side use.
     let xs: List<Int> = [1, 2, 3];
     let d: Deque<Int> = Deque.from_list(&xs);
     assert_eq(d.len(), 3);
