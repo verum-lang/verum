@@ -3014,7 +3014,59 @@ fn harvest_names_in_expr(
                 harvest_names_in_expr(b, out);
             }
         }
-        // Other expression forms (interpolation, generators, …)
+        // §11 close — f-strings and tagged literals: every embedded
+        // expression in `f"…{expr}…"` (or any handler-prefixed
+        // interpolation) MUST contribute its referenced names to
+        // the archive-load wanted-set.  Pre-fix the catch-all below
+        // silently dropped InterpolatedString, so a user file whose
+        // only reference to a stdlib free function is inside an
+        // f-string (e.g. `let s = f"{format_debug(&x)}";`, or the
+        // §J `f"{x:?}"` lowering that wraps the expr in
+        // `format_debug(&expr)`) would lazy-load NEITHER the
+        // function's module NOR the function descriptor —
+        // user-code compilation then failed with
+        // `UndefinedFunction("format_debug")` even though
+        // `format_debug` was reachable via the prelude.
+        //
+        // Walking every embedded expression closes the entire
+        // class of "function only referenced inside an interpolation"
+        // failures (Format-, Debug-, Display-related lazy-load
+        // misses).
+        ExprKind::InterpolatedString { exprs, .. } => {
+            for e in exprs.iter() {
+                harvest_names_in_expr(e, out);
+            }
+        }
+        // Tensor / map / set / array literals are sequences of
+        // expressions — recurse for completeness.  An expression
+        // that's only referenced inside such a literal should still
+        // seed the wanted-set.
+        ExprKind::TensorLiteral { data, .. } => {
+            harvest_names_in_expr(data, out);
+        }
+        ExprKind::MapLiteral { entries } => {
+            for entry in entries.iter() {
+                harvest_names_in_expr(&entry.0, out);
+                harvest_names_in_expr(&entry.1, out);
+            }
+        }
+        ExprKind::SetLiteral { elements } => {
+            for e in elements.iter() {
+                harvest_names_in_expr(e, out);
+            }
+        }
+        ExprKind::Array(arr) => match arr {
+            verum_ast::expr::ArrayExpr::List(items) => {
+                for e in items.iter() {
+                    harvest_names_in_expr(e, out);
+                }
+            }
+            verum_ast::expr::ArrayExpr::Repeat { value, count } => {
+                harvest_names_in_expr(value, out);
+                harvest_names_in_expr(count, out);
+            }
+        },
+        // Other expression forms (generators, async-builders, …)
         // are walked best-effort — over-inclusion is harmless.
         _ => {}
     }
