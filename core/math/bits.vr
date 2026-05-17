@@ -113,24 +113,45 @@ public fn lowest_bit(x: UInt64) -> UInt64 {
 // Rotation Operations
 // =============================================================================
 
-// Rotate bits left by n positions
+// Rotate bits left by n positions.
+//
+// **Architectural rule** (pinned by task #25 [E3] residual close-out):
+// every bodyless `@intrinsic("X")` declaration MUST use an intrinsic
+// name whose registry `param_count` matches the function's declared
+// arity.  Pre-fix `@intrinsic("llvm.fshl.i64")` was a 3-arg funnel-shift
+// — annotating a 2-arg `rotl(x, n)` with it created an arity mismatch
+// that `lookup_intrinsic` could not silently bridge; the dispatcher
+// fell through to the bodyless function (empty body → `Value::default()
+// = Unit`) and every bare-name `mount core.intrinsics.bitwise.rotl;`
+// call site collided onto THIS broken declaration (sibling name shadow
+// — bare lookup first-wins).
+//
+// Canonical 2-arg `rotate_left` / `rotate_right` in
+// `crates/verum_vbc/src/intrinsics/registry.rs` map to the dedicated
+// `ArithSubOpcode::RotateLeft` (0x55) / `RotateRight` (0x56) — single
+// instruction on x86 (`rolq` / `rorq`) and ARM (`ror`).  fshl is the
+// 3-arg funnel-shift; its registry entry lives under `fshl_u64` and
+// the public stdlib surface is `core/intrinsics/bitwise.vr::fshl<T>`.
 @inline(always)
-@intrinsic("llvm.fshl.i64")
+@intrinsic("rotate_left")
 public fn rotl(x: UInt64, n: UInt32) -> UInt64;
 
-// Rotate bits right by n positions
+// Rotate bits right by n positions — see `rotl` for the architectural
+// rationale of the 2-arg `rotate_right` intrinsic name choice.
 @inline(always)
-@intrinsic("llvm.fshr.i64")
+@intrinsic("rotate_right")
 public fn rotr(x: UInt64, n: UInt32) -> UInt64;
 
-// Rotate 32-bit left
+// Rotate 32-bit left — the registry `rotate_left` entry width-dispatches
+// internally; the 32-bit declaration here exists for explicit-width call
+// sites that prefer the narrower type signature.
 @inline(always)
-@intrinsic("llvm.fshl.i32")
+@intrinsic("rotate_left")
 public fn rotl32(x: UInt32, n: UInt32) -> UInt32;
 
-// Rotate 32-bit right
+// Rotate 32-bit right — see `rotl32`.
 @inline(always)
-@intrinsic("llvm.fshr.i32")
+@intrinsic("rotate_right")
 public fn rotr32(x: UInt32, n: UInt32) -> UInt32;
 
 // =============================================================================
