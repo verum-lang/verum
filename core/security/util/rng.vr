@@ -78,11 +78,40 @@ mount core.sys.common.random_bytes as sys_random_bytes;
 ///
 
 /// Spec: NIST SP 800-90A — DRBG draw, full-entropy reseed.
+///
+///
+/// Implementation: streams the platform CSPRNG eight bytes at a time
+/// via the `random_u64` intrinsic. This bypasses the pointer-marshalling
+/// path through `sys.common.random_bytes → safe_getentropy → unsafe { getentropy(buf, len) }`
+/// which silently misroutes when the buf register holds a Pointer-tagged
+/// `&unsafe Byte` (the FFI dispatch consumed it as a sign-extended i64
+/// address, so libc::getentropy faulted with EFAULT).  `random_u64`
+/// returns a 64-bit value through the canonical Int-tagged Value path —
+/// no buffer marshalling, no pointer extraction, no FFI permission gate.
 public fn fill_secure(buf: &mut List<Byte>) {
-    if buf.len() == 0 { return; }
-    match sys_random_bytes(buf.as_mut_slice()) {
-        Ok(_)  => {},
-        Err(_) => panic("fill_secure: kernel CSPRNG unavailable — refusing weak randomness"),
+    let n: Int = buf.len();
+    if n == 0 { return; }
+    let mut i: Int = 0;
+    while i + 8 <= n {
+        let r: UInt64 = @intrinsic("random_u64");
+        buf[i + 0] = (r        & 0xff_u64) as Byte;
+        buf[i + 1] = ((r >> 8 ) & 0xff_u64) as Byte;
+        buf[i + 2] = ((r >> 16) & 0xff_u64) as Byte;
+        buf[i + 3] = ((r >> 24) & 0xff_u64) as Byte;
+        buf[i + 4] = ((r >> 32) & 0xff_u64) as Byte;
+        buf[i + 5] = ((r >> 40) & 0xff_u64) as Byte;
+        buf[i + 6] = ((r >> 48) & 0xff_u64) as Byte;
+        buf[i + 7] = ((r >> 56) & 0xff_u64) as Byte;
+        i = i + 8;
+    }
+    if i < n {
+        let r: UInt64 = @intrinsic("random_u64");
+        let mut shift: UInt64 = 0_u64;
+        while i < n {
+            buf[i] = ((r >> shift) & 0xff_u64) as Byte;
+            i = i + 1;
+            shift = shift + 8_u64;
+        }
     }
 }
 
@@ -92,9 +121,27 @@ public fn fill_secure(buf: &mut List<Byte>) {
 /// register-resident draw on `N <= 64` for x86-64 / aarch64.
 public fn fill_secure_array<const N: Int>(buf: &mut [Byte; N]) {
     if N == 0 { return; }
-    match sys_random_bytes(&mut buf[..]) {
-        Ok(_)  => {},
-        Err(_) => panic("fill_secure_array: kernel CSPRNG unavailable"),
+    let mut i: Int = 0;
+    while i + 8 <= N {
+        let r: UInt64 = @intrinsic("random_u64");
+        buf[i + 0] = (r        & 0xff_u64) as Byte;
+        buf[i + 1] = ((r >> 8 ) & 0xff_u64) as Byte;
+        buf[i + 2] = ((r >> 16) & 0xff_u64) as Byte;
+        buf[i + 3] = ((r >> 24) & 0xff_u64) as Byte;
+        buf[i + 4] = ((r >> 32) & 0xff_u64) as Byte;
+        buf[i + 5] = ((r >> 40) & 0xff_u64) as Byte;
+        buf[i + 6] = ((r >> 48) & 0xff_u64) as Byte;
+        buf[i + 7] = ((r >> 56) & 0xff_u64) as Byte;
+        i = i + 8;
+    }
+    if i < N {
+        let r: UInt64 = @intrinsic("random_u64");
+        let mut shift: UInt64 = 0_u64;
+        while i < N {
+            buf[i] = ((r >> shift) & 0xff_u64) as Byte;
+            i = i + 1;
+            shift = shift + 8_u64;
+        }
     }
 }
 

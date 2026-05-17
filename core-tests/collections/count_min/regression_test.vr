@@ -6,15 +6,13 @@ mount core.prelude.*;
 mount core.collections.count_min.{CountMinSketch, CountMinError};
 
 // =============================================================================
-// §A — CountMinSketch construction gated on fill_secure CSPRNG
-//
-// `CountMinSketch.new(width, depth)` / `with_target` calls
-// `fill_secure(&mut key[..])` which is gated on
-// `core.sys.common.random_bytes`.  Same defect class as Bloom /
-// HyperLogLog / Reservoir.
+// §A — CountMinSketch construction CLOSED 2026-05-17 via CSPRNG
+// dispatch fix (task #13) — fill_secure now routes through
+// `random_u64` intrinsic instead of the broken
+// `core.sys.common.random_bytes → safe_getentropy → libc::getentropy`
+// pointer-marshalling chain.
 // =============================================================================
 
-@ignore
 @test
 fn regression_cms_new_constructible() {
     let cms = CountMinSketch.new(1024, 8);
@@ -22,13 +20,16 @@ fn regression_cms_new_constructible() {
     assert(cms.depth() == 8);
 }
 
-@ignore
 @test
 fn regression_cms_with_target_constructible() {
     let cms = CountMinSketch.with_target(0.001, 0.001);
     assert(cms.width() > 0);
 }
 
+// REGRESSION (§B.1): `cms.add(&item)` routes through
+// `hmac_sha256` which trips the IndexOutOfBounds {64,64} defect
+// in the hmac/sha256 block-processing path.  Same shape as Bloom
+// §B; gated on the hmac/sha256 fix.
 @ignore
 @test
 fn regression_cms_add_increments_total() {
@@ -38,6 +39,7 @@ fn regression_cms_add_increments_total() {
     assert(cms.total() >= 1_u64);
 }
 
+// REGRESSION (§B.2): same shape as §B.1.
 @ignore
 @test
 fn regression_cms_estimate_non_negative() {

@@ -111,7 +111,10 @@ public type HyperLogLog is {
     precision:  Int,
     m:          Int,     // 2^precision
     registers:  List<UInt8>,
-    key:        [Byte; 32],
+    /// `List<Byte>` of 32 elements rather than `[Byte; 32]` — fixed
+    /// arrays inside records mis-allocate slot space under VBC
+    /// codegen and corrupt adjacent fields.  See bloom.vr.
+    key:        List<Byte>,
 };
 
 implement HyperLogLog {
@@ -123,7 +126,9 @@ implement HyperLogLog {
         let mut regs: List<UInt8> = [];
         let mut i: Int = 0;
         while i < m { regs.push(0_u8); i = i + 1; }
-        let mut k: [Byte; 32] = [0_u8; 32];
+        let mut k: List<Byte> = [];
+        let mut ki: Int = 0;
+        while ki < 32 { k.push(0_u8); ki = ki + 1; }
         fill_secure(&mut k);
         HyperLogLog {
             precision: precision, m: m, registers: regs, key: k,
@@ -132,7 +137,7 @@ implement HyperLogLog {
 
     /// Construct with a caller-supplied 32-byte key — required when
     /// merging sketches across processes.
-    public fn new_with_key(p: Int, key: [Byte; 32]) -> HyperLogLog {
+    public fn new_with_key(p: Int, key: List<Byte>) -> HyperLogLog {
         let precision = clamp_precision(p);
         let m = 1 << precision;
         let mut regs: List<UInt8> = [];
@@ -146,7 +151,7 @@ implement HyperLogLog {
     /// Observe `item`. Idempotent: repeated adds of the same bytes
     /// don't change the sketch.
     public fn add(&mut self, item: &[Byte]) {
-        let h = hash64(&self.key[..], item);
+        let h = hash64(self.key.as_slice(), item);
         let idx = (h >> (64 - self.precision as UInt64)) as Int;
         // The rank is 1 + leading zeros in the remaining (64 - p) bits.
         let rank = rank_of(h, self.precision);

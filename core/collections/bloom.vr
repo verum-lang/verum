@@ -81,7 +81,11 @@ public type BloomFilter is {
     bit_len:  Int,
     k:        Int,
     /// Keyed so collision probing against a known filter is hard.
-    key:      [Byte; 32],
+    /// `List<Byte>` of 32 elements rather than `[Byte; 32]` — the
+    /// fixed-array form mis-allocates record slot space under VBC
+    /// codegen, corrupting the adjacent `bits` field and producing
+    /// IndexOutOfBounds at `set_bit`'s `self.bits[word]` access.
+    key:      List<Byte>,
     admitted: UInt64,
 };
 
@@ -179,7 +183,9 @@ implement BloomFilter {
         let mut bits: List<UInt64> = [];
         let mut i: Int = 0;
         while i < word_count { bits.push(0_u64); i = i + 1; }
-        let mut key: [Byte; 32] = [0_u8; 32];
+        let mut key: List<Byte> = [];
+        let mut ki: Int = 0;
+        while ki < 32 { key.push(0_u8); ki = ki + 1; }
         fill_secure(&mut key);
         Result.Ok(BloomFilter {
             bits:     bits,
@@ -232,7 +238,9 @@ implement BloomFilter {
         let mut i: Int = 0;
         while i < self.bits.len() { self.bits[i] = 0_u64; i = i + 1; }
         self.admitted = 0_u64;
-        let mut new_key: [Byte; 32] = [0_u8; 32];
+        let mut new_key: List<Byte> = [];
+        let mut nki: Int = 0;
+        while nki < 32 { new_key.push(0_u8); nki = nki + 1; }
         fill_secure(&mut new_key);
         self.key = new_key;
     }
@@ -246,7 +254,7 @@ implement BloomFilter {
     // -----------------------------------------------------------------
 
     fn probe_offsets(&self, item: &[Byte]) -> List<Int> {
-        let digest = hmac_sha256(&self.key[..], item);
+        let digest = hmac_sha256(self.key.as_slice(), item);
         let h1 = bytes_to_u64_le(&digest[..], 0);
         let h2 = bytes_to_u64_le(&digest[..], 8);
         let mut out: List<Int> = [];
