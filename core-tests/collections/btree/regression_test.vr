@@ -6,25 +6,28 @@ mount core.prelude.*;
 mount core.collections.btree.{BTreeMap};
 
 // =============================================================================
-// §A — BTreeMap field-access defect on populated map
+// §A — BTreeMap multi-insert + populated-state field-access defect
 //
-// Every method that reads `self.<field>` on a populated BTreeMap
+// Triage 2026-05-17: `BTreeMap.new() + single insert + len/get-absent`
+// now works (verified in triage_test.vr).  But ANY operation that
+// traverses a populated tree past one entry — second insert
+// (replace_value_in_node path), get on an existing key
+// (search_node), contains_key, remove, clear, len after 3 inserts,
+// pop_first/last, first_key_value, last_key_value, get_or_default —
 // panics at runtime with:
 //   "field access out of bounds: field index 0 (offset 0+8 = 8)
 //    exceeds object data size 0"
 //
-// Hypothesis (same architectural class as the closed list / map
-// layout drift): the stdlib `type BTreeMap<K,V> is { ... }` field
-// order doesn't match the runtime intercept allocation slots, OR
-// the runtime allocates 0 data slots for the BTreeMap envelope and
-// expects the body to allocate the inner tree on first insert.
+// Hypothesis: the failure is in `Maybe.as_mut()` / `Maybe.as_ref()`
+// on a `Some(Heap<BTreeNode<K,V>>)` payload, OR in the BTreeNode
+// generic-K-V substitution during tree traversal.  The 0-data
+// object is likely the Heap<BTreeNode> auto-deref reading from a
+// receiver whose monomorphised TypeDescriptor has 0 fields (generic
+// param substitution failed).
 //
-// Either way, the symptom is identical for every consumer of
-// `self.<field>` past the empty state.  Architectural fix path:
-// audit `crates/verum_vbc/.../method_dispatch.rs` for BTreeMap
-// intercepts (likely absent) and reconcile the stdlib type-decl
-// field order with the runtime allocation; same playbook as the
-// closed list / map fixes.
+// Architectural fix path: investigate `extract_expr_type_name`'s
+// MethodCall arm for `self.root.as_mut()` to verify the return type
+// gets correctly substituted with concrete K=Int, V=Int.
 // =============================================================================
 
 @ignore
@@ -177,6 +180,10 @@ fn regression_btreemap_first_last_none_on_empty() {
 
 // =============================================================================
 // §F — PASS-GUARD pins for the working empty-state surface
+//
+// Plus the recently-verified `BTreeMap.new() + single insert + len`
+// chain (validated 2026-05-17 in triage_test.vr; promoted here as a
+// PASS-GUARD against re-regression).
 // =============================================================================
 
 @test
@@ -204,4 +211,11 @@ fn pass_guard_btreemap_remove_absent_returns_none() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
     let r: Maybe<Int> = m.remove(&1);
     assert(r is None);
+}
+
+@test
+fn pass_guard_btreemap_single_insert_then_len() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    m.insert(1, 100);
+    assert_eq(m.len(), 1);
 }

@@ -178,17 +178,15 @@ fn regression_slice_windows_next_dispatch_panic() {
 // §E — Compiler crashes (ICE)
 // =============================================================================
 
-// REGRESSION (§E.1): `slice.binary_search(&target)` crashes the compiler
-// with SIGBUS.  Trigger: any single test file with one @test calling
-// `binary_search(&v)` against a sorted `&[Int]`.  Crash report locations:
-//   ~/.verum/crashes/verum-2026-05-16T12-50-21-*.json
-//
-// Backtrace localises to interpreter machinery (libsystem semaphore wait).
-// The crash is deterministic and reproduces under a single-test run, so
-// it is independent of parallel-test scheduling.  Likely class: a
-// codegen path emits an invalid instruction sequence for the
-// `where T: Ord` constraint when monomorphising against `Int`, and the
-// instruction-pointer derefs into an unmapped page mid-dispatch.
+// REGRESSION (§E.1): `slice.binary_search(&target)` originally
+// crashed the compiler with SIGBUS via the direct `*elem < *target`
+// chain under `where T: Ord`. The SIGBUS class is CLOSED via
+// source-level workaround `c5fb630f9` (delegate to binary_search_by
+// with an inline closure). However the closure body still
+// mis-dereferences the &Int comparison, yielding wrong Ordering
+// results — `binary_search(&5)` on `[1,3,5,7,9]` returns `Err(_)`
+// instead of `Ok(2)`.  Kept as @ignore until the closure's
+// `*v < *target` deref protocol-resolves correctly for Int.
 @ignore
 @test
 fn regression_slice_binary_search_compiler_sigbus() {
