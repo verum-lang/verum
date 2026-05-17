@@ -88,7 +88,6 @@ fn regression_b_parse_simple_int_pinned() {
     }
 }
 
-@ignore
 @test
 fn regression_b_add_zero_pinned() {
     let z = Decimal.zero();
@@ -99,7 +98,6 @@ fn regression_b_add_zero_pinned() {
     }
 }
 
-@ignore
 @test
 fn regression_b_mul_simple_pinned() {
     let a = Decimal.from_int(3);
@@ -110,7 +108,6 @@ fn regression_b_mul_simple_pinned() {
     }
 }
 
-@ignore
 @test
 fn regression_b_div_simple_exact_pinned() {
     let a = Decimal.from_int(10);
