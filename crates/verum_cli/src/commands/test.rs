@@ -1116,9 +1116,34 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
     // @test function and exits 0 on success, so the AOT-compiled
     // binary's exit code matches the test convention (mirrors what
     // run_test_interpret does in-process via Interpreter::call).
-    let test_input =
-        synthesise_test_input_with_crate_root(&test.file, target_dir, test.fn_name.as_deref())
-            .unwrap_or_else(|| test.file.clone());
+    //
+    // **Architectural rule** (task #16 close): the synthetic
+    // `fn main` MUST be emitted unconditionally for every AOT test,
+    // not gated on the presence of `src/lib.vr` / `src/main.vr` in the
+    // surrounding cog.  Pre-fix
+    // `synthesise_test_input_with_crate_root` returned `None` when
+    // either condition was missing (no `verum.toml` parent, or no
+    // crate-root file), leaving the test compiled WITHOUT a
+    // `verum_main` body.  The C-runtime entry (`emit_main_entry` in
+    // `platform_ir.rs:1927`) then fell through to its `no_main`
+    // branch and silently `return 1` for every test — yielding the
+    // depth-of-bug "AOT exit code 1, no diagnostic" failure mode
+    // that masked the test result entirely.
+    //
+    // Fall back to the new `synthesise_test_main_only` helper when
+    // the crate-root merge can't run: it produces a minimal test
+    // file containing only the original source plus the synthetic
+    // `fn main`, preserving the test convention regardless of cog
+    // layout.
+    let test_input = synthesise_test_input_with_crate_root(
+        &test.file,
+        target_dir,
+        test.fn_name.as_deref(),
+    )
+    .or_else(|| {
+        synthesise_test_main_only(&test.file, target_dir, test.fn_name.as_deref())
+    })
+    .unwrap_or_else(|| test.file.clone());
 
     // Wire CLI `--verify` and `--release` into the compilation:
     //  * `verify_mode_override` overrides the default Runtime mode
@@ -1317,6 +1342,52 @@ fn synthesise_test_input_with_crate_root(
         test_file.display(),
         root_path.display(),
         stripped_root,
+        test_source,
+        synth_main,
+    );
+    std::fs::write(&merged_path, merged).ok()?;
+    Some(merged_path)
+}
+
+/// Task #16 close — synthetic-main-only fallback when the cog has
+/// no `src/lib.vr` / `src/main.vr` to merge.  Produces a temp file
+/// containing the test source verbatim plus a `public fn main() -> Int
+/// { <fn>(); 0 }` trailer so the AOT entry-point flow finds a
+/// `verum_main` to call instead of silently `return 1`'ing.
+///
+/// Mirrors the synthetic-main half of
+/// `synthesise_test_input_with_crate_root` without the crate-root
+/// merge — used as the universal fallback so EVERY AOT test, even
+/// in cogs without a `src/` directory (e.g. integration test
+/// packages whose tests live in `tests/` only), gets a wired-up
+/// main entry.  Pre-fix the synthesis was gated on cog layout and
+/// silently dropped for everything else, leading to the depth-of-
+/// bug "AOT exit code 1, no diagnostic" failure mode.
+///
+/// Returns `None` only when `test_fn_name` is `None` (no @test to
+/// invoke) or when filesystem write fails — in both cases the
+/// caller falls through to the raw test file.
+fn synthesise_test_main_only(
+    test_file: &Path,
+    target_dir: &Path,
+    test_fn_name: Option<&str>,
+) -> Option<PathBuf> {
+    let test_fn = test_fn_name?;
+    let test_source = std::fs::read_to_string(test_file).ok()?;
+    let stem = test_file.file_stem()?.to_str()?;
+    let merged_path = target_dir.join(format!("test_{}.merged.vr", stem));
+    if std::fs::create_dir_all(target_dir).is_err() {
+        return None;
+    }
+    let synth_main = format!(
+        "\n\n// === task #16 close — synthetic main wraps the @test fn ===\n\
+         public fn main() -> Int {{\n    {}();\n    0\n}}\n",
+        test_fn
+    );
+    let merged = format!(
+        "// Auto-synthesised by task #16 — no crate-root merge needed.\n\
+         // Source test: {}\n\n{}{}",
+        test_file.display(),
         test_source,
         synth_main,
     );

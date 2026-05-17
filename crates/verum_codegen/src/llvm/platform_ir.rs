@@ -1791,34 +1791,45 @@ impl<'ctx> PlatformIR<'ctx> {
                 .or_llvm_err()?;
             builder.build_return(Some(&result)).or_llvm_err()?;
         } else {
-            // **Bare `write` declaration** — match libSystem / glibc's
-            // canonical signature `ssize_t write(int fd, const void *buf,
-            // size_t count)`.  Pre-fix this site declared `write` with
-            // i64 fd (Verum-side ABI), which conflicted with the
-            // POSIX-correct declaration in `runtime.rs::get_or_declare_write`
-            // (commit ed12665d's libsys_extern path).  When the i32-fd
-            // declaration won the order race, the i64-fd call here
-            // produced "Call parameter type does not match function
-            // signature!" verifier errors and UB at runtime (depending
-            // on register-passing conventions).
+            // **Canonical Verum-ABI write** (task #16 close).
             //
-            // Fix: declare `write` with the canonical POSIX signature
-            // `(i32 fd, ptr buf, i64 count) -> i64`, matching libSystem
-            // / glibc / musl exactly.  Truncate the i64 fd to i32 at
-            // the call boundary.
-            let write_fn = module.get_function("write").unwrap_or_else(|| {
-                let write_type =
-                    i64_type.fn_type(&[i32_type.into(), ptr_type.into(), i64_type.into()], false);
-                module.add_function("write", write_type, None)
-            });
-
-            let fd_i32 = builder
-                .build_int_truncate(fd.into_int_value(), i32_type, "fd_i32")
-                .or_llvm_err()?;
+            // `write` is declared in `syscall_registry::POSIX_SYSCALLS`
+            // with the canonical i64-everywhere signature
+            // `i64 (i64 fd, ptr buf, i64 count) -> i64`.  Per the
+            // architectural rule pinned in task #15, ALL emit paths
+            // must route through `get_or_declare_function` (which
+            // consults the registry first) so the canonical signature
+            // wins regardless of the caller's local fn_type hint.
+            //
+            // Pre-fix this site bypassed the registry with a bare
+            // `module.get_function("write").unwrap_or_else(add_function(i32 fd, …))`,
+            // emitted `%fd_i32 = trunc i64 %fd to i32; call i64 @write(i32 %fd_i32, …)`,
+            // then LLVM verification failed with `Call parameter type
+            // does not match function signature!` against the i64-fd
+            // declaration from predeclare_all.
+            //
+            // Fix: route through `get_or_declare_function`; pass the
+            // i64 fd directly without truncation. The registry-promoted
+            // declaration carries i64-fd, matching this call site.
+            // ABI rationale (uniform i64) — see module docstring at
+            // `syscall_registry.rs`.
+            //
+            // `i32_type` and `ptr_type` are retained for the Windows
+            // / Linux branches above; no longer used in this arm.
+            let _ = i32_type;
+            let _ = ptr_type;
+            let write_fn = super::error::get_or_declare_function(
+                module,
+                "write",
+                i64_type.fn_type(
+                    &[i64_type.into(), ptr_type.into(), i64_type.into()],
+                    false,
+                ),
+            );
             let result = builder
                 .build_call(
                     write_fn,
-                    &[fd_i32.into(), buf.into(), count.into()],
+                    &[fd.into(), buf.into(), count.into()],
                     "written",
                 )
                 .or_llvm_err()?

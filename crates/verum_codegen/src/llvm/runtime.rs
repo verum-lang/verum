@@ -145,6 +145,41 @@ fn libsys_extern<'ctx>(
     name: &str,
     fn_type: verum_llvm::types::FunctionType<'ctx>,
 ) -> verum_llvm::values::FunctionValue<'ctx> {
+    // **Registry-first canonical-signature lookup** (task #16 close).
+    //
+    // Mirrors `error::get_or_declare_function`'s discipline: when
+    // `name` is in `POSIX_SYSCALLS` / `VERUM_RUNTIME_SYMBOLS`, the
+    // canonical i64-everywhere signature WINS, regardless of the
+    // caller-provided `fn_type` hint.  Pre-fix `libsys_extern` would
+    // add `write` to the module with `(i32 fd, ptr, i64)` (C ABI
+    // shape) when no prior declaration existed, then later callers
+    // adapted their args to that i32 shape — mismatching the
+    // canonical i64-fd declaration from `predeclare_all`.
+    //
+    // The fix funnels every `libsys_extern` call through the
+    // canonical registry first.  Callers that pass a wrong-shape
+    // `fn_type` hint get the canonical FunctionValue back; the
+    // build_call site below this helper that adapts args to the
+    // returned function's actual param types then sees i64 fd and
+    // doesn't truncate.  Same architectural rule as task #15.
+    if let Some(canonical_sig) = super::syscall_registry::lookup_sig(name) {
+        let canonical_fn_type =
+            super::syscall_registry::canonical_fn_type(module.get_context(), canonical_sig);
+        if canonical_fn_type != fn_type {
+            super::error::record_signature_mismatch_public(
+                name,
+                format!(
+                    "{:?} (canonical from POSIX_SYSCALLS registry)",
+                    canonical_fn_type
+                ),
+                format!("{:?} (libsys_extern caller hint, ignored)", fn_type),
+            );
+        }
+        if let Some(f) = module.get_function(name) {
+            return f;
+        }
+        return module.add_function(name, canonical_fn_type, None);
+    }
     if let Some(f) = module.get_function(name) {
         return f;
     }
@@ -8725,39 +8760,32 @@ impl<'ctx> RuntimeLowering<'ctx> {
             // fd, pass `fd` directly (no truncation).  Both signatures
             // are ssize_t-returning so the return-value handling stays
             // identical.
-            let i32_type = self.context.i32_type();
-            let existing_write = module.get_function("write");
-            let fd_param_is_i64 = existing_write
-                .map(|f| {
-                    f.get_type()
-                        .get_param_types()
-                        .first()
-                        .map(|t| t.into_int_type().get_bit_width() == 64)
-                        .unwrap_or(false)
-                })
-                .unwrap_or(false);
-            let libsys_write = if fd_param_is_i64 {
-                existing_write.expect("checked is_some above")
-            } else {
-                libsys_extern(
-                    self.context,
-                    module,
-                    "write",
-                    // ssize_t write(int fd, const void *buf, size_t count)
-                    i64_type.fn_type(
-                        &[i32_type.into(), ptr_type.into(), i64_type.into()],
-                        false,
-                    ),
-                )
-            };
-            let fd_arg = if fd_param_is_i64 {
-                fd.into()
-            } else {
-                builder
-                    .build_int_truncate(fd, i32_type, "fd32")
-                    .expect("write fd trunc")
-                    .into()
-            };
+            // **Canonical i64-fd path (task #16 close)**: after the
+            // `libsys_extern` registry-first fix below, `write` is
+            // ALWAYS declared with the canonical
+            // `i64 (i64 fd, ptr, i64) -> i64` signature.  The legacy
+            // dual-path (check `fd_param_is_i64` + truncate-fallback)
+            // is gone — the registry guarantees the i64-fd form
+            // module-wide, so passing `fd` directly is always correct.
+            // Pre-fix the truncating fallback fired whenever the
+            // pre-declared `write` happened to be absent at this
+            // exact codegen ordering, producing
+            // `%fd_i32 = trunc i64 %0 to i32; call i64 @write(i32 ...)`
+            // — type-mismatched against the canonical i64-param
+            // declaration and tripping LLVM verification.
+            let libsys_write = libsys_extern(
+                self.context,
+                module,
+                "write",
+                // Caller-hint signature; registry overrides anyway —
+                // pass the canonical shape so the recorded mismatch
+                // path stays quiet for the common case.
+                i64_type.fn_type(
+                    &[i64_type.into(), ptr_type.into(), i64_type.into()],
+                    false,
+                ),
+            );
+            let fd_arg = fd.into();
             let call_site = builder
                 .build_call(libsys_write, &[fd_arg, buf.into(), count.into()], "ret")
                 .expect("write libsys call");
