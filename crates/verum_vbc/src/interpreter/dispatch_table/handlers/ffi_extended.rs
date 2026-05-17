@@ -2277,7 +2277,21 @@ pub(in super::super) fn handle_ffi_extended(
             let buf_reg = read_reg(state)?;
             let len_reg = read_reg(state)?;
 
-            let buf = state.get_reg(buf_reg).as_i64();
+            // `buf` arrives as a Verum `&unsafe Byte` reference whose
+            // runtime representation is a Pointer-tagged Value (the
+            // common case — `tail.as_mut_ptr() as &unsafe Byte`). A
+            // small minority of callers fabricate a raw address as
+            // an Int and cast — handle that too. `as_i64()` on a
+            // Pointer-tagged value extracts the sign-extended payload
+            // bits, which silently misreads high-address pointers as
+            // negative offsets, causing libc::getentropy to fault with
+            // EFAULT and the whole CSPRNG chain to return Err.
+            let buf_val = state.get_reg(buf_reg);
+            let buf = if buf_val.is_ptr() {
+                buf_val.as_ptr::<u8>() as usize as u64
+            } else {
+                buf_val.as_i64() as u64
+            };
             let len = state.get_reg(len_reg).as_i64();
 
             if len > 256 {
