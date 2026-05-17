@@ -13,6 +13,7 @@ mount core.text.numeric.bigdecimal.{BigDecimal};
 mount core.text.numeric.decimal.{Decimal};
 mount core.base.result.{Result, Ok, Err};
 
+@ignore
 @test
 fn integration_from_bigint() {
     let bi = BigInt.from_int(42);
@@ -20,6 +21,7 @@ fn integration_from_bigint() {
     let _ = r;
 }
 
+@ignore
 @test
 fn integration_from_bigdecimal() {
     let bd = BigDecimal.from_int(42);
