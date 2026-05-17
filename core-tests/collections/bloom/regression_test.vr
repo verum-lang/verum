@@ -31,7 +31,6 @@ fn regression_bloom_with_target_constructible() {
     assert(bf.hash_count() > 0);
 }
 
-@ignore
 @test
 fn regression_bloom_new_constructible() {
     let cfg = BloomConfig.defaults();
@@ -39,14 +38,12 @@ fn regression_bloom_new_constructible() {
     assert(bf.bits_len() > 0);
 }
 
-@ignore
 @test
 fn regression_bloom_with_defaults_constructible() {
     let bf = BloomFilter.with_defaults();
     assert(bf.bits_len() > 0);
 }
 
-@ignore
 @test
 fn regression_bloom_insert_contains_round_trip() {
     let mut bf = BloomFilter.with_target(1024, 1000);
@@ -55,7 +52,6 @@ fn regression_bloom_insert_contains_round_trip() {
     assert(bf.contains(&key));
 }
 
-@ignore
 @test
 fn regression_bloom_check_and_set_idempotent() {
     let mut bf = BloomFilter.with_target(1024, 1000);
@@ -66,7 +62,6 @@ fn regression_bloom_check_and_set_idempotent() {
     assert(was_present_second);
 }
 
-@ignore
 @test
 fn regression_bloom_admitted_counter_increments_on_insert() {
     let mut bf = BloomFilter.with_target(1024, 1000);
@@ -77,7 +72,6 @@ fn regression_bloom_admitted_counter_increments_on_insert() {
     assert_eq(bf.admitted(), 2_u64);
 }
 
-@ignore
 @test
 fn regression_bloom_clear_resets_admitted_counter() {
     let mut bf = BloomFilter.with_target(1024, 1000);
