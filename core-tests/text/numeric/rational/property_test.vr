@@ -66,7 +66,6 @@ fn law_reciprocal_round_trip() {
     };
 }
 
-@ignore
 @test
 fn law_reciprocal_zero_fails() {
     let zero = Rational.zero();
@@ -76,7 +75,6 @@ fn law_reciprocal_zero_fails() {
     };
 }
 
-@ignore
 @test
 fn law_div_by_zero_fails() {
     let a = rt(10);
