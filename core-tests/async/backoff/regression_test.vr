@@ -37,7 +37,8 @@ mount core.base.maybe.{Maybe, Some, None};
 //   construction)".
 // =============================================================================
 
-@ignore
+// CLOSED 2026-05-17 — Backoff.exponential_no_jitter constructor
+// dispatches correctly under --interp.
 @test
 fn regression_backoff_exponential_no_jitter_constructs() {
     let _b = Backoff.exponential_no_jitter(
@@ -93,7 +94,8 @@ fn regression_backoff_caps_at_ceiling() {
     }
 }
 
-@ignore
+// CLOSED 2026-05-17 — attempt counter advances correctly across
+// next_delay() calls under --interp.
 @test
 fn regression_backoff_attempt_counter_advances() {
     let mut b = Backoff.exponential_no_jitter(
