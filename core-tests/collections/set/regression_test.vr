@@ -143,7 +143,6 @@ fn regression_set_is_superset_via_other_ref() {
 //   non-intercepted constructors at user-side precompile.
 // =============================================================================
 
-@ignore
 @test
 fn regression_set_from_array_literal_undefined_function() {
     let s: Set<Int> = Set.from([1, 2, 3]);
