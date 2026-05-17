@@ -827,7 +827,7 @@ impl<'s> CompilationPipeline<'s> {
 /// the load-bearing files in `core/base/`.  Adding more protocol-
 /// defining files to this list when the stdlib grows is the only
 /// follow-up — the seed mechanism itself is generic.
-fn seed_protocol_registry_from_embedded_stdlib(
+pub(crate) fn seed_protocol_registry_from_embedded_stdlib(
     codegen: &mut VbcCodegen,
 ) {
     use std::sync::OnceLock;

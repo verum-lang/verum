@@ -105,7 +105,7 @@ mod refinement_verify;
 mod stdlib_bootstrap;
 mod theorem_proofs;
 mod tier_constructors;
-mod vbc_codegen;
+pub(crate) mod vbc_codegen;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GLOBAL STDLIB MODULE CACHE
