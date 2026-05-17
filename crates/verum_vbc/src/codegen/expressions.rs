@@ -1482,6 +1482,32 @@ impl VbcCodegen {
                 // Try to find as a function (for function references) or static/constant
                 // Extract func info first to avoid borrow conflicts
                 //
+                // **Field-init expected-type disambiguation (task #39 [F13]).**
+                // When a bare unqualified path like `SkTable` is compiled
+                // inside a struct-literal field-init (`SchemaRow { kind:
+                // SkTable, ... }`) AND the field's declared type is known
+                // (push_field_type_context sets `ctx.current_return_type_name`),
+                // prefer `<DeclaredType>.<name>` over the bare name.
+                // Closes the cross-stdlib variant-name collision class
+                // (e.g. `SchemaKind.SkTable` vs `SourceKind.SkTable(Text)`
+                // — pre-fix bare `lookup_function("SkTable")` would bind
+                // first-wins to whichever module loaded first; if it was
+                // the 1-arg variant, the unit-variant call site at
+                // `master_btree_meta/row.vr:46` failed with "undefined
+                // variable: SkTable" because arity didn't match).  The
+                // expected-type prefix lookup binds correctly in the AOT
+                // codegen path where strict resolution surfaces the issue;
+                // Tier-0 interp tolerated this via lenient skip.
+                let expected_prefixed_info: Option<crate::codegen::context::FunctionInfo> = self
+                    .ctx
+                    .current_return_type_name
+                    .as_ref()
+                    .map(|t| t.split('<').next().unwrap_or(t).to_string())
+                    .and_then(|prefix| {
+                        let qualified = format!("{}.{}", prefix, name);
+                        self.ctx.lookup_function(&qualified).cloned()
+                    });
+                //
                 // **Qualified-suffix fallback (task #138)**. The archive
                 // const-env loader registers public consts under their
                 // QUALIFIED name (e.g. `core.time.julian.JD_UNIX_EPOCH`)
@@ -1494,7 +1520,7 @@ impl VbcCodegen {
                 // table looking for an entry whose name ends with
                 // `.<name>` AND is a zero-param const-shaped function.
                 // Unambiguous match → use it.
-                let func_info_opt = self.ctx.lookup_function(name).cloned().or_else(|| {
+                let func_info_opt = expected_prefixed_info.or_else(|| self.ctx.lookup_function(name).cloned()).or_else(|| {
                     let is_const_shaped = !name.is_empty()
                         && name.chars().all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
                         && name.chars().next().is_some_and(|c| c.is_ascii_uppercase());
