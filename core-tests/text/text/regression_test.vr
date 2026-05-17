@@ -240,14 +240,18 @@ fn regression_i_cmp_shorter_less_pinned() {
 // `fmt_debug` for the `?` type-hint when the inner type is `Text`.
 // =============================================================================
 
-@ignore
+// CLOSED 2026-05-17 — dyn:Protocol.method priority lookup at
+// method_dispatch.rs ~L1590 ensures `value.fmt_debug(...)` inside
+// `fn format_debug<T: Debug>(value: &T)` dispatches to the
+// receiver's concrete-type `Debug.fmt_debug` impl (Text wraps in
+// quotes) instead of the first-suffix-wins `*.fmt_debug` candidate.
 @test
 fn regression_j_debug_format_quotes_pinned() {
     let s: Text = "hi";
     assert_eq(f"{s:?}", "\"hi\"");
 }
 
-@ignore
+// CLOSED 2026-05-17 — same path as quotes_pinned.
 @test
 fn regression_j_debug_format_newline_escape_pinned() {
     let s: Text = "a\nb";

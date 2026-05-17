@@ -1517,6 +1517,18 @@ pub(in super::super) fn handle_call_method(
     // Strip "dyn:" or "ctx:" prefix from context/protocol dispatch methods.
     // VBC codegen emits "dyn:Protocol.method" for context method calls,
     // but registered function names are "Type.method" without the prefix.
+    //
+    // §J / #15 close: track whether this CallM originated from a
+    // `dyn:Protocol.method` token so the post-strip lookup can prefer
+    // the receiver's concrete-type implementation over the
+    // first-suffix-wins bare scan.  For NaN-boxed primitives + small-
+    // string Text, `receiver.is_ptr()` is false and the existing
+    // `receiver_type` derivation at line ~1675 returns None, which
+    // collapses dispatch onto the bare-suffix path and routes
+    // `format_debug(&"hi")` to the wrong `*.fmt_debug` body (was:
+    // emitted `<hi>` instead of `<"hi">` because Display.fmt for Text
+    // was picked over Debug.fmt_debug for Text).
+    let was_dyn_dispatch = method_name.starts_with("dyn:");
     let method_name = if method_name.starts_with("dyn:") || method_name.starts_with("ctx:") {
         let rest = &method_name[4..];
         if let Some(dot) = rest.rfind('.') {
@@ -1573,6 +1585,48 @@ pub(in super::super) fn handle_call_method(
         // Verify the cached function still exists (should always be true within a module)
         if state.module.get_function(cached_fid).is_some() {
             found_func_id = Some(cached_fid);
+        }
+    }
+
+    // §J / #15 close: dyn:Protocol.method priority lookup.
+    //
+    // When CallM is dispatched against a `dyn:<Protocol>.<method>`
+    // token (codegen-emitted for protocol-bounded generic receivers
+    // — `value.fmt_debug(...)` inside `fn format_debug<T: Debug>`),
+    // the canonical resolution is `<ConcreteReceiverType>.<method>` —
+    // NOT the first `*.method` in the function table.  Pre-fix the
+    // strip code at ~L1520 dropped the protocol qualifier and the
+    // downstream bare-suffix scan picked whichever sibling
+    // `*.fmt_debug` came first (Display.fmt for Text wins over
+    // Debug.fmt_debug for Text because of HashMap iteration order).
+    //
+    // For heap receivers the first-pass receiver-type lookup at
+    // ~L1700 already constructs `<Recv>.<method>` correctly; this
+    // priority lookup covers the case the existing path misses:
+    // NaN-boxed primitives (Int, Float, Bool, Char) AND small-string
+    // Text — `receiver.is_ptr()` is false, so the existing pass
+    // returns None and falls through.
+    if was_dyn_dispatch && found_func_id.is_none() {
+        let concrete_type: Option<&'static str> = if dispatch_receiver.is_small_string()
+            || is_heap_string(&dispatch_receiver)
+        {
+            Some("Text")
+        } else if dispatch_receiver.is_int() {
+            Some("Int")
+        } else if dispatch_receiver.is_bool() {
+            Some("Bool")
+        } else if dispatch_receiver.is_float() {
+            Some("Float")
+        } else if dispatch_receiver.is_unit() {
+            Some("Unit")
+        } else {
+            None
+        };
+        if let Some(ty) = concrete_type {
+            let qualified = format!("{}.{}", ty, method_name);
+            if let Some(id) = state.module.find_function_by_name(&qualified) {
+                found_func_id = Some(id);
+            }
         }
     }
 
