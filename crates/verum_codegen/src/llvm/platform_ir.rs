@@ -3086,12 +3086,17 @@ impl<'ctx> PlatformIR<'ctx> {
                 "verum_thread_spawn",
                 i64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
             ),
+            // verum_thread_spawn_multi: packed-pointer trampoline,
+            // 1-arg `(i64) -> i64` ABI.  The body is emitted by
+            // `emit_thread_spawn_multi_ir` (line ~18915); this extern
+            // declaration must match that signature.  Pre-fix had the
+            // legacy 3-arg `(i64, ptr, i32) -> i64` shape, which the
+            // signature-mismatch registry flagged as a cross-site
+            // conflict.  Task #19 (memory §G) close-out for the
+            // verum_thread_spawn_multi family.
             (
                 "verum_thread_spawn_multi",
-                i64_type.fn_type(
-                    &[i64_type.into(), ptr_type.into(), ctx.i32_type().into()],
-                    false,
-                ),
+                i64_type.fn_type(&[i64_type.into()], false),
             ),
             (
                 "verum_thread_join",
