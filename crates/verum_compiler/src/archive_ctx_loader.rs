@@ -1066,9 +1066,9 @@ impl SymbolGraph {
         let mut modules: HashSet<u32> = HashSet::new();
         let mut queue: VecDeque<String> = VecDeque::new();
 
-        let mut enqueue = |name: &str,
-                           reached: &mut HashSet<String>,
-                           queue: &mut VecDeque<String>| {
+        let enqueue = |name: &str,
+                       reached: &mut HashSet<String>,
+                       queue: &mut VecDeque<String>| {
             if reached.insert(name.to_string()) {
                 queue.push_back(name.to_string());
             }
@@ -2164,7 +2164,7 @@ mod tests {
         // architecturally broken.  Test names use the canonical
         // simple-type-name form because the archive is searched
         // module-by-module (descriptor name only).
-        let mut probe = |type_name: &str, expected_field_count: Option<usize>| {
+        let probe = |type_name: &str, expected_field_count: Option<usize>| {
             let mut found_arity: Option<usize> = None;
             for entry in &archive.index {
                 let module = match archive.load_module(&entry.name) {
