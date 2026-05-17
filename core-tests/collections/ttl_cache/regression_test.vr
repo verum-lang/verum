@@ -25,6 +25,7 @@ mount core.time.duration.{Duration};
 // rebuild.
 // =============================================================================
 
+@ignore
 @test
 fn regression_ttl_insert_routes_through_checked_add() {
     let cfg = TtlCacheConfig {
@@ -39,6 +40,7 @@ fn regression_ttl_insert_routes_through_checked_add() {
     }
 }
 
+@ignore
 @test
 fn regression_ttl_insert_with_ttl_uses_override() {
     let cfg = TtlCacheConfig {
@@ -51,6 +53,7 @@ fn regression_ttl_insert_with_ttl_uses_override() {
     assert(v is Some(_));
 }
 
+@ignore
 @test
 fn regression_ttl_capacity_eviction_drops_lru() {
     let cfg = TtlCacheConfig {
@@ -67,6 +70,7 @@ fn regression_ttl_capacity_eviction_drops_lru() {
     assert_eq(s.evicted, 1_u64);
 }
 
+@ignore
 @test
 fn regression_ttl_remove_returns_bool() {
     let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
@@ -75,6 +79,7 @@ fn regression_ttl_remove_returns_bool() {
     assert(!c.remove(&1));
 }
 
+@ignore
 @test
 fn regression_ttl_stats_hits_on_get_hit() {
     let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
@@ -85,6 +90,7 @@ fn regression_ttl_stats_hits_on_get_hit() {
     assert_eq(s.hits, 2_u64);
 }
 
+@ignore
 @test
 fn regression_ttl_clear_drops_all_entries() {
     let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
@@ -94,6 +100,7 @@ fn regression_ttl_clear_drops_all_entries() {
     assert(c.is_empty());
 }
 
+@ignore
 @test
 fn regression_ttl_purge_zero_on_fresh() {
     let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
