@@ -3203,7 +3203,58 @@ fn collect_mount_names(
                 collect_mount_names(sub, &combined, out);
             }
         }
-        MountTreeKind::Glob(_) | MountTreeKind::File { .. } => {}
+        MountTreeKind::Glob(path) => {
+            // FUNDAMENTAL: `mount X.Y.*;` is a wholesale-module mount —
+            // every public symbol of `X.Y` (and its mod.vr re-exports)
+            // becomes available unqualified in the consumer's scope.
+            //
+            // Previously this arm was a silent no-op, so `mount
+            // core.prelude.*;` (the canonical idiom for stdlib access
+            // from user code) contributed NOTHING to the wanted set.
+            // The loader's per-function `is_method_of_wanted_type`
+            // filter then rejected protocol-impl methods like
+            // `Chunks.next` because their carrier-type leaf (`Chunks`)
+            // was absent from wanted — even though prelude re-exported
+            // Chunks via the collections module chain
+            // (`collections/mod.vr:70 public mount .slice.Chunks`).
+            //
+            // The architectural fix: insert the glob's source-module
+            // dotted path into `wanted` so the loader's wholesale-mount
+            // gate (`is_wholesale_module_mount = wanted.contains
+            // (module_name)`) at the function-registration site fires
+            // for every archive entry whose name starts with this
+            // prefix.  Mirror the cog-prefix-stripped form (every
+            // stdlib archive entry is registered without the `core.`
+            // cog prefix — `sys.bitfield.X` etc.).
+            //
+            // Reachability of these symbols is handled separately by
+            // `stdlib_reachability.rs::walk_tree`, which already
+            // records the glob's source module for BFS expansion; this
+            // fix closes the consumer-side wanted-set defect.
+            let segs: Vec<String> = path
+                .segments
+                .iter()
+                .filter_map(|seg| match seg {
+                    verum_ast::ty::PathSegment::Name(id) => {
+                        Some(id.name.to_string())
+                    }
+                    _ => None,
+                })
+                .collect();
+            if segs.is_empty() {
+                return;
+            }
+            let mut full: Vec<String> = prefix.to_vec();
+            full.extend(segs);
+            out.insert(full.join("."));
+            if full.len() >= 2 {
+                let stripped = full[1..].join(".");
+                if !stripped.is_empty() {
+                    out.insert(stripped);
+                }
+            }
+        }
+        MountTreeKind::File { .. } => {}
     }
 }
 
