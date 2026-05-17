@@ -1011,17 +1011,42 @@ public fn eprintln(s: &Text) {
 // =============================================================================
 
 // Format a Debug value to Text.
+//
+// §J close — the formatter argument MUST match the protocol-declared
+// type (`Formatter` from `core.base.protocols`, NOT the
+// implementation-side `TextFormatter` from this module).  Pre-fix
+// `TextFormatter.new(&mut buf)` was used here, producing a
+// `TextFormatter` value, but every `Debug for T` impl in the stdlib
+// declares `fn fmt_debug(&self, f: &mut Formatter) -> …`.  At
+// dispatch time the type mismatch silently routed the call away
+// from the user-defined Debug.fmt_debug body (the formatter
+// receiver-kind classification fell back to a ToString-shape path
+// that just emitted the underlying value), so
+// `format_debug(&"hi")` produced `hi` instead of `"\"hi\""`.
+//
+// Using `Formatter.new(&mut buf)` matches the protocol contract
+// exactly: the resolver sees `(&self, &mut Formatter)` on both the
+// trait-method side and the argument side, and the Debug.fmt_debug
+// body runs with `f.write_char('"')` actually writing into `buf`.
+//
+// Pinned by `regression_j_debug_format_quotes_pinned` +
+// `regression_j_debug_format_newline_escape_pinned` in
+// `core-tests/text/text/regression_test.vr`.
 public fn format_debug<T: Debug>(value: &T) -> Text {
     let mut buf = Text.new();
-    let mut f = TextFormatter.new(&mut buf);
+    let mut f = Formatter.new(&mut buf);
     value.fmt_debug(&mut f);
     buf
 }
 
 // Format a Display value to Text.
+//
+// Same type-match rule as `format_debug` — `Display` protocol takes
+// `&mut Formatter`, so we construct the canonical `Formatter` here
+// rather than `TextFormatter`.
 public fn format_display<T: Display>(value: &T) -> Text {
     let mut buf = Text.new();
-    let mut f = TextFormatter.new(&mut buf);
+    let mut f = Formatter.new(&mut buf);
     value.fmt(&mut f);
     buf
 }
