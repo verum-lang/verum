@@ -34,7 +34,6 @@
 // =============================================================================
 
 mount core.text.{Text, Utf8Error, ParseError};
-mount core.text.format.{format_debug, format_display};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
