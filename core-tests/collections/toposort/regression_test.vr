@@ -20,12 +20,12 @@ mount core.collections.toposort.{TopoGraph, TopoError};
 //   core-tests/collections/union_find/regression_test.vr §C.
 // =============================================================================
 
-@ignore
+// CLOSED 2026-05-17 — TopoGraph.contains(&Int) dispatches through
+// the corrected Map.contains_key path.
 @test
 fn regression_toposort_contains_after_add_node() {
     let mut g: TopoGraph<Int> = TopoGraph.new();
     g.add_node(7);
-    // Currently fails — contains returns false.
     assert(g.contains(&7));
 }
 
@@ -42,7 +42,8 @@ fn regression_toposort_contains_after_add_node() {
 //   See union_find audit §3.1 for the root Map.get defect.
 // =============================================================================
 
-@ignore
+// CLOSED 2026-05-17 — toposort emits isolated nodes in insertion
+// order under --interp.
 @test
 fn regression_toposort_isolated_nodes_returns_them() {
     let mut g: TopoGraph<Int> = TopoGraph.new();
@@ -61,7 +62,7 @@ fn regression_toposort_isolated_nodes_returns_them() {
     }
 }
 
-@ignore
+// CLOSED 2026-05-17 — linear chain topo-sorts correctly.
 @test
 fn regression_toposort_linear_chain() {
     let mut g: TopoGraph<Int> = TopoGraph.new();
@@ -82,7 +83,7 @@ fn regression_toposort_linear_chain() {
     }
 }
 
-@ignore
+// CLOSED 2026-05-17 — diamond dependency topo-sorts correctly.
 @test
 fn regression_toposort_diamond_dependency() {
     let mut g: TopoGraph<Int> = TopoGraph.new();
@@ -105,7 +106,8 @@ fn regression_toposort_diamond_dependency() {
 //      that reference 1 or 2 it grows beyond the unique-node count.
 // =============================================================================
 
-@ignore
+// CLOSED 2026-05-17 — add_edge doesn't duplicate existing nodes
+// (contains_key dispatch corrected).
 @test
 fn regression_toposort_add_edge_does_not_duplicate_nodes() {
     let mut g: TopoGraph<Int> = TopoGraph.new();
