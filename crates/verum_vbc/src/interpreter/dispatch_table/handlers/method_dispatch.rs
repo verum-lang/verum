@@ -2243,19 +2243,51 @@ pub(in super::super) fn handle_call_method(
             // the ambiguous-suffix fallback.  Pinned in
             // `core-tests/collections/slice/regression_test.vr` §A / §D.
             if found.is_none() && recv_type_id == crate::types::TypeId::LIST {
-                // Match by suffix to tolerate module prefixes
-                // (`core.collections.slice.Slice.to_list` is just as
-                // valid a registration as bare `Slice.to_list`).  The
-                // suffix `.Slice.<bare>` AND the bare `Slice.<bare>`
-                // form both need to be probed.
-                let bare_qualified = format!("Slice.{}", bare_method_name);
-                let dotted_qualified = format!(".Slice.{}", bare_method_name);
-                for (idx, desc) in state.module.functions.iter().enumerate() {
-                    if let Some(fname) = state.module.strings.get(desc.name)
-                        && (fname == bare_qualified || fname.ends_with(&dotted_qualified))
-                    {
-                        found = Some(crate::module::FunctionId(idx as u32));
-                        break;
+                // Static-prefix overrides for shared-runtime-kind LIST.
+                //
+                // Slice and the slice/list wrapper-iterator types
+                // (`Chunks<T>`, `Windows<T>`, `ChunksExact<T>`,
+                // `SliceIter<T>`, `SliceIterMut<T>`, `ListIter<T>`,
+                // `ListIterMut<T>`, `DequeIter<T>`, plus the Map/Set
+                // family iterators) all box into LIST-tagged heap
+                // objects because the runtime allocator inherits the
+                // first slice/list field's TypeId.  When dispatch
+                // lands on `List.<bare>` but the method lives under a
+                // wrapper qualifier, this priority-ordered probe routes
+                // the call before bare-suffix's ambiguity refusal.
+                //
+                // The list is ordered roughly by frequency / specificity:
+                // Slice first (covers all slice-only methods); then
+                // the for-loop iterator wrappers; then the
+                // collection iterators.  Match by suffix to tolerate
+                // module prefixes (`core.collections.slice.Chunks.next`
+                // is just as valid as bare `Chunks.next`).
+                const SLICE_LIST_KIND_PREFIXES: &[&str] = &[
+                    "Slice",
+                    "Chunks", "ChunksExact", "Windows",
+                    "SliceIter", "SliceIterMut", "SliceEnumerate",
+                    "Split", "SplitInclusive", "SplitN",
+                    "RSplit", "RSplitN",
+                    "ListIter", "ListIterMut",
+                    "DequeIter", "DequeIterMut", "DequeIntoIter", "DequeDrain",
+                    "MapIter", "MapIterMut", "MapKeys", "MapValues", "MapValuesMut",
+                    "MapDrain", "MapIntoIter",
+                    "SetIter", "SetIntoIter", "SetDrain",
+                    "MultisetIter", "MultisetDistinctIter",
+                    "HeapIter", "HeapDrain", "HeapDrainSorted", "HeapIntoIter",
+                    "BTreeMapIter", "BTreeMapKeys", "BTreeMapValues",
+                    "BTreeMapRange", "BTreeSetIter", "BTreeSetRange",
+                ];
+                'outer: for prefix in SLICE_LIST_KIND_PREFIXES {
+                    let bare_qualified = format!("{}.{}", prefix, bare_method_name);
+                    let dotted_qualified = format!(".{}.{}", prefix, bare_method_name);
+                    for (idx, desc) in state.module.functions.iter().enumerate() {
+                        if let Some(fname) = state.module.strings.get(desc.name)
+                            && (fname == bare_qualified || fname.ends_with(&dotted_qualified))
+                        {
+                            found = Some(crate::module::FunctionId(idx as u32));
+                            break 'outer;
+                        }
                     }
                 }
             }
