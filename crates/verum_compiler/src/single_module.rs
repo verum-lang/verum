@@ -78,6 +78,25 @@ pub fn compile_module_with_stdlib(
         CTX_CACHE.apply_lazy_with_types(archive, &mut codegen, module);
     }
 
+    // **Protocol-default-method AST seed** (closes #29 user-side tail).
+    //
+    // The user module rarely defines stdlib protocols (`Ord` / `Eq` /
+    // `Hash` / `Display` / `Debug` / `PartialOrd` / ...).  Without
+    // seeding the embedded stdlib's protocol ASTs, `protocol_registry`
+    // is empty when `collect_non_protocol_declarations` reaches a
+    // user-side `implement Ord for OrdRegA { fn cmp(...) }` and calls
+    // `generate_default_protocol_methods("Ord", "OrdRegA", {"cmp"})`.
+    // The registry lookup returns None, no defaults queue, every
+    // `OrdRegA.lt/le/gt/ge/max/min/clamp` call panics at runtime with
+    // "method 'OrdRegA.max' not found on receiver of runtime kind
+    // 'OrdRegA' (Object)".
+    //
+    // Match the canonical `pipeline::vbc_codegen::compile_ast_to_vbc`
+    // ordering: seed first, then collect protocols from the user
+    // module itself (so any locally-defined protocols layer on top of
+    // the seeded stdlib).
+    crate::pipeline::vbc_codegen::seed_protocol_registry_from_embedded_stdlib(&mut codegen);
+
     // User-side passes. Same order as `compile_ast_to_vbc`:
     //   protocols (so default-method inheritance is in place) →
     //   declarations (types/functions/consts) →
