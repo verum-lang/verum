@@ -136,21 +136,12 @@ implement<T> Reservoir<T> {
 // =============================================================================
 
 fn random_u64() -> UInt64 {
-    let mut buf: [Byte; 8] = [0_u8; 8];
-    // The historical `core.base.random.fill` import resolved to
-    // nothing, so reservoir sampling silently degraded to "always
-    // replace slot 0" (since `0 % seen == 0`). For non-CSPRNG
-    // adversarial-input use cases this just biased the sample;
-    // for security-critical sampling (trace IDs, request IDs)
-    // it broke the uniformity guarantee outright. Wire to the
-    // canonical platform CSPRNG; panic on failure since silent
-    // bias is the worse outcome.
-    match sys_random_bytes(&mut buf) {
-        Ok(_)  => {},
-        Err(_) => panic("Reservoir: kernel CSPRNG unavailable — sampling cannot proceed"),
-    }
-    let mut r: UInt64 = 0_u64;
-    let mut i: Int = 0;
-    while i < 8 { r = (r << 8_u64) | (buf[i] as UInt64); i = i + 1; }
-    r
+    // Route through the `random_u64` VBC intrinsic, which lowers to
+    // FfiExtended sub_op 0x47 — a direct libc::getentropy call on a
+    // Rust-side 8-byte buffer.  Bypasses the broken Verum-side
+    // pointer-marshalling chain through `sys.common.random_bytes →
+    // safe_getentropy → unsafe { getentropy(buf, len) }` that silently
+    // misroutes Pointer-tagged buf values as sign-extended i64
+    // addresses (closed at fill_secure but reservoir had its own copy).
+    @intrinsic("random_u64")
 }

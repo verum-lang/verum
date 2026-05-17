@@ -240,24 +240,13 @@ fn random_u64_in(lo: UInt64, hi: UInt64) -> UInt64 {
 }
 
 fn random_u64() -> UInt64 {
-    let mut buf: [Byte; 8] = [0_u8; 8];
-    // Backoff jitter sourced from CSPRNG to defeat thundering-herd
-    // attacks on shared backends. The historical `core.base.random.fill`
-    // import resolved to nothing → all clients converged to the
-    // floor wait, defeating the jitter entirely. Wire to the platform
-    // CSPRNG; on entropy failure fall back to a non-zero deterministic
-    // value (better than a coordinated retry storm even if not ideal).
-    match sys_random_bytes(&mut buf) {
-        Ok(_)  => {},
-        Err(_) => return 0xA5A5_A5A5_A5A5_A5A5_u64,
-    }
-    let mut r: UInt64 = 0_u64;
-    let mut i: Int = 0;
-    while i < 8 {
-        r = (r << 8_u64) | (buf[i] as UInt64);
-        i = i + 1;
-    }
-    r
+    // Backoff jitter sourced from CSPRNG via the `random_u64` VBC
+    // intrinsic — direct libc::getentropy on a Rust-side 8-byte
+    // buffer.  Bypasses the broken pointer-marshalling chain
+    // through `sys.common.random_bytes → safe_getentropy →
+    // unsafe { getentropy(buf, len) }` that silently misroutes
+    // Pointer-tagged buf values.
+    @intrinsic("random_u64")
 }
 
 // Saturating helpers live here until UInt64 gets them via core.
