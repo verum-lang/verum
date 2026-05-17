@@ -85,33 +85,31 @@ fn regression_popcnt_u64_basic() {
 // Validated paired-call test: `clz(1)=63 ctz(8)=3 bswap=0x0807060504030201
 // popcnt(0xF)=4 rotl(1,3)=8 rotr(8,3)=1`.
 
-// Empirically gated: stdlib `rotl<T>` / `rotr<T>` STILL return Unit at user
-// call sites despite the E3 closure of the sister `clz<T>` / `popcnt<T>`
-// surface.  Direct `@intrinsic("rotate_left", x, n)` and user-defined
-// wrappers with the IDENTICAL body work correctly — the defect is specific
-// to the PRECOMPILED-STDLIB dispatch path for 2-operand inline-sequence
-// intrinsics through generic wrappers.  Tracked as a residual of `language-
-// defect: generic-stdlib-intrinsic-monomorphisation` — different surface
-// from the table-shadow class closed for clz/popcnt.
-@ignore
+// E3 CLOSED — bare-name `mount … bitwise.rotl;` resolution no longer collides
+// with the broken `core/math/bits.vr::rotl` bodyless decl that previously
+// shadowed it.  Root cause was an arity-mismatched `@intrinsic("llvm.fshl.i64")`
+// annotation on a 2-arg `rotl(x, n)` declaration — `llvm.fshl.iN` is 3-arg
+// funnel-shift, so `lookup_intrinsic` returned None and the dispatcher fell
+// through to the empty body → `Value::default() = Unit`.  Bare-name
+// resolution picked this stub first-wins.  Fixed in `core/math/bits.vr`
+// (re-annotated to canonical 2-arg `@intrinsic("rotate_left|rotate_right")`)
+// + `lookup_intrinsic` `llvm.fshl.iN` / `llvm.fshr.iN` aliases for future-
+// proofing 3-arg bodyless decls.
 @test
 fn regression_rotl_u64_left_one() {
     assert_eq(rotl(1 as UInt64, 3 as UInt32), 8 as UInt64);
 }
 
-@ignore
 @test
 fn regression_rotl_u64_msb_wraps() {
     assert_eq(rotl(0x8000000000000000 as UInt64, 1 as UInt32), 1 as UInt64);
 }
 
-@ignore
 @test
 fn regression_rotr_u64_basic() {
     assert_eq(rotr(8 as UInt64, 3 as UInt32), 1 as UInt64);
 }
 
-@ignore
 @test
 fn regression_rotr_u64_low_wraps() {
     assert_eq(rotr(1 as UInt64, 1 as UInt32), 0x8000000000000000 as UInt64);

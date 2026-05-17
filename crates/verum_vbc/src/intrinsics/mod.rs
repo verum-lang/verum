@@ -273,6 +273,17 @@ pub fn lookup_intrinsic(name: &str) -> Option<IntrinsicInfo> {
             // routing through the CORRECT 3-operand registry entries.
             "fshl" => "fshl_u64",
             "fshr" => "fshr_u64",
+            // LLVM-canonical 3-arg funnel-shift width variants — closes
+            // the bodyless-decl alias gap so any future
+            // `@intrinsic("llvm.fshl.iW")` annotation on a 3-arg fn
+            // resolves to the dedicated `fshl_u64` / `fshr_u64` registry
+            // entry (3-operand `ArithSubOpcode::FunnelShift{Left,Right}`,
+            // 0x57 / 0x58 — the correct opcodes that preserve all three
+            // operands).  Arity-mismatched 2-arg declarations should
+            // instead use `rotate_left` / `rotate_right` per the rule
+            // pinned in `core/math/bits.vr::rotl`.
+            "llvm.fshl.i64" | "llvm.fshl.i32" | "llvm.fshl.i16" => "fshl_u64",
+            "llvm.fshr.i64" | "llvm.fshr.i32" | "llvm.fshr.i16" => "fshr_u64",
             _ => {
                 // Strip common prefixes used in import aliases
                 // e.g., intrinsic_memcpy → memcpy, intrinsic_slice_from_raw_parts_mut → slice_from_raw_parts_mut
