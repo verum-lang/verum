@@ -1998,7 +1998,23 @@ pub fn method_to_protocol(method_name: &str) -> Option<WellKnownProtocol> {
         "eq" | "ne" => Some(WellKnownProtocol::Eq),
         "cmp" | "lt" | "le" | "gt" | "ge" | "min" | "max" => Some(WellKnownProtocol::Ord),
         "clone" | "clone_from" => Some(WellKnownProtocol::Clone),
-        "fmt" | "to_string" | "debug_string" => Some(WellKnownProtocol::Debug),
+        // §J generic-protocol dispatch (task #15): Display's method
+        // is `fmt`; Debug's method is `fmt_debug` — pre-fix this
+        // mapping had `fmt → Debug` and was missing `fmt_debug`
+        // entirely, so generic-bounded calls like
+        // `value.fmt_debug(&mut f)` inside
+        // `fn format_debug<T: Debug>(value: &T)` lowered to
+        // `dyn:T.fmt_debug` (with T as a literal type-param name)
+        // instead of `dyn:Debug.fmt_debug`.  The runtime then
+        // couldn't pick the user-side Debug impl for the receiver's
+        // concrete type, and the call silently fell through to a
+        // Display-style ToString lowering — yielding `hi` instead
+        // of `"\"hi\""` for `format_debug(&"hi")`.  Correct mapping:
+        //   * `fmt` → Display protocol (the Display impl's method)
+        //   * `fmt_debug` / `debug_string` → Debug protocol
+        //   * `to_string` → Display (via `Display.to_string` blanket)
+        "fmt" | "to_string" => Some(WellKnownProtocol::Display),
+        "fmt_debug" | "debug_string" => Some(WellKnownProtocol::Debug),
         "into_iter" | "iter" => Some(WellKnownProtocol::IntoIterator),
         "next" | "has_next" => Some(WellKnownProtocol::Iterator),
         "drop" => Some(WellKnownProtocol::Drop),

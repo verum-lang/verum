@@ -1607,18 +1607,44 @@ pub(in super::super) fn handle_call_method(
     // Text — `receiver.is_ptr()` is false, so the existing pass
     // returns None and falls through.
     if was_dyn_dispatch && found_func_id.is_none() {
-        let concrete_type: Option<&'static str> = if dispatch_receiver.is_small_string()
+        // First: NaN-box classifiers for non-pointer receivers (Text
+        // small-string, Int, Bool, Float, Unit).
+        let concrete_type: Option<String> = if dispatch_receiver.is_small_string()
             || is_heap_string(&dispatch_receiver)
         {
-            Some("Text")
+            Some("Text".to_string())
         } else if dispatch_receiver.is_int() {
-            Some("Int")
+            Some("Int".to_string())
         } else if dispatch_receiver.is_bool() {
-            Some("Bool")
+            Some("Bool".to_string())
         } else if dispatch_receiver.is_float() {
-            Some("Float")
+            Some("Float".to_string())
         } else if dispatch_receiver.is_unit() {
-            Some("Unit")
+            Some("Unit".to_string())
+        } else if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
+            // Heap-pointer receiver: recover concrete type from
+            // ObjectHeader.type_id.  Same path the existing first-pass
+            // receiver-type lookup at ~L1700 uses, but reached here
+            // because `was_dyn_dispatch` strips the `dyn:Protocol.`
+            // qualifier BEFORE that pass evaluates — without this
+            // arm, dispatching `f"{Equal}"` through `format_display<T:
+            // Display>(value: &T)` for `Equal: Ordering` falls into
+            // the bare-suffix scan and picks an arbitrary `*.fmt`.
+            let ptr = dispatch_receiver.as_ptr::<u8>();
+            if !ptr.is_null()
+                && (ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+            {
+                // SAFETY: pointer alignment verified; every heap
+                // object begins with an ObjectHeader.
+                let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+                state
+                    .module
+                    .get_type(header.type_id)
+                    .and_then(|td| state.module.strings.get(td.name).map(|s| s.to_string()))
+                    .filter(|s| !s.is_empty())
+            } else {
+                None
+            }
         } else {
             None
         };
