@@ -30,7 +30,8 @@ fn regression_task_id_new_increments() {
     assert(a.id != b.id);
 }
 
-@ignore
+// CLOSED 2026-05-17 — Debug for variant constructors now renders the
+// qualified `<Type>.<Variant>` form under --interp.
 @test
 fn regression_task_join_error_debug_renders_qualified() {
     let s = f"{JoinError.Cancelled:?}";
