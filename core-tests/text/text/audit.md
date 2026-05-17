@@ -313,11 +313,11 @@ the `Int` direct return or the `count` alias).
   `obj.method()` MUST live in `dispatch_primitive_method`, NOT
   `try_intercept_text_static_runtime`.
 
-### Deferred — ranked by leverage (updated 2026-05-17, seventh pass)
+### Deferred — ranked by leverage (updated 2026-05-17, eighth pass)
 | # | Item | Estimated effort | Tests unblocked |
 |---|------|-----:|------:|
 | 1 | §D close — function-id collision (CallM migration OR global next_func_id) | multi-session | ~10 (§O included) |
-| 2 | §J runtime — Debug protocol dispatch `format_debug → fmt_debug` Text-writeback doesn't propagate formatter writes back to the buffer in user-side `format_debug(&value)` — parser-level routing closed in commit `504031af4`, archive-harvest gap closed in commit `6dc04cab0`, runtime-dispatch defect remains | medium | 2 (§J pins) |
+| 2 | §J residual — generic-protocol method dispatch defect.  Inside `fn format_debug<T: Debug>(value: &T)`, the call `value.fmt_debug(&mut f)` doesn't dispatch to the user-side `Debug for Text` impl when value is `&Text`. Empirically verified: same body shape with concrete `value: &Text` produces `<"hi">` correctly; the generic version produces `<hi>` (no quotes). Defect at the codegen/typechecker generic-protocol dispatch layer (`crates/verum_vbc/src/codegen/expressions.rs::compile_method_call` + `crates/verum_types/src/infer/` protocol-bound resolution). Affects every protocol-generic helper (`format_debug`, `format_display`, `dbg`, …). | medium-high | 2 (§J pins) + broader Debug/Display ergonomics |
 | 3 | §Y AOT path — architectural helper (commit `bb488e17a`) reaches the interp path but not the AOT path; AOT name-resolution uses a sibling probe site that doesn't go through `lookup_type_mount_scoped` | medium | 1 active (test_parse_error_eq_message under AOT) |
 
 Closed since the previous pass:
