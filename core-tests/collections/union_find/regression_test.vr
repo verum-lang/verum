@@ -67,23 +67,23 @@ fn regression_uf_generic_component_size_after_union() {
 //   reference query. The owned-K path works; the &K path doesn't.
 // =============================================================================
 
-@ignore
+// CLOSED 2026-05-17 — Map.contains_key(&Int) returns correct Bool
+// under --interp.  CBGR-ref auto-deref now dispatches correctly.
 @test
 fn regression_map_contains_key_ref_int() {
     let mut m: Map<Int, Int> = Map.new();
     m.insert(7, 70);
     let k = 7;
-    // Currently fails: returns false despite key being present.
     assert(m.contains_key(&k));
 }
 
-@ignore
+// CLOSED 2026-05-17 — Map.contains_key(&Text-literal) returns correct
+// Bool under --interp.
 @test
 fn regression_map_contains_key_ref_text_literal() {
     let mut m: Map<Text, Int> = Map.new();
     m.insert("k", 7);
     let k: Text = "k";
-    // Currently fails.
     assert(m.contains_key(&k));
 }
 
@@ -118,30 +118,29 @@ fn regression_map_get_key_value_int_keyed() {
 //   as_bytes() despite len field".
 // =============================================================================
 
-@ignore
+// CLOSED 2026-05-17 — Text.from(literal) produces correct as_bytes
+// length under --interp.
 @test
 fn regression_text_from_as_bytes_length_matches_len() {
     let a = Text.from("alpha");
     assert_eq(a.len(), 5);
     let bytes = a.as_bytes();
-    // Currently fails: bytes.len() == 0 even though a.len() == 5.
     assert_eq(bytes.len(), 5);
 }
 
-@ignore
+// CLOSED 2026-05-17 — Text.from(single-char-literal) produces correct
+// byte at index 0 under --interp.
 @test
 fn regression_text_from_byte_zero_is_correct() {
     let a = Text.from("k");
     let bytes = a.as_bytes();
-    // Currently panics: "Slice index out of bounds: index 0 but length is 0".
     assert_eq(bytes[0], 0x6B as Byte);
 }
 
-@ignore
+// CLOSED 2026-05-17 — Text literal .eq() between byte-identical Texts
+// returns true under --interp.
 @test
 fn regression_text_literal_eq_method_two_literals() {
-    // Even two byte-identical literal Texts return false from .eq() —
-    // method dispatch lands on the wrong (structural) eq.
     let a: Text = "k";
     let b: Text = "k";
     assert(a.eq(&b));
