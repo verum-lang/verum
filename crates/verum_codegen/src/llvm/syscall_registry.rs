@@ -58,7 +58,7 @@ use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result a
 /// AOT ABI. Concrete `FunctionType` values are constructed lazily from
 /// these descriptors so the registry table is `const`-friendly.
 #[derive(Copy, Clone)]
-enum AbiTy {
+pub enum AbiTy {
     /// 64-bit integer (Verum-uniform). Used for every integer arg/ret
     /// regardless of the underlying C type's width — the calling
     /// convention truncates on the callee side.
@@ -94,10 +94,13 @@ impl AbiTy {
 }
 
 /// Canonical signature of a single platform syscall under Verum ABI.
-struct SyscallSig {
-    name: &'static str,
-    args: &'static [AbiTy],
-    ret: AbiTy,
+pub struct SyscallSig {
+    /// LLVM symbol name (e.g. `"clock_gettime"`, `"verum_tcp_connect"`).
+    pub name: &'static str,
+    /// Argument shape under Verum ABI (i64 / Ptr).
+    pub args: &'static [AbiTy],
+    /// Return shape (`I64`, `Ptr`, or `Void`).
+    pub ret: AbiTy,
 }
 
 /// The canonical registry. Append-only — every syscall reachable from
@@ -367,6 +370,50 @@ fn lookup(name: &str) -> Option<&'static SyscallSig> {
         .iter()
         .chain(VERUM_RUNTIME_SYMBOLS.iter())
         .find(|s| s.name == name)
+}
+
+/// Public look-up surface used by `error::get_or_declare_function` to
+/// resolve a name to its canonical `(args, ret)` signature before
+/// deciding whether to honour or override the caller-provided
+/// `fn_type` hint.  Returns the static `SyscallSig` so callers can
+/// build the canonical `FunctionType` via [`canonical_fn_type`] without
+/// duplicating the AbiTy → LLVM type-conversion logic.
+pub fn lookup_sig(name: &str) -> Option<&'static SyscallSig> {
+    lookup(name)
+}
+
+/// Build the canonical LLVM `FunctionType` for a given `SyscallSig`.
+/// Mirrors the construction in [`get_or_declare`] so callers comparing
+/// against an `existing` declaration can compute the expected shape
+/// without re-implementing AbiTy::fn_type.
+///
+/// Accepts `impl AsContextRef<'ctx>` so callers holding either
+/// `&'ctx Context` or `ContextRef<'ctx>` (`module.get_context()`) can
+/// use the helper uniformly without an explicit conversion at every
+/// call site.
+pub fn canonical_fn_type<'ctx>(
+    ctx: impl verum_llvm::context::AsContextRef<'ctx>,
+    sig: &SyscallSig,
+) -> verum_llvm::types::FunctionType<'ctx> {
+    let cref: verum_llvm::context::ContextRef<'ctx> = unsafe {
+        verum_llvm::context::ContextRef::new(ctx.as_ctx_ref())
+    };
+    let i64_t = cref.i64_type();
+    let ptr_t = cref.ptr_type(verum_llvm::AddressSpace::default());
+    let arg_tys: Vec<verum_llvm::types::BasicMetadataTypeEnum<'ctx>> = sig
+        .args
+        .iter()
+        .map(|a| match a {
+            AbiTy::I64 => i64_t.into(),
+            AbiTy::Ptr => ptr_t.into(),
+            AbiTy::Void => unreachable!("Void is a return-only classification"),
+        })
+        .collect();
+    match sig.ret {
+        AbiTy::I64 => i64_t.fn_type(&arg_tys, false),
+        AbiTy::Ptr => ptr_t.fn_type(&arg_tys, false),
+        AbiTy::Void => cref.void_type().fn_type(&arg_tys, false),
+    }
 }
 
 /// Get-or-declare `name` under its canonical Verum-ABI signature.

@@ -367,6 +367,55 @@ pub fn get_or_declare_function<'ctx>(
     name: &str,
     fn_type: verum_llvm::types::FunctionType<'ctx>,
 ) -> verum_llvm::values::FunctionValue<'ctx> {
+    // **Registry-first canonical-signature lookup** (task #15 close).
+    //
+    // When `name` matches a `POSIX_SYSCALLS` / `VERUM_RUNTIME_SYMBOLS`
+    // entry, the registry holds the ABSOLUTE source of truth for the
+    // function's signature.  Even if the existing module declaration
+    // disagrees with `fn_type`, the registry decides.  Caller-provided
+    // `fn_type` is a hint only — it gets overridden silently when the
+    // registry knows better.
+    //
+    // Pre-fix the helper compared `existing_ty` against `fn_type` and
+    // returned `existing` (silently mismatched).  The mismatch landed
+    // in the registry as informational, but downstream `build_call`
+    // sites that adapted their argument shape to `fn_type` then
+    // disagreed with the declared signature at LLVM verification.
+    //
+    // The fix is the architectural rule pinned in tasks #12/#13/#14:
+    // every named POSIX/runtime symbol MUST funnel through one
+    // canonical signature, the `syscall_registry` registry, and every
+    // declaration site MUST accept that as final.  Caller signatures
+    // that disagree are recorded for diagnosis, then dropped — the
+    // canonical declaration is returned regardless, so subsequent
+    // `build_call` sites that adapt their args to the returned
+    // FunctionValue's actual type get the right shape.
+    if let Some(canonical_sig) = super::syscall_registry::lookup_sig(name) {
+        let canonical_fn_type = super::syscall_registry::canonical_fn_type(
+            module.get_context(),
+            canonical_sig,
+        );
+        if canonical_fn_type != fn_type {
+            // Caller's hint disagrees with the canonical registry —
+            // record for diagnostic visibility but proceed with the
+            // canonical signature.  Pre-fix this was the source of
+            // every "existing X, requested Y" mismatch report.
+            record_signature_mismatch(
+                name,
+                format!("{:?} (canonical from POSIX_SYSCALLS registry)", canonical_fn_type),
+                format!("{:?} (caller hint, ignored)", fn_type),
+            );
+        }
+        // Direct-promote the canonical declaration into the module
+        // (idempotent — `get_function` returns the existing decl when
+        // present).  Bypasses `syscall_registry::get_or_declare` to
+        // avoid the `&'ctx Context` requirement at call sites that
+        // only hold a `ContextRef`.
+        if let Some(existing) = module.get_function(name) {
+            return existing;
+        }
+        return module.add_function(name, canonical_fn_type, None);
+    }
     if let Some(existing) = module.get_function(name) {
         let existing_ty = existing.get_type();
         if existing_ty != fn_type {
