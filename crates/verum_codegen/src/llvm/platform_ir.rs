@@ -13732,7 +13732,16 @@ impl<'ctx> PlatformIR<'ctx> {
         self.emit_thread_spawn_ir(module)?;
         self.emit_thread_join_ir(module)?;
         self.emit_thread_is_done_ir(module)?;
-        self.emit_thread_spawn_multi_decl(module)?;
+        // NOTE: `emit_thread_spawn_multi_decl` removed — declared the
+        // stale 3-arg `(i64, ptr, i32) -> i64` ABI which collided with
+        // the current 1-arg packed-pointer trampoline emitted by
+        // `emit_thread_spawn_multi_ir` (line ~18915, `(i64) -> i64`).
+        // Both decls hit the LLVM module, the signature-mismatch gate
+        // surfaced the conflict, and AOT crashed at the first call
+        // site that picked the wrong shape.  Trampoline body emission
+        // remains in `emit_thread_spawn_multi_ir` (called from line
+        // ~656 via the runtime-IR setup chain).  Task #19 (memory §G)
+        // close-out for the verum_thread_spawn_multi family.
         Ok(())
     }
 
@@ -14071,20 +14080,15 @@ impl<'ctx> PlatformIR<'ctx> {
         Ok(())
     }
 
-    /// verum_thread_spawn_multi — extern C (complex loop + spawn)
-    fn emit_thread_spawn_multi_decl(&self, module: &Module<'ctx>) -> super::error::Result<()> {
-        let ctx = self.context;
-        let i64_type = ctx.i64_type();
-        let ptr_type = ctx.ptr_type(AddressSpace::default());
-        if module.get_function("verum_thread_spawn_multi").is_none() {
-            let fn_type = i64_type.fn_type(
-                &[i64_type.into(), ptr_type.into(), ctx.i32_type().into()],
-                false,
-            );
-            module.add_function("verum_thread_spawn_multi", fn_type, None);
-        }
-        Ok(())
-    }
+    // NOTE: `emit_thread_spawn_multi_decl` (the stale 3-arg
+    // `(i64, ptr, i32) -> i64` extern declaration for
+    // `verum_thread_spawn_multi`) was removed — it conflicted with the
+    // current 1-arg packed-pointer trampoline body emitted by
+    // `emit_thread_spawn_multi_ir` (`(i64) -> i64`).  The trampoline
+    // declares its own canonical signature via `get_or_declare_fn`;
+    // the duplicate `emit_thread_spawn_multi_decl` was leftover from
+    // a pre-trampoline ABI shape.  Closes task #19 (memory §G)
+    // signature-mismatch line for `verum_thread_spawn_multi`.
 
     // ========================================================================
     // Process spawn — full LLVM IR (fork/exec/pipe/dup2)
