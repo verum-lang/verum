@@ -1836,7 +1836,13 @@ fn main() -> Int { known_good() }
         .expect("finalize");
 
     // The broken function must NOT have been silently dropped — its
-    // descriptor lands in the module with a stub body.
+    // descriptor lands in the module with a stub body.  Match either
+    // bare or source-module-qualified shape: task #121's auto-stub
+    // promotes the descriptor name to `<source_module>.<leaf>` so
+    // cross-module bare-mount dispatch can reach it.  For this test's
+    // `lenient_panic_stub_test` config-module the qualified form is
+    // `lenient_panic_stub_test.broken_fn`; legacy / `module=main`
+    // configs keep the bare form.  Accept both.
     let broken_descriptor = vbc_module
         .functions
         .iter()
@@ -1844,7 +1850,7 @@ fn main() -> Int { known_good() }
             vbc_module
                 .strings
                 .get(f.name)
-                .map(|s| s == "broken_fn")
+                .map(|s| s == "broken_fn" || s.ends_with(".broken_fn"))
                 .unwrap_or(false)
         })
         .expect("broken_fn descriptor must be present in the module — the auto-stub replaces the silent drop");
@@ -1869,12 +1875,15 @@ fn main() -> Int { known_good() }
     );
 
     // The known-good function must still be present and untouched
-    // — the auto-stub path must never fire for healthy code.
+    // — the auto-stub path must never fire for healthy code.  Same
+    // bare-or-qualified shape as `broken_descriptor` above:
+    // `lenient_panic_stub_test.known_good` is the canonical qualified
+    // form emitted by the success-path descriptor promotion.
     let known_good = vbc_module.functions.iter().find(|f| {
         vbc_module
             .strings
             .get(f.name)
-            .map(|s| s == "known_good")
+            .map(|s| s == "known_good" || s.ends_with(".known_good"))
             .unwrap_or(false)
     });
     assert!(
