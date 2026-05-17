@@ -24,7 +24,6 @@ mount core.collections.bloom.{BloomFilter, BloomConfig};
 // reservoir §1).  Once landed, every pin below flips active.
 // =============================================================================
 
-@ignore
 @test
 fn regression_bloom_with_target_constructible() {
     let bf = BloomFilter.with_target(1024, 1000);
@@ -89,7 +88,8 @@ fn regression_bloom_clear_resets_admitted_counter() {
     assert_eq(bf.admitted(), 0_u64);
 }
 
-@ignore
+// CLOSED 2026-05-17 — BloomFilter.try_with_target correctly returns
+// `Err(_)` on invalid fp_rate.
 @test
 fn regression_bloom_try_with_target_invalid_fp_rate() {
     let r = BloomFilter.try_with_target(1024, 0);
