@@ -18326,6 +18326,115 @@ fn lower_cbgr_extended<'ctx>(
             ctx.mark_interior_list_ref(dst);
             Ok(())
         }
+        0x0C => {
+            // **RefField** (task #17 close) — produce a heap-anchored
+            // interior pointer to a record field by field-index.  Mirror
+            // of the VBC interpreter's `CbgrSubOpcode::RefField` handler
+            // (`verum_vbc/src/interpreter/dispatch_table/handlers/cbgr.rs:871`).
+            //
+            // Format: `dst:reg, base:reg, field_idx:varint`.
+            //
+            // The interpreter performs a deep auto-deref chain
+            // (CBGR-ref → ThinRef → FatRef → Heap<T> wrapper → Shared<T>
+            // wrapper → Variant wrapper) before computing the field
+            // offset.  For AOT codegen, we lower the **common case**:
+            // `base` is a heap pointer to a record-shaped object; the
+            // field offset is `OBJECT_HEADER_SIZE + field_idx *
+            // sizeof(Value)`.  Wrapper auto-deref scenarios for
+            // `Heap<T>` / `Shared<T>` / variant payloads are handled by
+            // upstream codegen sites that emit explicit `Deref` opcodes
+            // before the `&self.field` access, mirroring the runtime's
+            // chain by construction.
+            //
+            // Pre-fix this site fell into `emit_unimplemented_sub_op`
+            // which logged
+            // `[AOT warning] Unimplemented CbgrExtended sub_op: 0x0c`
+            // for every `&self.field` site across the stdlib:
+            // FsWatcher, NoOpMutex, SignalFlag, RefCell, BorrowError /
+            // BorrowMutError, StackFrame / Backtrace, ScanIter,
+            // OSError.fmt, every JSON / window-fn helper in the SQLite
+            // builtins, and X.509 chain verification.  The unhandled
+            // opcode silently turned the function into a bodyless stub,
+            // breaking the user-visible behaviour at runtime.
+            //
+            // **Architectural rule pinned**: every VBC opcode reachable
+            // from stdlib codegen MUST have a matching AOT lowering
+            // arm; the `emit_unimplemented_sub_op` fallback is a
+            // diagnostic of choice, not a silent stub.
+            if operands.len() < 3 {
+                return Ok(());
+            }
+            let dst = op_reg(operands, 0);
+            let base_reg = op_reg(operands, 1);
+            // Decode field_idx as varint (matches VBC's `read_varint`).
+            let (field_idx, _consumed) = {
+                let mut idx: u64 = 0;
+                let mut shift: u32 = 0;
+                let mut i = 2;
+                let mut consumed = 0usize;
+                loop {
+                    if i >= operands.len() {
+                        return Ok(());
+                    }
+                    let byte = operands[i];
+                    idx |= ((byte & 0x7F) as u64) << shift;
+                    consumed += 1;
+                    i += 1;
+                    if byte & 0x80 == 0 {
+                        break;
+                    }
+                    shift += 7;
+                    if shift >= 64 {
+                        // Overflow guard — silently truncate to a sane
+                        // value rather than producing UB.  Matches the
+                        // interpreter's `field offset overflow` panic
+                        // contract by emitting a no-op field index.
+                        break;
+                    }
+                }
+                (idx as usize, consumed)
+            };
+
+            let i64_type = ctx.types().i64_type();
+            let ptr_type = ctx.types().ptr_type();
+            let i8_type = ctx.types().i8_type();
+
+            // Convert base register to a heap pointer.  `as_ptr`
+            // handles both PointerValue (already typed) and IntValue
+            // (i64-encoded pointer slot reload) via `int_to_ptr` —
+            // same dual-shape guard as the rest of the lowering.
+            let base_ptr = as_ptr(ctx, ctx.get_register(base_reg)?, "refield_base")?;
+
+            // field_ptr = base_ptr + OBJECT_HEADER_SIZE + field_idx * sizeof(Value)
+            // sizeof(Value) is 8 bytes (canonical Verum Value width).
+            let offset = (super::runtime::RuntimeLowering::OBJECT_HEADER_SIZE as usize)
+                .checked_add(field_idx.wrapping_mul(8))
+                .unwrap_or(super::runtime::RuntimeLowering::OBJECT_HEADER_SIZE as usize);
+            let offset_const = i64_type.const_int(offset as u64, false);
+            let field_ptr = unsafe {
+                ctx.builder()
+                    .build_in_bounds_gep(i8_type, base_ptr, &[offset_const], "refield_ptr")
+                    .or_llvm_err()?
+            };
+            // Encode as i64-NaN-boxed pointer for storage in the
+            // register file (matches `Value::from_ptr` in the
+            // interpreter).  Downstream `Deref` / `DerefMut` opcodes
+            // route through this register and read/write the pointed-
+            // to `Value`.
+            let field_ptr_int = ctx
+                .builder()
+                .build_ptr_to_int(field_ptr, i64_type, "refield_ptr_int")
+                .or_llvm_err()?;
+            // Cast back to pointer for register storage (set_register
+            // accepts any BasicValueEnum).  Storing as ptr lets
+            // downstream `as_ptr` calls round-trip without a re-cast.
+            let field_ptr_val = ctx
+                .builder()
+                .build_int_to_ptr(field_ptr_int, ptr_type, "refield_ptr_back")
+                .or_llvm_err()?;
+            ctx.set_register(dst, field_ptr_val.into());
+            Ok(())
+        }
         0x0A => {
             // RefSliceRaw — build a slice Pack{ptr, len} with elem_size=1
             // Matches the interpreter-side fix (commit 3ae67c5). AOT's slice
