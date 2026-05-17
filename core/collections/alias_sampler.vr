@@ -62,16 +62,35 @@ mount core.*;
 mount core.collections.List;
 mount core.sys.common.random_bytes as sys_random_bytes;
 
-// CSPRNG-backed entropy fill. The historical `core.base.random.fill`
-// import resolved to nothing → both helpers below silently produced
-// all-zero buffers, collapsing alias_sample() to "always return 0"
-// and random_unit_interval() to a constant. Wire to the platform
-// source; panic on failure since silent bias is the worse outcome
-// for any caller relying on the distribution.
+// CSPRNG-backed entropy fill. Routes through the `random_u64` VBC
+// intrinsic in 8-byte chunks (direct libc::getentropy on a Rust-side
+// buffer) to bypass the broken pointer-marshalling chain through
+// `sys.common.random_bytes → safe_getentropy → unsafe { getentropy }`
+// that silently misroutes Pointer-tagged buf values.
 fn fill_random(buf: &mut [Byte]) {
-    match sys_random_bytes(buf) {
-        Ok(_)  => {},
-        Err(_) => panic("alias_sampler: kernel CSPRNG unavailable"),
+    let n: Int = buf.len();
+    if n == 0 { return; }
+    let mut i: Int = 0;
+    while i + 8 <= n {
+        let r: UInt64 = @intrinsic("random_u64");
+        buf[i + 0] = (r        & 0xff_u64) as Byte;
+        buf[i + 1] = ((r >> 8 ) & 0xff_u64) as Byte;
+        buf[i + 2] = ((r >> 16) & 0xff_u64) as Byte;
+        buf[i + 3] = ((r >> 24) & 0xff_u64) as Byte;
+        buf[i + 4] = ((r >> 32) & 0xff_u64) as Byte;
+        buf[i + 5] = ((r >> 40) & 0xff_u64) as Byte;
+        buf[i + 6] = ((r >> 48) & 0xff_u64) as Byte;
+        buf[i + 7] = ((r >> 56) & 0xff_u64) as Byte;
+        i = i + 8;
+    }
+    if i < n {
+        let r: UInt64 = @intrinsic("random_u64");
+        let mut shift: UInt64 = 0_u64;
+        while i < n {
+            buf[i] = ((r >> shift) & 0xff_u64) as Byte;
+            i = i + 1;
+            shift = shift + 8_u64;
+        }
     }
 }
 

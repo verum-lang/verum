@@ -30,7 +30,6 @@ mount core.collections.reservoir.Reservoir;
 //   `core.base.random.*` use site.
 // =============================================================================
 
-@ignore
 @test
 fn regression_reservoir_seen_increments_past_capacity() {
     let mut r: Reservoir<Int> = Reservoir.new(3);
@@ -45,7 +44,6 @@ fn regression_reservoir_seen_increments_past_capacity() {
     assert_eq(r.seen(), 50_u64);
 }
 
-@ignore
 @test
 fn regression_reservoir_len_ceiling_under_overflow() {
     let mut r: Reservoir<Int> = Reservoir.new(4);
@@ -59,7 +57,6 @@ fn regression_reservoir_len_ceiling_under_overflow() {
     assert(r.len() <= r.capacity());
 }
 
-@ignore
 @test
 fn regression_reservoir_take_returns_capacity_after_overflow() {
     let mut r: Reservoir<Int> = Reservoir.new(5);
@@ -73,7 +70,6 @@ fn regression_reservoir_take_returns_capacity_after_overflow() {
     assert_eq(s.len(), 5);
 }
 
-@ignore
 @test
 fn regression_reservoir_offer_returns_false_on_unsampled_overflow_item() {
     let mut r: Reservoir<Int> = Reservoir.new(2);
