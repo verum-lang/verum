@@ -23,7 +23,8 @@ fn regression_map_from_undefined_function() {
     assert_eq(m.len(), 2);
 }
 
-@ignore
+// CLOSED 2026-05-17 — verified green under --interp.  Map.with_capacity
+// now dispatches correctly through the static-constructor surface.
 @test
 fn regression_map_with_capacity_undefined_function() {
     let m: Map<Int, Int> = Map.with_capacity(16);
@@ -86,11 +87,11 @@ fn regression_map_get_returns_none_for_absent_key() {
 //   misroutes.
 // =============================================================================
 
-@ignore
+// CLOSED 2026-05-17 — verified green under --interp.  Map.iter()
+// stdlib-body dispatch now works; the 4th-field tombstones drift
+// scenario doesn't reach the iter path.
 @test
 fn regression_map_iter_via_stdlib_body() {
-    // Expected: iter() returns a working iterator over key-value pairs.
-    // Actual: depends on whether the dispatch falls through to stdlib.
     let mut m: Map<Int, Int> = Map.new();
     let _ = m.insert(1, 10);
     let _ = m.insert(2, 20);
