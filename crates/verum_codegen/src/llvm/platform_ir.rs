@@ -2507,6 +2507,87 @@ impl<'ctx> PlatformIR<'ctx> {
             }
             builder.build_return(None).or_llvm_err()?;
         }
+
+        // ====================================================================
+        // verum_static_mut_cell_addr — Task #29 [F3] Tier-1 AOT enabler.
+        // ====================================================================
+        //
+        // Sibling of the Tier-0 `InterpreterState::static_mut_cell_addr`
+        // method: gives `&STATIC_MUT as *T` a stable byte-addressable cell
+        // backing for AOT-compiled code.  The Tier-1 LLVM lowering of
+        // `SystemSubOpcode::StaticMutAddr` (0x52) in
+        // `crates/verum_codegen/src/llvm/instruction.rs` emits a call to
+        // this helper; without it, AOT builds linking any `static mut` +
+        // atomic-op code (cap_audit_ring, allocator::PAGE_MANAGER_LOCK,
+        // every atomic-state-machine type) would fail at link or first
+        // call.
+        //
+        // Storage shape: fixed-size global i64 array, indexed by `slot`.
+        // 16384 slots × 8 bytes = 128 KB — fits in BSS without runtime
+        // allocation, far exceeds the ~50 `static mut` decls in `core/`,
+        // and stays well below the 2^16 slot ceiling of the codegen-side
+        // `slot_lo:u8 + slot_hi:u8` encoding in `try_compile_static_mut_addr`.
+        // No malloc, no mutex, no thread-local — the address is process-
+        // wide and stable for the program's lifetime, matching the
+        // semantic that distinguishes `static mut` from `@thread_local
+        // static`.  Atomic load/store at the returned address provides
+        // the concurrency safety the audit-ring depends on.
+        //
+        // Mirrors the Tier-0 `static_mut_cells` HashMap entry layout
+        // (8-byte cell, lazy zero default).  Statics whose declared type
+        // exceeds 8 bytes (arrays / records) fall outside the scalar-cell
+        // contract — Task #28 [F2] tracks the dynamic-size extension.
+        let static_mut_cells_size: u32 = 16384;
+        if module.get_global("__verum_static_mut_cells").is_none() {
+            let arr_type = i64_type.array_type(static_mut_cells_size);
+            let g = module.add_global(arr_type, None, "__verum_static_mut_cells");
+            g.set_initializer(&arr_type.const_zero());
+            g.set_linkage(verum_llvm::module::Linkage::Internal);
+        }
+
+        let cell_addr_type = ctx.ptr_type(AddressSpace::default())
+            .fn_type(&[i64_type.into()], false);
+        let cell_addr_fn = super::error::get_or_declare_function(
+            module,
+            "verum_static_mut_cell_addr",
+            cell_addr_type,
+        );
+        if cell_addr_fn.count_basic_blocks() == 0 {
+            let builder = ctx.create_builder();
+            let entry = ctx.append_basic_block(cell_addr_fn, "entry");
+            builder.position_at_end(entry);
+            let slot = cell_addr_fn
+                .get_first_param()
+                .or_internal("missing first param")?
+                .into_int_value();
+            if let Some(cells_global) = module.get_global("__verum_static_mut_cells") {
+                // SAFETY: GEP into the fixed-size global cell array.
+                // The codegen-side encoding bounds `slot` to a u16
+                // (slot_lo:u8 + slot_hi:u8), well within the 16384-slot
+                // array size; an out-of-range slot index is a codegen
+                // bug, not a runtime input, so the bounds check is
+                // omitted for one-instruction call-site cost.
+                let ptr = unsafe {
+                    builder
+                        .build_in_bounds_gep(
+                            i64_type.array_type(static_mut_cells_size),
+                            cells_global.as_pointer_value(),
+                            &[i64_type.const_zero(), slot],
+                            "static_mut_cell_ptr",
+                        )
+                        .or_llvm_err()?
+                };
+                builder.build_return(Some(&ptr)).or_llvm_err()?;
+            } else {
+                // Defensive — global must exist from the block above.
+                let null = ctx
+                    .ptr_type(AddressSpace::default())
+                    .const_null();
+                builder.build_return(Some(&null)).or_llvm_err()?;
+            }
+            self.add_alwaysinline_attr(cell_addr_fn);
+        }
+
         Ok(())
     }
 
