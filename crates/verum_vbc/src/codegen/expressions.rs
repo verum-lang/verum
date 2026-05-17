@@ -8684,8 +8684,62 @@ impl VbcCodegen {
                                     verum_common::well_known_types::looks_like_type_param(type_name);
 
                                 if is_type_param {
-                                    // Generic type parameter - let runtime dispatch
-                                    method.name.to_string()
+                                    // Generic type parameter — runtime
+                                    // dispatch routes by receiver kind.
+                                    //
+                                    // For protocol-bounded receivers (the
+                                    // `value.fmt_debug(...)` shape inside
+                                    // `fn format_debug<T: Debug>(value: &T)`)
+                                    // route through `dyn:Protocol.method` so
+                                    // the runtime CallM dispatch consults
+                                    // the protocol-method registry instead
+                                    // of falling through to the non-
+                                    // deterministic bare-suffix scan.
+                                    //
+                                    // Bare-name fallback for static methods
+                                    // (`T.default()`) is the wrong layer
+                                    // for `current_return_type_name`-based
+                                    // disambiguation — the body of
+                                    // `Heap.new_default<T>` calls `T.default()`
+                                    // inside a `Heap.new(...)` argument
+                                    // position where the let-binding RHS
+                                    // hint doesn't apply; using the
+                                    // enclosing function's return type
+                                    // instead routes `T.default()` →
+                                    // `Heap.default()` which recurses.  The
+                                    // fundamental fix needs monomorphisation
+                                    // context propagation through codegen
+                                    // (tracked as task #17).
+                                    if let Some(proto) =
+                                        verum_common::method_to_protocol(method.name.as_str())
+                                    {
+                                        // §J / #15 close: instance-call on a
+                                        // generic-bounded receiver routes
+                                        // through `dyn:<Protocol>.<method>`
+                                        // so the runtime CallM dispatch
+                                        // dispatches against the protocol-
+                                        // method registry instead of falling
+                                        // through to the non-deterministic
+                                        // bare-suffix scan.
+                                        //
+                                        // Pre-fix: a bare `value.fmt_debug(...)`
+                                        // inside `fn format_debug<T: Debug>(value: &T)`
+                                        // emitted bare `"fmt_debug"`; the
+                                        // dispatch chain then picked an
+                                        // arbitrary `*.fmt_debug` candidate
+                                        // (HashMap iteration order) instead
+                                        // of the receiver's concrete-type
+                                        // impl, producing wrong-result
+                                        // output (e.g. `<hi>` instead of
+                                        // `<"hi">` for a Text receiver).
+                                        // The `dyn:Debug.fmt_debug` shape
+                                        // is the canonical protocol-method
+                                        // dispatch token already understood
+                                        // by `method_dispatch.rs:1517+`.
+                                        format!("dyn:{}.{}", proto.as_str(), method.name)
+                                    } else {
+                                        method.name.to_string()
+                                    }
                                 } else {
                                     // TASK #21 FIX: Resolve type alias for method dispatch.
                                     // If type_name is a type alias (e.g., Vec4f -> Vec), use the
@@ -18235,19 +18289,48 @@ impl VbcCodegen {
             ExprKind::Call { func, args, .. } => {
                 if let ExprKind::Path(path) = &func.kind {
                     let func_name = format!("{}", path);
-                    // (1) Direct lookup. If the registered entry is a
-                    //  variant constructor (`variant_tag.is_some()`),
-                    //  prefer the `parent_type_name` over the
-                    //  possibly-unset `return_type_name`. The parent
-                    //  type is what carries the methods (`Result`
-                    //  declares `unwrap`, not the `Err` constructor).
-                    if let Some(info) = self.ctx.lookup_function(&func_name) {
+                    // (1) Arity-aware lookup — task #39 partial mitigation.
+                    //
+                    // Bare-name `lookup_function(name)` is a HashMap probe
+                    // that returns whatever was registered first under
+                    // `name` regardless of arity.  For stdlib simple-name
+                    // collisions (e.g. THREE bare `range` registrations:
+                    // `core.base.iterator.range(start,end)` 2-arg vs
+                    // `core.database.common.check_codegen.range(lo,hi)`
+                    // 2-arg vs `core.database.sqlite.…table.range()`
+                    // 0-arg), the 0-arg registration silently wins the
+                    // bare slot and `infer_expr_type_name(range(0,5))`
+                    // returns its return type — completely wrong.  The
+                    // call site then builds `<WrongType>.method` for
+                    // any subsequent chained call and panics at runtime
+                    // with "method `<WrongType>.method` not found on
+                    // receiver of runtime kind `Range`".
+                    //
+                    // `lookup_function_with_arity` consults the
+                    // `name#arity` shadow slot when primary's arity
+                    // mismatches; this eliminates the arity-mismatched
+                    // candidates deterministically.  It does NOT
+                    // disambiguate same-arity collisions — that's the
+                    // residual surface tracked by task #39's
+                    // mount-scope-aware fundamental fix.
+                    if let Some(info) =
+                        self.ctx.lookup_function_with_arity(&func_name, args.len())
+                    {
                         if info.variant_tag.is_some()
                             && let Some(parent) = &info.parent_type_name
                         {
                             return Some(parent.clone());
                         }
-                        if let Some(rt) = &info.return_type_name {
+                        // Defense: don't surface an arity-mismatched
+                        // return type even if `lookup_function_with_arity`
+                        // fell through to its `return Some(info)` (wrong-
+                        // arity primary) — better to admit "unknown"
+                        // than to propagate a wrong type that cascades
+                        // into a bogus qualified method-name at the
+                        // dispatch layer.
+                        if info.param_count == args.len()
+                            && let Some(rt) = &info.return_type_name
+                        {
                             return Some(rt.clone());
                         }
                     }
