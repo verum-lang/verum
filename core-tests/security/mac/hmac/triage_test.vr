@@ -1,0 +1,64 @@
+// Triage: isolate hmac_sha256 IndexOutOfBounds {64,64} defect.
+mount core.prelude.*;
+mount core.security.mac.hmac.{hmac_sha256};
+mount core.collections.List;
+
+@test
+fn triage_hmac_sha256_empty_key_empty_data() {
+    let key: List<Byte> = [];
+    let data: List<Byte> = [];
+    let _digest = hmac_sha256(key.as_slice(), data.as_slice());
+}
+
+@test
+fn triage_hmac_sha256_short_key_short_data() {
+    let mut key: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 4 { key.push(i as Byte); i = i + 1; }
+    let data: List<Byte> = [];
+    let _digest = hmac_sha256(key.as_slice(), data.as_slice());
+}
+
+@test
+fn triage_sha256_digest_empty() {
+    let data: List<Byte> = [];
+    let _d = core.security.hash.sha256.Sha256.digest(data.as_slice());
+}
+
+@test
+fn triage_sha256_digest_4bytes() {
+    let mut data: List<Byte> = [];
+    data.push(1_u8); data.push(2_u8); data.push(3_u8); data.push(4_u8);
+    let _d = core.security.hash.sha256.Sha256.digest(data.as_slice());
+}
+
+@test
+fn triage_sha256_digest_64bytes() {
+    let mut data: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 64 { data.push(i as Byte); i = i + 1; }
+    let _d = core.security.hash.sha256.Sha256.digest(data.as_slice());
+}
+
+@test
+fn triage_hmac_new_only_no_finalize() {
+    let key: List<Byte> = [];
+    let _h = core.security.mac.hmac.HmacSha256.new(key.as_slice());
+}
+
+@test
+fn triage_hmac_new_and_finalize() {
+    let key: List<Byte> = [];
+    let h = core.security.mac.hmac.HmacSha256.new(key.as_slice());
+    let _d = h.finalize();
+}
+
+@test
+fn triage_hmac_sha256_32byte_key_4byte_data() {
+    let mut key: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 32 { key.push(i as Byte); i = i + 1; }
+    let mut data: List<Byte> = [];
+    data.push(0_u8); data.push(1_u8); data.push(2_u8); data.push(3_u8);
+    let _digest = hmac_sha256(key.as_slice(), data.as_slice());
+}
