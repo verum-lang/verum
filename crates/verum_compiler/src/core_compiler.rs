@@ -579,6 +579,40 @@ fn validate_import_tree(
     }
 }
 
+/// Reachability check on the current stdlib dep graph: does `from`
+/// already transitively reach `to` via existing `dependencies` edges?
+/// Used by `augment_dependencies_from_mounts` to drop derived edges
+/// that would introduce a new cycle.  BFS with visited-set;
+/// terminates in O(V + E) which is tiny for the stdlib graph (~100
+/// modules, ~500 edges).
+fn reaches(
+    modules: &HashMap<String, StdlibModule>,
+    from: &str,
+    to: &str,
+) -> bool {
+    if from == to {
+        return true;
+    }
+    let mut queue: std::collections::VecDeque<String> =
+        std::collections::VecDeque::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    queue.push_back(from.to_string());
+    visited.insert(from.to_string());
+    while let Some(cur) = queue.pop_front() {
+        if let Some(m) = modules.get(&cur) {
+            for dep in &m.dependencies {
+                if dep == to {
+                    return true;
+                }
+                if visited.insert(dep.clone()) {
+                    queue.push_back(dep.clone());
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Resolves stdlib modules and their dependencies
 #[derive(Debug)]
 pub struct StdlibModuleResolver {
@@ -1030,62 +1064,87 @@ impl StdlibModuleResolver {
                     if !self.modules.contains_key(&dep) {
                         continue;
                     }
-                    // **Conservative augmentation gate**: the stdlib has
-                    // *real* mutual layer references — `core.sys` mounts
-                    // `core.base.{Maybe, Result, protocols, coercion}`
-                    // for return-type info, and `core.base` mounts
-                    // `core.mem.allocator.*` for `cbgr_alloc` —
-                    // producing a `sys ↔ base ↔ mem ↔ sys` cycle that
-                    // the hardcoded baseline breaks ARBITRARILY by
-                    // listing only some edges. The actual compilation
-                    // works because forward-reference resolution
-                    // happens in multiple passes (parse → register
-                    // declarations → resolve types → codegen bodies)
-                    // and each pass tolerates not-yet-loaded references.
+                    // **FUNDAMENTAL augmentation rule** (replaces the
+                    // earlier hardcoded FOUNDATION_DEPS_TO_FORCE gate):
                     //
-                    // Adding every mount edge as a hard topological
-                    // constraint surfaces every cycle as a fatal error
-                    // — but the compilation was working with stale
-                    // edges. So restrict the augmentation to the dep
-                    // class that ACTUALLY broke: the foundation-module
-                    // `core.intrinsics`, which holds `@intrinsic`-
-                    // decorated raw-syscall declarations that user-side
-                    // codegen's mount-resolution looks up by exact
-                    // qualified name. When `core.intrinsics` compiles
-                    // BEFORE the consumer, the lookup succeeds; when
-                    // AFTER, the consumer's wrappers compile to
-                    // lenient panic-stubs. Force-ordering ONLY
-                    // `core.intrinsics` before its consumers eliminates
-                    // the panic-stub class without disturbing the
-                    // other (cyclic-but-working) forward references.
+                    // Always propose the edge.  Cycle detection is
+                    // performed once after the full edge list is
+                    // collected (see the apply-loop below); back-edges
+                    // that would form a cycle get dropped DETERMINISTI-
+                    // CALLY (consumer-side, so the cycle's "earliest"
+                    // member ends up compiling first per the existing
+                    // hardcoded baseline).
                     //
-                    // Other foundation modules (`core`, `core.sys`,
-                    // `core.base`, `core.mem`) are already correctly
-                    // ordered by the hardcoded baseline; adding their
-                    // derived edges only re-introduces cycles. Keep
-                    // them in the cycle-tolerant forward-reference
-                    // path until the codegen-time function-table
-                    // resolution is itself made order-independent.
-                    if !FOUNDATION_DEPS_TO_FORCE.contains(&dep.as_str()) {
-                        continue;
-                    }
+                    // This closes the panic-stub class universally —
+                    // every `mount X.Y.{Z};` in stdlib code surfaces
+                    // its dependency on X.Y to the topo sort, so X.Y's
+                    // public functions are guaranteed registered when
+                    // the consumer compiles.  Pre-fix, only consumers
+                    // of `core.intrinsics` benefited from forced
+                    // ordering; every other foundation utility
+                    // (`core.security.util.rng`, `core.sys.common`,
+                    // `core.base.protocols`, etc.) compiled in the
+                    // arbitrary order dictated by the hardcoded
+                    // baseline, surfacing as
+                    //   `[lenient] X compiled to panic-stub: undefined
+                    //    function: Y` whenever the consumer happened
+                    // to come first.
                     derived_edges.push((module_name.clone(), dep));
+                    let _ = FOUNDATION_DEPS_TO_FORCE; // (preserved for grep-discoverability of historical gate)
                 }
             }
         }
 
-        // Dedupe and apply. Keep the existing hardcoded deps and only
-        // ADD new ones — the hardcoded table is authoritative for
-        // ordering choices the maintainer made on purpose (e.g. listing
-        // `core.sys.linux` / `darwin` / `windows` as deps of `core.text`
-        // even though the actual mount is conditional under `@cfg`).
-        for (consumer, dep) in derived_edges {
+        // Dedupe + cycle-tolerant apply.  Keep the hardcoded baseline
+        // deps as-is; add a derived edge ONLY if it doesn't introduce a
+        // new cycle (the stdlib has real mutual layer references —
+        // `core.sys ↔ core.base ↔ core.mem ↔ core.sys` — that the
+        // hardcoded baseline breaks arbitrarily; we mustn't re-introduce
+        // those).
+        //
+        // Order matters: process edges in (consumer, dep) sorted order
+        // so the dropped back-edges are deterministic across runs.
+        let mut sorted_edges: Vec<(String, String)> = derived_edges
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        sorted_edges.sort();
+
+        for (consumer, dep) in sorted_edges {
             if !module_utils::should_compile_module_for_target(&dep, target) {
                 continue;
             }
-            if let Some(module) = self.modules.get_mut(&consumer)
-                && !module.dependencies.contains(&dep)
+            // Skip if the consumer module doesn't exist (already
+            // filtered upstream but defense-in-depth).
+            if !self.modules.contains_key(&consumer) {
+                continue;
+            }
+            // Skip if the edge already exists (hardcoded or earlier-
+            // derived).
+            if self
+                .modules
+                .get(&consumer)
+                .map(|m| m.dependencies.contains(&dep))
+                .unwrap_or(false)
             {
+                continue;
+            }
+            // Cycle check: would adding `consumer → dep` make `dep`
+            // reach `consumer`?  If yes, the edge is a back-edge in
+            // the existing partial order — dropping it preserves the
+            // hardcoded baseline's cycle-break choice.  Cheap BFS
+            // from `dep` over current dep edges; cap at modest depth
+            // (the dep graph has ~100 modules in stdlib).
+            if reaches(&self.modules, &dep, &consumer) {
+                tracing::debug!(
+                    "[stdlib] dropping derived dep edge {} → {} (would form cycle)",
+                    consumer,
+                    dep
+                );
+                continue;
+            }
+            if let Some(module) = self.modules.get_mut(&consumer) {
                 module.dependencies.push(dep);
             }
         }

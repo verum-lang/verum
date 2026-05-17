@@ -54,6 +54,7 @@
 )
 module core.security.util.rng;
 mount core.*;
+mount core.sys.common.random_bytes as sys_random_bytes;
 
 /// Fill `buf` with `buf.len()` cryptographically secure random bytes.
 ///
@@ -63,22 +64,25 @@ mount core.*;
 /// function does not allocate.
 ///
 
-/// Thin wrapper around the runtime intrinsic
-/// `@intrinsic("verum.rng.fill_secure", N)` that returns a fresh
-/// length-N byte sequence. We copy element-wise rather than
-/// memcpy because the intrinsic surface is a value, not a pointer
-/// — the codegen lowers the intrinsic-result-to-buffer copy to a
-/// vectorised store on the native target.
+/// Routes through `core.sys.common.random_bytes` which dispatches to
+/// the platform CSPRNG via the canonical syscall path —
+/// `getrandom(2)` on Linux, `getentropy(3)` on Darwin (via libSystem),
+/// `BCryptGenRandom` on Windows.  The earlier `@intrinsic("verum.rng.
+/// fill_secure", N)` shape silently emitted `LoadNil` (the intrinsic
+/// was never registered), so every caller (BloomFilter, HyperLogLog,
+/// CountMinSketch, AliasSampler, Reservoir replacement-phase, TLS
+/// ticket issuers) hit `NullPointerAt` when indexing the nil result.
+/// Routing through `sys.common` reuses the audited platform-aware
+/// implementation that already powers `core.base.nanoid` and
+/// `core.base.ulid`.
 ///
 
 /// Spec: NIST SP 800-90A — DRBG draw, full-entropy reseed.
 public fn fill_secure(buf: &mut List<Byte>) {
-    let n = buf.len();
-    let filled = @intrinsic("verum.rng.fill_secure", n);
-    let mut i = 0;
-    while i < n {
-        buf[i] = filled[i];
-        i = i + 1;
+    if buf.len() == 0 { return; }
+    match sys_random_bytes(buf.as_mut_slice()) {
+        Ok(_)  => {},
+        Err(_) => panic("fill_secure: kernel CSPRNG unavailable — refusing weak randomness"),
     }
 }
 
@@ -87,11 +91,10 @@ public fn fill_secure(buf: &mut List<Byte>) {
 /// destination at every call site, which the AOT path lowers to a
 /// register-resident draw on `N <= 64` for x86-64 / aarch64.
 public fn fill_secure_array<const N: Int>(buf: &mut [Byte; N]) {
-    let filled = @intrinsic("verum.rng.fill_secure", N);
-    let mut i = 0;
-    while i < N {
-        buf[i] = filled[i];
-        i = i + 1;
+    if N == 0 { return; }
+    match sys_random_bytes(&mut buf[..]) {
+        Ok(_)  => {},
+        Err(_) => panic("fill_secure_array: kernel CSPRNG unavailable"),
     }
 }
 
