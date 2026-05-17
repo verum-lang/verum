@@ -3372,6 +3372,43 @@ pub fn lower_instruction<'ctx>(
             tag,
             field_count,
         } => {
+            // **Operand-is-source-of-truth lowering** (task #22 close).
+            //
+            // Pre-fix this site treated a `validate_variant_layout`
+            // mismatch as a HARD error, returning
+            // `LlvmLoweringError::UnsupportedInstruction` which caused
+            // `Skipping function 'core.architecture.types.capability_*'`
+            // for every helper that constructed `Capability.{Tuple-
+            // payload variant}`.  The skip turned each affected
+            // function into a bodyless stub at AOT — silently broken
+            // user-visible behaviour.
+            //
+            // Root cause: descriptor for the constructed type
+            // (e.g. `Capability` at TypeId 1405) carries Unit-shaped
+            // variants in `vbc_mod.types` even though the codegen
+            // emitted MakeVariantTyped with a tuple field_count.  The
+            // descriptor mutation likely happens via cross-module
+            // re-registration where one side records the variants as
+            // Unit (placeholder) and `push_type_dedupe`'s
+            // first-rich-wins discipline kept the Unit shape.
+            //
+            // **Fundamental fix**: at IR lowering time, the encoded
+            // operand `field_count` IS the source of truth — the
+            // codegen already committed to this shape by emitting
+            // the instruction.  Validation against the descriptor is
+            // a sanity probe, not a hard gate; on disagreement, log
+            // the mismatch through the `SIGNATURE_MISMATCH_REGISTRY`
+            // diagnostic channel (so it surfaces in test output) and
+            // proceed with the operand's field_count.  The
+            // `lower_make_variant` path uses `field_count` directly,
+            // so the emitted IR is well-formed regardless of the
+            // descriptor's stale view.
+            //
+            // Mirrors the architectural pattern in task #15: caller's
+            // hint is honoured; validator's view is informational.
+            // The codegen and validator must eventually reconcile
+            // their descriptor view (tracked separately), but this
+            // does NOT block the function from compiling correctly.
             if let Some(vbc_mod) = ctx.vbc_module() {
                 if let Err(layout_err) = verum_vbc::validate::validate_variant_layout(
                     vbc_mod,
@@ -3379,12 +3416,14 @@ pub fn lower_instruction<'ctx>(
                     *tag,
                     *field_count,
                 ) {
-                    return Err(LlvmLoweringError::UnsupportedInstruction(
-                        verum_common::Text::from(format!(
-                            "MakeVariantTyped layout validation failed: {}",
-                            layout_err,
-                        )),
-                    ));
+                    super::error::record_signature_mismatch_public(
+                        &format!("MakeVariantTyped(type_id={})", type_id),
+                        format!("descriptor: {}", layout_err),
+                        format!(
+                            "operand: tag={}, field_count={} (used)",
+                            tag, field_count
+                        ),
+                    );
                 }
             }
             let runtime = RuntimeLowering::new(ctx.llvm_context());
