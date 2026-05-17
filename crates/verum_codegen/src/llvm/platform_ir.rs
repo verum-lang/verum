@@ -6160,6 +6160,7 @@ impl<'ctx> PlatformIR<'ctx> {
     fn emit_tcp_connect_timeout(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
+        let ptr_type = ctx.ptr_type(AddressSpace::default());
         let fn_type =
             i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
         let func = self.get_or_declare_fn(module, "verum_tcp_connect_timeout", fn_type);
@@ -6181,14 +6182,38 @@ impl<'ctx> PlatformIR<'ctx> {
             .into_int_value();
         // timeout_ms is param 2 — currently unused (see doc comment).
 
+        // **Canonical routing** (task #19 close): `verum_tcp_connect`
+        // canonical signature per `syscall_registry::VERUM_RUNTIME_SYMBOLS`
+        // is `i64 (ptr host, i64 port) -> i64`.  Pre-fix this site
+        // declared the local `fn_type` as `i64 (i64, i64)`, recorded
+        // in the SIGNATURE_MISMATCH_REGISTRY as the last remaining
+        // informational mismatch post-tasks #15/#16.
+        //
+        // Fix: route through canonical (ptr, i64) — the registry-first
+        // `get_or_declare_function` enforces this regardless, but we
+        // pass the canonical hint here to keep the diagnostic registry
+        // quiet for the common case.  The host param of THIS function
+        // (timeout wrapper) is an i64-shaped Text handle, so we
+        // convert to a raw char* via `verum_text_get_ptr` at the
+        // boundary — same pattern as `instruction.rs::TcpStream.connect`
+        // (line ~14488).
+        let text_get_ptr_fn = {
+            let ft = ptr_type.fn_type(&[i64_type.into()], false);
+            super::error::get_or_declare_function(module, "verum_text_get_ptr", ft)
+        };
+        let host_ptr = builder
+            .build_call(text_get_ptr_fn, &[host.into()], "tct_host_cptr")
+            .or_llvm_err()?
+            .basic_value_or("text_get_ptr: no value")?
+            .into_pointer_value();
         let connect_fn = self
             .get_or_declare_fn(
                 module,
                 "verum_tcp_connect",
-                i64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
+                i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
             );
         let result = builder
-            .build_call(connect_fn, &[host.into(), port.into()], "ct")
+            .build_call(connect_fn, &[host_ptr.into(), port.into()], "ct")
             .or_llvm_err()?
             .basic_value_or("expected basic value")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
