@@ -313,6 +313,7 @@ perf(crate): Optimize by X%
 | Syntax | `docs/detailed/05-syntax-grammar.md` |
 | Context System | `docs/detailed/16-context-system.md` |
 | CBGR | `docs/detailed/cbgr-implementation.md` |
+| **Intrinsic Dispatch Contract** | `docs/architecture/intrinsic-dispatch-contract.md` — body `@intrinsic` vs table authority, LLVM-canonical alias requirements, `static mut` cell-backed address-of, CBGR-ref bound-check, three-tier reference dispatch. Pinned rules with regression-test references. |
 | Cog Distribution | `docs/detailed/15-cog-distribution-architecture.md` |
 | Cog Management | `docs/detailed/15-cog-management.md` |
 | Roadmap | `docs/detailed/28-implementation-roadmap.md` |
