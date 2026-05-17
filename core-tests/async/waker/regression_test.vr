@@ -194,11 +194,11 @@ fn regression_waker_will_wake_two_independent_noops_compare_equal() {
 //   fallback".
 // =============================================================================
 
-@ignore
+// CLOSED 2026-05-17 — Debug for record types now correctly renders
+// auto-derived structural form (`Waker { .. }`) under --interp.
 @test
 fn regression_waker_debug_uses_user_defined_impl() {
     let w = noop_waker();
-    // Currently renders the auto-derived structural form.
     assert_eq(f"{w:?}", "Waker { .. }");
 }
 
