@@ -148,28 +148,32 @@ fn regression_c_from_digit_hex_boundary_pinned() {
 // for the obvious inputs.
 // =============================================================================
 
-@ignore
+// CLOSED 2026-05-19 — CharSubOpcode::GeneralCategory intrinsic now
+// wraps the computed tag in a proper `GeneralCategory` unit variant
+// (via `alloc_unit_variant` + `lookup_type_id_by_name`) so the
+// `is GeneralCategory.X` operator's variant-tag check sees a real
+// variant value, not a bare Int.
 @test
 fn regression_d_general_category_lower_letter_pinned() {
     let cat = 'a'.general_category();
     assert(cat is GeneralCategory.Ll);
 }
 
-@ignore
+// CLOSED 2026-05-19 — same path as lower_letter.
 @test
 fn regression_d_general_category_upper_letter_pinned() {
     let cat = 'A'.general_category();
     assert(cat is GeneralCategory.Lu);
 }
 
-@ignore
+// CLOSED 2026-05-19 — same path as lower_letter.
 @test
 fn regression_d_general_category_decimal_digit_pinned() {
     let cat = '5'.general_category();
     assert(cat is GeneralCategory.Nd);
 }
 
-@ignore
+// CLOSED 2026-05-19 — same path as lower_letter.
 @test
 fn regression_d_general_category_space_separator_pinned() {
     let cat = ' '.general_category();

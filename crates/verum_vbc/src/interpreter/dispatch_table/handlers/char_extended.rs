@@ -696,7 +696,29 @@ pub(in super::super) fn handle_char_extended(
                 }
             };
 
-            state.set_reg(dst, Value::from_i64(category));
+            // #22 §D close: wrap the computed tag in a proper
+            // `GeneralCategory` variant value.  Pre-fix the intrinsic
+            // returned a bare `Value::from_i64(tag)` and the user-side
+            // wrapper `fn general_category(self) -> GeneralCategory`
+            // simply returned the Int.  Then `cat is GeneralCategory.Ll`
+            // (the `is` operator's variant-tag check) compared against
+            // a non-variant Int value — never matched — every
+            // `general_category` `is`-test failed.
+            //
+            // Allocate a unit-shaped variant of `GeneralCategory` with
+            // the computed tag so the runtime `is` check sees a real
+            // variant payload.  TypeId resolved at runtime via the
+            // canonical `lookup_type_id_by_name` helper; falls back to
+            // `Value::from_i64(category)` only when the type isn't
+            // registered (precompile path before user-side import).
+            let result = if let Some(type_id) =
+                super::heap_helpers::lookup_type_id_by_name(state, "GeneralCategory")
+            {
+                super::method_dispatch::alloc_unit_variant(state, type_id, category as u32)?
+            } else {
+                Value::from_i64(category)
+            };
+            state.set_reg(dst, result);
             Ok(DispatchResult::Continue)
         }
 
