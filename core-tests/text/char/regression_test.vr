@@ -101,7 +101,11 @@ fn regression_b_eq_ignore_ascii_case_non_letter_pinned() {
 // `Char.from_digit`.
 // =============================================================================
 
-@ignore
+// CLOSED 2026-05-18 — duplicate `Char.from_digit` in
+// `core/base/primitives.vr` returned uppercase ('A'-'Z') and
+// shadowed the canonical `core/text/char.vr` lowercase definition
+// at archive load (first-wins on bare key).  Aligned primitives.vr
+// to `87 + digit` (= 'a' + digit - 10) so both definitions agree.
 @test
 fn regression_c_from_digit_hex_pinned() {
     match Char.from_digit(10, 16) {
@@ -110,7 +114,7 @@ fn regression_c_from_digit_hex_pinned() {
     }
 }
 
-@ignore
+// CLOSED 2026-05-18 — same path as quotes_pinned.
 @test
 fn regression_c_from_digit_hex_boundary_pinned() {
     // Full boundary sweep: digit 0..36 in base 36 with lowercase-letter

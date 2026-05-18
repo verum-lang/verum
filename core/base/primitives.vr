@@ -1717,6 +1717,25 @@ implement Char {
     }
 
     /// Create from digit value in given radix.
+    ///
+    /// Returns lowercase letters (`a`-`z`) for hex digits 10..=35,
+    /// matching the standard `from_digit` convention shared with
+    /// Rust / Swift / Python.  Callers needing uppercase output
+    /// should call `.to_ascii_uppercase()` on the result.
+    ///
+    /// Pinned by
+    /// `core-tests/text/char/regression_test.vr::regression_c_from_digit_hex_pinned`.
+    ///
+    /// Architectural rule: there must be exactly ONE `Char.from_digit`
+    /// definition in the stdlib — `core/text/char.vr:from_digit` is
+    /// the canonical home. This site existed historically as a sibling
+    /// definition and silently shadowed the canonical one during stdlib
+    /// load (`Char.from_digit` registered under bare key first-wins on
+    /// the cross-module name), making hex digits 10..=35 render as
+    /// 'A'..='Z' instead of 'a'..='z'.  Aligning the offset here is
+    /// the workaround until mount-scope-aware lookup lands (#39 in
+    /// MEMORY.md); the canonical body in `core/text/char.vr` is
+    /// `'a' as Int + digit - 10`, identical arithmetic to `87 + digit`.
     public fn from_digit(digit: Int, radix: Int) -> Maybe<Char> {
         assert(radix >= 2 && radix <= 36, "radix must be 2..=36");
         if digit < 0 || digit >= radix {
@@ -1724,7 +1743,7 @@ implement Char {
         } else if digit < 10 {
             Some((48 + digit) as Char)  // '0'-'9'
         } else {
-            Some((55 + digit) as Char)  // 'A'-'Z'
+            Some((87 + digit) as Char)  // 'a'-'z' — lowercase (87 = 'a' - 10)
         }
     }
 
