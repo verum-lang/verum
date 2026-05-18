@@ -78,17 +78,7 @@ const MIN_KEYS: Int = B - 1;
 /// }
 /// ```
 public type BTreeMap<K: Ord, V> is {
-    /// Always a valid Heap<BTreeNode>. When the map is empty the root
-    /// node is a leaf with empty keys/values/children. Originally
-    /// `Maybe<Heap<BTreeNode<K,V>>>` — but VBC codegen's variant-payload
-    /// extraction for `match &self.root { Some(node) =&gt; node.&lt;field&gt; }`
-    /// returns a 0-data object when the field type is a Maybe wrapping
-    /// a Heap of a RECURSIVE generic type (triage shows direct
-    /// `Maybe&lt;Heap&lt;T&gt;&gt;` works for non-recursive T, but BTreeNode's
-    /// `children: List&lt;Heap&lt;BTreeNode&lt;K,V&gt;&gt;&gt;` recursion through a
-    /// record field breaks payload extraction).  See task #16.
-    /// Direct `Heap&lt;T&gt;` field access is verified working.
-    root: Heap<BTreeNode<K, V>>,
+    root: Maybe<Heap<BTreeNode<K, V>>>,
     len: Int,
 };
 
@@ -108,16 +98,10 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// Create a new empty BTreeMap.
     public fn new() -> BTreeMap<K, V> {
         BTreeMap {
-            root: Heap.new(BTreeNode.new_leaf()),
+            root: None,
             len: 0,
         }
     }
-
-    /// Empty-state probe — replaces the previous `self.root.is_none()`
-    /// pattern. Uses `self.len == 0` (cheaper than reading the heap
-    /// node's keys list).
-    @inline(always)
-    fn root_is_empty(&self) -> Bool { self.len == 0 }
 
     /// Create a BTreeMap from a list of key-value pairs.
     /// If duplicate keys exist, the last value wins.
@@ -149,9 +133,7 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// Clears the map, removing all elements.
     public fn clear(&mut self) {
-        // Replace the root with a fresh empty leaf — preserves the
-        // non-Maybe representation while resetting the tree state.
-        let _ = replace(&mut self.root, Heap.new(BTreeNode.new_leaf()));
+        self.root = None;
         self.len = 0;
     }
 
@@ -168,18 +150,22 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// assert_eq(map.get(&2), None);
     /// ```
     public fn get(&self, key: &K) -> Maybe<V> {
-        if self.root_is_empty() {
+        if self.root.is_none() {
             return None;
         }
-        self.search_node(&self.root, key)
+        let node = self.root.as_ref()
+            .expect("BTreeMap.get: root is_some by guard above");
+        self.search_node(node, key)
     }
 
     /// Returns a mutable reference to the value corresponding to the key.
     public fn get_mut(&mut self, key: &K) -> Maybe<&mut V> {
-        if self.root_is_empty() {
+        if self.root.is_none() {
             return None;
         }
-        self.search_node_mut(&mut self.root, key)
+        let node = self.root.as_mut()
+            .expect("BTreeMap.get_mut: root is_some by guard above");
+        self.search_node_mut(node, key)
     }
 
     /// Returns true if the map contains a value for the specified key.
@@ -206,34 +192,40 @@ implement<K: Ord, V> BTreeMap<K, V> {
     public fn insert(&mut self, key: K, value: V) -> Maybe<V>
     where K: Clone, V: Clone
     {
-        // Handle empty tree — populate the existing sentinel root.
-        if self.root_is_empty() {
-            self.root.keys.push(key);
-            self.root.values.push(value);
+        // Handle empty tree
+        if self.root.is_none() {
+            let mut node = BTreeNode.new_leaf();
+            node.keys.push(key);
+            node.values.push(value);
+            self.root = Some(Heap.new(node));
             self.len = 1;
             return None;
         }
 
-        // Check if key exists — replace value directly.  Direct
-        // `&mut self.root` (Heap field, no Maybe wrapper) — see the
-        // type-decl comment for the workaround rationale.
-        match self.replace_value_in_node(&mut self.root, key.clone(), value.clone()) {
+        // Check if key exists — replace value directly via SetE (no &mut references)
+        // Pass key by value (not &key) to avoid alloca/deref mismatch in VBC generics.
+        let root_ref = self.root.as_mut()
+            .expect("BTreeMap.insert: root is_some after the empty-tree initial-insert branch above");
+        match self.replace_value_in_node(root_ref, key, value) {
             Some(old_val) => {
                 return Some(old_val);
             },
             None => {},
         }
 
-        // Insert into tree.
+        // Insert into tree
+        let root = self.root.as_mut()
+            .expect("BTreeMap.insert: root is_some (still) after the replace-in-node branch above");
+
         // If root is full, split it
-        if self.root.keys.len() == MAX_KEYS {
+        if root.keys.len() == MAX_KEYS {
             let new_root = BTreeNode.new_internal();
-            let old_root = replace(&mut self.root, Heap.new(new_root));
-            self.root.children.push(old_root);
-            self.split_child(&mut self.root, 0);
+            let old_root = replace(root, Heap.new(new_root));
+            root.children.push(old_root);
+            self.split_child(root, 0);
         }
 
-        self.insert_non_full(&mut self.root, key, value);
+        self.insert_non_full(root, key, value);
         self.len = self.len + 1;
         None
     }
@@ -253,18 +245,23 @@ implement<K: Ord, V> BTreeMap<K, V> {
     public fn remove(&mut self, key: &K) -> Maybe<V>
     where K: Clone, V: Clone
     {
-        if self.root_is_empty() {
+        if self.root.is_none() {
             return None;
         }
 
-        let res = self.remove_from_node(&mut self.root, key);
+        let res = self.remove_from_node(
+            self.root.as_mut()
+                .expect("BTreeMap.remove: root is_some by guard above"),
+            key,
+        );
 
-        // If root became empty && has a child, make child the new root.
-        // The non-Maybe representation means we always have a valid Heap;
-        // just promote the first child if root keys went empty.
-        if self.root.keys.is_empty() && !self.root.children.is_empty() {
-            let new_root = self.root.children.remove(0);
-            let _ = replace(&mut self.root, new_root);
+        // If root became empty && has a child, make child the new root
+        if let Some(ref mut root) = self.root {
+            if root.keys.is_empty() && !root.children.is_empty() {
+                self.root = Some(root.children.remove(0));
+            } else if root.keys.is_empty() {
+                self.root = None;
+            }
         }
 
         if res.is_some() {
@@ -278,8 +275,10 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// The key is the minimum key in the map.
     public fn first_key_value(&self) -> Maybe<(&K, &V)> {
-        if self.root_is_empty() { return None; }
-        self.find_min(&self.root)
+        match &self.root {
+            None => None,
+            Some(node) => self.find_min(node),
+        }
     }
 
     /// Gets the last key-value pair in the map.
@@ -287,8 +286,10 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
     /// The key is the maximum key in the map.
     public fn last_key_value(&self) -> Maybe<(&K, &V)> {
-        if self.root_is_empty() { return None; }
-        self.find_max(&self.root)
+        match &self.root {
+            None => None,
+            Some(node) => self.find_max(node),
+        }
     }
 
     /// Removes and returns the first (minimum) key-value pair.
@@ -382,8 +383,10 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// assert_eq(map.lower_bound(&6), None);
     /// ```
     public fn lower_bound(&self, key: &K) -> Maybe<(&K, &V)> {
-        if self.root_is_empty() { return None; }
-        self.find_lower_bound(&self.root, key)
+        match &self.root {
+            None => None,
+            Some(node) => self.find_lower_bound(node, key),
+        }
     }
 
     /// Returns the first key-value pair with a key strictly greater than the given key.
@@ -406,8 +409,10 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// assert_eq(map.upper_bound(&5), None);
     /// ```
     public fn upper_bound(&self, key: &K) -> Maybe<(&K, &V)> {
-        if self.root_is_empty() { return None; }
-        self.find_upper_bound(&self.root, key)
+        match &self.root {
+            None => None,
+            Some(node) => self.find_upper_bound(node, key),
+        }
     }
 
     /// Returns the key-value pair corresponding to the supplied key.
@@ -416,8 +421,10 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// This is useful when the key type implements `Ord` based on only a portion
     /// of the value, and you want to get the full stored key.
     public fn get_key_value(&self, key: &K) -> Maybe<(&K, &V)> {
-        if self.root_is_empty() { return None; }
-        self.search_node_kv(&self.root, key)
+        match &self.root {
+            None => None,
+            Some(node) => self.search_node_kv(node, key),
+        }
     }
 
     /// Removes a key from the map, returning the stored key and value if present.
@@ -1635,8 +1642,8 @@ implement<K: Ord, V> BTreeMapIter<K, V> {
             len: map.len,
         };
 
-        if map.len > 0 {
-            iter.push_left(&map.root);
+        if let Some(ref root) = map.root {
+            iter.push_left(root);
         }
 
         iter
@@ -1653,8 +1660,8 @@ implement<K: Ord, V> BTreeMapIter<K, V> {
             len: 0,
         };
 
-        if map.len > 0 {
-            iter.seek_to_key(&map.root, start_key);
+        if let Some(ref root) = map.root {
+            iter.seek_to_key(root, start_key);
             // Estimate remaining length (upper bound is map.len)
             iter.len = map.len;
         }
