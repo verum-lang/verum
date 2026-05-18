@@ -567,9 +567,32 @@ impl<'s> CompilationPipeline<'s> {
             // the bitcode-write / loop-pass SIGBUS on arity-collided
             // modules (#98).
             let override_passes = std::env::var("VERUM_PASSES_OVERRIDE").ok();
+            // **Task #24 mitigation** (LLVM PassManager SIGBUS at
+            // `appendLoopsToWorklist` / `IntervalMap::deleteNode`):
+            // `default<O[1-3]>` triggers LLVM's loop-pass pipeline,
+            // which walks Verum-emitted IR's loop-info graph and
+            // SIGBUSes on metadata corruption / dangling Use chains
+            // (see lines 645-710 for the full investigation log —
+            // bitcode + text roundtrip both crash, root cause is
+            // metadata-corruption-at-write-time not pass-side bug).
+            //
+            // The crash is deterministic for every non-trivial
+            // module; even `fn main() { let x: Int = 42; }` reproduces
+            // it.  Until the metadata-corruption root cause lands,
+            // **default to `always-inline,globaldce`** — the same
+            // safe pipeline that `has_ir_issues` branch uses.  Users
+            // who need aggressive optimisation can opt in explicitly
+            // via `VERUM_FORCE_FULL_O2=1` (force the broken
+            // `default<O2>`) or `VERUM_PASSES_OVERRIDE=<pipeline>`
+            // (custom pipeline).
+            //
+            // Validated 2026-05-18: `verum build --release` on a
+            // minimal program produces a 17.1 KB binary linking only
+            // libSystem.B.dylib (no-libc invariant per CLAUDE.md);
+            // running the binary exits 0.
             let passes = if let Some(p) = override_passes {
                 p
-            } else if !has_ir_issues || force_full {
+            } else if force_full {
                 match opt_level {
                     0 => "globaldce".to_string(),
                     1 => "default<O1>".to_string(),
