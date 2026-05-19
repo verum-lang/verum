@@ -225,17 +225,37 @@ implement CapEvent {
     /// True iff this event bumped the generation counter (Revoke or
     /// GenBump). Useful for filtering out non-lifetime-affecting
     /// events when reconstructing a use-after-free trace.
+    ///
+    /// Pre-fix this body compared `generation_before != generation_after`,
+    /// which was technically equivalent under the invariant that
+    /// callers must pass equal generation values for non-bump events
+    /// — but the test surface
+    /// `core-tests/mem/cap_audit/regression_test.vr::regression_bumped_generation_matrix`
+    /// constructs events with `(generation_before=1, generation_after=2)`
+    /// for ALL six `CapEventKind` variants and expects only Revoke /
+    /// GenBump to return true.  Switching to a kind-based check makes
+    /// the semantics intent-driven and matches the doc-comment.
     @inline
     public fn bumped_generation(&self) -> Bool {
-        self.generation_before != self.generation_after
+        match self.kind {
+            CapEventKind.Revoke => true,
+            CapEventKind.GenBump => true,
+            _ => false,
+        }
     }
 
     /// True iff this event modified the capability mask (Revoke or
     /// Attenuate). RefIncr / RefDecr / GenBump / EpochAdvance leave
     /// the mask unchanged.
+    ///
+    /// See `bumped_generation` for the kind-based check rationale.
     @inline
     public fn modified_capabilities(&self) -> Bool {
-        self.capabilities_before != self.capabilities_after
+        match self.kind {
+            CapEventKind.Revoke => true,
+            CapEventKind.Attenuate => true,
+            _ => false,
+        }
     }
 
     /// Bitmask of capabilities cleared by this event. Returns 0
