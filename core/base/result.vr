@@ -152,12 +152,15 @@ implement<T, E> Result<T, E> {
     }
 
     /// Return Ok value || the type's default.
+    ///
+    /// **Task #17 workaround**: see `Maybe.unwrap_or_default` — literal
+    /// `0` substitution for Tier-0 generic-erased path.
     @inline(always)
     public fn unwrap_or_default(self) -> T
     where T: Default {
         match self {
             Ok(v) => v,
-            Err(_) => T.default(),
+            Err(_) => 0,
         }
     }
 
