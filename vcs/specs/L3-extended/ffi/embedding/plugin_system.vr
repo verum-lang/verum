@@ -275,7 +275,7 @@ fn example_on_event(ctx: *mut PluginContext, event: *const Event) -> c_int {
 @no_mangle
 @extern("C")
 fn plugin_manager_create() -> *mut PluginManager {
-    Heap.into_raw(Heap(PluginManager.new()))
+    Heap.into_raw(Heap.new(PluginManager.new()))
 }
 
 /// Destroy plugin manager

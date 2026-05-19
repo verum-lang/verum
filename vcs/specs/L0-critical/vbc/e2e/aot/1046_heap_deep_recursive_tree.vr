@@ -55,9 +55,9 @@ fn main() -> Int {
     //    /
     //   4
     let leaf4 = Tree { value: 4, children: [] };
-    let node2 = Tree { value: 2, children: [Heap(leaf4)] };
+    let node2 = Tree { value: 2, children: [Heap.new(leaf4)] };
     let leaf3 = Tree { value: 3, children: [] };
-    let root = Tree { value: 1, children: [Heap(node2), Heap(leaf3)] };
+    let root = Tree { value: 1, children: [Heap.new(node2), Heap.new(leaf3)] };
 
     let s = root.sum();
     let d = root.depth();

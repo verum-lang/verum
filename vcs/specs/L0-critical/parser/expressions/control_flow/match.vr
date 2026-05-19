@@ -189,8 +189,8 @@ fn test_match_slice_patterns() {
 fn test_match_heap_patterns() {
     // Match with heap patterns (Verum uses Heap<T> instead of Rust's Box<T>)
     match heap_value {
-        Heap(0) => "zero",
-        Heap(n) => f"heap {n}",
+        Heap.new(0) => "zero",
+        Heap.new(n) => f"heap {n}",
     }
 }
 

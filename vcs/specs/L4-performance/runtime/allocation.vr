@@ -65,14 +65,14 @@ fn benchmark_stack_allocation() -> BenchmarkResult {
 /// Tiny allocation (16 bytes)
 fn benchmark_tiny_allocation() -> BenchmarkResult {
     for _ in 0..WARMUP_ITERATIONS {
-        let obj = Heap([0u8; SIZE_TINY]);
+        let obj = Heap.new([0u8; SIZE_TINY]);
         black_box(&*obj);
     }
 
     let start = Instant.now();
 
     for _ in 0..BENCHMARK_ITERATIONS {
-        let obj = Heap([0u8; SIZE_TINY]);
+        let obj = Heap.new([0u8; SIZE_TINY]);
         black_box(&*obj);
     }
 
@@ -92,14 +92,14 @@ fn benchmark_tiny_allocation() -> BenchmarkResult {
 /// Small allocation (64 bytes)
 fn benchmark_small_allocation() -> BenchmarkResult {
     for _ in 0..WARMUP_ITERATIONS {
-        let obj = Heap([0u8; SIZE_SMALL]);
+        let obj = Heap.new([0u8; SIZE_SMALL]);
         black_box(&*obj);
     }
 
     let start = Instant.now();
 
     for _ in 0..BENCHMARK_ITERATIONS {
-        let obj = Heap([0u8; SIZE_SMALL]);
+        let obj = Heap.new([0u8; SIZE_SMALL]);
         black_box(&*obj);
     }
 
@@ -121,14 +121,14 @@ fn benchmark_medium_allocation() -> BenchmarkResult {
     let iterations = BENCHMARK_ITERATIONS / 10;
 
     for _ in 0..(WARMUP_ITERATIONS / 10) {
-        let obj = Heap([0u8; SIZE_MEDIUM]);
+        let obj = Heap.new([0u8; SIZE_MEDIUM]);
         black_box(&*obj);
     }
 
     let start = Instant.now();
 
     for _ in 0..iterations {
-        let obj = Heap([0u8; SIZE_MEDIUM]);
+        let obj = Heap.new([0u8; SIZE_MEDIUM]);
         black_box(&*obj);
     }
 
@@ -150,14 +150,14 @@ fn benchmark_large_allocation() -> BenchmarkResult {
     let iterations = BENCHMARK_ITERATIONS / 100;
 
     for _ in 0..(WARMUP_ITERATIONS / 100) {
-        let obj = Heap([0u8; SIZE_LARGE]);
+        let obj = Heap.new([0u8; SIZE_LARGE]);
         black_box(&*obj);
     }
 
     let start = Instant.now();
 
     for _ in 0..iterations {
-        let obj = Heap([0u8; SIZE_LARGE]);
+        let obj = Heap.new([0u8; SIZE_LARGE]);
         black_box(&*obj);
     }
 
@@ -179,14 +179,14 @@ fn benchmark_huge_allocation() -> BenchmarkResult {
     let iterations = BENCHMARK_ITERATIONS / 1000;
 
     for _ in 0..(WARMUP_ITERATIONS / 1000) {
-        let obj = Heap([0u8; SIZE_HUGE]);
+        let obj = Heap.new([0u8; SIZE_HUGE]);
         black_box(&*obj);
     }
 
     let start = Instant.now();
 
     for _ in 0..iterations {
-        let obj = Heap([0u8; SIZE_HUGE]);
+        let obj = Heap.new([0u8; SIZE_HUGE]);
         black_box(&*obj);
     }
 
@@ -206,7 +206,7 @@ fn benchmark_huge_allocation() -> BenchmarkResult {
 /// CBGR Heap allocation (with generation tracking)
 fn benchmark_cbgr_heap_allocation() -> BenchmarkResult {
     for _ in 0..WARMUP_ITERATIONS {
-        let obj = Heap([0u8; SIZE_SMALL]);
+        let obj = Heap.new([0u8; SIZE_SMALL]);
         black_box(&*obj);
     }
 
@@ -214,7 +214,7 @@ fn benchmark_cbgr_heap_allocation() -> BenchmarkResult {
 
     for _ in 0..BENCHMARK_ITERATIONS {
         // Heap<T> includes CBGR metadata
-        let obj = Heap([0u8; SIZE_SMALL]);
+        let obj = Heap.new([0u8; SIZE_SMALL]);
         black_box(&*obj);
     }
 
@@ -300,7 +300,7 @@ fn benchmark_list_preallocate() -> BenchmarkResult {
 /// Allocation + deallocation cycle
 fn benchmark_alloc_dealloc_cycle() -> BenchmarkResult {
     for _ in 0..WARMUP_ITERATIONS {
-        let obj = Heap([0u8; SIZE_SMALL]);
+        let obj = Heap.new([0u8; SIZE_SMALL]);
         black_box(&*obj);
         drop(obj);
     }
@@ -308,7 +308,7 @@ fn benchmark_alloc_dealloc_cycle() -> BenchmarkResult {
     let start = Instant.now();
 
     for _ in 0..BENCHMARK_ITERATIONS {
-        let obj = Heap([0u8; SIZE_SMALL]);
+        let obj = Heap.new([0u8; SIZE_SMALL]);
         black_box(&*obj);
         drop(obj);
     }
@@ -343,7 +343,7 @@ fn benchmark_multithreaded_allocation() -> BenchmarkResult {
         let counter = Arc.clone(&total_allocs);
         thread.spawn(move || {
             for _ in 0..OPS_PER_THREAD {
-                let obj = Heap([0u8; SIZE_SMALL]);
+                let obj = Heap.new([0u8; SIZE_SMALL]);
                 black_box(&*obj);
             }
             counter.fetch_add(OPS_PER_THREAD, Ordering.Relaxed);

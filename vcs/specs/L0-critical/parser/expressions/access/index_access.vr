@@ -178,7 +178,7 @@ fn sum_first_two(arr: &List<Int>) -> Int {
 
 // Index on boxed collection
 fn test_index_on_boxed() {
-    let boxed = Heap([1, 2, 3]);
+    let boxed = Heap.new([1, 2, 3]);
     let first = boxed[0];
 }
 

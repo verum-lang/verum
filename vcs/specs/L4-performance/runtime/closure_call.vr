@@ -275,7 +275,7 @@ fn benchmark_closure_mutable_capture() -> BenchmarkResult {
 /// Boxed closure (heap allocated)
 fn benchmark_closure_boxed() -> BenchmarkResult {
     let captured = 42;
-    let closure: Heap<fn() -> Int> = Heap(|| captured);
+    let closure: Heap<fn() -> Int> = Heap.new(|| captured);
 
     // Warmup
     for _ in 0..WARMUP_ITERATIONS {
@@ -304,9 +304,9 @@ fn benchmark_closure_boxed() -> BenchmarkResult {
 /// Dynamic dispatch closure
 fn benchmark_closure_dyn_dispatch() -> BenchmarkResult {
     let closures: List<Heap<Fn() -> Int>> = [
-        Heap(|| 1),
-        Heap(|| 2),
-        Heap(|| 3),
+        Heap.new(|| 1),
+        Heap.new(|| 2),
+        Heap.new(|| 3),
     ];
 
     // Warmup

@@ -215,7 +215,7 @@ fn test_complex_nested_struct_pattern() {
     let order = Order {
         id: 1,
         customer: Customer { name: "Alice", email: "alice@example.com" },
-        items: Cons(1, Heap(Nil)),
+        items: Cons(1, Heap.new(Nil)),
         metadata: Metadata { created_at: 0 }
     };
 

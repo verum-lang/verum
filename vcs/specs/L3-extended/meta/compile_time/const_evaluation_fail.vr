@@ -48,7 +48,7 @@ type Trait is protocol {
 const DYNAMIC: &Trait = &SomeImpl {};  // ERROR: protocol objects not const
 
 // ERROR: Heap allocation in const
-const BOXED: Heap<Int> = Heap(42);
+const BOXED: Heap<Int> = Heap.new(42);
 
 // ERROR: Text formatting with runtime values
 fn get_name() -> Text { "test" }

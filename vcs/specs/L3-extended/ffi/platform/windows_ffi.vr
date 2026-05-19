@@ -276,7 +276,7 @@ ffi kernel32 {
     fn HeapFree(hHeap: HANDLE, dwFlags: DWORD, lpMem: LPVOID) -> BOOL;
 
     @extern("system")
-    fn GetProcessHeap() -> HANDLE;
+    fn GetProcessHeap.new() -> HANDLE;
 }
 
 // Memory allocation types

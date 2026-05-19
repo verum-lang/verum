@@ -31,7 +31,7 @@ const BENCHMARK_ITERATIONS: Int = 10_000_000;
 
 /// Baseline: Raw pointer access
 fn benchmark_raw_pointer() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let ptr: *const i64 = &*data as *const i64;
 
     for _ in 0..WARMUP_ITERATIONS {
@@ -57,7 +57,7 @@ fn benchmark_raw_pointer() -> BenchmarkResult {
 
 /// Tier 1: Checked reference read (should equal raw pointer)
 fn benchmark_checked_ref_read() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     // Compiler proves this reference is safe (doesn't escape scope)
     let checked_ref: &checked i64 = &checked *data;
 
@@ -86,7 +86,7 @@ fn benchmark_checked_ref_read() -> BenchmarkResult {
 
 /// Tier 1: Checked reference write
 fn benchmark_checked_ref_write() -> BenchmarkResult {
-    let mut data = Heap(0i64);
+    let mut data = Heap.new(0i64);
     let checked_ref: &checked mut i64 = &checked mut *data;
 
     for i in 0..WARMUP_ITERATIONS {
@@ -181,7 +181,7 @@ fn benchmark_checked_inlined_function() -> BenchmarkResult {
         *data
     }
 
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
 
     for _ in 0..WARMUP_ITERATIONS {
         black_box(read_checked(&checked *data));

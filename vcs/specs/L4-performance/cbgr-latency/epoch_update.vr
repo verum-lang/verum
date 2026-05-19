@@ -228,7 +228,7 @@ fn benchmark_nested_epochs() -> BenchmarkResult {
 /// Reference access with epoch check (full CBGR path)
 fn benchmark_ref_with_epoch() -> BenchmarkResult {
     let epoch = EpochManager.new();
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let ref_epoch = epoch.get();
     let managed_ref: &i64 = &*data;
 

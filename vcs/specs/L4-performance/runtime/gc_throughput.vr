@@ -28,7 +28,7 @@ fn benchmark_small_alloc() -> AllocBenchmarkResult {
     let start_mem = memory_used();
 
     for i in 0..ITERATIONS {
-        let obj = Heap([0u8; SMALL_ALLOC_SIZE]);
+        let obj = Heap.new([0u8; SMALL_ALLOC_SIZE]);
         allocated.push(obj);
 
         // Periodically drop some objects to trigger GC
@@ -58,7 +58,7 @@ fn benchmark_medium_alloc() -> AllocBenchmarkResult {
     let start_mem = memory_used();
 
     for i in 0..ITERATIONS / 10 {
-        let obj = Heap([0u8; MEDIUM_ALLOC_SIZE]);
+        let obj = Heap.new([0u8; MEDIUM_ALLOC_SIZE]);
         allocated.push(obj);
 
         if i % 100 == 0 && allocated.len() > 50 {
@@ -87,7 +87,7 @@ fn benchmark_large_alloc() -> AllocBenchmarkResult {
     let start_mem = memory_used();
 
     for i in 0..ITERATIONS / 100 {
-        let obj = Heap([0u8; LARGE_ALLOC_SIZE]);
+        let obj = Heap.new([0u8; LARGE_ALLOC_SIZE]);
         allocated.push(obj);
 
         if i % 10 == 0 && allocated.len() > 5 {
@@ -118,7 +118,7 @@ fn benchmark_gc_pauses() -> GCPauseResult {
 
         // Allocate 10MB
         for _ in 0..10_000 {
-            objects.push(Heap([0u8; 1024]));
+            objects.push(Heap.new([0u8; 1024]));
         }
 
         // Force GC and measure pause
@@ -153,14 +153,14 @@ fn benchmark_generational() -> GenerationalResult {
     for _ in 0..1000 {
         // Short-lived objects (should be collected young)
         for _ in 0..100 {
-            let _temp = Heap([0u8; 128]);
+            let _temp = Heap.new([0u8; 128]);
         }
         young_collected += 100;
 
         // Long-lived objects (should be promoted to old gen)
         static mut LONG_LIVED: List<Heap<[u8; 128]> > = List.new();
         unsafe {
-            LONG_LIVED.push(Heap([0u8; 128]));
+            LONG_LIVED.push(Heap.new([0u8; 128]));
             if LONG_LIVED.len() > 100 {
                 LONG_LIVED.truncate(50);
                 old_promoted += 50;
@@ -193,7 +193,7 @@ fn benchmark_concurrent_gc() -> ConcurrentGCResult {
         thread.spawn(|| {
             let mut local_allocs = 0;
             for _ in 0..ITERATIONS / 4 {
-                let _obj = Heap([0u8; 256]);
+                let _obj = Heap.new([0u8; 256]);
                 local_allocs += 1;
             }
             local_allocs

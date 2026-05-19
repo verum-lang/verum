@@ -196,7 +196,7 @@ fn main() {
     assert(sum100 == 5050);
 
     // Recursive data structure
-    let lst: ConsList<Int> = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Nil))))));
+    let lst: ConsList<Int> = Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Nil))))));
 
     let lst_sum = list_sum(lst);
     assert(lst_sum == 6);
@@ -222,7 +222,7 @@ fn main() {
     assert(safe_divide(10, 2) == Some(5));
     assert(safe_divide(10, 0) == None);
 
-    let lst2: ConsList<Int> = Cons(5, Heap(Cons(10, Heap(Cons(15, Heap(Nil))))));
+    let lst2: ConsList<Int> = Cons(5, Heap.new(Cons(10, Heap.new(Cons(15, Heap.new(Nil))))));
     assert(search_list(lst2, 10) == Some(10));
     assert(search_list(lst2, 99) == None);
 

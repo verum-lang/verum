@@ -35,11 +35,11 @@ fn test_tree_sum() -> Int {
     //   /  \
     // L(1) L(3)
     let tree = Node {
-        left: Heap(Node {
-            left: Heap(Leaf(1)),
-            right: Heap(Leaf(3)),
+        left: Heap.new(Node {
+            left: Heap.new(Leaf(1)),
+            right: Heap.new(Leaf(3)),
         }),
-        right: Heap(Leaf(5)),
+        right: Heap.new(Leaf(5)),
     };
     let s = tree_sum(&tree);
     if s != 9 {
@@ -52,11 +52,11 @@ fn test_tree_sum() -> Int {
 
 fn test_tree_depth() -> Int {
     let tree = Node {
-        left: Heap(Node {
-            left: Heap(Leaf(1)),
-            right: Heap(Leaf(2)),
+        left: Heap.new(Node {
+            left: Heap.new(Leaf(1)),
+            right: Heap.new(Leaf(2)),
         }),
-        right: Heap(Leaf(3)),
+        right: Heap.new(Leaf(3)),
     };
     let d = tree_depth(&tree);
     if d != 3 {
@@ -90,11 +90,11 @@ fn list_len(l: &IntList) -> Int {
 fn test_linked_list() -> Int {
     let lst = Cons {
         head: 10,
-        tail: Heap(Cons {
+        tail: Heap.new(Cons {
             head: 20,
-            tail: Heap(Cons {
+            tail: Heap.new(Cons {
                 head: 30,
-                tail: Heap(Nil),
+                tail: Heap.new(Nil),
             }),
         }),
     };

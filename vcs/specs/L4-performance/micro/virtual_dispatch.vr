@@ -142,11 +142,11 @@ fn benchmark_polymorphic_dispatch() -> BenchmarkResult {
 /// Benchmark: Dispatch through array of trait objects
 fn benchmark_array_dispatch() -> BenchmarkResult {
     let animals: List<Heap<Animal>> = [
-        Heap(Dog { bark_volume: 100 }),
-        Heap(Bird { wing_span: 50 }),
-        Heap(Fish { fin_count: 4 }),
-        Heap(Dog { bark_volume: 80 }),
-        Heap(Bird { wing_span: 60 }),
+        Heap.new(Dog { bark_volume: 100 }),
+        Heap.new(Bird { wing_span: 50 }),
+        Heap.new(Fish { fin_count: 4 }),
+        Heap.new(Dog { bark_volume: 80 }),
+        Heap.new(Bird { wing_span: 60 }),
     ];
 
     // Warmup
@@ -246,7 +246,7 @@ fn benchmark_nested_trait_obj() -> BenchmarkResult {
     }
 
     let container = Container {
-        animal: Heap(Dog { bark_volume: 100 }),
+        animal: Heap.new(Dog { bark_volume: 100 }),
     };
     let outer: &Outer = &container;
 

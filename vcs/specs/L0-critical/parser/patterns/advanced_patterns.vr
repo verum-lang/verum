@@ -164,11 +164,11 @@ fn test_const_patterns() {
 }
 
 fn test_heap_patterns() {
-    let heap_val = Heap(42);
+    let heap_val = Heap.new(42);
 
     // Heap patterns - Verum uses Heap<T> instead of Rust's Box<T>
     match heap_val {
-        Heap(inner) => process_inner(inner),
+        Heap.new(inner) => process_inner(inner),
     };
 }
 

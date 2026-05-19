@@ -50,8 +50,8 @@ fn main() -> Int {
     let leaf2 = Tree.Leaf(2);
     let leaf7 = Tree.Leaf(7);
     let leaf15 = Tree.Leaf(15);
-    let left = Tree.Node { left: Heap(leaf2), right: Heap(leaf7), value: 5 };
-    let root = Tree.Node { left: Heap(left), right: Heap(leaf15), value: 10 };
+    let left = Tree.Node { left: Heap.new(leaf2), right: Heap.new(leaf7), value: 5 };
+    let root = Tree.Node { left: Heap.new(left), right: Heap.new(leaf15), value: 10 };
 
     // Test 1: Sum of all values
     let s = tree_sum(&root);

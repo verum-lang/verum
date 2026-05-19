@@ -139,10 +139,10 @@ fn tree_sum(t: Tree) -> Int {
 
 fn test_recursive_tree() -> Int {
     let tree = Branch {
-        left: Heap(Leaf(1)),
-        right: Heap(Branch {
-            left: Heap(Leaf(2)),
-            right: Heap(Leaf(3)),
+        left: Heap.new(Leaf(1)),
+        right: Heap.new(Branch {
+            left: Heap.new(Leaf(2)),
+            right: Heap.new(Leaf(3)),
         }),
     };
     let sum = tree_sum(tree);

@@ -110,7 +110,7 @@ fn benchmark_alloc_dealloc() -> ComparisonResult {
     for _ in 0..100 {
         let mut objects: List<Heap<Object>> = List.new();
         for _ in 0..1000 {
-            objects.push(Heap(Object { data: [0u8; 1024] }));
+            objects.push(Heap.new(Object { data: [0u8; 1024] }));
         }
         // Objects dropped here
     }
@@ -121,7 +121,7 @@ fn benchmark_alloc_dealloc() -> ComparisonResult {
     for _ in 0..100 {
         let mut objects: List<Heap<Object>> = List.new();
         for _ in 0..(ITERATIONS / 100) {
-            objects.push(Heap(Object { data: [0u8; 1024] }));
+            objects.push(Heap.new(Object { data: [0u8; 1024] }));
         }
         // CBGR: Deterministic deallocation when objects drops
         // Java: Would trigger GC at some point
@@ -149,7 +149,7 @@ fn benchmark_allocation_rate() -> ComparisonResult {
 
     // Run for fixed time and count allocations
     while start.elapsed().as_millis() < 1000 {
-        let obj = Heap(SmallObject { id: count, data: [0u8; 64] });
+        let obj = Heap.new(SmallObject { id: count, data: [0u8; 64] });
         black_box(&*obj);
         count += 1;
     }
@@ -177,7 +177,7 @@ fn benchmark_latency_distribution() -> ComparisonResult {
 
     // Warmup
     for _ in 0..1000 {
-        let obj = Heap(Object { data: [0u8; 256] });
+        let obj = Heap.new(Object { data: [0u8; 256] });
         black_box(&*obj);
     }
 
@@ -185,7 +185,7 @@ fn benchmark_latency_distribution() -> ComparisonResult {
     for _ in 0..BATCH_SIZE {
         let start = Instant.now();
 
-        let obj = Heap(Object { data: [0u8; 256] });
+        let obj = Heap.new(Object { data: [0u8; 256] });
         black_box(&*obj);
         drop(obj);
 
@@ -226,7 +226,7 @@ fn benchmark_worst_case_latency() -> ComparisonResult {
     for _ in 0..BATCH_SIZE {
         let start = Instant.now();
 
-        objects.push(Heap(Object { data: [0u8; 512] }));
+        objects.push(Heap.new(Object { data: [0u8; 512] }));
 
         // Periodically clear to trigger deallocation
         if objects.len() > 1000 {
@@ -260,7 +260,7 @@ fn benchmark_survivor_pattern() -> ComparisonResult {
 
     // Warmup
     for _ in 0..10_000 {
-        let req = Heap(Request { id: 0, payload: [0u8; 128] });
+        let req = Heap.new(Request { id: 0, payload: [0u8; 128] });
         process_request(&*req);
     }
 
@@ -269,7 +269,7 @@ fn benchmark_survivor_pattern() -> ComparisonResult {
 
     // Simulate request processing - most objects are short-lived
     for i in 0..ITERATIONS {
-        let req = Heap(Request { id: i, payload: [0u8; 128] });
+        let req = Heap.new(Request { id: i, payload: [0u8; 128] });
         process_request(&*req);
         // req is dropped immediately - CBGR handles this efficiently
         // Java would copy to survivor space, then collect
@@ -301,12 +301,12 @@ fn benchmark_old_gen_pattern() -> ComparisonResult {
     // Create long-lived cache
     let mut cache: List<Heap<CacheEntry>> = List.with_capacity(100_000);
     for i in 0..100_000 {
-        cache.push(Heap(CacheEntry { key: i, data: [0u8; 256] }));
+        cache.push(Heap.new(CacheEntry { key: i, data: [0u8; 256] }));
     }
 
     // Warmup
     for _ in 0..1000 {
-        let temp = Heap(CacheEntry { key: 0, data: [1u8; 256] });
+        let temp = Heap.new(CacheEntry { key: 0, data: [1u8; 256] });
         black_box(&*temp);
     }
 
@@ -320,7 +320,7 @@ fn benchmark_old_gen_pattern() -> ComparisonResult {
         black_box(cache[idx].key);
 
         // Create temporary (short-lived)
-        let temp = Heap(CacheEntry { key: i, data: [1u8; 256] });
+        let temp = Heap.new(CacheEntry { key: i, data: [1u8; 256] });
         black_box(&*temp);
     }
 
@@ -344,7 +344,7 @@ fn benchmark_fragmentation() -> ComparisonResult {
 
     // Allocate many objects
     for _ in 0..10_000 {
-        objects.push(Some(Heap([0u8; 1024])));
+        objects.push(Some(Heap.new([0u8; 1024])));
     }
 
     // Free every other object (creates fragmentation)
@@ -357,7 +357,7 @@ fn benchmark_fragmentation() -> ComparisonResult {
 
     // Allocate in fragmented heap
     for _ in 0..ITERATIONS / 10 {
-        let obj = Heap([0u8; 1024]);
+        let obj = Heap.new([0u8; 1024]);
         black_box(&*obj);
     }
 
@@ -391,7 +391,7 @@ fn benchmark_drop_handlers() -> ComparisonResult {
 
     // Warmup
     for i in 0..1000 {
-        let res = Heap(Resource { id: i, cleanup_done: false });
+        let res = Heap.new(Resource { id: i, cleanup_done: false });
         black_box(&*res);
     }
 
@@ -399,7 +399,7 @@ fn benchmark_drop_handlers() -> ComparisonResult {
     timer.start();
 
     for i in 0..100_000 {
-        let res = Heap(Resource { id: i, cleanup_done: false });
+        let res = Heap.new(Resource { id: i, cleanup_done: false });
         black_box(&*res);
         // Drop is called deterministically here
     }
@@ -428,7 +428,7 @@ fn benchmark_weak_references() -> ComparisonResult {
 
     // Create objects with weak references
     for i in 0..100_000 {
-        let obj = Heap(Data { value: i });
+        let obj = Heap.new(Data { value: i });
         weak.push(Weak.downgrade(&obj));
         if i % 10 == 0 {
             strong.push(obj);
@@ -479,7 +479,7 @@ fn benchmark_memory_pressure() -> ComparisonResult {
     for _ in 0..100 {
         let mut batch: List<Heap<LargeObject>> = List.new();
         for _ in 0..1000 {
-            batch.push(Heap(LargeObject { data: [0u8; 10240] }));
+            batch.push(Heap.new(LargeObject { data: [0u8; 10240] }));
         }
         // Force deallocation
         batch.clear();
@@ -505,7 +505,7 @@ fn benchmark_request_response() -> ComparisonResult {
     type HttpResponse is { status: Int, body: List<u8> };
 
     fn handle_request(req: &HttpRequest) -> Heap<HttpResponse> {
-        Heap(HttpResponse {
+        Heap.new(HttpResponse {
             status: 200,
             body: [0u8; 1024],
         })
@@ -515,7 +515,7 @@ fn benchmark_request_response() -> ComparisonResult {
 
     // Simulate web server
     for i in 0..10_000 {
-        let req = Heap(HttpRequest {
+        let req = Heap.new(HttpRequest {
             method: Text.from("GET"),
             path: format("/api/users/{}", i),
             body: [],
@@ -559,7 +559,7 @@ fn benchmark_streaming_workload() -> ComparisonResult {
     for i in 0..event_count {
         let start = Instant.now();
 
-        let event = Heap(Event {
+        let event = Heap.new(Event {
             timestamp: i,
             payload: [0u8; 256],
         });

@@ -55,7 +55,7 @@ fn test_struct_destructuring_in_let() {
 fn test_nested_destructuring() {
     let nested_tuple = ((1, 2), (3, 4));
     let nested = Outer { inner: Inner { value: 42 } };
-    let container = Container { items: Cons(1, Heap(Cons(2, Heap(Nil)))) };
+    let container = Container { items: Cons(1, Heap.new(Cons(2, Heap.new(Nil)))) };
 
     // Nested destructuring
     let ((a, b), (c, d)) = nested_tuple;

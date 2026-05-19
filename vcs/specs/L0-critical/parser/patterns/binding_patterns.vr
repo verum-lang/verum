@@ -358,8 +358,8 @@ fn test_binding_with_where_clause() {
 
 fn test_multiple_at_patterns_in_nested_structure() {
     let tree = Tree.Node(
-        Heap(Tree.Leaf(1)),
-        Heap(Tree.Leaf(2)),
+        Heap.new(Tree.Leaf(1)),
+        Heap.new(Tree.Leaf(2)),
         10
     );
 

@@ -79,9 +79,9 @@ fn constant_fold(e: Expr) -> Expr {
             match fl {
                 IntLit(a) => match fr {
                     IntLit(b) => Expr.IntLit(a + b),
-                    _ => Expr.Add(Heap(fl), Heap(fr)),
+                    _ => Expr.Add(Heap.new(fl), Heap.new(fr)),
                 },
-                _ => Expr.Add(Heap(fl), Heap(fr)),
+                _ => Expr.Add(Heap.new(fl), Heap.new(fr)),
             }
         }
         Mul(l, r) => {
@@ -90,23 +90,23 @@ fn constant_fold(e: Expr) -> Expr {
             match fl {
                 IntLit(a) => match fr {
                     IntLit(b) => Expr.IntLit(a * b),
-                    _ => Expr.Mul(Heap(fl), Heap(fr)),
+                    _ => Expr.Mul(Heap.new(fl), Heap.new(fr)),
                 },
-                _ => Expr.Mul(Heap(fl), Heap(fr)),
+                _ => Expr.Mul(Heap.new(fl), Heap.new(fr)),
             }
         }
         Neg(inner) => {
             let fi = constant_fold(*inner);
             match fi {
                 IntLit(n) => Expr.IntLit(-n),
-                _ => Expr.Neg(Heap(fi)),
+                _ => Expr.Neg(Heap.new(fi)),
             }
         }
         If(c, t, e) => {
             Expr.If(
-                Heap(constant_fold(*c)),
-                Heap(constant_fold(*t)),
-                Heap(constant_fold(*e)),
+                Heap.new(constant_fold(*c)),
+                Heap.new(constant_fold(*t)),
+                Heap.new(constant_fold(*e)),
             )
         }
     }
@@ -115,10 +115,10 @@ fn constant_fold(e: Expr) -> Expr {
 fn test_basic_eval() -> Int {
     // 3 + 4 * 2 = 3 + 8 = 11
     let expr = Expr.Add(
-        Heap(Expr.IntLit(3)),
-        Heap(Expr.Mul(
-            Heap(Expr.IntLit(4)),
-            Heap(Expr.IntLit(2)),
+        Heap.new(Expr.IntLit(3)),
+        Heap.new(Expr.Mul(
+            Heap.new(Expr.IntLit(4)),
+            Heap.new(Expr.IntLit(2)),
         )),
     );
 
@@ -134,9 +134,9 @@ fn test_basic_eval() -> Int {
 fn test_negation() -> Int {
     // -(3 + 4) = -7
     let expr = Expr.Neg(
-        Heap(Expr.Add(
-            Heap(Expr.IntLit(3)),
-            Heap(Expr.IntLit(4)),
+        Heap.new(Expr.Add(
+            Heap.new(Expr.IntLit(3)),
+            Heap.new(Expr.IntLit(4)),
         )),
     );
 
@@ -152,9 +152,9 @@ fn test_negation() -> Int {
 fn test_if_expr() -> Int {
     // if true { 10 } else { 20 }
     let expr = Expr.If(
-        Heap(Expr.BoolLit(true)),
-        Heap(Expr.IntLit(10)),
-        Heap(Expr.IntLit(20)),
+        Heap.new(Expr.BoolLit(true)),
+        Heap.new(Expr.IntLit(10)),
+        Heap.new(Expr.IntLit(20)),
     );
 
     let result = eval(expr);
@@ -165,9 +165,9 @@ fn test_if_expr() -> Int {
 
     // if false { 10 } else { 20 }
     let expr2 = Expr.If(
-        Heap(Expr.BoolLit(false)),
-        Heap(Expr.IntLit(10)),
-        Heap(Expr.IntLit(20)),
+        Heap.new(Expr.BoolLit(false)),
+        Heap.new(Expr.IntLit(10)),
+        Heap.new(Expr.IntLit(20)),
     );
     let result2 = eval(expr2);
     if result2 != 20 {
@@ -181,10 +181,10 @@ fn test_if_expr() -> Int {
 fn test_tree_depth() -> Int {
     // depth of: Add(IntLit, Mul(IntLit, IntLit)) = 3
     let expr = Expr.Add(
-        Heap(Expr.IntLit(1)),
-        Heap(Expr.Mul(
-            Heap(Expr.IntLit(2)),
-            Heap(Expr.IntLit(3)),
+        Heap.new(Expr.IntLit(1)),
+        Heap.new(Expr.Mul(
+            Heap.new(Expr.IntLit(2)),
+            Heap.new(Expr.IntLit(3)),
         )),
     );
     let d = depth(expr);
@@ -199,10 +199,10 @@ fn test_tree_depth() -> Int {
 fn test_node_count() -> Int {
     // Add(IntLit(1), Mul(IntLit(2), IntLit(3))) = 5 nodes
     let expr = Expr.Add(
-        Heap(Expr.IntLit(1)),
-        Heap(Expr.Mul(
-            Heap(Expr.IntLit(2)),
-            Heap(Expr.IntLit(3)),
+        Heap.new(Expr.IntLit(1)),
+        Heap.new(Expr.Mul(
+            Heap.new(Expr.IntLit(2)),
+            Heap.new(Expr.IntLit(3)),
         )),
     );
     let n = count_nodes(expr);
@@ -217,8 +217,8 @@ fn test_node_count() -> Int {
 fn test_constant_fold() -> Int {
     // Fold: Add(IntLit(3), IntLit(4)) -> IntLit(7)
     let expr = Expr.Add(
-        Heap(Expr.IntLit(3)),
-        Heap(Expr.IntLit(4)),
+        Heap.new(Expr.IntLit(3)),
+        Heap.new(Expr.IntLit(4)),
     );
     let folded = constant_fold(expr);
     let result = eval(folded);
@@ -229,8 +229,8 @@ fn test_constant_fold() -> Int {
 
     // Fold: Mul(IntLit(3), IntLit(4)) -> IntLit(12)
     let expr2 = Expr.Mul(
-        Heap(Expr.IntLit(3)),
-        Heap(Expr.IntLit(4)),
+        Heap.new(Expr.IntLit(3)),
+        Heap.new(Expr.IntLit(4)),
     );
     let folded2 = constant_fold(expr2);
     let result2 = eval(folded2);
@@ -240,7 +240,7 @@ fn test_constant_fold() -> Int {
     }
 
     // Fold: Neg(IntLit(5)) -> IntLit(-5)
-    let expr3 = Expr.Neg(Heap(Expr.IntLit(5)));
+    let expr3 = Expr.Neg(Heap.new(Expr.IntLit(5)));
     let folded3 = constant_fold(expr3);
     let result3 = eval(folded3);
     if result3 != -5 {

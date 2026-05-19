@@ -165,7 +165,7 @@ fn user_data_stack_violation() {
 // ------------------------------------------------------------
 
 fn user_data_heap_correct() {
-    let counter = Heap(0_c_int);
+    let counter = Heap.new(0_c_int);
     let counter_ptr = Heap.into_raw(counter) as *mut c_void;
 
     @export("C")
@@ -299,7 +299,7 @@ fn context_callback(user_data: *mut c_void, x: c_int) -> c_int {
 }
 
 fn correct_boxed_context() {
-    let ctx = Heap(Context { multiplier: 2, offset: 10 });
+    let ctx = Heap.new(Context { multiplier: 2, offset: 10 });
     let ctx_ptr = Heap.into_raw(ctx) as *mut c_void;
 
     // OK: ctx is heap-allocated

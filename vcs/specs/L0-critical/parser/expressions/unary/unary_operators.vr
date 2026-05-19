@@ -159,7 +159,7 @@ fn test_clone_operator() {
 fn test_heap_allocation() {
     let value = 42;
     // Heap allocation
-    let boxed = Heap(value);
+    let boxed = Heap.new(value);
 }
 
 fn test_unary_precedence() {

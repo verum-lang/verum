@@ -17,6 +17,6 @@ fn type_error_match(s: Stream<Int>) -> Int =
 mount core.prelude.*;
 
 fn main() {
-    let s: Stream<Int> = Cons(1, Heap(Nil));
+    let s: Stream<Int> = Cons(1, Heap.new(Nil));
     let result = type_error_match(s);
 }

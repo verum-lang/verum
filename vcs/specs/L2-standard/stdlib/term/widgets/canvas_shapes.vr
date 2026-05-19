@@ -87,9 +87,9 @@ fn test_painter_rect_outline_sets_corners() {
 
 fn test_canvas_widget_builder() {
     let mut shapes: List<Heap<dyn Shape>> = List.new();
-    shapes.push(Heap(LineShape.new(0.0, 0.0, 1.0, 1.0, Color.Red)));
-    shapes.push(Heap(CircleShape.new(0.5, 0.5, 0.3, Color.Blue)));
-    shapes.push(Heap(RectShape.new(0.0, 0.0, 0.5, 0.5, Color.Green)));
+    shapes.push(Heap.new(LineShape.new(0.0, 0.0, 1.0, 1.0, Color.Red)));
+    shapes.push(Heap.new(CircleShape.new(0.5, 0.5, 0.3, Color.Blue)));
+    shapes.push(Heap.new(RectShape.new(0.0, 0.0, 0.5, 0.5, Color.Green)));
 
     let canvas = Canvas.new()
         .x_bounds(0.0, 1.0)

@@ -13,7 +13,7 @@ mount core.prelude.*;
 
 fn main() -> Int {
     let leaf = Node { value: 42, children: [] };
-    let root = Node { value: 5, children: [Heap(leaf)] };
+    let root = Node { value: 5, children: [Heap.new(leaf)] };
     let kids = root.children;
     let h = kids[0];
     let child = *h;

@@ -220,12 +220,12 @@ fn main() {
 
     let tree: Tree<Int> = Node {
         value: 5,
-        left: Heap(Node {
+        left: Heap.new(Node {
             value: 3,
-            left: Heap(Leaf(1)),
-            right: Heap(Leaf(4)),
+            left: Heap.new(Leaf(1)),
+            right: Heap.new(Leaf(4)),
         }),
-        right: Heap(Leaf(7)),
+        right: Heap.new(Leaf(7)),
     };
 
     assert(tree_sum(tree) == 20);  // 5+3+1+4+7=20

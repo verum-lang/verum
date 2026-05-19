@@ -17,7 +17,7 @@ fn test_many_small_allocations() {
     let mut objects: List<Heap<Int>> = [];
 
     for i in 0..100000 {
-        objects.push(Heap(i));
+        objects.push(Heap.new(i));
     }
 
     // Verify all values
@@ -63,7 +63,7 @@ fn test_nested_allocations() {
             }
         }
 
-        Heap(Node { value: depth, children: children })
+        Heap.new(Node { value: depth, children: children })
     }
 
     // Create tree with 4^6 = 4096 nodes
@@ -82,7 +82,7 @@ fn test_allocation_deallocation_cycles() {
         let mut list: List<Heap<[Int; 100]>> = [];
 
         for _ in 0..1000 {
-            list.push(Heap([0; 100]));
+            list.push(Heap.new([0; 100]));
         }
 
         // Random access
@@ -150,7 +150,7 @@ fn test_concurrent_reference_validation() {
 fn test_generation_counter_wrap() {
     // Try to wrap generation counter by many allocations
     for _ in 0..100000 {
-        let h = Heap(42);
+        let h = Heap.new(42);
         assert_eq(*h, 42);
         drop(h);
     }
@@ -273,8 +273,8 @@ fn test_tree_recursion() {
             Tree {
                 value: value,
                 children: [
-                    Heap(build_balanced_tree(depth - 1, value * 2)),
-                    Heap(build_balanced_tree(depth - 1, value * 2 + 1))
+                    Heap.new(build_balanced_tree(depth - 1, value * 2)),
+                    Heap.new(build_balanced_tree(depth - 1, value * 2 + 1))
                 ]
             }
         }
@@ -352,7 +352,7 @@ fn test_mixed_operations() {
             for l in 0..10 {
                 child_data.push((k * l) as Float);
             }
-            children.push(Heap(Entity {
+            children.push(Heap.new(Entity {
                 id: i * 10 + k,
                 name: f"child_{i}_{k}",
                 data: child_data,

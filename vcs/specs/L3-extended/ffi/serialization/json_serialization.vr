@@ -210,7 +210,7 @@ implement<T: FromJson> FromJson for List<T> {
 
         arr.iter()
             .enumerate()
-            .map(|(i, v)| T.from_json(v).map_err(|e| JsonError.AtIndex(i, Heap(e))))
+            .map(|(i, v)| T.from_json(v).map_err(|e| JsonError.AtIndex(i, Heap.new(e))))
             .collect()
     }
 }

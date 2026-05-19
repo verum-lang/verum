@@ -36,7 +36,7 @@ fn main() -> Int {
     }
 
     // Test 2: single element
-    let one = Cons(42, Heap(Nil));
+    let one = Cons(42, Heap.new(Nil));
     let s1 = list_sum(one);
     if (s1 != 42) {
         print(f"FAIL test2: sum(42)={s1}");
@@ -44,7 +44,7 @@ fn main() -> Int {
     }
 
     // Test 3: multiple elements
-    let lst = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Nil))))));
+    let lst = Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Nil))))));
     let s3 = list_sum(lst);
     if (s3 != 6) {
         print(f"FAIL test3: sum(1,2,3)={s3}");
@@ -52,7 +52,7 @@ fn main() -> Int {
     }
 
     // Test 4: length
-    let lst2 = Cons(10, Heap(Cons(20, Heap(Cons(30, Heap(Cons(40, Heap(Nil))))))));
+    let lst2 = Cons(10, Heap.new(Cons(20, Heap.new(Cons(30, Heap.new(Cons(40, Heap.new(Nil))))))));
     let len = list_len(lst2);
     if (len != 4) {
         print(f"FAIL test4: len={len}");

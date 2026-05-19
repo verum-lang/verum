@@ -199,7 +199,7 @@ async fn drop_all<T: AsyncDrop>(items: List<T>) -> List<AsyncDropError> {
             Ok(()) => {}
             Err(e) => errors.push(AsyncDropError {
                 resource: type_name<T>(),
-                cause: Heap(e),
+                cause: Heap.new(e),
             }),
         }
     }

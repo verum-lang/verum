@@ -116,7 +116,7 @@ fn test_ref_binding_in_match() {
 }
 
 fn test_dereference_in_pattern_matching() {
-    let boxed = Heap(42);
+    let boxed = Heap.new(42);
 
     // Dereference in pattern matching
     match *boxed {
@@ -125,11 +125,11 @@ fn test_dereference_in_pattern_matching() {
 }
 
 fn test_heap_pattern() {
-    let heap_value = Heap(42);
+    let heap_value = Heap.new(42);
 
     // Heap pattern - Verum uses Heap<T> instead of Rust's Box<T>
     match heap_value {
-        Heap(inner) => use(inner),
+        Heap.new(inner) => use(inner),
     };
 }
 
@@ -156,12 +156,12 @@ fn test_reference_pattern_with_guard() {
 }
 
 fn test_nested_reference_and_heap_patterns() {
-    let boxed = Heap(42);
+    let boxed = Heap.new(42);
 
     // Nested reference and Heap patterns
     // NOTE: Verum uses Heap<T> instead of Rust's Box<T>
     match &boxed {
-        &Heap(inner) => use(inner),
+        &Heap.new(inner) => use(inner),
     };
 }
 

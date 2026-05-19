@@ -141,7 +141,7 @@ fn create_callback<T>(
         },
     };
 
-    let mut boxed = Heap(wrapper);
+    let mut boxed = Heap.new(wrapper);
     // Set user_data to point to the wrapper itself
     boxed.raw_ctx.user_data = null as *mut c_void;
 

@@ -42,15 +42,15 @@ fn main() -> Int {
     // (3 + 4) * (10 - 2) = 7 * 8 = 56
     let expr = AST.BinOp {
         op: 1,
-        left: Heap(AST.BinOp {
+        left: Heap.new(AST.BinOp {
             op: 0,
-            left: Heap(AST.Num(3)),
-            right: Heap(AST.Num(4)),
+            left: Heap.new(AST.Num(3)),
+            right: Heap.new(AST.Num(4)),
         }),
-        right: Heap(AST.BinOp {
+        right: Heap.new(AST.BinOp {
             op: 2,
-            left: Heap(AST.Num(10)),
-            right: Heap(AST.Num(2)),
+            left: Heap.new(AST.Num(10)),
+            right: Heap.new(AST.Num(2)),
         }),
     };
 

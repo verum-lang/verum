@@ -267,7 +267,7 @@ fn register_closure<T, F>(data: T, callback: F) -> Result<CallbackHandle, Error>
 where
     F: Fn(&T, c_int) -> c_int + 'static
 {
-    let ctx = Heap(CallbackContext { data, callback });
+    let ctx = Heap.new(CallbackContext { data, callback });
     let ctx_ptr = Heap.into_raw(ctx) as *mut c_void;
 
     // SAFETY: ctx_ptr is valid, trampoline is correct
@@ -369,7 +369,7 @@ fn on_async_error(code: c_int, message: *const c_char, user_data: *mut c_void) {
 
 /// Start async operation and return handle
 fn start_async_op(data: &[u8]) -> AsyncOperation {
-    let state = Heap(AsyncState {
+    let state = Heap.new(AsyncState {
         completed: false,
         result: None,
         error: None,

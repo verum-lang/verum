@@ -92,7 +92,7 @@ fn verify_fat_ref_size() -> BenchmarkResult {
 
 /// Verify Heap (owned heap allocation) size
 fn verify_heap_size() -> BenchmarkResult {
-    let boxed: Heap<Int> = Heap(42);
+    let boxed: Heap<Int> = Heap.new(42);
 
     let actual_size = size_of_val(&boxed);
     // Box is just a pointer (8 bytes) - CBGR metadata is in allocator

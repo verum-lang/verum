@@ -34,7 +34,7 @@ fn test_tier0_struct_reference() {
 }
 
 fn test_tier0_heap_reference() {
-    let h = Heap(Point { x: 1.0, y: 2.0 });
+    let h = Heap.new(Point { x: 1.0, y: 2.0 });
     let r: &Point = &*h;
 
     // Validated access to heap object
@@ -255,8 +255,8 @@ fn test_validation_caching() {
 
 fn test_generation_tracking() {
     // Each allocation gets unique generation
-    let a = Heap(Point { x: 1.0, y: 1.0 });
-    let b = Heap(Point { x: 2.0, y: 2.0 });
+    let a = Heap.new(Point { x: 1.0, y: 1.0 });
+    let b = Heap.new(Point { x: 2.0, y: 2.0 });
 
     // References track which generation they point to
     let ra: &Point = &*a;

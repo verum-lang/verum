@@ -295,7 +295,7 @@ async fn send_complex() {
     let complex = ComplexSend {
         numbers: [1, 2, 3],
         mapping: [("a", [1, 2, 3])].into(),
-        optional: Some(Heap("hello")),
+        optional: Some(Heap.new("hello")),
         nested: Shared.new(Mutex.new(["world"])),
     };
 

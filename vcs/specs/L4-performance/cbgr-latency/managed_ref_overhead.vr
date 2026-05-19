@@ -20,7 +20,7 @@ const BENCHMARK_ITERATIONS: Int = 1_000_000;
 
 /// Baseline: raw pointer access (unsafe)
 fn benchmark_raw_pointer() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let ptr: *const i64 = &*data;
 
     // Warmup
@@ -46,7 +46,7 @@ fn benchmark_raw_pointer() -> BenchmarkResult {
 
 /// Tier 0: Managed reference with full checks
 fn benchmark_managed_ref() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let managed_ref: &i64 = &*data;
 
     // Warmup
@@ -155,9 +155,9 @@ fn benchmark_random_access() -> BenchmarkResult {
 
 /// Nested reference access
 fn benchmark_nested_refs() -> BenchmarkResult {
-    let inner = Heap(42i64);
-    let middle = Heap(&*inner);
-    let outer = Heap(&*middle);
+    let inner = Heap.new(42i64);
+    let middle = Heap.new(&*inner);
+    let outer = Heap.new(&*middle);
 
     let outer_ref = &*outer;
 
@@ -184,7 +184,7 @@ fn benchmark_nested_refs() -> BenchmarkResult {
 
 /// Write operation overhead
 fn benchmark_write_operation() -> BenchmarkResult {
-    let mut data = Heap(0i64);
+    let mut data = Heap.new(0i64);
     let managed_ref: &mut i64 = &mut *data;
 
     // Warmup

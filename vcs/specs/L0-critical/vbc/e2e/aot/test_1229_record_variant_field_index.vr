@@ -67,12 +67,12 @@ fn main() -> Int {
     // Test 4: tree recursive method through Heap with partial destructuring
     let t = Node {
         val: 10,
-        left: Heap(Node {
+        left: Heap.new(Node {
             val: 5,
-            left: Heap(Leaf(1)),
-            right: Heap(Leaf(2)),
+            left: Heap.new(Leaf(1)),
+            right: Heap.new(Leaf(2)),
         }),
-        right: Heap(Leaf(3)),
+        right: Heap.new(Leaf(3)),
     };
     let s = t.sum();
     if s != 21 {

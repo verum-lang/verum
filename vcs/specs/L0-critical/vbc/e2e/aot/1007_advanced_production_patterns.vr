@@ -108,8 +108,8 @@ fn main() -> Int {
 
     // Test 3: Recursive tree sum
     let tree = Node(
-        Heap(Node(Heap(Leaf(1)), Heap(Leaf(2)))),
-        Heap(Node(Heap(Leaf(3)), Heap(Leaf(4))))
+        Heap.new(Node(Heap.new(Leaf(1)), Heap.new(Leaf(2)))),
+        Heap.new(Node(Heap.new(Leaf(3)), Heap.new(Leaf(4))))
     );
     if (tree.sum() == 10) { passed = passed + 1; }
     else { print(f"FAIL 3: sum={tree.sum()}"); failed = failed + 1; }
@@ -152,7 +152,7 @@ fn main() -> Int {
     else { print(f"FAIL 8: result={result}"); failed = failed + 1; }
 
     // Test 9: Heap-wrapped tree methods
-    let htree = Heap(Node(Heap(Leaf(10)), Heap(Leaf(20))));
+    let htree = Heap.new(Node(Heap.new(Leaf(10)), Heap.new(Leaf(20))));
     if (htree.sum() == 30) { passed = passed + 1; }
     else { print(f"FAIL 9: htree.sum={htree.sum()}"); failed = failed + 1; }
 

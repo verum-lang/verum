@@ -676,14 +676,14 @@ fn benchmark_heap_push() -> ComparisonResult {
 
     // Warmup
     for _ in 0..3 {
-        let mut heap: Heap<Int> = Heap();
+        let mut heap: Heap<Int> = Heap.new();
         for i in 0..SMALL_SIZE {
             heap.push(data[i]);
         }
         black_box(heap);
     }
 
-    let mut heap: Heap<Int> = Heap();
+    let mut heap: Heap<Int> = Heap.new();
 
     let timer = Timer.new();
     timer.start();
@@ -712,7 +712,7 @@ fn benchmark_heap_pop() -> ComparisonResult {
 
     // Warmup
     for _ in 0..3 {
-        let mut heap: Heap<Int> = Heap();
+        let mut heap: Heap<Int> = Heap.new();
         for _ in 0..SMALL_SIZE {
             heap.push(rng.gen_range(0, SMALL_SIZE));
         }
@@ -720,7 +720,7 @@ fn benchmark_heap_pop() -> ComparisonResult {
         black_box(heap);
     }
 
-    let mut heap: Heap<Int> = Heap();
+    let mut heap: Heap<Int> = Heap.new();
     for i in 0..DATA_SIZE {
         heap.push(rng.gen_range(0, DATA_SIZE));
     }
@@ -747,7 +747,7 @@ fn benchmark_heap_pop() -> ComparisonResult {
 /// Benchmark: Heap peek 1M times
 fn benchmark_heap_peek() -> ComparisonResult {
     let mut rng = Random.with_seed(42);
-    let mut heap: Heap<Int> = Heap();
+    let mut heap: Heap<Int> = Heap.new();
     for _ in 0..DATA_SIZE {
         heap.push(rng.gen_range(0, DATA_SIZE));
     }

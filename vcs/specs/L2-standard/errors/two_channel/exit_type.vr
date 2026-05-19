@@ -276,12 +276,12 @@ fn map_cause<E: Clone, E2: Clone>(cause: Cause<E>, f: fn(E) -> E2) -> Cause<E2> 
         Cause.Die(defect) => Cause.Die(defect),
         Cause.Interrupt { fiber_id, reason } => Cause.Interrupt { fiber_id, reason },
         Cause.Both(left, right) => Cause.Both(
-            Heap(map_cause(*left, f)),
-            Heap(map_cause(*right, f)),
+            Heap.new(map_cause(*left, f)),
+            Heap.new(map_cause(*right, f)),
         ),
         Cause.Then(first, second) => Cause.Then(
-            Heap(map_cause(*first, f)),
-            Heap(map_cause(*second, f)),
+            Heap.new(map_cause(*first, f)),
+            Heap.new(map_cause(*second, f)),
         ),
     }
 }
@@ -380,7 +380,7 @@ fn test_parallel_cause() {
     let cause2: Cause<Text> = Cause.Fail(Expected.new("error2"));
 
     // Both failed in parallel
-    let both_cause: Cause<Text> = Cause.Both(Heap(cause1), Heap(cause2));
+    let both_cause: Cause<Text> = Cause.Both(Heap.new(cause1), Heap.new(cause2));
 
     let failures = both_cause.failures();
     assert_eq(failures.len(), 2);
@@ -397,7 +397,7 @@ fn test_sequential_cause() {
     let cause1: Cause<Text> = Cause.Fail(Expected.new("initial failure"));
     let cause2: Cause<Text> = Cause.Fail(Expected.new("cascading failure"));
 
-    let then_cause: Cause<Text> = Cause.Then(Heap(cause1), Heap(cause2));
+    let then_cause: Cause<Text> = Cause.Then(Heap.new(cause1), Heap.new(cause2));
 
     let failures = then_cause.failures();
     assert_eq(failures.len(), 2);
@@ -513,9 +513,9 @@ fn test_complex_cause() {
     let fail_c: Cause<Text> = Cause.Fail(Expected.new("c"));
     let die_bug: Cause<Text> = Cause.Die(Defect.new("invariant violated"));
 
-    let inner_both = Cause.Both(Heap(die_bug), Heap(fail_c));
-    let then_part = Cause.Then(Heap(fail_b), Heap(inner_both));
-    let complex_cause = Cause.Both(Heap(fail_a), Heap(then_part));
+    let inner_both = Cause.Both(Heap.new(die_bug), Heap.new(fail_c));
+    let then_part = Cause.Then(Heap.new(fail_b), Heap.new(inner_both));
+    let complex_cause = Cause.Both(Heap.new(fail_a), Heap.new(then_part));
 
     // Should collect all failures
     let failures = complex_cause.failures();

@@ -120,7 +120,7 @@ fn test_rest_in_nested_pattern() {
 }
 
 fn test_rest_in_tuple_variant() {
-    let data = Data.Many(1, Cons(2, Heap(Nil)));
+    let data = Data.Many(1, Cons(2, Heap.new(Nil)));
 
     // Rest in tuple variant
     match data {
@@ -209,7 +209,7 @@ fn test_rest_with_guard() {
 fn test_rest_in_complex_destructuring() {
     let packet = Packet {
         header: Header { version: 1 },
-        payload: Cons(0xFF, Heap(Cons(0x00, Heap(Nil))))
+        payload: Cons(0xFF, Heap.new(Cons(0x00, Heap.new(Nil))))
     };
 
     // Rest in complex destructuring

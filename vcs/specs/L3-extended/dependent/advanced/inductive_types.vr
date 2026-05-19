@@ -17,13 +17,13 @@ fn pnat_to_int(n: PNat) -> Int {
 
 fn int_to_pnat(n: Int) -> PNat {
     if n <= 0 { PZero }
-    else { PSucc(Heap(int_to_pnat(n - 1))) }
+    else { PSucc(Heap.new(int_to_pnat(n - 1))) }
 }
 
 fn padd(a: PNat, b: PNat) -> PNat {
     match a {
         PZero => b,
-        PSucc(pred) => PSucc(Heap(padd(*pred, b))),
+        PSucc(pred) => PSucc(Heap.new(padd(*pred, b))),
     }
 }
 
@@ -63,8 +63,8 @@ fn tree_map<A, B>(t: BTree<A>, f: fn(A) -> B) -> BTree<B> {
         BNode { value, left, right } =>
             BNode {
                 value: f(value),
-                left: Heap(tree_map(*left, f)),
-                right: Heap(tree_map(*right, f)),
+                left: Heap.new(tree_map(*left, f)),
+                right: Heap.new(tree_map(*right, f)),
             },
     }
 }
@@ -110,8 +110,8 @@ mount core.prelude.*;
 
 fn main() {
     // Peano arithmetic
-    let two = PSucc(Heap(PSucc(Heap(PZero))));
-    let three = PSucc(Heap(PSucc(Heap(PSucc(Heap(PZero))))));
+    let two = PSucc(Heap.new(PSucc(Heap.new(PZero))));
+    let three = PSucc(Heap.new(PSucc(Heap.new(PSucc(Heap.new(PZero))))));
     assert(pnat_to_int(two) == 2);
     assert(pnat_to_int(three) == 3);
 
@@ -124,8 +124,8 @@ fn main() {
     // Binary tree
     let tree = BNode {
         value: 1,
-        left: Heap(BNode { value: 2, left: Heap(BLeaf), right: Heap(BLeaf) }),
-        right: Heap(BNode { value: 3, left: Heap(BLeaf), right: Heap(BLeaf) }),
+        left: Heap.new(BNode { value: 2, left: Heap.new(BLeaf), right: Heap.new(BLeaf) }),
+        right: Heap.new(BNode { value: 3, left: Heap.new(BLeaf), right: Heap.new(BLeaf) }),
     };
     assert(tree_size(tree) == 3);
     assert(tree_depth(tree) == 2);

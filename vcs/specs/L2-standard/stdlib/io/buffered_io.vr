@@ -307,8 +307,8 @@ fn test_chain_and_take() using [FileSystem] {
     // Commented out: io unbound variable
     // fn chain_all<R: Read>(readers: impl IntoIterator<Item = R>) -> Heap<Read> {
     //     readers.into_iter().fold(
-    //         Heap(io.empty()) as Heap<Read>,
-    //         |acc, r| Heap(acc.chain(r))
+    //         Heap.new(io.empty()) as Heap<Read>,
+    //         |acc, r| Heap.new(acc.chain(r))
     //     )
     // }
 

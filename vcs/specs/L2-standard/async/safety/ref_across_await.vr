@@ -72,7 +72,7 @@ async fn bad_multiple_references() {
 
 // ERROR: Nested reference across await
 async fn bad_nested_reference() {
-    let outer = Heap([1, 2, 3]);
+    let outer = Heap.new([1, 2, 3]);
     let inner = &outer[0];
 
     // ERROR: nested reference held across await

@@ -150,8 +150,8 @@ fn test_binop_inference() -> Int {
     let env = new_env();
 
     let add_expr = SimpleExpr.EBinOp("+",
-        Heap(SimpleExpr.EInt(1)),
-        Heap(SimpleExpr.EInt(2)),
+        Heap.new(SimpleExpr.EInt(1)),
+        Heap.new(SimpleExpr.EInt(2)),
     );
     let ty = infer_type(add_expr, env);
     if type_tag(ty) != 0 {
@@ -160,8 +160,8 @@ fn test_binop_inference() -> Int {
     }
 
     let cmp_expr = SimpleExpr.EBinOp("==",
-        Heap(SimpleExpr.EInt(1)),
-        Heap(SimpleExpr.EInt(2)),
+        Heap.new(SimpleExpr.EInt(1)),
+        Heap.new(SimpleExpr.EInt(2)),
     );
     let ty2 = infer_type(cmp_expr, env);
     if type_tag(ty2) != 1 {
@@ -204,9 +204,9 @@ fn test_variable_lookup() -> Int {
 fn test_function_call_inference() -> Int {
     let mut env = new_env();
     // Register: fn add(Int, Int) -> Int
-    bind_var(&mut env, "add", TypeId.TFunc(Heap(TypeId.TInt), Heap(TypeId.TInt)));
+    bind_var(&mut env, "add", TypeId.TFunc(Heap.new(TypeId.TInt), Heap.new(TypeId.TInt)));
     // Register: fn to_text(Int) -> Text
-    bind_var(&mut env, "to_text", TypeId.TFunc(Heap(TypeId.TInt), Heap(TypeId.TText)));
+    bind_var(&mut env, "to_text", TypeId.TFunc(Heap.new(TypeId.TInt), Heap.new(TypeId.TText)));
 
     let call_add = SimpleExpr.ECall("add", [SimpleExpr.EInt(1), SimpleExpr.EInt(2)]);
     let ty = infer_type(call_add, env);
@@ -276,9 +276,9 @@ fn test_fresh_type_vars() -> Int {
 fn test_if_expr_inference() -> Int {
     let env = new_env();
     let if_expr = SimpleExpr.EIf(
-        Heap(SimpleExpr.EBool(true)),
-        Heap(SimpleExpr.EInt(1)),
-        Heap(SimpleExpr.EInt(2)),
+        Heap.new(SimpleExpr.EBool(true)),
+        Heap.new(SimpleExpr.EInt(1)),
+        Heap.new(SimpleExpr.EInt(2)),
     );
     let ty = infer_type(if_expr, env);
     if type_tag(ty) != 0 {

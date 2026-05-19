@@ -306,14 +306,14 @@ type UniqueHandle is { id: Int, resource: Heap<Int> };
 
 // E420: yield after move
 fn* yield_after_move() -> UniqueHandle {
-    let handle = UniqueHandle { id: 1, resource: Heap(42) };
+    let handle = UniqueHandle { id: 1, resource: Heap.new(42) };
     yield handle;  // handle is moved
     yield handle;  // ERROR: use of moved value 'handle'
 }
 
 // E420: borrow after yield that moved
 fn* borrow_after_yield() -> &UniqueHandle {
-    let handle = UniqueHandle { id: 1, resource: Heap(42) };
+    let handle = UniqueHandle { id: 1, resource: Heap.new(42) };
     yield &handle;  // yield borrow
     drop(handle);   // handle still exists
     yield &handle;  // ERROR: reference to handle invalidated

@@ -47,15 +47,15 @@ fn eval_bool(expr: BoolExpr) -> Bool {
 
 /// Type-safe expression builders
 fn lit(n: Int) -> IntExpr { IntLit(n) }
-fn add(a: IntExpr, b: IntExpr) -> IntExpr { IntAdd { left: Heap(a), right: Heap(b) } }
-fn mul(a: IntExpr, b: IntExpr) -> IntExpr { IntMul { left: Heap(a), right: Heap(b) } }
-fn neg(a: IntExpr) -> IntExpr { IntNeg(Heap(a)) }
+fn add(a: IntExpr, b: IntExpr) -> IntExpr { IntAdd { left: Heap.new(a), right: Heap.new(b) } }
+fn mul(a: IntExpr, b: IntExpr) -> IntExpr { IntMul { left: Heap.new(a), right: Heap.new(b) } }
+fn neg(a: IntExpr) -> IntExpr { IntNeg(Heap.new(a)) }
 
 fn bool_lit(b: Bool) -> BoolExpr { BoolLit(b) }
-fn bool_not(a: BoolExpr) -> BoolExpr { BoolNot(Heap(a)) }
-fn bool_and(a: BoolExpr, b: BoolExpr) -> BoolExpr { BoolAnd { left: Heap(a), right: Heap(b) } }
-fn int_lt(a: IntExpr, b: IntExpr) -> BoolExpr { IntLt { left: Heap(a), right: Heap(b) } }
-fn int_eq(a: IntExpr, b: IntExpr) -> BoolExpr { IntEq { left: Heap(a), right: Heap(b) } }
+fn bool_not(a: BoolExpr) -> BoolExpr { BoolNot(Heap.new(a)) }
+fn bool_and(a: BoolExpr, b: BoolExpr) -> BoolExpr { BoolAnd { left: Heap.new(a), right: Heap.new(b) } }
+fn int_lt(a: IntExpr, b: IntExpr) -> BoolExpr { IntLt { left: Heap.new(a), right: Heap.new(b) } }
+fn int_eq(a: IntExpr, b: IntExpr) -> BoolExpr { IntEq { left: Heap.new(a), right: Heap.new(b) } }
 
 /// GADT-style typed list
 type TypedNil is ();
@@ -76,7 +76,7 @@ fn optimize_int(expr: IntExpr) -> IntExpr {
             match (l, r) {
                 (IntLit(0), b) => b,     // 0 + b = b
                 (a, IntLit(0)) => a,     // a + 0 = a
-                (a, b) => IntAdd { left: Heap(a), right: Heap(b) },
+                (a, b) => IntAdd { left: Heap.new(a), right: Heap.new(b) },
             }
         }
         IntMul { left, right } => {
@@ -87,7 +87,7 @@ fn optimize_int(expr: IntExpr) -> IntExpr {
                 (_, IntLit(0)) => IntLit(0),  // a * 0 = 0
                 (IntLit(1), b) => b,           // 1 * b = b
                 (a, IntLit(1)) => a,           // a * 1 = a
-                (a, b) => IntMul { left: Heap(a), right: Heap(b) },
+                (a, b) => IntMul { left: Heap.new(a), right: Heap.new(b) },
             }
         }
         other => other,

@@ -122,7 +122,7 @@ fn test_closure_analysis() {
     // Case 3: Closure escapes (conceptual - simplified for typecheck)
     /// @verify: escape-analysis: requires managed
     fn escaping_closure() -> Int {
-        let value = Heap(42);
+        let value = Heap.new(42);
         *value  // Conceptually, a closure capturing `value` would escape
     }
 

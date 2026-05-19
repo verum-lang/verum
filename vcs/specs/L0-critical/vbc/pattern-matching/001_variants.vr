@@ -282,10 +282,10 @@ fn test_match_binding() {
 
 fn test_tree_construction() {
     let tree: Tree<Int> = Node {
-        left: Heap(Leaf(1)),
-        right: Heap(Node {
-            left: Heap(Leaf(2)),
-            right: Heap(Leaf(3))
+        left: Heap.new(Leaf(1)),
+        right: Heap.new(Node {
+            left: Heap.new(Leaf(2)),
+            right: Heap.new(Leaf(3))
         })
     };
 

@@ -297,7 +297,7 @@ fn benchmark_binary_search() -> ComparisonResult {
 
 /// Benchmark: Pointer/reference access
 fn benchmark_pointer_access() -> ComparisonResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let ref_data = &*data;
 
     // Warmup
@@ -367,7 +367,7 @@ fn benchmark_malloc_free() -> ComparisonResult {
 
     // Warmup
     for _ in 0..10_000 {
-        let x = Heap(42);
+        let x = Heap.new(42);
         black_box(&*x);
     }
 
@@ -375,7 +375,7 @@ fn benchmark_malloc_free() -> ComparisonResult {
     timer.start();
 
     for _ in 0..count {
-        let x = Heap(42);
+        let x = Heap.new(42);
         black_box(&*x);
     }
 

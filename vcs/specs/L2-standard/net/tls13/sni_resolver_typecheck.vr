@@ -30,7 +30,7 @@ implement CertSigner for StubSigner {
 fn build_identity() -> ServerIdentity {
     ServerIdentity {
         cert_chain: [],
-        signer:     Heap(StubSigner.new()),
+        signer:     Heap.new(StubSigner.new()),
     }
 }
 

@@ -169,10 +169,10 @@ fn benchmark_bimorphic_dispatch() -> BenchmarkResult {
 /// Polymorphic dispatch (cycling through 4 types)
 fn benchmark_polymorphic_dispatch() -> BenchmarkResult {
     let objects: List<Heap<Computable>> = [
-        Heap(ImplA { value: 1 }),
-        Heap(ImplB { value: 2 }),
-        Heap(ImplC { value: 3 }),
-        Heap(ImplD { value: 4 }),
+        Heap.new(ImplA { value: 1 }),
+        Heap.new(ImplB { value: 2 }),
+        Heap.new(ImplC { value: 3 }),
+        Heap.new(ImplD { value: 4 }),
     ];
 
     // Warmup
@@ -209,10 +209,10 @@ fn benchmark_megamorphic_dispatch() -> BenchmarkResult {
     let objects: List<Heap<Computable>> = List.new();
     for i in 0..16 {
         match i % 4 {
-            0 => objects.push(Heap(ImplA { value: i })),
-            1 => objects.push(Heap(ImplB { value: i })),
-            2 => objects.push(Heap(ImplC { value: i })),
-            _ => objects.push(Heap(ImplD { value: i })),
+            0 => objects.push(Heap.new(ImplA { value: i })),
+            1 => objects.push(Heap.new(ImplB { value: i })),
+            2 => objects.push(Heap.new(ImplC { value: i })),
+            _ => objects.push(Heap.new(ImplD { value: i })),
         }
     }
 
@@ -532,8 +532,8 @@ implement Visitor for ConcreteVisitor {
 
 fn benchmark_visitor_pattern() -> BenchmarkResult {
     let nodes: List<Heap<Node>> = [
-        Heap(NodeA { value: 1 }),
-        Heap(NodeB { value: 2 }),
+        Heap.new(NodeA { value: 1 }),
+        Heap.new(NodeB { value: 2 }),
     ];
     let visitor: &Visitor = &ConcreteVisitor {};
 

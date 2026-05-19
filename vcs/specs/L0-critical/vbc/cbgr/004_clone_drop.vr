@@ -73,7 +73,7 @@ fn test_clone_independence() {
 }
 
 fn test_clone_heap_object() {
-    let h1 = Heap(Point { x: 1.0, y: 2.0 });
+    let h1 = Heap.new(Point { x: 1.0, y: 2.0 });
     let h2 = h1.clone();
 
     // Two separate heap allocations
@@ -215,7 +215,7 @@ fn test_drop_heap() {
     let mut dropped: Bool = false;
 
     {
-        let h = Heap(CustomDrop { id: 1, dropped: &mut dropped });
+        let h = Heap.new(CustomDrop { id: 1, dropped: &mut dropped });
     }
 
     assert(dropped);

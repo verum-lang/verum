@@ -339,7 +339,7 @@ fn benchmark_gc_intensive() -> ComparisonResult {
     for _ in 0..100 {
         let mut objects: List<Heap<[u8; 1024]> > = List.with_capacity(100_000);
         for _ in 0..100_000 {
-            objects.push(Heap([0u8; 1024]));
+            objects.push(Heap.new([0u8; 1024]));
         }
         // All objects dropped here
     }

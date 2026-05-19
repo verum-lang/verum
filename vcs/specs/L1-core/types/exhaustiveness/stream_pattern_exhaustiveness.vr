@@ -72,7 +72,7 @@ fn stream_sum(s: Stream<Int>) -> Int =
 fn stream_map<T, U>(s: Stream<T>, f: fn(T) -> U) -> Stream<U> =
     match s {
         Nil => Nil,
-        Cons(x, rest) => Cons(f(x), Heap(stream_map(*rest, f)))
+        Cons(x, rest) => Cons(f(x), Heap.new(stream_map(*rest, f)))
     };
 
 // Stream filter with exhaustive matching
@@ -80,7 +80,7 @@ fn stream_map<T, U>(s: Stream<T>, f: fn(T) -> U) -> Stream<U> =
 fn stream_filter<T>(s: Stream<T>, pred: fn(T) -> Bool) -> Stream<T> =
     match s {
         Nil => Nil,
-        Cons(x, rest) where pred(x) => Cons(x, Heap(stream_filter(*rest, pred))),
+        Cons(x, rest) where pred(x) => Cons(x, Heap.new(stream_filter(*rest, pred))),
         Cons(_, rest) => stream_filter(*rest, pred)
     };
 
@@ -117,7 +117,7 @@ mount core.prelude.*;
 fn main() {
     // Stream tests
     let empty: Stream<Int> = Nil;
-    let s1 = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Nil))))));
+    let s1 = Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Nil))))));
 
     assert(stream_head(empty, 0) == 0);
     assert(stream_head(s1, 0) == 1);
@@ -129,7 +129,7 @@ fn main() {
 
     // List tests
     let empty_list: MyList<Int> = LNil;
-    let l1 = LCons(1, Heap(LCons(2, Heap(LNil))));
+    let l1 = LCons(1, Heap.new(LCons(2, Heap.new(LNil))));
 
     assert(list_head_opt(empty_list) == None);
     assert(list_head_opt(l1) == Some(1));

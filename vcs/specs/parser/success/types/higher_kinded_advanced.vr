@@ -130,7 +130,7 @@ type SomeFunctor<A> is {
 
 // Pack into existential (generic over F)
 fn pack_functor<F<_>: Functor, A>(fa: F<A>) -> SomeFunctor<A> {
-    SomeFunctor { data: Heap(fa as ()) }
+    SomeFunctor { data: Heap.new(fa as ()) }
 }
 
 // Map over existential (with type witness)

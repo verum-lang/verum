@@ -157,8 +157,8 @@ fn main() {
 
     // Test tree matching
     let tree = Node {
-        left: Heap(Leaf(1)),
-        right: Heap(Leaf(2)),
+        left: Heap.new(Leaf(1)),
+        right: Heap.new(Leaf(2)),
         value: 3
     };
     assert(tree_sum(&tree) == 6);
@@ -166,8 +166,8 @@ fn main() {
     // Test expression matching
     let expr = BinOp {
         op: Add,
-        left: Heap(Literal(10)),
-        right: Heap(Literal(20))
+        left: Heap.new(Literal(10)),
+        right: Heap.new(Literal(20))
     };
     assert(eval_const(&expr) == Some(30));
 

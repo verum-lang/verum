@@ -14,7 +14,7 @@ fn create_dangling_closure() -> Heap<fn() -> Int> {
     let local_ref = &local;
 
     // Closure captures reference - CBGR tracks generation
-    Heap(|| {
+    Heap.new(|| {
         *local_ref
     })
 }

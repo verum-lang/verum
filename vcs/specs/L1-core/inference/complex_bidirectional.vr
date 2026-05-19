@@ -113,9 +113,9 @@ fn map_tree<T, U>(t: Tree<T>, f: fn(T) -> U) -> Tree<U> {
     match t {
         Leaf(v) => Leaf(f(v)),
         Node { left, value, right } => Node {
-            left: Heap(map_tree(*left, f)),
+            left: Heap.new(map_tree(*left, f)),
             value: f(value),
-            right: Heap(map_tree(*right, f)),
+            right: Heap.new(map_tree(*right, f)),
         },
     }
 }
@@ -203,13 +203,13 @@ fn main() {
 
     // Section 5: Recursive data structure with bidirectional type flow
     let tree: Tree<Int> = Node {
-        left: Heap(Node {
-            left: Heap(Leaf(1)),
+        left: Heap.new(Node {
+            left: Heap.new(Leaf(1)),
             value: 2,
-            right: Heap(Leaf(3)),
+            right: Heap.new(Leaf(3)),
         }),
         value: 4,
-        right: Heap(Leaf(5)),
+        right: Heap.new(Leaf(5)),
     };
 
     assert(sum_tree(tree) == 15);
@@ -217,9 +217,9 @@ fn main() {
     // map_tree: T = Int, U = Text
     let text_tree: Tree<Text> = map_tree(
         Node {
-            left: Heap(Leaf(1)),
+            left: Heap.new(Leaf(1)),
             value: 2,
-            right: Heap(Leaf(3)),
+            right: Heap.new(Leaf(3)),
         },
         |n: Int| f"n{n}",
     );
@@ -231,18 +231,18 @@ fn main() {
     // Section 6: Expression evaluator
     // 2 + (3 * 4) = 14
     let expr: Expr = Add {
-        left: Heap(Literal(2)),
-        right: Heap(Mul {
-            left: Heap(Literal(3)),
-            right: Heap(Literal(4)),
+        left: Heap.new(Literal(2)),
+        right: Heap.new(Mul {
+            left: Heap.new(Literal(3)),
+            right: Heap.new(Literal(4)),
         }),
     };
     assert(eval(expr) == 14);
 
     // -(5 + 3) = -8
-    let neg_expr: Expr = Neg(Heap(Add {
-        left: Heap(Literal(5)),
-        right: Heap(Literal(3)),
+    let neg_expr: Expr = Neg(Heap.new(Add {
+        left: Heap.new(Literal(5)),
+        right: Heap.new(Literal(3)),
     }));
     assert(eval(neg_expr) == -8);
 

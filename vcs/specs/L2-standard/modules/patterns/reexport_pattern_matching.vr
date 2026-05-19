@@ -130,7 +130,7 @@ module helpers {
     }
 
     pub fn add_expr(l: Expr, r: Expr) -> Expr {
-        Binary { op: Add, lhs: Heap(l), rhs: Heap(r) }
+        Binary { op: Add, lhs: Heap.new(l), rhs: Heap.new(r) }
     }
 }
 

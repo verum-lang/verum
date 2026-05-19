@@ -102,10 +102,10 @@ fn eval_expr(e: Expr) -> Int {
 
 fn test_expr_eval() -> Int {
     // (2 + 3) * 4 = 20
-    let two = Heap(Num(2));
-    let three = Heap(Num(3));
-    let sum = Heap(Add2(two, three));
-    let four = Heap(Num(4));
+    let two = Heap.new(Num(2));
+    let three = Heap.new(Num(3));
+    let sum = Heap.new(Add2(two, three));
+    let four = Heap.new(Num(4));
     let expr = Mul2(sum, four);
     let result = eval_expr(expr);
     if result != 20 {

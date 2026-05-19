@@ -21,7 +21,7 @@ fn test_detect_simple_use_after_free() {
     // or CBGR catches it at runtime
 
     let result = @catch_cbgr_violation(fn() {
-        let h = Heap(Point { x: 1.0, y: 2.0 });
+        let h = Heap.new(Point { x: 1.0, y: 2.0 });
         let r: &Point = &*h;
 
         // Drop the heap object
@@ -65,7 +65,7 @@ fn test_detect_iterator_invalidation() {
 
 fn test_detect_double_free() {
     let result = @catch_cbgr_violation(fn() {
-        let h = Heap(Point { x: 1.0, y: 2.0 });
+        let h = Heap.new(Point { x: 1.0, y: 2.0 });
 
         // First drop
         drop(h);
@@ -79,11 +79,11 @@ fn test_detect_double_free() {
 
 fn test_detect_stale_reference_after_reassignment() {
     let result = @catch_cbgr_violation(fn() {
-        let mut h = Heap(Point { x: 1.0, y: 2.0 });
+        let mut h = Heap.new(Point { x: 1.0, y: 2.0 });
         let r: &Point = &*h;
 
         // Reassign h - old object is dropped
-        h = Heap(Point { x: 3.0, y: 4.0 });
+        h = Heap.new(Point { x: 3.0, y: 4.0 });
 
         // r now points to freed memory
         let _ = r.x;
@@ -98,12 +98,12 @@ fn test_detect_stale_reference_after_reassignment() {
 
 fn test_generation_increments() {
     // Each allocation should have unique generation
-    let h1 = Heap(42);
+    let h1 = Heap.new(42);
     let gen1 = @get_generation(&*h1);
 
     drop(h1);
 
-    let h2 = Heap(43);
+    let h2 = Heap.new(43);
     let gen2 = @get_generation(&*h2);
 
     // New allocation must have different generation
@@ -111,7 +111,7 @@ fn test_generation_increments() {
 }
 
 fn test_reference_stores_generation() {
-    let h = Heap(Point { x: 1.0, y: 2.0 });
+    let h = Heap.new(Point { x: 1.0, y: 2.0 });
     let r: &Point = &*h;
 
     let obj_gen = @get_generation(&*h);
@@ -123,14 +123,14 @@ fn test_reference_stores_generation() {
 
 fn test_generation_mismatch_detection() {
     let result = @catch_cbgr_violation(fn() {
-        let h1 = Heap(Point { x: 1.0, y: 2.0 });
+        let h1 = Heap.new(Point { x: 1.0, y: 2.0 });
         let r: &Point = &*h1;
         let stored_gen = @get_stored_generation(r);
 
         drop(h1);
 
         // Allocate at possibly same address but different generation
-        let h2 = Heap(Point { x: 3.0, y: 4.0 });
+        let h2 = Heap.new(Point { x: 3.0, y: 4.0 });
 
         // Force use of stale reference (if address reused)
         // Generation check should catch this
@@ -198,9 +198,9 @@ fn test_nested_epoch_tracking() {
 
 fn test_linked_list_drop_order() {
     // Dropping linked list should not cause use-after-free
-    let n3 = Heap(Node { value: 3, next: None });
-    let n2 = Heap(Node { value: 2, next: Some(n3) });
-    let n1 = Heap(Node { value: 1, next: Some(n2) });
+    let n3 = Heap.new(Node { value: 3, next: None });
+    let n2 = Heap.new(Node { value: 2, next: Some(n3) });
+    let n1 = Heap.new(Node { value: 1, next: Some(n2) });
 
     // Access before drop
     assert_eq(n1.value, 1);

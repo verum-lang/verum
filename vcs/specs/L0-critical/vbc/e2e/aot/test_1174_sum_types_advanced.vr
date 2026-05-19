@@ -74,8 +74,8 @@ fn main() -> Int {
     // Test 2: Expression tree
     // (2 + 3) * 4 = 20
     let expr = Expr.Mul(
-        Heap(Expr.Add(Heap(Expr.Num(2)), Heap(Expr.Num(3)))),
-        Heap(Expr.Num(4))
+        Heap.new(Expr.Add(Heap.new(Expr.Num(2)), Heap.new(Expr.Num(3)))),
+        Heap.new(Expr.Num(4))
     );
     let result = eval(expr);
     if result != 20 {

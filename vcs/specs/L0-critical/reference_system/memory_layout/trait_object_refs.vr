@@ -88,9 +88,9 @@ fn test_multiple_traits() {
 fn test_trait_object_collections() {
     // Collection of protocol objects
     let shapes: List<Heap<Drawable>> = [
-        Heap(Circle { radius: 1.0 }),
-        Heap(Rectangle { width: 2.0, height: 2.0 }),
-        Heap(Circle { radius: 3.0 }),
+        Heap.new(Circle { radius: 1.0 }),
+        Heap.new(Rectangle { width: 2.0, height: 2.0 }),
+        Heap.new(Circle { radius: 3.0 }),
     ];
 
     // Iterate over trait objects

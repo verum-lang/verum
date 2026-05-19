@@ -157,12 +157,12 @@ fn test_mixed_field_element_access() {
 }
 
 fn test_heap_field_access() {
-    let h = Heap(Point { x: 1.0, y: 2.0 });
+    let h = Heap.new(Point { x: 1.0, y: 2.0 });
 
     assert_eq(h.x, 1.0);
     assert_eq(h.y, 2.0);
 
-    let mut h2 = Heap(Point { x: 0.0, y: 0.0 });
+    let mut h2 = Heap.new(Point { x: 0.0, y: 0.0 });
     h2.x = 10.0;
     h2.y = 20.0;
 

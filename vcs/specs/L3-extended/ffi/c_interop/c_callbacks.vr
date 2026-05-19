@@ -157,7 +157,7 @@ fn callback_trampoline(user_data: *mut c_void, value: c_int) -> c_int {
 
 /// Safe wrapper for registering callbacks
 fn register_with_context<T>(data: T, callback: fn(&T, c_int) -> c_int) -> Result<(), c_int> {
-    let context = Heap(CallbackContext { data, callback });
+    let context = Heap.new(CallbackContext { data, callback });
     let context_ptr = Heap.into_raw(context) as *mut c_void;
 
     // SAFETY: Registering valid function pointer and context

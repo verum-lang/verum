@@ -22,7 +22,7 @@ implement<T> LinkedList<T> {
     }
 
     fn push_front(&mut self, value: T) {
-        let new_node = Heap(Node {
+        let new_node = Heap.new(Node {
             value: value,
             next: self.head.take()
         });
@@ -114,7 +114,7 @@ implement<T: Ord> BST<T> {
         fn insert_node<T: Ord>(node: &mut Maybe<Heap<BSTNode<T>>>, value: T) {
             match node {
                 None => {
-                    *node = Some(Heap(BSTNode {
+                    *node = Some(Heap.new(BSTNode {
                         value: value,
                         left: None,
                         right: None

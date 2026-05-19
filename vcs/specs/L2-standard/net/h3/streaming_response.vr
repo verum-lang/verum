@@ -51,7 +51,7 @@ fn sink_cancellation_is_observable() {
 }
 
 fn streaming_response_ok_status_200() {
-    let writer = Heap(BytesWriter.new([0x48_u8, 0x49_u8])); // "HI"
+    let writer = Heap.new(BytesWriter.new([0x48_u8, 0x49_u8])); // "HI"
     let resp = H3StreamingResponse.ok(writer);
     assert(resp.status == 200_u16);
     assert(resp.headers.len() == 0);
@@ -59,13 +59,13 @@ fn streaming_response_ok_status_200() {
 }
 
 fn streaming_response_custom_status() {
-    let writer = Heap(BytesWriter.new([]));
+    let writer = Heap.new(BytesWriter.new([]));
     let resp = H3StreamingResponse.status(206_u16, writer);
     assert(resp.status == 206_u16);
 }
 
 fn streaming_response_with_header_chain() {
-    let writer = Heap(BytesWriter.new([]));
+    let writer = Heap.new(BytesWriter.new([]));
     let resp = H3StreamingResponse.ok(writer)
         .with_header(f"content-type",  f"text/event-stream")
         .with_header(f"cache-control", f"no-cache");
@@ -73,7 +73,7 @@ fn streaming_response_with_header_chain() {
 }
 
 fn streaming_response_field_list_starts_with_status() {
-    let writer = Heap(BytesWriter.new([]));
+    let writer = Heap.new(BytesWriter.new([]));
     let resp = H3StreamingResponse.ok(writer);
     let fields = resp.to_field_list();
     assert(fields.len() == 1);
@@ -87,7 +87,7 @@ fn callback_writer_constructs() {
     let cb = CallbackWriter {
         next_chunk: || -> Maybe<List<Byte>> { None },
     };
-    let _writer: Heap<dyn H3StreamWriter> = Heap(cb);
+    let _writer: Heap<dyn H3StreamWriter> = Heap.new(cb);
 }
 
 @main
