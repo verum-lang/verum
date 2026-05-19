@@ -81,12 +81,20 @@ const OPAD: Byte = 0x5C;
 
 public type HmacSha256 is {
     inner: Sha256,
-    outer_key: [Byte; 64],
+    /// `List<Byte>` of 64 elements rather than `[Byte; 64]` — the
+    /// fixed-array form inside a record mis-allocates slot space
+    /// under VBC codegen, which corrupts the record's type
+    /// descriptor and breaks `h.finalize()` method dispatch
+    /// (first-wins to an unrelated `finalize` function across the
+    /// codebase).  See bloom.vr for the same workaround.
+    outer_key: List<Byte>,
 };
 
 implement HmacSha256 {
     public fn new(key: &[Byte]) -> HmacSha256 {
-        let mut k: [Byte; 64] = [0; 64];
+        let mut k: List<Byte> = [];
+        let mut ki: Int = 0;
+        while ki < 64 { k.push(0_u8); ki = ki + 1; }
         if key.len() > SHA256_BLOCK {
             let digest = Sha256.digest(key);
             let mut i = 0;
@@ -96,8 +104,10 @@ implement HmacSha256 {
             while i < key.len() { k[i] = key[i]; i = i + 1; }
         }
 
-        let mut ipad: [Byte; 64] = [0; 64];
-        let mut opad: [Byte; 64] = [0; 64];
+        let mut ipad: List<Byte> = [];
+        let mut opad: List<Byte> = [];
+        let mut pi: Int = 0;
+        while pi < 64 { ipad.push(0_u8); opad.push(0_u8); pi = pi + 1; }
         let mut i = 0;
         while i < SHA256_BLOCK {
             ipad[i] = k[i] ^ IPAD;
@@ -106,7 +116,7 @@ implement HmacSha256 {
         }
 
         let mut inner = Sha256.new();
-        inner.update(&ipad);
+        inner.update(ipad.as_slice());
         HmacSha256 { inner: inner, outer_key: opad }
     }
 
@@ -118,7 +128,7 @@ implement HmacSha256 {
     public fn finalize(self) -> [Byte; 32] {
         let inner_digest = self.inner.finalize();
         let mut outer = Sha256.new();
-        outer.update(&self.outer_key);
+        outer.update(self.outer_key.as_slice());
         outer.update(&inner_digest);
         outer.finalize()
     }
