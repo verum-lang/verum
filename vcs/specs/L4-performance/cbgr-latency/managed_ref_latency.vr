@@ -38,7 +38,7 @@ const BENCHMARK_ITERATIONS: Int = 10_000_000;
 
 /// Baseline: Raw pointer access (unsafe, no protection)
 fn benchmark_raw_pointer_baseline() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let ptr: *const i64 = &*data as *const i64;
 
     // Warmup
@@ -66,7 +66,7 @@ fn benchmark_raw_pointer_baseline() -> BenchmarkResult {
 
 /// Tier 0: Managed reference read (ThinRef)
 fn benchmark_managed_thin_ref_read() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let managed_ref: &i64 = &*data;  // ThinRef internally
 
     // Warmup to train branch predictor
@@ -99,7 +99,7 @@ fn benchmark_managed_thin_ref_read() -> BenchmarkResult {
 
 /// Tier 0: Managed reference write (ThinRef)
 fn benchmark_managed_thin_ref_write() -> BenchmarkResult {
-    let mut data = Heap(0i64);
+    let mut data = Heap.new(0i64);
     let managed_ref: &mut i64 = &mut *data;
 
     // Warmup
@@ -224,9 +224,9 @@ fn benchmark_managed_random_access() -> BenchmarkResult {
 
 /// Tier 0: Nested reference chain access
 fn benchmark_managed_nested_refs() -> BenchmarkResult {
-    let inner = Heap(42i64);
-    let middle = Heap(&*inner);
-    let outer = Heap(&*middle);
+    let inner = Heap.new(42i64);
+    let middle = Heap.new(&*inner);
+    let outer = Heap.new(&*middle);
     let ref_chain = &*outer;
 
     // Warmup
@@ -255,7 +255,7 @@ fn benchmark_managed_nested_refs() -> BenchmarkResult {
 
 /// Tier 0: Reference copy overhead
 fn benchmark_managed_ref_copy() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let source_ref: &i64 = &*data;
 
     // Warmup
@@ -286,7 +286,7 @@ fn benchmark_managed_ref_copy() -> BenchmarkResult {
 
 /// Tier 0: Cross-function reference passing
 fn benchmark_managed_cross_function() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
 
     @inline(never)
     fn access_ref(r: &i64) -> i64 {
@@ -324,7 +324,7 @@ fn benchmark_managed_struct_field() -> BenchmarkResult {
     };
 
     let container = Container {
-        value: Heap(42i64),
+        value: Heap.new(42i64),
         aux: 100,
     };
 

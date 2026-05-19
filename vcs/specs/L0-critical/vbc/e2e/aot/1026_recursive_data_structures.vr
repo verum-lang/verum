@@ -20,7 +20,7 @@ fn list_sum(xs: IntList) -> Int {
 }
 
 fn cons(head: Int, tail: IntList) -> IntList {
-    Cons { head: head, tail: Heap(tail) }
+    Cons { head: head, tail: Heap.new(tail) }
 }
 
 @allow(unbounded_recursion)

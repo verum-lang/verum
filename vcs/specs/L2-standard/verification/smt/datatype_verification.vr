@@ -80,7 +80,7 @@ fn list_append<T>(a: List<T>, b: List<T>) -> List<T> {
     ";
     match a {
         List.Nil => b,
-        List.Cons(head, tail) => List.Cons(head, Heap(list_append(*tail, b))),
+        List.Cons(head, tail) => List.Cons(head, Heap.new(list_append(*tail, b))),
     }
 }
 

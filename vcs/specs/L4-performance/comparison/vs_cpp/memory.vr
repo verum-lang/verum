@@ -113,7 +113,7 @@ fn main() {
 fn benchmark_heap_alloc() -> ComparisonResult {
     // Warmup
     for _ in 0..10_000 {
-        let x = Heap(42i64);
+        let x = Heap.new(42i64);
         black_box(&*x);
     }
 
@@ -121,7 +121,7 @@ fn benchmark_heap_alloc() -> ComparisonResult {
     timer.start();
 
     for _ in 0..ITERATIONS {
-        let x = Heap(42i64);
+        let x = Heap.new(42i64);
         black_box(&*x);
         // Drop/free happens here
     }
@@ -231,7 +231,7 @@ fn benchmark_memset() -> ComparisonResult {
 
 /// Benchmark: Pointer/reference dereference (CBGR overhead)
 fn benchmark_pointer_deref() -> ComparisonResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let ref_data = &*data;
 
     // Warmup
@@ -304,7 +304,7 @@ fn benchmark_pointer_arithmetic() -> ComparisonResult {
 fn benchmark_unique_ptr() -> ComparisonResult {
     // Warmup
     for _ in 0..10_000 {
-        let x = Heap([0u8; 64]);
+        let x = Heap.new([0u8; 64]);
         black_box(&*x);
     }
 
@@ -312,7 +312,7 @@ fn benchmark_unique_ptr() -> ComparisonResult {
     timer.start();
 
     for _ in 0..ITERATIONS {
-        let x = Heap([0u8; 64]);
+        let x = Heap.new([0u8; 64]);
         black_box(&*x);
     }
 

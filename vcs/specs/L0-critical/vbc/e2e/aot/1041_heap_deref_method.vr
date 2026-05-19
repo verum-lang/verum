@@ -51,25 +51,25 @@ fn main() -> Int {
     if e1.eval() != 42 { return 1; }
 
     // Test 2: Simple add: 3 + 4 = 7
-    let e2 = Expr.Add(Heap(Expr.Lit(3)), Heap(Expr.Lit(4)));
+    let e2 = Expr.Add(Heap.new(Expr.Lit(3)), Heap.new(Expr.Lit(4)));
     if e2.eval() != 7 { return 2; }
 
     // Test 3: Negate: -(5) = -5
-    let e3 = Expr.Neg(Heap(Expr.Lit(5)));
+    let e3 = Expr.Neg(Heap.new(Expr.Lit(5)));
     if e3.eval() != -5 { return 3; }
 
     // Test 4: Nested: (3 + 4) * (5 + -(2)) = 7 * 3 = 21
-    let sum1 = Expr.Add(Heap(Expr.Lit(3)), Heap(Expr.Lit(4)));
-    let neg2 = Expr.Neg(Heap(Expr.Lit(2)));
-    let sum2 = Expr.Add(Heap(Expr.Lit(5)), Heap(neg2));
-    let prod = Expr.Mul(Heap(sum1), Heap(sum2));
+    let sum1 = Expr.Add(Heap.new(Expr.Lit(3)), Heap.new(Expr.Lit(4)));
+    let neg2 = Expr.Neg(Heap.new(Expr.Lit(2)));
+    let sum2 = Expr.Add(Heap.new(Expr.Lit(5)), Heap.new(neg2));
+    let prod = Expr.Mul(Heap.new(sum1), Heap.new(sum2));
     if prod.eval() != 21 { return 4; }
 
     // Test 5: Depth check
     if prod.depth() != 3 { return 5; }
 
     // Test 6: Deep nesting: ---3 = -3
-    let deep = Expr.Neg(Heap(Expr.Neg(Heap(Expr.Neg(Heap(Expr.Lit(3)))))));
+    let deep = Expr.Neg(Heap.new(Expr.Neg(Heap.new(Expr.Neg(Heap.new(Expr.Lit(3)))))));
     if deep.eval() != -3 { return 6; }
     if deep.depth() != 3 { return 7; }
 

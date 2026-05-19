@@ -317,7 +317,7 @@ fn test_assignment_with_references() {
 }
 
 fn test_assignment_with_smart_pointers() {
-    let mut boxed = Heap(0);
+    let mut boxed = Heap.new(0);
     let mut shared = Shared(0);
 
     // Assign to boxed value (if mutable access allowed)

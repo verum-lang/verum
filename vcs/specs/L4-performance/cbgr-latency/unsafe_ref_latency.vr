@@ -35,7 +35,7 @@ const BENCHMARK_ITERATIONS: Int = 10_000_000;
 
 /// Baseline: Raw C-style pointer
 fn benchmark_raw_c_pointer() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let ptr: *const i64 = &*data as *const i64;
 
     for _ in 0..WARMUP_ITERATIONS {
@@ -62,7 +62,7 @@ fn benchmark_raw_c_pointer() -> BenchmarkResult {
 
 /// Tier 2: Unsafe reference read
 fn benchmark_unsafe_ref_read() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     // SAFETY: data is valid for 'static lifetime in this test
     let unsafe_ref: &unsafe i64 = &unsafe *data;
 
@@ -90,7 +90,7 @@ fn benchmark_unsafe_ref_read() -> BenchmarkResult {
 
 /// Tier 2: Unsafe reference write
 fn benchmark_unsafe_ref_write() -> BenchmarkResult {
-    let mut data = Heap(0i64);
+    let mut data = Heap.new(0i64);
     // SAFETY: Exclusive access ensured, data valid for test duration
     let unsafe_ref: &unsafe mut i64 = &unsafe mut *data;
 
@@ -178,7 +178,7 @@ fn benchmark_unsafe_pointer_arithmetic() -> BenchmarkResult {
 /// Tier 2: FFI-style raw pointer handling
 fn benchmark_unsafe_ffi_pattern() -> BenchmarkResult {
     // Simulate receiving a pointer from FFI
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let ffi_ptr: *const i64 = Heap.into_raw(data) as *const i64;
 
     for _ in 0..WARMUP_ITERATIONS {

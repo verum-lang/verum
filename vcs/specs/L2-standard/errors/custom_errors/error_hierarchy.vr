@@ -360,12 +360,12 @@ type ErrorChain is {
 implement ErrorChain {
     fn new(root: impl Error) -> Self {
         ErrorChain {
-            errors: [Heap(root)]
+            errors: [Heap.new(root)]
         }
     }
 
     fn caused_by(mut self, cause: impl Error) -> Self {
-        self.errors.push(Heap(cause));
+        self.errors.push(Heap.new(cause));
         self
     }
 

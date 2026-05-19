@@ -38,14 +38,14 @@ const HUGE_SIZE: Int = 1048576;  // 1MB
 fn benchmark_tiny_alloc() -> AllocBenchmarkResult {
     // Warmup
     for _ in 0..WARMUP_ITERATIONS {
-        let obj = Heap([0u8; TINY_SIZE]);
+        let obj = Heap.new([0u8; TINY_SIZE]);
         black_box(&*obj);
     }
 
     let start = Instant.now();
 
     for _ in 0..BENCHMARK_ITERATIONS {
-        let obj = Heap([0u8; TINY_SIZE]);
+        let obj = Heap.new([0u8; TINY_SIZE]);
         black_box(&*obj);
     }
 
@@ -66,14 +66,14 @@ fn benchmark_tiny_alloc() -> AllocBenchmarkResult {
 fn benchmark_small_alloc() -> AllocBenchmarkResult {
     // Warmup
     for _ in 0..WARMUP_ITERATIONS {
-        let obj = Heap([0u8; SMALL_SIZE]);
+        let obj = Heap.new([0u8; SMALL_SIZE]);
         black_box(&*obj);
     }
 
     let start = Instant.now();
 
     for _ in 0..BENCHMARK_ITERATIONS {
-        let obj = Heap([0u8; SMALL_SIZE]);
+        let obj = Heap.new([0u8; SMALL_SIZE]);
         black_box(&*obj);
     }
 
@@ -96,14 +96,14 @@ fn benchmark_medium_alloc() -> AllocBenchmarkResult {
 
     // Warmup
     for _ in 0..(WARMUP_ITERATIONS / 10) {
-        let obj = Heap([0u8; MEDIUM_SIZE]);
+        let obj = Heap.new([0u8; MEDIUM_SIZE]);
         black_box(&*obj);
     }
 
     let start = Instant.now();
 
     for _ in 0..iterations {
-        let obj = Heap([0u8; MEDIUM_SIZE]);
+        let obj = Heap.new([0u8; MEDIUM_SIZE]);
         black_box(&*obj);
     }
 
@@ -126,14 +126,14 @@ fn benchmark_large_alloc() -> AllocBenchmarkResult {
 
     // Warmup
     for _ in 0..(WARMUP_ITERATIONS / 100) {
-        let obj = Heap([0u8; LARGE_SIZE]);
+        let obj = Heap.new([0u8; LARGE_SIZE]);
         black_box(&*obj);
     }
 
     let start = Instant.now();
 
     for _ in 0..iterations {
-        let obj = Heap([0u8; LARGE_SIZE]);
+        let obj = Heap.new([0u8; LARGE_SIZE]);
         black_box(&*obj);
     }
 
@@ -156,14 +156,14 @@ fn benchmark_huge_alloc() -> AllocBenchmarkResult {
 
     // Warmup
     for _ in 0..(WARMUP_ITERATIONS / 1000) {
-        let obj = Heap([0u8; HUGE_SIZE]);
+        let obj = Heap.new([0u8; HUGE_SIZE]);
         black_box(&*obj);
     }
 
     let start = Instant.now();
 
     for _ in 0..iterations {
-        let obj = Heap([0u8; HUGE_SIZE]);
+        let obj = Heap.new([0u8; HUGE_SIZE]);
         black_box(&*obj);
     }
 
@@ -253,14 +253,14 @@ fn benchmark_arena_alloc() -> AllocBenchmarkResult {
 fn benchmark_cbgr_alloc() -> AllocBenchmarkResult {
     // Warmup
     for _ in 0..WARMUP_ITERATIONS {
-        let obj = Heap([0u8; SMALL_SIZE]);
+        let obj = Heap.new([0u8; SMALL_SIZE]);
         black_box(&*obj);
     }
 
     let start = Instant.now();
 
     for _ in 0..BENCHMARK_ITERATIONS {
-        let obj = Heap([0u8; SMALL_SIZE]);
+        let obj = Heap.new([0u8; SMALL_SIZE]);
         black_box(&*obj);
     }
 
@@ -295,7 +295,7 @@ fn benchmark_multithreaded_alloc() -> AllocBenchmarkResult {
         let counter = Arc.clone(&total_allocs);
         thread.spawn(move || {
             for _ in 0..OPS_PER_THREAD {
-                let obj = Heap([0u8; SMALL_SIZE]);
+                let obj = Heap.new([0u8; SMALL_SIZE]);
                 black_box(&*obj);
             }
             counter.fetch_add(OPS_PER_THREAD as i64, Ordering.Relaxed);
@@ -361,7 +361,7 @@ fn benchmark_mixed_sizes() -> AllocBenchmarkResult {
 fn benchmark_alloc_dealloc_cycle() -> AllocBenchmarkResult {
     // Warmup
     for _ in 0..WARMUP_ITERATIONS {
-        let obj = Heap([0u8; SMALL_SIZE]);
+        let obj = Heap.new([0u8; SMALL_SIZE]);
         black_box(&*obj);
         drop(obj);
     }
@@ -369,7 +369,7 @@ fn benchmark_alloc_dealloc_cycle() -> AllocBenchmarkResult {
     let start = Instant.now();
 
     for _ in 0..BENCHMARK_ITERATIONS {
-        let obj = Heap([0u8; SMALL_SIZE]);
+        let obj = Heap.new([0u8; SMALL_SIZE]);
         black_box(&*obj);
         drop(obj);  // Explicit drop
     }

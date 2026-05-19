@@ -31,8 +31,8 @@ fn pnat_wrong() -> PNat {
 fn tree_wrong() -> BTree<Int> {
     BNode {
         value: "not int",  // ERROR: Text != Int
-        left: Heap(BLeaf),
-        right: Heap(BLeaf),
+        left: Heap.new(BLeaf),
+        right: Heap.new(BLeaf),
     }
 }
 

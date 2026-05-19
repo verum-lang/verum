@@ -37,14 +37,14 @@ fn test_basic_references() -> Int {
 }
 
 fn test_heap_allocation() -> Int {
-    let boxed = Heap(100);
+    let boxed = Heap.new(100);
     let val = *boxed;
     if val != 100 {
         print(f"FAIL heap: expected 100, got {val}");
         return 1;
     }
 
-    let boxed2 = Heap(200);
+    let boxed2 = Heap.new(200);
     let sum = *boxed + *boxed2;
     if sum != 300 {
         print(f"FAIL heap sum: expected 300, got {sum}");
@@ -96,7 +96,7 @@ fn test_ref_through_functions() -> Int {
 }
 
 fn test_heap_struct() -> Int {
-    let heap_node = Heap(Node.new(42, "heap"));
+    let heap_node = Heap.new(Node.new(42, "heap"));
     let desc = heap_node.describe();
     if desc != "heap=42" {
         print(f"FAIL heap struct: expected 'heap=42', got '{desc}'");

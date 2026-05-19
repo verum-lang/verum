@@ -487,8 +487,8 @@ fn test_array_conversions() {
     let sum: Int = arr.into_iter().sum();
     assert(sum == 15);
 
-    // Commented out: Heap() constructor type mismatch for array literals
-    // let boxed: Heap<[Int; 5]> = Heap([1, 2, 3, 4, 5]);
+    // Commented out: Heap.new() constructor type mismatch for array literals
+    // let boxed: Heap<[Int; 5]> = Heap.new([1, 2, 3, 4, 5]);
     // assert(boxed[0] == 1);
 
     // Convert array of one type to another

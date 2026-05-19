@@ -120,7 +120,7 @@ fn leak_memory<T>(value: T) -> & T {
         ensures result.is_valid();
     ";
     // ERROR: Leaks memory, no cleanup
-    let boxed = Heap(value);
+    let boxed = Heap.new(value);
     let leaked: & T = Heap.leak(boxed);
     // Heap is leaked but contract doesn't track this
     leaked

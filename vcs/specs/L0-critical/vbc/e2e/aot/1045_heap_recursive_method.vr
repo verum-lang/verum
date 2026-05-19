@@ -31,7 +31,7 @@ mount core.prelude.*;
 fn main() -> Int {
     let leaf1 = Node { value: 10, children: [] };
     let leaf2 = Node { value: 20, children: [] };
-    let root = Node { value: 5, children: [Heap(leaf1), Heap(leaf2)] };
+    let root = Node { value: 5, children: [Heap.new(leaf1), Heap.new(leaf2)] };
     let v = root.total();
     print(f"total = {v}");
     assert_eq(v, 35);

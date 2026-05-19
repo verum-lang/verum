@@ -45,7 +45,7 @@ fn main() -> Int {
     }
 
     // Test 2: Addition: 3 + 4 = 7
-    let e2 = Expr.Add(Heap(Expr.Lit(3)), Heap(Expr.Lit(4)));
+    let e2 = Expr.Add(Heap.new(Expr.Lit(3)), Heap.new(Expr.Lit(4)));
     if eval(e2) != 7 {
         print(f"FAIL 2: add eval = {eval(e2)}");
         f = f + 1;
@@ -55,8 +55,8 @@ fn main() -> Int {
 
     // Test 3: Nested: (2 + 3) * 4 = 20
     let e3 = Expr.Mul(
-        Heap(Expr.Add(Heap(Expr.Lit(2)), Heap(Expr.Lit(3)))),
-        Heap(Expr.Lit(4))
+        Heap.new(Expr.Add(Heap.new(Expr.Lit(2)), Heap.new(Expr.Lit(3)))),
+        Heap.new(Expr.Lit(4))
     );
     let r3 = eval(e3);
     if r3 != 20 {
@@ -67,7 +67,7 @@ fn main() -> Int {
     }
 
     // Test 4: Neg: -(5 + 3) = -8
-    let e4 = Expr.Neg(Heap(Expr.Add(Heap(Expr.Lit(5)), Heap(Expr.Lit(3)))));
+    let e4 = Expr.Neg(Heap.new(Expr.Add(Heap.new(Expr.Lit(5)), Heap.new(Expr.Lit(3)))));
     let r4 = eval(e4);
     if r4 != -8 {
         print(f"FAIL 4: neg = {r4}");
@@ -78,8 +78,8 @@ fn main() -> Int {
 
     // Test 5: Count nodes: (2 + 3) * 4 has 5 nodes
     let e5 = Expr.Mul(
-        Heap(Expr.Add(Heap(Expr.Lit(2)), Heap(Expr.Lit(3)))),
-        Heap(Expr.Lit(4))
+        Heap.new(Expr.Add(Heap.new(Expr.Lit(2)), Heap.new(Expr.Lit(3)))),
+        Heap.new(Expr.Lit(4))
     );
     let n5 = count_nodes(e5);
     if n5 != 5 {

@@ -71,7 +71,7 @@ fn test_let_with_complex_types() {
     let closure_type: fn(Int, Int) -> Int = add;
 
     // Smart pointer types
-    let boxed: Heap<Int> = Heap(42);
+    let boxed: Heap<Int> = Heap.new(42);
     let shared: Shared<Int> = Shared(42);
 }
 

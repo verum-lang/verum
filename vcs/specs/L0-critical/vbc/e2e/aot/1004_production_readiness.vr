@@ -142,7 +142,7 @@ fn main() -> Int {
     }
 
     // === Test 4: Recursive data structure ===
-    let linked = Heap(Cons(10, Heap(Cons(20, Heap(Cons(30, Heap(Nil)))))));
+    let linked = Heap.new(Cons(10, Heap.new(Cons(20, Heap.new(Cons(30, Heap.new(Nil)))))));
     let ls = list_sum(linked);
     if (ls == 60) { stats.record_pass(); }
     else {

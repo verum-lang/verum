@@ -13,7 +13,7 @@ type TreeNode is {
 };
 
 fn leaf(v: Int) -> Heap<TreeNode> {
-    Heap(TreeNode {
+    Heap.new(TreeNode {
         value: v,
         left: None,
         right: None,
@@ -21,7 +21,7 @@ fn leaf(v: Int) -> Heap<TreeNode> {
 }
 
 fn node(v: Int, l: Heap<TreeNode>, r: Heap<TreeNode>) -> Heap<TreeNode> {
-    Heap(TreeNode {
+    Heap.new(TreeNode {
         value: v,
         left: Some(l),
         right: Some(r),
@@ -92,7 +92,7 @@ fn main() -> Int {
     assert_eq(tree_depth(&tree), 3);
 
     // Heap — simple box
-    let boxed = Heap(42);
+    let boxed = Heap.new(42);
     assert_eq(*boxed, 42);
 
     0

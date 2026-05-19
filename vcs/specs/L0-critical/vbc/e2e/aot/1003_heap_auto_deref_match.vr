@@ -72,7 +72,7 @@ mount core.prelude.*;
 
 fn main() -> Int {
     // Test 1: Linked list sum
-    let list = Heap(Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Cons(4, Heap(Nil)))))))));
+    let list = Heap.new(Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Cons(4, Heap.new(Nil)))))))));
     let s = sum_list(list);
     if (s != 10) {
         print(f"FAIL test1: sum={s}");
@@ -97,7 +97,7 @@ fn main() -> Int {
     }
 
     // Test 4: Empty list
-    let empty = Heap(Nil);
+    let empty = Heap.new(Nil);
     if (sum_list(empty) != 0) {
         print("FAIL test4a");
         return 1;
@@ -108,7 +108,7 @@ fn main() -> Int {
     }
 
     // Test 5: Single element list
-    let single = Heap(Cons(42, Heap(Nil)));
+    let single = Heap.new(Cons(42, Heap.new(Nil)));
     if (sum_list(single) != 42) {
         print("FAIL test5");
         return 1;
@@ -120,9 +120,9 @@ fn main() -> Int {
     //   Branch    Leaf(4)
     //   /    \
     // Leaf(1) Leaf(2)
-    let tree = Heap(Branch(
-        Heap(Branch(Heap(Leaf(1)), Heap(Leaf(2)))),
-        Heap(Leaf(4))
+    let tree = Heap.new(Branch(
+        Heap.new(Branch(Heap.new(Leaf(1)), Heap.new(Leaf(2)))),
+        Heap.new(Leaf(4))
     ));
     let ts = tree_sum(tree);
     if (ts != 7) {
@@ -145,7 +145,7 @@ fn main() -> Int {
     }
 
     // Test 9: Single leaf tree
-    let leaf = Heap(Leaf(99));
+    let leaf = Heap.new(Leaf(99));
     if (tree_sum(leaf) != 99 || tree_depth(leaf) != 1 || count_leaves(leaf) != 1) {
         print("FAIL test9");
         return 1;

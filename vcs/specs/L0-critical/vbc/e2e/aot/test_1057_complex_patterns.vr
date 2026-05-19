@@ -23,11 +23,11 @@ fn eval(e: &Expr) -> Int {
 fn test_expr_eval() -> Int {
     // (3 + 4) * 2 = 14
     let expr = Mul {
-        left: Heap(Add {
-            left: Heap(Num(3)),
-            right: Heap(Num(4)),
+        left: Heap.new(Add {
+            left: Heap.new(Num(3)),
+            right: Heap.new(Num(4)),
         }),
-        right: Heap(Num(2)),
+        right: Heap.new(Num(2)),
     };
     let result = eval(&expr);
     if result != 14 {
@@ -40,9 +40,9 @@ fn test_expr_eval() -> Int {
 
 fn test_neg_expr() -> Int {
     // -(5 + 3) = -8
-    let expr = Neg(Heap(Add {
-        left: Heap(Num(5)),
-        right: Heap(Num(3)),
+    let expr = Neg(Heap.new(Add {
+        left: Heap.new(Num(5)),
+        right: Heap.new(Num(3)),
     }));
     let result = eval(&expr);
     if result != -8 {

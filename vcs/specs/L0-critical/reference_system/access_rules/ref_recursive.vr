@@ -40,15 +40,15 @@ fn main() {
 fn test_tree_borrow() {
     let tree = Tree.Node {
         value: 10,
-        left: Heap(Tree.Node {
+        left: Heap.new(Tree.Node {
             value: 5,
-            left: Heap(Tree.Leaf),
-            right: Heap(Tree.Leaf),
+            left: Heap.new(Tree.Leaf),
+            right: Heap.new(Tree.Leaf),
         }),
-        right: Heap(Tree.Node {
+        right: Heap.new(Tree.Node {
             value: 15,
-            left: Heap(Tree.Leaf),
-            right: Heap(Tree.Leaf),
+            left: Heap.new(Tree.Leaf),
+            right: Heap.new(Tree.Leaf),
         }),
     };
 
@@ -74,15 +74,15 @@ fn tree_sum(tree: &Tree<Int>) -> Int {
 fn test_tree_recursive_sum() {
     let tree = Tree.Node {
         value: 10,
-        left: Heap(Tree.Node {
+        left: Heap.new(Tree.Node {
             value: 5,
-            left: Heap(Tree.Leaf),
-            right: Heap(Tree.Leaf),
+            left: Heap.new(Tree.Leaf),
+            right: Heap.new(Tree.Leaf),
         }),
-        right: Heap(Tree.Node {
+        right: Heap.new(Tree.Node {
             value: 15,
-            left: Heap(Tree.Leaf),
-            right: Heap(Tree.Leaf),
+            left: Heap.new(Tree.Leaf),
+            right: Heap.new(Tree.Leaf),
         }),
     };
 
@@ -94,11 +94,11 @@ fn test_tree_recursive_sum() {
 fn test_list_borrow() {
     let list = LinkedList.Cons {
         head: 1,
-        tail: Heap(LinkedList.Cons {
+        tail: Heap.new(LinkedList.Cons {
             head: 2,
-            tail: Heap(LinkedList.Cons {
+            tail: Heap.new(LinkedList.Cons {
                 head: 3,
-                tail: Heap(LinkedList.Nil),
+                tail: Heap.new(LinkedList.Nil),
             }),
         }),
     };

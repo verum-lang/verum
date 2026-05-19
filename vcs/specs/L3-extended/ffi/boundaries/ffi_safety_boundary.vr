@@ -58,7 +58,7 @@ implement FfiSafe for Maybe<T> where T: FfiSafe {
 
     fn to_ffi(&self) -> *const T.FfiRepr {
         match self {
-            Some(v) => Heap.into_raw(Heap(v.to_ffi())),
+            Some(v) => Heap.into_raw(Heap.new(v.to_ffi())),
             None => std.ptr.null(),
         }
     }

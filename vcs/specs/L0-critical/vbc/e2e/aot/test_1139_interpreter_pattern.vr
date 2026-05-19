@@ -40,13 +40,13 @@ fn test_lit() -> Int {
 
 fn test_add_sub() -> Int {
     // 10 + 20 = 30
-    let e1 = BinAdd(Heap(Lit(10)), Heap(Lit(20)));
+    let e1 = BinAdd(Heap.new(Lit(10)), Heap.new(Lit(20)));
     if eval(e1) != 30 {
         print("FAIL add");
         return 1;
     }
     // 30 - 12 = 18
-    let e2 = BinSub(Heap(Lit(30)), Heap(Lit(12)));
+    let e2 = BinSub(Heap.new(Lit(30)), Heap.new(Lit(12)));
     if eval(e2) != 18 {
         print("FAIL sub");
         return 1;
@@ -57,9 +57,9 @@ fn test_add_sub() -> Int {
 
 fn test_complex_expr() -> Int {
     // (3 + 4) * (10 - 5) = 7 * 5 = 35
-    let three_plus_four = BinAdd(Heap(Lit(3)), Heap(Lit(4)));
-    let ten_minus_five = BinSub(Heap(Lit(10)), Heap(Lit(5)));
-    let expr = BinMul(Heap(three_plus_four), Heap(ten_minus_five));
+    let three_plus_four = BinAdd(Heap.new(Lit(3)), Heap.new(Lit(4)));
+    let ten_minus_five = BinSub(Heap.new(Lit(10)), Heap.new(Lit(5)));
+    let expr = BinMul(Heap.new(three_plus_four), Heap.new(ten_minus_five));
     let r = eval(expr);
     if r != 35 {
         print(f"FAIL complex: {r}, expected 35");
@@ -71,8 +71,8 @@ fn test_complex_expr() -> Int {
 
 fn test_nested() -> Int {
     // -(3 + 4) = -7
-    let sum_expr = BinAdd(Heap(Lit(3)), Heap(Lit(4)));
-    let neg_expr = Neg(Heap(sum_expr));
+    let sum_expr = BinAdd(Heap.new(Lit(3)), Heap.new(Lit(4)));
+    let neg_expr = Neg(Heap.new(sum_expr));
     let r = eval(neg_expr);
     if r != -7 {
         print(f"FAIL neg: {r}");
@@ -83,7 +83,7 @@ fn test_nested() -> Int {
 }
 
 fn test_div_zero() -> Int {
-    let e = BinDiv(Heap(Lit(10)), Heap(Lit(0)));
+    let e = BinDiv(Heap.new(Lit(10)), Heap.new(Lit(0)));
     let r = eval(e);
     if r != 0 {
         print(f"FAIL div_zero: {r}");
@@ -124,8 +124,8 @@ fn expr_depth(e: Expr2) -> Int {
 fn test_depth() -> Int {
     // depth of ((1 + 2) * 3) = 3
     let expr = BinMul(
-        Heap(BinAdd(Heap(Lit(1)), Heap(Lit(2)))),
-        Heap(Lit(3))
+        Heap.new(BinAdd(Heap.new(Lit(1)), Heap.new(Lit(2)))),
+        Heap.new(Lit(3))
     );
     let d = expr_depth(expr);
     if d != 3 {

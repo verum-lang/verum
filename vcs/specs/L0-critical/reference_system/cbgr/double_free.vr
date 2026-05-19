@@ -21,7 +21,7 @@ fn main() {
     // 4. Attempting to use old references fails generation check
 
     // Simulate double-free scenario via dangling reference
-    let heap_val = Heap(42);
+    let heap_val = Heap.new(42);
 
     // Create reference that captures current generation
     let ref_to_heap: &Int = &*heap_val;

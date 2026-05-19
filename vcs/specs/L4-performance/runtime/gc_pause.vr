@@ -37,7 +37,7 @@ fn benchmark_steady_state_pauses() -> GCBenchmarkResult {
 
     // Warmup
     for _ in 0..WARMUP_ITERATIONS {
-        let obj = Heap([0u8; 64]);
+        let obj = Heap.new([0u8; 64]);
         black_box(&*obj);
     }
 
@@ -51,7 +51,7 @@ fn benchmark_steady_state_pauses() -> GCBenchmarkResult {
     while start.elapsed().as_secs() < BENCHMARK_DURATION_SECS as u64 {
         // Allocate objects
         for _ in 0..100 {
-            let obj = Heap([0u8; 64]);
+            let obj = Heap.new([0u8; 64]);
             black_box(&*obj);
             allocations += 1;
         }
@@ -113,7 +113,7 @@ fn benchmark_allocation_burst() -> GCBenchmarkResult {
         // Allocate burst of objects
         let burst_size = 10_000;
         for _ in 0..burst_size {
-            let obj = Heap([0u8; 256]);
+            let obj = Heap.new([0u8; 256]);
             black_box(&*obj);
             allocations += 1;
         }
@@ -159,7 +159,7 @@ fn benchmark_generational_behavior() -> GCBenchmarkResult {
     // Create long-lived objects (old generation)
     let mut long_lived: List<Heap<[u8; 1024]> > = List.with_capacity(10_000);
     for _ in 0..10_000 {
-        long_lived.push(Heap([0u8; 1024]));
+        long_lived.push(Heap.new([0u8; 1024]));
     }
 
     gc.collect();  // Promote to old generation
@@ -172,7 +172,7 @@ fn benchmark_generational_behavior() -> GCBenchmarkResult {
         let check_start = Instant.now();
 
         for _ in 0..1000 {
-            let obj = Heap([0u8; 64]);
+            let obj = Heap.new([0u8; 64]);
             black_box(&*obj);
             allocations += 1;
         }
@@ -266,7 +266,7 @@ fn benchmark_incremental_gc() -> GCBenchmarkResult {
 
     // Allocate a lot of garbage
     for _ in 0..WARMUP_ITERATIONS {
-        let obj = Heap([0u8; 128]);
+        let obj = Heap.new([0u8; 128]);
         black_box(&*obj);
     }
 
@@ -279,7 +279,7 @@ fn benchmark_incremental_gc() -> GCBenchmarkResult {
         let check_start = Instant.now();
 
         for _ in 0..500 {
-            let obj = Heap([0u8; 128]);
+            let obj = Heap.new([0u8; 128]);
             black_box(&*obj);
             allocations += 1;
         }
@@ -319,7 +319,7 @@ fn benchmark_explicit_gc() -> GCBenchmarkResult {
     for _ in 0..100 {
         // Create some garbage
         for _ in 0..10_000 {
-            let obj = Heap([0u8; 64]);
+            let obj = Heap.new([0u8; 64]);
             black_box(&*obj);
         }
 
@@ -363,7 +363,7 @@ fn benchmark_cbgr_deterministic() -> GCBenchmarkResult {
 
         // All allocations are CBGR-tracked and deterministically freed
         for _ in 0..1000 {
-            let obj = Heap([0u8; 64]);
+            let obj = Heap.new([0u8; 64]);
             let ref_obj = &*obj;
             black_box(*ref_obj);
             allocations += 1;

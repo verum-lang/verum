@@ -37,7 +37,7 @@ fn contains(list: Node, target: Int) -> Bool {
 }
 
 fn prepend(list: Node, val: Int) -> Node {
-    Node.Cons(val, Heap(list))
+    Node.Cons(val, Heap.new(list))
 }
 
 mount core.prelude.*;
@@ -55,7 +55,7 @@ fn main() -> Int {
     }
 
     // Test 2: Single element
-    let one = Node.Cons(42, Heap(Node.Empty));
+    let one = Node.Cons(42, Heap.new(Node.Empty));
     if length(one) != 1 {
         print(f"FAIL 2: length = {length(one)}");
         f = f + 1;
@@ -64,7 +64,7 @@ fn main() -> Int {
     }
 
     // Test 3: Sum of three elements
-    let three = Node.Cons(10, Heap(Node.Cons(20, Heap(Node.Cons(30, Heap(Node.Empty))))));
+    let three = Node.Cons(10, Heap.new(Node.Cons(20, Heap.new(Node.Cons(30, Heap.new(Node.Empty))))));
     let s = sum_list(three);
     if s != 60 {
         print(f"FAIL 3: sum = {s}");
@@ -74,7 +74,7 @@ fn main() -> Int {
     }
 
     // Test 4: Contains
-    let list = Node.Cons(5, Heap(Node.Cons(10, Heap(Node.Cons(15, Heap(Node.Empty))))));
+    let list = Node.Cons(5, Heap.new(Node.Cons(10, Heap.new(Node.Cons(15, Heap.new(Node.Empty))))));
     if !contains(list, 10) {
         print("FAIL 4: should contain 10");
         f = f + 1;

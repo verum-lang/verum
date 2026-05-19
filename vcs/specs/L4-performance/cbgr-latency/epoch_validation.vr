@@ -34,7 +34,7 @@ const BENCHMARK_ITERATIONS: Int = 10_000_000;
 
 /// Baseline: Access without epoch check
 fn benchmark_no_epoch_check() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let ptr: *const i64 = &*data;
 
     for _ in 0..WARMUP_ITERATIONS {
@@ -163,7 +163,7 @@ fn benchmark_epoch_arena() -> BenchmarkResult {
 
 /// Epoch validation: Hot path (branch predictor trained)
 fn benchmark_epoch_hot_path() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let managed_ref = &*data;
 
     // Train branch predictor heavily
@@ -191,7 +191,7 @@ fn benchmark_epoch_hot_path() -> BenchmarkResult {
 
 /// Epoch validation: Capability check (read)
 fn benchmark_epoch_read_capability() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     // Reference with read capability
     let read_ref: &i64 = &*data;
 
@@ -219,7 +219,7 @@ fn benchmark_epoch_read_capability() -> BenchmarkResult {
 
 /// Epoch validation: Capability check (write)
 fn benchmark_epoch_write_capability() -> BenchmarkResult {
-    let mut data = Heap(0i64);
+    let mut data = Heap.new(0i64);
     // Reference with write capability
     let write_ref: &mut i64 = &mut *data;
 
@@ -285,7 +285,7 @@ fn benchmark_epoch_multiple_active() -> BenchmarkResult {
 
 /// Epoch validation: Combined with generation check
 fn benchmark_epoch_plus_generation() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let managed_ref = &*data;
 
     for _ in 0..WARMUP_ITERATIONS {

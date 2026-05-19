@@ -94,13 +94,13 @@ fn main() -> Int {
     // Test 6: Recursive expression tree
     // (2 + 3) * (4 + 1) = 5 * 5 = 25
     let expr = Mul {
-        left: Heap(Add {
-            left: Heap(Lit(2)),
-            right: Heap(Lit(3)),
+        left: Heap.new(Add {
+            left: Heap.new(Lit(2)),
+            right: Heap.new(Lit(3)),
         }),
-        right: Heap(Add {
-            left: Heap(Lit(4)),
-            right: Heap(Lit(1)),
+        right: Heap.new(Add {
+            left: Heap.new(Lit(4)),
+            right: Heap.new(Lit(1)),
         }),
     };
     let result = eval(expr);

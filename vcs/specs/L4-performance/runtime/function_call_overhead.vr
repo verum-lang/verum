@@ -301,9 +301,9 @@ fn benchmark_virtual_call() -> BenchmarkResult {
 /// Benchmark: Protocol dispatch (polymorphic)
 fn benchmark_protocol_dispatch() -> BenchmarkResult {
     let objects: List<Heap<Callable>> = [
-        Heap(TypeA { value: 1 }),
-        Heap(TypeB { value: 2 }),
-        Heap(TypeC { value: 3 }),
+        Heap.new(TypeA { value: 1 }),
+        Heap.new(TypeB { value: 2 }),
+        Heap.new(TypeC { value: 3 }),
     ];
 
     for _ in 0..WARMUP_ITERATIONS {

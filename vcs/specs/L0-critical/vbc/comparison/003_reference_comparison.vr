@@ -60,8 +60,8 @@ fn test_maybe_reference_patterns() {
 
 fn test_heap_allocated_values() {
     // Heap allocated values should be independently accessible
-    let h1 = Heap(Point { x: 1.0, y: 2.0 });
-    let h2 = Heap(Point { x: 1.0, y: 2.0 });
+    let h1 = Heap.new(Point { x: 1.0, y: 2.0 });
+    let h2 = Heap.new(Point { x: 1.0, y: 2.0 });
 
     // Both should have same values
     assert_eq(h1.x, 1.0);

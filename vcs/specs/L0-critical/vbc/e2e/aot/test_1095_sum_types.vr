@@ -80,7 +80,7 @@ fn test_linked_list() -> Int {
         print("FAIL linked: empty sum");
         return 1;
     }
-    let single = Cons2(42, Heap(Nil2));
+    let single = Cons2(42, Heap.new(Nil2));
     if list_sum(single) != 42 {
         print("FAIL linked: single");
         return 1;

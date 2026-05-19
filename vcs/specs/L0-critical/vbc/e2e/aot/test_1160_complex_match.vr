@@ -94,8 +94,8 @@ fn eval3(e: Expr3) -> Int {
 fn test_match_recursive() -> Int {
     // (3 + (-2)) = 1
     let expr = Add3(
-        Heap(Num(3)),
-        Heap(Neg(Heap(Num(2)))),
+        Heap.new(Num(3)),
+        Heap.new(Neg(Heap.new(Num(2)))),
     );
     let result = eval3(expr);
     if result != 1 {

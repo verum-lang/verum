@@ -59,8 +59,8 @@ fn main() -> Int {
 
     // Test 1: Recursive expression evaluation
     let e = Expr.Add(
-        Heap(Expr.Lit(10)),
-        Heap(Expr.Neg(Heap(Expr.Lit(3))))
+        Heap.new(Expr.Lit(10)),
+        Heap.new(Expr.Neg(Heap.new(Expr.Lit(3))))
     );
     let result = eval(e);
     if result != 7 {

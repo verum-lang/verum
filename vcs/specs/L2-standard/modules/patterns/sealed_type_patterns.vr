@@ -185,8 +185,8 @@ fn main() {
     // Test binary expr evaluation
     let add_node = BinaryExpr {
         op: "+",
-        left: Heap(Literal { value: Number(10.0) }),
-        right: Heap(Literal { value: Number(20.0) })
+        left: Heap.new(Literal { value: Number(10.0) }),
+        right: Heap.new(Literal { value: Number(20.0) })
     };
     match eval_literal(&add_node) {
         Some(Number(30.0)) => (),
@@ -195,7 +195,7 @@ fn main() {
 
     // Test extended AST function
     let call_node = CallExpr {
-        callee: Heap(Identifier { name: "foo" }),
+        callee: Heap.new(Identifier { name: "foo" }),
         args: []
     };
     assert(contains_call(&call_node));

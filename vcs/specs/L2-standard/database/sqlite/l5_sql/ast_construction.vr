@@ -65,7 +65,7 @@ fn build_update_basic() {
         table: t,
         assignments: [asg],
         from: None,
-        where_clause: Some(EBinary(BEq, Heap(EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "id".clone())), Heap(ELit(LInt(1_i64))))),
+        where_clause: Some(EBinary(BEq, Heap.new(EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "id".clone())), Heap.new(ELit(LInt(1_i64))))),
         on_conflict: None,
         returning: [],
     };
@@ -121,11 +121,11 @@ fn build_expression_variety() {
     let _ = ELit(LCurrentTimestamp);
     let a = ELit(LInt(1_i64));
     let b = ELit(LInt(2_i64));
-    let _ = EBinary(BAdd, Heap(a), Heap(b));
-    let _ = EUnary(UNeg, Heap(ELit(LInt(5_i64))));
+    let _ = EBinary(BAdd, Heap.new(a), Heap.new(b));
+    let _ = EUnary(UNeg, Heap.new(ELit(LInt(5_i64))));
     let _ = EFunc("abs".clone(), [ELit(LInt(10_i64))], false);
     let _ = ECoalesce([ELit(LNull), ELit(LInt(1_i64))]);
-    let _ = ECast(Heap(ELit(LInt(1_i64))), "REAL".clone());
+    let _ = ECast(Heap.new(ELit(LInt(1_i64))), "REAL".clone());
 }
 
 fn build_transaction_statements() {

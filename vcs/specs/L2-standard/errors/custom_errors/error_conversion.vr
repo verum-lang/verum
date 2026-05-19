@@ -315,7 +315,7 @@ implement ChainedError {
     }
 
     fn caused_by(mut self, cause: impl Into<AppError>) -> Self {
-        self.cause = Some(Heap(ChainedError.new(cause.into())));
+        self.cause = Some(Heap.new(ChainedError.new(cause.into())));
         self
     }
 }

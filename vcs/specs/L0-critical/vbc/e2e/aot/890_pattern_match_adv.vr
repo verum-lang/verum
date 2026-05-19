@@ -116,8 +116,8 @@ fn main() -> Int {
     // Test 5: recursive expression tree with Heap
     // (1 + 2) + 3 = 6
     let e = Add(
-        Heap(Add(Heap(Num(1)), Heap(Num(2)))),
-        Heap(Num(3))
+        Heap.new(Add(Heap.new(Num(1)), Heap.new(Num(2)))),
+        Heap.new(Num(3))
     );
     let result = eval(e);
     if (result != 6) {

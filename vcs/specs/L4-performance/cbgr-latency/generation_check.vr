@@ -36,7 +36,7 @@ const BENCHMARK_ITERATIONS: Int = 10_000_000;
 
 /// Baseline: Access without generation check
 fn benchmark_no_generation_check() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let ptr: *const i64 = &*data;
 
     for _ in 0..WARMUP_ITERATIONS {
@@ -62,7 +62,7 @@ fn benchmark_no_generation_check() -> BenchmarkResult {
 
 /// Generation check: Hot path (branch predictor trained)
 fn benchmark_generation_check_hot() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let managed_ref = &*data;
 
     // Train branch predictor with many successful checks
@@ -94,7 +94,7 @@ fn benchmark_generation_check_hot() -> BenchmarkResult {
 fn benchmark_generation_check_cold() -> BenchmarkResult {
     // Create many allocations to test cold access
     let allocations: List<Heap<i64>> = (0..1000)
-        .map(|i| Heap(i))
+        .map(|i| Heap.new(i))
         .collect();
 
     // Warmup
@@ -126,13 +126,13 @@ fn benchmark_generation_after_churn() -> BenchmarkResult {
 
     // Initial allocations
     for i in 0..100 {
-        slot_reuse_data.push(Heap(i));
+        slot_reuse_data.push(Heap.new(i));
     }
 
     // Cause some allocation churn to increment generations
     for i in 0..1000 {
         let idx = i % 100;
-        slot_reuse_data[idx] = Heap(i as i64);  // Reuses slot, increments generation
+        slot_reuse_data[idx] = Heap.new(i as i64);  // Reuses slot, increments generation
     }
 
     // Now access with current (valid) references
@@ -158,7 +158,7 @@ fn benchmark_generation_after_churn() -> BenchmarkResult {
 /// Generation check: Sequential access pattern
 fn benchmark_generation_sequential() -> BenchmarkResult {
     let data: List<Heap<i64>> = (0..1024)
-        .map(|i| Heap(i))
+        .map(|i| Heap.new(i))
         .collect();
 
     let passes = BENCHMARK_ITERATIONS / 1024;
@@ -192,7 +192,7 @@ fn benchmark_generation_sequential() -> BenchmarkResult {
 /// Generation check: Random access pattern
 fn benchmark_generation_random() -> BenchmarkResult {
     let data: List<Heap<i64>> = (0..1024)
-        .map(|i| Heap(i))
+        .map(|i| Heap.new(i))
         .collect();
 
     let indices = generate_shuffled_indices(BENCHMARK_ITERATIONS, 1024);
@@ -221,7 +221,7 @@ fn benchmark_generation_random() -> BenchmarkResult {
 
 /// Generation check: Multiple aliased references
 fn benchmark_generation_aliased() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let ref1 = &*data;
     let ref2 = &*data;
     let ref3 = &*data;
@@ -266,7 +266,7 @@ fn benchmark_generation_nested() -> BenchmarkResult {
     };
 
     let nested = Nested {
-        inner: Heap(Inner { value: 42 }),
+        inner: Heap.new(Inner { value: 42 }),
     };
 
     for _ in 0..WARMUP_ITERATIONS {
@@ -293,7 +293,7 @@ fn benchmark_generation_nested() -> BenchmarkResult {
 
 /// Generation check: In tight loop
 fn benchmark_generation_tight_loop() -> BenchmarkResult {
-    let data = Heap(0i64);
+    let data = Heap.new(0i64);
     let managed_ref = &*data;
 
     let iterations = BENCHMARK_ITERATIONS / 1000;

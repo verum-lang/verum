@@ -131,7 +131,7 @@ fn parse_factor(tokens: List<Token>, pos: Int) -> ParseResult {
         // TkMinus (unary)
         let inner = parse_factor(tokens, pos + 1);
         return ParseResult {
-            node: AstNode.UnaryMinus(Heap(inner.node)),
+            node: AstNode.UnaryMinus(Heap.new(inner.node)),
             pos: inner.pos,
         };
     }
@@ -156,7 +156,7 @@ fn parse_term(tokens: List<Token>, pos: Int) -> ParseResult {
     while parser_peek_tag(tokens, cur_pos) == 4 || parser_peek_tag(tokens, cur_pos) == 5 {
         let op_tag = parser_peek_tag(tokens, cur_pos);
         let right = parse_factor(tokens, cur_pos + 1);
-        node = AstNode.BinOp(op_tag, Heap(node), Heap(right.node));
+        node = AstNode.BinOp(op_tag, Heap.new(node), Heap.new(right.node));
         cur_pos = right.pos;
     }
 
@@ -172,7 +172,7 @@ fn parse_expr(tokens: List<Token>, pos: Int) -> ParseResult {
     while parser_peek_tag(tokens, cur_pos) == 2 || parser_peek_tag(tokens, cur_pos) == 3 {
         let op_tag = parser_peek_tag(tokens, cur_pos);
         let right = parse_term(tokens, cur_pos + 1);
-        node = AstNode.BinOp(op_tag, Heap(node), Heap(right.node));
+        node = AstNode.BinOp(op_tag, Heap.new(node), Heap.new(right.node));
         cur_pos = right.pos;
     }
 

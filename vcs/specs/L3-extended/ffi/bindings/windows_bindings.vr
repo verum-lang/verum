@@ -200,7 +200,7 @@ ffi kernel32 {
     ) -> LPVOID;
 
     @extern("system")
-    fn GetProcessHeap() -> HANDLE;
+    fn GetProcessHeap.new() -> HANDLE;
 
     // ------------------------------------------------------------
     // Process and Thread

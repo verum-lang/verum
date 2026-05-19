@@ -56,8 +56,8 @@ fn test_leaf() -> Int {
 fn test_simple_tree() -> Int {
     let t = Node {
         value: 10,
-        left: Heap(Leaf(5)),
-        right: Heap(Leaf(15)),
+        left: Heap.new(Leaf(5)),
+        right: Heap.new(Leaf(15)),
     };
     let s = tree_sum(&t);
     if s != 30 {
@@ -77,15 +77,15 @@ fn test_simple_tree() -> Int {
 fn test_deep_tree() -> Int {
     let t = Node {
         value: 1,
-        left: Heap(Node {
+        left: Heap.new(Node {
             value: 2,
-            left: Heap(Leaf(3)),
-            right: Heap(Leaf(4)),
+            left: Heap.new(Leaf(3)),
+            right: Heap.new(Leaf(4)),
         }),
-        right: Heap(Node {
+        right: Heap.new(Node {
             value: 5,
-            left: Heap(Leaf(6)),
-            right: Heap(Leaf(7)),
+            left: Heap.new(Leaf(6)),
+            right: Heap.new(Leaf(7)),
         }),
     };
     // 1 + 2 + 3 + 4 + 5 + 6 + 7 = 28
@@ -129,7 +129,7 @@ fn list_len(l: &IntList) -> Int {
 
 // Test 4: Linked list
 fn test_linked_list() -> Int {
-    let l = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Cons(4, Heap(Nil))))))));
+    let l = Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Cons(4, Heap.new(Nil))))))));
     let s = list_sum(&l);
     if s != 10 {
         print(f"FAIL linked_list sum: expected 10, got {s}");
@@ -149,7 +149,7 @@ fn build_list(n: Int) -> IntList {
     let mut result = Nil;
     let mut i = n;
     while i > 0 {
-        result = Cons(i, Heap(result));
+        result = Cons(i, Heap.new(result));
         i = i - 1;
     }
     result
@@ -171,16 +171,16 @@ fn test_build_list() -> Int {
 fn test_asymmetric() -> Int {
     let t = Node {
         value: 100,
-        left: Heap(Node {
+        left: Heap.new(Node {
             value: 50,
-            left: Heap(Node {
+            left: Heap.new(Node {
                 value: 25,
-                left: Heap(Leaf(10)),
-                right: Heap(Leaf(15)),
+                left: Heap.new(Leaf(10)),
+                right: Heap.new(Leaf(15)),
             }),
-            right: Heap(Leaf(75)),
+            right: Heap.new(Leaf(75)),
         }),
-        right: Heap(Leaf(200)),
+        right: Heap.new(Leaf(200)),
     };
     let s = tree_sum(&t);
     // 100 + 50 + 25 + 10 + 15 + 75 + 200 = 475

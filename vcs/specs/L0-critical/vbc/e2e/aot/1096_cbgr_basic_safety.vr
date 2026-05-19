@@ -31,7 +31,7 @@ fn main() -> Int {
     print("test2 immut ref: OK");
 
     // Test 3: Heap allocation with reference
-    let h = Heap(Data { value: 42, name: "heap" });
+    let h = Heap.new(Data { value: 42, name: "heap" });
     let href = &(*h);
     assert_eq(href.value, 42);
     print("test3 heap ref: OK");

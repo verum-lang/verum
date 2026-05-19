@@ -186,7 +186,7 @@ fn test_cfg_any() {
 @test
 fn test_cfg_not() {
     let inner = CfgPredicate.Simple("windows");
-    let p: CfgPredicate = CfgPredicate.Not(Heap(inner));
+    let p: CfgPredicate = CfgPredicate.Not(Heap.new(inner));
     assert(p is CfgPredicate.Not);
 }
 
@@ -211,7 +211,7 @@ fn test_cfg_any_with_predicates() {
 @test
 fn test_cfg_nested_not_all() {
     let inner_pred = CfgPredicate.All(List.new());
-    let p = CfgPredicate.Not(Heap(inner_pred));
+    let p = CfgPredicate.Not(Heap.new(inner_pred));
     assert(p is CfgPredicate.Not);
 }
 

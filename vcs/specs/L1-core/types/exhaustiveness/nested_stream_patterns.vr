@@ -17,7 +17,7 @@ type Result<T, E> is Ok(T) | Err(E);
 fn concat_streams<T>(a: Stream<T>, b: Stream<T>) -> Stream<T> =
     match a {
         Nil => b,
-        Cons(x, tail) => Cons(x, Heap(concat_streams(*tail, b)))
+        Cons(x, tail) => Cons(x, Heap.new(concat_streams(*tail, b)))
     };
 
 // ============================================================
@@ -61,7 +61,7 @@ fn collect_successes<T, E>(s: Stream<Result<T, E>>) -> Stream<T> =
     match s {
         Nil => Nil,
         Cons(item, rest) => match item {
-            Ok(x) => Cons(x, Heap(collect_successes(*rest))),
+            Ok(x) => Cons(x, Heap.new(collect_successes(*rest))),
             Err(_) => collect_successes(*rest),
         }
     };
@@ -86,7 +86,7 @@ fn unzip<A, B>(s: Stream<(A, B)>) -> (Stream<A>, Stream<B>) =
         Nil => (Nil, Nil),
         Cons(pair, rest) => {
             let (as_, bs) = unzip(*rest);
-            (Cons(pair.0, Heap(as_)), Cons(pair.1, Heap(bs)))
+            (Cons(pair.0, Heap.new(as_)), Cons(pair.1, Heap.new(bs)))
         }
     };
 
@@ -96,7 +96,7 @@ fn zip<A, B>(a: Stream<A>, b: Stream<B>) -> Stream<(A, B)> =
         (Nil, Nil) => Nil,
         (Nil, Cons(_, _)) => Nil,
         (Cons(_, _), Nil) => Nil,
-        (Cons(x, xs), Cons(y, ys)) => Cons((x, y), Heap(zip(*xs, *ys)))
+        (Cons(x, xs), Cons(y, ys)) => Cons((x, y), Heap.new(zip(*xs, *ys)))
     };
 
 // ============================================================
@@ -109,7 +109,7 @@ fn compact<T>(s: Stream<Maybe<T>>) -> Stream<T> =
         Nil => Nil,
         Cons(item, rest) => match item {
             None => compact(*rest),
-            Some(val) => Cons(val, Heap(compact(*rest))),
+            Some(val) => Cons(val, Heap.new(compact(*rest))),
         }
     };
 
@@ -157,7 +157,7 @@ fn stream_filter<T>(s: Stream<T>, pred: fn(&T) -> Bool) -> Stream<T> =
         Nil => Nil,
         Cons(x, rest) => {
             if pred(&x) {
-                Cons(x, Heap(stream_filter(*rest, pred)))
+                Cons(x, Heap.new(stream_filter(*rest, pred)))
             } else {
                 stream_filter(*rest, pred)
             }
@@ -173,11 +173,11 @@ mount core.prelude.*;
 fn main() {
     // Build test streams
     let empty: Stream<Int> = Nil;
-    let s1 = Cons(1, Heap(Cons(2, Heap(Nil))));
-    let s2 = Cons(3, Heap(Cons(4, Heap(Nil))));
+    let s1 = Cons(1, Heap.new(Cons(2, Heap.new(Nil))));
+    let s2 = Cons(3, Heap.new(Cons(4, Heap.new(Nil))));
 
     // Stream of streams
-    let ss: Stream<Stream<Int>> = Cons(s1, Heap(Cons(s2, Heap(Nil))));
+    let ss: Stream<Stream<Int>> = Cons(s1, Heap.new(Cons(s2, Heap.new(Nil))));
     let empty_ss: Stream<Stream<Int>> = Nil;
 
     // Test flatten
@@ -191,16 +191,16 @@ fn main() {
 
     // Test result streams
     let results: Stream<Result<Int, Text>> =
-        Cons(Ok(1), Heap(Cons(Err("fail"), Heap(Cons(Ok(2), Heap(Nil))))));
+        Cons(Ok(1), Heap.new(Cons(Err("fail"), Heap.new(Cons(Ok(2), Heap.new(Nil))))));
     let successes = collect_successes(results);
 
     // Test zip
-    let pairs = zip(Cons(1, Heap(Nil)), Cons(2, Heap(Nil)));
+    let pairs = zip(Cons(1, Heap.new(Nil)), Cons(2, Heap.new(Nil)));
 
     // Test sum
-    assert(stream_sum(Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Nil))))))) == 6);
+    assert(stream_sum(Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Nil))))))) == 6);
 
     // Test compact
-    let maybes: Stream<Maybe<Int>> = Cons(Some(1), Heap(Cons(None, Heap(Cons(Some(3), Heap(Nil))))));
+    let maybes: Stream<Maybe<Int>> = Cons(Some(1), Heap.new(Cons(None, Heap.new(Cons(Some(3), Heap.new(Nil))))));
     let compacted = compact(maybes);
 }

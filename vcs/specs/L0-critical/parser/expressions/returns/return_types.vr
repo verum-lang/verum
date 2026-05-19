@@ -158,7 +158,7 @@ fn returns_closure() -> fn(Int) -> Int {
 }
 
 fn returns_boxed_closure() -> Heap<fn(Int) -> Int> {
-    Heap(|x| x * 2)
+    Heap.new(|x| x * 2)
 }
 
 // Associated type return

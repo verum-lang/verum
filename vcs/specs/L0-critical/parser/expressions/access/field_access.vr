@@ -177,7 +177,7 @@ fn update_point(p: &mut Point) {
 
 // Field access with deref
 fn test_field_access_with_deref() {
-    let boxed = Heap(Point { x: 1, y: 2 });
+    let boxed = Heap.new(Point { x: 1, y: 2 });
     let x = boxed.x;
     let y = (*boxed).y;
 }

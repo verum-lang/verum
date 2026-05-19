@@ -8,7 +8,7 @@ type Stack<T> is Empty | Cons(T, Heap<Stack<T>>);
 
 @allow(unbounded_recursion)
 fn push<T>(stack: Stack<T>, val: T) -> Stack<T> {
-    Stack.Cons(val, Heap(stack))
+    Stack.Cons(val, Heap.new(stack))
 }
 
 @allow(unbounded_recursion)

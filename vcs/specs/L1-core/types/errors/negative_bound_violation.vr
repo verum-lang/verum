@@ -69,7 +69,7 @@ type NonCopyable is {
 
 implement Clone for NonCopyable {
     fn clone(&self) -> Self {
-        NonCopyable { data: Heap(*self.data) }
+        NonCopyable { data: Heap.new(*self.data) }
     }
 }
 
@@ -196,7 +196,7 @@ fn main() {
         let w = Wrapper { value: Copyable { x: 1, y: 2 } };
         w.print();  // Uses default impl because Copyable: Copy
 
-        let w2 = Wrapper { value: NonCopyable { data: Heap(42) } };
+        let w2 = Wrapper { value: NonCopyable { data: Heap.new(42) } };
         w2.print();  // Uses specialized impl because NonCopyable: !Copy
     }
 
@@ -232,7 +232,7 @@ fn main() {
     implement Producer for GoodProducer {
         type Output is NonCopyable;  // OK: NonCopyable: !Copy
         fn produce(&self) -> Self.Output {
-            NonCopyable { data: Heap(42) }
+            NonCopyable { data: Heap.new(42) }
         }
     }
 
@@ -264,7 +264,7 @@ fn main() {
     fn violate_complex() {
         let a = Copyable { x: 1, y: 2 };  // Copy (violates !Copy)
         let b = ThreadLocal { handle: 0 as *mut () };  // !Send (violates Send)
-        let c = NonCopyable { data: Heap(42) };  // Has Drop
+        let c = NonCopyable { data: Heap.new(42) };  // Has Drop
         complex_negatives(a, b, c);  // ERROR: multiple violations
     }
 

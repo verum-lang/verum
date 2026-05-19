@@ -338,7 +338,7 @@ fn benchmark_closure_capturing() -> BenchmarkResult {
 
 /// Benchmark: Boxed closure (Fn protocol object)
 fn benchmark_boxed_closure() -> BenchmarkResult {
-    let closure: Heap<Fn(Int) -> Int> = Heap(|x: Int| x + 1);
+    let closure: Heap<Fn(Int) -> Int> = Heap.new(|x: Int| x + 1);
 
     // Warmup
     for i in 0..(WARMUP_ITERATIONS / 10) {

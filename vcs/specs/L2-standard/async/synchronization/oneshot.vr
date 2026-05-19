@@ -269,7 +269,7 @@ async fn test_oneshot_boxed() {
     let (tx, rx) = oneshot<Heap<List<Int>>>();
 
     spawn {
-        let data = Heap([1, 2, 3, 4, 5]);
+        let data = Heap.new([1, 2, 3, 4, 5]);
         tx.send(data).ok();
     };
 

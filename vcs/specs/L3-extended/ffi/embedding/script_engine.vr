@@ -72,7 +72,7 @@ fn verum_engine_create() -> *mut ScriptEngine {
         return std.ptr.null as *mut c_void;
     }
 
-    let engine = Heap(ScriptEngine {
+    let engine = Heap.new(ScriptEngine {
         runtime,
         sandbox: Sandbox.permissive(),
         globals: Map.new(),
@@ -98,7 +98,7 @@ fn verum_engine_create_sandboxed(config: *const Sandbox) -> *mut ScriptEngine {
         unsafe { (*config).clone() }
     };
 
-    let engine = Heap(ScriptEngine {
+    let engine = Heap.new(ScriptEngine {
         runtime,
         sandbox,
         globals: Map.new(),
@@ -150,7 +150,7 @@ fn verum_engine_eval(
         match e.evaluate(script_str) {
             Ok(value) => {
                 if !result.is_null() {
-                    *result = Heap.into_raw(Heap(value)) as *mut VerumValue;
+                    *result = Heap.into_raw(Heap.new(value)) as *mut VerumValue;
                 }
                 0
             }
@@ -189,7 +189,7 @@ fn verum_engine_exec_file(
         match e.execute_file(path_str) {
             Ok(value) => {
                 if !result.is_null() {
-                    *result = Heap.into_raw(Heap(value)) as *mut VerumValue;
+                    *result = Heap.into_raw(Heap.new(value)) as *mut VerumValue;
                 }
                 0
             }

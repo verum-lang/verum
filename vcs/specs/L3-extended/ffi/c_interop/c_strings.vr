@@ -469,7 +469,7 @@ fn encode_utf8(code: u32, output: &mut List<u8>) {
 // ------------------------------------------------------------
 
 fn forget<T>(value: T) {
-    let _ = Heap.into_raw(Heap(value));
+    let _ = Heap.into_raw(Heap.new(value));
 }
 
 unsafe fn slice_from_raw_parts<T>(ptr: *const T, len: usize) -> &[T] {

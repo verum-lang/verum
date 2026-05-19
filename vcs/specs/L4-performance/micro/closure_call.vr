@@ -227,7 +227,7 @@ fn benchmark_large_capture() -> BenchmarkResult {
 /// Benchmark: Boxed Fn trait object
 fn benchmark_boxed_fn() -> BenchmarkResult {
     let offset = 42;
-    let closure: Heap<Fn(Int) -> Int> = Heap(move |x| x + offset);
+    let closure: Heap<Fn(Int) -> Int> = Heap.new(move |x| x + offset);
 
     // Warmup
     for i in 0..(WARMUP_ITERATIONS / 10) {
@@ -252,7 +252,7 @@ fn benchmark_boxed_fn() -> BenchmarkResult {
 /// Benchmark: Boxed FnMut
 fn benchmark_boxed_fn_mut() -> BenchmarkResult {
     let mut counter = 0;
-    let mut closure: Heap<FnMut() -> Int> = Heap(|| {
+    let mut closure: Heap<FnMut() -> Int> = Heap.new(|| {
         counter += 1;
         counter
     });

@@ -27,7 +27,7 @@ fn nat_induction<R>(
 
 /// Addition via induction
 fn padd(a: PeanoNat, b: PeanoNat) -> PeanoNat {
-    nat_induction(a, b, |_, acc| PSucc(Heap(acc)))
+    nat_induction(a, b, |_, acc| PSucc(Heap.new(acc)))
 }
 
 /// Multiplication via induction
@@ -43,7 +43,7 @@ fn to_int(n: PeanoNat) -> Int {
 /// Convert Int to Peano
 fn from_int(n: Int) -> PeanoNat {
     if n <= 0 { PZero }
-    else { PSucc(Heap(from_int(n - 1))) }
+    else { PSucc(Heap.new(from_int(n - 1))) }
 }
 
 /// Induction over vectors
@@ -111,8 +111,8 @@ mount core.prelude.*;
 
 fn main() {
     // Peano arithmetic via induction
-    let two = PSucc(Heap(PSucc(Heap(PZero))));
-    let three = PSucc(Heap(two));
+    let two = PSucc(Heap.new(PSucc(Heap.new(PZero))));
+    let three = PSucc(Heap.new(two));
     assert(to_int(two) == 2);
     assert(to_int(three) == 3);
 
@@ -127,7 +127,7 @@ fn main() {
     // Tree induction
     let leaf1 = Leaf(1);
     let leaf2 = Leaf(2);
-    let tree = Branch { left: Heap(leaf1), right: Heap(leaf2) };
+    let tree = Branch { left: Heap.new(leaf1), right: Heap.new(leaf2) };
     assert(tree_size(tree) == 3);  // 2 leaves + 1 branch
     assert(tree_depth(tree) == 1);
 

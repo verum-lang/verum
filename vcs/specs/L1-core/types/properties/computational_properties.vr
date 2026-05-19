@@ -389,7 +389,7 @@ fn call_external() -> Int {
 /// Heap allocation infers Allocates property
 /// Properties: {Allocates}
 fn allocate_box(x: Int) -> Heap<Int> {
-    Heap(x)
+    Heap.new(x)
 }
 
 /// List creation infers Allocates
@@ -495,7 +495,7 @@ fn verify_pure_properties() {
 ///    - Modifies data through mutable reference
 ///
 /// 6. Allocates: Inferred when:
-///    - Uses Heap(x) for boxing
+///    - Uses Heap.new(x) for boxing
 ///    - Creates List, Map, Set, etc.
 ///    - Calls allocating functions
 ///

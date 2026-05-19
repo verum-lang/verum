@@ -53,8 +53,8 @@ fn test_binary_tree() -> Int {
     //    / \
     //   1   2
     let tree = TreeBranch(
-        Heap(TreeBranch(Heap(TreeLeaf(1)), Heap(TreeLeaf(2)))),
-        Heap(TreeLeaf(5))
+        Heap.new(TreeBranch(Heap.new(TreeLeaf(1)), Heap.new(TreeLeaf(2)))),
+        Heap.new(TreeLeaf(5))
     );
     let s = tree_sum(tree);
     if s != 8 {
@@ -67,8 +67,8 @@ fn test_binary_tree() -> Int {
 
 fn test_tree_depth() -> Int {
     let tree = TreeBranch(
-        Heap(TreeBranch(Heap(TreeLeaf(1)), Heap(TreeBranch(Heap(TreeLeaf(2)), Heap(TreeLeaf(3)))))),
-        Heap(TreeLeaf(4))
+        Heap.new(TreeBranch(Heap.new(TreeLeaf(1)), Heap.new(TreeBranch(Heap.new(TreeLeaf(2)), Heap.new(TreeLeaf(3)))))),
+        Heap.new(TreeLeaf(4))
     );
     let d = tree_depth(tree);
     if d != 4 {
@@ -81,8 +81,8 @@ fn test_tree_depth() -> Int {
 
 fn test_tree_count() -> Int {
     let tree = TreeBranch(
-        Heap(TreeBranch(Heap(TreeLeaf(1)), Heap(TreeLeaf(2)))),
-        Heap(TreeBranch(Heap(TreeLeaf(3)), Heap(TreeLeaf(4))))
+        Heap.new(TreeBranch(Heap.new(TreeLeaf(1)), Heap.new(TreeLeaf(2)))),
+        Heap.new(TreeBranch(Heap.new(TreeLeaf(3)), Heap.new(TreeLeaf(4))))
     );
     let c = tree_count(tree);
     if c != 4 {
@@ -96,13 +96,13 @@ fn test_tree_count() -> Int {
 fn test_balanced_tree() -> Int {
     // Build a complete binary tree with 7 nodes
     let tree = TreeBranch(
-        Heap(TreeBranch(
-            Heap(TreeBranch(Heap(TreeLeaf(1)), Heap(TreeLeaf(2)))),
-            Heap(TreeBranch(Heap(TreeLeaf(3)), Heap(TreeLeaf(4))))
+        Heap.new(TreeBranch(
+            Heap.new(TreeBranch(Heap.new(TreeLeaf(1)), Heap.new(TreeLeaf(2)))),
+            Heap.new(TreeBranch(Heap.new(TreeLeaf(3)), Heap.new(TreeLeaf(4))))
         )),
-        Heap(TreeBranch(
-            Heap(TreeBranch(Heap(TreeLeaf(5)), Heap(TreeLeaf(6)))),
-            Heap(TreeBranch(Heap(TreeLeaf(7)), Heap(TreeLeaf(8))))
+        Heap.new(TreeBranch(
+            Heap.new(TreeBranch(Heap.new(TreeLeaf(5)), Heap.new(TreeLeaf(6)))),
+            Heap.new(TreeBranch(Heap.new(TreeLeaf(7)), Heap.new(TreeLeaf(8))))
         ))
     );
     let s = tree_sum(tree);

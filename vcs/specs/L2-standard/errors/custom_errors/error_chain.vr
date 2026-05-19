@@ -52,7 +52,7 @@ implement<E: Error> ChainedError<E> {
     }
 
     fn with_source(mut self, source: impl Error) -> Self {
-        self.source = Some(Heap(source));
+        self.source = Some(Heap.new(source));
         self
     }
 }
@@ -210,7 +210,7 @@ implement<E: Error> ErrorContext<E> {
         ErrorContext {
             inner: error,
             context: context.into(),
-            source: Some(Heap(cause))
+            source: Some(Heap.new(cause))
         }
     }
 }

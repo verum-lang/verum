@@ -1,7 +1,7 @@
 // @test: run-interpreter
 // @tier: 0
 // @level: L0
-// @was-skip: @list_with_capacity macro unimplemented + generic inference for Some(Heap(Node)) - FIXED
+// @was-skip: @list_with_capacity macro unimplemented + generic inference for Some(Heap.new(Node)) - FIXED
 // @tags: vbc, memory, allocation, new, heap
 // @timeout: 5000
 // @expect: pass
@@ -34,14 +34,14 @@ fn test_nested_struct() {
 }
 
 fn test_heap_allocation() {
-    let h = Heap(Point { x: 1.0, y: 2.0 });
+    let h = Heap.new(Point { x: 1.0, y: 2.0 });
 
     assert_eq(h.x, 1.0);
     assert_eq(h.y, 2.0);
 }
 
 fn test_heap_modification() {
-    let mut h = Heap(Point { x: 1.0, y: 2.0 });
+    let mut h = Heap.new(Point { x: 1.0, y: 2.0 });
 
     h.x = 10.0;
     h.y = 20.0;
@@ -159,9 +159,9 @@ fn test_generic_allocation() {
 }
 
 fn test_linked_list() {
-    let n3 = Heap(Node { value: 3, next: None });
-    let n2 = Heap(Node { value: 2, next: Some(n3) });
-    let n1 = Heap(Node { value: 1, next: Some(n2) });
+    let n3 = Heap.new(Node { value: 3, next: None });
+    let n2 = Heap.new(Node { value: 2, next: Some(n3) });
+    let n1 = Heap.new(Node { value: 1, next: Some(n2) });
 
     assert_eq(n1.value, 1);
     assert_eq(@unwrap(n1.next).value, 2);
@@ -205,7 +205,7 @@ fn test_allocation_stress() {
     // Many allocations
     for _ in 0..1000 {
         let _ = Point { x: 1.0, y: 2.0 };
-        let _ = Heap(Point { x: 3.0, y: 4.0 });
+        let _ = Heap.new(Point { x: 3.0, y: 4.0 });
         let _ = [1, 2, 3, 4, 5];
     }
 

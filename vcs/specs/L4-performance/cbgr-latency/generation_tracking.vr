@@ -25,7 +25,7 @@ const BENCHMARK_ITERATIONS: Int = 10_000_000;
 
 /// Baseline: Direct pointer access (unsafe, no generation check)
 fn benchmark_no_generation_check() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let ptr: *const i64 = &*data as *const i64;
 
     // Warmup
@@ -51,7 +51,7 @@ fn benchmark_no_generation_check() -> BenchmarkResult {
 
 /// Generation check: Single allocation, repeated access
 fn benchmark_single_allocation_access() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let managed_ref: &i64 = &*data;
 
     // Warmup
@@ -82,7 +82,7 @@ fn benchmark_generation_with_churn() -> BenchmarkResult {
 
     // Pre-allocate some objects
     for i in 0..100 {
-        allocations.push(Heap(i));
+        allocations.push(Heap.new(i));
     }
 
     let start = Instant.now();
@@ -95,7 +95,7 @@ fn benchmark_generation_with_churn() -> BenchmarkResult {
         // Periodically reallocate (generation increment)
         if i % 1000 == 0 {
             let remove_idx = (i / 1000) % allocations.len();
-            allocations[remove_idx] = Heap(i as i64);
+            allocations[remove_idx] = Heap.new(i as i64);
         }
     }
 
@@ -115,7 +115,7 @@ fn benchmark_generation_increment() -> BenchmarkResult {
 
     for _ in 0..BENCHMARK_ITERATIONS / 100 {
         // Each allocation/deallocation increments generation
-        let obj = Heap(42i64);
+        let obj = Heap.new(42i64);
         black_box(&*obj);
         // obj dropped here, generation incremented
     }
@@ -132,7 +132,7 @@ fn benchmark_generation_increment() -> BenchmarkResult {
 
 /// Multiple references to same allocation
 fn benchmark_aliased_generation_check() -> BenchmarkResult {
-    let data = Heap(42i64);
+    let data = Heap.new(42i64);
     let ref1: &i64 = &*data;
     let ref2: &i64 = &*data;
     let ref3: &i64 = &*data;
@@ -172,7 +172,7 @@ fn benchmark_generation_reuse() -> BenchmarkResult {
 
     for i in 0..BENCHMARK_ITERATIONS / 100 {
         // Allocate
-        let obj = Heap(i as i64);
+        let obj = Heap.new(i as i64);
         refs.push(obj);
 
         // Keep only recent allocations
@@ -199,7 +199,7 @@ fn benchmark_generation_reuse() -> BenchmarkResult {
 
 /// Branch prediction impact on generation check
 fn benchmark_branch_prediction() -> BenchmarkResult {
-    let valid_data = Heap(42i64);
+    let valid_data = Heap.new(42i64);
     let valid_ref: &i64 = &*valid_data;
 
     // All checks should pass - branch predictor should optimize
@@ -229,7 +229,7 @@ fn benchmark_branch_prediction() -> BenchmarkResult {
 fn benchmark_cache_cold() -> BenchmarkResult {
     const ARRAY_SIZE: Int = 10_000;
     let data: List<Heap<i64>> = (0..ARRAY_SIZE)
-        .map(|i| Heap(i))
+        .map(|i| Heap.new(i))
         .collect();
 
     // Random access pattern (cache-unfriendly)
@@ -257,7 +257,7 @@ fn benchmark_cache_cold() -> BenchmarkResult {
 fn benchmark_sequential_vs_random() -> (BenchmarkResult, BenchmarkResult) {
     const ARRAY_SIZE: Int = 10_000;
     let data: List<Heap<i64>> = (0..ARRAY_SIZE)
-        .map(|i| Heap(i))
+        .map(|i| Heap.new(i))
         .collect();
 
     // Sequential access

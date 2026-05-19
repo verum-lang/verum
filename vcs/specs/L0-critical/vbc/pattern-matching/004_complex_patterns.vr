@@ -246,15 +246,15 @@ fn list_contains<T: Eq>(xs: List<T>, target: T) -> Bool =
 
 fn test_recursive_patterns() {
     let empty: List<Int> = Nil;
-    let nums = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Nil))))));
+    let nums = Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Nil))))));
 
     assert_eq(list_length(empty), 0);
     assert_eq(list_length(nums), 3);
 
-    let nums2 = Cons(10, Heap(Cons(20, Heap(Cons(30, Heap(Nil))))));
+    let nums2 = Cons(10, Heap.new(Cons(20, Heap.new(Cons(30, Heap.new(Nil))))));
     assert_eq(list_sum(nums2), 60);
 
-    let items = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Nil))))));
+    let items = Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Nil))))));
     assert(list_contains(items, 2));
     assert(!list_contains(Nil, 2));
 }
@@ -296,7 +296,7 @@ fn test_json_patterns() {
     assert(json_is_truthy(JsonString("hello")));
     assert(!json_is_truthy(JsonString("")));
     assert(!json_is_truthy(JsonArray(Nil)));
-    assert(json_is_truthy(JsonArray(Cons(JsonNull, Heap(Nil)))));
+    assert(json_is_truthy(JsonArray(Cons(JsonNull, Heap.new(Nil)))));
 
     assert_eq(json_type_name(JsonNull), "null");
     assert_eq(json_type_name(JsonBool(true)), "boolean");
@@ -329,23 +329,23 @@ fn count_nodes(e: Expr) -> Int =
 fn simplify(e: Expr) -> Expr =
     match e {
         // 0 + x => x
-        Add(Heap(Num(0)), right) => simplify(*right),
+        Add(Heap.new(Num(0)), right) => simplify(*right),
         // x + 0 => x
-        Add(left, Heap(Num(0))) => simplify(*left),
+        Add(left, Heap.new(Num(0))) => simplify(*left),
         // 0 * x => 0
-        Mul(Heap(Num(0)), _) => Num(0),
+        Mul(Heap.new(Num(0)), _) => Num(0),
         // x * 0 => 0
-        Mul(_, Heap(Num(0))) => Num(0),
+        Mul(_, Heap.new(Num(0))) => Num(0),
         // 1 * x => x
-        Mul(Heap(Num(1)), right) => simplify(*right),
+        Mul(Heap.new(Num(1)), right) => simplify(*right),
         // x * 1 => x
-        Mul(left, Heap(Num(1))) => simplify(*left),
+        Mul(left, Heap.new(Num(1))) => simplify(*left),
         // --x => x
-        Neg(Heap(Neg(inner))) => simplify(*inner),
+        Neg(Heap.new(Neg(inner))) => simplify(*inner),
         // Recurse
-        Add(left, right) => Add(Heap(simplify(*left)), Heap(simplify(*right))),
-        Mul(left, right) => Mul(Heap(simplify(*left)), Heap(simplify(*right))),
-        Neg(inner) => Neg(Heap(simplify(*inner))),
+        Add(left, right) => Add(Heap.new(simplify(*left)), Heap.new(simplify(*right))),
+        Mul(left, right) => Mul(Heap.new(simplify(*left)), Heap.new(simplify(*right))),
+        Neg(inner) => Neg(Heap.new(simplify(*inner))),
         // Base cases
         other => other
     };
@@ -353,28 +353,28 @@ fn simplify(e: Expr) -> Expr =
 fn test_expression_patterns() {
     // Build: (1 + 2) * 3
     let expr1 = Mul(
-        Heap(Add(Heap(Num(1)), Heap(Num(2)))),
-        Heap(Num(3))
+        Heap.new(Add(Heap.new(Num(1)), Heap.new(Num(2)))),
+        Heap.new(Num(3))
     );
     assert_eq(eval_expr(expr1), 9);
     assert_eq(count_nodes(expr1), 5);
 
     // Build: -(5 + -3)
     let expr2 = Neg(
-        Heap(Add(
-            Heap(Num(5)),
-            Heap(Neg(Heap(Num(3))))
+        Heap.new(Add(
+            Heap.new(Num(5)),
+            Heap.new(Neg(Heap.new(Num(3))))
         ))
     );
     assert_eq(eval_expr(expr2), -2);
 
     // Simplification: 0 + x => x
-    let zero_plus_five = Add(Heap(Num(0)), Heap(Num(5)));
+    let zero_plus_five = Add(Heap.new(Num(0)), Heap.new(Num(5)));
     let simplified = simplify(zero_plus_five);
     assert_eq(eval_expr(simplified), 5);
 
     // Simplification: 1 * x => x
-    let one_times_ten = Mul(Heap(Num(1)), Heap(Num(10)));
+    let one_times_ten = Mul(Heap.new(Num(1)), Heap.new(Num(10)));
     let simplified2 = simplify(one_times_ten);
     assert_eq(eval_expr(simplified2), 10);
 }

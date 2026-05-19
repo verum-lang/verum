@@ -21,9 +21,9 @@ fn eval(e: Expr) -> Float {
 }
 
 fn num(v: Float) -> Expr { Expr.Num(v) }
-fn add(l: Expr, r: Expr) -> Expr { Expr.Add(Heap(l), Heap(r)) }
-fn mul(l: Expr, r: Expr) -> Expr { Expr.Mul(Heap(l), Heap(r)) }
-fn neg(e: Expr) -> Expr { Expr.Neg(Heap(e)) }
+fn add(l: Expr, r: Expr) -> Expr { Expr.Add(Heap.new(l), Heap.new(r)) }
+fn mul(l: Expr, r: Expr) -> Expr { Expr.Mul(Heap.new(l), Heap.new(r)) }
+fn neg(e: Expr) -> Expr { Expr.Neg(Heap.new(e)) }
 
 fn check(name: Text, got: Float, expected: Float) -> Bool {
     let diff = got - expected;

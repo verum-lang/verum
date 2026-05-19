@@ -44,14 +44,14 @@ mount core.prelude.*;
 
 fn main() -> Int {
     // Test 1: linked list
-    let lst = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Cons(4, Heap(Nil))))))));
+    let lst = Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Cons(4, Heap.new(Nil))))))));
     let s = list_sum(lst);
     if (s != 10) {
         print(f"FAIL test1a: sum={s}");
         return 1;
     }
 
-    let lst2 = Cons(10, Heap(Cons(20, Heap(Cons(30, Heap(Nil))))));
+    let lst2 = Cons(10, Heap.new(Cons(20, Heap.new(Cons(30, Heap.new(Nil))))));
     let len = list_len(lst2);
     if (len != 3) {
         print(f"FAIL test1b: len={len}");
@@ -65,16 +65,16 @@ fn main() -> Int {
     //     / \   \
     //    1   4   9
     let tree = Node(
-        Heap(Node(
-            Heap(Leaf(1)),
+        Heap.new(Node(
+            Heap.new(Leaf(1)),
             3,
-            Heap(Leaf(4))
+            Heap.new(Leaf(4))
         )),
         5,
-        Heap(Node(
-            Heap(Leaf(6)),
+        Heap.new(Node(
+            Heap.new(Leaf(6)),
             7,
-            Heap(Leaf(9))
+            Heap.new(Leaf(9))
         ))
     );
     let ts = tree_sum(tree);
@@ -86,17 +86,17 @@ fn main() -> Int {
 
     // Test 3: tree depth
     let deep = Node(
-        Heap(Node(
-            Heap(Node(
-                Heap(Leaf(1)),
+        Heap.new(Node(
+            Heap.new(Node(
+                Heap.new(Leaf(1)),
                 2,
-                Heap(Leaf(3))
+                Heap.new(Leaf(3))
             )),
             4,
-            Heap(Leaf(5))
+            Heap.new(Leaf(5))
         )),
         6,
-        Heap(Leaf(7))
+        Heap.new(Leaf(7))
     );
     let d = tree_depth(deep);
     if (d != 4) {

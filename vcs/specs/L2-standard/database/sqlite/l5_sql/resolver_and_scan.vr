@@ -130,12 +130,12 @@ fn resolve_recurses_binary_op() {
 
     // id = 1
     let e = EBinary(BEq,
-        Heap(EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "id".clone())),
-        Heap(ELit(LInt(1_i64))),
+        Heap.new(EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "id".clone())),
+        Heap.new(ELit(LInt(1_i64))),
     );
     match resolve_expr(&e, &scopes) {
         Ok(EBinary(_, ref lhs, _)) => {
-            match lhs { Heap(EColumnRef(_, _)) => {}, _ => panic("lhs should be EColumnRef"), }
+            match lhs { Heap.new(EColumnRef(_, _)) => {}, _ => panic("lhs should be EColumnRef"), }
         }
         _ => panic("resolve binary"),
     }

@@ -34,8 +34,8 @@ fn stream_length<T>(s: Stream<T>) -> Int =
 
 fn test_basic_stream_patterns() {
     let empty: Stream<Int> = Nil;
-    let one = Cons(42, Heap(Nil));
-    let three = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Nil))))));
+    let one = Cons(42, Heap.new(Nil));
+    let three = Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Nil))))));
 
     // Test head extraction
     assert_eq(stream_head(empty, 0), 0);
@@ -69,9 +69,9 @@ fn take_first<T>(s: Stream<T>) -> Maybe<T> =
 
 fn test_take_operations() {
     let s1: Stream<Int> = Nil;
-    let s2 = Cons(1, Heap(Nil));
-    let s3 = Cons(10, Heap(Cons(20, Heap(Nil))));
-    let s4 = Cons(100, Heap(Cons(200, Heap(Cons(300, Heap(Nil))))));
+    let s2 = Cons(1, Heap.new(Nil));
+    let s3 = Cons(10, Heap.new(Cons(20, Heap.new(Nil))));
+    let s4 = Cons(100, Heap.new(Cons(200, Heap.new(Cons(300, Heap.new(Nil))))));
 
     assert(take_first(s1) == None);
     assert(take_first(s2) == Some(1));
@@ -90,15 +90,15 @@ fn test_take_operations() {
 fn classify_stream<T>(s: Stream<T>) -> Text =
     match s {
         Nil => "empty",
-        Cons(_, Heap(Nil)) => "single",
-        Cons(_, Heap(Cons(_, _))) => "multiple"
+        Cons(_, Heap.new(Nil)) => "single",
+        Cons(_, Heap.new(Cons(_, _))) => "multiple"
     };
 
 fn test_stream_classification() {
     let empty: Stream<Int> = Nil;
-    let single = Cons(1, Heap(Nil));
-    let double = Cons(1, Heap(Cons(2, Heap(Nil))));
-    let triple = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Nil))))));
+    let single = Cons(1, Heap.new(Nil));
+    let double = Cons(1, Heap.new(Cons(2, Heap.new(Nil))));
+    let triple = Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Nil))))));
 
     assert_eq(classify_stream(empty), "empty");
     assert_eq(classify_stream(single), "single");
@@ -124,8 +124,8 @@ fn stream_product(s: Stream<Int>) -> Int =
 
 fn test_stream_fold_operations() {
     let empty: Stream<Int> = Nil;
-    let nums = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Cons(4, Heap(Nil))))))));
-    let factors = Cons(2, Heap(Cons(3, Heap(Cons(5, Heap(Nil))))));
+    let nums = Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Cons(4, Heap.new(Nil))))))));
+    let factors = Cons(2, Heap.new(Cons(3, Heap.new(Cons(5, Heap.new(Nil))))));
 
     assert_eq(stream_sum(empty), 0);
     assert_eq(stream_sum(nums), 10);  // 1 + 2 + 3 + 4
@@ -141,11 +141,11 @@ fn test_stream_fold_operations() {
 fn stream_map<T, U>(s: Stream<T>, f: fn(T) -> U) -> Stream<U> =
     match s {
         Nil => Nil,
-        Cons(x, tail) => Cons(f(x), Heap(stream_map(*tail, f)))
+        Cons(x, tail) => Cons(f(x), Heap.new(stream_map(*tail, f)))
     };
 
 fn test_stream_map() {
-    let nums = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Nil))))));
+    let nums = Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Nil))))));
     let doubled = stream_map(nums, |x| x * 2);
 
     assert_eq(stream_head(doubled, 0), 2);
@@ -159,12 +159,12 @@ fn test_stream_map() {
 fn stream_filter(s: Stream<Int>, pred: fn(Int) -> Bool) -> Stream<Int> =
     match s {
         Nil => Nil,
-        Cons(x, tail) if pred(x) => Cons(x, Heap(stream_filter(*tail, pred))),
+        Cons(x, tail) if pred(x) => Cons(x, Heap.new(stream_filter(*tail, pred))),
         Cons(_, tail) => stream_filter(*tail, pred)
     };
 
 fn test_stream_filter() {
-    let nums = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Cons(4, Heap(Cons(5, Heap(Nil))))))))));
+    let nums = Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Cons(4, Heap.new(Cons(5, Heap.new(Nil))))))))));
     let evens = stream_filter(nums, |x| x % 2 == 0);
     let odds = stream_filter(nums, |x| x % 2 == 1);
 
@@ -187,14 +187,14 @@ fn flatten_stream<T>(ss: Stream<Stream<T>>) -> Stream<T> =
 fn concat_streams<T>(a: Stream<T>, b: Stream<T>) -> Stream<T> =
     match a {
         Nil => b,
-        Cons(x, tail) => Cons(x, Heap(concat_streams(*tail, b)))
+        Cons(x, tail) => Cons(x, Heap.new(concat_streams(*tail, b)))
     };
 
 fn test_nested_streams() {
-    let inner1 = Cons(1, Heap(Cons(2, Heap(Nil))));
-    let inner2 = Cons(3, Heap(Cons(4, Heap(Nil))));
-    let inner3 = Cons(5, Heap(Nil));
-    let nested = Cons(inner1, Heap(Cons(inner2, Heap(Cons(inner3, Heap(Nil))))));
+    let inner1 = Cons(1, Heap.new(Cons(2, Heap.new(Nil))));
+    let inner2 = Cons(3, Heap.new(Cons(4, Heap.new(Nil))));
+    let inner3 = Cons(5, Heap.new(Nil));
+    let nested = Cons(inner1, Heap.new(Cons(inner2, Heap.new(Cons(inner3, Heap.new(Nil))))));
 
     let flat = flatten_stream(nested);
     assert_eq(stream_sum(flat), 15);  // 1 + 2 + 3 + 4 + 5
@@ -209,21 +209,21 @@ fn filter_some<T>(s: Stream<Maybe<T>>) -> Stream<T> =
     match s {
         Nil => Nil,
         Cons(None, tail) => filter_some(*tail),
-        Cons(Some(x), tail) => Cons(x, Heap(filter_some(*tail)))
+        Cons(Some(x), tail) => Cons(x, Heap.new(filter_some(*tail)))
     };
 
 fn test_stream_with_maybe() {
     let mixed: Stream<Maybe<Int>> = Cons(
         Some(1),
-        Heap(Cons(
+        Heap.new(Cons(
             None,
-            Heap(Cons(
+            Heap.new(Cons(
                 Some(2),
-                Heap(Cons(
+                Heap.new(Cons(
                     None,
-                    Heap(Cons(
+                    Heap.new(Cons(
                         Some(3),
-                        Heap(Nil)
+                        Heap.new(Nil)
                     ))
                 ))
             ))
@@ -243,7 +243,7 @@ fn stream_take<T>(s: Stream<T>, n: Int) -> Stream<T> =
     match (n, s) {
         (0, _) => Nil,
         (_, Nil) => Nil,
-        (n, Cons(x, tail)) => Cons(x, Heap(stream_take(*tail, n - 1)))
+        (n, Cons(x, tail)) => Cons(x, Heap.new(stream_take(*tail, n - 1)))
     };
 
 fn stream_drop<T>(s: Stream<T>, n: Int) -> Stream<T> =
@@ -254,14 +254,14 @@ fn stream_drop<T>(s: Stream<T>, n: Int) -> Stream<T> =
     };
 
 fn test_stream_take_drop() {
-    let nums = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Cons(4, Heap(Cons(5, Heap(Nil))))))))));
+    let nums = Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Cons(4, Heap.new(Cons(5, Heap.new(Nil))))))))));
 
     let first_three = stream_take(nums, 3);
     assert_eq(stream_sum(first_three), 6);  // 1 + 2 + 3
     assert_eq(stream_length(first_three), 3);
 
     // Rebuild nums since it may have been consumed
-    let nums2 = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Cons(4, Heap(Cons(5, Heap(Nil))))))))));
+    let nums2 = Cons(1, Heap.new(Cons(2, Heap.new(Cons(3, Heap.new(Cons(4, Heap.new(Cons(5, Heap.new(Nil))))))))));
     let after_two = stream_drop(nums2, 2);
     assert_eq(stream_sum(after_two), 12);  // 3 + 4 + 5
     assert_eq(stream_length(after_two), 3);
@@ -281,9 +281,9 @@ type TreeNode<T> is Leaf(T) | Branch { value: T, left: Stream<TreeNode<T>>, righ
 fn collect_values<T>(nodes: Stream<TreeNode<T>>) -> Stream<T> =
     match nodes {
         Nil => Nil,
-        Cons(Leaf(v), tail) => Cons(v, Heap(collect_values(*tail))),
+        Cons(Leaf(v), tail) => Cons(v, Heap.new(collect_values(*tail))),
         Cons(Branch { value, left, right }, tail) =>
-            Cons(value, Heap(concat_streams(
+            Cons(value, Heap.new(concat_streams(
                 collect_values(left),
                 concat_streams(collect_values(right), collect_values(*tail))
             )))
@@ -292,11 +292,11 @@ fn collect_values<T>(nodes: Stream<TreeNode<T>>) -> Stream<T> =
 fn test_complex_stream_patterns() {
     let nodes: Stream<TreeNode<Int>> = Cons(
         Leaf(1),
-        Heap(Cons(
-            Branch { value: 2, left: Cons(Leaf(3), Heap(Nil)), right: Nil },
-            Heap(Cons(
+        Heap.new(Cons(
+            Branch { value: 2, left: Cons(Leaf(3), Heap.new(Nil)), right: Nil },
+            Heap.new(Cons(
                 Leaf(4),
-                Heap(Nil)
+                Heap.new(Nil)
             ))
         ))
     );

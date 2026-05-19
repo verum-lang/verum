@@ -60,7 +60,7 @@ fn main() -> Int {
     if (acc != 10) { return 1; }
 
     // 6. Recursive expression evaluator
-    let expr = Mul(Heap(Add(Heap(Num(2)), Heap(Num(3)))), Heap(Num(4)));
+    let expr = Mul(Heap.new(Add(Heap.new(Num(2)), Heap.new(Num(3)))), Heap.new(Num(4)));
     if (eval(expr) != 20) { return 1; }
 
     // 7. Error handling with ?
