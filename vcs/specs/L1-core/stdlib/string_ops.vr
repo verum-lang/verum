@@ -5,6 +5,8 @@
 // @timeout: 10000
 // @expect: pass
 
+mount core.prelude.*;
+
 fn main() {
     // String literals and concatenation
     let hello = "Hello";

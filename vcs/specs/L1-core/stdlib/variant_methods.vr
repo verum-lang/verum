@@ -5,6 +5,8 @@
 // @timeout: 10000
 // @expect: pass
 
+mount core.prelude.*;
+
 fn main() {
     // Maybe.unwrap on Some
     let x: Maybe<Int> = Some(42);

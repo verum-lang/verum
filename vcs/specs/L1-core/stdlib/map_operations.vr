@@ -5,6 +5,8 @@
 // @timeout: 10000
 // @expect: pass
 
+mount core.prelude.*;
+
 fn main() {
     // Basic Map operations
     let mut m: Map<Text, Int> = Map.new();

@@ -13,6 +13,8 @@ fn safe_divide(a: Int, b: Int) -> Maybe<Int> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Maybe type
     let result = safe_divide(10, 2);

@@ -35,6 +35,8 @@ implement Wrapper<Int> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic generic functions
     assert_eq(identity(42), 42);

@@ -19,6 +19,8 @@ fn make_multiplier(factor: Int) -> fn(Int) -> Int {
     multiply
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Lambda basics
     let double = fn(x: Int) -> Int { x * 2 };

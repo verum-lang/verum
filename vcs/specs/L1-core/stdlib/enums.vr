@@ -42,6 +42,8 @@ fn unwrap_or<T>(opt: Option<T>, default: T) -> T {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Simple enum
     assert_eq(color_name(Color.Red), "red");
