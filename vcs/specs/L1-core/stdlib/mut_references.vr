@@ -24,6 +24,8 @@ fn insertion_sort(xs: &mut List<Int>) {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Mutable reference: increment
     let mut data = [10, 20, 30];

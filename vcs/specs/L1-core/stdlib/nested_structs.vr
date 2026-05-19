@@ -43,6 +43,8 @@ implement Rect {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Vec2 operations
     let a = Vec2 { x: 3.0, y: 4.0 };

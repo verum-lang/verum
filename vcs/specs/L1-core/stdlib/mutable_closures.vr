@@ -15,6 +15,8 @@ fn make_counter(start: Int) -> fn() -> Int {
     next
 }
 
+mount core.prelude.*;
+
 fn main() {
     let counter = make_counter(0);
     assert_eq(counter(), 0);

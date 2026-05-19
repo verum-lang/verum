@@ -18,6 +18,8 @@ implement Point {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Construction
     let mut p = Point { x: 3, y: 4 };

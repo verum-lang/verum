@@ -21,6 +21,8 @@ fn describe(s: Shape) -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let c = Circle(5.0);
     let r = Rectangle(3.0, 4.0);

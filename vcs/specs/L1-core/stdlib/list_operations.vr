@@ -5,6 +5,8 @@
 // @timeout: 10000
 // @expect: pass
 
+mount core.prelude.*;
+
 fn main() {
     // Construction
     let xs = [1, 2, 3, 4, 5];

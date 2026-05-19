@@ -26,6 +26,8 @@ fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
 fn double(x: Int) -> Int { x * 2 }
 fn increment(x: Int) -> Int { x + 1 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic function calls
     assert_eq(add(3, 4), 7);

@@ -5,6 +5,8 @@
 // @timeout: 10000
 // @expect: pass
 
+mount core.prelude.*;
+
 fn main() {
     let name = "Verum";
     let version = 4;

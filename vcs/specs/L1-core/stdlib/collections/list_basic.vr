@@ -7,6 +7,8 @@
 
 /// Basic List<T> operations — exercises the core stdlib collection API.
 
+mount core.prelude.*;
+
 fn main() {
     // Construction
     let mut xs = [1, 2, 3];

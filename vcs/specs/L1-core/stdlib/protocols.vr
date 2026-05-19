@@ -24,6 +24,8 @@ implement Describable for Square {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let c = Circle { radius: 5.0 };
     let s = Square { side: 3.0 };
