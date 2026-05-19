@@ -6454,17 +6454,16 @@ impl VbcCodegen {
                     let module_name = mod_decl.name.name.to_string();
                     let prev_source = self.ctx.current_source_module.clone();
                     self.ctx.current_source_module = Some(module_name);
-                    let mut err = None;
+                    // LENIENT — see parallel arm in compile_item for rationale.
                     for item in items.iter() {
                         if let Err(e) = self.collect_declarations(item) {
-                            err = Some(e);
-                            break;
+                            tracing::warn!(
+                                "[lenient inline-module decl-collect] failed: {}",
+                                e
+                            );
                         }
                     }
                     self.ctx.current_source_module = prev_source;
-                    if let Some(e) = err {
-                        return Err(e);
-                    }
                 }
             }
             // Import declarations register aliased function names
@@ -11811,17 +11810,22 @@ impl VbcCodegen {
                     let module_name = mod_decl.name.name.to_string();
                     let prev_source = self.ctx.current_source_module.clone();
                     self.ctx.current_source_module = Some(module_name);
-                    let mut err = None;
+                    // LENIENT — a single inner-fn compile failure must
+                    // NOT abort the outer module's compilation (would
+                    // drop top-level fn main, surfacing as "No main
+                    // function found in VBC module").  Log per-item
+                    // failures and continue — matches the lenient
+                    // discipline of `compile_module_items_lenient`
+                    // for imported stdlib modules.
                     for sub_item in items.iter() {
                         if let Err(e) = self.compile_item(sub_item) {
-                            err = Some(e);
-                            break;
+                            tracing::warn!(
+                                "[lenient inline-module] failed to compile inner item: {}",
+                                e
+                            );
                         }
                     }
                     self.ctx.current_source_module = prev_source;
-                    if let Some(e) = err {
-                        return Err(e);
-                    }
                 }
             }
             // Non-function items are handled during declaration collection
