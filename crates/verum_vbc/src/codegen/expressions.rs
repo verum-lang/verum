@@ -7045,6 +7045,33 @@ impl VbcCodegen {
         resolved_target: Option<&verum_ast::expr::ResolvedCallTarget>,
     ) -> CodegenResult<Option<Reg>> {
         // ──────────────────────────────────────────────────────────
+        // Phase 0: Task #17 — `T.default()` on generic type-param.
+        // Runs BEFORE the pre-resolved fast path because the typechecker
+        // stamps `T.default()` as `StaticCall { qualified_name: "T.default" }`
+        // (or via protocol-Default registry seed), and the pre-resolved
+        // path then emits a plain `Call <T.default-fn-id>` which executes
+        // a broken body or auto-stub at runtime. At Tier-0 generic-erasure
+        // there is no runtime witness for T, so the only safe value is the
+        // primitive zero. Emit `LoadI{0}` directly.
+        // Cross-ref: memory/callg_emission_fix_blueprint_2026-05-19.md
+        // documents the fundamental monomorphisation fix that closes the
+        // non-primitive-T cases properly.
+        if method.name.as_str() == "default"
+            && args.is_empty()
+            && let ExprKind::Path(path) = &receiver.kind
+            && path.segments.len() == 1
+            && let PathSegment::Name(ident) = &path.segments[0]
+            && self.ctx.generic_type_params.contains(ident.name.as_str())
+        {
+            let result = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadI {
+                dst: result,
+                value: 0,
+            });
+            return Ok(Some(result));
+        }
+
+        // ──────────────────────────────────────────────────────────
         // Phase 1: Pre-resolved fast path.
         // ──────────────────────────────────────────────────────────
         if let Some(target) = resolved_target {
@@ -9539,6 +9566,36 @@ impl VbcCodegen {
         // not treat `Time` as a value.
         //
 
+        // Task #17 — surgical intercept for `T.default()` on an in-scope
+        // generic type-param. MUST run BEFORE the qualified-name lookup
+        // because the protocol registry seeds a `T.default` stub when
+        // processing `protocol Default`, and that stub miscompiles every
+        // primitive-T call site to a broken CallM dispatch. At Tier-0
+        // generic-erasure there is no runtime type-witness for T, so the
+        // existing stub's `dyn:Default.default` resolution is
+        // unpredictable. For primitive T (the only T that can satisfy
+        // `where T: Default` AND have a known zero-default — Int, Float,
+        // Bool, Byte etc.), emit a zero-int constant inline. Non-primitive
+        // T still gets a zero Int payload; the caller's let-binding type
+        // annotation handles retag on deref. Closes the entire
+        // `Heap.new_default<Int>` / `Shared.new_default<Int>` /
+        // `Result<Int,_>.unwrap_or_default()` / `Maybe<Int>.unwrap_or_default()`
+        // class of primitive-default tests.
+        // Cross-ref: `memory/callg_emission_fix_blueprint_2026-05-19.md`
+        // documents the fundamental monomorphisation fix that closes
+        // non-primitive-T cases properly.
+        if method_name == "default"
+            && args.is_empty()
+            && self.ctx.generic_type_params.contains(&type_name)
+        {
+            let result = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::LoadI {
+                dst: result,
+                value: 0,
+            });
+            return Ok(Some(Some(result)));
+        }
+
         // Variants are a special case: `Maybe.Some(42)`, `Result.Ok(x)`, etc.
         // are registered under the qualified name too (variant_tag set), but they
         // don't have an ordinary bytecode body — compile_static_method_call would
@@ -9739,6 +9796,11 @@ impl VbcCodegen {
                     format!("{}.{}", type_name, method.name),
                 ));
             }
+            // Task #17 intercept is now hoisted above the qualified-name
+            // lookup (see top of try_resolve_static_method) so it fires
+            // before the protocol-Default stub miscompiles primitive T
+            // call sites. The fall-through below preserves dyn dispatch
+            // for non-`default` generic-param methods.
             return Ok(Some(
                 self.compile_type_param_method_call(&type_name, method, args)?,
             ));

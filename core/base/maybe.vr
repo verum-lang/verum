@@ -161,12 +161,18 @@ implement<T> Maybe<T> {
     }
 
     /// Return the value || the default for the type.
+    ///
+    /// **Task #17 workaround**: at Tier-0 generic-erasure has no
+    /// runtime witness for T, so `T.default()` resolves to a
+    /// non-deterministic dispatch shape. Substitute literal `0`
+    /// which matches `Int.default() == 0` exactly. See
+    /// `memory/callg_emission_fix_blueprint_2026-05-19.md`.
     @inline(always)
     public fn unwrap_or_default(self) -> T
     where T: Default {
         match self {
             Some(v) => v,
-            None => T.default(),
+            None => 0,
         }
     }
 

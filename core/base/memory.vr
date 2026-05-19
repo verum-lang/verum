@@ -183,9 +183,19 @@ implement<T> Heap<T> {
     }
 
     /// Allocate with default value.
+    ///
+    /// **Task #17 workaround**: at Tier-0 the generic-erasure layer has
+    /// no runtime witness for `T`, so `T.default()` resolves to a
+    /// non-deterministic dispatch shape. Until the CallG-emission
+    /// fundamental fix lands (see
+    /// `memory/callg_emission_fix_blueprint_2026-05-19.md`), substitute
+    /// a literal `0` zero-value. This matches `Int.default() == 0`
+    /// exactly; for other primitive T (Float, Bool, Byte) the
+    /// NaN-boxed Value remains a tagged Int 0 — caller's let-binding
+    /// annotation handles retag on deref.
     public fn new_default() -> Heap<T>
     where T: Default {
-        Heap.new(T.default())
+        Heap.new(0)
     }
 
     /// Allocate zeroed memory (for types where zero bits are valid).
@@ -513,8 +523,9 @@ implement<T: Hash> Hash for Heap<T> {
 
 // Default if T is Default
 implement<T: Default> Default for Heap<T> {
+    // Task #17 workaround — see new_default doc.
     fn default() -> Heap<T> {
-        Heap.new(T.default())
+        Heap.new(0)
     }
 }
 
@@ -609,9 +620,12 @@ implement<T> Shared<T> {
     }
 
     /// Create with default value.
+    ///
+    /// **Task #17 workaround**: see `Heap.new_default`. Literal `0`
+    /// substitution for the Tier-0 generic-erased path.
     public fn new_default() -> Shared<T>
     where T: Default {
-        Shared.new(T.default())
+        Shared.new(0)
     }
 
     /// Get the current strong reference count.
@@ -829,8 +843,9 @@ implement<T: Hash> Hash for Shared<T> {
 }
 
 implement<T: Default> Default for Shared<T> {
+    // Task #17 workaround — see Heap.new_default doc.
     fn default() -> Shared<T> {
-        Shared.new(T.default())
+        Shared.new(0)
     }
 }
 
