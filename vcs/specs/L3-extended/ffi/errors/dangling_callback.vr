@@ -350,6 +350,8 @@ fn correct_thread_safe_callback() {
 // MAIN
 // ============================================================
 
+mount core.prelude.*;
+
 fn main() {
     // This file tests error detection - it should fail type checking
     // with the expected errors listed above

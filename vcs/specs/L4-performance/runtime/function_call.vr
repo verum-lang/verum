@@ -473,6 +473,8 @@ fn benchmark_tail_recursive_call() -> BenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Function Call Overhead Benchmark ===\n");
 

@@ -164,6 +164,8 @@ fn use_set<Elem, S>(ops: SetOps<Elem, S>, elements: List<Elem>) -> Int {
     (ops.size)(&s)
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Counter: both implementations return 3
     let c1 = int_counter_ops();

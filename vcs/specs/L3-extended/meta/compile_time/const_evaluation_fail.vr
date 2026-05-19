@@ -227,6 +227,8 @@ meta fn match_status(s: Status) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // All const evaluations above should fail
 }

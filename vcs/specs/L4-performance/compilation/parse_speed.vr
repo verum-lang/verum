@@ -27,6 +27,8 @@ const XLARGE_FILE_LINES: Int = 100_000;
 
 const TARGET_LOC_PER_SEC: Int = 100_000;
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Parser Performance");
 

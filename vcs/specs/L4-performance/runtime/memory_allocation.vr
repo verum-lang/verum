@@ -421,6 +421,8 @@ fn benchmark_object_pool() -> AllocBenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Memory Allocation Performance Benchmark ===\n");
 

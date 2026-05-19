@@ -70,6 +70,8 @@ implement MultiMethod for ImplA {
     fn method_c(&self, x: Int) -> Int { self.value - x }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Virtual Dispatch Overhead");
 

@@ -65,6 +65,8 @@ fn bench_function_call(iters: Int) -> Int {
 
 fn identity(x: Int) -> Int { x }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let iters = 10000000;
     print("=== CBGR Reference Check Microbenchmarks ===");

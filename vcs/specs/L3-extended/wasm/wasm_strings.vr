@@ -57,6 +57,8 @@ fn test_text_empty() {
     assert(empty.is_empty());
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_text_creation();
     test_text_concat();

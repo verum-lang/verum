@@ -101,6 +101,8 @@ fn verify_alignment(ptr: *const c_void, required_align: size_t) -> Bool {
     true
 }
 
+mount core.prelude.*;
+
 fn main() {
     let point = FfiPoint { x: 1.0, y: 2.0, z: 3.0 };
     assert(FfiPoint.size == 24);

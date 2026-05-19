@@ -125,6 +125,8 @@ where ensures len(result) == len(xs) {
     xs.map(|x| (x, x * 2))
 }
 
+mount core.prelude.*;
+
 fn main() {
     // All types inferred correctly
     let xs: SizedArray<Int, 5> = make_array(42);

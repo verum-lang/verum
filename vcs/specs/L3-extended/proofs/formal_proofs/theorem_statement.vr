@@ -236,6 +236,8 @@ theorem smt_example(x: Int, y: Int)
     proof by smt
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Theorem statement tests
 }

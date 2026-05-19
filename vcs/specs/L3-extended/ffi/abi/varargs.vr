@@ -266,6 +266,8 @@ fn parse_format_specifiers(format: &Text) -> List<Text> {
     specs
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Call printf with a simple argument
     unsafe {

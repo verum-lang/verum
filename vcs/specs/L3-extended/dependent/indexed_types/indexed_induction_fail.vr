@@ -35,6 +35,8 @@ fn wrong_constructor() -> PeanoNat {
     "hello"  // ERROR: Text != PeanoNat
 }
 
+mount core.prelude.*;
+
 fn main() {
     let _ = nat_ind_wrong(PZero);
     let _ = wrong_constructor();

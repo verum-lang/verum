@@ -159,6 +159,8 @@ fn my_type_release(ptr: *mut CRefCounted) {
 // Main
 // ------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Test FFI declarations and types compile
     print("Ownership transfer patterns passed");

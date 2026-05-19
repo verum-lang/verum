@@ -344,6 +344,8 @@ implement ValidatedHeader {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_bitfield();
     test_ipv4_header();

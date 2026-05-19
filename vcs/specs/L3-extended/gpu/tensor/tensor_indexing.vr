@@ -4,6 +4,8 @@
 // @skip-disabled: GPU tests downgraded to parse-only
 // @tags: tensor, indexing
 
+mount core.prelude.*;
+
 fn main() {
     // 1D indexing
     let v: Tensor<f32, [5]> = tensor<5>f32{10.0, 20.0, 30.0, 40.0, 50.0};

@@ -381,6 +381,8 @@ fn benchmark_epoch_bitmap() -> BenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Epoch Validation Performance Benchmark ===\n");
     println("Target: < 3ns per epoch validation\n");

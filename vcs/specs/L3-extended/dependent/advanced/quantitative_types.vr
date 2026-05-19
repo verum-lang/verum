@@ -102,6 +102,8 @@ fn close_session<T>(s: Session<T>) {
     // Session ended
 }
 
+mount core.prelude.*;
+
 fn main() {
     // File handle (affine usage)
     let file = open_file("test.txt");

@@ -196,6 +196,8 @@ meta fn through_async() {
     // Нет executor-а в sandbox
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Все эти константы вызовут ошибки компиляции
     const UNSAFE_VALUE: i64 = unsafe_memory();     // ERROR

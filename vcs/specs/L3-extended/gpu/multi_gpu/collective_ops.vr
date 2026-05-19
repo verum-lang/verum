@@ -4,6 +4,8 @@
 // @skip-disabled: GPU tests downgraded to parse-only
 // @tags: gpu, multi_gpu, collective
 
+mount core.prelude.*;
+
 fn main() {
     let devices = Device.all_gpus();
     let num_devices = devices.len();

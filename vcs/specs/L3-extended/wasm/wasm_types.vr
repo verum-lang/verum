@@ -52,6 +52,8 @@ fn color_value(c: Color) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Record type
     let p1 = Point.new(3, 4);

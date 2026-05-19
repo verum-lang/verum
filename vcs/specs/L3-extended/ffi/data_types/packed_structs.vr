@@ -121,6 +121,8 @@ implement Ipv4Addr {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let header = PacketHeader {
         magic: 0xCAFE,

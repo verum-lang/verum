@@ -54,6 +54,8 @@ type Version is {
     patch: Int,
 };
 
+mount core.prelude.*;
+
 fn main() {
     let p1 = Point { x: 10, y: 20 };
     let p2 = Point { x: 10, y: 20 };

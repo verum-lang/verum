@@ -48,6 +48,8 @@ module rust_baselines {
     pub const FIB_10000_TAIL_MS: Float = 0.3;
 }
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Verum vs Rust: Fibonacci");
 

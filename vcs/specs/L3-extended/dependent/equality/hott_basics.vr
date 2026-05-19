@@ -88,6 +88,8 @@ fn inverse_equiv<A, B>(e: Equiv<A, B>) -> Equiv<B, A> {
     Equiv { forward: e.backward, backward: e.forward }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let r: IdWitness<Int> = refl();
     let s = symm(r);

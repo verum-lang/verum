@@ -511,6 +511,8 @@ fn test_cstr_find() {
     assert(pos == Some(6));
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_cstring_creation();
     test_cstring_with_interior_null();

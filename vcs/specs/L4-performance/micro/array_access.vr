@@ -386,6 +386,8 @@ fn benchmark_list_push_pop() -> BenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Array Access Overhead Microbenchmarks ===\n");
 

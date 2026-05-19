@@ -246,6 +246,8 @@ module DependentFails {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // All proofs should fail SMT verification
 

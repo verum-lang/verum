@@ -24,6 +24,8 @@ const WARMUP_ITERATIONS: Int = 1_000;
 const BENCHMARK_ITERATIONS: Int = 100_000;
 const EXPECTED_LATENCY_NS: Float = 100.0;
 
+mount core.prelude.*;
+
 fn main() {
     // Run all CBGR latency benchmarks for Tier 0
     let results = BenchmarkResults.new("Tier 0 CBGR Latency");

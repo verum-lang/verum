@@ -92,6 +92,8 @@ fn dec<N: meta Int>(f: Fin<N>) -> Maybe<Fin<N>> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Create Fin values
     let zero = fin_zero.<5>();

@@ -209,6 +209,8 @@ theorem list_len_append<T>(xs: List<T>, ys: List<T>):
 //     proof by trivial  // FAILS - needs case analysis
 // }
 
+mount core.prelude.*;
+
 fn main() {
     // Trivial proofs verify at compile time
     // Runtime just confirms the theorems hold

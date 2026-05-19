@@ -29,6 +29,8 @@ const WARMUP_ITERATIONS: Int = 10_000;
 const BENCHMARK_ITERATIONS: Int = 1_000_000;
 const EXPECTED_LATENCY_NS: Float = 15.0;
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Tier 1 JIT Base CBGR Latency");
 

@@ -4,6 +4,8 @@
 // @skip-disabled: GPU tests downgraded to parse-only
 // @tags: tensor, slice
 
+mount core.prelude.*;
+
 fn main() {
     // 1D slicing
     let v: Tensor<f32, [10]> = Tensor.arange(0.0, 10.0, 1.0);

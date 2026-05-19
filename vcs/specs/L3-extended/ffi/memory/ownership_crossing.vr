@@ -92,6 +92,8 @@ implement<T> CBorrowed<T> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Ownership crossing test
     let data = take_from_c();

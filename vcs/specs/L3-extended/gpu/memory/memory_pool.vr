@@ -7,6 +7,8 @@
 /// GPU memory pool management for efficient allocation/deallocation
 /// and reduced fragmentation in deep learning workloads.
 
+mount core.prelude.*;
+
 fn main() {
     let device = Device.gpu(0);
 

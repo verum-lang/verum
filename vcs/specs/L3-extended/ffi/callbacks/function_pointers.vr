@@ -193,6 +193,8 @@ type Error is
     | RegistrationFailed
     | InvalidCallback;
 
+mount core.prelude.*;
+
 fn main() {
     // Test counter callback
     use_counter_callback();

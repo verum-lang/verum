@@ -17,6 +17,8 @@ pure fn build_manifest_path(service: &Text, version: &Text, env: &Text) -> Text
     f"deploy/{env}/{service}-{version}.yaml"
 }
 
+mount core.prelude.*;
+
 fn main() {
     let p = build_manifest_path(&"api".into(), &"1.2.3".into(), &"prod".into());
     assert(p.ends_with(".yaml"), "post-condition holds at runtime");

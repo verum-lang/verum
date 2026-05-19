@@ -119,6 +119,8 @@ fn function_affected_by_pragma() -> Int {
     3
 }
 
+mount core.prelude.*;
+
 fn main() {
     let a = exported_function();
     assert(a == 42);

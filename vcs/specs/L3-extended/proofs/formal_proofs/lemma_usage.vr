@@ -206,6 +206,8 @@ module list_lemmas {
 
 fn reverse<T>(xs: List<T>) -> List<T>;
 
+mount core.prelude.*;
+
 fn main() {
     // Lemma verification tests
 }

@@ -57,6 +57,8 @@ module rust_baselines {
     pub const FAN_OUT_IN_10K_MS: Float = 100.0;
 }
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Verum vs Rust: Async");
 

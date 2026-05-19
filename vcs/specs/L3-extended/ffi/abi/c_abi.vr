@@ -412,6 +412,8 @@ type c_longdouble is f64; // Simplified
 type c_void is ();
 type va_list is *mut c_void;
 
+mount core.prelude.*;
+
 fn main() {
     // C ABI tests
 }

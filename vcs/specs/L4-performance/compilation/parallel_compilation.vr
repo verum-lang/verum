@@ -25,6 +25,8 @@ const MEDIUM_PROJECT_MODULES: Int = 100;
 const LARGE_PROJECT_MODULES: Int = 500;
 const LOC_PER_MODULE: Int = 500;
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Parallel Compilation Performance");
 

@@ -196,6 +196,8 @@ const SORTED: [Int64; 4] = sort_4([3, 1, 4, 2]);    // [1, 2, 3, 4]
 const FILTERED: [Int64; 4] = filter_positive([-1, 2, -3, 4]); // [2, 4, 0, 0]
 const SUM_10: UInt64 = local_mutation(10);          // 45
 
+mount core.prelude.*;
+
 fn main() {
     // All values computed at compile time
     let math = MATH_RESULT;

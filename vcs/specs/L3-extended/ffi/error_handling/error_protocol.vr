@@ -470,6 +470,8 @@ fn internal_operation(input: c_int) -> Result<c_int, FfiError> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test POSIX error
     let io_err = IoError.from_errno(ENOENT);

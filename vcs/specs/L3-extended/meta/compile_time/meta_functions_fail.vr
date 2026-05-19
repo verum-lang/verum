@@ -253,6 +253,8 @@ meta fn const_with_mut(x: &mut Int) -> Int {
     *x
 }
 
+mount core.prelude.*;
+
 fn main() {
     // All compile-time evaluations above should fail
 }

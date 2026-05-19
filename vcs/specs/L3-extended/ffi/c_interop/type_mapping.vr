@@ -484,6 +484,8 @@ fn is_null<T>(ptr: *const T) -> Bool {
     ptr == null
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Type mapping verification
     let p = CPoint { x: 10, y: 20 };

@@ -154,6 +154,8 @@ fn cfg_bsd_or_unix() -> Int { 12 }
 @cfg(all(any(feature = "verum_cfg_bulk_29", feature = "verum_cfg_bulk_30"), not(target_os = "haiku"))) fn cfg_combo_15() -> Int { 200 }
 @cfg(all(any(feature = "verum_cfg_bulk_31", feature = "verum_cfg_bulk_32"), not(target_os = "haiku"))) fn cfg_combo_16() -> Int { 200 }
 
+mount core.prelude.*;
+
 fn main() {
     // Don't actually call the cfg-gated functions — their existence
     // alone proves @cfg-walker acceptance. The compiler evaluates each

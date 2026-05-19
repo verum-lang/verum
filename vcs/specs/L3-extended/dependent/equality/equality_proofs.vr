@@ -121,6 +121,8 @@ module ModularEquality {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let _ = ArithmeticEquality.add_zero(42);
     assert(ArithmeticEquality.add_comm(3, 5));

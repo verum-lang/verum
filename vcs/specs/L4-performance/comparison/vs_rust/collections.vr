@@ -63,6 +63,8 @@ module rust_baselines {
     pub const HEAP_PEEK_1M_MS: Float = 2.0;
 }
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Verum vs Rust: Collections");
 

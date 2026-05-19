@@ -116,6 +116,8 @@ fn system_abi_function(x: Int) -> Int {
     x + 1
 }
 
+mount core.prelude.*;
+
 fn main() {
     let a = c_compatible_function(21);
     assert(a == 42);

@@ -147,6 +147,8 @@ meta(2) fn use_stage_2_apply(x: Int) -> Int {
 const FROM_STAGE_1: Int = stage_1_fn(10);         // 20
 const RECURSIVE_1: Int = stage_1_recursive(5);    // 15
 
+mount core.prelude.*;
+
 fn main() {
     // Verify compile-time computed constants
     assert(FROM_STAGE_1 == 20);

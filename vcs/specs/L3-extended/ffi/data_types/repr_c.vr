@@ -427,6 +427,8 @@ fn draw_rectangle(x: i32, y: i32, w: i32, h: i32, color: Color) {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Create repr(C) structures
     let p = Point2D { x: 10, y: 20 };

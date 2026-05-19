@@ -4,6 +4,8 @@
 // @skip-disabled: SIMD tests can parse without runtime
 // @tags: simd, mask
 
+mount core.prelude.*;
+
 fn main() {
     // Create mask from comparison
     let a: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);

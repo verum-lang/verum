@@ -72,6 +72,8 @@ fn test_gpu_memcpy_h2d_d2h() {
     assert(host3.value == 99);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_gpu_alloc_free();
     test_gpu_alloc_zero_size();

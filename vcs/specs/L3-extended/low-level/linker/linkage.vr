@@ -72,6 +72,8 @@ fn protected_external() -> Int {
     11
 }
 
+mount core.prelude.*;
+
 fn main() {
     let a = public_function();
     assert(a == 42);

@@ -213,6 +213,8 @@ fn benchmark_concurrent_gc() -> ConcurrentGCResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== GC Throughput and Latency Benchmark ===\n");
 

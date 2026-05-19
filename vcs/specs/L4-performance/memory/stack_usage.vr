@@ -26,6 +26,8 @@
 
 const MAX_RECURSION_DEPTH: Int = 100_000;
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Stack Usage Performance");
 

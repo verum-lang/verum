@@ -351,6 +351,8 @@ type RefCell<T> is { value: T };
 
 // Type properties: use T.size instead of deprecated size_of<T>()
 
+mount core.prelude.*;
+
 fn main() {
     // Callback test
 }

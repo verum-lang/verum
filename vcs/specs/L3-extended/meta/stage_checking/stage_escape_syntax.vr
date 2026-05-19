@@ -198,6 +198,8 @@ meta fn gen_maybe_init(should_init: Bool) -> @Expr {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Verify escape syntax compiles correctly
     let basic = gen_with_explicit_escape(42);

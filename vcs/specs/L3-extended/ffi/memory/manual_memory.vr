@@ -586,6 +586,8 @@ fn call_c_with_buffer(data: &[u8]) -> Result<c_int, AllocError> {
     Ok(result)
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test manual allocation
     {

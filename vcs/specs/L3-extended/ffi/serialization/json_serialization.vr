@@ -629,6 +629,8 @@ implement JsonValue {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // JSON serialization test
 }

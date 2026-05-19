@@ -135,6 +135,8 @@ fn indexed_lookup(
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test basic dot product
     let a = [1.0_f32, 2.0, 3.0, 4.0];

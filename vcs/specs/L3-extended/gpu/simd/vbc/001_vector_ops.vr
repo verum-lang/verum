@@ -143,6 +143,8 @@ fn test_simd_min_max() {
     assert(mx.x0 == 5.0);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_simd_add();
     test_simd_sub();

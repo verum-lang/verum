@@ -69,6 +69,8 @@ module cpp_baselines {
     pub const I32X8_ADD_10M_MS: Float = 2.5;
 }
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Verum vs C++: SIMD");
 

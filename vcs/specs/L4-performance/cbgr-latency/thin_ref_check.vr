@@ -31,6 +31,8 @@ type ThinRefLayout is {
     epoch_caps: u32,     // 4 bytes - epoch capability bits
 };
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("ThinRef CBGR Check Latency");
 

@@ -102,6 +102,8 @@ fn test_gpu_sync_device() {
     assert(true);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_gpu_device_count();
     test_gpu_get_device();

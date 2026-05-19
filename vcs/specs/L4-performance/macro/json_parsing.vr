@@ -421,6 +421,8 @@ fn benchmark_stream_parse() -> JsonBenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== JSON Parsing Performance Benchmark ===\n");
 

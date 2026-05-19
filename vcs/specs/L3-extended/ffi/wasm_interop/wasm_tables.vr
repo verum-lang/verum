@@ -434,6 +434,8 @@ implement From<TableError> for CallError {
 
 fn max(a: u32, b: u32) -> u32 { if a > b { a } else { b } }
 
+mount core.prelude.*;
+
 fn main() {
     // WASM tables test
 }

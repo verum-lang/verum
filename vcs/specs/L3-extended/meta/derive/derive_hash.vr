@@ -74,6 +74,8 @@ fn smoke() {
     let c: Container<Int> = Container { id: 1, val: 42 };
 }
 
+mount core.prelude.*;
+
 fn main() {
     smoke();
 }

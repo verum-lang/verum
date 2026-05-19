@@ -71,6 +71,8 @@ fn cross_entropy_loss(logits: Tensor<f32, [BATCH, N]>, targets: Tensor<i64, [BAT
     -selected.mean()
 }
 
+mount core.prelude.*;
+
 fn main() {
     let device = Device.gpu(0);
 

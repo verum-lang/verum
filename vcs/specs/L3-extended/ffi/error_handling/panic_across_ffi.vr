@@ -141,6 +141,8 @@ implement<T> AssertUnwindSafe<T> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test panic-safe FFI patterns
     let result = register_panic_safe();

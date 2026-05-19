@@ -463,6 +463,8 @@ fn benchmark_zeroed_allocation() -> BenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Memory Allocation Performance Benchmark ===\n");
 

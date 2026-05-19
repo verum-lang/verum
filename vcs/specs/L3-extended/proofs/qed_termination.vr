@@ -261,6 +261,8 @@ theorem block_end<P: Prop>(h: P): P {
 //     }
 // }
 
+mount core.prelude.*;
+
 fn main() {
     // QED is a proof-level construct
     // Runtime verification of proven properties

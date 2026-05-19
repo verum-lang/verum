@@ -72,4 +72,6 @@ theorem corollary_int_sym(a: Int, b: Int) requires a == b ensures b == a {
     proof by base_generic
 }
 
+mount core.prelude.*;
+
 fn main() {}

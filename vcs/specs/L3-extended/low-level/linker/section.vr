@@ -109,6 +109,8 @@ fn required_symbol() {
 @section(".data.rel.ro")
 let RELRO_DATA: fn() -> Int = normal_function;
 
+mount core.prelude.*;
+
 fn main() {
     let a = normal_function();
     assert(a == 42);

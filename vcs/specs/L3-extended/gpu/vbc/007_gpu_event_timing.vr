@@ -362,6 +362,8 @@ fn test_event_sequence() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_event_create_destroy();
     test_event_pair_timing();

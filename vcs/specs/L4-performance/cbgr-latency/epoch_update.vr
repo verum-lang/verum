@@ -425,6 +425,8 @@ fn benchmark_epoch_invalidation() -> BenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== CBGR Epoch Update Performance ===\n");
 

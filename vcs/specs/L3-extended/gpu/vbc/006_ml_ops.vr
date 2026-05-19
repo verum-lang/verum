@@ -471,6 +471,8 @@ fn test_layer_norm() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_quantized_matmul();
     test_attention_score();

@@ -146,6 +146,8 @@ type IntResult is {
 // Main
 // ------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Test FFI declarations and types compile
     print("Null check patterns passed");

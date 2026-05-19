@@ -137,6 +137,8 @@ fn mk_percentage(v: Int) -> Maybe<Percentage> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Equality proofs
     let p: EqProof<Int> = refl();

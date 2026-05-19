@@ -83,6 +83,8 @@ where ensures len(result) == len(xs) + len(ys) {
     result
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Build a sized array
     let xs: SizedArray<Int, 5> = replicate(42);

@@ -71,6 +71,8 @@ fn test_tensor_reduce_sum() {
     assert_eq(numel(s), 1);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_tensor_on_default_device();
     test_tensor_add_default();

@@ -158,6 +158,8 @@ fn test_display() {
     // "12345"
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_display();
 }

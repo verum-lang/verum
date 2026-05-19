@@ -70,6 +70,8 @@ fn test_register_constraints(x: Int) -> Int {
     res
 }
 
+mount core.prelude.*;
+
 fn main() {
     let a = test_in_operand(42);
     assert(a == 42);

@@ -61,6 +61,8 @@ fn test_may_unwind_asm() {
     @asm("call some_throwing_fn", options(may_unwind));
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_volatile_asm();
 

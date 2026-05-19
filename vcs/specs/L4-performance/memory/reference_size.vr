@@ -29,6 +29,8 @@
 ///
 /// Spec reference: docs/detailed/cbgr-implementation.md
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Reference Size Verification");
 

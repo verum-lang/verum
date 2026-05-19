@@ -388,6 +388,8 @@ type SerializeError is
     | InvalidTag
     | InvalidUtf8;
 
+mount core.prelude.*;
+
 fn main() {
     // WASM types test
 }

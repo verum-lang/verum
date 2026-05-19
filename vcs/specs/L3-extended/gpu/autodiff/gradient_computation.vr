@@ -4,6 +4,8 @@
 // @skip-disabled: GPU tests downgraded to parse-only
 // @tags: autodiff, gradient, computation
 
+mount core.prelude.*;
+
 fn main() {
     // Basic element-wise operations
     test_elementwise_grads();

@@ -321,6 +321,8 @@ fn hard_fault_handler_c(stack_frame: *const u32) {
 type c_int is i32;
 type c_void is ();
 
+mount core.prelude.*;
+
 fn main() {
     // Test no_mangle function
     let r1 = exported_function();

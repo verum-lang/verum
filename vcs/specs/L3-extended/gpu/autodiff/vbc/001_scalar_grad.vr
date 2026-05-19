@@ -76,6 +76,8 @@ fn test_grad_chain_rule() {
     assert_eq(numel(y), 1);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_grad_scope_basic();
     test_grad_square();

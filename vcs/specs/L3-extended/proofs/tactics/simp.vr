@@ -62,4 +62,6 @@ theorem simp_omega(x: Int)
     proof { simp; omega }
 }
 
+mount core.prelude.*;
+
 fn main() {}

@@ -351,6 +351,8 @@ fn benchmark_managed_struct_field() -> BenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Managed Reference (Tier 0) Latency Benchmark ===\n");
     println("Target: < 15ns overhead per managed reference access\n");

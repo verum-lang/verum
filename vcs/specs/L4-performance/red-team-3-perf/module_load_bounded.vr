@@ -280,6 +280,8 @@ module bulk_mod_254 { pub type T254 is { v: Int }; pub fn make_254(x: Int) -> T2
 module bulk_mod_255 { pub type T255 is { v: Int }; pub fn make_255(x: Int) -> T255 { T255 { v: x } } }
 module bulk_mod_256 { pub type T256 is { v: Int }; pub fn make_256(x: Int) -> T256 { T256 { v: x } } }
 
+mount core.prelude.*;
+
 fn main() {
     // Don't actually call all 256 functions — module existence alone proves
     // resolver acceptance.  Compiler typechecks every module; a regression to

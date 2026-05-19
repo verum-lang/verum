@@ -213,6 +213,8 @@ module wasm {
     pub type Table = ();
 }
 
+mount core.prelude.*;
+
 fn main() {
     // WASM compilation only
 }

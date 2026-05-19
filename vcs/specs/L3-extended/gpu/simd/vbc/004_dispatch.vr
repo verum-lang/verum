@@ -96,6 +96,8 @@ fn test_simd_chain_operations() {
     assert(result == 40.0);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_simd_splat_extract();
     test_simd_insert();

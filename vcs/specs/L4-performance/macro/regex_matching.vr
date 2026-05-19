@@ -404,6 +404,8 @@ fn benchmark_complex_pattern() -> RegexBenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Regex Matching Performance Benchmark ===\n");
 

@@ -57,6 +57,8 @@ fn mat_wrong() -> Matrix<Int, 2, 2> {
     Matrix { data: [1.0, 2.0, 3.0, 4.0] }  // ERROR: Float != Int
 }
 
+mount core.prelude.*;
+
 fn main() {
     let _ = construct_wrong();
     let _ = sized_wrong();

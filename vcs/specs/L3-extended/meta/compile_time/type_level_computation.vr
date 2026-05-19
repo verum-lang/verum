@@ -239,6 +239,8 @@ meta fn optimal_hash_size(expected_elements: Int) -> Int {
 
 const HASH_TABLE_SIZE: Int = optimal_hash_size(1000);  // 2048
 
+mount core.prelude.*;
+
 fn main() {
     // Все значения вычислены во время компиляции
     let fact = FACT_5;

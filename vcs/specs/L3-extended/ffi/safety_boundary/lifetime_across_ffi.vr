@@ -126,6 +126,8 @@ type BorrowGuardMut is {
 // Main Test
 // ------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Test that FFI declarations and types compile
     print("Lifetime across FFI type definitions passed");

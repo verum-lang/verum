@@ -23,6 +23,8 @@ module vcs.specs.l4.compilation.smt_solving;
 const WARMUP_ITERATIONS: Int = 10;
 const BENCHMARK_ITERATIONS: Int = 100;
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("SMT Solving Time");
 

@@ -72,6 +72,8 @@ module cpp_baselines {
     pub const SHARED_PTR_1M_MS: Float = 100.0;
 }
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Verum vs C++: Memory");
 

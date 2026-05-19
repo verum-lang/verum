@@ -292,6 +292,8 @@ fn run_inference_benchmark(name: Text, source: Text) -> InferenceBenchmarkResult
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Type Inference Performance Benchmark ===\n");
 

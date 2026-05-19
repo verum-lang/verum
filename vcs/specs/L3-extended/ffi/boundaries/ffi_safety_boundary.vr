@@ -223,6 +223,8 @@ implement CString {
 
 type PhantomData<T> is {};
 
+mount core.prelude.*;
+
 fn main() {
     // Safety boundary verification
 }

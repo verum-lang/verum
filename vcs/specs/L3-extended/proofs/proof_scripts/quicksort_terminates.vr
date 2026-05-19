@@ -69,4 +69,6 @@ theorem quicksort_correct<T: Ord>(xs: List<T>):
     }
 }
 
+mount core.prelude.*;
+
 fn main() {}

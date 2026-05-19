@@ -39,6 +39,8 @@ fn map_wrong<T, U>(xs: List<T>, f: fn(T) -> U) -> List<Int> {
     xs.map(f)  // ERROR when U != Int
 }
 
+mount core.prelude.*;
+
 fn main() {
     // These should fail type checking
     let _ = inference_conflict(0);

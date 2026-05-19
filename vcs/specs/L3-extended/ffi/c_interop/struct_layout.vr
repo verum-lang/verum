@@ -454,6 +454,8 @@ implement RgbColor {
 
 // Type properties: use T.size and T.alignment instead of deprecated intrinsics
 
+mount core.prelude.*;
+
 fn main() {
     // Struct layout tests
 }

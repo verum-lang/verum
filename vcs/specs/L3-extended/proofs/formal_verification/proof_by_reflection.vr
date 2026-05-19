@@ -93,4 +93,6 @@ theorem reflect_tautology(e: BoolExpr)
 
 fn is_tautology(e: BoolExpr) -> Bool;
 
+mount core.prelude.*;
+
 fn main() {}

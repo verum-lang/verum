@@ -476,6 +476,8 @@ unsafe fn cstr_to_text(s: *const c_char) -> Text {
     Text.from_utf8_unchecked(bytes)
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Callback pattern tests
 }

@@ -206,6 +206,8 @@ fn benchmark_static_lifetime() -> BenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== CBGR Check Elimination Benchmark ===\n");
 

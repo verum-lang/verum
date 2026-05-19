@@ -405,6 +405,8 @@ fn benchmark_enum_dispatch() -> BenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Virtual Dispatch Overhead Microbenchmarks ===\n");
 

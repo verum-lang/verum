@@ -193,6 +193,8 @@ fn safe_open_and_read(path: &str) -> FfiResult<List<u8>> {
 }
 
 /// Test function
+mount core.prelude.*;
+
 fn main() {
     // Test error conversion
     set_errno(ENOENT);

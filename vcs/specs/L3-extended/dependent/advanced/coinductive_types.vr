@@ -118,6 +118,8 @@ fn stream_scan(s: StreamIter<Int>, n: Int) -> List<Int> {
     result
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Natural numbers
     let nums = nats();

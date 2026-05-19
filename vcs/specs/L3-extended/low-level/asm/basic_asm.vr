@@ -49,6 +49,8 @@ fn test_att_syntax(a: Int) -> Int {
     res
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_nop();
 

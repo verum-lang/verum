@@ -202,6 +202,8 @@ type AllSkipped is {
     b: Int,
 };
 
+mount core.prelude.*;
+
 fn main() {
     // These will all fail during derive expansion
 }

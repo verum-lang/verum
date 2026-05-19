@@ -4,6 +4,8 @@
 // @skip-disabled: GPU tests downgraded to parse-only
 // @tags: tensor, broadcasting
 
+mount core.prelude.*;
+
 fn main() {
     // Scalar broadcasting to vector
     let v: Tensor<f32, [4]> = tensor<4>f32{1.0, 2.0, 3.0, 4.0};

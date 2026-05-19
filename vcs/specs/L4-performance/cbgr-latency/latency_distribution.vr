@@ -27,6 +27,8 @@ const SAMPLE_SIZE: Int = 1_000_000;
 const HISTOGRAM_BINS: Int = 100;
 const WARMUP_SAMPLES: Int = 100_000;
 
+mount core.prelude.*;
+
 fn main() {
     let distribution = LatencyDistribution.new("CBGR Latency Distribution");
 

@@ -28,4 +28,6 @@ lemma abs_triangle(x: Int, y: Int): abs(x + y) <= abs(x) + abs(y) { proof by aut
 
 theorem square_nonneg(x: Int): x * x >= 0 { proof by smt }
 
+mount core.prelude.*;
+
 fn main() {}

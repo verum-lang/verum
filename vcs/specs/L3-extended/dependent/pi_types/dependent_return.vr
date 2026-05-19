@@ -73,6 +73,8 @@ fn matmul<T, M: meta Int, N: meta Int, K: meta Int>(
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic replicate
     let three_zeros: FixedArray<Int, 3> = replicate(0);

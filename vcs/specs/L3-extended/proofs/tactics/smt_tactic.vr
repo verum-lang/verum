@@ -87,4 +87,6 @@ theorem smt_with_lemmas<T>(xs: List<T>, ys: List<T>)
     ensures len(xs ++ ys) == len(xs) + len(ys)
 { proof by smt }
 
+mount core.prelude.*;
+
 fn main() {}

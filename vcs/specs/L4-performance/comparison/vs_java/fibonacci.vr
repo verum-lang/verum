@@ -52,6 +52,8 @@ module java_baselines {
     pub const FIB_STREAM_MS: Float = 100.0;
 }
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Verum vs Java: Fibonacci");
 

@@ -130,6 +130,8 @@ type FfiAllocator is protocol {
     fn deallocate(&self, ptr: *mut u8, size: usize, align: usize);
 };
 
+mount core.prelude.*;
+
 fn main() {
     // FFI allocation test
     let heap = CHeap { ptr: null as *mut u8, size: 1024 };

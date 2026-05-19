@@ -56,4 +56,6 @@ theorem reverse_membership<T: Eq>(xs: List<T>, x: T):
     proof by induction on xs
 }
 
+mount core.prelude.*;
+
 fn main() {}

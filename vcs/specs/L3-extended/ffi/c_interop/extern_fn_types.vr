@@ -118,6 +118,8 @@ type MixedCallback is fn(extern "C" fn(c_int) -> c_int) -> Int;
 // Main
 // ------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Test that extern function types parse correctly
     print("Extern function pointer types passed");

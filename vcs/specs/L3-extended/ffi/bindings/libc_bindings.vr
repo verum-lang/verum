@@ -592,6 +592,8 @@ const SEEK_END: c_int = 2;
 @spec fn overlaps(a: *mut c_void, b: *const c_void, n: c_size_t) -> Bool;
 @spec fn is_power_of_two(n: c_size_t) -> Bool;
 
+mount core.prelude.*;
+
 fn main() {
     // libc bindings tests
 }

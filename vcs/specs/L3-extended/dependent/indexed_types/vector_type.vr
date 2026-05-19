@@ -96,6 +96,8 @@ fn vto_list<T, N: meta Int>(v: Vect<T, N>) -> List<T> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Create vectors
     let v0: Vect<Int, 0> = vempty();

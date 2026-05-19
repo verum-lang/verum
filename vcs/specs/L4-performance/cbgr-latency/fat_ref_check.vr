@@ -33,6 +33,8 @@ type FatRefLayout is {
     len: u64,            // 8 bytes - slice length
 };
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("FatRef CBGR Check Latency");
 

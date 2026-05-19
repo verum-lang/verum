@@ -86,6 +86,8 @@ fn test_question_mark() {
     assert(err_result.is_ok());
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_result_ok();
     test_result_err();

@@ -59,4 +59,6 @@ theorem search_terminates(lo: Nat, hi: Nat)
     proof by omega
 }
 
+mount core.prelude.*;
+
 fn main() {}

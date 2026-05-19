@@ -113,6 +113,8 @@ type TaggedUnion is {
     data: [u8; 8],  // Raw storage
 };
 
+mount core.prelude.*;
+
 fn main() {
     // Test IntOrFloat
     let u: IntOrFloat = IntVal(42);

@@ -4,6 +4,8 @@
 // @skip-disabled: GPU tests downgraded to parse-only
 // @tags: tensor, creation
 
+mount core.prelude.*;
+
 fn main() {
     // Scalar tensor (0-dimensional)
     let s: Tensor<f32, []> = tensor<>f32{42.0};

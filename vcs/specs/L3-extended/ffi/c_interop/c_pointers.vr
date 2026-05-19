@@ -560,6 +560,8 @@ fn test_handle() {
     assert(handle.is_ok());
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_null_ptr();
     test_non_null();
