@@ -25,7 +25,6 @@ fn regression_alias_from_weights_uniform_constructible() {
     assert(r is Ok(_));
 }
 
-@ignore
 @test
 fn regression_alias_from_weights_empty_returns_error() {
     let weights: [Float; 0] = [];
