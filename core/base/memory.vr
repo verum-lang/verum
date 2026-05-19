@@ -183,9 +183,26 @@ implement<T> Heap<T> {
     }
 
     /// Allocate with default value.
+    ///
+    /// **Task #17 workaround**: the ideal body is
+    /// `Heap.new(T.default())`, but `T.default()` in a generic body
+    /// dispatches to a non-deterministic `*.default` candidate because
+    /// the VBC codegen can't propagate the monomorphisation context
+    /// for a type-parameter receiver in a static method call (no
+    /// receiver value to discriminate on at runtime).  Until the
+    /// codegen gains monomorphisation-context propagation for
+    /// `T.method()` static calls, delegate to `Heap.new_zeroed()` —
+    /// for the standard `Default` impls (`Int.default = 0`,
+    /// `Float.default = 0.0`, `Bool.default = false`, `Maybe.default
+    /// = None`, etc.) zero bits ARE the canonical default
+    /// representation.
+    ///
+    /// Types with non-zero-bit defaults must call `Heap.new(value)`
+    /// directly with the desired value rather than relying on the
+    /// generic `new_default()` shortcut.
     public fn new_default() -> Heap<T>
     where T: Default {
-        Heap.new(T.default())
+        Heap.new_zeroed()
     }
 
     /// Allocate zeroed memory (for types where zero bits are valid).
