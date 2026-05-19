@@ -74,6 +74,8 @@ fn test_fd_operations() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     if (test_write_read_all() != 0) { return 1; }
     print("test1-3: OK");

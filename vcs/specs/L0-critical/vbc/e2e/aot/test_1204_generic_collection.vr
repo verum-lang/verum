@@ -43,6 +43,8 @@ implement Stack<T> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

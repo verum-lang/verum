@@ -120,6 +120,8 @@ fn test_long_palindrome() {
     print("long_palindrome: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_odd_center();
     test_even_center();

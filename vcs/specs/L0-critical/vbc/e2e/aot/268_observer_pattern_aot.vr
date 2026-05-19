@@ -138,6 +138,8 @@ fn test_none_event() {
     assert_eq(subject_get_obs(s, 0).count, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_subscribe_notify();
     test_multiple_events();

@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test type name properties
 
+mount core.prelude.*;
+
 fn main() {
     // Test semantic type names
     assert_eq(Int8.name, "Int8");

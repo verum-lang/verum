@@ -166,6 +166,8 @@ fn test_empty_queue() {
     assert_eq(tq_count_overdue(q, 100), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_scheduling();
     test_urgent_count();

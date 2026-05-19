@@ -128,6 +128,8 @@ fn ht_contains(ht: HT8, key: Int) -> Bool {
     ht_lookup(ht, key) != -1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Empty table
     let ht0 = ht_new();

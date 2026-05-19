@@ -326,6 +326,8 @@ fn test_radix_sort_with_zeros() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_counting_sort_basic();
     test_counting_sort_already_sorted();

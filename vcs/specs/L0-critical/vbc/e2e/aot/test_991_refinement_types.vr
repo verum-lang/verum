@@ -141,6 +141,8 @@ fn test_abs_refinement() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
     failures = failures + test_positive_constraint();

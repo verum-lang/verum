@@ -105,6 +105,8 @@ fn test_missing_capability() -> () {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // All tests above should fail at compile time
     // If this file compiles successfully, the tests have failed

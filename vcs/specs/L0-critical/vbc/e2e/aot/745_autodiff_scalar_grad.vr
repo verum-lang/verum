@@ -103,6 +103,8 @@ fn fd_grad2_poly(x: Int) -> Int {
     (grad_poly(x + 1) - grad_poly(x - 1)) / 2
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Gradient of x^2
     // f'(3) = 6, finite diff = (16 - 4) / 2 = 6

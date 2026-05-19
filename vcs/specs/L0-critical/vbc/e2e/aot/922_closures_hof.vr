@@ -38,6 +38,8 @@ fn fold_list(nums: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: apply with closure
     let double = |x: Int| -> Int { x * 2 };

@@ -132,6 +132,8 @@ fn selection_sort(a: Arr16) -> Arr16 {
     arr
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Bubble sort on reverse-ordered array ===
     let mut a1 = arr_new(8);

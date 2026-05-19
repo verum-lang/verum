@@ -391,6 +391,8 @@ fn test_node_degrees() {
     assert_eq(graph_degree(&n4), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_triangle();
     test_triangle_dfs();

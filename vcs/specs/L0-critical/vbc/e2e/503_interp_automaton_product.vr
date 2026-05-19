@@ -218,6 +218,8 @@ fn test_product_state_count() {
     print("automaton_product_state_count: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_intersection();
     test_union();

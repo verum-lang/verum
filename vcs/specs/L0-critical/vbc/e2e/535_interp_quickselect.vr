@@ -133,6 +133,8 @@ fn test_duplicates_select() {
     print("duplicates_select: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_select();
     test_sorted_input();

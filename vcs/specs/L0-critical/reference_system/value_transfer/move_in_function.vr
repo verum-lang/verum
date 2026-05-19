@@ -40,6 +40,8 @@ fn take_list(items: List<Int>) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Copy into function - Text is Copy
     let s1 = Text.from("hello");

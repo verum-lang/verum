@@ -125,6 +125,8 @@ fn grid_eq(a: Grid, b: Grid) -> Bool {
     a.r4 == b.r4 && a.r5 == b.r5 && a.r6 == b.r6 && a.r7 == b.r7
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Empty grid stays empty ===
     let empty = grid_empty();

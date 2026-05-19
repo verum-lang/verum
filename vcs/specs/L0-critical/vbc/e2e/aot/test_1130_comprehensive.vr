@@ -187,6 +187,8 @@ fn test_action_system() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Comprehensive Tests:");
     let mut failures = 0;

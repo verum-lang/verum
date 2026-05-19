@@ -156,6 +156,8 @@ fn test_stack_arrays() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_concat_two();
     test_split_equal();

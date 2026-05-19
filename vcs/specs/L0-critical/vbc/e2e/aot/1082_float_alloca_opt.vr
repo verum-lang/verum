@@ -34,6 +34,8 @@ fn dot_product(n: Int) -> Float {
     sum
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Pi approximation
     let pi = compute_pi_approx();

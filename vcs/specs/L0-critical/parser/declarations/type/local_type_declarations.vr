@@ -7,6 +7,8 @@
 // Grammar: statement = ... | item | ... ; item = type_def | ...
 // Spec: grammar/verum.ebnf - Local type definitions are valid inside functions
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_local_record();
     test_local_variant_type();

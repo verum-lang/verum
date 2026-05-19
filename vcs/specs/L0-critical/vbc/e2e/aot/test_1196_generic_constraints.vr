@@ -28,6 +28,8 @@ fn describe<T: Printable>(item: &T) -> Text {
     item.to_text()
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

@@ -246,6 +246,8 @@ fn test_double_range() {
     assert_eq(combined, 140);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_range_basic();
     test_range_collect_sum();

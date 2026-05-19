@@ -525,6 +525,8 @@ fn test_struct_and_maybe_combined() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Literal patterns
     test_integer_literal_patterns();

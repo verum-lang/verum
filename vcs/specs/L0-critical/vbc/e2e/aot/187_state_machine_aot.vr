@@ -86,6 +86,8 @@ fn counter_step(value: Int, mode: Int) -> Int {
     else { 0 }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Traffic light
     assert_eq(run_traffic(0), 0);   // Still Red

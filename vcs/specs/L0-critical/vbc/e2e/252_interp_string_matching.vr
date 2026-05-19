@@ -370,6 +370,8 @@ fn test_find_last_no_match() {
     assert_eq(find_last(text, 3, pat, 2), -1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_find_basic();
     test_find_at_start();

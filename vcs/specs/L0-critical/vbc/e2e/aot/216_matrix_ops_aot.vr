@@ -159,6 +159,8 @@ fn test_determinant() {
     assert_eq(mat3_det(a), 3);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_identity();
     test_add_scale();

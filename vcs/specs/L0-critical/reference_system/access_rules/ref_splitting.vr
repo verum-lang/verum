@@ -26,6 +26,8 @@ type Pair<A, B> is {
     second: B,
 };
 
+mount core.prelude.*;
+
 fn main() {
     // Basic field splitting
     let mut state = State {

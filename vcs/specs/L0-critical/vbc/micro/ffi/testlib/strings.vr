@@ -11,6 +11,8 @@ extern {
     fn ffi_strlen(s: Text) -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     let len1 = ffi_strlen("hello");
     print("strlen(hello)="); print(len1); print("\n");

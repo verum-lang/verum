@@ -23,6 +23,8 @@ fn __ptr_free(ptr: Int) -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Spawn echo with piped stdout
     let args: List<Text> = ["-c", "echo hello_verum"];

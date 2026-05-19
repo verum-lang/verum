@@ -208,6 +208,8 @@ fn test_seg_multiple_updates() {
     print("seg_multiple_updates: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_seg_build_and_query();
     test_seg_point_update();

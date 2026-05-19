@@ -129,6 +129,8 @@ fn test_power_set_n2() {
     print("power_set_n2: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_popcount();
     test_subset_sum_n3();

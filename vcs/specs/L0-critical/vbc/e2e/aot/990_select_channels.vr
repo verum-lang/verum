@@ -4,6 +4,8 @@
 // @tags: select, channels, concurrency, async
 // @description: Select expression — wait for first ready channel
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: select between two channels, one sends first
     let fast = Channel.new(1);

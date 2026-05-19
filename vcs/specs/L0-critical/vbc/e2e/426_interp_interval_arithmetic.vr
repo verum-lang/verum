@@ -109,6 +109,8 @@ fn test_interval_no_overlap() {
     print("interval_no_overlap: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_interval_basics();
     test_interval_add();

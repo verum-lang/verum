@@ -170,6 +170,8 @@ fn test_chain_at_multiple_points() {
     assert_eq(c5, 60 * scale());
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_chain_sq_of_lin();
     test_chain_sq_of_lin_at_zero();

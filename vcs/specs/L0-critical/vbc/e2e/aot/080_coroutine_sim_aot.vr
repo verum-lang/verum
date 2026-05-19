@@ -214,6 +214,8 @@ fn chain_counter_to_counter(start: Int, mid_limit: Int, final_limit: Int) -> Int
     sum2
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Counter coroutine: basic ===
     let c1 = counter_new(0, 5);

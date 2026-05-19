@@ -143,6 +143,8 @@ fn bloom_insert_range(b: BitArr, start: Int, count: Int) -> BitArr {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Empty bloom filter has no bits set ===
     let empty = bit_arr_new();

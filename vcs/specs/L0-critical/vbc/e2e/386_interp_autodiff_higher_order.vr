@@ -238,6 +238,8 @@ fn test_inflection_point() {
     assert(f_cube_d2(scale()) > 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_cube_first_deriv();
     test_cube_second_deriv_analytical();

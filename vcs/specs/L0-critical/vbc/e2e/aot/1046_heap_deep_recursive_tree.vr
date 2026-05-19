@@ -45,6 +45,8 @@ implement Tree {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Build a tree:
     //       1

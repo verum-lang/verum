@@ -342,6 +342,8 @@ fn test_two_element() {
     assert_eq(a8_get(inv, 1), 3);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_single_step_lossless();
     test_constant_signal();

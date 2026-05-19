@@ -77,6 +77,8 @@ fn interval_midpoint(lo: Int, hi: Int) -> Int {
     (lo + hi) / 2
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Interval A = [2, 5], Interval B = [3, 7]
 

@@ -145,6 +145,8 @@ fn test_count_ones() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_ackermann();
     test_mccarthy();

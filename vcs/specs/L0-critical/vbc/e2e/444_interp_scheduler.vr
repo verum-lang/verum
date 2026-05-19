@@ -267,6 +267,8 @@ fn test_shortest_job_first() {
     print("shortest_job_first: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_round_robin_basic();
     test_round_robin_equal_burst();

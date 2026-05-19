@@ -84,6 +84,8 @@ fn test_int_to_float() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Float Arithmetic Tests:");
     let mut failures = 0;

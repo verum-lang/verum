@@ -3,6 +3,8 @@
 // @description: Producer-consumer pattern with channel between threads
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Single producer, single consumer via channel
     let ch = Channel.new(20);

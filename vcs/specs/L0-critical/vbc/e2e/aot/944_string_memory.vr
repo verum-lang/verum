@@ -38,6 +38,8 @@ fn tostring_heavy() -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Heavy f-string in loop (temporaries should be freed)
     format_many(50);

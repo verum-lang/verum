@@ -156,6 +156,8 @@ fn http_status_class(code: Int) -> Text {
 }
 
 // Main function that exercises the range patterns
+mount core.prelude.*;
+
 fn main() {
     // Test various range pattern functions
     let _ = classify_number(50);

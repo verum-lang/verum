@@ -4,6 +4,8 @@
 // @tags: comprehension, list, map, filter, e2e
 // @description: Test list comprehensions and functional collection operations
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

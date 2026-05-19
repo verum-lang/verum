@@ -182,6 +182,8 @@ fn test_pack_unpack() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bit_ops();
     test_popcount();

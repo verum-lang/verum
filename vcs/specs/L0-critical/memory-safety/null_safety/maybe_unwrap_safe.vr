@@ -13,6 +13,8 @@
 ///
 /// These are the idiomatic ways to handle optional values in Verum.
 
+mount core.prelude.*;
+
 fn main() {
     test_pattern_matching();
     test_map_combinators();

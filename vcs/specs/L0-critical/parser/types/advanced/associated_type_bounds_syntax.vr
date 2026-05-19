@@ -42,6 +42,8 @@ type Mappable is protocol {
     fn map(&self, f: fn(Self.Input) -> Self.Output) -> Self;
 };
 
+mount core.prelude.*;
+
 fn main() {
     assert(true);
 }

@@ -99,6 +99,8 @@ fn test_let_type_annotation() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Type System Tests:");
     let mut failures = 0;

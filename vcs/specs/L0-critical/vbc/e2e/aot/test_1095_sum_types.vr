@@ -116,6 +116,8 @@ fn test_weekday() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Sum Type Tests:");
     let mut failures = 0;

@@ -513,6 +513,8 @@ fn test_empty_manager() {
     assert_eq(mgr_min_effort(m), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_add_and_count();
     test_priorities();

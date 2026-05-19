@@ -62,6 +62,8 @@ fn maybe_is_just(m: Maybe) -> Bool {
     m is Just
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Shape matching
     let c = Circle(5);

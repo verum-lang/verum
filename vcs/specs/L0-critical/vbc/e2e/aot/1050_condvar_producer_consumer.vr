@@ -13,6 +13,8 @@ fn __cond_new_raw() -> Int { 0 }
 fn __cond_wait_raw(cond: Int, mtx: Int) -> Int { 0 }
 fn __cond_signal_raw(cond: Int) -> Int { 0 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mtx = __mutex_new_raw();
     let cond_not_empty = __cond_new_raw();

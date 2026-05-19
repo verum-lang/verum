@@ -204,6 +204,8 @@ fn test_chain_3_extreme() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_chain_2();
     test_chain_3();

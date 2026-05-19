@@ -260,6 +260,8 @@ fn test_reachable() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_fsm_ab();
     test_fsm_astarb();

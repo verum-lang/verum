@@ -14,6 +14,8 @@ type affine Resource is {
     name: Text,
 };
 
+mount core.prelude.*;
+
 fn main() {
     // Closure captures Text by copy (Text is not affine)
     let s = Text.from("captured by copy");

@@ -176,6 +176,8 @@ fn test_lane_min_max() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_splat_add();
     test_sub_mul();

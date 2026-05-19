@@ -25,6 +25,8 @@ fn check<T: Validator>(item: T) -> Bool {
     item.is_valid()
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let good = Email { address: "user@test.com" };
     let bad = Email { address: "x" };

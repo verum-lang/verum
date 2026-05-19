@@ -49,4 +49,6 @@ type CacheCtx is { _marker: Int };
 
 fn get_db() -> Database { Database { _marker: 0 } }
 
+mount core.prelude.*;
+
 fn main() -> Int { 0 }

@@ -222,6 +222,8 @@ fn test_powers_of_two() {
     assert_eq(ft_range_sum(ft, 3, 5), 28);    // 4+8+16
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic();
     test_point_update();

@@ -167,6 +167,8 @@ fn eval_full(s: TokStream) -> Int {
     else { -9999 }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Single number: "5" ===
     let s1 = ts_push(ts_empty(), tok_num(5));

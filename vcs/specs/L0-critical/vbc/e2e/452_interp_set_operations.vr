@@ -281,6 +281,8 @@ fn test_subset_check() {
     print("subset_check: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_set_union();
     test_set_intersection();

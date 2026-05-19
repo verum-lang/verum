@@ -361,6 +361,8 @@ fn test_cross_validation() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_polynomial();
     test_prime_factorization_370();

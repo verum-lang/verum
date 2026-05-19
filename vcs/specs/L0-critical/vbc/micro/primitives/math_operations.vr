@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test math operations for Float type
 
+mount core.prelude.*;
+
 fn main() {
     // Test sqrt
     assert_eq(4.0.sqrt(), 2.0);

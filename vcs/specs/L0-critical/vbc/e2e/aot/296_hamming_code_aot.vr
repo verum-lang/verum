@@ -239,6 +239,8 @@ fn test_encode_then_corrupt_and_recover() {
     assert_eq(decoded2, message);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_encode_decode_all();
     test_syndrome_clean();

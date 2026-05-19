@@ -570,6 +570,8 @@ fn test_process_group() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_all_reduce_sum();
     test_all_reduce_max();

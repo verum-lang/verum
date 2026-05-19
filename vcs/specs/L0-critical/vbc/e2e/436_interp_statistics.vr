@@ -138,6 +138,8 @@ fn test_histogram() {
     print("histogram: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_mean();
     test_variance();

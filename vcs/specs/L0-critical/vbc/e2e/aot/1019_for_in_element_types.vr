@@ -31,6 +31,8 @@ fn make_small_matrix() -> List<List<Int>> {
     m
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut passed = 0;
     let mut failed = 0;

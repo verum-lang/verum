@@ -408,6 +408,8 @@ fn test_combined_pipeline() {
     print("combined_pipeline: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_heapsort_pipeline();
     test_isqrt_pipeline();

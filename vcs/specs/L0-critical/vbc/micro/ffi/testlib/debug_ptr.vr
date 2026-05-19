@@ -10,6 +10,8 @@ extern {
     fn ffi_deref_i32(ptr: &Int32) -> Int32;
 }
 
+mount core.prelude.*;
+
 fn main() {
     let x: Int32 = 42;
     print("x="); print(x); print("\n");

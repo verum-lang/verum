@@ -242,6 +242,8 @@ fn test_factorial_via_stack() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_push_add();
     test_arithmetic();

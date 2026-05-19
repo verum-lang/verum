@@ -230,6 +230,8 @@ fn test_update_single_element() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_build_and_query();
     test_single_elements();

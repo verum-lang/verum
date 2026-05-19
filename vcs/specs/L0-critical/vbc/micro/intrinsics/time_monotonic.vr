@@ -2,6 +2,8 @@
 // @level: L0
 // @tier: 0
 // @expected-exit: 0
+mount core.prelude.*;
+
 fn main() {
     // Test that basic operations complete in finite time
     // This indirectly tests that the runtime is functioning

@@ -141,6 +141,8 @@ fn test_all_keys() {
     assert_eq(trie_search_1(t, 3), true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic();
     test_prefix();

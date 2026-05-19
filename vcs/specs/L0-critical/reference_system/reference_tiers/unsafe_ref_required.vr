@@ -14,6 +14,8 @@
 /// Verum has no compile-time borrow checker, but DOES require explicit
 /// opt-in for unsafe operations.
 
+mount core.prelude.*;
+
 fn main() {
     let value = 42;
 

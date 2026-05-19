@@ -10,6 +10,8 @@ fn make_maybe_list(include_evens: Bool) -> Maybe<List<Int>> {
     Some(items)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut passed = 0;
     let mut failed = 0;

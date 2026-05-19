@@ -171,6 +171,8 @@ fn test_polynomial() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_add();
     test_complex_expr();

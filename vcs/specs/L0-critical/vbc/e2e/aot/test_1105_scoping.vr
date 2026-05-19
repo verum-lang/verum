@@ -90,6 +90,8 @@ fn helper_fn(x: Int) -> Int {
     x * 2
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Scoping Tests:");
     let mut failures = 0;

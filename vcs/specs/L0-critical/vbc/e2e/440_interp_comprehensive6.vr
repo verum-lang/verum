@@ -143,6 +143,8 @@ fn test_format_everything() {
     print("format_everything: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rational_arithmetic();
     test_harmonic_partial();

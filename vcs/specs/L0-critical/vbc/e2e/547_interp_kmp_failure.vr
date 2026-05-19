@@ -129,6 +129,8 @@ fn test_failure_single_char() {
     print("failure_single_char: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_failure_aaaa();
     test_failure_abcabd();

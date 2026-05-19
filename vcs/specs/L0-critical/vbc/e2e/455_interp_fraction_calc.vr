@@ -245,6 +245,8 @@ fn test_frac_comparison() {
     print("frac_comparison: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gcd();
     test_frac_simplification();

@@ -127,6 +127,8 @@ fn test_money() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Operator Overloading Tests:");
     let mut failures = 0;

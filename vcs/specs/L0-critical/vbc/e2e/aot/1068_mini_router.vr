@@ -40,6 +40,8 @@ fn match_route(routes: List<Route>, request_path: Text) -> Response {
     not_found()
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Define routes
     let mut routes = List.new();

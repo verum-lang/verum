@@ -249,6 +249,8 @@ fn test_constant_signal() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_single_level();
     test_single_level_inverse();

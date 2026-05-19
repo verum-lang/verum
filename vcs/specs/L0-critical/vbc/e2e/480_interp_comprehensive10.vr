@@ -515,6 +515,8 @@ fn test_combined_pipeline() {
     print("combined_pipeline: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_records();
     test_closures();

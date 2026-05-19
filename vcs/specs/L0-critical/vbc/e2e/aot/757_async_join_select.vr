@@ -60,6 +60,8 @@ fn sum_range(start: Int, end: Int) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Join pattern - aggregate results from multiple computations
     let r1 = compute_fib(8);   // 21

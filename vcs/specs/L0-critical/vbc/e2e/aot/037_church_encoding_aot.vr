@@ -38,6 +38,8 @@ fn church_pow(base: Int, exp: Int) -> Int {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Church 0: apply f 0 times = identity
     assert_eq(church_apply(0, |x| x + 1, 5), 5);

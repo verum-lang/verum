@@ -147,6 +147,8 @@ fn svar() -> SExpr { SVar }
 fn sadd(a: SExpr, b: SExpr) -> SExpr { SAdd { left: a, right: b } }
 fn smul(a: SExpr, b: SExpr) -> SExpr { SMul { left: a, right: b } }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Evaluate constants ===
     assert_eq(sexpr_eval(sconst(42), 0), 42);

@@ -24,6 +24,8 @@ fn list_len(lst: IntList) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: empty list
     let empty = Nil;

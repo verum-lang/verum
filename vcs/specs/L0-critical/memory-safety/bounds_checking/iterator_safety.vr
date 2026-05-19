@@ -11,6 +11,8 @@
 /// - Ownership rules prevent iterator invalidation
 /// - Lazy evaluation for efficiency
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_iteration();
     test_iterator_combinators();

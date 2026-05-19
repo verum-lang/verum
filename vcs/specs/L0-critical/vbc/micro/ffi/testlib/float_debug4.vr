@@ -14,6 +14,8 @@ fn simple_if(x: Float) -> Bool {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("testing simple_if\n");
 

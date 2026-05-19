@@ -305,6 +305,8 @@ fn test_repeated_pattern() {
     assert_eq(z_search_count(pat, 2, txt, 6), 3);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_z_array_basic();
     test_z_array_all_same();

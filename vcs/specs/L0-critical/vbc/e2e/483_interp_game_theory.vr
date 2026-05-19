@@ -203,6 +203,8 @@ fn test_ttt_game_value() {
     print(f"ttt_game_value: empty_board_value={val} (draw) ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_ttt_winner_detection();
     test_ttt_minimax_terminal();

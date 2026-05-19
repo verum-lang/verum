@@ -246,6 +246,8 @@ fn test_deque_size_tracking() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_push_back_pop_back();
     test_push_front_pop_front();

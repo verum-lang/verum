@@ -194,6 +194,8 @@ fn test_sequential_evictions() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_ops();
     test_eviction();

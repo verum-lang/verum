@@ -231,6 +231,8 @@ fn test_sort_correctness() {
     assert_eq(arr8_get(sorted.starts, 1), 2);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_scheduling();
     test_all_overlapping();

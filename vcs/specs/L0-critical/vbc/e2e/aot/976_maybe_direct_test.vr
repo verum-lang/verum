@@ -16,6 +16,8 @@ fn make_none() -> Maybe2<Int> {
     None2
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Direct user-defined Maybe
     let m1 = make_some(42);

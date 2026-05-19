@@ -316,6 +316,8 @@ fn test_not_palindrome() {
     assert_eq(is_pal, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_push_back_pop_front();
     test_push_front_pop_back();

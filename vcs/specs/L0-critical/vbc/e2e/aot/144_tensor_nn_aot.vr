@@ -540,6 +540,8 @@ fn test_cumsum_argmax_combined() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_conv1d_edge_detect();
     test_conv1d_sum_kernel();

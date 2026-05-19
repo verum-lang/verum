@@ -108,6 +108,8 @@ fn test_already_sorted() {
     print("already_sorted: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bisect_left();
     test_basic_sort();

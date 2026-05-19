@@ -193,6 +193,8 @@ fn test_roundtrip() {
     assert_eq(r2.den, 7);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_fractions();
     test_integer();

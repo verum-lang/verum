@@ -139,6 +139,8 @@ fn test_max_depth() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_overlaps();
     test_count_pairs();

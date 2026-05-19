@@ -5,6 +5,8 @@
 // @tags: memory-safety, bounds-checking, list, panic
 // @description: Tests that list indexing with invalid index causes a controlled panic
 
+mount core.prelude.*;
+
 fn main() {
     let items = [10, 20, 30];
     let bad_idx = 100;

@@ -254,6 +254,8 @@ fn test_knapsack_monotonic() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_knapsack();
     test_single_item_fits();

@@ -115,6 +115,8 @@ fn test_list_two_arrays() {
     assert_eq(dot, 140);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_list_literal();
     test_list_sum_loop();

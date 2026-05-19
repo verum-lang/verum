@@ -4,6 +4,8 @@
 // @expected-exit: 0
 fn get_42() -> Int { 42 }
 
+mount core.prelude.*;
+
 fn main() {
     let x = get_42();
     assert_eq(x, 42);

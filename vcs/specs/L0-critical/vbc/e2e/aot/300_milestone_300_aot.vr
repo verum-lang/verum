@@ -207,6 +207,8 @@ fn test_number_theory() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_math();
     test_vectors();

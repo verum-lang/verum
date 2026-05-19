@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test type properties for built-in types (Int, Float, Bool, Byte, Char)
 
+mount core.prelude.*;
+
 fn main() {
     // Test Int (64-bit signed)
     assert_eq(Int.size, 8);

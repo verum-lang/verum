@@ -124,6 +124,8 @@ fn test_counts_are_correct() {
     print("counts_correct: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_sort();
     test_all_same();

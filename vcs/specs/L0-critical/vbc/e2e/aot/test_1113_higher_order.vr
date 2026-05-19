@@ -165,6 +165,8 @@ fn test_closure_capture() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Higher-Order Function Tests:");
     let mut failures = 0;

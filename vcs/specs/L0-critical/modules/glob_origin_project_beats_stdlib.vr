@@ -25,6 +25,8 @@
 
 type LocalTree<T> is Leaf(T) | Branch { left: Heap<LocalTree<T>>, right: Heap<LocalTree<T>> };
 
+mount core.prelude.*;
+
 fn main() {
     print("project-wins");
 }

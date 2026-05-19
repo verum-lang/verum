@@ -240,6 +240,8 @@ fn test_validity() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_triangle_circuit();
     test_square_circuit();

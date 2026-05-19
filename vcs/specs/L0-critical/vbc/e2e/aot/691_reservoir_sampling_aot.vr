@@ -168,6 +168,8 @@ fn test_different_seeds() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_lcg();
     test_reservoir_deterministic();

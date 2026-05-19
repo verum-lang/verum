@@ -15,6 +15,8 @@ fn __mutex_unlock_raw(mtx: Int) -> Int {
     0  // intrinsic
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Two threads incrementing a shared counter via mutex+channel
     let mtx = __mutex_new_raw();

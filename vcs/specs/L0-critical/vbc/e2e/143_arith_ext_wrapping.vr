@@ -136,6 +136,8 @@ fn test_wrap_neg() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_wrap_add();
     test_wrap_sub();

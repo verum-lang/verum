@@ -130,6 +130,8 @@ fn test_high_degree() {
     print("high_degree: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_constant_polynomial();
     test_linear_polynomial();

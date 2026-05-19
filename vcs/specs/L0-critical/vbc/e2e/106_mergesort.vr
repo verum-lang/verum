@@ -228,6 +228,8 @@ fn test_small_array() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sort_random();
     test_already_sorted();

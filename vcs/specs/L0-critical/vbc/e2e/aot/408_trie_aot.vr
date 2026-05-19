@@ -308,6 +308,8 @@ fn test_node_count() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_search_present();
     test_search_absent();

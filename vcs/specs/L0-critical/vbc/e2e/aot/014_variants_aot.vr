@@ -40,6 +40,8 @@ fn map_maybe(m: Maybe, f: fn(Int) -> Int) -> Maybe {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic variant construction and matching
     let c = Circle(5);

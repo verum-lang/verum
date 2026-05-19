@@ -62,6 +62,8 @@ fn test_divmod() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Tuple Pattern Tests:");
     let mut failures = 0;

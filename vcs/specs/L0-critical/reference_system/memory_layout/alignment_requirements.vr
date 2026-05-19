@@ -8,6 +8,8 @@
 /// CBGR metadata requires specific alignment for thread-safe checks.
 /// Spec: cbgr-implementation.md#memory-layout
 
+mount core.prelude.*;
+
 fn main() {
     verify_thin_ref_alignment();
     verify_fat_ref_alignment();

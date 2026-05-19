@@ -27,6 +27,8 @@ fn sum_list(data: List<Int>, n: Int) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Basic nursery pattern — spawn work, collect results
     let mut results = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

@@ -136,6 +136,8 @@ fn test_equal_dims() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_two_matrices();
     test_three_matrices();

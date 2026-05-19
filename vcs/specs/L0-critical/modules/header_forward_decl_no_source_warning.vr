@@ -23,6 +23,8 @@
 
 module nonexistent_helper;
 
+mount core.prelude.*;
+
 fn main() {
     print("dangling-forward-decl");
 }

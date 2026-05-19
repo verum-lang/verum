@@ -196,6 +196,8 @@ fn rmat_vec(m: RatMat3, v: RatVec3) -> RatVec3 {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Rational arithmetic basics ===
     let half = rat_new(1, 2);

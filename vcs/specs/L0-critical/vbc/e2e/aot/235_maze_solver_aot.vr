@@ -204,6 +204,8 @@ fn test_isolated_cell() {
     assert_eq(is_reachable(maze, 1, 1, 0, 0), false);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_open_maze();
     test_walled_maze();

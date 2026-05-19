@@ -1,3 +1,5 @@
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut s = Set.new();
     s.insert(10);

@@ -17,6 +17,8 @@
 // payload silently; this test fails CI when that regression
 // re-surfaces.
 
+mount core.prelude.*;
+
 fn main() {
     let m: Maybe<Int> = None;
     let v = m.unwrap();           // must panic with the message below

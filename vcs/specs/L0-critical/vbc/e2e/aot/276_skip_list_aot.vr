@@ -150,6 +150,8 @@ fn test_express_lane() {
     assert_eq(sl.level1.len <= sl.level0.len, true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_insert_and_search();
     test_sorted_order();

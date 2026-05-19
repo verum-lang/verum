@@ -207,6 +207,8 @@ fn test_bloom_false_positive_rate() {
     print("bloom_false_positive_rate: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bloom_basic_insert_query();
     test_bloom_no_false_negatives();

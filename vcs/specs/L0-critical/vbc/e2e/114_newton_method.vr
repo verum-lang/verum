@@ -173,6 +173,8 @@ fn test_sqrt_large() {
 // main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sqrt_perfect_squares();
     test_sqrt_irrational();

@@ -245,6 +245,8 @@ fn test_reservoir_large_stream() {
     assert_eq(no_duplicates(res), true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rng_deterministic();
     test_rng_different_seeds();

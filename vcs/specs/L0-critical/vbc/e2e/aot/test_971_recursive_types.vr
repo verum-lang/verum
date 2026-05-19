@@ -197,6 +197,8 @@ fn test_asymmetric() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Recursive Type Tests:");
     let mut failures = 0;

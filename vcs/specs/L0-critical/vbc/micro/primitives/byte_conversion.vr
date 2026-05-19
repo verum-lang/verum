@@ -5,6 +5,8 @@
 // @expected-exit: 0
 // @description: Test to_le_bytes and from_le_bytes methods for numeric types
 
+mount core.prelude.*;
+
 fn main() {
     // Test Int (i64) byte conversion
     let n: Int = 0x0102030405060708;

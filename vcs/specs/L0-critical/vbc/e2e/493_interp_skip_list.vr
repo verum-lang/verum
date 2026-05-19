@@ -244,6 +244,8 @@ fn test_skip_list_sequential_search() {
     print("skip_list_sequential_search: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_skip_list_basic();
     test_skip_list_single();

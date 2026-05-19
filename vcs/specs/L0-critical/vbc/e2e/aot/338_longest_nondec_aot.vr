@@ -255,6 +255,8 @@ fn test_erdos_szekeres() {
     assert_eq(l >= 3, true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_lnds();
     test_all_equal();

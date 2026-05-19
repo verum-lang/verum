@@ -145,6 +145,8 @@ fn test_arithmetic_identities() {
     assert_eq(lhs2, rhs2);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_big_add();
     test_isqrt();

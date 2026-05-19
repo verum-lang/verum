@@ -50,6 +50,8 @@ fn fizzbuzz_sum(n: Int) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Mutual recursion
     assert(is_even_check(0));

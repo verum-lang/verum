@@ -189,6 +189,8 @@ fn test_combined_pipeline() {
     assert_eq(msg, "6! = 720");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bool_from_comparison();
     test_bool_in_arithmetic_context();

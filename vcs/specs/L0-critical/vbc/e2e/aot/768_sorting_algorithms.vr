@@ -86,6 +86,8 @@ fn merge_halves(left: List<Int>, right: List<Int>, dst: List<Int>, ln: Int, rn: 
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Insertion sort on small array
     // Input: [5, 3, 8, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]

@@ -30,6 +30,8 @@ type Expr is Num(Int) | Add(Heap<Expr>, Heap<Expr>) | Mul(Heap<Expr>, Heap<Expr>
 fn eval(e: Expr) -> Int { match e { Num(n) => n, Add(l, r) => eval(*l) + eval(*r), Mul(l, r) => eval(*l) * eval(*r) } }
 fn make_adder(n: Int) -> fn(Int) -> Int { |x| x + n }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // 1. Variants + match
     let c = Rgb(255, 128, 0);

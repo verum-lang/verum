@@ -263,6 +263,8 @@ fn test_scale() {
     assert_eq(poly_eval(sp, 5), 3 * poly_eval(p, 5));
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_eval();
     test_horner_matches_naive();

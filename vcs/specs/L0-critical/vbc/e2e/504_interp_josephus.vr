@@ -181,6 +181,8 @@ fn test_step_equals_n() {
     print("josephus_edge_cases: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_known_values();
     test_step3();

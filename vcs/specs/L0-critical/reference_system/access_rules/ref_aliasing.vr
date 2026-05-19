@@ -11,6 +11,8 @@
 /// Spec: 04-memory-model.md#aliasing-rules
 /// Aliasing XOR Mutability: You cannot have both simultaneously.
 
+mount core.prelude.*;
+
 fn main() {
     let mut data = Text.from("shared data");
 

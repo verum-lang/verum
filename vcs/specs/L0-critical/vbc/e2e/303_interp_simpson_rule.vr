@@ -288,6 +288,8 @@ fn test_known_integrals() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_trapezoidal();
     test_simpson_rule();

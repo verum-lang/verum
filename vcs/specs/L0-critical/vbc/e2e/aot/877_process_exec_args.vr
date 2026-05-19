@@ -11,6 +11,8 @@ fn __process_exec_raw(program: Text, args: List<Text>) -> Int {
     -1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Program with no args
     let r1 = __process_exec_raw("/usr/bin/true", []);

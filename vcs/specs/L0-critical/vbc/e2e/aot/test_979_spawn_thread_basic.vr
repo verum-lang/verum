@@ -51,6 +51,8 @@ fn test_spawn_capture() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
     failures = failures + test_single_spawn();

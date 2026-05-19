@@ -153,6 +153,8 @@ fn test_array_sorted_after_count() {
     print("array_sorted_after_count: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sorted_no_inversions();
     test_reverse_max_inversions();

@@ -127,6 +127,8 @@ fn test_large_values() {
     print("large_values: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_perfect_squares();
     test_non_perfect_squares();

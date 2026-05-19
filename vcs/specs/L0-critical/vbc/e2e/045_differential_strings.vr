@@ -483,6 +483,8 @@ fn test_print_bool_results() {
     print("print_bools: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_string_equality();
     test_string_counting();

@@ -338,6 +338,8 @@ fn test_skewed_tree() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_insert_and_search();
     test_search_not_found();

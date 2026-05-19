@@ -2,6 +2,8 @@
 // @level: L0
 // @tags: unsafe, while, loop
 // @description: Unsafe block inside while loop body
+mount core.prelude.*;
+
 fn main() {
     let mut sum: Int = 0;
     let mut i: Int = 0;

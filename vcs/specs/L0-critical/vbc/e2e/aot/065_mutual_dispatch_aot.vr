@@ -151,6 +151,8 @@ fn merged_list_len(xs: MergedList) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Basic process_a ===
     assert_eq(process_a(A1(5)), 10);      // 5 * 2

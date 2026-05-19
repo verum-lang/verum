@@ -20,6 +20,8 @@ fn make_growing_list() -> Int {
     20
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let r1 = make_small_list();
     assert_eq(r1, 5);

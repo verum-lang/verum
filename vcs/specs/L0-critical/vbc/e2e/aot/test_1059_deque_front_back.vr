@@ -61,6 +61,8 @@ fn test_deque_front_after_pop() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Deque Front/Back Tests:");
     let mut failures = 0;

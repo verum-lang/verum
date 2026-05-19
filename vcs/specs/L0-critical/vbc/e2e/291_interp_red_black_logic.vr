@@ -485,6 +485,8 @@ fn test_reverse_inserts() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_single_insert();
     test_two_inserts();

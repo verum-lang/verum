@@ -203,6 +203,8 @@ fn test_eval_cubic() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_eval_horner();
     test_add_polynomials();

@@ -4,6 +4,8 @@
 // @tags: aot, string, stress
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test many string variables
     let s1 = "hello";

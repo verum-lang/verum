@@ -160,6 +160,8 @@ fn test_heap_property() {
     print("heap_property: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_tree_sum();
     test_tree_depth_search();

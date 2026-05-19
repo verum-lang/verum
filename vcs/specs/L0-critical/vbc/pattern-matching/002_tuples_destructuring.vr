@@ -288,6 +288,8 @@ fn test_or_pattern() {
     assert_eq(classify_int(10), "large");
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_tuple_creation();
     print("1");

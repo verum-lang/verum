@@ -297,6 +297,8 @@ fn test_roundtrip_5rows() {
     assert_eq(arrays_equal(input, dec, 20), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_zigzag_row_assignment();
     test_zigzag_row_4rows();

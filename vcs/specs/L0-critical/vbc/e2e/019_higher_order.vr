@@ -233,6 +233,8 @@ fn test_pipeline() {
     assert_eq(pipeline3(5, add_one, double, negate), -12);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_apply_twice();
     test_arr_map();

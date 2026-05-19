@@ -236,6 +236,8 @@ fn heap_sort_extract(h: Buf16) -> Buf16 {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Empty heap ===
     let h0 = buf_new();

@@ -223,6 +223,8 @@ fn test_sort_duplicates() {
     assert_eq(arr8_get(sorted, 4), 33);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_extract_digit();
     test_num_digits();

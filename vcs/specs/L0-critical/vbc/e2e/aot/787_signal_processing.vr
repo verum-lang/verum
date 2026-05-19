@@ -123,6 +123,8 @@ fn count_peaks(sig: List<Int>, sig_len: Int) -> Int {
     peaks
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Signal: [2, 4, 6, 8, 10, 8, 6, 4, 2, 0, 0, 0, 0, 0, 0, 0]
     let sig = [2, 4, 6, 8, 10, 8, 6, 4, 2, 0, 0, 0, 0, 0, 0, 0];

@@ -204,6 +204,8 @@ fn test_fixed_negative() {
 // main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_fixed_add_sub();
     test_fixed_mul();

@@ -402,6 +402,8 @@ fn test_duplicate_insert() {
     assert_eq(avl_balanced(t), true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty();
     test_single();

@@ -5,6 +5,8 @@
 // @timeout: 5000
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() {
     // Test nested functions with explicit arguments (no closure capture)
     fn add_offset(x: Int, offset: Int) -> Int {

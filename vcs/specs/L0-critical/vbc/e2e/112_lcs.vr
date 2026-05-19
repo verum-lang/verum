@@ -327,6 +327,8 @@ fn test_subsequence_patterns() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_classic_lcs();
     test_identical_sequences();

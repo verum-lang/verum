@@ -127,6 +127,8 @@ fn test_out_of_range_query() {
     print("element_queries: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_sum();
     test_point_update();

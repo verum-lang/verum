@@ -222,6 +222,8 @@ fn test_single_node() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_insert_find();
     test_count();

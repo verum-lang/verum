@@ -231,6 +231,8 @@ fn test_popcount() {
     assert_eq(popcount(256), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_xor_basic();
     test_to_gray_small();

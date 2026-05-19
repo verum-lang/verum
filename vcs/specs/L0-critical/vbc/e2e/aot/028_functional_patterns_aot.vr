@@ -76,6 +76,8 @@ fn negate(p: fn(Int) -> Bool) -> fn(Int) -> Bool {
     |x| !p(x)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Sum of squares
     let sum_sq = for_range(1, 11, |x| x * x);

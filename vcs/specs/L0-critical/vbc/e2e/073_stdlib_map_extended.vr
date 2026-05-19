@@ -330,6 +330,8 @@ fn test_map_merge() {
     print("  test_map_merge: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_map_insert_lookup();
     test_map_delete();

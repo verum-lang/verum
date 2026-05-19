@@ -48,6 +48,8 @@ implement Outer {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Constructor sets value = 42; pre-fix `o.get()` returned 1
     // (the refcount).  Post-fix it returns 42.

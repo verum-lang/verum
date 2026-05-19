@@ -142,6 +142,8 @@ fn test_distributive() {
     assert_eq(c_eq(lhs, rhs), true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_ops();
     test_multiply();

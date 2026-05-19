@@ -90,6 +90,8 @@ fn test_predicate_closures() {
     assert_eq(is_zero(1), false);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_closures();
     test_repeated_application();

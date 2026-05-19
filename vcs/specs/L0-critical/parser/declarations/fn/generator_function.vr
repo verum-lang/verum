@@ -689,6 +689,8 @@ implement AsyncDataSource {
 // Main function (entry point for parse test)
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // This file tests parser acceptance of generator syntax
     // No runtime execution needed for parse-pass test

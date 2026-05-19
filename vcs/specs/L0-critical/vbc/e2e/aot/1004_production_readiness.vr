@@ -94,6 +94,8 @@ fn color_name(c: Color) -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut stats = Stats.new();
 

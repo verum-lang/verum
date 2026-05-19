@@ -296,6 +296,8 @@ fn test_bubble_sort_5() {
     assert_eq(v4, 5);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_swap();
     test_swap_same();

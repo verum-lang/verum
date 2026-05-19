@@ -44,6 +44,8 @@ fn to_base(n: Int, base: Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // sign
     assert_eq(sign(42), 1);

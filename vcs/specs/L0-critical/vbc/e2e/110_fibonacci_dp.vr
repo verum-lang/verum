@@ -210,6 +210,8 @@ fn test_all_agree() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_base_cases();
     test_small_values();

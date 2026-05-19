@@ -319,6 +319,8 @@ fn test_independent_buffers() {
     assert_eq(cow_data_get(w.sys, p2.buf_id, 1), 20);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_no_sharing_no_copy();
     test_shared_triggers_copy();

@@ -742,6 +742,8 @@ fn test_negative_values() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_creation_and_shape();
     test_add_sub();

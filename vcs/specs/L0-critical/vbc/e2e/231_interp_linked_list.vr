@@ -253,6 +253,8 @@ fn test_mixed_operations() {
     assert_eq(list_sum(lst), 350);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_list();
     test_prepend();

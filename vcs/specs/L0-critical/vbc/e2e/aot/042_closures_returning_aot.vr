@@ -40,6 +40,8 @@ fn apply_n(f: fn(Int) -> Int, n: Int, start: Int) -> Int {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // make_adder
     let add5 = make_adder(5);

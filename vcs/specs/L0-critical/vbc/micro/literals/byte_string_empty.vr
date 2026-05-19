@@ -3,6 +3,8 @@
 // @tier: 0
 // @expected-exit: 0
 // @description: Verify empty byte string literal compiles
+mount core.prelude.*;
+
 fn main() {
     let bs = b"";
     // Empty byte string - just verify it compiles

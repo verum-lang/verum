@@ -143,6 +143,8 @@ fn test_sum_of_buffer() {
     assert_eq(sum, 15);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic();
     test_wraparound();

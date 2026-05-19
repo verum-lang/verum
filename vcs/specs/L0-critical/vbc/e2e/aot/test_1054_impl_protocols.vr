@@ -150,6 +150,8 @@ fn test_matrix_mul() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Implement Protocol Tests:");
     let mut failures = 0;

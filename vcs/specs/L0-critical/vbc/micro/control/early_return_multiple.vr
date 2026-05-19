@@ -30,6 +30,8 @@ fn find_divisor(n: Int) -> Int {
     return n;  // n is prime
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert_eq(find_divisor(0), -1);   // invalid
     assert_eq(find_divisor(1), -1);   // invalid

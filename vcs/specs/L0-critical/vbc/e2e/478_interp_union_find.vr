@@ -243,6 +243,8 @@ fn test_uf_path_compression() {
     print("uf_path_compression: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_uf_init();
     test_uf_basic_union();

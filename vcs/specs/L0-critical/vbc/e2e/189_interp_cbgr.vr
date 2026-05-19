@@ -167,6 +167,8 @@ fn tracker_can_reclaim_epoch(t: SimEpochTracker, epoch: Int) -> Bool {
 // Tests
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // ---- Basic SimThinRef creation and validation ----
     let mut h = sim_heap_new();

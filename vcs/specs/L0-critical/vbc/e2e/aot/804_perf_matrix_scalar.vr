@@ -42,6 +42,8 @@ fn make_matrix(n: Int) -> List<Int> {
     m
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let n = 64;
     let a = make_matrix(n);

@@ -108,6 +108,8 @@ fn test_channel_spawn_ordering() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut pass = 0;
 

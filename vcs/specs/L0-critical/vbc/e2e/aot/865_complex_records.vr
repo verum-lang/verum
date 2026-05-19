@@ -57,6 +57,8 @@ fn mat2_mul(m1: Matrix2, m2: Matrix2) -> Matrix2 {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Vec3 basics
     let v1 = vec3_new(1, 2, 3);

@@ -127,6 +127,8 @@ fn is_coprime(a: Int, b: Int) -> Bool {
     gcd(a, b) == 1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // --- ipow ---
     assert_eq(ipow(2, 0), 1);

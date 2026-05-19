@@ -18,6 +18,8 @@ extern {
     fn pipe(fds: &mut Int) -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // ============================================================
     // Test 1: errors_via = None (implicit) — extern {} default

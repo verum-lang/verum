@@ -192,6 +192,8 @@ fn test_cycle_detection() {
     assert_eq(reachable_count(g, 3), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_undirected_graph();
     test_directed_graph();

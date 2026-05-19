@@ -81,6 +81,8 @@ fn test_generic_list() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Generic Function Tests:");
     let mut failures = 0;

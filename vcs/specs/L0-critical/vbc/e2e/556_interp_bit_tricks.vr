@@ -140,6 +140,8 @@ fn test_is_pow2_and_combinations() {
     print("is_pow2_and_combinations: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_popcount();
     test_next_pow2();

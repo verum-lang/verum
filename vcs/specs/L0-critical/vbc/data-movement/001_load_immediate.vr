@@ -108,6 +108,8 @@ fn test_load_nil() {
     assert(n is None);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_load_integer();
     test_load_large_integers();

@@ -157,6 +157,8 @@ fn test_eq_zero() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_roundtrip();
     test_add();

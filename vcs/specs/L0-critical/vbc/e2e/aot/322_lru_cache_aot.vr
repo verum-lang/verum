@@ -281,6 +281,8 @@ fn test_put_updates_lru_order() {
     assert_eq(lru_contains(c, 4), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_cache();
     test_put_and_get();

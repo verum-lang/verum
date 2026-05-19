@@ -107,6 +107,8 @@ fn test_varied_cases() {
     print("varied_cases: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_classic_histogram();
     test_uniform_height();

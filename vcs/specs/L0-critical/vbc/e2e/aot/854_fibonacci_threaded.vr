@@ -36,6 +36,8 @@ fn fib_sum_range(start: Int, end: Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic fibonacci values
     let f0 = fib_iterative(0);

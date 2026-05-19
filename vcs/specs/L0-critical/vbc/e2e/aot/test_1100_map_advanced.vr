@@ -92,6 +92,8 @@ fn test_map_overwrite() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Map Advanced Tests:");
     let mut failures = 0;

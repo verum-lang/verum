@@ -282,6 +282,8 @@ fn test_barrier_workflow() {
     print("test_barrier_workflow passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_allreduce_sum();
     test_broadcast();

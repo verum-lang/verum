@@ -152,6 +152,8 @@ fn test_single_element() {
     assert_eq(dl_sum_forward(dl), 42);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_push_back();
     test_push_front();

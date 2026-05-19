@@ -27,6 +27,8 @@ fn compute_product(n: Int) -> Int {
     prod
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test sequential computation as baseline
     let sum_result = compute_sum(100);

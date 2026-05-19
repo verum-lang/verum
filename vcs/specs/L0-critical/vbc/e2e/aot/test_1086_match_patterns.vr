@@ -120,6 +120,8 @@ fn test_nested_match() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Pattern Matching Tests:");
     let mut failures = 0;

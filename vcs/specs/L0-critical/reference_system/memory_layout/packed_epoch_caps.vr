@@ -8,6 +8,8 @@
 /// Encoding: ((epoch & 0x00FF_FFFF) << 8) | capability_bits
 /// Spec: cbgr-implementation.md#epoch-caps-encoding
 
+mount core.prelude.*;
+
 fn main() {
     test_epoch_caps_encoding();
     print("  [OK] test_epoch_caps_encoding");

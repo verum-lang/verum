@@ -110,6 +110,8 @@ fn test_five_matrices() {
     print("five_matrices: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_two_matrices();
     test_single_matrix();

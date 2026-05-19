@@ -9,6 +9,8 @@ fn build_groups() -> Map<Text, List<Int>> {
     groups
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut passed = 0;
     let mut failed = 0;

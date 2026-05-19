@@ -262,6 +262,8 @@ fn test_combined_fsm() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_mod3_basic();
     test_mod3_larger();

@@ -15,6 +15,8 @@ fn gpu_sync(stream_id: Int) -> Int { @intrinsic("GPU_SYNC", stream_id) }
 
 fn gpu_get_device() -> Int { @intrinsic("GPU_GET_DEVICE") }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     if gpu_get_device() == 0 {
         print("SKIP: No GPU device available");

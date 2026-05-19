@@ -163,6 +163,8 @@ fn test_empty() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_literal_match();
     test_dot_wildcard();

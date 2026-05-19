@@ -7,6 +7,8 @@
 // Test: Previously type-checker-blocked methods now wired end-to-end.
 // to_upper/to_lower, to_uppercase/to_lowercase, to_int, index_of, join.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Text case conversion ===
     let s = "Hello World";

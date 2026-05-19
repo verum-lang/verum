@@ -37,6 +37,8 @@ fn dual_sq_der(av: Int, ad: Int) -> Int { 2 * av * ad }
 fn dual_cube_val(av: Int) -> Int { av * av * av }
 fn dual_cube_der(av: Int, ad: Int) -> Int { 3 * av * av * ad }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Forward-mode AD for f(x) = x^2
     // Seed: x = (3, 1) (value=3, tangent=1)

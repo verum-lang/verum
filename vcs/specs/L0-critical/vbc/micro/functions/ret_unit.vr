@@ -2,4 +2,6 @@
 // @level: L0
 // @expect: pass
 fn noop() { }
+mount core.prelude.*;
+
 fn main() { noop(); assert(true); }

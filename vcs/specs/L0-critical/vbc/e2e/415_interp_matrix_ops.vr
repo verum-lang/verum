@@ -127,6 +127,8 @@ fn test_matrix_identity() {
     print("matrix_identity: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_matrix_multiply();
     test_matrix_transpose();

@@ -215,6 +215,8 @@ fn test_wfc_larger_grid() {
     print(f"wfc_larger_grid: all_collapsed total_popcount={total_domains} ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_wfc_popcount();
     test_wfc_domain_ops();

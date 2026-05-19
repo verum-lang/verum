@@ -156,6 +156,8 @@ implement RecordWithRank2<Int, Bool> {
 // Main Function (Parse Test)
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Local rank-2 type annotation
     let f: fn<R>(Int) -> R = unreachable();

@@ -361,6 +361,8 @@ fn test_stirling_bell() {
     assert_eq(b4, 15);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_factorial();
     test_binomial_basic();

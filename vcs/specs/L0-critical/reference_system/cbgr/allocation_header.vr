@@ -18,6 +18,8 @@
 /// - bytes 20-23: flags (u32)
 /// - bytes 24-31: reserved (u64)
 
+mount core.prelude.*;
+
 fn main() {
     test_generation_tracking();
     test_epoch_tracking();

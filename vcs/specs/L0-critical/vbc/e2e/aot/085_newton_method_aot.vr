@@ -97,6 +97,8 @@ fn triangle_area_16sq(a: Int, b: Int, c: Int) -> Int {
     s2 * (s2 - 2*a) * (s2 - 2*b) * (s2 - 2*c)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Integer square root ===
     assert_eq(isqrt(0), 0);

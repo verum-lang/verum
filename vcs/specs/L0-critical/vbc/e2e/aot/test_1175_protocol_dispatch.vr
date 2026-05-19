@@ -54,6 +54,8 @@ fn show(item: &Point) -> Text {
     item.display()
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

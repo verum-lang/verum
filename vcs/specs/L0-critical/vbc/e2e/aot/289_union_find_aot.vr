@@ -244,6 +244,8 @@ fn test_path_compression() {
     assert_eq(uf_find(compressed, 0) == uf_find(compressed, 4), true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_union();
     test_chain_union();

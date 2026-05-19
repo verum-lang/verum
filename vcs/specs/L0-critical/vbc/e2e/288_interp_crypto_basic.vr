@@ -464,6 +464,8 @@ fn test_prng_sequence() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_xor_encrypt_decrypt();
     test_xor_identity();

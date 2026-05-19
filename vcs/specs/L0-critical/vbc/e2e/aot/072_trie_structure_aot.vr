@@ -135,6 +135,8 @@ fn trie_remove(t: Trie16, key: Int) -> Trie16 {
     trie_set(t, key, -1)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Empty trie ===
     let t0 = trie_new();

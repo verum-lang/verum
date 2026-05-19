@@ -419,6 +419,8 @@ fn test_complex_ownership_chain() {
     assert_eq(a8_get(s2.state, 2), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_create_and_read();
     test_ownership_transfer();

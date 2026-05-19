@@ -127,6 +127,8 @@ fn complex_expr(x: Int) -> Int {
     a + b + c + d + e + f + g + h + j + k
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // 50 locals sum: 50*51/2 = 1275
     assert_eq(fifty_locals(), 1275);

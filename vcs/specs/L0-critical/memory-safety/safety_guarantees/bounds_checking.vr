@@ -18,6 +18,8 @@
 /// - Stack/heap buffer overflows
 /// - Out-of-bounds memory access
 
+mount core.prelude.*;
+
 fn main() {
     test_static_bounds_checking();
     test_runtime_bounds_checking();

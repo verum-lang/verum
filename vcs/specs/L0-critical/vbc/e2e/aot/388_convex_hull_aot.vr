@@ -301,6 +301,8 @@ fn test_shoelace_known() {
     assert_eq(twice_area(xs, ys, 3), 12);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_orientation_basic();
     test_cross_product();

@@ -243,6 +243,8 @@ fn test_nested_loop() {
     print("bf_nested_loop: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_increment_output();
     test_move_pointer();

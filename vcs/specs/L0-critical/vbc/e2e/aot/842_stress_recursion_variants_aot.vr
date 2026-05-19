@@ -182,6 +182,8 @@ fn fib_mod(n: Int, m: Int) -> Int {
     b % m
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // GCD tests
     assert_eq(gcd(48, 18), 6);

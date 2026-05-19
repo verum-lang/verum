@@ -6,6 +6,8 @@
 
 type Pair is { a: Int, b: Int };
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut p1 = Pair { a: 10, b: 20 };
     let mut p2 = Pair { a: 30, b: 40 };

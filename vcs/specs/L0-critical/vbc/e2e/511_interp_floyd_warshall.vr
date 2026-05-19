@@ -162,6 +162,8 @@ fn test_path_transitivity() {
     print("path_transitivity: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_paths();
     test_symmetric_graph();

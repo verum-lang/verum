@@ -325,6 +325,8 @@ fn test_coloring_independence_number() {
     print("coloring_independence_number: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_greedy_coloring_triangle();
     test_greedy_coloring_cycle();

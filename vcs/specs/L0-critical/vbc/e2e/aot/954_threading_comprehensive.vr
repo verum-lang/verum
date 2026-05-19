@@ -3,6 +3,8 @@
 // @description: Comprehensive threading: spawn/join, captured values
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Basic thread spawn + join
     let handle = spawn { 42 };

@@ -237,6 +237,8 @@ fn test_all_zeros_ca() {
     print("all_zeros_ca: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rule30_single_seed();
     test_rule110_pattern();

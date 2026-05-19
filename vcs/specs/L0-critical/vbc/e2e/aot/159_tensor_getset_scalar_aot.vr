@@ -314,6 +314,8 @@ fn test_leaky_relu() {
     print("test_leaky_relu passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_get_scalar();
     test_set_scalar();

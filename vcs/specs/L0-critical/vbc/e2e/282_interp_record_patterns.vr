@@ -394,6 +394,8 @@ fn test_record_equality() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_8_field_record();
     test_8_field_config();

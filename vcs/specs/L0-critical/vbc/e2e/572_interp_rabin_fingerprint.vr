@@ -153,6 +153,8 @@ fn test_full_text_match() {
     print("full_text_match: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_single_occurrence();
     test_multiple_occurrences();

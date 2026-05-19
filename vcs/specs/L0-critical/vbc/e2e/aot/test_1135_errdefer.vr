@@ -89,6 +89,8 @@ fn test_defer_computation() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Errdefer Tests:");
     let mut failures = 0;

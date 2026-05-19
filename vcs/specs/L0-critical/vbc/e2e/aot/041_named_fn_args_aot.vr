@@ -67,6 +67,8 @@ fn count_if(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
     count
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic: named fn as argument
     assert_eq(apply(inc, 5), 6);

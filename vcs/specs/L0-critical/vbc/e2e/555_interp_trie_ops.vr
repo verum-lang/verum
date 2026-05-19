@@ -205,6 +205,8 @@ fn test_empty_and_single() {
     print("empty_and_single: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_insert_search();
     test_prefix_queries();

@@ -140,6 +140,8 @@ fn test_count_eq() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_range_min_max();
     test_range_sum();

@@ -5,6 +5,8 @@
 // @tags: memory-safety, cbgr, generation
 // @description: Tests compile-time borrow checking detects aliasing violation
 
+mount core.prelude.*;
+
 fn main() {
     let mut slot = Heap.new(42);
 

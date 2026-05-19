@@ -253,6 +253,8 @@ fn test_mat3_identity_multiply() {
 // main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_mat2_identity_multiply();
     test_mat2_multiply_and_det();

@@ -92,6 +92,8 @@ fn test_channel_close() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Spawn/Channel Tests:");
     let mut failures = 0;

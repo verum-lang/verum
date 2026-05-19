@@ -404,6 +404,8 @@ fn test_sort_reverse() {
     assert_eq(arr10_get(s, 4), 5);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sum_mean();
     test_sum_partial();

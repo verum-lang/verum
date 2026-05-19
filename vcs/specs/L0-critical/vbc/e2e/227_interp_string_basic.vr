@@ -153,6 +153,8 @@ fn test_text_in_loop() {
     assert_eq(repeat_text("hi", 0), "");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_text_literals();
     test_empty_text();

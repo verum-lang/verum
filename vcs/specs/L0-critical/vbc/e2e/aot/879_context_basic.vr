@@ -25,6 +25,8 @@ fn read_config() -> Int using [Config] {
     Config.get_value()
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let cfg = SimpleConfig { val: 42 };
     provide Config = cfg;

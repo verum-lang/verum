@@ -16,6 +16,8 @@ type affine Handle is {
 // Maybe wrapper for Handle (affine type) - using different variant names to avoid collision
 type MaybeHandle is HasHandle(Handle) | NoHandle;
 
+mount core.prelude.*;
+
 fn main() {
     test_maybe_copy();
     test_result_copy();

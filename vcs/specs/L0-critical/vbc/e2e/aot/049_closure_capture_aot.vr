@@ -38,6 +38,8 @@ fn fold_with(start: Int, end_val: Int, init: Int, f: fn(Int, Int) -> Int) -> Int
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Single capture
     let offset = 10;

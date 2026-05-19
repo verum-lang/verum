@@ -14,6 +14,8 @@ extern {
     fn ffi_get_greeting() -> &Int8;  // Returns const char*
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test strlen with string literals
     let len_hello = ffi_strlen("hello");

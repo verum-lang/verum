@@ -7,6 +7,8 @@
 // Test: Deque operations — new, push_front, push_back, pop_front, pop_back,
 // len, clear.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Create deque, push_back
     let mut d = Deque.new();

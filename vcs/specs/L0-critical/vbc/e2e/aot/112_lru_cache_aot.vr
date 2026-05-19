@@ -258,6 +258,8 @@ fn lru_count(c: LRU) -> Int {
     count
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: New empty cache ===
     let c0 = lru_new(3);

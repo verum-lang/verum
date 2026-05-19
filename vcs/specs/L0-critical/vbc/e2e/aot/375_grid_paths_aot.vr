@@ -280,6 +280,8 @@ fn test_obstacles_one_path() {
     assert_eq(count_paths_obstacles(obs, 3, 3), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_1x1_grid();
     test_1xn_grid();

@@ -160,6 +160,8 @@ fn test_valid_boxes() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_valid_board();
     test_invalid_row();

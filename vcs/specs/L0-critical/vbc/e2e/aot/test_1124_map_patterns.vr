@@ -120,6 +120,8 @@ fn test_frequency_counter() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Map Pattern Tests:");
     let mut failures = 0;

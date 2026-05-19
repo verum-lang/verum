@@ -87,6 +87,8 @@ fn is_symmetric(g: Graph6) -> Bool {
     true
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Undirected graph: 0-1, 1-2, 2-3, 3-4, 4-5, 0-5 (a cycle)
     let g = Graph6 {

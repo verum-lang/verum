@@ -219,6 +219,8 @@ fn test_shortest_path() {
     print("shortest_path: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bfs_reachability();
     test_connected_components();

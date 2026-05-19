@@ -258,6 +258,8 @@ fn test_graph_properties() {
     assert_eq(total_edges(g), 7);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_dijkstra();
     test_reachability();

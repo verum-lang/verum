@@ -262,6 +262,8 @@ fn test_two_vertices() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_linear_dag();
     test_linear_tail();

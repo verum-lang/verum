@@ -143,6 +143,8 @@ fn list4(a: Int, b: Int, c: Int, d: Int) -> IntList {
     ILCons { head: a, tail: ILCons { head: b, tail: ILCons { head: c, tail: ILCons { head: d, tail: ILNil } } } }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Literal matching ===
     let p_lit5 = PLit(5);

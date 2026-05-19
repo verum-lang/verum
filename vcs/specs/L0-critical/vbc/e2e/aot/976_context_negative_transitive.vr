@@ -10,6 +10,8 @@ pure fn add(a: Int, b: Int) -> Int { a + b }
 pure fn multiply(a: Int, b: Int) -> Int { a * b }
 pure fn compute(x: Int, y: Int) -> Int { add(multiply(x, y), add(x, y)) }
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: Pure functions
     let r = compute(3, 4);

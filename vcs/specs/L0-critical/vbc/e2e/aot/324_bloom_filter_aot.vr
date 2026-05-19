@@ -276,6 +276,8 @@ fn test_deterministic() {
     assert_eq(bf1.bits_hi, bf2.bits_hi);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_filter();
     test_single_insert();

@@ -307,6 +307,8 @@ fn test_conditional_mutation() {
     assert_eq(x, 27);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_mut_ref();
     test_mut_ref_overwrite();

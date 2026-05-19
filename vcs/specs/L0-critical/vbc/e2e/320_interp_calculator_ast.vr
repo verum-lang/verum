@@ -358,6 +358,8 @@ fn test_deep_unary_chain() {
     assert_eq(ast_eval(tree, 2), 42);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_literal();
     test_simple_add();

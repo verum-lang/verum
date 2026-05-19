@@ -139,6 +139,8 @@ fn test_set_to_list() {
     print("set_to_list: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_set_algebra();
     test_set_subset_superset();

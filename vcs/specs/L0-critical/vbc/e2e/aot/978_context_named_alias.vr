@@ -29,6 +29,8 @@ fn inc_count() -> Int using [Counter] {
     Counter.increment()
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: Basic context
     let mut counter = SimpleCounter { value: 0 };

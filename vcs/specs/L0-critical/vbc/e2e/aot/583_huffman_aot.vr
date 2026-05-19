@@ -266,6 +266,8 @@ fn test_compression_ratio() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_code_lengths();
     test_encode_decode();

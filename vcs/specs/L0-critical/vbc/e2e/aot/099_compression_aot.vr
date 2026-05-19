@@ -186,6 +186,8 @@ fn count_backrefs(encoded: Buf16) -> Int {
     c
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Empty input ===
     let empty = buf_new();

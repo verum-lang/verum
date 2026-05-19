@@ -253,6 +253,8 @@ fn test_collision_chain() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic();
     test_contains();

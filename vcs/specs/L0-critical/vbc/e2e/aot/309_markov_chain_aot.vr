@@ -205,6 +205,8 @@ fn test_different_starts() {
     check_lt(abs_val(sa.v2 - sb.v2), 5);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_mat_vec_identity();
     test_simple_transition();

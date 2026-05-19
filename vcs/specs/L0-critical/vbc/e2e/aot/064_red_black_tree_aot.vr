@@ -164,6 +164,8 @@ fn root_is_black(tree: RBTree) -> Bool {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Empty tree ===
     let empty = RBNil;

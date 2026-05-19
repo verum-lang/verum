@@ -102,6 +102,8 @@ fn test_tokenizer_stub() {
     print("test_tokenizer_stub passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gradient_zeros();
     test_backward_pass();

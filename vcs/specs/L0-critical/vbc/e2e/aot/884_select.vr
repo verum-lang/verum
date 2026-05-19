@@ -12,6 +12,8 @@ fn sender(value: Int) -> Int {
     value * value
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: basic channel create and properties
     let ch = Channel.new(8);

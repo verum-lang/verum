@@ -90,6 +90,8 @@ fn clamp_val(s: State, lo: Int, hi: Int) -> State {
     State { val: clamped, counter: s2.counter, history: s2.history }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Basic state creation ===
     let s0 = state_new(10);

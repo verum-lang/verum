@@ -197,6 +197,8 @@ fn test_single_node() {
     print("single_node: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_two_sccs();
     test_dag_all_singletons();

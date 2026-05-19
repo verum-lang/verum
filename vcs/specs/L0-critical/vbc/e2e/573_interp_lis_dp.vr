@@ -133,6 +133,8 @@ fn test_single_element() {
     print("single_element: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_classic();
     test_sorted_ascending();

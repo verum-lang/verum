@@ -4,6 +4,8 @@
 // @tags: string, text, operations, e2e
 // @description: Test string/text operations - contains, length, comparison, f-strings
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

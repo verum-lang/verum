@@ -154,6 +154,8 @@ fn test_count_pairs() {
     print("count_pairs: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_balanced();
     test_nested_balanced();

@@ -135,6 +135,8 @@ fn test_collect_pattern() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("For-In Iteration Tests:");
     let mut failures = 0;

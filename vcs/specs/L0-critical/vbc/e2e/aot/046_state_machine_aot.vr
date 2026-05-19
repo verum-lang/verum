@@ -55,6 +55,8 @@ fn run_to_completion(s: State) -> State {
     current
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic transitions
     let s0 = Idle;

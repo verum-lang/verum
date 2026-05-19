@@ -89,6 +89,8 @@ fn test_manual_replace() {
     print("test_manual_replace passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_regex_is_match_stub();
     test_regex_find_all_stub();

@@ -474,6 +474,8 @@ fn test_evaluate() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_deep_nesting();
     test_binary_path();

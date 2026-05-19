@@ -1,4 +1,6 @@
 // @test: typecheck-pass
 // @level: L0
 // @expect: pass
+mount core.prelude.*;
+
 fn main() { assert(!(false || false)); }

@@ -75,6 +75,8 @@ implement Matrix2x2 {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Color operations
     let red = Color.new(255, 0, 0);

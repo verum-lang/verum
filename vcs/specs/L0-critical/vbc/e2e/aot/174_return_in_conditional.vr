@@ -36,6 +36,8 @@ fn early_return_loop(n: Int) -> Int {
     return 0;
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     assert_eq(abs_val(-42), 42);
     assert_eq(abs_val(7), 7);

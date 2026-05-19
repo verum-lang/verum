@@ -212,6 +212,8 @@ fn test_edit_distance_triangle_inequality() {
     assert_eq(dac <= dab + dbc, true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_identical();
     test_empty_sequences();

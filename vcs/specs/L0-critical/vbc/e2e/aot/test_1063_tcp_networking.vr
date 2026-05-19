@@ -142,6 +142,8 @@ fn test_tcp_multi_message() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("TCP Networking Tests:");
     let mut failures = 0;

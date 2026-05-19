@@ -110,6 +110,8 @@ fn test_rgb() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Struct Pattern Tests:");
     let mut failures = 0;

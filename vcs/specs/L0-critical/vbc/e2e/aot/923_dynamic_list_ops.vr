@@ -4,6 +4,8 @@
 // @tags: aot, lists, dynamic, for-in
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Stack behavior (push/pop from end)
     let mut stack: List<Int> = [];

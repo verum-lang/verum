@@ -132,6 +132,8 @@ fn test_two_element_cases() {
     print("two_element_cases: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_all_mixed();
     test_already_sorted();

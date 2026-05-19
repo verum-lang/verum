@@ -288,6 +288,8 @@ fn test_partial_drop() {
 
 // test_forget: skipped — requires @forget macro (not yet implemented)
 
+mount core.prelude.*;
+
 fn main() {
     // Clone tests
     test_clone_primitive();

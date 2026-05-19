@@ -13,6 +13,8 @@ fn unsafe_cast<T>(ptr: *const T) -> &unsafe T {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let value = 42;
     let ptr: *const Int = &value as *const Int;

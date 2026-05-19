@@ -8,6 +8,8 @@ fn free_data(data: Heap<Int>) {
     drop(data);
 }
 
+mount core.prelude.*;
+
 fn main() {
     let data = Heap.new(42);
 

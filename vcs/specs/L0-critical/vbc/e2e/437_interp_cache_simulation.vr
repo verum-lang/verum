@@ -136,6 +136,8 @@ fn test_frequency_cache() {
     print("frequency_cache: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_lru_cache();
     test_frequency_cache();

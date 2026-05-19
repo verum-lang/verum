@@ -5,6 +5,8 @@
 // @expected-exit: 0
 // @description: Test UInt64 methods (checked arithmetic, bit operations)
 
+mount core.prelude.*;
+
 fn main() {
     let a: UInt64 = 100;
     let b: UInt64 = 200;

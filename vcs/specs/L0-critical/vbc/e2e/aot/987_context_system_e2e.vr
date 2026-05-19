@@ -35,6 +35,8 @@ fn test_config_7() -> Int {
     compute_with_retries(5)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: config with retries=3
     let result = test_config_3();

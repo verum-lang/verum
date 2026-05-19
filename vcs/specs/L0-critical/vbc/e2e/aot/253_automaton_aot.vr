@@ -134,6 +134,8 @@ fn test_get_set() {
     assert_eq(get_cell(g, 3), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rule110();
     test_rule30();

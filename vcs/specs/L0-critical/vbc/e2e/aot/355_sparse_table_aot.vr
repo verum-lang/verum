@@ -273,6 +273,8 @@ fn test_negative_values() {
     assert_eq(rmq(st, 3, 5), -7);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_build_level0();
     test_build_level1();

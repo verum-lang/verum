@@ -53,6 +53,8 @@ fn count_words(text: Text) -> Int {
     count
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // 1. Manual integer parsing
     let n1 = parse_int_manual("42");

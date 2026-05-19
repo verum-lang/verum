@@ -5,6 +5,8 @@
 // @tags: memory-safety, bounds-checking, negative-index, panic
 // @description: Tests that negative list indexing causes a controlled panic
 
+mount core.prelude.*;
+
 fn main() {
     let items = [1, 2, 3, 4, 5];
     let neg_idx = -1;

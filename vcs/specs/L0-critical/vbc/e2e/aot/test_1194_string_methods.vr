@@ -4,6 +4,8 @@
 // @tags: text, string, methods, e2e
 // @description: Test Text type method calls (len, contains, starts_with, etc.)
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

@@ -168,6 +168,8 @@ fn test_many_commands() {
     assert_eq(sys.history.count, 5);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_commands();
     test_undo();

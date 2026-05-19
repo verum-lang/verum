@@ -49,6 +49,8 @@ fn accumulate(n: Int) -> Int {
     sum
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     assert_eq(outer_scope(), 130);
     assert_eq(nested_if_scope(), 201);

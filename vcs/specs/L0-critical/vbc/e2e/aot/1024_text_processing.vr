@@ -29,6 +29,8 @@ fn starts_with_char(s: Text, prefix: Text) -> Bool {
     front == prefix
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: String concatenation
     let a = "hello";

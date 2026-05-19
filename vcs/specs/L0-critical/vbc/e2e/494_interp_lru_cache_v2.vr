@@ -283,6 +283,8 @@ fn test_lru_repeated_evictions() {
     print("lru_repeated_evictions: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_lru_basic_put_get();
     test_lru_eviction();

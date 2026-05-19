@@ -2,6 +2,8 @@
 // @level: L0
 // @tags: unsafe, mutation, local
 // @description: Unsafe block with local mutable variable
+mount core.prelude.*;
+
 fn main() {
     let result: Int = unsafe {
         let mut x: Int = 0;

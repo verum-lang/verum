@@ -4,6 +4,8 @@
 // @tags: memory-safety, integer-overflow, overflowing
 // @description: Tests overflowing arithmetic that returns overflow flag
 
+mount core.prelude.*;
+
 fn main() {
     let max_int = 9223372036854775807;  // Int.MAX
     let min_int = -9223372036854775807 - 1;  // Int.MIN

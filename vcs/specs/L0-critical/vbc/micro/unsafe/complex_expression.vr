@@ -6,6 +6,8 @@ fn compute(a: Int, b: Int) -> Int {
     a + b
 }
 
+mount core.prelude.*;
+
 fn main() {
     let result: Int = compute(
         unsafe { 10 + 5 },

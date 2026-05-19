@@ -163,6 +163,8 @@ fn test_period() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rule_basics();
     test_single_cell();

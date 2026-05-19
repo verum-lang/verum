@@ -46,6 +46,8 @@ fn div_mod_test(a: Int, b: Int) -> Int {
     if q * b + r == a { 0 } else { 1 }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Fast exponentiation
     assert_eq(ipow(2, 0), 1);

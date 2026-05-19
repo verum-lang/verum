@@ -187,6 +187,8 @@ fn test_fractional() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_knapsack();
     test_single_item();

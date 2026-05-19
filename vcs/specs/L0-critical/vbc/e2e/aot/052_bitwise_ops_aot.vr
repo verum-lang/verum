@@ -60,6 +60,8 @@ fn parity(n: Int) -> Int {
     count_ones(n) % 2
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic bitwise
     assert_eq(5 & 3, 1);     // 101 & 011 = 001

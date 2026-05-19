@@ -108,6 +108,8 @@ fn frob_inner(a: List<Int>, b: List<Int>, n: Int) -> Int {
     sum
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Setup matrices
     let a = [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // [[1,2],[3,4]]

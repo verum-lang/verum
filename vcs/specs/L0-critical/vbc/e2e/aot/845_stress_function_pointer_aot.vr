@@ -165,6 +165,8 @@ fn min_coins(amount: Int) -> Int {
     a10_get(dp, cap)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Knapsack tests
     // Items: weights=[2,3,4,5], values=[3,4,5,6], capacity=8

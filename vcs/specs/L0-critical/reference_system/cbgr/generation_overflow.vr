@@ -8,6 +8,8 @@
 /// Generation counters are 32-bit; test behavior at boundaries.
 /// Spec: cbgr-implementation.md#generation-tracking
 
+mount core.prelude.*;
+
 fn main() {
     test_generation_monotonicity();
     test_high_generation_values();

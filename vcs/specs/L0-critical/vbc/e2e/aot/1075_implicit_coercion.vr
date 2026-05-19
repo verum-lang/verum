@@ -14,6 +14,8 @@ fn add_floats(a: Float, b: Float) -> Float {
     a + b
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Explicit cast (known working)
     let f1 = process_float(5 as Float);

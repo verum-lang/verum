@@ -183,6 +183,8 @@ fn test_disc_low_values() {
     print("disc_low_values: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_single_bridge();
     test_no_bridge_cycle();

@@ -208,6 +208,8 @@ fn test_window_hash_consistency() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_hash();
     test_djb2();

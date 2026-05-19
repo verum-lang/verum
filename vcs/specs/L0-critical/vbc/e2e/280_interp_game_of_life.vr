@@ -205,6 +205,8 @@ fn test_period2() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rules();
     test_max_neighbors();

@@ -18,6 +18,8 @@ fn __mutex_unlock_raw(mtx: Int) -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: create mutex
     let mtx = __mutex_new_raw();

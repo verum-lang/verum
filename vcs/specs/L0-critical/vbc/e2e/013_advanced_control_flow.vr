@@ -252,6 +252,8 @@ fn test_leap_year() {
     assert(!is_leap(2100));
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_nested_while_multiplication_table();
     test_triple_nested_loop();

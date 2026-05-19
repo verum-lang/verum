@@ -19,6 +19,8 @@ fn circle_area(radius: Float) -> Float {
     3.14159 * radius * radius
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Float return from simple function
     let r = square(3.0);

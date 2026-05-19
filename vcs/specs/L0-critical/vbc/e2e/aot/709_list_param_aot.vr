@@ -8,6 +8,8 @@ fn first(xs: List<Int>) -> Int {
     xs[0]
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let arr = [10, 20, 30];
     let v = first(arr);

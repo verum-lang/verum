@@ -202,6 +202,8 @@ fn test_reverse_eight() {
     assert_eq(count_inversions(arr, 8), 28);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sorted_array();
     test_reverse_sorted();

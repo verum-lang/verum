@@ -204,6 +204,8 @@ fn test_digit_root() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_totient();
     test_catalan();

@@ -9,6 +9,8 @@ fn find_first_positive(a: Int, b: Int, c: Int) -> Int {
     return -1;
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert_eq(find_first_positive(-1, -2, 5), 5);
     assert_eq(find_first_positive(-1, 3, 5), 3);

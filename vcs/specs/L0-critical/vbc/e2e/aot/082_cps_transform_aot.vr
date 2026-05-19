@@ -70,6 +70,8 @@ fn iter_fold(start: Int, end_val: Int, init: Int, f: fn(Int, Int) -> Int) -> Int
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Basic CPS operations ===
     assert_eq(cps_add(3, 4, id), 7);

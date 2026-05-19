@@ -171,6 +171,8 @@ fn test_quadratic() {
     assert_eq(stack_peek(s), 16);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_arithmetic();
     test_complex_expression();

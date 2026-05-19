@@ -205,6 +205,8 @@ fn test_direct_vs_indirect() {
     assert_eq(a6_get(dist, 2), 11);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_from_node0();
     test_from_node4();

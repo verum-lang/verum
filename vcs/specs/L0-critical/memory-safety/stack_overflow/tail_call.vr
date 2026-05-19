@@ -27,6 +27,8 @@ fn sum_tail(n: Int, acc: Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // These would overflow the stack without tail call optimization
     let large_factorial = factorial(20);

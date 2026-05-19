@@ -188,6 +188,8 @@ fn test_harmonic() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basics();
     test_add();

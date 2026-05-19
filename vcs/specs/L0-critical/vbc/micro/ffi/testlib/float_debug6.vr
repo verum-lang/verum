@@ -14,6 +14,8 @@ fn compare_lt(a: Float, b: Float) -> Bool {
     a < b
 }
 
+mount core.prelude.*;
+
 fn main() {
     print(1); print("\n");
 

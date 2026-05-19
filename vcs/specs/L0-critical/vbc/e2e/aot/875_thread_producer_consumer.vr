@@ -42,6 +42,8 @@ fn fibonacci(n: Int) -> Int {
     b
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: 4 producer threads computing sum of squares over disjoint ranges
     // sum of i^2 for i in 0..99 = 99*100*199/6 = 328350

@@ -74,6 +74,8 @@ fn arr_sum(a: Arr8, n: Int) -> Int {
     s
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Create unsorted array
     let unsorted = Arr8 { e0: 5, e1: 3, e2: 8, e3: 1, e4: 7, e5: 2, e6: 6, e7: 4 };

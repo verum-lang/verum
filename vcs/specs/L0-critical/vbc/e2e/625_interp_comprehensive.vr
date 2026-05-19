@@ -264,6 +264,8 @@ fn test_format_integration() {
     print("  test_format_integration: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_vector_chains();
     test_particle_simulation();

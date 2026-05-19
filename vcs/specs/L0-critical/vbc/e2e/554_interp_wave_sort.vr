@@ -141,6 +141,8 @@ fn test_wave_odd_length() {
     print("wave_odd_length: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_wave_sort_basic();
     test_wave_arrange_basic();

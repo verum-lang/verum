@@ -20,6 +20,8 @@ fn sem_release(current: Int, max_permits: Int) -> Int {
     if (current < max_permits) { current + 1 } else { current }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Semaphore basic operations
     let mut sem = sem_init(3);

@@ -131,6 +131,8 @@ fn test_matrix_ops() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Complex Data Tests:");
     let mut failures = 0;

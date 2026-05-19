@@ -375,6 +375,8 @@ fn test_diamond_graph() {
     assert_eq(h5.total_collected, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_no_garbage();
     test_all_garbage();

@@ -112,6 +112,8 @@ fn test_map_result() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Complex Generics Tests:");
     let mut failures = 0;

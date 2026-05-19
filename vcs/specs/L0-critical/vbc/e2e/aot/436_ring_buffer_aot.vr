@@ -129,6 +129,8 @@ fn test_moving_average() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic();
     test_overflow();

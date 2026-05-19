@@ -774,6 +774,8 @@ fn test_reverse() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_map();
     test_filter();

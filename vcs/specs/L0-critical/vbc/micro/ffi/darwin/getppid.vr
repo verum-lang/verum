@@ -11,6 +11,8 @@ extern {
     fn getppid() -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // getppid() returns parent process ID
     // Parent PID is always > 0 (init/launchd is 1)

@@ -120,6 +120,8 @@ fn test_long_reading() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_fsm();
     test_comment();

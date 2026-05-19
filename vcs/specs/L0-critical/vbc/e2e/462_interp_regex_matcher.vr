@@ -182,6 +182,8 @@ fn test_combined_patterns() {
     print("combined_patterns: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_literal_match();
     test_dot_wildcard();

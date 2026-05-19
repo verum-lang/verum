@@ -253,6 +253,8 @@ fn test_det3_all_ones_row() {
     assert_eq(det3(m), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_det2_identity();
     test_det2_basic();

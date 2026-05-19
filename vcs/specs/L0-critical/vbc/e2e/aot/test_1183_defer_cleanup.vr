@@ -20,6 +20,8 @@ fn counted_operation() -> Int {
     ops  // should return 11
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

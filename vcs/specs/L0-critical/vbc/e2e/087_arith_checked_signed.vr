@@ -252,6 +252,8 @@ fn test_chained_checked() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_checked_add_normal();
     test_checked_add_overflow();

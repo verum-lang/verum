@@ -4,6 +4,8 @@
 // @expected-exit: 0
 
 // Test Map with nested value types (List<Int>)
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut m = Map.new();
     m.insert("nums", [1, 2, 3]);

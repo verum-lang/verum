@@ -185,6 +185,8 @@ fn test_lengths() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_values();
     test_subtractive();

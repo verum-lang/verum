@@ -180,6 +180,8 @@ fn test_components() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Graph Tests:");
     let mut failures = 0;

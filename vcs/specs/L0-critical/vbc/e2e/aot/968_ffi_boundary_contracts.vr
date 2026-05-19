@@ -20,6 +20,8 @@ extern {
     fn time(tloc: Int) -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: Basic extern calls still work
     let pid = getpid();

@@ -23,6 +23,8 @@ meta validate_email(addr: tt) {
     // Macro implementation for email validation
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // User-defined macros use @ prefix (same as attributes)
     @log_debug("Starting application");

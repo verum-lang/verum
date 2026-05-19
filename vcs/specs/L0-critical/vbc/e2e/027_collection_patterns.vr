@@ -661,6 +661,8 @@ fn test_flatset_union() {
     assert(!flatset_contains(uni, 5));
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_stack_basic();
     test_stack_lifo_order();

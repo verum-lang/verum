@@ -43,6 +43,8 @@ fn test_nursery_basic() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
     failures = failures + test_nursery_basic();

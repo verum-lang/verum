@@ -5,6 +5,8 @@
 // @expected-exit: 0
 // @description: Test Char methods
 
+mount core.prelude.*;
+
 fn main() {
     let letter = 'A';
     let digit = '5';

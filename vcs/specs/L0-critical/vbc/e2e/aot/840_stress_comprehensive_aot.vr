@@ -125,6 +125,8 @@ fn collatz_steps(start: Int) -> Int {
     steps
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Records
     let v1 = Coord { x: 3, y: 4 };

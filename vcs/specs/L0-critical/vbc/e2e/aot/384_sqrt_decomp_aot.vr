@@ -291,6 +291,8 @@ fn test_16_elements() {
     assert_eq(sd_query(sd, 4, 11), 492);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_isqrt();
     test_basic_query();

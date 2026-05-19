@@ -115,6 +115,8 @@ fn test_accumulate() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Generator Advanced Tests:");
     let mut failures = 0;

@@ -20,6 +20,8 @@ fn fibonacci(n: Int) -> Int {
     b
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let result = fibonacci(40);
     // fib(40) = 102334155

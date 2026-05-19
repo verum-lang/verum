@@ -105,6 +105,8 @@ fn count_transitions(events: List<Int>) -> Int {
     transitions
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Traffic light cycle
     let mut light = RedLight;

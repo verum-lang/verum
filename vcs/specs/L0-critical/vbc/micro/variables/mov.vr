@@ -1,4 +1,6 @@
 // @test: typecheck-pass
 // @level: L0
 // @expect: pass
+mount core.prelude.*;
+
 fn main() { let a: Int = 42; let b: Int = a; assert_eq(b, 42); }

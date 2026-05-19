@@ -312,6 +312,8 @@ fn test_integration() {
     assert_eq(pos_count, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_closures_and_higher_order();
     test_math_suite();

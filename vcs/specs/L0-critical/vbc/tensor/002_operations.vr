@@ -373,6 +373,8 @@ fn test_layer_norm() {
     assert(@abs(row0_mean / 3.0) < 0.001);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Binary operations
     test_add();

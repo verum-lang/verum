@@ -122,6 +122,8 @@ fn test_non_tail_vs_tail() {
     assert_eq(factorial_not_tail(10), factorial_tail(10, 1));
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_tail_recursion();
     test_tail_recursive_sum();

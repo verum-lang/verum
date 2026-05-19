@@ -121,6 +121,8 @@ fn test_scale() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_horner();
     test_add();

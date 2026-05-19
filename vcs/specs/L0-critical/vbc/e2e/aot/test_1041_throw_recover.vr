@@ -94,6 +94,8 @@ fn test_recover_value() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Throw/Recover Tests:");
     let mut failures = 0;

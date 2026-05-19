@@ -285,6 +285,8 @@ fn test_double_dealloc_safe() {
     assert_eq(p3.num_allocated, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_initial_state();
     test_single_alloc_dealloc();

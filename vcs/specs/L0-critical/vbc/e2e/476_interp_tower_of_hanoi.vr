@@ -214,6 +214,8 @@ fn test_hanoi_sum() {
     print(f"hanoi_sum: total_moves_1_to_8={s} ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_move_counts();
     test_simulate_1_disk();

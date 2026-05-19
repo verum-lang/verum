@@ -149,6 +149,8 @@ fn segments_intersect(a: Point, b: Point, c: Point, d: Point) -> Bool {
     else { false }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Cross product basics ===
     // CCW triangle

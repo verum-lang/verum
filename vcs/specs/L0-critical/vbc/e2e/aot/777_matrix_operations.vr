@@ -38,6 +38,8 @@ fn det3x3(m: List<Int>) -> Int {
     a * (e * iv - fv * h) - b_val * (d * iv - fv * g) + c * (d * h - e * g)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // 2x2 matrices for multiply test
     // A = [[1, 2], [3, 4]]  stored as [1, 2, 3, 4, 0, 0, ...]

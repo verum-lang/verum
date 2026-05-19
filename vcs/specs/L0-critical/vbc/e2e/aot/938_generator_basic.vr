@@ -26,6 +26,8 @@ fn* fibonacci() -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: count_up generator with has_next/next loop
     let gen = count_up(5);

@@ -63,6 +63,8 @@ fn demonstrate_no_null_comparison() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     demonstrate_maybe_usage();
     demonstrate_reference_safety();

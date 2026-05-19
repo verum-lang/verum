@@ -243,6 +243,8 @@ fn test_interval_scheduling() {
     print("interval_scheduling: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_merge_no_overlap();
     test_merge_all_overlap();

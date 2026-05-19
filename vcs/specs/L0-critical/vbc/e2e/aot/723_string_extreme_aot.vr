@@ -4,6 +4,8 @@
 // @tags: aot, string, extreme, stress
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // 1000 format string allocations
     let mut i = 0;

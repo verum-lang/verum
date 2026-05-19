@@ -332,6 +332,8 @@ fn test_list_aggregate() {
     print("test_list_aggregate passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_list_lifecycle();
     test_map_lifecycle();

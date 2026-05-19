@@ -689,6 +689,8 @@ fn test_slice_then_reverse() {
     assert_eq(arr8_get(rev, 3), 10);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_slice_from_16();
     test_slice_within_8();

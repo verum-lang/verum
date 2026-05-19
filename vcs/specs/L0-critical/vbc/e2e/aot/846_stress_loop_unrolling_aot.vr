@@ -186,6 +186,8 @@ fn binary_search(arr: A10, n: Int, target: Int) -> Int {
     -1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Build BST: insert 50, 30, 70, 20, 40, 60, 80
     let mut tree = bst15_new();

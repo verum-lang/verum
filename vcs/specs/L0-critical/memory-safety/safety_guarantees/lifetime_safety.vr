@@ -24,6 +24,8 @@
 // demonstrate the intended semantics using simplified patterns that don't require
 // explicit lifetime parameters.
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_lifetime();
     test_borrowed_from_scope();

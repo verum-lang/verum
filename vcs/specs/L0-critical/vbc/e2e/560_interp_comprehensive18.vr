@@ -318,6 +318,8 @@ fn test_combined_pipeline() {
     print("combined_pipeline: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_shell_pipeline();
     test_activity_pipeline();

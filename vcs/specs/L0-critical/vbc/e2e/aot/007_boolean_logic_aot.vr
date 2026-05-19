@@ -26,6 +26,8 @@ fn classify_bmi(bmi_x10: Int) -> Int {
     else { 3 }                     // obese
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic boolean
     assert(both(true, true));

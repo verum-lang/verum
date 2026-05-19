@@ -11,6 +11,8 @@
 /// This is the safety net when compile-time analysis cannot prove safety.
 /// Spec: cbgr-implementation.md#runtime-checks
 
+mount core.prelude.*;
+
 fn main() {
     // Demonstrate runtime CBGR check catching use-after-free
     demonstrate_cbgr_runtime_check();

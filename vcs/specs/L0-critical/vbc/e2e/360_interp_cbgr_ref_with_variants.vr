@@ -286,6 +286,8 @@ fn test_multiple_record_refs() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_canvas_shapes();
     test_bounds_tracking();

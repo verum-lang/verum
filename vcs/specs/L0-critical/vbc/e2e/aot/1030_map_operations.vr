@@ -1,6 +1,8 @@
 // @test: run
 // Map operations — insert, get, contains, remove, len
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Basic map operations
     let mut m = Map.new();

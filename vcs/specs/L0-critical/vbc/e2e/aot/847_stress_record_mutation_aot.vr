@@ -167,6 +167,8 @@ fn regex_accepts(state: Int) -> Int {
     if (state == 4) { 1 } else { 0 }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Vending machine: normal purchase
     let mut vm = fsm_init(5);

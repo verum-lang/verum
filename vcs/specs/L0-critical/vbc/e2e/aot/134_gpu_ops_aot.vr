@@ -669,6 +669,8 @@ fn test_full_workflow() {
     assert_eq(dm.kernel_launches, 3);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_device_id_tracking();
     test_memory_alloc_free();

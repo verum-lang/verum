@@ -370,6 +370,8 @@ fn test_combined_pipeline() {
     print("combined_pipeline: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_fw_pipeline();
     test_counting_sort_pipeline();

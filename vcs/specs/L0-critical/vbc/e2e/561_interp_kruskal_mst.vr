@@ -210,6 +210,8 @@ fn test_union_find_standalone() {
     print("union_find: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_mst();
     test_unsorted_edges();

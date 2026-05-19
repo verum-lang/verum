@@ -14,6 +14,8 @@
 /// - Negative indices (always invalid)
 /// - Arithmetic expressions with provable bounds violations
 
+mount core.prelude.*;
+
 fn main() {
     // Fixed-size array with known length
     let arr: [Int; 5] = [1, 2, 3, 4, 5];

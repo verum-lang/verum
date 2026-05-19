@@ -55,6 +55,8 @@ fn test_arithmetic_with_cast() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Type Cast Tests:");
     let mut failures = 0;

@@ -283,6 +283,8 @@ fn test_array_of_variants() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Simple variants
     test_simple_variant_match();

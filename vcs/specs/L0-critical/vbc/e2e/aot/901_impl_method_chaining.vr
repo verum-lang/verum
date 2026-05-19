@@ -104,6 +104,8 @@ implement Bounds {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: basic constructor and getters
     let p = Point2D.new(3, 4);

@@ -377,6 +377,8 @@ fn test_mixed_operations() {
     assert(total > 0.0);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Allocation stress
     test_many_small_allocations();

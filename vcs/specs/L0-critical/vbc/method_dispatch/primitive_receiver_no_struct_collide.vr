@@ -44,6 +44,8 @@ implement Container {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // The primitive receiver case — pre-fix could collide with
     // Container.clone (or any heap-struct *.clone in the table);

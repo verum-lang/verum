@@ -230,6 +230,8 @@ fn test_hanoi_n4_count() {
     print("hanoi_n4_count: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_hanoi_n1();
     test_hanoi_n2();

@@ -12,6 +12,8 @@ extern {
     fn memset(ptr: &unsafe Byte, value: Int, size: Int) -> &unsafe Byte;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Allocate 1024 bytes
     let ptr = malloc(1024);

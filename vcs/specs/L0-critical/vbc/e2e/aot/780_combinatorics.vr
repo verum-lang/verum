@@ -47,6 +47,8 @@ fn catalan(n: Int) -> Int {
     combinations(2 * n, n) / (n + 1)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Factorial base cases and small values
     // 0! = 1, 1! = 1, 5! = 120, 7! = 5040

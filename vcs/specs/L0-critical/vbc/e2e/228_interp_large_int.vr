@@ -133,6 +133,8 @@ fn test_large_expression() {
     assert_eq(result, 999999000000);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_large_multiplication();
     test_large_addition();

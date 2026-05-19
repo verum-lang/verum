@@ -189,6 +189,8 @@ fn test_variants_with_collections() {
     print("  test_variants_with_collections: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_expr_eval();
     test_linked_list();

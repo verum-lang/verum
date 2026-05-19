@@ -35,6 +35,8 @@ fn consumer(inp: Channel<Int>, expected_count: Int, result: Channel<Int>) -> Int
     sum
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut pass = 0;
 

@@ -11,6 +11,8 @@ fn __io_engine_new_raw(capacity: Int) -> Int { 0 }
 fn __io_engine_destroy_raw(engine: Int) -> Int { 0 }
 fn __io_poll_raw(engine: Int, max: Int, timeout_ns: Int) -> Int { 0 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Create an IO engine
     let engine = __io_engine_new_raw(64);

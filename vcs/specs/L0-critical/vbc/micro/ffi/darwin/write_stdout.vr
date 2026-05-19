@@ -18,6 +18,8 @@ extern {
     fn write(fd: Int, buf: Text, nbyte: Int) -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Write "OK" to stdout (fd=1)
     // The Text value is automatically marshalled to a C string pointer

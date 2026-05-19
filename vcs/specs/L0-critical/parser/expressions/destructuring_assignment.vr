@@ -462,6 +462,8 @@ fn create_point() -> geometry.Point {
 }
 
 // Main function to run all tests
+mount core.prelude.*;
+
 fn main() {
     // Section 1: Tuple Destructuring
     test_tuple_swap();

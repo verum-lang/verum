@@ -240,6 +240,8 @@ fn test_count_ways_single_coin() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_min_coins_basic();
     test_min_coins_medium();

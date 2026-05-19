@@ -35,6 +35,8 @@ fn is_error(x: Int) -> Int {
     if (x < 0) { 1 } else { 0 }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Successful operation chain
     let r1 = try_divide(100, 5);

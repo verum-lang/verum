@@ -2,6 +2,8 @@
 // @level: L0
 // @tier: 0
 // @expected-exit: 0
+mount core.prelude.*;
+
 fn main() {
     let x = (0b1010 | 0b0101) & 0b1100;
     assert_eq(x, 0b1100);

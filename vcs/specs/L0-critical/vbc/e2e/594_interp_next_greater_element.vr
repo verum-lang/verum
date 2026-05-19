@@ -128,6 +128,8 @@ fn test_mixed_nge() {
     print("mixed_nge: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_nge();
     test_decreasing_array();

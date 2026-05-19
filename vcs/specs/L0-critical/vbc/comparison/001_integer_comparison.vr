@@ -185,6 +185,8 @@ fn test_comparison_with_zero() {
     assert(!(0 < 0));
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_eq();
     test_ne();

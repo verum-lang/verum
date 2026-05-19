@@ -37,6 +37,8 @@ fn find_positive(nums: List<Int>) -> Maybe<Int> {
     None
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Result Ok path
     let r1 = parse_int("42");

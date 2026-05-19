@@ -205,6 +205,8 @@ fn complex_function(
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic usage verification
     let user = User {

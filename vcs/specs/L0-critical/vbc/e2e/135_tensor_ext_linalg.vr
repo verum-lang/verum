@@ -162,6 +162,8 @@ fn test_det_multiplicative() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_determinant();
     test_trace();

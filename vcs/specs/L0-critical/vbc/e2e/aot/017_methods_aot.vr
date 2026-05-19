@@ -26,6 +26,8 @@ implement Point {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Static constructor
     let p = Point.new(3, 4);

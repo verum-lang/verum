@@ -7,6 +7,8 @@
 // Tests that print() is a built-in function called without ! suffix.
 // Spec: grammar/verum.ebnf Section 2.20.1 - builtin_io
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic print (NOT println!)
     print("Hello, World!");

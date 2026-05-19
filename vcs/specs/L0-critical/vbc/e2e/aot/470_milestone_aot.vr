@@ -193,6 +193,8 @@ fn test_dies_out() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rule30();
     test_rule110();

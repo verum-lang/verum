@@ -5,6 +5,8 @@
 // @timeout: 5000
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() {
     // Nested function that returns unit (no explicit return)
     fn print_nothing() {

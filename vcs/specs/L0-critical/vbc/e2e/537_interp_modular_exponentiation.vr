@@ -119,6 +119,8 @@ fn test_edge_cases() {
     print("edge_cases: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_mod_pow();
     test_fermat_little_theorem();

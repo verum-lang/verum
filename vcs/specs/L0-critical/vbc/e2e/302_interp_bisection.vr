@@ -344,6 +344,8 @@ fn test_bisect_transition() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bisect_sqrt();
     test_bisect_cbrt();

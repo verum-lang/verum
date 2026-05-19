@@ -4,6 +4,8 @@
 // @tags: memory-safety, double-free, safe-pattern
 // @description: Tests safe patterns that prevent double-free
 
+mount core.prelude.*;
+
 fn main() {
     // Pattern 1: Take ownership and let scope handle cleanup
     {

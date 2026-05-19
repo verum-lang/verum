@@ -138,6 +138,8 @@ fn test_sum_prod() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sort();
     test_median();

@@ -10,6 +10,8 @@
 /// In the interpreter (Tier 0 execution), ALL references use managed tier.
 /// This test verifies that managed references provide correct safety guarantees.
 
+mount core.prelude.*;
+
 fn main() {
     test_managed_fallback_safety();
     print("  [OK] test_managed_fallback_safety");

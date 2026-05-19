@@ -105,6 +105,8 @@ fn test_bidirectional_channels() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut pass = 0;
 

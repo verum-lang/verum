@@ -75,6 +75,8 @@ fn dot_product_3(a0: Int, a1: Int, a2: Int, b0: Int, b1: Int, b2: Int) -> Int {
     a0 * b0 + a1 * b1 + a2 * b2
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // ---- 2x2 Matrix operations ----
     let identity = mat2(1, 0, 0, 1);

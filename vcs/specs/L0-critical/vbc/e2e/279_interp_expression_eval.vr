@@ -328,6 +328,8 @@ fn test_chain_add() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_add();
     test_simple_sub();

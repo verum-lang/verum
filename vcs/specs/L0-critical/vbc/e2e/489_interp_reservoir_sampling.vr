@@ -189,6 +189,8 @@ fn test_reservoir_coverage() {
     print(f"reservoir_coverage: distinct_selections={distinct} (>=2) ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_reservoir_basic();
     test_reservoir_k_equals_n();

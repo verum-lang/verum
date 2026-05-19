@@ -14,6 +14,8 @@
 // before main even printed. VBC had them via dispatch_primitive_method
 // (lines 1371-1383 in method_dispatch.rs) but AOT did not.
 
+mount core.prelude.*;
+
 fn main() {
     // Int.max
     assert_eq((5).max(3), 5);

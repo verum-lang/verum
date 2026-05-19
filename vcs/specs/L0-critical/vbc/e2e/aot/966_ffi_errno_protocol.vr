@@ -12,6 +12,8 @@ extern {
     fn getpid() -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // time(0) returns current epoch seconds — should always succeed
     let t = time(0);

@@ -48,6 +48,8 @@ fn test_nested() {
     assert_eq(b, -1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_trunc();
     test_basic_int();

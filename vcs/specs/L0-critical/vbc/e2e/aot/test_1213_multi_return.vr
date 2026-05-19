@@ -42,6 +42,8 @@ fn compute_stats(items: List<Int>) -> Stats {
     Stats { sum: sum, count: items.len(), min: lo, max: hi }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

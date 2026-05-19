@@ -56,6 +56,8 @@ fn classify(n: Int) -> Int {
     else { 0 }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: tuple variant matching
     let c = Circle(5);

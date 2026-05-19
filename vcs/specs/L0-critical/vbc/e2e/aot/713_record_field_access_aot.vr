@@ -10,6 +10,8 @@ fn dist_sq(p: Point) -> Int {
     p.x * p.x + p.y * p.y
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let p = Point { x: 3, y: 4 };
     let d = dist_sq(p);

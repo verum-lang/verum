@@ -282,6 +282,8 @@ fn test_lagrange_interpolation_check() {
     assert_eq(poly_eval(p, 10), 3);  // 100 mod 97 = 3
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gf_basics();
     test_gf_negation();

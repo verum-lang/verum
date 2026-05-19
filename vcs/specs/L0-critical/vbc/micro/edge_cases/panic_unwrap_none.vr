@@ -5,6 +5,8 @@
 // @timeout: 5000
 // @expected-panic: unwrap
 
+mount core.prelude.*;
+
 fn main() {
     let x: Maybe<Int> = None;
     let val = x.unwrap();

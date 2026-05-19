@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test Int methods (abs, signum, checked arithmetic, etc.)
 
+mount core.prelude.*;
+
 fn main() {
     // Test abs
     assert_eq((-42).abs(), 42);

@@ -153,6 +153,8 @@ fn test_closure_in_conditional() {
     assert_eq(g(4), 12);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_identity_closure();
     test_arithmetic_closures();

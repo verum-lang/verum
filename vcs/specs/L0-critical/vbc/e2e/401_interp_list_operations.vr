@@ -103,6 +103,8 @@ fn test_list_max_min() {
     print("list_max_min: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_list_basics();
     test_list_mutation();

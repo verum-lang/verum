@@ -12,6 +12,8 @@
 /// Spec: 04-memory-model.md#reference-tiers
 /// Spec: cbgr-implementation.md#reference-types
 
+mount core.prelude.*;
+
 fn main() {
     test_tier_0_managed_immutable();
     print("  [OK] test_tier_0_managed_immutable");

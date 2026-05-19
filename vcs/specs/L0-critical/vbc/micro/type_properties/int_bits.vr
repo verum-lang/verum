@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test type bits properties for integer types
 
+mount core.prelude.*;
+
 fn main() {
     // Test Int bit widths
     assert_eq(Int8.bits, 8);

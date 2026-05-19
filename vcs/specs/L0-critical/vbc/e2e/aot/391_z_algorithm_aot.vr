@@ -316,6 +316,8 @@ fn test_z_single() {
     assert_eq(a16_get(z, 0), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_z_basic();
     test_z_all_same();

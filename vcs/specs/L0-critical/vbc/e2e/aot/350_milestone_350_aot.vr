@@ -377,6 +377,8 @@ fn test_integration_lcm_chain() {
     assert_eq(result, 210);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sieve();
     test_bsearch_on_primes();

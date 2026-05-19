@@ -193,6 +193,8 @@ fn test_while_let_basic() {
     assert_eq(sum, 15);  // 5 + 4 + 3 + 2 + 1
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_single_if_let_some();
     test_single_if_let_none();

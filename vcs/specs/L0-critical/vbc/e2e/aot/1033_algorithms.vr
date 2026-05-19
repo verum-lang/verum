@@ -59,6 +59,8 @@ fn power(base: Int, exp: Int) -> Int {
     base * power(base, exp - 1)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Binary search
     let sorted = [2, 5, 8, 12, 16, 23, 38, 56, 72, 91];

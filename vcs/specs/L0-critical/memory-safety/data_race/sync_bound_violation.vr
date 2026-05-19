@@ -14,6 +14,8 @@ type UnsafeCell<T> is {
     value: T,
 };
 
+mount core.prelude.*;
+
 fn main() {
     // Placeholder - actual test requires spawn syntax
     // The intended test would verify compile-time rejection of:

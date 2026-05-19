@@ -9,6 +9,8 @@
 /// Compiler should select appropriate tier based on context.
 /// Spec: cbgr-implementation.md#tier-selection
 
+mount core.prelude.*;
+
 fn main() {
     test_default_tier_selection();
     test_checked_tier_promotion();

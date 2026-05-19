@@ -546,6 +546,8 @@ fn test_interleaved_machines() {
     assert_eq(c2.overflows, 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_traffic_light();
     test_bounded_counter();

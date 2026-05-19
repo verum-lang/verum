@@ -84,6 +84,8 @@ fn test_dynamic_dispatch() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Protocol Dispatch Tests:");
 

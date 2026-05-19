@@ -243,6 +243,8 @@ fn test_decreasing_dims() {
     assert_eq(matrix_chain_order(dims, 4), 10752);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_two_matrices();
     test_three_matrices_classic();

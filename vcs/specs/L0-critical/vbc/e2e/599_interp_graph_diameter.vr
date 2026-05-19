@@ -164,6 +164,8 @@ fn test_single_node() {
     print("single_node: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_path_graph();
     test_complete_graph();

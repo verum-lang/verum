@@ -40,6 +40,8 @@ fn compute(a: Int, b: Int) -> Result<Int, Text> {
     Ok(r)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

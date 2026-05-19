@@ -10,6 +10,8 @@ extern {
     fn ffi_fill_array_i32(arr: &mut Int, len: Int, value: Int);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test fill_array_i32
     let mut arr4 = [0, 0, 0, 0];

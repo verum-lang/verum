@@ -127,6 +127,8 @@ fn test_cycle() {
     assert_eq(s, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_transitions();
     test_invalid_transitions();

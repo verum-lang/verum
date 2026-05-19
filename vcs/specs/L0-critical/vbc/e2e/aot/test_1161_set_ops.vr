@@ -73,6 +73,8 @@ fn test_set_string() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Set Operations Tests:");
     let mut failures = 0;

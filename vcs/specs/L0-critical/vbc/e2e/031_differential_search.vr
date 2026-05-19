@@ -141,6 +141,8 @@ fn find_max(a: Arr8, n: Int) -> Int {
     m
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Sorted array for binary search tests
     let sorted = Arr8 { e0: 2, e1: 5, e2: 8, e3: 12, e4: 16, e5: 23, e6: 38, e7: 56 };

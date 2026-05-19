@@ -35,6 +35,8 @@ fn checked_add(a: Int, b: Int, limit: Int) -> Maybe<Int> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Maybe: Some/None
     let val = Some(42);

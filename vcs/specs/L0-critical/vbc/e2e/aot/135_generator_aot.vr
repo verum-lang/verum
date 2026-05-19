@@ -491,6 +491,8 @@ fn test_fib_sum() {
     assert_eq(s, 88);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_range_basic();
     test_range_offset();

@@ -40,6 +40,8 @@ fn get_progress(s: State) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Start from idle
     let s0 = Idle;

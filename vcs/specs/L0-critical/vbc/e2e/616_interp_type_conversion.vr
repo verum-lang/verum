@@ -66,6 +66,8 @@ fn test_overflow_wrapping() {
     print("  test_overflow_wrapping: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_int_arithmetic();
     test_bool_to_int();

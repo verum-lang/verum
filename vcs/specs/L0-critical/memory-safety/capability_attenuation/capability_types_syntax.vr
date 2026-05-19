@@ -126,6 +126,8 @@ type Config is { _marker: Int };
 
 fn database() -> Database with [Read, Write] { Database { _marker: 0 } }
 
+mount core.prelude.*;
+
 fn main() {
     // Run all syntax tests by type checking this file
     print("Capability type syntax tests passed");

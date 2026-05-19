@@ -183,6 +183,8 @@ fn test_free_clamp() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_alloc_free();
     test_oom_detection();

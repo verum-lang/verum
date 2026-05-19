@@ -183,6 +183,8 @@ fn merge_sorted(val1: List<Int>, nxt1: List<Int>, h1: Int,
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Build a linked list: 10 -> 20 -> 30 -> 40
     // Node 0: val=10, next=1

@@ -82,6 +82,8 @@ fn test_try_recover_chain_fail() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
     failures = failures + test_try_recover_basic();

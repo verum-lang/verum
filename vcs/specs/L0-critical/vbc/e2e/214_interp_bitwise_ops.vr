@@ -131,6 +131,8 @@ fn test_shift_mul_div_equivalence() {
     assert_eq(100 >> 2, 100 / 4);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bitwise_and();
     test_bitwise_or();

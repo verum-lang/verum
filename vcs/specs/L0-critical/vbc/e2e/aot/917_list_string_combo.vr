@@ -6,6 +6,8 @@
 
 // Test: Combined list + string operations — real-world patterns
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Scenario 1: Build a list, sort, verify ordering, compute sum
     let mut scores = List.new();

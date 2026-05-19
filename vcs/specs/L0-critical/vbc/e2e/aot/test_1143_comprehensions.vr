@@ -57,6 +57,8 @@ fn test_transform_comprehension() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Comprehension Tests:");
     let mut failures = 0;

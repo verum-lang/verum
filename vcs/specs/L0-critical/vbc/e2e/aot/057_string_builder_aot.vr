@@ -65,6 +65,8 @@ fn simple_hash(x: Int) -> Int {
     if h < 0 { 0 - h } else { h }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Pack/unpack 4 bytes
     let packed = pack4(10, 20, 30, 40);

@@ -297,6 +297,8 @@ fn test_max_min_reduction() {
     print("test_max_min_reduction passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_zeros_ones();
     test_arange();

@@ -169,6 +169,8 @@ fn test_scatter_gather() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Async I/O Pattern Tests:");
     let mut failures = 0;

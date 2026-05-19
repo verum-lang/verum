@@ -3,6 +3,8 @@
 // @description: Test Maybe<T> from list.get returns correct value
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Simple list.get returns Maybe<T>, v is the value directly
     let items = [10, 20, 30, 40, 50];

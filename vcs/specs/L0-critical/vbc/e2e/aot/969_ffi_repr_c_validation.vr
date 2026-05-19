@@ -48,6 +48,8 @@ fn distance_squared(p1: Point, p2: Point) -> Int {
     dx * dx + dy * dy
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: @repr(C) struct construction and field access
     let p1 = Point { x: 3, y: 4 };

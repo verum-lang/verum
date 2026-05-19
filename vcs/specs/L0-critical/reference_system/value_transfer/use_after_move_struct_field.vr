@@ -22,6 +22,8 @@ type Container is {
     value: Int,
 };
 
+mount core.prelude.*;
+
 fn main() {
     let container = Container {
         resource: Resource { handle: 42 },

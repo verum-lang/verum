@@ -134,6 +134,8 @@ fn test_decoder() {
     assert_eq(decoder2(1, 1), 8);   // d3 = 1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gates();
     test_half_adder();

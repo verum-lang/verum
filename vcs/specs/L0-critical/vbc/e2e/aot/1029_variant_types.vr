@@ -36,6 +36,8 @@ fn eval(e: Expr) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Circle
     let c = Circle(5);

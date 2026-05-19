@@ -156,6 +156,8 @@ fn test_frame_stewart() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_move_count();
     test_simulation_1();

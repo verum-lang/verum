@@ -189,6 +189,8 @@ fn test_convex_hull() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_cross_product();
     test_triangle_area();

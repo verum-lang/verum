@@ -255,6 +255,8 @@ fn test_automata_counting() {
     print("automata_counting: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_dfa_ends_ab();
     test_dfa_even_ones();

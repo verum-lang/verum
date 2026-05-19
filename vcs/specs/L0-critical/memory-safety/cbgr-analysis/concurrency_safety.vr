@@ -271,6 +271,8 @@ fn test_sequential_ops() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_send_transfer();
     test_sync_shared_ref();

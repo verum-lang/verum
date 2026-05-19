@@ -156,6 +156,8 @@ fn test_trie() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_trie();
     print("[OK] 441_trie_sim_aot");

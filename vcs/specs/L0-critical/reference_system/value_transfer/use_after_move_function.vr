@@ -21,6 +21,8 @@ fn take_ownership(h: FileHandle) {
     print(h.path);
 }
 
+mount core.prelude.*;
+
 fn main() {
     let handle = FileHandle { fd: 42, path: Text.from("/tmp/file.txt") };
     take_ownership(handle);  // handle moved into function (FileHandle is affine)

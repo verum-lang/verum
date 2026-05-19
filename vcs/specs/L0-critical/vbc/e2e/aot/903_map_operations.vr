@@ -6,6 +6,8 @@
 
 // Test: Map data structure operations — creation, insert, lookup, contains.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: create map and insert
     let mut m = Map.new();

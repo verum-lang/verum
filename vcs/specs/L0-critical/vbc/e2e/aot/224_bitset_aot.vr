@@ -164,6 +164,8 @@ fn test_identities() {
     assert_eq(bs_symmetric_diff(a, a), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic();
     test_set_operations();

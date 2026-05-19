@@ -6,6 +6,8 @@
 // @expected-exit: 0
 // @description: Register allocation stress test with 32 local variables
 
+mount core.prelude.*;
+
 fn main() {
     let v0: Int = 0;
     let v1: Int = 1;

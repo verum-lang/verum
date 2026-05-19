@@ -280,6 +280,8 @@ fn test_maybe_with_records() {
     assert_eq(v2, 0);  // negative target, loop doesn't execute
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_maybe_some();
     test_maybe_none();

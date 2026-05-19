@@ -163,6 +163,8 @@ fn test_concurrent_accumulate() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Comprehensive Integration Tests:");
     let mut failures = 0;

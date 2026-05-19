@@ -4,6 +4,8 @@
 // @tags: set, comprehension, e2e
 // @description: Test set creation and operations
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

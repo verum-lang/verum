@@ -275,6 +275,8 @@ fn test_accumulate() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_apply();
     test_apply2();

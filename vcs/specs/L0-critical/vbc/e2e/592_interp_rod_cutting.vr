@@ -153,6 +153,8 @@ fn test_rod_zero_length() {
     print("rod_zero_length: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_rod_cutting();
     test_rod_uniform_price();

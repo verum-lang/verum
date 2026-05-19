@@ -258,6 +258,8 @@ fn test_mixed_partial() {
     assert_eq(within_tol(mixed, scale(), 10), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_f1_partial_dx();
     test_f1_partial_dy();

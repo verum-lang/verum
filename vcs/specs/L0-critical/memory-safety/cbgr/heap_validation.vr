@@ -90,6 +90,8 @@ fn test_heap_across_functions() {
     assert_eq(*h, 999);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_heap_alloc_basic();
     test_heap_generation_tracking();

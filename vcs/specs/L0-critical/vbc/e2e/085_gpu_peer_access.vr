@@ -258,6 +258,8 @@ fn test_ring_allreduce() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_enable_disable();
     test_unsupported_peer();

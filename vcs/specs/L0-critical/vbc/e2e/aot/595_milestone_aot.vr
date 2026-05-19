@@ -214,6 +214,8 @@ fn test_luhn() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_xor();
     test_additive_checksum();

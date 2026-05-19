@@ -22,6 +22,8 @@ extern {
     fn ffi_identity_i64(x: Int) -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test integer addition
     let r1 = ffi_add_i32(10, 32);

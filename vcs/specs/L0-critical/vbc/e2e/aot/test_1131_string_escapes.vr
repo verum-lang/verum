@@ -65,6 +65,8 @@ fn test_multichar_escape() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("String Escape Tests:");
     let mut failures = 0;

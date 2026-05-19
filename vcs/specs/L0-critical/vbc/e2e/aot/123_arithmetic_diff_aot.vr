@@ -9,6 +9,8 @@
 // This test produces deterministic output that can be compared with interpreter tier.
 // All results are printed to stdout for differential verification.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Integer arithmetic
     assert_eq(42 + 17, 59);

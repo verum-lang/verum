@@ -3,6 +3,8 @@
 // @tier: 0
 // @expected-exit: 0
 // @description: Verify newline escape in byte string
+mount core.prelude.*;
+
 fn main() {
     let bs = b"\n";
     assert_eq(bs[0], 10);  // \n = LF = 10

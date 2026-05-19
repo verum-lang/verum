@@ -144,6 +144,8 @@ fn test_pascal_triangle() {
     print("pascal_triangle: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gcd();
     test_lcm();

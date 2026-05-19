@@ -131,6 +131,8 @@ fn test_twin_primes() {
     assert_eq(count_twin_primes(sieve, 50), 6);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_primes();
     test_count();

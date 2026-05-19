@@ -218,6 +218,8 @@ fn test_ring_buffer() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Data Structure Tests:");
     let mut failures = 0;

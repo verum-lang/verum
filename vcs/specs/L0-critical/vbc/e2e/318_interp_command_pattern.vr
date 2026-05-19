@@ -300,6 +300,8 @@ fn test_complex_sequence() {
     assert_eq(ch.state, 42);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_execute();
     test_undo_add();

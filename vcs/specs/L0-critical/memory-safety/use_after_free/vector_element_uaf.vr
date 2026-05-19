@@ -4,6 +4,8 @@
 // @tags: memory-safety, use-after-free, cbgr, list, borrow-checker
 // @description: Tests that borrow checker prevents use-after-free on list element at compile-time
 
+mount core.prelude.*;
+
 fn main() {
     let mut items: List<Heap<Int>> = [
         Heap.new(10),

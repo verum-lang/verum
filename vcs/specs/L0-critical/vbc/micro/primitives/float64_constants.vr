@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test Float64 type constants (MIN, MAX, BITS, EPSILON)
 
+mount core.prelude.*;
+
 fn main() {
     // Test Float64.BITS
     assert_eq(Float64.BITS(), 64);

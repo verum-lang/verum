@@ -626,6 +626,8 @@ fn test_matrix_power() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // LU Decomposition
     test_lu_decomposition();

@@ -145,6 +145,8 @@ fn m4_det(m: M4) -> Int {
     m.m00 * c00 - m.m01 * c01 + m.m02 * c02 - m.m03 * c03
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Identity checks
     let eye = m4_identity();

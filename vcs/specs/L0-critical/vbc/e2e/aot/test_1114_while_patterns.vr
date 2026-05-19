@@ -117,6 +117,8 @@ fn test_convergence() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("While Pattern Tests:");
     let mut failures = 0;

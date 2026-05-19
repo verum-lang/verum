@@ -24,6 +24,8 @@ fn check_in_range(t: Int, idx: Int) -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut errors = 0;
 

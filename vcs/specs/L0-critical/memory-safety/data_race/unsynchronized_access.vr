@@ -9,6 +9,8 @@
 // The test verifies that accessing mutable state from multiple threads without
 // synchronization is rejected by the type checker.
 
+mount core.prelude.*;
+
 fn main() {
     // Placeholder - actual test requires spawn syntax
     // The intended test would verify compile-time rejection of:

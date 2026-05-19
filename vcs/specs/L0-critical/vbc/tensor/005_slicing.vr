@@ -226,6 +226,8 @@ fn test_contiguous() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Single element access
     test_1d_element_access();

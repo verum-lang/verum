@@ -23,6 +23,8 @@ fn __time_monotonic_nanos_raw() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Run /usr/bin/true (exit code 0)
     let r1 = __process_exec_raw("/usr/bin/true", []);

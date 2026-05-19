@@ -278,6 +278,8 @@ fn test_lagrange3_widely_spaced() {
     assert_eq(lagrange3(p0, p1, p2, 15), 31000);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_lerp_midpoint();
     test_lerp_endpoints();

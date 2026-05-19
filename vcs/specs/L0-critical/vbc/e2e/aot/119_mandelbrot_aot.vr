@@ -229,6 +229,8 @@ fn sum_iterations(g: Grid64) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let max_iter = 50;
 

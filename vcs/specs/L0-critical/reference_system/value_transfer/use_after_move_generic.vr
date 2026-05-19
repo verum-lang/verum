@@ -21,6 +21,8 @@ type Wrapper<T> is {
 
 fn consume<T>(value: T) {}
 
+mount core.prelude.*;
+
 fn main() {
     let wrapper = Wrapper { value: Handle { fd: 42 } };
     consume(wrapper);  // wrapper moved (contains affine Handle)

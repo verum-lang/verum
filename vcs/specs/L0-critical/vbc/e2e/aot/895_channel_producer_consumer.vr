@@ -39,6 +39,8 @@ fn producer_primes(limit: Int) -> Int {
     count
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Channel send/recv
     let ch = Channel.new(4);

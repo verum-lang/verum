@@ -393,6 +393,8 @@ fn test_multi_device_alloc() {
     print("multi_device_alloc: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_device_state_basic();
     test_device_alloc_free();

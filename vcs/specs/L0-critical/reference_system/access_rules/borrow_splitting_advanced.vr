@@ -218,6 +218,8 @@ fn test_reborrow_in_method_chain() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Field splitting tests
     test_struct_field_splitting();

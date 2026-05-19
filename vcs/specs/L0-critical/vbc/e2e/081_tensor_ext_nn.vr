@@ -255,6 +255,8 @@ fn test_layer_norm() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rms_norm_basic();
     test_rms_norm_edge_cases();

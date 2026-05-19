@@ -11,6 +11,8 @@ fn make_graph() -> Map<Int, Node> {
     graph
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Map<Int, Node> — get struct from map, access value field
     let graph = make_graph();

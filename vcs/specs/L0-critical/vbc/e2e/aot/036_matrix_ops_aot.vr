@@ -86,6 +86,8 @@ fn mat3_pow(m: Mat3, n: Int) -> Mat3 {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Identity matrix properties
     let id = mat3_identity();

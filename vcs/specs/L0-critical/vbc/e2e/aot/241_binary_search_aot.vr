@@ -194,6 +194,8 @@ fn test_single_element() {
     assert_eq(upper_bound(a, 42), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_search();
     test_bounds();

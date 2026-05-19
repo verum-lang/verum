@@ -8,6 +8,8 @@
 /// Closures can borrow or move from their environment.
 /// Spec: 04-memory-model.md#aliasing-rules
 
+mount core.prelude.*;
+
 fn main() {
     test_immutable_capture();
     test_mutable_capture();

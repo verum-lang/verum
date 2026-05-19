@@ -136,6 +136,8 @@ fn test_flood_fill() {
     print("flood_fill: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_maze_bfs();
     test_flood_fill();

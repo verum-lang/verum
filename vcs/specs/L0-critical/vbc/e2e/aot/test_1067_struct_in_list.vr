@@ -115,6 +115,8 @@ fn test_struct_method_chain() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Struct In List Tests:");
     let mut failures = 0;

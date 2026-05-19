@@ -81,6 +81,8 @@ fn test_shared_capture() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let r1 = test_basic_counter();
     if (r1 != 0) { return r1; }

@@ -6,6 +6,8 @@
 // @expected-exit: 0
 // @description: Test integer multiplication overflow behavior (wrapping semantics)
 
+mount core.prelude.*;
+
 fn main() {
     // Test multiplication overflow
     let large: Int = 3037000500;  // Close to sqrt(i64 max)

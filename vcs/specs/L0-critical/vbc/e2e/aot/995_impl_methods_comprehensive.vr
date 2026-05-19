@@ -64,6 +64,8 @@ implement Counter {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Vec2 constructor and methods
     let v1 = Vec2.new(3, 4);

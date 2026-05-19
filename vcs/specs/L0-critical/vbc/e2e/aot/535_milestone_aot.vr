@@ -186,6 +186,8 @@ fn test_transitivity() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_unification();
     test_function_types();

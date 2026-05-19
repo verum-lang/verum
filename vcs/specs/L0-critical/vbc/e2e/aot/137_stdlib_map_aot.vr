@@ -337,6 +337,8 @@ fn test_negative_keys_values() {
     assert(kv_contains(m, 0));
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_insert_get();
     test_contains_key();

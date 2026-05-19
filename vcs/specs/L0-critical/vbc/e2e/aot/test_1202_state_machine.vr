@@ -68,6 +68,8 @@ fn run_simulation() -> Int {
     get_count(s8)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

@@ -46,6 +46,8 @@ fn collatz_steps(n: Int) -> Int {
     steps
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: 5 tasks all completing successfully
     let t1 = spawn safe_worker(10);

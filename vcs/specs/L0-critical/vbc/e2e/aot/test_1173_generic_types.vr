@@ -41,6 +41,8 @@ fn first_of<T>(a: T, b: T) -> T {
     a
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

@@ -198,6 +198,8 @@ fn test_rpn_edge_cases() {
     print("rpn_edge_cases: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rpn_basic_arithmetic();
     test_rpn_compound_expressions();

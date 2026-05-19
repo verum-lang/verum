@@ -376,6 +376,8 @@ fn test_min_coins() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_queens_trivial();
     test_queens_4();

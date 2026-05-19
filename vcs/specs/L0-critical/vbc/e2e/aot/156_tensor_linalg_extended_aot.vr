@@ -342,6 +342,8 @@ fn test_inverse() {
     print("test_inverse passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_matmul_2x2();
     test_transpose();

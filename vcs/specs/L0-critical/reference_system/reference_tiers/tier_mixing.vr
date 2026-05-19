@@ -8,6 +8,8 @@
 /// Different tiers can coexist with proper conversions.
 /// Spec: cbgr-implementation.md#tier-interoperability
 
+mount core.prelude.*;
+
 fn main() {
     test_tier_coexistence();
     test_tier_in_struct();

@@ -10,6 +10,8 @@ extern {
     fn ffi_copy_array_i64(dst: &mut Int, src: &Int, len: Int);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test copy_array
     let src = [10, 20, 30, 40];

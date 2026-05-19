@@ -300,6 +300,8 @@ fn test_student_records() {
     assert(bob_total > alice_total);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_point_operations();
     test_rect();

@@ -187,6 +187,8 @@ fn test_bitwise() {
     assert_eq((42 ^ 99) ^ 99, 42);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_records();
     test_closures();

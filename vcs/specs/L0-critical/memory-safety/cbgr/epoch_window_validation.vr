@@ -52,6 +52,8 @@ fn test_epoch_basic_validation() {
     assert(valid);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_epoch_window_valid();
     test_fatref_epoch_tracking();

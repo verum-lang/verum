@@ -245,6 +245,8 @@ fn test_interleaved_push_pop() {
     assert_eq(ring_back(r), 6);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_buffer();
     test_push_and_read();

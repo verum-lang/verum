@@ -346,6 +346,8 @@ fn test_array_modification_safety() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Nominal type safety
     test_nominal_type_safety();

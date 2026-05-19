@@ -116,6 +116,8 @@ fn test_overflow_safe() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Numeric Operations Tests:");
     let mut failures = 0;

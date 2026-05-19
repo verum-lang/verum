@@ -180,6 +180,8 @@ fn test_sort_stability() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Sorting Tests:");
     let mut failures = 0;

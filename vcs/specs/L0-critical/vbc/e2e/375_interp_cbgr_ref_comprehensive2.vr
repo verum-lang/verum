@@ -717,6 +717,8 @@ fn test_section_j_final() {
     assert_eq(fact + fib_val + sum_r, 188);            // assert 117
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_section_a_many_refs();
     test_section_b_deep_records();

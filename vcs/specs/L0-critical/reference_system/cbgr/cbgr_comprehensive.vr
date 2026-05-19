@@ -8,6 +8,8 @@
 /// This is the foundation of Verum's memory safety.
 /// Spec: cbgr-implementation.md
 
+mount core.prelude.*;
+
 fn main() {
     print("Starting CBGR comprehensive tests...");
     test_generation_basics();

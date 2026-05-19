@@ -6,6 +6,8 @@
 // @expected-exit: 0
 // @description: Test integer addition overflow behavior (wrapping semantics)
 
+mount core.prelude.*;
+
 fn main() {
     // Test large positive numbers
     let large: Int = 9223372036854775807;  // i64 max

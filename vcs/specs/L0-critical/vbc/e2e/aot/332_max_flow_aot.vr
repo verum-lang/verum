@@ -292,6 +292,8 @@ fn test_symmetric_network() {
     assert_eq(flow, 10);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_network();
     test_single_path();

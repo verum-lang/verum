@@ -46,6 +46,8 @@ fn abs_float(x: Float) -> Float {
     x
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Compute sin^2 + cos^2 for many values, should always = 1.0
     let terms = 15;

@@ -111,6 +111,8 @@ fn test_xor_swap() {
     print("  test_xor_swap: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_bitwise();
     test_shift_ops();

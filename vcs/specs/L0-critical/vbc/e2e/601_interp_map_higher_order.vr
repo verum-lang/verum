@@ -82,6 +82,8 @@ fn test_map_contains_value() {
     print("map_contains_value: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_map_for_each();
     test_map_filter();

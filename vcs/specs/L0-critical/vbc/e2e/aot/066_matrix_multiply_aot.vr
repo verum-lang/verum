@@ -82,6 +82,8 @@ fn mat_eq(a: Mat3, b: Mat3) -> Bool {
     && a.m20 == b.m20 && a.m21 == b.m21 && a.m22 == b.m22
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let zero = mat_zero();
     let id = mat_identity();

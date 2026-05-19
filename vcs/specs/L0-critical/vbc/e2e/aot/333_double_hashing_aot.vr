@@ -256,6 +256,8 @@ fn test_zero_key() {
     assert_eq(ht_contains(ht, 0), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_table();
     test_single_insert();

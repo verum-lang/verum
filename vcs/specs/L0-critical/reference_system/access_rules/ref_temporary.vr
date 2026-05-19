@@ -7,6 +7,8 @@
 /// Temporaries have their lifetime extended when borrowed.
 /// Spec: 04-memory-model.md#temporary-lifetime
 
+mount core.prelude.*;
+
 fn main() {
     test_temporary_borrow();
     test_temporary_in_expression();

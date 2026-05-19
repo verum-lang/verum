@@ -25,6 +25,8 @@ fn find_user(id: Int) -> Maybe<Text> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // This will succeed
     let user1 = find_user(1).unwrap();

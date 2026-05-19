@@ -31,6 +31,8 @@ fn swap_pair<T>(p: Pair<T>) -> Pair<T> {
     Pair { fst: p.snd, snd: p.fst }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: identity with Int
     let r1 = identity(42);

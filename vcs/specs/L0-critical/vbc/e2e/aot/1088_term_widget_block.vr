@@ -268,6 +268,8 @@ fn test_no_borders() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let r1 = test_plain_border();
     if r1 != 0 { return r1; }

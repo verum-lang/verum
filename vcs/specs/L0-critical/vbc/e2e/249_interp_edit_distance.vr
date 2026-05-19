@@ -370,6 +370,8 @@ fn test_suffix() {
     assert_eq(edit_distance(a, 3, b, 5), 2);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_identical_sequences();
     test_empty_sequences();

@@ -154,6 +154,8 @@ fn test_days_in_year() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_leap_year();
     test_days_in_month();

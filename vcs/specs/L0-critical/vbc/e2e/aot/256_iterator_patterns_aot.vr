@@ -161,6 +161,8 @@ fn test_chained() {
     assert_eq(sum, 120);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_for_range();
     test_map_reduce();

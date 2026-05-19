@@ -261,6 +261,8 @@ fn test_diamond_graph() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_linear_graph();
     test_shortcut_graph();

@@ -232,6 +232,8 @@ fn test_dt_all_same_leaf() {
     print("dt_all_same_leaf: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_dt_basic();
     test_dt_batch();

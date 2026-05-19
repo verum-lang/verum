@@ -6,6 +6,8 @@ fn get_value() -> Int {
     return unsafe { 42 };
 }
 
+mount core.prelude.*;
+
 fn main() {
     let x: Int = get_value();
     assert_eq(x, 42);

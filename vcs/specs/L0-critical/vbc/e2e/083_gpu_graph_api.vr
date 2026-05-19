@@ -244,6 +244,8 @@ fn test_diamond_graph() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_graph_creation();
     test_capture_launch();

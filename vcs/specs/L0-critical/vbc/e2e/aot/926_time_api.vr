@@ -12,6 +12,8 @@ fn __time_sleep_nanos_raw(nanos: Int) -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: monotonic clock returns non-zero nanoseconds
     let t1 = __time_monotonic_nanos_raw();

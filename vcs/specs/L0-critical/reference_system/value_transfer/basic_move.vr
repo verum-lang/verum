@@ -8,6 +8,8 @@
 /// Only types declared with `type affine` have move semantics.
 /// Spec: 04-memory-model.md#copy-vs-affine-semantics
 
+mount core.prelude.*;
+
 fn main() {
     test_copy_semantics();
     test_struct_copy();

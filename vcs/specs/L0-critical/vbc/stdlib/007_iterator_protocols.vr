@@ -299,6 +299,8 @@ fn test_chain_iterate() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_range_iteration();
     test_filter_count();

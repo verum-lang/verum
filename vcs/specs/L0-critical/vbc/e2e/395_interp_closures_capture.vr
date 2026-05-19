@@ -80,6 +80,8 @@ fn test_closure_composition() {
     print("closure_composition: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_closure_capture();
     test_multiplier();

@@ -258,6 +258,8 @@ fn test_inverse_product() {
     assert_eq(inv_ab, product_inv);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_ext_gcd_basic();
     test_ext_gcd_coprime();

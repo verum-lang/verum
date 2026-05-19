@@ -166,6 +166,8 @@ fn test_pipeline_transforms() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Integration Pattern Tests:");
     let mut failures = 0;

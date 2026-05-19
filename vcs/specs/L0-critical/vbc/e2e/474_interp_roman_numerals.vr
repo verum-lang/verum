@@ -184,6 +184,8 @@ fn test_roman_arithmetic() {
     print("roman_arithmetic: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_roman_simple_values();
     test_roman_numeral_lengths();

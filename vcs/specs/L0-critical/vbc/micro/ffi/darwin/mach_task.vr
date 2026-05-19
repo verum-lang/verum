@@ -11,6 +11,8 @@ extern {
     fn mach_task_self() -> u32;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // mach_task_self() returns Mach port for current task
     // It never fails

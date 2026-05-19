@@ -300,6 +300,8 @@ fn test_maze_like() {
     assert_eq(d >= 10, true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_straight_path();
     test_with_walls();

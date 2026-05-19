@@ -26,6 +26,8 @@ fn sum_recursive(n: Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Bounded fibonacci recursion - no overflow
     let fib15 = fibonacci(15);

@@ -13,6 +13,8 @@ extern {
     fn ffi_swap_i32(a: &mut Int32, b: &mut Int32);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test dereference
     let x: Int32 = 42;

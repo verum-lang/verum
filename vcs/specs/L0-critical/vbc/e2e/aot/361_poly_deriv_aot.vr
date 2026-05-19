@@ -272,6 +272,8 @@ fn test_zero_poly() {
     assert_eq(r.deriv1, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_eval_with_deriv_linear();
     test_eval_with_deriv_quadratic();

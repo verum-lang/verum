@@ -745,6 +745,8 @@ fn test_complex_mul() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_scatter();
     test_gather();

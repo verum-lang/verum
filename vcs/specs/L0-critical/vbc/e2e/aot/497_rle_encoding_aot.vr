@@ -194,6 +194,8 @@ fn test_single_element() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_encode_decode();
     test_all_same();

@@ -14,6 +14,8 @@ fn sum_list(xs: List<Int>, n: Int) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test list mutation via SetE
     let mut arr = [1, 2, 3, 4, 5];

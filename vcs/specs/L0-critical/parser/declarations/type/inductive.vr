@@ -35,6 +35,8 @@ type Rose<T> is inductive {
     | RoseNode(T, List<Rose<T>>)
 };
 
+mount core.prelude.*;
+
 fn main() -> Int {
     0
 }

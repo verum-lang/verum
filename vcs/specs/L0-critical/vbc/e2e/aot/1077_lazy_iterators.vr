@@ -25,6 +25,8 @@ implement MyRange {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Simple custom range iteration
     let mut r = my_range(0, 5);

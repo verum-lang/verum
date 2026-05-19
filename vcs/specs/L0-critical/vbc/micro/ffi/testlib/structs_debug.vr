@@ -20,6 +20,8 @@ extern {
     fn ffi_point2d_scale(p: &mut Point2D, factor: Int32);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: Struct return (this worked before)
     print("Test 1: Creating p1 = (3, 4)\n");

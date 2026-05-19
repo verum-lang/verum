@@ -216,6 +216,8 @@ fn test_divisors() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sieve();
     test_trial_division();

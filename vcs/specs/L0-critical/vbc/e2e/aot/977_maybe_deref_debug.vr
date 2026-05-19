@@ -3,6 +3,8 @@
 // @level: L0
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let list = [10, 20, 30];
     print("step 1: list created");

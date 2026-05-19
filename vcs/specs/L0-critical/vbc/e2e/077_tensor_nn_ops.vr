@@ -349,6 +349,8 @@ fn test_batch_norm() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sigmoid();
     test_relu();

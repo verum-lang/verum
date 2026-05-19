@@ -152,6 +152,8 @@ fn test_complex() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_arith();
     test_mul_sub();

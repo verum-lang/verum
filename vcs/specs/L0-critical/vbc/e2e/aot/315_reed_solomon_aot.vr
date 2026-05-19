@@ -310,6 +310,8 @@ fn test_different_messages() {
     assert_eq(differ, 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gf_arithmetic();
     test_encode_decode();

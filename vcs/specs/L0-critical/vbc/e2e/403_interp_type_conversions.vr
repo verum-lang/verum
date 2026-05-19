@@ -80,6 +80,8 @@ fn test_conditional_types() {
     print("conditional_types: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_int_arithmetic();
     test_bool_to_int();

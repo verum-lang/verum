@@ -161,6 +161,8 @@ fn test_staircase() {
     assert_eq(staircase_ways(10), 89);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_fibonacci();
     test_catalan();

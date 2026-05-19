@@ -303,6 +303,8 @@ fn test_lru_with_locality() {
     assert_eq(faults, 6);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_fifo_basic();
     test_lru_basic();

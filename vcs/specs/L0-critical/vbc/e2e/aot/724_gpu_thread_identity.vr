@@ -22,6 +22,8 @@ fn total_threads(gdim_x: Int, gdim_y: Int, gdim_z: Int,
     gdim_x * gdim_y * gdim_z * bdim_x * bdim_y * bdim_z
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // 1D grid: 4 blocks x 8 threads
     let grid_x = 4;

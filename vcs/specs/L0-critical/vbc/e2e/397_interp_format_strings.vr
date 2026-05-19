@@ -69,6 +69,8 @@ fn test_fstring_in_loop() {
     print("fstring_in_loop: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_int_interpolation();
     test_text_interpolation();

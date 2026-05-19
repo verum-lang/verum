@@ -57,6 +57,8 @@ fn fib_next(f: FibIter) -> FibIter {
     FibIter { a: f.b, b: f.a + f.b, count: f.count + 1, limit: f.limit }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

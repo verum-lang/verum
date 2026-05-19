@@ -224,6 +224,8 @@ fn test_partial_tree() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_complete_tree();
     test_single_node();

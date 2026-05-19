@@ -321,6 +321,8 @@ async fn test_context_across_await() using [Config] {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic usage
     test_simple_provide();

@@ -69,6 +69,8 @@ fn test_manual_drop() -> Int {
     drop_count
 }
 
+mount core.prelude.*;
+
 fn main() {
     let count = test_manual_drop();
     assert_eq(count, 3);

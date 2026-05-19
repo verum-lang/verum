@@ -78,6 +78,8 @@ fn test_two_type_params() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Generic Struct Tests:");
     let mut failures = 0;

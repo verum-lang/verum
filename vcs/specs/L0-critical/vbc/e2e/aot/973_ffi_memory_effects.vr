@@ -31,6 +31,8 @@ extern {
     fn memcpy(dst: &unsafe Byte, src: &Byte, size: Int) -> &unsafe Byte;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // ============================================================
     // Test 1: Pure function — can be called multiple times, same result

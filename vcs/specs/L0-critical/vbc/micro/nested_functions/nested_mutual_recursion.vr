@@ -5,6 +5,8 @@
 // @timeout: 5000
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() {
     fn is_even(n: Int) -> Bool {
         fn even(x: Int) -> Bool {

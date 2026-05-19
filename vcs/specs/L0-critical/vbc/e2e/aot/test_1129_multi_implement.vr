@@ -121,6 +121,8 @@ fn test_circle() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Multi-Implement Tests:");
     let mut failures = 0;

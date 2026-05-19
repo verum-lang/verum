@@ -41,6 +41,8 @@ fn test_maybe_unwrap() {
     assert_eq(value, 100);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test demonstrates correct usage of Maybe<T> instead of null
     let opt: Maybe<Int> = Maybe.None;

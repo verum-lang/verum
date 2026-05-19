@@ -206,6 +206,8 @@ fn test_stern() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_look_and_say_basic();
     test_look_and_say_multi();

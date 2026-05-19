@@ -4,6 +4,8 @@
 // @tags: memory-safety, bounds-check, list
 // @description: Tests that List access beyond bounds causes a panic
 
+mount core.prelude.*;
+
 fn main() {
     let items: List<Int> = [10, 20, 30, 40, 50];
 

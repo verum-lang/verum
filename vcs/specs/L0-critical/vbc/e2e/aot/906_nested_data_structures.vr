@@ -7,6 +7,8 @@
 // Test: Nested data structures — multiple maps, maps as counters,
 // map merge, sparse arrays, and graph representation.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Map as sparse array / lookup table with non-contiguous keys
     let mut sparse = Map.new();

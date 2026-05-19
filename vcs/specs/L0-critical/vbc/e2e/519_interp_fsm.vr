@@ -190,6 +190,8 @@ fn test_transition_table() {
     print("transition_table: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_binary_divisibility_by_3();
     test_even_zeros_fsm();

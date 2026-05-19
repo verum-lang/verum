@@ -47,6 +47,8 @@ fn lookup_and_double(items: List<Int>) -> Maybe<Int> {
     Some(val * 2)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: ? with Result — success path
     let r1 = compute(10, 2);

@@ -267,6 +267,8 @@ fn test_exhaustive_match() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
     failures = failures + test_basic_state_transitions();

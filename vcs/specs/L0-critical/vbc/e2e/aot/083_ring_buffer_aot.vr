@@ -94,6 +94,8 @@ fn ring_sum(r: Ring8) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Empty ring ===
     let r0 = ring_new();

@@ -14,6 +14,8 @@ fn add_edge(adj: Map<Int, List<Int>>, from: Int, to: Int) {
     neighbors.push(to);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut adj = Map.new();
 

@@ -146,6 +146,8 @@ fn exec_op(s: Stack16, op: Op) -> Stack16 {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test basic stack operations
     let s0 = stack_new();

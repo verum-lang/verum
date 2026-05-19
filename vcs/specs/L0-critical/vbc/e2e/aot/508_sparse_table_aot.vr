@@ -182,6 +182,8 @@ fn test_brute_max() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_min_queries();
     test_sorted_array();

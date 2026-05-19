@@ -124,6 +124,8 @@ fn find_first_over(threshold: Int) -> Int {
     -1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Control Flow Tests:");
     let mut failures = 0;

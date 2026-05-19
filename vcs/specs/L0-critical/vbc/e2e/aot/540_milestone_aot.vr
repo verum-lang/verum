@@ -193,6 +193,8 @@ fn test_rotate() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_isqrt();
     test_dnf();

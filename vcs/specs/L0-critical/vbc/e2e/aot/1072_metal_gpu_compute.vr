@@ -18,6 +18,8 @@ fn __metal_dispatch_1d(pipeline: Int, bufs: Int, buf_count: Int, grid: Int, tg: 
 fn __metal_vector_add_f32(a: Int, b: Int, result: Int, n: Int) -> Int { 0 }
 fn __time_monotonic_nanos_raw() -> Int { 0 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let device = __metal_get_device();
     if device == 0 {

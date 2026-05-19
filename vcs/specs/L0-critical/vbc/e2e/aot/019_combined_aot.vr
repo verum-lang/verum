@@ -69,6 +69,8 @@ fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
 
 // --- Main test ---
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Vec2 operations
     let v1 = Vec2.new(3, 4);

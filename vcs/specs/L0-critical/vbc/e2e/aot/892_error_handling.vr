@@ -54,6 +54,8 @@ fn chain_operations(x: Int) -> Outcome<Int> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: basic Result
     let r1 = try_divide(100, 4);

@@ -4,6 +4,8 @@
 // @tags: aot, list, set-element
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut arr = [1, 2, 3];
     print(arr[0]);

@@ -106,6 +106,8 @@ fn test_mutable_reference() {
     assert_eq(p.y, 2.0);  // y unchanged
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_reference_value_through_alias();
     test_reference_same_value();

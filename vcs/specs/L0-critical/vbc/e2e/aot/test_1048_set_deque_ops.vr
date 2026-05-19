@@ -143,6 +143,8 @@ fn test_deque_as_queue() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Set & Deque Tests:");
     let mut failures = 0;

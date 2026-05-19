@@ -160,6 +160,8 @@ fn test_shared_memory_calc() {
     print("test_shared_memory_calc passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gpu_context_init();
     test_gpu_workflow();

@@ -208,6 +208,8 @@ fn test_encode_known() {
     assert_eq(rs_get(r2, 0), 5);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_decode_simple();
     test_decode_subtractive();

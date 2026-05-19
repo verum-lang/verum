@@ -355,6 +355,8 @@ fn vm_run(code: Code32) -> Stack16 {
     vm.stack
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Simple push and add ===
     // PUSH 3, PUSH 4, ADD, HALT -> stack top = 7

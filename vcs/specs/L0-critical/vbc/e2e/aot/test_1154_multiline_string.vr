@@ -81,6 +81,8 @@ fn test_empty_string() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("String Tests:");
     let mut failures = 0;

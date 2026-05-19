@@ -420,6 +420,8 @@ fn test_search_all_nodes() {
     assert_eq(treap_search(t, 100), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_treap();
     test_single_insert();

@@ -6,6 +6,8 @@ fn factorial(n: Int) -> Int {
     if n <= 1 { 1 } else { n * factorial(n - 1) }
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert_eq(factorial(0), 1);
     assert_eq(factorial(1), 1);

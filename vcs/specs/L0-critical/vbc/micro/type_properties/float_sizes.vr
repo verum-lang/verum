@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test type size/alignment/bits properties for float types
 
+mount core.prelude.*;
+
 fn main() {
     // Test Float32 properties
     assert_eq(Float32.size, 4);

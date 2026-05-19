@@ -8,6 +8,8 @@
 /// Tier 0 (&T) -> Tier 1 (&checked T) -> Tier 2 (&unsafe T)
 /// Downgrade is always safe, upgrade requires proof.
 
+mount core.prelude.*;
+
 fn main() {
     test_downgrade_managed_to_checked();
     test_downgrade_checked_to_unsafe();

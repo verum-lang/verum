@@ -7,6 +7,8 @@
 // Test: String-keyed Map operations — insert, get, contains_key, remove,
 // overwrite, dynamic keys, and multi-entry access.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Insert with string literals, get with same literals
     let mut m = Map.new();

@@ -5,6 +5,8 @@
 // @expected-exit: 0
 // @description: Test checked arithmetic methods for numeric types
 
+mount core.prelude.*;
+
 fn main() {
     // Test Int checked_add (success)
     let a: Int = 100;

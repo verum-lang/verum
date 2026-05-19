@@ -290,6 +290,8 @@ fn test_single_element() {
     assert_eq(is_sa_sorted(data, sa), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_sequence();
     test_sorted_sequence();

@@ -198,6 +198,8 @@ fn test_single() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_counting_sort();
     test_all_sorts_agree();

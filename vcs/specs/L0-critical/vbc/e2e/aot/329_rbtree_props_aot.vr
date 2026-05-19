@@ -314,6 +314,8 @@ fn test_tree_height() {
     assert_eq(max_depth, 2);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bst_property();
     test_root_is_black();

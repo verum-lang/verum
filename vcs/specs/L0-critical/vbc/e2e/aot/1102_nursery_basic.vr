@@ -21,6 +21,8 @@ fn worker_sum(start: Int, end: Int, result_ch: Channel<Int>) -> Int {
     sum
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut pass = 0;
 

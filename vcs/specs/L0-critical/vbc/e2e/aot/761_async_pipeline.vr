@@ -42,6 +42,8 @@ fn stage_aggregate(value: Int, running_sum: Int) -> Int {
     else { running_sum + value }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Linear 4-stage pipeline
     let raw_data = [100, 49, 169, 225, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

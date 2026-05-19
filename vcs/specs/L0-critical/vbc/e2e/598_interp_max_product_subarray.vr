@@ -125,6 +125,8 @@ fn test_alternating_negatives() {
     print("alternating_negatives: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_all_positive();
     test_single_negative();

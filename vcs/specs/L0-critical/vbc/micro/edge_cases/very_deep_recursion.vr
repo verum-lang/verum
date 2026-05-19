@@ -13,6 +13,8 @@ fn deep_recurse(n: Int, acc: Int) -> Int {
     return deep_recurse(n - 1, acc + 1);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test 500 levels of recursion
     let result = deep_recurse(500, 0);

@@ -50,6 +50,8 @@ fn count_range(start: Int, end: Int, pred: fn(Int) -> Bool) -> Int {
     count
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic apply
     let double = |x: Int| -> Int { x * 2 };

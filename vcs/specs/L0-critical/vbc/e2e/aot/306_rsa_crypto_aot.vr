@@ -283,6 +283,8 @@ fn test_primality() {
     assert_eq(is_prime(100), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_mod_exp();
     test_mod_inverse();

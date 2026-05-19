@@ -142,6 +142,8 @@ fn test_matrix_square() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_identity_mul();
     test_known_2x2();

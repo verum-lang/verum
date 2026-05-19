@@ -231,6 +231,8 @@ fn test_palindrome() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_slen();
     test_str_eq();

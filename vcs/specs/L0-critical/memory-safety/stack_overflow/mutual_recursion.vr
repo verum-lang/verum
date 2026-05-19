@@ -30,6 +30,8 @@ fn infinite_odd(n: Int) -> Bool {
     infinite_even(n)
 }
 
+mount core.prelude.*;
+
 fn main() {
     // This works - proper base cases
     assert(is_even(10) == true);

@@ -179,6 +179,8 @@ fn test_if_sequential() {
     assert_eq(count, 3);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_if();
     test_basic_if_else();

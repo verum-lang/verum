@@ -160,6 +160,8 @@ fn test_m3() {
     // A(3, 2) and higher need very deep stack, skip
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_base_cases();
     test_m1();

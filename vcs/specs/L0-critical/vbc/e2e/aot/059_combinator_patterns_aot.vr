@@ -79,6 +79,8 @@ fn map_reduce(start: Int, end_val: Int, mapper: fn(Int) -> Int, reducer: fn(Int,
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Identity
     assert_eq(identity(42), 42);

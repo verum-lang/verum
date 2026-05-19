@@ -45,6 +45,8 @@ fn fd_second_deriv(f_plus: Int, f_zero: Int, f_minus: Int) -> Int {
     f_plus - 2 * f_zero + f_minus
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Second derivative of x^4
     // f''(2) = 12*4 = 48

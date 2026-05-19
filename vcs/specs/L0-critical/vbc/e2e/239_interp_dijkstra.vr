@@ -250,6 +250,8 @@ fn test_from_different_sources() {
     assert_eq(a8_get(dist2, 2), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_triangle();
     test_classic_dijkstra();

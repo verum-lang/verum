@@ -216,6 +216,8 @@ fn test_heap_validity() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_push_pop();
     test_sorted_insert();

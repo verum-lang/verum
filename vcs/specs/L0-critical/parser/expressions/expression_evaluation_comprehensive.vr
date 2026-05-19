@@ -566,6 +566,8 @@ fn test_expression_in_match() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Arithmetic
     test_basic_arithmetic();

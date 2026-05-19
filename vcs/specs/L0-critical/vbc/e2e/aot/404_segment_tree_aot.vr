@@ -242,6 +242,8 @@ fn test_update_then_query() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_build_query_all();
     test_query_ranges();

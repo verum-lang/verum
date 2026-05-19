@@ -598,6 +598,8 @@ fn test_transpose_then_binop() {
     assert_eq(tensor_get2d(sq, 1, 2), 36);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_tensor_zeros();
     test_tensor_fill();

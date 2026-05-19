@@ -30,6 +30,8 @@ fn triple(x: Int) -> Int { x * 3 }
 fn add_ten(x: Int) -> Int { x + 10 }
 fn halve(x: Int) -> Int { x / 2 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test map_array_f64 - modifies array in place
     let mut arr3 = [1.0, 2.0, 3.0, 4.0];

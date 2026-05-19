@@ -222,6 +222,8 @@ fn test_hankel_matrix() {
     assert_eq(det3, 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_catalan_values();
     test_formula_matches_recurrence();

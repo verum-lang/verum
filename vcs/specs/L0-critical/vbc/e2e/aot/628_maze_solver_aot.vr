@@ -230,6 +230,8 @@ fn test_adjacent() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_open_grid();
     test_wall_barrier();

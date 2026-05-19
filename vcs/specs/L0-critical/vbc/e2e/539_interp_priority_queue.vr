@@ -205,6 +205,8 @@ fn test_single_element_heap() {
     print("single_element_heap: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_insert_and_extract();
     test_decrease_key();

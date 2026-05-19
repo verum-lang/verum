@@ -178,6 +178,8 @@ fn test_fully_connected() {
     print("fully_connected: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_path_graph();
     test_triangle_no_ap();

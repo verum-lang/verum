@@ -237,6 +237,8 @@ fn test_fibonacci() {
     assert_eq(fib(20), 6765);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_int_overflow_large();
     test_int_div_truncation();

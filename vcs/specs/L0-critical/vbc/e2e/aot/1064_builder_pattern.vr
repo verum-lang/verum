@@ -64,6 +64,8 @@ implement RequestBuilder {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut builder = new_request("https://api.example.com/data");
     builder.method("POST");

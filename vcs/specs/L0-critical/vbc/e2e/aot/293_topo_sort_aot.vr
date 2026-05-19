@@ -304,6 +304,8 @@ fn test_wide_fan_out() {
     assert_eq(validate_topo_order(g, result.order), true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_linear_dag();
     test_diamond_dag();

@@ -207,6 +207,8 @@ fn test_composition() {
     assert_eq(count, 3);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_fold();
     test_map();

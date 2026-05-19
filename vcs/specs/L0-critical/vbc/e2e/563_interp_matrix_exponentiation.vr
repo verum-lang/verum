@@ -146,6 +146,8 @@ fn test_power_zero_and_one() {
     print("power_zero_and_one: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_mat_mul_identity();
     test_mat_mul_specific();

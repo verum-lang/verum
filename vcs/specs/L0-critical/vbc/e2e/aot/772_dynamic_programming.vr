@@ -101,6 +101,8 @@ fn max_subarray(arr: List<Int>, n: Int) -> Int {
     best
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Fibonacci iterative - fib(0)=0, fib(1)=1, fib(10)=55
     assert_eq(fib_iter(0), 0);

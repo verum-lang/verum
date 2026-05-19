@@ -325,6 +325,8 @@ fn test_reverse_preserves_popcount() {
     assert_eq(popcount(vals_c), popcount(reverse_bits(vals_c, 8)));
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_popcount_basic();
     test_popcount_powers();

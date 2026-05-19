@@ -10,6 +10,8 @@
 /// This is the core safety guarantee of CBGR.
 /// Spec: cbgr-implementation.md#use-after-free-detection
 
+mount core.prelude.*;
+
 fn main() {
     // Canonical use-after-free: reference outlives its target
     // This demonstrates CBGR's runtime safety guarantee

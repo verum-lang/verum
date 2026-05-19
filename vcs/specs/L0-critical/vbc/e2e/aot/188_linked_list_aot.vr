@@ -66,6 +66,8 @@ fn list_contains(p: NodePool, head: Int, target: Int) -> Bool {
     false
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Build a linked list: 10 -> 20 -> 30 -> 40
     // Manually set up the node pool

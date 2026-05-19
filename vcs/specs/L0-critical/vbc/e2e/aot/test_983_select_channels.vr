@@ -4,6 +4,8 @@
 // @tags: channel, fan-in, pipeline, runtime
 // @description: Test fan-in and pipeline patterns with channels
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

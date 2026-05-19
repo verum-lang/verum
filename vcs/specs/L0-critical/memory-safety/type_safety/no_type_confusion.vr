@@ -13,6 +13,8 @@
 ///
 /// This prevents exploitation of memory layout differences.
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_type_mismatch();
     test_struct_confusion();

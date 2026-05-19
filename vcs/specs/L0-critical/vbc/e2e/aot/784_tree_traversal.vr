@@ -160,6 +160,8 @@ fn is_symmetric(tree: List<Int>) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Build a BST:
     //         8

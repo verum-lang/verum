@@ -20,6 +20,8 @@ type Named is protocol {
     fn name(&self) -> &Text;
 };
 
+mount core.prelude.*;
+
 fn main() {
     test_trait_object_creation();
     test_trait_object_dispatch();

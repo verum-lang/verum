@@ -163,6 +163,8 @@ fn test_text_equality_detailed() {
     assert("a" != "A");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_text_literal();
     test_text_empty();

@@ -269,6 +269,8 @@ fn test_domain_propagation() {
     print("domain_propagation: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_nqueens_4();
     test_nqueens_5();

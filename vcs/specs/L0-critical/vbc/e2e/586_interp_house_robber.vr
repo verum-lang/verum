@@ -117,6 +117,8 @@ fn test_two_elements() {
     print("two_elements: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_cases();
     test_large_middle();

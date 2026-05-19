@@ -40,6 +40,8 @@ fn process(input: Text) -> Result<Int> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test success path
     match process("42") {

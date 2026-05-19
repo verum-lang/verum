@@ -32,6 +32,8 @@ fn parse_and_add(s1: Text, s2: Text) -> Result<Int, Text> {
     Ok(10 + 20)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

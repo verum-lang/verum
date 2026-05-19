@@ -246,6 +246,8 @@ fn test_log_base() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_hypot();
     test_copysign();

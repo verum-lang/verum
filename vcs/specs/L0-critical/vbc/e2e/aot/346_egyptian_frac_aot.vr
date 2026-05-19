@@ -264,6 +264,8 @@ fn test_ceil_div_fn() {
     assert_eq(ceil_div(10, 3), 4);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_unit_fraction();
     test_two_thirds();

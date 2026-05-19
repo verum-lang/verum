@@ -121,6 +121,8 @@ fn binary_search_sqrt(n: Int) -> Int {
     if lo * lo > n { lo - 1 } else { lo }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic functions
     assert_eq(abs(-5), 5);

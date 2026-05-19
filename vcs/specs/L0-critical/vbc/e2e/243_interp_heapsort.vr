@@ -282,6 +282,8 @@ fn test_small_sort() {
     assert_eq(arr_get(s, 3), 4);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_sort();
     test_reverse_order();

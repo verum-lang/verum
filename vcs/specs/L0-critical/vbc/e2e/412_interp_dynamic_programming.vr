@@ -143,6 +143,8 @@ fn test_count_paths() {
     print("count_paths: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_fibonacci_dp();
     test_max_subarray();

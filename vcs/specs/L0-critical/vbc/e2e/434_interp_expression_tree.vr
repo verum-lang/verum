@@ -115,6 +115,8 @@ fn test_expression_loop() {
     print("expression_loop: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_eval();
     test_postfix_eval();

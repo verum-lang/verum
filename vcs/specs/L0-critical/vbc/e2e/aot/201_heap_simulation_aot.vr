@@ -148,6 +148,8 @@ fn test_heap_sort() {
     assert_eq(h.size, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_heap_basic();
     test_heap_sort();

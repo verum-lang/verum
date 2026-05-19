@@ -110,6 +110,8 @@ fn parity(n: Int) -> Int {
     popcount(n) % 2
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Basic AND truth table ===
     assert_eq(bit_and(0, 0), 0);

@@ -3,6 +3,8 @@
 // @description: 4 workers each capturing 2 channels
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let work = Channel.new(20);
     let done = Channel.new(10);

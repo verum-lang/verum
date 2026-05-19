@@ -650,6 +650,8 @@ fn test_repetition_penalty() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_softmax_basic();
     test_temperature_scaling();

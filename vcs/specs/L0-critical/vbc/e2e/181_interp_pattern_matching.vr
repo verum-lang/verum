@@ -311,6 +311,8 @@ fn test_is_in_conditional() {
     assert_eq(result2, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_match_int_literal();
     test_match_bool();

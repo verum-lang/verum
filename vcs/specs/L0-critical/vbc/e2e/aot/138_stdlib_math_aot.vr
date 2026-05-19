@@ -141,6 +141,8 @@ fn test_combinations_pow() {
     assert_eq(mod_pow(2, 12, 13), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basics();
     test_sqrt_gcd();

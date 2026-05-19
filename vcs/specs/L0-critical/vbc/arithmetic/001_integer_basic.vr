@@ -160,6 +160,8 @@ fn test_distributivity() {
     assert_eq((a + b) * c, a * c + b * c);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_add();
     test_sub();

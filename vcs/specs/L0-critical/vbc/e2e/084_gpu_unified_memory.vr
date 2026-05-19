@@ -267,6 +267,8 @@ fn test_full_lifecycle() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_managed_alloc();
     test_advise_hints();

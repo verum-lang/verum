@@ -691,6 +691,8 @@ fn test_reduce_with_3x3() {
     assert_eq(arr16_get(col_sums, 2), 18); // 3+6+9
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_conv1d_identity_kernel();
     test_conv1d_sum_kernel();

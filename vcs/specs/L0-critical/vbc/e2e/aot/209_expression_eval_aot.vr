@@ -170,6 +170,8 @@ fn test_dup_swap() {
     assert_eq(pop_val(s2), 4);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_eval();
     test_complex_eval();

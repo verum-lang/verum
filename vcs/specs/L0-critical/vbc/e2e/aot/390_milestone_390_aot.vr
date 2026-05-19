@@ -457,6 +457,8 @@ fn test_dp_with_graph() {
     assert_eq(common, 3);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_hash_basic();
     test_mod_arithmetic();

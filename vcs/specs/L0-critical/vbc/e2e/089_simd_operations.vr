@@ -220,6 +220,8 @@ fn test_simd_clamp() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simd_arithmetic();
     test_splat_neg();

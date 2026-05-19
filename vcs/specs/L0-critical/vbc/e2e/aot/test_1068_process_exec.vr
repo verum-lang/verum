@@ -47,6 +47,8 @@ fn test_shell_command() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Process Exec Tests:");
     let mut failures = 0;

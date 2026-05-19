@@ -16,6 +16,8 @@ fn gpu_memcpy(dst: Int, src: Int, size: Int) -> Int { @intrinsic("GPU_MEMCPY", d
 
 fn gpu_get_device() -> Int { @intrinsic("GPU_GET_DEVICE") }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Skip if no GPU device available
     if gpu_get_device() == 0 {

@@ -12,6 +12,8 @@
 ///
 /// Heap overflow exploits are prevented by design.
 
+mount core.prelude.*;
+
 fn main() {
     test_list_growth();
     test_list_bounds();

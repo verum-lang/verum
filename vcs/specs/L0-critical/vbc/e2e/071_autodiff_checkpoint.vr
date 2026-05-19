@@ -672,6 +672,8 @@ fn test_gradient_zeroing() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gradient_accumulation();
     test_gradient_clipping();

@@ -69,6 +69,8 @@ fn process_ages(ages: List<Int>) -> List<Int> {
     filtered
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: User type with methods
     let alice = User.new("Alice", 30);

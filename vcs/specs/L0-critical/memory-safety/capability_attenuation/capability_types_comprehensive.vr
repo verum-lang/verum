@@ -279,6 +279,8 @@ fn test_record_capability_fields() -> () {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     print("Starting comprehensive capability attenuation tests...");
 

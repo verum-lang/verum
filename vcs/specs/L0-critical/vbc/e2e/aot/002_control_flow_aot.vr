@@ -50,6 +50,8 @@ fn clamp(val: Int, lo: Int, hi: Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // abs
     assert_eq(abs(5), 5);

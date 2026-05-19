@@ -119,6 +119,8 @@ fn iv_scale(iv: Interval, k: Int) -> Interval {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Basic construction and properties ===
     let a = iv_new(2, 8);

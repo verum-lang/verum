@@ -146,6 +146,8 @@ fn test_identical_dims() {
     assert_eq(matrix_chain_cost(p, 3), 2000);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_two_matrices();
     test_three_matrices();

@@ -160,6 +160,8 @@ fn is_control_flow(op: Opcode) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test execution of all 32 opcodes
     assert_eq(execute(Nop), 0);

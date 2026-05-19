@@ -227,6 +227,8 @@ fn test_sparse_transpose() {
     print("sparse_transpose: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sparse_creation_and_lookup();
     test_sparse_scalar_multiply();

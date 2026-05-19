@@ -141,6 +141,8 @@ fn test_base_conversion() {
     assert_eq(from_base(to_base(100, 2), 2), 100);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_digit_ops();
     test_reverse();

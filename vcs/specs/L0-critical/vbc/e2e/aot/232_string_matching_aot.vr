@@ -152,6 +152,8 @@ fn test_hash() {
     assert_eq(h3, 2016);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_naive_search();
     test_count();

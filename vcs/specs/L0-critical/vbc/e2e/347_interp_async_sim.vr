@@ -333,6 +333,8 @@ fn test_empty_pool() {
     assert_eq(p2.num_tasks, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_single_task();
     test_multiple_tasks();

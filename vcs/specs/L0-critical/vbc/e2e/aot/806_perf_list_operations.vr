@@ -39,6 +39,8 @@ fn push_and_sum_test(n: Int) -> Int {
     sum
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let n = 10000;
     let result = push_and_sum_test(n);

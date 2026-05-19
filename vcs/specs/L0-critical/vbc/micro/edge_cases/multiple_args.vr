@@ -6,6 +6,8 @@ fn sum5(a: Int, b: Int, c: Int, d: Int, e: Int) -> Int {
     a + b + c + d + e
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert_eq(sum5(1, 2, 3, 4, 5), 15);
     assert_eq(sum5(10, 20, 30, 40, 50), 150);

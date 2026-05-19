@@ -303,6 +303,8 @@ fn test_repeated_pattern() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_string();
     test_lcp_banana();

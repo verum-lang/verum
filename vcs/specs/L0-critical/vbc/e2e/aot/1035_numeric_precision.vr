@@ -37,6 +37,8 @@ fn count_digits(n: Int) -> Int {
     count
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Palindrome detection
     if (!is_palindrome(12321)) {

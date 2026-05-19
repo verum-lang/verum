@@ -96,6 +96,8 @@ fn test_nested_spawn_capture() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Spawn Closure Capture Tests:");
 

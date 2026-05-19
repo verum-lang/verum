@@ -140,6 +140,8 @@ fn test_rle_single() {
     assert_eq(arr8_get(decoded, 0), 42);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rle_basic();
     test_rle_roundtrip();

@@ -13,6 +13,8 @@
 /// 3. Three-tier references - safety/performance trade-off
 /// 4. Compile-time analysis - static safety where possible
 
+mount core.prelude.*;
+
 fn main() {
     print("=== CBGR Overview Tests ===");
 

@@ -340,6 +340,8 @@ fn test_data_accumulation() {
     assert_eq(lr.handlers.total_data_val, 150);  // 10+20+30+40+50
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_loop();
     test_single_event();

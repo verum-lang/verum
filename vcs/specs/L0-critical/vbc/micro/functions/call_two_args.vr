@@ -2,4 +2,6 @@
 // @level: L0
 // @expect: pass
 fn add(a: Int, b: Int) -> Int { a + b }
+mount core.prelude.*;
+
 fn main() { assert_eq(add(3, 4), 7); }

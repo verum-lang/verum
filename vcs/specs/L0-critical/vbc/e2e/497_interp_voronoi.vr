@@ -220,6 +220,8 @@ fn test_voronoi_collinear_sites() {
     print("voronoi_collinear_sites: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_voronoi_basic();
     test_voronoi_single_site();

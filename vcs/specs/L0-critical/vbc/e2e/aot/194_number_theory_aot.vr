@@ -167,6 +167,8 @@ fn test_modpow() {
     assert_eq(modpow(5, 3, 13), 8);         // 125 % 13
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gcd_lcm();
     test_primes();

@@ -28,6 +28,8 @@ fn process_point(p: &mut Point) {
     p.y += 10;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Rereference mutable as immutable
     let mut data = Text.from("original");

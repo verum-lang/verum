@@ -139,6 +139,8 @@ fn test_single_and_duplicates() {
     print("single_and_duplicates: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_knuth_random();
     test_knuth_reversed();

@@ -55,6 +55,8 @@ fn count_primes(limit: Int) -> Int {
     cnt
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // square_sum(100) = 100*101*201/6 = 338350
     let ss = square_sum(100);

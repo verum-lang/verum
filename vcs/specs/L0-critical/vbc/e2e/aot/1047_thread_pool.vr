@@ -6,6 +6,8 @@
 
 // Multiple concurrent spawn+await tasks with different computations.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Three concurrent spawns
     let t1 = spawn { 21 * 2 };

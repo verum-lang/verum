@@ -124,6 +124,8 @@ fn test_float_mixed_expr() {
     assert_eq(a * b + c, 10.0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_float_addition();
     test_float_subtraction();

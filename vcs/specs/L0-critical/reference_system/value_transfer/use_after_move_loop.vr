@@ -20,6 +20,8 @@ fn consume_token(t: Token) {
     print(t.value);
 }
 
+mount core.prelude.*;
+
 fn main() {
     let token = Token { value: 42 };
     for _ in 0..3 {

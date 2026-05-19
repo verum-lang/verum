@@ -671,6 +671,8 @@ fn test_scalar_triple_product() {
 // main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_det_2x2();
     test_trace_2x2();

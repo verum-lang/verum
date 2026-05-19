@@ -398,6 +398,8 @@ fn test_coalesced_access() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_thread_block_mapping();
     test_reduction_parallel();

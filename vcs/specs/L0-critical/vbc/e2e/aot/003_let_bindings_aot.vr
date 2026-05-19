@@ -6,6 +6,8 @@
 // @expected-exit: 0
 // @description: AOT let bindings, mutable variables, shadowing
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic let binding
     let x = 42;

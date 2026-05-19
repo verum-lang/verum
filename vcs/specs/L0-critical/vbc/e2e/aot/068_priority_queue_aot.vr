@@ -115,6 +115,8 @@ fn heap_count_le(h: MinHeap, threshold: Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Empty heap ===
     let empty = HEmpty;

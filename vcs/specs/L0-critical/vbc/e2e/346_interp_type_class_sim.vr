@@ -420,6 +420,8 @@ fn test_find_min_reverse() {
     assert_eq(find_min_with_ord(arr, 4, ord), 8);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_eq_default();
     test_eq_modular();

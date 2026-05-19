@@ -6,6 +6,8 @@
 // @expected-exit: 0
 // @description: Tuple edge cases with various numeric values
 
+mount core.prelude.*;
+
 fn main() {
     // === Test 1: Zero values ===
     let zeros = (0, 0, 0);

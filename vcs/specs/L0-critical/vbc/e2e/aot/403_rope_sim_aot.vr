@@ -329,6 +329,8 @@ fn test_palindrome() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty();
     test_push_and_get();

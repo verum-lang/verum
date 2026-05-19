@@ -671,6 +671,8 @@ fn test_various_programs() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_push_halt();
     test_add();

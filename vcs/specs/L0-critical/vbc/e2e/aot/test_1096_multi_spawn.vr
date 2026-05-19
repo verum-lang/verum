@@ -115,6 +115,8 @@ fn test_pipeline_stages() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Multi-Spawn Tests:");
     let mut failures = 0;

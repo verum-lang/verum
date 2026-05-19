@@ -148,6 +148,8 @@ fn test_us_coins_ways() {
     print("us_coins_ways: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_classic_coins();
     test_single_coin_divisible();

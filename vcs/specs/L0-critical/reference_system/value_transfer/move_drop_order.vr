@@ -38,6 +38,8 @@ type StructWithTrackers is {
     third: Tracker,
 };
 
+mount core.prelude.*;
+
 fn main() {
     test_reverse_declaration_order();
     test_struct_field_drop_order();

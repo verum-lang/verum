@@ -5,6 +5,8 @@
 // @expected-exit: 0
 // @description: Test Byte (UInt8) methods
 
+mount core.prelude.*;
+
 fn main() {
     let b: Byte = 65;  // ASCII 'A'
 

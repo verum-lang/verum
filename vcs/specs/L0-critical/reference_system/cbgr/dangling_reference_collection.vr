@@ -9,6 +9,8 @@
 /// CBGR detects the dangling reference when dereferenced.
 /// Spec: cbgr-implementation.md#dangling-prevention
 
+mount core.prelude.*;
+
 fn main() {
     let mut refs: List<&Int> = List.new();
 

@@ -6,6 +6,8 @@
 // @expected-exit: 0
 // @description: Test Maybe<&T> unwrap from compiled list.get()
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let list = [10, 20, 30, 40, 50];
 

@@ -3,6 +3,8 @@
 // @description: Test iterator protocols: map, filter, fold, chain, zip, enumerate
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Manual list iteration with for-in
     let nums = [10, 20, 30, 40, 50];

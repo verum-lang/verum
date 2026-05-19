@@ -191,6 +191,8 @@ fn empty_graph() -> Graph6 {
     Graph6 { adj0: 0, adj1: 0, adj2: 0, adj3: 0, adj4: 0, adj5: 0 }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // ========== Test 1: Cycle graph C6 ==========
     // 0-1-2-3-4-5-0

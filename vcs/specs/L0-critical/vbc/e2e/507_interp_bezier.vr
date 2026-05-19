@@ -190,6 +190,8 @@ fn test_arc_length_approx() {
     print("bezier_arc_length_approx: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_linear_bezier();
     test_quadratic_bezier();

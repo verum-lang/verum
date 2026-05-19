@@ -4,6 +4,8 @@
 // @tags: memory-safety, dangling-reference, scope, cbgr
 // @description: Tests that references escaping their scope are detected at runtime via CBGR
 
+mount core.prelude.*;
+
 fn main() {
     let outer_ref: &Int;
 

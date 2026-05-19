@@ -69,6 +69,8 @@ fn pipeline_len(p: Pipeline) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Strategy pattern
     let add_s = make_add_strategy();

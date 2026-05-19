@@ -7,6 +7,8 @@
 /// Protocol objects enable polymorphic behavior while CBGR ensures memory safety.
 /// Spec: cbgr-implementation.md#trait-object-layout
 
+mount core.prelude.*;
+
 fn main() {
     test_cbgr_tracking();
     print("  [OK] test_cbgr_tracking");

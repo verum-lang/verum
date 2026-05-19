@@ -17,6 +17,8 @@ type affine Handle is {
     name: Text,
 };
 
+mount core.prelude.*;
+
 fn main() {
     // Basic use after move with affine type
     let h1 = Handle { id: 1, name: Text.from("resource") };

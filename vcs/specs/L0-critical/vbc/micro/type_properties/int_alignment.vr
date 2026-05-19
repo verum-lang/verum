@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test type alignment properties for integer types
 
+mount core.prelude.*;
+
 fn main() {
     // Test Int alignments (generally same as size for primitives)
     assert_eq(Int8.alignment, 1);

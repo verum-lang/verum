@@ -299,6 +299,8 @@ fn test_create_record_chain() {
     assert_eq(p2.y, 2);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_ref_point2d();
     test_ref_point3d();

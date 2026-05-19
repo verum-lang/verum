@@ -257,6 +257,8 @@ fn test_ref_termination() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_counter_loop();
     test_running_stats();

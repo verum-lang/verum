@@ -55,6 +55,8 @@ fn blocked_histogram(data: List<Int>, n: Int, num_bins: Int, block_size: Int) ->
     global_bins
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Simple histogram via function
     let data = [0, 1, 2, 3, 0, 1, 2, 0, 1, 0, 0, 0, 0, 0, 0, 0];

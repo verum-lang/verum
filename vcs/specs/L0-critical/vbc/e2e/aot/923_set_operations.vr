@@ -6,6 +6,8 @@
 
 // Test: Set operations — new, insert, contains, remove, len, clear.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Create set and insert elements
     let mut s = Set.new();

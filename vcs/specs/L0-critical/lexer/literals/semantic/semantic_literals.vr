@@ -5,6 +5,8 @@
 // @description: Semantic literal tests for all 10 semantic tags defined in grammar/verum.ebnf
 // Reference: semantic_tag = 'gql' | 'rx' | 'sql' | 'url' | 'email' | 'json' | 'xml' | 'yaml' | 'contract' | 'sh';
 
+mount core.prelude.*;
+
 fn main() {
     test_gql_literals();
     test_rx_literals();

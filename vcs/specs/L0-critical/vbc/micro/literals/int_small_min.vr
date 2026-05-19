@@ -3,4 +3,6 @@
 // @tier: 0
 // @expected-exit: 0
 // LOAD_SMALL_I min value (-64)
+mount core.prelude.*;
+
 fn main() { assert_eq(-64, -64); }

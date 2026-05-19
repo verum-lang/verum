@@ -185,6 +185,8 @@ fn test_active_with_binding(n: Int) -> Text {
 // Main Test Function
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test simple active patterns
     assert_eq(test_simple_active_pattern(4), "even");

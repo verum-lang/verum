@@ -430,6 +430,8 @@ fn test_zero_gradient() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_dual_number_add();
     test_dual_number_mul();

@@ -153,6 +153,8 @@ fn test_lis() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_knapsack();
     test_knapsack_single();

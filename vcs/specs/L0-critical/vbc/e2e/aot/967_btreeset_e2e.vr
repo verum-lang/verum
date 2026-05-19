@@ -7,6 +7,8 @@
 //
 // E2E test for stdlib BTreeSet API.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut pass = 0;
 

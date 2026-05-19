@@ -209,6 +209,8 @@ fn test_closure_capture() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_stack_local_tier1();
     test_loop_local_tier1();

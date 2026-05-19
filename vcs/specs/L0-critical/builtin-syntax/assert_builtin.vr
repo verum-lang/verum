@@ -7,6 +7,8 @@
 // Tests that assert functions are built-ins called without ! suffix.
 // Spec: grammar/verum.ebnf Section 2.20.1 - builtin_assertion
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let x: Int = 42;
     let y: Int = 42;

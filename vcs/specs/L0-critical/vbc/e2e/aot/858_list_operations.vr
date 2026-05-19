@@ -17,6 +17,8 @@ fn sum_list(arr: List<Int>, n: Int) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic list creation and access
     let mut arr = [10, 20, 30, 40, 50];

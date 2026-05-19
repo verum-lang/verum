@@ -172,6 +172,8 @@ fn test_saturation() {
     assert_eq(s < 100, true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_pack_unpack();
     test_lerp();

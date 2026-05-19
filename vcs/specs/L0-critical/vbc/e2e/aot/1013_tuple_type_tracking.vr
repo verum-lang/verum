@@ -21,6 +21,8 @@ fn make_list_pair() -> (List<Int>, List<Int>) {
     (a, b)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut passed = 0;
     let mut failed = 0;

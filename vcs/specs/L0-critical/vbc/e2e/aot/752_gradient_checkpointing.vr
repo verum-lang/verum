@@ -36,6 +36,8 @@ fn relu_grad(x: Int, grad_out: Int) -> Int {
     if (x > 0) { grad_out } else { 0 }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Checkpoint saves forward values for backward pass
     // 3-layer network: x → L1 → ReLU → L2 → ReLU → L3 → output

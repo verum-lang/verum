@@ -85,6 +85,8 @@ fn test_attention_score() {
     print("test_attention_score passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rms_norm();
     test_rms_norm_uniform();

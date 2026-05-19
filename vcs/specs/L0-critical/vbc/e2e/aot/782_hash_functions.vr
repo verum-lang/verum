@@ -108,6 +108,8 @@ fn linear_probe_lookup(table: List<Int>, table_size: Int, key: Int) -> Int {
     found
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Division hash
     let h1 = div_hash(42, 16);

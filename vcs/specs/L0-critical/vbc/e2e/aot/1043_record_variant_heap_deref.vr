@@ -36,6 +36,8 @@ implement AST {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // (3 + 4) * (10 - 2) = 7 * 8 = 56
     let expr = AST.BinOp {

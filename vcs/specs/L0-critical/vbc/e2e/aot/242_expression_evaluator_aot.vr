@@ -145,6 +145,8 @@ fn test_single_number() {
     assert_eq(eval_rpn(e), 42);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_add();
     test_complex();

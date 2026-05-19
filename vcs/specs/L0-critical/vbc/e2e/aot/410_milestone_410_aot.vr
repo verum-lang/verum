@@ -295,6 +295,8 @@ fn test_running_median_duplicates() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_josephus_small();
     test_josephus_classic();

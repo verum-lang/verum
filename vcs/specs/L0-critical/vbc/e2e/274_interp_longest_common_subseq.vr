@@ -212,6 +212,8 @@ fn test_lcs_symmetry() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_lcs_equal();
     test_lcs_disjoint();

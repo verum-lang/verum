@@ -305,6 +305,8 @@ fn test_btree_search() {
     assert_eq(btree_search(t, 25), false);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bnode_search();
     test_bnode_insert();

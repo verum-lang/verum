@@ -3,6 +3,8 @@
 // @tier: 0
 // @expected-exit: 0
 // @description: Verify byte string literal contains correct ASCII bytes
+mount core.prelude.*;
+
 fn main() {
     let bs = b"hello";
     assert_eq(bs[0], 104);  // h

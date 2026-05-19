@@ -6,6 +6,8 @@
 // @expected-exit: 0
 // @description: Comprehensive edge case tests for tuple support
 
+mount core.prelude.*;
+
 fn main() {
     // === Test 1: Empty tuple (unit type) ===
     fn return_unit() -> () {

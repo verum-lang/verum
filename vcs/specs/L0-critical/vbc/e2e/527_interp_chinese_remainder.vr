@@ -133,6 +133,8 @@ fn test_crt_uniqueness() {
     print("crt_uniqueness: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_crt2();
     test_crt3_system();

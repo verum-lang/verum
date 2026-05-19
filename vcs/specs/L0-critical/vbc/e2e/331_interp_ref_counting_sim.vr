@@ -330,6 +330,8 @@ fn test_double_free_protection() {
     assert_eq(s3.total_frees, 2);  // Tracked but harmless in sim
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_alloc_free();
     test_multiple_refs();

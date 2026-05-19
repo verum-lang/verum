@@ -4,6 +4,8 @@
 // @tags: memory-safety, integer-overflow, checked, safe
 // @description: Tests explicit checked arithmetic operations
 
+mount core.prelude.*;
+
 fn main() {
     // Use a large value that will overflow when +1 is added
     let max_int = 9223372036854775807;

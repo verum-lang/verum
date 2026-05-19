@@ -53,6 +53,8 @@ fn tokenize(input: Text) -> List<Token> {
     tokens
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let tokens = tokenize("12+34*5");
     let count = tokens.len();

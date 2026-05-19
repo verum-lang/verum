@@ -47,6 +47,8 @@ fn generator_next(state: Int, step: Int) -> Int {
     state + step
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: State machine lifecycle
     let mut state = state_idle();

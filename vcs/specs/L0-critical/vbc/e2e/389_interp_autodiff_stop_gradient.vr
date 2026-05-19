@@ -302,6 +302,8 @@ fn test_loss_with_stop_gradient_constant() {
     assert_eq(a16_get(grads, 1), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_detach_blocks_gradient();
     test_no_detach();

@@ -16,6 +16,8 @@ fn create_display_debug() -> some T: Display + Debug;
 fn process_opaque(x: some T: Sized);
 
 // Main function for test execution
+mount core.prelude.*;
+
 fn main() {
     // Parser-only test - runtime not tested
     assert(true);

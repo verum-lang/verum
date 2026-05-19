@@ -138,6 +138,8 @@ fn arrays_equal(a: Arr8, b: Arr8, n: Int) -> Bool {
     eq
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // --- Test 1: Standard unsorted array ---
     let a1 = Arr8 { e0: 5, e1: 3, e2: 8, e3: 1, e4: 7, e5: 2, e6: 6, e7: 4 };

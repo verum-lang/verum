@@ -8,6 +8,8 @@ fn make_msg(n: Int) -> Text {
     f"item_{n}"
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Heavy string allocation: 200 format strings in a loop
     let mut i = 0;

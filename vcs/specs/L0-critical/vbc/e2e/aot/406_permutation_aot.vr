@@ -288,6 +288,8 @@ fn test_four_elements() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_identity();
     test_last_perm();

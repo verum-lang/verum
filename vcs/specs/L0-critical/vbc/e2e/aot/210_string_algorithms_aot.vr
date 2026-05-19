@@ -138,6 +138,8 @@ fn test_upper_count() {
     assert_eq(count_upper(mixed), 3);  // H, L, L
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_palindrome();
     test_counting();

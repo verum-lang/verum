@@ -168,6 +168,8 @@ fn test_range_comparison() {
 }
 
 // Main function that calls all tests
+mount core.prelude.*;
+
 fn main() {
     test_exclusive_ranges();
     test_inclusive_ranges();

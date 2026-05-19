@@ -7,6 +7,8 @@
 /// Borrows must be properly scoped within loop iterations.
 /// Each iteration can create new borrows that don't outlive the iteration.
 
+mount core.prelude.*;
+
 fn main() {
     // Immutable reference in for loop - iterate by value
     let numbers = [1, 2, 3, 4, 5];

@@ -339,6 +339,8 @@ fn test_arr4_pattern() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_record();
     test_vec3();

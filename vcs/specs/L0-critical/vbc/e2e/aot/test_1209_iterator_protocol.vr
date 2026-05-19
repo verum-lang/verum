@@ -60,6 +60,8 @@ fn sum_range(start: Int, end_val: Int) -> Int {
     sum
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

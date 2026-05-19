@@ -132,6 +132,8 @@ fn test_maybe_chain() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Comprehensive E2E Tests:");
     let mut failures = 0;

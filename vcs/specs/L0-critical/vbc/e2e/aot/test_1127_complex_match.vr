@@ -142,6 +142,8 @@ fn test_calculator() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Complex Match Tests:");
     let mut failures = 0;

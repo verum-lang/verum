@@ -109,6 +109,8 @@ fn test_chained_spawns() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Spawn Type Capture Tests:");
 

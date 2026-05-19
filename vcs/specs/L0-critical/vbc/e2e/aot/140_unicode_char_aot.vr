@@ -94,6 +94,8 @@ fn test_punctuation() {
     assert(is_p4);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_ascii_alpha();
     test_case_conversion_logic();

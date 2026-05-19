@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test Float methods
 
+mount core.prelude.*;
+
 fn main() {
     // Test abs
     assert_eq((-3.14).abs(), 3.14);

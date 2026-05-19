@@ -115,6 +115,8 @@ fn test_weight_ops() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Advanced Operator Tests:");
     let mut failures = 0;

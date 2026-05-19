@@ -5,6 +5,8 @@
 // @expected-exit: 0
 // @description: Test Int32 methods (arithmetic, bit operations)
 
+mount core.prelude.*;
+
 fn main() {
     let a: Int32 = 100;
     let b: Int32 = -50;

@@ -355,6 +355,8 @@ fn test_mod_arithmetic() {
     assert_eq(mod_pow(5, 10, 11), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_abs_sign();
     test_min_max_clamp();

@@ -19,6 +19,8 @@ fn gpu_stream_destroy(stream_id: Int) -> Int { @intrinsic("GPU_STREAM_DESTROY", 
 
 fn gpu_get_device() -> Int { @intrinsic("GPU_GET_DEVICE") }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     if gpu_get_device() == 0 {
         print("SKIP: No GPU device available");

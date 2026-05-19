@@ -268,6 +268,8 @@ fn test_returned_value() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_single_mutable_ref();
     test_mut_ref_scope();

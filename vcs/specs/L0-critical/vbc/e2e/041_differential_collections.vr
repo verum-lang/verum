@@ -452,6 +452,8 @@ fn test_set_empty_ops() {
     print("set_empty: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_stack();
     test_stack_fill();

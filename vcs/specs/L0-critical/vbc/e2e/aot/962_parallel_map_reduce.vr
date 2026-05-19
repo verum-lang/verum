@@ -3,6 +3,8 @@
 // @description: Parallel map-reduce with multiple worker threads
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Parallel sum of squares using 4 worker threads
     // Each worker computes partial sum, sends result via channel

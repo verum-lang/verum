@@ -84,6 +84,8 @@ fn bst_sum(tree: BST) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Empty tree
     let empty = Empty;

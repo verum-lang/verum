@@ -235,6 +235,8 @@ fn test_queue_peek_and_size() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_stack_lifo();
     test_stack_size();

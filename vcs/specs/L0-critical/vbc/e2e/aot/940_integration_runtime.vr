@@ -28,6 +28,8 @@ fn compute_sum(start: Int, end: Int) -> Int {
     sum
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Generator collected into list
     let mut fibs: List<Int> = [];

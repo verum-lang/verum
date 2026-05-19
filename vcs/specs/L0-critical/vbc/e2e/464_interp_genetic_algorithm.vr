@@ -250,6 +250,8 @@ fn test_ga_elitism() {
     print("ga_elitism: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_fitness_evaluation();
     test_crossover_operation();

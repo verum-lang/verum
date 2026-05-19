@@ -596,6 +596,8 @@ fn test_reduction_sum_parts() {
 // Main: run all tests
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_matmul_chain();
     test_det_inverse_roundtrip();

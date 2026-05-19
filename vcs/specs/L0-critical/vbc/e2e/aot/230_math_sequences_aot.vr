@@ -170,6 +170,8 @@ fn test_sum_powers() {
     assert_eq(sum_cubes(5), t5 * t5);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_fibonacci();
     test_triangular();

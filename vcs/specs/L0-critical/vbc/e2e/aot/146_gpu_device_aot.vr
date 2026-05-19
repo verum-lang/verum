@@ -83,6 +83,8 @@ fn test_device_reset() {
     print("test_device_reset passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_device_count();
     test_device_properties();

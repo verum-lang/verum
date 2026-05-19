@@ -206,6 +206,8 @@ fn test_struct_methods() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Advanced Pattern Tests:");
     let mut failures = 0;

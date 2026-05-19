@@ -200,6 +200,8 @@ fn test_three_symbols() {
     print("three_symbols: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_two_symbols();
     test_four_symbols_equal();

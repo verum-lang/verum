@@ -11,6 +11,8 @@ fn abs_val(x: Int) -> Int {
     if (x < 0) { 0 - x } else { x }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: ReLU properties
     // relu(x) = max(0, x)

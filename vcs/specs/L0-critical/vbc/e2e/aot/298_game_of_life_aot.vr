@@ -109,6 +109,8 @@ fn grids_equal(a: Grid, b: Grid) -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Blinker: period 2 oscillator
     // . X .     . . .

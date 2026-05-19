@@ -439,6 +439,8 @@ fn test_filter_process() {
     assert_eq(output_sum, 20);   // 2+4+6+8
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_rendezvous();
     test_sync_not_ready();

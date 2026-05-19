@@ -25,6 +25,8 @@ fn double_all(items: &mut List<Int>) {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic mutable reference
     let mut data = Text.from("hello");

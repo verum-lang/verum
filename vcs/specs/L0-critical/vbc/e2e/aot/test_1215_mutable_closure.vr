@@ -20,6 +20,8 @@ fn make_accumulator(init: Int) -> fn(Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

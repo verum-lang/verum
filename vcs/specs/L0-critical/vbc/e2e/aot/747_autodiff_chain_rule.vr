@@ -85,6 +85,8 @@ fn fd_grad(f_plus: Int, f_minus: Int) -> Int {
     (f_plus - f_minus) / 2
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Simple composition f(g(x)) = (3x+1)^2
     assert_eq(grad_comp1(0), 6);

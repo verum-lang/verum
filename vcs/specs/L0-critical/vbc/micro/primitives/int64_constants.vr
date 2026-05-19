@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test Int64 type constants (MIN, MAX, BITS)
 
+mount core.prelude.*;
+
 fn main() {
     // Test Int64.MIN (-2^63)
     assert_eq(Int64.MIN(), -9223372036854775808);

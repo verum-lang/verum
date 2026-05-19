@@ -6,6 +6,8 @@ fn compute(a: Int, b: Int) -> Int {
     a * b + a - b
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert_eq(compute(3, 2), 7);
     assert_eq(compute(0, 5), -5);

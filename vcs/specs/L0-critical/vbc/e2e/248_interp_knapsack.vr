@@ -372,6 +372,8 @@ fn test_increasing_capacity() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_knapsack();
     test_classic_knapsack();

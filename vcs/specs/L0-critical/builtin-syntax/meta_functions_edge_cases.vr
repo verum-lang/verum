@@ -11,6 +11,8 @@
 /// 4. @concat with dynamic and static parts
 /// 5. Location functions in different contexts
 
+mount core.prelude.*;
+
 fn main() {
     test_const_expressions();
     test_location_functions();

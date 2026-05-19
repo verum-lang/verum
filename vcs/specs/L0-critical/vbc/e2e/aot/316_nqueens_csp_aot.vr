@@ -270,6 +270,8 @@ fn test_validate_invalid() {
     assert_eq(validate_solution(bad2, 4), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_is_safe();
     test_4queens_count();

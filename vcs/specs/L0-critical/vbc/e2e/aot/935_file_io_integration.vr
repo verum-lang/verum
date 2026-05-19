@@ -29,6 +29,8 @@ fn compute_data(n: Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Write and read back a simple string
     let path1 = "/tmp/verum_test_935a.txt";

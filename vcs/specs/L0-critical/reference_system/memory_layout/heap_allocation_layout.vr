@@ -11,6 +11,8 @@
 ///   - epoch (4 bytes): allocation epoch timestamp
 /// Spec: cbgr-implementation.md#heap-layout
 
+mount core.prelude.*;
+
 fn main() {
     test_heap_basic_layout();
     print("  [OK] test_heap_basic_layout");

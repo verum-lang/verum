@@ -45,6 +45,8 @@ fn color_value(c: Color) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Record creation and field access
     let p = Vec2 { x: 3, y: 4 };

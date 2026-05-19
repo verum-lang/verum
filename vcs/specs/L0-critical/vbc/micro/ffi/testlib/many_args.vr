@@ -10,6 +10,8 @@ extern {
     fn ffi_add_8_i64(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test 8 integer arguments
     // On System V AMD64 ABI, first 6 integer args go to registers, rest on stack

@@ -216,6 +216,8 @@ fn test_incremental_update() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_lowbit();
     test_single_update_query();

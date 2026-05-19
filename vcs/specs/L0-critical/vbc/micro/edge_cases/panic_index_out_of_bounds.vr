@@ -5,6 +5,8 @@
 // @timeout: 5000
 // @expected-panic: Index out of bounds
 
+mount core.prelude.*;
+
 fn main() {
     let arr = [10, 20, 30];
     let idx = 5;

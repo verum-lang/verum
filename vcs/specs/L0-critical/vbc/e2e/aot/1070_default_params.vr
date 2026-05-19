@@ -14,6 +14,8 @@ fn compute(a: Int, b: Int = 0, c: Int = 0) -> Int {
     a + b + c
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test with all args provided
     let r1 = compute(1, 2, 3);

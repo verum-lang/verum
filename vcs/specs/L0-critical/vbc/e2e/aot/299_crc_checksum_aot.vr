@@ -92,6 +92,8 @@ fn poly_hash(data: Arr8, n: Int, base: Int, modulus: Int) -> Int {
     h
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let data = Arr8 { d0: 72, d1: 101, d2: 108, d3: 108, d4: 111, d5: 0, d6: 0, d7: 0 };
     let n = 5;  // "Hello" in ASCII

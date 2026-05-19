@@ -143,6 +143,8 @@ fn test_distinct_window() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_max_sum_window();
     test_kadane();

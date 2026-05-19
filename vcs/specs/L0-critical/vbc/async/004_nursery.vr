@@ -408,6 +408,8 @@ async fn test_nursery_scatter_gather() {
 
 async fn process_item(x: Int) -> Int { x * 2 }
 
+mount core.prelude.*;
+
 fn main() {
     @block_on(async {
         // Basic usage

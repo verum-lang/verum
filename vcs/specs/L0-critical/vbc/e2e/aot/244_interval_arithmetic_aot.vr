@@ -144,6 +144,8 @@ fn test_identities() {
     assert_eq(ivl_eq(ivl_intersection(a, a), a), true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic();
     test_arithmetic();

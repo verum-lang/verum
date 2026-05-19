@@ -76,6 +76,8 @@ fn safe_div(a: Int, b: Int) -> Option {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Ordering
     assert_eq(ordering_to_int(compare(1, 2)), -1);

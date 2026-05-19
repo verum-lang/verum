@@ -10,6 +10,8 @@ fn add_int(a: Int, b: Int) -> Int {
     a + b
 }
 
+mount core.prelude.*;
+
 fn main() {
     print(1); print("\n");
 

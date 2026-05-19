@@ -200,6 +200,8 @@ fn test_toad() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_grid();
     test_block();

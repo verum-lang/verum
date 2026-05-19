@@ -27,6 +27,8 @@
 // This test pins the soundness contract: `r.unwrap()` on a known
 // Err value must panic, not return the inner Err payload.
 
+mount core.prelude.*;
+
 fn main() {
     let r: Result<Int, Int> = Result.Err(99);
     let v = r.unwrap();           // must panic with the message below

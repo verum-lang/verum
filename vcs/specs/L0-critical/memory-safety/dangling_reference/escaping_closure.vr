@@ -13,6 +13,8 @@ fn create_adder() -> fn(Int) -> Int {
 }
 // When function returns, 'base' is deallocated and generation is bumped
 
+mount core.prelude.*;
+
 fn main() {
     let add = create_adder();
     // Invoking closure dereferences base_ref, triggering CBGR check

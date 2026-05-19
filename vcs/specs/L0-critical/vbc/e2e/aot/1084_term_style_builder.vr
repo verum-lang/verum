@@ -217,6 +217,8 @@ fn test_rgb_color() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let r1 = test_modifier_ops();
     if r1 != 0 { return r1; }

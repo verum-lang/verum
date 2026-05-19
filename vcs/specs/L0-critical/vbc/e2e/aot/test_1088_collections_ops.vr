@@ -136,6 +136,8 @@ fn test_nested_list() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Collection Operations Tests:");
     let mut failures = 0;

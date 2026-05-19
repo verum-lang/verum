@@ -69,6 +69,8 @@ implement Stack {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Pair operations
     let p = Pair.new(3, 7);

@@ -63,6 +63,8 @@ fn test_recv_in_spawn() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Channel Maybe Recv Tests:");
     let mut failures = 0;

@@ -309,6 +309,8 @@ fn test_retry_pattern() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_error_handling();
     test_error_propagation();

@@ -19,6 +19,8 @@ extern {
     fn ffi_round_f64(x: Float) -> Float;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Pi approximation for testing
     let pi = 3.14159265358979;

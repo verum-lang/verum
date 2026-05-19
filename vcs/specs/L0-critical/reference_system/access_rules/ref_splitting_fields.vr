@@ -8,6 +8,8 @@
 /// This is safe because the fields don't overlap.
 /// Spec: 04-memory-model.md#borrow-splitting
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_field_splitting();
     test_nested_field_splitting();

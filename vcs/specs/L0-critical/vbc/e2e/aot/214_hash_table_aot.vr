@@ -173,6 +173,8 @@ fn test_contains() {
     assert_eq(hmap_contains(m, 43), false);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_ops();
     test_collision();

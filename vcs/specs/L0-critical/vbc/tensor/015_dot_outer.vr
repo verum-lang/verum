@@ -131,6 +131,8 @@ fn test_outer_rank1() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_dot_product();
     test_outer_product();

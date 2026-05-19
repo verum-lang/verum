@@ -74,6 +74,8 @@ fn test_nested_scope_generation() {
     assert_eq(*ro, 100);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_generation_basic();
     test_independent_generations();

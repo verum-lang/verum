@@ -64,6 +64,8 @@ fn abs_val(x: Int) -> Int {
     x
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Triangle with vertices: A(0,0), B(4,0), C(0,3)
     // This is a 3-4-5 right triangle

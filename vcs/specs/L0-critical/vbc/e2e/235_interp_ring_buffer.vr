@@ -250,6 +250,8 @@ fn test_extensive_wraparound() {
     assert_eq(total_popped, 10);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_buffer();
     test_push_and_peek();

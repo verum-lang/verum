@@ -122,6 +122,8 @@ fn test_closest_pair() {
     print("closest_pair: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_distance();
     test_triangle_area();

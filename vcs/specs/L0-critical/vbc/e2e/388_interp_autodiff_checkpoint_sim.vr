@@ -354,6 +354,8 @@ fn test_gradient_identity_chain() {
     assert_eq(grad, scale()); // product of 1.0^6 = 1.0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_chain();
     test_checkpoint_matches_full();

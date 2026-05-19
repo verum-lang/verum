@@ -9,6 +9,8 @@
 /// Epochs provide temporal tracking beyond generations.
 /// Spec: cbgr-implementation.md#epoch-management
 
+mount core.prelude.*;
+
 fn main() {
     test_epoch_tracking();
     test_epoch_capabilities();

@@ -161,6 +161,8 @@ fn test_higher_order_composition() {
     print("higher_order_composition: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_records_with_closures();
     test_generator_with_variants();

@@ -8,6 +8,8 @@
 /// 1. Fixed-size arrays [T; N] - size known at compile time, static bounds checking
 /// 2. Dynamic arrays [T] or List<T> - can grow/shrink, runtime bounds checking only
 
+mount core.prelude.*;
+
 fn main() {
     test_fixed_array_valid();
     test_dynamic_array_valid();

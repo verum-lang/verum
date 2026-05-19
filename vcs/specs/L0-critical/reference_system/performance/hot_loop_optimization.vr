@@ -7,6 +7,8 @@
 /// Compiler should hoist checks out of tight loops.
 /// Spec: cbgr-implementation.md#check-optimization
 
+mount core.prelude.*;
+
 fn main() {
     test_loop_check_hoisting();
     test_invariant_ref_optimization();

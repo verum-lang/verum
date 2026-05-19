@@ -8,6 +8,8 @@
 /// Some tier conversions are implicit, others require explicit casts.
 /// Spec: cbgr-implementation.md#tier-coercion
 
+mount core.prelude.*;
+
 fn main() {
     test_checked_to_managed();
     test_managed_coercion();

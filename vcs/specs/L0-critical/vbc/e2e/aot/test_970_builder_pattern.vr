@@ -203,6 +203,8 @@ fn test_host_override() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Builder Pattern Tests:");
     let mut failures = 0;

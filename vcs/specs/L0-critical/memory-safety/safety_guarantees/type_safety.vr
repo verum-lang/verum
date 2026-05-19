@@ -20,6 +20,8 @@
 /// - Data corruption from type mismatches
 /// - Information disclosure through type coercion
 
+mount core.prelude.*;
+
 fn main() {
     test_strong_typing();
     test_nominal_typing();

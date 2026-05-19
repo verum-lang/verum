@@ -200,6 +200,8 @@ fn test_error_patterns() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
     failures = failures + test_semantic_types();

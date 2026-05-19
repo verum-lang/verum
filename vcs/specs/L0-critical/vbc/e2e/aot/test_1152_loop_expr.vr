@@ -75,6 +75,8 @@ fn test_collatz_loop() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Loop Expression Tests:");
     let mut failures = 0;

@@ -3,6 +3,8 @@
 // @description: Channel-based sync patterns
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Channel send/recv roundtrip (same thread)
     let ch = Channel.new(5);

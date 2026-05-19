@@ -399,6 +399,8 @@ fn test_pipeline_rabin_z_lis_partition() {
     print("pipeline4_rabin_z_lis_partition: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_pipeline_rabin_lis_partition_ternary();
     test_pipeline_lis_partition_matching();

@@ -148,6 +148,8 @@ fn make_random_array(seed: Int, n: Int) -> A16 {
     arr
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Bubble sort descending
     let desc = A16 {

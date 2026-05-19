@@ -4,6 +4,8 @@
 // @tags: memory-safety, cbgr, epoch
 // @description: Tests CBGR epoch capability enforcement
 
+mount core.prelude.*;
+
 fn main() {
     let data = Heap.new([1, 2, 3]);
 

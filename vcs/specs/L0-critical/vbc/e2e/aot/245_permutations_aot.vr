@@ -166,6 +166,8 @@ fn test_cycle() {
     assert_eq(perm4_eq(p, perm4_id()), true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_identity();
     test_inverse();

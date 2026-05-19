@@ -29,6 +29,8 @@ fn join_with(items: List<Int>, sep: Text) -> Text {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: basic f-string with expressions
     let x = 10;

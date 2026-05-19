@@ -366,6 +366,8 @@ fn test_single_element() {
     assert_eq(skip_max(sl), 42);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_insert_sorted();
     test_levels_built();

@@ -8,6 +8,8 @@
 // Currently skipped because threading primitives (spawn, channel, ThreadHandle)
 // are not yet implemented in the compiler.
 
+mount core.prelude.*;
+
 fn main() {
     // Placeholder test - actual channel test requires spawn syntax
     print("Channel communication test - skipped (threading not implemented)");

@@ -8,6 +8,8 @@
 /// reading uninitialized memory. This file demonstrates all
 /// valid initialization patterns.
 
+mount core.prelude.*;
+
 fn main() {
     test_literal_init();
     test_shorthand_init();

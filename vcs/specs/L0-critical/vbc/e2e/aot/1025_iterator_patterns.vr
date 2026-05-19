@@ -17,6 +17,8 @@ fn fibonacci(n: Int) -> List<Int> {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: For-in over range
     let mut sum = 0;

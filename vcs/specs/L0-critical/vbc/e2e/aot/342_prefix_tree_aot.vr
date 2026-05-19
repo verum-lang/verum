@@ -369,6 +369,8 @@ fn test_common_prefix_sharing() {
     assert_eq(trie_search(t, make_word3(0, 1, 2)), 0); // "abc" not a complete word
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_insert_search();
     test_prefix_check();

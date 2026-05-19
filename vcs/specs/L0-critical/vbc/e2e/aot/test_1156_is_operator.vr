@@ -84,6 +84,8 @@ fn test_is_in_loop() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Is Operator Tests:");
     let mut failures = 0;

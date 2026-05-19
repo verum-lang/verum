@@ -237,6 +237,8 @@ fn test_inverse_ackermann_concept() {
     assert_eq(ack_closed(3, 3), 61);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_ack_m0();
     test_ack_m1();

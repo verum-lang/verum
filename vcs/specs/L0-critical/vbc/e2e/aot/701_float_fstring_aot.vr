@@ -4,6 +4,8 @@
 // @tags: aot, format-string, float, interpolation
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // 1: Basic float interpolation
     let pi = 3.14;

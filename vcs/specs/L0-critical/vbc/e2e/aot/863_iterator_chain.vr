@@ -65,6 +65,8 @@ fn mul(a: Int, b: Int) -> Int {
     a * b
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Build a list
     let mut nums: List<Int> = [];

@@ -62,6 +62,8 @@ fn sum(a: List<Int>, n: Int) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Simple list return
     let z = zeros(8);

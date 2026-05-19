@@ -88,6 +88,8 @@ fn test_spawn_in_loop() {
     print("spawn_in_loop: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_spawn_await();
     test_multiple_tasks();

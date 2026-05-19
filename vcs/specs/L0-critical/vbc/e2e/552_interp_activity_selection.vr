@@ -158,6 +158,8 @@ fn test_single_activity() {
     print("single_activity: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_classic_example();
     test_all_compatible();

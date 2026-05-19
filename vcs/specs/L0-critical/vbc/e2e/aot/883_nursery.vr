@@ -21,6 +21,8 @@ fn slow_sum(n: Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: basic thread spawn-await pattern (simulating nursery)
     // Since nursery syntax may not be fully wired, test via spawn/await

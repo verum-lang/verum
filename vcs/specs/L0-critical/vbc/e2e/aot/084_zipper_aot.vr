@@ -119,6 +119,8 @@ fn zipper_to_list(z: Zipper) -> IList {
     ICons { val: cur.focus, next: cur.right }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Create from list [1,2,3,4,5] ===
     let xs = list_range(1, 6);

@@ -164,6 +164,8 @@ fn test_mst_parents() {
     print("mst_parents: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_mst();
     test_complete_graph_mst();

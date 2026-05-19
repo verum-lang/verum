@@ -122,6 +122,8 @@ fn test_squares_generator() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Generator Tests:");
     let mut failures = 0;

@@ -210,6 +210,8 @@ fn test_deref_coercion() {
     assert_eq(r.inner, 42);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_immutable_reference();
     test_mutable_reference();

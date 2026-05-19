@@ -76,6 +76,8 @@ fn safe_sqrt(n: Int) -> Maybe {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Maybe basics
     let j = Just(42);

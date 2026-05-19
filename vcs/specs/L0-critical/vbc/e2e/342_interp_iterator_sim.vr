@@ -420,6 +420,8 @@ fn test_skip_all() {
     assert_eq(result.len, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_iteration();
     test_collect();

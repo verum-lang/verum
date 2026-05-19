@@ -349,6 +349,8 @@ fn test_find_best() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_closure_capturing_closure();
     test_nested_closure_capture();

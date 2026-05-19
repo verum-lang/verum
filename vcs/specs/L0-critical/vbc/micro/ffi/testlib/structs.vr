@@ -34,6 +34,8 @@ extern {
     fn ffi_point3d_magnitude(p: Point3D) -> Float;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test Point2D creation
     let p1 = ffi_make_point2d(3, 4);

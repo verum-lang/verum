@@ -33,6 +33,8 @@ fn worker_sum(iterations: Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Mutex basic lock/unlock
     let mtx = __mutex_new_raw();

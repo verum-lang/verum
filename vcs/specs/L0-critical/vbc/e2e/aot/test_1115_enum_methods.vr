@@ -116,6 +116,8 @@ fn test_expr_eval() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Enum Methods Tests:");
     let mut failures = 0;

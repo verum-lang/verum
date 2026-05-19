@@ -307,6 +307,8 @@ fn test_all_valid_permutations() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_all_permutations();
     test_lexicographic_order();

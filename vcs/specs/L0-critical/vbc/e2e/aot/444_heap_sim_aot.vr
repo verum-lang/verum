@@ -170,6 +170,8 @@ fn test_heap_duplicates() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_heap_basic();
     test_heap_sorted_extract();

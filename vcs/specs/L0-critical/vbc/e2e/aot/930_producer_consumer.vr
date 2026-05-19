@@ -45,6 +45,8 @@ fn producer_fib(n: Int) -> Int {
     b
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: 4 producers compute non-overlapping ranges
     let p1 = spawn producer_range(0, 250);

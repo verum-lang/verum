@@ -14,6 +14,8 @@ extern {
     fn ffi_round_f64(x: Float) -> Float;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test sqrt
     let sqrt4 = ffi_sqrt_f64(4.0);

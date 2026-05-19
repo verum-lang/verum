@@ -186,6 +186,8 @@ fn test_collatz() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Multi-Feature Stress Tests:");
     let mut failures = 0;

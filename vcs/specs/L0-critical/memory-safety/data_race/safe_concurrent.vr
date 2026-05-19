@@ -12,6 +12,8 @@
 //
 // Currently skipped because threading primitives are not yet implemented.
 
+mount core.prelude.*;
+
 fn main() {
     // Placeholder - demonstrates the intended safe concurrency patterns
     print("Safe concurrent patterns test - skipped (threading not implemented)");

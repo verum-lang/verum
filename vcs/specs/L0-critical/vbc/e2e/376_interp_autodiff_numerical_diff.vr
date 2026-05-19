@@ -218,6 +218,8 @@ fn test_convergence() {
     assert(err3 <= err2 + 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_square_derivative();
     test_cube_derivative();

@@ -8,6 +8,8 @@ type Container is {
     data: Heap<List<Int>>,
 };
 
+mount core.prelude.*;
+
 fn main() {
     let container = Container {
         data: Heap.new([1, 2, 3]),

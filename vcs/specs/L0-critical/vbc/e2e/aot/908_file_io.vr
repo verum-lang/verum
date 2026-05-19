@@ -14,6 +14,8 @@ fn __file_read_to_string_raw(path: Text) -> Text {
     ""
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let path = "/tmp/verum_test_908.txt";
     let content = "Hello from Verum AOT!";

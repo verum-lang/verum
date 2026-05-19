@@ -42,6 +42,8 @@ implement Accum {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Counter with while loop
     let mut c = Counter.new(0, 3);

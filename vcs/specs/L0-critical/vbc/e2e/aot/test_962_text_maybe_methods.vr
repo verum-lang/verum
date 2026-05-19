@@ -90,6 +90,8 @@ fn test_split_once() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Text Maybe Methods Tests:");
 

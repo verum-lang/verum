@@ -227,6 +227,8 @@ fn is_subsequence(a: Seq8, b: Seq8) -> Bool {
     ai == a.len
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Classic LCS example ===
     // s = [1,2,3,4,5], t = [2,4,5,6]

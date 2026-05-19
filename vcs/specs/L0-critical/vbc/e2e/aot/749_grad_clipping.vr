@@ -59,6 +59,8 @@ fn scale_grads(grads: List<Int>, n: Int, scale_num: Int, scale_den: Int) -> List
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: L2 norm computation
     let grads = [3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

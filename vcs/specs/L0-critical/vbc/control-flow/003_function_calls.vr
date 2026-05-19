@@ -145,6 +145,8 @@ fn test_call_stack_depth() {
     assert_eq(recurse_depth(100), 100);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_simple_call();
     test_no_args();

@@ -128,6 +128,8 @@ fn test_matrix_power() {
     assert_eq(a4.m01, 3);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_ops();
     test_multiply();

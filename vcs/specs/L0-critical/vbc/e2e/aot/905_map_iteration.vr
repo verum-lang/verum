@@ -7,6 +7,8 @@
 // Test: Iterate over map entries by tracking keys and values in parallel
 // lists, verify map contents via loop, and compute sums from tracked values.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Build map with 5 entries (keys 1..5, values key*10),
     // verify all entries, sum values = 150

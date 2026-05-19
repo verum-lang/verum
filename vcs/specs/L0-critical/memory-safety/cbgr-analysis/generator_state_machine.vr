@@ -304,6 +304,8 @@ fn test_generator_cleanup() {
 // Entry Point
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_single_yield();
     test_count_up();

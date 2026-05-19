@@ -217,6 +217,8 @@ fn max_non_adjacent(a: Arr8, n: Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // --- Fibonacci ---
     assert_eq(fib(0), 0);

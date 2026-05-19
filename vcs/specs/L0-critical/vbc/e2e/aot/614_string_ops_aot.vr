@@ -295,6 +295,8 @@ fn test_find_substr() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_slen_basic();
     test_reverse();

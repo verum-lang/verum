@@ -52,6 +52,8 @@ fn process(cmd: Command) -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

@@ -149,6 +149,8 @@ fn test_lex_classify() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("State Pattern Tests:");
     let mut failures = 0;

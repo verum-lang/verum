@@ -206,6 +206,8 @@ fn test_comparison_produces_bool() {
     assert(in_range);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_and_truth_table();
     test_or_truth_table();

@@ -36,6 +36,8 @@ fn step_counter() -> Int using [Counter] {
     Counter.increment()
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: UpCounter via context
     let mut up = UpCounter { value: 10 };

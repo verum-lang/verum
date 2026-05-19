@@ -348,6 +348,8 @@ fn test_pow_mod() {
     assert_eq(pow_mod(31, 1, 1000000007), 31);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_search_basic();
     test_search_at_start();

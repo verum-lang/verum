@@ -390,6 +390,8 @@ fn test_map_fold_max_neg() {
     print("map_fold_max_neg: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_apply_basic();
     test_composition();

@@ -321,6 +321,8 @@ fn test_three_variable_sat() {
     print("three_variable_sat: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_connectives();
     test_implies_xor_iff();

@@ -12,6 +12,8 @@ extern {
     fn ffi_tls_get() -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Initial value should be 0
     let init = ffi_tls_get();

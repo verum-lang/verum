@@ -146,6 +146,8 @@ fn test_zip_with() {
     assert_eq(zip_with(4, mul), 38);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_for_each();
     test_map_reduce();

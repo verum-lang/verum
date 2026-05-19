@@ -206,6 +206,8 @@ fn test_single_symbol() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_decode_simple();
     test_decode_subtractive();

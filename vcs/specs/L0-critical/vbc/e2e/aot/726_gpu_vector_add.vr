@@ -40,6 +40,8 @@ fn dot_product(a: List<Int>, b: List<Int>, n: Int) -> Int {
     partial
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let n = 8;
 

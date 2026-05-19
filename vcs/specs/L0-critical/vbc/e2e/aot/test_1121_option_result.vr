@@ -157,6 +157,8 @@ fn test_maybe_map() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Option/Result Tests:");
     let mut failures = 0;

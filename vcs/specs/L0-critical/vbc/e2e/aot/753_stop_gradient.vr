@@ -39,6 +39,8 @@ fn quantize(x: Int, step: Int) -> Int {
     (x / step) * step
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Stop gradient preserves forward value
     assert_eq(stop_grad(42), 42);

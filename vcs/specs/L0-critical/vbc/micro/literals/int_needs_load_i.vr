@@ -3,4 +3,6 @@
 // @tier: 0
 // @expected-exit: 0
 // Just outside LOAD_SMALL_I range, needs LOAD_I
+mount core.prelude.*;
+
 fn main() { assert_eq(64, 64); }

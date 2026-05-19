@@ -112,6 +112,8 @@ fn test_growth_rate() {
     print("growth_rate: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_dp_values();
     test_direct_values();

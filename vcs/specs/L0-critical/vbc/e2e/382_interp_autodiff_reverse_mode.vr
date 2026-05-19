@@ -293,6 +293,8 @@ fn test_chain_operations() {
     assert_eq(a16_get(adj, 0), 2 * scale()); // df/dx = 2
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sub_gradient();
     test_quadratic();

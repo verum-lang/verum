@@ -4,6 +4,8 @@
 // @tags: memory-safety, dangling-reference, collection, invalidation, cbgr
 // @description: Tests that collection references are invalidated on mutation (detected at COMPILE-TIME)
 
+mount core.prelude.*;
+
 fn main() {
     let mut items: List<Int> = [1, 2, 3, 4, 5];
 

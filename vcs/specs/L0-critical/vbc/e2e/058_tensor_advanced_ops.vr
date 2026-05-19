@@ -1005,6 +1005,8 @@ fn test_softmax_approx() {
 // Main — run all tests
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_relu();
     test_leaky_relu();
