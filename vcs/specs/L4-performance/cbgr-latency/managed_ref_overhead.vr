@@ -208,6 +208,8 @@ fn benchmark_write_operation() -> BenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== CBGR Managed Reference Overhead Benchmark ===\n");
 

@@ -81,6 +81,8 @@ fn ldadd(ptr: &mut I64, val: I64) -> I64 {
     prev
 }
 
+mount core.prelude.*;
+
 fn main() {
     let timer = read_timer();
     assert(timer > 0);

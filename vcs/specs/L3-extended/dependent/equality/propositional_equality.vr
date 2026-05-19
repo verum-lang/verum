@@ -87,6 +87,8 @@ fn mod_setoid(n: Int) -> Setoid<Int> {
     Setoid { eq: |a, b| (a - b) % n == 0 }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic equality proofs
     let r: PropEq<Int> = prop_refl();

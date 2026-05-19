@@ -28,6 +28,8 @@ const ALLOCATION_RATE: Int = 100_000;  // Allocations per iteration
 const MEASUREMENT_ITERATIONS: Int = 100;
 const PAUSE_SAMPLE_SIZE: Int = 10_000;
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("GC Latency Performance");
 

@@ -73,4 +73,6 @@ theorem sqrt_approx(x: Float)
     proof by auto
 }
 
+mount core.prelude.*;
+
 fn main() {}

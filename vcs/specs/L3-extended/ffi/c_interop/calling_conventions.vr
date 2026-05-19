@@ -390,6 +390,8 @@ fn window_proc(
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Calling convention test compilation
 }

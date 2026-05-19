@@ -235,6 +235,8 @@ type SelfRef<'a> is {
     reference: &'a Text,  // References own data - cannot clone
 };
 
+mount core.prelude.*;
+
 fn main() {
     // All derive usages above should fail with constraint errors
 }

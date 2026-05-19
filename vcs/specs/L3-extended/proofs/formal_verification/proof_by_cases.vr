@@ -75,4 +75,6 @@ theorem result_split<T, E>(r: Result<T, E>):
     }
 }
 
+mount core.prelude.*;
+
 fn main() {}

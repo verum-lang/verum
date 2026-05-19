@@ -295,6 +295,8 @@ fn benchmark_sequential_vs_random() -> (BenchmarkResult, BenchmarkResult) {
     )
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== CBGR Generation Tracking Overhead ===\n");
 

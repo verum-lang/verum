@@ -134,6 +134,8 @@ fn lookup<V>(list: List<(Text, V)>, key: Text) -> Maybe<V> {
     None
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Sized vector
     let sv = create_sized_vec([1, 2, 3, 4, 5]);

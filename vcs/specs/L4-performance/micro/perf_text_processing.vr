@@ -68,6 +68,8 @@ fn bench_comparison(count: Int) -> Int {
     matches
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let count = 10000;
     print("=== Text Processing Benchmarks ===");

@@ -216,6 +216,8 @@ const HASH_123: UInt64 = simple_hash(1, 2, 3);
 const MAX_VAL: UInt64 = max3(5, 12, 8);      // 12
 const MIN_VAL: UInt64 = min3(5, 12, 8);      // 5
 
+mount core.prelude.*;
+
 fn main() {
     // Compile-time computed values used at runtime
     let result = MATH_RESULT;

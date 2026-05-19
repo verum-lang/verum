@@ -72,6 +72,8 @@ fn binary_search_fin<N: meta Int>(
     None
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Safe array access
     let arr: [Int; 5] = [10, 20, 30, 40, 50];

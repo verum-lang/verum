@@ -79,6 +79,8 @@ fn test_tensor_grad_unary() {
     assert(shape_eq(b, 1, 3));
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_tensor_grad_add();
     test_tensor_grad_matmul();

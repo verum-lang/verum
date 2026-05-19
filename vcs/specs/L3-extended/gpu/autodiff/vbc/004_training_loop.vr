@@ -92,6 +92,8 @@ fn test_batch_processing() {
     assert(shape_eq(y, 2, 8));
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_simple_forward_pass();
     test_loss_computation();

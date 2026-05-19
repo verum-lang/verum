@@ -626,6 +626,8 @@ const STD_ERROR_HANDLE: DWORD = 0xFFFFFFF4;  // -12
 const INVALID_SOCKET: SOCKET = !0;
 const SOCKET_ERROR: c_int = -1;
 
+mount core.prelude.*;
+
 fn main() {
     // Windows bindings tests
 }

@@ -116,6 +116,8 @@ fn test_simd_bitwise_or() {
     assert(result.x0 == 255);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_simd_mask_all();
     test_simd_mask_none();

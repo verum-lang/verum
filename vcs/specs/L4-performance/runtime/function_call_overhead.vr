@@ -24,6 +24,8 @@
 const WARMUP_ITERATIONS: Int = 100_000;
 const BENCHMARK_ITERATIONS: Int = 10_000_000;
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Function Call Overhead");
 

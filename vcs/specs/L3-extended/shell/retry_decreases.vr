@@ -21,6 +21,8 @@ fn retry_until_zero(attempt: Int, accumulator: Int) -> Int
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let r = retry_until_zero(5, 0);
     assert(r == 5, "structural induction: 5 calls accumulate to 5");

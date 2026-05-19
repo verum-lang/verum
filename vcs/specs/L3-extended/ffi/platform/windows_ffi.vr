@@ -556,6 +556,8 @@ implement CString {
     fn as_ptr(&self) -> LPCSTR { self.data.as_ptr() as LPCSTR }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Windows FFI test
 }

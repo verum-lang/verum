@@ -4,6 +4,8 @@
 // @skip-disabled: SIMD tests can parse without runtime
 // @tags: simd, vector
 
+mount core.prelude.*;
+
 fn main() {
     // SIMD vector types
     let a: f32x4 = f32x4(1.0, 2.0, 3.0, 4.0);

@@ -237,6 +237,8 @@ meta fn trait_object_introspection() -> TypeInfo {
     <Clone>.type_info().concrete_type()  // No concrete type
 }
 
+mount core.prelude.*;
+
 fn main() {
     // All introspection operations above should fail
 }

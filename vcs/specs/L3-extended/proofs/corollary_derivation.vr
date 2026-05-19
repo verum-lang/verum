@@ -243,6 +243,8 @@ corollary list_append_4<T>(a: List<T>, b: List<T>, c: List<T>, d: List<T>):
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Verify corollaries are properly derived
     let x = 5;

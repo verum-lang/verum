@@ -388,6 +388,8 @@ fn benchmark_large_file() -> LexerBenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Lexer Throughput Benchmark ===\n");
 

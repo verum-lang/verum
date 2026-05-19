@@ -4,6 +4,8 @@
 // @skip-disabled: GPU tests downgraded to parse-only
 // @tags: gpu, memory, allocation
 
+mount core.prelude.*;
+
 fn main() {
     // Get default GPU device
     let device = Device.gpu(0);

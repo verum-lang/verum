@@ -131,6 +131,8 @@ meta fn sneaky_io<F: Fn() -> T, T>(f: F) -> T {
     f()
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Эти вызовы вызовут ошибки компиляции
     const CONFIG: Text = read_config();  // ERROR

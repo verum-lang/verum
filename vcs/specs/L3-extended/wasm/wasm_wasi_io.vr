@@ -35,6 +35,8 @@ fn is_palindrome(s: Text) -> Bool {
     true
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic string operations
     let msg = greet("WASM");

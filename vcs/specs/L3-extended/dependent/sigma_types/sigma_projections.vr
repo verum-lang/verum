@@ -128,6 +128,8 @@ type Person is {
 fn person_name(p: Person) -> Text { p.name }
 fn person_age(p: Person) -> Int { p.age }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic dependent pair
     let pair: DepPair<Int, Text> = DepPair { fst: 42, snd: "hello" };

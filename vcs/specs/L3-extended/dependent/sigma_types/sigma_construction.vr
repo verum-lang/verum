@@ -149,6 +149,8 @@ fn sv_push<T>(sv: SizedVec<T>, x: T) -> SizedVec<T> {
     SizedVec { len: sv.len + 1, data }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Direct construction
     let sized = direct_construction();

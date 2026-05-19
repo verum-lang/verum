@@ -339,6 +339,8 @@ unsafe fn cstr_to_text(ptr: *const c_char) -> Text {
 @extern("C")
 unsafe fn zeroed<T>() -> T;
 
+mount core.prelude.*;
+
 fn main() {
     // Errno-based error handling
     let file_result = file_open("/nonexistent", 0);

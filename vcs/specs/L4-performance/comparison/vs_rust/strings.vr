@@ -59,6 +59,8 @@ module rust_baselines {
     pub const JOIN_100K_MS: Float = 40.0;
 }
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Verum vs Rust: String Processing");
 

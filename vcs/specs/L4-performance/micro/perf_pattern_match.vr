@@ -109,6 +109,8 @@ fn bench_ten_way(iters: Int) -> Int {
     sum
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let iters = 1000000;
     print("=== Pattern Match Dispatch Benchmarks ===");

@@ -116,6 +116,8 @@ fn concat_nonempty<T>(a: NonEmptyList<T>, b: NonEmptyList<T>) -> NonEmptyList<T>
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Refinement types
     let even: EvenInt = 42;

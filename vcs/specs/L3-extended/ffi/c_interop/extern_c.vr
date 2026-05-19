@@ -210,6 +210,8 @@ fn point_distance(p1: Point2D, p2: Point2D) -> c_double {
     (dx * dx + dy * dy).sqrt()
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test exported functions
     let sum = verum_add(3, 4);

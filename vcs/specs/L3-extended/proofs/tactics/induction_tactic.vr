@@ -68,4 +68,6 @@ theorem fib_nonneg(n: Nat): fib_val(n) >= 0 {
 
 fn fib_val(n: Nat) -> Nat;
 
+mount core.prelude.*;
+
 fn main() {}

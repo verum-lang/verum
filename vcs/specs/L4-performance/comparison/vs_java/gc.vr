@@ -67,6 +67,8 @@ module java_baselines {
     pub const CONCURRENT_MARK_OVERHEAD: Float = 10.0;
 }
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Verum CBGR vs Java GC");
 

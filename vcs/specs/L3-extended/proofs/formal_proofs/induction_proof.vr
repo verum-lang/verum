@@ -242,6 +242,8 @@ theorem quicksort_terminates<T: Ord>(xs: List<T>): is_sorted(quicksort(xs)) {
 fn quicksort<T: Ord>(xs: List<T>) -> List<T>;
 fn is_sorted<T: Ord>(xs: List<T>) -> Bool;
 
+mount core.prelude.*;
+
 fn main() {
     // Induction proof tests
 }

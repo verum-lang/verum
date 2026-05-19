@@ -98,6 +98,8 @@ where meta Start >= 0, Len >= 0, Start + Len <= N {
     FixedArray { data: [T.default(); Len] }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic meta arithmetic
     let size = flat_size.<3, 4>();

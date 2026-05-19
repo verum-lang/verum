@@ -320,6 +320,8 @@ fn simd_find(haystack: &[u8], needle: u8) -> Maybe<Int> {
     None
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic vector operations
     test_vector_creation();

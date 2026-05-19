@@ -7,6 +7,8 @@
 /// Peer-to-peer (P2P) GPU memory access and direct GPU-to-GPU transfers.
 /// Includes NVLink and PCIe P2P communication patterns.
 
+mount core.prelude.*;
+
 fn main() {
     let devices = Device.all_gpus();
     let num_devices = devices.len();

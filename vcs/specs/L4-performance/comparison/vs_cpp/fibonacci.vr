@@ -48,6 +48,8 @@ module cpp_baselines {
     pub const FIB_40_TEMPLATE_MS: Float = 0.0;
 }
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Verum vs C++: Fibonacci");
 

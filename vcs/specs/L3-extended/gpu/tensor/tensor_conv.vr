@@ -7,6 +7,8 @@
 /// Tensor convolution operations for neural networks including
 /// 1D, 2D, 3D convolutions, transposed convolutions, and dilated convolutions.
 
+mount core.prelude.*;
+
 fn main() {
     let device = Device.gpu(0);
 

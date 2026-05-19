@@ -90,6 +90,8 @@ fn proto_close(p: Protocol<Ready>) -> Protocol<Closed> {
     Protocol { version: p.version, state: () }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Connection lifecycle
     let conn = new_conn();

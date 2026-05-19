@@ -26,6 +26,8 @@
 const ITERATIONS: Int = 100_000_000;
 const DATA_SIZE: Int = 10_000_000;
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Verum vs C Performance");
 

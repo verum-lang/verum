@@ -73,6 +73,8 @@ fn ssort<T, N: meta Int>(arr: SizedArr<T, N>) -> SizedArr<T, N> {
     SizedArr { data: d }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Create sized arrays
     let arr: SizedArr<Int, 5> = vreplicate(42);

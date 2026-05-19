@@ -27,6 +27,8 @@
 const WARMUP_ITERATIONS: Int = 10_000;
 const BENCHMARK_ITERATIONS: Int = 1_000_000;
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Async Runtime Performance");
 

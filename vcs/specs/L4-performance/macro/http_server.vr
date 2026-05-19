@@ -477,6 +477,8 @@ fn benchmark_middleware() -> HttpBenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== HTTP Server Performance Benchmark ===\n");
 

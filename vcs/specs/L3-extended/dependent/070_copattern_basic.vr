@@ -46,6 +46,8 @@ cofix fn infinite_ones() -> CoList<Int> {
     .rest => infinite_ones(),
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Construct copattern values
     let z = zeros();

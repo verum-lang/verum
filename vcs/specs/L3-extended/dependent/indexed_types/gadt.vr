@@ -94,6 +94,8 @@ fn optimize_int(expr: IntExpr) -> IntExpr {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Build and evaluate integer expressions
     let e1 = add(lit(3), lit(4));

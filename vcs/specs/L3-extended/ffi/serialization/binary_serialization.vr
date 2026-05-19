@@ -513,6 +513,8 @@ type BinaryError is
     | TrailingData
     | ChecksumMismatch;
 
+mount core.prelude.*;
+
 fn main() {
     // Binary serialization test
 }

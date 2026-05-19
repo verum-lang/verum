@@ -400,6 +400,8 @@ fn percentile(sorted_data: &[u64], p: f64) -> u64 {
     sorted_data[idx]
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== GC Pause Time Benchmark ===\n");
     println("Targets: P50 < 100us, P99 < 1ms, Throughput > 95%\n");

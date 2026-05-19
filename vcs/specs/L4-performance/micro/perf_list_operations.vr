@@ -67,6 +67,8 @@ fn bench_push_pop(count: Int) -> Int {
     popped
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let count = 100000;
     print("=== List Operations Benchmarks ===");

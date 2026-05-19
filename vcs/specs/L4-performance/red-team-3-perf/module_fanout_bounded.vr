@@ -177,6 +177,8 @@ module aggregator {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let s = aggregator.sum_all();
     // 1+2+...+64 = 2080

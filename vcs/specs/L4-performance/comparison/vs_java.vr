@@ -77,6 +77,8 @@ module java_baselines {
     pub const GC_INTENSIVE_MS: Float = 2000.0;
 }
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Verum vs Java Performance");
 

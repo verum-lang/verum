@@ -592,6 +592,8 @@ implement CString {
     fn as_ptr(&self) -> *const c_char { self.data.as_ptr() as *const c_char }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // POSIX FFI test
 }

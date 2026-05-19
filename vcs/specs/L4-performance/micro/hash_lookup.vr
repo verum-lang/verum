@@ -384,6 +384,8 @@ fn benchmark_set_contains() -> BenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Hash Lookup Overhead Microbenchmarks ===\n");
 

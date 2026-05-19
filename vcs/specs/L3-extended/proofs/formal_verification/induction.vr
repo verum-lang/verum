@@ -156,6 +156,8 @@ theorem eval_nonneg_positive(e: Expr)
 fn eval(e: Expr) -> Int;
 fn all_positive(e: Expr) -> Bool;
 
+mount core.prelude.*;
+
 fn main() {
     // Induction verification tests
 }

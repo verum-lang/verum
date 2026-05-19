@@ -58,6 +58,8 @@ fn verum_strlen(s: &[Byte]) -> Int {
 @export("C", name = "strlen")
 fn c_strlen(s: &[Byte]) -> Int;
 
+mount core.prelude.*;
+
 fn main() {
     // Both names call the same function
     let a = original_implementation();

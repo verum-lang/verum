@@ -40,6 +40,8 @@ fn max_of<T>(a: T, b: T, greater: fn(T, T) -> Bool) -> T {
     if greater(a, b) { a } else { b }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Pair
     let p = Pair.new(10, 20);

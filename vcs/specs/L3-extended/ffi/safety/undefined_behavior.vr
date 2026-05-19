@@ -88,6 +88,8 @@ fn safe_cast_to_int(ptr: *const c_void) -> *const c_int {
     ptr as *const c_int
 }
 
+mount core.prelude.*;
+
 fn main() {
     // UB prevention patterns
     let null_ptr: *const c_int = 0 as *const c_int;

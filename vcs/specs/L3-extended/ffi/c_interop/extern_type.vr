@@ -473,6 +473,8 @@ const null: *const c_void = 0 as *const c_void;
 
 // Type properties: use T.size instead of deprecated size_of<T>()
 
+mount core.prelude.*;
+
 fn main() {
     // Extern type declaration tests
 }

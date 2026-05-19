@@ -88,6 +88,8 @@ fn sum_datum(d: Datum) -> Int {
     d.a + d.b + d.c
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let iters = 1000000;
     print("=== CBGR Overhead Benchmark ===");

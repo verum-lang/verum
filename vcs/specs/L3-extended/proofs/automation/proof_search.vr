@@ -172,6 +172,8 @@ fn try_intro<P>(depth: Int) -> Maybe<P> { None }
 fn try_elim<P>(depth: Int) -> Maybe<P> { None }
 fn try_apply_lemma<P>(lemma: &Lemma) -> Maybe<P> { None }
 
+mount core.prelude.*;
+
 fn main() {
     // Proof automation
 }

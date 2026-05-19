@@ -75,6 +75,8 @@ fn is_prime(n: Int) -> Bool {
     true
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // If/else
     assert_eq(classify(42), 1);

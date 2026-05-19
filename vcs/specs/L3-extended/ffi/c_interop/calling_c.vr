@@ -516,6 +516,8 @@ implement CString {
 // Type properties: use T.size instead of deprecated size_of<T>()
 fn min(a: usize, b: usize) -> usize { if a < b { a } else { b } }
 
+mount core.prelude.*;
+
 fn main() {
     // FFI calling test
 }

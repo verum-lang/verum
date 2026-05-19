@@ -43,6 +43,8 @@ fn compute_fibonacci(n: Int) -> Int {
     else { compute_fibonacci(n - 1) + compute_fibonacci(n - 2) }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Scenario 1: Body-only change in Module B
     // Expected: only B recompiled, C uses cached, D uses cached

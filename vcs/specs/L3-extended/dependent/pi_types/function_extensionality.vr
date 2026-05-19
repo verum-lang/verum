@@ -75,6 +75,8 @@ fn build_list(n: Int) -> List<Int> {
     result
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Verify identity
     assert(id(42) == 42);

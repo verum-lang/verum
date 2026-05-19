@@ -124,6 +124,8 @@ meta fn meta_apply_twice<T>(f: fn(T) -> T, x: T) -> T {
 
 const TWICE_DOUBLED: Int = meta_apply_twice(meta_double, 5);  // 20
 
+mount core.prelude.*;
+
 fn main() {
     // Runtime calls work as expected
     let result = runtime_combined(1, 2, 3);

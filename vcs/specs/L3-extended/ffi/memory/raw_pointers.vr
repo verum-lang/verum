@@ -96,6 +96,8 @@ fn alloc_buffer(size: size_t, out: *mut *mut u8) -> c_int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() {
     let mut val: c_int = 0;
     let r = get_value(&mut val as *mut c_int);

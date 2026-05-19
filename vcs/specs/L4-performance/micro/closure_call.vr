@@ -389,6 +389,8 @@ fn benchmark_iterator_closure() -> BenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Closure Call Overhead Microbenchmarks ===\n");
 

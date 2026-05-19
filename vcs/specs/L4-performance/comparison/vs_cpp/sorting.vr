@@ -57,6 +57,8 @@ module cpp_baselines {
     pub const PDQSORT_1M_MS: Float = 60.0;
 }
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Verum vs C++: Sorting");
 

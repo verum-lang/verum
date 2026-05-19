@@ -96,6 +96,8 @@ fn map_builder<A, B>(eb: ExprBuilder<A>, f: fn(A) -> B) -> ExprBuilder<B> {
     ExprBuilder { build: || f((eb.build)()) }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Phantom type tags
     let ti = tag_int(42);

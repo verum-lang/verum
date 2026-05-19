@@ -533,6 +533,8 @@ fn test_open_flags() {
     assert((flags.value & OpenFlags.O_TRUNC) != 0);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_c_types_sizes();
     test_pointer_null();

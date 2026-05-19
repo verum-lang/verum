@@ -191,6 +191,8 @@ implement Text {
 }
 
 /// Test function
+mount core.prelude.*;
+
 fn main() {
     // Test basic conversion
     let original = "Hello, World!";

@@ -81,4 +81,6 @@ theorem quant_rewrite(): forall n: Nat. n + 0 == n {
     proof by auto
 }
 
+mount core.prelude.*;
+
 fn main() {}

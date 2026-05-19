@@ -402,6 +402,8 @@ fn test_async_operation() {
     assert(!op.is_completed());
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_sort_with_callback();
     test_callback_with_context();

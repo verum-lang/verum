@@ -360,6 +360,8 @@ fn benchmark_boxed_closure() -> BenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Function Call Overhead Microbenchmarks ===\n");
 

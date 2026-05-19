@@ -349,6 +349,8 @@ fn benchmark_unsafe_memcpy() -> BenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Unsafe Reference (Tier 2) Latency Benchmark ===\n");
     println("Target: 0ns overhead (identical to raw pointer access)\n");

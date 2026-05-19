@@ -56,6 +56,8 @@ fn bounded_wrong() -> BoundedVal {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let _ = make_wrong_nonempty();
     let _ = make_wrong_sorted();

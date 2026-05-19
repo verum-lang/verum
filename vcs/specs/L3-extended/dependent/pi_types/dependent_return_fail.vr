@@ -34,6 +34,8 @@ fn map_wrong<T, U, N: meta Nat>(
     xs.map(f)  // ERROR: Cannot unify 'N' with '0'
 }
 
+mount core.prelude.*;
+
 fn main() {
     // These calls will fail type checking
     let wrong1 = replicate_wrong(3, 0);

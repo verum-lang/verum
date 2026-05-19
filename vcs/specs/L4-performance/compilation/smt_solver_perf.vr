@@ -244,6 +244,8 @@ fn time_verification<F: Fn()>(name: Text, f: F) -> VerificationTiming {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== SMT Solver Performance Benchmark ===\n");
 

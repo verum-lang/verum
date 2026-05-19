@@ -554,6 +554,8 @@ fn test_default_intensity() {
 // Main test runner
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_restart_within_limits();
     test_restart_exceeds_limit();

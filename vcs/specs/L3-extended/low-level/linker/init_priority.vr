@@ -79,6 +79,8 @@ fn cleanup_memory_subsystem() {
     // Runs last during cleanup
 }
 
+mount core.prelude.*;
+
 fn main() {
     // After all initializers run, verify order
     // Note: actual verification depends on runtime support

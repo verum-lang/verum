@@ -281,6 +281,8 @@ meta fn unsatisfied_bounds() -> TokenStream {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // All code generation above should fail
 }

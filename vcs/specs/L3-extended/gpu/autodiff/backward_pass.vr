@@ -4,6 +4,8 @@
 // @skip-disabled: GPU tests downgraded to parse-only
 // @tags: autodiff, backward
 
+mount core.prelude.*;
+
 fn main() {
     // Tape-based automatic differentiation
     let tape = GradientTape.new();

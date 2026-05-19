@@ -424,6 +424,8 @@ fn benchmark_streaming_compress() -> CompressionBenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Compression Performance Benchmark ===\n");
 

@@ -101,6 +101,8 @@ type SizedFunctor is protocol {
     fn smap<A, B>(self, f: fn(A) -> B) -> Self;
 };
 
+mount core.prelude.*;
+
 fn main() {
     // Apply function n times
     let doubled = apply_n_times(|x| x * 2, 1, 10);  // 1024

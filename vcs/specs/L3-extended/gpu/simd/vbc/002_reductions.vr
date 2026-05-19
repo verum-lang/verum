@@ -78,6 +78,8 @@ fn test_simd_reduce_or() {
     assert(result == 15);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_simd_reduce_add();
     test_simd_reduce_mul();

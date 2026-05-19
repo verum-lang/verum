@@ -37,6 +37,8 @@ fn bitwise_xor(a: Int, b: Int) -> Int {
     a ^ b
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic arithmetic
     assert_eq(add(20, 22), 42);

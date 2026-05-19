@@ -330,6 +330,8 @@ fn benchmark_checked_array_element() -> BenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Checked Reference (Tier 1) Latency Benchmark ===\n");
     println("Target: 0ns overhead (compiles to raw pointer access)\n");

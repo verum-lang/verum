@@ -263,6 +263,8 @@ type Display is protocol {
     fn display(&self) -> Text;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // FFI type mismatch error tests
 }

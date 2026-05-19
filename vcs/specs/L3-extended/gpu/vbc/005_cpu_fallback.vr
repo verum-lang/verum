@@ -92,6 +92,8 @@ fn test_cpu_fallback_chain() {
     assert(shape_eq(c, 3, 3));
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_cpu_fallback_add();
     test_cpu_fallback_matmul();

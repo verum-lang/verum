@@ -4,6 +4,8 @@
 // @skip-disabled: GPU tests downgraded to parse-only
 // @tags: gpu, memory, transfer
 
+mount core.prelude.*;
+
 fn main() {
     let device = Device.gpu(0);
 

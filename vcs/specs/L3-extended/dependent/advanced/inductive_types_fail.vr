@@ -36,6 +36,8 @@ fn tree_wrong() -> BTree<Int> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let _ = pnat_wrong();
     let _ = tree_wrong();

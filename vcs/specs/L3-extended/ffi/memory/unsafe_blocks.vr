@@ -458,6 +458,8 @@ fn good_example(ptr: *const i32, len: size_t) -> i32 {
     total
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test basic unsafe operations
     let mut value = 42;

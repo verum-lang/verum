@@ -69,6 +69,8 @@ fn test_nested_list() {
     assert(matrix[2][0] == 5);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_list_basic();
     test_list_iteration();

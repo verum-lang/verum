@@ -106,6 +106,8 @@ fn odd_length<T>(l: OddList<T>) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Peano arithmetic
     let two = PSucc(Heap(PSucc(Heap(PZero))));

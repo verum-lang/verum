@@ -414,6 +414,8 @@ type PhantomData<T> is {};
 
 // Type properties: use T.size and T.alignment instead of deprecated intrinsics
 
+mount core.prelude.*;
+
 fn main() {
     // WASM memory test
 }

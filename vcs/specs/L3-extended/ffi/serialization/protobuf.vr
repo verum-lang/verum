@@ -470,6 +470,8 @@ type ProtoError is
     | InvalidEnumValue(i32)
     | MissingRequiredField(&str);
 
+mount core.prelude.*;
+
 fn main() {
     // Protobuf test
 }

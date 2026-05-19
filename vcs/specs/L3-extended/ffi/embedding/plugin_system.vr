@@ -495,6 +495,8 @@ implement CStr {
     fn to_str(&self) -> Result<&str, ()> { Ok("") }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Plugin system test
 }

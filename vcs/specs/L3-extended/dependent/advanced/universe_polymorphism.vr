@@ -107,6 +107,8 @@ fn church_add(a: ChurchNat, b: ChurchNat) -> ChurchNat {
     |f, x| a(f, b(f, x))
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic type-level operations
     assert(id(42) == 42);

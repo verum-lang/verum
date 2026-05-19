@@ -212,6 +212,8 @@ type Result<T, E> is
 type IntResult is Result<Int, Int>;
 const RESULT_SIZE: Int = @size_of(IntResult);
 
+mount core.prelude.*;
+
 fn main() {
     // Compile-time computed values available at runtime
     let int_size = INT_SIZE;

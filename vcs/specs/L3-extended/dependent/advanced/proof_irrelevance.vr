@@ -99,6 +99,8 @@ fn transfer<A, B>(proof: ProofWit<A>, equiv: fn(A) -> B) -> ProofWit<B> {
     match proof { PW => PW }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Proof irrelevance
     let p1: ProofWit<Int> = PW;

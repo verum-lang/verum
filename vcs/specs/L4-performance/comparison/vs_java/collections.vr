@@ -64,6 +64,8 @@ module java_baselines {
     pub const STREAM_COLLECT_1M_MS: Float = 60.0;
 }
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Verum vs Java: Collections");
 

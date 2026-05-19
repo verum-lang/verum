@@ -254,6 +254,8 @@ meta fn gen_with_attrs(inline: Bool) -> @Expr {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test that generated code works
     // (In practice, these would be spliced into the module)

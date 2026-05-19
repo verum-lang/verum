@@ -78,6 +78,8 @@ fn test_chain_reduce_after_ops() {
     assert_eq(numel(z), 1);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_chain_binary_ops();
     test_chain_unary_ops();

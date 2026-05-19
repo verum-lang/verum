@@ -94,6 +94,8 @@ implement Config for EnvConfig {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Context Resolution Overhead");
 

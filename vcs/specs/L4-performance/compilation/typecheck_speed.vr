@@ -25,6 +25,8 @@ const SMALL_LOC: Int = 1_000;
 const MEDIUM_LOC: Int = 10_000;
 const LARGE_LOC: Int = 50_000;
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Type Checker Performance");
 

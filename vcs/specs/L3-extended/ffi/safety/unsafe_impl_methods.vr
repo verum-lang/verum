@@ -153,6 +153,8 @@ implement<T> Wrapper<T> {
 // Main
 // ------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     let mut counter = Counter.new();
     counter.increment();

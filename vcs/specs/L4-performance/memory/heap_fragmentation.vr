@@ -23,6 +23,8 @@
 const STRESS_ITERATIONS: Int = 100;
 const ALLOCATION_COUNT: Int = 100_000;
 
+mount core.prelude.*;
+
 fn main() {
     let results = BenchmarkResults.new("Heap Fragmentation");
 

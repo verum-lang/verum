@@ -296,6 +296,8 @@ fn test_calc_with_types() {
 //     }
 // }
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_calc_equality();
     test_calc_with_let_bindings();

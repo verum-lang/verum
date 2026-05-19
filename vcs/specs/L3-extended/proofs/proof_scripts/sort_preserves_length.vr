@@ -72,4 +72,6 @@ theorem qsort_length<T: Ord>(xs: List<T>): len(qsort(xs)) == len(xs) {
     proof by induction on xs
 }
 
+mount core.prelude.*;
+
 fn main() {}

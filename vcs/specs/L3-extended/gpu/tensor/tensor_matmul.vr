@@ -7,6 +7,8 @@
 /// Tensor matrix multiplication operations including batched matmul,
 /// transposed operations, and specialized GEMM variants.
 
+mount core.prelude.*;
+
 fn main() {
     let device = Device.gpu(0);
 

@@ -362,6 +362,8 @@ fn benchmark_generation_vs_atomic() -> BenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== Generation Check Performance Benchmark ===\n");
     println("Target: < 5ns per generation check\n");

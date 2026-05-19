@@ -143,6 +143,8 @@ fn process_buffer(
 // Main
 // ------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Test FFI declarations and types compile
     print("Buffer overflow prevention patterns passed");

@@ -530,6 +530,8 @@ type MsgPackError is
     | InvalidUtf8
     | TypeMismatch { expected: &str, found: &str };
 
+mount core.prelude.*;
+
 fn main() {
     // MessagePack test
 }

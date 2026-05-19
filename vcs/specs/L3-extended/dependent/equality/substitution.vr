@@ -107,6 +107,8 @@ fn map_subst<T>(
     xs.map(|x| transport(proof, f(x)))
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic substitution
     let r: EqWitness<Int> = EqRefl;

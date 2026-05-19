@@ -396,6 +396,8 @@ fn benchmark_simd_memory_bandwidth() -> SIMDBenchmarkResult {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     println("=== SIMD Throughput Benchmark ===\n");
     println("Target: > 80% of theoretical SIMD peak\n");

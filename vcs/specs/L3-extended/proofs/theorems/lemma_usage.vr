@@ -60,4 +60,6 @@ lemma helper(x: Int) requires x >= 0 ensures x * x >= 0 { proof by smt }
 
 theorem square_nonneg_thm(x: Int): x * x >= 0 { proof by smt }
 
+mount core.prelude.*;
+
 fn main() {}

@@ -87,6 +87,8 @@ fn safe_alloc(size: size_t) -> Maybe<BoundedBuffer> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let buf = safe_alloc(1024);
     let counter = AtomicCounter.new(0);

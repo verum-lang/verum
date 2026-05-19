@@ -60,4 +60,6 @@ theorem simp_progress(a: Int, b: Int)
     proof { simp; omega }
 }
 
+mount core.prelude.*;
+
 fn main() {}

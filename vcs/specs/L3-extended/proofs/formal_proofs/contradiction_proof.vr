@@ -169,6 +169,8 @@ fn gcd(a: Int, b: Int) -> Nat;
 fn head_of<T>(xs: List<T>) -> Maybe<T>;
 fn is_bijection_between<T>(s: FiniteSet<T>, t: FiniteSet<T>) -> Bool;
 
+mount core.prelude.*;
+
 fn main() {
     // Contradiction proof tests
 }

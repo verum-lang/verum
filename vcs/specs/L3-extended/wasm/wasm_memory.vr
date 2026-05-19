@@ -54,6 +54,8 @@ fn tree_depth(t: &TreeNode) -> Int {
     1 + if ld > rd { ld } else { rd }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // List operations
     let mut numbers = List.new();

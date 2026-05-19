@@ -4,6 +4,8 @@
 // @skip-disabled: GPU tests downgraded to parse-only
 // @tags: gpu, multi_gpu, device
 
+mount core.prelude.*;
+
 fn main() {
     // Query available devices
     let device_count = Device.gpu_count();

@@ -4,6 +4,8 @@
 // @skip-disabled: GPU tests downgraded to parse-only
 // @tags: tensor, reshape
 
+mount core.prelude.*;
+
 fn main() {
     // Basic reshape: 1D to 2D
     let v: Tensor<f32, [12]> = Tensor.arange(0.0, 12.0, 1.0);
