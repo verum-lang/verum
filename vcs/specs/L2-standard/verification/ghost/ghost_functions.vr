@@ -153,6 +153,8 @@ fn sum_positive(list: &List<Int>) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(fibonacci(10) == 55);
 

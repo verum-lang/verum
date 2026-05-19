@@ -74,6 +74,8 @@ fn validate_range(value: Int, min: Int, max: Int) -> Int {
     value
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test checked_divide
     let result = checked_divide(10.0, 2.0);

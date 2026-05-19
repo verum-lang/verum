@@ -10,6 +10,8 @@
 
 using [FileSystem]
 
+mount core.prelude.*;
+
 fn main() {
     test_read_to_string();
     test_read_to_bytes();

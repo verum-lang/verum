@@ -6,6 +6,8 @@
 /// Comprehensive test suite for Text manipulation operations.
 /// Tests concatenation, slicing, replacement, case conversion, and mutations.
 
+mount core.prelude.*;
+
 fn main() {
     test_text_concatenation();
     test_text_slicing();

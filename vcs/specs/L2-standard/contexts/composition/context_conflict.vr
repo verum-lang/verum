@@ -49,6 +49,8 @@ fn use_database() using [Database] {
     Database.query("SELECT 1");
 }
 
+mount core.prelude.*;
+
 fn main() {
     let postgres = PostgresDb { conn_string: "postgres://..." };
     let mysql = MySqlDb { conn_string: "mysql://..." };

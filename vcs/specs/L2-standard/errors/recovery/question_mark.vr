@@ -264,6 +264,8 @@ async fn fetch_async(path: &Text) -> Result<Text, IoError> {
     read_file(path)
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic ? usage
     match load_and_parse("/data.txt") {

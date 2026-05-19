@@ -69,6 +69,8 @@ fn test_transitivity(x: Int, y: Int, z: Int) -> Bool
     x < z
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Simple verification entry point
     assert(test_add_commutative(3, 5));

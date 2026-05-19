@@ -371,6 +371,8 @@ fn data_pipeline(inputs: &List<Text>) -> Result<PipelineResult, PipelineError> {
     Ok(PipelineResult { stages: results })
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic nested
     match basic_nested("valid_input") {

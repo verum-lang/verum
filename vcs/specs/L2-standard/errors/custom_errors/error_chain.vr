@@ -328,6 +328,8 @@ fn should_retry(error: &Error) -> Bool {
     desc.contains("timeout") || desc.contains("temporary")
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Create an error chain
     let io_error = IoError.NotFound("/etc/app/config.toml");

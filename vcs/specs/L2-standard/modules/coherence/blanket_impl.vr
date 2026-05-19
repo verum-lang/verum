@@ -326,6 +326,8 @@ module examples {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount traits.*;
     mount blanket_implementations.*;

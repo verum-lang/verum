@@ -7,6 +7,8 @@
 /// Deque (double-ended queue) allows efficient insertion and removal at both ends.
 /// Implemented as a ring buffer for O(1) operations at both ends.
 
+mount core.prelude.*;
+
 fn main() {
     test_deque_creation();
     test_deque_push_operations();

@@ -241,6 +241,8 @@ fn test_stream_deferred_evaluation() {
 // Main test runner
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_simple_stream_lazy();
     test_filtered_stream_lazy();

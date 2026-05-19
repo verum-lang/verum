@@ -106,6 +106,8 @@ implement QueryExecutor {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // This file tests type checking only
     // All scope dependencies above are valid

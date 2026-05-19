@@ -113,6 +113,8 @@ module features {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount platform_library.cross_platform.{File, open};
     mount platform_library.debug_utils.trace;

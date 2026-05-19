@@ -8,6 +8,8 @@ fn infinite_recursion(n: Int) -> Int {
     infinite_recursion(n + 1)
 }
 
+mount core.prelude.*;
+
 fn main() {
     let result = infinite_recursion(0);
     print(f"{result}");

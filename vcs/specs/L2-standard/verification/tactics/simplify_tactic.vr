@@ -143,6 +143,8 @@ fn float_identity(x: Float) -> Float {
     x * 1.0
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(add_zero(42) == 42);
     assert(mul_zero(99) == 0);

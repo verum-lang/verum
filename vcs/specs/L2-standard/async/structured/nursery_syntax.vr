@@ -278,6 +278,8 @@ type Mode is Fast | Slow;
 type TimeoutError is ();
 type CancelledError is ();
 
+mount core.prelude.*;
+
 fn main() {
     // This file tests parse-only, no execution
 }

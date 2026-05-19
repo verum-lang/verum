@@ -305,6 +305,8 @@ where F: Fn(&Transaction) -> Result<T, Text> {
     result
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic finally demonstration
     let content = try {

@@ -7,6 +7,8 @@
 /// Int represents integers of unlimited size (BigInt semantics).
 /// Tests arithmetic, comparison, bitwise operations, and conversions.
 
+mount core.prelude.*;
+
 fn main() {
     test_int_creation();
     test_int_arithmetic();

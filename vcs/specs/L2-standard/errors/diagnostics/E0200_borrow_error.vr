@@ -112,6 +112,8 @@ fn reborrow_violation() {
 //    = help: consider using interior mutability with Cell or RefCell
 //    = note: mutable borrows are exclusive to prevent data races
 
+mount core.prelude.*;
+
 fn main() {
     // This file should not compile
 }

@@ -163,6 +163,8 @@ module utils {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Using absolute paths directly
     let pool = crate.database.connection.Pool.new("postgres://localhost/mydb");

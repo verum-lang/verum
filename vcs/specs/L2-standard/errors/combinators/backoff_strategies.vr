@@ -468,6 +468,8 @@ fn test_jitter_factor_clamping() {
 // Main test runner
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_exponential_backoff_delays();
     test_exponential_backoff_max_cap();

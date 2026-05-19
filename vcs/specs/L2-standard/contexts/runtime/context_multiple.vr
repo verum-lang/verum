@@ -61,6 +61,8 @@ fn run_operations() using [Logger, Metrics] {
     finish_operation();
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Provide both contexts
     let logger = SimpleLogger;

@@ -126,6 +126,8 @@ fn pin_codegen_partition_invariant() {
             invariant violated — manifest is internally inconsistent");
 }
 
+mount core.prelude.*;
+
 fn main() {
     pin_codegen_pass_count();
     pin_codegen_v0_attested_count();

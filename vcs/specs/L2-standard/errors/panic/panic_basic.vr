@@ -183,6 +183,8 @@ fn test_array_bounds() {
     safe_array_access(&arr, 10);  // Should panic
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Example that will panic
     let arr = [1, 2, 3, 4, 5];

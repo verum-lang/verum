@@ -6,6 +6,8 @@
 /// Comprehensive test suite for trigonometric functions.
 /// Tests sin, cos, tan and their inverses, hyperbolic functions.
 
+mount core.prelude.*;
+
 fn main() {
     test_sin();
     test_cos();

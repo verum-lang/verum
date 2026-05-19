@@ -117,6 +117,8 @@ pub fn logout(session: &Session) -> Result<(), AuthError> {
 // Example main.vr using the directory module
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Clean mount from directory module - mod.vr handles re-exports
     mount auth.{login, logout, User, Session, Credentials, AuthError};

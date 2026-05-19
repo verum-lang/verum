@@ -164,6 +164,8 @@ fn approximately_equal(a: Float, b: Float) -> Bool {
     (a - b).abs() < 0.0001
 }
 
+mount core.prelude.*;
+
 fn main() {
     let result = demonstrate_assume_assert(5, 10);
     assert(result == 15);

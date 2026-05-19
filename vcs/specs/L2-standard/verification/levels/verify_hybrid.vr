@@ -102,6 +102,8 @@ fn all_positive(list: List<Int>) -> Bool {
     list.iter().all(|&x| x > 0)
 }
 
+mount core.prelude.*;
+
 fn main() {
     let list = [1, 2, 3, 4, 5];
     let sum = process_bounded_list(list);

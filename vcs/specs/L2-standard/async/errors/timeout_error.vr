@@ -182,6 +182,8 @@ type Formatter is {};
 
 async fn sleep(duration: Duration) {}
 
+mount core.prelude.*;
+
 fn main() {
     let duration = Duration.from_millis(100);
     println(f"Operation timed out after {duration.as_millis()}ms");

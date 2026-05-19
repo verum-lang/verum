@@ -9,6 +9,8 @@
 
 using [FileSystem, Async]
 
+mount core.prelude.*;
+
 fn main() {
     test_read_stream();
     test_write_stream();

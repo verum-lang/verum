@@ -181,6 +181,8 @@ implement FileConfig {
     fn get(&self, key: Text) -> Maybe<Text> { None }
 }
 
+mount core.prelude.*;
+
 fn main() {
     provide Logger = ConsoleLogger {};
     provide Config = FileConfig.load("config.toml");

@@ -302,6 +302,8 @@ fn test_flatten() {
 // Main test runner
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_fold();
     test_tap_and_tap_error();

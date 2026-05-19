@@ -339,6 +339,8 @@ type ErrorContextBuilder is protocol extends Sized {
     fn resource(self, kind: impl Into<Text>, id: impl Into<Text>) -> Self;
 };
 
+mount core.prelude.*;
+
 fn main() {
     // Example: Adding context to errors
     let result: Result<Int, Text> = Err("base error");

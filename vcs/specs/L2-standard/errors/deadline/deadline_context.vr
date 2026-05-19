@@ -447,6 +447,8 @@ fn test_deadline_extend() {
 // Main test runner
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_deadline_check_success();
     test_deadline_check_failure();

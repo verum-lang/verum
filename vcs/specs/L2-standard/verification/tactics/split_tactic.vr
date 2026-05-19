@@ -116,6 +116,8 @@ fn is_ok<T, E>(result: &Result<T, E>) -> Bool {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(sign(-5) == -1);
     assert(sign(0) == 0);

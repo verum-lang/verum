@@ -102,6 +102,8 @@ module consumer {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount library.PublicType;
     mount consumer.use_library;

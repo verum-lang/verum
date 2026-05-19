@@ -54,6 +54,8 @@ module nested {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test math module
     let sum = math.add(5, 3);

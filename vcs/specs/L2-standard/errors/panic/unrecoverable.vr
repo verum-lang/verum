@@ -274,6 +274,8 @@ fn abort_behaviors() {
     // - Used by other abort mechanisms
 }
 
+mount core.prelude.*;
+
 fn main() {
     // This file demonstrates unrecoverable scenarios
     // Running it would terminate the program

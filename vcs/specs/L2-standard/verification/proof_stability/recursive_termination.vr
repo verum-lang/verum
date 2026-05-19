@@ -152,6 +152,8 @@ fn mccarthy91(n: Int) -> Int
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(factorial(5) == 120);
     assert(fib(10) == 55);

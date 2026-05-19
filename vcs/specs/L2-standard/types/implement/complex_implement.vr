@@ -180,6 +180,8 @@ implement Display for List<Int> {
 // Main test function
 // ============================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: Chained methods
     let result = Builder.new()

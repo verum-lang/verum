@@ -115,6 +115,8 @@ type Display is protocol {
     fn to_string(&self) -> Text;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // This file tests type checking for using clause syntax
     // No runtime behavior tested here

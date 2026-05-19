@@ -244,6 +244,8 @@ fn run_query(conn: &Connection) -> Result<QueryResult, DatabaseError> {
     Ok(QueryResult { rows_affected: 1 })
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Demonstrate error conversions
     let result: Result<UserData, AppError> = fetch_user_data(1);

@@ -131,6 +131,8 @@ module facade {
         }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount types.{Color, Maybe, Result, Tree, Expression, Op};
     mount consumer.{color_to_rgb, unwrap_or, tree_sum, eval_const};

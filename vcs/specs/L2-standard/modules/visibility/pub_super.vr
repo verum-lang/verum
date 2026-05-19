@@ -26,6 +26,8 @@ module parent {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Import public function from parent.child
     mount parent.child.public_function;

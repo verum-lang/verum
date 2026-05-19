@@ -43,6 +43,8 @@ fn log_status(msg: Text) using [Logger] {
     Logger.info("Status", msg);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Context composition test: functions declare which contexts they need,
     // and the type checker verifies the contexts are available at call sites.

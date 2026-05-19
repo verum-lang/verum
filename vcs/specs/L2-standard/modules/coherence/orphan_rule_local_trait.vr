@@ -162,6 +162,8 @@ module local_library {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount external_crate.{ExtList, Map, String, Duration};
     mount local_library.{Summarize, ToJson, Validate, PrettyPrint, SizeEstimate};

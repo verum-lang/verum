@@ -6,6 +6,8 @@
 /// Comprehensive test suite for random number generation.
 /// Tests RNGs, distributions, and random sampling.
 
+mount core.prelude.*;
+
 fn main() {
     // Commented out: thread_rng(), choose(), and rand stdlib not yet available
     // test_thread_rng();

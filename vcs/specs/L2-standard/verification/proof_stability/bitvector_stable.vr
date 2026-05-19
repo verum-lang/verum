@@ -151,6 +151,8 @@ fn is_power_of_two(x: U32) -> Bool
     x != 0 && (x & (x - 1)) == 0
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(test_bit_and(0xFF, 0x0F));
     assert(test_bit_or(0xF0, 0x0F));

@@ -53,6 +53,8 @@ module network {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Access public items from inline module
     let conn = network.connect("localhost:8080");

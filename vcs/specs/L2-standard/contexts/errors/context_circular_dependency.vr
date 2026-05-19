@@ -38,6 +38,8 @@ implement ServiceB for ServiceBImpl {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // ERROR: Circular context dependency
     // ServiceA needs ServiceB, and ServiceB needs ServiceA

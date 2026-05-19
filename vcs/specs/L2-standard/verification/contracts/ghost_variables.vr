@@ -151,6 +151,8 @@ fn sum_positive(list: List<Int{> 0}>) -> Int{>= 0} {
     total
 }
 
+mount core.prelude.*;
+
 fn main() {
     let mut sorted_list = SortedList.new();
     sorted_list.insert(3);

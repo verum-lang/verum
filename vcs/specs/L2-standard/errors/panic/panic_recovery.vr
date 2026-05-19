@@ -254,6 +254,8 @@ fn sleep_ms(ms: Int) {
     // Platform sleep
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Demonstrate panic recovery
     let result = panic_to_result(|| {

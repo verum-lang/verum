@@ -329,6 +329,8 @@ fn replace_none() {
     assert_eq(maybe, None);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic None handling
     let absent: Maybe<Int> = None;

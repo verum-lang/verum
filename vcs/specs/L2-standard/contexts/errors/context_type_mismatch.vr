@@ -41,6 +41,8 @@ fn use_cache() using [Cache] {
     Cache.get("key");
 }
 
+mount core.prelude.*;
+
 fn main() {
     let db = PostgresDb { conn: "postgres://..." };
     let cache = RedisCache { conn: "redis://..." };

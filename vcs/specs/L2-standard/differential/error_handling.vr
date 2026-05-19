@@ -331,6 +331,8 @@ fn test_collecting() {
     print("first_error=1");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_outcome();
     test_map_operations();

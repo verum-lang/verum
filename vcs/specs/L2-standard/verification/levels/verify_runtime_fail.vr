@@ -17,6 +17,8 @@ fn divide_by_zero_attempt(x: Float, y: Float) -> Float {
     x / y
 }
 
+mount core.prelude.*;
+
 fn main() {
     // This should panic at runtime with contract violation
     let result = divide_by_zero_attempt(10.0, 0.0);

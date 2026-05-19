@@ -388,6 +388,8 @@ implement LoggerPlugin { fn new() -> Self { LoggerPlugin { level: Info } } }
 implement MetricsPlugin { fn new() -> Self { MetricsPlugin { prefix: "" } } }
 implement NoOpPlugin { fn new() -> Self { NoOpPlugin } }
 
+mount core.prelude.*;
+
 fn main() {
     // Test plugin system
     let plugin = load_plugin("logger");

@@ -6,6 +6,8 @@
 /// Comprehensive test suite for regular expression operations.
 /// Tests pattern matching, capturing, substitution, and regex features.
 
+mount core.prelude.*;
+
 fn main() {
     test_regex_basics();
     test_regex_matching();

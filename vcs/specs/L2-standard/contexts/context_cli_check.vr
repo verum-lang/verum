@@ -126,6 +126,8 @@ fn verbose_build(path: Text) using CliFull {
 // Entry point — type-checks context system correctly
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // This test verifies context system syntax type-checks correctly.
     // Runtime would require actual context provider implementations.

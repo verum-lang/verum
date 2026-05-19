@@ -34,6 +34,8 @@ fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
     |x: Int| -> Int { f(g(x)) }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === No-capture closures ===
     let double = |x: Int| -> Int { x * 2 };

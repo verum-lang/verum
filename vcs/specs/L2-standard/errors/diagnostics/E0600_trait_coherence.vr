@@ -100,6 +100,8 @@ implement Marker for List<T> where T: Marker {}
 // May or may not conflict depending on coherence rules
 // impl Marker for List<Int> {}  // E0600 without specialization
 
+mount core.prelude.*;
+
 fn main() {
     // This file should not compile
 }

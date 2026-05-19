@@ -307,6 +307,8 @@ fn destructuring_closure(source: &Text) -> Text {
 
 // === Verification tests ===
 
+mount core.prelude.*;
+
 fn main() {
     // Test basic closure recovery
     let result1 = basic_closure_recovery("missing");

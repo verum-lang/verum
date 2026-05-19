@@ -361,6 +361,8 @@ fn test_digit_sum() {
     print("digit_sum_99=18");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_char_codes();
     test_hash();

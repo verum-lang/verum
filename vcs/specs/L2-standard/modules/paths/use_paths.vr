@@ -207,6 +207,8 @@ module complex_paths {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Use nested module items
     let outer_type = outer.OuterType { value: 42 };

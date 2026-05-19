@@ -327,6 +327,8 @@ fn test_weighted_sum() {
     print("iter_weighted_sum=200");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sum_and_product();
     test_min_max();

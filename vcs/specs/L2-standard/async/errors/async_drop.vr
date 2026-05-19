@@ -230,6 +230,8 @@ fn log_error(msg: Text) {
 
 fn type_name<T>() -> Text { "T" }
 
+mount core.prelude.*;
+
 fn main() {
     // Async drop happens in async context
 }

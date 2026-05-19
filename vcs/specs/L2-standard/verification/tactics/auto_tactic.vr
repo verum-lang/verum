@@ -90,6 +90,8 @@ fn transitive_order(a: Int, b: Int, c: Int) -> Bool {
     a < c
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test cases
     assert(abs(-5) == 5);

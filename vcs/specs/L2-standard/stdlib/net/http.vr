@@ -9,6 +9,8 @@
 
 using [Network, Async]
 
+mount core.prelude.*;
+
 fn main() {
     test_http_get();
     test_http_post();

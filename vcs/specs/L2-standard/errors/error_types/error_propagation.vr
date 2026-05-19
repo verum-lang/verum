@@ -193,6 +193,8 @@ fn collect_all_errors(paths: List<&Text>) -> Result<List<Text>, List<FileError>>
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test manual propagation
     let result = process_file_manual("valid.txt");

@@ -7,6 +7,8 @@
 /// PriorityQueue is a max-heap by default - largest element has highest priority.
 /// Provides O(log n) insertion and O(log n) removal of the highest priority element.
 
+mount core.prelude.*;
+
 fn main() {
     test_priority_queue_creation();
     test_priority_queue_push();

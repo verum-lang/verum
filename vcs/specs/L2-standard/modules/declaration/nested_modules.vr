@@ -98,6 +98,8 @@ module core {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Access deeply nested modules using full paths
     mount core.collections.LinkedList;

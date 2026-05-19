@@ -39,6 +39,8 @@ fn safe_parse(input: Text) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let result = safe_parse("123");
     assert(result == 42);

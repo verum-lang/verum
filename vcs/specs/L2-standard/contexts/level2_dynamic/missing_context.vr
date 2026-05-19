@@ -43,6 +43,8 @@ fn query_database() {
 //     Logger.info("Found users");
 // }
 
+mount core.prelude.*;
+
 fn main() {
     // This test verifies compile-time detection of missing context usage
     // The code should not compile due to E801 errors above

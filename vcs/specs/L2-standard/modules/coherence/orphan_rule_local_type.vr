@@ -283,6 +283,8 @@ module local_types {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount std_traits.{Clone, Debug, Display, Default, FromStr};
     mount serde.{Serialize, Deserialize};

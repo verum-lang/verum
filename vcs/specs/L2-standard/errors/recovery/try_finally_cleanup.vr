@@ -45,6 +45,8 @@ fn multi_resource() -> Result<Int, Text> {
     result
 }
 
+mount core.prelude.*;
+
 fn main() {
     match use_resource() {
         Ok(val) => print(f"Got: {val}"),

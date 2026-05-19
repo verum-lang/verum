@@ -31,6 +31,8 @@ fn random_id() -> Int {
     42
 }
 
+mount core.prelude.*;
+
 fn main() {
     // First injection creates the singleton
     let db1 = inject DatabaseService;

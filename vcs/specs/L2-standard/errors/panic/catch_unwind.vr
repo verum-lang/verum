@@ -274,6 +274,8 @@ fn test_panics() {
     assert(message.contains("expected panic"));
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Demonstrate catch_unwind
     let result = panic_to_result(|| {

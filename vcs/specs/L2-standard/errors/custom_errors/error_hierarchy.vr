@@ -382,6 +382,8 @@ implement ErrorChain {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount application.AppError;
     mount domain.{UserError, UserId, ValidationError};

@@ -330,6 +330,8 @@ fn test_error_kind_accessors() {
 // Main test runner
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_io_error_classification();
     test_database_error_classification();

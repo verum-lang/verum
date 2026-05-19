@@ -7,6 +7,8 @@
 /// Text is the semantic string type (equivalent to String).
 /// Tests creation, concatenation, and fundamental string operations.
 
+mount core.prelude.*;
+
 fn main() {
     test_text_creation();
     test_text_concatenation();

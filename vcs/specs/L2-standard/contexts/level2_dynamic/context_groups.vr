@@ -143,6 +143,8 @@ async fn app_main() using FullApplication {
     EventBus.publish("app.ready", "{}").await;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // This file tests using type checking only
 }

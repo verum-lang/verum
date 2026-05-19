@@ -248,6 +248,8 @@ fn complex_match(x: Int, y: Int) -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Demonstrate unreachable being triggered
     let status_code = 999;

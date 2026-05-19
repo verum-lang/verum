@@ -163,6 +163,8 @@ module application {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount networking.{Connection, new_connection};
     mount networking.tcp.{new_stream, bind_listener};

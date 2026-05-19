@@ -465,6 +465,8 @@ implement Metrics for TestMetrics {
 
 // === Main Test Runner ===
 
+mount core.prelude.*;
+
 fn main() {
     // Setup base contexts for tests that need them
     provide Logger = TestLogger { prefix: "MAIN" };

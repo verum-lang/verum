@@ -61,6 +61,8 @@ fn with_request_scope(f: fn()) {
     f();
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Simulate first request
     with_request_scope(|| {

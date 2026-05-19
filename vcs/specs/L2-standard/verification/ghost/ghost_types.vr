@@ -167,6 +167,8 @@ implement<T: Clone> GuardedResource<T> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let mut list = RealList.new();
     list.push(1);

@@ -252,6 +252,8 @@ fn test_verbose_config() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
     failures = failures + test_logger_basic();

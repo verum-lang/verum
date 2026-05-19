@@ -273,6 +273,8 @@ fn complex_invariant_check() -> Bool { true }
 fn quick_sanity_check() -> Bool { true }
 fn log_error(msg: &str) {}
 
+mount core.prelude.*;
+
 fn main() {
     // This demonstrates assertion failure
     let x = 5;

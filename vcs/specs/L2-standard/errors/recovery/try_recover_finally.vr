@@ -335,6 +335,8 @@ fn get_config_with_metrics(path: &Text) -> Config {
 
 fn now() -> Int { 0 }
 
+mount core.prelude.*;
+
 fn main() {
     // Full error handling demonstration
     let content = full_error_handling("/invalid/path.txt");

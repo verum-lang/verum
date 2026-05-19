@@ -171,6 +171,8 @@ type Mutex<T> is { data: T };
 
 fn null_mut<T>() -> *mut T { 0 as *mut T }
 
+mount core.prelude.*;
+
 fn main() {
     send_sync_examples();
 }

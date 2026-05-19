@@ -6,6 +6,8 @@
 /// Comprehensive test suite for exponential and logarithmic functions.
 /// Tests exp, log, power functions and related operations.
 
+mount core.prelude.*;
+
 fn main() {
     test_exp();
     test_exp2();

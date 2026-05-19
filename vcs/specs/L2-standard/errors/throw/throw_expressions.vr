@@ -353,6 +353,8 @@ type User is {
 // Test entry point
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test basic throw
     try {

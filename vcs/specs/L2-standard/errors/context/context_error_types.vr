@@ -397,6 +397,8 @@ implement Repository<User, UserRepoError> for UserRepository {
 
 // === Verification Tests ===
 
+mount core.prelude.*;
+
 fn main() {
     // Setup mock database context
     provide Database = MockDatabase {};

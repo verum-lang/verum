@@ -173,6 +173,8 @@ module library {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount crate.api.handlers.handle_request;
     mount crate.api.{ApiRequest, HttpMethod};

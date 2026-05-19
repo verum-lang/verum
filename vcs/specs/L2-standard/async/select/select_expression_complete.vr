@@ -213,6 +213,8 @@ async fn nested_select() -> Int {
 // Entry Point
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // This is a syntax/type-checking test
     // Tests would be run by an async runtime

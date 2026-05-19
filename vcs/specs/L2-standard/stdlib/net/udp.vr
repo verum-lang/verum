@@ -9,6 +9,8 @@
 
 using [Network]
 
+mount core.prelude.*;
+
 fn main() {
     test_udp_socket();
     test_udp_send_recv();

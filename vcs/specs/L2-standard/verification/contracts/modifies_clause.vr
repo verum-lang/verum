@@ -143,6 +143,8 @@ fn resize_list<T: Default>(list: &mut List<T>, new_len: Int{>= 0}) {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let mut x = 5;
     increment(&mut x);

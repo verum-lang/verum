@@ -197,6 +197,8 @@ module field_visibility {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount encapsulation.PublicApi;
     mount sibling.use_public_api;

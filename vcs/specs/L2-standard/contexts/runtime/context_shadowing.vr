@@ -47,6 +47,8 @@ fn demonstrate_shadowing() using [Config] {
     print_config("Back to outer");
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Provide outer config
     let outer_config = EnvConfig { environment: "production" };

@@ -387,6 +387,8 @@ implement<T> Future<T> {
     fn ready(value: T) -> Self { Future { value: value } }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test Result monad
     let result: Result<Int, Text> = Ok(42);

@@ -151,6 +151,8 @@ module extended {
         };
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount consumer.{classify_number, try_parse, fizzbuzz, grade, sum_list};
     mount extended.{parse_port, validate_rgb};

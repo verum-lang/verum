@@ -24,6 +24,8 @@
 module http;
 module crypto;
 
+mount core.prelude.*;
+
 fn main() {
     // Import from directory module submodules
     mount http.{Client, Server, Request, Response};

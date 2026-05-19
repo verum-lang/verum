@@ -6,6 +6,8 @@
 /// Comprehensive test suite for Text split and join operations.
 /// Tests various splitting patterns and string joining methods.
 
+mount core.prelude.*;
+
 fn main() {
     test_split_basic();
     test_split_char();

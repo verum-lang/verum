@@ -7,6 +7,8 @@
 /// Text represents UTF-8 encoded strings with full Unicode support.
 /// Tests all methods of creating and initializing Text values.
 
+mount core.prelude.*;
+
 fn main() {
     test_text_literals();
     test_text_constructors();

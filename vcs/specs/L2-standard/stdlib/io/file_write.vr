@@ -27,6 +27,8 @@ implement NamedTempFile {
 
 using [FileSystem]
 
+mount core.prelude.*;
+
 fn main() {
     test_write_string();
     test_write_bytes();
