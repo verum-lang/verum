@@ -164,7 +164,6 @@ fn property_digit_round_trip_radix10() {
 }
 
 // Pinned: from_digit returns wrong char for hex (regression §X).
-@ignore
 @test
 fn property_digit_round_trip_radix16_pinned() {
     for n in range(0, 16) {
@@ -302,7 +301,6 @@ fn property_char_range_inside_outside() {
 // =============================================================================
 
 // Pinned: `eq_ignore_ascii_case` returns wrong on cross-case letter pair.
-@ignore
 @test
 fn property_eq_ignore_ascii_case_letters_pinned() {
     for c in ascii_lower_letters().iter() {
