@@ -36,4 +36,6 @@ type Stack<u: Level, T: Type(u)> is {
     rest: Heap<Stack<u, T>>,
 };
 
+mount core.prelude.*;
+
 fn main() { }

@@ -236,6 +236,8 @@ implement Debug for UniqueResource {
 // SECTION 8: Main Test Cases
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test must_move with non-Copy types
     let nc = NonCopyable.new(42);

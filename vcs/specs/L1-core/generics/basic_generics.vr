@@ -124,6 +124,8 @@ implement<T> Maybe<T> {
 // SECTION 4: Main Test Cases
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test identity with different types
     let int_id: Int = identity(42);

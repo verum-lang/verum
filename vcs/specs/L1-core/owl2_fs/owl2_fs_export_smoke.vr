@@ -47,6 +47,8 @@ public fn knownBy(a: Person, b: Person) -> Bool { true }
 @owl2_characteristic("Functional")
 public fn ssn_of(p: Citizen) -> Text { "" }
 
+mount core.prelude.*;
+
 fn main() {
     print("owl2-fs export smoke ok");
 }

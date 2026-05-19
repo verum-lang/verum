@@ -21,6 +21,8 @@ fn create_iterator() -> some I: Iterator<Item = Int> {
     [1, 2, 3].iter()
 }
 
+mount core.prelude.*;
+
 fn main() {
     let iter = create_iterator();
 

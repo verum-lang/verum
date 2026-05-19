@@ -161,6 +161,8 @@ fn match_list_pattern(items: List<Int>) -> Text {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // === Tuple pattern inference ===
 

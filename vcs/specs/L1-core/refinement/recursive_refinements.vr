@@ -527,6 +527,8 @@ fn forest_size<T>(forest: &Forest<T>) -> Nat
 // SECTION 11: Main Test Function
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test factorial
     let fact5 = factorial(5);

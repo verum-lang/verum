@@ -27,6 +27,8 @@ theorem power_positive(base: Int, exp: Int)
 theorem unfold_def(x: Int)
     proof by unfold(x);
 
+mount core.prelude.*;
+
 fn main() {
     print("Induction proof tests parsed");
 }

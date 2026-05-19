@@ -30,6 +30,8 @@ implement CoreList for List<Int> {
     fn pop(&mut self) -> Maybe<Int> { None }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Std attribute tests parsed");
 }

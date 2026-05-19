@@ -6,6 +6,8 @@
 /// Test for Map<K, V> type.
 /// Map is an associative container mapping keys to values (semantic equivalent of HashMap).
 
+mount core.prelude.*;
+
 fn main() {
     // Map creation
     let map: Map<Text, Int> = {};

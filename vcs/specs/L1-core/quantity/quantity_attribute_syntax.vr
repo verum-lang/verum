@@ -33,6 +33,8 @@ public fn untouched(x: Int) -> Int { x }
 // V2 will validate the linearity discipline of `linear`'s body.
 public fn mixed(@quantity(0) phantom: Int, @quantity(1) one: Int, @quantity(omega) free: Int) -> Int { one + free }
 
+mount core.prelude.*;
+
 fn main() {
     let _ = consume_file(42);
     let _ = fixed_width(8, 100);

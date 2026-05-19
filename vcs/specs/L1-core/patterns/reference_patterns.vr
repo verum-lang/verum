@@ -115,6 +115,8 @@ fn first_positive(list: &List<Int>) -> Maybe<Int> {
     None
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic classification
     assert(classify_int(5) == "positive");

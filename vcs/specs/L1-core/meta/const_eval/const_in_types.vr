@@ -41,6 +41,8 @@ type CacheAligned is {
     data: [Int; ELEMENTS_PER_LINE],
 };
 
+mount core.prelude.*;
+
 fn main() {
     assert_eq(Int.size, 8);
     assert_eq(ELEMENTS_PER_LINE, 8);

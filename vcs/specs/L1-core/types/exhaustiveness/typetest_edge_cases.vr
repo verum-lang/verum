@@ -100,6 +100,8 @@ fn handle_outcome<T, E>(r: Outcome<T, E>) -> Text =
         ErrVal(_) => "failure"
     };
 
+mount core.prelude.*;
+
 fn main() {
     assert(identify_animal(Dog) == "is a dog");
     assert(identify_animal(Cat) == "is a cat");

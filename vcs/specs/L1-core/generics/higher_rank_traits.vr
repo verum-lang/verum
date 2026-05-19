@@ -194,6 +194,8 @@ fn round_trip_check<S: Serializer, T: Serialize + Deserialize + Eq>(s: &S, value
 // SECTION 7: Main Test Function
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test PolyFunc (rank-2 polymorphism)
     let poly = PolyFunc.new(|x| x);

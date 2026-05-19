@@ -51,6 +51,8 @@ meta fn auto_debug<T>() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     const FACT_10: Int = factorial(10);
     assert_eq(FACT_10, 3628800);

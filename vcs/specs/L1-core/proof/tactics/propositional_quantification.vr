@@ -40,6 +40,8 @@ theorem tautology_excluded_middle<P: Prop>()
     ensures P || !P
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: proof/tactics/propositional_quantification");
 }

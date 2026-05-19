@@ -121,6 +121,8 @@ fn process_maybe_ref<T: Clone>(r: &Maybe<T>) -> Maybe<T> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let n = 42;
     assert(ref_match(&n) == 42);

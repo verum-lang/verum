@@ -17,6 +17,8 @@ fn fake_sort(lst: List<Int>) -> List<Int>
     lst  // This may satisfy len but not sorting
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Contract violation error tests");
 }

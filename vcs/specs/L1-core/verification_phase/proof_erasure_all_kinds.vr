@@ -70,6 +70,8 @@ fn sum_range(lo: Int, hi: Int) -> Int {
     if lo > hi { 0 } else { lo + sum_range(lo + 1, hi) }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let f = factorial(5);
     let s = sum_range(1, 10);

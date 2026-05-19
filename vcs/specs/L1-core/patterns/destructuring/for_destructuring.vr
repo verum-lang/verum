@@ -312,6 +312,8 @@ fn for_options(items: List<Maybe<Int>>) -> Int {
 //------------------------------------------------------------------------------
 
 @test
+mount core.prelude.*;
+
 fn main() {
     // Basic pairs
     let pairs: List<(Int, Int)> = [(1, 2), (3, 4), (5, 6)];

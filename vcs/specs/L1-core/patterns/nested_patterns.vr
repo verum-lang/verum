@@ -283,6 +283,8 @@ fn extract_deep(d: DeepNest) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Flatten maybe
     assert(flatten_maybe(None) == None);

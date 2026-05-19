@@ -29,6 +29,8 @@ fn add_then_double(a: Int, b: Int) -> Int {
     (a + b) + (a + b)
 }
 
+mount core.prelude.*;
+
 fn main() {
     let r = add_then_double(3, 4);
     print(r);

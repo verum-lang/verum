@@ -48,6 +48,8 @@ theorem pos_seven_fano_identity(n: PosSeven)
     ensures (n * (n - 1)) / 2 == 21
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: proof/tactics/nominal_refinement_chain");
 }

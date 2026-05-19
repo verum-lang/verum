@@ -186,6 +186,8 @@ fn weighted_average_simple(a: Int, w_a: Positive, b: Int, w_b: Positive) -> Floa
     sum / weight_sum  // Safe: weight_sum > 0 since both weights positive
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic division
     let result = safe_divide(10.0, 2.0);

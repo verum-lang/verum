@@ -157,6 +157,8 @@ fn test_list_syntactic_subsumption() {
     let int_list: IntList = pos_list;
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_identical_refinements();
     test_literal_comparison();

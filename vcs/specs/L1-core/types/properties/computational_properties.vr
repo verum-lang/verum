@@ -516,6 +516,8 @@ fn verify_pure_properties() {
 // MAIN ENTRY POINT
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test Pure property inference
     assert(add(2, 3) == 5);

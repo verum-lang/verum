@@ -51,6 +51,8 @@ fn test_meta_expr() {
     };
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_meta_expr();
     print("Multi-stage tests parsed");

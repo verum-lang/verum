@@ -47,6 +47,8 @@ fn map_wrapper<T, U>(wrapper: Wrapper<T>, f: fn(T) -> U) -> Wrapper<U> {
     Wrapper { value: f(wrapper.value) }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Identity with different types
     let int_result: Int = identity(42);

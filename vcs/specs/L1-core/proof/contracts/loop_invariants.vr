@@ -69,6 +69,8 @@ fn matrix_sum(rows: Int, cols: Int) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() {
     let s = sum_to_n(5);
     assert_eq(s, 10);

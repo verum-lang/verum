@@ -422,6 +422,8 @@ fn test_expr_context() -> Bool {
     Wrapper<Person>.default().value.name == ""
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test Person implementation
     let person = Person { name: "Alice", age: 30 };

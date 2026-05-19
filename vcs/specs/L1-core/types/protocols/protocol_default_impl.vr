@@ -232,6 +232,8 @@ fn get_tag<T: Tagged>(item: &T) -> Text {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test Point Displayable defaults
     let p1 = Point { x: 1, y: 2 };

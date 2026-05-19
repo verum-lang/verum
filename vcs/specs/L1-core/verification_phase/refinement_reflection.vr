@@ -49,6 +49,8 @@ theorem double_double(x: Int)
     ensures double_it(double_it(x)) == 4 * x
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: verification_phase/refinement_reflection");
 }

@@ -254,6 +254,8 @@ fn bool_implies(pair: (Bool, Bool)) -> Bool {
 //------------------------------------------------------------------------------
 
 @test
+mount core.prelude.*;
+
 fn main() {
     // Single boolean
     assert(bool_explicit(true) == "yes");

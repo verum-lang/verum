@@ -23,6 +23,8 @@ lemma bounded_sum(lst: List<Int>)
 theorem sorted_transitivity: forall a: Int, b: Int, c: Int .
     !(a <= b && b <= c) || a <= c;
 
+mount core.prelude.*;
+
 fn main() {
     print("Quantifiers in proofs tests parsed");
 }

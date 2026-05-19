@@ -26,6 +26,8 @@ corollary derived_corollary(n: Int) -> Bool
     from base_theorem
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("proof erasure of corollary verified");
 }

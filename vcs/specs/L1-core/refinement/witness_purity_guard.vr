@@ -84,6 +84,8 @@ fn abs_plus_double(x: Int) -> Int{>= 0} {
     a + d                          // a >= 0 && d >= 0 ⇒ a + d >= 0
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Smoke check that the pure refinement witness chain compiles —
     // the @verify(formal) annotation routes through the SMT verifier,

@@ -180,6 +180,8 @@ fn test_greeter() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_existential_passthrough();
     test_display_existential();

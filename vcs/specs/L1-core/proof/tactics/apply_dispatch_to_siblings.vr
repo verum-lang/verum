@@ -43,6 +43,8 @@ theorem apply_another_sibling(z: Int)
     proof by apply nonneg_reflexive
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: proof/tactics/apply_dispatch_to_siblings");
 }

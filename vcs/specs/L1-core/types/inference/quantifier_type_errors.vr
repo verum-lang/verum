@@ -73,6 +73,8 @@ fn test_nested_inner_not_bool() {
     let invalid: Bool = forall x: Int . exists y: Int . x + y;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Type error tests - this file should not compile
     print("This should not compile");

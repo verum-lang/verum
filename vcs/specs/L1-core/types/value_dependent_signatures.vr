@@ -40,6 +40,8 @@ public fn fst_dep<A, B: fn(A) -> Type>(
     s.0
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("value-dependent signatures parsed and typechecked");
 }

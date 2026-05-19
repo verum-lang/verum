@@ -22,6 +22,8 @@ type Tree<T> is Leaf(T) | Branch { left: Heap<Tree<T>>, right: Heap<Tree<T>> };
 // argument side is forbidden from mentioning the recursive type.
 type Callback is Make(fn(Int) -> Callback);
 
+mount core.prelude.*;
+
 fn main() {
     print("ok");
 }

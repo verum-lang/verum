@@ -46,6 +46,8 @@ fn double_negation(p: Bool) -> Bool
     !(!p)
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: verification_phase/function_body_boolean_ensures");
 }

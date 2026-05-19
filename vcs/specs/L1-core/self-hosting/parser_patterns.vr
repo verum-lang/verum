@@ -336,6 +336,8 @@ fn test_eval_multiple_vars() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
     failures = failures + test_parse_number();

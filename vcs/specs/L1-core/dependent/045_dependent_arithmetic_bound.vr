@@ -26,6 +26,8 @@ fn slice(
     count
 }
 
+mount core.prelude.*;
+
 fn main() {
     let a = slice(10, 2, 5);
     let b = slice(10, 0, 10);

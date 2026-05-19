@@ -55,6 +55,8 @@ meta try_or_default(body: block, default_val: expr) {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Meta patterns tests parsed");
 }

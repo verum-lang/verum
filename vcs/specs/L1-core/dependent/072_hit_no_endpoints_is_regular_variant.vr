@@ -16,6 +16,8 @@ type Maybe2<T> is
     | Nothing
     | Just(T);
 
+mount core.prelude.*;
+
 fn main() {
     let r: Color = Red;
     assert(r is Red);

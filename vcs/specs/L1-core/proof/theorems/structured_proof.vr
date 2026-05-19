@@ -28,6 +28,8 @@ theorem exists_witness(n: Int)
 theorem identity(x: Int) -> Int
     proof = x;
 
+mount core.prelude.*;
+
 fn main() {
     print("Structured proof tests parsed");
 }

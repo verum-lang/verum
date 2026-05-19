@@ -70,6 +70,8 @@ fn grid_get<T, R: meta Int{> 0}, C: meta Int{> 0}>(
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let ne: NonEmptyList<Int> = [10, 20, 30];
     assert(head(ne) == 10);

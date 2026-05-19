@@ -43,6 +43,8 @@ theorem result_substitution_bool_return() -> Bool
     proof by auto
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: proof/tactics/auto_trivial — regression for auto dispatch");
 }

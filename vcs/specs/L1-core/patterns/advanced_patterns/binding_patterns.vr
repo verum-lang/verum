@@ -242,6 +242,8 @@ fn at_tree_node(n: SimpleNode) -> (SimpleNode, Int) {
 // Tests
 //------------------------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Basic @ binding
     assert(at_with_literal(0) == (0, "zero"));

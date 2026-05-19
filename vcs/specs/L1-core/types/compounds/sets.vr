@@ -6,6 +6,8 @@
 /// Test for Set<T> type.
 /// Set is an unordered collection of unique elements (semantic equivalent of HashSet).
 
+mount core.prelude.*;
+
 fn main() {
     // Set creation
     let set: Set<Int> = Set.new();

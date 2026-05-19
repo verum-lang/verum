@@ -17,6 +17,8 @@ fn safe_div(x: Int, y: Int{self != 0}) -> Int {
     x / y
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Literal 0 provably violates `self != 0`.
     let r = safe_div(42, 0);

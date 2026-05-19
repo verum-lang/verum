@@ -5,6 +5,8 @@
 // @timeout: 30000
 // @description: Tests array-like operations using List<T> (fixed-size [T;N] not yet in parser)
 
+mount core.prelude.*;
+
 fn main() {
     // Array-like creation with literal syntax
     let numbers: List<Int> = [1, 2, 3, 4, 5];

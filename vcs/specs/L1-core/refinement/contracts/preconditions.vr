@@ -195,6 +195,8 @@ implement Divisible for Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic preconditions
     let d = divide(10, 2);

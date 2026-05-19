@@ -124,6 +124,8 @@ fn safe_divide_all<M: Monad>(ma: M.F<Int>, divisor: Int) -> M.F<Int> {
     })
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Using Functor for Maybe
     let maybe_int: Maybe<Int> = Some(21);

@@ -148,6 +148,8 @@ fn magnitude(n: Int) -> Text =
 // MAIN
 // ============================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Age classification
     assert(classify_age(5) == "child");

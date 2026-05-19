@@ -76,6 +76,8 @@ fn describe(m: Measurement) -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let red = Color { r: 255, g: 0, b: 0, a: 255 };
     assert(red.r == 255);

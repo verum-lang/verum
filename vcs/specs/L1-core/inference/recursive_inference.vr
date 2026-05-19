@@ -156,6 +156,8 @@ fn search_list(lst: ConsList<Int>, target: Int) -> Maybe<Int> {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Basic recursive inference
     let f5 = factorial(5);

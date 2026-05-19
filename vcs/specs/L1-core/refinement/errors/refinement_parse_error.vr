@@ -210,6 +210,8 @@ type NestedBad is Int{> 0}{< 100};
 //    = note: unclosed refinement predicate
 //    = help: add closing `}` to complete the refinement
 
+mount core.prelude.*;
+
 fn main() {
     // This file should not parse - all refinements have syntax errors
 }

@@ -195,6 +195,8 @@ fn* chain_gen<T>(first: impl Iterator<Item = T>, second: impl Iterator<Item = T>
 // Section 8: Main Entry Point
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Basic generator creation and type validation
     let gen = int_generator();

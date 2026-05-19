@@ -147,6 +147,8 @@ fn unit_to_percentage(u: UnitInterval) -> Percentage {
     u * 100.0
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Arithmetic reasoning
     let doubled = double_positive(5);

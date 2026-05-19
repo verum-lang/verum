@@ -59,6 +59,8 @@ fn weighted_sum(items: List<Weighted<Float>>) -> Float {
     sum
 }
 
+mount core.prelude.*;
+
 fn main() {
     let sv = SizedVec { n: 3, data: [1, 2, 3] };
     assert(sv.n == 3);

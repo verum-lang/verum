@@ -69,6 +69,8 @@ fn min(a: Int, b: Int) -> Int {
     if a <= b { a } else { b }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let nums: NumList<Int> = [1, 2, 3, 4, 5];
     let total = sum_list(nums);

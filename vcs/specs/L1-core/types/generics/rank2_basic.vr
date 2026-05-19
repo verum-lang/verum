@@ -52,6 +52,8 @@ fn local_rank2_type<A>() {
 // Main - Minimal tests that don't require closure inference
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: Create a Transducer struct with a placeholder
     // Note: We can't easily create actual closures for rank-2 fields yet

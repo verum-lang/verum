@@ -57,6 +57,8 @@ fn double_array<T, N: meta Int>(arr: [T; N]) -> [T; N * 2] {
     result
 }
 
+mount core.prelude.*;
+
 fn main() {
     let arr: [Int; 4] = [1, 2, 3, 4];
     assert(sum_array(arr) == 10);

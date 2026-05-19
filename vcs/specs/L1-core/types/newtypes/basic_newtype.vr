@@ -30,6 +30,8 @@ type Milliseconds is (Float);
 type Username is (Text);
 type Password is (Text);
 
+mount core.prelude.*;
+
 fn main() {
     // Basic newtype instantiation
     let id: UserId = UserId(42);

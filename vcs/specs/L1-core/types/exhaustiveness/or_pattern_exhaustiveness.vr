@@ -38,6 +38,8 @@ fn classify_pair(p: (Bool, Bool)) -> Text =
         (true, false) | (false, true) => "different"
     };
 
+mount core.prelude.*;
+
 fn main() {
     assert(is_primary(Red) == true);
     assert(is_primary(Green) == false);

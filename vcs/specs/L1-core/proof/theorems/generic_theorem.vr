@@ -22,6 +22,8 @@ theorem transitivity<T: Eq>(a: T, b: T, c: T)
     requires a.eq(&b), b.eq(&c)
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("Generic theorem tests parsed");
 }

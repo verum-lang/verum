@@ -46,6 +46,8 @@ type Monad is protocol extends Functor {
     fn flat_map<A, B>(self: Self.F<A>, f: fn(A) -> Self.F<B>) -> Self.F<B>;
 };
 
+mount core.prelude.*;
+
 fn main() {
     // HKT usage would be tested at runtime
     assert(true);

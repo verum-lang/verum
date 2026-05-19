@@ -23,6 +23,8 @@
 
 type Bad is Wrap(fn(Bad) -> Bool);
 
+mount core.prelude.*;
+
 fn main() {
     print("unreachable");
 }

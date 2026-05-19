@@ -42,6 +42,8 @@ fn test_assert_macros() {
     debug_assert(true);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_paren_call();
     test_assert_macros();

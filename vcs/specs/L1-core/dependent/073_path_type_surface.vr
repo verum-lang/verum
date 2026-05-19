@@ -19,6 +19,8 @@ theorem eq_is_reflexive(n: Int)
     ensures n == n
     proof by cubical;
 
+mount core.prelude.*;
+
 fn main() {
     let n: Int = 42;
     assert(n == n);

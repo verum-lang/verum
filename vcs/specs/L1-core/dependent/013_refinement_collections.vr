@@ -86,6 +86,8 @@ fn filter_large(xs: PositiveList, threshold: Positive) -> PositiveList {
     result
 }
 
+mount core.prelude.*;
+
 fn main() {
     let ps: PositiveList = [1, 2, 3, 4, 5];
     let total = sum_positives(ps);

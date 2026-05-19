@@ -152,6 +152,8 @@ implement File<ReadWrite> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Door state machine
     let door: Door<Unlocked> = Door.new("Front");

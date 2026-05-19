@@ -253,6 +253,8 @@ fn regex_match(s: Text, pattern: Text) -> Bool {
 @extern
 fn runtime_regex_match(s: Text, pattern: Text) -> Bool;
 
+mount core.prelude.*;
+
 fn main() {
     // Runtime fallback
     let sqrt_result = sqrt_fallback(4.0);

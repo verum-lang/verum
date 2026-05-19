@@ -20,6 +20,8 @@ axiom extensionality<T>(f: fn(T) -> T, g: fn(T) -> T);
 // Mathematical axiom
 axiom induction_principle(p: fn(Int) -> Bool);
 
+mount core.prelude.*;
+
 fn main() {
     print("Basic axiom tests parsed");
 }

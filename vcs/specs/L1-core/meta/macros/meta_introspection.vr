@@ -60,6 +60,8 @@ fn test_implements() {
     const IMPL: Bool = @implements(Person, Display);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_type_name();
     test_type_predicates();

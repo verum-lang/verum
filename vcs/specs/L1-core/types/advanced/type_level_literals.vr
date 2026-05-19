@@ -69,6 +69,8 @@ implement EnableFeature<false> {
     fn feature_enabled() -> Bool { false }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // let buf: FixedBuffer = create_buffer<1024>();
     // assert(buf.len() == 1024);

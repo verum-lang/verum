@@ -36,6 +36,8 @@ fn compute_at_compile_time() {
 const MAX_NAME_LEN: Int = 255;
 type BoundedName is Text { self.len() <= MAX_NAME_LEN };
 
+mount core.prelude.*;
+
 fn main() {
     assert_eq(BITS_PER_INT, 64);
     assert_eq(MAX_BUFFER, 1048576);

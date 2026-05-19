@@ -86,6 +86,8 @@ fn always<A, B>(a: A, _b: B) -> A {
     a
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic inference from argument type
     let x = identity(42);  // T = Int inferred

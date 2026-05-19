@@ -25,6 +25,8 @@ type Circle is
     | Base
     | Loop() = Base..Base;
 
+mount core.prelude.*;
+
 fn main() {
     let z: Interval = Zero;
     let o: Interval = One;

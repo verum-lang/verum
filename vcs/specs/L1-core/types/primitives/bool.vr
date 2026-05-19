@@ -6,6 +6,8 @@
 /// Test for Bool primitive type.
 /// Bool represents a logical boolean value with two possible states.
 
+mount core.prelude.*;
+
 fn main() {
     // Basic boolean literals
     let b: Bool = true;

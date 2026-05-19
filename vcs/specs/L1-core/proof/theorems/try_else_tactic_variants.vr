@@ -32,6 +32,8 @@ theorem try_else_multi_requires(x: Int, y: Int)
     ensures x + y >= 0
     proof by try auto else auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("try...else tactic — all 5 combinator shapes verified");
 }

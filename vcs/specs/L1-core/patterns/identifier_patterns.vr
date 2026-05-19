@@ -131,6 +131,8 @@ fn deep_binding(data: (((Int, Int), Int), Int)) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Simple binding
     assert(bind_value(5) == 10);

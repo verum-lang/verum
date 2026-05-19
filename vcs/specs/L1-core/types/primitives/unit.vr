@@ -36,6 +36,8 @@ type Nested is {
     inner: Maybe<Unit>,
 };
 
+mount core.prelude.*;
+
 fn main() {
     // Basic unit literal
     let u: Unit = ();

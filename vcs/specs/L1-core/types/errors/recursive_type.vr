@@ -7,6 +7,8 @@
 /// Test for recursive/infinite type errors.
 /// These examples demonstrate various forms of infinite type detection.
 
+mount core.prelude.*;
+
 fn main() {
     // ========================================================================
     // Direct infinite type errors

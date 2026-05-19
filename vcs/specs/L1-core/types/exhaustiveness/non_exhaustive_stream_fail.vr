@@ -13,6 +13,8 @@ fn bad_stream_head<T>(s: Stream<T>) -> T =
         // ERROR: Non-exhaustive - missing Nil case
     };
 
+mount core.prelude.*;
+
 fn main() {
     let s: Stream<Int> = Nil;
     let _ = bad_stream_head(s);  // Would fail at runtime

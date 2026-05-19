@@ -136,6 +136,8 @@ fn absolute(x: Int) -> NonNegativeInt {
 // Main function: demonstrating all syntaxes coexist
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Inline syntax types
     let pos: Positive = 42;

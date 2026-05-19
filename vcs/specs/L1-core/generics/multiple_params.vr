@@ -165,6 +165,8 @@ fn bimap<A, B, C, D>(pair: (A, B), f: fn(A) -> C, g: fn(B) -> D) -> (C, D) {
 // SECTION 6: Main Test Cases
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test swap
     let (t, i) = swap((42, "hello"));

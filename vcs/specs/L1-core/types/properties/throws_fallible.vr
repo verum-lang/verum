@@ -244,6 +244,8 @@ fn verify_fallible_inference() {
 
 // === Verification tests ===
 
+mount core.prelude.*;
+
 fn main() {
     // Test basic throws implies Fallible
     let result1 = try {

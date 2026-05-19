@@ -457,6 +457,8 @@ fn no_overflow(x: i32{>= 0 && < 1000}, y: i32{>= 0 && < 1000}) -> i32{>= 0}
 // SECTION 13: Main Test Function
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Linear arithmetic
     let la_result = linear_addition(10, 20);

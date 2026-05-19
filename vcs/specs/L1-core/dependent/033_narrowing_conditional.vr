@@ -89,6 +89,8 @@ fn validate(x: Int) -> Maybe<Int{> 0, <= 100}> {
     Some(x)
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(process(5) == "positive: 5");
     assert(process(0) == "zero");

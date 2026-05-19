@@ -25,6 +25,8 @@ fn triple_to_text(t: (Int, Float, Bool)) -> Text {
     if b { f"{n} {f} yes" } else { f"{n} {f} no" }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic tuple declaration
     let tuple: (Int, Text, Bool) = (42, "hello", true);

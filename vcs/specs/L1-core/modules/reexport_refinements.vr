@@ -71,6 +71,8 @@ module consumer {
     pub type Error is Invalid;
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     0
 }

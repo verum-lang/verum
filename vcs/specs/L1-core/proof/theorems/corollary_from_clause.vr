@@ -28,6 +28,8 @@ corollary derived_symmetry(a: Int, b: Int)
     from base_symmetry
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("corollary from-clause parser regression green");
 }

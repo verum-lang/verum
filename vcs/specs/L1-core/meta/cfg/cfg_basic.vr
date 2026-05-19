@@ -43,6 +43,8 @@ fn get_platform() -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let platform = get_platform();
     print(f"Platform: {platform}");

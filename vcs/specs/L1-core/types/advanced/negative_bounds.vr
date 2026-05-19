@@ -107,6 +107,8 @@ fn debug_print(msg: Text) {
     print(msg);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Negative bounds are primarily compile-time constraints
     assert(true);

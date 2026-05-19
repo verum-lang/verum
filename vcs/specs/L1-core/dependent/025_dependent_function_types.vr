@@ -83,6 +83,8 @@ fn concat<T>(xs: List<T>, ys: List<T>) -> List<T>
     result
 }
 
+mount core.prelude.*;
+
 fn main() {
     let zeros = make_zeros(5);
     assert(zeros.len() == 5);

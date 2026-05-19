@@ -78,6 +78,8 @@ fn chain_subtype() -> Int {
     plain
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(pos_as_nat(5) == 5);
     assert(small_as_pos(50) == 50);

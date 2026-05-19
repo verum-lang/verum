@@ -53,6 +53,8 @@ theorem forall_prime_excluded_middle()
     ensures forall p: Int. is_prime(p) || !is_prime(p)
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: verification_phase/user_function_bool_return");
 }

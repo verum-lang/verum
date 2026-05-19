@@ -98,6 +98,8 @@ type Product is ();
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Basic generic wrapper - use .new() to avoid bidirectional inference limitation
     let int_wrapper = Wrapper.new(42);

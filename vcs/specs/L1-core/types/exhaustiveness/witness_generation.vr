@@ -59,6 +59,8 @@ fn missing_range(n: Int) -> Text =
         // ERROR: Non-exhaustive - missing case: 5
     };
 
+mount core.prelude.*;
+
 fn main() {
     // Call the non-exhaustive functions so the type checker analyzes them
     let _ = missing_some(None);

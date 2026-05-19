@@ -38,6 +38,8 @@ fn test_hash_in_set() {
     assert_eq(colors.len(), 3);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_hash_in_map();
     test_hash_in_set();

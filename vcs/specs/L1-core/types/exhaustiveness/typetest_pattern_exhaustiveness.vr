@@ -64,6 +64,8 @@ fn container_area(c: Container) -> Float =
         Empty => 0.0
     };
 
+mount core.prelude.*;
+
 fn main() {
     let circle = Circle { radius: 5.0 };
     let rect = Rectangle { width: 4.0, height: 6.0 };

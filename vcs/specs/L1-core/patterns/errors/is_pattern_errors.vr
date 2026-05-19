@@ -198,6 +198,8 @@ fn recursive_type_invalid_pattern() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // All examples above should produce E502 "Invalid is pattern" error
 }

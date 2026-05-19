@@ -48,6 +48,8 @@ implement Printable for List<Text> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Specialize attribute tests parsed");
 }

@@ -327,6 +327,8 @@ fn matrix_sum(m: List<List<Int>>) -> Int
     total
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Sum to n
     let sum = sum_to_n(10);

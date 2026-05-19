@@ -149,6 +149,8 @@ where
 // SECTION 5: Main Test Cases
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test basic where clauses
     assert(compare_and_pick(10, 20) == 20);

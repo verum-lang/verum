@@ -53,6 +53,8 @@ type Matrix<T, R: meta Int, C: meta Int> is {
     data: [T; R * C],
 };
 
+mount core.prelude.*;
+
 fn main() {
     let buf: AlignedBuffer<Int, 16> = AlignedBuffer { data: [0; 16] };
     assert(buf.data.len() == 16);

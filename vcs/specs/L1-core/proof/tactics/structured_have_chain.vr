@@ -37,6 +37,8 @@ theorem have_chain_discharges_residual_via_auto(n: Int)
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: proof/tactics/structured_have_chain");
 }

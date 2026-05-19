@@ -44,6 +44,8 @@ theorem exists_positive_sum(a: Int, b: Int)
     proof { witness a + b; }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: proof/tactics/exists_witness_substitution");
 }

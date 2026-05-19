@@ -6,6 +6,8 @@
 /// Test for Int primitive type.
 /// Int represents arbitrary precision integers (BigInt semantics).
 
+mount core.prelude.*;
+
 fn main() {
     // Basic integer literals
     let i: Int = 42;

@@ -377,6 +377,8 @@ fn test_nested_comprehension_in_stream() {
 // Test entry point
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_stream();
     test_stream_with_filter();

@@ -115,6 +115,8 @@ fn filter_generic<T: Clone>(list: List<T>, pred: fn(T) -> Bool) -> List<T> {
     result
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic generic inference: T = Int inferred from argument
     let y = id(42);

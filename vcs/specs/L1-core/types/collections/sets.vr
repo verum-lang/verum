@@ -5,6 +5,8 @@
 // @timeout: 30000
 // @description: Tests Set<T> collection type operations
 
+mount core.prelude.*;
+
 fn main() {
     // Set creation
     let empty: Set<Int> = Set.new();

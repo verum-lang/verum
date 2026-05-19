@@ -137,6 +137,8 @@ fn match_special_float(f: Float) -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Integer literals
     assert(match_int(0) == "zero");

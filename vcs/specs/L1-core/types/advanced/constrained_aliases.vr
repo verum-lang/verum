@@ -41,6 +41,8 @@ fn display_sorted(list: SortedDisplayList<Text>) {
 // This should fail type checking:
 // let invalid: NumList<Text> = ["a", "b"];  // ERROR: Text: !Num
 
+mount core.prelude.*;
+
 fn main() {
     let ints: NumList<Int> = [1, 2, 3];
     let sorted: SortedDisplayList<Int> = [3, 1, 2];

@@ -198,6 +198,8 @@ fn test_status_completed(status: Status) -> Int {
 
 // === Verification tests ===
 
+mount core.prelude.*;
+
 fn main() {
     // Test basic narrowing
     assert(test_is_narrowing_maybe(Some(5)) == 10);

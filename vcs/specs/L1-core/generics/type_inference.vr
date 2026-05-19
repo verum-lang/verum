@@ -149,6 +149,8 @@ fn list_map<T, U>(items: List<T>, f: fn(T) -> U) -> List<U> {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Basic identity inference
     let x = identity(42);  // T = Int inferred

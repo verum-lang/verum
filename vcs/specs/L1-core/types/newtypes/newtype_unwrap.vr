@@ -12,6 +12,8 @@ type Email is (Text);
 type Temperature is (Float);
 type Enabled is (Bool);
 
+mount core.prelude.*;
+
 fn main() {
     // Create newtype instances
     let id: UserId = UserId(42);

@@ -149,6 +149,8 @@ fn count_ops(e: ExprTree) -> Int {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Basic even/odd
     assert(is_even(0) == true);

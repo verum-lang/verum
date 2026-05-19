@@ -307,6 +307,8 @@ fn tuple_struct_complex(t: Triple) -> Text {
 // Tests
 //------------------------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Basic destructuring
     assert(destructure_point(Point { x: 3, y: 4 }) == 7);

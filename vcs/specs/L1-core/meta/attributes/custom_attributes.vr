@@ -52,6 +52,8 @@ type DatabasePool is {
     max_connections: Int,
 };
 
+mount core.prelude.*;
+
 fn main() {
     test_addition();
     print("Custom attribute tests parsed");

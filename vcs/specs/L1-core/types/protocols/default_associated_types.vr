@@ -350,6 +350,8 @@ implement<T: Clone> Container for Wrapper<T> {
 // Test cases
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test Container with default Item = Int
     let int_container = IntContainer { items: [1, 2, 3] };

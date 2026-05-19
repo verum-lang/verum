@@ -5,6 +5,8 @@
 // @timeout: 30000
 // @description: Tests Map<K, V> collection type operations
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Map creation and insert
     let mut ages: Map<Text, Int> = Map.new();

@@ -20,6 +20,8 @@
 // corrupting the running checksum. The canonical symptom was
 // crc32("12345678") ≠ zlib's 0x9AE0DAAF.
 
+mount core.prelude.*;
+
 fn main() {
     // Value with bit 31 set — arithmetic shift would preserve that bit
     // in the high halves.

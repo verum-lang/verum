@@ -40,6 +40,8 @@ theorem by_contradiction(p: Bool)
     requires p
     proof by contradiction;
 
+mount core.prelude.*;
+
 fn main() {
     print("Tactic composition tests parsed");
 }

@@ -48,6 +48,8 @@ type CEnum is
     | Variant2(Int)
     | Variant3 { x: Int, y: Int };
 
+mount core.prelude.*;
+
 fn main() {
     let s = CStruct { x: 1, y: 2, z: 3.0 };
     let w = Wrapper(42);

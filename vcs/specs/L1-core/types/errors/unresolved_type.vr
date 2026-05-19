@@ -7,6 +7,8 @@
 /// Test for unresolved type errors.
 /// These examples should fail with E402 when a type cannot be found.
 
+mount core.prelude.*;
+
 fn main() {
     // ========================================================================
     // Undefined type names

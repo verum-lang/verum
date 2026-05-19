@@ -123,6 +123,8 @@ fn point_check(p: Point) -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic tests
     assert(color_specific_first(Red) == "red");

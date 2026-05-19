@@ -301,6 +301,8 @@ fn array_of_local_refs(a: Int, b: Int, c: Int) -> Int {
 // Main - validation
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Tier 1 candidates
     assert(tier1_candidate_local(21) == 42);

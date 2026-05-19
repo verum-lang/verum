@@ -71,6 +71,8 @@ fn lerp(a: Float, b: Float, t: Float) -> Float {
     a * (1.0 - t) + b * t
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test refined type definitions are accepted
     let p: Probability = 0.7;

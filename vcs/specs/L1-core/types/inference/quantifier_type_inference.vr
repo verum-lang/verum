@@ -248,6 +248,8 @@ fn test_slice_domain(data: List<Int>) {
     let range_pred: Bool = forall i in 0..100 . i >= 0;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Type inference tests execute successfully
     print("Quantifier type inference tests passed");

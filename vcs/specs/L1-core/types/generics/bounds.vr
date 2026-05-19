@@ -72,6 +72,8 @@ fn to_string_list<T: Display>(items: &List<T>) -> List<Text> {
     items.iter().map(|x| x.to_string()).collect()
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Using max with different Ord types
     let max_int: Int = max(10, 20);

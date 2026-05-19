@@ -48,6 +48,8 @@ fn replicate<T, N: meta Int>(value: T) -> FixedArray<T, N> {
     FixedArray { data: [value; N] }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let arr: FixedArray<Int, 5> = zeros();
     assert(arr.data.len() == 5);

@@ -36,6 +36,8 @@ fn process() using [Logger if cfg.logging_enabled] {
     print("Processing");
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Cfg features tests parsed");
 }

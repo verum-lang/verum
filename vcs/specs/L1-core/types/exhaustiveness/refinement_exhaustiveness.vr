@@ -95,6 +95,8 @@ fn day_name(d: DayOfWeek) -> Text =
         7 => "Sunday"
     };
 
+mount core.prelude.*;
+
 fn main() {
     let zero: NonNegativeInt = 0;
     let five: NonNegativeInt = 5;

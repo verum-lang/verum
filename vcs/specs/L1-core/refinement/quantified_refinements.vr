@@ -446,6 +446,8 @@ type Subsequence<T: Eq> is {
 // SECTION 12: Main Test Function
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test all-positive
     let positives: AllPositive = [1, 2, 3, 4, 5];

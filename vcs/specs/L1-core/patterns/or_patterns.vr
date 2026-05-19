@@ -184,6 +184,8 @@ fn struct_field_or(p: Point) -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Weekend check
     assert(is_weekend(Saturday) == true);

@@ -140,6 +140,8 @@ implement<A, B> Pair<A, B> {
 // SECTION 6: Main Test Cases
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test Wrapper
     let w_int = Wrapper.new(42);

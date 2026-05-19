@@ -39,6 +39,8 @@ corollary derived_multi(a: Int, b: Int, c: Int)
     requires c > 0
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("corollary generic/refined/multi from-clause regression green");
 }

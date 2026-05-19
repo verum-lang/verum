@@ -205,6 +205,8 @@ module app_module {}
 // Main function to run tests
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Validate that compilation succeeds with all valid attributes
     let t = ValidDeriveOnType { value: 42 };

@@ -38,6 +38,8 @@ fn redundant_stream<T>(s: Stream<T>) -> Int =
         Cons(_, _) => 2  // WARNING: redundant - covered by first Cons
     };
 
+mount core.prelude.*;
+
 fn main() {
     // Tests just verify parsing and type checking
 }

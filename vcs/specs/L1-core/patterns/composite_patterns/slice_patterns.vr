@@ -227,6 +227,8 @@ fn list_while_let(mut lst: List<Int>) -> Int {
 // Tests
 //------------------------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Empty matching
     assert(match_empty([]) == true);

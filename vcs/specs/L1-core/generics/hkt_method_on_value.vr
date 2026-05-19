@@ -34,6 +34,8 @@ fn fmap<F<_>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> {
     fa.map(f)
 }
 
+mount core.prelude.*;
+
 fn main() {
     let a: Maybe<Int> = Maybe.Some(2);
     let doubled: Maybe<Int> = fmap(a, |x| x * 2);

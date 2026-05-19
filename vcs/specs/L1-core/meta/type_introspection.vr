@@ -270,6 +270,8 @@ fn test_generate_field_names() {
 // Main test runner
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // @type_name tests
     test_type_name_basic();

@@ -13,6 +13,8 @@ fn map<F<_>, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> {
     fa
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("higher-kinded map parsed and type-checked");
 }

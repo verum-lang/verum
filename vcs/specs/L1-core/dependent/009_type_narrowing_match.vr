@@ -74,6 +74,8 @@ fn parse_and_validate(s: Text) -> Result<Positive, Text> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let c = Circle { radius: 5.0 };
     assert(area(c) > 0.0);

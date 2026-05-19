@@ -165,6 +165,8 @@ fn max_by_measure<T: Measurable + Clone>(a: T, b: T) -> T {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Container<Int>
     let ci = Container.new(42);

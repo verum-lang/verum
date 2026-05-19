@@ -125,6 +125,8 @@ where
     ZipIterator { a, b }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Using RangeIterator
     let range_iter = RangeIterator { current: 0, end: 5 };

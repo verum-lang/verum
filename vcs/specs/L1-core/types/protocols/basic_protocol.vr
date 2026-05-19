@@ -183,6 +183,8 @@ implement Debug for Named {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     let p = Point { x: 1, y: 2 };
     let mut counter = SimpleCounter { value: 0 };

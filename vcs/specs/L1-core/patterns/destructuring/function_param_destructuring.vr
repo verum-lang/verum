@@ -226,6 +226,8 @@ fn cross_product_z(Point { x: x1, y: y1 }: Point, Point { x: x2, y: y2 }: Point)
 //------------------------------------------------------------------------------
 
 @test
+mount core.prelude.*;
+
 fn main() {
     // Tuple params
     assert(add_pair((3, 4)) == 7);

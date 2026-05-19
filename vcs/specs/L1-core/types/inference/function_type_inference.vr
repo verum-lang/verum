@@ -262,6 +262,8 @@ fn test_protocol_function_types() {
     let result: Text = mapper.apply(|n| f"{n}", 42);
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Function type inference tests passed");
 }

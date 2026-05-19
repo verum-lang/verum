@@ -73,6 +73,8 @@ implement Clone for NonCopyable {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // === Basic Negative Bound Violations ===
 

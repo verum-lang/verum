@@ -422,6 +422,8 @@ fn validate_user(id: UserId, name: Identifier) -> Bool {
 // Main function demonstrating usage
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Basic predicate-refined types
     let x: Positive = 42;

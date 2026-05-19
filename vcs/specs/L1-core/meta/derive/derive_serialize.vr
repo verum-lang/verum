@@ -36,6 +36,8 @@ type Message is
     | Binary(List<Int>)
     | Ping;
 
+mount core.prelude.*;
+
 fn main() {
     let user = User { name: "Alice", age: 30, active: true };
     print("Derive serialize tests parsed");

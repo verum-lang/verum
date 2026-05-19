@@ -61,6 +61,8 @@ fn divisibility_check(n: Int) -> Text =
         _ => "not divisible by 2 or 3"
     };
 
+mount core.prelude.*;
+
 fn main() {
     assert(classify_parity(10) == "even, half is 5");
     assert(classify_parity(7) == "odd, half-minus-one is 3");

@@ -303,6 +303,8 @@ fn collatz_steps(n: Int{> 0}) -> Int{>= 0}
     count
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic countdown
     let sum = countdown(5);

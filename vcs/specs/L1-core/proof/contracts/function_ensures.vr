@@ -41,6 +41,8 @@ fn sort(lst: List<Int>) -> List<Int>
     lst
 }
 
+mount core.prelude.*;
+
 fn main() {
     let r = increment(5);
     assert(r > 5);

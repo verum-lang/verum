@@ -259,6 +259,8 @@ fn count_satisfying(arr: List<Int>, pred: fn(Int) -> Bool) -> Int{>= 0}
     count
 }
 
+mount core.prelude.*;
+
 fn main() {
     // All positive
     let positives: AllPositive = [1, 2, 3, 4, 5];

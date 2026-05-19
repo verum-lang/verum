@@ -112,6 +112,8 @@ fn last_two<T>(xs: MyList<T>) -> Maybe<(T, T)> =
         },
     };
 
+mount core.prelude.*;
+
 fn main() {
     // Stream tests
     let empty: Stream<Int> = Nil;

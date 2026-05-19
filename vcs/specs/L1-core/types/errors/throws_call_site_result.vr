@@ -50,4 +50,6 @@ fn use_map_err(s: &Text) -> Result<Int, MyError> {
     parse(s).map_err(|e| e)
 }
 
+mount core.prelude.*;
+
 fn main() { print("throws call-site returns Result"); }

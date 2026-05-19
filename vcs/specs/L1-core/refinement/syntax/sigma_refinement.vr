@@ -148,6 +148,8 @@ fn absolute(x: Int) -> NonNegative {
 // Main function demonstrating usage
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Basic sigma types
     let pos: Positive = 42;

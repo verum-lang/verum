@@ -35,6 +35,8 @@ implement B {
     fn name(&self) -> Text { "B" }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let a = A {};
     let b = B {};

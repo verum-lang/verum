@@ -184,6 +184,8 @@ fn test_builder_cbgr_safety() {
 // Main test runner
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_builder_all_fields();
     test_builder_defaults();

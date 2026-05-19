@@ -43,6 +43,8 @@ lemma helper_trivial(x: Int) -> Bool
 corollary from_identity(y: Int) -> Bool
     from identity_commutes;
 
+mount core.prelude.*;
+
 fn main() {
     print("framework export targets parsed");
 }

@@ -195,6 +195,8 @@ fn clamp_to_byte(x: Int) -> Byte {
     else { x }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test all functions
     let a = add_positives(3, 5);

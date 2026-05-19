@@ -181,6 +181,8 @@ fn max_by_key<T: Clone, K: Ord>(items: List<T>, key_fn: fn(T) -> K) -> Maybe<T> 
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Compare with type constraint
     assert(compare(1, 2) == -1);

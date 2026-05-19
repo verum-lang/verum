@@ -49,6 +49,8 @@ fn area(r: ValidRect) -> Int {
     r.width * r.height
 }
 
+mount core.prelude.*;
+
 fn main() {
     let p: Positive = 10;
     let b: Byte = 200;

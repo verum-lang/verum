@@ -63,6 +63,8 @@ fn categorize(x: Int, y: Int) -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(describe_move(Move { dx: 0, dy: 0 }) == "no movement");
     assert(describe_move(Move { dx: 5, dy: 0 }) == "horizontal: 5");

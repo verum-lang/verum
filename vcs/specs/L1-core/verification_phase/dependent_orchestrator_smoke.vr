@@ -17,6 +17,8 @@ theorem double_is_positive(x: Positive)
     ensures x + x > 0
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     let p: Positive = 5;
     assert(double(p) == 10);

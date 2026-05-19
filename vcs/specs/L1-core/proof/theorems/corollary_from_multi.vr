@@ -42,6 +42,8 @@ corollary c4(n: Int, m: Int)
     from base_positive
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("corollary from-clause multi-ordering parser regression green");
 }

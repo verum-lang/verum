@@ -347,6 +347,8 @@ implement ResourcePool<T> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // NonEmptyList
     let mut list = NonEmptyList.new(1);

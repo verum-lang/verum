@@ -207,6 +207,8 @@ fn safe_parse(input: &Text) -> Int {
 
 // === Verification tests ===
 
+mount core.prelude.*;
+
 fn main() {
     // Test basic throws
     let result1 = try {

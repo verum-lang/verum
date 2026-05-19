@@ -30,4 +30,6 @@ fn bad() -> Maybe<Int> {
     Some(1)
 }
 
+mount core.prelude.*;
+
 fn main() { print("compile-fail"); }

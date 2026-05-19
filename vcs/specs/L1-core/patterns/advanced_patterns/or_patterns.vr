@@ -301,6 +301,8 @@ fn if_let_or(m: Maybe<Int>) -> Bool {
 // Tests
 //------------------------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Integer or
     assert(match_int_or(0) == "binary digit");

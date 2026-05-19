@@ -60,6 +60,8 @@ fn merge<A, B>(a: A, b: B) -> List<A.Item>
     result
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(true);
 }

@@ -40,6 +40,8 @@ theorem inequality_chain(x: Int)
         }
     };
 
+mount core.prelude.*;
+
 fn main() {
     print("Calculational proof tests parsed");
 }

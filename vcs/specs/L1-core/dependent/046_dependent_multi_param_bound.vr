@@ -21,6 +21,8 @@ fn between(lo: Int, hi: Int, x: Int{>= lo, <= hi}) -> Int {
     x
 }
 
+mount core.prelude.*;
+
 fn main() {
     let a = between(0, 100, 50);
     let b = between(5, 10, 7);

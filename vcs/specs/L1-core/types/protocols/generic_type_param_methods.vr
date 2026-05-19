@@ -138,6 +138,8 @@ fn make_default_pair<X: Default, Y: Default>() -> (X, Y) {
 // Tests
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: TypeExpr.method() - direct static call
     let p = Person.default();

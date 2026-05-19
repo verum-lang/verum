@@ -49,6 +49,8 @@ theorem by_chain(x: Int)
     requires x > 0
     proof by simp; omega;
 
+mount core.prelude.*;
+
 fn main() {
     print("Tactic tests parsed");
 }

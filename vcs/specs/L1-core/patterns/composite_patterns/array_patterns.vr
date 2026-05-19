@@ -229,6 +229,8 @@ fn match_single(arr: List<Int>) -> Int {
 // Tests
 //------------------------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Basic matching
     assert(match_list_3([1, 2, 3]) == 6);
