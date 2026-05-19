@@ -49,6 +49,8 @@ fn debug_only() {
     @warning("This function is debug-only");
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_source_location();
     test_stringify();

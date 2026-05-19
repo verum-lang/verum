@@ -47,6 +47,8 @@ public fn interval_eq(i: I, j: I) -> Bool { @builtin_interval_eq(i, j) }
 /// in `verum_types.infer`).
 public type Glue<A>(phi: I, T: fn(I) -> Type, e: fn(i: I) -> Path<A>(T(i), A)) is @builtin_glue;
 
+mount core.prelude.*;
+
 fn main() {
     print("cubical builtin expressions parsed");
 }

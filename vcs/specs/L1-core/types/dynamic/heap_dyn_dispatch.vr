@@ -45,4 +45,6 @@ fn via_ref(t: &dyn Tracer) {
     let _ = t.start_span(&"x".into());
 }
 
+mount core.prelude.*;
+
 fn main() {}

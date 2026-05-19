@@ -45,6 +45,8 @@ meta timed(body: block) {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Meta def basic tests parsed");
 }

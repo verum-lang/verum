@@ -72,6 +72,8 @@ fn process(x: Positive) -> Positive {
     incremented
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(add_pos(3, 4) == 7);
     assert(mul_pos(3, 4) == 12);

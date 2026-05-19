@@ -106,6 +106,8 @@ fn absolute(x: Int) -> NotNegative {
     if x < 0 { -x } else { x }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic negative refinements
     let divisor: NonZero = 5;

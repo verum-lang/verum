@@ -28,6 +28,8 @@ theorem eq_refl_holds<A>(x: A)
     ensures x == x
     proof by refl;
 
+mount core.prelude.*;
+
 fn main() {
     let n: Int = 7;
     assert(n == n);

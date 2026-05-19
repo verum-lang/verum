@@ -20,6 +20,8 @@ fn incomplete_nested(ss: Stream<Stream<Int>>) -> Int =
         // Missing: Nil => ...
     };
 
+mount core.prelude.*;
+
 fn main() {
     let ss: Stream<Stream<Int>> = Nil;
     let _ = incomplete_nested(ss);

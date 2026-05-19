@@ -264,6 +264,8 @@ fn priority_range(n: Int) -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Digit check
     assert(is_digit(0) == true);

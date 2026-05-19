@@ -185,6 +185,8 @@ fn lift2<F<_>: Applicative, A, B, C>(
 // SECTION 8: Main Test Cases
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test Maybe Functor
     let maybe_int: Maybe<Int> = Maybe.Some(42);

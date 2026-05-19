@@ -40,6 +40,8 @@ public axiom ax_transport<A, B>(p: Equiv<A, B>, a: A) -> B;
 /// Nullary axiom (no params, no return type — pure assertion).
 public axiom ax_consistent;
 
+mount core.prelude.*;
+
 fn main() {
     print("axiom declarations parsed");
 }

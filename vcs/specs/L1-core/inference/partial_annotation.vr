@@ -73,6 +73,8 @@ fn unwrap_or<T>(opt: Maybe<T>, default: T) -> T {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // === Annotated list inference ===
 

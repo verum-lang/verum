@@ -71,6 +71,8 @@ fn test_id() {
     let y: Int = x;       // Should be compatible
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test MaybeInt alias
     let mi: MaybeInt = Some(42);

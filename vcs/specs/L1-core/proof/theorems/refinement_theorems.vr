@@ -34,6 +34,8 @@ fn scale(value: Int { self >= 0 }, factor: Int { self > 0 }) -> Int
 // Sigma type definition
 type BoundedList is n: Int, data: List<Int> where n == data.len();
 
+mount core.prelude.*;
+
 fn main() {
     print("Refinement theorem tests parsed");
 }

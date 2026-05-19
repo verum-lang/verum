@@ -234,6 +234,8 @@ fn let_from_match() -> Int {
 //------------------------------------------------------------------------------
 
 @test
+mount core.prelude.*;
+
 fn main() {
     // Basic tuples
     assert(let_pair() == 3);

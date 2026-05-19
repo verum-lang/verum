@@ -6,6 +6,8 @@
 /// Test for fixed-size array types.
 /// Arrays have a compile-time known size and are stack-allocated.
 
+mount core.prelude.*;
+
 fn main() {
     // === Basic Array Declaration ===
 

@@ -55,6 +55,8 @@ fn new_function(x: Int) -> Int {
     x + 2
 }
 
+mount core.prelude.*;
+
 fn main() {
     let r = new_function(5);
     assert_eq(r, 7);

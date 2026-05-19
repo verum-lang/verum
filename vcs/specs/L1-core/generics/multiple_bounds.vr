@@ -126,6 +126,8 @@ implement<T: Ord + Clone> SortedList<T> {
 // SECTION 5: Main Test Cases
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test two bounds
     let (lo, hi) = sorted_pair(30, 10);

@@ -47,6 +47,8 @@ meta fn with_escape() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Stage coherence tests parsed");
 }

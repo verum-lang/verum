@@ -41,6 +41,8 @@ meta fn gen_lookup_table(entries: List<(Text, Int)>) {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Quote lift tests parsed");
 }

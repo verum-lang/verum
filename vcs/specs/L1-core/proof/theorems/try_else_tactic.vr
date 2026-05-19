@@ -18,6 +18,8 @@ theorem t2(a: Int, b: Int)
     ensures b == a
     proof by try auto else auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("try...else tactic combinator works");
 }

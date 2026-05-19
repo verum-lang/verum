@@ -236,6 +236,8 @@ fn impossible_claim(x: Int{> 0}, y: Int{> 0}) -> Int
     // x + y == x + y, but x + y !> x + y
 }
 
+mount core.prelude.*;
+
 fn main() {
     // These tests are designed to fail verification
     // The test harness should:

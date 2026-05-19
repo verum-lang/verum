@@ -272,6 +272,8 @@ fn bind_mode_option(m: &Maybe<Int>) -> Int {
 // Tests
 //------------------------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Simple binding
     assert(bind_simple(5) == 6);

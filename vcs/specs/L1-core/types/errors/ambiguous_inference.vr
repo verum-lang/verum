@@ -7,6 +7,8 @@
 /// Test for ambiguous type inference errors.
 /// These examples have multiple valid type solutions or insufficient constraints.
 
+mount core.prelude.*;
+
 fn main() {
     // E404: Empty collection with no context
     let empty: List<_> = List.new();  // ERROR: cannot infer element type for empty list

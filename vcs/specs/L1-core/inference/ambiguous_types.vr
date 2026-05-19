@@ -9,6 +9,8 @@
 /// These are expected errors that demonstrate the limits of inference.
 /// Each case requires additional type annotations to compile.
 
+mount core.prelude.*;
+
 fn main() {
     // === ERROR 1: Empty Collection Without Type ===
     // E404: Cannot infer element type for empty collection

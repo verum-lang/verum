@@ -25,6 +25,8 @@ theorem descent_trivial_int(x: Int)
     ensures x == x
     proof by descent;
 
+mount core.prelude.*;
+
 fn main() {
     let n: Int = 42;
     assert(n == n);

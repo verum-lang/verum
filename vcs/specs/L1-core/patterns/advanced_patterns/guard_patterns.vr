@@ -304,6 +304,8 @@ fn context_guard(n: Int, threshold: Int) -> Bool {
 // Tests
 //------------------------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Basic guards
     assert(classify_int(5) == "positive");

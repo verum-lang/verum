@@ -75,6 +75,8 @@ fn load_plugin(path: Text) -> Result<Plugin, LoadError> {
     Ok(DefaultPlugin.new())
 }
 
+mount core.prelude.*;
+
 fn main() {
     let iter = make_iterator(10);
     // iter has type: some I: Iterator<Item = Int>

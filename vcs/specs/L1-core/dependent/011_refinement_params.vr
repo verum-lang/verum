@@ -62,6 +62,8 @@ fn blend(a: Float, b: Float, pct: Percentage) -> Float {
     a * ratio + b * (1.0 - ratio)
 }
 
+mount core.prelude.*;
+
 fn main() {
     let d = safe_divide(100, 7);
     assert(d == 14);

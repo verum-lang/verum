@@ -54,6 +54,8 @@ async fn select_with_guards() -> Int {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     0
 }

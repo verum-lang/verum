@@ -82,6 +82,8 @@ fn pop_safe<S: Stack>(stack: &mut S) -> S.Item {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let mut stack = IntStack { data: [] };
     assert(stack.is_empty());

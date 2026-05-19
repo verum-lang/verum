@@ -140,6 +140,8 @@ fn test_tuple_subsumption() {
     let sum = takes_int_tuple(pos_tuple);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_subsumption();
     test_transitive_subsumption();

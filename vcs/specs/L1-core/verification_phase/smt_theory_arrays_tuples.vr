@@ -57,6 +57,8 @@ theorem map_set_get<K, V>(m: Map<K, V>, k: Int, v: Int)
     ensures m.set(k, v).get(k) == v
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: verification_phase/smt_theory_arrays_tuples");
 }

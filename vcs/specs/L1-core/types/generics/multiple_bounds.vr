@@ -159,6 +159,8 @@ implement Summable for Interval {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Ord + Clone bounds
     assert(pick_max(10, 20) == 20);

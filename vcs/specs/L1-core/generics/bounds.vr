@@ -133,6 +133,8 @@ fn to_display<T: Display>(x: T) -> Text {
 // SECTION 6: Main Test Cases
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test Ord bounds
     assert(max(10, 20) == 20);

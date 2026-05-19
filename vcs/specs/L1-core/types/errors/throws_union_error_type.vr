@@ -65,4 +65,6 @@ fn with_map_err(input: &Text) -> Result<Int, AppError> {
     })
 }
 
+mount core.prelude.*;
+
 fn main() { print("multi-throws union preserved at call-site"); }

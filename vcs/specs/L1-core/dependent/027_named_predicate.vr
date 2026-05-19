@@ -66,6 +66,8 @@ fn is_hex_color(s: Text) -> Bool {
 type Email is Text where is_valid_email;
 type HexColor is Text where is_hex_color;
 
+mount core.prelude.*;
+
 fn main() {
     let p: Positive = 5;
     assert(is_positive(p));

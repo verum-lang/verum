@@ -13,6 +13,8 @@ fn float_distance(x1: Float, y1: Float, x2: Float, y2: Float) -> Float {
     (dx * dx + dy * dy).sqrt()
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic float literals
     let f: Float = 3.14;

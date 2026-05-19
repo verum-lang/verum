@@ -60,6 +60,8 @@ fn zip_with<A, B, C>(a: List<A>, b: List<B>, f: fn(A, B) -> C) -> List<C> {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // === Basic Unification ===
 

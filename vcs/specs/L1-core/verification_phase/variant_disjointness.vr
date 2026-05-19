@@ -45,6 +45,8 @@ theorem result_variants_distinct()
     ensures Result.Err != Result.Pending
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: verification_phase/variant_disjointness");
 }

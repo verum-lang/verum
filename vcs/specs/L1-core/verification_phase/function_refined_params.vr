@@ -48,6 +48,8 @@ fn rule3_sigma(x: Int where x > 0) -> Int
     x + 1
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: verification_phase/function_refined_params");
 }

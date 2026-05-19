@@ -302,6 +302,8 @@ fn test_compiler_scenario() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() {
     let mut failures = 0;
     failures = failures + test_basic_define_resolve();

@@ -41,6 +41,8 @@ fn filter_list<T: Clone>(items: List<T>, pred: fn(T) -> Bool) -> List<T> {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // === List Literal Inference ===
 

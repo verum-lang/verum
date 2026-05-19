@@ -54,6 +54,8 @@ type Triangle is {
     c: Float,
 } where |t| t.a + t.b > t.c && t.b + t.c > t.a && t.a + t.c > t.b;
 
+mount core.prelude.*;
+
 fn main() {
     let e: EvenInt = 42;
     assert(e % 2 == 0);

@@ -85,6 +85,8 @@ fn collect_drawables() -> List<dyn Drawable> {
     ]
 }
 
+mount core.prelude.*;
+
 fn main() {
     let mut counter = make_counter(0, 5);
     let mut sum = 0;

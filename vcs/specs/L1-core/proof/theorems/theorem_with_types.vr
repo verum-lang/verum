@@ -30,6 +30,8 @@ lemma append_len<T>(a: List<T>, b: List<T>)
 // Axiom about type identity
 axiom type_identity<T>(x: T, y: T) -> Bool;
 
+mount core.prelude.*;
+
 fn main() {
     print("Theorem with types tests parsed");
 }

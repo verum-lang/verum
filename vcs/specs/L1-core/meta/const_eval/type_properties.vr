@@ -45,6 +45,8 @@ fn test_stride() {
 const INT_SIZE: Int = Int.size;
 const FLOAT_ALIGNMENT: Int = Float.alignment;
 
+mount core.prelude.*;
+
 fn main() {
     test_primitive_properties();
     test_numeric_bounds();

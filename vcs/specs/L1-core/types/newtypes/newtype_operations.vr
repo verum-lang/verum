@@ -78,6 +78,8 @@ fn scale_distance(distance: Meters, factor: Float) -> Meters {
     Meters(d * factor)
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Counter operations
     let counter: Counter = Counter.new();

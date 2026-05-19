@@ -54,6 +54,8 @@ fn normalize(x: Float, min: Float, max: Float) -> Float
     (clamped - min) / (max - min)
 }
 
+mount core.prelude.*;
+
 fn main() {
     let a = absolute(-10);
     assert(a == 10);

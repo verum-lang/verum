@@ -86,6 +86,8 @@ fn chain_defaults(a: Int, b: Int = a + 1, c: Int = b + 1) -> Int {
 // Main Test Function
 // ============================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test basic default parameter
     assert_eq(greet("World"), "Hello, World!");

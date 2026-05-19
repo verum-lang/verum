@@ -84,6 +84,8 @@ fn positive_to_byte(n: Positive) -> Maybe<Int{>= 0, < 256}> {
     if n < 256 { Some(n) } else { None }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let doubled = map_positive([1, -2, 3, -4, 5], |x| x * 2);
     assert(doubled == [2, 6, 10]);

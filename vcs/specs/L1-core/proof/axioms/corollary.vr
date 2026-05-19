@@ -22,6 +22,8 @@ corollary positive_triple(n: Int)
         show n * 3 > 0 by omega;
     };
 
+mount core.prelude.*;
+
 fn main() {
     print("Corollary tests parsed");
 }

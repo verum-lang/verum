@@ -28,6 +28,8 @@ theorem double_positive(n: Int) -> Bool
     requires n > 0
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("Basic theorem tests parsed");
 }

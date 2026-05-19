@@ -19,6 +19,8 @@ fn safe_get(len: Int, i: Int{>= 0, < len}) -> Int {
     i
 }
 
+mount core.prelude.*;
+
 fn main() {
     let r = safe_get(10, 3);
     print(r);

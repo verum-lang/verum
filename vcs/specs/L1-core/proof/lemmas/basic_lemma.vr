@@ -30,6 +30,8 @@ lemma list_nonempty<T>(lst: List<T>)
     requires lst.len() > 0
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("Basic lemma tests parsed");
 }

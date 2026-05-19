@@ -66,6 +66,8 @@ fn sum_nats(xs: List<Natural>) -> Natural {
     total
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(add_naturals(3, 5) == 8);
     assert(mul_positive(3, 4) == 12);

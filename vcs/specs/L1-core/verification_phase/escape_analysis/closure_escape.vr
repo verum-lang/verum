@@ -199,6 +199,8 @@ fn apply_all(x: Int, ops: [fn(Int) -> Int; 3]) -> Int {
 // Main - validation
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Basic closure escape
     let add5 = create_adder(5);

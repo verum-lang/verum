@@ -173,6 +173,8 @@ fn find_leaf_pair(tree: Tree<Int>) -> Maybe<(Int, Int)> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Special values
     assert(is_special(42) == Some(42));

@@ -337,6 +337,8 @@ fn* always_some() -> Maybe<Int>{is Some(_)} {
     yield None;     // ERROR: None does not satisfy refinement {is Some(_)}
 }
 
+mount core.prelude.*;
+
 fn main() {
     // All examples above should produce E420 "Generator type error"
 }

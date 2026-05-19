@@ -63,6 +63,8 @@ fn pop<T, N: meta Int{> 0}>(stack: &mut FixedStack<T, N>) -> Maybe<T> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let a: Vec3 = [1.0, 0.0, 0.0];
     let b: Vec3 = [0.0, 1.0, 0.0];

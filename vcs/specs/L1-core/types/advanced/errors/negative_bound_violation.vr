@@ -333,6 +333,8 @@ implement SafeInt {
 protocol Default { fn default() -> Self; }
 implement Default for Int { fn default() -> Int { 0 } }
 
+mount core.prelude.*;
+
 fn main() {
     // All above examples should produce E0403 negative bound violation errors
 }

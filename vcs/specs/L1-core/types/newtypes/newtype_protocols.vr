@@ -158,6 +158,8 @@ fn get_default<T: Defaultable>() -> T {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Temperature tests
     let temp = Temperature(98.6);

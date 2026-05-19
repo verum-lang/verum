@@ -273,6 +273,8 @@ fn match_single(single: Int) -> Int {
 // Tests
 //------------------------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Basic destructuring
     assert(destructure_pair((3, 4)) == 7);

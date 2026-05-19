@@ -224,6 +224,8 @@ fn wildcard_with_guard(pair: (Int, Int)) -> Text {
 // Tests
 //------------------------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Basic wildcard
     assert(wildcard_catch_all(0) == "zero");

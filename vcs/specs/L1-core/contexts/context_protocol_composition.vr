@@ -66,6 +66,8 @@ fn validate_and_store<T: Validatable>(item: T)
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     0
 }

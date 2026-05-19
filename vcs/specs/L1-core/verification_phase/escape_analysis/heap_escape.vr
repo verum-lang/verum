@@ -162,6 +162,8 @@ fn call_with_ref(x: &Int) -> Int {
 // Main - basic validation
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     let x: Int = 42;
     let y: Int = 100;

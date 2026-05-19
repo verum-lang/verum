@@ -168,6 +168,8 @@ fn stream_filter<T>(s: Stream<T>, pred: fn(&T) -> Bool) -> Stream<T> =
 // MAIN
 // ============================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Build test streams
     let empty: Stream<Int> = Nil;

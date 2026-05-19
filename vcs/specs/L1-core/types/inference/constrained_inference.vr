@@ -162,6 +162,8 @@ implement EqP for Score {
 // Main demonstration
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Protocol-constrained inference
     let s = Score { value: 42 };

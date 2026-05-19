@@ -88,6 +88,8 @@ implement NonCopyable {
 
 // impl Clone for NonCopyable but NOT Copy
 
+mount core.prelude.*;
+
 fn main() {
     // Using must_move with non-Copy types
     let nc = NonCopyable.new(42);

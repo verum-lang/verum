@@ -23,6 +23,8 @@ fn clamp_non_negative(x: Int) -> Int {
     if x < 0 { 0 } else { x }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let r = clamp_non_negative(-5);
     print(r);

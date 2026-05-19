@@ -33,6 +33,8 @@ fn test_mixed_quantifiers() {
     let has_identity = exists z: Int . forall x: Int . x + z == x;
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_exists_typed();
     test_exists_collection();

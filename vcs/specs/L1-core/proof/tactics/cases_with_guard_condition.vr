@@ -49,6 +49,8 @@ theorem sign_trichotomy_cases(x: Int)
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: proof/tactics/cases_with_guard_condition");
 }

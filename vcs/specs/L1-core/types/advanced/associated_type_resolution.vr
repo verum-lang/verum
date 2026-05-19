@@ -196,6 +196,8 @@ type ListIter<T> is { items: &List<T>, pos: Int };
 // Standard protocols (using correct Verum syntax)
 type Ordering is Lt | Eq | Gt;
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_projection();
     test_concrete_iterator();

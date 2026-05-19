@@ -6,6 +6,8 @@
 /// Test for List<T> type.
 /// List is a dynamically-sized, growable sequence (semantic equivalent of Vec).
 
+mount core.prelude.*;
+
 fn main() {
     // List creation with constructor
     let list: List<Int> = [1, 2, 3];

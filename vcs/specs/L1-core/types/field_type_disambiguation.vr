@@ -46,6 +46,8 @@ implement Event {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Two construction paths — one from method body (Fix #1 target),
     // one from top-level code (baseline sanity).

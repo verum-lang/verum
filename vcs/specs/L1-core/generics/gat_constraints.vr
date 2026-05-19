@@ -51,6 +51,8 @@ type Transformer is protocol {
     fn transform<A, B>(&self, input: Self.Input<A>) -> Self.Output<B>;
 };
 
+mount core.prelude.*;
+
 fn main() {
     let mc = MaybeContainer;
     let wrapped = mc.wrap(42);

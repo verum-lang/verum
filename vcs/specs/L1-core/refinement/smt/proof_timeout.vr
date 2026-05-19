@@ -190,6 +190,8 @@ fn float_associativity_fails(a: Float, b: Float, c: Float) -> Bool {
     (left - right).abs() < 1e-10
 }
 
+mount core.prelude.*;
+
 fn main() {
     // These tests are designed to timeout
     // The test harness should verify that verification fails with timeout error

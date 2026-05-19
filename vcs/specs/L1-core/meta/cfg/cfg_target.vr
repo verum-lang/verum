@@ -46,6 +46,8 @@ fn gpu_compute() {
     print("GPU compute on Linux");
 }
 
+mount core.prelude.*;
+
 fn main() {
     let page = get_page_size();
     print(f"Page size: {page}");

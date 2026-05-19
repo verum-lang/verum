@@ -162,6 +162,8 @@ fn test_fold() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_provide();
     test_higher_order();

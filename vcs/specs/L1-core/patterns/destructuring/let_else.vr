@@ -314,6 +314,8 @@ fn process_until_none(items: ConsList<Maybe<Int>>) -> Int {
 //------------------------------------------------------------------------------
 
 @test
+mount core.prelude.*;
+
 fn main() {
     // Basic Maybe
     assert(unwrap_or_return(Some(42)) == 42);

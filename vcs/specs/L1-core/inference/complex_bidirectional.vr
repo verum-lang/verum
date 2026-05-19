@@ -144,6 +144,8 @@ fn eval(e: Expr) -> Int {
 // Main - testing complex bidirectional scenarios
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Section 1: Nested function calls with type propagation
     let result: Int = outer(middle(inner, 42));

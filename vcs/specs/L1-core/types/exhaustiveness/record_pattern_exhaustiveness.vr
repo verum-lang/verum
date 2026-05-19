@@ -56,6 +56,8 @@ fn config_timeout(c: Config) -> Int =
         Config { timeout: None, .. } => 30  // default
     };
 
+mount core.prelude.*;
+
 fn main() {
     assert(point_quadrant(Point { x: 1, y: 1 }) == "Q1");
     assert(person_status(Person { name: "Alice", age: 30, active: true }) == "active user");

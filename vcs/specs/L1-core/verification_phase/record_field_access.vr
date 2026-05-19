@@ -44,6 +44,8 @@ theorem nested_field(s: Segment)
     ensures s.start.x == s.start.x
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: verification_phase/record_field_access");
 }

@@ -258,6 +258,8 @@ fn modular_inverse_exists(a: Int{> 0}, m: Int{> 1}) -> Bool
     exists x: Int{> 0 && < m} => (a * x) % m == 1
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Linear arithmetic
     let sum = linear_positive_sum(3, 5);

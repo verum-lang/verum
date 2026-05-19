@@ -182,6 +182,8 @@ implement Functor for Wrong {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("This should not compile due to type errors");
 }

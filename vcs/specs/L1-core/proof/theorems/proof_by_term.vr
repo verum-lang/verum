@@ -18,6 +18,8 @@ theorem double_proof(x: Int) -> Int
 theorem max_proof(a: Int, b: Int) -> Int
     proof = if a > b { a } else { b };
 
+mount core.prelude.*;
+
 fn main() {
     print("Proof by term tests parsed");
 }

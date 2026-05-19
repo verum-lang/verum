@@ -14,6 +14,8 @@ public type StaticMat<T, M: meta USize{M > 0}, N: meta USize{N > 0}> is {
     data: [T; M * N],
 };
 
+mount core.prelude.*;
+
 fn main() {
     // 2×3 matrix
     let a: StaticMat<Int, 2, 3> = StaticMat { data: [1, 2, 3, 4, 5, 6] };

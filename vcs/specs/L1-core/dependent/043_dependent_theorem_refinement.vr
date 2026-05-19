@@ -25,6 +25,8 @@ theorem slice_length_non_negative(
 )
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("dependent theorem parameters verified");
 }

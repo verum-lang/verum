@@ -63,6 +63,8 @@ theorem forall_has_a_match()
         exists d: Color. c == d
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: verification_phase/variant_quantifier_exhaustiveness");
 }

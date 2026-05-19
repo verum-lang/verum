@@ -6,6 +6,8 @@
 /// Test for Text primitive type.
 /// Text represents UTF-8 encoded strings with full Unicode support.
 
+mount core.prelude.*;
+
 fn main() {
     // Basic string literals
     let t: Text = "hello";

@@ -7,6 +7,8 @@
 /// Test for type inference from literals.
 /// The compiler infers types from literal values when not explicitly annotated.
 
+mount core.prelude.*;
+
 fn main() {
     // === Integer Literal Inference ===
 

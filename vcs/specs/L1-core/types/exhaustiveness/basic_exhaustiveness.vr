@@ -53,6 +53,8 @@ fn is_special(n: Int) -> Bool =
         _ => false
     };
 
+mount core.prelude.*;
+
 fn main() {
     assert(color_name(Red) == "red");
     assert(bool_to_int(true) == 1);

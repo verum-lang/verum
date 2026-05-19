@@ -216,6 +216,8 @@ type Temperature is {
 // Main function demonstrating usage
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Basic comparisons
     let pos: Positive = 42;

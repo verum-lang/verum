@@ -251,6 +251,8 @@ implement<T> Maybe<T> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // All above examples should produce E0402 kind mismatch errors
 }

@@ -273,6 +273,8 @@ implement<T> DerefMut for SmartPtr<T> {
 // fn zip_iterators<A, B>(mut a: A, mut b: B) -> List<(A.Item, B.Item)> { ... }
 // fn same_type_iterators<A, B>(mut a: A, mut b: B) -> List<A.Item> { ... }
 
+mount core.prelude.*;
+
 fn main() {
     // Test RangeIterator (concrete impl, no generic dispatch)
     let mut range = RangeIterator { current: 0, end: 3 };

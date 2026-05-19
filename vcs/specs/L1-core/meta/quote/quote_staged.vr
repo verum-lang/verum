@@ -47,6 +47,8 @@ pure meta fn pure_codegen(n: Int) {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Quote staged tests parsed");
 }

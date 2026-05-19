@@ -25,6 +25,8 @@ public type Path<A>(a: A, b: A) is @builtin_path;
 /// The glue type constructor — foundation of computational univalence.
 public type Glue<A>(phi: I, T: fn(I) -> Type, e: fn(i: I) -> Path<A>(T(i), A)) is @builtin_glue;
 
+mount core.prelude.*;
+
 fn main() {
     print("cubical builtin primitives parsed");
 }

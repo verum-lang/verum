@@ -39,6 +39,8 @@ implement NonNegInt {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let r = checked_divide(10, 2);
     assert_eq(r, 5);

@@ -5,6 +5,8 @@
 // @timeout: 30000
 // @description: Tests List<T> collection type operations
 
+mount core.prelude.*;
+
 fn main() {
     // List creation with literal syntax
     let empty: List<Int> = [];

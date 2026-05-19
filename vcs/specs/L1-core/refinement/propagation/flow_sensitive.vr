@@ -303,6 +303,8 @@ fn chained_optional(opt: Maybe<Maybe<Int>>) -> Maybe<Positive> {
 // Main demonstration
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Absolute value
     assert(absolute_value(-5) == 5);

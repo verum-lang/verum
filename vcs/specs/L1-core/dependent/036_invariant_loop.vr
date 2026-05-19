@@ -90,6 +90,8 @@ fn factorial(n: Natural) -> Positive {
     result
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(sum_to(10) == 55);
     assert(sum_to(0) == 0);

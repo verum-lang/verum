@@ -314,6 +314,8 @@ fn multi_at(data: (Maybe<Int>, Maybe<Int>)) -> ((Maybe<Int>, Maybe<Int>), Int) {
 // Tests
 //------------------------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Nested Maybe
     assert(nested_maybe(Some(Some(42))) == 42);

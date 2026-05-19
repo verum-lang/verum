@@ -233,6 +233,8 @@ fn match_control_char(c: Char) -> Text {
 // Tests
 //------------------------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Integer literals
     assert(match_int(0) == "zero");

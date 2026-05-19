@@ -59,6 +59,8 @@ fn create_session() -> SessionId {
     SessionId.generate()
 }
 
+mount core.prelude.*;
+
 fn main() {
     let t = Token.new("abc123");
     assert(validate_token(&t));

@@ -271,6 +271,8 @@ fn factorial(n: Int) -> Int {
 // Main - comprehensive validation
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Vector operations
     let v = Vector3 { data: [3.0, 4.0, 0.0] };

@@ -72,6 +72,8 @@ fn map_pair<A, B, C, D>(
     (f(a), g(b))
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Swap with different type combinations
     let swapped_int_text: (Text, Int) = swap((42, "hello"));

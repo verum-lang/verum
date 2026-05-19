@@ -252,6 +252,8 @@ fn categorize_with_rest(list: List<Int>) -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let list = [1, 2, 3, 4, 5];
 

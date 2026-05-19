@@ -69,6 +69,8 @@ fn min_max(xs: List<Int>) -> Maybe<(Int, Int)>
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(abs_val(-10) == 10);
     assert(abs_val(5) == 5);

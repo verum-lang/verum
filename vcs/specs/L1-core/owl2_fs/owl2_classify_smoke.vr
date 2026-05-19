@@ -52,6 +52,8 @@ public fn knows(a: Person, b: Person) -> Bool { true }
 @owl2_characteristic("Functional")
 public fn ssn_of(p: Citizen) -> Text { "" }
 
+mount core.prelude.*;
+
 fn main() {
     print("owl2 classify smoke ok");
 }

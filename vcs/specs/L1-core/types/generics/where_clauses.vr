@@ -191,6 +191,8 @@ implement<T: Clone + Eq> BoundedBox<T> {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Basic where clauses
     assert(pick_larger(10, 20) == 20);

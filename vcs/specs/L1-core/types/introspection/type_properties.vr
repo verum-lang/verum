@@ -231,6 +231,8 @@ fn test_type_properties_in_where_clauses() {
 // Main entry point
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_primitive_type_properties();
     test_reference_type_properties();

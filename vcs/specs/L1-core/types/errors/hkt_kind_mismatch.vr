@@ -30,6 +30,8 @@ type Pair<A, B> is { first: A, second: B };
 // (* -> *) -> * kind: takes a type constructor
 type Fix<F<_>> is { unfix: F<Fix<F>> };
 
+mount core.prelude.*;
+
 fn main() {
     // === Basic Kind Mismatches ===
 

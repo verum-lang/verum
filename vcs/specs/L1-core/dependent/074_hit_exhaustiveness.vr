@@ -38,6 +38,8 @@ fn describe_interval(i: Interval2) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(describe_circle(Base) == 0);
     assert(describe_interval(Zero) == 0);

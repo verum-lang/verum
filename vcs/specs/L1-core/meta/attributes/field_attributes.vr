@@ -39,6 +39,8 @@ type ApiError is
     | @serialize(rename = "bad_request") BadRequest(Text)
     | @serialize(rename = "server_error") InternalError { message: Text, code: Int };
 
+mount core.prelude.*;
+
 fn main() {
     let addr = Address { street: "123 Main St", city: "Springfield", zip_code: "12345" };
     let user = UserProfile {

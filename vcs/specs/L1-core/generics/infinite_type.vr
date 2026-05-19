@@ -222,6 +222,8 @@ type GoodTree<T> is
 // SECTION 14: Main Function With Error Cases
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Each of these should trigger E403 infinite type errors:
 

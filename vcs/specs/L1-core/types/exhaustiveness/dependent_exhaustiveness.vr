@@ -94,6 +94,8 @@ fn unwrap_maybe_int(w: Wrapper<Maybe<Int>>) -> Int =
         Wrap(None) => 0,
     };
 
+mount core.prelude.*;
+
 fn main() {
     assert(head1(Elem1(42)) == 42);
     assert(head2(Elem2(1, 2)) == 1);

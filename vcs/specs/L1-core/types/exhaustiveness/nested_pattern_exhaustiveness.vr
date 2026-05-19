@@ -56,6 +56,8 @@ fn tuple_match(t: (Maybe<Int>, Maybe<Int>, Maybe<Int>)) -> Int =
         (Some(_), Some(_), Some(_)) => 7
     };
 
+mount core.prelude.*;
+
 fn main() {
     assert(nested_option(Some(Some(42))) == 42);
     assert(nested_result(Ok(Some(10))) == 10);

@@ -225,6 +225,8 @@ fn transfer_ownership(item: MoveOnly) -> MoveOnly {
 // Main - validation
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Sendable data
     let data = create_sendable(42);

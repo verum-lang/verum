@@ -18,6 +18,8 @@ meta fn invalid_quote_up() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Invalid stage error tests");
 }

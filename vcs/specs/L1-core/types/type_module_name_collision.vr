@@ -35,6 +35,8 @@ module Mixed {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Type's static method — must resolve via implement block, not
     // module-style function lookup.

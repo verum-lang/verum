@@ -32,6 +32,8 @@ fn non_terminating(n: Int) -> Int {
     x
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Invariant violation error tests");
 }

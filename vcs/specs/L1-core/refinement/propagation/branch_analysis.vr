@@ -300,6 +300,8 @@ fn complex_definite_assignment(x: Int) -> Positive {
 // Main demonstration
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Join refinements
     assert(join_refinements(5, true) >= 0);

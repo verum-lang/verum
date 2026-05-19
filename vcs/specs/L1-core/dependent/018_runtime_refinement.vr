@@ -72,6 +72,8 @@ fn assert_positive(x: Int, msg: Text) -> Positive {
     x  // After assert, x is known > 0
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Maybe-based validation
     assert(try_positive(5) == Some(5));

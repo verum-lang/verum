@@ -251,6 +251,8 @@ fn match_subsumption(opt: Maybe<NonNegative>) -> Positive {
 //    = note: `Positive` is `Int{> 0}`, which excludes 0
 //    = help: ensure the source type's refinement implies the target's refinement
 
+mount core.prelude.*;
+
 fn main() {
     // This file should not compile - all assignments have subsumption errors
 }

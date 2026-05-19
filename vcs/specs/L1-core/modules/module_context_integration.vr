@@ -102,6 +102,8 @@ module logging_module {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Context usage would be provided at the call site
     0

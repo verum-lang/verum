@@ -198,6 +198,8 @@ protocol Clone { fn clone(&self) -> Self; }
 protocol Eq { fn eq(&self, other: &Self) -> Bool; }
 implement<T> ListIterator<T> { fn count(&self) -> Int { 0 } }
 
+mount core.prelude.*;
+
 fn main() {
     // All above examples should produce E0401 errors
 }

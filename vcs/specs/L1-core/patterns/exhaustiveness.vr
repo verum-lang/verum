@@ -195,6 +195,8 @@ fn classify_positive(n: Int) -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Color
     assert(color_name(Red) == "red");

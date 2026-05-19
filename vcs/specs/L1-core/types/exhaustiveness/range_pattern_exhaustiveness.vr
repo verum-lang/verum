@@ -47,6 +47,8 @@ fn range_test(n: Int) -> Text =
         101.. => "large"          // exclusive: n > 100
     };
 
+mount core.prelude.*;
+
 fn main() {
     assert(classify_score(85) == "B");
     assert(classify_score(95) == "A");

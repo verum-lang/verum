@@ -45,6 +45,8 @@ async fn main_async() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Run async main
     0

@@ -114,6 +114,8 @@ fn fold_list<T, A>(items: List<T>, init: A, f: fn(A, T) -> A) -> A {
 // SECTION 5: Main Test Entry Point
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Creates identity<Int>
     let a: Int = identity(42);

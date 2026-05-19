@@ -35,6 +35,8 @@ fn handle_request() using [DatabasePool, Logger] {
     print("Request handled");
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Inject attribute tests parsed");
 }

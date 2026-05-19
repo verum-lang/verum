@@ -337,6 +337,8 @@ fn shape_rest(s: Shape) -> Text {
 //------------------------------------------------------------------------------
 
 @test
+mount core.prelude.*;
+
 fn main() {
     // Color
     assert(color_all(Red) == "red");

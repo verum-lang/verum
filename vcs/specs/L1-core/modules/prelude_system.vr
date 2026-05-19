@@ -89,6 +89,8 @@ module domain_module {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Prelude types available
     let opt: Maybe<Int> = Maybe.Some(100);

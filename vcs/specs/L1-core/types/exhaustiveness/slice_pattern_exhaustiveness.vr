@@ -52,6 +52,8 @@ fn single_match(arr: [Int; 1]) -> Int =
         [x] => x
     };
 
+mount core.prelude.*;
+
 fn main() {
     assert(array_match([1, 2, 3]) == "no zeros");
     assert(array_match([0, 1, 2]) == "starts zero");

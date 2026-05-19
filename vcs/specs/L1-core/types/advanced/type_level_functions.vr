@@ -108,6 +108,8 @@ implement SizeOf for Text {
     type Size is Text;
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_type_aliases();
 

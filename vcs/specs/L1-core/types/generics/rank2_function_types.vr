@@ -150,6 +150,8 @@ fn make_take_transducer<A>(n: Int) -> StatefulTransducer<A, A, Int> {
 // Test Cases
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: Basic transducer creation with map
     let double_xform: Transducer<Int, Int> = make_map_transducer(|x| x * 2);

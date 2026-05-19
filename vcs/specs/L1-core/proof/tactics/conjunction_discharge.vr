@@ -38,6 +38,8 @@ theorem conjunction_nominal_param(n: PosSeven)
     ensures n == 7 && n * 6 == 42 && n - 1 == 6
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: proof/tactics/conjunction_discharge");
 }

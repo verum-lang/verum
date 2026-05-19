@@ -19,6 +19,8 @@ fn sort_data(data: List<Int>) -> List<Int>
     data
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     0
 }

@@ -313,6 +313,8 @@ fn find_first<T: Eq>(arr: List<T>, target: T) -> Maybe<Int>
     None
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic postconditions
     let abs = absolute(-5);

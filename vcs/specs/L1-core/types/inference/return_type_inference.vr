@@ -187,6 +187,8 @@ fn fibonacci(n: Int) -> Int {
 // Main demonstration
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Arithmetic
     assert(arithmetic_return(3, 4) == 11);

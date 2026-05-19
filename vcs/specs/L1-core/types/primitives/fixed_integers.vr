@@ -7,6 +7,8 @@
 /// Verum supports both signed (Int8, Int16, Int32, Int64) and
 /// unsigned (UInt8, UInt16, UInt32, UInt64) integers.
 
+mount core.prelude.*;
+
 fn main() {
     // Signed integer types
     let a: Int8 = 127;

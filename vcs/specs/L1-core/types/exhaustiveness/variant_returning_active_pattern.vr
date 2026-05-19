@@ -153,6 +153,8 @@ fn describe_special_parity(x: Int) -> Text =
 // MAIN
 // ============================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Parity tests
     assert(check_parity(4) == "even number");

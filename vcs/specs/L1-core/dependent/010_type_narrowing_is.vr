@@ -74,6 +74,8 @@ fn process(v: Value) -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let cat = Cat { name: "Whiskers" };
     assert(greet(cat) == "meow from Whiskers");

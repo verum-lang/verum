@@ -335,6 +335,8 @@ fn tree_contains(tree: Tree<Int>, target: Int) -> Bool {
 // Tests
 //------------------------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Basic maybe
     assert(match_maybe(Some(42)) == 42);

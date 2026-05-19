@@ -345,6 +345,8 @@ where
 // SECTION 7: Main Test Cases
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test RangeIterator
     let range_iter = RangeIterator.new(0, 5);

@@ -7,6 +7,8 @@
 /// Test for infinite type errors (occurs check failures).
 /// These examples create recursive type constraints that cannot be solved.
 
+mount core.prelude.*;
+
 fn main() {
     // E403: Self-referential closure type
     let f = |x| f(x);  // ERROR: f: T -> T where T = (T -> T), infinite

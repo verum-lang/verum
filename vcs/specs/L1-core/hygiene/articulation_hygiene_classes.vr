@@ -30,6 +30,8 @@ public type S1 is Base | Loop() = Base..Base;
 @recursive
 public fn ackermann(m: Int, n: Int) -> Int { 0 }
 
+mount core.prelude.*;
+
 fn main() {
     print("articulation hygiene classes ok");
 }

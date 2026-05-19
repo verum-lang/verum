@@ -30,6 +30,8 @@ implement CacheService {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     0
 }

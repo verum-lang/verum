@@ -40,6 +40,8 @@ meta fn simple_quote() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Quote basic tests parsed");
 }

@@ -149,6 +149,8 @@ type BoundedCounter is {
 // Main function demonstrating usage
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Basic refinements
     let pos: Positive = 42;

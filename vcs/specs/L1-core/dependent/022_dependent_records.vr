@@ -77,6 +77,8 @@ fn gcd(a: Int{>= 0}, b: Int{>= 0}) -> Int{>= 0} {
     if b == 0 { a } else { gcd(b, a % b) }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let slice = make_slice([10, 20, 30, 40, 50], 1, 4);
     match slice {

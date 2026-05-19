@@ -54,6 +54,8 @@ fn cascade_window(
     y - x
 }
 
+mount core.prelude.*;
+
 fn main() {
     let r1 = bounded_index(10, 3);
     let r2 = clamp_above(5, 7);

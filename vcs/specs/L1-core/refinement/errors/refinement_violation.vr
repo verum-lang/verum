@@ -131,6 +131,8 @@ fn cast_violations() {
     let c: ByteValue = y;  // Error: -50 < 0
 }
 
+mount core.prelude.*;
+
 fn main() {
     // This file should not compile - all assignments violate refinements
 }

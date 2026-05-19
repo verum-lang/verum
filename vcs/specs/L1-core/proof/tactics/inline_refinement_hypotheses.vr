@@ -33,6 +33,8 @@ theorem multi_param_refinements(a: Int { self >= 0 }, b: Int { self >= 0 })
     ensures a + b >= 0
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: proof/tactics/inline_refinement_hypotheses");
 }

@@ -30,6 +30,8 @@ implement Shape for Square {
 
 // Square is conceptually a subtype of Rectangle (same interface, stricter invariant)
 
+mount core.prelude.*;
+
 fn main() {
     // === COVARIANCE (output position) ===
 

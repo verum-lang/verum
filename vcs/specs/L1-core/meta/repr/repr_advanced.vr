@@ -49,6 +49,8 @@ type Int8 is {
     v4: Int, v5: Int, v6: Int, v7: Int,
 };
 
+mount core.prelude.*;
+
 fn main() {
     let fd = FileDescriptor(3);
     print("Repr advanced tests parsed");

@@ -83,6 +83,8 @@ type FiniteEnum<T> is
 // Nested generic that expands - SHOULD FAIL
 // type Nest<T> = Maybe<Nest<Maybe<T>>>;  // ERROR: Infinite nesting
 
+mount core.prelude.*;
+
 fn main() {
     // Correct usage of finite recursive types
 

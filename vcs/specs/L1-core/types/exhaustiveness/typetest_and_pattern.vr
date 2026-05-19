@@ -162,6 +162,8 @@ fn describe_value(v: Value) -> Text =
 // MAIN
 // ============================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Type test with and-pattern
     assert(classify_value(42) == "positive integer");

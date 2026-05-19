@@ -190,6 +190,8 @@ fn is_horizontal(d: Direction) -> Bool {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Maybe tests
     assert(unwrap_or(Some(42), 0) == 42);

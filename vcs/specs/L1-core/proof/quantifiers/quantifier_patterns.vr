@@ -38,6 +38,8 @@ fn test_multi_binding() {
     let all_less = forall x in xs, y in ys . x < y;
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_forall_pattern();
     test_forall_maybe();

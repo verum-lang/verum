@@ -257,6 +257,8 @@ fn range_byte(b: Int) -> Text {
 // Tests
 //------------------------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Inclusive ranges
     assert(range_inclusive_int(5) == "single digit");

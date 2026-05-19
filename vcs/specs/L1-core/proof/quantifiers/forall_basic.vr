@@ -35,6 +35,8 @@ fn test_forall_nested() {
     let commutative = forall a: Int . forall b: Int . a + b == b + a;
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_forall_typed();
     test_forall_collection();

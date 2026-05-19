@@ -95,6 +95,8 @@ fn eval(v: TypedValue) -> Float {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let pos = classify_int(42);
     assert(number_to_float(pos) == 42.0);

@@ -73,6 +73,8 @@ fn clone_twice<C: BoundedContainer, T: Clone>(value: T) -> (C.Item<T>, C.Item<T>
     (item1, item2)
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Using BoxWrapper as Container
     let wrapped: Heap<Int> = BoxWrapper.wrap(42);

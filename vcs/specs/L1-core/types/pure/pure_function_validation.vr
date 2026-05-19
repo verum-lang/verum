@@ -463,6 +463,8 @@ pure fn never_negative(n: Int) -> Int {
 // Test Entry Point
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test pure functions work correctly
     assert_eq(add(2, 3), 5);

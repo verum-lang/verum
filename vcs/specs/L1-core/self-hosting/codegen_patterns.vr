@@ -284,6 +284,8 @@ fn test_multi_block_asm() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() {
     let mut failures = 0;
     failures = failures + test_basic_emit();

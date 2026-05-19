@@ -104,6 +104,8 @@ fn valid_list_patterns<T>(list: ConsList<T>) -> Text {
 //------------------------------------------------------------------------------
 
 @test
+mount core.prelude.*;
+
 fn main() {
     // Valid order
     assert(valid_order(0) == "zero");

@@ -71,6 +71,8 @@ theorem chain_constructor_flow(c: Color, d: Color)
     ensures false
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: verification_phase/adt_end_to_end");
 }

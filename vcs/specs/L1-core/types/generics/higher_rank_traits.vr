@@ -53,6 +53,8 @@ fn with_identity<T: Clone>(value: &T) -> T {
     value.clone()
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Using ForEach
     let items: List<Int> = [1, 2, 3, 4, 5];

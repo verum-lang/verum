@@ -30,6 +30,8 @@ fn hcomp_trivial(base: Int) -> Int {
     base
 }
 
+mount core.prelude.*;
+
 fn main() {
     let x = path_at_endpoint(5);
     let y = transport_identity(10);

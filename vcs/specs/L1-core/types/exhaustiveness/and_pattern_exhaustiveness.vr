@@ -85,6 +85,8 @@ fn narrow_type(opt: Maybe<Int>) -> Int =
         None => 0
     };
 
+mount core.prelude.*;
+
 fn main() {
     assert(classify_maybe(Some(5)) == "positive");
     assert(classify_maybe(Some(-3)) == "negative");

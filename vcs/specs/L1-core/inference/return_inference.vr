@@ -181,6 +181,8 @@ fn side_effect() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test basic return
     let sum = add(10, 20);

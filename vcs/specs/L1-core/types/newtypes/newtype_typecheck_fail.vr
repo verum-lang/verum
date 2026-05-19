@@ -20,6 +20,8 @@ type Meters is (Float);
 type Seconds is (Float);
 type Kilograms is (Float);
 
+mount core.prelude.*;
+
 fn main() {
     // === Cannot assign wrapped type directly ===
 

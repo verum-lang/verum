@@ -64,6 +64,8 @@ implement Applicative for Maybe {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let a: Maybe<Int> = Maybe.Some(2);
     let b: Maybe<Int> = Maybe.Some(3);

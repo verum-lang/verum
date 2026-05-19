@@ -56,6 +56,8 @@ meta fn with_lift(computed: Int) {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Quote interpolation tests parsed");
 }

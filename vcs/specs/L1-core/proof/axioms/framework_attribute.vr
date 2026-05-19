@@ -53,6 +53,8 @@ axiom swallowtail_normal_form(x: Int, y: Int) -> Bool
 axiom gps_coherence(n: Int) -> Bool
     ensures n >= 0;
 
+mount core.prelude.*;
+
 fn main() {
     print("framework-attribute axioms parsed");
 }

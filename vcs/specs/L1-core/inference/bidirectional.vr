@@ -88,6 +88,8 @@ type Person is {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Upward inference: List<Int> flows up to items
     let items = [1, 2, 3];

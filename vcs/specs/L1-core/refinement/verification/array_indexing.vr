@@ -293,6 +293,8 @@ fn partition(arr: &mut List<Int>, lo: Int{>= 0}, hi: Int{>= 0}) -> Int{>= 0}
     i
 }
 
+mount core.prelude.*;
+
 fn main() {
     let arr = [1, 2, 3, 4, 5];
 

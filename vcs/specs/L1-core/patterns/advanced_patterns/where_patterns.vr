@@ -282,6 +282,8 @@ fn transform_where(m: Maybe<Int>) -> Maybe<Int> {
 // Tests
 //------------------------------------------------------------------------------
 
+mount core.prelude.*;
+
 fn main() {
     // Basic where
     assert(filter_positive(5) == Some(5));

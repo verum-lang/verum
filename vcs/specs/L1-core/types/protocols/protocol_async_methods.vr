@@ -184,6 +184,8 @@ implement AsyncService for EchoService {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Typecheck-only: verify protocol definitions and implementations compile
 }

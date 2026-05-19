@@ -236,6 +236,8 @@ fn test_ffi_boundary() {
 // Main test runner
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Basic assignment tests
     test_assign_int_to_unknown();

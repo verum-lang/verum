@@ -187,6 +187,8 @@ theorem has_identity: exists e: Int . forall x: Int . x + e == x;
 /// Lemma - simplified
 lemma bounded_above: forall x: Int . forall y: Int . !(x <= y) || x <= y + 1;
 
+mount core.prelude.*;
+
 fn main() {
     // Run basic tests
     test_forall_basic();

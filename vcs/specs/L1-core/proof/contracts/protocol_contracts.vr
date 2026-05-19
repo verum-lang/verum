@@ -48,6 +48,8 @@ implement BoundedBuffer {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let mut buf = BoundedBuffer.new(3);
     assert(buf.push(1));

@@ -35,6 +35,8 @@ type UnitInterval is Float{>= 0.0 && <= 1.0};
 type Probability is Float{>= 0.0 && <= 1.0};
 type NonZeroFloat is Float{!= 0.0};
 
+mount core.prelude.*;
+
 fn main() {
     // === Basic Refinement Subtyping ===
 

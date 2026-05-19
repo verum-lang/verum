@@ -23,6 +23,8 @@
 // This round-trips the idiomatic stdlib lambdas in `core/math/hott.vr`
 // (`fn(x: A) -> x`, `fn(b: A) -> refl(b)`, etc.) without ceremony.
 
+mount core.prelude.*;
+
 fn main() {
     // Non-ambiguous baseline: operator expression is obviously not a type.
     let double = fn(x: Int) -> x * 2;

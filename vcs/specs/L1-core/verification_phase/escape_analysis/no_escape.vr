@@ -180,6 +180,8 @@ fn test_inline_ref_usage() -> Int {
 // Main - basic validation
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Basic non-escaping
     assert(local_reference_no_escape() == 52);

@@ -350,6 +350,8 @@ fn doc_function(@doc("Documented param") x: Int) {
 // Main function
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Verify basic functionality
     let t = TargetTypeDeriveClone { value: 42 };

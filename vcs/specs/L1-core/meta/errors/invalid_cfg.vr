@@ -11,6 +11,8 @@ fn empty_cfg() {
     print("should not compile");
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Invalid cfg error tests");
 }

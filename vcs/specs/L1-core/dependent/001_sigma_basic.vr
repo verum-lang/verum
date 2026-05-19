@@ -33,6 +33,8 @@ fn interval_length(iv: Interval) -> Int {
     iv.hi - iv.lo
 }
 
+mount core.prelude.*;
+
 fn main() {
     let n: Natural = 42;
     assert(n >= 0);

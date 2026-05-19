@@ -152,6 +152,8 @@ implement Add for Point {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test inherent methods
     let p = Point.new(3.0, 4.0);

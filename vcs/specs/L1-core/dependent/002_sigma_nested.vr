@@ -40,6 +40,8 @@ fn matrix_element_count(m: DenseMatrix) -> Int {
     m.rows * m.cols
 }
 
+mount core.prelude.*;
+
 fn main() {
     let bp = BoundedPair { lo: 0, hi: 10, mid: 5 };
     assert(bp.mid >= bp.lo);

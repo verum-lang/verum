@@ -343,6 +343,8 @@ fn with_diverging(m: Maybe<Int>) -> Int {
 //------------------------------------------------------------------------------
 
 @test
+mount core.prelude.*;
+
 fn main() {
     // Boolean
     assert(bool_explicit(true) == "yes");

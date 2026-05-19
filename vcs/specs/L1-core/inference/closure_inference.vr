@@ -55,6 +55,8 @@ fn text_len(s: Text) -> Int { s.len() }
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     let numbers = [1, 2, 3, 4, 5];
 

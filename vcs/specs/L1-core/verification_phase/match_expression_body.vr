@@ -44,6 +44,8 @@ theorem match_chain_arithmetic(x: Int)
     }) == 200
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: verification_phase/match_expression_body");
 }

@@ -35,6 +35,8 @@ theorem color_non_red_implies_green_or_blue(c: Color)
     ensures c == Color.Green || c == Color.Blue
     proof by auto;
 
+mount core.prelude.*;
+
 fn main() {
     print("L1-core: verification_phase/variant_exhaustiveness");
 }

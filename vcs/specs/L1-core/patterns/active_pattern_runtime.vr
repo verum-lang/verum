@@ -120,6 +120,8 @@ fn test_pattern_guards() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_total_patterns();
     test_negative_patterns();

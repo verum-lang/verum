@@ -48,6 +48,8 @@ fn f_certified(n: Int) -> Int { n + 1 }
 @verify(synthesize)
 fn f_synthesize(n: Int) -> Int { n + 1 }
 
+mount core.prelude.*;
+
 fn main() {
     print("all 9 verify strategies parsed");
 }

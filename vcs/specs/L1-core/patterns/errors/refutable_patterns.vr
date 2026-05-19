@@ -7,6 +7,8 @@
 /// Test for refutable pattern errors.
 /// Refutable patterns can fail to match and must be used in appropriate contexts.
 
+mount core.prelude.*;
+
 fn main() {
     // ========================================================================
     // Refutable patterns in let bindings (ERROR)

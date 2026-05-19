@@ -18,6 +18,8 @@ fn identity<T>(x: T) -> T {
     x
 }
 
+mount core.prelude.*;
+
 fn main() {
     // === Explicit numeric casts with `as` ===
 

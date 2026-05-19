@@ -160,6 +160,8 @@ fn conflicting_match_hints(x: Int) -> Int {
 // Main function - these error tests are compile-time only
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // This file contains error cases that should be detected at compile time.
     // The file is expected to fail compilation with the appropriate error codes.

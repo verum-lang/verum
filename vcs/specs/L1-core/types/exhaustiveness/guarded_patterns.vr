@@ -33,6 +33,8 @@ fn status_message(s: Status) -> Text =
         Inactive => "inactive"
     };
 
+mount core.prelude.*;
+
 fn main() {
     assert(classify_number(-5) == "negative");
     assert(classify_number(0) == "zero");

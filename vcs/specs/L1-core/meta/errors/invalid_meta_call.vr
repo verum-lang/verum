@@ -10,6 +10,8 @@ fn bad_at() {
     let x = @;
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("Invalid meta call error tests");
 }

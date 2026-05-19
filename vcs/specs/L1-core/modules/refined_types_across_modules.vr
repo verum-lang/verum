@@ -113,6 +113,8 @@ module consumer {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     0
 }

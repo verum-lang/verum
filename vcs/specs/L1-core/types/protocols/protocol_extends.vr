@@ -339,6 +339,8 @@ fn use_field<T: Field>(a: T, b: T) -> T {
 // fn iterate_both_ways<I: DoubleEndedIterator>(mut iter: I) -> (Maybe<I.Item>, Maybe<I.Item>) { ... }
 // fn random_access<I: RandomAccessIterator>(iter: &I, index: Int) -> Maybe<&I.Item> { ... }
 
+mount core.prelude.*;
+
 fn main() {
     // Test Number with inheritance chain
     let n1 = Number { value: 10 };

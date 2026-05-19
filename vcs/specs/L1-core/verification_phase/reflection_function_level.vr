@@ -51,6 +51,8 @@ public fn clamp(x: Int) -> Int
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let a = clamp(-5);
     let b = clamp(4);

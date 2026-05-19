@@ -183,6 +183,8 @@ implement Formatter for Bool {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test serializer
     let bytes = 42.serialize();
