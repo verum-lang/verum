@@ -433,9 +433,31 @@ public fn size_class_index(size: Int) -> Maybe<Int> {
 }
 
 /// Get actual allocation size for a size class.
+///
+/// **Workaround**: body inlines the lookup via match instead of
+/// `SIZE_CLASSES[idx]` — bare-name `SIZE_CLASSES` collides with
+/// `core/mem/size_class.vr::SIZE_CLASSES` (73-element table) and the
+/// archive-load first-wins picks the wrong table.  Match-based body
+/// is collision-immune.  Pinned by
+/// `core-tests/mem/allocator/regression_test.vr::regression_size_class_round_trip_exact`.
+/// Until mount-scope-aware const resolution lands (#39 in MEMORY.md),
+/// this inline match is the canonical fix.
 @inline
 public fn size_class_to_size(class_idx: Int) -> Int {
-    SIZE_CLASSES[class_idx]
+    match class_idx {
+        0 => 16,
+        1 => 32,
+        2 => 48,
+        3 => 64,
+        4 => 80,
+        5 => 96,
+        6 => 128,
+        7 => 256,
+        8 => 512,
+        9 => 1024,
+        10 => 2048,
+        _ => 0,
+    }
 }
 
 /// Calculate slots per page for a size class.
