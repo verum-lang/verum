@@ -107,6 +107,8 @@ type Rows is { count: Int };
 type DbError is Failed;
 type LogLevel is Debug | Info | Warn | Error;
 
+mount core.prelude.*;
+
 fn main() {
     let db = ProductionDb { conn: "prod://db" };
 

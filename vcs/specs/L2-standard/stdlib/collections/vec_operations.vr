@@ -7,6 +7,8 @@
 /// Vec is the growable array type, semantically similar to List<T>.
 /// Tests demonstrate the low-level vector operations and memory management.
 
+mount core.prelude.*;
+
 fn main() {
     test_vec_creation();
     test_vec_indexing();

@@ -25,6 +25,8 @@ async fn chain() -> Int {
     y
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic async/await
     let a = fetch_value(5).await;

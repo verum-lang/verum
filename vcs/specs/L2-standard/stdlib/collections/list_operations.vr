@@ -7,6 +7,8 @@
 /// List is a dynamically-sized, growable sequence (semantic equivalent of Vec).
 /// Tests creation, indexing, iteration, and all standard methods.
 
+mount core.prelude.*;
+
 fn main() {
     test_list_creation();
     test_list_indexing();

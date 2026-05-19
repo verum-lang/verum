@@ -159,6 +159,8 @@ type Config is {
     value: Int,
 };
 
+mount core.prelude.*;
+
 fn main() {
     logging.log("Starting application");
 

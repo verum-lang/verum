@@ -90,6 +90,8 @@ fn test_complex_quantifier(
     arr[0] <= arr[n-1]
 }
 
+mount core.prelude.*;
+
 fn main() {
     let arr: List<Element> = [10, 20, 30, 40, 50];
     assert(test_forall_bounded(arr, 5));

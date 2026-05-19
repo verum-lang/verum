@@ -6,6 +6,8 @@
 /// Comprehensive test suite for Instant type.
 /// Tests monotonic time measurement and elapsed duration.
 
+mount core.prelude.*;
+
 fn main() {
     test_instant_creation();
     test_instant_elapsed();

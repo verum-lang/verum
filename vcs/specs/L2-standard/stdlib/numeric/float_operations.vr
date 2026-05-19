@@ -6,6 +6,8 @@
 /// Comprehensive test suite for Float (IEEE 754 double-precision) operations.
 /// Tests arithmetic, comparison, special values, and mathematical functions.
 
+mount core.prelude.*;
+
 fn main() {
     test_float_creation();
     test_float_arithmetic();

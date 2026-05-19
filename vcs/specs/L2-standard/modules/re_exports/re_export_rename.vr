@@ -70,6 +70,8 @@ module application {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount application.{setup, run_query};
 

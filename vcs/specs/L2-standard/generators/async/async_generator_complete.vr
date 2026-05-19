@@ -297,6 +297,8 @@ async fn download_file(url: Text) -> Result<(), Error>
 // Main Entry Point
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Run all tests
     Runtime.block_on(async {

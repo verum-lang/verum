@@ -6,6 +6,8 @@
 /// Comprehensive test suite for Text search operations.
 /// Tests find, contains, pattern matching, and split operations.
 
+mount core.prelude.*;
+
 fn main() {
     test_text_contains();
     test_text_find();

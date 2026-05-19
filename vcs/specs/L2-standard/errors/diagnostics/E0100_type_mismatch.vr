@@ -85,6 +85,8 @@ fn complex_type_mismatch() {
 
 fn null_mut<T>() -> *mut T { 0 as *mut T }
 
+mount core.prelude.*;
+
 fn main() {
     // This file should not compile
 }

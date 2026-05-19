@@ -161,6 +161,8 @@ type BoxFuture<T> is Heap<Future<Output = T>>;
 //    = note: `NotSend` is not `Send` because it contains `*mut Int`
 //    = help: consider wrapping in `Arc<Mutex<...>>` for shared access
 
+mount core.prelude.*;
+
 fn main() {
     // This file should not compile
 }

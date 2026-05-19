@@ -7,6 +7,8 @@
 /// Heap is a priority queue implementation using a binary heap.
 /// Supports both min-heap and max-heap configurations.
 
+mount core.prelude.*;
+
 fn main() {
     test_heap_creation();
     test_heap_push_pop();

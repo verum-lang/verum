@@ -192,6 +192,8 @@ module build {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Platform detection
     @cfg(target_os = "linux")

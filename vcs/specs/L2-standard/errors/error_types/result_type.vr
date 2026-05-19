@@ -133,6 +133,8 @@ fn get_multiple_users(ids: List<UserId>) -> Result<List<User>, UserError> {
     Ok(users)
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic Result usage
     let div_result = divide(42.0, 2.0);

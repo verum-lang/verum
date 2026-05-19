@@ -283,6 +283,8 @@ fn test_set() {
     print("set_union=4");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_stack();
     test_map();

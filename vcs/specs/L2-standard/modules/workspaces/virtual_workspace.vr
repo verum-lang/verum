@@ -220,6 +220,8 @@ module integration_tests {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Virtual workspace example
 }

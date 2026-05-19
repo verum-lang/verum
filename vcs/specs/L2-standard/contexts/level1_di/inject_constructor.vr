@@ -83,6 +83,8 @@ implement UserService {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // UserService is automatically constructed with its dependencies
     let user_service = inject UserService;

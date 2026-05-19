@@ -119,6 +119,8 @@ fn count_down(n: Int) -> Int {
     if n <= 0 { 0 } else { n + count_down(n - 1) }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Basic recursion ===
     assert_eq(factorial(0), 1);

@@ -619,6 +619,8 @@ fn kitchen_sink<T: Clone>()
 // Test Entry Point
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Note: This is primarily a typecheck test
     // Runtime behavior requires actual context implementations

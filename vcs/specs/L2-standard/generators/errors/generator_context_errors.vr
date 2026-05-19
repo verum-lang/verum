@@ -385,6 +385,8 @@ async fn unpinned_context_error() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // All examples above should produce E421 "Generator context error"
 }

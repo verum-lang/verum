@@ -90,6 +90,8 @@ context WriteOnly {
     fn set(value: Text);
 }
 
+mount core.prelude.*;
+
 fn main() {
     let config = Map.new();
 

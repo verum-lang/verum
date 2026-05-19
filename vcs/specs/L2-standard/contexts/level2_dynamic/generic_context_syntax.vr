@@ -149,6 +149,8 @@ type IoError is
 // PART 8: Main Entry Point
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     print("Generic context syntax tests compiled successfully");
 }

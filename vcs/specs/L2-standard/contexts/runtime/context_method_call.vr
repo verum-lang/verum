@@ -52,6 +52,8 @@ fn application_flow() using [Logger] {
     report_error("Validation failed");
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Provide the Logger context
     let logger = ConsoleLogger { prefix: "APP" };

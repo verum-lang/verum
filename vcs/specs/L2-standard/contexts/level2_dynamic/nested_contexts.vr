@@ -76,6 +76,8 @@ fn inner_function() -> () using [Database] {
     // and within this function's scope
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Provide the initial Database context
     provide Database = InMemoryDatabase {};

@@ -330,6 +330,8 @@ fn combining_results() {
     assert_eq(result.unwrap(), (1, 2));
 }
 
+mount core.prelude.*;
+
 fn main() {
     // map example
     let mapped = Ok(42).map(|n| n * 2);

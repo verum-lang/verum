@@ -39,6 +39,8 @@ fn nested_calls() using [Logger] {
     log_message("done");
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Provide a Logger context
     let logger = Logger { prefix: "APP" };

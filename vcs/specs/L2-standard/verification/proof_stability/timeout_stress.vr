@@ -172,6 +172,8 @@ fn max(arr: List<Int>) -> Int
     m
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(test_large_disjunction(42));
     assert(test_nonlinear(3, 4, 5));  // 3-4-5 triangle

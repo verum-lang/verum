@@ -137,6 +137,8 @@ module short_names {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount consumer.{process, classify_io_error, classify_net_error};
     mount short_names.{create_short, create_connection, make_query};

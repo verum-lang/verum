@@ -86,6 +86,8 @@ async fn async_without_await() -> List<Row> using [Database] {
     Database.query("SELECT 1")  // ERROR: missing .await
 }
 
+mount core.prelude.*;
+
 fn main() {
     // This code should not compile due to async context mismatches
 }

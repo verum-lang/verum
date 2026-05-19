@@ -58,6 +58,8 @@ implement Counter {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Contracts present but not verified
     let result = divide(10, 2);

@@ -189,6 +189,8 @@ ghost fn count_ones(x: UInt32) -> Int {
     count
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(wrapping_add_u8(200, 100) == 44);  // 300 mod 256
     assert(saturating_add_u8(200, 100) == 255);

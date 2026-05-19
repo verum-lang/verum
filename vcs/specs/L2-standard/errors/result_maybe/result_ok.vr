@@ -294,6 +294,8 @@ fn default_value(key: &Text) -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic Ok handling
     let result: Result<Int, Text> = Ok(42);

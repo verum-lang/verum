@@ -134,6 +134,8 @@ module helpers {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount helpers.{int_expr, var_expr, add_expr};
     mount ast.Value;

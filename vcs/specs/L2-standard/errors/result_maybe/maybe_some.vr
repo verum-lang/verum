@@ -319,6 +319,8 @@ fn combine_some_values() {
     assert_eq(summed, Some(3));
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic Some handling
     let maybe: Maybe<Int> = Some(42);

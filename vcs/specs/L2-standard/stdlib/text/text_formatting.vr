@@ -6,6 +6,8 @@
 /// Comprehensive test suite for Text formatting operations.
 /// Tests format strings, number formatting, alignment, and display traits.
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_formatting();
     test_numeric_formatting();

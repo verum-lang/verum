@@ -6,6 +6,8 @@
 /// Comprehensive test suite for Text encoding operations.
 /// Tests UTF-8 encoding/decoding, character handling, and byte manipulation.
 
+mount core.prelude.*;
+
 fn main() {
     test_utf8_basics();
     test_utf8_encoding();

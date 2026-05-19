@@ -114,6 +114,8 @@ fn now() -> Timestamp {
     1234567890
 }
 
+mount core.prelude.*;
+
 fn main() {
     // This code should not compile due to scope violations
 }

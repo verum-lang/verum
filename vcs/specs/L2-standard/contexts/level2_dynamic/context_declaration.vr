@@ -99,6 +99,8 @@ type Serialize is protocol {};
 type Duration is Int;
 type Timestamp is Int;
 
+mount core.prelude.*;
+
 fn main() {
     // This file tests context declaration syntax only
     // No runtime behavior tested here

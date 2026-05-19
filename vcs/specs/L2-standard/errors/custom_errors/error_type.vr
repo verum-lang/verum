@@ -282,6 +282,8 @@ implement<E> Wrapped<E> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Create and use custom errors
     let parse_err = ParseError.InvalidToken {

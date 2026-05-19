@@ -31,6 +31,8 @@ fn get_counter_value() -> Int using [Counter] {
     Counter.get()
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Provide the Counter context with initial value 42
     let counter = SimpleCounter { value: 42 };

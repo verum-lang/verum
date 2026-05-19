@@ -116,6 +116,8 @@ fn test_2d_array(
     row[j] == row[j]
 }
 
+mount core.prelude.*;
+
 fn main() {
     let arr = [1, 2, 3, 4, 5];
     assert(test_store_select_same(arr, 2, 100));

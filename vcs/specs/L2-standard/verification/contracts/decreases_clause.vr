@@ -160,6 +160,8 @@ fn divides(d: Int, n: Int) -> Bool {
     n % d == 0
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(factorial(5) == 120);
     assert(fibonacci(10) == 55);

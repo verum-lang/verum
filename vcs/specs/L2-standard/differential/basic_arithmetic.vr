@@ -20,6 +20,8 @@ fn check_int(name: Int, actual: Int, expected: Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Integer addition
     assert_eq(2 + 3, 5);

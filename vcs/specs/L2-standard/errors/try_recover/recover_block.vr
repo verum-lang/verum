@@ -204,6 +204,8 @@ fn multi_level_recovery() -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic recovery
     let data = fetch_with_fallback("missing");

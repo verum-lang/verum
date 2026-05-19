@@ -151,6 +151,8 @@ module framework {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount framework.core.types.{Request, Response, make_request, ok_response};
     mount framework.router.{new_router, add_route, handle};

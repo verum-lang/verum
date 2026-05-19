@@ -46,6 +46,8 @@ type User is {
     name: Text,
 };
 
+mount core.prelude.*;
+
 fn main() {
     // This should fail at compile time:
     // E802: Missing dependency 'DatabaseConnection' required by 'UserRepository'

@@ -200,6 +200,8 @@ fn chained_try_blocks() -> Result<Int, Text> {
     c
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic try block
     match process_file("valid.txt") {

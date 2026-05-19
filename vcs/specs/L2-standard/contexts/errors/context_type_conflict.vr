@@ -201,6 +201,8 @@ fn context_substitution_error() using [DataSource] {
     DataSource.write("data");  // ERROR: wrong context
 }
 
+mount core.prelude.*;
+
 fn main() {
     // This code should not compile due to context type conflicts
 }

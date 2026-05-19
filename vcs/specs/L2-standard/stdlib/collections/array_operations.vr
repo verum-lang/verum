@@ -7,6 +7,8 @@
 /// Arrays have compile-time known size and are stack-allocated.
 /// Tests creation, indexing, slicing, and all array-specific operations.
 
+mount core.prelude.*;
+
 fn main() {
     test_array_creation();
     test_array_indexing();

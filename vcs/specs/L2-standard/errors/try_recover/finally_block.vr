@@ -264,6 +264,8 @@ fn finally_guarantee() -> Int {
     result.unwrap_or(0)
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Full error handling with finally
     let content = full_error_handling("/invalid/path.txt");

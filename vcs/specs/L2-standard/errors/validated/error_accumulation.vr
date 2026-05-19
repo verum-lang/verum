@@ -419,6 +419,8 @@ fn test_result_vs_validated() {
 // Main test runner
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_validated();
     test_error_accumulation();

@@ -7,6 +7,8 @@
 /// Map is an associative container mapping keys to values (semantic equivalent of HashMap).
 /// Tests insertion, retrieval, removal, iteration, and all standard methods.
 
+mount core.prelude.*;
+
 fn main() {
     test_map_creation();
     test_map_insertion();

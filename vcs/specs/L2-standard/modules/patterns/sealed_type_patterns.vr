@@ -149,6 +149,8 @@ module extended_ast {
         }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount json.{Value, type_name, is_truthy};
     mount ast.{Node, node_type};

@@ -6,6 +6,8 @@
 /// Comprehensive test suite for Duration type.
 /// Tests time duration creation, arithmetic, and conversions.
 
+mount core.prelude.*;
+
 fn main() {
     test_duration_creation();
     test_duration_components();

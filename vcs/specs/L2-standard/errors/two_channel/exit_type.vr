@@ -533,6 +533,8 @@ fn test_complex_cause() {
 // Main test runner
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_exit();
     test_expected_errors();

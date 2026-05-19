@@ -454,6 +454,8 @@ fn test_partial_acquisition_failure() {
 // Main test runner
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_scoped_file_success();
     test_scoped_file_failure();

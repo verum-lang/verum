@@ -99,6 +99,8 @@ implement AuthService {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // First, provide the context
     provide Logger = ConsoleLogger.new("app");

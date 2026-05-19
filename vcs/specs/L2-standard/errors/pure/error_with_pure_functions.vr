@@ -581,6 +581,8 @@ pure fn parse_json_impl(text: Text) -> JsonValue {
 // Test entry point
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: Pure function with throws
     try {

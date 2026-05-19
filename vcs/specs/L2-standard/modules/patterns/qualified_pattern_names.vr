@@ -97,6 +97,8 @@ module consumer {
         }
 }
 
+mount core.prelude.*;
+
 fn main() {
     mount consumer.{color_to_hex, signal_name, describe_state, map_option, signal_to_color};
     mount graphics.Color;

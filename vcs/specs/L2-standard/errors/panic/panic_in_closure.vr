@@ -9,6 +9,8 @@ fn apply(f: fn(Int) -> Int, x: Int) -> Int {
     f(x)
 }
 
+mount core.prelude.*;
+
 fn main() {
     let divisor = 0;
     let divide_by = |x: Int| -> Int {

@@ -6,6 +6,8 @@
 /// Comprehensive test suite for arithmetic operations.
 /// Tests basic arithmetic, checked/wrapping operations, and integer math.
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_arithmetic();
     test_integer_division();

@@ -100,6 +100,8 @@ fn pin_kernel_v0_filenames() {
            "kernel_v0: 10 k_*.vr rule files must exist on disk");
 }
 
+mount core.prelude.*;
+
 fn main() {
     pin_kernel_v0_proved_count();
     pin_kernel_v0_admitted_count();

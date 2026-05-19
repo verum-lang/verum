@@ -202,6 +202,8 @@ fn try_block_example(config_text: &Text) -> Result<Int, ConfigError> {
     result
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test question mark with Result
     let config_text = "host=localhost;port=8080";

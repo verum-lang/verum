@@ -127,6 +127,8 @@ fn gcd(a: Int, b: Int) -> Int {
     else { gcd(b, a % b) }
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(factorial(5) == 120);
     assert(is_even(10) == true);

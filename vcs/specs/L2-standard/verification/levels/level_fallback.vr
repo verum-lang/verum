@@ -77,6 +77,8 @@ fn override_module_level(x: Int) -> Int {
     x * 2
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test each verification level
     let abs_result = proven_abs(-5);

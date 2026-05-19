@@ -134,6 +134,8 @@ fn pin_foundation_msfs_coherence() {
             citation pair would derive False");
 }
 
+mount core.prelude.*;
+
 fn main() {
     pin_foundation_profile_classifier_size();
     pin_foundation_msfs_distinct_families();

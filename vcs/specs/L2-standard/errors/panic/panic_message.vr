@@ -249,6 +249,8 @@ fn demonstrate_builder() {
         .do_panic();
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Demonstrate panic with detailed message
     let ctx = OperationContext {

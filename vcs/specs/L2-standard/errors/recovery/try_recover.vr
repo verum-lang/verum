@@ -186,6 +186,8 @@ fn fetch_recoverable_only(source: &Text) -> Result<Data, DataError> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic recovery
     let data = fetch_with_fallback("missing");

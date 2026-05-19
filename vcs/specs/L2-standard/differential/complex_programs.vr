@@ -284,6 +284,8 @@ fn test_higher_order() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sorting();
     test_stack();

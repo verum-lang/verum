@@ -149,6 +149,8 @@ fn overflow_detection() {
 //            if y != 0 { divide(x, y) }
 //    = note: verification level is `static`, requiring compile-time proof
 
+mount core.prelude.*;
+
 fn main() {
     // This file should not compile
 }

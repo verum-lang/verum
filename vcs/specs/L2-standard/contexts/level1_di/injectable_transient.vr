@@ -47,6 +47,8 @@ implement Counter {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Each injection creates a new instance
     let counter1 = inject Counter;

@@ -312,6 +312,8 @@ fn finalize_stage(input: &Text) -> Result<StageResult, PipelineError> {
     Ok(StageResult { data: input.clone() })
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic nested
     match basic_nested("valid_input") {

@@ -76,6 +76,8 @@ fn collatz_steps(n: Int) -> Int {
     steps
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === If/Else ===
     assert_eq(abs_val(5), 5);

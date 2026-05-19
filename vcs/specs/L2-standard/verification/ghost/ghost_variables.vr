@@ -163,6 +163,8 @@ fn sum_array(arr: &[Int]) -> Int {
     sum
 }
 
+mount core.prelude.*;
+
 fn main() {
     let mut counter = Counter.new();
     counter.increment();

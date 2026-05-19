@@ -6,6 +6,8 @@
 /// Comprehensive test suite for mathematical functions.
 /// Tests trigonometric, exponential, logarithmic, and special functions.
 
+mount core.prelude.*;
+
 fn main() {
     test_trigonometric_functions();
     test_inverse_trigonometric();

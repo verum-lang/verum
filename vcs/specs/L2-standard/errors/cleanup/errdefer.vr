@@ -353,6 +353,8 @@ fn transactional_operation(should_fail: Bool) -> Result<Int, Text> {
 
 // === Verification tests ===
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: Success path - only defer runs
     let _ = success_path();

@@ -88,6 +88,8 @@ fn power_iter(base: Int, exp: Int) -> Int {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Simple functions ===
     assert_eq(constant(), 42);

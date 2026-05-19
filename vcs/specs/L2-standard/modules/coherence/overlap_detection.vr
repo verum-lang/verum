@@ -109,6 +109,8 @@ type Zero is protocol {
     fn zero() -> Self;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // This file should not compile
 }

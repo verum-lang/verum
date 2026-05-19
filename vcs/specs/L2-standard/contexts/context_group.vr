@@ -327,6 +327,8 @@ async fn mixed_operation() -> Result<Int, DbError> using MixedServices {
 // Test entry point
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // This file tests using type checking syntax only
     // Runtime behavior would require actual context implementations

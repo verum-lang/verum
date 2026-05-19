@@ -98,6 +98,8 @@ fn provide_undefined() {
 
 type SomeValue is {};
 
+mount core.prelude.*;
+
 fn main() {
     // This code should not compile due to invalid using definitions
 }

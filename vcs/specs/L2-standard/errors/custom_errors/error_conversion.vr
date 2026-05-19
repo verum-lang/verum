@@ -355,6 +355,8 @@ fn parse_preferences(user: &User) -> Result<Preferences, ParseError> {
     Ok(Preferences { theme: "dark" })
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Demonstrate automatic conversion
     let io_err: IoError = IoError.NotFound("/missing.txt");

@@ -123,6 +123,8 @@ module outer {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let sum = math.add(5, 10);
     assert(sum == 15);

@@ -188,6 +188,8 @@ async fn test_select_timeout() -> Result<Int, TimeoutError> {
     Err(TimeoutError)
 }
 
+mount core.prelude.*;
+
 fn main() {
     let result1 = test_basic_select().await;
     print(f"First completed: {result1}");

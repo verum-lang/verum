@@ -6,6 +6,8 @@
 /// Comprehensive test suite for Unicode support in Text.
 /// Tests UTF-8 encoding, character handling, normalization, and internationalization.
 
+mount core.prelude.*;
+
 fn main() {
     test_utf8_encoding();
     test_unicode_characters();

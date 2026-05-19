@@ -196,6 +196,8 @@ module solutions {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // This file should fail to typecheck due to E203 errors
     // The orphan implementations in local_crate are invalid

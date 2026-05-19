@@ -57,6 +57,8 @@ fn prelude_int_methods_accessible() {
     assert(Int.MIN < 0);
 }
 
+mount core.prelude.*;
+
 fn main() {
     prelude_maybe_available_without_explicit_mount();
     prelude_result_available_without_explicit_mount();

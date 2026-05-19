@@ -148,6 +148,8 @@ type AuthError is
     | PermissionDenied;
 type Ordering is Less | Equal | Greater;
 
+mount core.prelude.*;
+
 fn main() {
     // Abstract verification - no concrete execution
 }

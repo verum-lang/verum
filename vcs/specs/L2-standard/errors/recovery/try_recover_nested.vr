@@ -45,6 +45,8 @@ fn initialize() -> Result<Int, AppError> {
     Ok(config)
 }
 
+mount core.prelude.*;
+
 fn main() {
     let result = initialize();
     match result {

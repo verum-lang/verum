@@ -467,6 +467,8 @@ fn test_iterator_methods() {
 // Test entry point
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_range();
     test_fixed_sequence();

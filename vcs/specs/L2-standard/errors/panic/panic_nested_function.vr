@@ -24,6 +24,8 @@ fn run_pipeline(values: List<Int>) -> List<Int> {
     results
 }
 
+mount core.prelude.*;
+
 fn main() {
     let data = [10, 20, -5, 30];
     let results = run_pipeline(data);

@@ -374,6 +374,8 @@ fn iteration_combinators() {
     assert_eq(users.len(), 3);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // map example
     let mapped = Some(42).map(|n| n * 2);

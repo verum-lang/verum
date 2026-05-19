@@ -304,6 +304,8 @@ fn practical_patterns() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic Err handling
     let result: Result<Int, Text> = Err("not found");

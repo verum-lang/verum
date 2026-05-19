@@ -6,6 +6,8 @@
 /// Comprehensive test suite for complex number operations.
 /// Tests complex arithmetic, polar form, and complex functions.
 
+mount core.prelude.*;
+
 fn main() {
     test_complex_creation();
     // Commented out: scalar multiplication type mismatch (Int vs Complex)

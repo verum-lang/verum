@@ -9,6 +9,8 @@
 
 using [FileSystem]
 
+mount core.prelude.*;
+
 fn main() {
     test_buf_reader_creation();
     test_buf_reader_methods();

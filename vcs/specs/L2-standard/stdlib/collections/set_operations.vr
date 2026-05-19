@@ -7,6 +7,8 @@
 /// Set is an unordered collection of unique elements (semantic equivalent of HashSet).
 /// Tests add, contains, union, intersection, and all standard set operations.
 
+mount core.prelude.*;
+
 fn main() {
     test_set_creation();
     test_set_insertion();

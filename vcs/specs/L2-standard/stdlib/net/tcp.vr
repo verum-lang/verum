@@ -9,6 +9,8 @@
 
 using [Network, Async]
 
+mount core.prelude.*;
+
 fn main() {
     test_tcp_connect();
     test_tcp_listener();
