@@ -91,6 +91,8 @@ fn test_spawn_with_loop() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Closure Spawn Capture Tests:");
     let mut failures = 0;

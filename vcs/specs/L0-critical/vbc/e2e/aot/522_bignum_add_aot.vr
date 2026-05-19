@@ -209,6 +209,8 @@ fn test_add_identity() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic();
     test_add_small();

@@ -165,6 +165,8 @@ fn test_two_pointer_merge_check() {
     print("two_pointer_merge_check: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_two_sum_pairs();
     test_two_sum_find();

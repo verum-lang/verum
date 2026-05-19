@@ -105,6 +105,8 @@ fn test_error_propagation() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
     failures = failures + test_result_ok();

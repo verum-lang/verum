@@ -266,6 +266,8 @@ fn test_two_txns_vs_single() {
     assert(two >= single);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_single_ascending();
     test_single_descending();

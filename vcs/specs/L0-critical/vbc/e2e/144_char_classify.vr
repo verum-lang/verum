@@ -166,6 +166,8 @@ fn test_case_conversion() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_is_digit();
     test_is_alpha();

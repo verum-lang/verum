@@ -37,6 +37,8 @@ fn char_poly_eval(a: List<Int>, lambda: Int) -> Int {
     mat3_det(shifted)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Diagonal matrix — eigenvalues are diagonal elements
     let diag = [3, 0, 0, 0, 5, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0];

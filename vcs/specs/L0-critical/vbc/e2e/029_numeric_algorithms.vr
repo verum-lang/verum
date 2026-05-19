@@ -675,6 +675,8 @@ fn test_ilog2() {
     assert_eq(ipow(2, ilog2(256)), 256);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_isqrt_newton();
     test_binary_search();

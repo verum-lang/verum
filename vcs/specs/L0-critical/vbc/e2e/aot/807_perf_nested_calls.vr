@@ -17,6 +17,8 @@ fn level3(x: Int) -> Int { level4(x) + 1 }
 fn level2(x: Int) -> Int { level3(x) + 1 }
 fn level1(x: Int) -> Int { level2(x) + 1 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let n = 100000;
     let mut sum = 0;

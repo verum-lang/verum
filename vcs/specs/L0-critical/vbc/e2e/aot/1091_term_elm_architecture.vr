@@ -210,6 +210,8 @@ fn test_render_view() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let r1 = test_basic_update();
     if r1 != 0 { return r1; }

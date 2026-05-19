@@ -118,6 +118,8 @@ fn mod_pow(base: Int, exp: Int, m: Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // --- SECTION 1: Recursion ---
     assert_eq(fib(10), 55);

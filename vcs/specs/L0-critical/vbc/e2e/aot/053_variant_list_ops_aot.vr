@@ -116,6 +116,8 @@ fn range_list(start: Int, end_val: Int) -> IList {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Build list [1, 2, 3, 4, 5]
     let xs = range_list(1, 6);

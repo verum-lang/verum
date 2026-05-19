@@ -155,6 +155,8 @@ fn database() -> Database {
     Database { name: "test".to_text() }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let mut db = database();
 

@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test Int32 type constants (MIN, MAX, BITS)
 
+mount core.prelude.*;
+
 fn main() {
     // Test Int32.MIN (-2^31)
     assert_eq(Int32.MIN(), -2147483648);

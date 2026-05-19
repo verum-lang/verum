@@ -75,6 +75,8 @@ fn alt_b(n: Int) -> Int {
     else { 0 - n + alt_a(n - 1) }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Hofstadter Female: first values are 1,1,2,2,3,3,4,5,5,6,...
     assert_eq(hof_f(0), 1);

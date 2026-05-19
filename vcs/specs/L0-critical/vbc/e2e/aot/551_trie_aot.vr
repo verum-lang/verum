@@ -218,6 +218,8 @@ fn test_prefix_search() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_trie();
     test_single_insert();

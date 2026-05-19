@@ -55,6 +55,8 @@ implement Team {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

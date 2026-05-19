@@ -25,6 +25,8 @@ fn channel_recv(ch: List<Int>, idx: Int) -> Int {
     ch[idx + 2]
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Simple send/receive
     let mut ch = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

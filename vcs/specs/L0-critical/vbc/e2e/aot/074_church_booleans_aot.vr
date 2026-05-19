@@ -129,6 +129,8 @@ fn tt_conv_inhibit() -> Int {
     + cb_to_int(cb_conv_inhibit(CTrue, CFalse)) * 4 + cb_to_int(cb_conv_inhibit(CTrue, CTrue)) * 8
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let t = CTrue;
     let f = CFalse;

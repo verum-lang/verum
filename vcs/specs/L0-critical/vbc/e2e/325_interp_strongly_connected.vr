@@ -255,6 +255,8 @@ fn test_all_connected() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_cycle();
     test_no_edges();

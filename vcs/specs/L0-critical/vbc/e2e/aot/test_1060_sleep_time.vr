@@ -44,6 +44,8 @@ fn test_time_monotonic() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Sleep/Time Tests:");
     let mut failures = 0;

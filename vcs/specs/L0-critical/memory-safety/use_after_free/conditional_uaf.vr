@@ -16,6 +16,8 @@ fn process(should_free: Bool) {
     let _ = data_ref.len();  // CBGR detects use after free when should_free is true
 }
 
+mount core.prelude.*;
+
 fn main() {
     process(true);  // Will trigger use-after-free
 }

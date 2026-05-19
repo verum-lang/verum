@@ -6,6 +6,8 @@
 
 // Test actual for-in iteration on Map — returns (key, value) tuples.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut m = Map.new();
     m.insert(1, 100);

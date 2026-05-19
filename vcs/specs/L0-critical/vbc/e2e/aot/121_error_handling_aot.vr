@@ -248,6 +248,8 @@ fn test_accumulating_errors() -> Int {
 // Main: run all tests
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_error_handling();
     test_error_propagation();

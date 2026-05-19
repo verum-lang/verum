@@ -157,6 +157,8 @@ fn test_stress() {
     assert_eq(fib_sum, 17710);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_matrix();
     test_fast_fib();

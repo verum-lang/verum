@@ -16,6 +16,8 @@ fn sum_range(n: Int) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let n = 10000000;
     let result = sum_range(n);

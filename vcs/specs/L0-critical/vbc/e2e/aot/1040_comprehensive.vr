@@ -41,6 +41,8 @@ fn execute(pos: Position, cmd: Command) -> Position {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Position creation and movement
     let start = Position.new(0, 0);

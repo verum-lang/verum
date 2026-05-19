@@ -192,6 +192,8 @@ fn test_two_people() {
     assert_eq(josephus_sim(2, 2), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_classic_k2();
     test_k3();

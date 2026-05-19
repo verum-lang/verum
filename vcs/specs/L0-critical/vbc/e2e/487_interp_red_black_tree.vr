@@ -273,6 +273,8 @@ fn test_rb_rotations() {
     print("rb_rotations: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rb_valid_tree();
     test_rb_red_red_violation();

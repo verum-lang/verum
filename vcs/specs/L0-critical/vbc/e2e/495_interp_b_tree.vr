@@ -285,6 +285,8 @@ fn test_bt_order_violation() {
     print("bt_order_violation: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bt_leaf_only();
     test_bt_two_levels();

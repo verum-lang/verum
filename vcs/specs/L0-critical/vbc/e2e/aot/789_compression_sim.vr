@@ -175,6 +175,8 @@ fn compression_ratio(data: List<Int>, data_len: Int) -> Int {
     unique * 100 / data_len
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Data: [1, 2, 1, 2, 1, 3, 3, 3, 4, 5]
     let data = [1, 2, 1, 2, 1, 3, 3, 3, 4, 5, 0, 0, 0, 0, 0, 0];

@@ -179,6 +179,8 @@ fn test_mixed_patterns() {
     };
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_view_pattern();
     test_classification_view_pattern();

@@ -58,6 +58,8 @@ fn merge_sort(arr: List<Int>) -> List<Int> {
     merge(sorted_left, sorted_right)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let n = 1000;
     let mut arr: List<Int> = [];

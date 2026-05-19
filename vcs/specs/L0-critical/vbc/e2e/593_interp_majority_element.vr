@@ -106,6 +106,8 @@ fn test_large_majority() {
     print("large_majority: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_majority();
     test_all_same();

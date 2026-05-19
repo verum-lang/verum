@@ -310,6 +310,8 @@ fn test_complex_stream_patterns() {
 // Main - run all tests
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_stream_patterns();
     test_take_operations();

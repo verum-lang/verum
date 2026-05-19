@@ -329,6 +329,8 @@ fn test_special_tokens() {
     print("test_special_tokens passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_vocab_lookup();
     test_encode_decode();

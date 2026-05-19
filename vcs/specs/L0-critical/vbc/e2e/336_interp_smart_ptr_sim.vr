@@ -314,6 +314,8 @@ fn test_move_then_drop() {
     assert_eq(s1.num_moves, 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_create_and_read();
     test_write_through_handle();

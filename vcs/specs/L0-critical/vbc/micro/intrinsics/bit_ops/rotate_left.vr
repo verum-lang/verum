@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @was-skip: now passing with stdlib methods
 // This test would verify rotate left intrinsic but needs stdlib loaded.
+mount core.prelude.*;
+
 fn main() {
     assert(true);
 }

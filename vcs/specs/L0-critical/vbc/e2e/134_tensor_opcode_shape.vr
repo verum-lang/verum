@@ -186,6 +186,8 @@ fn test_transpose_inverse() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_reshape();
     test_transpose();

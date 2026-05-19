@@ -67,6 +67,8 @@ fn outer_broadcast(col: List<Int>, row: List<Int>, m: Int, n: Int) -> List<Int> 
     r
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Scalar + Vector broadcasting
     // scalar(5) + [1,2,3,4] = [6,7,8,9]

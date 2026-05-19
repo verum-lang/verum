@@ -240,6 +240,8 @@ fn test_sum_of_values() {
     assert_eq(total, 100);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_map();
     test_single_insert();

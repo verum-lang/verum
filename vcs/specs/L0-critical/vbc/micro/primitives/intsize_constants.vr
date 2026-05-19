@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test IntSize and UIntSize type constants (platform-dependent, 64-bit)
 
+mount core.prelude.*;
+
 fn main() {
     // Test IntSize.BITS (64 on 64-bit platforms)
     assert_eq(IntSize.BITS(), 64);

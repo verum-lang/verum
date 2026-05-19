@@ -160,6 +160,8 @@ fn test_coin_change() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_knapsack01();
     test_unbounded();

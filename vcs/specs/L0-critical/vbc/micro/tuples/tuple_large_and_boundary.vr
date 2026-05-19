@@ -6,6 +6,8 @@
 // @expected-exit: 0
 // @description: Large tuples and boundary condition tests
 
+mount core.prelude.*;
+
 fn main() {
     // === Test 1: 6-element tuple ===
     let t6 = (1, 2, 3, 4, 5, 6);

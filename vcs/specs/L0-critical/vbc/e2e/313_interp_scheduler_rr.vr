@@ -283,6 +283,8 @@ fn test_all_same_burst() {
     assert_eq(a8_get(done.states, 2), 3);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_single_process();
     test_two_equal_processes();

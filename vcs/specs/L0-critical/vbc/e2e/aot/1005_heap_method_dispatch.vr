@@ -39,6 +39,8 @@ fn list_sum(lst: Heap<IntList>) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut passed = 0;
     let mut failed = 0;

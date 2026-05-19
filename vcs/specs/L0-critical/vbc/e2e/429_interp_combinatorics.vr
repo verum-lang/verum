@@ -130,6 +130,8 @@ fn test_derangements() {
     print("derangements: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_factorial();
     test_combinations();

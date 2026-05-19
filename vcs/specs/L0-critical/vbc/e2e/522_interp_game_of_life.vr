@@ -167,6 +167,8 @@ fn test_glider_partial() {
     print("glider_partial: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_blinker();
     test_block();

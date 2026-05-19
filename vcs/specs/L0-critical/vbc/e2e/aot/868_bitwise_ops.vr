@@ -54,6 +54,8 @@ fn swap_nibbles(n: Int) -> Int {
     ((n & 0xF0) >> 4) | ((n & 0x0F) << 4)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic AND, OR, XOR
     assert_eq(0xFF & 0x0F, 0x0F);

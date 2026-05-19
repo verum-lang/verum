@@ -365,6 +365,8 @@ fn test_zeros() {
     assert_eq(arrays_equal(arr, dec.data, 8), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_encode();
     test_single_element();

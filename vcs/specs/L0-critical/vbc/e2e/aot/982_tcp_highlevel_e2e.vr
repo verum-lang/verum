@@ -27,6 +27,8 @@ fn server(port: Int) -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let port = 19982;
     let srv = spawn server(port);

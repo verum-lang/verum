@@ -215,6 +215,8 @@ fn test_multiply() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_inc_dec();
     test_loop();

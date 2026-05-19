@@ -25,6 +25,8 @@ fn read_list(items: &List<Int>) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic immutable reference
     let data = Text.from("hello world");

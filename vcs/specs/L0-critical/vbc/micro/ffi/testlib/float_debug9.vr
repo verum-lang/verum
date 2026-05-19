@@ -20,6 +20,8 @@ fn approx_eq(a: Float, b: Float, epsilon: Float) -> Bool {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     print(1); print("\n");
 

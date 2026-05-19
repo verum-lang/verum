@@ -252,6 +252,8 @@ fn test_sqrt() {
     print("test_sqrt passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sin_cos();
     test_tan();

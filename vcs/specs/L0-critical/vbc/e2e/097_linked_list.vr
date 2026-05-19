@@ -216,6 +216,8 @@ fn test_reverse() {
     print("  test_reverse: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_push_and_peek();
     test_pop_front();

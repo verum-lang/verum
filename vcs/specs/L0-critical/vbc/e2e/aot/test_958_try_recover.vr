@@ -101,6 +101,8 @@ fn test_recover_computation() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Try/Recover Tests:");
 

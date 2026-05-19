@@ -479,6 +479,8 @@ fn test_binop_large() {
     assert_eq(r.value, 100);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_parse_single_digit();
     test_parse_digit_fail();

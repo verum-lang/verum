@@ -222,6 +222,8 @@ fn test_token_frequency() {
     print("test_token_frequency passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_vocab_lookup();
     test_encode_hello();

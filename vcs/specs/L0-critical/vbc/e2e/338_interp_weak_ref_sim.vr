@@ -388,6 +388,8 @@ fn test_cycle_breaking_with_weak() {
     assert_eq(a8_get(s4.strong, pb.obj_id), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_strong();
     test_clone_strong();

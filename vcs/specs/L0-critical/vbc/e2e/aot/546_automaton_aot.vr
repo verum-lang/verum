@@ -240,6 +240,8 @@ fn test_mealy_machine() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_even_zeros_dfa();
     test_ends_with_1_dfa();

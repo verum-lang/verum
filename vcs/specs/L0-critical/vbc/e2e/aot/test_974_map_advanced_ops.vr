@@ -173,6 +173,8 @@ fn test_map_function() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Advanced Map/Set Tests:");
     let mut failures = 0;

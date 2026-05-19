@@ -130,6 +130,8 @@ fn digital_root(n: Int) -> Int {
     x
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Primality
     assert(!is_prime(0));

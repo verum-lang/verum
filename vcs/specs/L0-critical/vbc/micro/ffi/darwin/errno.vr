@@ -12,6 +12,8 @@ extern {
     fn __error() -> *mut Int32;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Get errno pointer
     let errno_ptr = __error();

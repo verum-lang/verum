@@ -24,6 +24,8 @@ fn make_row(start: Int, count: Int) -> List<Int> {
     row
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

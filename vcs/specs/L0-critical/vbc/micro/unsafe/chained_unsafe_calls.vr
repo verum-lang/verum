@@ -10,6 +10,8 @@ unsafe fn double(x: Int) -> Int {
     x * 2
 }
 
+mount core.prelude.*;
+
 fn main() {
     let result: Int = unsafe {
         let a: Int = add_one(5);

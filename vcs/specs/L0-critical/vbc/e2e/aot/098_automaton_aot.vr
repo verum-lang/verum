@@ -150,6 +150,8 @@ fn make_input6(b0: Int, b1: Int, b2: Int, b3: Int, b4: Int, b5: Int) -> Arr16 {
     a
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // ========================================================
     // DFA 1: Accepts binary strings divisible by 3

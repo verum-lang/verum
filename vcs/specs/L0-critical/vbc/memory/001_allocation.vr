@@ -213,6 +213,8 @@ fn test_allocation_stress() {
     assert(true);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_struct_allocation();
     test_nested_struct();

@@ -205,6 +205,8 @@ fn test_knapsack() {
     print("  test_knapsack: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_fib_memo();
     test_fib_dp();

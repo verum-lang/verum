@@ -282,6 +282,8 @@ fn test_epoch_capability() {
     // Any attempt to use escaped reference would fail epoch check
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Tier 0 tests
     test_tier0_basic_validation();

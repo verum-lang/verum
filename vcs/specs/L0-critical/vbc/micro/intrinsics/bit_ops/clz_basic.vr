@@ -5,6 +5,8 @@
 // @was-skip: now passing with stdlib methods
 // This test would verify clz (count leading zeros) intrinsic but needs stdlib loaded.
 // Without stdlib, Int has no methods defined.
+mount core.prelude.*;
+
 fn main() {
     // Placeholder - actual test needs stdlib
     assert(true);

@@ -190,6 +190,8 @@ fn test_pred_succ() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_binary_search();
     test_sorted_insert();

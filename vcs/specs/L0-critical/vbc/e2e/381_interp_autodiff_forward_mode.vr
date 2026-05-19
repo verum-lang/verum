@@ -230,6 +230,8 @@ fn test_horner_form() {
     assert_eq(result.deriv, 10 * scale());
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_constant();
     test_identity();

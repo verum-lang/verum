@@ -147,6 +147,8 @@ fn test_sort_stability() {
     assert_eq(arr8_get(sb, 1), 2);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bubble_sort();
     test_selection_sort();

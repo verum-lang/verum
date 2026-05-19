@@ -12,6 +12,8 @@ extern {
 
 fn double_val(x: Int32) -> Int32 { x * 2 }
 
+mount core.prelude.*;
+
 fn main() {
     let doubled: Int32 = ffi_apply_unary(double_val, 7);
     print(doubled);

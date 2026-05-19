@@ -170,6 +170,8 @@ fn test_scalar_chain_cost() {
     print("scalar_chain_cost: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_matrix_chain_order_3();
     test_matrix_chain_order_4();

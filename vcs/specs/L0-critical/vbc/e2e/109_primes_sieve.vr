@@ -278,6 +278,8 @@ fn test_sum_of_primes() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_primes_up_to_50();
     test_composites();

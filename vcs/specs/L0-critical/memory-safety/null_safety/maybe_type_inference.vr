@@ -82,6 +82,8 @@ fn test_none_return() {
     assert(result.is_none());
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_maybe_int();
     test_maybe_text();

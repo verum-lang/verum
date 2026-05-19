@@ -228,6 +228,8 @@ fn test_map_operation() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_persistence();
     test_chain_updates();

@@ -44,6 +44,8 @@ fn collatz_steps(mut n: Int) -> Int {
     steps
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: spawn compute-heavy tasks
     let t1 = spawn fib(30);

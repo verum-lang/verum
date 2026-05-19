@@ -175,6 +175,8 @@ fn test_leaky_relu_mixed() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_get_scalar_first();
     test_get_scalar_last();

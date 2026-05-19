@@ -180,6 +180,8 @@ fn test_digit_extraction() {
     print("radix_digit_extraction: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_digit_extraction();
     test_basic_sort();

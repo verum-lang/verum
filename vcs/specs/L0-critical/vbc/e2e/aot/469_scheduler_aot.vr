@@ -184,6 +184,8 @@ fn test_job_deadlines() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_activity_selection();
     test_weighted_schedule();

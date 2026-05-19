@@ -140,6 +140,8 @@ fn test_countdown() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_increment();
     test_inc_dec();

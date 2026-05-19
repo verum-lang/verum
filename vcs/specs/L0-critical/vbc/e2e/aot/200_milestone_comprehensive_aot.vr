@@ -242,6 +242,8 @@ fn test_primes() {
     assert_eq(count_primes_up_to_30(), 10);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_boolean_and_or();
     test_boolean_not();

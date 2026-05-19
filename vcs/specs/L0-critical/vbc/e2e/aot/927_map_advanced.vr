@@ -26,6 +26,8 @@ fn max_value(m: Map<Text, Int>, keys: List<Text>) -> Int {
     best
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Map.get in function parameters
     let mut scores = Map.new();

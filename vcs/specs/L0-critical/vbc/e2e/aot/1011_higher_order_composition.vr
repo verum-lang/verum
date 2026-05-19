@@ -29,6 +29,8 @@ fn sum_list(items: List<Int>) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut passed = 0;
     let mut failed = 0;

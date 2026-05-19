@@ -10,6 +10,8 @@
 /// Note: Array literals [1, 2, 3] produce fixed-size arrays [T; N].
 /// Use List.from([...]) for dynamic lists.
 
+mount core.prelude.*;
+
 fn main() {
     test_list_growth();
     test_list_modification();

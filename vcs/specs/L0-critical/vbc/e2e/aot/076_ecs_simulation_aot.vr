@@ -211,6 +211,8 @@ fn nearest_to_origin(w: World) -> Int {
     best_id
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Create 8 entities ===
     let mut w = world_new();

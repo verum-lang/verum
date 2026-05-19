@@ -188,6 +188,8 @@ fn test_signal_properties() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_diffusion();
     test_moving_average();

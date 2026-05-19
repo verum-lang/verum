@@ -9,6 +9,8 @@
 /// This prevents dangling references and use-after-free.
 /// Spec: 04-memory-model.md#lifetime-rules
 
+mount core.prelude.*;
+
 fn main() {
     let escaped = create_escaping_reference();
     print(*escaped);  // PANIC: generation mismatch (local no longer exists)

@@ -25,6 +25,8 @@ fn escape_from_temporary() -> &Int {
 }
 // When function returns, container is dropped, generation bumped
 
+mount core.prelude.*;
+
 fn main() {
     let escaped = escape_from_temporary();
     // Dereferencing triggers CBGR check

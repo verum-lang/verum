@@ -21,6 +21,8 @@ fn repeat_text(s: Text, n: Int) -> Text {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: basic string concatenation
     let a = "Hello";

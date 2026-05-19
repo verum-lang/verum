@@ -203,6 +203,8 @@ fn test_mov() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_load();
     test_add();

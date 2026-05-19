@@ -20,6 +20,8 @@ fn create_dangling_closure() -> Heap<fn() -> Int> {
 }
 // local is dropped here, generation bumped
 
+mount core.prelude.*;
+
 fn main() {
     let closure = create_dangling_closure();
     // CBGR detects generation mismatch when closure tries to dereference

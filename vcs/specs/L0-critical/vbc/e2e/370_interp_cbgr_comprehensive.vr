@@ -440,6 +440,8 @@ fn test_multi_borrow() {
     assert_eq(sum_four(&a, &a, &a, &a), 40);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basics();
     test_record_refs();

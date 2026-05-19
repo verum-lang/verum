@@ -59,6 +59,8 @@ fn triple_sum(t: Triple) -> Int {
     t.a + t.b + t.c
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: Primitive Int through FFI
     let pid = getpid();

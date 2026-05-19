@@ -223,6 +223,8 @@ fn reconstruct(table: DPTable, items: Items8, capacity: Int) -> Arr16 {
     selected
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test Set 1: 0/1 Knapsack basic ===
     // Items: (weight, value) = (2,6), (3,5), (4,8), (5,9), (7,12)

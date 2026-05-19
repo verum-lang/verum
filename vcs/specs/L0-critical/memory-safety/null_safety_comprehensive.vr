@@ -9,6 +9,8 @@
 /// This eliminates null pointer dereferences entirely.
 /// Spec: 03-type-system.md#null-safety
 
+mount core.prelude.*;
+
 fn main() {
     test_maybe_basic();
     test_maybe_chaining();

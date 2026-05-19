@@ -158,6 +158,8 @@ fn negate(p: fn(Int) -> Bool) -> fn(Int) -> Bool {
     |x: Int| -> Bool { !p(x) }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Basic closure factories ===
     let add3 = make_adder(3);

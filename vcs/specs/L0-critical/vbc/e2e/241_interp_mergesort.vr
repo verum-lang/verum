@@ -232,6 +232,8 @@ fn test_partial_sort() {
     assert_eq(arr_get(s, 7), 66);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_sort();
     test_already_sorted();

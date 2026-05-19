@@ -178,6 +178,8 @@ fn test_knapsack_all_fit() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_knapsack_basic();
     test_knapsack_small();

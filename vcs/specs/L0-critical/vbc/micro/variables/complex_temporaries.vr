@@ -6,6 +6,8 @@
 // @expected-exit: 0
 // @description: Test with many temporary values in one expression requiring register management
 
+mount core.prelude.*;
+
 fn main() {
     // Many nested operations requiring temporaries
     // (1+2)*(3+4) = 3*7 = 21

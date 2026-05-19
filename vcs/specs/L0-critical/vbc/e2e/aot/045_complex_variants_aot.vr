@@ -97,6 +97,8 @@ fn value_map_ints(v: Value, f: fn(Int) -> Int) -> Value {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic values
     assert(value_is_null(VNull));

@@ -155,6 +155,8 @@ fn test_circular_overwrite() {
     assert_eq(log_get_data(log, 1), 2);   // Unchanged
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_dispatch();
     test_event_log();

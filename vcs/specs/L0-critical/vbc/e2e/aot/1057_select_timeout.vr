@@ -9,6 +9,8 @@
 fn __time_monotonic_nanos_raw() -> Int { 0 }
 fn __time_sleep_nanos_raw(ns: Int) -> Int { 0 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let ch1 = Channel.new(1);
     let ch2 = Channel.new(1);

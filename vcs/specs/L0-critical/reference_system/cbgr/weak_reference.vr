@@ -7,6 +7,8 @@
 /// Weak refs don't prevent deallocation but are safely tracked.
 /// Spec: cbgr-implementation.md#weak-references
 
+mount core.prelude.*;
+
 fn main() {
     test_weak_concept();
     test_weak_upgrade_concept();

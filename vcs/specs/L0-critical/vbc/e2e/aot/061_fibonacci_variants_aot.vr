@@ -100,6 +100,8 @@ fn nat_double(n: Nat) -> Nat {
     nat_add(n, n)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Basic Nat construction and conversion ===
     let zero = Zero;

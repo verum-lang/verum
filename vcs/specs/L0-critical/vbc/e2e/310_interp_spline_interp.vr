@@ -270,6 +270,8 @@ fn test_compare_methods() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_lerp_basic();
     test_lerp_horizontal();

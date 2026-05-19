@@ -191,6 +191,8 @@ fn test_roundtrip_small() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_rle();
     test_no_runs();

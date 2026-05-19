@@ -18,6 +18,8 @@
 /// Note: E201 errors are definite assignment errors, NOT borrow checker errors (E30x).
 /// Verum does not have a compile-time borrow checker - CBGR handles memory safety at runtime.
 
+mount core.prelude.*;
+
 fn main() {
     // INVALID: declaration without initialization, then use
     let x: Int;

@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test UInt32 type constants (MIN, MAX, BITS)
 
+mount core.prelude.*;
+
 fn main() {
     // Test UInt32.MIN
     assert_eq(UInt32.MIN(), 0);

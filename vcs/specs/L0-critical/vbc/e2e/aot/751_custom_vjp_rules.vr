@@ -74,6 +74,8 @@ fn leaky_relu_vjp(x: Int, alpha_num: Int, alpha_den: Int, grad_out: Int) -> Int 
     if (x > 0) { grad_out } else { grad_out * alpha_num / alpha_den }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: ReLU VJP - positive input
     assert_eq(relu(5), 5);

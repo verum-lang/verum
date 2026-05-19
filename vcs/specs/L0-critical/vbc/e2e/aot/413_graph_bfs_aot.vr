@@ -310,6 +310,8 @@ fn test_single_vertex() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_chain_bfs();
     test_chain_reachable();

@@ -159,6 +159,8 @@ fn test_three_generations() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty();
     test_single_cell();

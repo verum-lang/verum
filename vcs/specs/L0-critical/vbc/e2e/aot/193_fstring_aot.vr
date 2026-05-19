@@ -8,6 +8,8 @@ fn get_greeting() -> Text {
     "world"
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // 1: Text variable interpolation
     let name = "Verum";

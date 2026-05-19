@@ -134,6 +134,8 @@ fn catalan(n: Int) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Fibonacci
     assert_eq(fib(0), 0);

@@ -94,6 +94,8 @@ fn test_timeout_pattern() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Timed Spawn Tests:");
     let mut failures = 0;

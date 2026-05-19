@@ -2,6 +2,8 @@
 // @level: L0
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let s = "Hello";
     let empty = "";

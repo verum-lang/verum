@@ -75,6 +75,8 @@ fn gcd(a: Int, b: Int) -> Int {
     gcd(b, a % b)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Modular exponentiation: 2^10 mod 1000 = 1024 mod 1000 = 24
     assert_eq(mod_pow(2, 10, 1000), 24);

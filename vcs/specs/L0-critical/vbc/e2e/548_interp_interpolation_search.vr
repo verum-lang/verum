@@ -92,6 +92,8 @@ fn test_interpolation_matches_binary() {
     print("interpolation_matches_binary: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_uniform_distribution();
     test_not_found();

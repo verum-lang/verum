@@ -293,6 +293,8 @@ fn test_negative_values() {
     assert_eq(bloom_might_contain(bf, -100), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_filter();
     test_single_insert();

@@ -1,3 +1,5 @@
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test Map with Int value (should work)
     let mut m = Map.new();

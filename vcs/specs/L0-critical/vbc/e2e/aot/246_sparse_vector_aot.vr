@@ -188,6 +188,8 @@ fn test_self_dot() {
     assert_eq(sv_norm_sq(v), 14);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic();
     test_dot_product();

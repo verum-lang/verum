@@ -234,6 +234,8 @@ fn test_power() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_isqrt_fn();
     test_pythagorean();

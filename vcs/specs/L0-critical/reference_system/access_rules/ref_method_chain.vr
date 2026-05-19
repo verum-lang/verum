@@ -7,6 +7,8 @@
 /// Chained method calls should correctly manage borrows.
 /// Spec: 04-memory-model.md#aliasing-rules
 
+mount core.prelude.*;
+
 fn main() {
     test_immutable_access();
     test_mutable_access();

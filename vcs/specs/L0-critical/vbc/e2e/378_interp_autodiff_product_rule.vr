@@ -225,6 +225,8 @@ fn test_multiple_product() {
     assert_eq(result, 26 * scale());
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_product_rule_basic();
     test_product_rule_at_zero();

@@ -317,6 +317,8 @@ fn test_lcp_of_direct() {
     assert_eq(lcp_of(s, 5, 0, 2), 2); // share "1,2" then differ (1 vs 3)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_suffix_array_banana();
     test_lcp_banana();

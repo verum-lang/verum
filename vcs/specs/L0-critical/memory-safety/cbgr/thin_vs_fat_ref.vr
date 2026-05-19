@@ -4,6 +4,8 @@
 // @tags: memory-safety, cbgr, thin-ref, fat-ref
 // @description: Tests ThinRef vs FatRef automatic selection
 
+mount core.prelude.*;
+
 fn main() {
     // ThinRef (16 bytes): ptr + generation + epoch_caps
     // Used for fixed-size types

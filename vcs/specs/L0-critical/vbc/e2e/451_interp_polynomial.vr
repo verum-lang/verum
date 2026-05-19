@@ -198,6 +198,8 @@ fn test_poly_composition() {
     print("poly_composition: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_poly_eval_horner();
     test_poly_addition();

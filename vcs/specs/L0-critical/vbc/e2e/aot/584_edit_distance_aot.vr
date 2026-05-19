@@ -194,6 +194,8 @@ fn test_triangle_inequality() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_edit_distance();
     test_lcs();

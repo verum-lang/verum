@@ -103,6 +103,8 @@ fn run_fsm(table: List<Int>, num_inputs: Int, initial_state: Int, inputs: List<I
     current
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: One-hot encode state 3 = 2^3 = 8
     assert_eq(one_hot_encode(3), 8);

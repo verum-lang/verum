@@ -157,6 +157,8 @@ fn test_employee_list() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Complex Struct Tests:");
     let mut failures = 0;

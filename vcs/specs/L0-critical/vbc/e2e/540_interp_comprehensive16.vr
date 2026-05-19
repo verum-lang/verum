@@ -407,6 +407,8 @@ fn test_combined_pipeline() {
     print("combined_pipeline: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_binsort_pipeline();
     test_quickselect_pipeline();

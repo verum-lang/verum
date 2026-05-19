@@ -50,6 +50,8 @@ fn test_monotonic_increases() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
     failures = failures + test_monotonic_increases();

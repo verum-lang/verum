@@ -1083,6 +1083,8 @@ fn test_gpu_memory_pool() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gpu_context_init();
     test_gpu_device_info();

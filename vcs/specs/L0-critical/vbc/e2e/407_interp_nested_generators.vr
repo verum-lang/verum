@@ -141,6 +141,8 @@ fn test_generator_nested_loop() {
     print("generator_nested_loop: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_range_generator();
     test_squares_generator();

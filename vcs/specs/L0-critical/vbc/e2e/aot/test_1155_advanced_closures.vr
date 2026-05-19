@@ -76,6 +76,8 @@ fn test_closure_capture_val() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Advanced Closure Tests:");
     let mut failures = 0;

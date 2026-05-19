@@ -152,6 +152,8 @@ fn hit_rate_scaled(hits: Int, total: Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Access pattern: [0, 4, 0, 4, 8, 0, 4, 8, 12, 0]
     let addrs = [0, 4, 0, 4, 8, 0, 4, 8, 12, 0, 0, 0, 0, 0, 0, 0];

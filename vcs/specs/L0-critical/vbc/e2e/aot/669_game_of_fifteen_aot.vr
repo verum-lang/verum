@@ -204,6 +204,8 @@ fn test_boundary_moves() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_solved_state();
     test_one_move();

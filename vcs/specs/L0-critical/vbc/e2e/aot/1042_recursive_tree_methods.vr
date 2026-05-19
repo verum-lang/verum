@@ -48,6 +48,8 @@ implement Tree {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     //       Branch
     //      /      \

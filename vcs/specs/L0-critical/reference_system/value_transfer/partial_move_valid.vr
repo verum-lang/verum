@@ -20,6 +20,8 @@ type Container is {
     count: Int,
 };
 
+mount core.prelude.*;
+
 fn main() {
     test_partial_move_affine();
     test_copy_fields_still_accessible();

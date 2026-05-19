@@ -194,6 +194,8 @@ fn test_all_same_preferences_n2() {
     print("all_same_preferences_n2: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_n2();
     test_conflict_n2();

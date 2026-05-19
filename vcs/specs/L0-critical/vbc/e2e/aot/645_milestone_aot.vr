@@ -211,6 +211,8 @@ fn test_goldbach() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_primality();
     test_count_primes();

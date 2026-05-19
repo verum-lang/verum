@@ -196,6 +196,8 @@ fn test_dot_product() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_distances();
     test_cross_product();

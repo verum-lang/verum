@@ -69,6 +69,8 @@ fn block_reduce(data: List<Int>, n: Int, block_size: Int) -> List<Int> {
     block_results
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Power-of-2 tree reduction
     let data = [1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0];

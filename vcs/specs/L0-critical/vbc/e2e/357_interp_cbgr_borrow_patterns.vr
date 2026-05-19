@@ -273,6 +273,8 @@ fn test_norm_squared() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_shared_borrows();
     test_exclusive_borrows();

@@ -10,6 +10,8 @@
 /// The epoch counter increments on key events (mutation, drop).
 /// References capture epoch to detect stale access.
 
+mount core.prelude.*;
+
 fn main() {
     test_epoch_on_mutation();
     test_epoch_on_drop();

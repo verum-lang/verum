@@ -93,6 +93,8 @@ fn test_text_repeat() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Advanced String Tests:");
     let mut failures = 0;

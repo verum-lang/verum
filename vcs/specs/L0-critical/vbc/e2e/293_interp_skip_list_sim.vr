@@ -400,6 +400,8 @@ fn test_count_after_inserts() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_list();
     test_single_insert_search();

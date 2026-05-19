@@ -136,6 +136,8 @@ fn test_list_of_boxes() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Generic Protocol Tests:");
     let mut failures = 0;

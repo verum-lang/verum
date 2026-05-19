@@ -196,6 +196,8 @@ fn test_optional_chaining() {
     assert(!v5.has_value);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_safe_division();
     test_error_propagation();

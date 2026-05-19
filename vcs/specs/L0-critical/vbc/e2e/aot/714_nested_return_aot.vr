@@ -19,6 +19,8 @@ fn get_value(idx: Int) -> Int {
     n.value
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test via accessor function (known workaround)
     let v0 = get_value(0);

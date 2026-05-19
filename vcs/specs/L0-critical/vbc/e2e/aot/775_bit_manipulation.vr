@@ -65,6 +65,8 @@ fn lowest_bit_pos(n: Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: popcount
     // 0 = 0b0 -> 0 bits

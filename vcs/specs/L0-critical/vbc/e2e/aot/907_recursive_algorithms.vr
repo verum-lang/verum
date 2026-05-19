@@ -93,6 +93,8 @@ fn digit_sum(n: Int) -> Int {
     remainder + digit_sum(rest)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Fibonacci
     let fib0 = fib(0);

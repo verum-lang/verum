@@ -110,6 +110,8 @@ fn test_single_element() {
     print("single_element: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_heap_sort();
     test_already_sorted();

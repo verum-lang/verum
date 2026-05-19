@@ -246,6 +246,8 @@ fn test_recursive_generic() {
 // test_align_of_generic: skipped — requires .<T>() turbofish and @align_of
 // test_size_of_in_allocation: skipped — requires .<T>() turbofish and T.default()
 
+mount core.prelude.*;
+
 fn main() {
     // Basic generic functions
     test_identity();

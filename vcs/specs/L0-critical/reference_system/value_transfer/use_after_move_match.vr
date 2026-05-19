@@ -19,6 +19,8 @@ type affine Resource is {
 // Maybe type containing affine value
 type MaybeResource is Some(Resource) | None;
 
+mount core.prelude.*;
+
 fn main() {
     let opt = MaybeResource.Some(Resource { id: 42 });
 

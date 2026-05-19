@@ -133,6 +133,8 @@ fn test_matvec() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_identity();
     test_det();

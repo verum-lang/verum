@@ -26,6 +26,8 @@ fn timed_work(iterations: Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Time a computation
     let t_start = __time_monotonic_nanos_raw();

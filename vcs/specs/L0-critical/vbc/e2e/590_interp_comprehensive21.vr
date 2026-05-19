@@ -286,6 +286,8 @@ fn test_pipeline_house_two_pointer() {
     print("pipeline4_house_two_pointer: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_pipeline_sieve_house_robber();
     test_pipeline_sieve_sort_twoptr();

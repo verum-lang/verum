@@ -297,6 +297,8 @@ fn test_complete_graph() {
     assert_eq(arr6_get(dist, 3), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_graph();
     test_bfs_path();

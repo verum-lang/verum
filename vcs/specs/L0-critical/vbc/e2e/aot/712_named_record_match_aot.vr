@@ -17,6 +17,8 @@ fn area(s: Shape) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let c = Circle { radius: 5 };
     let t = Triangle { base: 6, height: 4 };

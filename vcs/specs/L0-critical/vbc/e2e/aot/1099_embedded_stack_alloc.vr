@@ -130,6 +130,8 @@ fn test_reset() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let r1 = test_basic_alloc();
     let r2 = test_alignment_padding();

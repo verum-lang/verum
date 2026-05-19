@@ -270,6 +270,8 @@ fn test_count_non_overlapping_pattern() {
     assert_eq(kmp_count(text, pat), 2);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_failure_function();
     test_failure_all_same();

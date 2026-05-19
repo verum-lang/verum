@@ -13,6 +13,8 @@
 /// - No raw memory copy functions in safe code
 /// - All operations prevent classic buffer overflow vulnerabilities
 
+mount core.prelude.*;
+
 fn main() {
     // Basic copy operations
     test_list_clone();

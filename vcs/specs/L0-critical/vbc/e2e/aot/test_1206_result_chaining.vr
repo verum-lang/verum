@@ -40,6 +40,8 @@ fn process(input1: Text, input2: Text) -> Result<Int, AppError> {
     checked_add(a, b)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

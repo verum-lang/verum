@@ -420,6 +420,8 @@ fn test_kmp() {
     assert_eq(matches[0], 10);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Sorting
     test_quicksort();

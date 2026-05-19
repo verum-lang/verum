@@ -277,6 +277,8 @@ fn test_ref_to_function_result() {
     assert_eq(*r, 56);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_ref_int();
     test_basic_ref_zero();

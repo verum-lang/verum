@@ -209,6 +209,8 @@ fn test_burst_error_detection() {
     print("burst_error_detection: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_parity_bit();
     test_hamming_distance();

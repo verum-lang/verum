@@ -107,6 +107,8 @@ fn test_nested_labeled() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Labeled Break/Continue Tests:");
     let mut failures = 0;

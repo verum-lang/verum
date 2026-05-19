@@ -4,6 +4,8 @@
 // @tags: memory-safety, dangling-reference, safe-pattern
 // @description: Tests safe reference patterns that prevent dangling
 
+mount core.prelude.*;
+
 fn main() {
     // Pattern 1: Reference within valid scope
     let outer_val = 42;

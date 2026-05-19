@@ -380,6 +380,8 @@ fn test_identity_operations() {
     assert_eq(eval_tree(t_mul), 42);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_single_number();
     test_simple_add();

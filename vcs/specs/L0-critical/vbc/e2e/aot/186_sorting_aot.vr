@@ -91,6 +91,8 @@ fn insertion_sort(arr: Arr5, n: Int) -> Arr5 {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Bubble sort
     let a1 = Arr5 { a: 5, b: 3, c: 1, d: 4, e: 2 };

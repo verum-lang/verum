@@ -401,6 +401,8 @@ fn test_composite_calculation() {
     assert_eq(kadane(facts, 5), 13);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sort_then_palindrome();
     test_inversions_and_sorting();

@@ -383,6 +383,8 @@ fn test_poly_composition() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_horner_constant();
     test_horner_linear();

@@ -335,6 +335,8 @@ fn test_empty() {
     assert_eq(longest_run(input), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_encode_basic();
     test_encode_all_same();

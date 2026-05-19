@@ -371,6 +371,8 @@ fn test_milestone_pipeline() {
     print("milestone_pipeline: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_stage_rod_cutting();
     test_stage_majority();

@@ -178,6 +178,8 @@ fn test_bool_ref() {
     assert(!flag);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_immutable_ref_basic();
     test_immutable_ref_function();

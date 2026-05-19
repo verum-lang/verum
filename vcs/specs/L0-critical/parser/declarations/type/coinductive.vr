@@ -33,6 +33,8 @@ type MappedStream<A, B> is coinductive {
     fn advance(&self) -> MappedStream<A, B>;
 };
 
+mount core.prelude.*;
+
 fn main() -> Int {
     0
 }

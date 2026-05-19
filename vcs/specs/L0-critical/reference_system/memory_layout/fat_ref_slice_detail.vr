@@ -7,6 +7,8 @@
 /// References carry generation and epoch information for memory safety.
 /// Spec: cbgr-implementation.md#fat-references
 
+mount core.prelude.*;
+
 fn main() {
     test_array_basics();
     print("  [OK] test_array_basics");

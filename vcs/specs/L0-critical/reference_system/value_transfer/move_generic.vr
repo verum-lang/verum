@@ -13,6 +13,8 @@ type affine Handle is {
     fd: Int,
 };
 
+mount core.prelude.*;
+
 fn main() {
     test_generic_copy();
     test_generic_container_copy();

@@ -11,6 +11,8 @@
 /// When a container reallocates, old references become dangling.
 /// Spec: cbgr-implementation.md#generation-tracking
 
+mount core.prelude.*;
+
 fn main() {
     test_reallocation_detection();
 }

@@ -178,6 +178,8 @@ fn test_transitive() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_initial();
     test_union_basic();

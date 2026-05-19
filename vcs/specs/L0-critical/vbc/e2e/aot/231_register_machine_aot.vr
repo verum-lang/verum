@@ -156,6 +156,8 @@ fn test_factorial_program() {
     assert_eq(reg_get(r, 1), 120);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_load_imm();
     test_arithmetic();

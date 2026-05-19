@@ -196,6 +196,8 @@ fn test_channel_pipeline() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Concurrency Tests:");
     let mut failures = 0;

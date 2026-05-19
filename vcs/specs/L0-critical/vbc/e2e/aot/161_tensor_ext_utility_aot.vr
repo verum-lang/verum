@@ -157,6 +157,8 @@ fn test_lcg_random() {
     print("test_lcg_random passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_dft_4pt();
     test_scatter();

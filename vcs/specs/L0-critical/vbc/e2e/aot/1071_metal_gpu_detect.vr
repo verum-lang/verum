@@ -10,6 +10,8 @@ fn __metal_get_device() -> Int { 0 }
 fn __metal_max_memory() -> Int { 0 }
 fn __metal_max_threads_per_threadgroup() -> Int { 0 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let device = __metal_get_device();
     if device == 0 {

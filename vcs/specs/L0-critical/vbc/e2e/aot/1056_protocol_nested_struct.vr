@@ -33,6 +33,8 @@ fn print_desc<T: Describable>(thing: &T) {
     print(thing.describe());
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let p = Point { x: 3, y: 4 };
     let c = Circle { center: Point { x: 10, y: 20 }, radius: 5 };

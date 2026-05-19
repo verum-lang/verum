@@ -117,6 +117,8 @@ fn shift_reg4(reg: Int, new_bit: Int) -> Int {
     ((reg << 1) & 15) | (new_bit & 1)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === AND truth table ===
     assert_eq(gate_and(0, 0), 0);

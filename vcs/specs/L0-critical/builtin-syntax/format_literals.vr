@@ -7,6 +7,8 @@
 // Tests format string literals f"..." (replaces format!() macro).
 // Spec: grammar/verum.ebnf Section 2.20 - Format Strings
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let name: Text = "Verum";
     let version: Int = 1;

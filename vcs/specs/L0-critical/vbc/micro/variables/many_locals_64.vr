@@ -6,6 +6,8 @@
 // @expected-exit: 0
 // @description: Register allocation stress test with 64 local variables (tests register spilling)
 
+mount core.prelude.*;
+
 fn main() {
     let v0: Int = 0;
     let v1: Int = 1;

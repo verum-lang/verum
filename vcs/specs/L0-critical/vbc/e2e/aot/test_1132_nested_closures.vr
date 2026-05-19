@@ -86,6 +86,8 @@ fn test_closure_conditional() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Nested Closure Tests:");
     let mut failures = 0;

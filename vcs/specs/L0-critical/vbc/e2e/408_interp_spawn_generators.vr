@@ -106,6 +106,8 @@ fn test_generator_after_spawn() {
     print("generator_after_spawn: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_spawn_basic();
     test_spawn_multiple();

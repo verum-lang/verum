@@ -222,6 +222,8 @@ fn test_partition_pattern() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
     failures = failures + test_list_create_push_len();

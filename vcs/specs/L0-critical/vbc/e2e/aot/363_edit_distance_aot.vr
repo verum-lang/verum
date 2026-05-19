@@ -265,6 +265,8 @@ fn test_edit_lcs_relation() {
     assert_eq(ed >= max_len - lcs, true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_equal_words();
     test_empty_words();

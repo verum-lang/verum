@@ -12,6 +12,8 @@
 ///
 /// Spec: 04-memory-model.md#reference-tiers
 
+mount core.prelude.*;
+
 fn main() {
     test_generation_is_what_unsafe_skips();
     print("  [OK] test_generation_is_what_unsafe_skips");

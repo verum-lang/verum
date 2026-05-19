@@ -125,6 +125,8 @@ fn test_countdown() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Iterator Pattern Tests:");
     let mut failures = 0;

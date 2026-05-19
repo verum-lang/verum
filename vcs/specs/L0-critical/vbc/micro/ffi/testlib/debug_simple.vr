@@ -11,6 +11,8 @@ extern {
     fn ffi_add_i32(a: Int, b: Int) -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // First test a simple value-passing FFI call
     let a = 10;

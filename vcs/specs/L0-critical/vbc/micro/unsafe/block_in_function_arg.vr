@@ -6,6 +6,8 @@ fn consume(value: Int) -> Int {
     value
 }
 
+mount core.prelude.*;
+
 fn main() {
     let result: Int = consume(unsafe { 100 });
     assert_eq(result, 100);

@@ -212,6 +212,8 @@ fn test_power_of_two_products() {
     assert_eq(karatsuba(256, 512, 100), 131072);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_karatsuba();
     test_karatsuba_base100();

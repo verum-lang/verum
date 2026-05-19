@@ -449,6 +449,8 @@ fn test_word_count_digits() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_string_basics();
     test_string_search();

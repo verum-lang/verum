@@ -132,6 +132,8 @@ fn test_bool_int_comparison() {
     assert_eq(0 > 1, false);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_and_basic();
     test_and_with_expressions();

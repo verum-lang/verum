@@ -293,6 +293,8 @@ fn test_sum_of_primes() {
     assert_eq(total, 160);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sieve_small_primes();
     test_sieve_composites();

@@ -707,6 +707,8 @@ fn test_string_reversal() {
     assert(str16_equals(s, double_rev));
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_character_counting();
     test_simple_encoding();

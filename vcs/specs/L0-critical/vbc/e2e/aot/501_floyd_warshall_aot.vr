@@ -159,6 +159,8 @@ fn test_no_path() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_graph();
     test_complete_graph();

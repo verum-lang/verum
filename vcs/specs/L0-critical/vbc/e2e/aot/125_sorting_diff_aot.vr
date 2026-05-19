@@ -114,6 +114,8 @@ fn test_sorting() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sorting();
     print("[OK] 125_sorting_diff_aot");

@@ -192,6 +192,8 @@ fn test_decrement() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_increment();
     test_move_and_inc();

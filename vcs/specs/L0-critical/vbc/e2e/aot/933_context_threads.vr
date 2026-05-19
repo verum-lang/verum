@@ -50,6 +50,8 @@ fn worker_hashes(start: Int, count: Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Sequential hash computation for verification
     let h1 = compute_hash(42);

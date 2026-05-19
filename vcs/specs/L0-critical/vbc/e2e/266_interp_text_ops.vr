@@ -288,6 +288,8 @@ fn test_text_in_conditions() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_text_literals();
     test_empty_text();

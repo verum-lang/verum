@@ -2,6 +2,8 @@
 // This test verifies methods that were migrated from C stubs
 // to compiled core/text/text.vr via VBC→LLVM.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut fail = 0;
 

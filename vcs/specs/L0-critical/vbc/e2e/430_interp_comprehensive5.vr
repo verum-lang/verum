@@ -169,6 +169,8 @@ fn test_bitset_operations() {
     print("bitset_operations: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_cross_product();
     test_fermat_little_theorem();

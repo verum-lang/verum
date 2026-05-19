@@ -8,6 +8,8 @@
 // Currently skipped because threading primitives (spawn, Mutex, ThreadHandle)
 // are not yet implemented in the compiler.
 
+mount core.prelude.*;
+
 fn main() {
     // Placeholder test - actual mutex test requires spawn syntax
     print("Mutex protection test - skipped (threading not implemented)");

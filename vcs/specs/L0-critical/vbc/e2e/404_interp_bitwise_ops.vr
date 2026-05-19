@@ -90,6 +90,8 @@ fn test_power_of_two_check() {
     print("power_of_two_check: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bitwise_and();
     test_bitwise_or();

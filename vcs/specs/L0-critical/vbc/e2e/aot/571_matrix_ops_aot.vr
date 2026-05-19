@@ -211,6 +211,8 @@ fn test_cayley_hamilton() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_identity();
     test_multiply_identity();

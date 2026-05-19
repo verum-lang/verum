@@ -346,6 +346,8 @@ fn test_set_and_read() {
     assert_eq(mat3_sum_all(&result), 6);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_identity();
     test_zero();

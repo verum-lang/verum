@@ -27,6 +27,8 @@ fn queue_front(buf: List<Int>, head: Int) -> Int {
     buf[head]
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let cap = 16;
 

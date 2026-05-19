@@ -149,6 +149,8 @@ fn test_suffix_cmp() {
     print("suffix_cmp: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_banana();
     test_lcp_banana();

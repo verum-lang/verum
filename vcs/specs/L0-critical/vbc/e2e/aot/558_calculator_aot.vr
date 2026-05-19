@@ -197,6 +197,8 @@ fn test_stack_depth() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_arithmetic();
     test_complex_expression();

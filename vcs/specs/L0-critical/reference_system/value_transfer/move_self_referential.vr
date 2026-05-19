@@ -7,6 +7,8 @@
 /// Self-referential types require special handling and are typically affine.
 /// Spec: 04-memory-model.md#pinning
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_self_ref();
 }

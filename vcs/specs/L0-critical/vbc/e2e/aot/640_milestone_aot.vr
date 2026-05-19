@@ -224,6 +224,8 @@ fn test_sort_then_median() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_stats();
     test_single_element();

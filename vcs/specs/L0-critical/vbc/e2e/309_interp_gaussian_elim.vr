@@ -238,6 +238,8 @@ fn test_determinant_properties() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_2x2_simple();
     test_2x2_general();

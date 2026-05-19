@@ -136,6 +136,8 @@ fn test_palindrome_number() {
     print("  test_palindrome_number: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_text_equality();
     test_fstring_complex();

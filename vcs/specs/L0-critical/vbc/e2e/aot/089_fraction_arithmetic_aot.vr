@@ -114,6 +114,8 @@ fn frac_mediant(a: Frac, b: Frac) -> Frac {
     frac_norm(Frac { num: a.num + b.num, den: a.den + b.den })
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Basic construction and normalization ===
     let half = frac_new(1, 2);

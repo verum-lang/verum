@@ -38,6 +38,8 @@ fn count_positives(items: List<Int>) -> Int {
     count
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: range (exclusive)
     let s1 = sum_range(1, 6);

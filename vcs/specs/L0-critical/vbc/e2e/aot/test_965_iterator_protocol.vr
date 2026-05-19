@@ -160,6 +160,8 @@ fn test_counter() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Iterator Protocol Tests:");
     let mut failures = 0;

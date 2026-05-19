@@ -314,6 +314,8 @@ fn test_bignum_chain() {
     print("bignum_chain: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bignum_from_to_int();
     test_bignum_add();

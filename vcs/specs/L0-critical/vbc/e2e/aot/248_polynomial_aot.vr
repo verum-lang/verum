@@ -241,6 +241,8 @@ fn test_identities() {
     assert_eq(diff.c2, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_eval();
     test_add_sub();

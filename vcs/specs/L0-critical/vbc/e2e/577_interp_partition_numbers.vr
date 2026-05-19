@@ -112,6 +112,8 @@ fn test_table_consistency() {
     print("table_consistency: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_small_values();
     test_p4_p5();

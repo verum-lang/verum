@@ -135,6 +135,8 @@ fn test_all_equal() {
     print("all_equal: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_window();
     test_window_size_one();

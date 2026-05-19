@@ -116,6 +116,8 @@ fn test_spawn_sequential_vs_concurrent() {
     print("spawn_sequential_vs_concurrent: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_spawn_await();
     test_multiple_spawns_then_awaits();

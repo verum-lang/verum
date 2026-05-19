@@ -155,6 +155,8 @@ fn test_percentile() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_find_kth();
     test_median();

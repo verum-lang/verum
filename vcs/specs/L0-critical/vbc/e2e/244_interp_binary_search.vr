@@ -255,6 +255,8 @@ fn test_negative_values() {
     assert_eq(binary_search(a, -12, 0, 10), -1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_find_existing();
     test_missing_elements();

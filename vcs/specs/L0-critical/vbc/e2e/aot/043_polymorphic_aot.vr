@@ -72,6 +72,8 @@ fn count_regular(list: ShapeList) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Individual shapes
     let c = Circle(10);

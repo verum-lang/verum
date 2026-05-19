@@ -178,6 +178,8 @@ fn test_ack_properties() {
     print("ack_properties: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_ack_base_cases();
     test_ack_m2();

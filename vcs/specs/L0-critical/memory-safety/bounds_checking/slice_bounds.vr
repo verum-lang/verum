@@ -11,6 +11,8 @@
 ///
 /// All slice operations are bounds-checked both at creation and access.
 
+mount core.prelude.*;
+
 fn main() {
     test_slice_creation();
     test_slice_access();

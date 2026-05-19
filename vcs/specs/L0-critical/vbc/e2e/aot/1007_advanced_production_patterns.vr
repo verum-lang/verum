@@ -87,6 +87,8 @@ fn fold_list(lst: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut passed = 0;
     let mut failed = 0;

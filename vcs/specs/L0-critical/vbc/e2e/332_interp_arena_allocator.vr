@@ -356,6 +356,8 @@ fn test_fill_entire_arena() {
     assert_eq(p_fail.offset, -1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_allocation();
     test_write_and_read();

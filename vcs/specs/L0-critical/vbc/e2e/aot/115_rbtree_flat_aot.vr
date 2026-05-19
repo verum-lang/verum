@@ -321,6 +321,8 @@ fn rb_verify(t: RBTree) -> Bool {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Empty tree ===
     let t0 = rb_new();

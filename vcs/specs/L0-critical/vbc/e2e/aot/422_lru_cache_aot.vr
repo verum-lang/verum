@@ -152,6 +152,8 @@ fn test_update() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic();
     test_eviction();

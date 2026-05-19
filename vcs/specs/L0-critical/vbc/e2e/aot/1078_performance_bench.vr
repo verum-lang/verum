@@ -124,6 +124,8 @@ fn run_bench(name: Text, iterations: Int, f: fn() -> Int) -> Int {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("=== Verum Performance Benchmarks ===");
     print("");

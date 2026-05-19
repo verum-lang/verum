@@ -199,6 +199,8 @@ fn test_is_prime() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_modpow();
     test_gcd_lcm();

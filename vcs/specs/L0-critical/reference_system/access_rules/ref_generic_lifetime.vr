@@ -8,6 +8,8 @@
 /// References are automatically tracked by the compiler.
 /// Spec: 04-memory-model.md#cbgr
 
+mount core.prelude.*;
+
 fn main() {
     test_reference_return();
     test_container_with_reference();

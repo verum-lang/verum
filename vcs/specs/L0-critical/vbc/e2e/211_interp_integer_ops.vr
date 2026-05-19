@@ -154,6 +154,8 @@ fn test_large_values() {
     assert_eq(large % large, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_addition();
     test_subtraction();

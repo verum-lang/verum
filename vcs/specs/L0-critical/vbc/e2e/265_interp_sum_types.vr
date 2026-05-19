@@ -334,6 +334,8 @@ fn test_chain_operations() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_direction_creation();
     test_direction_negative_is();

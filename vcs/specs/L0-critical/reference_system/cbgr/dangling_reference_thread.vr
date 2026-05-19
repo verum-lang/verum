@@ -11,6 +11,8 @@
 /// CBGR detects the generation mismatch when the thread tries to dereference.
 /// Spec: cbgr-implementation.md#thread-safety
 
+mount core.prelude.*;
+
 fn main() {
     let local = 42;
     let local_ref = &local;

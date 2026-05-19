@@ -78,6 +78,8 @@ fn euler_totient(n: Int) -> Int {
     count
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // abs, min, max, clamp
     assert_eq(abs_val(5), 5);

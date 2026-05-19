@@ -181,6 +181,8 @@ fn rpn_eval_add_mul() -> Int {
 // Main test
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // ---- Sorting ----
     let unsorted = Arr10 { e0: 5, e1: 2, e2: 8, e3: 1, e4: 9,

@@ -124,6 +124,8 @@ fn test_two_element() {
     print("two_element: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_peak_in_middle();
     test_peak_at_start();

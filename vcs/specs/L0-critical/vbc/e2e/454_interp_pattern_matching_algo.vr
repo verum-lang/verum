@@ -263,6 +263,8 @@ fn test_longest_repeated_pattern() {
     print("longest_repeated_pattern: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_naive_search_basic();
     test_pattern_counting();

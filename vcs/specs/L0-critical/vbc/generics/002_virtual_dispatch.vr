@@ -290,6 +290,8 @@ fn test_protocol_inheritance() {
     assert_eq(derived_ref.derived_method(), 20);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Virtual dispatch
     test_basic_virtual_dispatch();

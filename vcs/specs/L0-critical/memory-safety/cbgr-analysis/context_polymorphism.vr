@@ -226,6 +226,8 @@ fn test_context_poly_with_result() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_context_param();
     test_context_polymorphism_callback();

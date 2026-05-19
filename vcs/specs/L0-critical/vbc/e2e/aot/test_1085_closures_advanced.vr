@@ -99,6 +99,8 @@ fn test_mutable_capture() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Advanced Closure Tests:");
     let mut failures = 0;

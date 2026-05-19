@@ -6,6 +6,8 @@
 // @expected-exit: 0
 // @description: Test variable shadowing with proper scope management
 
+mount core.prelude.*;
+
 fn main() {
     let x: Int = 10;
     assert_eq(x, 10);

@@ -17,6 +17,8 @@
 // `NewMap` / `NewSet` opcode used by `<Collection>.new()`, dropping
 // the capacity hint because the heap auto-grows.
 
+mount core.prelude.*;
+
 fn main() {
     // ---- List.with_capacity -------------------------------------------
     let mut xs: List<Int> = List.with_capacity(4);

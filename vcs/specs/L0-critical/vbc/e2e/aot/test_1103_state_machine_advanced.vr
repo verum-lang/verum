@@ -173,6 +173,8 @@ fn test_elevator() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("State Machine Advanced Tests:");
     let mut failures = 0;

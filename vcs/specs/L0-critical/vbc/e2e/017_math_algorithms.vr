@@ -349,6 +349,8 @@ fn test_palindrome_numbers() {
     assert(!is_palindrome_number(-121));
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_primes();
     test_prime_counting();

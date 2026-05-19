@@ -7,6 +7,8 @@
 // Test: Map keys() and values() methods — verify correct counts after
 // insert, remove, and overwrite operations.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Integer-keyed map — keys/values lengths
     let mut m1 = Map.new();

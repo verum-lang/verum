@@ -160,6 +160,8 @@ fn test_powers_of_two() {
     print("powers_of_two: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_small_composites();
     test_prime_numbers();

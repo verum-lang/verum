@@ -40,6 +40,8 @@ fn get_retries() -> Int using [Config] {
     Config.max_retries()
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

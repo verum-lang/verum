@@ -68,6 +68,8 @@ fn count_leaves(t: Heap<Tree>) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Linked list sum
     let list = Heap(Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Cons(4, Heap(Nil)))))))));

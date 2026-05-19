@@ -199,6 +199,8 @@ fn test_sa_reverse_sorted() {
     print("sa_reverse_sorted: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sa_simple();
     test_sa_all_equal();

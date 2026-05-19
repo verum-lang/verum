@@ -4,6 +4,8 @@
 // @tags: io, file, read, write, runtime
 // @description: Test file I/O runtime operations
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

@@ -33,6 +33,8 @@ fn* sq_gen(n: Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

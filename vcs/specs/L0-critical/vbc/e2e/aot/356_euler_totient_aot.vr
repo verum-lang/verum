@@ -285,6 +285,8 @@ fn test_phi_1() {
     assert_eq(phi_formula(1), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_phi_small_values();
     test_phi_formula_matches_naive();

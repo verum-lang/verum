@@ -23,6 +23,8 @@ implement Circle {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let c = Circle { center: Point { x: 10, y: 20 }, radius: 5 };
 

@@ -154,6 +154,8 @@ fn test_accumulator_pattern() {
     print("accumulator_pattern: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_colors();
     test_generator_sum();

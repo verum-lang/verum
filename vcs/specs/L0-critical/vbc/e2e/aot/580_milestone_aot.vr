@@ -180,6 +180,8 @@ fn test_euler_theorem() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gcd_lcm();
     test_mod_pow();

@@ -54,6 +54,8 @@ fn add_lists(a: List<Int>, b: List<Int>, n: Int) -> List<Int> {
     r
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: DFT of impulse [1,0,0,0] should be constant [1,1,1,1]
     // DFT: X[k] = sum_{n=0}^{N-1} x[n] * exp(-j*2*pi*k*n/N)

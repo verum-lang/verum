@@ -67,6 +67,8 @@ fn gcd(a_in: Int, b_in: Int) -> Int {
     a
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Direct recursion
     assert_eq(factorial(0), 1);

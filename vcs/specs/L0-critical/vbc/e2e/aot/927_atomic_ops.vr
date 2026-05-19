@@ -35,6 +35,8 @@ fn increment_worker(n: Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Mutex-based CAS pattern — lock, check, update, unlock
     let mtx = __mutex_new_raw();

@@ -290,6 +290,8 @@ fn test_roundtrip() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_from_int();
     test_from_zero();

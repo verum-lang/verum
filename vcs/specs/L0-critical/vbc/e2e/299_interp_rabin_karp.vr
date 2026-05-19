@@ -337,6 +337,8 @@ fn test_verify_match_correct() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_hash_deterministic();
     test_hash_different_patterns();

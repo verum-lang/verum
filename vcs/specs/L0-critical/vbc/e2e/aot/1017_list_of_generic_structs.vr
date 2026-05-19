@@ -14,6 +14,8 @@ fn make_pairs() -> List<Pair<List<Int>, Text>> {
     pairs
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut passed = 0;
     let mut failed = 0;

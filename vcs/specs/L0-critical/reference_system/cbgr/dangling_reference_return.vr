@@ -16,6 +16,8 @@ fn return_local_ref() -> &Int {
 }
 // local is dropped here, generation bumped
 
+mount core.prelude.*;
+
 fn main() {
     let ref_val = return_local_ref();
     // CBGR detects generation mismatch at runtime

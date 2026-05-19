@@ -237,6 +237,8 @@ fn test_reverse_sorted_input() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_insert_and_min();
     test_extract_min_order();

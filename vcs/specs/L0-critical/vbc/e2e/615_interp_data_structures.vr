@@ -272,6 +272,8 @@ fn test_two_pointer() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_stack();
     test_queue_simulation();

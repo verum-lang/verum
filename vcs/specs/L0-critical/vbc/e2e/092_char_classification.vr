@@ -323,6 +323,8 @@ fn test_unicode_extended() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_ascii_digits();
     test_ascii_letters();

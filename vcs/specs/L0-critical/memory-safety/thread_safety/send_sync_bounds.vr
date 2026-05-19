@@ -17,6 +17,8 @@
 ///
 /// These bounds are automatically derived but can be manually implemented in unsafe.
 
+mount core.prelude.*;
+
 fn main() {
     test_send_types();
     test_sync_types();

@@ -1,4 +1,6 @@
 // @test: typecheck-pass
 // @level: L0
 // @expect: pass
+mount core.prelude.*;
+
 fn main() { assert_eq(0b1100 ^ 0b1010, 0b0110); }

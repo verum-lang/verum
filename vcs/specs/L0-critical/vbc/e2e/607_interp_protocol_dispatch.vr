@@ -314,6 +314,8 @@ fn test_range_methods() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_methods();
     test_method_chaining();

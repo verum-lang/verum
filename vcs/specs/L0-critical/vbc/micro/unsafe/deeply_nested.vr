@@ -2,6 +2,8 @@
 // @level: L0
 // @tags: unsafe, nested, deep
 // @description: Deeply nested unsafe blocks (stress test context management)
+mount core.prelude.*;
+
 fn main() {
     let result: Int = unsafe {
         let a: Int = 1;

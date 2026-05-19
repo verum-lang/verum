@@ -86,6 +86,8 @@ fn is_balanced(expr: List<Int>, n: Int) -> Int {
     valid
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Push and peek
     let mut stk = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

@@ -213,6 +213,8 @@ fn test_hanoi() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_recursion();
     test_recursive_list_ops();

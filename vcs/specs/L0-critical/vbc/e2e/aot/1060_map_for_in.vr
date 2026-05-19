@@ -6,6 +6,8 @@
 
 // Test Map iteration patterns that production code needs.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut m = Map.new();
     m.insert("x", 10);

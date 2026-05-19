@@ -213,6 +213,8 @@ fn test_det_properties() {
     print("det_properties: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_det2();
     test_det3();

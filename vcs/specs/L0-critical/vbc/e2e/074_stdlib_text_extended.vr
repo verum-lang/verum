@@ -645,6 +645,8 @@ fn test_base_conversion() {
     print("  test_base_conversion: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_char_code_conversion();
     test_is_digit();

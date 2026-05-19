@@ -207,6 +207,8 @@ fn test_variant_negative_is_check() {
     assert_eq(s is Rect { w: _, h: _ }, false);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_record_creation_and_access();
     test_record_with_text_field();

@@ -99,6 +99,8 @@ fn test_empty_comprehension() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Advanced Comprehension Tests:");
     let mut failures = 0;

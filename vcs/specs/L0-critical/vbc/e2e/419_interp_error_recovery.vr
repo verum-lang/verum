@@ -143,6 +143,8 @@ fn test_result_map() {
     print("result_map: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_safe_divide();
     test_safe_sqrt();

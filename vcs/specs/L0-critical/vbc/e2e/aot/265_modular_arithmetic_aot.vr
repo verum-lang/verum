@@ -135,6 +135,8 @@ fn test_identities() {
     assert_eq((50 * 60) % m, mod_mul(50, 60, m));
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_modular();
     test_mod_pow();

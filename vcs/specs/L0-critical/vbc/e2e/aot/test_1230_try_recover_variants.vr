@@ -26,6 +26,8 @@ fn get_timeout(name: Text) -> Result<Int, IoError> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

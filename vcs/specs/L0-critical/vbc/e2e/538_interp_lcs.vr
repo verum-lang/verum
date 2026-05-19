@@ -119,6 +119,8 @@ fn test_subsequence_property() {
     print("subsequence_property: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_classic_lcs();
     test_identical_sequences();

@@ -194,6 +194,8 @@ fn test_sorted_invariant() {
     assert_eq(treap_get(t, 4).key, 50);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_insert_and_search();
     test_min_max();

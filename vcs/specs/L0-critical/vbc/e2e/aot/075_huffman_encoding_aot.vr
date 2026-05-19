@@ -168,6 +168,8 @@ fn huffman_4(a: HTree, b: HTree, c: HTree, d: HTree) -> HTree {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Basic leaf properties ===
     let leaf_a = make_leaf(0, 10);

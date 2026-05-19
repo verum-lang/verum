@@ -24,6 +24,8 @@ implement Counter {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Mut Self Tests:");
 

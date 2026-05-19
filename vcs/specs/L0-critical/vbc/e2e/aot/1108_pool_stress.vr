@@ -95,6 +95,8 @@ fn test_rapid_spawn_await() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut pass = 0;
 

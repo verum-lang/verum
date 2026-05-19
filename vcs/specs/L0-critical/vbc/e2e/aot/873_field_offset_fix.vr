@@ -57,6 +57,8 @@ fn get_delta_x(v: Delta) -> Int { v.x }
 fn get_delta_name(v: Delta) -> Int { v.name }
 fn get_delta_a(v: Delta) -> Int { v.a }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test Alpha: x at position 0, y at position 1
     let a = make_alpha(10, 20);

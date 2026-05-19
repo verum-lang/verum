@@ -80,6 +80,8 @@ fn mat3_mul(a: List<Int>, b: List<Int>) -> List<Int> {
     r
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: 2x2 inverse
     // A = [[2, 1], [1, 3]], det = 5

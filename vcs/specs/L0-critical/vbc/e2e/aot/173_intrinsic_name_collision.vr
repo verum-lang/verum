@@ -33,6 +33,8 @@ fn checked_mul(a: Int, b: Int) -> Int {
     a + b
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // wrapping_add should do a * 100 + b, NOT actual wrapping add
     let r1 = wrapping_add(3, 7);

@@ -4,6 +4,8 @@
 // @tags: aot, mutable, lists, five, aliasing
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Five mutable lists simultaneously
     let mut a = [1, 2, 3];

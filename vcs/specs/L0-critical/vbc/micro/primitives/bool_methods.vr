@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test Bool methods
 
+mount core.prelude.*;
+
 fn main() {
     let t = true;
     let f = false;

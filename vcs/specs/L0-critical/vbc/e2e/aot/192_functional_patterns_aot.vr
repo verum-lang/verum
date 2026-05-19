@@ -106,6 +106,8 @@ fn test_find_any_all() {
     assert_eq(all_of(0, 10, all_positive), false);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_map_compose();
     test_filter_reduce();

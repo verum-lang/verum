@@ -118,6 +118,8 @@ fn utilization_pct(bursts: List<Int>, n: Int, makespan: Int) -> Int {
     (total_burst * 100) / makespan
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // 4 jobs: (arrival, burst)
     // Job 0: arrives at 0, burst 3

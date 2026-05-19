@@ -273,6 +273,8 @@ fn test_result_is_palindrome() {
     assert_eq(is_palindrome(arr, r.start, r.length), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_single_char();
     test_two_same();

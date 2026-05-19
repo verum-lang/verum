@@ -233,6 +233,8 @@ fn test_different_source() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_positive_weights();
     test_negative_edges();

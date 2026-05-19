@@ -160,6 +160,8 @@ fn test_update() {
     assert_eq(r.value, 200);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic();
     test_eviction();

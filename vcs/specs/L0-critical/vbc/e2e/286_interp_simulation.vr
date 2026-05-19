@@ -450,6 +450,8 @@ fn test_temperature_simulation() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_account();
     test_overdraft_protection();

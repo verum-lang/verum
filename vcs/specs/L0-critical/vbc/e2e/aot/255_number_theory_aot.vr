@@ -169,6 +169,8 @@ fn test_perfect_numbers() {
     assert_eq(sum_divisors(1), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gcd_lcm();
     test_primes();

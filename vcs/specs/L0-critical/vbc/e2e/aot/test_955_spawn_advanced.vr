@@ -107,6 +107,8 @@ fn test_capture_bool() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Advanced Spawn Tests:");
 

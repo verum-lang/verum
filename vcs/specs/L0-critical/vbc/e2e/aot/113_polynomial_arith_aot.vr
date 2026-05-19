@@ -237,6 +237,8 @@ fn poly_coeff_sum(p: Poly) -> Int {
     s
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Zero polynomial ===
     let z = poly_zero();

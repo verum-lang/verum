@@ -337,6 +337,8 @@ fn test_multiple_splits_joins() {
     assert_eq(rope_get(j2, 7), 8);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_build();
     test_get_set();

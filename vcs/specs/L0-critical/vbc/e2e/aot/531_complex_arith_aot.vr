@@ -185,6 +185,8 @@ fn test_gaussian_integers() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_ops();
     test_multiply();

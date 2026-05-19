@@ -72,6 +72,8 @@ fn ema_step(prev: Int, new_val: Int) -> Int {
     prev * 3 / 4 + new_val / 4
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Basic accumulator ===
     let a0 = acc_new();

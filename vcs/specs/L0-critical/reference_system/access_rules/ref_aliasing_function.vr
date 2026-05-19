@@ -21,6 +21,8 @@ fn modify_data(data: &mut List<Int>) {
     data.push(100);
 }
 
+mount core.prelude.*;
+
 fn main() {
     let mut numbers = [1, 2, 3, 4, 5];
 

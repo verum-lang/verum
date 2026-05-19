@@ -183,6 +183,8 @@ fn test_palindrome() {
     assert_eq(is_palindrome_in_base(10, 2), false);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_digits();
     test_digit_at();

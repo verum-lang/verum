@@ -38,6 +38,8 @@ fn approx_eq(a: Float, b: Float) -> Bool {
     abs_diff < 0.01
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
     let a = Vec2.new(3.0, 4.0);

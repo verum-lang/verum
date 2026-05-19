@@ -232,6 +232,8 @@ fn test_swap_elements() {
     assert_eq(arr[3], 2);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_field_get();
     test_field_set();

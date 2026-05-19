@@ -41,6 +41,8 @@ fn compute_sum(n: Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let t_start = __time_monotonic_nanos_raw();
 

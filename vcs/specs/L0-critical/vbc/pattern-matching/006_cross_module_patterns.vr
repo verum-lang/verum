@@ -69,6 +69,8 @@ fn analyze_result(r: Result2<Int, Text>) -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: Core types pattern matching
     let some_val: Maybe2<Int> = Some2(42);

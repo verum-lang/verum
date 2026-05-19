@@ -243,6 +243,8 @@ fn test_ref_computation_results() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_immutable_ref_passing();
     test_mutable_ref_passing();

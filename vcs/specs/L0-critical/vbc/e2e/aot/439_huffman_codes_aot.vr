@@ -118,6 +118,8 @@ fn test_max4() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_log2();
     test_code_length();

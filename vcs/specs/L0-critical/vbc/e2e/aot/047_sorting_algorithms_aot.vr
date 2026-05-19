@@ -117,6 +117,8 @@ fn arr8_sum(arr: Arr8, n: Int) -> Int {
     s
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let unsorted = Arr8 { a0: 5, a1: 3, a2: 8, a3: 1, a4: 9, a5: 2, a6: 7, a7: 4 };
     let n = 8;

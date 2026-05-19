@@ -205,6 +205,8 @@ fn test_fifo_order() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic();
     test_full_overwrite();

@@ -178,6 +178,8 @@ fn test_compose() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Functional Pattern Tests:");
     let mut failures = 0;

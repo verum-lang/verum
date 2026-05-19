@@ -115,6 +115,8 @@ fn test_matrix() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Generic Implement Tests:");
     let mut failures = 0;

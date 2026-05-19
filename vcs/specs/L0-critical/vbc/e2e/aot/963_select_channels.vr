@@ -3,6 +3,8 @@
 // @description: Fan-out/fan-in with multiple worker threads
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Two channels captured in one spawn
     let work = Channel.new(10);

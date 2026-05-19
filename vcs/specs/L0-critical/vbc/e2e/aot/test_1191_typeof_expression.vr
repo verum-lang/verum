@@ -4,6 +4,8 @@
 // @tags: typeof, reflection, e2e
 // @description: Test typeof() expression for runtime type inspection
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

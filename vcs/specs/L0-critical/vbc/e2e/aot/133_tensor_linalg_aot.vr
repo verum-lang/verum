@@ -610,6 +610,8 @@ fn test_vec_operations_combined() {
     assert_eq(m_uv.z, mu_mv.z);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_mat2_mul_basic();
     test_mat2_mul_identity();

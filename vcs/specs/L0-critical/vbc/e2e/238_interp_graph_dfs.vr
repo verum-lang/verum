@@ -356,6 +356,8 @@ fn test_single_node() {
     assert_eq(has_cycle_directed(g), false);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_tree_dfs();
     test_tree_dfs_from_leaf();

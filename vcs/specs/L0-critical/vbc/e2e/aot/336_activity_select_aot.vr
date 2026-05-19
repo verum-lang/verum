@@ -263,6 +263,8 @@ fn test_single_activity() {
     assert_eq(min_platforms(act), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_classic_greedy();
     test_all_disjoint();

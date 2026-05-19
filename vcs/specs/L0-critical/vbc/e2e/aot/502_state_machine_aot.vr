@@ -200,6 +200,8 @@ fn test_eval_multi_ops() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_lex_simple();
     test_lex_multidigit();

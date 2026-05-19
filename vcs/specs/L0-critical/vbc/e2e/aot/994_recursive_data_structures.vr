@@ -40,6 +40,8 @@ fn tree_depth(t: Tree) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: linked list
     let lst = Cons(1, Heap(Cons(2, Heap(Cons(3, Heap(Cons(4, Heap(Nil))))))));

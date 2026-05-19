@@ -320,6 +320,8 @@ fn test_justify_space_between() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let r1 = test_grow_distribution();
     if r1 != 0 { return r1; }

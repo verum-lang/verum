@@ -815,6 +815,8 @@ fn test_shape_numel() {
 // main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Concatenation
     test_concat_basic();

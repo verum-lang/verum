@@ -153,6 +153,8 @@ fn test_list_of_results() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Result Error Handling Tests:");
     let mut failures = 0;

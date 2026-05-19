@@ -20,6 +20,8 @@ extern {
     fn getpid() -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // ============================================================
     // Test 1: transfer_from — C allocates, Verum owns result

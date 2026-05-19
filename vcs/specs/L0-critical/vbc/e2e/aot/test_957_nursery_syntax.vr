@@ -8,6 +8,8 @@ fn worker(x: Int) -> Int {
     x * 10
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("before nursery");
 

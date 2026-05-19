@@ -214,6 +214,8 @@ fn test_tautology_clauses() {
     print("tautology_clauses: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_satisfiable_simple();
     test_unsatisfiable();

@@ -140,6 +140,8 @@ fn test_fan_out() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Channel Pipeline Tests:");
     let mut failures = 0;

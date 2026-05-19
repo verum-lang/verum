@@ -209,6 +209,8 @@ fn test_count_unique() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rle_basic();
     test_rle_roundtrip();

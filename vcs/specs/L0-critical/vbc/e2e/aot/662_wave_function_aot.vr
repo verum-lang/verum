@@ -222,6 +222,8 @@ fn test_cross_corr() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_square_wave();
     test_triangle_wave();

@@ -546,6 +546,8 @@ fn test_arange_sum() {
     assert_eq(sum, 45);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_arange_basic();
     test_arange_step2();

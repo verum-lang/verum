@@ -7,6 +7,8 @@
 /// Sequential access should be faster than random.
 /// Spec: cbgr-implementation.md#cache-optimization
 
+mount core.prelude.*;
+
 fn main() {
     test_sequential_access();
     test_random_access();

@@ -140,6 +140,8 @@ fn test_nonzero_all() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_one_hot_basic();
     test_one_hot_multi();

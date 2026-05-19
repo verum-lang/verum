@@ -10,6 +10,8 @@ extern {
     fn ffi_sum_array_i32(arr: &Int, len: Int) -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: sum_array_i32
     let arr1 = [1, 2, 3, 4, 5];

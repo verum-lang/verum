@@ -597,6 +597,8 @@ fn test_rand_shape() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_zeros();
     test_ones();

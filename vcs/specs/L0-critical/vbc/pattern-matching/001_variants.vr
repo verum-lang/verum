@@ -304,6 +304,8 @@ fn test_exhaustive_match() {
     assert_eq(option_to_int(Some(42)), 42);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // IS_VAR tests
     test_is_none();

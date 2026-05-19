@@ -8,6 +8,8 @@ fn __mutex_new_raw() -> Int { 0 }
 fn __mutex_lock_raw(mtx: Int) -> Int { 0 }
 fn __mutex_unlock_raw(mtx: Int) -> Int { 0 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: basic channel send/recv with spawn
     let ch1 = Channel.new(4);

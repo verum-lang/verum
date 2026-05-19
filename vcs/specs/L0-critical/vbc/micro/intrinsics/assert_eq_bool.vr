@@ -2,4 +2,6 @@
 // @level: L0
 // @tier: 0
 // @expected-exit: 0
+mount core.prelude.*;
+
 fn main() { assert_eq(true, true); }

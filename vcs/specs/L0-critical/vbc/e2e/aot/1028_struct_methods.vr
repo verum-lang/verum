@@ -49,6 +49,8 @@ implement Counter {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Constructor and field access
     let p = Point.new(3, 4);

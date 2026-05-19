@@ -30,6 +30,8 @@ fn build_csv(items: List<Int>) -> Text {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic concatenation
     let hello = "hello" + " " + "world";

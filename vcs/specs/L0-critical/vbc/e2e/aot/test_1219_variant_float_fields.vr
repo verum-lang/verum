@@ -41,6 +41,8 @@ fn sum_pair(p: Pair) -> Float {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

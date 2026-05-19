@@ -486,6 +486,8 @@ fn test_destroy_nonexistent() {
     assert_eq(dm.event_count, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_device_count();
     test_current_device();

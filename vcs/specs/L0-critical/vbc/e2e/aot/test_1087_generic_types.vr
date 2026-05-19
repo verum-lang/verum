@@ -99,6 +99,8 @@ fn test_wrapper() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Generic Type Tests:");
     let mut failures = 0;

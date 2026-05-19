@@ -144,6 +144,8 @@ fn test_repeat_generator() {
     print("repeat_generator: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_filtered_generator();
     test_mapped_generator();

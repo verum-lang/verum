@@ -339,6 +339,8 @@ fn test_large_throughput() {
     assert_eq(state.produced, state.consumed + state.buf.count);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_ring_buffer_basic();
     test_ring_buffer_full();

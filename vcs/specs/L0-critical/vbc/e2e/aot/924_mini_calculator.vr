@@ -60,6 +60,8 @@ fn execute_rpn(tokens: List<Int>) -> Int {
     stack.top()
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: 3 4 + = 7
     let r1 = execute_rpn([3, 4, -1]);

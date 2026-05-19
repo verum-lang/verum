@@ -5,6 +5,8 @@
 // @timeout: 5000
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() {
     fn fibonacci(n: Int) -> Int {
         fn fib_inner(x: Int) -> Int {

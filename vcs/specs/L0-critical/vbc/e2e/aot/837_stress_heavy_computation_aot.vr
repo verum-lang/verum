@@ -146,6 +146,8 @@ fn digit_sum(x: Int) -> Int {
     s
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Mandelbrot iterations for points inside/outside
     // c = (0, 0) is inside, should reach max_iter

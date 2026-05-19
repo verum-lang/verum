@@ -17,6 +17,8 @@ type affine Capability is {
     level: Int,
 };
 
+mount core.prelude.*;
+
 fn main() {
     let cap = Capability { name: Text.from("admin"), level: 10 };
     let condition = true;

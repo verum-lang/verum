@@ -212,6 +212,8 @@ fn test_overcrowding() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_blinker();
     test_block();

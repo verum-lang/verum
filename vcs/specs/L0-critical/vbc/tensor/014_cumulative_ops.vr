@@ -151,6 +151,8 @@ fn test_cummin() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_cumsum();
     test_cumprod();

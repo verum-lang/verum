@@ -77,6 +77,8 @@ fn test_text_encoding() {
     assert_eq(s1.len(), 4);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_integer_tag_boundary();
     test_float_integer_distinction();

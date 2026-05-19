@@ -100,6 +100,8 @@ fn test_simulation() {
     assert_eq(x1, 7);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_initial_state();
     test_movement();

@@ -10,6 +10,8 @@ fn square(x: Float) -> Float {
     x * x
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // This should implicitly coerce Int 5 to Float 5.0
     let result = square(5);

@@ -209,6 +209,8 @@ fn test_char_class() {
     assert_eq(char_class(0), 5);   // EOF
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_number_only();
     test_expression();

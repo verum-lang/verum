@@ -4,6 +4,8 @@
 // @tags: memory-safety, bounds-check, safe-pattern
 // @description: Tests safe alternatives to direct array indexing
 
+mount core.prelude.*;
+
 fn main() {
     let arr = [1, 2, 3, 4, 5];
 

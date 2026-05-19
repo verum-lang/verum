@@ -55,6 +55,8 @@ fn count_ways(n: Int) -> Int {
     count_ways(n - 1) + count_ways(n - 2)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // GCD
     assert_eq(gcd(48, 18), 6);

@@ -1488,6 +1488,8 @@ fn test_combined_integration() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_device_management();
     test_memory_lifecycle();

@@ -26,6 +26,8 @@ fn build_squares(n: Int) -> List<Int> {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: basic list literal and indexing
     let arr = [10, 20, 30, 40, 50];

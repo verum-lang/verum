@@ -11,6 +11,8 @@ extern {
     fn mach_absolute_time() -> u64;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // mach_absolute_time() returns monotonically increasing tick count
     // It never fails

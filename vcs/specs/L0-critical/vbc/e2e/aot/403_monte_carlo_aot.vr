@@ -298,6 +298,8 @@ fn test_shuffle_deterministic() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_lcg_deterministic();
     test_lcg_range_valid();

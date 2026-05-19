@@ -486,6 +486,8 @@ fn test_horizontal_operations() {
     assert_eq(ps.w, 10);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_splat();
     test_add();

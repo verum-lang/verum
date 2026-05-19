@@ -123,6 +123,8 @@ fn test_arithmetic_properties() {
     assert_eq(min_48 - min_48, 0);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_48bit_boundary_values();
     test_add_near_max();

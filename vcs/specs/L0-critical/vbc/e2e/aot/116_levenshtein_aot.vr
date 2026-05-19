@@ -244,6 +244,8 @@ fn hamming(s: Str8, t: Str8) -> Int {
     dist
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Encode strings as integer sequences for testing
     // "kitten" = [107, 105, 116, 116, 101, 110, 0, 0], len=6

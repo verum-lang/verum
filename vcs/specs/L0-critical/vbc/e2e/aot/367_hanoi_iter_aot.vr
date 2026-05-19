@@ -286,6 +286,8 @@ fn test_disk_conservation() {
     assert_eq(total_disks(st), n);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_hanoi_1();
     test_hanoi_2();

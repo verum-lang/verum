@@ -201,6 +201,8 @@ fn test_dependent_bounds() {
     assert_eq(total, 30);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_multiplication_table_sum();
     test_triangular_loop();

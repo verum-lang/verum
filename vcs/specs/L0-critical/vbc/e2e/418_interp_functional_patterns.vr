@@ -157,6 +157,8 @@ fn test_accumulate_pattern() {
     print("accumulate_pattern: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_map();
     test_filter_count();

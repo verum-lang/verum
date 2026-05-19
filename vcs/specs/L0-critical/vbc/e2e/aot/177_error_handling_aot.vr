@@ -40,6 +40,8 @@ fn safe_div_maybe(a: Int, b: Int) -> Maybe<Int> {
     if b == 0 { None } else { Some(a / b) }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // ? operator Ok path
     let r1 = double_positive(5);

@@ -100,6 +100,8 @@ fn test_nested_guard() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Match Guard Tests:");
     let mut failures = 0;

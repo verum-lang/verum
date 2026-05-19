@@ -358,6 +358,8 @@ fn test_overcrowding() {
     assert_eq(get_cell(next, 3, 3), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_grid();
     test_single_cell_dies();

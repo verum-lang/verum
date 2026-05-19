@@ -35,6 +35,8 @@ fn newton_sqrt(n: Float) -> Float {
     guess
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic float arithmetic
     let a = 3.14;

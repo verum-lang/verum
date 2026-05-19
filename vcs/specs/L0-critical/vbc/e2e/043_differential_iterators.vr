@@ -496,6 +496,8 @@ fn test_scan_ops() {
     print("scan_ops: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_map_transforms();
     test_filter_ops();

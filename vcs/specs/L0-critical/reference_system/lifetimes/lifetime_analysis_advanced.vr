@@ -272,6 +272,8 @@ fn test_reference_in_tuple() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Basic lifetime tests
     test_basic_lifetime();

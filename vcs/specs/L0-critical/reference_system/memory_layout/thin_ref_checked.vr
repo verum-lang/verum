@@ -8,6 +8,8 @@
 /// They provide zero-overhead access when compiler can prove safety.
 /// Spec: cbgr-implementation.md#reference-tiers
 
+mount core.prelude.*;
+
 fn main() {
     verify_checked_sizes();
     compare_tier_sizes();

@@ -4,6 +4,8 @@
 // @tags: memory-safety, double-free, cbgr, loop
 // @description: Tests that CBGR detects double-free in loop context
 
+mount core.prelude.*;
+
 fn main() {
     let data = Heap.new(100);
 

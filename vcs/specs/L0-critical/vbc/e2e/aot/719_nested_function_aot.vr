@@ -4,6 +4,8 @@
 // @tags: aot, nested-function
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     fn double(x: Int) -> Int {
         x * 2

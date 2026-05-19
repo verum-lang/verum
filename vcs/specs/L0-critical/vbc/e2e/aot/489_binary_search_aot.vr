@@ -181,6 +181,8 @@ fn test_rotated() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_binary_search();
     test_lower_upper_bound();

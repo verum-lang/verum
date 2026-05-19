@@ -161,6 +161,8 @@ fn test_nested_try() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Error Propagation Tests:");
     let mut failures = 0;

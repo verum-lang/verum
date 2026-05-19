@@ -163,6 +163,8 @@ fn test_different_bounds() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_chk_add_normal();
     test_chk_add_overflow();

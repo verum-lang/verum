@@ -34,6 +34,8 @@ fn print_area(shape: &dyn Drawable) -> Int {
     shape.area()
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

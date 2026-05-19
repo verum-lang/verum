@@ -244,6 +244,8 @@ fn test_minimal_nfa_two_states() {
     print("minimal_nfa_two_states: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_nfa_no_eps();
     test_nfa_with_eps();

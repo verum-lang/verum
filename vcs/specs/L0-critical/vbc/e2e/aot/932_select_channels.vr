@@ -17,6 +17,8 @@ fn range_sum(start: Int, count: Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Three independent channels
     let ch1 = Channel.new(8);

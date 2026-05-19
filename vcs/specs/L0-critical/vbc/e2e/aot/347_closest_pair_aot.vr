@@ -270,6 +270,8 @@ fn test_2d_negative_coords() {
     assert_eq(out.idx2, 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_1d_basic();
     test_1d_duplicates();

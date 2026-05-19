@@ -25,6 +25,8 @@ type affine Handle is {
 // Maybe wrapper for Handle (affine type)
 type MaybeHandle is Some(Handle) | None;
 
+mount core.prelude.*;
+
 fn main() {
     test_copy_through_match();
     test_copy_through_option();

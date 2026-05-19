@@ -23,6 +23,8 @@ meta timing(block: tt) {
     // Measures execution time
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_macro_call();
     test_macro_in_expression();

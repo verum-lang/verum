@@ -57,6 +57,8 @@ fn student_avg(s: Student) -> Int {
     (s.score1 + s.score2 + s.score3) / 3
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Point operations
     let p1 = Point { x: 3, y: 4 };

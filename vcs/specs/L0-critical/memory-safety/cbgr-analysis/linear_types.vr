@@ -188,6 +188,8 @@ fn test_linear_in_loop() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_linear_consumed_once();
     test_linear_passed_to_function();

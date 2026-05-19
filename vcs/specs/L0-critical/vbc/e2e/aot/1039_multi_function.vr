@@ -63,6 +63,8 @@ fn bubble_sort(xs: List<Int>) -> List<Int> {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Fibonacci
     if (fibonacci(0) != 0) {

@@ -205,6 +205,8 @@ fn test_mux() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_and();
     test_or();

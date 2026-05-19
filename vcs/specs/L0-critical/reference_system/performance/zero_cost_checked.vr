@@ -7,6 +7,8 @@
 /// Escape analysis enables compile-time verification.
 /// Spec: cbgr-implementation.md#zero-cost-tier
 
+mount core.prelude.*;
+
 fn main() {
     test_checked_vs_raw();
     test_escape_analysis_simple();

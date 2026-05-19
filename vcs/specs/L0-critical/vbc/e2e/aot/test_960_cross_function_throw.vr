@@ -119,6 +119,8 @@ fn test_multiple_calls() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Cross-Function Throw Tests:");
 

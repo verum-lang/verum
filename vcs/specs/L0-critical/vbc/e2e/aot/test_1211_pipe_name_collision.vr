@@ -8,6 +8,8 @@ fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int {
     |x: Int| -> Int { g(f(x)) }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let inc = |x: Int| -> Int { x + 1 };
     let double = |x: Int| -> Int { x * 2 };

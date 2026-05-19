@@ -39,6 +39,8 @@ fn token_priority(t: Token) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Simple match
     let r = color_value(Red);

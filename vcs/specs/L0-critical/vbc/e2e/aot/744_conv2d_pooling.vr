@@ -98,6 +98,8 @@ fn avg_pool2d(input: List<Int>, h: Int, w: Int, pool: Int) -> List<Int> {
     out
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Identity convolution (1x1 kernel = [1])
     let input = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 0, 0, 0, 0, 0, 0]; // 3x3

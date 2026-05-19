@@ -55,6 +55,8 @@ fn make_adder(n: Int) -> fn(Int) -> Int {
     |x: Int| -> Int { x + n }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: basic apply
     let r1 = apply(|x: Int| -> Int { x * 3 }, 14);

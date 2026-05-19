@@ -82,6 +82,8 @@ fn list_map_mul(lst: IntList, factor: Int) -> IntList {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Empty list
     let empty = Nil;

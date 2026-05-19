@@ -83,6 +83,8 @@ fn test_deque_empty_pop() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Deque Operations Tests:");
     let mut failures = 0;

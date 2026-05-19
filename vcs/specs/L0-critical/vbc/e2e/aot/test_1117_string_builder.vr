@@ -125,6 +125,8 @@ fn test_text_comparison() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("String Builder Tests:");
     let mut failures = 0;

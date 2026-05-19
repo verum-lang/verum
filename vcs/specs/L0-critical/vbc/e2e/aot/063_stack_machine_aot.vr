@@ -123,6 +123,8 @@ fn eval_ops(stack: IntStack, ops: OpList) -> IntStack {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Basic push/pop ===
     let s0 = SEmpty;

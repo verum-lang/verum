@@ -445,6 +445,8 @@ fn test_sum_even_digits() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sum_range();
     test_factorial();

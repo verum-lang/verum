@@ -468,6 +468,8 @@ fn test_dead_state_absorbs() {
     assert_eq(s3, -1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_fsm1_ac();
     test_fsm1_abc();

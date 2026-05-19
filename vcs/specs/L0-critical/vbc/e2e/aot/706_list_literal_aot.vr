@@ -4,6 +4,8 @@
 // @tags: aot, list, literal, indexing
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let xs = [10, 20, 30, 40, 50];
 

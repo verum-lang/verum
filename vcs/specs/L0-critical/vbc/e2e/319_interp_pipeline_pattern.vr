@@ -280,6 +280,8 @@ fn test_complex_pipeline() {
     assert_eq(total, 55);  // 1+4+9+16+25
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_map_double();
     test_map_square();

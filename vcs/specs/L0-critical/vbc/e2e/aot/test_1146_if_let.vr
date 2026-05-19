@@ -76,6 +76,8 @@ fn test_while_let() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("If-Let Tests:");
     let mut failures = 0;

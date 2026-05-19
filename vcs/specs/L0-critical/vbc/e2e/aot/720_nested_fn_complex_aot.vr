@@ -4,6 +4,8 @@
 // @tags: aot, nested-function, complex
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     fn add(a: Int, b: Int) -> Int {
         a + b

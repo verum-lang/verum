@@ -7,6 +7,8 @@
 //
 // AOT test for string operations: concat, format, comparison
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic literal concat
     let s1 = "Hello" + " " + "World";

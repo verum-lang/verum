@@ -130,6 +130,8 @@ fn test_nested_variant_matching() {
     print("nested_variant_matching: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_shapes();
     test_expr_eval();

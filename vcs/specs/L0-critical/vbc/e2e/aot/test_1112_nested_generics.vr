@@ -93,6 +93,8 @@ fn test_pair_list() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Nested Generics Tests:");
     let mut failures = 0;

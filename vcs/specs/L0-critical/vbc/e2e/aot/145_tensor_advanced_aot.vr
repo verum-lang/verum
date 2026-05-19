@@ -828,6 +828,8 @@ fn test_topk() {
 // main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_where();
     test_masked_fill();

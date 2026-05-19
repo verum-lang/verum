@@ -237,6 +237,8 @@ fn ht_delete(h: HashTab, key: Int) -> HashTab {
     ht
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Empty table ===
     let h0 = ht_new();

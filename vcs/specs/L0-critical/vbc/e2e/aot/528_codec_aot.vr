@@ -208,6 +208,8 @@ fn test_zigzag() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_varint();
     test_delta_roundtrip();

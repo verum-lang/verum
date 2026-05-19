@@ -232,6 +232,8 @@ fn test_primes() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Algorithm Tests:");
     let mut failures = 0;

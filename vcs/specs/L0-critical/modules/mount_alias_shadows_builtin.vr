@@ -53,6 +53,8 @@ module consumer_explicit_path {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // The aliasing module's Maybe and the built-in Maybe<T> coexist —
     // the compiler does NOT panic on "Maybe is reserved". The

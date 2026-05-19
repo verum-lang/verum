@@ -20,6 +20,8 @@ fn greet(name: Text, age: Int) -> Text {
     f"Hello {name}, you are {age} years old"
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

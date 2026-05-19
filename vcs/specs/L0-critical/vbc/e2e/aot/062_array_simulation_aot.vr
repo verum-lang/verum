@@ -144,6 +144,8 @@ fn arr_add(a: Arr8, b: Arr8) -> Arr8 {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === arr_new: all zeros ===
     let z = arr_new();

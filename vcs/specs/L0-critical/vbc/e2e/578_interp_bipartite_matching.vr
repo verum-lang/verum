@@ -154,6 +154,8 @@ fn test_asymmetric() {
     print("asymmetric: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_perfect_matching();
     test_contention_matching();

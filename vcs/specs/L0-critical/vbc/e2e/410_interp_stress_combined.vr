@@ -175,6 +175,8 @@ fn test_stress_recursion() {
     print("stress_recursion: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_stress_loops();
     test_stress_generators();

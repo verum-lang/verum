@@ -198,6 +198,8 @@ fn test_highest_bit() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_crc_basic();
     test_crc_detect_error();

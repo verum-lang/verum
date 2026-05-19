@@ -53,6 +53,8 @@ fn matrix_det_2x2(a11: Int, a12: Int, a21: Int, a22: Int) -> Int {
     a11 * a22 - a12 * a21
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Prime counting
     assert_eq(sieve_count(10), 4);    // 2,3,5,7

@@ -291,6 +291,8 @@ fn test_duplicates() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_no_overlap();
     test_all_overlap();

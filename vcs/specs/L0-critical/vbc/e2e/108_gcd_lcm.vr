@@ -226,6 +226,8 @@ fn test_coprime() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gcd();
     test_lcm();

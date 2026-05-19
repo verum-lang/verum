@@ -81,6 +81,8 @@ fn test_infinity_basic() {
     assert_eq(neg_inf + 1.0, neg_inf);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_add_basic();
     test_add_negative();

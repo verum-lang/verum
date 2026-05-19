@@ -372,6 +372,8 @@ fn test_self_loops() {
     assert_eq(same_comp(comp, 0, 1), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_two_sccs();
     test_single_scc();

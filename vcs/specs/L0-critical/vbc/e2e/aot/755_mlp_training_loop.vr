@@ -41,6 +41,8 @@ fn mse_grad(pred: Int, target: Int) -> Int {
     2 * (pred - target)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Simple 2-input, 1-output linear model ===
     // Model: y = w1*x1 + w2*x2 + b

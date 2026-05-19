@@ -31,6 +31,8 @@ type Config is {
     verbose: Bool,
 };
 
+mount core.prelude.*;
+
 fn main() {
     test_partial_tuple();
     test_partial_array();

@@ -14,6 +14,8 @@ fn __file_read_to_string_raw(path: Text) -> Text {
     ""
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Write CSV data to file
     let csv_data = "alice,95\nbob,87\ncharlie,92\ndave,78\neve,99";

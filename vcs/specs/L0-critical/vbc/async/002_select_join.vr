@@ -210,6 +210,8 @@ async fn test_sequential_with_dependency() {
     assert_eq(c, 25);  // 10 * 2 + 5
 }
 
+mount core.prelude.*;
+
 fn main() {
     @block_on(async {
         // SELECT tests

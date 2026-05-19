@@ -510,6 +510,8 @@ fn test_inth_root() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_isqrt_newton();
     test_isqrt_invariant();

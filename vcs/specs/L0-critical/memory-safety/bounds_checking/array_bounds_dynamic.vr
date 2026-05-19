@@ -13,6 +13,8 @@
 /// - Prevent buffer overflows and memory corruption
 /// - Provide clear error messages with index and length
 
+mount core.prelude.*;
+
 fn main() {
     let arr = [10, 20, 30, 40, 50];
 

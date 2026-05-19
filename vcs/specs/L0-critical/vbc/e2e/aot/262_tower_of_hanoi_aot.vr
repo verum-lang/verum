@@ -148,6 +148,8 @@ fn test_four_disks() {
     assert_eq(peg_size(h.peg_a), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_one_disk();
     test_two_disks();

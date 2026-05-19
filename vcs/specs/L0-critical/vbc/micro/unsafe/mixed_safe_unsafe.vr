@@ -10,6 +10,8 @@ unsafe fn unsafe_multiply(a: Int, b: Int) -> Int {
     a * b
 }
 
+mount core.prelude.*;
+
 fn main() {
     let x: Int = safe_add(10, 20);
     let y: Int = unsafe { unsafe_multiply(x, 2) };

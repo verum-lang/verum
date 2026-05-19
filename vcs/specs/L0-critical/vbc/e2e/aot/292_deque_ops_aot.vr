@@ -316,6 +316,8 @@ fn test_full_deque() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_push_pop_back();
     test_push_pop_front();

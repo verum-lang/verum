@@ -395,6 +395,8 @@ fn test_many_simultaneous_immut() {
     assert_eq(*r10, 42);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_many_immutable_refs();
     test_refs_in_loop();

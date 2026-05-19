@@ -336,6 +336,8 @@ fn test_two_nodes() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_linear_chain();
     test_diamond();

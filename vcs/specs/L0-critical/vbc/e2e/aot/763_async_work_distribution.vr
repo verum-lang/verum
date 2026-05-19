@@ -42,6 +42,8 @@ fn is_prime(n: Int) -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Parallel sum reduction (split into 4 chunks)
     let n = 100;

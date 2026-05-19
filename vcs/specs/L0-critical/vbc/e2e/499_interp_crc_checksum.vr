@@ -231,6 +231,8 @@ fn test_crc16_range() {
     print("crc16_range: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_crc8_known_values();
     test_crc8_append_property();

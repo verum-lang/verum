@@ -124,6 +124,8 @@ fn test_nonblocking_stream() {
     print("test_nonblocking_stream passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_stream_lifecycle();
     test_stream_priority();

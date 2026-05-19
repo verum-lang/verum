@@ -209,6 +209,8 @@ fn star(r: Regex) -> Regex { RStar(r) }
 fn plus(r: Regex) -> Regex { RPlus(r) }
 fn alt(a: Regex, b: Regex) -> Regex { RAlt { left: a, right: b } }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let empty = seq_new(0);
 

@@ -350,6 +350,8 @@ fn set_enabled(c: &mut Config, e: Bool) {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Fundamental aliasing rule tests
     test_multiple_immutable_references();

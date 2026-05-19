@@ -121,6 +121,8 @@ fn test_leaky_relu_various_alpha() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_leaky_relu_positive();
     test_leaky_relu_negative();

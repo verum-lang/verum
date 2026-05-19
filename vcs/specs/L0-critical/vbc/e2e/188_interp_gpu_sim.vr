@@ -305,6 +305,8 @@ fn graph_instantiate(g: GpuGraph) -> GpuGraph {
 // Tests
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // ---- Device management ----
     let cpu_dev = make_cpu_fallback_device();

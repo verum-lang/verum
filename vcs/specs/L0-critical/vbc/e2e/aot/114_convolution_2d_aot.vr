@@ -187,6 +187,8 @@ fn kern_sum(k: Kernel3) -> Int {
     k.k0 + k.k1 + k.k2 + k.k3 + k.k4 + k.k5 + k.k6 + k.k7 + k.k8
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Build a test image: gradient from top-left to bottom-right
     let mut img = grid_new(0);

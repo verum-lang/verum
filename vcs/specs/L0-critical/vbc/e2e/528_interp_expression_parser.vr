@@ -171,6 +171,8 @@ fn test_complex_expression() {
     print("complex_expression: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_addition();
     test_multiplication_precedence();

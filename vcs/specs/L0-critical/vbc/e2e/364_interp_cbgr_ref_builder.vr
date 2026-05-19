@@ -277,6 +277,8 @@ fn test_multi_ref_loop() {
     assert_eq(total, 385);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_nested_read_write();
     test_square_via_ref();

@@ -58,6 +58,8 @@ fn count_occurrences(arr: List<Int>, n: Int, target: Int) -> Int {
     upper_bound(arr, n, target) - lower_bound(arr, n, target)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Sorted array: [2, 4, 4, 6, 8, 10, 10, 10, 12, 14, 0, 0, 0, 0, 0, 0]
     let arr = [2, 4, 4, 6, 8, 10, 10, 10, 12, 14, 0, 0, 0, 0, 0, 0];

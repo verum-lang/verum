@@ -50,6 +50,8 @@ fn collatz_steps(start: Int) -> Int {
     steps
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test range sum: 1+2+3+...+100 = 5050
     let s = range_sum(100);

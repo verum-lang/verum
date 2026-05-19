@@ -196,6 +196,8 @@ fn eadd(a: Expr, b: Expr) -> Expr { EAdd { left: a, right: b } }
 fn esub(a: Expr, b: Expr) -> Expr { ESub { left: a, right: b } }
 fn emul(a: Expr, b: Expr) -> Expr { EMul { left: a, right: b } }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let env0 = env_new();
     let env1 = env_set(env_set(env_set(env0, 0, 5), 1, 3), 2, 7);

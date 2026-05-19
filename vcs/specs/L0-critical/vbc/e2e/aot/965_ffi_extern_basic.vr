@@ -12,6 +12,8 @@ extern {
     fn getuid() -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // getpid/getuid should work through FFI validation
     let pid = getpid();

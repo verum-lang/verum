@@ -148,6 +148,8 @@ fn test_combined_unary() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_tensor_negate();
     test_tensor_abs();

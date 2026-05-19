@@ -191,6 +191,8 @@ fn test_roundtrip_property() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_decode_simple();
     test_decode_subtractive();

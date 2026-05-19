@@ -5,6 +5,8 @@
 // @timeout: 3000
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() {
     fn deep_tuple(a: Int, b: Int) -> (Int, Int, Int) {
         fn level2(x: Int, y: Int) -> (Int, Int, Int) {

@@ -254,6 +254,8 @@ fn test_assignment_move() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_container_move();
     test_borrow_no_move();

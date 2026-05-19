@@ -207,6 +207,8 @@ fn test_count_matching_pairs() {
     print("count_matching_pairs: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_valid_sequences();
     test_invalid_sequences();

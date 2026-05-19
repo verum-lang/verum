@@ -32,6 +32,8 @@ fn count_char(s: Text, target: Text) -> Int {
     count
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

@@ -7,6 +7,8 @@
 /// FatRef is used for references to dynamically-sized types (DST).
 /// Layout: ptr (8) + generation (4) + epoch_caps (4) + len/vtable (8)
 
+mount core.prelude.*;
+
 fn main() {
     verify_slice_ref_size();
     verify_trait_object_ref_size();

@@ -119,6 +119,8 @@ fn fp_poly2(a0: Int, a1: Int, a2: Int, x: Int) -> Int {
     fp_add(a0, fp_add(fp_mul(a1, x), fp_mul(a2, fp_mul(x, x))))
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let one = fp_from_int(1);
     let two = fp_from_int(2);

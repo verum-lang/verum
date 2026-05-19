@@ -5,6 +5,8 @@
 // @timeout: 5000
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() {
     fn add(a: Int, b: Int) -> Int {
         return a + b;

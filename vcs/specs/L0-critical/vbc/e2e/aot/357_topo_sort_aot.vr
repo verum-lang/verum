@@ -294,6 +294,8 @@ fn test_two_nodes() {
     assert_eq(a6_get(r.order, 1), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_linear_chain();
     test_diamond_dag();

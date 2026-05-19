@@ -17,6 +17,8 @@ fn create_container() -> Container {
     // When function returns, 'value' is deallocated and generation is bumped
 }
 
+mount core.prelude.*;
+
 fn main() {
     let c = create_container();
     // Attempting to dereference causes CBGR generation check

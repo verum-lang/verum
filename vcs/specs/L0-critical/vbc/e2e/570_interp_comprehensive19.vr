@@ -298,6 +298,8 @@ fn test_pipeline_uf_segtree() {
     print("pipeline_uf_segtree: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_pipeline_main();
     test_pipeline_fib_palindrome();

@@ -291,6 +291,8 @@ fn test_newton_sqrt() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_power_factorial();
     test_gcd_lcm();

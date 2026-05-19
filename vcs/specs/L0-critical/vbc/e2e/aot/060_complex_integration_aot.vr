@@ -169,6 +169,8 @@ fn binomial(n: Int, k: Int) -> Int {
 
 // ==================== Main Integration ====================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Pairs and Triples ===
     let p = Pair { fst: 10, snd: 20 };

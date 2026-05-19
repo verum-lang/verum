@@ -6,6 +6,8 @@
 
 // Test: for-in loop over lists.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: for-in over list literal
     let nums = [10, 20, 30, 40, 50];

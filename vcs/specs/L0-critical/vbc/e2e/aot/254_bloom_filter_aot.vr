@@ -126,6 +126,8 @@ fn test_union() {
     assert_eq(bloom_may_contain(combined, 40), true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic();
     test_multiple_adds();

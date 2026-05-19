@@ -83,6 +83,8 @@ fn test_ordering() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_equality();
     test_less_than();

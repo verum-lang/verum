@@ -205,6 +205,8 @@ fn test_variant_name() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Nested Variant Tests:");
     let mut failures = 0;

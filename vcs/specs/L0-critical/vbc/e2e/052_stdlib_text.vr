@@ -342,6 +342,8 @@ fn test_replace_and_count() {
     assert_eq(txt_get(replaced, 2), 66);  // B unchanged
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_ops();
     test_equality();

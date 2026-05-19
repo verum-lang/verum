@@ -64,6 +64,8 @@ fn ht_contains(keys: List<Int>, used: List<Int>, capacity: Int, key: Int) -> Boo
     false
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let capacity = 64;
 

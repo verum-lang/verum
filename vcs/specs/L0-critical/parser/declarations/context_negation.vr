@@ -126,6 +126,8 @@ fn full_service() using [WebContext, MetricsContext] {
     handle_web_request();
 }
 
+mount core.prelude.*;
+
 fn main() {
     let result = pure_add(1, 2);
     assert_eq(result, 3);

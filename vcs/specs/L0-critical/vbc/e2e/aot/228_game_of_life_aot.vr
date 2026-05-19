@@ -168,6 +168,8 @@ fn test_neighbor_count() {
     assert_eq(count_neighbors(grid, 0, 0), 2);  // (0,1) and (1,0)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_blinker();
     test_block();

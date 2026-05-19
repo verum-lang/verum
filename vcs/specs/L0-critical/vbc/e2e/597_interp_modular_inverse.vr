@@ -131,6 +131,8 @@ fn test_gcd_iter() {
     print("gcd_iter: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_inverse();
     test_inverse_prime_mod();

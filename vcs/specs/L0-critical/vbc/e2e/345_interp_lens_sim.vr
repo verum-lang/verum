@@ -307,6 +307,8 @@ fn test_multiple_modifications() {
     assert_eq(company_get_revenue(co5), 1000000);  // untouched
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_address_lens();
     test_person_lens();

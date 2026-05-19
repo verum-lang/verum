@@ -437,6 +437,8 @@ fn test_xor_self() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_caesar_basic();
     test_caesar_wrap();

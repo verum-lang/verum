@@ -279,6 +279,8 @@ fn test_remaining_space() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_allocation();
     test_multiple_allocations();

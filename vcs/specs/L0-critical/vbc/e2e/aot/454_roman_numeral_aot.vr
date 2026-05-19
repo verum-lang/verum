@@ -145,6 +145,8 @@ fn test_roundtrip() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_roman_to_int();
     test_greedy();

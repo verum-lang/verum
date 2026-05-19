@@ -347,6 +347,8 @@ fn out_degree(g: Graph8, node: Int) -> Int {
     get_row(g, node).count
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Build a simple DAG ===
     // 0 -> 1 -> 3

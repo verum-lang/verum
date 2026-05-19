@@ -347,6 +347,8 @@ fn test_increment_decrement_roundtrip() {
     assert_eq(buf_get(down, 2), 30);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_single_map();
     test_compose_two();

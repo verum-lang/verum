@@ -148,6 +148,8 @@ fn test_idempotent() {
     assert_eq(dsu_count_sets(d), sets_before);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_initial();
     test_union();

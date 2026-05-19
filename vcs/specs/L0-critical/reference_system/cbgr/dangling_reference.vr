@@ -11,6 +11,8 @@
 /// Dereferencing 'dangling' checks generation and panics on mismatch.
 /// Spec: cbgr-implementation.md#dangling-prevention
 
+mount core.prelude.*;
+
 fn main() {
     let dangling: &Int;
     {

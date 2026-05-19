@@ -201,6 +201,8 @@ fn test_zero() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_to_binary();
     test_to_octal();

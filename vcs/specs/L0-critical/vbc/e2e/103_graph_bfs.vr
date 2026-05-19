@@ -304,6 +304,8 @@ fn test_bfs_disconnected() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bfs_line_graph();
     test_bfs_star_graph();

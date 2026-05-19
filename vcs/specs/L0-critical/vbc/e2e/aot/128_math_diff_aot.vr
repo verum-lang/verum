@@ -132,6 +132,8 @@ fn reverse_number(n: Int) -> Int {
     if n < 0 { -result } else { result }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Primes
     assert_eq(count_primes(10), 4);

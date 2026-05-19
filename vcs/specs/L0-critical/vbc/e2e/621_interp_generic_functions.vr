@@ -131,6 +131,8 @@ fn test_builder_generics() {
     print("  test_builder_generics: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_generic_wrapper();
     test_pair_operations();

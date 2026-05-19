@@ -175,6 +175,8 @@ fn test_range() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Implement Chain Tests:");
     let mut failures = 0;

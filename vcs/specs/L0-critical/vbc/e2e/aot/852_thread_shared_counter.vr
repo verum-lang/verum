@@ -17,6 +17,8 @@ fn sum_range(start: Int, end: Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Verify sum_range for n=1000: sum 0..999 = 999*1000/2 = 499500
     let n = 1000;

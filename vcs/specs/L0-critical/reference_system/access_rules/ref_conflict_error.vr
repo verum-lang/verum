@@ -9,6 +9,8 @@
 /// Verum detects this at COMPILE-TIME via borrow checking.
 /// Spec: 04-memory-model.md#aliasing-rules
 
+mount core.prelude.*;
+
 fn main() {
     let mut data = [1, 2, 3, 0];
 

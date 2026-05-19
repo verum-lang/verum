@@ -293,6 +293,8 @@ fn test_diameter() {
     assert_eq(diameter >= 9, true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_graph1_shortest_paths();
     test_graph1_symmetry();

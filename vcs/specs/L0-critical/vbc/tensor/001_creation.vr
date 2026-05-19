@@ -296,6 +296,8 @@ fn test_tensor_to_device() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic creation
     test_tensor_new();

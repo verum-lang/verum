@@ -27,6 +27,8 @@ extern fn ffi_abs_i64(x: Int) -> Int;
 @ffi("vcs/testlibs/ffi_testlib/target/release/libffi_testlib.dylib")
 extern fn ffi_sqrt_f64(x: Float) -> Float;
 
+mount core.prelude.*;
+
 fn main() {
     // Test single-function declarations
     let sum = ffi_add_i32(25, 17);

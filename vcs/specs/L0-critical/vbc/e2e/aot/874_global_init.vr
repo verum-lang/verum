@@ -21,6 +21,8 @@ fn get_computed() -> Int {
     COMPUTED
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test static variable access
     assert_eq(get_magic(), 42);

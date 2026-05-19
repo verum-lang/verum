@@ -345,6 +345,8 @@ fn test_double_hashing() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_hash_basic();
     test_hash_deterministic();

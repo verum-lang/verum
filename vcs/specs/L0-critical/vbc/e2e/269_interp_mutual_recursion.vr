@@ -380,6 +380,8 @@ fn test_decrease_mutual() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_is_even_odd();
     test_is_even_odd_negative();

@@ -4,6 +4,8 @@
 // @tags: map, text, keys, e2e
 // @description: Test Map with Text keys and various value types
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

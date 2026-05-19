@@ -55,6 +55,8 @@ fn rgb_blend(a: RGB, b: RGB) -> RGB {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Vec2 basic operations
     let v1 = Vec2 { x: 3, y: 4 };

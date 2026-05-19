@@ -121,6 +121,8 @@ fn test_zeller() {
     assert_eq(h2, 5);  // Thursday = 5
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_leap_year();
     test_days_in_month();

@@ -204,6 +204,8 @@ fn test_no_cycle_single_node() {
     assert_eq(has_cycle(next, 0), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_cycle();
     test_no_cycle();

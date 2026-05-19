@@ -279,6 +279,8 @@ fn test_prefix_detection() {
     assert_eq(trie_has_prefix(tp, s230), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_insert_search();
     test_multiple_sequences();

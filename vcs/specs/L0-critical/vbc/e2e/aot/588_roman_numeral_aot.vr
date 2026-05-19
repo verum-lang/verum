@@ -221,6 +221,8 @@ fn test_properties() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_decode();
     test_decode_fix();

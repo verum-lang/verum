@@ -8,6 +8,8 @@
 /// The ThinRef layout is: ptr (8) + generation (4) + epoch_caps (4) = 16 bytes
 /// Spec: cbgr-implementation.md#thin-ref-layout
 
+mount core.prelude.*;
+
 fn main() {
     test_ref_generation_tracking();
     print("  [OK] test_ref_generation_tracking");

@@ -163,6 +163,8 @@ fn test_box_check() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_valid_solution();
     test_another_valid();

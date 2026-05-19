@@ -179,6 +179,8 @@ fn test_rk_full_match() {
     print("rk_full_match: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rk_simple();
     test_rk_multiple_matches();

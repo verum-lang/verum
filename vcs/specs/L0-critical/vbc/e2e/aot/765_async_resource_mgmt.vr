@@ -14,6 +14,8 @@ fn min_val(a: Int, b: Int) -> Int {
     if (a < b) { a } else { b }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Resource pool - acquire and release
     let pool_size = 4;

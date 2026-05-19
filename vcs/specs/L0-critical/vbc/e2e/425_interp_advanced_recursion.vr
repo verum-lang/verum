@@ -115,6 +115,8 @@ fn test_tower_of_hanoi_count() {
     print("tower_of_hanoi_count: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_accumulator_recursion();
     test_reverse_digits();

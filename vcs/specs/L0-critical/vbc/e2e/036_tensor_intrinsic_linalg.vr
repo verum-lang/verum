@@ -671,6 +671,8 @@ fn test_fibonacci_via_matmul() {
     assert_eq(m5.e0, 8); // Fib(6)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_mat2x2_mul_identity();
     test_mat2x2_mul_specific();

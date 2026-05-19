@@ -4,6 +4,8 @@
 // @tags: memory-safety, use-after-free, cbgr, closure
 // @description: Tests that CBGR detects use-after-free through closures
 
+mount core.prelude.*;
+
 fn main() {
     let data = Heap.new(42);
 

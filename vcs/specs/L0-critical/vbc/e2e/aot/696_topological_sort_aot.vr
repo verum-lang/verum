@@ -229,6 +229,8 @@ fn test_cycle_detection() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_linear_dag();
     test_diamond_dag();

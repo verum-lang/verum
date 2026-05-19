@@ -11,6 +11,8 @@
 ///
 /// All valid conversions must use explicit, checked mechanisms.
 
+mount core.prelude.*;
+
 fn main() {
     test_invalid_primitive_cast();
     test_invalid_struct_cast();

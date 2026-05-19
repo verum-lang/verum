@@ -47,6 +47,8 @@ fn double_buffer_step(buf: List<Int>, n: Int) -> List<Int> {
     out
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Matrix transpose (barrier pattern)
     // [[1, 2, 3], [4, 5, 6]] -> [[1, 4], [2, 5], [3, 6]]

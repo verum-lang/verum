@@ -18,6 +18,8 @@ fn make_adder(n: Int) -> fn(Int) -> Int {
     |x| x + n
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Basic closure capture
     let offset = 10;

@@ -279,6 +279,8 @@ fn test_complex_pattern() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_liveness_release();
     test_sequential_access();

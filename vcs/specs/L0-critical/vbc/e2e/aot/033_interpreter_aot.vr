@@ -75,6 +75,8 @@ fn is_constant(e: Expr) -> Bool {
     e is Lit
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Simple literals
     assert_eq(eval(Lit(42)), 42);

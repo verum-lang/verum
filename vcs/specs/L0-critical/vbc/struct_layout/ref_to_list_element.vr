@@ -19,6 +19,8 @@
 
 type Box is { value: Int, name: Text };
 
+mount core.prelude.*;
+
 fn main() {
     let mut xs = List.new();
     xs.push(Box { value: 10, name: "a" });

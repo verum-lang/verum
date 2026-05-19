@@ -44,6 +44,8 @@ fn count_primes(limit: Int) -> Int {
     count
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let result = count_primes(100000);
     // There are 9592 primes below 100,000

@@ -196,6 +196,8 @@ fn test_point_query() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_overlap();
     test_merge_two();

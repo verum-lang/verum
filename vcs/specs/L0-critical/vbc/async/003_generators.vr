@@ -323,6 +323,8 @@ fn test_generator_no_reference_leak() {
     assert_eq(value, Some(42));
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Basic generators
     test_simple_generator();

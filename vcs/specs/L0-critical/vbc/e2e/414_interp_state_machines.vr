@@ -187,6 +187,8 @@ fn test_counter_state() {
     print("counter_state: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_traffic_light();
     test_door_state();

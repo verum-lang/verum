@@ -190,6 +190,8 @@ fn test_all_words() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_ops();
     test_delete();

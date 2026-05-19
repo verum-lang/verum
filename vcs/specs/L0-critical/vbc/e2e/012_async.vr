@@ -114,6 +114,8 @@ async fn run_all_tests() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // In interpreter, async runs synchronously — just call the async runner
     let _future = run_all_tests();

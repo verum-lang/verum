@@ -66,6 +66,8 @@ fn map_sum_range(start: Int, end: Int, f: fn(Int) -> Int) -> Int {
     sum
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic closures returning closures
     let add5 = make_adder(5);

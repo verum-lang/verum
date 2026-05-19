@@ -130,6 +130,8 @@ fn test_identity_matmul() {
     print("test_identity_matmul passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_tensor_creation();
     test_tensor_add();

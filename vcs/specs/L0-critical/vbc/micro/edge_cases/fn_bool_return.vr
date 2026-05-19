@@ -6,6 +6,8 @@ fn is_even(n: Int) -> Bool {
     n % 2 == 0
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert(is_even(0));
     assert(is_even(2));

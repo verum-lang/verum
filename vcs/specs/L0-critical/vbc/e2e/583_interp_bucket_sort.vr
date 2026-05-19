@@ -137,6 +137,8 @@ fn test_count_distribution() {
     print("count_distribution: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_sort();
     test_duplicates_sort();

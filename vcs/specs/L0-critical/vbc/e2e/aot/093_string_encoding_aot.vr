@@ -139,6 +139,8 @@ fn arr_sum(a: Arr16) -> Int {
     s
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Empty sequence ===
     let empty = arr_new();

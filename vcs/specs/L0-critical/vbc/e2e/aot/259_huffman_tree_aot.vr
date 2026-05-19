@@ -167,6 +167,8 @@ fn test_log2() {
     assert_eq(int_log2(7), 2);  // floor(log2(7))
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sort_by_freq();
     test_total_freq();

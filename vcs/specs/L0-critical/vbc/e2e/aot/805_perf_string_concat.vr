@@ -16,6 +16,8 @@ fn build_string(n: Int) -> Text {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let n = 1000;
     let s = build_string(n);

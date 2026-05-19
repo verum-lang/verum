@@ -343,6 +343,8 @@ fn test_newton_sqrt() {
     print("newton_sqrt: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_float_add();
     test_float_sub();

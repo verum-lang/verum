@@ -45,6 +45,8 @@ fn test_is_operator() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_is_operator()
 }

@@ -37,6 +37,8 @@ fn quicksort(arr: List<Int>) -> List<Int> {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Quicksort
     let unsorted = [5, 3, 8, 1, 9, 2, 7, 4, 6, 0];

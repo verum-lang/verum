@@ -209,6 +209,8 @@ fn test_search_correctness() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_unimodal1();
     test_unimodal2();

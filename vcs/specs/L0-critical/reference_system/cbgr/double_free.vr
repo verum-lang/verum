@@ -11,6 +11,8 @@
 /// This prevents memory corruption and security vulnerabilities.
 /// Spec: cbgr-implementation.md#double-free-prevention
 
+mount core.prelude.*;
+
 fn main() {
     // CBGR double-free detection works via generation tracking:
     // 1. When memory is allocated, it gets a generation counter

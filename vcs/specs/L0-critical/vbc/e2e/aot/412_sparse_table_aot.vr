@@ -293,6 +293,8 @@ fn test_all_same() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_single_element();
     test_pair_queries();

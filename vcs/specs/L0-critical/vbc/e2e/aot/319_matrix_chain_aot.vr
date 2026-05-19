@@ -170,6 +170,8 @@ fn test_five_matrices() {
     assert_eq(cost > 0, true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_two_matrices();
     test_three_matrices();

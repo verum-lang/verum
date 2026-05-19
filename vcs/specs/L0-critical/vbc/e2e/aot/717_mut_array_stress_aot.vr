@@ -10,6 +10,8 @@ fn make_vec(a: Int, b: Int, c: Int) -> Vec3 {
     Vec3 { x: a, y: b, z: c }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Multiple mutable records with conditional mutation
     let mut v1 = make_vec(1, 2, 3);

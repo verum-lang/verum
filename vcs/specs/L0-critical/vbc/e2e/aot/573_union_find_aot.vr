@@ -180,6 +180,8 @@ fn test_path_compression() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_initial();
     test_basic_union();

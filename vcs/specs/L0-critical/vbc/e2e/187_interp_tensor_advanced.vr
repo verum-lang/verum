@@ -926,6 +926,8 @@ fn test_contraction() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gather();
     test_scatter();

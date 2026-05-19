@@ -72,6 +72,8 @@ fn ht_lookup(ht: HT8, key: Int) -> Int {
     -1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Manually insert some key-value pairs
     // key 10 -> slot 2, key 42 -> slot 2 (collision -> 3), key 7 -> slot 7

@@ -133,6 +133,8 @@ fn test_lerp() {
     assert_eq(sin_lerp(90), 1000);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_sin();
     test_basic_cos();

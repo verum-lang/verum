@@ -9,6 +9,8 @@ type Node is {
     next: Maybe<Heap<Node>>,
 };
 
+mount core.prelude.*;
+
 fn main() {
     let node = Heap.new(Node {
         value: 42,

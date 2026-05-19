@@ -177,6 +177,8 @@ fn test_mut_in_loop_scope() {
     assert_eq(total, 55);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_block_scope();
     test_nested_blocks();

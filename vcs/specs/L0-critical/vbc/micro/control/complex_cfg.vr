@@ -23,6 +23,8 @@ fn classify(n: Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert_eq(classify(-200), -2);
     assert_eq(classify(-50), -1);

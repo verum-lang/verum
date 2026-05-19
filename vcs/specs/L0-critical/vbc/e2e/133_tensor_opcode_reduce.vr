@@ -180,6 +180,8 @@ fn test_multi_reduce() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_tensor_sum();
     test_tensor_max_min();

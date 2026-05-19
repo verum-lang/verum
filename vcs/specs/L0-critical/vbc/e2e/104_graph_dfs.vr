@@ -439,6 +439,8 @@ fn test_longer_cycle() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_dfs_tree_visit();
     test_dfs_disconnected();

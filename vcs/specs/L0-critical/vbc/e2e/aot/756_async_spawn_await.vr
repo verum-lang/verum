@@ -45,6 +45,8 @@ fn collatz_steps(n: Int) -> Int {
     steps
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Simple spawn and await
     let result = compute_square(7);

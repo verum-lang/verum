@@ -166,6 +166,8 @@ fn deep_generic_witness()
     None
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Smoke check that the impl-cycle, module-cycle, deep-super, and
     // deep-generic graphs all compile without the closure walker

@@ -15,6 +15,8 @@ fn __time_sleep_nanos_raw(nanos: Int) -> Int {
     @intrinsic("time_sleep_nanos")
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: monotonic time is positive
     let t0 = __time_monotonic_nanos_raw();

@@ -162,6 +162,8 @@ fn scan_grid(size: Int) -> Int {
     count
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Direction operations
     assert_eq(dir_dx(East), 1);

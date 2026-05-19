@@ -26,6 +26,8 @@ fn weighted_sum(start: Int, count: Int, weight: Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic partial_sum: sum 0..99 = 99*100/2 = 4950
     let r1 = partial_sum(0, 100);

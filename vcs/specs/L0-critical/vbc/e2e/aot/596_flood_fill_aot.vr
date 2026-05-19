@@ -212,6 +212,8 @@ fn test_grid_operations() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_grid_operations();
     test_single_cell();

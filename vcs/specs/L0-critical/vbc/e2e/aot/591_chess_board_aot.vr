@@ -205,6 +205,8 @@ fn test_knight_path_exists() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_knight_corner();
     test_knight_attacks_fn();

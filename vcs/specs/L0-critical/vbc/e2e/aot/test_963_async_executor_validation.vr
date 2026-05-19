@@ -138,6 +138,8 @@ fn test_spawn_expr() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Async Executor Validation:");
 

@@ -48,6 +48,8 @@ fn isqrt(x: Int) -> Int {
     if ((g + 1) * (g + 1) - x < x - g * g) { g + 1 } else { g }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: SVD of diagonal matrix
     // A = diag(3, 5), singular values = {5, 3} (sorted descending)

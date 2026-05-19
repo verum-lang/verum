@@ -81,6 +81,8 @@ fn test_remove() -> Int {
     pass
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let r1 = test_basic();
     print(f"  basic: {r1}/4");

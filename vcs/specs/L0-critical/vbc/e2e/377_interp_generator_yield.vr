@@ -151,6 +151,8 @@ fn test_multiple_generators() {
     print("multiple_generators: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_single_yield();
     test_counting();

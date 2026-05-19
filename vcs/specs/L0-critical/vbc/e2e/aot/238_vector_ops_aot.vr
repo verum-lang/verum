@@ -137,6 +137,8 @@ fn test_distributive() {
     assert_eq(vec4_eq(lhs, rhs), true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_ops();
     test_dot_product();

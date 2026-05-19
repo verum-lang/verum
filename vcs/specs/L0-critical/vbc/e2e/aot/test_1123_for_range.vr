@@ -105,6 +105,8 @@ fn test_for_with_condition() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("For Range Tests:");
     let mut failures = 0;

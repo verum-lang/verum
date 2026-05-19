@@ -199,6 +199,8 @@ fn test_nbytes_2d() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Default dtype
     test_default_dtype();

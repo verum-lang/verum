@@ -319,6 +319,8 @@ fn test_integration() {
     assert_eq(is_prime(s), true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sorting_basic();
     test_sorting_presorted();

@@ -259,6 +259,8 @@ fn test_ansi256_mid_color() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let r1 = test_cube_root();
     if r1 != 0 { return r1; }

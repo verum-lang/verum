@@ -411,6 +411,8 @@ fn test_chained_pipelines() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_map_operations();
     test_filter_operations();

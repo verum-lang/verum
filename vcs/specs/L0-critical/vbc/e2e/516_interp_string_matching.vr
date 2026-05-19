@@ -155,6 +155,8 @@ fn test_failure_function() {
     print("failure_function: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_search();
     test_no_match();

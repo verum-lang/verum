@@ -228,6 +228,8 @@ fn test_treap_right_spine() {
     print("treap_right_spine: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_treap_valid();
     test_treap_heap_violation();

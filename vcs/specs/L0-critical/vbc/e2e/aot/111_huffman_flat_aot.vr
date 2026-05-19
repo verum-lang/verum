@@ -485,6 +485,8 @@ fn build_huffman_4(s0f: Int, s1f: Int, s2f: Int, s3f: Int) -> HuffTree {
     t
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Frequency counting ===
     // Message: [0, 1, 0, 2, 0, 1, 0, 3, 0, 1]

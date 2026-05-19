@@ -216,6 +216,8 @@ fn test_idempotent_union() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_union_find();
     test_set_size();

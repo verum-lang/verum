@@ -147,6 +147,8 @@ fn test_masked_count() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_masked_fill_true();
     test_masked_fill_false();

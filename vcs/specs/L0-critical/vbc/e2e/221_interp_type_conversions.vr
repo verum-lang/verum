@@ -138,6 +138,8 @@ fn test_int_float_parallel_loop() {
     assert_eq(fcount, 5.0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_int_division_truncates();
     test_int_modulo();

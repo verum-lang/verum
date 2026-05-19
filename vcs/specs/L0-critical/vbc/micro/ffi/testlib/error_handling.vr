@@ -13,6 +13,8 @@ extern {
     fn ffi_clear_error();
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Initial error should be 0
     ffi_clear_error();

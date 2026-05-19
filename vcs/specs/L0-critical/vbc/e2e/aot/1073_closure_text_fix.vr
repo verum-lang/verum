@@ -10,6 +10,8 @@ fn greet(name: Text) -> Text {
     f"Hello, {name}!"
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Pattern 1: Direct function call with Text (baseline — works)
     let r1 = greet("world");

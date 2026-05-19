@@ -150,6 +150,8 @@ fn test_tensor_combined() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_tensor_add();
     test_tensor_sub();

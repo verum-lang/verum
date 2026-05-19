@@ -9,6 +9,8 @@
 /// Unsafe: ~0ns (no checks)
 /// Spec: cbgr-implementation.md#performance
 
+mount core.prelude.*;
+
 fn main() {
     let bench = Benchmark.new("Reference Tier Comparison");
     let mut b = Bencher.new();

@@ -110,6 +110,8 @@ fn test_for_in_dynamic_list() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("For-In Collection Tests:");
     let mut failures = 0;

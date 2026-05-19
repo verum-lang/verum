@@ -311,6 +311,8 @@ fn test_subset_items() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_knapsack_cap7();
     test_item_selection();

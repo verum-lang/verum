@@ -121,6 +121,8 @@ fn poly_quadratic(c0: Int, c1: Int, c2: Int) -> Poly {
     PCoeff { coeff: c0, rest: PCoeff { coeff: c1, rest: PCoeff { coeff: c2, rest: PZero } } }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Basic polynomial evaluation ===
     // p(x) = 1 + 3x + 2x^2

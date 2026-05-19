@@ -48,6 +48,8 @@ implement Config {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

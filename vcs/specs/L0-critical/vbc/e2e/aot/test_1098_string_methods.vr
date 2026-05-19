@@ -111,6 +111,8 @@ fn test_split() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("String Methods Tests:");
     let mut failures = 0;

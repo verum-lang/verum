@@ -178,6 +178,8 @@ fn test_round_trip() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_nibble_extraction();
     test_encode_ab_cd();

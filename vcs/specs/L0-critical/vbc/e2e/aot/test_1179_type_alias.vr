@@ -49,6 +49,8 @@ implement Matrix {
 
 type NodeId is (Int);
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

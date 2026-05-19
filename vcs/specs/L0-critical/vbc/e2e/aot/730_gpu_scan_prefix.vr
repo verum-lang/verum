@@ -51,6 +51,8 @@ fn exclusive_scan(data: List<Int>, n: Int) -> List<Int> {
     result
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Inclusive scan of [1, 2, 3, 4] = [1, 3, 6, 10]
     let data = [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

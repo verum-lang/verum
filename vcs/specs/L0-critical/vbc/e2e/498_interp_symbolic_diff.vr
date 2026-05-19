@@ -332,6 +332,8 @@ fn test_diff_product_rule() {
     print("diff_product_rule: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_diff_constant();
     test_diff_variable();

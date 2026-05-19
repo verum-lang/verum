@@ -246,6 +246,8 @@ fn test_hash_sensitivity() {
     print("hash_sensitivity: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_jenkins_deterministic();
     test_fnv_deterministic();

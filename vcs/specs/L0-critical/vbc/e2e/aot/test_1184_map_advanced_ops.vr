@@ -4,6 +4,8 @@
 // @tags: map, operations, iteration, e2e
 // @description: Test Map operations including insert, get, remove, contains_key, len
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

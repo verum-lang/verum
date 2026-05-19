@@ -143,6 +143,8 @@ fn test_list_map_filter() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Closures & HOF Tests:");
     let mut failures = 0;

@@ -159,6 +159,8 @@ fn test_file_io() -> Int {
 }
 
 // ---- Main test ----
+mount core.prelude.*;
+
 fn main() -> Int {
     // ============================================================
     // SECTION 1: Collections (List + Map)

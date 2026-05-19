@@ -315,6 +315,8 @@ fn test_pattern_equals_text() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_failure_function_simple();
     test_failure_function_abab();

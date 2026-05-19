@@ -154,6 +154,8 @@ fn test_recursive_tree() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Pattern Match Tests:");
     let mut failures = 0;

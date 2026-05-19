@@ -213,6 +213,8 @@ fn test_amicable_pair_symmetry() {
     assert_eq(sum_divisors(sum_divisors(284)), 284);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sum_divisors_basic();
     test_perfect_numbers();

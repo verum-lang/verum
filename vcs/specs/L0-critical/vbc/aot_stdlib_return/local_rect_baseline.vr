@@ -24,6 +24,8 @@ implement LocalRect {
     public fn area(&self) -> Int { self.width * self.height }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let r = LocalRect.new(5, 10, 80, 24);
     print(f"x={r.x} y={r.y} w={r.width} h={r.height} area={r.area()}");

@@ -270,6 +270,8 @@ fn test_multiple_type_dispatch() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_record_basics();
     test_mutable_records();

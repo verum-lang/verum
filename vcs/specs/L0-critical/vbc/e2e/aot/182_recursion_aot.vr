@@ -47,6 +47,8 @@ fn ackermann(m: Int, n: Int) -> Int {
     else { ackermann(m - 1, ackermann(m, n - 1)) }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Factorial
     assert_eq(factorial(0), 1);

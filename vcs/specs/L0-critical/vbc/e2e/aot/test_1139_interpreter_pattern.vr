@@ -136,6 +136,8 @@ fn test_depth() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Interpreter Pattern Tests:");
     let mut failures = 0;

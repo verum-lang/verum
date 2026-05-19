@@ -207,6 +207,8 @@ fn test_chain() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_triangle();
     test_directed_weighted();

@@ -176,6 +176,8 @@ fn test_memory_release_clamp() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_device_creation();
     test_activation();

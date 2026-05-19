@@ -148,6 +148,8 @@ fn test_result_map() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Variant Methods Tests:");
     let mut failures = 0;

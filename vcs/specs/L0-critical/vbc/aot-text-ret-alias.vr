@@ -22,6 +22,8 @@ fn classify(n: Int) -> Text {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print(classify(7));
     0

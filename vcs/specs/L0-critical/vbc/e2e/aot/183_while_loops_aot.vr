@@ -70,6 +70,8 @@ fn nested_loop_sum(n: Int) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Sum range
     assert_eq(sum_range(0, 10), 45);

@@ -259,6 +259,8 @@ fn test_flow_single_edge() {
     print("flow_single_edge: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_flow_simple_triangle();
     test_flow_bottleneck();

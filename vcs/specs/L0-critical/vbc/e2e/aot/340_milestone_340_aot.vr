@@ -436,6 +436,8 @@ fn test_integration() {
     assert_eq(is_prime(f11), 1); // 89 is prime
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sorting();
     print("sort ok");

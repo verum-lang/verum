@@ -20,6 +20,8 @@ fn compare_texts(a: Text, b: Text) -> Bool {
     a == b
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

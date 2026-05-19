@@ -120,6 +120,8 @@ fn mat4_sum(m: Mat4) -> Int {
     m.m20 + m.m21 + m.m22 + m.m23 + m.m30 + m.m31 + m.m32 + m.m33
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // BigRec: sum of 1..25 = 325
     let r1 = make_big(0);

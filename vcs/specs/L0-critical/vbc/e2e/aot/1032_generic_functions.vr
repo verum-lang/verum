@@ -45,6 +45,8 @@ fn count_if(xs: List<Int>, pred: fn(Int) -> Bool) -> Int {
     count
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Identity
     let a = identity(42);

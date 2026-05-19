@@ -253,6 +253,8 @@ fn test_determinant_product() {
     assert_eq(det_comp, smul(det_f2, det_f3));
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_linear_jacobian();
     test_linear_jacobian_apply();

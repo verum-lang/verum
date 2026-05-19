@@ -225,6 +225,8 @@ fn test_ac_encode_decode_roundtrip() {
     print(f"ac_roundtrip: code={code} decoded=[1,0,1,0] ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_ac_uniform_alphabet();
     test_ac_biased_alphabet();

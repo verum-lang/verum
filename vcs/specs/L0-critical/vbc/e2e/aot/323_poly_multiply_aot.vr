@@ -229,6 +229,8 @@ fn test_binomial_expansion() {
     assert_eq(arr8_get(cube, 3), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_linear_times_linear();
     test_constant_times_poly();

@@ -342,6 +342,8 @@ fn test_modify_chain_with_logging() {
     assert_eq(state_get_log(r6.state, 2), 98);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_get_put();
     test_modify();

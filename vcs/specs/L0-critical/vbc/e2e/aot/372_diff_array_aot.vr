@@ -292,6 +292,8 @@ fn test_from_nonzero_base() {
     assert_eq(a8_get(result, 7), 8);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_build_and_reconstruct();
     test_single_range_update();

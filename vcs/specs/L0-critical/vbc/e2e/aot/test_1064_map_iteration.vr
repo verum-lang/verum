@@ -108,6 +108,8 @@ fn test_map_many_entries() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Map Tests:");
     let mut failures = 0;

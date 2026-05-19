@@ -340,6 +340,8 @@ fn container_get_safe(c: &SafeContainer, idx: Int) -> Maybe<Int> {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Guarantee 1: No null pointer dereferences
     test_no_null();

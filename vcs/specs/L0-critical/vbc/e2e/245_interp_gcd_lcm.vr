@@ -238,6 +238,8 @@ fn test_lcm_negative() {
     assert_eq(lcm(-4, -6), 12);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gcd_basic();
     test_gcd_edge_cases();

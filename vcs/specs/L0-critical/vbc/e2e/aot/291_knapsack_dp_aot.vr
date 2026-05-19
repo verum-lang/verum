@@ -243,6 +243,8 @@ fn test_greedy_suboptimal() {
     assert_eq(knapsack(items, 5), 22);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_knapsack();
     test_single_item();

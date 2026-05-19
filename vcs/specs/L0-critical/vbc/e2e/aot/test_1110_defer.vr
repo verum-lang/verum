@@ -76,6 +76,8 @@ fn test_defer_resource() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Defer Tests:");
     let mut failures = 0;

@@ -1,3 +1,5 @@
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut d = Deque.new();
 

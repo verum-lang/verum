@@ -628,6 +628,8 @@ fn test_element_wise_ops() {
     assert_eq(arr9_sum(a), 45);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_mat2_identity();
     test_mat2_add();

@@ -20,6 +20,8 @@ fn close_connection(conn: Connection) {
     print(conn.id);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_copy_primitives();
     test_copy_arrays();

@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test bit manipulation methods for integer types
 
+mount core.prelude.*;
+
 fn main() {
     // Test leading_zeros
     let x: Int = 0x0000_0000_0000_00FF;

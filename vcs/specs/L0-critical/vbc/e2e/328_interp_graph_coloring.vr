@@ -198,6 +198,8 @@ fn test_single_node() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_no_edges();
     test_single_edge();

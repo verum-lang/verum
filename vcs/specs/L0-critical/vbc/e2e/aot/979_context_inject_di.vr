@@ -25,6 +25,8 @@ fn read_port() -> Int using [Config] {
     Config.get_port()
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: provide + context method
     let cfg = AppConfig { port: 3000 };

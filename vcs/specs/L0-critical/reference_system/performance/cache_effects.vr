@@ -10,6 +10,8 @@
 
 
 
+mount core.prelude.*;
+
 fn main() {
     let bench = Benchmark.new("CBGR Cache Effects");
     let mut b = Bencher.new();

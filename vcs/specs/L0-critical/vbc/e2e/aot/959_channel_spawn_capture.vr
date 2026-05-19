@@ -3,6 +3,8 @@
 // @description: Channel captured in spawn closure — send from thread, recv on main
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Channel captured directly in spawn, send from thread
     let ch = Channel.new(10);

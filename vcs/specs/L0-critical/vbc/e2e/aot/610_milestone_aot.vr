@@ -194,6 +194,8 @@ fn test_tribonacci() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_figurate();
     test_power_sums();

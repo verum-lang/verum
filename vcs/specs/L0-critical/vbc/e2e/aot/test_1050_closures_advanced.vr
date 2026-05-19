@@ -141,6 +141,8 @@ fn test_closure_in_loop() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Advanced Closure Tests:");
     let mut failures = 0;

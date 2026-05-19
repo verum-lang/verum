@@ -23,6 +23,8 @@ fn both(a: Bool, b: Bool) -> Bool {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Bool return + logical NOT
     let even = is_even(4);

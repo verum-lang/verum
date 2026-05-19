@@ -284,6 +284,8 @@ async fn test_async_return_maybe() {
     assert(none is None);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Run all async tests
     @block_on(async {

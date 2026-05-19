@@ -172,6 +172,8 @@ fn test_individual_checks() {
     assert_eq(check_box(g, 2, 2), true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_valid_solution();
     test_another_valid();

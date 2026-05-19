@@ -190,6 +190,8 @@ fn test_explicit_drop() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_valid_move();
     test_ownership_consumed_by_function();

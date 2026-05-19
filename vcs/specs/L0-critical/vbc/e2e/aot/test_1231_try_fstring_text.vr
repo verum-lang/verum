@@ -22,6 +22,8 @@ fn parse_greeting(name: Text, title: Text) -> Result<Text, ParseError> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

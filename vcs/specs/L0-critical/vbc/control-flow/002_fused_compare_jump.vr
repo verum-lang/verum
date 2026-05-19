@@ -214,6 +214,8 @@ fn test_mixed_type_boundaries() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_jmp_eq();
     test_jmp_ne();

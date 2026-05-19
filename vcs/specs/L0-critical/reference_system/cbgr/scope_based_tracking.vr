@@ -7,6 +7,8 @@
 /// CBGR integrates with lexical scopes for safety.
 /// Spec: cbgr-implementation.md#scope-integration
 
+mount core.prelude.*;
+
 fn main() {
     test_scope_drops();
     test_nested_scope_tracking();

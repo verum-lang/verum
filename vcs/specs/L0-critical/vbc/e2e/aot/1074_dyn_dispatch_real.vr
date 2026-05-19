@@ -47,6 +47,8 @@ fn sum_areas(shapes: List<&dyn Shape>) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let c = Circle { radius: 5 };
     let r = Rect { width: 4, height: 6 };

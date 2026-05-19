@@ -173,6 +173,8 @@ fn test_mc_simulation_counts() {
     print(f"mc_simulation_counts: v0={visits[0]} v1={visits[1]} total=11 ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_mc_two_state();
     test_mc_three_state();

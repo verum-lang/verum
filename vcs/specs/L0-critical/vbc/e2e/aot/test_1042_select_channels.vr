@@ -180,6 +180,8 @@ fn test_roundtrip() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Channel Fan-In Tests:");
     let mut failures = 0;

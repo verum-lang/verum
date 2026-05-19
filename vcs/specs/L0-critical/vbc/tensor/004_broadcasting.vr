@@ -206,6 +206,8 @@ fn test_broadcast_1d_with_scalar_tensor() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Same shape
     test_same_shape_add();

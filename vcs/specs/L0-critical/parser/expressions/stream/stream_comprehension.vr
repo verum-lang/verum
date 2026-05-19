@@ -6,6 +6,8 @@
 // Reference: stream_comprehension_expr = 'stream' , '[' , stream_body , ']';
 // Grammar: grammar/verum.ebnf lines 706-713
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_stream();
     test_stream_with_filter();

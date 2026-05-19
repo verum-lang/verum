@@ -103,6 +103,8 @@ fn test_deque_grow() {
     print("deque_grow: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_deque_push_pop();
     test_deque_push_front();

@@ -47,6 +47,8 @@ fn classify_int(n: Int) -> Int {
     else { 4 }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Shape variants (tuple only)
     let c = Circle(10);

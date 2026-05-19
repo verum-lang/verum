@@ -713,6 +713,8 @@ async fn deep_pattern() {
 // Main function (entry point for parse test)
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // This file tests parser acceptance of for await syntax
     // No runtime execution needed for parse-pass test

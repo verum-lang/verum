@@ -153,6 +153,8 @@ fn test_point_interval() {
     assert_eq(sum.hi, 10);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic();
     test_overlap();

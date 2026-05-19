@@ -26,6 +26,8 @@ fn rect_area(r: Rect) -> Int {
     r.width * r.height
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic record construction and field access
     let p = Point { x: 3, y: 4 };

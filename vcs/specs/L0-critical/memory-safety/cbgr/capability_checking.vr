@@ -51,6 +51,8 @@ fn test_capability_enforcement() {
     assert_eq(slice.len(), 5);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_immutable_read_only();
     test_mutable_read_write();

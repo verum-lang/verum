@@ -57,6 +57,8 @@ fn drosen_dy(x: Int, y: Int) -> Int {
     2 * (y - x * x)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Partial derivatives of f(x,y) = x*y
     assert_eq(f_xy(3, 5), 15);

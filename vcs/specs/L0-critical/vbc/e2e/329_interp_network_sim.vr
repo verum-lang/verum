@@ -252,6 +252,8 @@ fn test_batch_delivery() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_chain_routing();
     test_star_routing();

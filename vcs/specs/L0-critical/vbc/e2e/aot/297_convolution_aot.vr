@@ -82,6 +82,8 @@ fn correlate(a: Arr8, b: Arr8, n: Int) -> Int {
     sum
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Signal: [1, 2, 3, 4]
     let signal = Arr8 { d0: 1, d1: 2, d2: 3, d3: 4, d4: 0, d5: 0, d6: 0, d7: 0 };

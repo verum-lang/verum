@@ -142,6 +142,8 @@ fn test_late_deadline_jobs() {
     print("late_deadline: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_classic_scheduling();
     test_all_same_deadline();

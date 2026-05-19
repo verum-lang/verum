@@ -333,6 +333,8 @@ fn test_window_size_2() {
     assert_eq(a8_get(result, 6), 6);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_sliding_max();
     test_matches_naive();

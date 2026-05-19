@@ -346,6 +346,8 @@ fn test_integration() {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_math_section();
     test_bit_manipulation();

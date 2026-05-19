@@ -71,6 +71,8 @@ fn double_rect(r: Rect) -> Rect {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic nested record
     let r = Rect.new(10, 20, 30, 40);

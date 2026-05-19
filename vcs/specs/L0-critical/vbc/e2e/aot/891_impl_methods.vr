@@ -81,6 +81,8 @@ implement Stack {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Vec2 methods
     let a = Vec2.new(3, 4);

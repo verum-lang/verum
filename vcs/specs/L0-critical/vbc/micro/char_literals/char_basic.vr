@@ -2,6 +2,8 @@
 // @level: L0
 // @tier: 0
 // @expected-exit: 0
+mount core.prelude.*;
+
 fn main() {
     let c: Char = 'A';
     let i: Int = c as Int;

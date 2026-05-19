@@ -197,6 +197,8 @@ fn test_jz() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_inc();
     test_move_and_inc();

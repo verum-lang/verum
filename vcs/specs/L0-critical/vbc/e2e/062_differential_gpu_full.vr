@@ -890,6 +890,8 @@ fn test_graph_replay() {
 // main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_memory_balance();
     test_stream_ordering();

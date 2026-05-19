@@ -311,6 +311,8 @@ fn test_reverse_queue_with_stack() {
     assert_eq(queue_is_empty(q2), true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_stack_empty();
     test_stack_push_pop();

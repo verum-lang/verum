@@ -512,6 +512,8 @@ fn test_loss_monotonic() {
     assert(prev_loss < scale()); // 52: loss < 1.0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_dual_basic();
     test_dual_higher_power();

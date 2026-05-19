@@ -364,6 +364,8 @@ fn test_nested_struct_simulation() {
     assert_eq(inner_f1_addr, 8);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_align_up();
     test_simple_struct_layout();

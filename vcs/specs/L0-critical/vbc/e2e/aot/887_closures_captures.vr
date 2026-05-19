@@ -18,6 +18,8 @@ fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int, x: Int) -> Int {
     f(g(x))
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: basic closure (no capture)
     let double = |x: Int| -> Int { x * 2 };

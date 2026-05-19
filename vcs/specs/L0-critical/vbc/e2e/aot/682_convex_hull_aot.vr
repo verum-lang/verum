@@ -260,6 +260,8 @@ fn test_polygon_area() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_cross_product();
     test_triangle_hull();

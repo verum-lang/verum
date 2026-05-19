@@ -29,6 +29,8 @@ fn sum_counter(c: &mut Counter) -> Int {
     total
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: basic custom iterator
     let mut c = Counter { current: 0, max: 5 };

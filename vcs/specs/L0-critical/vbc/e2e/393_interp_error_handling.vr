@@ -141,6 +141,8 @@ fn test_nested_maybe() {
     print("nested_maybe: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_safe_divide();
     test_safe_sqrt();

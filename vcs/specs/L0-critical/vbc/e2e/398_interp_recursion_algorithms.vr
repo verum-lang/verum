@@ -159,6 +159,8 @@ fn test_binary_search() {
     print("binary_search: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_power();
     test_hanoi();

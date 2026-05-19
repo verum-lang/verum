@@ -49,6 +49,8 @@ Third paragraph.
 fn test_code_block() {
     // Code block example
     let code_block = """
+mount core.prelude.*;
+
 fn main() {
     let x = 42;
     print(x)

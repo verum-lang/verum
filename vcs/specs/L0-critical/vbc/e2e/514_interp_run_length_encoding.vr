@@ -138,6 +138,8 @@ fn test_compression_ratio() {
     print("compression_ratio: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_encode();
     test_roundtrip();

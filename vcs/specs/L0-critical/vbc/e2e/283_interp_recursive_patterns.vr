@@ -482,6 +482,8 @@ fn test_mergesort() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_ackermann();
     test_power_set_size();

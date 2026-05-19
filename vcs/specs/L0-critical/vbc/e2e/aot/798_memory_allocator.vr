@@ -88,6 +88,8 @@ fn coalesce(start1: Int, size1: Int, start2: Int, size2: Int) -> List<Int> {
     [new_start, new_size, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Initial state: one big free block [0, 1024)
     let mut free_starts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

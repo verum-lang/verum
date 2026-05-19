@@ -55,6 +55,8 @@ fn rects_overlap(a: Rect, b: Rect) -> Bool {
     a.x < b_right && a_right > b.x && a.y < b_bottom && a_bottom > b.y
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Vec2 operations
     let v1 = vec2_new(3, 4);

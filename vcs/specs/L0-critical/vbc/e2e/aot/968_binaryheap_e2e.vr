@@ -7,6 +7,8 @@
 //
 // E2E test for stdlib BinaryHeap API (max-heap).
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut pass = 0;
 

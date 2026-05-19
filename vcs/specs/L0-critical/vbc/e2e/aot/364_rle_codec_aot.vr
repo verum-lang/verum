@@ -327,6 +327,8 @@ fn test_back_and_forth() {
     assert_eq(seq_equal(s, d), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_all_same();
     test_all_different();

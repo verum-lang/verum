@@ -611,6 +611,8 @@ fn test_accumulate_pattern() {
     assert(gen_is_done(g));
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_range_generator();
     test_range_product();

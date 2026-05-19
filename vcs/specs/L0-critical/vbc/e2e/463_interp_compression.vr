@@ -281,6 +281,8 @@ fn test_lz_no_repetition() {
     print("lz_no_repetition: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rle_basic();
     test_rle_all_same();

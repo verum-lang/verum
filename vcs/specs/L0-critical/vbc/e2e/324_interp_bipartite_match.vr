@@ -184,6 +184,8 @@ fn test_contention() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_perfect_matching();
     test_augmenting_needed();

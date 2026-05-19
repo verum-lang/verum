@@ -187,6 +187,8 @@ fn from_gray(g: Int) -> Int {
     from_binary(bin_bits, bit_count)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: RLE encode [1,1,1,2,2,3] -> [1,3,2,2,3,1] (6 values)
     let data1 = [1, 1, 1, 2, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

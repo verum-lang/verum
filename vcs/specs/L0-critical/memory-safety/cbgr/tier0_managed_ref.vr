@@ -4,6 +4,8 @@
 // @tags: memory-safety, cbgr, tier0, managed
 // @description: Tests Tier 0 managed references (&T) with CBGR protection
 
+mount core.prelude.*;
+
 fn main() {
     let data = Heap.new(42);
 

@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test type size properties for integer types
 
+mount core.prelude.*;
+
 fn main() {
     // Test Int sizes
     assert_eq(Int8.size, 1);

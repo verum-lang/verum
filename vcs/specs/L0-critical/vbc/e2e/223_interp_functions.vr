@@ -167,6 +167,8 @@ fn test_functions_with_locals() {
     assert_eq(compute(5, 5), 35);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_functions();
     test_multi_params();

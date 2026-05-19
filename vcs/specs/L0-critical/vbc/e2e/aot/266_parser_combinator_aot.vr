@@ -180,6 +180,8 @@ fn test_empty() {
     assert_eq(r.ok, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_single_number();
     test_addition();

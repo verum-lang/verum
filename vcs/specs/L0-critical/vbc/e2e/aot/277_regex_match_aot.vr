@@ -152,6 +152,8 @@ fn test_length_mismatch() {
     assert_eq(simple_match(p, s, 0, 0), false);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_literal_match();
     test_any_match();

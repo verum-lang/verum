@@ -295,6 +295,8 @@ fn test_leetcode_example() {
     assert_eq(lru_get_val(cache, 4), 4);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_cache();
     test_put_and_get();

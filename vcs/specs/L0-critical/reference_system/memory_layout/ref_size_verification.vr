@@ -7,6 +7,8 @@
 /// ThinRef: 16 bytes, FatRef: 24 bytes
 /// Spec: cbgr-implementation.md#memory-layout
 
+mount core.prelude.*;
+
 fn main() {
     test_thin_ref_size();
     test_fat_ref_size();

@@ -193,6 +193,8 @@ fn test_identities() {
     assert_eq(prod.den, 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_creation();
     test_add();

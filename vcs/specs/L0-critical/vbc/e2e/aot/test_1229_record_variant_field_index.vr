@@ -25,6 +25,8 @@ fn approx(a: Float, b: Float) -> Bool {
     abs < 0.01
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

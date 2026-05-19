@@ -110,6 +110,8 @@ fn get_readonly_db() -> Database with [Read] { Database { _marker: 0 } }
 fn get_full_db() -> Database with [Read, Write] { Database { _marker: 0 } }
 fn get_admin_db() -> Database with [Read, Write, Admin] { Database { _marker: 0 } }
 
+mount core.prelude.*;
+
 fn main() {
     test_readwrite_to_read();
     test_admin_to_readwrite();

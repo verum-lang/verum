@@ -256,6 +256,8 @@ fn test_two_fsms() {
     assert_eq(m2.transitions, 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_fsm_basic();
     test_fsm_invalid_transitions();

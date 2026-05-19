@@ -89,6 +89,8 @@ fn test_fib_tail() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Recursion Tests:");
     let mut failures = 0;

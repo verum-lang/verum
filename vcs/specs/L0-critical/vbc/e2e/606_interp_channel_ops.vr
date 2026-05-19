@@ -118,6 +118,8 @@ fn test_channel_wrap_around() {
     print("channel_wrap_around: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_channel_basic();
     test_channel_full();

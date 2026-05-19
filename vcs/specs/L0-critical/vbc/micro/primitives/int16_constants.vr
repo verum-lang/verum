@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test Int16 type constants (MIN, MAX, BITS)
 
+mount core.prelude.*;
+
 fn main() {
     // Test Int16.MIN (-2^15)
     assert_eq(Int16.MIN(), -32768);

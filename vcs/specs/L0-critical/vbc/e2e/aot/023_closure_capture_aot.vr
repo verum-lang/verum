@@ -54,6 +54,8 @@ fn fold_range(start: Int, end: Int, init: Int, f: fn(Int, Int) -> Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic capture
     let add5 = make_adder(5);

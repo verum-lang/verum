@@ -265,6 +265,8 @@ fn test_monotone_parameter() {
     assert_eq(monotone, 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_lerp_basics();
     test_quad_bezier_endpoints();

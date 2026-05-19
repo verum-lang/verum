@@ -43,6 +43,8 @@ fn shared_mem_copy(data: List<Int>, n: Int, offset: Int) -> List<Int> {
     shared
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Shared memory load/store
     let mut buf = [0, 0, 0, 0, 0, 0, 0, 0];

@@ -104,6 +104,8 @@ fn test_map_counter_pattern() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Map + Struct Value Tests:");
     let mut failures = 0;

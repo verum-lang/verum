@@ -229,6 +229,8 @@ fn test_longest_common_prefix() {
     print("longest_common_prefix: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_word_insertion_and_search();
     test_prefix_counting();

@@ -339,6 +339,8 @@ fn test_multi_accumulator() {
     assert_eq(c.pos_count, 49);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_running_sum_basic();
     test_running_sum_loop();

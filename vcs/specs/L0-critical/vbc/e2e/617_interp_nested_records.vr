@@ -127,6 +127,8 @@ fn test_record_in_loop() {
     print("  test_record_in_loop: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_nested();
     test_record_composition();

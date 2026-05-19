@@ -22,6 +22,8 @@ fn show_item<T: Displayable>(item: T) -> Text {
     item.show()
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let p = Point { x: 3, y: 4 };
 

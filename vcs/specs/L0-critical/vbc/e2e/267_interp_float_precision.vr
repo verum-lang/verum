@@ -281,6 +281,8 @@ fn test_float_identity_operations() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_float_add();
     test_float_sub();

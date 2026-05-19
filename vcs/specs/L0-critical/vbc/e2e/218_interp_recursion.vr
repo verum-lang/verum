@@ -168,6 +168,8 @@ fn test_recursive_gcd() {
     assert_eq(gcd(48, 18), 6);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_factorial();
     test_fibonacci();

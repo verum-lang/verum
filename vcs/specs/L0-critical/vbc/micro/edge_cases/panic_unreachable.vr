@@ -5,6 +5,8 @@
 // @timeout: 5000
 // @expected-panic: Unreachable
 
+mount core.prelude.*;
+
 fn main() {
     let x = 3;
     match x {

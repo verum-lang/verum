@@ -29,6 +29,8 @@ fn sum_to(n: Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test fibonacci
     assert(fib(10) == 55);

@@ -187,6 +187,8 @@ fn test_bit_field_ops() {
     assert_eq(test_bit(10, 3), true);   // 1010, bit 3 set
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_popcount();
     test_lowest_set_bit();

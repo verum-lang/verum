@@ -18,6 +18,8 @@ fn safe_div(a: Int, x: Int) -> Int {
     a / x
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let f5 = factorial(5);
     if f5 != 120 {

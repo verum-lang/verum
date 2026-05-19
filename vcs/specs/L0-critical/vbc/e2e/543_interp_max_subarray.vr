@@ -141,6 +141,8 @@ fn test_large_subarray() {
     print("large_subarray: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_kadane();
     test_single_and_two_elements();

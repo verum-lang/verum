@@ -101,6 +101,8 @@ fn node_degree(g: Graph6, node: Int) -> Int {
     deg
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let g = Graph6 {
         e00: 0, e01: 7, e02: 0, e03: 9, e04: 0, e05: 0,

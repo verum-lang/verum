@@ -15,6 +15,8 @@ fn __file_write_string_raw(path: Text, content: Text) -> Int {
     @intrinsic("file_write_string")
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let path = "/tmp/verum_test_878.txt";
     let content = "Hello from Verum AOT!";

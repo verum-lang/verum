@@ -194,6 +194,8 @@ fn test_digit_extraction() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_counting_sort();
     test_counting_sort_small();

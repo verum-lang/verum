@@ -18,6 +18,8 @@ fn producer(count: Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Basic thread communication via return values
     let t1 = spawn producer(100);

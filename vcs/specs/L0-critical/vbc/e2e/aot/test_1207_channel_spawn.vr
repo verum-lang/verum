@@ -19,6 +19,8 @@ fn recv_or(ch: Channel<Int>, default: Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

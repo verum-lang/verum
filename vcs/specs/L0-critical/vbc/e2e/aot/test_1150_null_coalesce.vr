@@ -53,6 +53,8 @@ fn test_coalesce_all_none() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Null Coalesce Tests:");
     let mut failures = 0;

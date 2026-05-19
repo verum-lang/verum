@@ -74,6 +74,8 @@ fn test_large_content() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("File I/O Tests:");
     let mut failures = 0;

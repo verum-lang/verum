@@ -170,6 +170,8 @@ fn test_rotation_check() {
     print("rotation_check: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_reverse();
     test_palindrome_check();

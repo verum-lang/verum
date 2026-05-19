@@ -88,6 +88,8 @@ fn rat_to_int(n: Int, d: Int) -> Int {
     n / d
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Simplify 6/4 = 3/2
     assert_eq(simplify_num(6, 4), 3);

@@ -38,6 +38,8 @@ fn reduce(items: List<Int>, init: Int, f: fn(Int, Int) -> Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: function composition
     let double = |x: Int| -> Int { x * 2 };

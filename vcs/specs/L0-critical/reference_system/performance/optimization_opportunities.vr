@@ -10,6 +10,8 @@
 /// - Tier promotion via escape analysis
 /// Spec: cbgr-implementation.md#optimizations
 
+mount core.prelude.*;
+
 fn main() {
     test_repeated_access_optimization();
     test_loop_hoisting_optimization();

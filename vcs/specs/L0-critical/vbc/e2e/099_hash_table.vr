@@ -238,6 +238,8 @@ fn test_multiple_collisions() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_insert_and_get();
     test_not_found();

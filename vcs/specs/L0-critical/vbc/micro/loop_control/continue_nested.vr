@@ -2,6 +2,8 @@
 // @level: L0
 // @tier: 0
 // @expected-exit: 0
+mount core.prelude.*;
+
 fn main() {
     let mut total = 0;
     let mut i = 0;

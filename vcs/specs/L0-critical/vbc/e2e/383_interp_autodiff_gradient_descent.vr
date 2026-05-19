@@ -256,6 +256,8 @@ fn test_convergence_steps() {
     assert_eq(within_tol(x, target, tol), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gd_simple();
     test_gd_from_above();

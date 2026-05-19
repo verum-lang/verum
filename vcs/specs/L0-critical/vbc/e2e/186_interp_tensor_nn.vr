@@ -779,6 +779,8 @@ fn test_nn_forward_pass() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_relu();
     test_leaky_relu();

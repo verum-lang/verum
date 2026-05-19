@@ -26,6 +26,8 @@ implement Node {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let leaf1 = Node { value: 10, children: [] };
     let leaf2 = Node { value: 20, children: [] };

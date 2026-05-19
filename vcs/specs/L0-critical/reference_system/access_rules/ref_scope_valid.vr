@@ -8,6 +8,8 @@
 /// Borrows that don't overlap are allowed (Non-Lexical Lifetimes).
 /// Spec: 04-memory-model.md#aliasing-rules
 
+mount core.prelude.*;
+
 fn main() {
     test_sequential_borrows();
     test_nll_pattern();

@@ -219,6 +219,8 @@ fn test_apply_both_composed() {
     assert_eq(apply_both(double, inc, 3), 8);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_closure();
     test_closure_with_capture();

@@ -229,6 +229,8 @@ fn test_canonical_huffman_codes() {
     print("canonical_huffman_codes: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_frequency_analysis();
     test_huffman_bit_lengths();

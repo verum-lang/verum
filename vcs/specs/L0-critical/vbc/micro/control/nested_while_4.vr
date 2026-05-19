@@ -5,6 +5,8 @@
 // @timeout: 5000
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() {
     let mut total: Int = 0;
     let mut i: Int = 0;

@@ -225,6 +225,8 @@ fn test_more_data_points() {
     assert_eq(within_tol(trained.b, scale(), 300), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_perfect_linear();
     test_with_intercept();

@@ -10,6 +10,8 @@ async fn process_data(ref_data: &List<Int>) -> Int {
     ref_data[0]  // Access after original might be freed
 }
 
+mount core.prelude.*;
+
 fn main() {
     let data = Heap.new([1, 2, 3]);
     let ref_data = &data;

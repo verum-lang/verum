@@ -2,6 +2,8 @@
 // @level: L0
 // @tier: 0
 // @expected-exit: 0
+mount core.prelude.*;
+
 fn main() {
     // Simple atomic load/store test using regular variable
     // This tests basic memory semantics

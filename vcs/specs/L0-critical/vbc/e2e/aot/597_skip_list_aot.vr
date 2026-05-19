@@ -168,6 +168,8 @@ fn test_search_consistency() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bin_search();
     test_lin_search();

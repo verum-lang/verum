@@ -154,6 +154,8 @@ fn lcm(a: Int, b: Int) -> Int {
 // ============================================================
 // Main: integrate all features
 // ============================================================
+mount core.prelude.*;
+
 fn main() -> Int {
     // Vec2 operations
     let v1 = Vec2 { x: 3, y: 4 };

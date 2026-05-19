@@ -107,6 +107,8 @@ fn test_btree_count() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Recursive Generic Tests:");
     let mut failures = 0;

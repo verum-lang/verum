@@ -102,6 +102,8 @@ fn test_record_as_return() {
     print("record_as_return: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_vec2_operations();
     test_line_midpoint();

@@ -40,6 +40,8 @@ implement<T> Stack<T> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test with Int
     let mut int_stack = Stack.new();

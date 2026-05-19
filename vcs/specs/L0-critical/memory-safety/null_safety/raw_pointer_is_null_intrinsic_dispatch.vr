@@ -33,6 +33,8 @@
 // `List.try_with_capacity(8)` call must reach the `Ok(...)` branch
 // of `ptr.is_null()`, NOT panic at FatRef.is_null pc=0.
 
+mount core.prelude.*;
+
 fn main() {
     let r: Result<List<Int>, AllocError> = List.try_with_capacity(8);
     match r {

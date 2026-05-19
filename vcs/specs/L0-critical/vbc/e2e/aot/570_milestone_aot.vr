@@ -326,6 +326,8 @@ fn test_pow2() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rle();
     test_hamming();

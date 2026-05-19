@@ -131,6 +131,8 @@ fn test_high_replace_cost() {
     print("high_replace_cost: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_identical_sequences();
     test_unit_weights();

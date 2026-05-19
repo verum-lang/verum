@@ -10,6 +10,8 @@
 /// - Return Result/Maybe for fallible conversions
 /// - Preserve type safety guarantees
 
+mount core.prelude.*;
+
 fn main() {
     test_numeric_widening();
     test_numeric_narrowing();

@@ -12,6 +12,8 @@ extern {
     fn dup(fd: Int) -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test 1: getpid always succeeds
     let pid = getpid();

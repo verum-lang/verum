@@ -18,6 +18,8 @@ fn make_text_list_pair() -> Pair<Text, List<Int>> {
     Pair { first: "world", second: nums }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut passed = 0;
     let mut failed = 0;

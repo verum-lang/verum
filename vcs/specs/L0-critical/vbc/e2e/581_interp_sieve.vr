@@ -146,6 +146,8 @@ fn test_prime_sum() {
     print("prime_sum: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_primes_up_to_20();
     test_primes_up_to_50();

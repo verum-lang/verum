@@ -276,6 +276,8 @@ fn test_lifecycle() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_acquire_check();
     test_generation_mismatch();

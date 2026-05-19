@@ -46,6 +46,8 @@ fn list_nth(xs: IntList, n: Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Linked list construction and length
     let xs = cons(1, cons(2, cons(3, cons(4, cons(5, Nil)))));

@@ -62,6 +62,8 @@ fn count_ops(e: Expr) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Basic eval ===
     assert_eq(eval(ENum(42)), 42);

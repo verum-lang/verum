@@ -177,6 +177,8 @@ fn test_identities() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_eval();
     test_add();

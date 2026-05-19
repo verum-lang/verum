@@ -220,6 +220,8 @@ fn test_xor_properties() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_caesar();
     test_caesar_roundtrip();

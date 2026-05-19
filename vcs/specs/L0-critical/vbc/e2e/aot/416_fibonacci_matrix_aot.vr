@@ -168,6 +168,8 @@ fn test_fib_30() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_mat_mul_identity();
     test_mat_mul_base_squared();

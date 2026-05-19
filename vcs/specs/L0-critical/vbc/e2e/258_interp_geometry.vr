@@ -305,6 +305,8 @@ fn test_dot_product() {
     assert_eq(dot(pt_new(0, 0), pt_new(1, 0), pt_new(-1, 0)), -1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_manhattan();
     test_dist_sq();

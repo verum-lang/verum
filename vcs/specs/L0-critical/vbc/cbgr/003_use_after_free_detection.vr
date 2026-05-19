@@ -302,6 +302,8 @@ fn test_immutable_and_mutable_aliasing() {
     assert(result is CbgrViolation || result is CompileError);
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Use-after-free detection
     test_detect_simple_use_after_free();

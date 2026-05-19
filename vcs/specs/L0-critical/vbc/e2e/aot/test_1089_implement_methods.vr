@@ -137,6 +137,8 @@ fn test_stack2() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Implement Methods Tests:");
     let mut failures = 0;

@@ -207,6 +207,8 @@ fn test_sort_all_same() {
     assert_eq(arr8_get(sorted, 3), 7);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_build_heap();
     test_sift_down_simple();

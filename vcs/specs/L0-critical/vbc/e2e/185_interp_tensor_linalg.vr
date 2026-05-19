@@ -667,6 +667,8 @@ fn test_cayley_hamilton() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_dot_product();
     test_matmul_2x2();

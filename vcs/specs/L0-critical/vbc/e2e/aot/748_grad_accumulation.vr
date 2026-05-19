@@ -30,6 +30,8 @@ fn compute_loss(w: Int, b: Int, x: Int, target: Int) -> Int {
     diff * diff
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Single sample gradient
     let w = 2;

@@ -9,6 +9,8 @@ fn abs(x: Int) -> Int {
     return -x;
 }
 
+mount core.prelude.*;
+
 fn main() {
     assert_eq(abs(5), 5);
     assert_eq(abs(-5), 5);

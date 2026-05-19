@@ -29,6 +29,8 @@ fn build_pair(key: Text, val: Int) -> Text { f"{key}={val}" }
 
 fn join3(a: Text, b: Text, c: Text) -> Text { f"{a}|{b}|{c}" }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic string concat
     assert_eq(repeat_char(5), "xxxxx");

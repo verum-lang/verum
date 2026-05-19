@@ -3,6 +3,8 @@
 // @tier: 0
 // @expected-exit: 0
 // @description: Verify hex escapes in byte strings
+mount core.prelude.*;
+
 fn main() {
     let bs = b"\x00\x41\xFF";
     assert_eq(bs[0], 0);    // \x00

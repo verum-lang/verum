@@ -172,6 +172,8 @@ fn test_zip() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Pipeline Tests:");
     let mut failures = 0;

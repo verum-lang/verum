@@ -8,6 +8,8 @@
 /// it promotes the reference from managed to checked tier.
 /// This eliminates runtime overhead without sacrificing safety.
 
+mount core.prelude.*;
+
 fn main() {
     // All these cases should be verified as "escape-analysis: promoted"
     test_local_scope_promotion();

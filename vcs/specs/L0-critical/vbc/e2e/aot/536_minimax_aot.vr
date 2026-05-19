@@ -166,6 +166,8 @@ fn test_nim_three_piles() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_minimax_basic();
     test_minimax_equal();

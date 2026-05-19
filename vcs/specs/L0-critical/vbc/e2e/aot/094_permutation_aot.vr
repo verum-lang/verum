@@ -191,6 +191,8 @@ fn perm_inversions(p: Arr8) -> Int {
     inv
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Identity permutation ===
     let id5 = perm_identity(5);

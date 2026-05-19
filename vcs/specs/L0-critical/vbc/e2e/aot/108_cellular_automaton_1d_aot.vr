@@ -124,6 +124,8 @@ fn single_cell(pos: Int) -> Grid16 {
     grid_set(grid_new(), pos, 1)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // ===== Rule 30 Tests =====
     // Rule 30 in binary: 00011110

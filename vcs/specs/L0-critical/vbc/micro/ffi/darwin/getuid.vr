@@ -12,6 +12,8 @@ extern {
     fn geteuid() -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // getuid() returns real user ID
     // geteuid() returns effective user ID

@@ -243,6 +243,8 @@ fn test_batch_gradient() {
     assert(updated.w > n.w);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_relu();
     test_neuron_forward();

@@ -171,6 +171,8 @@ fn test_2x2() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_open_3x3();
     test_wall_3x3();

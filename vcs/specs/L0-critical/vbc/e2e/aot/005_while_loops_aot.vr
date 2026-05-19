@@ -46,6 +46,8 @@ fn is_prime(n: Int) -> Bool {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // sum_while
     assert_eq(sum_while(0), 0);

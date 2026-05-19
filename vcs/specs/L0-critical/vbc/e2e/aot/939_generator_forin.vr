@@ -27,6 +27,8 @@ fn* evens(n: Int) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: for-in with generator
     let mut sum = 0;

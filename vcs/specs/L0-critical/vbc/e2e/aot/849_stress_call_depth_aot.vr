@@ -128,6 +128,8 @@ fn reduce_array(arr: Arr8, n: Int, op_tag: Int, init: Int) -> Int {
     acc
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic dispatch
     assert_eq(dispatch_op(0, 10, 20), 30);   // add

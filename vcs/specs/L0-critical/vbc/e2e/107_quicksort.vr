@@ -269,6 +269,8 @@ fn test_six_elements() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sort_random();
     test_already_sorted();

@@ -197,6 +197,8 @@ fn test_catalan_recurrence() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_catalan_values();
     test_catalan_larger();

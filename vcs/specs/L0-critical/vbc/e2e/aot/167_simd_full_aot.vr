@@ -214,6 +214,8 @@ fn test_simd_matvec() {
     print("test_simd_matvec passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simd_create();
     test_simd_arithmetic();

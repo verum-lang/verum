@@ -64,6 +64,8 @@ fn is_established(state: ConnState) -> Bool {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut state = Closed;
 

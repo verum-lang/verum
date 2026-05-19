@@ -427,6 +427,8 @@ fn test_chain() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_map_filter_fold();
     test_scan();

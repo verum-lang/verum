@@ -215,6 +215,8 @@ fn test_sort_negative_numbers() {
     assert_eq(arr8_get(sorted, 7), 7);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bubble_sort();
     test_bubble_sort_already_sorted();

@@ -156,6 +156,8 @@ fn bst_height(t: TreePool, idx: Int) -> Int {
     1 + if lh > rh { lh } else { rh }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Manually build a BST:
     //        5

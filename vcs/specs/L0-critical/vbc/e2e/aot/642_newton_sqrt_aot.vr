@@ -192,6 +192,8 @@ fn test_isqrt_property() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_isqrt();
     test_perfect_square();

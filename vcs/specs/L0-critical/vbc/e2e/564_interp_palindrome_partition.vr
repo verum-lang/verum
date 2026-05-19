@@ -196,6 +196,8 @@ fn test_is_pal_helper() {
     print("is_pal_helper: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_already_palindrome();
     test_aab_two_cuts();

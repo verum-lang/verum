@@ -104,6 +104,8 @@ fn test_nursery_chain() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Nursery + Closure Tests:");
 

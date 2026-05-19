@@ -330,6 +330,8 @@ fn test_chain_union() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_union_find();
     test_count_components();

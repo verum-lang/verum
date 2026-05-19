@@ -280,6 +280,8 @@ fn test_rle_alternating() {
 // main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rle_encode_basic();
     test_rle_roundtrip();

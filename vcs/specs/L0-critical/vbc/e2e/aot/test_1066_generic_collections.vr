@@ -189,6 +189,8 @@ fn test_array_linked_list() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Generic Collection Tests:");
     let mut failures = 0;

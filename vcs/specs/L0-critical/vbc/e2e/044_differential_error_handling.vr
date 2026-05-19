@@ -421,6 +421,8 @@ fn test_validated_arithmetic() {
     print("validated_arithmetic: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_outcome();
     test_safe_arithmetic();

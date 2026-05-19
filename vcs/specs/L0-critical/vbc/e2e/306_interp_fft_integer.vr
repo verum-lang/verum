@@ -262,6 +262,8 @@ fn test_magnitude() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_dft4_dc();
     test_dft4_impulse();

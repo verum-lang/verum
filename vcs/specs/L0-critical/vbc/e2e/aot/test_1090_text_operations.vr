@@ -89,6 +89,8 @@ fn test_int_to_text() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Text Operations Tests:");
     let mut failures = 0;

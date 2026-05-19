@@ -282,6 +282,8 @@ fn test_free_list() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("CBGR Memory Model Tests:");
 

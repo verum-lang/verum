@@ -148,6 +148,8 @@ fn test_text_replace() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Text Operation Tests:");
     let mut failures = 0;

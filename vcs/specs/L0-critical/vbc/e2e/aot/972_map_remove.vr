@@ -1,3 +1,5 @@
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut m = Map.new();
     m.insert(10, 100);

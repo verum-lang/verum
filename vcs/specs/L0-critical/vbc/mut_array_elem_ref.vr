@@ -13,6 +13,8 @@
 // backing. Fixed by emitting CbgrSubOpcode.RefListElement, which
 // produces a plain pointer into the List's backing buffer.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut arr = [1, 2, 3, 4, 5];
     let r = &mut arr[2];

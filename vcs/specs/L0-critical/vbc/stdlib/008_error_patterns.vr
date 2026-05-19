@@ -287,6 +287,8 @@ fn test_error_propagation() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_option_some_none();
     test_option_map();

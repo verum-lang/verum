@@ -438,6 +438,8 @@ fn test_node_count() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_single_pattern();
     test_two_patterns();

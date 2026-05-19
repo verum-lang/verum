@@ -102,6 +102,8 @@ fn build_heap(arr: List<Int>, n: Int) -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Insert single element
     let mut h1 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

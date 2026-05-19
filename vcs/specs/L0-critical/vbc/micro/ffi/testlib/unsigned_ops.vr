@@ -17,6 +17,8 @@ extern {
     ) -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // Test unsigned 32-bit addition
     let u32_sum = ffi_add_u32(100, 200);

@@ -686,6 +686,8 @@ fn test_registry_validated_container() {
     assert_eq(bad_idx, -1); // not in registry
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_tagged_union_basic();
     test_tagged_union_negative();

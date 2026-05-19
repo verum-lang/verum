@@ -401,6 +401,8 @@ fn run_part2() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let p1 = run_part1();
     if p1 != 0 { return p1; }

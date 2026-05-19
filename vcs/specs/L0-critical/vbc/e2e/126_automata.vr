@@ -140,6 +140,8 @@ fn test_nine_and_twelve() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_zero_is_div3();
     test_three_is_div3();

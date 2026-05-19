@@ -119,6 +119,8 @@ fn test_conjugate() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_add_sub();
     test_multiply();

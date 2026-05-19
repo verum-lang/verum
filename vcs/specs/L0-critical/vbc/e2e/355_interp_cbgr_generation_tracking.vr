@@ -407,6 +407,8 @@ fn test_alternating_read_write_cycles() {
     assert_eq(x, 64);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_ref_valid_in_scope();
     test_ref_valid_in_inner_scope();

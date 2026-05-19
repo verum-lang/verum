@@ -18,6 +18,8 @@ fn make_wrapper() -> Wrapper {
     Wrapper { value: 42 }
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_temporary_extension();
     test_method_chain_temporaries();

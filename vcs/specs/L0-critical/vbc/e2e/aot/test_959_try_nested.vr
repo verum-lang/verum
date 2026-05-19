@@ -72,6 +72,8 @@ fn test_try_in_loop() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Nested Try/Recover Tests:");
 

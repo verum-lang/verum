@@ -264,6 +264,8 @@ fn test_buddy_no_merge() {
     assert_eq(buddy_merged(freed, 0), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_pool_initial();
     test_pool_alloc_one();

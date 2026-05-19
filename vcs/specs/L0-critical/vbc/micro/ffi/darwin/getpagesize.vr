@@ -11,6 +11,8 @@ extern {
     fn getpagesize() -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // getpagesize() returns system page size
     // On Intel macOS: 4096 bytes

@@ -27,6 +27,8 @@ fn get_value(tree: &Tree<Int>) -> Maybe<Int> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_tree_borrow();
     test_tree_recursive_sum();

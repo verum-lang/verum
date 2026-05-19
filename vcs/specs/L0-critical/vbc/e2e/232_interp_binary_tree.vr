@@ -296,6 +296,8 @@ fn test_duplicate_insert() {
     assert_eq(tree_get(t, 0), 5);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_tree();
     test_single_insert();

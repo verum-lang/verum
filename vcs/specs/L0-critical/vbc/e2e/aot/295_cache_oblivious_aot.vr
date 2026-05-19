@@ -327,6 +327,8 @@ fn test_sum_invariant() {
     assert_eq(mat4_sum(m), 136);  // sum 1..16 = 16*17/2 = 136
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_transpose_simple();
     test_recursive_transpose();

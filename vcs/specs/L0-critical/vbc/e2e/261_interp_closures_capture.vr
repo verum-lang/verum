@@ -275,6 +275,8 @@ fn test_closure_capturing_closure() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_adder_factory();
     test_multiplier_factory();

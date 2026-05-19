@@ -252,6 +252,8 @@ fn test_edge_check() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_distances_from_0();
     test_distances_from_5();

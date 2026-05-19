@@ -161,6 +161,8 @@ fn test_modular_inverse() {
     print("modular_inverse: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_prime_counting();
     test_prime_factorization();

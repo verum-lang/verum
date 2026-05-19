@@ -4,6 +4,8 @@
 // @tags: memory-safety, double-free, cbgr, alias
 // @description: Tests CBGR detection of double-free through aliased pointers
 
+mount core.prelude.*;
+
 fn main() {
     let data = Heap.new(42);
 

@@ -381,6 +381,8 @@ fn test_map_wrapper() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Simple generic inference
     test_simple_generic_inference();

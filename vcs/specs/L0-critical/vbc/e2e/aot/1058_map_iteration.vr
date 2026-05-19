@@ -6,6 +6,8 @@
 
 // Map iteration: insert, get, len, keys, values.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut m = Map.new();
     m.insert("a", 1);

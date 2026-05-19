@@ -207,6 +207,8 @@ fn test_hash_properties() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_xor();
     test_checksum_add();

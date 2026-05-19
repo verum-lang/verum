@@ -218,6 +218,8 @@ fn test_consecutive_fibonacci() {
     assert_eq(binary_gcd(21, 34), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_gcd();
     test_zero_cases();

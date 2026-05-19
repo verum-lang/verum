@@ -275,6 +275,8 @@ fn test_unsubscribed_topic_ignored() {
     assert_eq(s0.notif_count, 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_no_subscribers();
     test_single_subscriber_all_topics();

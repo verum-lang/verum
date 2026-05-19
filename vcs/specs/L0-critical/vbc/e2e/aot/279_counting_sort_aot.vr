@@ -144,6 +144,8 @@ fn test_distinct() {
     assert_eq(count_distinct(a), 3);  // {1, 2, 3}
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_counting_sort();
     test_already_sorted();

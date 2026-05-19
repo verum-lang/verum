@@ -6,6 +6,8 @@
 
 // Test: List clone, extend, and stress operations
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Build list
     let mut original = List.new();

@@ -183,6 +183,8 @@ fn test_left_heavy() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_literal();
     test_simple_add();

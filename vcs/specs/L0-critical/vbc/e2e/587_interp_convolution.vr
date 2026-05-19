@@ -122,6 +122,8 @@ fn test_polynomial_multiply() {
     print("polynomial_multiply: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_degree_one_times_degree_one();
     test_ones_convolution();

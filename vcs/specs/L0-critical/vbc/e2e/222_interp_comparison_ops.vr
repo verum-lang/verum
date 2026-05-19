@@ -144,6 +144,8 @@ fn test_comparison_as_value() {
     assert_eq(result3, true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_equality();
     test_inequality();

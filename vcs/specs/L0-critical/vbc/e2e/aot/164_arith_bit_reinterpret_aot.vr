@@ -210,6 +210,8 @@ fn test_bit_tricks() {
     print("test_bit_tricks passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bitwise_basic();
     test_shifts();

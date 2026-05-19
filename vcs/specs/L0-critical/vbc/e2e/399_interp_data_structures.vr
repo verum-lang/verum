@@ -145,6 +145,8 @@ fn test_matrix_ops() {
     print("matrix_ops: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_pairs();
     test_triples();

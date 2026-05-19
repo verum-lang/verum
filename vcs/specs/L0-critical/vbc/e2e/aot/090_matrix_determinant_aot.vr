@@ -159,6 +159,8 @@ fn mat3_transpose(m: Mat3) -> Mat3 {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === 2x2 Determinants ===
     // Identity

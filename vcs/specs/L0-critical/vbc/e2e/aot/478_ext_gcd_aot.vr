@@ -222,6 +222,8 @@ fn test_lcm() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_ext_gcd();
     test_mod_inverse();

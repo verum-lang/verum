@@ -200,6 +200,8 @@ fn run_tests_d() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let a = run_tests_a();
     if a != 0 { return a; }

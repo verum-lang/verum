@@ -219,6 +219,8 @@ fn test_permutation_properties() {
     print("permutation_properties: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_next_permutation();
     test_all_permutations_count();

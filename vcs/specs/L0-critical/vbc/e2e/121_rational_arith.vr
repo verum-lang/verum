@@ -169,6 +169,8 @@ fn test_division_and_equality() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_gcd_and_simplify();
     test_addition();

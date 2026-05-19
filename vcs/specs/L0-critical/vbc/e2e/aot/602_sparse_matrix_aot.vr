@@ -183,6 +183,8 @@ fn test_identity_spmv() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_spmv();
     test_sparse_get();

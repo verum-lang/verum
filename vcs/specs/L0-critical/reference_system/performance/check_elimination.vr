@@ -7,6 +7,8 @@
 /// Redundant checks are removed when provably unnecessary.
 /// This reduces runtime overhead while maintaining safety.
 
+mount core.prelude.*;
+
 fn main() {
     demonstrate_redundant_check_elimination();
     demonstrate_loop_hoisting();

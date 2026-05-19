@@ -11,6 +11,8 @@ extern {
     fn pthread_self() -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // pthread_self() returns ID of current thread
     // It never fails

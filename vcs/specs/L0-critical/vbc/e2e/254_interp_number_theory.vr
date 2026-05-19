@@ -328,6 +328,8 @@ fn test_crt_verify_uniqueness() {
     assert_eq((x + 12) % 4, 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_mod_pow_basic();
     test_mod_pow_large();

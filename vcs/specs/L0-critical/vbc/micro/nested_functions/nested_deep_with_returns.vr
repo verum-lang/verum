@@ -5,6 +5,8 @@
 // @timeout: 5000
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() {
     fn level1(x: Int) -> Int {
         fn level2(y: Int) -> Int {

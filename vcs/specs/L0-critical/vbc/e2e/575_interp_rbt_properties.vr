@@ -164,6 +164,8 @@ fn test_valid_seven_node_rbt() {
     print("valid_seven_node: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_valid_three_node_rbt();
     test_double_red_violation();

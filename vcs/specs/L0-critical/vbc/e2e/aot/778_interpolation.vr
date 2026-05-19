@@ -41,6 +41,8 @@ fn abs_val(x: Int) -> Int {
     if (x < 0) { 0 - x } else { x }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Basic linear interpolation
     // lerp(0, 100, 0.5) = 50

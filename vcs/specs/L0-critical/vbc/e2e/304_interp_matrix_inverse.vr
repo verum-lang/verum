@@ -230,6 +230,8 @@ fn test_3x3_determinant() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_mat2_determinant();
     test_mat2_inverse_identity();

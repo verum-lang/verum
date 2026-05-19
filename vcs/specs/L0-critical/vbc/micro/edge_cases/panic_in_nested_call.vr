@@ -17,6 +17,8 @@ fn outer(x: Int) -> Int {
     middle(x)
 }
 
+mount core.prelude.*;
+
 fn main() {
     let result = outer(42);
     print(f"{result}");

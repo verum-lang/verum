@@ -178,6 +178,8 @@ fn test_selection_sort() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     if (test_first_last() != 0) { return 1; }
     if (test_swap() != 0) { return 1; }

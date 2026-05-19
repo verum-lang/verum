@@ -164,6 +164,8 @@ fn test_reduce_operations() {
     print("  test_reduce_operations: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_apply_functions();
     test_closure_factories();

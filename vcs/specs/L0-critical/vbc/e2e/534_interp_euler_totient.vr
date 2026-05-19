@@ -119,6 +119,8 @@ fn test_divisor_sum() {
     print("divisor_sum: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_small_values();
     test_primes();

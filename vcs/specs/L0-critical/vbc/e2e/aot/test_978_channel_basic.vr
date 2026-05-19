@@ -4,6 +4,8 @@
 // @tags: channel, send, recv, runtime
 // @description: Test basic channel operations - send/recv/len/FIFO
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

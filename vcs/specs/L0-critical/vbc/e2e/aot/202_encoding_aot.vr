@@ -143,6 +143,8 @@ fn test_checksum() {
     assert_eq(asum, 285);  // 0+1+4+9+16+25+36+49+64+81
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_hex();
     test_rle();

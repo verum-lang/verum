@@ -163,6 +163,8 @@ fn test_option_chain() {
     assert_eq(is_none(r4), true);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_tagged_union();
     test_tagged_eq();

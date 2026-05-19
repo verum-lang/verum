@@ -12,6 +12,8 @@ fn get_value(use_none: Bool) -> Maybe<Int> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let value1 = get_value(false);
     let value2 = get_value(true);

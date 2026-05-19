@@ -5,6 +5,8 @@
 // Exercises Text method suite: find, slice, contains, starts_with, ends_with,
 // trim, to_upper, to_lower, replace, repeat, split, byte_at
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let s = "Hello, World!";
 

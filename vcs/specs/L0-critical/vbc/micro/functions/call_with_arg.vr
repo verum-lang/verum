@@ -2,4 +2,6 @@
 // @level: L0
 // @expect: pass
 fn double(x: Int) -> Int { x * 2 }
+mount core.prelude.*;
+
 fn main() { assert_eq(double(5), 10); }

@@ -107,6 +107,8 @@ fn big_double(a: BigInt) -> BigInt {
     big_add(a, a)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // === Test 1: Construction and conversion ===
     let zero = big_new(0, 0);

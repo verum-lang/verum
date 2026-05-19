@@ -278,6 +278,8 @@ fn test_alternating() {
     assert_eq(out.count2, 4);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_sort();
     test_all_zeros();

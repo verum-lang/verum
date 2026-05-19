@@ -6,6 +6,8 @@
 // @expected-exit: 0
 // @description: Tuples with complex expressions that stress register allocation
 
+mount core.prelude.*;
+
 fn main() {
     // === Test 1: Tuple with function calls as elements ===
     fn double(x: Int) -> Int {

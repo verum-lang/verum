@@ -40,6 +40,8 @@ fn collatz_steps(n: Int) -> Int {
     steps
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Basic nested
     assert_eq(double(triple(2)), 12);

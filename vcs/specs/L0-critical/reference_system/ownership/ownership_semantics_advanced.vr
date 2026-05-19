@@ -283,6 +283,8 @@ fn test_loop_cleanup() {
 // MAIN
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     // Explicit drop tests
     test_explicit_drop();

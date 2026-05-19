@@ -11,6 +11,8 @@ extern {
     fn arc4random() -> u32;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // arc4random() returns a random 32-bit unsigned integer
     // It never fails and provides cryptographic-quality random

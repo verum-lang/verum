@@ -67,6 +67,8 @@ module api {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // From outside api module, we can only access public items
     let response = api.v2.handle_modern(api.v2.ModernRequest {

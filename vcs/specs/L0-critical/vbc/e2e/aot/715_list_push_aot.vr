@@ -4,6 +4,8 @@
 // @tags: aot, list, push, method
 // @expected-exit: 0
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut xs = [10, 20];
     assert_eq(xs.len(), 2);

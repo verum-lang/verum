@@ -14,6 +14,8 @@ fn apply_to_text(f: fn(Text) -> Text, s: Text) -> Text {
     f(s)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: direct function with Text
     let msg = greet("world");

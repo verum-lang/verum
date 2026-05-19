@@ -123,6 +123,8 @@ fn checksum(vals: List<Int>, count: Int) -> Int {
     sum % 256
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Parity of 0b1011 (3 ones) = 1 (odd parity)
     assert_eq(parity(11, 4), 1);

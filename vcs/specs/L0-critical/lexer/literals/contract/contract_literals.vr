@@ -7,6 +7,8 @@
 // Reference: contract_literal = 'contract' , '#' , ( plain_string | raw_string );
 // Grammar: grammar/verum.ebnf lines 263-264
 
+mount core.prelude.*;
+
 fn main() {
     test_requires_clauses();
     test_ensures_clauses();

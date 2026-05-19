@@ -428,6 +428,8 @@ fn test_record_update() {
     print("record_update: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_point_basic();
     test_rect_ops();

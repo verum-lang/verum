@@ -142,6 +142,8 @@ fn test_star_graph() {
     print("star_graph: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_complete_graph_k4();
     test_bipartite_cycle();

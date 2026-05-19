@@ -191,6 +191,8 @@ fn test_hash_distribution() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty_bloom();
     test_add_and_check();

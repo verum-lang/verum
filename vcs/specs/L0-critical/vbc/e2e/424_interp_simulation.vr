@@ -139,6 +139,8 @@ fn test_particle_simulation() {
     print("particle_simulation: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_game_of_life_step();
     test_population_growth();

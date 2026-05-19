@@ -265,6 +265,8 @@ fn do_condition_number_test() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     do_lu_test();
     do_power_iteration_test();

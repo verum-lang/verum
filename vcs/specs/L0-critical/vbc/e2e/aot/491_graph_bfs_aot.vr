@@ -211,6 +211,8 @@ fn test_cycle() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_linear_graph();
     test_complete_graph();

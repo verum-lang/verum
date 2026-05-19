@@ -39,6 +39,8 @@ fn manhattan_dist(x1: Int, y1: Int, x2: Int, y2: Int) -> Int {
     abs_val(x2 - x1) + abs_val(y2 - y1)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Euclidean distance squared
     // Distance from (0,0) to (3,4): d^2 = 9 + 16 = 25, d = 5

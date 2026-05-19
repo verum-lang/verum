@@ -421,6 +421,8 @@ fn test_tuple_patterns() {
 // Main - run all tests
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() {
     test_guard_patterns();
     test_guards_with_destructuring();

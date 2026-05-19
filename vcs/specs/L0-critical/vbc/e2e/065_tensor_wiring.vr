@@ -1001,6 +1001,8 @@ fn test_nonzero_onehot() {
 // Main — run all tests
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_clone();
     test_arange();

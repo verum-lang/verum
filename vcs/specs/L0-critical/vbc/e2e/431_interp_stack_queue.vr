@@ -121,6 +121,8 @@ fn test_circular_buffer() {
     print("circular_buffer: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_stack();
     test_queue();

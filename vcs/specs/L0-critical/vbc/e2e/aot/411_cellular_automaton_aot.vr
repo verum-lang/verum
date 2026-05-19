@@ -259,6 +259,8 @@ fn test_all_dead_stays_dead() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_rule30_encode();
     test_rule30_single_seed();

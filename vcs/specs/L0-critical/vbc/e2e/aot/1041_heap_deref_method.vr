@@ -43,6 +43,8 @@ implement Expr {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: Literal
     let e1 = Expr.Lit(42);

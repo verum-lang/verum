@@ -19,6 +19,8 @@ fn abs_val(x: Int) -> Int {
     if (x < 0) { 0 - x } else { x }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Dataset: [4, 7, 2, 9, 1, 5, 8, 3, 6, 10]
     let data = [4, 7, 2, 9, 1, 5, 8, 3, 6, 10, 0, 0, 0, 0, 0, 0];

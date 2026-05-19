@@ -185,6 +185,8 @@ fn test_lev_prefix_suffix() {
     print("lev_prefix_suffix: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_lev_identical();
     test_lev_empty_vs_nonempty();

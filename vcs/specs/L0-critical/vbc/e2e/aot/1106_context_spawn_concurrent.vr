@@ -6,6 +6,8 @@
 // @expected-exit: 0
 // @description: Context propagation with spawn under concurrent load — multiple threads using shared context values
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut pass = 0;
 

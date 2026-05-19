@@ -135,6 +135,8 @@ fn season_weather_score(s: Season, w: Weather) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Animal tests
     assert_eq(animal_weight(Cat(5)), 5);

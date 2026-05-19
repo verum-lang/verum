@@ -213,6 +213,8 @@ fn test_epoch_day_of_week() {
     assert_eq(day_of_week(1970, 1, 1), 4);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_leap_year();
     test_days_in_month_regular();

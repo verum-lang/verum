@@ -51,6 +51,8 @@ fn color_value(c: Color) -> Int {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
 

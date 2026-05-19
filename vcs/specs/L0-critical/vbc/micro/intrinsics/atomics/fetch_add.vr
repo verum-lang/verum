@@ -2,6 +2,8 @@
 // @level: L0
 // @tier: 0
 // @expected-exit: 0
+mount core.prelude.*;
+
 fn main() {
     // Test increment patterns that would use fetch_add
     let mut x = 10;

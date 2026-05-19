@@ -79,6 +79,8 @@ fn test_text_with_numbers() {
     print("text_with_numbers: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_text_basics();
     test_format_strings();

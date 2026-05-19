@@ -276,6 +276,8 @@ fn test_cross_ref_loop() {
     assert_eq(total, 160);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_sum_two_refs();
     test_sum_three_refs();

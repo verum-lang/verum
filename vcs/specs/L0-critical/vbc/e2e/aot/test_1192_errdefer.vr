@@ -16,6 +16,8 @@ fn risky_divide(a: Int, b: Int) -> Result<Int, MyError> {
     Ok(a / b)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

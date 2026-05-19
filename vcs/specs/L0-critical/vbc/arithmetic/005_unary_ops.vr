@@ -125,6 +125,8 @@ fn test_not_with_comparisons() {
     assert(!!(x > 0));    // 5 is greater than 0 (double negation)
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_neg_integer();
     test_neg_float();

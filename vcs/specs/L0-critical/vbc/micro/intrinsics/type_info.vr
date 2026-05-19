@@ -2,6 +2,8 @@
 // @level: L0
 // @tier: 0
 // @expected-exit: 0
+mount core.prelude.*;
+
 fn main() {
     // Test that type information is consistent
     // Int is 64-bit on most platforms

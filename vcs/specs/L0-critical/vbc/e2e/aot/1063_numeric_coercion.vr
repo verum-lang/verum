@@ -6,6 +6,8 @@
 
 // Test numeric operations and coercions.
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Int to Float conversion
     let x = 42;

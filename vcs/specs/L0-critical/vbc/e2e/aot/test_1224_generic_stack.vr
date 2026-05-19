@@ -27,6 +27,8 @@ fn peek<T>(stack: Stack<T>) -> Maybe<T> {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut f = 0;
 

@@ -4,6 +4,8 @@
 // @tags: channel, spawn, producer-consumer, runtime
 // @description: Test producer-consumer pattern across threads with channels
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut failures = 0;
     let n = 100;

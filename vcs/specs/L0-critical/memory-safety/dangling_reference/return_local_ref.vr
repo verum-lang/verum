@@ -11,6 +11,8 @@ fn get_ref() -> &Int {
 }
 // When function returns, 'x' is deallocated and generation is bumped
 
+mount core.prelude.*;
+
 fn main() {
     let r = get_ref();
     // Dereferencing triggers CBGR generation check

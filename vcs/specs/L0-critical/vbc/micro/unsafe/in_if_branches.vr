@@ -2,6 +2,8 @@
 // @level: L0
 // @tags: unsafe, if, branch
 // @description: Unsafe blocks in if branches
+mount core.prelude.*;
+
 fn main() {
     let cond: Bool = true;
     let result: Int = if cond {

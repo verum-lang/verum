@@ -166,6 +166,8 @@ fn out_degree(g: Graph8, node: Int, n: Int) -> Int {
     deg
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Build a graph: 0->1->2->3->4, 0->2, 3->5, 4->5, 5->6, 6->7
     let mut g = g8_empty();

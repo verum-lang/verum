@@ -19,6 +19,8 @@
 /// - Information disclosure from uncleared memory
 /// - Security vulnerabilities from predictable uninitialized values
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_initialization();
     test_conditional_initialization();

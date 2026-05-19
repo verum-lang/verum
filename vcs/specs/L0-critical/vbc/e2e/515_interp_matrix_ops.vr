@@ -184,6 +184,8 @@ fn test_identity_multiply() {
     print("identity_multiply: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_addition();
     test_transpose();

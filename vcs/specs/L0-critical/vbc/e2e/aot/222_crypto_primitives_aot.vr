@@ -153,6 +153,8 @@ fn test_xor_stream() {
     assert_eq(data2, 30);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_xor_cipher();
     test_hash();

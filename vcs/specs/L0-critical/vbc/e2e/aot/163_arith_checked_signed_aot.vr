@@ -164,6 +164,8 @@ fn test_saturating() {
     print("test_saturating passed");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_checked_add();
     test_checked_sub();

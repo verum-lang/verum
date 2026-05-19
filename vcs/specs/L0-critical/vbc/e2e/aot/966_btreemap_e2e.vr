@@ -79,6 +79,8 @@ fn test_dup_insert() -> Int {
     pass
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let p1 = test_basic_ops();
     let p2 = test_remove();

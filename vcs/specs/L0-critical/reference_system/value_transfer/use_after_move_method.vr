@@ -23,6 +23,8 @@ implement Consumer {
     }
 }
 
+mount core.prelude.*;
+
 fn main() {
     let c = Consumer { data: Text.from("owned") };
     let result = c.consume();  // c is moved (affine type consumed)

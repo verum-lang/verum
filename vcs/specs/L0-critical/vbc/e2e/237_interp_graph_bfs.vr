@@ -284,6 +284,8 @@ fn test_single_node_bfs() {
     assert_eq(count_reachable(g, 0), 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_chain_bfs();
     test_diamond_bfs();

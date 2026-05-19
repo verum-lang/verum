@@ -38,6 +38,8 @@ fn z3_unknown_witness(a: Int, b: Int, c: Int, d: Int)
     // — that would be a soundness defect.
 }
 
+mount core.prelude.*;
+
 fn main() {
     print("L0-critical: red-team-1.5 fail-closed guardrail");
 }

@@ -65,6 +65,8 @@ fn grids_equal(a: List<Int>, b: List<Int>, size: Int) -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let size = 16;
 

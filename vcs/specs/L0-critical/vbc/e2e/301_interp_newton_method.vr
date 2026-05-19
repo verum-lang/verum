@@ -325,6 +325,8 @@ fn test_convergence_rate() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_newton_sqrt();
     test_newton_isqrt();

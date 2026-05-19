@@ -228,6 +228,8 @@ fn test_ring_buffer_stats() {
     print("ring_buffer_stats: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_ring_buffer();
     test_wraparound_indexing();

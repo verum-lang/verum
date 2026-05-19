@@ -95,6 +95,8 @@ fn test_worker_completion() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     let mut pass = 0;
 

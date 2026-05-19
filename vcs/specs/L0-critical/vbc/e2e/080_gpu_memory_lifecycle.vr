@@ -508,6 +508,8 @@ fn test_unified_memory() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_alloc_free_tracking();
     test_host_device_transfer();

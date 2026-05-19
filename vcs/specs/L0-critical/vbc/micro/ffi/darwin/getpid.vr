@@ -12,6 +12,8 @@ extern {
     fn getpid() -> Int;
 }
 
+mount core.prelude.*;
+
 fn main() {
     // getpid() always succeeds and returns current process ID
     // Process ID is always > 0

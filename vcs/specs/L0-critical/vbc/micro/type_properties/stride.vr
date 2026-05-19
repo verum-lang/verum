@@ -4,6 +4,8 @@
 // @expected-exit: 0
 // @description: Test type stride property (array element spacing)
 
+mount core.prelude.*;
+
 fn main() {
     // For primitive types, stride equals size (no padding)
     assert_eq(Int8.stride, 1);

@@ -245,6 +245,8 @@ fn test_multiple_rects() {
     assert_eq(total_area, 625); // 225 + 400
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_particle_factory();
     test_particle_step();

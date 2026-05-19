@@ -264,6 +264,8 @@ fn test_simulation_n3() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_move_count();
     test_hanoi_count_recursive();

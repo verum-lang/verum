@@ -61,6 +61,8 @@ fn negate(pred: fn(Int) -> Bool) -> fn(Int) -> Bool {
     |x| !pred(x)
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // fold_range as sum
     let sum = fold_range(1, 11, 0, |acc, x| acc + x);

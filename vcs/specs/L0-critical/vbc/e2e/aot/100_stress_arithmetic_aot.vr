@@ -122,6 +122,8 @@ fn lcg_run(seed: Int, a: Int, c: Int, m: Int, steps: Int) -> Int {
     x
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // ================================================================
     // Test 1: Long arithmetic chain (150 operations)

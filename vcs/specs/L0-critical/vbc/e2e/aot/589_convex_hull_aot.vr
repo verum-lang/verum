@@ -239,6 +239,8 @@ fn test_hull_validity() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_triangle_pts();
     test_square();

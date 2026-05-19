@@ -282,6 +282,8 @@ fn test_random_generation() {
 // Main
 // ============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_fft_2point();
     test_fft_4point_real();

@@ -222,6 +222,8 @@ fn test_point_query() {
     assert_eq(bit_range_query(tree, 8, 8), 6);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_lowbit();
     test_single_update_query();

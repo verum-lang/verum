@@ -6,6 +6,8 @@
 // @expected-exit: 0
 // @description: Test integer multiplication overflow behavior (wrapping semantics)
 
+mount core.prelude.*;
+
 fn main() {
     let x: Int = 9223372036854775807;  // Int max
     let y: Int = 2;

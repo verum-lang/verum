@@ -163,6 +163,8 @@ fn test_specific_middle_perm() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_first_permutation();
     test_second_permutation();

@@ -359,6 +359,8 @@ fn test_statistics() {
     assert_eq(r3.slab.num_frees, 1);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_bitmap_ops();
     test_initial_state();

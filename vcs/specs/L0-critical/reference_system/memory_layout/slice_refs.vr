@@ -7,6 +7,8 @@
 /// Slices are fat references containing pointer + length.
 /// CBGR adds generation and epoch for safety.
 
+mount core.prelude.*;
+
 fn main() {
     test_slice_creation();
     test_slice_borrowing();

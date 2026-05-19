@@ -8,6 +8,8 @@
 //              including basic closures, environment capture, higher-order functions,
 //              and closure chaining.
 
+mount core.prelude.*;
+
 fn main() {
     test_basic_closure();
     test_environment_capture();

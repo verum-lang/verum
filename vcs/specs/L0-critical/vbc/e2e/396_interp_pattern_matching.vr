@@ -136,6 +136,8 @@ fn test_variant_construction() {
     print("variant_construction: ok");
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_shape_matching();
     test_expr_eval();

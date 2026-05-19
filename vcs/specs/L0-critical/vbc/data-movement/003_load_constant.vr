@@ -41,6 +41,8 @@ fn test_float_constants() {
     assert(e > 2.71 && e < 2.72);
 }
 
+mount core.prelude.*;
+
 fn main() {
     test_string_constants();
     test_small_string();

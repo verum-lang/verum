@@ -5,6 +5,8 @@
 fn add(a: Int, b: Int) -> Int { a + b }
 fn mul(a: Int, b: Int) -> Int { a * b }
 
+mount core.prelude.*;
+
 fn main() {
     assert_eq(add(mul(2, 3), mul(4, 5)), 26);
     assert_eq(mul(add(1, 2), add(3, 4)), 21);

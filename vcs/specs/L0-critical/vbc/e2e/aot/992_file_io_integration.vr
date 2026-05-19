@@ -4,6 +4,8 @@
 // @tags: io, file, read, write
 // @description: File I/O integration — write, read, verify
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Test 1: write and read a file
     let path = "/tmp/verum_test_992.txt";

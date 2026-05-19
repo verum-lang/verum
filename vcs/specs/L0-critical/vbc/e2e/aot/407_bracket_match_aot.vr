@@ -313,6 +313,8 @@ fn test_complex_valid() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_empty();
     test_simple_parens();

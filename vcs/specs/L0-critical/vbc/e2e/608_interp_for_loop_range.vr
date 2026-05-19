@@ -303,6 +303,8 @@ fn test_sieve_pattern() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_counting();
     test_nested_iteration();

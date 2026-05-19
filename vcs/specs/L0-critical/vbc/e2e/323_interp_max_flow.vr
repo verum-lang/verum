@@ -240,6 +240,8 @@ fn test_cross_flow() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_simple_flow();
     test_parallel_paths();

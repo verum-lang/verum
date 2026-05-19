@@ -41,6 +41,8 @@ fn is_prime(n: Int) -> Bool {
     }
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Fibonacci
     assert_eq(fib(0), 0);

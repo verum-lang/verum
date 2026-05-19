@@ -233,6 +233,8 @@ fn test_activity_selection() -> Int {
     1
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_overlap();
     test_merge();

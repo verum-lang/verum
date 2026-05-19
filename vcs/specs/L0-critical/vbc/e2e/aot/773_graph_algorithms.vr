@@ -253,6 +253,8 @@ fn topological_sort_count(adj0: List<Int>, adj1: List<Int>, adj2: List<Int>,
     ord_idx
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     // Directed graph: 0->1(1), 0->2(4), 1->2(2), 1->3(5), 2->3(1), 2->4(3), 3->5(2), 4->5(1)
     let adj0 = [0, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

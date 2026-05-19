@@ -195,6 +195,8 @@ fn test_pipeline() {
 // Main
 // =============================================================================
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_functions_as_values();
     test_map_list();

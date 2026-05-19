@@ -14,6 +14,8 @@ type Container is {
     count: Int,
 };
 
+mount core.prelude.*;
+
 fn main() {
     let mut container = Container {
         value: Text.from("nested"),

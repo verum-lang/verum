@@ -361,6 +361,8 @@ fn test_empty_matrix() {
     assert_eq(sm_frobenius_sq(e), 0);
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     test_basic_ops();
     test_transpose();

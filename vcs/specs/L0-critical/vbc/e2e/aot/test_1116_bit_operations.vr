@@ -138,6 +138,8 @@ fn test_power_of_two() -> Int {
     0
 }
 
+mount core.prelude.*;
+
 fn main() -> Int {
     print("Bitwise Operation Tests:");
     let mut failures = 0;
