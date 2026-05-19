@@ -12,6 +12,8 @@ fn make_adder(n: Int) -> fn(Int) -> Int {
     |x| x + n
 }
 
+mount core.prelude.*;
+
 fn main() {
     // basic closure
     let double = |x| x * 2;

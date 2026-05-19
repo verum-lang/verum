@@ -6,6 +6,8 @@
 
 type Point is { x: Int, y: Int };
 
+mount core.prelude.*;
+
 fn main() {
     // Ref to local
     let x = 42;

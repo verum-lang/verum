@@ -8,6 +8,8 @@
 // preserved from the prior reverse-scan implementation; the new
 // version is O(n + m) instead of O(n·m).
 
+mount core.prelude.*;
+
 fn main() {
     // Empty needle: returns Some(haystack.len()) per convention.
     match "hello".rfind("") {
