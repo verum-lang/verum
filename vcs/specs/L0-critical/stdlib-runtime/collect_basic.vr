@@ -10,6 +10,8 @@
 // a separate stdlib gap that doesn't affect this spec's goal of
 // guarding the type-system half.
 
+mount core.prelude.*;
+
 fn main() {
     let nums: List<Int> = (0..5).collect();
 

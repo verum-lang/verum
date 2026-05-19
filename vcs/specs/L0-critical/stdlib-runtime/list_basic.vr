@@ -4,6 +4,8 @@
 // @tags: stdlib-runtime, list, basic
 // @expected-stdout: list ops ok
 
+mount core.prelude.*;
+
 fn main() {
     let xs = [1, 2, 3, 4, 5];
     assert_eq(xs.len(), 5);

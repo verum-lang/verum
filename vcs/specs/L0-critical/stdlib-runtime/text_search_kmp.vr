@@ -11,6 +11,8 @@
 // most likely to expose subtle implementation bugs, so each helper
 // gets one.
 
+mount core.prelude.*;
+
 fn main() {
     // contains -------------------------------------------------------
     assert("hello world".contains("world"));

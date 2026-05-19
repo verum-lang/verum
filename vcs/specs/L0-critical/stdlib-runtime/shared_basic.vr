@@ -4,6 +4,8 @@
 // @tags: stdlib-runtime, shared, heap, generic
 // @expected-stdout: shared ok
 
+mount core.prelude.*;
+
 fn main() {
     let s_int = Shared<Int>.new(42);
     let s_bool = Shared<Bool>.new(true);
