@@ -487,14 +487,16 @@ public type Iterator is protocol {
     /// ```verum
     /// let total_age = people.iter().sum_by(|p| p.age);
     /// ```
+    // Task #17/#26 workaround — literal `0` / `1` substitution.
     fn sum_by<B: Add<Output = B> + Zero, F: fn(&Self.Item) -> B>(self, f: F) -> B {
-        self.fold(B.zero(), |acc, item| acc + f(&item))
+        self.fold(0, |acc, item| acc + f(&item))
     }
 
     /// Multiply elements by extracting a numeric key from each item.
     /// Equivalent to `.map(f).product()` but reads more naturally.
+    /// Task #17/#26 workaround — literal `1` substitution.
     fn product_by<B: Mul<Output = B> + One, F: fn(&Self.Item) -> B>(self, f: F) -> B {
-        self.fold(B.one(), |acc, item| acc * f(&item))
+        self.fold(1, |acc, item| acc * f(&item))
     }
 
     // =========================================================================

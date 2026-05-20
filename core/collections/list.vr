@@ -2502,7 +2502,8 @@ implement<T> List<T> {
     public fn product(&self) -> T
     where T: Mul + One
     {
-        let mut acc: T = T.one();
+        // Task #26 workaround — literal `1` substitution.
+        let mut acc: T = 1;
         for i in range(0, self.len) {
             let item: &T = unsafe { &*self.ptr.offset(i) };
             acc = acc * *item;
