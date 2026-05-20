@@ -362,6 +362,16 @@ implement<T: Eq, E: Eq> Eq for Result<T, E> {
             _ => false,
         }
     }
+
+    // Task #39 workaround — explicit `ne`. See Heap.ne doc.
+    fn ne(&self, other: &Result<T, E>) -> Bool {
+        let s_eq = match (self, other) {
+            (Ok(a), Ok(b)) => a == b,
+            (Err(a), Err(b)) => a == b,
+            _ => false,
+        };
+        !s_eq
+    }
 }
 
 implement<T: Ord, E: Ord> Ord for Result<T, E> {
