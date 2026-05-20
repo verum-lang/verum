@@ -505,6 +505,16 @@ implement<T: Eq> Eq for Heap<T> {
     fn eq(&self, other: &Heap<T>) -> Bool {
         **self == **other
     }
+
+    // Task #39 workaround — explicit `ne` mirrors `eq` since the
+    // protocol Eq default-method materialisation doesn't fire for
+    // generic-erased Heap<T> at Tier-0 (let-bound field reads
+    // avoid the inline `self.field != other.field` codegen aliasing
+    // bug also documented for OSError.ne, task #21).
+    fn ne(&self, other: &Heap<T>) -> Bool {
+        let s_eq = **self == **other;
+        !s_eq
+    }
 }
 
 // Ord if T is Ord
@@ -861,6 +871,12 @@ implement<T: Debug> Debug for Shared<T> {
 implement<T: Eq> Eq for Shared<T> {
     fn eq(&self, other: &Shared<T>) -> Bool {
         **self == **other
+    }
+
+    // Task #39 workaround — see Heap.ne doc.
+    fn ne(&self, other: &Shared<T>) -> Bool {
+        let s_eq = **self == **other;
+        !s_eq
     }
 }
 
