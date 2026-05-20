@@ -2175,6 +2175,31 @@ impl CodegenContext {
         self.functions.values().find(|f| f.id == id)
     }
 
+    /// **Scope-aware arity-disambiguated lookup** (#17/#39).
+    /// Probes the per-module index first when scope is known and the
+    /// simple name has no qualifier, then falls back to the standard
+    /// `lookup_function_with_arity` chain.  Same arity-matching
+    /// discipline (primary by-name + `name#arity` alternative) applies
+    /// to both the scoped and the bare lookup.
+    pub fn lookup_function_with_arity_in_scope(
+        &self,
+        name: &str,
+        arity: usize,
+    ) -> Option<&FunctionInfo> {
+        if let Some(scope) = &self.current_source_module
+            && !name.contains('.')
+            && !name.contains("::")
+        {
+            let key = (scope.clone(), name.to_string());
+            if let Some(info) = self.scoped_functions.get(&key)
+                && info.param_count == arity
+            {
+                return Some(info);
+            }
+        }
+        self.lookup_function_with_arity(name, arity)
+    }
+
     /// Looks up a function by name with arity disambiguation.
     /// When the primary lookup returns a function with wrong arity,
     /// checks for an arity-qualified alternative (name#arity).

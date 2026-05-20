@@ -4499,12 +4499,16 @@ impl VbcCodegen {
             None
         };
 
-        // Look up function - use arity-based disambiguation when available
+        // Look up function - use arity-based disambiguation when available.
+        // #17/#39: probe scope-aware index first so cross-module
+        // name collisions (SIZE_CLASSES, BLOCK_SIZE, Char.from_digit,
+        // index_of) prefer the entry registered in the caller's own
+        // module rather than first-wins archive-load order.
         let (resolved_name, func_info) = match module_qualified_lookup
             .or_else(|| type_aware_lookup)
             .or_else(|| {
                 self.ctx
-                    .lookup_function_with_arity(&func_name, args.len())
+                    .lookup_function_with_arity_in_scope(&func_name, args.len())
                     .map(|info| (func_name.clone(), info.clone()))
             })
             .or_else(suffix_match_lookup)
