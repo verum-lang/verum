@@ -2788,8 +2788,9 @@ impl VbcCodegen {
 
                 // Check if it's a static/constant (registered as 0-param function)
                 // For bootstrap: define a local variable for the static and assign to it
-                // This is a workaround until proper global variable support is added
-                if let Some(func_info) = self.ctx.lookup_function(name)
+                // This is a workaround until proper global variable support is added.
+                // #17 migration #6: scope-aware lookup.
+                if let Some(func_info) = self.ctx.lookup_function_in_scope(name)
                     && func_info.param_count == 0
                 {
                     // This is a static variable - create a local shadow and assign
