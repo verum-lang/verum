@@ -18461,6 +18461,49 @@ impl VbcCodegen {
                         {
                             return Some(parent.clone());
                         }
+                        // Task #26/#39 surgical disambiguation —
+                        // free-fn vs method shadow on bare-name call.
+                        //
+                        // When the bare-name primary slot holds a METHOD
+                        // (parent_type_name.is_some(), e.g. BTreeSet.range)
+                        // but the user wrote `range(1, 6)` with no
+                        // receiver, scan the function table for an
+                        // arity-matching FREE function (parent_type_name
+                        // is None) registered under a qualified key
+                        // ending in `.<func_name>` — that's the
+                        // user-intended target.  Without this,
+                        // `range(1, 6).sum()` mis-infers the receiver of
+                        // `.sum()` as `BTreeSetRange<...>` (the method's
+                        // return type) and emits a Call to a non-
+                        // existent `BTreeSetRange.sum` that panics at
+                        // runtime with "method 'BTreeSetRange.sum' not
+                        // found on receiver of runtime kind Range".
+                        // The free-fn `core.base.iterator.range(start,
+                        // end) -> Range<Int>` is the correct target.
+                        if info.parent_type_name.is_some()
+                            && info.param_count == args.len()
+                            && !func_name.contains('.')
+                            && !func_name.contains("::")
+                        {
+                            let suffix_dot = format!(".{}", func_name);
+                            let suffix_colon = format!("::{}", func_name);
+                            let free_fn_candidate = self
+                                .ctx
+                                .functions
+                                .iter()
+                                .find(|(k, v)| {
+                                    v.parent_type_name.is_none()
+                                        && v.param_count == args.len()
+                                        && v.return_type_name.is_some()
+                                        && (k.ends_with(&suffix_dot)
+                                            || k.ends_with(&suffix_colon))
+                                });
+                            if let Some((_, free_info)) = free_fn_candidate
+                                && let Some(rt) = &free_info.return_type_name
+                            {
+                                return Some(rt.clone());
+                            }
+                        }
                         // Defense: don't surface an arity-mismatched
                         // return type even if `lookup_function_with_arity`
                         // fell through to its `return Some(info)` (wrong-

@@ -134,7 +134,17 @@ public type RefinementPredicate is
 // -----------------------------------------------------------------------------
 
 /// Closed integer interval `lo <= col <= hi`.
-public fn range(lo: Int, hi: Int) -> RefinementPredicate {
+///
+/// Renamed from `range` to `int_range` 2026-05-20 to break a
+/// cross-module collision with `core.base.iterator.range(Int,Int)`
+/// — the bare-name first-wins shadow caused `range(1, 6).sum()` in
+/// user code to resolve to this builder (returning a
+/// `RefinementPredicate`) instead of the iterator's Range<Int>,
+/// then `.sum()` panicked with
+/// "method 'RefinementPredicate.sum' not found on Range". Same
+/// architectural class as the SIZE_CLASSES / Char.from_digit
+/// cross-module collisions logged in MEMORY.md.
+public fn int_range(lo: Int, hi: Int) -> RefinementPredicate {
     RpIntRange { lo: lo, hi: hi }
 }
 
