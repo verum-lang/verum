@@ -148,11 +148,15 @@ public fn int_range(lo: Int, hi: Int) -> RefinementPredicate {
     RpIntRange { lo: lo, hi: hi }
 }
 
-/// Inclusive lower bound `col >= n`.
-public fn min(n: Int) -> RefinementPredicate { RpIntGe(n) }
+/// Inclusive lower bound `col >= n`. Renamed from `min` 2026-05-20
+/// to break the cross-module collision with `core.math.simple.min`,
+/// `core.math.libm.min`, etc.  Same architectural class as the
+/// `range` → `int_range` rename above.
+public fn int_min(n: Int) -> RefinementPredicate { RpIntGe(n) }
 
-/// Inclusive upper bound `col <= n`.
-public fn max(n: Int) -> RefinementPredicate { RpIntLe(n) }
+/// Inclusive upper bound `col <= n`. Renamed from `max` 2026-05-20
+/// — see `int_min` doc-comment for collision-driven rationale.
+public fn int_max(n: Int) -> RefinementPredicate { RpIntLe(n) }
 
 /// Strict positive (`col > 0`) — convenience for the common case.
 public fn positive() -> RefinementPredicate { RpIntGt(0) }
