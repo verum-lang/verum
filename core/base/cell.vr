@@ -108,6 +108,14 @@ implement<T: Clone + Eq> Eq for Cell<T> {
     fn eq(&self, other: &Cell<T>) -> Bool {
         self.get() == other.get()
     }
+
+    // Task #39 workaround — explicit `ne` because Tier-0 generic
+    // erasure doesn't materialise the Eq protocol default-method.
+    @inline(always)
+    fn ne(&self, other: &Cell<T>) -> Bool {
+        let s_eq = self.get() == other.get();
+        !s_eq
+    }
 }
 
 implement<T: Clone + Ord> Ord for Cell<T> {
@@ -305,6 +313,12 @@ implement<T: Clone> Clone for RefCell<T> {
 implement<T: Eq> Eq for RefCell<T> {
     fn eq(&self, other: &RefCell<T>) -> Bool {
         *self.borrow().value == *other.borrow().value
+    }
+
+    // Task #39 workaround — see Heap.ne doc in core/base/memory.vr.
+    fn ne(&self, other: &RefCell<T>) -> Bool {
+        let s_eq = *self.borrow().value == *other.borrow().value;
+        !s_eq
     }
 }
 
