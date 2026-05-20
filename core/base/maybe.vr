@@ -541,6 +541,16 @@ implement<T: Eq> Eq for Maybe<T> {
             _ => false,
         }
     }
+
+    // Task #39 workaround — explicit `ne`. See Heap.ne doc.
+    fn ne(&self, other: &Maybe<T>) -> Bool {
+        let s_eq = match (self, other) {
+            (None, None) => true,
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        };
+        !s_eq
+    }
 }
 
 implement<T: Ord> Ord for Maybe<T> {
