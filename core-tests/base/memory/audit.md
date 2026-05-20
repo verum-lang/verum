@@ -106,7 +106,7 @@ intrinsic_name propagation in `compile_function`). Pinned by interpreter
 trace gating on `VERUM_TRACE_PUSH_STR=1` instrumentation in
 `crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs:429`.
 
-### 3.4 cbgr_test heap suite — 24/35 PASSING 2026-05-20 (partial, was 4/35)
+### 3.4 cbgr_test heap suite — 25/35 PASSING 2026-05-20 (partial, was 4/35)
 
 **Status update**: previous baseline of 4 passed / 14 failed has
 been promoted to **24 passed / 11 failed** out of 35 total tests
