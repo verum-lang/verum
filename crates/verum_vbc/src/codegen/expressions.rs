@@ -1520,7 +1520,11 @@ impl VbcCodegen {
                 // table looking for an entry whose name ends with
                 // `.<name>` AND is a zero-param const-shaped function.
                 // Unambiguous match → use it.
-                let func_info_opt = expected_prefixed_info.or_else(|| self.ctx.lookup_function(name).cloned()).or_else(|| {
+                // #17 migration #2: prefer scope-aware lookup so
+                // BLOCK_SIZE-class collisions resolve to the caller's
+                // own module's const rather than first-wins archive
+                // shadow.
+                let func_info_opt = expected_prefixed_info.or_else(|| self.ctx.lookup_function_in_scope(name).cloned()).or_else(|| {
                     let is_const_shaped = !name.is_empty()
                         && name.chars().all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
                         && name.chars().next().is_some_and(|c| c.is_ascii_uppercase());
