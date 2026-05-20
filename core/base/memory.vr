@@ -512,6 +512,40 @@ implement<T: Ord> Ord for Heap<T> {
     fn cmp(&self, other: &Heap<T>) -> Ordering {
         (**self).cmp(&**other)
     }
+
+    // Task #39 workaround — explicit Ord comparison methods.
+    //
+    // At Tier-0 generic erasure the Ord protocol's default `.lt/.gt/.le/.ge`
+    // body materialisation doesn't fire for Heap<T> (dispatch panics with
+    // "method 'Heap.gt' not found"). Provide explicit impls that delegate
+    // to cmp until protocol default-method monomorphisation lands.
+    fn lt(&self, other: &Heap<T>) -> Bool {
+        match (**self).cmp(&**other) {
+            Ordering.Less => true,
+            _ => false,
+        }
+    }
+
+    fn gt(&self, other: &Heap<T>) -> Bool {
+        match (**self).cmp(&**other) {
+            Ordering.Greater => true,
+            _ => false,
+        }
+    }
+
+    fn le(&self, other: &Heap<T>) -> Bool {
+        match (**self).cmp(&**other) {
+            Ordering.Greater => false,
+            _ => true,
+        }
+    }
+
+    fn ge(&self, other: &Heap<T>) -> Bool {
+        match (**self).cmp(&**other) {
+            Ordering.Less => false,
+            _ => true,
+        }
+    }
 }
 
 // Hash if T is Hash
@@ -833,6 +867,24 @@ implement<T: Eq> Eq for Shared<T> {
 implement<T: Ord> Ord for Shared<T> {
     fn cmp(&self, other: &Shared<T>) -> Ordering {
         (**self).cmp(&**other)
+    }
+
+    // Task #39 workaround — explicit Ord comparison methods (see
+    // Heap impl for rationale).
+    fn lt(&self, other: &Shared<T>) -> Bool {
+        match (**self).cmp(&**other) { Ordering.Less => true, _ => false }
+    }
+
+    fn gt(&self, other: &Shared<T>) -> Bool {
+        match (**self).cmp(&**other) { Ordering.Greater => true, _ => false }
+    }
+
+    fn le(&self, other: &Shared<T>) -> Bool {
+        match (**self).cmp(&**other) { Ordering.Greater => false, _ => true }
+    }
+
+    fn ge(&self, other: &Shared<T>) -> Bool {
+        match (**self).cmp(&**other) { Ordering.Less => false, _ => true }
     }
 }
 
