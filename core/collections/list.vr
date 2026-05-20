@@ -2481,7 +2481,8 @@ implement<T> List<T> {
     public fn sum(&self) -> T
     where T: Add + Default
     {
-        let mut acc: T = T.default();
+        // Task #17 workaround — literal `0` substitution.
+        let mut acc: T = 0;
         for i in range(0, self.len) {
             let item: &T = unsafe { &*self.ptr.offset(i) };
             acc = acc + *item;

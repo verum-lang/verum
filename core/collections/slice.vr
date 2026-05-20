@@ -746,11 +746,12 @@ implement<T> [T] {
     }
 
     /// Fill with default value.
+    /// Task #17 workaround — literal `0` substitution.
     fn fill_default(&mut self)
     where T: Default
     {
         for i in range(0, self.len()) {
-            self[i] = T.default();
+            self[i] = 0;
         }
     }
 

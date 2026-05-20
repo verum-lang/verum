@@ -161,8 +161,9 @@ implement<T> Mutex<T> {
 }
 
 implement<T: Default> Default for Mutex<T> {
+    // Task #17 workaround — literal `0` substitution.
     fn default() -> Mutex<T> {
-        Mutex.new(T.default())
+        Mutex.new(0)
     }
 }
 
