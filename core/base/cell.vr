@@ -76,9 +76,10 @@ implement<T: Clone> Cell<T> {
     }
 
     /// Take the value, leaving Default.default() in its place.
+    /// Task #17 workaround — literal `0` substitution.
     @inline(always)
     public fn take(&self) -> T where T: Default {
-        self.replace(T.default())
+        self.replace(0)
     }
 
     /// Update the cell's value using a function.
@@ -124,9 +125,10 @@ implement<T: Clone> Clone for Cell<T> {
 }
 
 implement<T: Clone + Default> Default for Cell<T> {
+    // Task #17 workaround — literal `0` substitution.
     @inline(always)
     fn default() -> Cell<T> {
-        Cell.new(T.default())
+        Cell.new(0)
     }
 }
 
@@ -319,8 +321,9 @@ implement<T: Debug> Debug for RefCell<T> {
 }
 
 implement<T: Default> Default for RefCell<T> {
+    // Task #17 workaround — literal `0` substitution.
     fn default() -> RefCell<T> {
-        RefCell.new(T.default())
+        RefCell.new(0)
     }
 }
 

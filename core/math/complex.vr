@@ -61,18 +61,21 @@ implement<T> Complex<T> {
 
 implement<T: Default> Complex<T> {
     /// Create a complex number from just the real part (imaginary = 0).
+    /// Task #17 workaround — literal `0` substitution.
     public fn from_real(re: T) -> Complex<T> {
-        Complex { re: re, im: T.default() }
+        Complex { re: re, im: 0 }
     }
 
     /// Create a complex number from just the imaginary part (real = 0).
+    /// Task #17 workaround — literal `0` substitution.
     public fn from_imag(im: T) -> Complex<T> {
-        Complex { re: T.default(), im: im }
+        Complex { re: 0, im: im }
     }
 
     /// The zero complex number (0 + 0i).
+    /// Task #17 workaround — literal `0` substitution.
     public fn zero() -> Complex<T> {
-        Complex { re: T.default(), im: T.default() }
+        Complex { re: 0, im: 0 }
     }
 }
 

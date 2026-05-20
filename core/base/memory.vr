@@ -1100,8 +1100,11 @@ public fn replace<T>(dest: &mut T, src: T) -> T {
 }
 
 /// Take a value, leaving the default in its place.
+///
+/// Task #17 workaround — literal `0` substitution. See
+/// `Heap.new_default`.
 public fn take<T: Default>(dest: &mut T) -> T {
-    replace(dest, T.default())
+    replace(dest, 0)
 }
 
 // `memcmp` is mounted directly from `core.intrinsics.memory.{...}`
@@ -1202,8 +1205,9 @@ implement<T: Hash> Hash for ManuallyDrop<T> {
 }
 
 implement<T: Default> Default for ManuallyDrop<T> {
+    // Task #17 workaround — literal `0` substitution.
     fn default() -> ManuallyDrop<T> {
-        ManuallyDrop { value: T.default() }
+        ManuallyDrop { value: 0 }
     }
 }
 
@@ -1446,8 +1450,9 @@ implement<T: Clone + Hash> Hash for Cow<T> {
 }
 
 implement<T: Clone + Default> Default for Cow<T> {
+    // Task #17 workaround — literal `0` substitution.
     fn default() -> Cow<T> {
-        Owned(T.default())
+        Owned(0)
     }
 }
 
@@ -1595,8 +1600,9 @@ implement<T: Hash> Hash for Pin<T> {
 }
 
 implement<T: Default> Default for Pin<T> {
+    // Task #17 workaround — literal `0` substitution.
     fn default() -> Pin<T> {
-        Pin { pointer: T.default() }
+        Pin { pointer: 0 }
     }
 }
 

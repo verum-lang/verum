@@ -255,8 +255,9 @@ implement<T> RwLock<T> {
 }
 
 implement<T: Default> Default for RwLock<T> {
+    // Task #17 workaround — literal `0` substitution.
     fn default() -> RwLock<T> {
-        RwLock.new(T.default())
+        RwLock.new(0)
     }
 }
 
