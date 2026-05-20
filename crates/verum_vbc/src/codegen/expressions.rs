@@ -7045,18 +7045,24 @@ impl VbcCodegen {
         resolved_target: Option<&verum_ast::expr::ResolvedCallTarget>,
     ) -> CodegenResult<Option<Reg>> {
         // ──────────────────────────────────────────────────────────
-        // Phase 0: Task #17 — `T.default()` on generic type-param.
-        // Runs BEFORE the pre-resolved fast path because the typechecker
-        // stamps `T.default()` as `StaticCall { qualified_name: "T.default" }`
-        // (or via protocol-Default registry seed), and the pre-resolved
-        // path then emits a plain `Call <T.default-fn-id>` which executes
-        // a broken body or auto-stub at runtime. At Tier-0 generic-erasure
-        // there is no runtime witness for T, so the only safe value is the
-        // primitive zero. Emit `LoadI{0}` directly.
+        // Phase 0: Task #17/#26 — `T.default()`/`T.zero()`/`T.one()`
+        // on generic type-param. Runs BEFORE the pre-resolved fast path
+        // because the typechecker stamps `T.default()` /etc. as
+        // `StaticCall { qualified_name: "T.default" }` (or via
+        // protocol-Default/Zero/One registry seed), and the pre-resolved
+        // path then emits a plain `Call <fn-id>` which executes a broken
+        // body or auto-stub at runtime. At Tier-0 generic-erasure there
+        // is no runtime witness for T, so the safe primitive identity is
+        // hard-coded: `default → 0`, `zero → 0`, `one → 1`.
         // Cross-ref: memory/callg_emission_fix_blueprint_2026-05-19.md
         // documents the fundamental monomorphisation fix that closes the
         // non-primitive-T cases properly.
-        if method.name.as_str() == "default"
+        let task17_primitive_identity = match method.name.as_str() {
+            "default" | "zero" => Some(0i64),
+            "one" => Some(1i64),
+            _ => None,
+        };
+        if let Some(value) = task17_primitive_identity
             && args.is_empty()
             && let ExprKind::Path(path) = &receiver.kind
             && path.segments.len() == 1
@@ -7066,7 +7072,7 @@ impl VbcCodegen {
             let result = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::LoadI {
                 dst: result,
-                value: 0,
+                value,
             });
             return Ok(Some(result));
         }
@@ -9584,14 +9590,19 @@ impl VbcCodegen {
         // Cross-ref: `memory/callg_emission_fix_blueprint_2026-05-19.md`
         // documents the fundamental monomorphisation fix that closes
         // non-primitive-T cases properly.
-        if method_name == "default"
+        let task17_primitive_identity = match method_name.as_str() {
+            "default" | "zero" => Some(0i64),
+            "one" => Some(1i64),
+            _ => None,
+        };
+        if let Some(value) = task17_primitive_identity
             && args.is_empty()
             && self.ctx.generic_type_params.contains(&type_name)
         {
             let result = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::LoadI {
                 dst: result,
-                value: 0,
+                value,
             });
             return Ok(Some(Some(result)));
         }
