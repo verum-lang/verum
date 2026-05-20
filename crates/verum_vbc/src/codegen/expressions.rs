@@ -894,8 +894,11 @@ impl VbcCodegen {
             && path.segments.len() == 1
             && let PathSegment::Name(ident) = &path.segments[0]
         {
-            // Look up as a function
-            if let Some(func_info) = self.ctx.lookup_function(&ident.name) {
+            // Look up as a function. #17 migration #3: scope-aware
+            // probe — for FFI callback resolution, the function-name
+            // resolution should prefer the caller's module's binding
+            // over first-wins archive shadow.
+            if let Some(func_info) = self.ctx.lookup_function_in_scope(&ident.name) {
                 return Some(FfiCallbackInfo {
                     arg_idx,
                     func_id: func_info.id.0,
