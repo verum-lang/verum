@@ -17567,7 +17567,9 @@ impl VbcCodegen {
                             // For uppercase names, check if this is a variant constructor
                             // and return the parent type name instead (e.g., Nothing → Maybe)
                             if ident.name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                                if let Some(func_info) = self.ctx.lookup_function(&ident.name) {
+                                // #17 migration #5: scope-aware lookup
+                                // for variant ctor / const resolution.
+                                if let Some(func_info) = self.ctx.lookup_function_in_scope(&ident.name) {
                                     if let Some(ref parent_type) = func_info.parent_type_name {
                                         return Some(parent_type.clone());
                                     }
@@ -18294,8 +18296,10 @@ impl VbcCodegen {
                             // returned None for a Path-typed const
                             // base — and the fallthrough `GetF` site
                             // null-derefs on the inlined `LoadI 0`.
+                            // #17 migration #5b: scope-aware const lookup
+                            // for `infer_expr_type_name` (const-from-Path).
                             if let Some(info) =
-                                self.ctx.lookup_function(&ident.name)
+                                self.ctx.lookup_function_in_scope(&ident.name)
                                 && info.param_count == 0
                                 && (info.is_const
                                     || info
