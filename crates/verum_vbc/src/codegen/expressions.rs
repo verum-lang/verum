@@ -7064,17 +7064,44 @@ impl VbcCodegen {
         };
         if let Some(value) = task17_primitive_identity
             && args.is_empty()
-            && let ExprKind::Path(path) = &receiver.kind
-            && path.segments.len() == 1
-            && let PathSegment::Name(ident) = &path.segments[0]
-            && self.ctx.generic_type_params.contains(ident.name.as_str())
         {
-            let result = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::LoadI {
-                dst: result,
-                value,
-            });
-            return Ok(Some(result));
+            let matched = match &receiver.kind {
+                // T.default() / T.zero() / T.one() — single-segment Path.
+                ExprKind::Path(path)
+                    if path.segments.len() == 1
+                        && matches!(
+                            &path.segments[0],
+                            PathSegment::Name(ident)
+                                if self.ctx.generic_type_params.contains(ident.name.as_str())
+                        ) =>
+                {
+                    true
+                }
+                // Self.Item.default() / Self.Item.zero() / Self.Item.one()
+                // — Field access whose base is `Self` and field is `Item`.
+                // The associated type Self.Item is generic-erased at Tier-0,
+                // so we hard-code the primitive identity literal.
+                // (PathSegment::SelfValue covers both `Self` type-position
+                // and `self` value-position; both lower to the same variant
+                // at this level — see verum_ast::ty::PathSegment.)
+                ExprKind::Field { expr: base, field } if field.name.as_str() == "Item" => {
+                    matches!(
+                        &base.kind,
+                        ExprKind::Path(p)
+                            if p.segments.len() == 1
+                                && matches!(&p.segments[0], PathSegment::SelfValue)
+                    )
+                }
+                _ => false,
+            };
+            if matched {
+                let result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::LoadI {
+                    dst: result,
+                    value,
+                });
+                return Ok(Some(result));
+            }
         }
 
         // ──────────────────────────────────────────────────────────
