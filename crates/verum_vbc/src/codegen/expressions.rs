@@ -14751,9 +14751,12 @@ impl VbcCodegen {
                             // 1. NOT a local variable AND
                             // 2. NOT a static/const (registered as zero-argument function)
                             let is_local_var = self.ctx.get_var_reg(&ident.name).is_ok();
+                            // #17 migration #4: scope-aware probe so
+                            // const-detection prefers caller's module's
+                            // binding over first-wins archive shadow.
                             let is_static_or_const = self
                                 .ctx
-                                .lookup_function(&ident.name)
+                                .lookup_function_in_scope(&ident.name)
                                 .map(|f| f.param_count == 0 && !f.is_async && !f.is_generator)
                                 .unwrap_or(false);
 
