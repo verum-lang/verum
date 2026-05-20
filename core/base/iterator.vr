@@ -468,15 +468,18 @@ public type Iterator is protocol {
     // =========================================================================
 
     /// Sum all elements.
+    /// Task #17/#26 workaround — literal `0` substitution for the
+    /// generic-erased Self.Item.zero() default-body accumulator.
     fn sum(self) -> Self.Item
     where Self.Item: Add<Output = Self.Item> + Zero {
-        self.fold(Self.Item.zero(), |a, b| a + b)
+        self.fold(0, |a, b| a + b)
     }
 
     /// Product of all elements.
+    /// Task #17/#26 workaround — literal `1` substitution.
     fn product(self) -> Self.Item
     where Self.Item: Mul<Output = Self.Item> + One {
-        self.fold(Self.Item.one(), |a, b| a * b)
+        self.fold(1, |a, b| a * b)
     }
 
     /// Sum elements by extracting a numeric key from each item.
