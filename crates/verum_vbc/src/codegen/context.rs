@@ -116,6 +116,22 @@ pub struct CodegenContext {
     /// Function registry for lookups.
     pub functions: HashMap<String, FunctionInfo>,
 
+    /// **Scope-aware function index** (#17/#39 foundation, additive).
+    ///
+    /// Maps `(module_scope, simple_name)` -> `FunctionInfo`.  Populated
+    /// in parallel with `functions` by `register_function` when
+    /// `current_source_module` is known.  Consumers prefer this index
+    /// over the bare `functions` table when a current compile-scope is
+    /// available — the per-module entry shields name resolution from
+    /// the cross-module first-wins collision class that surfaced 7+
+    /// times this session (SIZE_CLASSES allocator vs size_class.vr,
+    /// Char.from_digit canonical vs primitives.vr, etc).  Fallback to
+    /// bare `functions` lookup when scope is absent or scope-specific
+    /// entry is missing.  Architectural rule: every call site that
+    /// previously did `lookup_function(name)` and risked first-wins
+    /// shadow should migrate to `lookup_function_in_scope(scope, name)`.
+    pub scoped_functions: HashMap<(String, String), FunctionInfo>,
+
     /// When true, register_function will not overwrite existing entries.
     /// Used when importing stdlib modules after user code has been registered.
     pub prefer_existing_functions: bool,
@@ -1019,6 +1035,7 @@ impl CodegenContext {
             bytes: Vec::new(),
             bytes_intern: HashMap::new(),
             functions: HashMap::new(),
+            scoped_functions: HashMap::new(),
             prefer_existing_functions: false,
             current_source_module: None,
             stats: CodegenStats::default(),
@@ -1992,6 +2009,21 @@ impl CodegenContext {
             }
             return;
         }
+        // **#17/#39 scope-aware mirror**: also record under the
+        // (current_source_module, name) key so collision-prone lookups
+        // can prefer the per-scope entry.  Only fires when scope is
+        // known AND the simple name is bare (no qualifier dots) — fully-
+        // qualified registrations are already collision-safe.
+        if let Some(scope) = &self.current_source_module
+            && !name.contains('.') && !name.contains("::")
+        {
+            let key = (scope.clone(), name.clone());
+            if self.prefer_existing_functions {
+                self.scoped_functions.entry(key).or_insert(info.clone());
+            } else {
+                self.scoped_functions.insert(key, info.clone());
+            }
+        }
         if self.prefer_existing_functions {
             self.functions.entry(name).or_insert(info);
         } else {
@@ -2102,6 +2134,25 @@ impl CodegenContext {
 
     /// Looks up a function by name.
     pub fn lookup_function(&self, name: &str) -> Option<&FunctionInfo> {
+        self.functions.get(name)
+    }
+
+    /// **Scope-aware function lookup** (#17/#39 foundation).
+    ///
+    /// Probes the per-module scope index first using
+    /// `(current_source_module, name)`; falls back to the bare
+    /// `functions` table when no scope-specific entry is registered.
+    /// Call sites that have a current compile-scope (which is most
+    /// codegen sites — `current_source_module` is the dotted path of
+    /// the module currently being collected/compiled) should prefer
+    /// this over plain `lookup_function` to dodge cross-module
+    /// first-wins shadowing.
+    pub fn lookup_function_in_scope(&self, name: &str) -> Option<&FunctionInfo> {
+        if let Some(scope) = &self.current_source_module
+            && let Some(info) = self.scoped_functions.get(&(scope.clone(), name.to_string()))
+        {
+            return Some(info);
+        }
         self.functions.get(name)
     }
 
