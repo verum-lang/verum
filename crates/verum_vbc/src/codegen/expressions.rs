@@ -13389,7 +13389,7 @@ impl VbcCodegen {
                                                     .lookup_function(&format!("{}.{}", base, variant_name))
                                                     .or_else(|| self.ctx.lookup_function(&format!("{}::{}", base, variant_name)));
                                                 if let Some(info) = scrutinee_aware_info
-                                                    .or_else(|| self.ctx.lookup_function(&variant_name))
+                                                    .or_else(|| self.ctx.lookup_function_in_scope(&variant_name))
                                                 {
                                                     // Pick the declared payload type if it's concrete;
                                                     // otherwise fall through to the same generic-substitution
@@ -13776,7 +13776,7 @@ impl VbcCodegen {
                     } else {
                         // Fallback: call the function (shouldn't happen in normal flow)
                         // This path exists for safety in case caching wasn't done
-                        if let Some(func_info) = self.ctx.lookup_function(&pattern_name) {
+                        if let Some(func_info) = self.ctx.lookup_function_in_scope(&pattern_name) {
                             let func_info = func_info.clone();
 
                             // Compile params + scrutinee as arguments
@@ -15383,7 +15383,7 @@ impl VbcCodegen {
                     );
                 }
                 // Fallback: try simple name for non-colliding variants
-                if self.ctx.lookup_function(field).is_some() {
+                if self.ctx.lookup_function_in_scope(field).is_some() {
                     return self.compile_variant_constructor_hinted(
                         field,
                         &verum_common::List::new(),
@@ -15481,7 +15481,7 @@ impl VbcCodegen {
             // since every NaN-boxed Value is exactly 8 bytes.
             if matches!(field, "size" | "alignment" | "stride" | "name")
                 && self.ctx.get_var_reg(type_name).is_err()
-                && self.ctx.lookup_function(type_name).is_none()
+                && self.ctx.lookup_function_in_scope(type_name).is_none()
                 && let Some(value) = self.layout_property_for_named(type_name, field)
             {
                 let result = self.ctx.alloc_temp();
@@ -19042,7 +19042,7 @@ impl VbcCodegen {
                         }
 
                         // Look up regular Verum functions by return type name
-                        if let Some(func_info) = self.ctx.lookup_function(&func_name)
+                        if let Some(func_info) = self.ctx.lookup_function_in_scope(&func_name)
                             && let Some(ref ret_name) = func_info.return_type_name
                         {
                             return self.type_name_to_type_kind(ret_name);
@@ -20485,7 +20485,7 @@ impl VbcCodegen {
                     .join("::")
             };
             if !func_name.is_empty()
-                && let Some(func) = self.ctx.lookup_function(&func_name)
+                && let Some(func) = self.ctx.lookup_function_in_scope(&func_name)
             {
                 let func_id = func.id.0;
 
