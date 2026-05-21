@@ -855,17 +855,26 @@ implement<T> List<T> {
         None
     }
 
-    // Alias for position — find index of element, returns -1 if not found.
-    public fn index_of(&self, value: &T) -> Int
+    // Find index of element matching `value` (by value-equality).
+    //
+    // **Signature unified with slice's `[T].index_of -> Maybe<Int>`**.
+    // Pre-fix List returned `Int` with `-1` sentinel; slice returned
+    // `Maybe<Int>`.  Cross-module bare-name collision on `index_of`
+    // dispatched List's body against slice callsites expecting
+    // `Maybe<Int>`, breaking
+    // `core-tests/collections/slice/regression_test.vr::regression_slice_position_misdispatches_to_iterator_predicate_form`.
+    // Until #17/#39 mount-scope-aware dispatch fully closes, siblings
+    // sharing a simple name MUST agree on signature shape.
+    public fn index_of(&self, value: &T) -> Maybe<Int>
     where T: Eq
     {
         for i in range(0, self.len) {
             let item: &T = unsafe { &*self.ptr.offset(i) };
             if *item == *value {
-                return i;
+                return Some(i);
             }
         }
-        -1
+        None
     }
 
     // =========================================================================
