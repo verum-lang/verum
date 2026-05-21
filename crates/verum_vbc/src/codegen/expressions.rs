@@ -4379,8 +4379,13 @@ impl VbcCodegen {
                 0 => None,
                 1 => {
                     let chosen = candidates.remove(0);
+                    // #17 migration #8: scope-aware probe for the
+                    // suffix-match unique-candidate path.  The chosen
+                    // name comes from a single-element suffix match;
+                    // scope-aware lookup tightens to caller's module
+                    // first.
                     self.ctx
-                        .lookup_function(&chosen)
+                        .lookup_function_in_scope(&chosen)
                         .map(|info| (chosen, info.clone()))
                 }
                 _ => {
