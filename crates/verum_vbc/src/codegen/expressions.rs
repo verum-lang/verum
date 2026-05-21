@@ -713,14 +713,16 @@ impl VbcCodegen {
         let parent_name = explicit_parent
             .map(|s| s.to_string())
             .or_else(|| {
+                // #17 migration #9a: scope-aware parent-type extraction
+                // from primary name.
                 self.ctx
-                    .lookup_function(primary_lookup_name)
+                    .lookup_function_in_scope(primary_lookup_name)
                     .and_then(|info| info.parent_type_name.clone())
             })
             .or_else(|| {
                 fallback_lookup_name.and_then(|n| {
                     self.ctx
-                        .lookup_function(n)
+                        .lookup_function_in_scope(n)
                         .and_then(|info| info.parent_type_name.clone())
                 })
             })
