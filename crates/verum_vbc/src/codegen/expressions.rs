@@ -8068,7 +8068,7 @@ impl VbcCodegen {
         if args.is_empty()
             && self.ctx.is_raw_pointer(receiver_reg)
             && method.name == "is_null"
-            && let Some(func_info) = self.ctx.lookup_function("is_null").cloned()
+            && let Some(func_info) = self.ctx.lookup_function_in_scope("is_null").cloned()
         {
             // Fresh consecutive arg register (Call instruction expects
             // args in a contiguous range starting at `start`).
@@ -9780,7 +9780,7 @@ impl VbcCodegen {
             // We forward `type_name` as the explicit parent hint here for the
             // same reason as the typed branch above — the surrounding `TypeName.`
             // segment is the most authoritative signal for the parent sum type.
-            if let Some(func_info) = self.ctx.lookup_function(&method_name).cloned()
+            if let Some(func_info) = self.ctx.lookup_function_in_scope(&method_name).cloned()
                 && func_info.variant_tag.is_some()
                 && func_info.param_count == args.len()
             {
@@ -12670,7 +12670,7 @@ impl VbcCodegen {
                 let pattern_name = name.name.to_string();
 
                 // Look up the pattern function
-                let func_info = self.ctx.lookup_function(&pattern_name);
+                let func_info = self.ctx.lookup_function_in_scope(&pattern_name);
 
                 if let Some(func_info) = func_info {
                     let func_info = func_info.clone();
