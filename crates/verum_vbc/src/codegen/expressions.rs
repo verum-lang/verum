@@ -763,12 +763,15 @@ impl VbcCodegen {
         type_display_name: &'static str,
         usage_context: &str,
     ) -> CodegenResult<u32> {
+        // #17 migration #10: variant-tag lookup uses scope-aware
+        // first then falls back to bare lookup.  Qualified names
+        // (with dots) flow through the fallback path unchanged.
         self.ctx
-            .lookup_function(canonical)
+            .lookup_function_in_scope(canonical)
             .and_then(|info| info.variant_tag)
             .or_else(|| {
                 self.ctx
-                    .lookup_function(qualified)
+                    .lookup_function_in_scope(qualified)
                     .and_then(|info| info.variant_tag)
             })
             .ok_or_else(|| {
