@@ -6739,7 +6739,7 @@ impl VbcCodegen {
                     .as_ref()
                     .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
             });
-        let direct_tag = self.ctx.lookup_function(name).and_then(|info| {
+        let direct_tag = self.ctx.lookup_function_in_scope(name).and_then(|info| {
             // Only accept the direct hit when we lack a context type or
             // when the parent matches it; otherwise fall through to the
             // suffix-and-args lookup which uses the disambiguation table.
@@ -9895,7 +9895,7 @@ impl VbcCodegen {
                         return Some(type_name.clone());
                     }
                     // Check if it's a type name (constructor)
-                    if let Some(func_info) = self.ctx.lookup_function(&name)
+                    if let Some(func_info) = self.ctx.lookup_function_in_scope(&name)
                         && func_info.param_count == 0
                     {
                         return func_info.return_type_name.clone();
@@ -10129,7 +10129,7 @@ impl VbcCodegen {
             let receiver_type = if let Some(type_name) = self.ctx.variable_type_names.get(&var_name)
             {
                 Some(type_name.clone())
-            } else if let Some(func_info) = self.ctx.lookup_function(&var_name) {
+            } else if let Some(func_info) = self.ctx.lookup_function_in_scope(&var_name) {
                 // For constants/statics (functions with 0 params), get return type
                 if func_info.param_count == 0 {
                     func_info.return_type_name.clone()
