@@ -1999,6 +1999,19 @@ implement<T: Eq> Eq for Deque<T> {
         }
         true
     }
+
+    // Task #39 workaround — explicit `ne` (see Heap.ne doc).
+    fn ne(&self, other: &Deque<T>) -> Bool {
+        if self.len != other.len {
+            return true;
+        }
+        for i in range(0, self.len) {
+            if self.get(i).expect("Deque ne: i in range — get is_some") != other.get(i).expect("Deque ne: i < self.len ≤ other.len") {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 implement<T: Debug> Debug for Deque<T> {
