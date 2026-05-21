@@ -2773,6 +2773,21 @@ implement<T: Eq> Eq for List<T> {
         }
         true
     }
+
+    // Task #39 workaround — explicit `ne`. See Heap.ne doc.
+    fn ne(&self, other: &List<T>) -> Bool {
+        if self.len != other.len {
+            return true;
+        }
+        for i in range(0, self.len) {
+            let a: &T = unsafe { &*self.ptr.offset(i) };
+            let b: &T = unsafe { &*other.ptr.offset(i) };
+            if !(*a == *b) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 implement<T: Debug> Debug for List<T> {
