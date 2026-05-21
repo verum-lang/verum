@@ -3018,6 +3018,26 @@ implement<K: Ord + Eq, V: Eq> Eq for BTreeMap<K, V> {
             }
         }
     }
+
+    // Task #39 workaround — explicit `ne` (see Heap.ne doc).
+    fn ne(&self, other: &BTreeMap<K, V>) -> Bool {
+        if self.len() != other.len() {
+            return true;
+        }
+        let mut it_self = self.iter();
+        let mut it_other = other.iter();
+        loop {
+            match (it_self.next(), it_other.next()) {
+                (None, None) => { return false; }
+                (Some(a), Some(b)) => {
+                    if !(a.0 == b.0 && a.1 == b.1) {
+                        return true;
+                    }
+                }
+                _ => { return true; }
+            }
+        }
+    }
 }
 
 implement<T: Ord + Eq> Eq for BTreeSet<T> {
@@ -3036,6 +3056,26 @@ implement<T: Ord + Eq> Eq for BTreeSet<T> {
                     }
                 }
                 _ => { return false; }
+            }
+        }
+    }
+
+    // Task #39 workaround — explicit `ne` (see Heap.ne doc).
+    fn ne(&self, other: &BTreeSet<T>) -> Bool {
+        if self.len() != other.len() {
+            return true;
+        }
+        let mut it_self = self.iter();
+        let mut it_other = other.iter();
+        loop {
+            match (it_self.next(), it_other.next()) {
+                (None, None) => { return false; }
+                (Some(a), Some(b)) => {
+                    if !(a == b) {
+                        return true;
+                    }
+                }
+                _ => { return true; }
             }
         }
     }
