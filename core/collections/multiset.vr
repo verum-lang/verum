@@ -516,6 +516,17 @@ implement<T: Hash + Eq> Eq for Multiset<T> {
         }
         true
     }
+
+    // Task #39 workaround — explicit `ne` (see Heap.ne doc).
+    fn ne(&self, other: &Multiset<T>) -> Bool {
+        if self.cardinality != other.cardinality { return true; }
+        if self.distinct_len() != other.distinct_len() { return true; }
+        let mut iter = self.iter();
+        while let Some((k, v)) = iter.next() {
+            if other.count(k) != v { return true; }
+        }
+        false
+    }
 }
 
 implement<T: Hash + Eq + Debug> Debug for Multiset<T> {

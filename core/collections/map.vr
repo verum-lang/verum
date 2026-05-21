@@ -2058,6 +2058,29 @@ implement<K: Hash + Eq + Debug, V: Eq + Debug> Eq for Map<K, V> {
 
         true
     }
+
+    // Task #39 workaround — explicit `ne` (see Heap.ne doc).
+    fn ne(&self, other: &Map<K, V>) -> Bool {
+        if self.len != other.len {
+            return true;
+        }
+        for i in range(0, self.cap) {
+            let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
+            if (entry.hash > 0) {
+                let key: &K = &entry.key;
+                let value: &V = &entry.value;
+                match other.get(key) {
+                    Some(other_v) => {
+                        if !(*value == *other_v) {
+                            return true;
+                        }
+                    }
+                    None => return true,
+                }
+            }
+        }
+        false
+    }
 }
 
 implement<K: Hash + Eq, V: Hash> Hash for Map<K, V> {
