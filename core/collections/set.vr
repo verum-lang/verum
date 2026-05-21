@@ -817,6 +817,26 @@ implement<T: Hash + Eq> Eq for Set<T> {
         }
         true
     }
+
+    // Task #39 workaround — explicit `ne` (see Heap.ne doc).
+    fn ne(&self, other: &Set<T>) -> Bool {
+        if self.len() != other.len() {
+            return true;
+        }
+        let mut iter = self.iter();
+        loop {
+            match iter.next() {
+                None => break,
+                Some(v) => {
+                    let item: &T = v;
+                    if !other.contains(item) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
 }
 
 implement<T: Hash + Eq> FromIterator<T> for Set<T> {
