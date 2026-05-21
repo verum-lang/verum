@@ -12010,13 +12010,13 @@ impl VbcCodegen {
                                         variant_name
                                             .rsplit("::")
                                             .next()
-                                            .and_then(|s| self.ctx.lookup_function(s))
+                                            .and_then(|s| self.ctx.lookup_function_in_scope(s))
                                     })
                                     .or_else(|| {
                                         variant_name
                                             .rsplit('.')
                                             .next()
-                                            .and_then(|s| self.ctx.lookup_function(s))
+                                            .and_then(|s| self.ctx.lookup_function_in_scope(s))
                                     })
                                     .and_then(|info| info.variant_payload_types.clone());
 
@@ -14084,7 +14084,7 @@ impl VbcCodegen {
 
                 // Handle non-local static: create shadow if needed
                 if self.ctx.get_var_reg(var_name).is_err()
-                    && let Some(func_info) = self.ctx.lookup_function(var_name).cloned()
+                    && let Some(func_info) = self.ctx.lookup_function_in_scope(var_name).cloned()
                     && func_info.param_count == 0
                 {
                     let init_reg = self.ctx.alloc_temp();
@@ -15285,7 +15285,7 @@ impl VbcCodegen {
             if !is_qualified_module_path && !is_type_const_chain {
                 // Try just the last segment (function name) as a simple function lookup.
                 // This handles cases where imports have already resolved the module path.
-                if let Some(func_info) = self.ctx.lookup_function(field).cloned() {
+                if let Some(func_info) = self.ctx.lookup_function_in_scope(field).cloned() {
                     // If it's a variant constructor, emit MakeVariant instead of Call
                     if func_info.variant_tag.is_some() {
                         return self.compile_variant_constructor(field, &verum_common::List::new());
@@ -16110,7 +16110,7 @@ impl VbcCodegen {
                     variant_name
                         .rsplit("::")
                         .next()
-                        .and_then(|simple| self.ctx.lookup_function(simple))
+                        .and_then(|simple| self.ctx.lookup_function_in_scope(simple))
                         .and_then(|info| info.variant_tag)
                 })
                 .or_else(|| {
@@ -17632,7 +17632,7 @@ impl VbcCodegen {
                     let name = ident.name.to_string();
                     // Check if this is a variant constructor — return parent type name
                     // so variable_type_names stores "State" not "Done"
-                    if let Some(func_info) = self.ctx.lookup_function(&name)
+                    if let Some(func_info) = self.ctx.lookup_function_in_scope(&name)
                         && let Some(ref parent_type) = func_info.parent_type_name
                     {
                         return Some(parent_type.clone());
