@@ -7775,8 +7775,15 @@ impl VbcCodegen {
             // `super`/`cog`/`.` and let the simple-name fallback fire
             // on a name that resolves to the wrong module.
             let is_qualified_module_path = self.path_was_rooted_module_path(receiver);
+            // #17 migration #7: scope-aware probe — when a method
+            // call's receiver looks like a value reference (not a
+            // qualified-module path) AND a free fn matches the method
+            // name, prefer the caller's module's binding to dodge
+            // free-fn vs same-named-method collision (e.g. current_epoch
+            // / wraparound_count free fn vs EpochManager.current_epoch
+            // method recursion).
             if !is_qualified_module_path
-                && let Some(func_info) = self.ctx.lookup_function(&method.name).cloned()
+                && let Some(func_info) = self.ctx.lookup_function_in_scope(&method.name).cloned()
                 && func_info.param_count == args.len()
             {
                 if let Some(tag) = func_info.variant_tag {
