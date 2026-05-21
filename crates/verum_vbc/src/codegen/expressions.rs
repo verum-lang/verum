@@ -3067,7 +3067,7 @@ impl VbcCodegen {
                 // Handle non-local static variables: create a local shadow initialized
                 // from the current static value, then do the compound operation
                 if self.ctx.get_var_reg(name).is_err()
-                    && let Some(func_info) = self.ctx.lookup_function(name).cloned()
+                    && let Some(func_info) = self.ctx.lookup_function_in_scope(name).cloned()
                     && func_info.param_count == 0
                 {
                     let init_reg = self.ctx.alloc_temp();
@@ -8938,7 +8938,7 @@ impl VbcCodegen {
 
             // Look up function info to get return type
             if !func_name.is_empty() {
-                if let Some(func_info) = self.ctx.lookup_function(&func_name).cloned() {
+                if let Some(func_info) = self.ctx.lookup_function_in_scope(&func_name).cloned() {
                     if let Some(ref ret_type) = func_info.return_type {
                         // Check return type kind for UInt64
                         let type_name = self.type_ref_to_name(ret_type);
@@ -11060,7 +11060,7 @@ impl VbcCodegen {
                 })
                 .collect::<Vec<_>>()
                 .join("::");
-            if let Some(info) = self.ctx.lookup_function(&func_name)
+            if let Some(info) = self.ctx.lookup_function_in_scope(&func_name)
                 && info.is_generator
             {
                 return false; // Use IterNew/IterNext (gen_register path)
@@ -11682,7 +11682,7 @@ impl VbcCodegen {
                         .or_else(|| self.ctx.lookup_function(&dot_name))
                         .or_else(|| {
                             if let Some(simple) = variant_name.rsplit("::").next() {
-                                self.ctx.lookup_function(simple)
+                                self.ctx.lookup_function_in_scope(simple)
                             } else {
                                 None
                             }
