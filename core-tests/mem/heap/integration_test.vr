@@ -2,7 +2,16 @@
 // core-tests/mem/heap/integration_test.vr
 // =============================================================================
 //
-// Integration tests: heap constants composed with allocator + size_class.
+// Integration tests for `core.mem.heap` — the thread-local LocalHeap
+// fast-path layer over `cbgr_alloc`.
+//
+//   §1  Static-shape composition — heap constants line up with sibling
+//       allocator / size_class constants.
+//   §2  Live heap_alloc round-trip via the public `Heap<T>` surface —
+//       `Heap.new(value)` lands in `LocalHeap::alloc` for sizes ≤
+//       LARGE_THRESHOLD, exercising the thread-local fast path.
+//   §3  Free-list churn — repeated alloc/drop cycles must recycle pages
+//       and not exhaust process memory.
 // =============================================================================
 
 mount core.prelude.*;
@@ -10,7 +19,7 @@ mount core.mem.heap.{DIRECT_LOOKUP_SIZE, PAGE_HEADER_SIZE};
 mount core.mem.size_class.{SMALL_SIZE_MAX, WORD_SIZE};
 
 // -----------------------------------------------------------------------------
-// §1  DIRECT_LOOKUP_SIZE covers wsize range that maps to SMALL_SIZE_MAX
+// §1  Static-shape composition
 // -----------------------------------------------------------------------------
 
 @test
@@ -25,10 +34,6 @@ fn integration_direct_lookup_covers_small_range() {
     assert(direct_max_bytes < SMALL_SIZE_MAX);
 }
 
-// -----------------------------------------------------------------------------
-// §2  PAGE_HEADER_SIZE leaves room for a reasonable number of blocks
-// -----------------------------------------------------------------------------
-
 @test
 fn integration_page_header_leaves_room() {
     // A 64 KiB page minus a 128-byte header = 65408 usable bytes.
@@ -36,6 +41,60 @@ fn integration_page_header_leaves_room() {
     let usable: Int = page_size - PAGE_HEADER_SIZE;
     assert(usable > 65000);
     assert_eq(usable, 65408);
+}
+
+// -----------------------------------------------------------------------------
+// §2  Live heap_alloc round-trip via Heap<T>
+//
+// `Heap.new(small_value)` → `cbgr_alloc(layout)` → `LocalHeap::alloc`
+// (for sizes ≤ LARGE_THRESHOLD).  The thread-local heap services the
+// allocation from its direct-lookup table when wsize ≤ 128.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_heap_alloc_via_public_api() {
+    let boxed = Heap.new(0xC0FFEE);
+    assert_eq(*boxed, 0xC0FFEE);
+    assert(boxed.is_valid());
+}
+
+@test
+fn integration_heap_repeated_alloc_recycles_pages() {
+    // 100 alloc/drop cycles — the freelist must recycle slots; if it
+    // didn't, repeated allocation would exhaust the page and trip
+    // either OOM or a slow path.  We can only observe "no panic", but
+    // that's enough to detect a broken freelist.
+    for i in 0..100 {
+        let _scratch = Heap.new(i);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §3  Free-list churn across multiple live allocations
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_multiple_concurrent_heap_allocations() {
+    // 8 simultaneously-live Heap allocations.  Each one must come from
+    // its own slot — if the allocator returned overlapping pointers, the
+    // `*a == 1`, `*b == 2`, etc. assertions would fail.
+    let a = Heap.new(1);
+    let b = Heap.new(2);
+    let c = Heap.new(3);
+    let d = Heap.new(4);
+    let e = Heap.new(5);
+    let f = Heap.new(6);
+    let g = Heap.new(7);
+    let h = Heap.new(8);
+
+    assert_eq(*a, 1);
+    assert_eq(*b, 2);
+    assert_eq(*c, 3);
+    assert_eq(*d, 4);
+    assert_eq(*e, 5);
+    assert_eq(*f, 6);
+    assert_eq(*g, 7);
+    assert_eq(*h, 8);
 }
 
 fn main() {

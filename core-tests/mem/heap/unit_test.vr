@@ -21,6 +21,7 @@ mount core.mem.heap.{
     HeapStats, HeapError,
     get_heap_stats,
 };
+mount core.mem.segment.{SegmentError};
 
 // =============================================================================
 // Section 1: Heap constants
@@ -78,6 +79,162 @@ fn test_page_flags_pairwise_distinct() {
 fn test_get_heap_stats_returns_value() {
     let _stats: HeapStats = get_heap_stats();
     assert(true);
+}
+
+@test
+fn test_heap_stats_record_construction() {
+    let s = HeapStats {
+        alloc_count: 100 as UInt64,
+        dealloc_count: 50 as UInt64,
+        bytes_allocated: 4096 as UInt64,
+        bytes_freed: 1024 as UInt64,
+        live_count: 50 as UInt64,
+        live_bytes: 3072 as UInt64,
+        pages_in_use: 2 as UInt32,
+        segments_owned: 1 as UInt32,
+    };
+    assert_eq(s.alloc_count, 100 as UInt64);
+    assert_eq(s.dealloc_count, 50 as UInt64);
+    assert_eq(s.bytes_allocated, 4096 as UInt64);
+    assert_eq(s.bytes_freed, 1024 as UInt64);
+    assert_eq(s.live_count, 50 as UInt64);
+    assert_eq(s.live_bytes, 3072 as UInt64);
+    assert_eq(s.pages_in_use, 2 as UInt32);
+    assert_eq(s.segments_owned, 1 as UInt32);
+}
+
+@test
+fn test_heap_stats_new_zero_initial() {
+    // HeapStats.new() is the zero-initialiser called from LocalHeap.new()
+    // during thread-heap bootstrap.  Every counter — including the
+    // page / segment book-keeping fields — must start at zero to
+    // prevent leakage across thread recycling.
+    let s = HeapStats.new();
+    assert_eq(s.alloc_count, 0 as UInt64);
+    assert_eq(s.dealloc_count, 0 as UInt64);
+    assert_eq(s.bytes_allocated, 0 as UInt64);
+    assert_eq(s.bytes_freed, 0 as UInt64);
+    assert_eq(s.live_count, 0 as UInt64);
+    assert_eq(s.live_bytes, 0 as UInt64);
+    assert_eq(s.pages_in_use, 0 as UInt32);
+    assert_eq(s.segments_owned, 0 as UInt32);
+}
+
+// =============================================================================
+// Section 3: HeapError variants
+// =============================================================================
+
+@test
+fn test_heap_error_out_of_memory_construction() {
+    let e: HeapError = HeapError.OutOfMemory;
+    assert(e is HeapError.OutOfMemory);
+}
+
+@test
+fn test_heap_error_page_exhausted_construction() {
+    let e: HeapError = HeapError.PageExhausted;
+    assert(e is HeapError.PageExhausted);
+}
+
+@test
+fn test_heap_error_invalid_pointer_construction() {
+    let e: HeapError = HeapError.InvalidPointer;
+    assert(e is HeapError.InvalidPointer);
+}
+
+@test
+fn test_heap_error_use_after_free_construction() {
+    let e: HeapError = HeapError.UseAfterFree;
+    assert(e is HeapError.UseAfterFree);
+}
+
+@test
+fn test_heap_error_invalid_size_construction() {
+    let e: HeapError = HeapError.InvalidSize { size: -1 };
+    match e {
+        HeapError.InvalidSize { size } => assert_eq(size, -1),
+        _ => panic("expected InvalidSize variant"),
+    }
+}
+
+@test
+fn test_heap_error_invalid_alignment_construction() {
+    let e: HeapError = HeapError.InvalidAlignment { alignment: 7 };
+    match e {
+        HeapError.InvalidAlignment { alignment } => assert_eq(alignment, 7),
+        _ => panic("expected InvalidAlignment variant"),
+    }
+}
+
+@test
+fn test_heap_error_eq_reflexive_oom() {
+    let a: HeapError = HeapError.OutOfMemory;
+    let b: HeapError = HeapError.OutOfMemory;
+    assert(a == b);
+}
+
+@test
+fn test_heap_error_eq_invalid_size_payload_compared() {
+    let a: HeapError = HeapError.InvalidSize { size: 100 };
+    let b: HeapError = HeapError.InvalidSize { size: 100 };
+    let c: HeapError = HeapError.InvalidSize { size: 200 };
+    assert(a == b);
+    assert(!(a == c));
+    assert(a != c);
+}
+
+@test
+fn test_heap_error_eq_distinct_variants() {
+    let a: HeapError = HeapError.OutOfMemory;
+    let b: HeapError = HeapError.PageExhausted;
+    assert(!(a == b));
+    assert(a != b);
+}
+
+@test
+fn test_heap_error_message_per_variant() {
+    let e1: HeapError = HeapError.OutOfMemory;
+    let e2: HeapError = HeapError.PageExhausted;
+    let e3: HeapError = HeapError.InvalidPointer;
+    let e4: HeapError = HeapError.UseAfterFree;
+    assert_eq(e1.message(), "out of memory");
+    assert_eq(e2.message(), "page exhausted");
+    assert_eq(e3.message(), "invalid pointer");
+    assert_eq(e4.message(), "use after free detected");
+}
+
+@test
+fn test_heap_error_invalid_size_message_carries_payload() {
+    // `.message()` formats the payload — required for post-mortem
+    // diagnostic output to be actionable.
+    let e: HeapError = HeapError.InvalidSize { size: 999_888 };
+    assert(e.message().contains("999888"));
+}
+
+@test
+fn test_heap_error_invalid_alignment_message_carries_payload() {
+    let e: HeapError = HeapError.InvalidAlignment { alignment: 33 };
+    assert(e.message().contains("33"));
+}
+
+@test
+fn test_heap_error_segment_error_wrapping() {
+    // HeapError.SegmentError wraps a SegmentError — exercise the
+    // wrapping path and `.message()` cascade.
+    let inner: SegmentError = SegmentError.OutOfMemory;
+    let e: HeapError = HeapError.SegmentError { inner: inner };
+    assert(e is HeapError.SegmentError);
+    let msg = e.message();
+    assert(msg.contains("segment error"));
+}
+
+@test
+fn test_heap_error_from_segment_error_conversion() {
+    // `impl From<SegmentError> for HeapError` makes `?` work across
+    // the segment->heap boundary — pin the lift here.
+    let inner: SegmentError = SegmentError.OutOfMemory;
+    let lifted: HeapError = HeapError.from(inner);
+    assert(lifted is HeapError.SegmentError);
 }
 
 // =============================================================================

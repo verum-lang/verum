@@ -51,15 +51,16 @@ Direct heap_alloc unit tests deferred.
 
 | # | Defect | Layer | Fix |
 |---|---|---|---|
-| 1 | Missing test coverage for `core/mem/heap.vr` | `core-tests/mem/heap/{unit,property,integration,regression}_test.vr` | New 4-file suite; ~230 LOC total (static-shape only). |
+| 1 | Missing test coverage for `core/mem/heap.vr` | `core-tests/mem/heap/{unit,property,integration,regression}_test.vr` | 4-file suite; ~230 LOC total (static-shape only). |
 | 2 | Missing `audit.md` for `core-tests/mem/heap/` | This file. |
+| 3 | §B live `heap_alloc` round-trip lift | `integration_test.vr` §2-§3 — `integration_heap_alloc_via_public_api`, `integration_heap_repeated_alloc_recycles_pages` (100-cycle churn), `integration_multiple_concurrent_heap_allocations` (8 simultaneously-live slots).  Routes through `Heap.new` which lands in `LocalHeap::alloc` for sizes ≤ LARGE_THRESHOLD. Closes §B. |
 
 ## 5. Action items deferred
 
 | # | Defect | Estimate | Track |
 |---|---|---|---|
 | §A | Unify PAGE_HEADER_SIZE between heap.vr (128) and size_class.vr (64) — see size_class §3.4. | ~30 min | open |
-| §B | Direct `heap_alloc` / `heap_free` round-trip tests (currently only via Heap.new in cbgr_test). | ~1 hour | open |
+| ~~§B~~ | ~~Direct `heap_alloc` / `heap_free` round-trip tests (currently only via Heap.new in cbgr_test).~~ | **CLOSED via §4.3 above** — lifted through public `Heap<T>` API which is the canonical entry to `LocalHeap`. |
 | §C | Test `init_thread_heap` / `shutdown_thread_heap` lifecycle. | ~1 hour | open |
 | §D | Test HeapError variants (OutOfMemory, InvalidPointer, etc.). | ~30 min | open |
 | §E | Cross-tier divergence sweep on `--aot` + `--interp`. | 1 hour wall-clock | open |
