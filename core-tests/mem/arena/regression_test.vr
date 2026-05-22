@@ -11,11 +11,30 @@
 //       memory growth.
 //   §C  ARENA_ALIGNMENT = 8 (64-bit word).  Pre-fix some drafts used
 //       4 (32-bit) which broke alignment for u64 / pointer fields.
+//   §D  Task #8 — `GenerationalArena.new(N)` returns a non-pointer
+//       Value; every subsequent `&self` method (capacity / used /
+//       generation / is_destroyed / …) AND every direct field access
+//       fails at `GetF` (opcode 0x62) with `NullPointerAt`.  Diagnostic
+//       evidence in `integration_test.vr` §0:
+//         (a) sibling `ArenaConfig.default()` / `.fixed(N)` cross-
+//             module constructors work fine (3-field record, no
+//             nested record).
+//         (b) a user-defined 7-Int-field record works fine.
+//         (c) `GenerationalArena.new(N)` (7-field record with a
+//             nested `ArenaConfig` field built via cross-module
+//             constructor `ArenaConfig.fixed(N)`) is the failing
+//             shape.
+//       Hypothesis: when a record literal's slot is itself a fresh
+//       cross-module constructor call AND the enclosing record was
+//       loaded from the precompiled stdlib archive, the resulting
+//       Value is mis-encoded.  Pinned `@ignore`'d below until #8
+//       closes; the moment it does, both pins flip active.
 // =============================================================================
 
 mount core.prelude.*;
 mount core.mem.arena.{
     DEFAULT_ARENA_CAPACITY, MAX_ARENA_CAPACITY, ARENA_ALIGNMENT,
+    GenerationalArena,
 };
 
 @test
@@ -31,6 +50,25 @@ fn regression_max_capacity_is_256_mib() {
 @test
 fn regression_alignment_is_8_bytes() {
     assert_eq(ARENA_ALIGNMENT, 8);
+}
+
+// REGRESSION: task #8 — GenerationalArena.new(N) returns a non-pointer
+// Value; first field access fails NullPointer at GetF.  Flips active
+// when the fundamental fix closes.
+@ignore
+@test
+fn regression_task_8_generational_arena_constructor_round_trip() {
+    let arena = GenerationalArena.new(1024);
+    let c = arena.capacity();
+    assert(c >= 1024);
+}
+
+@ignore
+@test
+fn regression_task_8_generational_arena_direct_field() {
+    let arena = GenerationalArena.new(1024);
+    let c = arena.capacity;
+    assert(c >= 1024);
 }
 
 fn main() {

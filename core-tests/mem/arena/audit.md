@@ -58,14 +58,38 @@ generation increment that observers can detect.
 
 | # | Defect | Layer | Fix |
 |---|---|---|---|
-| 1 | Missing test coverage for `core/mem/arena.vr` | `core-tests/mem/arena/{unit,property,integration,regression}_test.vr` | New 4-file suite; ~215 LOC total (static-shape only). |
+| 1 | Missing test coverage for `core/mem/arena.vr` | `core-tests/mem/arena/{unit,property,integration,regression}_test.vr` | 4-file suite; ~215 LOC total (static-shape only). |
 | 2 | Missing `audit.md` for `core-tests/mem/arena/` | This file. |
+| 3 | **DEFECT SURFACED** — `GenerationalArena` constructors fail. Tracked as **task #8**. 9 live-lifecycle tests + 2 minimal repros in `integration_test.vr` / `regression_test.vr` pinned `@ignore` in their final form; they flip green automatically when task #8 closes. |
+
+### §4.3 — Task #8 isolation steps (recorded in `integration_test.vr §0` probes)
+
+| Probe | Result | What it tells us |
+|---|---|---|
+| `probe_arenaconfig_default_field_access` | ✅ pass | Cross-module 3-field stdlib record constructor + field access works |
+| `probe_arenaconfig_fixed_field_access` | ✅ pass | Same for `.fixed(N)` constructor |
+| `probe_user_seven_field_record_field_access` | ✅ pass | User-defined 7-Int-field record + inline literal works |
+| `probe_user_record_with_nested_constructor_field` | ✅ pass | User record with a slot built via `ArenaConfig.default()` works |
+| `probe_generationalarena_direct_field_read` | ❌ fail | `GenerationalArena.new(N)` returns non-pointer; first GetF on result errors NullPointer |
+| `probe_arena_with_config_constructor` | ❌ fail | `GenerationalArena.with_config(...)` errors inside its own body at SetF (opcode 0x63) PC 88 |
+
+The failure differs by constructor — `.new(N)` returns a malformed
+Value (caller-side GetF errors), `.with_config(cfg)` errors mid-body
+at a SetF on a null receiver.  Together they indicate the
+**MakeRecord step for GenerationalArena is broken** — most likely
+because the precompiled-stdlib archive registers
+`GenerationalArena` with the wrong field count (or wrong
+`type_field_layouts`).  Repro one-liner: `let a =
+GenerationalArena.new(1024); let _ = a.capacity;` — sufficient for
+the verum_vbc dev loop.  Same defect class as the closed List /
+Map / BinaryHeap layout-drift fixes (search `core-tests/INVENTORY.md`
+for "Two fundamental fixes CLOSED in this branch" entries).
 
 ## 5. Action items deferred
 
 | # | Defect | Estimate | Track |
 |---|---|---|---|
-| §A | Live `GenerationalArena.new / alloc / reset / clone` round-trip — requires deliberate OS-memory integration. | ~2 hours | open |
-| §B | Test arena snapshot / restore — interacts with generation bump semantics. | Blocked on §A | open |
-| §C | Test ArenaError variants (CapacityExceeded, AllocationTooLarge, BufferOverflow). | Blocked on §A | open |
+| §A | Live `GenerationalArena.new / alloc / reset / clone` round-trip. | Blocked on **task #8** (~2-3 days, fundamental fix in record-receiver method dispatch path). 9 tests written in final form, pinned `@ignore`. |
+| §B | Test arena snapshot / restore. | Blocked on §A. |
+| §C | Test ArenaError variants (CapacityExceeded, AllocationTooLarge, BufferOverflow). | ~30 min | open |
 | §D | Cross-tier divergence sweep on `--aot` + `--interp`. | 1 hour wall-clock | open |
