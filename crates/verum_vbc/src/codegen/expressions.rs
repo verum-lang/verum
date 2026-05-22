@@ -18234,6 +18234,46 @@ impl VbcCodegen {
                         {
                             return Some(inner_type);
                         }
+                        // **Closure expected-return-type plumbing (#26 residual).**
+                        //
+                        // When the callee is a local variable that's actually a
+                        // fn-typed parameter of the *current* function
+                        // (canonical case: `f` inside `fn reduce_with<R, F: fn(R,
+                        // Self.Item) -> ReduceResult<R>>(mut self, init, f) { …
+                        // match f(acc, x) { Continue(...) => …, Reduced(...) => …
+                        // } … }`), the prior arms returned `None` — meaning
+                        // `compile_match`'s `match_scrutinee_type` lookup landed
+                        // empty and variant patterns inside the match resolved
+                        // via non-deterministic bare-name first-wins
+                        // HashMap-iteration order.
+                        //
+                        // Fix: when `name` resolves to a current-function
+                        // parameter AND the enclosing function's stored
+                        // `param_closure_return_type_names[idx]` carries a
+                        // `Some(<base>)` entry, return that as the call's
+                        // result-type name.  The stored entry was populated at
+                        // function-registration time by
+                        // `extract_closure_return_type_name` (recognises both
+                        // direct `fn(...)` and `F: fn(...)` generic-bound
+                        // shapes) — see `mod.rs::register_function` and
+                        // `register_impl_function` for the producer side.
+                        //
+                        // Closes the variant-pattern mis-routing inside
+                        // `reduce_with`'s body (and every other stdlib /
+                        // user-side blanket impl that has a `match <fn-typed-
+                        // param>(...) { … }` shape).
+                        if self.ctx.registers.contains(name.as_str())
+                            && let Some(ref cur_fn) = self.ctx.current_function
+                            && let Some(cur_info) = self.ctx.lookup_function(cur_fn)
+                            && let Some(idx) = cur_info
+                                .param_names
+                                .iter()
+                                .position(|n| n == name.as_str())
+                            && let Some(Some(ret_name)) =
+                                cur_info.param_closure_return_type_names.get(idx)
+                        {
+                            return Some(ret_name.clone());
+                        }
                         // If uppercase and not found as function, it may be a variant
                         // constructor in the collision set. Try to find the parent type
                         // via qualified name search so method dispatch resolves correctly.
