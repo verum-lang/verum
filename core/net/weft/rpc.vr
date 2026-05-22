@@ -58,6 +58,7 @@
 module core.net.weft.rpc;
 
 mount core.*;
+mount core.text.builder.{TextBuilder};
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
 mount core.net.http.{Method, Headers, Response};
@@ -260,7 +261,7 @@ implement IntoResponse for RpcError {
 /// chars as `\uXXXX`. Full RFC 8259 coverage lives in core.encoding.json.
 fn json_escape(s: &Text) -> Text {
     let bytes = s.as_bytes();
-    let mut out = Text.builder();
+    let mut out = TextBuilder.new();
     let mut i: Int = 0;
     while i < bytes.len() {
         let b = bytes[i];
