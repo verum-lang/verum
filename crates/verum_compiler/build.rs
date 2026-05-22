@@ -1269,6 +1269,17 @@ fn compute_core_blake3(core_dir: &Path, files: &[(String, Vec<u8>)]) -> String {
         "crates/verum_vbc/src/intrinsics/lowering.rs",
         "crates/verum_vbc/src/codegen/expressions.rs",
         "crates/verum_vbc/src/codegen/statements.rs",
+        // `mod.rs` carries the function-registration / TypeRef-resolution
+        // logic (`register_function`, `register_impl_function`,
+        // `resolve_field_type_ref`, …) — changes here affect what
+        // `FunctionDescriptor` shape the precompile pass emits into
+        // `runtime.vbca`, so it must invalidate the cache like the other
+        // codegen sources do.  Pre-fix a change to `mod.rs` rebuilt the
+        // user_compiler crate but reused the stale precompile archive,
+        // making in-source codegen fixes invisible at every cross-module
+        // call site that consults the archived FunctionInfo.
+        "crates/verum_vbc/src/codegen/mod.rs",
+        "crates/verum_vbc/src/codegen/context.rs",
     ];
     hasher.update(b"codegen:");
     for rel in codegen_paths {
