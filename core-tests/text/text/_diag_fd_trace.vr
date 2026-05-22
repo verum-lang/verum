@@ -1,0 +1,24 @@
+// Trace what format_debug returns
+@test
+fn diag_fd_trace_text() {
+    let s: Text = "hi";
+    let out = format_debug(&s);
+    print(f"format_debug(&\"hi\") = <{out}>");
+    print(f"  len = {out.len()}");
+    let bytes = out.as_bytes();
+    let mut i: Int = 0;
+    let n = bytes.len();
+    while i < n {
+        print(f"  byte[{i}] = {bytes[i] as Int:x}");
+        i = i + 1;
+    }
+}
+
+@test
+fn diag_fd_trace_int() {
+    let n: Int = 42;
+    let out = format_debug(&n);
+    print(f"format_debug(42) = <{out}>");
+}
+
+fn main() {}
