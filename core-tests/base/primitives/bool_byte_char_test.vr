@@ -648,10 +648,14 @@ fn test_char_from_digit() {
     assert_eq(Char.from_digit(9, 10), Some('9'));
     assert_eq(Char.from_digit(10, 10), None);
 
-    // Base 16
+    // Base 16 — Char.from_digit returns LOWERCASE letters for digits
+    // 10..=35, matching the canonical contract pinned at
+    // `core/text/char.vr::from_digit` and the standard `from_digit`
+    // convention shared with Rust / Swift / Python.  Callers that need
+    // uppercase should call `.to_ascii_uppercase()` on the result.
     assert_eq(Char.from_digit(0, 16), Some('0'));
-    assert_eq(Char.from_digit(10, 16), Some('A'));
-    assert_eq(Char.from_digit(15, 16), Some('F'));
+    assert_eq(Char.from_digit(10, 16), Some('a'));
+    assert_eq(Char.from_digit(15, 16), Some('f'));
     assert_eq(Char.from_digit(16, 16), None);
 }
 

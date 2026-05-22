@@ -9210,6 +9210,66 @@ impl VbcCodegen {
             } else {
                 method.name.to_string()
             }
+        } else if let ExprKind::Cast { ty, .. } = &receiver.kind {
+            // Case 6c: Receiver is a cast expression — `(N as Byte).method(...)`.
+            //
+            // Pre-fix `(255 as Byte).saturating_add(1 as Byte)` fell through
+            // to the final `else` arm (bare `method.name`), and runtime
+            // dispatch then picked `Int.saturating_add` (which has no 255
+            // ceiling) over `Byte.saturating_add`, returning `256` instead of
+            // the expected `255`.  Same defect class affected every primitive
+            // sized-int cast (Byte / UInt8/16/32/64 / Int8/16/32 /
+            // Char-as-Int / Float-as-X) used as a method-call receiver.
+            //
+            // Fix: emit the same dispatch-form Case 1a uses for typed-let
+            // receivers, gated on the cast's target type:
+            //
+            //   * `Byte` (and its aliases UInt8/U8/u8)          → `byte$method`
+            //   * `Int32` (and aliases I32/i32)                  → `int32$method`
+            //   * `UInt64` (and aliases U64/u64 / USize / usize) → `uint64$method`
+            //   * `Int` / `Float` / `Bool` / `Char` / `Text`    → `<Type>.method`
+            //   * Generic type-params (`T`, `K`, `V`, …)        → bare `method`
+            //   * Everything else                                → `<TargetType>.method`
+            //
+            // The width-suffixed forms (`byte$…`, `int32$…`, `uint64$…`) are
+            // necessary because the runtime CallM dispatcher in
+            // `dispatch_primitive_method` strips the qualified `<Type>.`
+            // prefix BEFORE dispatching by receiver runtime-kind, so a
+            // CallM keyed on `Byte.saturating_add` routes to the Int branch's
+            // `saturating_add` (which has no 255 ceiling).  Only the explicit
+            // `byte$saturating_add` etc. cases inside the Int branch carry
+            // u8 semantics.  Mirrors Case 1a's `VarTypeKind::Byte → "byte$…"`
+            // discipline for typed-let receivers; without this Cast arm the
+            // `effective_method_name` cascade had no path for cast-as-receiver
+            // forms.  Pinned by
+            // `core-tests/base/primitives/regression_test.vr::regression_as_byte_cast_propagates_type_to_dispatch_pinned`.
+            if let verum_ast::ty::TypeKind::Path(path) = &ty.kind
+                && let Some(ident) = path.as_ident()
+            {
+                let target = ident.name.to_string();
+                match target.as_str() {
+                    "Byte" | "UInt8" | "U8" | "u8" => format!("byte${}", method.name),
+                    "Int32" | "I32" | "i32" => format!("int32${}", method.name),
+                    "UInt" | "UInt64" | "U64" | "u64"
+                    | "USize" | "UIntSize" | "Usize" | "usize" => {
+                        format!("uint64${}", method.name)
+                    }
+                    "Int" | "Float" | "Bool" | "Char" | "Text" | "Unit" => {
+                        format!("{}.{}", target, method.name)
+                    }
+                    _ => {
+                        if verum_common::well_known_types::looks_like_type_param(&target) {
+                            method.name.to_string()
+                        } else {
+                            let resolved = self.resolve_type_alias(&target);
+                            let base = VbcCodegen::strip_generic_args(&resolved);
+                            format!("{}.{}", base, method.name)
+                        }
+                    }
+                }
+            } else {
+                method.name.to_string()
+            }
         } else if let ExprKind::Paren(inner) = &receiver.kind {
             // Case 7: Receiver is a parenthesized expression - unwrap and check inner
             // This handles cases like `(0.0).is_zero()` where the literal is wrapped in parentheses
@@ -18392,6 +18452,30 @@ impl VbcCodegen {
             }
             // F-string literal: f"hello {name}" → Text
             ExprKind::InterpolatedString { .. } => Some("Text".to_string()),
+            // Cast expression: `expr as TargetType` — the cast EXPRESSION's
+            // type is the TargetType, not the inner expression's type.
+            //
+            // Without this arm `extract_expr_type_name((255 as Byte))` fell
+            // through to `_ => None`; method dispatch on the cast receiver
+            // then used the inner-expression's type (`Int` for integer
+            // literals), so `(255 as Byte).saturating_add(1 as Byte)` routed
+            // through `Int.saturating_add` (which has no 255 ceiling) and
+            // returned `256` instead of the expected `255`.
+            //
+            // Same defect class affects every primitive-sized-int cast
+            // (Byte / UInt8/16/32/64 / Int8/16/32 / Char-as-Int / Float-as-X)
+            // where the dispatcher relies on `extract_expr_type_name` to
+            // route to the correct primitive impl.
+            //
+            // Mirrors the normalisation in `infer_expr_type_kind`'s Cast arm
+            // and in `compile_cast` so the three sites agree on the recognised
+            // primitive name set.
+            ExprKind::Cast { ty, .. } => match &ty.kind {
+                verum_ast::ty::TypeKind::Path(path) => {
+                    path.as_ident().map(|ident| ident.name.to_string())
+                }
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -18846,6 +18930,20 @@ impl VbcCodegen {
                 }
                 inner_type
             }
+            // Cast expression: `expr as TargetType` — the cast EXPRESSION's
+            // type is `TargetType`, not the inner-expression's type.  Without
+            // this arm `infer_expr_type_name((255 as Byte))` returned `None`
+            // and any call site that needed the cast-target's type (let-RHS
+            // inference, Eq-protocol resolution, …) silently fell back to
+            // the inner type.  Paired with the Cast arm in
+            // `extract_expr_type_name` so the two type-extraction functions
+            // agree on cast semantics.
+            ExprKind::Cast { ty, .. } => match &ty.kind {
+                verum_ast::ty::TypeKind::Path(path) => {
+                    path.as_ident().map(|ident| ident.name.to_string())
+                }
+                _ => None,
+            },
             _ => None,
         }
     }
