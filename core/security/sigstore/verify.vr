@@ -77,7 +77,6 @@ mount security.x509.ext.ext_key_usage.{ExtKeyUsage, ExtKeyUsagePurpose};
 mount security.x509.oid.{Oid};
 mount security.x509.verifier.{
     VerifierConfig, RevocationPolicy, CertPurpose,
-    verify_parsed as verify_x509_parsed,
     VerificationError as X509VerifyError,
 };
 mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
@@ -249,7 +248,10 @@ public async fn verify_bundle<C: HttpClient>(
     x509_config.now_override = Some(integrated_time);
     // Fulcio EE certs are short-lived; revocation checks waste budget.
     x509_config.revocation = RevocationPolicy.NoCheck;
-    let _x509_result = verify_x509_parsed(http, &ee, &intermediates, &trust.fulcio_trust_store, &x509_config).await
+    // Fully-qualified path — `mount verify_parsed as verify_x509_parsed`
+    // rename doesn't surface to AOT codegen function-table lookup
+    // (defect class shared with task #17/#39 mount-scope-aware work).
+    let _x509_result = security.x509.verifier.verify_parsed(http, &ee, &intermediates, &trust.fulcio_trust_store, &x509_config).await
         .map_err(|e| X509Failed(e))?;
 
     // Step 4: verify each tlog entry's SET against trusted Rekor pubkey.
