@@ -1,0 +1,22 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: reference_system, cbgr, escape-analysis, task-18
+// @expected-stdout: hello
+// @expected-exit: 0
+// @description: Task #18 — returning &Text to a string literal must not trip
+//               CBGR use-after-free.  Pre-fix this panicked with
+//               `CBGR use-after-free detected: expected generation 2, found 3`
+//               because the callee's frame `pop_frame` blanket-bumped the
+//               source slot's generation before the caller could deref.
+//               The interpreter's `do_return` now materialises any CBGR
+//               register-slot ref that points INTO the current frame onto
+//               a process-lifetime escape cell, rewriting the returned
+//               value to a `ThinRef` that survives `pop_frame`.
+
+fn get_text() -> &Text { &"hello" }
+
+fn main() {
+    let t = get_text();
+    print(*t);
+}
