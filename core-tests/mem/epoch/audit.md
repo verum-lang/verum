@@ -74,14 +74,15 @@ NOT exercise. Deferred to a future cycle.
 
 | # | Defect | Layer | Fix |
 |---|---|---|---|
-| 1 | Missing test coverage for `core/mem/epoch.vr` | `core-tests/mem/epoch/{unit,property,integration,regression}_test.vr` | New 4-file suite; ~365 LOC total.  Read-only surface covered; write-surface deferred. |
+| 1 | Missing test coverage for `core/mem/epoch.vr` | `core-tests/mem/epoch/{unit,property,integration,regression}_test.vr` | 4-file suite; ~365 LOC total.  Read-only surface covered; write-surface deferred. |
 | 2 | Missing `audit.md` for `core-tests/mem/epoch/` | This file. |
+| 3 | §B test-only deterministic-advance API present in stdlib | `unit_test.vr §6` adds 4 tests using `reset_for_tests` + `increment_epoch_for_tests` from `core/mem/epoch.vr:643/658`. **Currently @ignore'd** pinned by **task #9** — `reset_for_tests` panics under `--interp` with `NullPointerAt opcode 0x78 (CbgrExtended) site: core.mem.epoch.reset_for_tests pc: 6`. The body's `&mut GLOBAL_EPOCH.epoch` (field-of-static-mut-struct) is not covered by the closed `task #26 [E2]` scalar-only static-mut backing-cell fix.  Tests written in their final form, flip green when #9 closes. |
 
 ## 5. Action items deferred
 
 | # | Defect | Estimate | Track |
 |---|---|---|---|
 | §A | Test register/unregister callback round-trip with a fence between tests to isolate from other tests' callbacks. | ~45 min | open |
-| §B | Test epoch advance: explicit `advance` API needed for test determinism; without one, the test would have to allocate 2^32 objects. | ~2 hours (requires stdlib API addition) | open |
-| §C | Test wraparound: when epoch == EPOCH_MAX, the next advance must wrap to 0 AND increment wraparound_count. | Blocked on §B | open |
+| §B | Test epoch advance via test-only `reset_for_tests` / `increment_epoch_for_tests`. | API exists in stdlib; runtime support blocked on **task #9** (extend `static mut` cell-backed access from scalar-only to `static mut <struct>.<scalar_field>`). 4 tests pinned `@ignore` in their final form. |
+| §C | Test wraparound: when epoch == EPOCH_MAX, the next advance must wrap to 0 AND increment wraparound_count. | Blocked on §B / #9. | ~30 min, open |
 | §D | Cross-tier divergence sweep on `--aot` + `--interp`. | 1 hour wall-clock | open |
