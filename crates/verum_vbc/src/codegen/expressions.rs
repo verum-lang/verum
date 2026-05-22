@@ -12872,7 +12872,7 @@ impl VbcCodegen {
                             // has been overridden by a user-defined Maybe.
                             let some_tag = self
                                 .ctx
-                                .lookup_function(variant_tags::SOME)
+                                .lookup_function_in_scope(variant_tags::SOME)
                                 .and_then(|info| info.variant_tag)
                                 .unwrap_or_else(maybe_success_tag);
                             self.ctx.emit(Instruction::IsVar {
@@ -13366,7 +13366,7 @@ impl VbcCodegen {
                         // Fall back to simple name lookup (e.g., "Num")
                         .or_else(|| {
                             self.ctx
-                                .lookup_function(simple_variant)
+                                .lookup_function_in_scope(simple_variant)
                                 .and_then(|info| info.variant_payload_types.clone())
                         })
                         // Fall back to searching for qualified names
@@ -13652,7 +13652,7 @@ impl VbcCodegen {
                 let type_name = format!("{}", path);
                 let is_variant = self
                     .ctx
-                    .lookup_function(&type_name)
+                    .lookup_function_in_scope(&type_name)
                     .and_then(|info| info.variant_tag)
                     .is_some()
                     || {
@@ -13685,7 +13685,7 @@ impl VbcCodegen {
                     qualified_lookup
                         .or_else(|| {
                             self.ctx
-                                .lookup_function(&type_name)
+                                .lookup_function_in_scope(&type_name)
                                 .and_then(|info| info.variant_payload_types.clone())
                         })
                         .or_else(|| {
@@ -13930,7 +13930,7 @@ impl VbcCodegen {
                     // Check if this is a partial pattern (returns Maybe<T>)
                     let is_partial = self
                         .ctx
-                        .lookup_function(&pattern_name)
+                        .lookup_function_in_scope(&pattern_name)
                         .map(|f| f.is_partial_pattern)
                         .unwrap_or(false);
 
@@ -16195,11 +16195,11 @@ impl VbcCodegen {
             None
         } else {
             self.ctx
-                .lookup_function(&variant_name)
+                .lookup_function_in_scope(&variant_name)
                 .and_then(|info| info.variant_tag)
                 .or_else(|| {
                     self.ctx
-                        .lookup_function(&dot_name)
+                        .lookup_function_in_scope(&dot_name)
                         .and_then(|info| info.variant_tag)
                 })
                 .or_else(|| {
@@ -17547,7 +17547,7 @@ impl VbcCodegen {
         let inner_types = self.extract_inner_types(scrutinee_type);
         let info = self
             .ctx
-            .lookup_function(&variant_name)
+            .lookup_function_in_scope(&variant_name)
             .or_else(|| {
                 let base = crate::codegen::VbcCodegen::strip_generic_args(scrutinee_type);
                 self.ctx
@@ -20103,7 +20103,7 @@ impl VbcCodegen {
 
                 let func_id = self
                     .ctx
-                    .lookup_function(&func_name)
+                    .lookup_function_in_scope(&func_name)
                     .map(|f| f.id)
                     .ok_or_else(|| {
                         CodegenError::with_span(
