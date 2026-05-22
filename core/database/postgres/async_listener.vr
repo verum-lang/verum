@@ -61,7 +61,6 @@ mount core.database.common.error.{
 };
 mount core.database.postgres.connection.{
     PgConnection, PgConnState, PcsReady,
-    connect as sync_connect,
 };
 mount core.database.postgres.config.PgConfig;
 mount core.database.postgres.notify.Notification;
@@ -206,7 +205,13 @@ public async fn connect_listener_async(
 ) -> Result<AsyncPgListener, DbError> {
     let cfg_owned = cfg.clone();
     let conn_jh = spawn_blocking(move || -> Result<PgConnection, DbError> {
-        sync_connect(&cfg_owned)
+        // Fully-qualified path instead of `mount connect as sync_connect`
+        // — the rename-aliased import doesn't surface to AOT codegen's
+        // function-table lookup (defect class shared with task #17/#39
+        // mount-scope-aware lookup work).  Until that fundamental fix
+        // lands, every cross-module `mount X as Y` followed by `Y(...)`
+        // is a candidate AOT-breakage; route through the qualified path.
+        core.database.postgres.connection.connect(&cfg_owned)
     });
     let mut conn = match conn_jh.join().await {
         Ok(r)  => r?,
