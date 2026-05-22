@@ -2970,10 +2970,50 @@ pub(super) fn dispatch_primitive_method(
         }
     }
 
-    // Extract unqualified method name from qualified names like "Heap.generation" -> "generation"
-    // This handles cases where codegen emits fully qualified method names for struct methods.
-    // Support both "." (new convention) and "::" (legacy) for backwards compatibility.
-    let method = if let Some(pos) = method.rfind('.') {
+    // Width-specific prefix normalisation for sized-integer primitives.
+    //
+    // The runtime CallM dispatcher strips the qualified `<Type>.` prefix
+    // below and dispatches by the receiver's runtime kind alone — for
+    // sized-int types that are NaN-boxed as `Int` (Byte=u8, Int32=i32,
+    // UInt64=u64, ISize=i64-as-pointer-width-signed, etc.) this collapses
+    // every width back to the generic `Int` handler which carries i64
+    // semantics.
+    //
+    // Result: a CallM keyed on `Byte.saturating_add` would route to the
+    // Int branch's `saturating_add` handler at line ~3353 (which uses
+    // `i64::saturating_add`, no 255 ceiling), returning 256 for
+    // `(255 as Byte).saturating_add(1 as Byte)` instead of the expected 255.
+    //
+    // The width-suffixed handler families (`byte$saturating_add`,
+    // `int32$<method>`, `uint64$<method>`) carry the correct u8 / i32 /
+    // u64 semantics and live in the Int branch alongside the generic
+    // handlers.  Rewrite the qualified prefix to the width-suffixed form
+    // so those handlers fire regardless of which codegen path emitted the
+    // method name.  Pre-fix this normalisation only happened at the
+    // codegen-typed-let dispatch site (Case 1a in `compile_method_call`'s
+    // `effective_method_name` cascade) — every other path that produced
+    // `Byte.<method>` (cast-as-receiver, paren-wrapped cast,
+    // Type-as-Receiver static-method) silently routed to the wrong impl.
+    //
+    // Architectural rule: the runtime CallM dispatcher MUST honour
+    // qualified-prefix width information when it can; pinned by
+    // `core-tests/base/primitives/regression_test.vr::regression_as_byte_cast_propagates_type_to_dispatch_pinned`.
+    let normalised_method: String;
+    let method = if let Some(pos) = method.find('.')
+        && let Some(suffix_form) = match &method[..pos] {
+            "Byte" | "UInt8" | "U8" | "u8" => Some("byte"),
+            "Int32" | "I32" | "i32" => Some("int32"),
+            "UInt" | "UInt64" | "U64" | "u64"
+            | "USize" | "UIntSize" | "Usize" | "usize" => Some("uint64"),
+            _ => None,
+        }
+    {
+        normalised_method = format!("{}${}", suffix_form, &method[pos + 1..]);
+        normalised_method.as_str()
+    } else if let Some(pos) = method.rfind('.') {
+        // Generic strip: `Heap.generation` → `generation`.  Receiver kind
+        // disambiguates Heap from any other type carrying a `generation`
+        // method.
         &method[pos + 1..]
     } else if let Some(pos) = method.rfind("::") {
         &method[pos + 2..]
