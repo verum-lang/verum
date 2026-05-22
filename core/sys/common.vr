@@ -471,8 +471,10 @@ public fn os_alloc(size: Int, alignment: Int) -> Maybe<&unsafe Byte> {
 
     @cfg(target_os = "macos")
     {
-        // Use local intrinsic wrapper to ensure the intrinsic is invoked
-        let result = mmap_intrinsic(
+        // Fully-qualified path — `mount safe_mmap as mmap_intrinsic`
+        // rename doesn't surface to AOT codegen function-table lookup
+        // (defect class shared with task #17/#39 mount-scope-aware work).
+        let result = super.darwin.libsystem.safe_mmap(
             0,                       // Let OS choose address
             aligned_size,
             MemProt.READ_WRITE,      // PROT_READ | PROT_WRITE
@@ -537,8 +539,9 @@ public unsafe fn os_free(ptr: &unsafe Byte, size: Int) {
 
     @cfg(target_os = "macos")
     {
-        // Use local intrinsic wrapper
-        let _ = munmap_intrinsic(ptr as Int, size);
+        // Fully-qualified path (see os_alloc fix above for the
+        // mount-rename AOT defect rationale).
+        let _ = super.darwin.libsystem.safe_munmap(ptr as Int, size);
     }
 
     @cfg(target_os = "windows")
@@ -572,20 +575,16 @@ fn align_pointer(ptr: &unsafe Byte, alignment: Int) -> &unsafe Byte {
 // duplication was harmless at runtime, but violated the "single
 // canonical home per intrinsic" architectural invariant.
 //
-// Post-fix: re-export from the canonical home.  Callers in this
-// file that use `mmap_intrinsic` / `gettid_intrinsic` continue to
-// work; the intrinsic-name is declared exactly once.
-@cfg(target_os = "macos")
-mount super.darwin.libsystem.{
-    safe_mmap as mmap_intrinsic,
-    safe_munmap as munmap_intrinsic,
-    safe_gettid as gettid_intrinsic,
-};
+// Post-fix: callers in this file invoke `super.darwin.libsystem.{
+// safe_mmap, safe_munmap, safe_gettid}` via the fully-qualified
+// path — rename-aliased mounts (`mount safe_mmap as mmap_intrinsic`)
+// historically broke AOT codegen function-table lookup, so we
+// dropped the rename and call canonical names directly.
 
 /// Get current thread ID (platform-independent).
 public fn get_thread_id() -> UInt64 {
     @cfg(target_os = "macos")
-    { return gettid_intrinsic(); }
+    { return super.darwin.libsystem.safe_gettid(); }
 
     @cfg(target_os = "linux")
     { return super.linux.syscall.gettid() as UInt64; }
