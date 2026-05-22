@@ -17,7 +17,7 @@
 mount core.prelude.*;
 mount core.mem.arena.{
     DEFAULT_ARENA_CAPACITY, MAX_ARENA_CAPACITY,
-    ARENA_ALIGNMENT,
+    DEFAULT_GROWTH_FACTOR, ARENA_ALIGNMENT, ARENA_GEN_INITIAL,
     ArenaConfig, ArenaError,
 };
 
@@ -51,6 +51,19 @@ fn test_arena_capacity_relationship() {
     assert(DEFAULT_ARENA_CAPACITY < MAX_ARENA_CAPACITY);
 }
 
+@test
+fn test_default_growth_factor_is_200() {
+    // 200% = double on growth — matches mimalloc's doubling.
+    assert_eq(DEFAULT_GROWTH_FACTOR, 200);
+}
+
+@test
+fn test_arena_gen_initial_is_one() {
+    // Generation lattice starts at 1 (0 is reserved as
+    // UNALLOCATED across the CBGR header / arena / heap families).
+    assert_eq(ARENA_GEN_INITIAL, 1);
+}
+
 // =============================================================================
 // Section 2: ArenaConfig record construction
 // =============================================================================
@@ -74,6 +87,102 @@ fn test_arena_config_construction_via_record_literal() {
     // ArenaConfig record fields.  Pin its value here to cover the
     // alignment surface that was originally misplaced in this record.
     assert_eq(ARENA_ALIGNMENT, 8);
+}
+
+@test
+fn test_arena_config_default_constructor() {
+    // ArenaConfig.default() materialises the canonical 64-KiB / 256-MiB
+    // / 2× shape that powers AST-arenas and per-task arenas.
+    let cfg: ArenaConfig = ArenaConfig.default();
+    assert_eq(cfg.initial_capacity, DEFAULT_ARENA_CAPACITY);
+    assert_eq(cfg.max_capacity, MAX_ARENA_CAPACITY);
+    assert_eq(cfg.growth_factor, DEFAULT_GROWTH_FACTOR);
+}
+
+@test
+fn test_arena_config_fixed_constructor() {
+    // `fixed(cap)` pins capacity (initial == max) and disables growth
+    // by setting the factor to 100% (no expansion).
+    let cfg: ArenaConfig = ArenaConfig.fixed(4096);
+    assert_eq(cfg.initial_capacity, 4096);
+    assert_eq(cfg.max_capacity, 4096);
+    assert_eq(cfg.growth_factor, 100);
+}
+
+@test
+fn test_arena_config_custom_constructor() {
+    let cfg: ArenaConfig = ArenaConfig.custom(8192, 1048576, 150);
+    assert_eq(cfg.initial_capacity, 8192);
+    assert_eq(cfg.max_capacity, 1048576);
+    assert_eq(cfg.growth_factor, 150);
+}
+
+// =============================================================================
+// Section 3: ArenaError variants — construction + .message() routing
+// =============================================================================
+
+@test
+fn test_arena_error_out_of_memory_construction() {
+    let e: ArenaError = ArenaError.OutOfMemory { requested: 1024, available: 256 };
+    assert(e is ArenaError.OutOfMemory);
+    // .message() must include both numbers for forensic clarity.
+    let msg = e.message();
+    assert(msg.contains("1024"));
+    assert(msg.contains("256"));
+}
+
+@test
+fn test_arena_error_exceeds_max_capacity_construction() {
+    let e: ArenaError = ArenaError.ExceedsMaxCapacity { requested: 2048, max: 1024 };
+    assert(e is ArenaError.ExceedsMaxCapacity);
+    let msg = e.message();
+    assert(msg.contains("2048"));
+    assert(msg.contains("1024"));
+}
+
+@test
+fn test_arena_error_invalid_alignment_construction() {
+    let e: ArenaError = ArenaError.InvalidAlignment { alignment: 7 };
+    assert(e is ArenaError.InvalidAlignment);
+    let msg = e.message();
+    assert(msg.contains("7"));
+    assert(msg.contains("power of 2"));
+}
+
+@test
+fn test_arena_error_already_destroyed_construction() {
+    let e: ArenaError = ArenaError.AlreadyDestroyed;
+    assert(e is ArenaError.AlreadyDestroyed);
+    let msg = e.message();
+    assert(msg.contains("destroyed"));
+}
+
+@test
+fn test_arena_error_variants_pairwise_distinct_via_is() {
+    let oom: ArenaError = ArenaError.OutOfMemory { requested: 0, available: 0 };
+    let xmc: ArenaError = ArenaError.ExceedsMaxCapacity { requested: 0, max: 0 };
+    let inv: ArenaError = ArenaError.InvalidAlignment { alignment: 0 };
+    let dst: ArenaError = ArenaError.AlreadyDestroyed;
+
+    assert(oom is ArenaError.OutOfMemory);
+    assert(!(oom is ArenaError.ExceedsMaxCapacity));
+    assert(!(oom is ArenaError.InvalidAlignment));
+    assert(!(oom is ArenaError.AlreadyDestroyed));
+
+    assert(!(xmc is ArenaError.OutOfMemory));
+    assert(xmc is ArenaError.ExceedsMaxCapacity);
+    assert(!(xmc is ArenaError.InvalidAlignment));
+    assert(!(xmc is ArenaError.AlreadyDestroyed));
+
+    assert(!(inv is ArenaError.OutOfMemory));
+    assert(!(inv is ArenaError.ExceedsMaxCapacity));
+    assert(inv is ArenaError.InvalidAlignment);
+    assert(!(inv is ArenaError.AlreadyDestroyed));
+
+    assert(!(dst is ArenaError.OutOfMemory));
+    assert(!(dst is ArenaError.ExceedsMaxCapacity));
+    assert(!(dst is ArenaError.InvalidAlignment));
+    assert(dst is ArenaError.AlreadyDestroyed);
 }
 
 // =============================================================================
