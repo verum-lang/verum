@@ -4541,7 +4541,7 @@ impl VbcCodegen {
                 } else if let Some(simple_name) = func_name.rsplit("::").next() {
                     if simple_name != func_name {
                         self.ctx
-                            .lookup_function(simple_name)
+                            .lookup_function_in_scope(simple_name)
                             .map(|info| (simple_name.to_string(), info.clone()))
                     } else {
                         None
@@ -5930,7 +5930,7 @@ impl VbcCodegen {
             | "tcp_recv" | "tcp_close" | "udp_bind" | "udp_send" | "udp_recv" | "udp_close" => {
                 let func_id = self
                     .ctx
-                    .lookup_function(name)
+                    .lookup_function_in_scope(name)
                     .map(|f| f.id.0)
                     .unwrap_or(u32::MAX);
                 let result = self.ctx.alloc_temp();
@@ -6654,7 +6654,7 @@ impl VbcCodegen {
         let parent = explicit_parent.map(|s| s.to_string()).or_else(|| {
             variant_name.and_then(|n| {
                 self.ctx
-                    .lookup_function(n)
+                    .lookup_function_in_scope(n)
                     .and_then(|info| info.parent_type_name.clone())
                     .or_else(|| self.parent_type_from_qualified_name(n))
             })
@@ -6811,7 +6811,7 @@ impl VbcCodegen {
                 // matching, in case the disambiguation rejected it
                 // because the context type wasn't actually populated.
                 self.ctx
-                    .lookup_function(name)
+                    .lookup_function_in_scope(name)
                     .and_then(|info| info.variant_tag)
             })
             .unwrap_or_else(|| {
@@ -6861,7 +6861,7 @@ impl VbcCodegen {
         if !args.is_empty() {
             let payload_types: Option<Vec<String>> = self
                 .ctx
-                .lookup_function(name)
+                .lookup_function_in_scope(name)
                 .and_then(|info| info.variant_payload_types.clone())
                 .or_else(|| {
                     // When the bare lookup picked a different type's
