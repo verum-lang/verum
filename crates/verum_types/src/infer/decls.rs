@@ -8175,7 +8175,32 @@ impl TypeChecker {
 
         // Parameters are tracked separately and are valid to return references to
         // (the caller owns the referent).
-        !self.current_function_params.contains(var_name)
+        //
+        // Module-level items (const, function, type, static, imported via
+        // `mount`) live in the root scope of `self.ctx.env` and carry
+        // process lifetime.  Pre-fix the predicate gated only on the
+        // function-parameter check, so every `&CONST_NAME` returned from
+        // a function triggered the E312 false-positive
+        // `\`CONST_NAME\` does not live long enough - reference outlives referent`.
+        // The grammar (`grammar/verum.ebnf`) admits `fn f() -> &T { &CONST }`
+        // as well-formed; the language semantics treat module-level items
+        // as static-lifetime; the pre-fix checker contradicted both.
+        // `lookup_in_root_only` walks the env's parent chain to the root
+        // and probes that scope only — function-body `let` bindings live
+        // in nested scopes pushed by the body-block checker, so they
+        // remain correctly classified as local.
+        if self.current_function_params.contains(var_name) {
+            return false;
+        }
+        if self
+            .ctx
+            .env
+            .lookup_in_root_only(var_name.as_str())
+            .is_some()
+        {
+            return false;
+        }
+        true
     }
 
     /// Check if an expression is a &checked reference to a local variable.

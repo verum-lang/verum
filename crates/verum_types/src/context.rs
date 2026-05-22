@@ -1334,6 +1334,33 @@ impl TypeEnv {
             .or_else(|| self.parent.as_ref().and_then(|p| p.lookup(name)))
     }
 
+    /// Look up `name` ONLY in the root (module-level) scope, ignoring
+    /// every intermediate nested scope.
+    ///
+    /// This is the canonical predicate for "is this identifier a
+    /// module-level item (const, function, type, …) rather than a
+    /// function-local binding".  The lifetime checker
+    /// (`check_return_lifetime` in `infer/decls.rs`) uses it to refine
+    /// the `is_local_variable` heuristic: pre-fix the checker treated
+    /// every name that is not a function parameter as "local", which
+    /// produced E312 false-positives on `&CONST_NAME` returns even
+    /// though module-level consts have process lifetime and are
+    /// always safe to return references to.
+    ///
+    /// The walk follows the parent chain to the root, then looks up
+    /// in the root's `bindings` map.  This is O(depth) but `depth`
+    /// is bounded by the nested-scope depth at the call site, which
+    /// is small in practice (function-body scope + a couple of `let`
+    /// scopes for in-function control flow).
+    pub fn lookup_in_root_only(&self, name: &str) -> Option<&TypeScheme> {
+        // Walk to the root (no parent).
+        let mut scope = self;
+        while let Some(parent) = scope.parent.as_deref() {
+            scope = parent;
+        }
+        scope.bindings.get(&Text::from(name))
+    }
+
     /// Collect all names visible in this scope (current + parents).
     /// Used by error messages to compute "did you mean?" suggestions.
     /// Deduplicates inner-shadowing outer (inner scope wins, matching
