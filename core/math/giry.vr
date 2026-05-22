@@ -660,8 +660,8 @@ public fn functor_density<C: InfinityCategory, D: InfinityCategory>(
 ) -> Float {
     let proposals: List<FunctorProposal> = oracle.query(context);
     let probs: List<Float> = oracle.softmax_probs(&proposals);
-    let result: Float = 0.0;
-    let idx: Int = 0;
+    let _result: Float = 0.0;
+    let mut idx: Int = 0;
     for proposal in proposals {
         if proposal.name == *functor_name {
             return probs.get(idx).unwrap_or(0.0);
@@ -694,9 +694,9 @@ public fn sample_above<C: InfinityCategory, D: InfinityCategory>(
 ) -> Maybe<Text> {
     let proposals: List<FunctorProposal> = oracle.query(context);
     let probs: List<Float> = oracle.softmax_probs(&proposals);
-    let best_name: Maybe<Text> = Maybe.None;
-    let best_prob: Float = threshold;
-    let idx: Int = 0;
+    let mut best_name: Maybe<Text> = Maybe.None;
+    let mut best_prob: Float = threshold;
+    let mut idx: Int = 0;
     for proposal in proposals {
         let p: Float = probs.get(idx).unwrap_or(0.0);
         if p >= best_prob {
