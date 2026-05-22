@@ -19,7 +19,8 @@ mount core.mem.diagnostics.{
     live_allocations, live_allocation_count,
     CallFrame, current_call_stack,
 };
-mount core.mem.capability.{CAP_READ, CAP_WRITE, CAP_OWNED};
+mount core.mem.capability.{CAP_READ, CAP_WRITE, CAP_MUTABLE, CAP_REVOKE, CAP_OWNED, has_capability};
+mount core.mem.header.{HEADER_SIZE};
 
 // =============================================================================
 // Section 1: live_allocations / live_allocation_count — read-only API
@@ -109,6 +110,192 @@ fn test_current_call_stack_with_skip() {
     assert(s1.len() >= 0);
     assert(s2.len() >= 0);
     assert(s3.len() >= 0);
+}
+
+// =============================================================================
+// Section 4: MemHeaderView — 8-field record + capability predicates
+// =============================================================================
+
+@test
+fn test_mem_header_view_record_construction() {
+    // 8-field record per `core/mem/diagnostics.vr` lines 67-97:
+    //   generation / epoch / capabilities / size / alignment /
+    //   type_id / flags / ref_count.
+    let v: MemHeaderView = MemHeaderView {
+        generation:   42 as UInt32,
+        epoch:        7 as UInt16,
+        capabilities: (CAP_READ | CAP_WRITE),
+        size:         256 as UInt32,
+        alignment:    8 as UInt32,
+        type_id:      1234 as UInt32,
+        flags:        0 as UInt32,
+        ref_count:    1 as UInt32,
+    };
+    assert_eq(v.generation,   42 as UInt32);
+    assert_eq(v.epoch,        7 as UInt16);
+    assert_eq(v.size,         256 as UInt32);
+    assert_eq(v.alignment,    8 as UInt32);
+    assert_eq(v.type_id,      1234 as UInt32);
+    assert_eq(v.flags,        0 as UInt32);
+    assert_eq(v.ref_count,    1 as UInt32);
+}
+
+// REGRESSION: `MemHeaderView.can_read`/`can_write`/`can_mutate`/`can_revoke`
+// dispatches collide with sibling `can_read`/etc. methods on
+// `ThinRef<T>` (`core/mem/thin_ref.vr:210`), `FatRef<T>`
+// (`core/mem/fat_ref.vr:278`), `PagerState`
+// (`core/database/sqlite/.../state.vr:52`), and `Capability`
+// (`core/logic/separation.vr:267`).  Under the current
+// first-suffix-wins lookup (pre task #17/#39 mount-scope-aware
+// dispatch), `v.can_read()` for `v: MemHeaderView` resolves to one
+// of the foreign impls and returns the wrong value.  Tests below
+// drive the equivalent semantics through the FREE function
+// `has_capability(flags, cap)` to validate the capability-bit
+// algebra on a `MemHeaderView`-shaped record without touching
+// the colliding method-call path.
+
+@test
+fn test_mem_header_view_capabilities_field_read_back() {
+    // Pin that the `capabilities` field round-trips through the
+    // record-literal write + dot read.  Isolates field-layout from
+    // method-dispatch defects.
+    let v: MemHeaderView = MemHeaderView {
+        generation: 1 as UInt32,
+        epoch: 1 as UInt16,
+        capabilities: 0x0001 as UInt16,
+        size: 64 as UInt32,
+        alignment: 8 as UInt32,
+        type_id: 0 as UInt32,
+        flags: 0 as UInt32,
+        ref_count: 1 as UInt32,
+    };
+    assert_eq(v.capabilities, 0x0001 as UInt16);
+}
+
+@test
+fn test_has_capability_read_via_view_capabilities_field() {
+    // Drive `has_capability(...)` over the field — equivalent
+    // semantics to `v.can_read()`, sidesteps method-dispatch
+    // collision.
+    let v: MemHeaderView = MemHeaderView {
+        generation: 1 as UInt32,
+        epoch: 1 as UInt16,
+        capabilities: CAP_READ,
+        size: 64 as UInt32,
+        alignment: 8 as UInt32,
+        type_id: 0 as UInt32,
+        flags: 0 as UInt32,
+        ref_count: 1 as UInt32,
+    };
+    assert(has_capability(v.capabilities, CAP_READ));
+    assert(!has_capability(v.capabilities, CAP_WRITE));
+}
+
+@test
+fn test_has_capability_write_via_view_capabilities_field() {
+    let v: MemHeaderView = MemHeaderView {
+        generation: 1 as UInt32,
+        epoch: 1 as UInt16,
+        capabilities: CAP_WRITE,
+        size: 64 as UInt32,
+        alignment: 8 as UInt32,
+        type_id: 0 as UInt32,
+        flags: 0 as UInt32,
+        ref_count: 1 as UInt32,
+    };
+    assert(has_capability(v.capabilities, CAP_WRITE));
+    assert(!has_capability(v.capabilities, CAP_READ));
+}
+
+@test
+fn test_has_capability_combined_read_write_via_view() {
+    let v: MemHeaderView = MemHeaderView {
+        generation: 1 as UInt32,
+        epoch: 1 as UInt16,
+        capabilities: (CAP_READ | CAP_WRITE),
+        size: 64 as UInt32,
+        alignment: 8 as UInt32,
+        type_id: 0 as UInt32,
+        flags: 0 as UInt32,
+        ref_count: 1 as UInt32,
+    };
+    assert(has_capability(v.capabilities, CAP_READ));
+    assert(has_capability(v.capabilities, CAP_WRITE));
+    assert(!has_capability(v.capabilities, CAP_REVOKE));
+}
+
+@test
+fn test_has_capability_zero_mask_yields_false_for_every_bit() {
+    // Empty mask: no capability ever evaluates as held.
+    let v: MemHeaderView = MemHeaderView {
+        generation: 1 as UInt32,
+        epoch: 1 as UInt16,
+        capabilities: 0 as UInt16,
+        size: 64 as UInt32,
+        alignment: 8 as UInt32,
+        type_id: 0 as UInt32,
+        flags: 0 as UInt32,
+        ref_count: 1 as UInt32,
+    };
+    assert(!has_capability(v.capabilities, CAP_READ));
+    assert(!has_capability(v.capabilities, CAP_WRITE));
+    assert(!has_capability(v.capabilities, CAP_MUTABLE));
+    assert(!has_capability(v.capabilities, CAP_REVOKE));
+}
+
+@test
+@ignore
+fn test_mem_header_view_can_read_method_pinned_by_collision() {
+    // PINS the dispatch collision class: `v.can_read()` on a
+    // MemHeaderView with `capabilities: CAP_READ` should return
+    // `true` (per `core/mem/diagnostics.vr:155`).  Under current
+    // first-suffix-wins, the call routes to a foreign impl and
+    // returns false.  Flips green when task #17/#39 (mount-scope-aware
+    // function lookup) closes.
+    let v: MemHeaderView = MemHeaderView {
+        generation: 1 as UInt32,
+        epoch: 1 as UInt16,
+        capabilities: CAP_READ,
+        size: 64 as UInt32,
+        alignment: 8 as UInt32,
+        type_id: 0 as UInt32,
+        flags: 0 as UInt32,
+        ref_count: 1 as UInt32,
+    };
+    assert(v.can_read());
+}
+
+@test
+fn test_mem_header_view_total_bytes_is_header_plus_size() {
+    // `total_bytes()` is the load-bearing invariant for allocation
+    // accounting: total footprint = 32-byte header + payload size.
+    let v: MemHeaderView = MemHeaderView {
+        generation: 1 as UInt32,
+        epoch: 1 as UInt16,
+        capabilities: CAP_READ,
+        size: 256 as UInt32,
+        alignment: 8 as UInt32,
+        type_id: 0 as UInt32,
+        flags: 0 as UInt32,
+        ref_count: 1 as UInt32,
+    };
+    assert_eq(v.total_bytes(), HEADER_SIZE + 256);
+}
+
+@test
+fn test_mem_header_view_total_bytes_with_zero_payload() {
+    // Edge case: a zero-payload allocation still consumes the header.
+    let v: MemHeaderView = MemHeaderView {
+        generation: 1 as UInt32,
+        epoch: 1 as UInt16,
+        capabilities: CAP_READ,
+        size: 0 as UInt32,
+        alignment: 8 as UInt32,
+        type_id: 0 as UInt32,
+        flags: 0 as UInt32,
+        ref_count: 1 as UInt32,
+    };
+    assert_eq(v.total_bytes(), HEADER_SIZE);
 }
 
 // =============================================================================

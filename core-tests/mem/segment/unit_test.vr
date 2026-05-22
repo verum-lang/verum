@@ -18,8 +18,10 @@
 
 mount core.prelude.*;
 mount core.mem.segment.{
-    SEGMENT_SIZE, SLICE_SIZE, SLICES_PER_SEGMENT,
+    SEGMENT_SIZE, SLICE_SIZE, SLICES_PER_SEGMENT, SEGMENT_ALIGN,
     SMALL_PAGE_SIZE, MEDIUM_PAGE_SIZE, LARGE_PAGE_THRESHOLD,
+    MASK_WORDS, PURGE_DELAY_NS, MAX_RECLAIM_PER_OP,
+    SLICE_FREE, SLICE_USED, SLICE_SPAN_START, SLICE_SPAN_CONTINUE,
     SEGMENT_NORMAL, SEGMENT_HUGE,
     SegmentError, SegmentStats,
     get_segment_stats,
@@ -97,7 +99,148 @@ fn test_segment_kinds_distinct() {
 }
 
 // =============================================================================
-// Section 4: get_segment_stats — read-only stats surface
+// Section 4: Bookkeeping constants — alignment, masks, reclaim policy
+// =============================================================================
+
+@test
+fn test_segment_align_equals_segment_size() {
+    // Segments are page-aligned to their own size — the alignment
+    // constraint that lets `ptr_to_segment(ptr)` recover the segment
+    // base by masking off `SEGMENT_SIZE - 1`.
+    assert_eq(SEGMENT_ALIGN, SEGMENT_SIZE);
+}
+
+@test
+fn test_mask_words_is_8() {
+    // 8 × 64 = 512 bits per segment = SLICES_PER_SEGMENT.  The
+    // commit/decommit mask is exactly one bit per slice.
+    assert_eq(MASK_WORDS, 8);
+    assert_eq(MASK_WORDS * 64, SLICES_PER_SEGMENT);
+}
+
+@test
+fn test_purge_delay_ns_is_10_ms() {
+    // 10 ms (10_000_000 ns) before decommitting reclaimed slices —
+    // amortises the syscall cost of mprotect/madvise back-and-forth.
+    assert_eq(PURGE_DELAY_NS, 10_000_000);
+}
+
+@test
+fn test_max_reclaim_per_op_is_8() {
+    // Bound the reclaim batch size to keep the latency tail bounded.
+    assert_eq(MAX_RECLAIM_PER_OP, 8);
+}
+
+// =============================================================================
+// Section 5: Slice-state byte constants
+// =============================================================================
+
+@test
+fn test_slice_free_is_zero() {
+    // Default-zero memory means a freshly-allocated segment has all
+    // slices in the FREE state without explicit initialisation.
+    assert_eq(SLICE_FREE, 0 as UInt8);
+}
+
+@test
+fn test_slice_used_is_one() {
+    assert_eq(SLICE_USED, 1 as UInt8);
+}
+
+@test
+fn test_slice_span_start_is_two() {
+    assert_eq(SLICE_SPAN_START, 2 as UInt8);
+}
+
+@test
+fn test_slice_span_continue_is_three() {
+    assert_eq(SLICE_SPAN_CONTINUE, 3 as UInt8);
+}
+
+@test
+fn test_slice_state_bytes_pairwise_distinct() {
+    let states: List<UInt8> = [
+        SLICE_FREE, SLICE_USED, SLICE_SPAN_START, SLICE_SPAN_CONTINUE,
+    ];
+    for i in 0..states.len() {
+        for j in 0..states.len() {
+            if i != j {
+                assert(states[i] != states[j]);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Section 6: SegmentError variants — construction + .message() routing
+// =============================================================================
+
+@test
+fn test_segment_error_mmap_failed_carries_code() {
+    let e: SegmentError = SegmentError.MmapFailed { code: 12 };
+    assert(e is SegmentError.MmapFailed);
+    let msg = e.message();
+    assert(msg.contains("mmap"));
+    assert(msg.contains("12"));
+}
+
+@test
+fn test_segment_error_munmap_failed_carries_code() {
+    let e: SegmentError = SegmentError.MunmapFailed { code: 22 };
+    assert(e is SegmentError.MunmapFailed);
+    let msg = e.message();
+    assert(msg.contains("munmap"));
+    assert(msg.contains("22"));
+}
+
+@test
+fn test_segment_error_out_of_memory_construction() {
+    let e: SegmentError = SegmentError.OutOfMemory;
+    assert(e is SegmentError.OutOfMemory);
+    let msg = e.message();
+    assert(msg.contains("memory"));
+}
+
+@test
+fn test_segment_error_unsupported_os_carries_op_text() {
+    let e: SegmentError = SegmentError.UnsupportedOs { op: "segment_alloc".to_text() };
+    assert(e is SegmentError.UnsupportedOs);
+    let msg = e.message();
+    assert(msg.contains("segment_alloc"));
+}
+
+@test
+fn test_segment_error_variants_pairwise_distinct_via_is() {
+    let mmap: SegmentError = SegmentError.MmapFailed { code: 0 };
+    let munmap: SegmentError = SegmentError.MunmapFailed { code: 0 };
+    let oom: SegmentError = SegmentError.OutOfMemory;
+    let uos: SegmentError = SegmentError.UnsupportedOs { op: "x".to_text() };
+    assert(mmap is SegmentError.MmapFailed);
+    assert(!(mmap is SegmentError.MunmapFailed));
+    assert(!(mmap is SegmentError.OutOfMemory));
+    assert(!(mmap is SegmentError.UnsupportedOs));
+    assert(munmap is SegmentError.MunmapFailed);
+    assert(oom is SegmentError.OutOfMemory);
+    assert(uos is SegmentError.UnsupportedOs);
+}
+
+@test
+fn test_segment_error_eq_reflexive_out_of_memory() {
+    let a: SegmentError = SegmentError.OutOfMemory;
+    let b: SegmentError = SegmentError.OutOfMemory;
+    assert(a == b);
+}
+
+@test
+fn test_segment_error_eq_distinct_variants() {
+    let a: SegmentError = SegmentError.OutOfMemory;
+    let b: SegmentError = SegmentError.MmapFailed { code: 0 };
+    assert(!(a == b));
+    assert(a != b);
+}
+
+// =============================================================================
+// Section 7: SegmentStats — read-only stats surface
 // =============================================================================
 
 @test
@@ -105,6 +248,38 @@ fn test_get_segment_stats_returns_value() {
     // The function must not panic; the value has fields we can read.
     let _stats: SegmentStats = get_segment_stats();
     assert(true);
+}
+
+@test
+fn test_segment_stats_record_construction_round_trip() {
+    // SegmentStats has 4 fields: total_segments / abandoned_segments /
+    // used_slices / committed_bytes.  Pin the shape via record-literal
+    // round-trip so any future field addition / removal breaks here.
+    let s: SegmentStats = SegmentStats {
+        total_segments:     8 as UInt32,
+        abandoned_segments: 1 as UInt32,
+        used_slices:        128 as UInt64,
+        committed_bytes:    16_777_216 as UInt64,  // 16 MiB
+    };
+    assert_eq(s.total_segments,     8 as UInt32);
+    assert_eq(s.abandoned_segments, 1 as UInt32);
+    assert_eq(s.used_slices,        128 as UInt64);
+    assert_eq(s.committed_bytes,    16_777_216 as UInt64);
+}
+
+@test
+fn test_segment_stats_zero_shape() {
+    // Empty-state — every counter zero — is the bootstrap shape.
+    let s: SegmentStats = SegmentStats {
+        total_segments:     0 as UInt32,
+        abandoned_segments: 0 as UInt32,
+        used_slices:        0 as UInt64,
+        committed_bytes:    0 as UInt64,
+    };
+    assert_eq(s.total_segments, 0 as UInt32);
+    assert_eq(s.abandoned_segments, 0 as UInt32);
+    assert_eq(s.used_slices, 0 as UInt64);
+    assert_eq(s.committed_bytes, 0 as UInt64);
 }
 
 // =============================================================================
