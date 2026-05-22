@@ -2410,6 +2410,7 @@ impl VbcCodegen {
                 return_type_inner: None,
                 is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
             };
             self.ctx.register_function(name.to_string(), info);
         }
@@ -2972,6 +2973,7 @@ impl VbcCodegen {
                 return_type_inner: None,
                 is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
             };
             self.ctx.register_function(name.to_string(), info);
         }
@@ -5908,6 +5910,7 @@ impl VbcCodegen {
                 return_type_inner: None,
                 is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
             };
             // Always register qualified name.
             self.ctx.register_function(qualified, info.clone());
@@ -6004,6 +6007,7 @@ impl VbcCodegen {
                 return_type_inner: None,
                 is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
             };
             self.ctx.register_function(name.to_string(), info);
         }
@@ -6597,6 +6601,27 @@ impl VbcCodegen {
             })
             .collect();
 
+        // For each parameter, extract the closure-arg return-type
+        // simple-name when the parameter is function-typed (directly
+        // `fn(...) -> X`, or via a generic-param bound that resolves
+        // to a function type).  Drives the call-site disambiguation
+        // hook in `compile_static_method_call` so that a closure
+        // argument's body sees the right variant-table when its
+        // return expression mentions a sum-type variant whose simple
+        // name collides across two types (canonical case:
+        // `ReduceResult.Continue` vs `ControlFlow.Continue`).
+        let param_closure_return_type_names: Vec<Option<String>> = func
+            .params
+            .iter()
+            .map(|p| {
+                if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
+                    Self::extract_closure_return_type_name(ty, &func.generics)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         let contexts: Vec<String> = func
             .contexts
             .iter()
@@ -6673,6 +6698,7 @@ impl VbcCodegen {
             return_type_inner: None,
             is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names,
         };
 
         // #201 diagnostic — env-var-gated trace of every register_function
@@ -6822,6 +6848,7 @@ impl VbcCodegen {
             return_type_inner: None,
             is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
         };
 
         self.ctx.register_function(name, info);
@@ -7142,6 +7169,7 @@ impl VbcCodegen {
             return_type_inner: None,
             is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
         };
 
         self.ctx.register_function(name, info);
@@ -7928,6 +7956,27 @@ impl VbcCodegen {
             })
             .collect();
 
+        // Closure expected-return-type name per param (mirrors the
+        // populate-site in `register_function`).  Captures the case
+        // where an `implement<I: Iterator> I { fn reduce_with<R,
+        // F: fn(R, Self.Item) -> ReduceResult<R>>(…) }` blanket-impl
+        // method takes a closure parameter and the body refers to a
+        // bare variant constructor whose simple name collides across
+        // two sum types.  See `extract_closure_return_type_name` and
+        // the matching usage in `compile_static_method_call` /
+        // `compile_call` / `compile_method_call`.
+        let param_closure_return_type_names: Vec<Option<String>> = func
+            .params
+            .iter()
+            .map(|p| {
+                if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
+                    Self::extract_closure_return_type_name(ty, &func.generics)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         let contexts: Vec<String> = func
             .contexts
             .iter()
@@ -8013,6 +8062,7 @@ impl VbcCodegen {
             return_type_inner: None,
             is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names,
         };
 
         self.ctx.register_function(qualified_name, info);
@@ -8118,6 +8168,7 @@ impl VbcCodegen {
                 return_type_inner: None,
                 is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
             };
 
             self.ctx.register_function(name.clone(), info);
@@ -8610,6 +8661,7 @@ impl VbcCodegen {
                     return_type_inner: None,
                     is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
                 };
                 self.ctx.register_function(getter_name, getter_info);
 
@@ -8641,6 +8693,7 @@ impl VbcCodegen {
                     return_type_inner: None,
                     is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
                 };
                 self.ctx.register_function(setter_name, setter_info);
             }
@@ -9439,6 +9492,7 @@ impl VbcCodegen {
                         return_type_inner: None,
                         is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
                     };
 
                     // 1. Always register with qualified name (TypeName::VariantName)
@@ -9857,6 +9911,7 @@ impl VbcCodegen {
                     return_type_inner: None,
                     is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
                 };
 
                 self.ctx.register_function(type_name, info);
@@ -10252,6 +10307,7 @@ impl VbcCodegen {
                     // discriminator that the codegen passthrough
                     // arms gate on.
                     is_transparent_wrapper: true,
+                    param_closure_return_type_names: Vec::new(),
                 };
 
                 self.ctx.register_function(type_name.clone(), info);
@@ -10351,6 +10407,7 @@ impl VbcCodegen {
                     // drop the other elements, so the flag stays
                     // false there.
                     is_transparent_wrapper: is_transparent,
+                    param_closure_return_type_names: Vec::new(),
                 };
 
                 self.ctx.register_function(type_name, info);
@@ -10380,6 +10437,7 @@ impl VbcCodegen {
                     return_type_inner: None,
                     is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
                 };
 
                 self.ctx.register_function(type_name, info);
@@ -10412,6 +10470,7 @@ impl VbcCodegen {
                     return_type_inner: None,
                     is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
                 };
 
                 self.ctx.register_function(type_name, info);
@@ -10465,6 +10524,7 @@ impl VbcCodegen {
                     return_type_inner: None,
                     is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
                 };
                 let of_qualified = format!("{}.of", type_name);
                 self.ctx.register_function(of_qualified, of_info);
@@ -10494,6 +10554,7 @@ impl VbcCodegen {
                     return_type_inner: None,
                     is_const: false,
                 is_transparent_wrapper: false,
+                param_closure_return_type_names: Vec::new(),
                 };
                 let rep_qualified = format!("{}.rep", type_name);
                 self.ctx.register_function(rep_qualified, rep_info);
@@ -10609,6 +10670,7 @@ impl VbcCodegen {
             // marker so the typechecker treats them as values.
             is_const: true,
             is_transparent_wrapper: false,
+            param_closure_return_type_names: Vec::new(),
         };
 
         // Register with simple name for local access
@@ -11208,6 +11270,87 @@ impl VbcCodegen {
 
     /// Resolves a field type, mapping generic type parameters to TypeRef::Generic.
     /// `generic_param_map` maps param names (e.g., "A") to their TypeParamId index.
+    /// When a parameter's declared type is a bare generic-param path
+    /// (`f: F`) and the surrounding function decl bounds `F` to a
+    /// function type (`F: fn(...) -> X`), substitute the resolved
+    /// `TypeRef::Generic` with the bound's `TypeRef::Function`.
+    ///
+    /// This preserves the closure-arg shape across the archive
+    /// boundary so user-side codegen can drive the call-site
+    /// expected-return-type disambig push (see
+    /// `archive_ctx_loader::extract_closure_return_type_from_typeref`).
+    /// Without this round-trip, `f: F` archives as `TypeRef::Generic(F)`
+    /// and the user-side method-call dispatch can't tell that the
+    /// closure's body should consult a specific sum-type's variant
+    /// table — a closure returning bare `Continue(...)` where two
+    /// types ship a `Continue` variant (e.g. `ReduceResult.Continue`
+    /// vs `ControlFlow.Continue`) hits non-deterministic resolution.
+    ///
+    /// Idempotent for non-generic-param paths or for generic params
+    /// without a fn bound — returns `resolved` unchanged.
+    fn substitute_fn_bound_for_generic(
+        &self,
+        resolved: TypeRef,
+        ast_ty: &verum_ast::ty::Type,
+        generics: &verum_common::List<verum_ast::ty::GenericParam>,
+        generic_param_map: &std::collections::HashMap<String, u16>,
+    ) -> TypeRef {
+        use verum_ast::ty::{GenericParamKind, PathSegment, TypeBoundKind, TypeKind};
+
+        // Only substitute when the resolved form is a bare generic
+        // (the un-substituted shape we'd otherwise carry into the
+        // archive). Direct fn types (`f: fn(...)`) already land as
+        // `TypeRef::Function` — leave them alone.
+        if !matches!(&resolved, TypeRef::Generic(_)) {
+            return resolved;
+        }
+        // Recover the generic-param name from the AST.
+        let target_name = match &ast_ty.kind {
+            TypeKind::Path(path) if path.segments.len() == 1 => {
+                match &path.segments[0] {
+                    PathSegment::Name(ident) => ident.name.to_string(),
+                    _ => return resolved,
+                }
+            }
+            _ => return resolved,
+        };
+        // Find the matching generic param and probe its bounds.
+        for gp in generics.iter() {
+            let (gp_name, bounds) = match &gp.kind {
+                GenericParamKind::Type { name, bounds, .. } => (name.name.as_str(), bounds),
+                GenericParamKind::HigherKinded { name, bounds, .. } => {
+                    (name.name.as_str(), bounds)
+                }
+                _ => continue,
+            };
+            if gp_name != target_name {
+                continue;
+            }
+            // The parser emits a Function-typed bound as
+            // `Equality(<Function type>)` (see
+            // `verum_fast_parser::ty::type_to_type_bound`); fall back
+            // through `GenericProtocol` for the
+            // `F: Iterator<Item=...>`-shaped bound that carries a
+            // Function payload.
+            for b in bounds.iter() {
+                let bound_ty = match &b.kind {
+                    TypeBoundKind::Equality(ty) => ty,
+                    TypeBoundKind::GenericProtocol(ty) => ty,
+                    _ => continue,
+                };
+                if matches!(&bound_ty.kind, TypeKind::Function { .. }) {
+                    // Resolve the bound through the same map so any
+                    // nested generic-param references inside the
+                    // bound (`fn(R, Self.Item) -> ReduceResult<R>`)
+                    // stay as `TypeRef::Generic` rather than
+                    // collapsing to `Concrete(PTR)`.
+                    return self.resolve_field_type_ref(bound_ty, generic_param_map);
+                }
+            }
+        }
+        resolved
+    }
+
     fn resolve_field_type_ref(
         &self,
         ty: &verum_ast::ty::Type,
@@ -12496,7 +12639,20 @@ impl VbcCodegen {
             // the correct false-flag result.
             let type_ref = match &param.kind {
                 FunctionParamKind::Regular { ty, .. } => {
-                    self.resolve_field_type_ref(ty, &method_generic_param_map)
+                    let resolved = self.resolve_field_type_ref(ty, &method_generic_param_map);
+                    // **Closure expected-return-type plumbing (#26 residual).**
+                    // When the user wrote `f: F` and the function declares
+                    // `F: fn(...) -> X`, the resolved TypeRef is
+                    // `TypeRef::Generic(F)` — losing the fn-bound shape at the
+                    // archive boundary.  Substitute with the bound's
+                    // `TypeRef::Function` so user-side codegen reading the
+                    // archive can recover the closure-arg's return-type
+                    // simple-name via
+                    // `archive_ctx_loader::extract_closure_return_type_from_typeref`
+                    // and drive the call-site disambig push for closure
+                    // arguments.  No-op when the param isn't a generic-param
+                    // path or when the generic carries no fn bound.
+                    self.substitute_fn_bound_for_generic(resolved, ty, &func.generics, &method_generic_param_map)
                 }
                 FunctionParamKind::SelfRefMut => TypeRef::Reference {
                     inner: Box::new(TypeRef::Concrete(parent_tid)),
@@ -13431,6 +13587,94 @@ impl VbcCodegen {
             args.push(tail.to_string());
         }
         args
+    }
+
+    /// For a parameter of declared type `ty`, return the *simple
+    /// name* of the closure-arg's return type IF the parameter is
+    /// callable.  Two shapes are recognised:
+    ///
+    ///   * **Direct function type**: `f: fn(...) -> X` —
+    ///     return `Some(extract_type_name_from_ast(X))`.
+    ///   * **Generic-param bound**: `f: F` where `F` is one of the
+    ///     function's generic parameters whose bounds include a
+    ///     function type `fn(...) -> X`.  Return the same simple
+    ///     name.
+    ///
+    /// Returns `None` for non-callable parameters (`Int`, `List<T>`,
+    /// `&Foo`, …), so the caller can use it directly without further
+    /// filtering.
+    ///
+    /// Used by `register_function` to populate
+    /// `FunctionInfo.param_closure_return_type_names`.  Drives the
+    /// call-site disambiguation hook in `compile_static_method_call`
+    /// — see that function's per-arg `push_disambig_context` block.
+    fn extract_closure_return_type_name(
+        ty: &verum_ast::ty::Type,
+        generics: &verum_common::List<verum_ast::ty::GenericParam>,
+    ) -> Option<String> {
+        use verum_ast::ty::{GenericParamKind, PathSegment, TypeBoundKind, TypeKind};
+
+        // Helper: extract the simple base name of a Function type's
+        // return type.  Strips generic args (`ReduceResult<R>` → `"ReduceResult"`).
+        let return_name_of_fn = |return_ty: &verum_ast::ty::Type| -> Option<String> {
+            let raw = Self::extract_type_name_from_ast(return_ty);
+            let base = raw.split('<').next().unwrap_or(&raw).trim().to_string();
+            if base.is_empty() || base == "()" {
+                None
+            } else {
+                Some(base)
+            }
+        };
+
+        // Direct fn-type case: `f: fn(...) -> X`.
+        if let TypeKind::Function { return_type, .. } = &ty.kind {
+            return return_name_of_fn(return_type);
+        }
+
+        // Generic-param bound case: `f: F` where `F: fn(...) -> X`.
+        // The parser surfaces `F: fn(...)` as a TypeBound on the
+        // generic param F; the bound is encoded as either
+        // `GenericProtocol(Type)` or `Protocol(Path)` depending on
+        // shape (the former covers `fn(...)`-shaped bounds carried
+        // as a Type literal).  We probe both.
+        if let TypeKind::Path(path) = &ty.kind
+            && path.segments.len() == 1
+            && let Some(PathSegment::Name(ident)) = path.segments.first()
+        {
+            let target_name = ident.name.as_str();
+            for gp in generics.iter() {
+                let (gp_name, bounds) = match &gp.kind {
+                    GenericParamKind::Type { name, bounds, .. } => (name.name.as_str(), bounds),
+                    GenericParamKind::HigherKinded { name, bounds, .. } => {
+                        (name.name.as_str(), bounds)
+                    }
+                    _ => continue,
+                };
+                if gp_name != target_name {
+                    continue;
+                }
+                for b in bounds.iter() {
+                    // The parser encodes `F: fn(...) -> X` as an
+                    // `Equality` bound carrying the raw Function type
+                    // (see `verum_fast_parser::ty::type_to_type_bound`
+                    // — complex non-Path / non-Generic types fall
+                    // through to the Equality arm).
+                    // `Iterator<Item = ...>`-shaped bounds carrying a
+                    // Function type would land under `GenericProtocol`,
+                    // so we probe both for robustness.
+                    let bound_ty = match &b.kind {
+                        TypeBoundKind::Equality(ty) => ty,
+                        TypeBoundKind::GenericProtocol(ty) => ty,
+                        _ => continue,
+                    };
+                    if let TypeKind::Function { return_type, .. } = &bound_ty.kind {
+                        return return_name_of_fn(return_type);
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     /// Generic parameters are preserved so that element types can be extracted

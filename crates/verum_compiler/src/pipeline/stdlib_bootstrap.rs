@@ -803,6 +803,7 @@ impl<'s> CompilationPipeline<'s> {
                             return_type_inner: None,
                             is_const: false,
                             is_transparent_wrapper: false,
+                            param_closure_return_type_names: Vec::new(),
                         };
                         self.global_function_registry
                             .insert(qualified, info.clone());
@@ -964,6 +965,7 @@ impl<'s> CompilationPipeline<'s> {
                             return_type_inner: None,
                             is_const: false,
                             is_transparent_wrapper: false,
+                            param_closure_return_type_names: Vec::new(),
                         };
                         self.global_function_registry
                             .insert(qualified, info.clone());

@@ -570,6 +570,26 @@ pub struct FunctionInfo {
     /// (records / units / variants) leaves this flag at its default
     /// `false`, so the disambiguation is structural, not heuristic.
     pub is_transparent_wrapper: bool,
+
+    /// For each parameter, the *return-type simple-name* of that
+    /// parameter's function-type signature, when the parameter is
+    /// callable (i.e. its declared type is `fn(...) -> X`, or a
+    /// generic-param whose bound resolves to `fn(...) -> X`).
+    ///
+    /// Parallel to `param_names` / `param_type_names`; entries are
+    /// `None` for parameters that aren't function-typed.  At a call
+    /// site, when arg `i` is a closure expression, codegen pushes
+    /// `param_closure_return_type_names[i]` as the
+    /// `current_return_type_name` disambig context before compiling
+    /// the closure body — so bare variant constructors in the body
+    /// (`Continue(...)`, `Some(...)`, …) consult the right type's
+    /// variant table even when the simple name collides across two
+    /// sum types (e.g. `ReduceResult.Continue` vs `ControlFlow.Continue`).
+    ///
+    /// Populated by `register_function` (see `mod.rs::register_function`).
+    /// Empty by default — callers that don't populate it (test stubs,
+    /// synthetic constructors, etc.) get the no-op path.
+    pub param_closure_return_type_names: Vec<Option<String>>,
 }
 
 /// Statistics collected during codegen.
