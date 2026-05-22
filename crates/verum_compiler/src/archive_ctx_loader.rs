@@ -421,6 +421,22 @@ fn register_module(
             .map(|p| type_ref_simple_name(&p.type_ref, module).unwrap_or_default())
             .collect();
 
+        // For each param, extract the *closure-arg return-type
+        // simple-name* when the param's archive TypeRef is a
+        // function type (`fn(...) -> X` — either declared directly
+        // or substituted from a `F: fn(...)` generic bound during
+        // stdlib precompilation).  Mirrors
+        // `mod.rs::extract_closure_return_type_name` for the
+        // AST-driven path.  Drives the call-site disambig push in
+        // `compile_static_method_call` / `compile_call` so a
+        // closure body's bare variant constructor consults the
+        // right type's variant table.
+        let param_closure_return_type_names: Vec<Option<String>> = fn_desc
+            .params
+            .iter()
+            .map(|p| extract_closure_return_type_from_typeref(&p.type_ref, module))
+            .collect();
+
         // Return-type base name + inner generics drive the variant
         // disambiguator (closes out the same code path #300 fixed
         // for source-driven compilation).
@@ -491,6 +507,7 @@ fn register_module(
             // the type itself is mounted.  See `is_transparent_wrapper`
             // in `verum_vbc/src/codegen/context.rs`.
             is_transparent_wrapper: false,
+            param_closure_return_type_names,
         };
 
         // Always register qualified — `module.path.simple` —
@@ -595,6 +612,7 @@ fn register_module(
                 return_type_inner: None,
                 is_const: false,
             is_transparent_wrapper: false,
+            param_closure_return_type_names: Vec::new(),
             };
             ctx.register_function(qualified, info);
             stats.variant_ctors_resolved += 1;
@@ -710,6 +728,7 @@ fn register_module(
             // call-site passthrough arms in `compile_call` /
             // `compile_method_call` fire on archive-loaded newtypes.
             is_transparent_wrapper: true,
+            param_closure_return_type_names: Vec::new(),
         };
         ctx.register_function(type_name.clone(), info);
         stats.functions_registered += 1;
@@ -743,6 +762,33 @@ struct VariantHit {
 /// Strip a [`TypeRef`] down to its base nominal name when one exists.
 /// Returns `None` for unresolvable / structural / function types
 /// (those don't drive the variant disambiguator).
+/// For an archive-loaded parameter's `TypeRef`, return the *return-type
+/// simple-name* of the function shape IF the parameter is callable.
+///
+/// The archive serialises a function-typed parameter as
+/// `TypeRef::Function { return_type, .. }` (or `Rank2Function`).  For
+/// generic parameters with a `F: fn(...)` bound, the stdlib precompiler
+/// emits the substituted Function type into the descriptor's param
+/// type_ref, so this single check covers both `f: fn(...)` and
+/// `f: F` (where F has a fn-shaped bound).
+///
+/// Mirrors `mod.rs::extract_closure_return_type_name` for the
+/// archive-loaded path so call-site disambig works uniformly across
+/// stdlib-loaded and user-defined functions.
+fn extract_closure_return_type_from_typeref(
+    ty: &TypeRef,
+    module: &VbcModule,
+) -> Option<String> {
+    match ty {
+        TypeRef::Function { return_type, .. } => type_ref_simple_name(return_type, module),
+        TypeRef::Rank2Function { return_type, .. } => type_ref_simple_name(return_type, module),
+        // Reference-wrapped function pointers (`&fn(...)`) — peek
+        // through one indirection.
+        TypeRef::Reference { inner, .. } => extract_closure_return_type_from_typeref(inner, module),
+        _ => None,
+    }
+}
+
 fn type_ref_simple_name(ty: &TypeRef, module: &VbcModule) -> Option<String> {
     match ty {
         TypeRef::Concrete(tid) => {
@@ -3651,6 +3697,14 @@ fn register_module_filtered(
                 type_ref_simple_name(&p.type_ref, module).unwrap_or_default()
             })
             .collect();
+        // Mirror the closure-return-type extraction from
+        // `populate_ctx_from_archive` so both archive-load paths
+        // populate `param_closure_return_type_names` identically.
+        let param_closure_return_type_names: Vec<Option<String>> = fn_desc
+            .params
+            .iter()
+            .map(|p| extract_closure_return_type_from_typeref(&p.type_ref, module))
+            .collect();
         let return_type_name = type_ref_simple_name(&fn_desc.return_type, module);
         let return_type_inner = type_ref_inner_generics(&fn_desc.return_type, module);
         // #87 — restore the intrinsic-name marker that was serialised
@@ -3697,6 +3751,7 @@ fn register_module_filtered(
             // #97 — see populate_ctx_from_archive for the rationale.
             is_const: fn_desc.is_const,
             is_transparent_wrapper: false,
+            param_closure_return_type_names,
         };
         ctx.register_function(qualified.clone(), info.clone());
         // ALSO register under any qualified path from `wanted` whose
@@ -4011,6 +4066,7 @@ fn register_module_filtered(
                 return_type_inner: None,
                 is_const: false,
             is_transparent_wrapper: false,
+            param_closure_return_type_names: Vec::new(),
             };
             ctx.register_function(qualified, info);
             // Deliberately skip simple-name registration — see the
@@ -4088,6 +4144,7 @@ fn register_module_filtered(
             return_type_inner: None,
             is_const: false,
             is_transparent_wrapper: true,
+            param_closure_return_type_names: Vec::new(),
         };
         ctx.register_function(type_name.clone(), info);
         ctx.newtype_names.insert(type_name.clone());

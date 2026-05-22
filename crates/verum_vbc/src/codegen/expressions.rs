@@ -4877,18 +4877,36 @@ impl VbcCodegen {
                     // Same pattern as `push_field_type_context` and
                     // the let-binding annotation override in
                     // `compile_let`.
-                    let saved = func_info
-                        .param_type_names
-                        .get(i)
-                        .filter(|s| !s.is_empty())
-                        .map(|type_name| {
-                            let base = type_name
-                                .split('<')
-                                .next()
-                                .unwrap_or(type_name.as_str())
-                                .to_string();
-                            self.ctx.push_disambig_context(Some(base))
-                        });
+                    //
+                    // **Closure expected-return-type plumbing (#26 residual).**
+                    // For a function-typed parameter being passed a
+                    // closure expression (`|acc, x| Continue(acc + x)`),
+                    // prefer the closure's *return-type* simple name
+                    // (extracted at registration time into
+                    // `FunctionInfo.param_closure_return_type_names`)
+                    // over the param's own type name.  The param type
+                    // itself is the function shape (`F` or `fn(...)
+                    // -> ReduceResult<R>`) — not what a body-local
+                    // variant constructor wants to consult.
+                    let saved = if matches!(arg.kind, ExprKind::Closure { .. })
+                        && let Some(Some(ret_name)) =
+                            func_info.param_closure_return_type_names.get(i)
+                    {
+                        Some(self.ctx.push_disambig_context(Some(ret_name.clone())))
+                    } else {
+                        func_info
+                            .param_type_names
+                            .get(i)
+                            .filter(|s| !s.is_empty())
+                            .map(|type_name| {
+                                let base = type_name
+                                    .split('<')
+                                    .next()
+                                    .unwrap_or(type_name.as_str())
+                                    .to_string();
+                                self.ctx.push_disambig_context(Some(base))
+                            })
+                    };
                     let arg_val = self
                         .compile_expr(arg)?
                         .or_internal("call arg has no value")?;
@@ -8515,12 +8533,62 @@ impl VbcCodegen {
         // Compile arguments into consecutive registers (after receiver).
         // Phase 1: compile all arg expressions (may allocate non-consecutive regs)
         // Phase 2: allocate consecutive fresh regs and move values into them
+        //
+        // **Closure expected-return-type plumbing (#26 residual).**
+        //
+        // Method dispatch here resolves at runtime via CallM, so the
+        // FunctionInfo isn't known precisely.  Do a best-effort bare-
+        // name probe so a closure argument body can still see the right
+        // disambig context when the resolved target has fn-typed params.
+        // The probe uses `args.len() + 1` (account for `self`) and prefers
+        // a scope-aware lookup, falling back to bare.
+        //
+        // When the probe finds a FunctionInfo whose
+        // `param_closure_return_type_names[i + 1]` carries a `Some(name)`,
+        // push `name` as `current_return_type_name` before compiling
+        // arg `i` — exactly the same mechanism as
+        // `compile_static_method_call` / `compile_call` use for the
+        // statically-resolved path.
+        let closure_disambig_lookup = self
+            .ctx
+            .lookup_function_with_arity_in_scope(method.name.as_str(), args.len() + 1)
+            .or_else(|| {
+                self.ctx
+                    .lookup_function_with_arity(method.name.as_str(), args.len() + 1)
+            })
+            .or_else(|| {
+                // Bare-name probe didn't match; sometimes the impl-block
+                // method is only registered under a qualified key
+                // (`I.reduce_with` / `Iterator.reduce_with`) without a
+                // bare alias.  Suffix-probe via `.<method>` so the
+                // closure-disambig hook still sees the FunctionInfo.
+                let suffix = format!(".{}", method.name.as_str());
+                self.ctx
+                    .find_function_by_suffix(&suffix)
+                    .filter(|fi| fi.param_count == args.len() + 1)
+            })
+            .cloned();
         let args_start = if !args.is_empty() {
             let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
-            for arg in args.iter() {
+            for (i, arg) in args.iter().enumerate() {
+                // Skip self (param index 0): callsite `args` already
+                // excludes the receiver — so closure arg at callsite
+                // index `i` is at function param index `i + 1`.
+                let saved_disambig = if matches!(arg.kind, ExprKind::Closure { .. })
+                    && let Some(ref fi) = closure_disambig_lookup
+                    && let Some(Some(ret_name)) =
+                        fi.param_closure_return_type_names.get(i + 1)
+                {
+                    Some(self.ctx.push_disambig_context(Some(ret_name.clone())))
+                } else {
+                    None
+                };
                 let arg_val = self
                     .compile_expr(arg)?
                     .or_internal("method arg has no value")?;
+                if let Some(saved) = saved_disambig {
+                    self.ctx.pop_disambig_context(saved);
+                }
                 arg_vals.push(arg_val);
             }
 
@@ -10344,9 +10412,38 @@ impl VbcCodegen {
         let args_start = if !args.is_empty() {
             let mut arg_results: Vec<Reg> = Vec::with_capacity(args.len());
             for (i, arg) in args.iter().enumerate() {
+                // **Closure expected-return-type plumbing (#26 residual).**
+                //
+                // When arg `i` is a closure expression and the formal
+                // parameter is callable with return type `X`, push
+                // `X`'s simple name onto the disambig stack before
+                // compiling the closure body.  This lets a bare
+                // variant constructor in the lambda's body
+                // (`Continue(...)`, `Some(...)`, …) resolve to the
+                // right type's variant table even when the simple
+                // name collides across two sum types (canonical
+                // case: `ReduceResult.Continue` vs `ControlFlow.Continue`
+                // — the iterator's `reduce_with` callback expects a
+                // `ReduceResult<R>`, but bare `Continue` is also
+                // `ControlFlow.Continue`, and first-wins lookup is
+                // non-deterministic).  See
+                // `FunctionInfo.param_closure_return_type_names`
+                // (populated in `mod.rs::register_function` via
+                // `extract_closure_return_type_name`).
+                let saved_disambig = if matches!(arg.kind, ExprKind::Closure { .. })
+                    && let Some(Some(ret_name)) =
+                        func_info.param_closure_return_type_names.get(i)
+                {
+                    Some(self.ctx.push_disambig_context(Some(ret_name.clone())))
+                } else {
+                    None
+                };
                 let arg_val = self
                     .compile_expr(arg)?
                     .or_internal("static method arg has no value")?;
+                if let Some(saved) = saved_disambig {
+                    self.ctx.pop_disambig_context(saved);
+                }
                 // `&mut self` receiver wrapping — when this call shape
                 // is an instance method dispatched via the static-call
                 // path (typechecker pre-resolved
@@ -19451,6 +19548,7 @@ impl VbcCodegen {
             return_type_inner: None,
             is_const: false,
             is_transparent_wrapper: false,
+            param_closure_return_type_names: Vec::new(),
         };
         self.ctx.register_function(closure_name.clone(), info);
 
@@ -20580,6 +20678,7 @@ impl VbcCodegen {
             return_type_inner: None,
             is_const: false,
             is_transparent_wrapper: false,
+            param_closure_return_type_names: Vec::new(),
         };
         self.ctx.register_function(spawn_func_name.clone(), info);
 
@@ -28733,6 +28832,7 @@ impl VbcCodegen {
             return_type_inner: None,
             is_const: false,
             is_transparent_wrapper: false,
+            param_closure_return_type_names: Vec::new(),
         };
         self.ctx.register_function(gen_name.clone(), info);
 
