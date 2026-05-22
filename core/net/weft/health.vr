@@ -43,6 +43,7 @@
 module core.net.weft.health;
 
 mount core.*;
+mount core.text.builder.{TextBuilder};
 mount core.collections.list.{List};
 mount core.net.http.{Response, StatusCode};
 mount core.net.weft.response_ext.{resp_status, resp_text, resp_with_body_text};
@@ -184,7 +185,7 @@ implement Readiness {
     /// the awaits. Eliminates the held-Mutex-across-await
     /// deadlock pattern.
     pub async fn diagnostic_body(&self) -> Text {
-        let mut out = Text.builder();
+        let mut out = TextBuilder.new();
         if self.draining.load(MemoryOrdering.Acquire) {
             out.push_str("draining=true\n");
         }

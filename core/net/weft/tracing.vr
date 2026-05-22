@@ -40,6 +40,7 @@
 module core.net.weft.tracing;
 
 mount core.*;
+mount core.text.builder.{TextBuilder};
 mount core.time.{Instant};
 mount core.net.http.{Response, StatusCode, Headers};
 mount core.net.weft.service.{Layer};
@@ -105,7 +106,7 @@ implement TraceContext {
 }
 
 fn random_hex(n_chars: Int) -> Text {
-    let mut out = Text.builder();
+    let mut out = TextBuilder.new();
     const HEX: [Byte; 16] = [
         0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
         0x38, 0x39, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66,

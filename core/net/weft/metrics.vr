@@ -28,6 +28,7 @@
 module core.net.weft.metrics;
 
 mount core.*;
+mount core.text.builder.{TextBuilder};
 mount core.collections.map.{Map};
 mount core.collections.list.{List};
 mount core.time.{Instant};
@@ -224,7 +225,7 @@ implement WeftMetricsRegistry {
     /// Render in Prometheus text exposition format. Suitable for a
     /// `GET /metrics` handler.
     public fn render_prometheus(&self) -> Text {
-        let mut out = Text.builder();
+        let mut out = TextBuilder.new();
         // Counters.
         let cs = self.counters.lock();
         for (name, counter) in cs.iter() {
