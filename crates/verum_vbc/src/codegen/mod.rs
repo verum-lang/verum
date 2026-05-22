@@ -13055,7 +13055,21 @@ impl VbcCodegen {
         // DropRef handles both:
         // 1. User-defined Drop::drop() calls (if type has Drop impl)
         // 2. CBGR slot invalidation (bumps generation to invalidate references)
-        for (_name, var_reg) in vars.iter().rev() {
+        //
+        // Task #18 escape-analysis discipline: skip DropRef for any local
+        // whose name was collected by `collect_escaping_local_refs`
+        // (populated at `compile_function` entry).  These slots are
+        // returned via `&local` flowing into `Ret { value: &local }`;
+        // their generation must NOT be bumped here, otherwise the
+        // caller's CBGR ref carries the pre-bump generation and trips
+        // `CBGR use-after-free detected` on the next deref.  The deeper
+        // soundness across `pop_frame`'s own slot-generation bump is
+        // handled by interpreter-side stabilisation in `do_return`
+        // (commit chain phase 3).
+        for (name, var_reg) in vars.iter().rev() {
+            if self.ctx.current_fn_escaping_vars.contains(name) {
+                continue;
+            }
             self.ctx.emit(Instruction::DropRef { src: *var_reg });
         }
 
