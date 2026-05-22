@@ -19865,6 +19865,36 @@ impl VbcCodegen {
                 | ExprKind::Literal(_)
         );
         if !needs_stable {
+            // **Path** that resolves to a module-level const (not a
+            // local variable) — `&ANSWER` where `ANSWER` is a const.
+            // The const's load via `compile_path` lands in an
+            // `alloc_temp`'d register that the very next `alloc_temp`
+            // (the Ref instruction's `dst`) may recycle from the free
+            // list, so the encoded CBGR ref ends up referencing a
+            // slot whose `LoadI` value was overwritten before the
+            // Ret/Deref reads it back.  Stabilising into a fresh
+            // never-recyclable slot via `alloc_fresh` closes that
+            // class of corruption — matching the literal/Call/Index
+            // stabilisation already in effect.
+            //
+            // Locals (`&x` where `x: T` is a let-bound) bypass this
+            // path: `compile_simple_path` returns the variable's
+            // permanent `define_var` slot (not a temp), and Path
+            // matched against an existing local would return early
+            // via `get_var_reg` (`compile_simple_path` line ~1458),
+            // never reaching the const-resolution branch.  So the
+            // ExprKind::Path special-case here only fires for
+            // module-level paths.
+            if matches!(&inner.kind, ExprKind::Path(_))
+                && !self.path_is_local_variable(inner)
+            {
+                let stable = self.ctx.registers.alloc_fresh();
+                self.ctx.emit(Instruction::Mov {
+                    dst: stable,
+                    src: inner_reg,
+                });
+                return stable;
+            }
             return inner_reg;
         }
         let stable = self.ctx.registers.alloc_fresh();
@@ -19873,6 +19903,32 @@ impl VbcCodegen {
             src: inner_reg,
         });
         stable
+    }
+
+    /// Returns `true` when the path expression resolves to a let-bound
+    /// local variable that has a permanent (non-recyclable) register
+    /// slot allocated via `define_var`.
+    ///
+    /// Used by `stabilize_ref_source` to distinguish:
+    ///   * `&local_var` — operand backed by a permanent slot; no
+    ///     stabilisation needed.
+    ///   * `&CONST_NAME` / `&module::ITEM` / `&Type::ASSOC_CONST` —
+    ///     operand backed by a recyclable `alloc_temp` slot (the load
+    ///     site emits `LoadI` / `Call` into a temp); the next
+    ///     `alloc_temp` (Ref's `dst`) can recycle that slot from the
+    ///     free list before Ret/Deref reads it.  Must stabilise.
+    fn path_is_local_variable(&self, expr: &Expr) -> bool {
+        use verum_ast::expr::ExprKind;
+        let ExprKind::Path(path) = &expr.kind else {
+            return false;
+        };
+        if path.segments.len() != 1 {
+            return false;
+        }
+        let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] else {
+            return false;
+        };
+        self.ctx.get_var_reg(ident.name.as_str()).is_ok()
     }
 
     /// Emits a reference instruction based on tier.
