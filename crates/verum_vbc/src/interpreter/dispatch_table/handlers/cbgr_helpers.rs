@@ -35,8 +35,14 @@ pub(super) fn encode_cbgr_ref_mut(abs_index: u32, generation: u32) -> i64 {
 
 /// Decodes a register-based reference into (abs_index, generation).
 /// Masks off the mutability bit so register index is always correct.
+///
+/// Visibility raised to `pub(in super::super)` for task #18 — the
+/// `do_return` stabilisation in `dispatch_table::mod.rs` reads the
+/// encoded ref's `abs_index` to decide whether the ref points into
+/// the current frame and therefore needs heap-cell materialisation
+/// before `pop_frame` invalidates the slot.
 #[inline(always)]
-pub(super) fn decode_cbgr_ref(encoded: i64) -> (u32, u32) {
+pub(in super::super) fn decode_cbgr_ref(encoded: i64) -> (u32, u32) {
     let raw = -(encoded + 1);
     let abs_index = ((raw & 0xFFFF_FFFF) as u32) & !CBGR_MUTABLE_BIT;
     let generation = ((raw >> 32) & 0xFFFF_FFFF) as u32;
@@ -108,8 +114,12 @@ const CBGR_REF_ABS_INDEX_MAX: u32 = 1 << 24;
 /// any encoded value whose decoded abs_index exceeds
 /// `CBGR_REF_ABS_INDEX_MAX` — a real CBGR ref's index is always small
 /// (bounded by the register-file capacity).
+///
+/// Visibility raised to `pub(in super::super)` for task #18 — the
+/// `do_return` stabilisation in `dispatch_table::mod.rs` uses this
+/// predicate to gate the register-frame escape detection.
 #[inline(always)]
-pub(super) fn is_cbgr_ref(val: &Value) -> bool {
+pub(in super::super) fn is_cbgr_ref(val: &Value) -> bool {
     if !val.is_inline_int() {
         return false;
     }

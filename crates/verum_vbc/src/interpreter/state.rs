@@ -719,6 +719,40 @@ pub struct InterpreterState {
     /// task scripts are unaffected.
     pub coop_pump_depth: u32,
 
+    /// Task #18 — escape-cell storage for refs that flow out of a
+    /// function via `Ret`.
+    ///
+    /// `do_return` runs before the callee's frame is popped.  When the
+    /// returned `Value` is a CBGR register-slot ref (`is_cbgr_ref`) and
+    /// the encoded absolute slot index falls inside the callee's frame
+    /// (`abs_index >= reg_base && abs_index < registers.top`), the
+    /// referenced value is materialised into a fresh `Box<UnsafeCell<Value>>`
+    /// cell stored here.  The returned `Value` is then rewritten to a
+    /// `ThinRef` pointing at that cell's interior.  This survives
+    /// `pop_frame`'s blanket slot-generation bump (the encoded ref no
+    /// longer references a register slot) AND survives the next
+    /// `push_frame`'s slot reinitialisation (the cell lives on the heap,
+    /// independent of the register file).
+    ///
+    /// `Box<UnsafeCell<Value>>` gives a stable address that `Vec` growth
+    /// does not invalidate (the Box owns the cell on the heap; only the
+    /// pointer-sized handle moves on push).  String literals — the
+    /// canonical `&"hello"` case for task #18 — fall through this same
+    /// path: the LoadStr-loaded `Value` (SmallStr NaN-box or
+    /// interned-blob pointer) is copied into the cell verbatim, and the
+    /// caller's `*t` deref reads the byte-identical value through the
+    /// ThinRef machinery without consulting the (now-stale) register
+    /// slot generation.
+    ///
+    /// Cells live for the `InterpreterState`'s lifetime (whole-program
+    /// execution).  The cumulative cost is one cell per escaping ref —
+    /// negligible against the panic-free correctness gain.  A future
+    /// liveness-driven sweep can reclaim cells once the returning ref
+    /// is provably unreachable, but the existing GC machinery already
+    /// covers the dominant case where the ref is bound to a let in the
+    /// caller and dropped on caller-scope exit.
+    pub escape_cells: Vec<Box<std::cell::UnsafeCell<Value>>>,
+
     /// Permission router for intrinsic gating (#12 / P3.2).
     ///
 
@@ -2557,6 +2591,7 @@ impl InterpreterState {
             #[cfg(feature = "ffi")]
             ffi_array_buffers: Vec::new(),
             pending_drops: Vec::new(),
+            escape_cells: Vec::new(),
             global_instruction_count: 0,
             coop_pump_depth: 0,
             permission_router: Box::new(
