@@ -21,6 +21,7 @@ mount core.mem.epoch.{
     current_epoch, wraparound_count,
     cached_epoch, invalidate_epoch_cache,
     Epoch,
+    reset_for_tests, increment_epoch_for_tests,
 };
 
 // =============================================================================
@@ -117,6 +118,73 @@ fn test_epoch_type_is_unit() {
     // must be available.
     let _e: Epoch = ();
     assert(true);
+}
+
+// =============================================================================
+// Section 6: Deterministic-advance write-surface (test-only API)
+//
+// `reset_for_tests` + `increment_epoch_for_tests` give tests the
+// ability to pin the WRITE surface of the global epoch counter
+// without relying on the 2^32-allocation natural wraparound or
+// cross-test side effects.  Each test MUST call `reset_for_tests()`
+// first to establish a deterministic baseline.  Audit §B-§C lift.
+// =============================================================================
+
+// REGRESSION (task #9): `reset_for_tests` panics under `--interp`
+// with `NullPointerAt opcode 0x78 (CbgrExtended) site:
+// core.mem.epoch.reset_for_tests pc: 6` — the body's
+// `&mut GLOBAL_EPOCH.epoch` (field-of-static-mut-struct) is not
+// covered by the task #26 [E2] scalar-only static-mut backing-cell
+// fix.  Pinned `@ignore` in their final form; flip green when #9
+// extends cell-backed access to `static mut <struct>.<scalar_field>`.
+
+@ignore
+@test
+fn test_reset_for_tests_zeros_epoch_and_wraparounds() {
+    reset_for_tests();
+    // Post-reset both reads must observe 0.
+    assert_eq(current_epoch(), 0 as UInt64);
+    assert_eq(wraparound_count(), 0);
+}
+
+@ignore
+@test
+fn test_increment_epoch_for_tests_advances_by_one() {
+    reset_for_tests();
+    let before = current_epoch();
+    let after = increment_epoch_for_tests();
+    // The function returns the NEW value; equivalently observable via
+    // current_epoch() afterwards.
+    assert(after > before);
+    assert_eq(after, current_epoch());
+}
+
+@ignore
+@test
+fn test_increment_epoch_for_tests_is_monotone_under_repeated_calls() {
+    reset_for_tests();
+    let e0 = current_epoch();
+    let e1 = increment_epoch_for_tests();
+    let e2 = increment_epoch_for_tests();
+    let e3 = increment_epoch_for_tests();
+    // Strict monotonicity: each call advances the counter.
+    assert(e0 < e1);
+    assert(e1 < e2);
+    assert(e2 < e3);
+}
+
+@ignore
+@test
+fn test_reset_then_increment_then_reset_round_trip() {
+    reset_for_tests();
+    let _ = increment_epoch_for_tests();
+    let _ = increment_epoch_for_tests();
+    let _ = increment_epoch_for_tests();
+    assert(current_epoch() > 0 as UInt64);
+    reset_for_tests();
+    // Re-reset returns to baseline.
+    assert_eq(current_epoch(), 0 as UInt64);
+    assert_eq(wraparound_count(), 0);
 }
 
 // =============================================================================
