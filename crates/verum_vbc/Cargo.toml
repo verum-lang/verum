@@ -80,7 +80,11 @@ verum_mlir = { workspace = true, optional = true }
 dashmap = { workspace = true, optional = true }
 parking_lot = { workspace = true, optional = true }
 
-# Unix libc for V-LLSI syscall operations
+# Unix-only syscall surface for the interpreter runtime handlers
+# (setsockopt / getpeername / getsockname / close in net_runtime, plus
+# fatal-signal handling). Windows builds are libc-free: the cross-platform
+# socket paths go through `std::net`, errno constants through local
+# definitions, and Windows system APIs through `windows-sys` below.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

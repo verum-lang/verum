@@ -14,6 +14,7 @@
 //! `--force` is set.
 
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -116,12 +117,18 @@ pub fn install(force: bool) -> Result<()> {
     let script = pre_commit_script(env!("CARGO_PKG_VERSION"));
     fs::write(&target, script.as_bytes())
         .map_err(|e| CliError::Custom(format!("write {}: {e}", target.display())))?;
-    let mut perms = fs::metadata(&target)
-        .map_err(|e| CliError::Custom(format!("stat {}: {e}", target.display())))?
-        .permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&target, perms)
-        .map_err(|e| CliError::Custom(format!("chmod {}: {e}", target.display())))?;
+    // Make the hook executable. Windows has no Unix permission bits —
+    // Git for Windows runs hooks through its bundled shell regardless —
+    // so the chmod step is Unix-only.
+    #[cfg(unix)]
+    {
+        let mut perms = fs::metadata(&target)
+            .map_err(|e| CliError::Custom(format!("stat {}: {e}", target.display())))?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&target, perms)
+            .map_err(|e| CliError::Custom(format!("chmod {}: {e}", target.display())))?;
+    }
 
     ui::success(&format!(
         "Installed pre-commit hook at {}",

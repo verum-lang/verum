@@ -169,15 +169,15 @@ pub const TCP_LISTEN_FLAG_REUSEPORT: i64 = 1 << 0;
 /// distinguishes v2 from v1 (which collapses everything to `-1`).
 pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
     if !(0..=65535).contains(&port) {
-        return -(libc::EINVAL as i64);
+        return -(EINVAL as i64);
     }
     if !(0..=65535).contains(&backlog) {
-        return -(libc::EINVAL as i64);
+        return -(EINVAL as i64);
     }
 
     let parsed: std::net::IpAddr = match host.parse() {
         Ok(ip) => ip,
-        Err(_) => return -(libc::EINVAL as i64),
+        Err(_) => return -(EINVAL as i64),
     };
     let addr = std::net::SocketAddr::new(parsed, port as u16);
 
@@ -195,7 +195,7 @@ pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
     // expected behaviour.
     let listener = match TcpListener::bind(addr) {
         Ok(l) => l,
-        Err(e) => return -(e.raw_os_error().unwrap_or(libc::EINVAL) as i64),
+        Err(e) => return -(e.raw_os_error().unwrap_or(EINVAL) as i64),
     };
 
     // Apply flags. Failures here are non-fatal — listener is already
@@ -767,6 +767,11 @@ pub const NET_STATUS_REACTOR_ERROR: i64 = -3;
 /// I/O on the socket (after readiness) failed.
 pub const NET_STATUS_IO_ERROR: i64 = -4;
 
+/// `EINVAL` — invalid-argument errno. The value is 22 on Linux, macOS
+/// and Windows alike, so a single platform-agnostic constant replaces
+/// `EINVAL` and keeps the argument-validation paths libc-free.
+const EINVAL: i32 = 22;
+
 fn timeout_from_ms(timeout_ms: i64) -> Duration {
     if timeout_ms <= 0 {
         Duration::from_millis(0)
@@ -944,13 +949,27 @@ pub fn tcp_recv_timeout_coop(
     }
     let cap = max_len.min(1 << 20) as usize;
     let mut buf = vec![0_u8; cap];
-    let raw_fd: i64 = {
+    // Clone the stream out of the registry under the lock; the clone
+    // shares the underlying socket but lets us drop the lock before the
+    // reactor-driven wait/read loop.
+    let mut stream: TcpStream = {
         let map = REGISTRY.lock().unwrap();
         match map.get(&fd) {
-            Some(NetResource::Stream(s)) => stream_raw_fd(s),
+            Some(NetResource::Stream(s)) => match s.try_clone() {
+                Ok(c) => c,
+                Err(_) => return (NET_STATUS_IO_ERROR, String::new()),
+            },
             _ => return (NET_STATUS_IO_ERROR, String::new()),
         }
     };
+    // The reactor/coop path requires a non-blocking socket: after a
+    // readiness wake we must never block (kqueue/IOCP can deliver stale
+    // wakes). `read` then reports real EOF as `Ok(0)` and "no data yet"
+    // as `WouldBlock` natively — no MSG_DONTWAIT / peek probe needed.
+    if stream.set_nonblocking(true).is_err() {
+        return (NET_STATUS_IO_ERROR, String::new());
+    }
+    let raw_fd = stream_raw_fd(&stream);
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
     loop {
         let now = std::time::Instant::now();
@@ -963,30 +982,17 @@ pub fn tcp_recv_timeout_coop(
             1 => {}
             _ => return (NET_STATUS_REACTOR_ERROR, String::new()),
         }
-        let n = unsafe {
-            libc::recv(
-                raw_fd as libc::c_int,
-                buf.as_mut_ptr() as *mut libc::c_void,
-                buf.len(),
-                libc::MSG_DONTWAIT,
-            )
-        };
-        if n > 0 {
-            let n = n as usize;
-            buf.truncate(n);
-            return (n as i64, String::from_utf8_lossy(&buf).into_owned());
-        } else if n == 0 {
-            if !verify_real_eof(raw_fd) {
-                continue;
+        match stream.read(&mut buf) {
+            Ok(0) => return (NET_STATUS_EOF, String::new()),
+            Ok(n) => {
+                buf.truncate(n);
+                return (n as i64, String::from_utf8_lossy(&buf).into_owned());
             }
-            return (NET_STATUS_EOF, String::new());
-        } else {
-            let err = std::io::Error::last_os_error();
-            match err.kind() {
+            Err(e) => match e.kind() {
                 std::io::ErrorKind::WouldBlock => continue,
                 std::io::ErrorKind::Interrupted => continue,
                 _ => return (NET_STATUS_IO_ERROR, String::new()),
-            }
+            },
         }
     }
 }
@@ -997,64 +1003,81 @@ pub fn tcp_accept_timeout_coop(
     listen_fd: i64,
     timeout_ms: i64,
 ) -> i64 {
-    let raw_fd: i64 = {
-        let map = REGISTRY.lock().unwrap();
-        match map.get(&listen_fd) {
-            Some(NetResource::Listener(l)) => listener_raw_fd(l),
-            _ => -1,
-        }
-    };
-    let effective_fd = if raw_fd >= 0 { raw_fd } else { listen_fd };
-    if effective_fd < 0 {
-        return NET_STATUS_IO_ERROR;
-    }
-    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
-    loop {
-        let now = std::time::Instant::now();
-        if now >= deadline {
-            return NET_STATUS_TIMEOUT;
-        }
-        let remaining_ms = (deadline - now).as_millis() as i64;
-        match io_wait_readable_coop(state, effective_fd, remaining_ms.max(1)) {
-            0 => return NET_STATUS_TIMEOUT,
-            1 => {}
-            _ => return NET_STATUS_REACTOR_ERROR,
-        }
-        let mut peer: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
-        let mut peer_len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-        #[cfg(target_os = "linux")]
-        let conn_fd = unsafe {
-            libc::accept4(
-                effective_fd as libc::c_int,
-                &mut peer as *mut _ as *mut libc::sockaddr,
-                &mut peer_len,
-                libc::SOCK_CLOEXEC,
-            )
-        };
-        #[cfg(not(target_os = "linux"))]
-        let conn_fd = unsafe {
-            libc::accept(
-                effective_fd as libc::c_int,
-                &mut peer as *mut _ as *mut libc::sockaddr,
-                &mut peer_len,
-            )
-        };
-        if conn_fd >= 0 {
-            #[cfg(unix)]
-            {
-                use std::os::unix::io::FromRawFd;
-                let stream = unsafe { TcpStream::from_raw_fd(conn_fd) };
-                return register(NetResource::Stream(stream));
-            }
-            #[cfg(not(unix))]
+    // Reactor-driven accept loop shared by the registry path (synthetic
+    // fd → cloned listener) and the raw-kernel-fd fallback path.
+    fn accept_loop(
+        state: &mut crate::interpreter::state::InterpreterState,
+        listener: &TcpListener,
+        timeout_ms: i64,
+    ) -> i64 {
+        if listener.set_nonblocking(true).is_err() {
             return NET_STATUS_IO_ERROR;
         }
-        let err = std::io::Error::last_os_error();
-        match err.kind() {
-            std::io::ErrorKind::WouldBlock => continue,
-            std::io::ErrorKind::Interrupted => continue,
-            _ => return NET_STATUS_IO_ERROR,
+        let raw_fd = listener_raw_fd(listener);
+        let deadline =
+            std::time::Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
+        loop {
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return NET_STATUS_TIMEOUT;
+            }
+            let remaining_ms = (deadline - now).as_millis() as i64;
+            match io_wait_readable_coop(state, raw_fd, remaining_ms.max(1)) {
+                0 => return NET_STATUS_TIMEOUT,
+                1 => {}
+                _ => return NET_STATUS_REACTOR_ERROR,
+            }
+            // `accept` on a non-blocking listener returns the connected
+            // stream directly — no sockaddr_storage decoding needed.
+            match listener.accept() {
+                Ok((stream, _peer)) => return register(NetResource::Stream(stream)),
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::WouldBlock => continue,
+                    std::io::ErrorKind::Interrupted => continue,
+                    _ => return NET_STATUS_IO_ERROR,
+                },
+            }
         }
+    }
+
+    // Registry path: a synthetic fd backed by a tracked TcpListener.
+    let cloned: Option<TcpListener> = {
+        let map = REGISTRY.lock().unwrap();
+        match map.get(&listen_fd) {
+            Some(NetResource::Listener(l)) => l.try_clone().ok(),
+            _ => None,
+        }
+    };
+    if let Some(listener) = cloned {
+        return accept_loop(state, &listener, timeout_ms);
+    }
+
+    // Raw-kernel-fd fallback: `listen_fd` is a real fd handed back by the
+    // v2 listen path. Wrap it without taking ownership, then surrender
+    // the fd so the kernel listener survives the call.
+    if listen_fd < 0 {
+        return NET_STATUS_IO_ERROR;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::{FromRawFd, IntoRawFd};
+        let listener = unsafe { TcpListener::from_raw_fd(listen_fd as i32) };
+        let result = accept_loop(state, &listener, timeout_ms);
+        let _surrendered = listener.into_raw_fd();
+        result
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::{FromRawSocket, IntoRawSocket};
+        let listener = unsafe { TcpListener::from_raw_socket(listen_fd as u64) };
+        let result = accept_loop(state, &listener, timeout_ms);
+        let _surrendered = listener.into_raw_socket();
+        result
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = state;
+        NET_STATUS_IO_ERROR
     }
 }
 
@@ -1070,13 +1093,20 @@ pub fn udp_recv_from_timeout_coop(
     }
     let cap = max_len.min(1 << 20) as usize;
     let mut buf = vec![0_u8; cap];
-    let raw_fd: i64 = {
+    let socket: UdpSocket = {
         let map = REGISTRY.lock().unwrap();
         match map.get(&fd) {
-            Some(NetResource::Udp(s)) => udp_raw_fd(s),
+            Some(NetResource::Udp(s)) => match s.try_clone() {
+                Ok(c) => c,
+                Err(_) => return (NET_STATUS_IO_ERROR, String::new(), None),
+            },
             _ => return (NET_STATUS_IO_ERROR, String::new(), None),
         }
     };
+    if socket.set_nonblocking(true).is_err() {
+        return (NET_STATUS_IO_ERROR, String::new(), None);
+    }
+    let raw_fd = udp_raw_fd(&socket);
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
     loop {
         let now = std::time::Instant::now();
@@ -1089,33 +1119,22 @@ pub fn udp_recv_from_timeout_coop(
             1 => {}
             _ => return (NET_STATUS_REACTOR_ERROR, String::new(), None),
         }
-        let mut peer_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
-        let mut peer_len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-        let n = unsafe {
-            libc::recvfrom(
-                raw_fd as libc::c_int,
-                buf.as_mut_ptr() as *mut libc::c_void,
-                buf.len(),
-                libc::MSG_DONTWAIT,
-                &mut peer_storage as *mut _ as *mut libc::sockaddr,
-                &mut peer_len,
-            )
-        };
-        if n > 0 {
-            let n = n as usize;
-            buf.truncate(n);
-            let peer_tuple = decode_sockaddr_storage(&peer_storage, peer_len);
-            return (n as i64, String::from_utf8_lossy(&buf).into_owned(), peer_tuple);
-        } else if n == 0 {
-            let peer_tuple = decode_sockaddr_storage(&peer_storage, peer_len);
-            return (0, String::new(), peer_tuple);
-        } else {
-            let err = std::io::Error::last_os_error();
-            match err.kind() {
+        // `recv_from` yields the peer as a typed `SocketAddr` — no
+        // sockaddr_storage layout decoding required.
+        match socket.recv_from(&mut buf) {
+            Ok((n, peer)) => {
+                buf.truncate(n);
+                return (
+                    n as i64,
+                    String::from_utf8_lossy(&buf).into_owned(),
+                    Some(socket_addr_to_tuple(peer)),
+                );
+            }
+            Err(e) => match e.kind() {
                 std::io::ErrorKind::WouldBlock => continue,
                 std::io::ErrorKind::Interrupted => continue,
                 _ => return (NET_STATUS_IO_ERROR, String::new(), None),
-            }
+            },
         }
     }
 }
@@ -1130,13 +1149,20 @@ pub fn tcp_send_timeout_coop(
     if data.is_empty() {
         return 0;
     }
-    let raw_fd: i64 = {
+    let mut stream: TcpStream = {
         let map = REGISTRY.lock().unwrap();
         match map.get(&fd) {
-            Some(NetResource::Stream(s)) => stream_raw_fd(s),
+            Some(NetResource::Stream(s)) => match s.try_clone() {
+                Ok(c) => c,
+                Err(_) => return NET_STATUS_IO_ERROR,
+            },
             _ => return NET_STATUS_IO_ERROR,
         }
     };
+    if stream.set_nonblocking(true).is_err() {
+        return NET_STATUS_IO_ERROR;
+    }
+    let raw_fd = stream_raw_fd(&stream);
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
     let mut written = 0_usize;
     while written < data.len() {
@@ -1150,26 +1176,17 @@ pub fn tcp_send_timeout_coop(
             1 => {}
             _ => return NET_STATUS_REACTOR_ERROR,
         }
-        let flags = libc::MSG_DONTWAIT | platform_msg_nosignal();
-        let n = unsafe {
-            libc::send(
-                raw_fd as libc::c_int,
-                data[written..].as_ptr() as *const libc::c_void,
-                data.len() - written,
-                flags,
-            )
-        };
-        if n > 0 {
-            written += n as usize;
-        } else if n == 0 {
-            return NET_STATUS_EOF;
-        } else {
-            let err = std::io::Error::last_os_error();
-            match err.kind() {
+        // Rust's runtime installs an ignore-SIGPIPE handler at startup,
+        // so a write to a broken connection surfaces as `Err(BrokenPipe)`
+        // rather than a signal — no MSG_NOSIGNAL flag required.
+        match stream.write(&data[written..]) {
+            Ok(0) => return NET_STATUS_EOF,
+            Ok(n) => written += n,
+            Err(e) => match e.kind() {
                 std::io::ErrorKind::WouldBlock => continue,
                 std::io::ErrorKind::Interrupted => continue,
                 _ => return if written > 0 { written as i64 } else { NET_STATUS_IO_ERROR },
-            }
+            },
         }
     }
     written as i64
@@ -1177,103 +1194,14 @@ pub fn tcp_send_timeout_coop(
 
 
 
-/// Distinguish a genuine peer-FIN from a kqueue stale-event wake
-/// after fd recycling.  Returns true iff the kernel agrees the
-/// socket is truly EOF.
-fn verify_real_eof(raw_fd: i64) -> bool {
-    // 1. SO_ERROR check.  Non-zero => connection has an error
-    //    pending; treat as EOF.
-    let mut so_err: libc::c_int = 0;
-    let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
-    let rc = unsafe {
-        libc::getsockopt(
-            raw_fd as libc::c_int,
-            libc::SOL_SOCKET,
-            libc::SO_ERROR,
-            &mut so_err as *mut _ as *mut libc::c_void,
-            &mut len,
-        )
-    };
-    if rc != 0 || so_err != 0 {
-        return true;
-    }
-    // 2. Peek-recv: if no data and no FIN, recv(MSG_PEEK|MSG_DONTWAIT)
-    //    returns EWOULDBLOCK — the earlier 0-return was spurious.
-    let mut probe = [0u8; 1];
-    let n = unsafe {
-        libc::recv(
-            raw_fd as libc::c_int,
-            probe.as_mut_ptr() as *mut libc::c_void,
-            1,
-            libc::MSG_DONTWAIT | libc::MSG_PEEK,
-        )
-    };
-    if n < 0 {
-        let err = std::io::Error::last_os_error();
-        if err.kind() == std::io::ErrorKind::WouldBlock {
-            return false;
-        }
-    }
-    true
-}
-
-
-/// Per-platform MSG_NOSIGNAL.  macOS doesn't have it (uses SO_NOSIGPIPE
-/// socket option instead, set when the socket is opened); Linux has it.
-#[inline]
-fn platform_msg_nosignal() -> i32 {
-    #[cfg(target_os = "linux")]
-    {
-        libc::MSG_NOSIGNAL
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        0
-    }
-}
-
-
-/// Decode a `sockaddr_storage` populated by `recvfrom` into the
-/// `(family, host_str, port)` tuple shape used by the rest of
-/// net_runtime.  Returns None if the family is not AF_INET / AF_INET6.
-fn decode_sockaddr_storage(
-    storage: &libc::sockaddr_storage,
-    len: libc::socklen_t,
-) -> Option<(u8, String, i64)> {
-    let family = storage.ss_family as i32;
-    if family == libc::AF_INET
-        && len as usize >= std::mem::size_of::<libc::sockaddr_in>()
-    {
-        let sin: &libc::sockaddr_in = unsafe { &*(storage as *const _ as *const _) };
-        let ip = u32::from_be(sin.sin_addr.s_addr);
-        let host = format!(
-            "{}.{}.{}.{}",
-            (ip >> 24) & 0xff,
-            (ip >> 16) & 0xff,
-            (ip >> 8) & 0xff,
-            ip & 0xff
-        );
-        let port = u16::from_be(sin.sin_port) as i64;
-        Some((4, host, port))
-    } else if family == libc::AF_INET6
-        && len as usize >= std::mem::size_of::<libc::sockaddr_in6>()
-    {
-        let sin6: &libc::sockaddr_in6 = unsafe { &*(storage as *const _ as *const _) };
-        let segs: [u16; 8] = unsafe { std::mem::transmute(sin6.sin6_addr.s6_addr) };
-        let ip = std::net::Ipv6Addr::from([
-            u16::from_be(segs[0]),
-            u16::from_be(segs[1]),
-            u16::from_be(segs[2]),
-            u16::from_be(segs[3]),
-            u16::from_be(segs[4]),
-            u16::from_be(segs[5]),
-            u16::from_be(segs[6]),
-            u16::from_be(segs[7]),
-        ]);
-        let port = u16::from_be(sin6.sin6_port) as i64;
-        Some((6, ip.to_string(), port))
-    } else {
-        None
+/// Convert a `std::net::SocketAddr` into the `(family, host, port)`
+/// tuple shape used across net_runtime — `4` for IPv4, `6` for IPv6.
+/// `UdpSocket::recv_from` hands back a typed `SocketAddr`, so no
+/// `sockaddr_storage` layout decoding (and no libc) is required.
+fn socket_addr_to_tuple(addr: std::net::SocketAddr) -> (u8, String, i64) {
+    match addr {
+        std::net::SocketAddr::V4(v4) => (4, v4.ip().to_string(), v4.port() as i64),
+        std::net::SocketAddr::V6(v6) => (6, v6.ip().to_string(), v6.port() as i64),
     }
 }
 
@@ -1419,24 +1347,24 @@ mod tests {
     #[test]
     fn tcp_listen_v2_invalid_host_returns_einval() {
         let r = tcp_listen_v2("not-an-ip", 0, 128, 0);
-        assert_eq!(r, -(libc::EINVAL as i64));
+        assert_eq!(r, -(EINVAL as i64));
     }
 
     #[test]
     fn tcp_listen_v2_invalid_port_returns_einval() {
-        assert_eq!(tcp_listen_v2("0.0.0.0", -1, 128, 0), -(libc::EINVAL as i64));
+        assert_eq!(tcp_listen_v2("0.0.0.0", -1, 128, 0), -(EINVAL as i64));
         assert_eq!(
             tcp_listen_v2("0.0.0.0", 70_000, 128, 0),
-            -(libc::EINVAL as i64)
+            -(EINVAL as i64)
         );
     }
 
     #[test]
     fn tcp_listen_v2_invalid_backlog_returns_einval() {
-        assert_eq!(tcp_listen_v2("0.0.0.0", 0, -1, 0), -(libc::EINVAL as i64));
+        assert_eq!(tcp_listen_v2("0.0.0.0", 0, -1, 0), -(EINVAL as i64));
         assert_eq!(
             tcp_listen_v2("0.0.0.0", 0, 70_000, 0),
-            -(libc::EINVAL as i64)
+            -(EINVAL as i64)
         );
     }
 

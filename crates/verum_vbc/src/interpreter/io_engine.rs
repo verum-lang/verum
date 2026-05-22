@@ -457,8 +457,14 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         if self.backend_fd >= 0 {
+            // `backend_fd` is a kqueue / epoll descriptor — a `Session`
+            // is only ever created on macOS/Linux (`create` returns
+            // `None` elsewhere). Closing it through `OwnedFd`'s own
+            // `Drop` keeps the teardown libc-free.
+            #[cfg(unix)]
             unsafe {
-                libc::close(self.backend_fd as libc::c_int);
+                use std::os::unix::io::{FromRawFd, OwnedFd, RawFd};
+                drop(OwnedFd::from_raw_fd(self.backend_fd as RawFd));
             }
         }
     }

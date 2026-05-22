@@ -1,7 +1,8 @@
 use crate::Error;
 use verum_mlir_sys::{
-    MlirDiagnosticSeverity_MlirDiagnosticError, MlirDiagnosticSeverity_MlirDiagnosticNote,
-    MlirDiagnosticSeverity_MlirDiagnosticRemark, MlirDiagnosticSeverity_MlirDiagnosticWarning,
+    MlirDiagnosticSeverity, MlirDiagnosticSeverity_MlirDiagnosticError,
+    MlirDiagnosticSeverity_MlirDiagnosticNote, MlirDiagnosticSeverity_MlirDiagnosticRemark,
+    MlirDiagnosticSeverity_MlirDiagnosticWarning,
 };
 
 /// Diagnostic severity.
@@ -13,23 +14,24 @@ pub enum DiagnosticSeverity {
     Warning,
 }
 
-// NOTE: `mlirDiagnosticGetSeverity` in the regenerated `verum_mlir_sys`
-// bindings (LLVM 21) returns `u32` rather than the historical `i32`, and
-// the `MlirDiagnosticSeverity_*` constants are also `u32` in the new
-// bindings. The TryFrom impl below therefore targets `u32` — otherwise
-// `verum_mlir/src/diagnostic.rs:30` (which calls `try_from` on a `u32`
-// value returned by the FFI) fails to compile with E0277.
-impl TryFrom<u32> for DiagnosticSeverity {
+// NOTE: bindgen types the `MlirDiagnosticSeverity` enum — and its
+// `MlirDiagnosticSeverity_*` constants — according to the target ABI:
+// `u32` on Linux/macOS, but `i32` on Windows/MSVC (plain C enums are
+// signed there). Targeting the bindgen type alias instead of a hard-coded
+// integer keeps this `TryFrom` impl correct on every platform —
+// `mlirDiagnosticGetSeverity` returns that very alias, so
+// `verum_mlir/src/diagnostic.rs` calls `try_from` without any cast.
+impl TryFrom<MlirDiagnosticSeverity> for DiagnosticSeverity {
     type Error = Error;
 
-    fn try_from(severity: u32) -> Result<Self, Error> {
+    fn try_from(severity: MlirDiagnosticSeverity) -> Result<Self, Error> {
         #[allow(non_upper_case_globals)]
         Ok(match severity {
             MlirDiagnosticSeverity_MlirDiagnosticError => Self::Error,
             MlirDiagnosticSeverity_MlirDiagnosticNote => Self::Note,
             MlirDiagnosticSeverity_MlirDiagnosticRemark => Self::Remark,
             MlirDiagnosticSeverity_MlirDiagnosticWarning => Self::Warning,
-            _ => return Err(Error::UnknownDiagnosticSeverity(severity)),
+            _ => return Err(Error::UnknownDiagnosticSeverity(severity as u32)),
         })
     }
 }

@@ -26,17 +26,18 @@ use super::{
 /// Order in which to traverse an operation tree.
 //
 
-// NOTE: `MlirWalkOrder_*` constants in the regenerated `verum_mlir_sys`
-// bindings (LLVM 21) are `u32`, not the historical `i32`. The enum repr
-// MUST match, otherwise the discriminant initializers `= Mlir..._*` fail
-// with E0308. The same applies to `WalkResult` below.
+// NOTE: bindgen types the `MlirWalkOrder_*` / `MlirWalkResult_*` constants
+// per the target ABI — `u32` on Linux/macOS, `i32` on Windows/MSVC (plain
+// C enums are signed there). A `#[repr(u32)]` enum needs `u32` discriminant
+// initializers, so each constant is cast with `as u32`; the values are
+// small and non-negative, so the cast is exact on every platform.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum WalkOrder {
     /// Visit the operation before its nested regions.
-    PreOrder = MlirWalkOrder_MlirWalkPreOrder,
+    PreOrder = MlirWalkOrder_MlirWalkPreOrder as u32,
     /// Visit the operation after its nested regions.
-    PostOrder = MlirWalkOrder_MlirWalkPostOrder,
+    PostOrder = MlirWalkOrder_MlirWalkPostOrder as u32,
 }
 
 /// Control flow action returned by the walk callback.
@@ -44,11 +45,11 @@ pub enum WalkOrder {
 #[repr(u32)]
 pub enum WalkResult {
     /// Continue into this operation’s children.
-    Advance = MlirWalkResult_MlirWalkResultAdvance,
+    Advance = MlirWalkResult_MlirWalkResultAdvance as u32,
     /// Terminate the entire walk immediately.
-    Interrupt = MlirWalkResult_MlirWalkResultInterrupt,
+    Interrupt = MlirWalkResult_MlirWalkResultInterrupt as u32,
     /// Don’t visit this operation’s children, but keep walking siblings.
-    Skip = MlirWalkResult_MlirWalkResultSkip,
+    Skip = MlirWalkResult_MlirWalkResultSkip as u32,
 }
 
 pub trait OperationLike<'c: 'a, 'a>: Display + 'a {
