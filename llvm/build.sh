@@ -33,6 +33,23 @@ log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1" >&2; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
+# True when running under a Windows bash (Git-Bash / MSYS2 / Cygwin).
+is_windows() {
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Path to the installed llvm-config, accounting for the .exe suffix on Windows.
+llvm_config_path() {
+    if [[ -f "$INSTALL_DIR/bin/llvm-config.exe" ]]; then
+        echo "$INSTALL_DIR/bin/llvm-config.exe"
+    else
+        echo "$INSTALL_DIR/bin/llvm-config"
+    fi
+}
+
 # Parse llvm.toml to get configuration
 parse_config() {
     if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -58,35 +75,61 @@ parse_config() {
     SHALLOW="${SHALLOW:-true}"
 }
 
-# Clone LLVM source if needed
+# Clone LLVM source if needed.
+#
+# The llvm-project monorepo is large; even a shallow clone can drop
+# mid-transfer ("connection reset" / "early EOF"), leaving a partial,
+# unusable checkout. So we validate any existing tree and retry the clone.
 clone_source() {
     if [[ -d "$SOURCE_DIR" ]]; then
-        log_info "LLVM source already exists at $SOURCE_DIR"
+        # Usable only if git metadata AND the llvm/ source tree are intact.
+        if git -C "$SOURCE_DIR" rev-parse --verify HEAD &>/dev/null \
+           && [[ -f "$SOURCE_DIR/llvm/CMakeLists.txt" ]]; then
+            log_info "LLVM source already exists at $SOURCE_DIR"
 
-        # Check if we need to switch tags
-        cd "$SOURCE_DIR"
-        CURRENT_TAG=$(git describe --tags --exact-match 2>/dev/null || echo "unknown")
-        if [[ "$CURRENT_TAG" != "$LLVM_TAG" ]]; then
-            log_info "Switching from $CURRENT_TAG to $LLVM_TAG"
-            git fetch --tags --depth 1 origin "refs/tags/$LLVM_TAG:refs/tags/$LLVM_TAG"
-            git checkout "$LLVM_TAG"
+            local CURRENT_TAG
+            CURRENT_TAG=$(git -C "$SOURCE_DIR" describe --tags --exact-match 2>/dev/null || echo "unknown")
+            if [[ "$CURRENT_TAG" != "$LLVM_TAG" ]]; then
+                log_info "Switching from $CURRENT_TAG to $LLVM_TAG"
+                git -C "$SOURCE_DIR" fetch --tags --depth 1 origin "refs/tags/$LLVM_TAG:refs/tags/$LLVM_TAG"
+                git -C "$SOURCE_DIR" checkout "$LLVM_TAG"
+            fi
+            return 0
         fi
-        cd "$SCRIPT_DIR"
-    else
-        log_info "Cloning LLVM from $LLVM_REPO (tag: $LLVM_TAG)"
-
-        if [[ "$SHALLOW" == "true" ]]; then
-            git clone --depth 1 --branch "$LLVM_TAG" "$LLVM_REPO" "$SOURCE_DIR"
-        else
-            git clone --branch "$LLVM_TAG" "$LLVM_REPO" "$SOURCE_DIR"
-        fi
+        log_warn "Existing $SOURCE_DIR is incomplete or corrupt — removing it."
+        rm -rf "$SOURCE_DIR"
     fi
+
+    log_info "Cloning LLVM from $LLVM_REPO (tag: $LLVM_TAG)"
+
+    local clone_args=(--branch "$LLVM_TAG")
+    [[ "$SHALLOW" == "true" ]] && clone_args+=(--depth 1)
+
+    # Retry: large transfers over flaky networks routinely fail once or twice.
+    local attempt
+    for attempt in 1 2 3; do
+        if git clone "${clone_args[@]}" "$LLVM_REPO" "$SOURCE_DIR"; then
+            return 0
+        fi
+        log_warn "Clone attempt $attempt/3 failed; cleaning up and retrying..."
+        rm -rf "$SOURCE_DIR"
+        sleep 5
+    done
+
+    log_error "git clone failed after 3 attempts — check network connectivity."
+    exit 1
 }
 
 # Detect build tool (Ninja preferred)
 detect_generator() {
     if command -v ninja &> /dev/null; then
         echo "Ninja"
+    elif is_windows; then
+        # The "Unix Makefiles" generator needs `make`, which MSVC
+        # toolchains do not ship. Ninja is mandatory on Windows.
+        log_error "Ninja not found — required on Windows."
+        log_error "Install it: winget install Ninja-build.Ninja"
+        exit 1
     else
         log_warn "Ninja not found, using Unix Makefiles (slower)"
         echo "Unix Makefiles"
@@ -101,6 +144,9 @@ detect_jobs() {
     elif [[ "$(uname)" == "Darwin" ]]; then
         # macOS
         sysctl -n hw.ncpu
+    elif [[ -n "${NUMBER_OF_PROCESSORS:-}" ]]; then
+        # Windows (Git-Bash inherits NUMBER_OF_PROCESSORS from the environment)
+        echo "$NUMBER_OF_PROCESSORS"
     else
         # Fallback
         echo 4
@@ -195,9 +241,11 @@ install() {
 
     log_success "Installation complete"
 
-    # Verify installation
-    if [[ -f "$INSTALL_DIR/bin/llvm-config" ]]; then
-        local VERSION=$("$INSTALL_DIR/bin/llvm-config" --version)
+    # Verify installation (llvm-config gains a .exe suffix on Windows)
+    local llvm_config
+    llvm_config=$(llvm_config_path)
+    if [[ -f "$llvm_config" ]]; then
+        local VERSION=$("$llvm_config" --version)
         log_success "LLVM $VERSION installed successfully"
     else
         log_error "llvm-config not found after installation"
@@ -276,15 +324,19 @@ main() {
     log_info "  Type:     $BUILD_TYPE"
     echo ""
 
-    # Check if already installed
-    if [[ -f "$INSTALL_DIR/bin/llvm-config" ]]; then
-        local INSTALLED_VERSION=$("$INSTALL_DIR/bin/llvm-config" --version)
+    # Check if already installed (llvm-config gains a .exe suffix on Windows)
+    local installed_config
+    installed_config=$(llvm_config_path)
+    if [[ -f "$installed_config" ]]; then
+        local INSTALLED_VERSION=$("$installed_config" --version)
         log_warn "LLVM $INSTALLED_VERSION already installed at $INSTALL_DIR"
-        read -p "Rebuild? [y/N] " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        # Non-interactive: `cargo build` auto-invokes this script via build.rs,
+        # so it must never block on stdin. Force a rebuild with VERUM_LLVM_REBUILD=1.
+        if [[ "${VERUM_LLVM_REBUILD:-0}" != "1" ]]; then
+            log_info "Already installed — skipping (set VERUM_LLVM_REBUILD=1 to force a rebuild)."
             exit 0
         fi
+        log_info "VERUM_LLVM_REBUILD=1 — rebuilding from scratch."
         clean
     fi
 

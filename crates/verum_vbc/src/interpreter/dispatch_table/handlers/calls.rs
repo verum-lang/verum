@@ -194,9 +194,7 @@ pub(in super::super) fn handle_call(
             // here as a sibling to hasher_runtime / char_runtime.  The
             // widened bytecode_length gate below (`is_intrinsic_stub`)
             // now routes them through `try_dispatch_intrinsic_by_name`
-            // directly — the dedicated intercept is preserved at
-            // `super::ctx_runtime` for defensive depth but no longer
-            // wired here.  See the `is_intrinsic_stub` comment for
+            // directly.  See the `is_intrinsic_stub` comment for
             // the architectural rationale.
             if let Some(result) = super::shell_runtime::try_intercept_shell_runtime(
                 state,
