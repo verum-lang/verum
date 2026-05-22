@@ -9766,7 +9766,7 @@ impl VbcCodegen {
         // If it's a variable or static/const, treat as regular method call on a value.
         let is_static_or_const = self
             .ctx
-            .lookup_function(&type_name)
+            .lookup_function_in_scope(&type_name)
             .map(|f| f.param_count == 0 && !f.is_async && !f.is_generator)
             .unwrap_or(false);
 
@@ -11689,7 +11689,7 @@ impl VbcCodegen {
                         .unwrap_or(false)
                         && self
                             .ctx
-                            .lookup_function(ident_name)
+                            .lookup_function_in_scope(ident_name)
                             .and_then(|info| info.variant_tag)
                             .is_some();
 
@@ -11697,7 +11697,7 @@ impl VbcCodegen {
                         // Lookup tag — prefer scrutinee type when known
                         let tag = self
                             .ctx
-                            .lookup_function(ident_name)
+                            .lookup_function_in_scope(ident_name)
                             .and_then(|info| info.variant_tag)
                             .or_else(|| {
                                 if let Some(ref scrutinee_type) = self.ctx.match_scrutinee_type {
@@ -11775,8 +11775,8 @@ impl VbcCodegen {
                     // if the function info has a __const_val_ intrinsic name.
                     let const_value = self
                         .ctx
-                        .lookup_function(&variant_name)
-                        .or_else(|| self.ctx.lookup_function(&dot_name))
+                        .lookup_function_in_scope(&variant_name)
+                        .or_else(|| self.ctx.lookup_function_in_scope(&dot_name))
                         .or_else(|| {
                             if let Some(simple) = variant_name.rsplit("::").next() {
                                 self.ctx.lookup_function_in_scope(simple)
@@ -11900,19 +11900,19 @@ impl VbcCodegen {
                         let tag = scrutinee_first_tag
                             .or_else(|| {
                                 self.ctx
-                                    .lookup_function(&variant_name)
+                                    .lookup_function_in_scope(&variant_name)
                                     .and_then(|info| info.variant_tag)
                             })
                             .or_else(|| {
                                 self.ctx
-                                    .lookup_function(&dot_name)
+                                    .lookup_function_in_scope(&dot_name)
                                     .and_then(|info| info.variant_tag)
                             })
                             .or_else(|| {
                                 // Try simple name (last segment) for unqualified lookup
                                 if let Some(simple) = variant_name.rsplit("::").next() {
                                     self.ctx
-                                        .lookup_function(simple)
+                                        .lookup_function_in_scope(simple)
                                         .and_then(|info| info.variant_tag)
                                 } else {
                                     None
@@ -12101,8 +12101,8 @@ impl VbcCodegen {
                                 // same outer context.
                                 let payload_types: Option<Vec<String>> = self
                                     .ctx
-                                    .lookup_function(&variant_name)
-                                    .or_else(|| self.ctx.lookup_function(&dot_name))
+                                    .lookup_function_in_scope(&variant_name)
+                                    .or_else(|| self.ctx.lookup_function_in_scope(&dot_name))
                                     .or_else(|| {
                                         variant_name
                                             .rsplit("::")
@@ -12448,7 +12448,7 @@ impl VbcCodegen {
                 // Check if this is a variant constructor (record variant pattern)
                 let variant_tag = self
                     .ctx
-                    .lookup_function(&type_name)
+                    .lookup_function_in_scope(&type_name)
                     .and_then(|info| info.variant_tag)
                     .or_else(|| {
                         // Simple name not found (likely in collision set).
@@ -12860,7 +12860,7 @@ impl VbcCodegen {
                         // Check if this is a partial pattern (returns Maybe<T>)
                         let is_partial = self
                             .ctx
-                            .lookup_function(&pattern_name)
+                            .lookup_function_in_scope(&pattern_name)
                             .map(|f| f.is_partial_pattern)
                             .unwrap_or(false);
 
