@@ -301,6 +301,22 @@ pub struct CodegenContext {
     /// the actual memory address of the element rather than its value.
     pub byte_array_vars: HashSet<String>,
 
+    /// Task #18 — escape-analysis result for the current function.
+    ///
+    /// Names of local variables whose `&local` ref flows out of the function
+    /// via `Ret { value: &local }` (implicit trailing-expression return or
+    /// explicit `return &local;`).  Populated by
+    /// `analyze_escaping_local_refs` at `compile_function` entry; consumed
+    /// by `compile_block`'s scope-exit DropRef emission so the slot's
+    /// generation is NOT bumped — without this skip the caller's CBGR ref
+    /// would carry the pre-bump generation and trip use-after-free
+    /// detection on the next deref.
+    ///
+    /// Cleared at `compile_function` exit so the set never leaks across
+    /// function compilations.  When the function's return type is not a
+    /// reference type the set is always empty (no escape possible).
+    pub current_fn_escaping_vars: HashSet<String>,
+
     /// Variables that hold typed arrays with their element sizes.
     ///
 
@@ -1075,6 +1091,7 @@ impl CodegenContext {
             user_defined_types: HashSet::new(),
             module_aliases: HashMap::new(),
             byte_array_vars: HashSet::new(),
+            current_fn_escaping_vars: HashSet::new(),
             typed_array_vars: HashMap::new(),
             try_recover_depth: 0,
             required_contexts: HashSet::new(),
