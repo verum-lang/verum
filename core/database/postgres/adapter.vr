@@ -22,7 +22,7 @@ mount core.*;
 mount base.{Result, Ok, Err, Text};
 mount core.database.common.error.{DbError, AdapterId};
 mount core.database.postgres.config.PgConfig;
-mount core.database.postgres.connection.{PgConnection, connect as pg_connect};
+mount core.database.postgres.connection.{PgConnection};
 
 // -----------------------------------------------------------------------------
 // PgAdapter — vendor identity + connect entry-point.
@@ -44,6 +44,9 @@ implement PgAdapter {
     /// Connect — TCP + Startup + SCRAM auth + ParameterStatus loop.
     /// Returns when the server emits ReadyForQuery.
     public fn connect(cfg: &PgConfig) -> Result<PgConnection, DbError> {
-        pg_connect(cfg)
+        // Fully-qualified path instead of `mount connect as pg_connect`
+        // (see `async_listener.vr` for the defect class — `mount X as Y`
+        // doesn't surface Y to AOT codegen's function-table lookup).
+        core.database.postgres.connection.connect(cfg)
     }
 }
