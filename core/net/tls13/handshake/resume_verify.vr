@@ -43,7 +43,9 @@ mount core.collections.List;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.security.kdf.hkdf.{HkdfError};
-mount core.security.util.constant_time.{constant_time_eq as ct_shared_eq};
+// `mount X as Y` rename-aliases don't surface to AOT codegen
+// function-table lookup (task #17/#39 mount-scope-aware defect class).
+// Use fully-qualified path at the call site below instead.
 mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
 mount core.net.tls13.keyschedule.schedule.{EarlySecret, SecretBytes};
 mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};
@@ -329,5 +331,5 @@ fn derive_resumption_psk(
 
 /// Delegates to the audited core.security.util.constant_time helper.
 fn constant_time_eq(a: &[Byte], b: &[Byte]) -> Bool {
-    ct_shared_eq(a, b)
+    core.security.util.constant_time.constant_time_eq(a, b)
 }
