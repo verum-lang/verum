@@ -2,20 +2,146 @@
 // core-tests/mem/arena/integration_test.vr
 // =============================================================================
 //
-// Integration tests: arena constants composed with header generation
-// constants.  The arena uses the same `GEN_INITIAL` / `GEN_MAX` as
-// the rest of CBGR — pin the consistency.
+// Integration tests for `core.mem.arena` — the generational bump-pointer
+// arena allocator with O(1) mass invalidation.
+//
+//   §1  Static-shape composition — arena constants line up with the CBGR
+//       generation lattice.
+//   §2  Live arena lifecycle — `new` → `alloc` → `reset` → `alloc again`
+//       → `destroy`.  Exercises bump-pointer allocation, generation
+//       bump on reset, and is_destroyed flag on destroy.
+//
+// Live arena lifecycle tests are presently @ignore'd pending the
+// fundamental fix for task #8 (GenerationalArena value broken at GetF
+// after constructor return — symptom of cross-module method shadow
+// class shared with #17 / #39 lookup-by-receiver-type work).  Tests are
+// kept here in their final form so they flip to active the moment the
+// underlying defect closes.
 // =============================================================================
 
 mount core.prelude.*;
 mount core.mem.arena.{
     DEFAULT_ARENA_CAPACITY, MAX_ARENA_CAPACITY, ARENA_ALIGNMENT,
-    ArenaConfig,
+    ArenaConfig, GenerationalArena,
 };
 mount core.mem.header.{GEN_INITIAL, GEN_MAX};
 
 // -----------------------------------------------------------------------------
-// §1  ArenaConfig default values produce a valid config
+// §0  Probe — does cross-module constructor + field access work for the
+//     sibling ArenaConfig record?  This diagnostic narrows down whether
+//     the GenerationalArena GetF NullPointer is a record-allocation
+//     issue or a method-dispatch issue.
+// -----------------------------------------------------------------------------
+
+@test
+fn probe_arenaconfig_default_field_access() {
+    let cfg = ArenaConfig.default();
+    // Direct field read on a record returned from a cross-module
+    // constructor.  If this fails, the defect is in record-return
+    // path.  If this passes but GenerationalArena fails, the defect
+    // is specific to GenerationalArena's 7-field layout or its
+    // method dispatch.
+    assert_eq(cfg.initial_capacity, DEFAULT_ARENA_CAPACITY);
+    assert(cfg.max_capacity >= cfg.initial_capacity);
+    assert(cfg.growth_factor > 100);
+}
+
+@test
+fn probe_arenaconfig_fixed_field_access() {
+    let cfg = ArenaConfig.fixed(2048);
+    assert_eq(cfg.initial_capacity, 2048);
+    assert_eq(cfg.max_capacity, 2048);
+    assert_eq(cfg.growth_factor, 100);
+}
+
+// Probe: bypass the method, read the field directly.  Pinned
+// @ignore'd until task #8 closes — see file header comment for the
+// triangulation that points the defect at the precompiled
+// `GenerationalArena.new` body specifically.
+@ignore
+@test
+fn probe_generationalarena_direct_field_read() {
+    let arena = GenerationalArena.new(1024);
+    let c = arena.capacity;
+    assert(c >= 1024);
+}
+
+// Probe: a USER-DEFINED 7-field record with the same shape as
+// GenerationalArena (Int fields + nested record).  If this works,
+// the defect is specific to the precompiled-stdlib representation
+// of GenerationalArena (function-id remap or field-layout
+// registration drift).  If this also fails, the defect is in the
+// 7-field MakeRecord path itself.
+type ProbeArenaShape is {
+    buffer: Int,
+    capacity: Int,
+    used: Int,
+    generation: Int,
+    alloc_count: Int,
+    reset_count: Int,
+    config: Int,    // simplified: nested-record stand-in
+};
+
+@test
+fn probe_user_seven_field_record_field_access() {
+    let r = ProbeArenaShape {
+        buffer: 100,
+        capacity: 1024,
+        used: 0,
+        generation: 1,
+        alloc_count: 0,
+        reset_count: 0,
+        config: 42,
+    };
+    assert_eq(r.capacity, 1024);
+    assert_eq(r.config, 42);
+}
+
+// Probe: replicate GenerationalArena's pattern of including a nested
+// stdlib record field initialised via cross-module constructor.  This
+// pinpoints whether the defect lives in record-literal construction
+// where one of the slots is itself a fresh cross-module-built record.
+type ProbeWithNestedConstructor is {
+    a: Int,
+    b: Int,
+    cfg: ArenaConfig,
+};
+
+@test
+fn probe_user_record_with_nested_constructor_field() {
+    let r = ProbeWithNestedConstructor {
+        a: 11,
+        b: 22,
+        cfg: ArenaConfig.default(),
+    };
+    assert_eq(r.a, 11);
+    assert_eq(r.b, 22);
+    assert(r.cfg.initial_capacity > 0);
+}
+
+// Probe: alternative constructor `with_config` builds the same
+// GenerationalArena from an explicit ArenaConfig.  If it ALSO
+// fails, the defect is in EVERY GenerationalArena constructor (i.e.
+// in the precompiled stdlib's representation of the type itself).
+// If it WORKS, the defect is specific to `new(capacity: Int)` —
+// most likely because its body contains `__alloc_zeroed_raw` AND
+// `ArenaConfig.fixed(...)` inside the record-literal initializer.
+@ignore
+@test
+fn probe_arena_with_config_constructor() {
+    // Pinned @ignore until task #8 closes.  This probe fails
+    // differently than `.new(N)` — at SetF (opcode 0x63) PC 88 inside
+    // `GenerationalArena.with_config` body — confirming the defect is
+    // in the heap-allocation step of MakeRecord for GenerationalArena
+    // (after the precompile archive load, the resulting record type
+    // can't be heap-allocated).
+    let arena = GenerationalArena.with_config(ArenaConfig.default());
+    let c = arena.capacity();
+    assert(c > 0);
+}
+
+// -----------------------------------------------------------------------------
+// §1  Static-shape composition (always-green)
 // -----------------------------------------------------------------------------
 
 @test
@@ -31,10 +157,6 @@ fn integration_default_arena_config_valid() {
     assert(ARENA_ALIGNMENT > 0);
 }
 
-// -----------------------------------------------------------------------------
-// §2  Arena generation lifecycle uses the same constants as the CBGR header
-// -----------------------------------------------------------------------------
-
 @test
 fn integration_arena_uses_same_generation_lattice() {
     // The arena's generation counter shares the same GEN_INITIAL → GEN_MAX
@@ -43,15 +165,138 @@ fn integration_arena_uses_same_generation_lattice() {
     assert(GEN_INITIAL < GEN_MAX);
 }
 
-// -----------------------------------------------------------------------------
-// §3  Arena alignment matches typical word size
-// -----------------------------------------------------------------------------
-
 @test
 fn integration_arena_alignment_matches_word_size() {
     // 8-byte alignment = 64-bit word alignment, matching all CBGR
     // pointer-sized fields.
     assert_eq(ARENA_ALIGNMENT, 8);
+}
+
+// -----------------------------------------------------------------------------
+// §2  Live arena lifecycle — pinned @ignore until task #8 closes
+//
+// REGRESSION (task #8): `GenerationalArena.new(1024)` returns a value
+// where `arena.capacity()` (and every other &self method) fails with
+// `NullPointerAt opcode 0x62 (GetF), site: GenerationalArena.capacity,
+// pc: 0`.  The interpreter's bare-name lookup for `capacity` (20+
+// stdlib types declare `fn capacity(&self)`) appears to resolve to the
+// right symbol — the error site IS "GenerationalArena.capacity" — but
+// the receiver passed in is null at PC 0.  Same defect class as the
+// closed List / Map / BinaryHeap layout-drift fixes.  Until the
+// fundamental fix lands, the live lifecycle stays unobservable from
+// the user-facing surface.
+// -----------------------------------------------------------------------------
+
+@ignore
+@test
+fn integration_arena_new_initial_state() {
+    let arena = GenerationalArena.new(1024);
+    // Fresh arena: 0 bytes used, 0 allocations.
+    assert_eq(arena.used(), 0);
+    assert_eq(arena.alloc_count(), 0);
+    assert_eq(arena.reset_count(), 0);
+    assert(arena.capacity() >= 1024);
+    assert(!arena.is_destroyed());
+}
+
+@ignore
+@test
+fn integration_arena_new_capacity_only() {
+    let arena = GenerationalArena.new(1024);
+    let c = arena.capacity();
+    assert(c >= 1024);
+}
+
+@ignore
+@test
+fn integration_arena_alloc_advances_used() {
+    let mut arena = GenerationalArena.new(1024);
+    let ptr = arena.alloc(64);
+    // Successful allocation returns a non-zero pointer.
+    assert(ptr != 0);
+    // bump-pointer arithmetic: used is at least 64 bytes (more after
+    // alignment rounding).
+    assert(arena.used() >= 64);
+    assert_eq(arena.alloc_count(), 1);
+}
+
+@ignore
+@test
+fn integration_arena_reset_bumps_generation() {
+    let mut arena = GenerationalArena.new(1024);
+    let gen_before = arena.generation();
+    let _p1 = arena.alloc(32);
+    let _p2 = arena.alloc(32);
+    arena.reset();
+    // reset bumps the generation counter — every ref allocated pre-reset
+    // is now invalidated.
+    assert(arena.generation() > gen_before);
+    // used counter is rewound for memory reuse.
+    assert_eq(arena.used(), 0);
+    assert_eq(arena.reset_count(), 1);
+}
+
+@ignore
+@test
+fn integration_arena_reset_does_not_decrease_capacity() {
+    let mut arena = GenerationalArena.new(1024);
+    let cap_before = arena.capacity();
+    let _p = arena.alloc(64);
+    arena.reset();
+    // Memory is NOT freed on reset — only on destroy.  Capacity holds.
+    assert_eq(arena.capacity(), cap_before);
+}
+
+@ignore
+@test
+fn integration_arena_destroy_marks_arena_dead() {
+    let mut arena = GenerationalArena.new(1024);
+    let _p = arena.alloc(64);
+    arena.destroy();
+    assert(arena.is_destroyed());
+    // Post-destroy alloc is a no-op returning 0.
+    let p2 = arena.alloc(32);
+    assert_eq(p2, 0);
+}
+
+@ignore
+@test
+fn integration_arena_repeated_alloc_increments_counter() {
+    let mut arena = GenerationalArena.new(2048);
+    for _i in 0..16 {
+        let _p = arena.alloc(64);
+    }
+    assert_eq(arena.alloc_count(), 16);
+    assert(arena.used() >= 1024);
+}
+
+@ignore
+@test
+fn integration_arena_reset_reuses_memory() {
+    let mut arena = GenerationalArena.new(1024);
+    let p_before = arena.alloc(32);
+    arena.reset();
+    let p_after = arena.alloc(32);
+    // After reset, the next alloc must start at the buffer base —
+    // identical raw pointer.
+    assert_eq(p_before, p_after);
+}
+
+@ignore
+@test
+fn integration_arena_snapshot_captures_state() {
+    let mut arena = GenerationalArena.new(1024);
+    let _p1 = arena.alloc(64);
+    let _p2 = arena.alloc(64);
+    let snap = arena.snapshot();
+    let used_at_snap = arena.used();
+    let gen_at_snap = arena.generation();
+    let _p3 = arena.alloc(64);
+    assert(arena.used() > used_at_snap);
+    let ok = arena.restore(snap);
+    assert(ok);
+    assert_eq(arena.used(), used_at_snap);
+    assert_eq(arena.generation(), gen_at_snap);
 }
 
 fn main() {
