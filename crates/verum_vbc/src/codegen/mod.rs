@@ -12400,6 +12400,30 @@ impl VbcCodegen {
             }
         };
 
+        // Task #18 — escape-analysis pass.
+        //
+        // When the function's return type is a reference (`&T` / `&mut T`
+        // / `&checked T` / `&unsafe T` and their mut variants), walk the
+        // body AST and collect the names of local variables whose `&local`
+        // expression flows directly into a return position (the trailing
+        // expression of a block, or an explicit `return &local;`).
+        //
+        // `compile_block`'s scope-exit DropRef emission consumes this set
+        // and skips the slot-generation bump for these names — without
+        // the skip, the caller's CBGR ref carries the pre-bump generation
+        // and trips `CBGR use-after-free detected: expected generation N,
+        // found N+1` on the next deref.  The deeper runtime correctness
+        // (slot-frame stabilisation across `pop_frame`'s own generation
+        // bump) is handled in the interpreter's `do_return` — this
+        // codegen pass elides the redundant DropRef bump and supplies
+        // the AOT lowering with the same escape information.
+        self.ctx.current_fn_escaping_vars.clear();
+        if let Some(ref body) = func.body
+            && Self::return_type_is_reference(func.return_type.as_ref())
+        {
+            Self::collect_escaping_local_refs(body, &mut self.ctx.current_fn_escaping_vars);
+        }
+
         // Compile the body
         if let Some(ref body) = func.body {
             match body {
@@ -12451,6 +12475,10 @@ impl VbcCodegen {
         // into the next function's compilation.
         self.current_return_ast_type = None;
         self.current_fn_lookup_name = None;
+        // Clear task #18 escape-analysis set so it cannot leak into the
+        // next function's compilation (its DropRef-skip discipline is
+        // strictly per-function-body and must not contaminate siblings).
+        self.ctx.current_fn_escaping_vars.clear();
 
         // End function compilation
         let (instructions, register_count) = self.ctx.end_function();
@@ -13675,6 +13703,190 @@ impl VbcCodegen {
         }
 
         None
+    }
+
+    /// Task #18 — does the declared return type carry a reference qualifier?
+    ///
+    /// Returns `true` for `&T`, `&mut T`, `&checked T`, `&checked mut T`,
+    /// `&unsafe T`, `&unsafe mut T`.  Returns `false` for owned types,
+    /// raw pointers (`*const T` / `*mut T`), `Heap<T>` / `Shared<T>`,
+    /// generics whose type parameter happens to be a reference (caller's
+    /// problem — we cannot inspect through the bind here), and the
+    /// `None`-return-type case (no escape possible).
+    ///
+    /// Used as a fast pre-filter for `collect_escaping_local_refs`: if
+    /// the function never returns a reference, no `&local` inside its
+    /// body needs the DropRef-skip discipline.
+    fn return_type_is_reference(ret: Option<&verum_ast::ty::Type>) -> bool {
+        use verum_ast::ty::TypeKind;
+        let Some(ty) = ret else { return false };
+        matches!(
+            ty.kind,
+            TypeKind::Reference { .. }
+                | TypeKind::CheckedReference { .. }
+                | TypeKind::UnsafeReference { .. }
+        )
+    }
+
+    /// Task #18 — collect locals whose `&local` reaches a return position.
+    ///
+    /// Walks the function body and adds to `out` the names of every local
+    /// variable whose address-taken form (`&local` / `&mut local` /
+    /// `&checked local` / `&unsafe local` and their mut variants)
+    /// appears as:
+    ///   - the trailing expression of the body block (implicit return), or
+    ///   - the operand of an explicit `return &local;` statement.
+    ///
+    /// The walk is intentionally conservative — it only recognises the
+    /// direct `&IDENT` pattern, not derived patterns like
+    /// `&local.field` (which is still a returned ref but is rare and
+    /// caught by the runtime stabilisation in `do_return`).
+    ///
+    /// Refs whose operand is a non-`Path` expression (string literal,
+    /// arithmetic, call result, …) need no entry here — they are not
+    /// scope-bound locals, so `compile_block` never emits DropRef on
+    /// their backing register.  Their stabilisation is exclusively the
+    /// interpreter's `do_return` responsibility.
+    fn collect_escaping_local_refs(body: &FunctionBody, out: &mut std::collections::HashSet<String>) {
+        match body {
+            FunctionBody::Block(block) => Self::scan_block_for_escaping_refs(block, out),
+            FunctionBody::Expr(expr) => Self::scan_expr_as_return(expr, out),
+        }
+    }
+
+    fn scan_block_for_escaping_refs(block: &Block, out: &mut std::collections::HashSet<String>) {
+        // Walk every statement so that explicit `return &x;` is caught
+        // wherever it lives in the block (top-level, inside an
+        // `if`/`match` arm, inside a nested block, …).
+        for stmt in block.stmts.iter() {
+            Self::scan_stmt_for_escaping_refs(stmt, out);
+        }
+        // Trailing expression of the block — implicit return on the
+        // outermost block of the function body; for nested blocks it's
+        // only a "return position" when the nested block itself sits in
+        // a return position. We treat all trailing-expressions as
+        // return-position candidates because the DropRef-skip set is
+        // additive (false-positives only elide a redundant generation
+        // bump; no soundness impact).
+        if let Some(ref expr) = block.expr {
+            Self::scan_expr_as_return(expr, out);
+        }
+    }
+
+    fn scan_stmt_for_escaping_refs(stmt: &verum_ast::Stmt, out: &mut std::collections::HashSet<String>) {
+        if let StmtKind::Expr { expr, .. } = &stmt.kind {
+            Self::scan_expr_for_return_stmt(expr, out);
+        }
+        // Let, Item, Defer, Provide, … — no return-position expression
+        // surfaces directly through these stmt kinds.  (A nested `return
+        // &x;` inside, e.g., a `defer { return &x; }` block would still
+        // be reached because the inner block expression goes through
+        // `scan_expr_for_return_stmt` when reached as an Expr stmt.)
+    }
+
+    /// Recursively scan an expression for explicit `return <expr>` nodes.
+    /// Whenever one is found, its operand is treated as a return-position
+    /// expression and fed into `scan_expr_as_return`.
+    fn scan_expr_for_return_stmt(expr: &verum_ast::Expr, out: &mut std::collections::HashSet<String>) {
+        use verum_ast::expr::ExprKind;
+        match &expr.kind {
+            ExprKind::Return(value) => {
+                if let verum_common::Maybe::Some(ret_expr) = value {
+                    Self::scan_expr_as_return(ret_expr, out);
+                }
+            }
+            ExprKind::Block(block) => {
+                Self::scan_block_for_escaping_refs(block, out);
+            }
+            ExprKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                Self::scan_block_for_escaping_refs(then_branch, out);
+                if let verum_common::Maybe::Some(else_block) = else_branch {
+                    Self::scan_expr_for_return_stmt(else_block, out);
+                }
+            }
+            ExprKind::Match { arms, .. } => {
+                for arm in arms.iter() {
+                    Self::scan_expr_for_return_stmt(&arm.body, out);
+                }
+            }
+            // Other expr kinds: any nested `return` inside them would be
+            // ill-formed at this position; we do not descend.
+            _ => {}
+        }
+    }
+
+    /// Inspect a return-position expression.  If it is a direct `&IDENT`
+    /// pattern (possibly wrapped in `Paren`), insert the identifier's
+    /// name into `out`.
+    fn scan_expr_as_return(expr: &verum_ast::Expr, out: &mut std::collections::HashSet<String>) {
+        use verum_ast::expr::{ExprKind, UnOp};
+        // Strip parens — `return (&x)` parses with Paren wrapper.
+        let inner = Self::strip_paren(expr);
+        match &inner.kind {
+            ExprKind::Unary { op, expr: inner_expr } if matches!(
+                op,
+                UnOp::Ref
+                    | UnOp::RefMut
+                    | UnOp::RefChecked
+                    | UnOp::RefCheckedMut
+                    | UnOp::RefUnsafe
+                    | UnOp::RefUnsafeMut
+            ) => {
+                let operand = Self::strip_paren(inner_expr);
+                // Direct bare-identifier pattern: `&local`.
+                if let ExprKind::Path(path) = &operand.kind
+                    && path.segments.len() == 1
+                    && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+                {
+                    out.insert(ident.name.to_string());
+                }
+            }
+            ExprKind::Block(block) => {
+                // `{ ...; &x }` — trailing expression of inner block is
+                // the return-position; recurse through the inner block.
+                if let Some(ref tail) = block.expr {
+                    Self::scan_expr_as_return(tail, out);
+                }
+                // Also scan statements for explicit `return &x;`.
+                for stmt in block.stmts.iter() {
+                    Self::scan_stmt_for_escaping_refs(stmt, out);
+                }
+            }
+            ExprKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                if let Some(ref tail) = then_branch.expr {
+                    Self::scan_expr_as_return(tail, out);
+                }
+                for stmt in then_branch.stmts.iter() {
+                    Self::scan_stmt_for_escaping_refs(stmt, out);
+                }
+                if let verum_common::Maybe::Some(else_block) = else_branch {
+                    Self::scan_expr_as_return(else_block, out);
+                }
+            }
+            ExprKind::Match { arms, .. } => {
+                for arm in arms.iter() {
+                    Self::scan_expr_as_return(&arm.body, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[inline]
+    fn strip_paren(expr: &verum_ast::Expr) -> &verum_ast::Expr {
+        use verum_ast::expr::ExprKind;
+        match &expr.kind {
+            ExprKind::Paren(inner) => Self::strip_paren(inner),
+            _ => expr,
+        }
     }
 
     /// Generic parameters are preserved so that element types can be extracted
