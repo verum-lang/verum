@@ -383,13 +383,25 @@ public fn winsock_close(fd: FileDesc) -> Result<(), OSError> {
 }
 
 /// Read from socket (alias for recv with no flags). POSIX read() compatibility.
+///
+/// Calls `winsock_recv` (the in-module 3-arg function) explicitly instead
+/// of the bare name `recv` so the call site resolves deterministically.
+/// Prior to this fix, the bare `recv(fd, buf, 0)` call resolved through
+/// glob mounts to a 2-arg `recv` from another module (e.g.
+/// `core/concurrency/session.vr::recv`) and `vbc_lowering` rejected
+/// the call with "wrong number of arguments for recv: expected 2,
+/// found 3" — blocking every AOT build that pulled in winsock2.
 public fn winsock_read(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
-    recv(fd, buf, 0)
+    winsock_recv(fd, buf, 0)
 }
 
 /// Write to socket (alias for send with no flags). POSIX write() compatibility.
+///
+/// Same shadow-resolution fix as `winsock_read`: route through the
+/// in-module `winsock_send` instead of bare `send` so vbc_lowering
+/// resolves the right symbol.
 public fn winsock_write(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
-    send(fd, buf, 0)
+    winsock_send(fd, buf, 0)
 }
 
 /// Stub for fcntl (not applicable on Windows, use ioctlsocket).
@@ -626,17 +638,17 @@ public fn set_multicast_loop_v4(fd: FileDesc, enable: Bool) -> Result<(), OSErro
 
 /// Peek at incoming data without consuming it.
 public fn peek(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
-    recv(fd, buf, MSG_PEEK)
+    winsock_recv(fd, buf, MSG_PEEK)
 }
 
 /// Non-blocking receive. Returns Err(EWOULDBLOCK) if no data available.
 public fn recv_nonblock(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
     // On Windows, non-blocking behavior is set on the socket, not per-call.
     // This function assumes the socket is already in non-blocking mode.
-    recv(fd, buf, 0)
+    winsock_recv(fd, buf, 0)
 }
 
 /// Non-blocking send. Returns Err(EWOULDBLOCK) if buffer full.
 public fn send_nonblock(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
-    send(fd, buf, 0)
+    winsock_send(fd, buf, 0)
 }
