@@ -77,15 +77,16 @@ verifying conformance. Deferred to follow-up.
 
 | # | Defect | Layer | Fix |
 |---|---|---|---|
-| 1 | Missing test coverage for `core/mem/allocator.vr` | `core-tests/mem/allocator/{unit,property,integration,regression}_test.vr` | New 4-file suite; ~345 LOC total (static-shape only). |
+| 1 | Missing test coverage for `core/mem/allocator.vr` | `core-tests/mem/allocator/{unit,property,integration,regression}_test.vr` | 4-file suite; ~345 LOC total (static-shape only). |
 | 2 | Missing `audit.md` for `core-tests/mem/allocator/` | This file. |
+| 3 | §A live cbgr_alloc / cbgr_dealloc lift | `integration_test.vr` §2 — `integration_heap_new_returns_valid_allocation`, `integration_heap_drop_at_scope_end`, `integration_heap_alloc_dealloc_burst` (32-cycle churn), `integration_heap_small_size_class`, `integration_heap_medium_size_class` (128-byte struct), `integration_heap_into_raw_from_raw_round_trip`, `integration_shared_clone_drops_back_to_one`. Routes through public `Heap<T>` / `Shared<T>` API which internally calls `cbgr_alloc` / `cbgr_dealloc`. Closes §A. |
 
 ## 5. Action items deferred
 
 | # | Defect | Estimate | Track |
 |---|---|---|---|
-| §A | Live cbgr_alloc / cbgr_dealloc round-trip — covered partially in `core-tests/base/memory/cbgr_test.vr`; refactor and consolidate here. | ~2 hours | open |
-| §B | Test cbgr_realloc with growth across size-class boundaries. | ~1 hour | open |
+| ~~§A~~ | ~~Live cbgr_alloc / cbgr_dealloc round-trip — covered partially in `core-tests/base/memory/cbgr_test.vr`; refactor and consolidate here.~~ | **CLOSED via §4.3 above** — lifted through public `Heap<T>` / `Shared<T>` API. |
+| §B | Test cbgr_realloc with growth across size-class boundaries.  Lift route: `let mut v: List<Int> = []; for ... { v.push(i) }` — every grow crosses class boundaries through `cbgr_realloc`. | ~1 hour | open |
 | §C | Test context-scoped allocator (`set_context_allocator` + `ctx_alloc`). | ~1 hour | open |
 | §D | Test `Alloc` / `Allocator` protocol implementations (TieredAllocator, SimpleAllocator, MemStackAllocator). | ~3 hours | open |
 | §E | Test AllocStats accuracy across alloc + dealloc cycles. | ~30 min | open |
