@@ -51,6 +51,14 @@ $vs = Find-VsInstall
 Write-Host "    $vs"
 
 Write-Host "==> Loading MSVC environment (x64)..." -ForegroundColor Cyan
+# vsdevcmd.bat (invoked by Enter-VsDevShell) probes for vswhere on PATH
+# during init; without that, it prints "'vswhere.exe' is not recognized"
+# even though the env still loads correctly. Add the VS Installer dir to
+# PATH first so the cosmetic warning is suppressed.
+$vsInstallerDir = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
+if (Test-Path "$vsInstallerDir\vswhere.exe") {
+    $env:Path = "$vsInstallerDir;$env:Path"
+}
 Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
 Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation `
     -DevCmdArguments '-arch=x64 -host_arch=x64' | Out-Null
@@ -103,6 +111,12 @@ else {
 # Put lld-link (and the rest of the LLVM tools) on PATH for cargo/rustc.
 $env:Path = "$llvmInstall\bin;$env:Path"
 
+# bindgen (used by verum_tblgen + verum_mlir_sys build.rs) loads
+# libclang.dll via clang-sys, which checks LIBCLANG_PATH before falling
+# back to the PATH DLL search. Set it explicitly so the bindgen step is
+# robust against PATH ordering / DLL hijacking edge cases.
+$env:LIBCLANG_PATH = "$llvmInstall\bin"
+
 Write-Host "==> Toolchain:" -ForegroundColor Cyan
 foreach ($t in 'cmake', 'cl', 'ninja', 'bash', 'git', 'cargo', 'lld-link') {
     $c = Get-Command $t -ErrorAction SilentlyContinue
@@ -117,7 +131,19 @@ $cargoArgv.Add('build')
 if (-not $DebugBuild) { $cargoArgv.Add('--release') }
 if ($CargoArgs) { $CargoArgs | ForEach-Object { $cargoArgv.Add($_) } }
 Write-Host "==> cargo $($cargoArgv -join ' ')" -ForegroundColor Cyan
-& cargo $cargoArgv.ToArray()
+# Cargo prints normal progress ("Compiling X v1.2.3") to stderr. Under
+# `$ErrorActionPreference = 'Stop'` + a `2>&1`/Tee-Object/log-capture
+# pipeline, PowerShell wraps each stderr line as a NativeCommandError
+# and aborts the script on the first one. Relax the preference for
+# the cargo call only — we still gate success on `$LASTEXITCODE`.
+$prevErrorPref = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    & cargo $cargoArgv.ToArray()
+}
+finally {
+    $ErrorActionPreference = $prevErrorPref
+}
 $code = $LASTEXITCODE
 Write-Host "==> cargo build exit code: $code" -ForegroundColor $(if ($code -eq 0) { 'Green' } else { 'Red' })
 exit $code
