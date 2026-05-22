@@ -555,13 +555,79 @@ const fn build_dispatch_table() -> [Handler; 256] {
 
 /// This is the core return-handling logic used by Ret/RetV handlers and
 /// by the dispatch loop for implicit returns at end of function.
+///
+
+/// # Task #18 — escaping-ref stabilisation
+///
+
+/// `pop_frame` (called below) bumps the slot-generation of every
+/// register in the callee's frame.  If the returned `Value` is a CBGR
+/// register-slot ref whose encoded `abs_index` points INTO the callee's
+/// frame, the caller would hold a ref with the pre-bump generation and
+/// trip `CBGR use-after-free detected` on the next deref.  Worse, the
+/// next `push_frame` reinitialises the slot to `Value::unit()`, so even
+/// a no-check variant would deref garbage.
+///
+
+/// The fix: before pop_frame, detect this escape pattern and materialise
+/// the referenced value into a heap-allocated `Box<UnsafeCell<Value>>`
+/// cell stored on `state.escape_cells`.  Replace the returned `Value`
+/// with a `ThinRef` pointing at the cell's interior.  The caller's
+/// subsequent `*t` deref reads the byte-identical value through the
+/// ThinRef machinery (`handle_deref` already routes ThinRef payloads
+/// before falling through to register-slot CBGR validation), and the
+/// slot's now-stale generation is never consulted.
+///
+
+/// **String literals are not a special case** — `&"hello"` puts a
+/// SmallStr NaN-box into the freshly-`alloc_fresh`'d slot, then `Ref`
+/// encodes a CBGR register ref to that slot.  The stabilisation here
+/// copies the SmallStr Value into the cell verbatim; deref through the
+/// ThinRef yields the same Value the caller would have read from the
+/// register.  No generation tracking ever fires on string literals
+/// after this materialisation, matching the task-#18 directive that
+/// "string literals should bypass generation tracking entirely".
 pub(crate) fn do_return(
     state: &mut InterpreterState,
-    value: Value,
+    mut value: Value,
 ) -> InterpreterResult<DispatchResult> {
     // If returning from a generator function, mark it as Completed
     if let Some(gen_id) = state.current_generator.take() {
         state.generators.complete(gen_id, Some(value));
+    }
+
+    // Task #18 — stabilise CBGR register-slot refs that point INTO the
+    // current frame BEFORE the frame is popped.  Done in-place so the
+    // value flowing back to the caller is already detached from the
+    // register file.
+    if handlers::cbgr_helpers::is_cbgr_ref(&value) {
+        let (abs_index, _gen) =
+            handlers::cbgr_helpers::decode_cbgr_ref(value.as_i64());
+        let frame_base = state.reg_base();
+        let frame_top = state.registers.top() as u32;
+        if abs_index >= frame_base && abs_index < frame_top {
+            // Read the referenced Value while the slot is still live.
+            let inner = state.registers.get_absolute(abs_index);
+            // Allocate a process-lifetime cell.  Box gives a stable
+            // address (Vec growth doesn't move the Box's contents) and
+            // 8-byte alignment for the NaN-boxed Value payload.
+            let cell: Box<std::cell::UnsafeCell<Value>> =
+                Box::new(std::cell::UnsafeCell::new(inner));
+            let ptr = cell.get() as *mut u8;
+            state.escape_cells.push(cell);
+            // Re-encode the return value as a ThinRef pointing at the
+            // cell's interior.  generation=0/epoch_caps=0 — ChkRef
+            // falls through unchecked for ThinRef shapes (see
+            // `handle_chk_ref`); deref reads the Value at the pointer
+            // (see `handle_deref`'s `ref_val.is_thin_ref()` arm).
+            let thin = crate::value::ThinRef::new(
+                ptr,
+                0,
+                state.cbgr_epoch as u16,
+                crate::value::Capabilities::READ_ONLY,
+            );
+            value = Value::from_thin_ref(thin);
+        }
     }
 
     // Pop current frame
