@@ -32,10 +32,10 @@ mount sys.linux.syscall.{
     SYS_CLOCK_GETTIME, SYS_CLOCK_NANOSLEEP, SYS_NANOSLEEP,
     SYS_GETTIMEOFDAY,
 };
-mount core.intrinsics.{
-    rdtsc as rdtsc_intrinsic,
-    rdtscp as rdtscp_intrinsic,
-};
+// `mount X as Y` rename aliases don't surface to AOT codegen
+// function-table lookup (task #17/#39 mount-scope-aware defect class) —
+// call core.intrinsics.{rdtsc,rdtscp} via fully-qualified path
+// at the use sites below instead of aliasing here.
 
 // =============================================================================
 // Clock IDs
@@ -398,7 +398,7 @@ public fn sleep_us(us: UInt64) {
 @inline
 public fn rdtsc() -> UInt64 {
     // Uses intrinsic for rdtsc - compiler emits appropriate assembly
-    rdtsc_intrinsic()
+    core.intrinsics.rdtsc()
 }
 
 /// Read CPU timestamp counter with processor ID.
@@ -410,7 +410,7 @@ public fn rdtsc() -> UInt64 {
 public fn rdtscp() -> (UInt64, UInt32) {
     // Uses intrinsic for rdtscp - compiler emits appropriate assembly
     // Returns (timestamp, processor_id)
-    rdtscp_intrinsic()
+    core.intrinsics.rdtscp()
 }
 
 /// Serializing fence + TSC read for accurate timing.
