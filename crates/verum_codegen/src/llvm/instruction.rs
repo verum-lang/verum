@@ -2408,6 +2408,40 @@ pub fn lower_instruction<'ctx>(
         }
 
         Instruction::Ret { value } => {
+            // Task #18 — escape-ref stabilisation parity contract.
+            //
+            // The Tier-0 interpreter's `do_return` (see
+            // `verum_vbc/src/interpreter/dispatch_table/mod.rs`)
+            // materialises CBGR register-slot refs that point into the
+            // current frame onto a process-lifetime heap cell BEFORE
+            // popping the frame.  Without this, `pop_frame`'s blanket
+            // generation bump invalidates the caller's CBGR ref.
+            //
+            // **AOT parity rule**: when this lowering site emits the
+            // LLVM `ret` instruction, the same escape semantics MUST
+            // hold — i.e. any `Ref` whose source is a function-local
+            // alloca and whose result reaches `Ret { value }` must be
+            // backed by heap storage (via `verum_alloc` / equivalent),
+            // not the function-local `alloca` chain currently emitted
+            // by `lower_ref` for primitives.  The alloca dies with the
+            // stack frame; the caller would dereference reclaimed
+            // memory.
+            //
+            // Full implementation is currently gated by task #24 (LLVM
+            // bitcode-serialisation SIGSEGV — every AOT binary is
+            // broken regardless of escape handling).  Once #24 closes
+            // and AOT binaries can roundtrip through bitcode, this
+            // path needs the per-ref escape decision threaded from the
+            // VBC codegen's `current_fn_escaping_vars` set so
+            // `lower_ref` can substitute a heap allocation for the
+            // alloca when the dst register is consumed by this Ret.
+            // Codegen-side phase 1+2 of task #18 (commits in the same
+            // chain) already populates `current_fn_escaping_vars` and
+            // skips DropRef emission for those names — fewer DropRef
+            // instructions flow through this lowering, which is
+            // strictly less work but does NOT close the alloca-escape
+            // soundness gap on its own.
+            //
             // Free all owned text registers except the one being returned
             // — and except any register that ALIASES the return register.
             //
@@ -30601,6 +30635,27 @@ fn lower_iter_next<'ctx>(
 }
 
 fn lower_ref<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> Result<()> {
+    // Task #18 (AOT side, future-work hook):
+    //
+    // For refs whose `dst` register is consumed by a `Ret` later in
+    // this function — i.e. the ref ESCAPES the frame — the alloca
+    // emitted below (`build_alloca` for primitives) does NOT survive
+    // the function return.  The caller's deref would read reclaimed
+    // stack memory, mirroring the Tier-0 interpreter bug that
+    // `do_return` now stabilises by materialising the referenced
+    // value onto a heap cell.
+    //
+    // The codegen-side phase 1+2 changes populate
+    // `current_fn_escaping_vars` with the names of locals whose `&x`
+    // reaches a return position.  Plumbing that information through
+    // VBC metadata into this lowering site (e.g. as a
+    // `per_instr_escapes: BitSet` shipped alongside the function
+    // descriptor) would let this branch emit `verum_alloc` for the
+    // escaping case and keep `build_alloca` for the non-escaping
+    // common case.  That plumbing is gated by task #24 (no AOT
+    // binaries link today regardless of escape soundness).  Until
+    // then this lowering remains alloca-only.
+    //
     // Detect if this is a reference to a local allocation
     let has_slot = ctx.get_register_slot(src.0).is_some();
     let has_alloca = ctx.is_alloca_mode() && ctx.get_alloca_ptr(src.0).is_some();
