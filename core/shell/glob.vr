@@ -25,7 +25,9 @@ module glob;
 
 mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone};
-mount core.base.glob.{GlobPattern, GlobError, compile as glob_compile};
+mount core.base.glob.{GlobPattern, GlobError};
+// `mount X as Y` rename-alias doesn't surface to AOT codegen (task #11).
+// Use fully-qualified `core.base.glob.compile` at call sites.
 mount core.io.path.{Path, PathBuf};
 mount core.io.fs.{
     metadata as fs_metadata, Metadata,
@@ -64,7 +66,7 @@ public fn glob_with_hidden(pattern: &Text, include_hidden: Bool)
 public fn glob_in(base: &PathBuf, pattern: &Text, include_hidden: Bool)
     -> Result<List<PathBuf>, ShellError>
 {
-    let compiled = glob_compile(pattern.as_str()).map_err(|e| ShellError.SpawnFailed {
+    let compiled = core.base.glob.compile(pattern.as_str()).map_err(|e| ShellError.SpawnFailed {
         command: f"glob({pattern})",
         reason:  f"invalid pattern: {e}",
     })?;

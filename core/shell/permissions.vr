@@ -25,7 +25,9 @@
 module permissions;
 
 mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
-mount core.base.glob.{GlobPattern, compile as glob_compile};
+mount core.base.glob.{GlobPattern};
+// `mount X as Y` rename-alias doesn't surface to AOT codegen (task #11).
+// Use fully-qualified `core.base.glob.compile` at call sites.
 mount core.intrinsics.bitwise.{bitand, bitor, shl, shr};
 mount core.io.path.{Path, PathBuf};
 mount core.io.fs.{current_dir as fs_current_dir};
@@ -118,7 +120,7 @@ fn path_matches(pattern: &Text, path: &Text) -> Bool {
     // 1. Exact prefix match
     if path.starts_with(pattern) { return true; }
     // 2. Glob match (supports ** for recursive any-directory, * within component)
-    match glob_compile(pattern.as_str()) {
+    match core.base.glob.compile(pattern.as_str()) {
         Ok(g)  => g.matches_path(path.as_str()),
         Err(_) => false,
     }
