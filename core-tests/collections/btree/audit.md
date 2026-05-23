@@ -10,10 +10,66 @@ internal balanced tree.
 populated BTreeMap panics with
   "field access out of bounds: field index 0 (offset 0+8 = 8)
    exceeds object data size 0".
-Same architectural class as the closed `List` / `Map` layout drift
-(stdlib `type X is { ... }` field order mismatches runtime
-intercept allocation) but here the defect is not yet closed for
-`BTreeMap`.
+
+### Re-diagnosis 2026-05-23
+
+The original audit attributed this to the same architectural class as
+the closed `List` / `Map` layout drift (stdlib `type X is { ... }`
+field order mismatching the runtime intercept allocation).  That
+framing is **not** accurate for BTreeMap — there is NO Rust-side
+runtime intercept for BTreeMap construction or field access (only the
+iterator-wrapper types `BTreeMapIter` / `BTreeMapKeys` / `BTreeMapRange`
+appear in `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
+method_dispatch.rs:2381`).  So this isn't layout drift between two
+authorities — it's a pure codegen + runtime SetF defect.
+
+Minimal reproduction:
+
+```verum
+let mut m: BTreeMap<Int,Int> = BTreeMap.new();
+m.insert(1, 100);   // ← succeeds
+m.get(&1);          // ← panics: field index 0 (offset 0+8 = 8)
+                    //   exceeds object data size 0
+```
+
+The `BTreeMap.new()` returns a fresh 2-field record `{ root: None,
+len: 0 }` via standard `MakeRecord` (no intercept).  The `insert`
+body at `core/collections/btree.vr:200` writes
+`self.root = Some(Heap.new(node))` via `SetF` — and *that write*
+somehow corrupts the BTreeMap record's storage so the subsequent
+`self.root` read sees object data size 0.
+
+The `Maybe<Heap<BTreeNode<K,V>>>` field type is the suspicious
+shape — a 2-field record (Maybe variant + Heap wrapper) holding a
+nested-Heap value.  No other BTreeMap field assignment fails (the
+`self.len = 1` write at `btree.vr:201` is fine because Int is a
+scalar that fits a single record slot).
+
+### Fix paths
+
+1. **Audit `SetF` for nested-Heap fields** — find the codegen +
+   runtime arm that writes a `Maybe<Heap<T>>` value into a record
+   field and see where the size-0 reset comes from.  Likely a
+   record-allocation slot-count miscount where `Maybe<Heap<T>>` is
+   treated as a 0-byte type (or perhaps a header-size confusion).
+
+2. **Add explicit BTreeMap runtime intercept** — mirror the
+   `MakeRecord` discipline used for `List`/`Map` and stamp a
+   known-good 2-slot allocation for BTreeMap on construction.
+   Sidesteps the generic SetF defect for this specific record shape.
+
+Working surface today: only the empty-state surface (new, get on
+absent key, contains_key absent, remove absent, get_or_default on
+absent, is_empty/len coherence) — 6 unit + 5 property + 2
+integration + 4 PASS-GUARDs (17 / 17 green on `--interp`).
+
+Populated-state surface — `insert`, `get` (with value), populated
+`contains_key`, `remove`, `clear`, `first_key_value`,
+`last_key_value`, `pop_first`, `pop_last`, `len` past zero,
+`get_or_default` present — pinned in `regression_test.vr` §A as
+`@ignore`'d (11 pins).  Empty-state `pop_first` / `first_last_none`
+return a sentinel that the Maybe<(&K,&V)>::deref dispatch
+doesn't recognise — pinned as §B (2 pins).
 
 Working surface today: only the empty-state surface (new, get on
 absent key, contains_key absent, remove absent, get_or_default on
