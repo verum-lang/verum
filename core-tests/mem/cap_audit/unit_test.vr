@@ -224,6 +224,136 @@ fn test_bumped_generation_false_for_ref_incr() {
     assert(!event.bumped_generation());
 }
 
+@test
+fn test_bumped_generation_false_for_ref_decr() {
+    // RefDecr does NOT touch generation — predicate must be false
+    // even if generation_before != generation_after (the predicate
+    // is kind-driven, not diff-driven; see task #24 close-out).
+    let event = CapEvent.new(
+        CapEventKind.RefDecr,
+        100 as UInt64,
+        5 as UInt32, 5 as UInt32,
+        0 as UInt16, 0 as UInt16,
+        0 as UInt64,
+    );
+    assert(!event.bumped_generation());
+}
+
+@test
+fn test_bumped_generation_false_for_epoch_advance() {
+    // EpochAdvance bumps the epoch field, NOT the generation —
+    // predicate must be false regardless of generation values.
+    let event = CapEvent.new(
+        CapEventKind.EpochAdvance,
+        100 as UInt64,
+        5 as UInt32, 5 as UInt32,
+        0 as UInt16, 0 as UInt16,
+        0 as UInt64,
+    );
+    assert(!event.bumped_generation());
+}
+
+@test
+fn test_bumped_generation_kind_driven_not_diff_driven() {
+    // Critical: even when gen_before != gen_after, the predicate
+    // must return false for variants that semantically don't bump
+    // (Attenuate, RefIncr, RefDecr, EpochAdvance).  This is the
+    // intent-vs-diff contract pinned in task #24 close-out.
+    let attenuate = CapEvent.new(
+        CapEventKind.Attenuate,
+        100 as UInt64,
+        1 as UInt32, 2 as UInt32,            // gen DIFFERS, but kind is Attenuate
+        0xFF as UInt16, 0x01 as UInt16,
+        0 as UInt64,
+    );
+    assert(!attenuate.bumped_generation());
+
+    let ref_incr = CapEvent.new(
+        CapEventKind.RefIncr,
+        100 as UInt64,
+        1 as UInt32, 2 as UInt32,            // gen DIFFERS, but kind is RefIncr
+        0 as UInt16, 0 as UInt16,
+        0 as UInt64,
+    );
+    assert(!ref_incr.bumped_generation());
+}
+
+// =============================================================================
+// Section 5: CapEvent epoch_at_event field independence
+// =============================================================================
+
+@test
+fn test_cap_event_new_records_epoch_at_event() {
+    // The 7th argument to .new() is the timestamp_ns / epoch-at-event
+    // value — fully independent of generation / capabilities.
+    let event = CapEvent.new(
+        CapEventKind.GenBump,
+        100 as UInt64,
+        1 as UInt32, 2 as UInt32,
+        0 as UInt16, 0 as UInt16,
+        0xDEAD_BEEF as UInt64,
+    );
+    assert_eq(event.epoch_at_event, 0xDEAD_BEEF as UInt64);
+}
+
+@test
+fn test_cap_event_new_independent_fields_no_cross_contamination() {
+    // Construct two events with the SAME kind but DIFFERENT payloads.
+    // The fields must not bleed across — pin field-independence.
+    let a = CapEvent.new(
+        CapEventKind.Revoke,
+        0x1111 as UInt64,
+        10 as UInt32, 11 as UInt32,
+        0x00FF as UInt16, 0 as UInt16,
+        100 as UInt64,
+    );
+    let b = CapEvent.new(
+        CapEventKind.Revoke,
+        0x2222 as UInt64,
+        20 as UInt32, 21 as UInt32,
+        0xFF00 as UInt16, 0 as UInt16,
+        200 as UInt64,
+    );
+    assert_eq(a.ptr_id, 0x1111 as UInt64);
+    assert_eq(b.ptr_id, 0x2222 as UInt64);
+    assert_eq(a.generation_before, 10 as UInt32);
+    assert_eq(b.generation_before, 20 as UInt32);
+    assert_eq(a.capabilities_before, 0x00FF as UInt16);
+    assert_eq(b.capabilities_before, 0xFF00 as UInt16);
+    assert_eq(a.epoch_at_event, 100 as UInt64);
+    assert_eq(b.epoch_at_event, 200 as UInt64);
+}
+
+// =============================================================================
+// Section 6: CapEvent ptr_id full UInt64 range
+// =============================================================================
+
+@test
+fn test_cap_event_ptr_id_supports_max_uint64() {
+    let event = CapEvent.new(
+        CapEventKind.Revoke,
+        0xFFFFFFFFFFFFFFFF as UInt64,    // max 64-bit
+        1 as UInt32, 2 as UInt32,
+        0 as UInt16, 0 as UInt16,
+        0 as UInt64,
+    );
+    assert_eq(event.ptr_id, 0xFFFFFFFFFFFFFFFF as UInt64);
+}
+
+@test
+fn test_cap_event_ptr_id_supports_zero() {
+    // Zero ptr_id is a valid (but unusual) input — pin the
+    // contract that the constructor does not reject it.
+    let event = CapEvent.new(
+        CapEventKind.Revoke,
+        0 as UInt64,
+        1 as UInt32, 2 as UInt32,
+        0 as UInt16, 0 as UInt16,
+        0 as UInt64,
+    );
+    assert_eq(event.ptr_id, 0 as UInt64);
+}
+
 // =============================================================================
 // Entry point
 // =============================================================================

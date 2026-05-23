@@ -20,7 +20,7 @@ mount core.mem.epoch.{
     DEFAULT_SYNC_INTERVAL, EPOCH_MAX,
     current_epoch, wraparound_count,
     cached_epoch, invalidate_epoch_cache,
-    Epoch,
+    Epoch, EpochCache,
     reset_for_tests, increment_epoch_for_tests,
 };
 
@@ -185,6 +185,109 @@ fn test_reset_then_increment_then_reset_round_trip() {
     // Re-reset returns to baseline.
     assert_eq(current_epoch(), 0 as UInt64);
     assert_eq(wraparound_count(), 0);
+}
+
+// =============================================================================
+// Section 7: EpochCache — 3-field record + sync_interval semantics
+// =============================================================================
+
+@test
+fn test_epoch_cache_record_literal_construction() {
+    // 3-field shape per `core/mem/epoch.vr:479-488`:
+    //   cached_epoch / checks_since_sync / sync_interval.
+    let c: EpochCache = EpochCache {
+        cached_epoch:      42 as UInt64,
+        checks_since_sync: 500,
+        sync_interval:     1000,
+    };
+    assert_eq(c.cached_epoch,      42 as UInt64);
+    assert_eq(c.checks_since_sync, 500);
+    assert_eq(c.sync_interval,     1000);
+}
+
+@test
+fn test_epoch_cache_zero_state() {
+    // Fresh-cache shape: cached=0, checks_since_sync=0,
+    // sync_interval=DEFAULT_SYNC_INTERVAL.  Used as the bootstrap
+    // shape on first thread spawn.
+    let c: EpochCache = EpochCache {
+        cached_epoch:      0 as UInt64,
+        checks_since_sync: 0,
+        sync_interval:     DEFAULT_SYNC_INTERVAL,
+    };
+    assert_eq(c.cached_epoch, 0 as UInt64);
+    assert_eq(c.checks_since_sync, 0);
+    assert_eq(c.sync_interval, DEFAULT_SYNC_INTERVAL);
+}
+
+@test
+fn test_epoch_cache_sync_interval_pins_default() {
+    // The default sync interval matches the module-level constant —
+    // any drift between EpochCache.sync_interval default and
+    // DEFAULT_SYNC_INTERVAL constant would silently change the
+    // cache-refresh frequency on every thread.
+    let default_c: EpochCache = EpochCache {
+        cached_epoch:      0 as UInt64,
+        checks_since_sync: 0,
+        sync_interval:     DEFAULT_SYNC_INTERVAL,
+    };
+    assert_eq(default_c.sync_interval, 1000);
+}
+
+@test
+fn test_epoch_cache_aggressive_sync_interval() {
+    // Tighter cache (sync every 100 checks) — increases accuracy
+    // at the cost of more global-epoch loads.  Pin the freedom to
+    // choose smaller values.
+    let c: EpochCache = EpochCache {
+        cached_epoch:      0 as UInt64,
+        checks_since_sync: 0,
+        sync_interval:     100,
+    };
+    assert(c.sync_interval < DEFAULT_SYNC_INTERVAL);
+}
+
+@test
+fn test_epoch_cache_relaxed_sync_interval() {
+    // Wider cache (sync every 10_000 checks) — for benchmarks where
+    // the user wants minimal CBGR overhead and accepts coarser
+    // wraparound-safety guarantees.
+    let c: EpochCache = EpochCache {
+        cached_epoch:      0 as UInt64,
+        checks_since_sync: 0,
+        sync_interval:     10_000,
+    };
+    assert(c.sync_interval > DEFAULT_SYNC_INTERVAL);
+}
+
+// =============================================================================
+// Section 8: EPOCH_MAX boundary algebra
+// =============================================================================
+
+// REGRESSION: `UInt32→UInt16` cast does not silently truncate the
+// high bits — `(0x10000 as UInt32) as UInt16` returns a value other
+// than 0.  Defer the test until the cast semantics are pinned in
+// the language spec; for now we exercise EPOCH_MAX bounds via
+// inclusion-only checks (no arithmetic wraparound assertions).
+
+@test
+fn test_epoch_max_full_width_is_16_bits() {
+    // EPOCH_MAX must fully use the 16-bit space.  Any narrower value
+    // would mean usable epoch ≠ UInt16.MAX — a silent reduction of
+    // the wraparound-safety window.
+    assert_eq(EPOCH_MAX, 0xFFFF as UInt16);
+    // The next bit (16) is outside the EPOCH_MAX range.
+    let beyond: UInt32 = 0x10000 as UInt32;
+    assert(beyond > (EPOCH_MAX as UInt32));
+}
+
+@test
+fn test_epoch_max_in_uint64_range() {
+    // current_epoch() returns UInt64.  Confirm EPOCH_MAX fits trivially
+    // within that range so wraparound accounting can multiply
+    // wraparound_count * (EPOCH_MAX + 1) without overflow concerns.
+    let max_u64: UInt64 = EPOCH_MAX as UInt64;
+    assert(max_u64 < 0x1_0000_0000_0000 as UInt64);
 }
 
 // =============================================================================

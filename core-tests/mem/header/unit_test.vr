@@ -280,6 +280,74 @@ fn test_validation_error_alias_compatible() {
 }
 
 // =============================================================================
+// Section 7: MemValidationError Eq laws
+// =============================================================================
+
+@test
+fn test_validation_error_eq_reflexive_gen_mismatch() {
+    let a = MemValidationError.generation_mismatch(5 as UInt32, 7 as UInt32);
+    let b = MemValidationError.generation_mismatch(5 as UInt32, 7 as UInt32);
+    assert(a == b);
+}
+
+@test
+fn test_validation_error_eq_reflexive_epoch_mismatch() {
+    let a = MemValidationError.epoch_mismatch(1 as UInt16, 2 as UInt16);
+    let b = MemValidationError.epoch_mismatch(1 as UInt16, 2 as UInt16);
+    assert(a == b);
+}
+
+@test
+fn test_validation_error_eq_distinct_payloads_within_same_variant() {
+    // Same variant, different payload → not equal.  Pin payload-compare.
+    let a = MemValidationError.generation_mismatch(5 as UInt32, 7 as UInt32);
+    let b = MemValidationError.generation_mismatch(5 as UInt32, 99 as UInt32);
+    assert(!(a == b));
+    assert(a != b);
+}
+
+@test
+fn test_validation_error_eq_distinct_variants() {
+    let a = MemValidationError.generation_mismatch(0 as UInt32, 1 as UInt32);
+    let b = MemValidationError.epoch_mismatch(0 as UInt16, 1 as UInt16);
+    assert(!(a == b));
+    assert(a != b);
+}
+
+// =============================================================================
+// Section 8: HEADER_SIZE + GEN_* arithmetic invariants
+// =============================================================================
+
+@test
+fn test_header_align_equals_header_size_for_full_cache_line_use() {
+    // HEADER_ALIGN == HEADER_SIZE pins the "header is its own
+    // alignment quantum" contract that the segment allocator's slice
+    // partitioner depends on.
+    assert_eq(HEADER_ALIGN, HEADER_SIZE);
+    assert_eq(HEADER_SIZE, 32);
+}
+
+@test
+fn test_gen_max_below_uint32_max() {
+    // GEN_MAX = 0xFFFF_FFFE leaves 0xFFFF_FFFF (UInt32.MAX) as the
+    // in-transition sentinel — used when an allocation is mid-revoke
+    // and neither generation_before nor generation_after is observable.
+    let gen_max: UInt32 = GEN_MAX;
+    let u32_max: UInt32 = 0xFFFF_FFFF as UInt32;
+    assert(gen_max < u32_max);
+}
+
+@test
+fn test_gen_constants_chained_inequalities() {
+    // The full lattice ordering pinned in one place:
+    //   GEN_UNALLOCATED < GEN_INITIAL < GEN_MAX < UInt32.MAX
+    assert(GEN_UNALLOCATED < GEN_INITIAL);
+    assert(GEN_INITIAL < GEN_MAX);
+    let u32_max: UInt32 = 0xFFFF_FFFF as UInt32;
+    assert(GEN_MAX < u32_max);
+}
+
+// =============================================================================
 // Entry point
 // =============================================================================
 

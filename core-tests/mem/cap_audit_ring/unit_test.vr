@@ -191,6 +191,78 @@ fn test_record_gen_bump_accepts_full_args() {
 }
 
 // =============================================================================
+// Section 7: enable / disable idempotence across multiple cycles
+// =============================================================================
+
+@test
+fn test_audit_enable_is_idempotent_across_three_calls() {
+    // Calling enable() multiple times must leave the ring in the
+    // enabled state — no internal counter increments, no error.
+    disable();
+    enable();
+    enable();
+    enable();
+    assert(is_enabled());
+    disable();
+}
+
+@test
+fn test_audit_disable_is_idempotent_across_three_calls() {
+    enable();
+    disable();
+    disable();
+    disable();
+    assert(!is_enabled());
+}
+
+@test
+fn test_audit_toggle_cycle_four_round_trips() {
+    // Four enable/disable cycles must not drift away from the
+    // expected state at any point.
+    disable();
+    for _ in 0..4 {
+        enable();
+        assert(is_enabled());
+        disable();
+        assert(!is_enabled());
+    }
+}
+
+// =============================================================================
+// Section 8: recent(n) — bounded by ring capacity, single-event lower bound
+// =============================================================================
+
+@test
+fn test_recent_beyond_capacity_bounded_by_capacity() {
+    // recent(n) MUST NOT return more than the ring capacity — even
+    // when n > CAP_AUDIT_RING_CAPACITY, the result is bounded.  This
+    // is a "no buffer overflow" guarantee for forensic readers.
+    let events = recent(CAP_AUDIT_RING_CAPACITY * 4);
+    assert(events.len() <= CAP_AUDIT_RING_CAPACITY);
+}
+
+@test
+fn test_recent_with_exact_capacity_request_is_bounded() {
+    let events = recent(CAP_AUDIT_RING_CAPACITY);
+    assert(events.len() <= CAP_AUDIT_RING_CAPACITY);
+}
+
+@test
+fn test_recent_one_returns_at_most_one() {
+    let events = recent(1);
+    assert(events.len() <= 1);
+}
+
+// Note on disabled-state record_* short-circuit + reset-after-recent
+// tests: those rely on `reset_for_tests()` which currently null-derefs
+// at `pc=49 opcode 0x78` (CbgrExtended on a static-mut array element
+// field-addr `&mut (*slot_ptr).state as *mut UInt64`).  Same defect
+// class as task #9 (epoch `&mut static_mut.scalar_field` cell-backing)
+// and §3.3 (mem/hazard fundamental).  The shape is already pinned in
+// `regression_test.vr §C` — adding duplicates here would just multiply
+// the same red signal.
+
+// =============================================================================
 // Entry point
 // =============================================================================
 
