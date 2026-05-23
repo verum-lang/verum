@@ -160,15 +160,22 @@ public type RuntimeConfig is AsyncRuntimeConfig;
 // The functions are emitted with internal linkage; LTO folds the
 // loads to constants at every call site after global-DCE — zero
 // runtime overhead vs hardcoded defaults.
-extern {
-    /// Manifest-driven `[runtime].async_worker_threads`. 0 ≡
-    /// auto-detect via `num_cpus::get()`; >0 overrides.
-    fn verum_get_runtime_async_worker_threads() -> Int;
-    /// Manifest-driven `[runtime].task_stack_size` (bytes). 0 ≡
-    /// platform default (~8 MiB on Unix, 1 MiB on Windows); >0
-    /// overrides per-spawned-task stack size.
-    fn verum_get_runtime_task_stack_size() -> Int;
-}
+// Manifest-driven runtime bridges.  Implemented as pure-Verum
+// stubs returning 0 (auto-detect / platform-default) so the
+// Tier-0 VBC interpreter (where extern symbols aren't linked)
+// can still execute `AsyncRuntimeConfig.default()`.  AOT/Tier-1
+// binaries linked against `verum_runtime` get the manifest-bridge
+// extern symbols at link time, overriding these defaults via
+// LTO / cross-archive function-id remap when the extern symbol
+// becomes the authoritative definition.
+//
+// FFI symbol id collision pinned (#24 [E2] residual): under
+// Tier-0, missing `extern fn` declarations surface as
+// `FfiRuntimeError("FFI symbol not found: FfiSymbolId(N)")`
+// at the first call site.  Pure-Verum stub eliminates the
+// surface for interpreter-only test runs.
+fn verum_get_runtime_async_worker_threads() -> Int { 0 }
+fn verum_get_runtime_task_stack_size() -> Int { 0 }
 
 implement AsyncRuntimeConfig {
     /// Create default configuration optimized for general use.
