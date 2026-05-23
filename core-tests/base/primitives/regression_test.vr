@@ -105,6 +105,55 @@ fn regression_as_byte_cast_saturating_add_saturates_at_u8_max_pinned() {
 }
 
 // =============================================================================
+// Byte alias dispatch — UInt8.<method> normalises to byte$<method>
+// =============================================================================
+
+// REGRESSION: pre-fix `UInt8.<method>` qualified-name CallM dispatch
+// short-circuited at the early `is_builtin_prefix` gate in
+// `dispatch_primitive_method` because UInt8 (and its aliases U8/u8/I8/i8/
+// UInt16/U16/u16/Int16/I16/i16/I32/i32/U64/u64/Int64/I64/i64/UInt128/U128/
+// u128/Int128/I128/i128/USize/UIntSize/Usize/usize/ISize/IntSize/Isize/
+// isize) was missing from the allowlist.  The gate returned `Ok(None)`
+// before the width-prefix normaliser at the same function could rewrite
+// `UInt8.<method>` to `byte$<method>`.
+//
+// Surface site: `let lower = (b as Byte); lower.to_ascii_uppercase()`
+// — typechecker stamps `UInt8.to_ascii_uppercase` as the resolved
+// static call (UInt8 is Byte's canonical name in `NUMERIC_ALIAS_MATRIX`),
+// but the runtime dispatcher rejected `UInt8.<method>` and panicked
+// with `method 'UInt8.to_ascii_lowercase' not found on receiver of
+// runtime kind Int`.
+//
+// Closed by extending the `is_builtin_prefix` allowlist with every
+// sized-int alias spelling (canonical + uppercase-short + Rust-style
+// lowercase, for both signed and unsigned widths 8/16/32/64/128 +
+// pointer-width USize/ISize).  Now every qualified-prefix sized-int
+// CallM reaches the width-prefix normaliser and routes to the correct
+// byte$/int32$/uint64$ arm.
+//
+// Architectural rule pinned: every sized-int alias the
+// `NUMERIC_ALIAS_MATRIX` recognises as a Byte/Int32/UInt64 alias MUST
+// be in `dispatch_primitive_method`'s `is_builtin_prefix` allowlist so
+// the runtime dispatcher honours qualified CallM forms regardless of
+// which alias spelling the codegen / typechecker resolved.
+@test
+fn regression_byte_alias_dispatch_through_normaliser_pinned() {
+    // Round-trip via UInt8 canonical name (the form the typechecker
+    // resolves to when the receiver carries the `Byte` alias).
+    let lower: Byte = 97;
+    let upper = lower.to_ascii_uppercase();
+    assert_eq(upper, 65 as Byte);
+
+    let round_trip = upper.to_ascii_lowercase();
+    assert_eq(round_trip, 97 as Byte);
+
+    // Cast-receiver form — exercises both my Cast arm (Case 6c) AND the
+    // runtime prefix-normaliser path.
+    let r = (98 as Byte).to_ascii_uppercase();
+    assert_eq(r, 66 as Byte);
+}
+
+// =============================================================================
 // Unit `()` receiver — protocol-default dispatch
 // =============================================================================
 
