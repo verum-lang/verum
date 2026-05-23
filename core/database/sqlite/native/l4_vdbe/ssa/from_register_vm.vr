@@ -370,11 +370,11 @@ fn lift_straight_line(
             reg_state_write(rs, dst_reg, v);
         }
 
-        Add(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp::AddOp, pending),
-        Subtract(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp::SubOp, pending),
-        Multiply(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp::MulOp, pending),
-        Divide(a, b, d)   => arith(prog, rs, span, a, b, d, ArithOp::DivOp, pending),
-        Remainder(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp::RemOp, pending),
+        Add(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp.AddOp, pending),
+        Subtract(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp.SubOp, pending),
+        Multiply(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp.MulOp, pending),
+        Divide(a, b, d)   => arith(prog, rs, span, a, b, d, ArithOp.DivOp, pending),
+        Remainder(a, b, d) => arith(prog, rs, span, a, b, d, ArithOp.RemOp, pending),
 
         BitAnd(a, b, d)    => bitwise(prog, rs, span, a, b, d, BitOp::AndOp, pending),
         BitOr(a, b, d)     => bitwise(prog, rs, span, a, b, d, BitOp::OrOp, pending),
