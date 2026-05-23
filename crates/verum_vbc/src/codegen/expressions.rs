@@ -6585,6 +6585,96 @@ impl VbcCodegen {
                 if let Some(recv) = receiver
                     && args.len() + 1 == info.param_count
                 {
+                    // Width-aware bypass for sized-int receiver + width-
+                    // sensitive intrinsic methods (saturating_add/sub/mul,
+                    // wrapping_add/sub/mul/shl/shr, checked_add/sub/mul/div).
+                    //
+                    // `compile_static_method_call` (line ~10456) checks
+                    // `func_info.intrinsic_name.is_some()` and routes through
+                    // `compile_imported_intrinsic_call` → emits the bytecode
+                    // opcode directly (e.g. `ArithExtendedOpcode(SaturatingAdd)`
+                    // with hardcoded `width=64`).  For sized-int receivers
+                    // (Byte/UInt8/Int32/UInt64/etc.) this collapses width
+                    // semantics back to i64 — `(255 as Byte).saturating_add(1
+                    // as Byte)` returns `256` instead of `255` because
+                    // `i64::saturating_add` has no 255 ceiling.
+                    //
+                    // The typechecker resolves `(N as Byte).method(M)` as a
+                    // static call to the free intrinsic `method<T>` (with
+                    // `prepended_args = [N, M]`) because the cast receiver
+                    // type doesn't reach the typechecker's inherent-method
+                    // lookup at the moment of resolved-target stamping.
+                    // Detect this here and fall back to `compile_method_call`
+                    // — which routes through `effective_method_name`'s
+                    // Case 6c/7c Cast arms to emit `CallM { method_id:
+                    // "byte$method" }` form, picked up by
+                    // `dispatch_primitive_method`'s width-specific arms with
+                    // correct u8/i32/u64 semantics.
+                    //
+                    // Pinned by
+                    // `core-tests/base/primitives/regression_test.vr::regression_as_byte_cast_saturating_add_saturates_at_u8_max_pinned`.
+                    let is_width_sensitive_intrinsic = info
+                        .intrinsic_name
+                        .as_deref()
+                        .map(|name| {
+                            matches!(
+                                name,
+                                "saturating_add" | "saturating_sub" | "saturating_mul"
+                                    | "saturating_div" | "saturating_neg" | "saturating_abs"
+                                    | "wrapping_add" | "wrapping_sub" | "wrapping_mul"
+                                    | "wrapping_neg" | "wrapping_shl" | "wrapping_shr"
+                                    | "checked_add" | "checked_sub" | "checked_mul"
+                                    | "checked_div" | "checked_rem"
+                                    | "overflowing_add" | "overflowing_sub" | "overflowing_mul"
+                            )
+                        })
+                        .unwrap_or(false);
+                    let recv_is_sized_primitive = if is_width_sensitive_intrinsic {
+                        // Cheap syntactic check on the receiver — only fires
+                        // when the receiver is a Cast (or Paren-wrapped Cast)
+                        // to a sized-int primitive.  Other receivers (typed-
+                        // let / Path / etc.) continue through the existing
+                        // intrinsic path; their case-1a / case-1b dispatch
+                        // discipline already routes correctly.
+                        let cast_target_name = |ty: &verum_ast::ty::Type| -> Option<String> {
+                            match &ty.kind {
+                                verum_ast::ty::TypeKind::Path(p) => {
+                                    p.as_ident().map(|i| i.name.to_string())
+                                }
+                                _ => None,
+                            }
+                        };
+                        let target = match &recv.kind {
+                            ExprKind::Cast { ty, .. } => cast_target_name(ty),
+                            ExprKind::Paren(inner) => {
+                                if let ExprKind::Cast { ty, .. } = &inner.kind {
+                                    cast_target_name(ty)
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        };
+                        target.is_some_and(|t| {
+                            matches!(
+                                t.as_str(),
+                                "Byte" | "UInt8" | "U8" | "u8"
+                                    | "Int8" | "I8" | "i8"
+                                    | "UInt16" | "U16" | "u16"
+                                    | "Int16" | "I16" | "i16"
+                                    | "Int32" | "I32" | "i32"
+                                    | "UInt" | "UInt64" | "U64" | "u64"
+                                    | "USize" | "UIntSize" | "Usize" | "usize"
+                                    | "Int64" | "I64" | "i64"
+                                    | "ISize" | "IntSize" | "Isize" | "isize"
+                            )
+                        })
+                    } else {
+                        false
+                    };
+                    if recv_is_sized_primitive {
+                        return self.compile_method_call(recv, method, args, None);
+                    }
                     let mut prepended: Vec<Expr> = Vec::with_capacity(args.len() + 1);
                     prepended.push((*recv).clone());
                     for a in args.iter() {
@@ -8693,6 +8783,72 @@ impl VbcCodegen {
                 } else {
                     false
                 }
+            } else if let ExprKind::Cast { ty, .. } = &receiver.kind {
+                // Direct cast receiver `(N as Byte).method(...)`:
+                // accept when the cast target spelling is a primitive
+                // numeric name.  Without this arm the Duration/Instant
+                // intrinsic dispatch below (around line 8824) hijacks
+                // every cast-receiver `.saturating_add`/`.wrapping_add`/
+                // `.checked_add` etc. call because those method names
+                // overlap with Duration's time-intrinsics — collapsing
+                // u8 saturation back to i64 semantics.  Pre-fix
+                // `(255 as Byte).saturating_add(1 as Byte)` returned
+                // `256` because the intrinsic-dispatch path emitted
+                // `ArithExtendedOpcode(SaturatingAdd)` with `width=64`.
+                if let verum_ast::ty::TypeKind::Path(p) = &ty.kind
+                    && let Some(ident) = p.as_ident()
+                {
+                    matches!(
+                        ident.name.as_str(),
+                        "Int" | "Float" | "Bool" | "Char" | "Byte"
+                            | "Int8" | "Int16" | "Int32" | "Int64" | "Int128"
+                            | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128"
+                            | "Float32" | "Float64"
+                            | "USize" | "UIntSize" | "Usize" | "usize"
+                            | "ISize" | "IntSize" | "Isize" | "isize"
+                            | "I8" | "I16" | "I32" | "I64" | "I128"
+                            | "U8" | "U16" | "U32" | "U64" | "U128"
+                            | "i8" | "i16" | "i32" | "i64" | "i128"
+                            | "u8" | "u16" | "u32" | "u64" | "u128"
+                            | "f32" | "f64"
+                    )
+                } else {
+                    false
+                }
+            } else if let ExprKind::Paren(inner) = &receiver.kind
+                && let ExprKind::Cast { ty, .. } = &inner.kind
+            {
+                // Paren-wrapped cast `((N as Byte)).method(...)`:
+                // same architectural class as the direct-Cast arm above.
+                // The parser wraps every `(expr)` in `Paren`, so the
+                // canonical cast-receiver shape `(N as Byte)` lands as
+                // `Paren { Cast { ty: Byte } }`.  Treat it as a
+                // primitive-numeric receiver to skip the Duration /
+                // Instant / Stopwatch / PerfCounter / DeadlineTimer
+                // intrinsic-dispatch path below.  Closes the §A
+                // residual saturating_add intrinsic-width-propagation
+                // defect.  Pinned by
+                // `core-tests/base/primitives/regression_test.vr::regression_as_byte_cast_saturating_add_saturates_at_u8_max_pinned`.
+                if let verum_ast::ty::TypeKind::Path(p) = &ty.kind
+                    && let Some(ident) = p.as_ident()
+                {
+                    matches!(
+                        ident.name.as_str(),
+                        "Int" | "Float" | "Bool" | "Char" | "Byte"
+                            | "Int8" | "Int16" | "Int32" | "Int64" | "Int128"
+                            | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128"
+                            | "Float32" | "Float64"
+                            | "USize" | "UIntSize" | "Usize" | "usize"
+                            | "ISize" | "IntSize" | "Isize" | "isize"
+                            | "I8" | "I16" | "I32" | "I64" | "I128"
+                            | "U8" | "U16" | "U32" | "U64" | "U128"
+                            | "i8" | "i16" | "i32" | "i64" | "i128"
+                            | "u8" | "u16" | "u32" | "u64" | "u128"
+                            | "f32" | "f64"
+                    )
+                } else {
+                    false
+                }
             } else if let ExprKind::Field { expr: base, .. } = &receiver.kind {
                 // Check if base is a primitive type name like Int, Float, Byte, etc.
                 // This handles cases like Int.MAX.saturating_add(1) where we should NOT
@@ -9358,6 +9514,65 @@ impl VbcCodegen {
                         }
                     }
                     _ => method.name.to_string(),
+                }
+            } else if let ExprKind::Cast { ty: cast_ty, .. } = &inner.kind {
+                // Case 7c: Paren-wrapped cast — `(N as Byte).method(...)`.
+                //
+                // Parser produces `Paren { inner: Cast { ty: Byte } }` for
+                // `(N as Byte)` (parse_paren_or_tuple wraps EVERY parenthesised
+                // single expression in Paren).  Without this arm Case 7's
+                // generic-fallback at the bottom routes through
+                // `extract_expr_type_name(inner)` → "Byte" → `format!("Byte.{}")`
+                // which emits a qualified `Byte.<method>` CallM.  For
+                // `saturating_add` / `wrapping_add` / `checked_add` the
+                // devirtualization shortcut at the bottom of
+                // `compile_method_call` then looks up the qualified name in
+                // the function table — but the typechecker / `register_stdlib_intrinsics`
+                // tags `<sized-int>.<method>` with `intrinsic_name`, so the
+                // devirt path falls through to `compile_static_method_call`'s
+                // intrinsic check (line ~10456) which emits a direct
+                // `ArithExtendedOpcode(SaturatingAdd)` bytecode opcode with
+                // hardcoded `width=64` (i64 semantics) — collapsing u8
+                // saturation.  Pre-fix `(255 as Byte).saturating_add(1 as Byte)`
+                // returned `256` (i64::saturating_add has no 255 ceiling).
+                //
+                // Fix: emit the same width-suffixed form Case 6c (direct
+                // ExprKind::Cast receiver) does — `byte$<method>` /
+                // `int32$<method>` / `uint64$<method>` — which (a) bypasses
+                // the devirt path (effective_method_name starts with `byte$`),
+                // (b) routes through `dispatch_primitive_method`'s width-
+                // specific arms with correct u8 / i32 / u64 semantics.
+                //
+                // Mirrors Case 6c exactly so both code paths agree on the
+                // recognised primitive name set.  Pinned by
+                // `core-tests/base/primitives/regression_test.vr::regression_paren_wrapped_cast_propagates_width_pinned`
+                // (added in the §A residual close-out).
+                if let verum_ast::ty::TypeKind::Path(path) = &cast_ty.kind
+                    && let Some(ident) = path.as_ident()
+                {
+                    let target = ident.name.to_string();
+                    match target.as_str() {
+                        "Byte" | "UInt8" | "U8" | "u8" => format!("byte${}", method.name),
+                        "Int32" | "I32" | "i32" => format!("int32${}", method.name),
+                        "UInt" | "UInt64" | "U64" | "u64"
+                        | "USize" | "UIntSize" | "Usize" | "usize" => {
+                            format!("uint64${}", method.name)
+                        }
+                        "Int" | "Float" | "Bool" | "Char" | "Text" | "Unit" => {
+                            format!("{}.{}", target, method.name)
+                        }
+                        _ => {
+                            if verum_common::well_known_types::looks_like_type_param(&target) {
+                                method.name.to_string()
+                            } else {
+                                let resolved = self.resolve_type_alias(&target);
+                                let base = VbcCodegen::strip_generic_args(&resolved);
+                                format!("{}.{}", base, method.name)
+                            }
+                        }
+                    }
+                } else {
+                    method.name.to_string()
                 }
             } else {
                 // For any other paren-wrapped expression, try extract_expr_type_name
