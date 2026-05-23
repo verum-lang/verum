@@ -224,8 +224,10 @@ fn write_to_fd(fd: FileDesc, s: &Text) -> IoResult<()> {
 /// Read bytes from a file descriptor.
 @cfg(not(target_os = "windows"))
 fn read_from_fd(fd: FileDesc, buf: &mut [Byte]) -> IoResult<Int> {
-    mount super.termios.read as raw_read;
-    let n = raw_read(fd.0, buf as &unsafe mut Byte, buf.len());
+    // Fully-qualified path — `mount X as Y` rename-aliases don't
+    // surface to AOT codegen function-table lookup (task #11);
+    // an in-body mount with rename is the worst-case shape.
+    let n = super.termios.read(fd.0, buf as &unsafe mut Byte, buf.len());
     if n < 0 {
         Err(StreamError.from_errno())
     } else {
