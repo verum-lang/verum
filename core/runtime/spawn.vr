@@ -102,9 +102,7 @@ mount super.supervisor.{
     ChildId,
 };
 mount core.intrinsics.{
-    spawn_with_env as spawn_with_env_intrinsic,
-    spawn_supervised as spawn_supervised_intrinsic,
-    FutureHandle,
+            FutureHandle,
     JoinHandleOpaque,
 };
 
@@ -932,7 +930,7 @@ where type
 
     // Spawn on executor - cast wrapped future to opaque handle for intrinsic
     let handle: FutureHandle = transmute(wrapped_future);
-    let opaque_result = spawn_with_env_intrinsic(handle, task_id as UInt64);
+    let opaque_result = core.intrinsics.spawn_with_env(handle, task_id as UInt64);
     // Cast opaque join handle back to typed JoinHandle
     transmute(opaque_result)
 }
@@ -950,7 +948,7 @@ where type
 {
     // This integrates with the supervisor module
     // Convert to opaque types for the intrinsic
-    let opaque_result = spawn_supervised_intrinsic(
+    let opaque_result = core.intrinsics.spawn_supervised(
         transmute(supervisor),
         transmute(future),
         transmute(spec),
