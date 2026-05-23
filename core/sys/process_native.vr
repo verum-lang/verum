@@ -57,36 +57,19 @@ mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
 mount core.sys.common.{OSError, FileDesc};
 
 // Linux: direct syscalls
+// Module-level platform-prefix mounts.  Per-item rename aliases
+// (`mount X.{foo as bar}`) don't surface to AOT codegen (task #11);
+// module-level alias `mount X as Y` followed by `Y.fn(...)` qualified
+// access works because the call site uses path-lookup not bare-name
+// lookup.
 @cfg(target_os = "linux")
-mount core.sys.linux.syscall.{
-    fork as sys_fork,
-    pipe as sys_pipe,
-    pipe2 as sys_pipe2,
-    dup2 as sys_dup2,
-    execve as sys_execve,
-    wait4 as sys_wait4,
-    kill as sys_kill,
-    close as sys_close,
-    write as sys_write,
-    read as sys_read,
-    fcntl as sys_fcntl,
-    F_SETFD, FD_CLOEXEC,
-};
+mount core.sys.linux.syscall as platform_syscall;
 
-// macOS: libSystem.B.dylib bindings
+@cfg(target_os = "linux")
+mount core.sys.linux.syscall.{F_SETFD, FD_CLOEXEC};
+
 @cfg(target_os = "macos")
-mount core.sys.darwin.libsystem.{
-    fork as sys_fork,
-    pipe as sys_pipe,
-    dup2 as sys_dup2,
-    execve as sys_execve,
-    waitpid as sys_waitpid,
-    kill as sys_kill,
-    close as sys_close,
-    write as sys_write,
-    read as sys_read,
-    _exit as sys__exit,
-};
+mount core.sys.darwin.libsystem as platform_syscall;
 
 // =============================================================================
 // SpawnResult — what `native_spawn` returns
@@ -220,9 +203,9 @@ public fn native_spawn(
 
         // ── Parent path ─────────────────────────────────────────────
         // Close child-only pipe ends; keep parent ends.
-        if capture_stdin  { let _ = sys_close(FileDesc.from_raw(stdin_pipe[0])); }
-        if capture_stdout { let _ = sys_close(FileDesc.from_raw(stdout_pipe[1])); }
-        if capture_stderr { let _ = sys_close(FileDesc.from_raw(stderr_pipe[1])); }
+        if capture_stdin  { let _ = platform_syscall.close(FileDesc.from_raw(stdin_pipe[0])); }
+        if capture_stdout { let _ = platform_syscall.close(FileDesc.from_raw(stdout_pipe[1])); }
+        if capture_stderr { let _ = platform_syscall.close(FileDesc.from_raw(stderr_pipe[1])); }
 
         // The parent's `blob` lives until function return — its drop
         // happens AFTER we have observed the spawn success. The child's
@@ -269,7 +252,7 @@ fn child_execve(prog_ptr: Int, argv_ptr: Int) {
 fn child_execve(prog_ptr: Int, argv_ptr: Int) {
     // libSystem.B.dylib execve. Inheriting environ via NULL envp is
     // the documented contract on Darwin too.
-    let _ = sys_execve(
+    let _ = platform_syscall.execve(
         prog_ptr as &Byte,
         argv_ptr as &(&Byte),
         0 as &(&Byte),
@@ -285,19 +268,19 @@ fn child_setup_stdio(
     // STDIN_FILENO = 0, STDOUT_FILENO = 1, STDERR_FILENO = 2.
     // Each dup2/close is a single syscall — async-signal-safe.
     if stdin_pipe[0] >= 0 {
-        let _ = sys_dup2(FileDesc.from_raw(stdin_pipe[0]), FileDesc.from_raw(0 as Int32));
-        let _ = sys_close(FileDesc.from_raw(stdin_pipe[0]));
-        let _ = sys_close(FileDesc.from_raw(stdin_pipe[1]));
+        let _ = platform_syscall.dup2(FileDesc.from_raw(stdin_pipe[0]), FileDesc.from_raw(0 as Int32));
+        let _ = platform_syscall.close(FileDesc.from_raw(stdin_pipe[0]));
+        let _ = platform_syscall.close(FileDesc.from_raw(stdin_pipe[1]));
     }
     if stdout_pipe[1] >= 0 {
-        let _ = sys_dup2(FileDesc.from_raw(stdout_pipe[1]), FileDesc.from_raw(1 as Int32));
-        let _ = sys_close(FileDesc.from_raw(stdout_pipe[0]));
-        let _ = sys_close(FileDesc.from_raw(stdout_pipe[1]));
+        let _ = platform_syscall.dup2(FileDesc.from_raw(stdout_pipe[1]), FileDesc.from_raw(1 as Int32));
+        let _ = platform_syscall.close(FileDesc.from_raw(stdout_pipe[0]));
+        let _ = platform_syscall.close(FileDesc.from_raw(stdout_pipe[1]));
     }
     if stderr_pipe[1] >= 0 {
-        let _ = sys_dup2(FileDesc.from_raw(stderr_pipe[1]), FileDesc.from_raw(2 as Int32));
-        let _ = sys_close(FileDesc.from_raw(stderr_pipe[0]));
-        let _ = sys_close(FileDesc.from_raw(stderr_pipe[1]));
+        let _ = platform_syscall.dup2(FileDesc.from_raw(stderr_pipe[1]), FileDesc.from_raw(2 as Int32));
+        let _ = platform_syscall.close(FileDesc.from_raw(stderr_pipe[0]));
+        let _ = platform_syscall.close(FileDesc.from_raw(stderr_pipe[1]));
     }
 }
 
@@ -308,13 +291,13 @@ fn child_exit(code: Int) -> ! {
 
 @cfg(target_os = "macos")
 fn child_exit(code: Int) -> ! {
-    sys__exit(code as Int32)
+    platform_syscall._exit(code as Int32)
 }
 
 @cfg(any(target_os = "linux", target_os = "macos"))
 fn close_pipe(p: &[Int32; 2]) {
-    if p[0] >= 0 { let _ = sys_close(FileDesc.from_raw(p[0])); }
-    if p[1] >= 0 { let _ = sys_close(FileDesc.from_raw(p[1])); }
+    if p[0] >= 0 { let _ = platform_syscall.close(FileDesc.from_raw(p[0])); }
+    if p[1] >= 0 { let _ = platform_syscall.close(FileDesc.from_raw(p[1])); }
 }
 
 // =============================================================================
@@ -323,23 +306,23 @@ fn close_pipe(p: &[Int32; 2]) {
 
 @cfg(target_os = "linux")
 fn make_pipe(fds: &mut [Int32; 2]) -> Result<(), OSError> {
-    sys_pipe(fds)
+    platform_syscall.pipe(fds)
 }
 
 @cfg(target_os = "macos")
 fn make_pipe(fds: &mut [Int32; 2]) -> Result<(), Text> {
-    let r = sys_pipe(&mut fds[0]);
+    let r = platform_syscall.pipe(&mut fds[0]);
     if r != 0 { Err("pipe failed".into()) } else { Ok(()) }
 }
 
 @cfg(target_os = "linux")
 fn do_fork() -> Result<Int, OSError> {
-    sys_fork()
+    platform_syscall.fork()
 }
 
 @cfg(target_os = "macos")
 fn do_fork() -> Result<Int, Text> {
-    let r = sys_fork();
+    let r = platform_syscall.fork();
     if r < 0 { Err("fork failed".into()) } else { Ok(r as Int) }
 }
 
@@ -351,7 +334,7 @@ fn do_fork() -> Result<Int, Text> {
 public fn native_kill(pid: Int, sig: Int) -> Result<(), Text> {
     @cfg(any(target_os = "linux", target_os = "macos"))
     {
-        match sys_kill(pid, sig) {
+        match platform_syscall.kill(pid, sig) {
             Ok(_)  => Ok(()),
             Err(_) => Err("kill failed".into()),
         }
@@ -370,7 +353,7 @@ public fn native_fd_write_all(fd: Int, data: &[Byte]) -> Result<Int, Text> {
         let total_len = data.len() as Int;
         while total < total_len {
             let remaining: &[Byte] = &data[total as usize..];
-            let r = sys_write(FileDesc.from_raw(fd as Int32), remaining);
+            let r = platform_syscall.write(FileDesc.from_raw(fd as Int32), remaining);
             match r {
                 Ok(n) => {
                     if n == 0 { return Err("write returned 0".into()); }
@@ -398,7 +381,7 @@ public fn native_fd_read_chunk(fd: Int, max: Int) -> Result<List<Byte>, Text> {
         let mut buf: List<Byte> = List.with_capacity(max as usize);
         let mut i: Int = 0;
         while i < max { buf.push(0); i = i + 1; }
-        let r = sys_read(FileDesc.from_raw(fd as Int32), &mut buf);
+        let r = platform_syscall.read(FileDesc.from_raw(fd as Int32), &mut buf);
         match r {
             Ok(n)  => {
                 buf.truncate(n as usize);
