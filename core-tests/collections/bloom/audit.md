@@ -9,11 +9,10 @@ approximated from a small table.
 ## Status
 
 **regression-only** — Every BloomFilter constructor routes through
-`fill_secure(&mut key[..])` (32-byte HMAC key generation), which
-lowers to the `core.sys.common.random_bytes` intrinsic.  That
-intrinsic is missing from the VBC dispatch table — same defect
-class as the closed Reservoir replacement-phase defect (see
-`core-tests/collections/reservoir/regression_test.vr`).
+`fill_secure(&mut key[..])` from `core.security.util.rng`.  The
+cross-module dispatch fails at archive load time — not because the
+underlying CSPRNG intrinsic is missing, but because of a fundamental
+gap in the VBC bytecode format (see "Re-diagnosis 2026-05-23" below).
 
 Failure surface — every constructor (`new`, `with_target`,
 `with_defaults`, `try_new`, `try_with_target`) panics with:
@@ -22,6 +21,95 @@ Failure surface — every constructor (`new`, `with_target`,
 [lenient] BloomFilter.try_new compiled to panic-stub:
 undefined function: fill_secure (in function BloomFilter.try_new)
 ```
+
+## Re-diagnosis 2026-05-23
+
+The original audit (above) attributed the failure to a missing
+`core.sys.common.random_bytes` VBC intrinsic. Investigation on
+2026-05-23 disproved that framing — `random_bytes` IS wired (see
+`core/sys/common.vr:1206` + the syscall-registry `getrandom` /
+`getentropy` / `BCryptGenRandom` plumbing in
+`crates/verum_vbc/src/interpreter/dispatch_table/handlers/ffi_extended.rs`).
+
+The **actual** root cause is cross-module function-id resolution:
+
+* `core/collections/bloom.vr:56` does `mount core.security.util.rng.{fill_secure};`
+  and calls bare `fill_secure(&mut key)` from `BloomFilter.try_new`.
+* `core.security.util.rng` lives under `core.security`, which already
+  depends on `core.collections` because `security/{password_hash, token,
+  merkle, otp, cose, kdf/pbkdf2, jwt, kdf/argon2, aead/chacha20_poly1305,
+  aead/aes_gcm}.vr` all mount `core.collections.List`.
+* The augmentation pass at `crates/verum_compiler/src/core_compiler.rs::
+  augment_dependencies_from_mounts` detects the back-edge
+  `core.collections → core.security` and DROPS it (cycle-tolerant gate)
+  to preserve the existing forward edge.
+* `core.collections` therefore compiles FIRST.  When `bloom.try_new`'s
+  body is lowered, the per-module ctx's `lookup_function("fill_secure")`
+  returns None → codegen emits a lenient panic-stub for
+  `BloomFilter.try_new` carrying the message
+  `undefined function: fill_secure`.
+
+Same architectural class hits HyperLogLog, CountMinSketch,
+AliasSampler.
+
+### Why tactical stdlib-source workarounds don't help
+
+The investigation tried THREE re-routings of the CSPRNG draw to
+`core.sys.common.random_bytes` (which `core.sys` already exports
+without a topo cycle):
+
+1. `mount core.sys.common.{random_bytes};` — bare-name collides with
+   `core.sys.linux.auxv.random_bytes() -> *const Byte` (different
+   signature, same simple name).
+2. `mount core.sys.common.{random_bytes as csprng_fill};` — the
+   `mount X as Y` rename alias has known AOT-path issues
+   (commit `b59c43f89`).
+3. Fully-qualified call `core.sys.common.random_bytes(...)` — passes
+   compile-time (no panic-stub) but at runtime the `Call(id)` mis-
+   resolves through `ArchiveBodyRemap`'s Tier-3 identity fallback to
+   whatever function happens to occupy the resolved id (observed live
+   failures: `DequeIntoIter.zip_longest@pc=8` and
+   `DequeDrain.map@pc=12`).
+
+### Why a global pre-register of free-fn stubs doesn't close it either
+
+A stage-3 pre-register pass (mirroring the existing stage-1 canonical-
+type-static-method + stage-2 variant-constructor pre-registers in
+`crates/verum_compiler/src/pipeline/stdlib_bootstrap.rs`) was prototyped
+during the investigation and reverted. It would register every
+uniquely-named public free fn as a stub in `global_function_registry`,
+which makes `lookup_function("fill_secure")` succeed during bloom's
+compile (no panic-stub).  But the per-module `finalize_module_from_state`
+deliberately does NOT call `emit_missing_stub_descriptors` — so bloom.vbc's
+output `module.functions` table carries NO descriptor for the stub id,
+and `ArchiveBodyRemap`'s Tier-2 name fallback can't fire (the
+`archive_id_to_name` lookup misses for the stub id).  The Tier-3 identity
+fallback then lands the `Call` on whatever unrelated function occupies
+the raw stub id.
+
+Adding the descriptor-emit call IS the natural next step, but the
+documented history at `crates/verum_vbc/src/codegen/mod.rs:5687-5750`
+shows that even the surgical Call-id-only descriptor synthesis at stdlib
+precompile scale blows `runtime.vbca` from 12.9 MB to 134 MB (~800K
+synthesized stubs across ~500 modules).
+
+### Architectural fix path
+
+Task **#47** is the bytecode-format change that closes this defect
+class universally: encode cross-module `Call` operands as `StringId`
+(function name) instead of raw `func_id`.  The user-side merge then
+resolves by name once per Call site, not once per
+`(module × imported-function)` pair — eliminating the explosion and
+making cross-module dispatch order-independent.
+
+Estimated scope: multi-day VBC + codegen work, plus archive-format
+version bump + migration of every loader callsite.
+
+### What the test surface should look like post-#47
+
+Once #47 lands, every `@ignore`'d test in §A becomes active without
+stdlib-source changes — the cross-module call to `fill_secure`
+resolves correctly by name regardless of compile order.
 
 Working surface today: only `BloomConfig` value construction and
 field access — 3 unit + 3 property + 2 integration + 2 PASS-GUARDs
