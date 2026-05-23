@@ -16006,6 +16006,88 @@ impl VbcCodegen {
             archive_func_by_name: &archive_func_by_name_snapshot,
         };
 
+        // ----- TLS slot remap — fixes cross-archive slot collisions -----
+        //
+        // **task #10/§3.3 close-out + AOT cascade Class B partial close.**
+        //
+        // Pre-fix: each stdlib precompile pass restarted `next_tls_slot`
+        // at 0.  Different archive modules' `static mut` declarations
+        // therefore picked overlapping slot literals (hazard.vr assigned
+        // slot 0 to GLOBAL_HAZARD_DOMAIN; sys/common.vr also assigned
+        // slot 0 to PROCESS_ARGC).  When all archives merge into one
+        // user-side runtime, the LAST `__tls_init_*` for that slot wins,
+        // silently overwriting earlier writes.  Consumers reading their
+        // module's static then see another module's value (or nil if
+        // the slot was overwritten with a different type).
+        //
+        // Fix: per-archive-module pre-pass that scans every
+        // `__tls_init_<NAME>` function for the `LoadI dst, val; TlsSet
+        // {slot: dst, ...}` peephole pattern.  For each unique archive
+        // slot literal found, allocate a fresh user-side TLS slot via
+        // `register_thread_local(NAME)` (keyed on the NAME extracted
+        // from the function name so cross-module re-imports stay
+        // coherent).  Apply the remap in a third instruction-walk pass
+        // that rewrites `LoadI val` to the user-side slot wherever the
+        // dst register flows directly into a TlsSet or TlsGet slot
+        // operand.
+        let mut tls_slot_remap: HashMap<i64, i64> = HashMap::new();
+        for archive_desc in archive_module.functions.iter() {
+            let archive_name = match archive_module.strings.get(archive_desc.name) {
+                Some(s) if s.starts_with("__tls_init_") => &s[11..],
+                _ => continue,
+            };
+            // Decode this ctor's body to extract the literal slot.
+            let ctor_instrs: Vec<crate::instruction::Instruction> =
+                if let Some(ref decoded) = archive_desc.instructions {
+                    decoded.clone()
+                } else {
+                    let off = archive_desc.bytecode_offset as usize;
+                    let len = archive_desc.bytecode_length as usize;
+                    if len == 0 || off + len > archive_module.bytecode.len() {
+                        continue;
+                    }
+                    let region = &archive_module.bytecode[off..off + len];
+                    match crate::bytecode::decode_instructions(region) {
+                        Ok(decoded) => decoded,
+                        Err(_) => continue,
+                    }
+                };
+            // Find the LoadI; TlsSet pattern.  The `__tls_init_*`
+            // function body emitted by `compile_pending_tls_inits`
+            // (codegen/mod.rs::~10955) is:
+            //   <init expression>
+            //   LoadI slot_reg, <slot literal>
+            //   TlsSet { slot: slot_reg, val: result_reg }
+            //   Ret { value: result_reg }
+            // So the slot literal is the LoadI immediately preceding
+            // the TlsSet.
+            let mut prev_loadi: Option<(crate::instruction::Reg, i64)> = None;
+            for instr in ctor_instrs.iter() {
+                match instr {
+                    crate::instruction::Instruction::LoadI { dst, value } => {
+                        prev_loadi = Some((*dst, *value));
+                    }
+                    crate::instruction::Instruction::TlsSet { slot, .. } => {
+                        if let Some((load_dst, archive_slot)) = prev_loadi
+                            && load_dst == *slot
+                        {
+                            // Allocate a user-side slot keyed on NAME so
+                            // downstream consumers in OTHER archive
+                            // modules that mount this NAME hit the same
+                            // user_slot.
+                            let user_slot =
+                                self.ctx.register_thread_local(archive_name) as i64;
+                            tls_slot_remap.insert(archive_slot, user_slot);
+                            break;
+                        }
+                    }
+                    _ => {
+                        prev_loadi = None;
+                    }
+                }
+            }
+        }
+
         let mut copied = 0usize;
         for archive_desc in archive_module.functions.iter() {
             let archive_fid = archive_desc.id.0;
@@ -16070,6 +16152,50 @@ impl VbcCodegen {
             // shared per-instruction helper.
             for instr in instructions.iter_mut() {
                 crate::bytecode_remap::rewrite_instruction_ids(instr, &remap);
+            }
+
+            // THIRD PASS — TLS slot remap (peephole on LoadI → TlsSet /
+            // LoadI → TlsGet).  See `tls_slot_remap` construction above
+            // for the full rationale.  Walk instruction pairs and, when
+            // the destination register of a LoadI matches the slot
+            // operand of the immediately-following TlsSet/TlsGet, rewrite
+            // the LoadI value through `tls_slot_remap`.  Identity-fallback
+            // for slot literals not in the remap (defensive — should
+            // never happen for `__tls_init_*`-managed slots since the
+            // pre-pass builds the remap exhaustively).
+            if !tls_slot_remap.is_empty() {
+                for i in 0..instructions.len() {
+                    let (loadi_dst, loadi_val): (
+                        crate::instruction::Reg,
+                        i64,
+                    ) = match &instructions[i] {
+                        crate::instruction::Instruction::LoadI { dst, value } => {
+                            (*dst, *value)
+                        }
+                        _ => continue,
+                    };
+                    if i + 1 >= instructions.len() {
+                        continue;
+                    }
+                    let consumes_as_slot = match &instructions[i + 1] {
+                        crate::instruction::Instruction::TlsSet { slot, .. }
+                        | crate::instruction::Instruction::TlsGet { slot, .. } => {
+                            *slot == loadi_dst
+                        }
+                        _ => false,
+                    };
+                    if !consumes_as_slot {
+                        continue;
+                    }
+                    if let Some(&new_slot) = tls_slot_remap.get(&loadi_val)
+                        && new_slot != loadi_val
+                    {
+                        instructions[i] = crate::instruction::Instruction::LoadI {
+                            dst: loadi_dst,
+                            value: new_slot,
+                        };
+                    }
+                }
             }
 
             // Build the new descriptor with codegen-namespace ids /
