@@ -142,7 +142,7 @@ public fn wal_writer_create(
 ) -> Result<WalWriter, PagerError> {
     if !is_power_of_two_or_sentinel(page_size) {
         return Err(PagerError {
-            kind: InvalidPageSize,
+            kind: PagerErrorKind.InvalidPageSize,
             message: "WAL page size must be 512..65536 power-of-two or sentinel 1",
         });
     }
@@ -223,7 +223,7 @@ where V: SqliteVfs
     };
     if bytes.len() < 8 {
         return Err(PagerError {
-            kind: CorruptHeader,
+            kind: PagerErrorKind.CorruptHeader,
             message: "WAL create: vfs.random_bytes returned < 8 bytes",
         });
     }
@@ -262,7 +262,7 @@ public fn wal_writer_open(
     let hdr = decode_file_header(&buf);
     if hdr.magic != magic_little() {
         return Err(PagerError {
-            kind: CorruptHeader,
+            kind: PagerErrorKind.CorruptHeader,
             message: "WAL file magic mismatch",
         });
     }
@@ -354,7 +354,7 @@ public fn wal_writer_append_frame(
 ) -> Result<(), PagerError> {
     if page_data.len() != w.state.page_size {
         return Err(PagerError {
-            kind: InvalidPageSize,
+            kind: PagerErrorKind.InvalidPageSize,
             message: "WAL append: page_data length must equal page_size",
         });
     }
@@ -501,7 +501,7 @@ where V: SqliteVfs
     };
     if bytes.len() < 8 {
         return Err(PagerError {
-            kind: CorruptHeader,
+            kind: PagerErrorKind.CorruptHeader,
             message: "WAL reset: vfs.random_bytes returned < 8 bytes",
         });
     }
