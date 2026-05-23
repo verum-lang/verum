@@ -589,3 +589,94 @@ fn gcm_decrypt_common<F: fn(&[Byte; 16]) -> [Byte; 16]>(
     }
     Ok(())
 }
+
+
+// =============================================================================
+// Free-function AOT shims — wrappers around `Aes128Gcm.encrypt` /
+// `Aes256Gcm.encrypt` that the protocol/TLS layer imports via bare
+// names (`mount X.{aes128_gcm_seal, aes128_gcm_open, ...}`).  Without
+// these wrappers AOT codegen errors "undefined function:
+// aes128_gcm_seal" at every consumer of the AES-GCM record-layer.
+// The wrappers append the 16-byte tag to the sealed buffer (the AEAD
+// wire-encoding convention) so callers get a single concatenated
+// (ciphertext || tag) output.
+// =============================================================================
+
+/// AES-128-GCM seal: encrypt + authenticate `pt` under `key` with
+/// 12-byte `iv` and `aad`.  Output `sealed` = ciphertext || tag.
+public fn aes128_gcm_seal(
+    key: &AesKey128,
+    iv: &[Byte; 12],
+    aad: &[Byte],
+    pt: &[Byte],
+    sealed: &mut List<Byte>,
+) -> Result<(), GcmError> {
+    let g = Aes128Gcm.new(key);
+    let mut tag: [Byte; 16] = [0; 16];
+    g.encrypt(iv, aad, pt, sealed, &mut tag);
+    let mut i = 0;
+    while i < 16 { sealed.push(tag[i]); i = i + 1; }
+    Ok(())
+}
+
+/// AES-128-GCM open: parse `sealed` as ciphertext || 16-byte tag,
+/// verify tag, decrypt into `pt`.
+public fn aes128_gcm_open(
+    key: &AesKey128,
+    iv: &[Byte; 12],
+    aad: &[Byte],
+    sealed: &[Byte],
+    pt: &mut List<Byte>,
+) -> Result<(), GcmError> {
+    if sealed.len() < 16 {
+        return Err(GcmError.TagMismatch);
+    }
+    let ct_len = sealed.len() - 16;
+    let g = Aes128Gcm.new(key);
+    let mut tag: [Byte; 16] = [0; 16];
+    let mut i = 0;
+    while i < 16 { tag[i] = sealed[ct_len + i]; i = i + 1; }
+    let mut ciphertext: List<Byte> = [];
+    let mut j = 0;
+    while j < ct_len { ciphertext.push(sealed[j]); j = j + 1; }
+    g.decrypt(iv, aad, ciphertext.as_slice(), &tag, pt)
+}
+
+/// AES-256-GCM seal: 32-byte key variant of `aes128_gcm_seal`.
+public fn aes256_gcm_seal(
+    key: &AesKey256,
+    iv: &[Byte; 12],
+    aad: &[Byte],
+    pt: &[Byte],
+    sealed: &mut List<Byte>,
+) -> Result<(), GcmError> {
+    let g = Aes256Gcm.new(key);
+    let mut tag: [Byte; 16] = [0; 16];
+    g.encrypt(iv, aad, pt, sealed, &mut tag);
+    let mut i = 0;
+    while i < 16 { sealed.push(tag[i]); i = i + 1; }
+    Ok(())
+}
+
+/// AES-256-GCM open: 32-byte key variant of `aes128_gcm_open`.
+public fn aes256_gcm_open(
+    key: &AesKey256,
+    iv: &[Byte; 12],
+    aad: &[Byte],
+    sealed: &[Byte],
+    pt: &mut List<Byte>,
+) -> Result<(), GcmError> {
+    if sealed.len() < 16 {
+        return Err(GcmError.TagMismatch);
+    }
+    let ct_len = sealed.len() - 16;
+    let g = Aes256Gcm.new(key);
+    let mut tag: [Byte; 16] = [0; 16];
+    let mut i = 0;
+    while i < 16 { tag[i] = sealed[ct_len + i]; i = i + 1; }
+    let mut ciphertext: List<Byte> = [];
+    let mut j = 0;
+    while j < ct_len { ciphertext.push(sealed[j]); j = j + 1; }
+    g.decrypt(iv, aad, ciphertext.as_slice(), &tag, pt)
+}
+
