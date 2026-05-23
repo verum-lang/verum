@@ -72,8 +72,8 @@ mount security.merkle.{
 mount security.hash.sha256.{Sha256};
 mount security.ecc.ed25519.{
     Ed25519Seed, Ed25519PublicKey, Ed25519Signature, Ed25519Error,
-    sign as ed25519_sign,
-    verify as ed25519_verify,
+    sign,
+    verify,
 };
 
 // =============================================================================
@@ -194,7 +194,7 @@ public fn sign_current_tree_head(log: &TransparencyLog, timestamp_ms: Int) -> Re
     let mut root_bytes: List<Byte> = List.new();
     let mut i = 0; while i < HASH_SIZE { root_bytes.push(root[i]); i = i + 1; }
     let msg = canonical_sth_message(log.leaves.len(), &root_bytes, timestamp_ms);
-    let sig = ed25519_sign(&log.operator_seed, &msg);
+    let sig = security.ecc.ed25519.sign(&log.operator_seed, &msg);
     Ok(SignedTreeHead {
         tree_size: log.leaves.len(),
         root_hash: root_bytes,
@@ -211,7 +211,7 @@ public fn verify_sth(sth: &SignedTreeHead) -> Result<(), LogError> {
         return Err(LogError.TreeSizeMismatch { expected: HASH_SIZE, found: sth.root_hash.len() });
     }
     let msg = canonical_sth_message(sth.tree_size, &sth.root_hash, sth.timestamp_ms);
-    match ed25519_verify(&sth.operator_pubkey, &msg, &sth.signature) {
+    match security.ecc.ed25519.verify(&sth.operator_pubkey, &msg, &sth.signature) {
         Ok(_)  => Ok(()),
         Err(e) => Err(LogError.SignatureFailed(e)),
     }
