@@ -73,7 +73,7 @@ module core.base.nanoid;
 
 mount core.*;
 mount core.collections.List;
-mount core.sys.common.random_bytes as sys_random_bytes;
+// Inlined: use core.sys.common.random_bytes(...) directly (task #11).
 
 // CSPRNG-backed entropy fill. The historical `core.base.random.fill`
 // import resolved to nothing, silently producing zero-byte entropy
@@ -81,7 +81,7 @@ mount core.sys.common.random_bytes as sys_random_bytes;
 // Wire to the canonical platform source; panic on failure rather
 // than hand back a deterministic ID.
 fn fill_random(buf: &mut [Byte]) {
-    match sys_random_bytes(buf) {
+    match core.sys.common.random_bytes(buf) {
         Ok(_)  => {},
         Err(_) => panic("NanoID: kernel CSPRNG unavailable — refusing to issue zero-entropy ID"),
     }

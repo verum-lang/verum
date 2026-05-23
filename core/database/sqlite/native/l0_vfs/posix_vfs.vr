@@ -42,13 +42,15 @@ mount base.{Result, Ok, Err, Text, Maybe};
 mount sys.common.{
     FileDesc, OSError,
     pread, pread_raw, pwrite, full_fsync,
-    file_size as sys_file_size,
-    truncate as sys_truncate,
-    access as sys_access,
-    random_bytes as sys_random_bytes,
     monotonic_nanos, realtime_nanos,
     ACCESS_F_OK, ACCESS_R_OK, ACCESS_W_OK,
 };
+// `mount X as Y` rename-aliases don't surface to AOT codegen (task #11).
+// Use fully-qualified paths at call sites:
+//   sys_file_size    → sys.common.file_size
+//   sys_truncate     → sys.common.truncate
+//   sys_access       → sys.common.access
+//   sys_random_bytes → sys.common.random_bytes (this one was via separate mount)
 mount sys.durability;
 
 @cfg(target_os = "linux")
@@ -273,7 +275,7 @@ implement SqliteFile for PosixFile {
         if self.closed {
             return Err(VfsError { kind: Closed, message: "truncate on closed file" });
         }
-        match sys_truncate(self.fd, size) {
+        match sys.common.truncate(self.fd, size) {
             Ok(_)  => Ok(()),
             Err(e) => Err(to_vfs_err(e)),
         }
@@ -317,7 +319,7 @@ implement SqliteFile for PosixFile {
         if self.closed {
             return Err(VfsError { kind: Closed, message: "file_size on closed file" });
         }
-        match sys_file_size(self.fd) {
+        match sys.common.file_size(self.fd) {
             Ok(n)  => Ok(n),
             Err(e) => Err(to_vfs_err(e)),
         }
@@ -507,7 +509,7 @@ implement VfsProtocol for PosixVfs {
             CanReadWrite => ACCESS_F_OK | ACCESS_R_OK | ACCESS_W_OK,
         };
         let cp = to_c_path(path);
-        match sys_access(&cp, mode) {
+        match sys.common.access(&cp, mode) {
             Ok(b)  => Ok(b),
             Err(e) => Err(to_vfs_err(e)),
         }
@@ -540,7 +542,7 @@ implement VfsProtocol for PosixVfs {
         let mut out: List<Byte> = List.with_capacity(len);
         out.resize(len, 0 as Byte);
         let slice: &mut [Byte] = out.as_mut_slice();
-        match sys_random_bytes(slice) {
+        match core.sys.common.random_bytes(slice) {
             Ok(_) => Ok(out),
             Err(_) => Err(VfsError {
                 kind: IoError,
