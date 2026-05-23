@@ -76,7 +76,7 @@ public fn engine_new(mode: CheckMode) -> IntegrityEngine {
     IntegrityEngine {
         mode: clone_mode(&mode),
         phase: IpInit,
-        report: report_new(mode),
+        report: core.database.sqlite.native.integrity.report.report_new(mode),
     }
 }
 
