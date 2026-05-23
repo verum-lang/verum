@@ -8768,6 +8768,41 @@ impl VbcCodegen {
                     } else {
                         false
                     }
+                } else if let ExprKind::Cast { ty, .. } = &inner.kind {
+                    // Paren-wrapped cast `((N as Byte)).method(...)` — the
+                    // canonical cast-receiver shape the parser produces for
+                    // `(N as Byte).method(...)` (every `(expr)` becomes
+                    // `Paren { inner: expr }`).  Accept when the cast target
+                    // spelling is a primitive numeric name; the Duration /
+                    // Instant / Stopwatch / PerfCounter / DeadlineTimer
+                    // intrinsic dispatch at line ~8895 below MUST be skipped
+                    // for primitive-sized-int casts — otherwise the cast
+                    // receiver hijacks the Duration intrinsic, emitting an
+                    // inline duration-arithmetic sequence with i64 semantics
+                    // (collapsing u8 saturation back to i64 — pre-fix
+                    // `(255 as Byte).saturating_add(1 as Byte)` returned
+                    // `256` instead of `255`).  Pinned by
+                    // `core-tests/base/primitives/regression_test.vr::regression_as_byte_cast_saturating_add_saturates_at_u8_max_pinned`.
+                    if let verum_ast::ty::TypeKind::Path(p) = &ty.kind
+                        && let Some(ident) = p.as_ident()
+                    {
+                        matches!(
+                            ident.name.as_str(),
+                            "Int" | "Float" | "Bool" | "Char" | "Byte"
+                                | "Int8" | "Int16" | "Int32" | "Int64" | "Int128"
+                                | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "UInt128"
+                                | "Float32" | "Float64"
+                                | "USize" | "UIntSize" | "Usize" | "usize"
+                                | "ISize" | "IntSize" | "Isize" | "isize"
+                                | "I8" | "I16" | "I32" | "I64" | "I128"
+                                | "U8" | "U16" | "U32" | "U64" | "U128"
+                                | "i8" | "i16" | "i32" | "i64" | "i128"
+                                | "u8" | "u16" | "u32" | "u64" | "u128"
+                                | "f32" | "f64"
+                        )
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 }
