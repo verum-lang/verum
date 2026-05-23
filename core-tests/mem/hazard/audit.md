@@ -104,3 +104,57 @@ The fundamental fix (path 1) closes the class.  Pinned by the
 | §C | force_reclaim_all behaviour — populate retire list past threshold, observe count drops. | Blocked on live integration | open |
 | §D | Cross-tier divergence sweep on `--aot` + `--interp`. | 1 hour wall-clock | open |
 | §E | **FUNDAMENTAL** `static mut` record-typed backing — extend `static_mut_cell_addr` to honour record layout; unblocks `hazard_stats()` and every other record-typed-static-mut consumer (epoch / GlobalAllocator state / cap-audit-ring head pointer if it ever becomes record-shaped). | 2-3 days VBC work | open — see §3.3 |
+
+## 6. Investigation 2026-05-23 — `__tls_init_*` path traced
+
+Read `crates/verum_vbc/src/codegen/mod.rs:6395-6435` and
+`interpreter/mod.rs:399-424`.  Findings:
+
+1. **Static-mut record initializers ARE queued** — `is_thread_local
+   || static_decl.is_mut` (line 6402-6403) routes EVERY `static mut`
+   (including non-thread-local) through `pending_tls_inits`, which
+   `compile_pending_tls_inits` (line 10941) lowers to a
+   `__tls_init_<NAME>` synthetic function that compiles the init
+   expression and `TlsSet`s the result.
+
+2. **Interpreter runs them** — `run_global_ctors` (line 399)
+   executes any ctor whose name starts with `__tls_init_*`, regardless
+   of the underlying static being thread-local or process-wide.
+
+3. **The bug must be downstream** — either:
+   - (a) the init expression `HazardDomain { ... }` doesn't compile
+     into a real record Value (some sub-expression like the
+     `0 as &unsafe ThreadRecord` cast fails silently);
+   - (b) `TlsGet` returns the record Value but the method-receiver
+     materialisation produces a null `&self` because the Value is
+     by-value and the codegen for `&self.field` (GetF) expects a
+     stable memory address that an in-register Value doesn't have.
+
+4. **Cell allocator is NOT in the path** — `static_mut_cell_addr`
+   (state.rs:2864) is invoked only by `StaticMutAddr` (0x52), which is
+   emitted only for `&IDENT as *T` casts (codegen
+   `try_compile_static_mut_addr`).  Method calls on a static mut
+   record go through `TlsGet` + method dispatch, not through the
+   cell allocator.  So the cell allocator's 8-byte limit is NOT the
+   bottleneck for `hazard_stats()` — the bottleneck is the
+   `&self.field` lowering on a by-value record self-receiver.
+
+**Proper fix candidates:**
+
+- **Path 1 (interpreter-side):** when `TlsGet` returns a record Value
+  for static mut, materialise the record into a process-lifetime
+  heap-stable allocation (similar to the task #18 escape-cell
+  pattern), and have method-receiver materialisation produce a real
+  `ThinRef`/`FatRef` to that allocation.  `&self.field` then resolves
+  to a real field address.
+- **Path 2 (codegen-side):** when the method receiver is a static
+  mut Path, lower the method call to (a) `StaticMutAddr` to get the
+  cell base, (b) cast to `&RecordType`, (c) pass as `&self`.  This
+  requires the cell allocator to size cells by record layout.
+
+Path 1 is structurally simpler — it piggybacks on the existing
+escape-cell infrastructure landed for task #18.  Path 2 is more
+efficient but requires record-aware cell allocation.
+
+Tracked as task #10/§3.3.  Investigation logged in
+[[task_static_mut_record_typed_backing_2026-05-22]].
