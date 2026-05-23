@@ -77,7 +77,7 @@ mount core.database.postgres.wire.codec.{
     PG_TYPE_TEXT, PG_TYPE_BPCHAR, PG_TYPE_VARCHAR,
     PG_TYPE_TIMESTAMP, PG_TYPE_TIMESTAMPTZ,
 };
-mount core.time.rfc3339.{Rfc3339Time, parse as parse_rfc3339};
+mount core.time.rfc3339.{Rfc3339Time, parse};
 
 // =============================================================================
 // PG_TYPE_*ARRAY OIDs not exported by codec.vr — keep local consts
@@ -521,7 +521,7 @@ fn decode_timestamp_value(v: &WireValue, col_idx: Int, name: &str)
             match Text.from_bytes(bytes.as_slice()) {
                 Ok(t) => {
                     let normalised = normalise_pg_timestamp(&t);
-                    parse_rfc3339(&normalised).map_err(|e|
+                    core.time.rfc3339.parse(&normalised).map_err(|e|
                         text_decode_failed(col_idx, name, "timestamp", f"rfc3339 parse: {e}"))
                 },
                 Err(_) => Err(text_decode_failed(col_idx, name, "timestamp",
