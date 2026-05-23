@@ -405,9 +405,14 @@ async fn update_targets<R: TufRepository>(
             reason: "no trusted snapshot".to_text(),
         })?;
     let filename = f"{role_name}.json";
+    // AOT workaround — `f"{filename}"` inside the closure-error
+    // `.ok_or_else(|| ...)` arm reported `undefined variable:
+    // filename` under AOT closure-capture path.  Hoist the message
+    // out so the closure has no captured-name dependency.
+    let missing_msg = f"snapshot lacks {filename} entry";
     let metafile = snapshot.meta.get(&filename)
         .ok_or_else(|| InconsistentMetadata {
-            reason: f"snapshot lacks {filename} entry",
+            reason: missing_msg.clone(),
         })?
         .clone();
 
