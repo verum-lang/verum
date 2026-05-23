@@ -59,11 +59,14 @@ mount core.database.sqlite.native.wal_frame_layout.constants.{
     file_header_size, frame_header_size, magic_little, current_format_version,
 };
 mount core.database.sqlite.native.wal_frame_layout.file_header.{
-    WalFileHeader, new as new_file_header,
+    WalFileHeader,
 };
+// `mount X as Y` rename-alias doesn't surface to AOT codegen (task #11).
+// Use full path `core.database.sqlite.native.wal_frame_layout.file_header.new`.
 mount core.database.sqlite.native.wal_frame_layout.frame_header.{
-    WalFrameHeader, new as new_frame_header,
+    WalFrameHeader,
 };
+// task #11: use full path `core.database.sqlite.native.wal_frame_layout.frame_header.new`
 mount core.database.sqlite.native.l1_pager.wal_state.{
     WalState, wal_state_new,
 };
@@ -148,7 +151,7 @@ public fn wal_writer_create(
     // initial value over the first 24 bytes (magic .. salt2) and
     // store it in the header's checksum1/2 fields.  The same pair
     // seeds the per-frame rolling state.
-    let hdr_no_cksum = new_file_header(
+    let hdr_no_cksum = core.database.sqlite.native.wal_frame_layout.file_header.new(
         magic_little(),
         current_format_version(),
         page_size,
@@ -163,7 +166,7 @@ public fn wal_writer_create(
         WalChecksum { s1: 0 as u32, s2: 0 as u32 },
         prefix_bytes.as_slice(),
     );
-    let hdr = new_file_header(
+    let hdr = core.database.sqlite.native.wal_frame_layout.file_header.new(
         magic_little(),
         current_format_version(),
         page_size,
@@ -367,7 +370,7 @@ public fn wal_writer_append_frame(
     let after_prefix = wal_running_checksum(w.running.clone(), prefix.as_slice());
     let after_body = wal_running_checksum(after_prefix, page_data);
 
-    let frame_hdr = new_frame_header(
+    let frame_hdr = core.database.sqlite.native.wal_frame_layout.frame_header.new(
         page_no as u32,
         commit_db_size as u32,
         w.state.salt1,
@@ -442,7 +445,7 @@ public fn wal_writer_reset(
     // the salt rotation also rotates the checksum chain origin so
     // a torn write straddling the rotation can't be confused for a
     // valid frame in the new chain.
-    let hdr_no_cksum = new_file_header(
+    let hdr_no_cksum = core.database.sqlite.native.wal_frame_layout.file_header.new(
         magic_little(),
         current_format_version(),
         w.state.page_size,
@@ -457,7 +460,7 @@ public fn wal_writer_reset(
         WalChecksum { s1: 0 as u32, s2: 0 as u32 },
         prefix_bytes.as_slice(),
     );
-    let hdr = new_file_header(
+    let hdr = core.database.sqlite.native.wal_frame_layout.file_header.new(
         magic_little(),
         current_format_version(),
         w.state.page_size,
@@ -624,7 +627,7 @@ fn encode_frame_prefix_8(page_no: u32, commit_db_size: u32) -> List<Byte> {
 }
 
 fn decode_file_header(buf: &List<Byte>) -> WalFileHeader {
-    new_file_header(
+    core.database.sqlite.native.wal_frame_layout.file_header.new(
         decode_u32_be(buf, 0),
         decode_u32_be(buf, 4),
         decode_u32_be(buf, 8) as Int,
@@ -654,7 +657,7 @@ public fn decode_frame_header(buf: &List<Byte>, offset: Int) -> WalFrameHeader {
         tmp.push(buf[offset + i]);
         i = i + 1;
     }
-    new_frame_header(
+    core.database.sqlite.native.wal_frame_layout.frame_header.new(
         decode_u32_be(&tmp, 0),
         decode_u32_be(&tmp, 4),
         decode_u32_be(&tmp, 8),
