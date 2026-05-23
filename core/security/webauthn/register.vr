@@ -63,7 +63,7 @@ mount collections.{List, Set};
 mount encoding.json.{JsonValue, decode as json_decode};
 type JsonObject is Map<Text, JsonValue>;
 mount encoding.base64.{decode_url_no_pad as b64url_decode};
-mount encoding.cbor.{CborValue, decode as cbor_decode};
+mount encoding.cbor.{CborValue, decode};
 mount security.hash.sha256.{Sha256, digest};
 mount security.webauthn.types.{
     AuthenticatorAttestationResponse, AttestationObject, AttestationFormat,
@@ -285,7 +285,7 @@ fn parse_token_binding(obj: &JsonObject) -> Result<TokenBindingStatus, WebAuthnE
 // =============================================================================
 
 fn parse_attestation_object(bytes: &List<Byte>) -> Result<AttestationObject, WebAuthnError> {
-    let value = cbor_decode(bytes.as_slice())
+    let value = encoding.cbor.decode(bytes.as_slice())
         .map_err(|e| WebAuthnError.InvalidCbor(f"attestationObject: {e}"))?;
     let map = value.as_map()
         .ok_or_else(|| WebAuthnError.InvalidCbor("attestationObject not a map".to_text()))?;
