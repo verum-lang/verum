@@ -77,9 +77,16 @@ mount core.net.tcp.{TcpStream};
 mount core.net.addr.{SocketAddr};
 mount core.net.http.{Method, Headers};
 mount core.net.http_parser.{HttpParser, ParseProgress, HeaderView};
+// AOT B3 workaround — alias-mount `accept_key as ws_accept_key`
+// failed AOT resolution under first-suffix-wins `lookup_function`
+// (same root class as task #17/#39 + the cursor_new disambiguation
+// applied to `core/database/sqlite/native/l4_vdbe/cursor_btree_bridge.vr`).
+// Resolved by switching the call site to qualified-path
+// `core.net.websocket.accept_key(&key)`.  encode / decode kept their
+// aliases — they don't collide.
 mount core.net.websocket.{
     WsFrame, WsOpcode as Opcode, CloseCode,
-    encode as ws_encode, decode as ws_decode, accept_key as ws_accept_key,
+    encode as ws_encode, decode as ws_decode,
     WebSocketDecodeResult as DecodeResult,
     WebSocketDecodeError as DecodeError,
 };
@@ -529,7 +536,7 @@ pub async fn run_ws_session<H: WsHandler>(
         }
         Some(k) => k.clone(),
     };
-    let accept = ws_accept_key(&key);
+    let accept = core.net.websocket.accept_key(&key);
     let chosen_subproto = negotiate_subprotocol(&info.request_headers, &config.offered_subprotocols);
 
     // 3. Emit 101 Switching Protocols.

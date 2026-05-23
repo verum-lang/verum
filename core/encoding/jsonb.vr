@@ -64,7 +64,11 @@ module core.encoding.jsonb;
 mount core.*;
 mount core.collections.List;
 mount core.encoding.json.{JsonValue, JsonError, parse as parse_json, stringify as json_stringify};
-mount core.encoding.value.{Value, ConvertError, from_json as value_from_json, to_json as value_to_json};
+// AOT alias-mount workaround — `from_json as value_from_json` /
+// `to_json as value_to_json` fail AOT first-suffix-wins
+// `register_import_aliases` resolution (root: task #17/#39).
+// Call sites use qualified-path `core.encoding.value.{from,to}_json`.
+mount core.encoding.value.{Value, ConvertError};
 
 // =============================================================================
 // Constants
@@ -218,7 +222,7 @@ public fn decode_value(bytes: &[Byte]) -> Result<Value, JsonbError> {
         Ok(v)  => v,
         Err(e) => return Err(JbeBadJson(e)),
     };
-    Ok(value_from_json(&jv))
+    Ok(core.encoding.value.from_json(&jv))
 }
 
 /// Decode + parse to `JsonValue` (as opposed to the universal
@@ -262,7 +266,7 @@ public fn encode(json_text: &Text) -> List<Byte> {
 /// `JbeBadValue(CeUnsupportedVariant)` — round-trip with CBOR /
 /// BSON via the equivalent format-specific encoders instead.
 public fn encode_value(v: &Value) -> Result<List<Byte>, JsonbError> {
-    let jv = match value_to_json(v) {
+    let jv = match core.encoding.value.to_json(v) {
         Ok(j)  => j,
         Err(e) => return Err(JbeBadValue(e)),
     };

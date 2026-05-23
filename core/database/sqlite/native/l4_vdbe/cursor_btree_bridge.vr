@@ -33,7 +33,17 @@ mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l3_btree.cursor.{
-    BtreeCursor, cursor_new, cursor_root, cursor_is_valid, cursor_is_at_end,
+    BtreeCursor,
+    // Alias `cursor_new` as `btree_cursor_new` to disambiguate from
+    // the 0-arg `cursor_new` siblings in
+    // `core/database/sqlite/native/vtabs/{dbstat,generate_series,
+    // json_each}.vr`.  Pre-fix the AOT vbc_lowering's first-suffix-
+    // wins `lookup_function` picked one of those 0-arg variants and
+    // rejected `cursor_new(&tree)` with "wrong number of arguments
+    // for cursor_new: expected 0, found 1".  Same root class as
+    // task #17/#39 mount-scope-aware lookup.
+    cursor_new as btree_cursor_new,
+    cursor_root, cursor_is_valid, cursor_is_at_end,
     cursor_current_page, cursor_current_cell,
 };
 mount core.database.sqlite.native.l3_btree.btree.{
@@ -116,7 +126,7 @@ public fn op_open_read(
         Ok(t)  => t,
         Err(e) => return Err(BeBtree(e)),
     };
-    let mut c = cursor_new(&tree);
+    let mut c = btree_cursor_new(&tree);
     match cursor_root(&mut c) {
         Ok(_)  => Ok(c),
         Err(e) => Err(BeBtree(e)),
