@@ -245,7 +245,7 @@ public fn verify_inclusion(
     let mut root_arr: [Byte; 32] = [0_u8; 32];
     let mut i = 0;
     while i < HASH_SIZE { root_arr[i] = sth.root_hash.get(i).unwrap(); i = i + 1; }
-    verify_inclusion_proof(&leaf.bytes, index, sth.tree_size, proof, &root_arr)
+    security.merkle.verify_inclusion_proof(&leaf.bytes, index, sth.tree_size, proof, &root_arr)
 }
 
 // =============================================================================
