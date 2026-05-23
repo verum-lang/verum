@@ -62,7 +62,7 @@ mount core.database.sqlite.native.pragmas.config.{
     PragmaConfig, pragma_config_default,
 };
 mount core.database.sqlite.native.incrblob.engine.{
-    BlobEngine, engine_new as blob_engine_new,
+    BlobEngine, engine_new,
 };
 
 // -----------------------------------------------------------------------------
@@ -212,7 +212,7 @@ public fn open_memory(mode: ConnectionMode) -> Result<Connection, ConnectionErro
         table_store: Map.new(),
         registry: registry_new(),
         pragma_cfg: pragma_config_default(),
-        blob_engine: blob_engine_new(),
+        blob_engine: core.database.sqlite.native.incrblob.engine.engine_new(),
     })
 }
 
@@ -251,7 +251,7 @@ public fn open_file(path: &Text, mode: ConnectionMode) -> Result<Connection, Con
         table_store: Map.new(),
         registry: registry_new(),
         pragma_cfg: pragma_config_default(),
-        blob_engine: blob_engine_new(),
+        blob_engine: core.database.sqlite.native.incrblob.engine.engine_new(),
     })
 }
 
