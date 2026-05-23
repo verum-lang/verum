@@ -25,6 +25,7 @@ mount core.mem.capability.{
     CAP_READ, CAP_WRITE, CAP_OWNED, CAP_READ_ONLY,
     pack_epoch_caps, unpack_epoch, unpack_caps,
 };
+mount core.mem.{UseAfterFreeError, RevocationError};
 
 // =============================================================================
 // Section 1: Layout pin — `@repr(C, size(16), align(8))` is asserted
@@ -131,6 +132,196 @@ fn test_thin_ref_read_only_caps_exclude_write() {
     let caps = unpack_caps(packed);
     assert((caps & CAP_READ) != 0 as UInt16);
     assert((caps & CAP_WRITE) == 0 as UInt16);
+}
+
+// =============================================================================
+// Section 5: pack ⟂ unpack identity sweep
+// =============================================================================
+
+@test
+fn test_pack_unpack_identity_at_boundaries() {
+    // Boundary inputs across 16-bit lanes.
+    let pairs: List<(UInt16, UInt16)> = [
+        (0 as UInt16,      0 as UInt16),
+        (0xFFFF as UInt16, 0 as UInt16),
+        (0 as UInt16,      0xFFFF as UInt16),
+        (0xFFFF as UInt16, 0xFFFF as UInt16),
+        (1 as UInt16,      1 as UInt16),
+        (0x8000 as UInt16, 0x8000 as UInt16),       // MSB set on both lanes
+        (0x5555 as UInt16, 0xAAAA as UInt16),       // alternating bits
+    ];
+    for p in pairs.iter() {
+        let (e, c) = *p;
+        let packed = pack_epoch_caps(e, c);
+        assert_eq(unpack_epoch(packed), e);
+        assert_eq(unpack_caps(packed), c);
+    }
+}
+
+@test
+fn test_pack_epoch_lane_isolation() {
+    // Modifying ONLY the epoch field must not touch the caps lane.
+    let baseline = pack_epoch_caps(0 as UInt16, 0xBEEF as UInt16);
+    let modified = pack_epoch_caps(0xCAFE as UInt16, 0xBEEF as UInt16);
+    // Caps lane (upper 16) must be identical
+    assert_eq(modified & 0xFFFF0000 as UInt32, baseline & 0xFFFF0000 as UInt32);
+    // Epoch lane (lower 16) must differ
+    assert(modified != baseline);
+    assert_eq(unpack_caps(modified), unpack_caps(baseline));
+}
+
+@test
+fn test_pack_caps_lane_isolation() {
+    // Modifying ONLY the caps field must not touch the epoch lane.
+    let baseline = pack_epoch_caps(0xCAFE as UInt16, 0 as UInt16);
+    let modified = pack_epoch_caps(0xCAFE as UInt16, 0xBEEF as UInt16);
+    // Epoch lane (lower 16) must be identical
+    assert_eq(modified & 0x0000FFFF as UInt32, baseline & 0x0000FFFF as UInt32);
+    assert_eq(unpack_epoch(modified), unpack_epoch(baseline));
+}
+
+// =============================================================================
+// Section 6: UseAfterFreeError — 5-field record + constructors
+// =============================================================================
+
+@test
+fn test_use_after_free_error_record_construction() {
+    // 5-field shape per `core/mem/mod.vr:265`.
+    let e: UseAfterFreeError = UseAfterFreeError {
+        expected_gen:   42 as UInt32,
+        actual_gen:     17 as UInt32,
+        expected_epoch: 3 as UInt16,
+        actual_epoch:   5 as UInt16,
+        type_name:      "Heap<Int>".to_text(),
+    };
+    assert_eq(e.expected_gen,   42 as UInt32);
+    assert_eq(e.actual_gen,     17 as UInt32);
+    assert_eq(e.expected_epoch, 3 as UInt16);
+    assert_eq(e.actual_epoch,   5 as UInt16);
+    assert_eq(e.type_name,      "Heap<Int>");
+}
+
+// REGRESSION: `UseAfterFreeError.new(...)`, `.null_pointer(...)`, and
+// `.message()` dispatch through the same first-suffix-wins
+// `lookup_function` defect class as the diagnostics/heap collisions
+// (task #17/#39 mount-scope-aware lookup).  `UseAfterFreeError.new(...)`
+// collides with `Heap.new` / `Shared.new` / `HazardStats.new` / etc.;
+// `.null_pointer(...)` with the `RevocationError.null_pointer` static;
+// `.message()` is universal across stdlib error types.  Construction
+// via record literal works (above).  The constructor + `.message()`
+// surface is pinned via @ignore until #17/#39 closes.
+
+@test
+@ignore
+fn test_use_after_free_error_new_constructor_round_trip_pinned_by_collision() {
+    let e: UseAfterFreeError = UseAfterFreeError.new(
+        100 as UInt32,
+        99 as UInt32,
+        7 as UInt16,
+        6 as UInt16,
+        "Shared<Text>".to_text(),
+    );
+    assert_eq(e.expected_gen, 100 as UInt32);
+}
+
+@test
+@ignore
+fn test_use_after_free_error_null_pointer_uses_gen_unallocated_sentinel_pinned() {
+    let e: UseAfterFreeError = UseAfterFreeError.null_pointer("Heap<Byte>".to_text());
+    assert_eq(e.expected_gen, GEN_UNALLOCATED);
+    assert(e.message().contains("null pointer"));
+}
+
+@test
+fn test_use_after_free_error_eq_reflexive_via_record_literal() {
+    // Record-literal construction sidesteps the `.new()` /
+    // `.null_pointer()` constructor dispatch.  Eq's structural body
+    // (`expected_gen == other.expected_gen && ...`) is reachable
+    // because `UseAfterFreeError == UseAfterFreeError` goes through
+    // the type's protocol_id which routes correctly post task #16
+    // (EqG protocol_id=0 runtime-type dispatch).
+    let a: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: 1 as UInt32,
+        actual_gen: 2 as UInt32,
+        expected_epoch: 3 as UInt16,
+        actual_epoch: 4 as UInt16,
+        type_name: "T".to_text(),
+    };
+    let b: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: 1 as UInt32,
+        actual_gen: 2 as UInt32,
+        expected_epoch: 3 as UInt16,
+        actual_epoch: 4 as UInt16,
+        type_name: "T".to_text(),
+    };
+    assert(a == b);
+}
+
+@test
+fn test_use_after_free_error_eq_distinct_field_diff() {
+    let a: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: 1 as UInt32,
+        actual_gen: 2 as UInt32,
+        expected_epoch: 3 as UInt16,
+        actual_epoch: 4 as UInt16,
+        type_name: "T".to_text(),
+    };
+    let b: UseAfterFreeError = UseAfterFreeError {
+        expected_gen: 9 as UInt32,           // differs
+        actual_gen: 2 as UInt32,
+        expected_epoch: 3 as UInt16,
+        actual_epoch: 4 as UInt16,
+        type_name: "T".to_text(),
+    };
+    assert(!(a == b));
+    assert(a != b);
+}
+
+// =============================================================================
+// Section 7: RevocationError — 4-variant surface
+// =============================================================================
+
+@test
+fn test_revocation_error_null_pointer_construction() {
+    let e: RevocationError = RevocationError.null_pointer("Heap<Int>".to_text());
+    assert(e is RevocationError.NullPointer);
+}
+
+@test
+fn test_revocation_error_capability_violation_construction() {
+    let e: RevocationError = RevocationError.capability_violation("Heap<Text>".to_text());
+    assert(e is RevocationError.CapabilityViolation);
+}
+
+@test
+fn test_revocation_error_already_revoked_construction() {
+    let e: RevocationError = RevocationError.already_revoked("Shared<Byte>".to_text());
+    assert(e is RevocationError.AlreadyRevoked);
+}
+
+@test
+fn test_revocation_error_internal_construction_via_record() {
+    let e: RevocationError = RevocationError.Internal {
+        type_name: "Heap<UInt32>".to_text(),
+        reason: "some internal failure".to_text(),
+    };
+    assert(e is RevocationError.Internal);
+}
+
+@test
+fn test_revocation_error_variants_pairwise_distinct() {
+    let np: RevocationError = RevocationError.null_pointer("X".to_text());
+    let cv: RevocationError = RevocationError.capability_violation("X".to_text());
+    let ar: RevocationError = RevocationError.already_revoked("X".to_text());
+    let ix: RevocationError = RevocationError.Internal {
+        type_name: "X".to_text(),
+        reason: "y".to_text(),
+    };
+    assert(np is RevocationError.NullPointer);
+    assert(!(np is RevocationError.CapabilityViolation));
+    assert(cv is RevocationError.CapabilityViolation);
+    assert(ar is RevocationError.AlreadyRevoked);
+    assert(ix is RevocationError.Internal);
 }
 
 // =============================================================================
