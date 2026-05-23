@@ -868,11 +868,25 @@ implement<T> List<T> {
     public fn index_of(&self, value: &T) -> Maybe<Int>
     where T: Eq
     {
-        for i in range(0, self.len) {
-            let item: &T = unsafe { &*self.ptr.offset(i) };
-            if *item == *value {
-                return Some(i);
+        // Method-form `self.len()` + `self.get(i)` (not raw
+        // `self.len` / `self.ptr.offset(i)`).  When this body is
+        // dispatched against a SLICE receiver (cross-module
+        // bare-name collision with `[T].index_of`, #17/#39), the
+        // slice's ObjectHeader differs from List's record layout,
+        // so direct field reads of `len`/`ptr` return garbage bits.
+        // Method dispatch routes through the runtime kind and
+        // works for both List AND slice receivers until the
+        // mount-scope-aware lookup closes the collision class.
+        let n = self.len();
+        let mut i: Int = 0;
+        while i < n {
+            match self.get(i) {
+                Some(item) => {
+                    if *item == *value { return Some(i); }
+                },
+                None => return None,
             }
+            i = i + 1;
         }
         None
     }
