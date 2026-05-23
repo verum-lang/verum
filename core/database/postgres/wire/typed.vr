@@ -68,8 +68,10 @@ mount core.database.postgres.wire.codec.{
     PG_RANGE_FLAG_LB_INF, PG_RANGE_FLAG_UB_INF,
     element_oid_for_array, range_element_oid,
     PgComposite, PgCompositeField,
-    decode_composite as raw_decode_composite,
 };
+// `mount X as Y` rename-alias doesn't surface to AOT codegen.
+// Use fully-qualified `core.database.postgres.wire.codec.decode_composite`
+// at the call site below.
 
 // =============================================================================
 // TypedValue — sum type covering every supported PG OID.
@@ -903,7 +905,7 @@ public fn decode_composite_at(
     slice: &ArenaSlice,
     arena: &SpindleArena,
 ) -> Result<TypedValue, DbError> {
-    let raw = raw_decode_composite(slice)?;
+    let raw = core.database.postgres.wire.codec.decode_composite(slice)?;
     let ncols = raw.field_count();
     if ncols > 4096 {
         return Err(decode_fault(f"composite: ncolumns {ncols} out of range"));
