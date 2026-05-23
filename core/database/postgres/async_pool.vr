@@ -41,7 +41,7 @@ mount core.database.common.error.{
 };
 mount core.database.postgres.config.PgConfig;
 mount core.database.postgres.async_connection.{
-    AsyncPgConnection, connect as async_connect,
+    AsyncPgConnection, connect,
 };
 mount core.async.channel.{
     Sender, Receiver, bounded_channel,
@@ -542,7 +542,7 @@ async fn open_and_warm(
     config: &PgConfig,
     pool_cfg: &AsyncPoolConfig,
 ) -> Result<AsyncPgConnection, DbError> {
-    let h = async_connect(config, pool_cfg.mailbox_capacity).await?;
+    let h = core.database.postgres.async_connection.connect(config, pool_cfg.mailbox_capacity).await?;
     let mut i: Int = 0;
     while i < (pool_cfg.prepare_on_open.len() as Int) {
         match h.prepare(&pool_cfg.prepare_on_open[i]).await {
