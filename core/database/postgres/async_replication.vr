@@ -72,7 +72,7 @@ mount core.database.postgres.replication.{
     PgReplicationConfig, PgReplicationConnection,
     LogicalReplicationOptions,
     Lsn, ReplicationMessage,
-    connect_replication as sync_connect_replication,
+    connect_replication,
 };
 mount core.async.channel.{
     Sender, Receiver, OneshotSender,
@@ -394,7 +394,7 @@ public async fn connect_replication_async(
 ) -> Result<AsyncPgReplicationConnection, DbError> {
     let cfg_owned = cfg.clone();
     let conn_jh = spawn_blocking(move || -> Result<PgReplicationConnection, DbError> {
-        sync_connect_replication(&cfg_owned)
+        core.database.postgres.replication.connect_replication(&cfg_owned)
     });
     let conn = match conn_jh.join().await {
         Ok(r)  => r?,
