@@ -166,10 +166,10 @@ fn walk_for_loss(v: &ConfigValue, caps: &FormatCapabilities, path: &Text, report
         ConfigValue.ConfigArray(items) => {
             // Heterogeneous-arrays check
             if !caps.has_heterogeneous_arrays && items.len() >= 2 {
-                let first_type = type_name(items.get(0).unwrap());
+                let first_type = configuration.value.type_name(items.get(0).unwrap());
                 let mut i = 1;
                 while i < items.len() {
-                    if type_name(items.get(i).unwrap()) != first_type {
+                    if configuration.value.type_name(items.get(i).unwrap()) != first_type {
                         report.push(path_with_kind(path, "heterogeneous-array"));
                         break;
                     }
@@ -281,11 +281,11 @@ fn coerce_for_capabilities(
             // Heterogeneous coercion: if dst lacks heterogeneous arrays
             // and elements differ in type, coerce all to string.
             let needs_homogenise = if !caps.has_heterogeneous_arrays && items.len() >= 2 {
-                let first_t = type_name(items.get(0).unwrap());
+                let first_t = configuration.value.type_name(items.get(0).unwrap());
                 let mut hetero = false;
                 let mut i = 1;
                 while i < items.len() {
-                    if type_name(items.get(i).unwrap()) != first_t { hetero = true; break; }
+                    if configuration.value.type_name(items.get(i).unwrap()) != first_t { hetero = true; break; }
                     i = i + 1;
                 }
                 hetero
@@ -295,7 +295,7 @@ fn coerce_for_capabilities(
                 let mut out: List<ConfigValue> = List.new();
                 let mut i = 0;
                 while i < items.len() {
-                    out.push(ConfigValue.ConfigString(type_name(items.get(i).unwrap())));
+                    out.push(ConfigValue.ConfigString(configuration.value.type_name(items.get(i).unwrap())));
                     i = i + 1;
                 }
                 Ok(ConfigValue.ConfigArray(out))
