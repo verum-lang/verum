@@ -208,7 +208,13 @@ public fn simplex_three() -> Simplex {
 /// Generalises `simplex_zero` through `simplex_three`. The
 /// refinement on `n` keeps the dimension non-negative.
 public fn simplex_standard(n: Int{>= 0}) -> Simplex {
-    let vs = List.range(0, n + 1);
+    // List.range doesn't exist; build via explicit loop.
+    let mut vs: List<Int> = List.new();
+    let mut i = 0;
+    while i <= n {
+        vs.push(i);
+        i = i + 1;
+    }
     Simplex { dim: n, vertices: vs }
 }
 
@@ -280,7 +286,13 @@ public fn simplex_is_degenerate(s: &Simplex) -> Bool {
 /// The **boundary** of a simplex as the list of its face indices.
 /// An n-simplex has n+1 faces, one for each vertex removed.
 public fn simplex_face_indices(s: &Simplex) -> List<Int> {
-    List.range(0, s.dim + 1)
+    let mut vs: List<Int> = List.new();
+    let mut i = 0;
+    while i <= s.dim {
+        vs.push(i);
+        i = i + 1;
+    }
+    vs
 }
 
 /// Count the distinct horns of a given n-simplex. An n-simplex has
