@@ -10,7 +10,7 @@ module core.database.sqlite.native.expr_affinity_resolver.node;
 mount core.database.sqlite.native.affinity_matrix_api.affinity.{
     MatrixAffinity, AfInteger, AfText, AfBlob, AfReal, AfNumeric,
 };
-mount core.database.sqlite.native.affinity_matrix_api.classify.{classify as classify_type};
+mount core.database.sqlite.native.affinity_matrix_api.classify.{classify};
 mount base.{Bool, Text};
 
 public type ExprNode is
@@ -31,7 +31,7 @@ public type ExprNode is
 public fn resolve(e: &ExprNode) -> MatrixAffinity {
     match e {
         EnColumn(a)      => a.clone(),
-        EnCast(ty)       => classify_type(ty),
+        EnCast(ty)       => core.database.sqlite.native.affinity_matrix_api.classify.classify(ty),
         EnLiteralInt     => AfBlob,      // literals have no affinity per §14.3
         EnLiteralReal    => AfBlob,
         EnLiteralText    => AfBlob,
