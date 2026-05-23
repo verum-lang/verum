@@ -284,7 +284,7 @@ pub async fn stream_lines_bounded(
     let token = cancel.token();
     let cmd_for_producer = cmd_text.clone();
     let read_chunk = config.read_chunk;
-    let max_memory = config.max_memory;
+    let mem_limit = config.max_memory;
     let policy = config.on_overflow.clone();
 
     // Producer task — reads lines, applies overflow policy, watches cancel.
@@ -299,10 +299,10 @@ pub async fn stream_lines_bounded(
                     Ok(Some(s))    => {
                         let stripped = strip_trailing_newline(s);
                         total_buffered = total_buffered + stripped.len() as Int;
-                        if max_memory > 0 && total_buffered > max_memory {
+                        if mem_limit > 0 && total_buffered > mem_limit {
                             let _ = tx.send_async(Err(ShellError.SpawnFailed {
                                 command: cmd_for_producer.clone(),
-                                reason:  f"stream memory limit ({max_memory} bytes) exceeded".into(),
+                                reason:  f"stream memory limit ({mem_limit} bytes) exceeded".into(),
                             })).await;
                             break;
                         }
