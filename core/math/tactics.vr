@@ -147,34 +147,58 @@ public fn all_solved(state: ProofState) -> Bool {
 }
 
 /// Add a hypothesis to the current (first) goal.
+///
+/// Spread patterns (`[head, ..rest]`) aren't surfaced to AOT codegen
+/// (interp tolerates them via dynamic dispatch); the body is
+/// rewritten to use explicit head/tail extraction so the same
+/// shape compiles in both tiers.
 public fn push_hypothesis(state: ProofState, name: Text, hyp: TacticProp) -> ProofState {
-    match state.goals {
-        [] => state,
-        [head, ..rest] => {
-            let updated_goal = Goal {
-                proposition: head.proposition,
-                hypotheses: [{ name: name, hyp: hyp }, ..head.hypotheses],
-                label: head.label,
-            };
-            ProofState {
-                goals: [updated_goal, ..rest],
-                focus_depth: state.focus_depth,
-                dirty: true,
-            }
-        },
+    if state.goals.is_empty() {
+        return state;
+    }
+    let head = state.goals.get(0).unwrap();
+    let mut new_hypotheses: List<Hypothesis> = [];
+    new_hypotheses.push(Hypothesis { name: name, hyp: hyp });
+    let mut hi = 0;
+    while hi < head.hypotheses.len() {
+        new_hypotheses.push(head.hypotheses.get(hi).unwrap());
+        hi = hi + 1;
+    }
+    let updated_goal = Goal {
+        proposition: head.proposition,
+        hypotheses: new_hypotheses,
+        label: head.label,
+    };
+    let mut new_goals: List<Goal> = [];
+    new_goals.push(updated_goal);
+    let mut gi = 1;
+    while gi < state.goals.len() {
+        new_goals.push(state.goals.get(gi).unwrap());
+        gi = gi + 1;
+    }
+    ProofState {
+        goals: new_goals,
+        focus_depth: state.focus_depth,
+        dirty: true,
     }
 }
 
 /// Close the current (first) goal unconditionally — used internally when a
 /// tactic produces a complete proof term.
 public fn close_goal(state: ProofState) -> ProofState {
-    match state.goals {
-        [] => state,
-        [_, ..rest] => ProofState {
-            goals: rest,
-            focus_depth: state.focus_depth,
-            dirty: true,
-        },
+    if state.goals.is_empty() {
+        return state;
+    }
+    let mut rest: List<Goal> = [];
+    let mut gi = 1;
+    while gi < state.goals.len() {
+        rest.push(state.goals.get(gi).unwrap());
+        gi = gi + 1;
+    }
+    ProofState {
+        goals: rest,
+        focus_depth: state.focus_depth,
+        dirty: true,
     }
 }
 
@@ -808,12 +832,18 @@ tactic all_goals_strict(inner: fn() -> TacticResult, allow_residual: Bool = fals
 /// tactic_seq([ring_law, norm_num, smt])
 /// ```
 tactic tactic_seq(tactics: List<fn() -> TacticResult>) {
-    match tactics {
-        [] => skip,
-        [head, ..rest] => {
-            head();
-            tactic_seq(rest)
-        },
+    if tactics.is_empty() {
+        skip
+    } else {
+        let head = tactics.get(0).unwrap();
+        let mut rest: List<fn() -> TacticResult> = [];
+        let mut i = 1;
+        while i < tactics.len() {
+            rest.push(tactics.get(i).unwrap());
+            i = i + 1;
+        }
+        head();
+        tactic_seq(rest)
     }
 }
 
