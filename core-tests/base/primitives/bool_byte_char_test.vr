@@ -283,16 +283,24 @@ fn test_byte_is_ascii_alphanumeric() {
 
 @test
 fn test_byte_is_ascii_whitespace() {
+    // ASCII whitespace per the canonical contract pinned at
+    // `core/base/primitives.vr::is_ascii_whitespace` and
+    // `core/text/char.vr::is_ascii_whitespace`:
+    //   { 0x09 HT, 0x0A LF, 0x0C FF, 0x0D CR, 0x20 SPACE }
+    // This matches Rust's `u8::is_ascii_whitespace` convention.
+    // Note that 0x0B (vertical tab) is NOT in the set — historical
+    // POSIX behaviour, also matched by Rust.
     assert((32 as Byte).is_ascii_whitespace());   // space
     assert((9 as Byte).is_ascii_whitespace());    // horizontal tab
     assert((10 as Byte).is_ascii_whitespace());   // newline (LF)
+    assert((12 as Byte).is_ascii_whitespace());   // form feed (FF) — canonical inclusion
     assert((13 as Byte).is_ascii_whitespace());   // carriage return (CR)
 
     // Non-whitespace
-    assert(!(11 as Byte).is_ascii_whitespace());  // vertical tab (not standard whitespace)
-    assert(!(12 as Byte).is_ascii_whitespace());  // form feed (not standard whitespace)
+    assert(!(11 as Byte).is_ascii_whitespace());  // vertical tab (NOT in the canonical set)
     assert(!(0 as Byte).is_ascii_whitespace());   // null
     assert(!(65 as Byte).is_ascii_whitespace());  // 'A'
+    assert(!(8 as Byte).is_ascii_whitespace());   // backspace
 }
 
 // -----------------------------------------------------------------------------

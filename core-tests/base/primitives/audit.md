@@ -156,6 +156,17 @@ intercept.  Pinned by `regression_test.vr::regression_unit_receiver_dispatch_pin
     receiver dispatch).
   * 2 `@ignore`'d pins for residual saturating_add intrinsic-width
     propagation + let-bound cast `VarTypeKind::Byte` folding.
+  * Test contract fix — `test_byte_is_ascii_whitespace` now correctly
+    asserts that 0x0C (form feed) IS canonical ASCII whitespace per
+    Rust / `core/text/char.vr` / `core/base/primitives.vr` and 0x0B
+    (vertical tab) is NOT (POSIX-aligned).
+  * `is_builtin_prefix` allowlist extended in `dispatch_primitive_method`
+    to cover every sized-int alias (Byte/UInt8/U8/u8/Int8/I8/i8/UInt16/
+    U16/u16/Int16/I16/i16/Int32/I32/i32/UInt64/U64/u64/Int64/I64/i64/
+    UInt128/U128/u128/Int128/I128/i128/USize/UIntSize/Usize/usize/
+    ISize/IntSize/Isize/isize).  Unblocks the width-prefix normaliser
+    for typechecker-resolved alias-canonical-name CallM forms.  New
+    regression pin `regression_byte_alias_dispatch_through_normaliser_pinned`.
 
 ### Deferred
 
@@ -174,8 +185,15 @@ intercept.  Pinned by `regression_test.vr::regression_unit_receiver_dispatch_pin
   * Cross-tier AOT validation — verify all green interpreter tests also
     pass under `verum test --aot`.  Pending separate AOT validation
     cycle for cast-receiver dispatch.
-  * `test_byte_is_ascii_whitespace` + `test_byte_case_conversion_roundtrip`
-    — likely same §A residual class (`UInt8.to_ascii_lowercase` panic
-    suggests typechecker resolves cast receiver to UInt8 alias
-    canonical name, but `byte$to_ascii_lowercase` arm doesn't exist
-    in the runtime intercept).
+  * ~~`test_byte_is_ascii_whitespace`~~ — CLOSED via test contract
+    update: 12 (form feed) IS canonical ASCII whitespace per Rust /
+    `core/text/char.vr` / `core/base/primitives.vr`.
+  * ~~`test_byte_case_conversion_roundtrip`~~ — CLOSED via
+    `is_builtin_prefix` allowlist extension in
+    `dispatch_primitive_method`.  Pre-fix the allowlist missed `UInt8`
+    (and U8/u8/I32/etc.); the typechecker resolves cast receivers via
+    the alias canonical name (`UInt8` is Byte's canonical name in
+    `NUMERIC_ALIAS_MATRIX`), so qualified-prefix CallM dispatch
+    short-circuited at the early-return gate before reaching the
+    width-prefix normaliser.  Allowlist now covers every sized-int
+    alias spelling (canonical + uppercase-short + Rust-style lowercase).

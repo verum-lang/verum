@@ -2935,11 +2935,37 @@ pub(super) fn dispatch_primitive_method(
             || matches!(
                 type_prefix,
                 "String"
+                    // Canonical primitive type names (interpreter-routed).
                     | "Byte"
                     | "UInt64"
                     | "Int32"
                     | "Float32"
                     | "Float64"
+                    // Sized-int aliases — needed so the width-prefix
+                    // normaliser below sees the qualified name BEFORE the
+                    // "user-type not in WKT" early-return.  Without these,
+                    // `(N as Byte).<method>` (which the codegen now emits
+                    // as `byte$<method>` via the Case 6c Cast arm in
+                    // `compile_method_call::effective_method_name`) is
+                    // unaffected, BUT every site that still emits the
+                    // qualified `UInt8.<method>` / `U8.<method>` etc.
+                    // shape — typechecker-resolved-target stamping for
+                    // typed-let receivers via the alias canonical-name
+                    // (UInt8 is Byte's canonical name in the numeric
+                    // alias matrix) — would short-circuit the dispatcher
+                    // here and panic with `<Alias>.<method> not found`.
+                    | "UInt8" | "U8" | "u8"
+                    | "Int8" | "I8" | "i8"
+                    | "UInt16" | "U16" | "u16"
+                    | "Int16" | "I16" | "i16"
+                    | "I32" | "i32"
+                    | "U64" | "u64"
+                    | "Int64" | "I64" | "i64"
+                    | "UInt128" | "U128" | "u128"
+                    | "Int128" | "I128" | "i128"
+                    | "USize" | "UIntSize" | "Usize" | "usize"
+                    | "ISize" | "IntSize" | "Isize" | "isize"
+                    // Timer types (interpreter-specific, not in WKT).
                     | "Stopwatch"
                     | "PerfCounter"
                     | "DeadlineTimer"
@@ -2956,11 +2982,37 @@ pub(super) fn dispatch_primitive_method(
             || matches!(
                 type_prefix,
                 "String"
+                    // Canonical primitive type names (interpreter-routed).
                     | "Byte"
                     | "UInt64"
                     | "Int32"
                     | "Float32"
                     | "Float64"
+                    // Sized-int aliases — needed so the width-prefix
+                    // normaliser below sees the qualified name BEFORE the
+                    // "user-type not in WKT" early-return.  Without these,
+                    // `(N as Byte).<method>` (which the codegen now emits
+                    // as `byte$<method>` via the Case 6c Cast arm in
+                    // `compile_method_call::effective_method_name`) is
+                    // unaffected, BUT every site that still emits the
+                    // qualified `UInt8.<method>` / `U8.<method>` etc.
+                    // shape — typechecker-resolved-target stamping for
+                    // typed-let receivers via the alias canonical-name
+                    // (UInt8 is Byte's canonical name in the numeric
+                    // alias matrix) — would short-circuit the dispatcher
+                    // here and panic with `<Alias>.<method> not found`.
+                    | "UInt8" | "U8" | "u8"
+                    | "Int8" | "I8" | "i8"
+                    | "UInt16" | "U16" | "u16"
+                    | "Int16" | "I16" | "i16"
+                    | "I32" | "i32"
+                    | "U64" | "u64"
+                    | "Int64" | "I64" | "i64"
+                    | "UInt128" | "U128" | "u128"
+                    | "Int128" | "I128" | "i128"
+                    | "USize" | "UIntSize" | "Usize" | "usize"
+                    | "ISize" | "IntSize" | "Isize" | "isize"
+                    // Timer types (interpreter-specific, not in WKT).
                     | "Stopwatch"
                     | "PerfCounter"
                     | "DeadlineTimer"
