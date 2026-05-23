@@ -49,7 +49,10 @@ mount encoding.json.{
     encode, decode,
 };
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
-mount async_.sleep_seconds;
+// Fix: was `mount async_.sleep_seconds;` — non-existent module path
+// + function name.  The canonical async sleep accepting whole seconds
+// is `core.async.timer.sleep_secs`.
+mount core.async.timer.sleep_secs;
 
 mount core.search.types.{
     SearchIndex, SearchError, SearchQuery, SearchResults, SearchHit,
@@ -488,7 +491,7 @@ pub async fn wait_for_task<C: HttpClient>(
             "failed"    => return Err(SearchError.Backend("task failed".to_text())),
             "canceled"  => return Err(SearchError.Backend("task canceled".to_text())),
             _ => {
-                sleep_seconds(1).await;
+                sleep_secs(1).await;
                 elapsed = elapsed + 1;
             }
         }
