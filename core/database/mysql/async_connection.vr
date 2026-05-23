@@ -54,7 +54,7 @@ mount core.database.mysql.connection.{
     connect,
 };
 mount core.database.mysql.stmt_cache.{
-    MysqlStmtCache, fingerprint as my_stmt_fingerprint,
+    MysqlStmtCache, fingerprint,
 };
 mount core.database.mysql.wire.frontend.StmtParam;
 mount core.database.mysql.config.MysqlConfig;
@@ -568,7 +568,7 @@ fn run_actor(mut conn: MysqlConnection, mut rx: Receiver<MysqlRequest>) {
                 run_load_data_subloop(&mut conn, &sql, chunk_rx, ack);
             }
             MyReqPrepare { sql, reply } => {
-                let fp = my_stmt_fingerprint(&sql);
+                let fp = core.database.mysql.stmt_cache.fingerprint(&sql);
                 let r = match cache.lookup(fp) {
                     Some(cached) => Ok(cached),
                     None => {
@@ -594,7 +594,7 @@ fn run_actor(mut conn: MysqlConnection, mut rx: Receiver<MysqlRequest>) {
             MyReqClosePrepared { stmt, reply } => {
                 // Drop the cache slot first so a subsequent
                 // MyReqPrepare(same sql) re-prepares cleanly.
-                let fp = my_stmt_fingerprint(&stmt.sql);
+                let fp = core.database.mysql.stmt_cache.fingerprint(&stmt.sql);
                 let _ = cache.invalidate(fp);
                 let r = conn.close_prepared(&stmt);
                 let _ = reply.send(r);
