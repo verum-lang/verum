@@ -375,6 +375,24 @@ pub struct VbcCodegen {
     /// Used to infer the type of field access expressions for chained access.
     type_field_type_names: std::collections::HashMap<(String, String), String>,
 
+    /// Declared type-name for every `static mut NAME: T = init;` slot.
+    /// Populated when an `ItemKind::Static` with `is_mut == true` is
+    /// processed; consulted by `extract_expr_type_name`'s Path arm so a
+    /// bare reference to a static-mut binding propagates the declared
+    /// type to let-bindings (`let r = STATIC_MUT_RECORD`).  Without this,
+    /// downstream `r.field` lookups have no `type_name` hint, fall
+    /// through to the global interned-name fallback in
+    /// `resolve_field_index`, and read at completely wrong byte offsets
+    /// (e.g. `field_idx = intern("a")` instead of positional 0) — every
+    /// `r.field0` read returns the value of some other field, every
+    /// method dispatch on `STATIC_MUT.method()` either reads a wrong
+    /// receiver self or null-derefs at the first GetF.  Architectural
+    /// rule: every `static mut NAME` MUST record its declared type here
+    /// (both bare-name and module-qualified) so the type-tracking surface
+    /// matches what pure `static NAME` gets for free via
+    /// `register_constant_with_value` → `FunctionInfo.return_type_name`.
+    static_mut_type_names: std::collections::HashMap<String, String>,
+
     /// Pending constants that need bytecode compilation.
     /// These are constants whose values couldn't be inlined (e.g., struct literals).
     /// Stored as (function_name, expression_clone) for compilation in compile_function_bodies.
@@ -1185,6 +1203,7 @@ impl VbcCodegen {
             next_field_id: 0,
             type_field_layouts: std::collections::HashMap::new(),
             type_field_type_names: std::collections::HashMap::new(),
+            static_mut_type_names: std::collections::HashMap::new(),
             // Pending constants for deferred compilation
             pending_constants: Vec::new(),
             archive_func_name_to_fid: std::collections::HashMap::new(),
@@ -6417,6 +6436,30 @@ impl VbcCodegen {
                     if let Some(var_type) = Some(&static_decl.ty) {
                         let vt = self.type_kind_to_var_type(&var_type.kind);
                         self.ctx.register_constant_type(&name, vt);
+                    }
+
+                    // Record the declared *type name* (separate from the
+                    // VarTypeKind above, which only carries primitive
+                    // discriminators like Int/Float/Bool/Text/Unit).
+                    // `extract_expr_type_name` consults this map when a
+                    // bare reference to a static-mut binding flows into a
+                    // let-binding or a field-access receiver; without it,
+                    // the path's type is unknown and `resolve_field_index`
+                    // falls through to the global interned-name fallback —
+                    // producing wildly wrong byte offsets for record-typed
+                    // static muts.  Both the bare name and the module-
+                    // qualified alias are recorded so cross-module mounts
+                    // of the same static surface the type identically.
+                    let declared_type_name = Self::extract_type_name_from_ast(&static_decl.ty);
+                    if !declared_type_name.is_empty() {
+                        self.static_mut_type_names
+                            .insert(name.clone(), declared_type_name.clone());
+                        let module_name = &self.config.module_name;
+                        if !module_name.is_empty() && module_name != "main" {
+                            let qualified_name = format!("{}.{}", module_name, name);
+                            self.static_mut_type_names
+                                .insert(qualified_name, declared_type_name);
+                        }
                     }
 
                     // Queue the init expression for compilation as a TLS initializer
@@ -16061,13 +16104,36 @@ impl VbcCodegen {
             //   Ret { value: result_reg }
             // So the slot literal is the LoadI immediately preceding
             // the TlsSet.
+            //
+            // Sister scan: recover the declared TYPE NAME of the static
+            // by tracking `New { dst, type_id, ... }` opcodes.  The init
+            // expression for a record-typed `static mut NAME: T = T{..}`
+            // emits a `New` whose dst register ultimately flows into the
+            // TlsSet val (possibly via intermediate SetF/Clone steps).
+            // Recovering the archive type_id at this scan, mapping
+            // through `type_id_remap`, and reverse-lookup via
+            // `self.types` lets us re-populate `static_mut_type_names`
+            // for cross-archive static-mut bindings — the source-module
+            // population in the `ItemKind::Static` arm only fires for
+            // statics declared in the user's own translation unit.
+            // Without this scan, every `STATIC_MUT_RECORD.field` access
+            // in user code that mounts a stdlib static (e.g.
+            // `core.mem.hazard.GLOBAL_HAZARD_DOMAIN`) falls through to
+            // the global interned-id fallback in `resolve_field_index`
+            // and reads at wildly wrong byte offsets — root cause of
+            // `hazard_stats() → GLOBAL_HAZARD_DOMAIN.scan_hazards()`
+            // null-derefing at the first GetF inside the method body.
             let mut prev_loadi: Option<(crate::instruction::Reg, i64)> = None;
+            let mut last_new: Option<(crate::instruction::Reg, u32)> = None;
             for instr in ctor_instrs.iter() {
                 match instr {
                     crate::instruction::Instruction::LoadI { dst, value } => {
                         prev_loadi = Some((*dst, *value));
                     }
-                    crate::instruction::Instruction::TlsSet { slot, .. } => {
+                    crate::instruction::Instruction::New { dst, type_id, .. } => {
+                        last_new = Some((*dst, *type_id));
+                    }
+                    crate::instruction::Instruction::TlsSet { slot, val } => {
                         if let Some((load_dst, archive_slot)) = prev_loadi
                             && load_dst == *slot
                         {
@@ -16078,6 +16144,33 @@ impl VbcCodegen {
                             let user_slot =
                                 self.ctx.register_thread_local(archive_name) as i64;
                             tls_slot_remap.insert(archive_slot, user_slot);
+
+                            // If the val we're about to store originated
+                            // from a record `New { type_id }`, recover
+                            // the canonical type name and populate
+                            // static_mut_type_names for both the bare
+                            // archive name and the module-qualified key.
+                            if let Some((new_dst, archive_type_id)) = last_new
+                                && new_dst == *val
+                                && let Some(&user_tid) = type_id_remap.get(&archive_type_id)
+                                && let Some(td) = self.types.iter().find(|t| t.id.0 == user_tid)
+                                && let Some(canonical_name) =
+                                    self.ctx.strings.get(td.name.0 as usize).cloned()
+                            {
+                                // `td.name` is the simple type-name as
+                                // re-registered into `self.ctx.strings`
+                                // by `import_archive_module_types`; the
+                                // same key that `type_field_layouts` is
+                                // populated under.  Insert it for the
+                                // bare archive name so subsequent reads
+                                // of `STATIC` in user code surface the
+                                // right type, and ALSO for the dotted
+                                // archive-qualified key (some lookup
+                                // sites probe via the `<module>.<NAME>`
+                                // form).
+                                self.static_mut_type_names
+                                    .insert(archive_name.to_string(), canonical_name);
+                            }
                             break;
                         }
                     }
