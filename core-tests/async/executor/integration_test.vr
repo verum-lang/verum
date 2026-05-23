@@ -1,0 +1,69 @@
+// =============================================================================
+// core-tests/async/executor/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.async.executor` — exercises the
+// runtime configuration surface against `List<T>`, `Maybe<T>`, and
+// the `Default` protocol.
+//
+// Live `AsyncRuntime` instantiation and `block_on(future)` are gated
+// by task #10 (LLVM AOT generate_native SmallVector hang) / task #12
+// (AsyncSemaphore.new null-deref through AtomicInt.swap) — those
+// scenarios live in `tests/` once the executor dispatcher gap closes.
+// =============================================================================
+
+mount core.async.executor.{
+    RuntimeBuilder, AsyncRuntimeConfig, RuntimeConfig,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section A: List<RuntimeBuilder> — bulk container with builder values
+//
+//   Real deployment scenarios sometimes hold a collection of builders
+//   (test fixtures, multi-tenant runtime configurations).  Pin that
+//   builders can be held in a List and accessed.
+// =============================================================================
+
+@ignore
+@test
+fn integration_executor_list_of_builders_constructs() {
+    let mut bs: List<RuntimeBuilder> = [];
+    bs.push(RuntimeBuilder.new().max_tasks(10));
+    bs.push(RuntimeBuilder.new().max_tasks(20));
+    bs.push(RuntimeBuilder.new().max_tasks(30));
+    assert_eq(bs.len(), 3);
+}
+
+// =============================================================================
+// Section B: List<AsyncRuntimeConfig> — config presets ingested in bulk
+// =============================================================================
+
+@ignore
+@test
+fn integration_executor_list_of_config_presets() {
+    let mut cs: List<AsyncRuntimeConfig> = [];
+    cs.push(AsyncRuntimeConfig.default());
+    cs.push(AsyncRuntimeConfig.cpu_bound());
+    cs.push(AsyncRuntimeConfig.io_bound());
+    assert_eq(cs.len(), 3);
+}
+
+// =============================================================================
+// Section C: RuntimeConfig (canonical alias) — interop with the
+//   AsyncRuntimeConfig type at function boundaries
+// =============================================================================
+
+fn config_round_trip(c: RuntimeConfig) -> RuntimeConfig {
+    c
+}
+
+@ignore
+@test
+fn integration_executor_runtime_config_alias_function_boundary() {
+    let c = AsyncRuntimeConfig.default();
+    let _round = config_round_trip(c);
+    assert(true);
+}
+
+fn main() {}

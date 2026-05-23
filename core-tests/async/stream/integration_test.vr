@@ -1,0 +1,208 @@
+// =============================================================================
+// core-tests/async/stream/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.async.stream` — exercises the
+// Stream protocol against `Maybe`, `List`, `Poll`, the noop-context
+// poll driver, and Stream-shaped values held in collections.
+//
+// Combinator-pipeline tests (map → filter → take chains end-to-end)
+// are deliberately omitted at this level — every concrete combinator
+// type (`StreamMap<S, F>` etc.) has its own implement<Stream> block
+// whose method dispatch hits the constrained-implement-block defect
+// pinned by task #22.  Pure factory / poll-driver round-trip tests
+// stay clean of that surface and exercise the Stream contract
+// directly via `poll_next`.
+// =============================================================================
+
+mount core.async.stream.{
+    Stream,
+    stream_once, stream_empty, stream_repeat_n, stream_from_fn,
+};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context, noop_context};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section A: Poll-loop drain → List<T> via manual driver
+//
+//   Treat Stream as the producer; drain into List using `poll_next`
+//   in a loop until the first Poll.Ready(None).  This is the
+//   reference shape every higher-level `.collect()` will reduce to.
+// =============================================================================
+
+@test
+fn integration_drain_stream_once_into_list() {
+    let mut s = stream_once(42);
+    let mut cx = noop_context();
+    let mut out: List<Int> = [];
+    let mut done = false;
+    let mut safety = 0;
+    while !done && safety < 10 {
+        let p = s.poll_next(&mut cx);
+        match p {
+            Poll.Ready(Some(v)) => out.push(v),
+            Poll.Ready(None) => done = true,
+            Poll.Pending => done = true,
+        }
+        safety = safety + 1;
+    }
+    assert_eq(out.len(), 1);
+    assert_eq(out[0], 42);
+}
+
+@test
+fn integration_drain_stream_empty_into_list_is_empty() {
+    let mut s: StreamEmpty<Int> = stream_empty();
+    let mut cx = noop_context();
+    let mut out: List<Int> = [];
+    let mut done = false;
+    let mut safety = 0;
+    while !done && safety < 10 {
+        let p = s.poll_next(&mut cx);
+        match p {
+            Poll.Ready(Some(v)) => out.push(v),
+            Poll.Ready(None) => done = true,
+            Poll.Pending => done = true,
+        }
+        safety = safety + 1;
+    }
+    assert_eq(out.len(), 0);
+}
+
+// @ignore'd pending task #7 — same T.clone class as property_test.
+@ignore
+@test
+fn integration_drain_stream_repeat_n_collects_exact_count() {
+    let mut s = stream_repeat_n(11, 4);
+    let mut cx = noop_context();
+    let mut out: List<Int> = [];
+    let mut done = false;
+    let mut safety = 0;
+    while !done && safety < 20 {
+        let p = s.poll_next(&mut cx);
+        match p {
+            Poll.Ready(Some(v)) => out.push(v),
+            Poll.Ready(None) => done = true,
+            Poll.Pending => done = true,
+        }
+        safety = safety + 1;
+    }
+    assert_eq(out.len(), 4);
+    let mut i = 0;
+    while i < out.len() {
+        assert_eq(out[i], 11);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section B: stream_from_fn drives over a List<Int> producer
+//
+//   The generator closure pops items from a captured list; the stream
+//   yields them in order and terminates when the list empties.
+// =============================================================================
+
+@test
+fn integration_stream_from_fn_drains_captured_list() {
+    let mut src: List<Int> = [10, 20, 30];
+    let mut idx = 0;
+    let mut s = stream_from_fn(|| {
+        if idx < src.len() {
+            let v = src[idx];
+            idx = idx + 1;
+            Some(v)
+        } else {
+            None
+        }
+    });
+    let mut cx = noop_context();
+    let mut out: List<Int> = [];
+    let mut done = false;
+    let mut safety = 0;
+    while !done && safety < 20 {
+        let p = s.poll_next(&mut cx);
+        match p {
+            Poll.Ready(Some(v)) => out.push(v),
+            Poll.Ready(None) => done = true,
+            Poll.Pending => done = true,
+        }
+        safety = safety + 1;
+    }
+    assert_eq(out.len(), 3);
+    assert_eq(out[0], 10);
+    assert_eq(out[1], 20);
+    assert_eq(out[2], 30);
+}
+
+// =============================================================================
+// Section C: size_hint informs collection pre-sizing
+//
+//   For known-bounded streams (empty, once, repeat_n), the upper
+//   bound from size_hint is the exact count of forthcoming yields.
+//   This is the practical contract every `.collect()` consumer relies
+//   on for List capacity reservation.
+// =============================================================================
+
+// @ignore'd pending task #7 — same T.clone class as property_test.
+@ignore
+@test
+fn integration_size_hint_upper_bound_matches_drain_count_for_repeat_n() {
+    let mut s = stream_repeat_n("a", 6);
+    let (lo, hi) = s.size_hint();
+    assert_eq(lo, 6);
+    assert_eq(hi, Some(6));
+
+    let mut cx = noop_context();
+    let mut drained = 0;
+    let mut done = false;
+    let mut safety = 0;
+    while !done && safety < 20 {
+        let p = s.poll_next(&mut cx);
+        match p {
+            Poll.Ready(Some(_)) => drained = drained + 1,
+            Poll.Ready(None) => done = true,
+            Poll.Pending => done = true,
+        }
+        safety = safety + 1;
+    }
+    assert_eq(drained, 6);
+}
+
+// =============================================================================
+// Section D: List<Stream-like values> — heterogenous container of
+//   stream payloads carried through the type system.  The List itself
+//   doesn't hold Stream impls (no dynamic dispatch over generic
+//   protocols yet), but holding Maybe<Int> harvested from polls does
+//   exercise Maybe + Poll + Stream interop simultaneously.
+// =============================================================================
+
+@test
+fn integration_list_of_polled_maybes_from_streams() {
+    let mut s1 = stream_once(1);
+    let mut s2: StreamEmpty<Int> = stream_empty();
+    let mut s3 = stream_once(3);
+    let mut cx = noop_context();
+
+    let m1: Maybe<Int> = match s1.poll_next(&mut cx) {
+        Poll.Ready(v) => v,
+        Poll.Pending => None,
+    };
+    let m2: Maybe<Int> = match s2.poll_next(&mut cx) {
+        Poll.Ready(v) => v,
+        Poll.Pending => None,
+    };
+    let m3: Maybe<Int> = match s3.poll_next(&mut cx) {
+        Poll.Ready(v) => v,
+        Poll.Pending => None,
+    };
+
+    let polled: List<Maybe<Int>> = [m1, m2, m3];
+    assert_eq(polled.len(), 3);
+    assert_eq(polled[0], Some(1));
+    assert_eq(polled[1], None);
+    assert_eq(polled[2], Some(3));
+}
+
+fn main() {}
