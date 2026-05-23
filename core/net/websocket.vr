@@ -369,7 +369,7 @@ public fn decode(buf: &[Byte], expect_masked: Bool, max_payload: Int) -> WebSock
 
     let short_len = (b1 & 0x7F) as Int;
     let mut pos = 2;
-    let payload_len: Int;
+    let mut payload_len: Int = 0;
     if short_len < 126 {
         payload_len = short_len;
     } else if short_len == 126 {
