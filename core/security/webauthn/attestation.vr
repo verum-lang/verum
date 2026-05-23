@@ -69,7 +69,7 @@ mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.List;
 mount encoding.cbor.CborValue;
 mount security.hash.sha256.{Sha256, digest};
-mount security.ecc.ed25519.{Ed25519PublicKey, Ed25519Signature, verify as ed25519_verify};
+mount security.ecc.ed25519.{Ed25519PublicKey, Ed25519Signature, verify};
 mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
 mount security.x509.spki.{Spki};
 mount security.sig.rsa.{
@@ -361,7 +361,7 @@ fn verify_signature_with_credential_pk(
             let mut sig_arr: Ed25519Signature = [0_u8; 64];
             let mut m: Int = 0;
             while m < 64 { sig_arr[m] = sig[m]; m = m + 1; }
-            ed25519_verify(&pk_arr, signed_input.as_slice(), &sig_arr)
+            security.ecc.ed25519.verify(&pk_arr, signed_input.as_slice(), &sig_arr)
                 .map_err(|_| WebAuthnError.InvalidSignature)
         }
         CredentialPublicKey.EcdsaP256 { x, y } => {
@@ -386,7 +386,7 @@ fn verify_signature_against_spki(
             let mut sig_arr: Ed25519Signature = [0_u8; 64];
             let mut k: Int = 0;
             while k < 64 { sig_arr[k] = sig[k]; k = k + 1; }
-            ed25519_verify(&ed.bytes, signed_input.as_slice(), &sig_arr)
+            security.ecc.ed25519.verify(&ed.bytes, signed_input.as_slice(), &sig_arr)
                 .map_err(|_| WebAuthnError.InvalidSignature)
         }
         (security.x509.spki.SubjectPublicKey.EcP256(ec), COSE_ALG_ES256) => {

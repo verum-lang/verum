@@ -62,7 +62,7 @@ mount time.rfc3339.{Rfc3339Time, parse_rfc3339};
 mount time.system_time.{epoch_seconds};
 mount security.ecc.ed25519.{
     Ed25519PublicKey, Ed25519Signature,
-    verify as ed25519_verify,
+    verify,
 };
 mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
 mount security.hash.sha256.{Sha256};
@@ -218,7 +218,7 @@ fn verify_ed25519_sig(
     let mut sig: Ed25519Signature = [0_u8; 64];
     let mut k: Int = 0;
     while k < 64 { sig[k] = sig_bytes[k]; k = k + 1; }
-    match ed25519_verify(&pk, payload.as_slice(), &sig) {
+    match security.ecc.ed25519.verify(&pk, payload.as_slice(), &sig) {
         Ok(())  => Ok(()),
         Err(_)  => Err(MalformedSignature("ed25519: verification failed".to_text())),
     }

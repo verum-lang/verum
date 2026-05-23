@@ -71,8 +71,8 @@ mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount security.ecc.ed25519.{
     Ed25519Seed, Ed25519PublicKey, Ed25519Signature,
-    sign as ed25519_sign, verify as ed25519_verify,
-    public_key as ed25519_public_key,
+    sign, verify,
+    public_key,
 };
 mount security.hash.sha256.{digest};
 mount encoding.json.{
@@ -493,7 +493,7 @@ pub fn dsse_sign_statement(
     let payload_bytes = jcs_canonicalize(&payload_json)
         .map_err(|e| f"dsse: jcs canonicalise: {e}")?;
     let pae = dsse_pae(&DSSE_PAYLOAD_TYPE_INTOTO.to_text(), &payload_bytes);
-    let sig = ed25519_sign(seed, &pae);
+    let sig = security.ecc.ed25519.sign(seed, &pae);
     let mut sig_bytes: List<Byte> = List.with_capacity(64);
     let mut i: Int = 0;
     while i < 64 { sig_bytes.push(sig[i]); i = i + 1; }
@@ -557,7 +557,7 @@ pub fn dsse_verify_statement(
                     let mut arr: [Byte; 64] = [0_u8; 64];
                     let mut k: Int = 0;
                     while k < 64 { arr[k] = sig_bytes[k]; k = k + 1; }
-                    if ed25519_verify(pubkey, &pae, &arr).is_ok() {
+                    if security.ecc.ed25519.verify(pubkey, &pae, &arr).is_ok() {
                         verified = true;
                         break;
                     }

@@ -80,7 +80,7 @@ mount security.x509.verifier.{
     VerificationError as X509VerifyError,
 };
 mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
-mount security.ecc.ed25519.{Ed25519PublicKey, Ed25519Signature, verify as ed25519_verify};
+mount security.ecc.ed25519.{Ed25519PublicKey, Ed25519Signature, verify};
 mount security.hash.sha256.{Sha256, digest};
 mount security.provenance.{
     DsseEnvelope, dsse_envelope_from_json, DsseVerifyError,
@@ -414,7 +414,7 @@ fn verify_envelope_against_cert(
                 let mut sig64: Ed25519Signature = [0_u8; 64];
                 let mut k: Int = 0;
                 while k < 64 { sig64[k] = sig_bytes[k]; k = k + 1; }
-                if ed25519_verify(&ed.bytes, pae.as_slice(), &sig64).is_ok() {
+                if security.ecc.ed25519.verify(&ed.bytes, pae.as_slice(), &sig64).is_ok() {
                     return Ok(());
                 }
             }
