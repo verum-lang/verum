@@ -55,7 +55,7 @@ mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount encoding.cbor.{
-    CborValue, decode as cbor_decode, encode as cbor_encode,
+    CborValue, decode, encode,
     CborError,
 };
 mount security.webauthn.types.{
@@ -97,7 +97,7 @@ pub type CredentialPublicKey is
 /// key. Validates kty / alg / crv / coordinate-length consistency
 /// per the registered IANA constants.
 pub fn decode_cose_key(bytes: &[Byte]) -> Result<CredentialPublicKey, WebAuthnError> {
-    let value = cbor_decode(bytes).map_err(|e| WebAuthnError.InvalidCbor(f"{e}"))?;
+    let value = encoding.cbor.decode(bytes).map_err(|e| WebAuthnError.InvalidCbor(f"{e}"))?;
     decode_cose_key_value(&value)
 }
 

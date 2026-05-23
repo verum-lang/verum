@@ -53,7 +53,7 @@ module core.security.webauthn.authenticator_data;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.List;
-mount encoding.cbor.{CborValue, decode as cbor_decode, encode as cbor_encode, encode_canonical};
+mount encoding.cbor.{CborValue, decode, encode, encode_canonical};
 mount security.webauthn.types.{
     AuthenticatorData, AttestedCredentialData, AuthDataFlags,
     parse_flags, flags_to_byte,
@@ -110,7 +110,7 @@ pub fn parse_authenticator_data(bytes: &[Byte]) -> Result<AuthenticatorData, Web
             while k < bytes.len() { buf.push(bytes[k]); k = k + 1; }
             buf
         };
-        let value = cbor_decode(remaining.as_slice())
+        let value = encoding.cbor.decode(remaining.as_slice())
             .map_err(|e| WebAuthnError.InvalidCbor(f"extensions: {e}"))?;
         Some(value)
     } else { None };
@@ -224,7 +224,7 @@ fn parse_attested_credential_data(
 /// is followed by optional Extensions — we need to know where the
 /// COSE_Key ends.
 fn decode_cose_consume_length(bytes: &List<Byte>) -> Result<(CborValue, Int), WebAuthnError> {
-    let value = cbor_decode(bytes.as_slice())
+    let value = encoding.cbor.decode(bytes.as_slice())
         .map_err(|e| WebAuthnError.InvalidCbor(f"COSE_Key: {e}"))?;
     // Re-encode in canonical CBOR — the byte count of the canonical
     // re-encoding equals the byte count of the original IFF the
