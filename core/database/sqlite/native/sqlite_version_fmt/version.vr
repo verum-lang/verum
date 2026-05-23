@@ -30,7 +30,9 @@ public fn from_libversion_number(n: Int64) -> SqliteVersion {
     let rest = n - (major as Int64) * 1000000_i64;
     let minor = (rest / 1000_i64) as Int;
     let patch = (rest - (minor as Int64) * 1000_i64) as Int;
-    new(major, minor, patch)
+    // Fully-qualified path — bare `new` collides with 1-arg `new(x)`
+    // siblings in other modules; AOT picks one of those (task #11).
+    core.database.sqlite.native.sqlite_version_fmt.version.new(major, minor, patch)
 }
 
 // Emit integer as Text. UInt64 magnitude — Int.MIN-safe.
