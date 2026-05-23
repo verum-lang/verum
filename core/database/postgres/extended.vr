@@ -139,9 +139,11 @@ public fn build_parse_bind_execute(
     portal: &Text,
     max_rows: Int,
 ) -> List<Byte> {
-    let p = parse(stmt_name, sql, param_oids);
-    let b = bind(portal, stmt_name, param_formats, params, result_formats);
-    let e = execute(portal, max_rows);
+    // Fully-qualified — bare `parse` collides with 1-arg parse from
+    // other modules under AOT lookup (task #11).
+    let p = core.database.postgres.wire.frontend.parse(stmt_name, sql, param_oids);
+    let b = core.database.postgres.wire.frontend.bind(portal, stmt_name, param_formats, params, result_formats);
+    let e = core.database.postgres.wire.frontend.execute(portal, max_rows);
     let s = send_sync();
     let mut out: List<Byte> = List.new();
     append_all(&mut out, p.as_slice());
@@ -160,8 +162,8 @@ public fn build_bind_execute(
     portal: &Text,
     max_rows: Int,
 ) -> List<Byte> {
-    let b = bind(portal, stmt_name, param_formats, params, result_formats);
-    let e = execute(portal, max_rows);
+    let b = core.database.postgres.wire.frontend.bind(portal, stmt_name, param_formats, params, result_formats);
+    let e = core.database.postgres.wire.frontend.execute(portal, max_rows);
     let s = send_sync();
     let mut out: List<Byte> = List.new();
     append_all(&mut out, b.as_slice());
