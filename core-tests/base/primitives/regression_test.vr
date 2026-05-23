@@ -83,19 +83,26 @@ fn regression_as_byte_cast_checked_add_overflows_at_u8_max_pinned() {
 }
 
 // Cast-as-receiver, `saturating_add` — must saturate at u8::MAX.
-// Pre-fix returned 256 / 260 / 510 etc. (Int.saturating_add saturates at
-// i64::MAX, not u8::MAX).
+// Pre-fix returned 256 / 260 / 510 etc. (`(255 as Byte).saturating_add(1 as
+// Byte)` returned `256`) because the parser wraps `(N as Byte)` in
+// `Paren { inner: Cast { … } }`, and Case 7's paren-wrapped fallback
+// in `compile_method_call::effective_method_name` formatted the qualified
+// name as `Byte.saturating_add`.  The devirtualization shortcut at the
+// bottom of `compile_method_call` then looked up the qualified name,
+// found it tagged with `intrinsic_name` (via `register_stdlib_intrinsics`
+// at codegen/mod.rs:2532), and routed through
+// `compile_static_method_call`'s intrinsic check which emits a direct
+// `ArithExtendedOpcode(SaturatingAdd)` bytecode opcode with hardcoded
+// `width=64` (i64 semantics) — collapsing u8 saturation.
 //
-// STILL OPEN: `saturating_add` is emitted as a direct
-// `ArithExtendedOpcode(SaturatingAdd)` bytecode opcode (not a CallM), so
-// it bypasses both the codegen Cast arm AND the runtime prefix-rewrite.
-// The bytecode opcode reads a width byte from the stream, which the
-// codegen currently sets from the bare `saturating_add` intrinsic
-// definition (width=0 → i64) rather than from the cast-target width
-// (width=8 → u8).  The fix requires width propagation through the
-// intrinsic-emission path in `compile_intrinsic_call` or equivalent.
-// Tracked as §A residual in `core-tests/base/primitives/audit.md`.
-@ignore
+// Closed by extending Case 7's paren-wrapped fallback with an explicit
+// `ExprKind::Cast { ty, .. }` arm (Case 7c) that mirrors Case 6c's
+// width-suffixed format dispatch (`byte$<method>` / `int32$<method>` /
+// `uint64$<method>` for sized-int targets).  The `byte$saturating_add`
+// CallM form (a) bypasses the devirt path entirely
+// (`effective_method_name.starts_with("byte$")`), (b) routes through
+// `dispatch_primitive_method`'s `byte$saturating_add` arm with correct
+// u8 saturation.
 @test
 fn regression_as_byte_cast_saturating_add_saturates_at_u8_max_pinned() {
     assert_eq((100 as Byte).saturating_add(50 as Byte), 150 as Byte);
