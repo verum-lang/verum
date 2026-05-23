@@ -104,6 +104,59 @@ fn regression_as_byte_cast_saturating_add_saturates_at_u8_max_pinned() {
     assert_eq((255 as Byte).saturating_add(255 as Byte), 255 as Byte);
 }
 
+// =============================================================================
+// Unit `()` receiver — protocol-default dispatch
+// =============================================================================
+
+// REGRESSION: pre-fix `().cmp(&())` panicked with `method 'Once.next' not
+// found on receiver of runtime kind ()` because the dispatcher's
+// bare-method suffix-scan picked the `Iterator.cmp` default body
+// (monomorphised onto `Once<T>`) over the inherent `implement Ord for ()
+// { fn cmp(...) }` impl.  Iterator.cmp's body executes `self.next()`
+// → `CallM { method_id: "Once.next" }` (because the body was
+// monomorphised with `self_type = Once`), and Unit has no `.next` method.
+//
+// Same defect class affected every protocol method on `()`: Eq.eq /
+// Ord.cmp / Hash.hash_value / Clone.clone / Default.default / Display.fmt
+// were all reachable but routed unpredictably depending on
+// HashMap-iteration-order of the function table.
+//
+// Closed by a Unit-receiver intercept in
+// `dispatch_primitive_method` that returns the mathematical identity
+// for each protocol method.  `()` has exactly one value, so every method
+// reduces to a constant:
+//
+//   * `().cmp(&())  == Equal`, `() == ()`, `() <= ()`, etc.
+//   * `().hash_value() == fxhash_bytes(0, &[])` (seed-0 unchanged).
+//   * `().clone() == ()`, `Unit.default() == ()`.
+//   * `f"{()}" == "()"` (Display.fmt).
+//
+// Architectural rule pinned: every primitive's protocol-default surface
+// MUST be reachable through `dispatch_primitive_method` so the
+// function-table-side suffix-scan never wins over the canonical
+// primitive intercept.
+@test
+fn regression_unit_receiver_dispatch_pinned() {
+    // Ord — closed by Unit-receiver intercept (`cmp` arm).
+    assert_eq(().cmp(&()), Equal);
+    assert(() <= ());
+    assert(() >= ());
+    assert(!(() < ()));
+    assert(!(() > ()));
+
+    // Eq — closed by Unit-receiver intercept (`eq`/`ne` arms).
+    assert(() == ());
+    assert(!(() != ()));
+
+    // Default — `Unit.default()` returns `()`.
+    assert_eq(().default(), ());
+
+    // Clone — identity.
+    let u = ();
+    let cloned = u.clone();
+    assert_eq(cloned, ());
+}
+
 // REGRESSION: same defect class on let-binding form — `let a = 255 as Byte;`
 // then `a.method(b)` also routed through Int's handler because the cast's
 // target type wasn't propagated when the binding's RHS expression type was

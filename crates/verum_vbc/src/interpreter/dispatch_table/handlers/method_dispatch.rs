@@ -7706,6 +7706,63 @@ pub(super) fn dispatch_primitive_method(
         }
     }
 
+    // ────────────────────────────────────────────────────────────────────────
+    // Unit `()` methods
+    // ────────────────────────────────────────────────────────────────────────
+    //
+    // `()` has exactly one value, so every protocol method on Unit reduces to
+    // a mathematical identity:
+    //
+    //   * Eq: `() == ()` is always `true`; `() != ()` is always `false`.
+    //   * Ord: `().cmp(&())` is always `Equal`; lt/le/gt/ge are constants.
+    //   * Hash: hash of unit is the empty-string fxhash (seed 0 unchanged).
+    //   * Clone / Copy: `().clone() == ()`.
+    //   * Default: `Unit.default() == ()`.
+    //   * Display / Debug / ToString: rendered as the literal `"()"`.
+    //
+    // Without this intercept `().cmp(&())` collapsed into the suffix-scan
+    // candidate-list of every type's `.cmp` (Int.cmp, Float.cmp, Maybe.cmp,
+    // …) AND the `Iterator.cmp` default-method body monomorphised onto
+    // arbitrary iterator types (`Once<T>` / `Args` / `Vars` / `Rev` / …).
+    // Iterator.cmp's body executes `self.next()` which is then dispatched
+    // on the Unit receiver as `CallM { method_id: "Once.next" }` (because
+    // the body was monomorphised with `self_type = Once`) — and Unit has
+    // no `.next` method, so the dispatcher panics with the misleading
+    // "method 'Once.next' not found on receiver of runtime kind `()`"
+    // error reported in the original bug class.
+    //
+    // Architectural rule pinned: every primitive's protocol-default surface
+    // MUST be reachable through `dispatch_primitive_method` so the
+    // function-table-side suffix-scan never wins over the canonical
+    // primitive intercept.  Pinned by
+    // `core-tests/base/primitives/regression_test.vr::regression_unit_receiver_dispatch_pinned`.
+    if receiver.is_unit() {
+        match method {
+            // Eq / cmp / Ord — exhaustive small surface.
+            "eq" => return Ok(Some(Value::from_bool(true))),
+            "ne" => return Ok(Some(Value::from_bool(false))),
+            "lt" => return Ok(Some(Value::from_bool(false))),
+            "le" => return Ok(Some(Value::from_bool(true))),
+            "gt" => return Ok(Some(Value::from_bool(false))),
+            "ge" => return Ok(Some(Value::from_bool(true))),
+            "cmp" | "partial_cmp" => {
+                return Ok(Some(make_ordering(state, std::cmp::Ordering::Equal)?));
+            }
+            // Hash protocol — hash of unit (no bytes) is the seed-0 mix.
+            "hash_value" => return Ok(Some(Value::from_i64(fxhash_bytes(0, &[])))),
+            // Clone / Copy / Default — identity / canonical-zero.
+            "clone" | "default" => return Ok(Some(Value::unit())),
+            // Display / Debug / format wires.
+            "to_text" | "to_string" | "display" | "debug" | "fmt_debug" => {
+                return Ok(Some(alloc_string_value(state, "()")?));
+            }
+            // Convenience: explicit `is_unit` predicate (parity with
+            // Int.is_int / Bool.is_bool reflection helpers).
+            "is_unit" => return Ok(Some(Value::from_bool(true))),
+            _ => {}
+        }
+    }
+
     // Bool methods
     if receiver.is_bool() {
         let v = receiver.as_bool();
