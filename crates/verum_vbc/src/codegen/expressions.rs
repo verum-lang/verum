@@ -7175,6 +7175,92 @@ impl VbcCodegen {
         resolved_target: Option<&verum_ast::expr::ResolvedCallTarget>,
     ) -> CodegenResult<Option<Reg>> {
         // ──────────────────────────────────────────────────────────
+        // **Phase 0a — chained `<TypeName>.<Variant>.<method>()` materialisation.**
+        //
+        // When the receiver is `Field { Path(TypeName), Variant }` whose
+        // qualified `<TypeName>.<Variant>` resolves to a 0-arg variant
+        // constructor, materialise the receiver via `MakeVariant` BEFORE
+        // any downstream branch attempts `compile_expr(Path(TypeName))`
+        // (the `field_writeback_target` block at line ~8142 was the
+        // structural offender — it called `compile_expr(base)` on the
+        // bare `Path(LogLevel)`, which `compile_simple_path` rejects
+        // because `LogLevel` is neither a local variable nor a
+        // well-known type-name in `is_type_name`).  Pinned by
+        // `core-tests/base/primitives/regression_test.vr::regression_chained_type_variant_method_pinned`.
+        if let ExprKind::Field { expr: base, field } = &receiver.kind
+            && let ExprKind::Path(ref base_path) = base.kind
+            && base_path.segments.len() == 1
+            && let PathSegment::Name(ref type_ident) = base_path.segments[0]
+            && type_ident
+                .name
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_uppercase())
+            && self.ctx.get_var_reg(type_ident.name.as_str()).is_err()
+        {
+            let type_name = type_ident.name.to_string();
+            let variant = field.name.to_string();
+            let qualified_verum = format!("{}.{}", type_name, variant);
+            let qualified_rust = format!("{}::{}", type_name, variant);
+            if let Some(func_info) = self
+                .ctx
+                .lookup_qualified_function(&qualified_verum)
+                .or_else(|| self.ctx.lookup_qualified_function(&qualified_rust))
+                .cloned()
+                && let Some(tag) = func_info.variant_tag
+                && func_info.param_count == 0
+            {
+                // Materialise the receiver as MakeVariant, then emit
+                // `CallM` for the trailing method.  Mirrors the path that
+                // `let x = TypeName.Variant; x.method()` would take.
+                let receiver_reg = self.ctx.alloc_temp();
+                self.emit_make_variant(receiver_reg, tag, 0, Some(type_name.as_str()));
+
+                // Compile arguments
+                let args_start = if !args.is_empty() {
+                    let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
+                    for arg in args.iter() {
+                        let v = self
+                            .compile_expr(arg)?
+                            .or_internal("chained TypeName.Variant arg has no value")?;
+                        arg_vals.push(v);
+                    }
+                    let first = self.ctx.registers.alloc_fresh();
+                    for _ in 1..args.len() {
+                        self.ctx.registers.alloc_fresh();
+                    }
+                    for (i, arg_val) in arg_vals.iter().enumerate() {
+                        let d = Reg(first.0 + i as u16);
+                        if *arg_val != d {
+                            self.ctx.emit(Instruction::Mov {
+                                dst: d,
+                                src: *arg_val,
+                            });
+                            self.ctx.free_temp(*arg_val);
+                        }
+                    }
+                    first
+                } else {
+                    Reg(0)
+                };
+
+                let dst = self.ctx.alloc_temp();
+                let method_id = self.intern_string(method.name.as_str());
+                self.ctx.emit(Instruction::CallM {
+                    dst,
+                    receiver: receiver_reg,
+                    method_id,
+                    args: crate::instruction::RegRange {
+                        start: args_start,
+                        count: args.len() as u8,
+                    },
+                });
+                self.ctx.free_temp(receiver_reg);
+                return Ok(Some(dst));
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────
         // Phase 0: Task #17/#26 — `T.default()`/`T.zero()`/`T.one()`
         // on generic type-param. Runs BEFORE the pre-resolved fast path
         // because the typechecker stamps `T.default()` /etc. as
@@ -15442,6 +15528,65 @@ impl VbcCodegen {
                 }
             }
             return Ok(Some(result));
+        }
+
+        // **Type-name + variant-ctor fast path**.  `try_flatten_module_path`
+        // intentionally returns `None` when the single-segment base is a
+        // known type name (line 15188's `!is_type_name` gate) — pure module
+        // paths should not include type-qualified segments.  But for the
+        // canonical `<TypeName>.<Variant>` shape that's the receiver of a
+        // chained `.method()` (e.g. `LogLevel.Trace.name()`,
+        // `Ordering.Less.reverse()`), the field access MUST resolve to the
+        // variant constructor or `compile_method_call` falls back to
+        // compiling `<TypeName>` as a Value expression and panics with
+        // `undefined variable: <TypeName>`.
+        //
+        // Probe the function table for `<TypeName>.<field>` (Verum-style)
+        // and `<TypeName>::<field>` (Rust-style) BEFORE the flatten path
+        // runs; emit `MakeVariant` when the match has `variant_tag.is_some()`.
+        // Non-variant matches (static methods, etc.) fall through to the
+        // existing flatten path which handles them correctly.
+        //
+        // Architectural rule pinned: every `<TypeName>.<Variant>` shape
+        // used as an expression (let-binding RHS, method-receiver,
+        // function-argument) MUST resolve through this fast path so the
+        // codegen never has to evaluate the bare type name as a value.
+        // Pinned by `core-tests/base/primitives/regression_test.vr::regression_chained_type_variant_method_pinned`.
+        //
+        // **Acceptance gate**: leading uppercase identifier (universal
+        // Verum naming convention for sum-types) + qualified function
+        // lookup that returns a variant constructor. We don't gate on
+        // `is_type_name` because that's an allowlist of stdlib well-
+        // known types only — user-defined `type LogLevel is Trace | ...`
+        // would never match. The variant-ctor check (`variant_tag.is_some()`)
+        // is itself the safety net — non-variant matches fall through.
+        if let ExprKind::Path(ref path) = base.kind
+            && path.segments.len() == 1
+            && let PathSegment::Name(ref type_ident) = path.segments[0]
+            && type_ident
+                .name
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_uppercase())
+            && !self.ctx.registers.contains(type_ident.name.as_str())
+        {
+            let type_name = type_ident.name.to_string();
+            let qualified_verum = format!("{}.{}", type_name, field);
+            let qualified_rust = format!("{}::{}", type_name, field);
+            if let Some(func_info) = self
+                .ctx
+                .lookup_qualified_function(&qualified_verum)
+                .or_else(|| self.ctx.lookup_qualified_function(&qualified_rust))
+                .cloned()
+                && let Some(tag) = func_info.variant_tag
+            {
+                return self.compile_variant_constructor_with_tag_named_and_parent(
+                    Some(field),
+                    tag,
+                    &verum_common::List::new(),
+                    Some(type_name.as_str()),
+                );
+            }
         }
 
         // First, try to flatten the full path (base + field) and look up as a qualified function

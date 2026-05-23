@@ -161,6 +161,46 @@ fn regression_byte_alias_dispatch_through_normaliser_pinned() {
 }
 
 // =============================================================================
+// Chained `<TypeName>.<Variant>.<method>()` codegen
+// =============================================================================
+
+// REGRESSION: pre-fix `Ordering.Less.reverse()` (or any chained
+// `<EnumType>.<Variant>.<method>()` shape) panicked at codegen with
+// `undefined variable: <EnumType>` because `try_flatten_module_path`
+// at `crates/verum_vbc/src/codegen/expressions.rs:15188` intentionally
+// returns `None` when the single-segment base is a known type name
+// (`is_type_name(&ident.name)` gate).  The fallthrough then tried to
+// compile `<EnumType>` as a Value expression — which fails because
+// type names are not bindings.
+//
+// Affected every `<EnumType>.<Variant>.<method>()` chain used as a
+// method receiver, function argument, or let-binding RHS:
+//
+//   * `LogLevel.Trace.name()` (in `core-tests/base/log/`)
+//   * `Ordering.Less.reverse()` and friends
+//   * `Maybe.None.is_none()`, `Result.Ok(_).unwrap_or(_)`, etc.
+//   * Bound `f"{Ordering.Less.name()}"` interpolation
+//
+// Closed by adding a `<TypeName>.<Variant>` fast path at the top of
+// `compile_field_access` (before the flatten attempt) that probes
+// `lookup_qualified_function("<TypeName>.<field>")` and emits
+// `MakeVariant` when `variant_tag.is_some()`.
+//
+// Architectural rule pinned: every `<TypeName>.<Variant>` shape used
+// as an expression MUST resolve through the type-name + variant-ctor
+// fast path so the codegen never has to evaluate the bare type name
+// as a value.  Non-variant matches (static methods on types) fall
+// through to the existing module-path-flatten + suffix-match logic
+// which handles them correctly.
+@test
+fn regression_chained_type_variant_method_pinned() {
+    // Ord — chained Ordering.<Variant>.reverse() must resolve correctly.
+    assert_eq(Ordering.Less.reverse(), Greater);
+    assert_eq(Ordering.Equal.reverse(), Equal);
+    assert_eq(Ordering.Greater.reverse(), Less);
+}
+
+// =============================================================================
 // Unit `()` receiver — protocol-default dispatch
 // =============================================================================
 
