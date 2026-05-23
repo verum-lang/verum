@@ -299,3 +299,53 @@ fn write_u64_le(v: UInt64, dst: &mut [Byte; 16], off: Int) {
     dst[off + 6] = ((v >> 48) & 0xFF) as Byte;
     dst[off + 7] = ((v >> 56) & 0xFF) as Byte;
 }
+
+
+// =============================================================================
+// Free-function AOT shims — wrappers around `ChaCha20Poly1305.encrypt`
+// / `.decrypt` that the protocol/TLS layer imports via bare names.
+// Same pattern as `aes128_gcm_seal` / `aes128_gcm_open` in aes_gcm.vr
+// — without these wrappers AOT codegen errors "undefined function:
+// chacha20_poly1305_seal" at every consumer (tls13 / quic).
+// =============================================================================
+
+/// ChaCha20-Poly1305 seal: encrypt + authenticate `pt` under `key`
+/// with 12-byte `nonce` and `aad`. Output `sealed` = ciphertext || tag.
+public fn chacha20_poly1305_seal(
+    key: &ChaChaKey,
+    nonce: &ChaChaNonce,
+    aad: &[Byte],
+    pt: &[Byte],
+    sealed: &mut List<Byte>,
+) -> Result<(), AeadError> {
+    let cipher = ChaCha20Poly1305.new(key);
+    let mut tag: [Byte; 16] = [0; 16];
+    cipher.encrypt(nonce, aad, pt, sealed, &mut tag);
+    let mut i = 0;
+    while i < 16 { sealed.push(tag[i]); i = i + 1; }
+    Ok(())
+}
+
+/// ChaCha20-Poly1305 open: parse `sealed` as ciphertext || 16-byte tag,
+/// verify tag, decrypt into `pt`.
+public fn chacha20_poly1305_open(
+    key: &ChaChaKey,
+    nonce: &ChaChaNonce,
+    aad: &[Byte],
+    sealed: &[Byte],
+    pt: &mut List<Byte>,
+) -> Result<(), AeadError> {
+    if sealed.len() < 16 {
+        return Err(AeadError.TagMismatch);
+    }
+    let ct_len = sealed.len() - 16;
+    let cipher = ChaCha20Poly1305.new(key);
+    let mut tag: [Byte; 16] = [0; 16];
+    let mut i = 0;
+    while i < 16 { tag[i] = sealed[ct_len + i]; i = i + 1; }
+    let mut ciphertext: List<Byte> = [];
+    let mut j = 0;
+    while j < ct_len { ciphertext.push(sealed[j]); j = j + 1; }
+    cipher.decrypt(nonce, aad, ciphertext.as_slice(), &tag, pt)
+}
+
