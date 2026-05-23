@@ -77,7 +77,7 @@ mount security.jwt.{
     decode_header_only,
 };
 mount encoding.json.{
-    JsonValue, json_encode, decode as json_decode,
+    JsonValue, json_encode, decode,
 };
 // JsonObject is Map<Text, JsonValue> — the inner map of a JsonValue.JsonObject(map) match arm.
 type JsonObject is Map<Text, JsonValue>;
@@ -188,7 +188,7 @@ public async fn discover<C: HttpClient>(
     if resp.body.len() > MAX_DISCOVERY_BYTES {
         return Err(DiscoveryError.TooLarge { size: resp.body.len(), limit: MAX_DISCOVERY_BYTES });
     }
-    let json_value = json_decode(&resp.body)
+    let json_value = encoding.json.decode(&resp.body)
         .map_err(|e| DiscoveryError.InvalidJson(f"{e}"))?;
     parse_provider_config(&json_value, expected_issuer)
 }
@@ -350,7 +350,7 @@ public async fn fetch_jwks<C: HttpClient>(
     if resp.body.len() > MAX_JWKS_BYTES {
         return Err(JwksError.TooLarge { size: resp.body.len(), limit: MAX_JWKS_BYTES });
     }
-    let value = json_decode(&resp.body)
+    let value = encoding.json.decode(&resp.body)
         .map_err(|e| JwksError.InvalidJson(f"{e}"))?;
     parse_jwks(&value)
 }
