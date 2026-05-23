@@ -15811,6 +15811,38 @@ impl VbcCodegen {
                 self.archive_func_name_to_fid
                     .entry(name.to_string())
                     .or_insert(user_fid);
+                // **task #17/#39 + #10/§3.3 close-out** — propagate
+                // `__tls_init_*` synthetic functions from the archive's
+                // codegen into the user-side `static_init_functions`
+                // list.  Without this, the archive's TLS-init ctors
+                // are loaded as ordinary function bodies but never
+                // registered as global constructors — the user-side
+                // codegen's `module.global_ctors` only contains the
+                // ctors the USER's source declares, not the stdlib's.
+                //
+                // Symptom pre-fix: `static mut GLOBAL_HAZARD_DOMAIN:
+                // HazardDomain = HazardDomain { ... }` declared in
+                // `core/mem/hazard.vr` was precompiled into the stdlib
+                // archive with its `__tls_init_GLOBAL_HAZARD_DOMAIN`
+                // synthetic function; user code that mounted
+                // `GLOBAL_HAZARD_DOMAIN` then queried it via TlsGet
+                // and observed `Value::default()` (nil) — the slot
+                // was never populated.  `hazard_stats()` null-derefed
+                // at `&self.thread_count` because `self` was nil.
+                //
+                // Idempotent across multi-archive merges: the
+                // `FunctionId(user_fid)` is the user-side remapped id
+                // post-merge, and `static_init_functions` is a
+                // dedup-on-push by the comparison at line ~15067.
+                if name.starts_with("__tls_init_") {
+                    let already_registered = self
+                        .static_init_functions
+                        .iter()
+                        .any(|&fid| fid == user_fid);
+                    if !already_registered {
+                        self.static_init_functions.push(user_fid);
+                    }
+                }
             }
         }
 
