@@ -179,6 +179,27 @@ public static mut GLOBAL_EPOCH: EpochManager = EpochManager {
     revocation_lock: 0,
 };
 
+// =============================================================================
+// Scalar-shadow statics for the two hot read-paths
+//
+// `current_epoch()` and `wraparound_count()` are called from CBGR validation
+// hot paths and from observability surfaces.  Reading them through
+// `GLOBAL_EPOCH.<field>` requires the record-shaped-static-mut codegen path
+// which isn't implemented yet (NullPointerAt + StackOverflow via free-fn
+// recursion fallback).  Until record-cell codegen lands, mirror the two
+// scalar fields into their own `static mut` cells (each fits the [E2] scalar
+// path: 8 bytes, init=0).
+//
+// Every advance / wraparound write site MUST update both the record field
+// (for in-method access via &self.epoch) AND the scalar shadow (for free-fn
+// observers).  See `advance_epoch` body below.  Architectural rule:
+// scalar-shadow MUST be kept in sync with the record field while
+// record-shaped static-mut codegen is unimplemented.
+// =============================================================================
+
+static mut GLOBAL_EPOCH_COUNTER: UInt64 = 0;
+static mut GLOBAL_WRAPAROUND_COUNT: Int = 0;
+
 implement EpochManager {
     // =========================================================================
     // Epoch Counter Operations
@@ -616,13 +637,19 @@ public fn unregister_revocation_callback(id: Int) -> Bool {
 /// Get current global epoch.
 @inline
 public fn current_epoch() -> UInt64 {
-    unsafe { GLOBAL_EPOCH.current_epoch() }
+    // Read scalar shadow directly — bypasses record-shaped static-mut
+    // codegen until that path is implemented.  See GLOBAL_EPOCH_COUNTER
+    // docs above for the scalar-shadow invariant.
+    let p = unsafe { &GLOBAL_EPOCH_COUNTER as *const UInt64 };
+    atomic_load_u64(p, ORDERING_ACQUIRE)
 }
 
 /// Get total wraparound count.
 @inline
 public fn wraparound_count() -> Int {
-    unsafe { GLOBAL_EPOCH.wraparound_count() }
+    // Read scalar shadow directly (see current_epoch above).
+    let p = unsafe { &GLOBAL_WRAPAROUND_COUNT as *const Int };
+    atomic_load_int(p, ORDERING_RELAXED)
 }
 
 /// Test-only — force the global epoch counter back to a known state.
@@ -641,10 +668,13 @@ public fn wraparound_count() -> Int {
 ///
 /// Symmetric counterpart to `cap_audit_ring::reset_for_tests`.
 public fn reset_for_tests() {
-    unsafe {
-        atomic_store_u64(&mut GLOBAL_EPOCH.epoch, 0, ORDERING_RELEASE);
-        atomic_store_int(&mut GLOBAL_EPOCH.wraparounds, 0, ORDERING_RELEASE);
-    }
+    // Reset the scalar shadows (record-cell write through
+    // `&mut GLOBAL_EPOCH.<field>` is unimplemented; see scalar-shadow
+    // doc above GLOBAL_EPOCH_COUNTER).
+    let ep = unsafe { &mut GLOBAL_EPOCH_COUNTER as *mut UInt64 };
+    let wp = unsafe { &mut GLOBAL_WRAPAROUND_COUNT as *mut Int };
+    atomic_store_u64(ep, 0, ORDERING_RELEASE);
+    atomic_store_int(wp, 0, ORDERING_RELEASE);
 }
 
 /// Test-only — force the global epoch counter forward by one increment.
