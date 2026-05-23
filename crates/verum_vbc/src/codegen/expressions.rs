@@ -18134,6 +18134,30 @@ impl VbcCodegen {
                             {
                                 return Some(type_name.clone());
                             }
+                            // Static-mut bindings: declared `static mut NAME: T = init;`
+                            // record T in `static_mut_type_names` at codegen time.
+                            // `register_constant_with_value` populates `FunctionInfo.
+                            // return_type_name` for plain `static` — pure statics
+                            // surface their type via the `lookup_function_in_scope`
+                            // arm below — but the `is_mut` branch routes through
+                            // `register_thread_local` (TLS-slot storage) and never
+                            // touches the function registry.  Without this consult
+                            // every `let r = STATIC_MUT_RECORD; r.field` chain
+                            // resolves `field` via the global interned-name
+                            // fallback and reads at byte offsets matching the
+                            // interned-id, not the record's declared layout —
+                            // root cause of `static mut TT: Tri = Tri{a,b,c};
+                            // let r = TT; r.a` returning the value of `r.c`.
+                            // Architectural rule: every static-mut bare-ident
+                            // read MUST surface the declared type here so
+                            // downstream consumers (let-binding type propagation,
+                            // method-receiver type extraction) treat the static
+                            // identically to a pure `static`.
+                            if let Some(type_name) =
+                                self.static_mut_type_names.get(&*ident.name)
+                            {
+                                return Some(type_name.clone());
+                            }
                             // For uppercase names, check if this is a variant constructor
                             // and return the parent type name instead (e.g., Nothing → Maybe)
                             if ident.name.chars().next().is_some_and(|c| c.is_uppercase()) {
@@ -18912,6 +18936,21 @@ impl VbcCodegen {
                             if let Some(n) =
                                 self.ctx.variable_type_names.get(&*ident.name).cloned()
                             {
+                                return Some(n);
+                            }
+                            // Static-mut bindings carry their declared type in
+                            // `static_mut_type_names` (populated at the
+                            // `ItemKind::Static` arm).  Without this consult
+                            // every direct `STATIC_MUT_RECORD.field` access
+                            // falls through to the global interned-name
+                            // fallback inside `resolve_field_index` and
+                            // reads bytes at completely wrong offsets — the
+                            // same root cause as the let-binding sibling
+                            // arm in `extract_expr_type_name`.  Both inferrers
+                            // MUST surface the declared type for parity with
+                            // pure `static NAME` (which the const-arm below
+                            // already handles via `lookup_function_in_scope`).
+                            if let Some(n) = self.static_mut_type_names.get(&*ident.name).cloned() {
                                 return Some(n);
                             }
                             // Fall back to the function table for
