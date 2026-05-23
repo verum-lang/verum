@@ -52,12 +52,15 @@ mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount collections.List;
 mount security.ecc.ed25519.{
     Ed25519Seed, Ed25519PublicKey, Ed25519Signature, Ed25519Error,
-    sign as ed25519_sign,
-    verify as ed25519_verify,
-    public_key as ed25519_public_key,
 };
-mount security.hash.sha256.{digest as sha256_digest};
-mount encoding.hex.{encode as hex_encode, decode as hex_decode};
+// `mount X as Y` rename-aliases don't surface to AOT codegen
+// (task #11).  Use fully-qualified paths at call sites:
+//   ed25519_sign           → security.ecc.ed25519.sign
+//   ed25519_verify         → security.ecc.ed25519.verify
+//   ed25519_public_key     → security.ecc.ed25519.public_key
+//   sha256_digest          → security.hash.sha256.digest
+//   hex_encode             → encoding.hex.encode
+//   hex_decode             → encoding.hex.decode
 mount time.rfc3339.{Rfc3339Time, now_utc};
 
 // =============================================================================
@@ -129,16 +132,16 @@ public fn sign_cog(
     manifest_canonical_json: &List<Byte>,
     source_archive: &List<Byte>,
 ) -> Result<CogSignature, CogSignatureError> {
-    let manifest_hash = sha256_digest(manifest_canonical_json);
-    let source_hash = sha256_digest(source_archive);
+    let manifest_hash = security.hash.sha256.digest(manifest_canonical_json);
+    let source_hash = security.hash.sha256.digest(source_archive);
     let to_sign = concat_hashes(&manifest_hash, &source_hash);
-    let signature_bytes = ed25519_sign(seed, &to_sign);
-    let public_key_bytes = ed25519_public_key(seed);
+    let signature_bytes = security.ecc.ed25519.sign(seed, &to_sign);
+    let public_key_bytes = security.ecc.ed25519.public_key(seed);
     Ok(CogSignature {
-        public_key:       hex_encode(&public_key_bytes),
-        signature:        hex_encode(&signature_bytes),
-        manifest_sha256:  hex_encode(&manifest_hash),
-        source_sha256:    hex_encode(&source_hash),
+        public_key:       encoding.hex.encode(&public_key_bytes),
+        signature:        encoding.hex.encode(&signature_bytes),
+        manifest_sha256:  encoding.hex.encode(&manifest_hash),
+        source_sha256:    encoding.hex.encode(&source_hash),
         signed_at:        now_utc(),
     })
 }
@@ -156,10 +159,10 @@ public fn verify_cog(
     source_archive: &List<Byte>,
 ) -> Result<(), CogSignatureError> {
     // Step 1: compute the two hashes ourselves.
-    let manifest_hash = sha256_digest(manifest_canonical_json);
-    let source_hash = sha256_digest(source_archive);
-    let computed_manifest = hex_encode(&manifest_hash);
-    let computed_source = hex_encode(&source_hash);
+    let manifest_hash = security.hash.sha256.digest(manifest_canonical_json);
+    let source_hash = security.hash.sha256.digest(source_archive);
+    let computed_manifest = encoding.hex.encode(&manifest_hash);
+    let computed_source = encoding.hex.encode(&source_hash);
 
     // Step 2: compare against the signature's stored hashes.
     if computed_manifest != sig.manifest_sha256 {
@@ -181,7 +184,7 @@ public fn verify_cog(
 
     // Step 4: Ed25519 verify.
     let to_verify = concat_hashes(&manifest_hash, &source_hash);
-    match ed25519_verify(&public_key, &to_verify, &signature_bytes) {
+    match security.ecc.ed25519.verify(&public_key, &to_verify, &signature_bytes) {
         Ok(_)  => Ok(()),
         Err(_) => Err(VerificationFailed),
     }
@@ -196,8 +199,8 @@ public fn verify_cog_precomputed_hashes(
     manifest_sha256: &[Byte; 32],
     source_sha256: &[Byte; 32],
 ) -> Result<(), CogSignatureError> {
-    let computed_manifest = hex_encode(manifest_sha256);
-    let computed_source = hex_encode(source_sha256);
+    let computed_manifest = encoding.hex.encode(manifest_sha256);
+    let computed_source = encoding.hex.encode(source_sha256);
     if computed_manifest != sig.manifest_sha256 {
         return Err(HashMismatch {
             expected: sig.manifest_sha256.clone(),
@@ -213,7 +216,7 @@ public fn verify_cog_precomputed_hashes(
     let public_key = decode_public_key(&sig.public_key)?;
     let signature_bytes = decode_signature(&sig.signature)?;
     let to_verify = concat_hashes(manifest_sha256, source_sha256);
-    match ed25519_verify(&public_key, &to_verify, &signature_bytes) {
+    match security.ecc.ed25519.verify(&public_key, &to_verify, &signature_bytes) {
         Ok(_)  => Ok(()),
         Err(_) => Err(VerificationFailed),
     }
@@ -226,8 +229,8 @@ public fn signing_message(
     manifest_canonical_json: &List<Byte>,
     source_archive: &List<Byte>,
 ) -> List<Byte> {
-    let manifest_hash = sha256_digest(manifest_canonical_json);
-    let source_hash = sha256_digest(source_archive);
+    let manifest_hash = security.hash.sha256.digest(manifest_canonical_json);
+    let source_hash = security.hash.sha256.digest(source_archive);
     concat_hashes(&manifest_hash, &source_hash)
 }
 
@@ -248,7 +251,7 @@ fn decode_public_key(hex: &Text) -> Result<Ed25519PublicKey, CogSignatureError> 
     if hex.len() != 64 {
         return Err(InvalidPublicKey(f"expected 64 hex chars, got {hex.len()}"));
     }
-    let bytes = hex_decode(hex)
+    let bytes = encoding.hex.decode(hex)
         .map_err(|e| InvalidPublicKey(f"hex decode: {e}"))?;
     if bytes.len() != 32 {
         return Err(InvalidPublicKey(f"expected 32 bytes, got {bytes.len()}"));
@@ -263,7 +266,7 @@ fn decode_signature(hex: &Text) -> Result<Ed25519Signature, CogSignatureError> {
     if hex.len() != 128 {
         return Err(InvalidSignature(f"expected 128 hex chars, got {hex.len()}"));
     }
-    let bytes = hex_decode(hex)
+    let bytes = encoding.hex.decode(hex)
         .map_err(|e| InvalidSignature(f"hex decode: {e}"))?;
     if bytes.len() != 64 {
         return Err(InvalidSignature(f"expected 64 bytes, got {bytes.len()}"));
