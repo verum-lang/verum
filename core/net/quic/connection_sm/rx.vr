@@ -241,7 +241,11 @@ public fn parse_long_packet(
     let ct_start = pn_offset + (pn_len as Int);
     let ciphertext = slice_of(wire, ct_start, packet_end);
 
-    let plaintext = open(keys, full_pn, aad.as_slice(), ciphertext.as_slice())
+    // Fully-qualified path — bare `open` resolves to a 2-arg variant
+    // from another module (sqlite subjournal) under glob-mount lookup,
+    // causing AOT-side arity mismatch.  Task #17/#39 mount-scope-aware
+    // lookup defect class.
+    let plaintext = core.net.quic.connection_sm.aead.open(keys, full_pn, aad.as_slice(), ciphertext.as_slice())
         .map_err(|_| RxError.AeadFailure)?;
 
     let consumed = packet_end;
@@ -299,7 +303,11 @@ public fn parse_short_packet(
     let ct_start = pn_offset + (pn_len as Int);
     let ciphertext = slice_of(wire, ct_start, packet_end);
 
-    let plaintext = open(keys, full_pn, aad.as_slice(), ciphertext.as_slice())
+    // Fully-qualified path — bare `open` resolves to a 2-arg variant
+    // from another module (sqlite subjournal) under glob-mount lookup,
+    // causing AOT-side arity mismatch.  Task #17/#39 mount-scope-aware
+    // lookup defect class.
+    let plaintext = core.net.quic.connection_sm.aead.open(keys, full_pn, aad.as_slice(), ciphertext.as_slice())
         .map_err(|_| RxError.AeadFailure)?;
 
     let dcid_bytes = slice_of(wire, 1, dcid_end);
