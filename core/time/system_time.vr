@@ -352,3 +352,12 @@ public fn now_unix_ms() -> Int {
 public fn now_unix_s() -> Int {
     SystemTime.now().secs
 }
+
+
+/// Convenience alias for `now_unix_s()` — wall-clock seconds since
+/// Unix epoch.  Exists for callers that import `epoch_seconds`
+/// (security/x509 / security/sigstore / storage/s3).
+public fn epoch_seconds() -> Int {
+    now_unix_s()
+}
+
