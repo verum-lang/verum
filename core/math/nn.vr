@@ -1369,7 +1369,7 @@ public fn clip_grad_value(params: &mut [Parameter], clip_value: Float) {
         let grad_opt = params[idx].grad.clone();
         match grad_opt {
             Some(grad) => {
-                params[idx].grad = Some(clamp(&grad, -clip_value, clip_value));
+                params[idx].grad = Some(core.math.nn.clamp(&grad, -clip_value, clip_value));
             }
             None => {}
         }
@@ -1433,7 +1433,7 @@ public fn binary_cross_entropy(
     target: &DynTensor<Float>,  // Binary targets in {0, 1}
 ) -> Float {
     let eps = 1e-7;  // For numerical stability
-    let pred_clipped = clamp(pred, eps, 1.0 - eps);
+    let pred_clipped = core.math.nn.clamp(pred, eps, 1.0 - eps);
 
     let loss = add(
         &mul(target, &log(&pred_clipped)),
