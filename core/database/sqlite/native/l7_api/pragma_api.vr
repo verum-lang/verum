@@ -66,7 +66,7 @@ mount core.database.sqlite.native.pragmas.registry.{
 };
 mount core.database.sqlite.native.pragmas.dispatch.{
     PragmaResult, PrRow, PrRows, PrEmpty, PrError,
-    execute as pragma_dispatch,
+    execute,
 };
 mount core.database.sqlite.native.l7_api.database.{
     Database, SqliteApiDbError,
@@ -177,7 +177,7 @@ fn unwrap_single_row(result: PragmaResult) -> Result<PragmaValue, SqliteApiDbErr
 public fn pragma_get(db: &mut Database, kind: PragmaKind) -> Result<PragmaValue, SqliteApiDbError> {
     let name = pragma_kind_to_name(&kind);
     let cfg = db.pragma_cfg_mut();
-    let result = pragma_dispatch(cfg, &name, None, None);
+    let result = core.database.sqlite.native.pragmas.dispatch.execute(cfg, &name, None, None);
     unwrap_single_row(result)
 }
 
@@ -197,7 +197,7 @@ public fn pragma_set(
     let name = pragma_kind_to_name(&kind);
     let reg = value_to_register(&value);
     let cfg = db.pragma_cfg_mut();
-    let result = pragma_dispatch(cfg, &name, Some(reg), None);
+    let result = core.database.sqlite.native.pragmas.dispatch.execute(cfg, &name, Some(reg), None);
     match result {
         PrError(msg) => Err(DbGeneric(msg)),
         _            => Ok(()),
