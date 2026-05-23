@@ -20,17 +20,17 @@
 module builtins;
 
 mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
-mount core.base.env.{var_opt as env_var_opt, temp_dir as host_temp_dir, args, exit};
+mount core.base.env.{var_opt, temp_dir, args, exit};
 mount core.io.path.{Path, PathBuf};
 mount core.io.fs.{
     metadata as fs_metadata,
     Metadata,
-    create_dir as fs_create_dir,
-    create_dir_all as fs_create_dir_all,
-    remove_dir as fs_remove_dir,
-    remove_dir_all as fs_remove_dir_all,
+    create_dir,
+    create_dir_all,
+    remove_dir,
+    remove_dir_all,
     read_dir as fs_read_dir,
-    remove_file as fs_remove_file,
+    remove_file,
     rename as fs_rename,
     copy as fs_copy,
     read as fs_read,
@@ -60,7 +60,7 @@ public fn mv(from: &Path, to: &Path) -> Result<(), ShellError> {
         Ok(_)  => Ok(()),
         Err(_) => {
             let _ = cp(from, to)?;
-            fs_remove_file(from).map_err(|io| ShellError.SpawnFailed {
+            core.io.fs.remove_file(from).map_err(|io| ShellError.SpawnFailed {
                 command: f"mv {from} {to}",
                 reason:  f"{io}",
             })
@@ -70,7 +70,7 @@ public fn mv(from: &Path, to: &Path) -> Result<(), ShellError> {
 
 /// Remove a single file.
 public fn rm(path: &Path) -> Result<(), ShellError> {
-    fs_remove_file(path).map_err(|io| ShellError.SpawnFailed {
+    core.io.fs.remove_file(path).map_err(|io| ShellError.SpawnFailed {
         command: f"rm {path}",
         reason:  f"{io}",
     })
@@ -80,7 +80,7 @@ public fn rm(path: &Path) -> Result<(), ShellError> {
 public fn rm_rf(path: &Path) -> Result<(), ShellError> {
     match fs_metadata(path) {
         Ok(m) if m.is_dir() =>
-            fs_remove_dir_all(path).map_err(|io| ShellError.SpawnFailed {
+            core.io.fs.remove_dir_all(path).map_err(|io| ShellError.SpawnFailed {
                 command: f"rm -rf {path}",
                 reason:  f"{io}",
             }),
@@ -91,7 +91,7 @@ public fn rm_rf(path: &Path) -> Result<(), ShellError> {
 
 /// Create directory. Errors if it already exists.
 public fn mkdir(path: &Path) -> Result<(), ShellError> {
-    fs_create_dir(path).map_err(|io| ShellError.SpawnFailed {
+    core.io.fs.create_dir(path).map_err(|io| ShellError.SpawnFailed {
         command: f"mkdir {path}",
         reason:  f"{io}",
     })
@@ -99,7 +99,7 @@ public fn mkdir(path: &Path) -> Result<(), ShellError> {
 
 /// Create directory and all missing parents (mkdir -p).
 public fn mkdir_p(path: &Path) -> Result<(), ShellError> {
-    fs_create_dir_all(path).map_err(|io| ShellError.SpawnFailed {
+    core.io.fs.create_dir_all(path).map_err(|io| ShellError.SpawnFailed {
         command: f"mkdir -p {path}",
         reason:  f"{io}",
     })
@@ -169,7 +169,7 @@ public fn is_dir(path: &Path) -> Bool {
 /// Locate a program in PATH (cross-platform `which`).
 /// Returns the absolute path of the first match or None.
 public fn which(program: &Text) -> Maybe<PathBuf> {
-    let path_var = match env_var_opt(&"PATH".into()) {
+    let path_var = match core.base.env.var_opt(&"PATH".into()) {
         Some(p) => p,
         None    => return None,
     };
@@ -201,7 +201,7 @@ public fn command_exists(program: &Text) -> Bool {
 // =============================================================================
 
 public fn temp_dir() -> PathBuf {
-    PathBuf.from(host_temp_dir())
+    PathBuf.from(core.base.env.temp_dir())
 }
 
 /// Convenience that re-exports `core.shell.resources.TempFile.new()`
