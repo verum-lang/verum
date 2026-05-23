@@ -574,14 +574,24 @@ fn expect_optional_bulk(v: RespValue, cmd: &str) -> Result<Maybe<List<Byte>>, Re
 }
 
 fn expect_text_int(v: &RespValue) -> Result<Int, RedisError> {
+    // Workaround for AOT closure-capture defect on let-binding named
+    // `s` inside the closure body (task #11-class — same shape as
+    // shell/stream `max_memory`).  Rebound to `str_val` /
+    // `simple_str` to sidestep the capture analysis bug.
     match v {
         RespValue.Integer(n) => Ok(*n),
         RespValue.BulkString(b) => {
-            let s = Text.from_utf8(b.as_slice())
+            let str_val = Text.from_utf8(b.as_slice())
                 .map_err(|e| RedisError.InvalidReply(f"utf8: {e}"))?;
-            Int.parse(&s).map_err(|_| RedisError.InvalidReply(f"int parse: {s}"))
+            match Int.parse(&str_val) {
+                Ok(n)  => Ok(n),
+                Err(_) => Err(RedisError.InvalidReply(f"int parse: {str_val}")),
+            }
         }
-        RespValue.SimpleString(s) => Int.parse(s).map_err(|_| RedisError.InvalidReply(f"int parse: {s}")),
+        RespValue.SimpleString(simple_str) => match Int.parse(simple_str) {
+            Ok(n)  => Ok(n),
+            Err(_) => Err(RedisError.InvalidReply(f"int parse: {simple_str}")),
+        },
         _ => Err(RedisError.InvalidReply("expected integer or text-int".to_text())),
     }
 }
