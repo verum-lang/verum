@@ -64,7 +64,7 @@ module core.security.webauthn.authenticate;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.List;
-mount encoding.json.{JsonValue, JsonObject, decode as json_decode};
+mount encoding.json.{JsonValue, JsonObject, decode};
 mount encoding.base64.{decode_url_no_pad as b64url_decode};
 mount security.hash.sha256.{Sha256, digest};
 mount security.ecc.ed25519.{Ed25519PublicKey, Ed25519Signature, verify};
@@ -314,7 +314,7 @@ fn parse_client_data(json_bytes: &List<Byte>) -> Result<CollectedClientData, Web
     // Same shape as register.vr's parser, intentionally duplicated
     // here to keep this module self-contained and free of cyclic
     // imports through register.vr.
-    let value = json_decode(json_bytes.as_slice())
+    let value = encoding.json.decode(json_bytes.as_slice())
         .map_err(|e| WebAuthnError.InvalidJson(f"{e}"))?;
     let obj = value.as_object()
         .ok_or_else(|| WebAuthnError.InvalidJson("clientData not an object".to_text()))?;
