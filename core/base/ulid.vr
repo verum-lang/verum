@@ -66,7 +66,7 @@ module core.base.ulid;
 
 mount core.*;
 mount core.collections.List;
-mount core.sys.common.random_bytes as sys_random_bytes;
+// Inlined: use core.sys.common.random_bytes(...) directly (task #11).
 mount core.time.system_time.{SystemTime};
 
 // CSPRNG-backed entropy fill. The historical `core.base.random.fill`
@@ -76,7 +76,7 @@ mount core.time.system_time.{SystemTime};
 // the canonical platform source; panic on failure rather than issue
 // a deterministic identifier.
 fn fill_random(buf: &mut [Byte]) {
-    match sys_random_bytes(buf) {
+    match core.sys.common.random_bytes(buf) {
         Ok(_)  => {},
         Err(_) => panic("ULID: kernel CSPRNG unavailable — refusing to issue zero-entropy ULID"),
     }
@@ -253,7 +253,7 @@ public fn generate() -> Ulid {
     // 80 bits inside `Ulid.from_parts_seeded`.  Stdlib-agnostic
     // RNG via `sys.common.random_bytes`.
     let mut seed_bytes: List<Byte> = List.with_capacity(16);
-    let _ = sys_random_bytes(&mut seed_bytes, 16);
+    let _ = core.sys.common.random_bytes(&mut seed_bytes, 16);
     let mut seed: UInt64 = 0_u64;
     let mut i: Int = 0;
     while i < 8 && i < seed_bytes.len() {

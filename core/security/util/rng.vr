@@ -54,7 +54,7 @@
 )
 module core.security.util.rng;
 mount core.*;
-mount core.sys.common.random_bytes as sys_random_bytes;
+// Inlined: use core.sys.common.random_bytes(...) directly (task #11).
 
 /// Fill `buf` with `buf.len()` cryptographically secure random bytes.
 ///
