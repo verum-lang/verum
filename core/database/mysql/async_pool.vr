@@ -26,7 +26,7 @@ mount core.database.common.error.{
 };
 mount core.database.mysql.config.MysqlConfig;
 mount core.database.mysql.async_connection.{
-    AsyncMysqlConnection, connect as async_connect,
+    AsyncMysqlConnection, connect,
 };
 mount core.async.channel.{
     Sender, Receiver, bounded_channel,
@@ -216,7 +216,7 @@ async fn open_and_warm(
     config: &MysqlConfig,
     pool_cfg: &AsyncMysqlPoolConfig,
 ) -> Result<AsyncMysqlConnection, DbError> {
-    let h = async_connect(config, pool_cfg.mailbox_capacity).await?;
+    let h = core.database.mysql.async_connection.connect(config, pool_cfg.mailbox_capacity).await?;
     let mut i: Int = 0;
     while i < (pool_cfg.prepare_on_open.len() as Int) {
         match h.prepare(&pool_cfg.prepare_on_open[i]).await {
