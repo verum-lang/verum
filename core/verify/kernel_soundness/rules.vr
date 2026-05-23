@@ -76,8 +76,8 @@ public type PremiseShape is
 public pure fn rule_premises_required(d: Derivation) -> List<PremiseShape> {
     match d.rule {
         // ---- Structural ---------------------------------------------------
-        KernelRule.KVar => List.empty(),
-        KernelRule.KUniv => List.empty(),
+        KernelRule.KVar => List.new(),
+        KernelRule.KUniv => List.new(),
         KernelRule.KPiForm => List.from([
             PremiseShape.TermHasUniverse {
                 level_bound: UniverseLevel.Variable { name: Text.from("u") }
@@ -185,16 +185,16 @@ public pure fn rule_premises_required(d: Derivation) -> List<PremiseShape> {
             PremiseShape.AnyTerm,
         ]),
         // ---- Inductive ----------------------------------------------------
-        KernelRule.KInductive => List.empty(),
-        KernelRule.KPos => List.empty(),
+        KernelRule.KInductive => List.new(),
+        KernelRule.KPos => List.new(),
         KernelRule.KElim => List.from([
             PremiseShape.AnyTerm,
             PremiseShape.AnyTerm,
             PremiseShape.AnyTerm,
         ]),
         // ---- SMT / Axiom --------------------------------------------------
-        KernelRule.KSmt => List.empty(),
-        KernelRule.KFwAx => List.empty(),
+        KernelRule.KSmt => List.new(),
+        KernelRule.KFwAx => List.new(),
         // ---- Diakrisis ----------------------------------------------------
         KernelRule.KEpsMu => List.from([
             PremiseShape.AnyTerm,
@@ -254,7 +254,7 @@ public pure fn rule_side_conditions_required(d: Derivation) -> List<SideConditio
             CoreTerm.Axiom { name: _, ty, framework: _ } => List.from([
                 SideCondition.BodyInProp { axiom_body: *ty },
             ]),
-            _ => List.empty(),
+            _ => List.new(),
         },
         KernelRule.KPos => match d.conclusion.term {
             CoreTerm.Inductive { path, args } => List.from([
@@ -263,7 +263,7 @@ public pure fn rule_side_conditions_required(d: Derivation) -> List<SideConditio
                     constructors: args,
                 },
             ]),
-            _ => List.empty(),
+            _ => List.new(),
         },
         KernelRule.KSmt => match d.conclusion.term {
             CoreTerm.SmtProof { cert } => List.from([
@@ -271,7 +271,7 @@ public pure fn rule_side_conditions_required(d: Derivation) -> List<SideConditio
                     cert_solver_tag: cert.solver_tag,
                 },
             ]),
-            _ => List.empty(),
+            _ => List.new(),
         },
         KernelRule.KRefineOmega => match d.conclusion.term {
             CoreTerm.Refine { base: _, binder: _, predicate } => List.from([
@@ -280,7 +280,7 @@ public pure fn rule_side_conditions_required(d: Derivation) -> List<SideConditio
                     bound: UniverseLevel.Variable { name: Text.from("omega") },
                 },
             ]),
-            _ => List.empty(),
+            _ => List.new(),
         },
         KernelRule.KUniverseAscent => List.from([
             SideCondition.LevelLt {
@@ -295,7 +295,7 @@ public pure fn rule_side_conditions_required(d: Derivation) -> List<SideConditio
                     base: *base,
                 },
             ]),
-            _ => List.empty(),
+            _ => List.new(),
         },
         KernelRule.KQuotElim => match d.conclusion.term {
             CoreTerm.QuotElim { scrutinee, motive: _, case_fn } => {
@@ -310,14 +310,14 @@ public pure fn rule_side_conditions_required(d: Derivation) -> List<SideConditio
                     },
                 ])
             }
-            _ => List.empty(),
+            _ => List.new(),
         },
         // No side conditions for the remaining rules (the kernel still
         // checks them — every rule has at least the implicit context-
         // well-formedness obligation — but those are folded into
         // premise-shape checking via the `Context` invariant in
         // judgment.vr, not surfaced as a separate `SideCondition`).
-        _ => List.empty(),
+        _ => List.new(),
     }
 }
 

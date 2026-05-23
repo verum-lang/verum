@@ -157,7 +157,7 @@ public pure fn admitted_rule_count() -> Int {
 /// every admitted lemma. The audit gate emits this verbatim into its
 /// JSON report so the trusted-base IOUs are always enumerable.
 public pure fn admitted_lemma_iou_list() -> List<Tuple2<Text, Text>> {
-    let mut out: List<Tuple2<Text, Text>> = List.empty();
+    let mut out: List<Tuple2<Text, Text>> = List.new();
     for row in corpus_rows() {
         match row.status {
             LemmaStatus.Proved => {}
