@@ -104,35 +104,78 @@ branch to match the canonical lowercase contract.
 `.to_ascii_uppercase()` on the result.  Pinned by
 `regression_test.vr::regression_char_from_digit_returns_lowercase_pinned`.
 
-### §C `()` (Unit) method dispatch escapes Unit-typed receivers — OPEN
+### §C `()` (Unit) method dispatch escapes Unit-typed receivers — CLOSED in this branch
 
-Surface: `bool_byte_char_test::test_unit_ord_protocol`,
-`test_unit_default`, and several Once/Iterator chains report
-`method 'Once.next' not found on receiver of runtime kind ()` — the
-dispatcher is somehow mapping `().cmp(...)` to `Once.next(...)` candidate
-class.  Root cause not yet investigated.  Suspected: shared codegen
-classifier for Unit receivers escaping to the IntoIterator fallback path.
+**Defect class** — pre-fix `().cmp(&())` panicked with `method 'Once.next'
+not found on receiver of runtime kind ()` because the dispatcher's
+bare-method suffix-scan picked the `Iterator.cmp` default body
+(monomorphised onto `Once<T>` during stdlib precompile) over the inherent
+`implement Ord for () { fn cmp(...) }` impl.  Iterator.cmp's body
+executes `self.next()` → `CallM { method_id: "Once.next" }` (because the
+body was monomorphised with `self_type = Once`), and Unit has no `.next`
+method, so the dispatcher panicked with the misleading error.
 
-**Action**: investigate the codegen path that emits `CallM` for receiver
-of kind Unit, and the `IntoIterator`/`Once<T>` candidate scan in the
-dispatch panic builder, then write a regression pin.
+**Blast radius** — every protocol method on `()`: Eq.eq / Ord.cmp /
+Hash.hash_value / Clone.clone / Default.default / Display.fmt were all
+reachable but routed unpredictably depending on HashMap-iteration-order
+of the function table.  Affected `bool_byte_char_test::test_unit_ord_protocol`
++ `test_unit_default` in this conformance suite.
+
+**Fix** — Unit-receiver intercept in
+`dispatch_primitive_method` that returns the mathematical identity for
+each protocol method.  `()` has exactly one value, so every method
+reduces to a constant:
+
+  * `().cmp(&()) == Equal`, `() == ()`, `() <= ()`, `() >= ()`,
+    `!(() < ())`, `!(() > ())`.
+  * `().hash_value() == fxhash_bytes(0, &[])` (seed-0 unchanged).
+  * `().clone() == ()`, `Unit.default() == ()`.
+  * `f"{()}" == "()"`, `().to_text() == "()"`, etc.
+
+**Architectural rule pinned**: every primitive's protocol-default surface
+MUST be reachable through `dispatch_primitive_method` so the
+function-table-side suffix-scan never wins over the canonical primitive
+intercept.  Pinned by `regression_test.vr::regression_unit_receiver_dispatch_pinned`.
 
 ## 3. Action items
 
 ### Landed in this branch
 
-  * §A — Cast arm added to `extract_expr_type_name` AND `infer_expr_type_name`
-    in `crates/verum_vbc/src/codegen/expressions.rs`.
+  * §A — Three-site Cast arm in `crates/verum_vbc/src/codegen/expressions.rs`
+    (extract_expr_type_name / infer_expr_type_name /
+    compile_method_call::effective_method_name Case 6c) + runtime
+    width-prefix normalisation in `dispatch_primitive_method`.  Wraps and
+    checked arithmetic on cast-receiver Byte now correct.
   * §B — `test_char_from_digit` updated to expect canonical lowercase.
-  * New `regression_test.vr` with three regression pins (Char.from_digit
-    lowercase, Cast type-propagation receiver-form, Cast type-propagation
-    let-binding-form).
+  * §C — Unit-receiver intercept in `dispatch_primitive_method` returns
+    canonical values for every protocol method on `()`.  Closes the
+    "Iterator.cmp default body monomorphised onto Once<T> bleeds into
+    Unit receiver" defect class.
+  * New `regression_test.vr` with 4 regression pins (Char.from_digit
+    lowercase + Cast-receiver wrap u8 + Cast-receiver checked u8 + Unit
+    receiver dispatch).
+  * 2 `@ignore`'d pins for residual saturating_add intrinsic-width
+    propagation + let-bound cast `VarTypeKind::Byte` folding.
 
 ### Deferred
 
-  * §C — Unit-receiver method-dispatch defect.  Requires tracing the
-    codegen path that emits the wrong `CallM` opcode for `().cmp(...)`.
-    Scope estimate: 1 day.
+  * §A residual — `saturating_add` intrinsic width propagation.  The
+    codegen emits `ArithExtendedOpcode(SaturatingAdd)` directly (not
+    `CallM`), and the opcode reads a `width` byte from the bytecode
+    stream that defaults to 64 (i64 semantics) for the bare
+    `saturating_add` intrinsic.  Fix needs width propagation through
+    the intrinsic-emission path keyed on the cast target's spelling.
+  * §A residual — let-bound cast `VarTypeKind` folding.  Unannotated
+    `let a = N as Byte` lands as `VarTypeKind::Int` because the
+    expr-type inference path at `compile_let:341` folds primitive
+    integer widths to `TypeKind::Int → VarTypeKind::Int`.  Needs a
+    cast-target-aware step that recovers the width spelling for
+    primitive-byte-shape RHS expressions.
   * Cross-tier AOT validation — verify all green interpreter tests also
-    pass under `verum test --aot`.  Pending stdlib precompile / binary
-    rebuild cycle to complete.
+    pass under `verum test --aot`.  Pending separate AOT validation
+    cycle for cast-receiver dispatch.
+  * `test_byte_is_ascii_whitespace` + `test_byte_case_conversion_roundtrip`
+    — likely same §A residual class (`UInt8.to_ascii_lowercase` panic
+    suggests typechecker resolves cast receiver to UInt8 alias
+    canonical name, but `byte$to_ascii_lowercase` arm doesn't exist
+    in the runtime intercept).
