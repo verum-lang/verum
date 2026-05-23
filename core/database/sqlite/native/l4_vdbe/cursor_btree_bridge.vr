@@ -42,7 +42,7 @@ mount core.database.sqlite.native.l3_btree.cursor.{
     // rejected `cursor_new(&tree)` with "wrong number of arguments
     // for cursor_new: expected 0, found 1".  Same root class as
     // task #17/#39 mount-scope-aware lookup.
-    cursor_new as btree_cursor_new,
+    cursor_new,
     cursor_root, cursor_is_valid, cursor_is_at_end,
     cursor_current_page, cursor_current_cell,
 };
@@ -126,7 +126,7 @@ public fn op_open_read(
         Ok(t)  => t,
         Err(e) => return Err(BeBtree(e)),
     };
-    let mut c = btree_cursor_new(&tree);
+    let mut c = core.database.sqlite.native.l3_btree.cursor.cursor_new(&tree);
     match cursor_root(&mut c) {
         Ok(_)  => Ok(c),
         Err(e) => Err(BeBtree(e)),
