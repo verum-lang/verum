@@ -383,7 +383,12 @@ public fn execute_collect(stmt: &mut PreparedStatement) -> ExecOutcome {
         match step_one(stmt) {
             SoRowReady => {
                 let mut row: List<Register> = List.new();
-                let n = column_count(stmt);
+                // Fully-qualified path — bare `column_count` collides
+                // with 4+ zero-arg `column_count()` siblings across
+                // sqlite native modules; AOT-side lookup picks one of
+                // those and rejects with arity mismatch.  Task #17/#39
+                // mount-scope-aware lookup defect class.
+                let n = core.database.sqlite.native.l6_session.statement_lifecycle.column_count(stmt);
                 let mut c: Int = 0;
                 while c < n {
                     row.push(column_value(stmt, c));
