@@ -246,7 +246,10 @@ fn parse_command(
         }
 
         let tok = state.peek().unwrap().clone();
-        let kind = classify(&tok, &cmd.settings, state.after_double_dash);
+        // Fully-qualified path — bare `classify` collides with 8+
+        // 2-arg `classify(...)` siblings in sqlite native modules
+        // (task #11 mount-scope-aware lookup defect).
+        let kind = core.cli.parser.classify(&tok, &cmd.settings, state.after_double_dash);
 
         match kind {
             TokenKind.TDoubleDash => {
