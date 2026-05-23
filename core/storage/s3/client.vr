@@ -49,7 +49,7 @@ mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount encoding.hex.{encode as hex_encode};
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
-mount security.hash.sha256.{Sha256, digest as sha256_digest};
+mount security.hash.sha256.{Sha256, digest};
 mount time.system_time.epoch_seconds;
 mount time.rfc3339.{Rfc3339Time, parse_rfc3339};
 

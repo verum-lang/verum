@@ -56,7 +56,7 @@ mount encoding.json.{
 };
 mount encoding.jcs.{canonicalize as jcs_canonicalize, JcsError};
 mount encoding.hex.{encode as hex_encode};
-mount security.hash.sha256.{digest as sha256_digest};
+mount security.hash.sha256.{digest};
 mount security.tuf.types.{
     TufKey, TufKeyType, TufKeyScheme, KeyId, Signature,
 };
@@ -113,7 +113,7 @@ public fn compute_keyid(key: &TufKey) -> Result<KeyId, CanonicalError> {
     obj.insert("scheme".to_text(),  json_string(scheme_to_text(&key.scheme)));
     obj.insert("keyval".to_text(),  key.keyval.clone());
     let bytes = canonical_signing_payload(&json_object(obj))?;
-    let digest = sha256_digest(&bytes);
+    let digest = security.hash.sha256.digest(&bytes);
     Ok(KeyId(hex_encode(&digest)))
 }
 

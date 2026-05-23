@@ -74,7 +74,7 @@ mount security.ecc.ed25519.{
     sign as ed25519_sign, verify as ed25519_verify,
     public_key as ed25519_public_key,
 };
-mount security.hash.sha256.{digest as sha256_digest};
+mount security.hash.sha256.{digest};
 mount encoding.json.{
     JsonValue, JsonObject, json_object, json_string, json_number,
     json_array, json_null, json_bool,
@@ -119,7 +119,7 @@ public type Digest is {
 public fn digest_sha256(bytes: &List<Byte>) -> Digest {
     Digest {
         algorithm: "sha256".to_text(),
-        hex: hex_encode(&sha256_digest(bytes)),
+        hex: hex_encode(&security.hash.sha256.digest(bytes)),
     }
 }
 
