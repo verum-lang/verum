@@ -49,28 +49,22 @@ fn test_max_threads_is_256() {
 // Section 2: hazard_stats — read-only stats surface
 // =============================================================================
 
-// REGRESSION: `hazard_stats()` reaches into the static-mut record
-// `GLOBAL_HAZARD_DOMAIN` via a method-receiver implicit-self load
-// (`GLOBAL_HAZARD_DOMAIN.scan_hazards()`).  The current static-mut
-// backing (`InterpreterState::static_mut_cell_addr`, Task #26 [E2])
-// allocates an 8-byte cell only for scalar `static mut`s, not for
-// record-typed ones, so `&self` materialises as a null pointer and
-// the first GetF (opcode 0x62) inside scan_hazards null-derefs at
-// pc=144 with `NullPointerAt { op: "opcode 0x62", site:
-// "HazardDomain.scan_hazards" }`.  Fundamental fix tracked in
-// `audit.md` §3.3 — extend the cell allocator to handle record-typed
-// `static mut` with per-field offset materialisation, OR refactor
-// the access pattern in hazard.vr to use scalar field-by-field
-// reads through individual `StaticMutAddr` ops.
+// REGRESSION CLOSED 2026-05-23 (commit 027b9c73a): TLS-slot remap on
+// archive merge unblocked the static-mut HazardDomain init.  Pre-fix
+// each stdlib precompile pass restarted `next_tls_slot` at 0, so
+// hazard.vr's GLOBAL_HAZARD_DOMAIN landed on slot 12 (same slot as
+// sys/common.vr's PROCESS_ARGV, etc.); cross-archive merge wrote to
+// the same TLS slot from multiple modules, last-writer-wins.
+// `hazard_stats()` then read whatever the last writer left.
+// Fix: per-archive slot remap during `merge_archive_function_bodies`
+// (`crates/verum_vbc/src/codegen/mod.rs`).
 @test
-@ignore
 fn test_hazard_stats_returns_value() {
     let _stats: HazardStats = hazard_stats();
     assert(true);
 }
 
 @test
-@ignore
 fn test_hazard_stats_initial_state_is_zero() {
     let s: HazardStats = hazard_stats();
     assert(s.protected_count >= 0);

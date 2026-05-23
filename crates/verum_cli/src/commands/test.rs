@@ -1553,6 +1553,26 @@ fn run_test_interpret(test: &Test, _cfg: &TestRunCfg) -> TestResult {
     interp.state.config.max_instructions = 0;
     interp.state.config.timeout_ms = 0;
 
+    // Run global ctors before executing the test function.  Without
+    // this, `__tls_init_*` synthetic functions never populate their
+    // TLS slots — every `static mut` declared in the user's mounted
+    // stdlib reads back `Value::default()` (nil), and methods on those
+    // statics null-deref at the first GetF.  Mirrors `Interpreter::run_main`
+    // (which the file/cog runners use) and the AOT path's
+    // `@llvm.global_ctors` array. Pre-fix:
+    //   * `verum run hazard_stats_test.vr` worked (run_main path).
+    //   * `verum test --interp --filter test_hazard_stats` null-derefed
+    //     at `core.mem.hazard.hazard_stats pc=30` (test path bypassed ctors).
+    if let Err(e) = interp.run_global_ctors() {
+        return TestResult::Fail {
+            duration: start.elapsed(),
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: None,
+            error: format!("global_ctors: {:?}", e),
+        };
+    }
+
     let outcome = if let Some(args) = &test.case_args {
         // @test_case path: convert literal args → VBC Values, call directly.
         let vbc_args: std::result::Result<Vec<_>, _> =
