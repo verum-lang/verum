@@ -53,28 +53,21 @@ mount super.linux.auxv.init_auxv;
 // Initialization State
 // =============================================================================
 
-/// Initialization status flags (atomic).
-static mut INIT_STATE: InitState = InitState {
-    tls_initialized: false,
-    context_initialized: false,
-    allocator_initialized: false,
-    panic_handler_initialized: false,
-    fully_initialized: false,
-};
+// =============================================================================
+// Initialization status flags
+//
+// Split into individual scalar `static mut Bool` to use the [E2] scalar
+// cell-allocation path (≤8 bytes, init=0) — the record-shaped variant
+// (`static mut INIT_STATE: InitState = {...}`) collides with the
+// unimplemented record-cell path that surfaces as `NullPointerAt 0x62`
+// at every GetF site (`is_initialized()` body, etc.).  See task #24.
+// =============================================================================
 
-/// Runtime initialization state.
-type InitState is {
-    /// TLS (thread-local storage) initialized.
-    tls_initialized: Bool,
-    /// Context system initialized.
-    context_initialized: Bool,
-    /// CBGR allocator initialized.
-    allocator_initialized: Bool,
-    /// Panic handler initialized.
-    panic_handler_initialized: Bool,
-    /// All initialization complete.
-    fully_initialized: Bool,
-};
+static mut INIT_TLS_INITIALIZED: Bool = false;
+static mut INIT_CONTEXT_INITIALIZED: Bool = false;
+static mut INIT_ALLOCATOR_INITIALIZED: Bool = false;
+static mut INIT_PANIC_HANDLER_INITIALIZED: Bool = false;
+static mut INIT_FULLY_INITIALIZED: Bool = false;
 
 /// Initialization error types.
 public type InitError is
@@ -172,7 +165,7 @@ implement Eq for InitError {
 /// ```
 public fn verum_init() -> Result<(), InitError> {
     unsafe {
-        if INIT_STATE.fully_initialized {
+        if INIT_FULLY_INITIALIZED {
             return Err(InitError.AlreadyInitialized);
         }
     }
@@ -191,7 +184,7 @@ public fn verum_init() -> Result<(), InitError> {
 
     // Mark as fully initialized
     unsafe {
-        INIT_STATE.fully_initialized = true;
+        INIT_FULLY_INITIALIZED = true;
     }
 
     Ok(())
@@ -204,7 +197,7 @@ public fn verum_init() -> Result<(), InitError> {
 /// Performs cleanup in reverse initialization order.
 public fn verum_shutdown() {
     unsafe {
-        if !INIT_STATE.fully_initialized {
+        if !INIT_FULLY_INITIALIZED {
             return;
         }
 
@@ -214,14 +207,14 @@ public fn verum_shutdown() {
         shutdown_context_system();
         shutdown_tls();
 
-        INIT_STATE.fully_initialized = false;
+        INIT_FULLY_INITIALIZED = false;
     }
 }
 
 /// Check if runtime is fully initialized.
 @inline
 public fn is_initialized() -> Bool {
-    unsafe { INIT_STATE.fully_initialized }
+    unsafe { INIT_FULLY_INITIALIZED }
 }
 
 // =============================================================================
@@ -230,14 +223,14 @@ public fn is_initialized() -> Bool {
 
 fn init_tls() -> Result<(), InitError> {
     unsafe {
-        if INIT_STATE.tls_initialized {
+        if INIT_TLS_INITIALIZED {
             return Ok(());
         }
     }
 
     match init_runtime() {
         Ok(()) => {
-            unsafe { INIT_STATE.tls_initialized = true; }
+            unsafe { INIT_TLS_INITIALIZED = true; }
             Ok(())
         }
         Err(e) => {
@@ -248,9 +241,9 @@ fn init_tls() -> Result<(), InitError> {
 
 fn shutdown_tls() {
     unsafe {
-        if INIT_STATE.tls_initialized {
+        if INIT_TLS_INITIALIZED {
             cleanup_runtime();
-            INIT_STATE.tls_initialized = false;
+            INIT_TLS_INITIALIZED = false;
         }
     }
 }
@@ -261,7 +254,7 @@ fn shutdown_tls() {
 
 fn init_context_system() -> Result<(), InitError> {
     unsafe {
-        if INIT_STATE.context_initialized {
+        if INIT_CONTEXT_INITIALIZED {
             return Ok(());
         }
     }
@@ -271,14 +264,14 @@ fn init_context_system() -> Result<(), InitError> {
         return Err(InitError.ContextFailed { reason: "TLS not initialized" });
     }
 
-    unsafe { INIT_STATE.context_initialized = true; }
+    unsafe { INIT_CONTEXT_INITIALIZED = true; }
     Ok(())
 }
 
 fn shutdown_context_system() {
     unsafe {
         // Context slots are freed with TLS
-        INIT_STATE.context_initialized = false;
+        INIT_CONTEXT_INITIALIZED = false;
     }
 }
 
@@ -288,7 +281,7 @@ fn shutdown_context_system() {
 
 fn init_allocator() -> Result<(), InitError> {
     unsafe {
-        if INIT_STATE.allocator_initialized {
+        if INIT_ALLOCATOR_INITIALIZED {
             return Ok(());
         }
     }
@@ -308,7 +301,7 @@ fn init_allocator() -> Result<(), InitError> {
         // Initialize heap - if it fails, report error
         let heap_result = core.mem.heap.init_thread_heap();
         if heap_result.is_ok() {
-            unsafe { INIT_STATE.allocator_initialized = true; }
+            unsafe { INIT_ALLOCATOR_INITIALIZED = true; }
         } else {
             return Err(InitError.AllocatorFailed { reason: "Heap init failed" });
         }
@@ -317,7 +310,7 @@ fn init_allocator() -> Result<(), InitError> {
     @cfg(runtime = "embedded")
     {
         // Embedded uses static allocator, no runtime init needed
-        unsafe { INIT_STATE.allocator_initialized = true; }
+        unsafe { INIT_ALLOCATOR_INITIALIZED = true; }
     }
 
     Ok(())
@@ -325,7 +318,7 @@ fn init_allocator() -> Result<(), InitError> {
 
 fn shutdown_allocator() {
     unsafe {
-        if INIT_STATE.allocator_initialized {
+        if INIT_ALLOCATOR_INITIALIZED {
             // Shutdown the thread-local heap (abandons segments for reclamation)
             @cfg(not(runtime = "embedded"))
             {
@@ -333,7 +326,7 @@ fn shutdown_allocator() {
                 // Force reclamation of any pending hazard pointer retirements
                 core.mem.hazard.force_reclaim_all();
             }
-            INIT_STATE.allocator_initialized = false;
+            INIT_ALLOCATOR_INITIALIZED = false;
         }
     }
 }
@@ -392,18 +385,18 @@ public type SysInitPanicInfo is {
 
 fn init_panic_handler() -> Result<(), InitError> {
     unsafe {
-        if INIT_STATE.panic_handler_initialized {
+        if INIT_PANIC_HANDLER_INITIALIZED {
             return Ok(());
         }
         PANIC_HANDLER = default_panic_handler;
-        INIT_STATE.panic_handler_initialized = true;
+        INIT_PANIC_HANDLER_INITIALIZED = true;
     }
     Ok(())
 }
 
 fn shutdown_panic_handler() {
     unsafe {
-        INIT_STATE.panic_handler_initialized = false;
+        INIT_PANIC_HANDLER_INITIALIZED = false;
     }
 }
 
