@@ -78,7 +78,7 @@ mount security.hash.sha256.{digest};
 mount encoding.json.{
     JsonValue, JsonObject, json_object, json_string, json_number,
     json_array, json_null, json_bool,
-    encode as json_encode, decode as json_decode,
+    encode, decode,
 };
 mount encoding.jcs.{canonicalize as jcs_canonicalize};
 mount encoding.base64.{
@@ -569,7 +569,7 @@ pub fn dsse_verify_statement(
     }
     if !verified { return Err(DsseVerifyError.InvalidSignature); }
 
-    let payload_json = json_decode(&payload_bytes)
+    let payload_json = encoding.json.decode(&payload_bytes)
         .map_err(|e| DsseVerifyError.InvalidPayload(f"json decode: {e}"))?;
     statement_from_json(&payload_json)
         .map_err(|e| DsseVerifyError.InvalidPayload(e))

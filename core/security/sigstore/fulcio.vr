@@ -72,8 +72,8 @@ mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount encoding.json.{
-    JsonValue, JsonObject, json_object, json_string, decode as json_decode,
-    encode as json_encode,
+    JsonValue, JsonObject, json_object, json_string, decode,
+    encode,
 };
 mount encoding.base64.{
     encode_standard as b64_encode, decode_standard as b64_decode,
@@ -236,7 +236,7 @@ public async fn request_signing_cert<C: HttpClient>(
     let pub_bytes = fulcio_key_public_bytes(key);
     let pop_bytes = fulcio_proof_of_possession(key, oidc_sub);
     let body = build_request_body(oidc_id_token, key, &pub_bytes, &pop_bytes);
-    let body_bytes = json_encode(&body);
+    let body_bytes = encoding.json.encode(&body);
 
     let url = compose_url(&config.base_url, "/api/v2/signingCert");
     let mut headers: Map<Text, Text> = Map.new();
@@ -294,7 +294,7 @@ fn build_request_body(
 // =============================================================================
 
 fn parse_signing_cert_response(bytes: &List<Byte>) -> Result<FulcioCertResponse, FulcioError> {
-    let value = json_decode(bytes.as_slice())
+    let value = encoding.json.decode(bytes.as_slice())
         .map_err(|e| InvalidJson(f"{e}"))?;
     let obj = value.as_object()
         .ok_or_else(|| InvalidJson("response not an object".to_text()))?;

@@ -46,7 +46,7 @@ mount collections.{List, Map};
 mount encoding.json.{
     JsonValue, JsonObject,
     json_object, json_string, json_array, json_number, json_bool,
-    encode as json_encode, decode as json_decode,
+    encode, decode,
 };
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
 mount async_.sleep_seconds;
@@ -233,7 +233,7 @@ fn json_to_filter_lit(v: &JsonValue) -> Text {
         JsonValue.Number(n) => f"{n}",
         JsonValue.Bool(b)   => if *b { "true".to_text() } else { "false".to_text() },
         JsonValue.Null      => "null".to_text(),
-        other               => json_encode(other), // arrays/objects — pass through (caller's problem)
+        other               => encoding.json.encode(other), // arrays/objects — pass through (caller's problem)
     }
 }
 
@@ -420,7 +420,7 @@ async fn delete<C: HttpClient>(
 async fn post_json<C: HttpClient>(
     http: &C, cfg: &MeiliConfig, url: &Text, body: &JsonValue,
 ) -> Result<JsonValue, SearchError> {
-    let body_bytes = json_encode(body).as_bytes().to_list();
+    let body_bytes = encoding.json.encode(body).as_bytes().to_list();
     let req = Request {
         method:  Method.Post,
         url:     url.clone(),
@@ -435,7 +435,7 @@ async fn post_json<C: HttpClient>(
 async fn patch_json<C: HttpClient>(
     http: &C, cfg: &MeiliConfig, url: &Text, body: &JsonValue,
 ) -> Result<JsonValue, SearchError> {
-    let body_bytes = json_encode(body).as_bytes().to_list();
+    let body_bytes = encoding.json.encode(body).as_bytes().to_list();
     let req = Request {
         method:  Method.Patch,
         url:     url.clone(),
@@ -459,7 +459,7 @@ async fn handle_response(resp: Response) -> Result<JsonValue, SearchError> {
     if resp.body.is_empty() {
         return Ok(JsonValue.Null);
     }
-    json_decode(resp.body.as_slice())
+    encoding.json.decode(resp.body.as_slice())
         .map_err(|e| SearchError.Backend(f"json: {e}"))
 }
 

@@ -67,7 +67,7 @@ mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount encoding.json.{
     JsonValue, JsonObject, json_object, json_string, json_number,
-    json_array, decode as json_decode, encode as json_encode,
+    json_array, decode, encode,
 };
 mount encoding.base64.{
     encode_standard as b64_encode, decode_standard as b64_decode,
@@ -165,7 +165,7 @@ public async fn submit_entry<C: HttpClient>(
 ) -> Result<LogEntry, RekorError> {
     let url = compose_url(&config.base_url, "/api/v2/log/entries");
     let body = build_submit_body(kind, api_ver, spec);
-    let body_bytes = json_encode(&body);
+    let body_bytes = encoding.json.encode(&body);
     let mut headers: Map<Text, Text> = Map.new();
     headers.insert("content-type".to_text(), CONTENT_TYPE_JSON.to_text());
     headers.insert("accept".to_text(), CONTENT_TYPE_JSON.to_text());
@@ -385,7 +385,7 @@ fn ct_eq(a: &Text, b: &Text) -> Bool {
 // =============================================================================
 
 fn parse_log_entry_response(bytes: &List<Byte>) -> Result<LogEntry, RekorError> {
-    let value = json_decode(bytes.as_slice())
+    let value = encoding.json.decode(bytes.as_slice())
         .map_err(|e| InvalidJson(f"{e}"))?;
     let obj = value.as_object()
         .ok_or_else(|| InvalidJson("response not an object".to_text()))?;
@@ -420,7 +420,7 @@ fn parse_log_entry(uuid: Text, value: &JsonValue) -> Result<LogEntry, RekorError
 
     let body_bytes = b64_decode(&body_b64)
         .map_err(|e| InvalidBase64(f"body: {e}"))?;
-    let body_value = json_decode(body_bytes.as_slice())
+    let body_value = encoding.json.decode(body_bytes.as_slice())
         .map_err(|e| InvalidJson(f"body json: {e}"))?;
     let body = decode_entry_body(&body_value)?;
 
