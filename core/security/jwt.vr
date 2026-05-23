@@ -57,7 +57,7 @@ module core.security.jwt;
 
 mount core.*;
 mount core.collections.List;
-mount core.encoding.base64.{encode_url as b64u_encode, decode_url as b64u_decode};
+mount core.encoding.base64.{encode_url, decode_url};
 mount core.encoding.json.{JsonValue, parse as json_parse, stringify as json_stringify};
 mount core.security.mac.hmac.{hmac_sha256, hmac_sha384, hmac_sha512};
 mount core.security.ecc.ed25519.{
@@ -256,8 +256,8 @@ public fn sign_compact(
     check_key_matches_algo(&header.alg, key)?;
 
     let header_json = header_to_json(header);
-    let header_b64  = b64u_encode(header_json.as_bytes());
-    let payload_b64 = b64u_encode(payload_json.as_bytes());
+    let header_b64  = core.encoding.base64.encode_url(header_json.as_bytes());
+    let payload_b64 = core.encoding.base64.encode_url(payload_json.as_bytes());
 
     // Signing input = header_b64 || "." || payload_b64, byte-exact.
     let signing_cap = header_b64.as_bytes().len() + 1 + payload_b64.as_bytes().len();
@@ -267,7 +267,7 @@ public fn sign_compact(
     push_bytes(&mut signing_input, payload_b64.as_bytes());
 
     let signature = compute_signature(&header.alg, signing_input.as_slice(), key)?;
-    let sig_b64 = b64u_encode(signature.as_slice());
+    let sig_b64 = core.encoding.base64.encode_url(signature.as_slice());
 
     // Final token = signing_input || "." || sig_b64.
     let token_cap = signing_input.len() + 1 + sig_b64.as_bytes().len();
@@ -324,11 +324,11 @@ public fn verify_compact(
     let payload_b64 = &bytes[(h_end + 1)..p_end];
     let sig_b64     = &bytes[(p_end + 1)..];
 
-    let header_bytes = b64u_decode(&Text.from_utf8_unchecked(header_b64))
+    let header_bytes = core.encoding.base64.decode_url(&Text.from_utf8_unchecked(header_b64))
         .map_err(|_| JwtError.Base64Decode)?;
-    let payload_bytes = b64u_decode(&Text.from_utf8_unchecked(payload_b64))
+    let payload_bytes = core.encoding.base64.decode_url(&Text.from_utf8_unchecked(payload_b64))
         .map_err(|_| JwtError.Base64Decode)?;
-    let sig_bytes = b64u_decode(&Text.from_utf8_unchecked(sig_b64))
+    let sig_bytes = core.encoding.base64.decode_url(&Text.from_utf8_unchecked(sig_b64))
         .map_err(|_| JwtError.Base64Decode)?;
 
     // Parse header and verify alg.

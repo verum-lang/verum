@@ -51,7 +51,7 @@ module core.security.token;
 
 mount core.*;
 mount core.collections.List;
-mount core.encoding.base64.{encode_url as b64u_encode};
+mount core.encoding.base64.{encode_url};
 mount core.encoding.hex.{encode as hex_encode};
 mount core.security.util.rng.{fill_secure_array};
 mount core.security.util.constant_time.{constant_time_eq};
@@ -93,7 +93,7 @@ public fn generate_bytes(len_bytes: Int) -> List<Byte> {
 /// ≈ 256-bit entropy.
 public fn generate_urlsafe(len_bytes: Int) -> Text {
     let raw = generate_bytes(len_bytes);
-    b64u_encode(raw.as_slice())
+    core.encoding.base64.encode_url(raw.as_slice())
 }
 
 /// Lowercase hex-encoded token. `2 × len_bytes` characters.
