@@ -595,7 +595,7 @@ fn parse_list_v2_response(body: &List<Byte>) -> Result<ListPage, StorageError> {
         let size = Int.parse(&size_text).unwrap_or(0);
         let etag = strip_quotes(&extract_xml_text(&block, "ETag").unwrap_or_else(|| "".to_text()));
         let last = extract_xml_text(&block, "LastModified")
-            .and_then(|s| parse_rfc3339(&s).ok())
+            .and_then(|s| core.time.rfc3339.parse(&s).ok())
             .unwrap_or_else(|| now_rfc3339());
         objects.push(ObjectMetadata {
             key,

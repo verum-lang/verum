@@ -890,7 +890,7 @@ fn get_int(obj: &JsonObject, key: &str) -> Result<Int, TufClientError> {
 
 fn get_rfc3339(obj: &JsonObject, key: &str) -> Result<core.time.rfc3339.Rfc3339Time, TufClientError> {
     let s = get_string(obj, key)?;
-    core.time.rfc3339.parse_rfc3339(&s)
+    core.time.rfc3339.parse(&s)
         .map_err(|e| InvalidJson(f"{key} parse: {e}"))
 }
 
