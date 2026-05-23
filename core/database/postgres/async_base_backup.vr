@@ -72,11 +72,11 @@ mount core.database.common.error.{
 };
 mount core.database.postgres.replication.{
     PgReplicationConfig, PgReplicationConnection,
-    connect_replication as sync_connect_replication,
+    connect_replication,
 };
 mount core.database.postgres.base_backup.{
     BaseBackupOptions, BaseBackupSession, BackupTablespace,
-    start as sync_base_backup_start,
+    start,
 };
 mount core.async.channel.{
     Sender, Receiver, OneshotSender,
@@ -181,8 +181,8 @@ public async fn connect_and_start_async(
     let cfg_owned = cfg.clone();
     let opts_owned = opts.clone();
     let init_jh = spawn_blocking(move || -> Result<BaseBackupSession, DbError> {
-        let conn = sync_connect_replication(&cfg_owned)?;
-        sync_base_backup_start(conn, &opts_owned)
+        let conn = core.database.postgres.replication.connect_replication(&cfg_owned)?;
+        core.database.postgres.base_backup.start(conn, &opts_owned)
     });
     let session = match init_jh.join().await {
         Ok(r)  => r?,
