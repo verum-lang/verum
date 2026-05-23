@@ -198,7 +198,10 @@ public static mut GLOBAL_EPOCH: EpochManager = EpochManager {
 // =============================================================================
 
 static mut GLOBAL_EPOCH_COUNTER: UInt64 = 0;
-static mut GLOBAL_WRAPAROUND_COUNT: Int = 0;
+// Stored as UInt64 to match the [E2] scalar cell path that's
+// validated for UInt64; cast to Int at the read site
+// (`wraparound_count`) below.
+static mut GLOBAL_WRAPAROUND_COUNT: UInt64 = 0;
 
 implement EpochManager {
     // =========================================================================
@@ -647,9 +650,10 @@ public fn current_epoch() -> UInt64 {
 /// Get total wraparound count.
 @inline
 public fn wraparound_count() -> Int {
-    // Read scalar shadow directly (see current_epoch above).
-    let p = unsafe { &GLOBAL_WRAPAROUND_COUNT as *const Int };
-    atomic_load_int(p, ORDERING_RELAXED)
+    // Read scalar shadow (UInt64 cell) and cast to Int.  See
+    // current_epoch above for the scalar-shadow rationale.
+    let p = unsafe { &GLOBAL_WRAPAROUND_COUNT as *const UInt64 };
+    atomic_load_u64(p, ORDERING_RELAXED) as Int
 }
 
 /// Test-only — force the global epoch counter back to a known state.
@@ -672,9 +676,9 @@ public fn reset_for_tests() {
     // `&mut GLOBAL_EPOCH.<field>` is unimplemented; see scalar-shadow
     // doc above GLOBAL_EPOCH_COUNTER).
     let ep = unsafe { &mut GLOBAL_EPOCH_COUNTER as *mut UInt64 };
-    let wp = unsafe { &mut GLOBAL_WRAPAROUND_COUNT as *mut Int };
+    let wp = unsafe { &mut GLOBAL_WRAPAROUND_COUNT as *mut UInt64 };
     atomic_store_u64(ep, 0, ORDERING_RELEASE);
-    atomic_store_int(wp, 0, ORDERING_RELEASE);
+    atomic_store_u64(wp, 0, ORDERING_RELEASE);
 }
 
 /// Test-only — force the global epoch counter forward by one increment.
