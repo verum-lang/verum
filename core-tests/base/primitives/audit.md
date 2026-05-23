@@ -168,6 +168,38 @@ intercept.  Pinned by `regression_test.vr::regression_unit_receiver_dispatch_pin
     for typechecker-resolved alias-canonical-name CallM forms.  New
     regression pin `regression_byte_alias_dispatch_through_normaliser_pinned`.
 
+### §D `<TypeName>.<Variant>.<method>()` codegen — CLOSED 2026-05-23
+
+  * Pre-fix every chained `<EnumType>.<Variant>.<method>()` shape
+    panicked with `undefined variable: <EnumType>`.  Affected
+    `LogLevel.Trace.name()`, `Ordering.Less.reverse()`,
+    `Maybe.None.is_none()`, `f"{Severity.Warn.name()}"` interpolation,
+    and the entire ord_default_comparison / log / severity test class.
+  * Root cause: the `field_writeback_target` block at
+    `crates/verum_vbc/src/codegen/expressions.rs:~8142` called
+    `compile_expr(base)` on the bare `Path(TypeName)` (e.g.
+    `Path(LogLevel)`).  `compile_simple_path` then rejected the
+    type name as undefined because user-defined sum types are NOT in
+    the `is_type_name` allowlist (which only covers stdlib well-known
+    types).  Pre-fix the only way to invoke a variant's method was via
+    let-binding (`let x = LogLevel.Trace; x.name()`) which bypassed
+    this code path.
+  * Fix: two surgical fast paths.
+      * `compile_method_call` Phase 0a — detect
+        `Field { Path(TypeName), Variant }` receiver with
+        `<TypeName>.<Variant>` resolving to a 0-arg variant ctor;
+        materialise via `MakeVariant` + emit `CallM` directly.
+      * `compile_field_access` type-name fast path — same shape but
+        without the `.method()` suffix.  Probes the function table
+        for `<TypeName>.<field>` before the existing flatten path
+        runs.
+  * Acceptance gate: leading uppercase + not a local register +
+    qualified lookup returns a variant ctor with `param_count == 0`.
+    Dodges the `is_type_name` allowlist limitation that gated
+    user-defined type names out of the fast path.
+  * New regression pin `regression_chained_type_variant_method_pinned`
+    covers `Ordering.<Variant>.reverse()` ordering identity.
+
 ### Deferred
 
   * §A residual — `saturating_add` intrinsic width propagation.  The
