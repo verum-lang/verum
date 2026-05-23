@@ -66,7 +66,7 @@ mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount encoding.hex.{encode as hex_encode};
-mount security.hash.sha256.{Sha256, digest as sha256_digest};
+mount security.hash.sha256.{Sha256, digest};
 mount security.mac.hmac.{hmac_sha256};
 
 // =============================================================================
@@ -123,7 +123,7 @@ pub fn sign_request(
     now_iso8601_basic: &Text,
 ) -> Result<SignedHeaders, Text> {
     // Step 0 — payload hash.
-    let body_hash = hex_encode(&sha256_digest(body.as_slice()));
+    let body_hash = hex_encode(&security.hash.sha256.digest(body.as_slice()));
 
     // Step 1 — canonical request.
     let canonical_uri = canonical_path(url_path);
@@ -142,7 +142,7 @@ pub fn sign_request(
     // Step 2 — string-to-sign.
     let date_8 = now_iso8601_basic.byte_substring(0, 8); // YYYYMMDD
     let credential_scope = f"{date_8}/{region}/{service}/aws4_request";
-    let canonical_request_hash = hex_encode(&sha256_digest(canonical_request.as_bytes()));
+    let canonical_request_hash = hex_encode(&security.hash.sha256.digest(canonical_request.as_bytes()));
     let string_to_sign = f"AWS4-HMAC-SHA256\n{now_iso8601_basic}\n{credential_scope}\n{canonical_request_hash}";
 
     // Step 3 — signing key.
@@ -214,7 +214,7 @@ pub fn presign(
     let signed_headers = "host".to_text();
 
     let canonical_request = f"{method.to_upper()}\n{canonical_uri}\n{canonical_query}\n{canonical_headers}\n{signed_headers}\n{body_hash}";
-    let canonical_request_hash = hex_encode(&sha256_digest(canonical_request.as_bytes()));
+    let canonical_request_hash = hex_encode(&security.hash.sha256.digest(canonical_request.as_bytes()));
 
     let string_to_sign = f"AWS4-HMAC-SHA256\n{now_iso8601_basic}\n{credential_scope}\n{canonical_request_hash}";
 

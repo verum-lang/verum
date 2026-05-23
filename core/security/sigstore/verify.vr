@@ -81,7 +81,7 @@ mount security.x509.verifier.{
 };
 mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
 mount security.ecc.ed25519.{Ed25519PublicKey, Ed25519Signature, verify as ed25519_verify};
-mount security.hash.sha256.{Sha256, digest as sha256_digest};
+mount security.hash.sha256.{Sha256, digest};
 mount security.provenance.{
     DsseEnvelope, dsse_envelope_from_json, DsseVerifyError,
 };
@@ -472,7 +472,7 @@ fn verify_envelope_in_log(
     let envelope_json = security.provenance.dsse_envelope_to_json(envelope);
     let canonical = encoding.jcs.canonicalize(&envelope_json)
         .map_err(|_| InvalidBundle("envelope canonicalisation failed".to_text()))?;
-    let envelope_hash_hex = encoding.hex.encode(&sha256_digest(&canonical));
+    let envelope_hash_hex = encoding.hex.encode(&security.hash.sha256.digest(&canonical));
 
     let mut i: Int = 0;
     while i < entries.len() {

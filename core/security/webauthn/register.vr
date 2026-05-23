@@ -64,7 +64,7 @@ mount encoding.json.{JsonValue, decode as json_decode};
 type JsonObject is Map<Text, JsonValue>;
 mount encoding.base64.{decode_url_no_pad as b64url_decode};
 mount encoding.cbor.{CborValue, decode as cbor_decode};
-mount security.hash.sha256.{Sha256, digest as sha256_digest};
+mount security.hash.sha256.{Sha256, digest};
 mount security.webauthn.types.{
     AuthenticatorAttestationResponse, AttestationObject, AttestationFormat,
     AuthenticatorData, AttestedCredentialData, ClientDataType,
@@ -147,7 +147,7 @@ pub fn verify_registration(
     check_origin(&client_data.origin, &expected.origins)?;
 
     // 2. Compute clientDataHash.
-    let client_data_hash = sha256_digest(response.client_data_json.as_slice());
+    let client_data_hash = security.hash.sha256.digest(response.client_data_json.as_slice());
 
     // 3. Decode attestationObject CBOR.
     let att_obj = parse_attestation_object(&response.attestation_object)?;

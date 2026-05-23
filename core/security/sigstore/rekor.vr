@@ -76,7 +76,7 @@ mount encoding.hex.{encode as hex_encode, decode as hex_decode};
 mount encoding.jcs.{canonicalize as jcs_canonicalize};
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
 mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
-mount security.hash.sha256.{Sha256, digest as sha256_digest};
+mount security.hash.sha256.{Sha256, digest};
 mount security.sigstore.types.{
     EntryKind, ApiVersion, EntryBody, HashedRekordBody, IntotoBody, DsseBody,
     LogEntry, SignedEntryTimestamp, InclusionProof, Digest,

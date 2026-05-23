@@ -66,7 +66,7 @@ mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.List;
 mount encoding.json.{JsonValue, JsonObject, decode as json_decode};
 mount encoding.base64.{decode_url_no_pad as b64url_decode};
-mount security.hash.sha256.{Sha256, digest as sha256_digest};
+mount security.hash.sha256.{Sha256, digest};
 mount security.ecc.ed25519.{Ed25519PublicKey, Ed25519Signature, verify as ed25519_verify};
 mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
 mount security.sig.rsa.{
@@ -178,7 +178,7 @@ pub fn verify_authentication(
     check_origin(&client_data.origin, &expected.origins)?;
 
     // 2. clientDataHash.
-    let client_data_hash = sha256_digest(response.client_data_json.as_slice());
+    let client_data_hash = security.hash.sha256.digest(response.client_data_json.as_slice());
 
     // 3. Parse authData.
     let auth_data = parse_authenticator_data(response.authenticator_data.as_slice())?;

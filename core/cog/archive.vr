@@ -60,7 +60,7 @@ module core.cog.archive;
 mount core.*;
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount collections.{List, Map};
-mount security.hash.sha256.{digest as sha256_digest};
+mount security.hash.sha256.{digest};
 mount encoding.hex.{encode as hex_encode};
 mount io.path.{Path, PathBuf};
 
@@ -234,7 +234,7 @@ public fn read_archive_bytes(bytes: &List<Byte>) -> Result<CogArchive, ArchiveEr
         i = i + 1;
     }
 
-    let sha256 = hex_encode(&sha256_digest(bytes));
+    let sha256 = hex_encode(&security.hash.sha256.digest(bytes));
     Ok(CogArchive { header, modules, module_data, sha256 })
 }
 
