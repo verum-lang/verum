@@ -17,7 +17,15 @@ module panic;
 // our own user-facing `unreachable(msg)` defined below — the
 // intrinsic is the LLVM `unreachable` UB-hint, distinct from the
 // panicking diagnostic surface.
-mount core.intrinsics.{spin_hint, unreachable as intrinsic_unreachable, catch_unwind};
+mount core.intrinsics.{spin_hint, catch_unwind};
+// `unreachable as intrinsic_unreachable` rename dropped per task #11
+// (mount-rename doesn't surface to AOT codegen).  The only call site
+// uses fully-qualified `core.intrinsics.unreachable()` instead.
+// Explicit Result/Ok/Err mounts ensure AOT codegen's catch_unwind
+// internal Result::Ok/Result::Err lookup succeeds — these are
+// implicitly in scope via prelude but the codegen's variant-tag
+// lookup needs them in the local function table.
+mount core.base.result.{Result, Ok, Err};
 
 // `write_stderr` and `exit_process` were originally mounted mid-file,
 // but the codegen-side mount processing for `panic_impl` (which calls
@@ -338,7 +346,7 @@ public unsafe fn unreachable_unchecked(_msg: Text = "") -> ! {
     // UB; we're inside an `unsafe fn` so the call is permitted,
     // and we wrap it in an explicit `unsafe { ... }` block to
     // make the contract-discharge visible at the call site.
-    unsafe { intrinsic_unreachable() }
+    unsafe { core.intrinsics.unreachable() }
 }
 
 /// Marks code as unimplemented.
