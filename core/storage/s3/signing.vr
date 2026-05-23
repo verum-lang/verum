@@ -247,7 +247,7 @@ fn percent_encode_path(path: &Text) -> Text {
         if b == b'/' {
             out = out.append("/");
         } else if is_unreserved(b) {
-            out = out.append(&Text.from_byte(b));
+            out = out.append(&Text.from_bytes(&[b]).unwrap_or("".clone()));
         } else {
             out = out.append(&f"%{b:02X}");
         }
@@ -290,7 +290,7 @@ fn percent_encode_strict(s: &Text) -> Text {
     while i < bs.len() {
         let b = bs[i];
         if is_unreserved(b) {
-            out = out.append(&Text.from_byte(b));
+            out = out.append(&Text.from_bytes(&[b]).unwrap_or("".clone()));
         } else {
             out = out.append(&f"%{b:02X}");
         }
@@ -373,7 +373,7 @@ fn collapse_whitespace(s: &Text) -> Text {
                 prev_ws = true;
             }
         } else {
-            out = out.append(&Text.from_byte(b));
+            out = out.append(&Text.from_bytes(&[b]).unwrap_or("".clone()));
             prev_ws = false;
         }
         i = i + 1;
