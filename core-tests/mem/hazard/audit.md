@@ -158,3 +158,50 @@ efficient but requires record-aware cell allocation.
 
 Tracked as task #10/§3.3.  Investigation logged in
 [[task_static_mut_record_typed_backing_2026-05-22]].
+
+## 7. Investigation 2026-05-23 — minimal-repro analysis
+
+Wrote a minimal repro (`/tmp/static_mut_hazard_shape.vr`) that
+mirrors HazardDomain's exact shape (`head: &unsafe Marker, counter:
+Int, epoch: Int` + `&self` method calling `atomic_load_int(&self.counter,
+ORDERING_RELAXED)` + static-mut record initializer).  **Works
+correctly under `verum run`** — prints `counter=0`.
+
+Then ran `hazard_stats()` directly from user code
+(`/tmp/test_hazard_stats_direct.vr`).  Got the canonical
+`NullPointerAt op=opcode 0x62 site=core.mem.hazard.hazard_stats
+pc=30`.  Tried `GLOBAL_HAZARD_DOMAIN.current_epoch()` — got
+`Stack overflow depth 16384` (recursive dispatch).
+
+**Findings:**
+
+1. The defect is NOT in the static_mut backing mechanism itself —
+   user-code static_mut records with the same shape work fine.
+
+2. The defect IS in precompile-stdlib compilation specifically.
+   `hazard.vr` was compiled at build time (Rust `cargo build`)
+   through the stdlib precompile path, which has different
+   function-resolution semantics than user-code compilation:
+   - Method-name collisions resolve to wrong target
+     (`current_epoch` resolves to the free function in
+     `core.mem.epoch` instead of the `HazardDomain.current_epoch`
+     method → infinite-recursion stack overflow).
+   - Field access `&self.thread_count` materialises as null in
+     some downstream lowering pass.
+
+3. **Real root:** task #17/#39 mount-scope-aware `lookup_function`.
+   The precompile-stdlib `lookup_function(name)` doesn't filter by
+   mount scope, so cross-module name collisions resolve
+   first-suffix-wins, often to wrong targets.
+
+The `.aot-blockers.md` cascade (Class B — bare-name signature
+collision) is the AOT-side manifestation of the same defect.
+Closing #17/#39 simultaneously closes:
+  * AOT cascade Class B (`cursor_new`, `translate`, …)
+  * hazard_stats() null-deref + current_epoch() stack overflow
+  * diagnostics' MemHeaderView.can_read 5-way collision
+  * many other "X resolves to wrong sibling" defects across stdlib
+
+Estimate: multi-day VBC codegen refactor (refactor every
+`lookup_function` call site to honour mount scope).  Out of scope
+for this session — pinned for future work.
