@@ -51,7 +51,7 @@ mount core.database.common.error.{
 mount core.database.mysql.connection.{
     MysqlConnection, MySimpleQueryResult,
     MysqlPreparedStatement, MysqlPreparedResult,
-    connect as sync_connect,
+    connect,
 };
 mount core.database.mysql.stmt_cache.{
     MysqlStmtCache, fingerprint as my_stmt_fingerprint,
@@ -232,7 +232,7 @@ implement AsyncMysqlConnection {
         let cfg = self.cancel_cfg.clone();
         let conn_id = self.connection_id;
         let jh = spawn_blocking(move || -> Result<(), DbError> {
-            let mut side = sync_connect(&cfg)?;
+            let mut side = core.database.mysql.connection.connect(&cfg)?;
             let sql = if full_session {
                 f"KILL {conn_id}"
             } else {
@@ -446,7 +446,7 @@ public async fn connect(
     let cfg_owned = cfg.clone();
     let cancel_cfg = cfg.clone();
     let conn_jh = spawn_blocking(move || -> Result<MysqlConnection, DbError> {
-        sync_connect(&cfg_owned)
+        core.database.mysql.connection.connect(&cfg_owned)
     });
     let conn = match conn_jh.join().await {
         Ok(r)  => r?,

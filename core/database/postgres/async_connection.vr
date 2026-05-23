@@ -67,7 +67,7 @@ mount core.database.common.error.{
 };
 mount core.database.postgres.connection.{
     PgConnection, PgSimpleQueryResult, PgPreparedStatement,
-    connect as sync_connect,
+    connect,
 };
 mount core.database.postgres.config.PgConfig;
 mount core.database.postgres.pg_stmt_cache.{
@@ -499,7 +499,7 @@ public async fn connect(
     // blocking pool thread so the caller doesn't block.
     let cfg_owned = cfg.clone();
     let conn_jh = spawn_blocking(move || -> Result<PgConnection, DbError> {
-        sync_connect(&cfg_owned)
+        core.database.postgres.connection.connect(&cfg_owned)
     });
     let conn = match conn_jh.join().await {
         Ok(r)  => r?,
