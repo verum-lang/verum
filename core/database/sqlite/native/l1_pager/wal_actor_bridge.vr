@@ -44,8 +44,10 @@ mount core.database.sqlite.native.l1_pager.wal_pager.{
     WalPager,
     wal_pager_read, wal_pager_write, wal_pager_commit, wal_pager_checkpoint,
     CheckpointMode, CheckpointResult,
-    Passive as WPassive, Full as WFull, Restart as WRestart, Truncate as WTruncate,
 };
+// `mount X as Y` variant rename-aliases don't surface to AOT codegen
+// (task #11).  Use fully-qualified `CheckpointMode.{Passive,Full,
+// Restart,Truncate}` at the match arms below.
 
 // -----------------------------------------------------------------------------
 // WalPagerActor — owns a WalPager + serves PagerRequest
@@ -128,10 +130,10 @@ public fn wal_pager_apply(
 
 fn translate_mode(m: PagerCheckpointMode) -> CheckpointMode {
     match m {
-        Passive  => WPassive,
-        Full     => WFull,
-        Restart  => WRestart,
-        Truncate => WTruncate,
+        Passive  => CheckpointMode.Passive,
+        Full     => CheckpointMode.Full,
+        Restart  => CheckpointMode.Restart,
+        Truncate => CheckpointMode.Truncate,
     }
 }
 
