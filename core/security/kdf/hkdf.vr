@@ -66,9 +66,8 @@ mount core.security.mac.hmac.{
     HmacSha384, hmac_sha384,
     HmacSha512, hmac_sha512,
 };
-mount core.security.hash.sha256.OUTPUT_SIZE as SHA256_LEN;
-mount core.security.hash.sha384.OUTPUT_SIZE as SHA384_LEN;
-mount core.security.hash.sha512.OUTPUT_SIZE as SHA512_LEN;
+// SHA{256,384,512}_LEN const-rename mounts dropped — task #11.
+// Call sites use fully-qualified `core.security.hash.sha{256,384,512}.OUTPUT_SIZE`.
 
 // =============================================================================
 // Common errors
@@ -138,7 +137,7 @@ public fn hkdf_expand_sha256(
     length: Int,
     out: &mut List<Byte>,
 ) -> Result<(), HkdfError> {
-    if prk.len() < SHA256_LEN {
+    if prk.len() < core.security.hash.sha256.OUTPUT_SIZE {
         return Err(HkdfError.InvalidPrk { len: prk.len() });
     }
     if length > MAX_EXPAND_OUTPUT_256 {
@@ -146,7 +145,7 @@ public fn hkdf_expand_sha256(
     }
     if length <= 0 { return Ok(()); }
 
-    let n_blocks = (length + SHA256_LEN - 1) / SHA256_LEN;
+    let n_blocks = (length + core.security.hash.sha256.OUTPUT_SIZE - 1) / core.security.hash.sha256.OUTPUT_SIZE;
     let mut t_prev: [Byte; 32] = [0; 32];
     let mut produced = 0;
 
@@ -159,12 +158,12 @@ public fn hkdf_expand_sha256(
         mac.update(&ctr);
         let t_i = mac.finalize();
 
-        let take = if produced + SHA256_LEN > length { length - produced } else { SHA256_LEN };
+        let take = if produced + core.security.hash.sha256.OUTPUT_SIZE > length { length - produced } else { core.security.hash.sha256.OUTPUT_SIZE };
         out.extend_from_slice(&t_i[..take]);
         produced = produced + take;
 
         let mut k = 0;
-        while k < SHA256_LEN { t_prev[k] = t_i[k]; k = k + 1; }
+        while k < core.security.hash.sha256.OUTPUT_SIZE { t_prev[k] = t_i[k]; k = k + 1; }
         i = i + 1;
     }
     Ok(())
@@ -203,7 +202,7 @@ public fn hkdf_expand_sha384(
     length: Int,
     out: &mut List<Byte>,
 ) -> Result<(), HkdfError> {
-    if prk.len() < SHA384_LEN {
+    if prk.len() < core.security.hash.sha384.OUTPUT_SIZE {
         return Err(HkdfError.InvalidPrk { len: prk.len() });
     }
     if length > MAX_EXPAND_OUTPUT_384 {
@@ -211,7 +210,7 @@ public fn hkdf_expand_sha384(
     }
     if length <= 0 { return Ok(()); }
 
-    let n_blocks = (length + SHA384_LEN - 1) / SHA384_LEN;
+    let n_blocks = (length + core.security.hash.sha384.OUTPUT_SIZE - 1) / core.security.hash.sha384.OUTPUT_SIZE;
     let mut t_prev: [Byte; 48] = [0; 48];
     let mut produced = 0;
 
@@ -224,12 +223,12 @@ public fn hkdf_expand_sha384(
         mac.update(&ctr);
         let t_i = mac.finalize();
 
-        let take = if produced + SHA384_LEN > length { length - produced } else { SHA384_LEN };
+        let take = if produced + core.security.hash.sha384.OUTPUT_SIZE > length { length - produced } else { core.security.hash.sha384.OUTPUT_SIZE };
         out.extend_from_slice(&t_i[..take]);
         produced = produced + take;
 
         let mut k = 0;
-        while k < SHA384_LEN { t_prev[k] = t_i[k]; k = k + 1; }
+        while k < core.security.hash.sha384.OUTPUT_SIZE { t_prev[k] = t_i[k]; k = k + 1; }
         i = i + 1;
     }
     Ok(())
@@ -267,7 +266,7 @@ public fn hkdf_expand_sha512(
     length: Int,
     out: &mut List<Byte>,
 ) -> Result<(), HkdfError> {
-    if prk.len() < SHA512_LEN {
+    if prk.len() < core.security.hash.sha512.OUTPUT_SIZE {
         return Err(HkdfError.InvalidPrk { len: prk.len() });
     }
     if length > MAX_EXPAND_OUTPUT_512 {
@@ -275,7 +274,7 @@ public fn hkdf_expand_sha512(
     }
     if length <= 0 { return Ok(()); }
 
-    let n_blocks = (length + SHA512_LEN - 1) / SHA512_LEN;
+    let n_blocks = (length + core.security.hash.sha512.OUTPUT_SIZE - 1) / core.security.hash.sha512.OUTPUT_SIZE;
     let mut t_prev: [Byte; 64] = [0; 64];
     let mut produced = 0;
 
@@ -288,12 +287,12 @@ public fn hkdf_expand_sha512(
         mac.update(&ctr);
         let t_i = mac.finalize();
 
-        let take = if produced + SHA512_LEN > length { length - produced } else { SHA512_LEN };
+        let take = if produced + core.security.hash.sha512.OUTPUT_SIZE > length { length - produced } else { core.security.hash.sha512.OUTPUT_SIZE };
         out.extend_from_slice(&t_i[..take]);
         produced = produced + take;
 
         let mut k = 0;
-        while k < SHA512_LEN { t_prev[k] = t_i[k]; k = k + 1; }
+        while k < core.security.hash.sha512.OUTPUT_SIZE { t_prev[k] = t_i[k]; k = k + 1; }
         i = i + 1;
     }
     Ok(())
