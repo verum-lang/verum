@@ -2202,8 +2202,8 @@ implement<K: Hash + Eq, V> FromIterator<(K, V)> for Map<K, V> {
         let mut it = iter;
         loop {
             match it.next() {
-                None => break,
-                Some(pair) => {
+                Maybe.None => break,
+                Maybe.Some(pair) => {
                     // Cast pair to tuple type explicitly
                     let tuple: (K, V) = pair;
                     map.insert(tuple.0, tuple.1);
@@ -2223,8 +2223,8 @@ implement<K: Hash + Eq, V> Extend<(K, V)> for Map<K, V> {
         let mut it = iter;
         loop {
             match it.next() {
-                None => break,
-                Some(pair) => {
+                Maybe.None => break,
+                Maybe.Some(pair) => {
                     // Cast pair to tuple type explicitly
                     let tuple: (K, V) = pair;
                     self.insert(tuple.0, tuple.1);
