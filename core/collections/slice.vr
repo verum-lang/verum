@@ -224,13 +224,13 @@ implement<T> [T] {
     {
         for i in range(0, self.len()) {
             match self.get(i) {
-                Some(item) => {
-                    if *item == *value { return Some(i); }
+                Maybe.Some(item) => {
+                    if *item == *value { return Maybe.Some(i); }
                 },
-                None => return None,
+                Maybe.None => return Maybe.None,
             }
         }
-        None
+        Maybe.None
     }
 
     /// Find last index of element matching `value`.
@@ -241,13 +241,13 @@ implement<T> [T] {
         while i > 0 {
             i = i - 1;
             match self.get(i) {
-                Some(item) => {
-                    if *item == *value { return Some(i); }
+                Maybe.Some(item) => {
+                    if *item == *value { return Maybe.Some(i); }
                 },
-                None => return None,
+                Maybe.None => return Maybe.None,
             }
         }
-        None
+        Maybe.None
     }
 
     /// Find first element matching predicate.
