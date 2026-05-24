@@ -1,0 +1,228 @@
+// =============================================================================
+// core-tests/tracing/resource/unit_test.vr
+// =============================================================================
+//
+// `core/tracing/resource.vr` defines `Resource` — the OpenTelemetry
+// "entity producing telemetry" descriptor (typically service.name +
+// service.version + container/process/pod attributes).
+//
+// Surface:
+//   * `Resource.empty()` — empty attribute set
+//   * `Resource.service(name, version)` — common-case constructor
+//   * `Resource.from_attributes(attrs)`
+//   * `Resource.with_schema_url(url)` builder
+//   * `Resource.with_attribute(k, v)` builder
+//   * `Resource.merge(&other)` — other wins on conflict
+//   * accessors: attributes() / schema_url() / clone()
+// =============================================================================
+
+mount core.tracing.resource.{Resource};
+mount core.tracing.attribute.{AttributeValue, AttributeSet};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Resource.empty
+// =============================================================================
+
+@test
+fn test_empty_has_no_attributes() {
+    let r = Resource.empty();
+    assert(r.attributes().is_empty());
+}
+
+@test
+fn test_empty_has_no_schema_url() {
+    let r = Resource.empty();
+    match r.schema_url() {
+        Maybe.Some(_) => panic("expected None"),
+        Maybe.None => assert(true),
+    }
+}
+
+// =============================================================================
+// Section 2: Resource.service
+// =============================================================================
+
+@test
+fn test_service_constructor_populates_attributes() {
+    let name = "my-service".clone();
+    let ver = "1.0.0".clone();
+    let r = Resource.service(&name, &ver);
+    // Two attributes: service.name + service.version.
+    assert_eq(r.attributes().len(), 2);
+}
+
+@test
+fn test_service_constructor_no_schema_url() {
+    let name = "my-service".clone();
+    let ver = "1.0.0".clone();
+    let r = Resource.service(&name, &ver);
+    match r.schema_url() {
+        Maybe.Some(_) => panic("service ctor should not set schema_url"),
+        Maybe.None => assert(true),
+    }
+}
+
+@test
+fn test_service_attribute_keys_present() {
+    let name = "svc".clone();
+    let ver = "v1".clone();
+    let r = Resource.service(&name, &ver);
+    let k1 = "service.name".clone();
+    let k2 = "service.version".clone();
+    let attrs = r.attributes();
+    match attrs.get(&k1) {
+        Maybe.Some(_) => assert(true),
+        Maybe.None => panic("service.name attribute missing"),
+    }
+    match attrs.get(&k2) {
+        Maybe.Some(_) => assert(true),
+        Maybe.None => panic("service.version attribute missing"),
+    }
+}
+
+// =============================================================================
+// Section 3: Resource.from_attributes
+// =============================================================================
+
+@test
+fn test_from_attributes_empty() {
+    let attrs = AttributeSet.new();
+    let r = Resource.from_attributes(attrs);
+    assert(r.attributes().is_empty());
+}
+
+@test
+fn test_from_attributes_with_one_entry() {
+    let mut attrs = AttributeSet.new();
+    attrs.set("env".clone(), AttributeValue.Text("prod".clone()));
+    let r = Resource.from_attributes(attrs);
+    assert_eq(r.attributes().len(), 1);
+}
+
+@test
+fn test_from_attributes_no_schema_url() {
+    let attrs = AttributeSet.new();
+    let r = Resource.from_attributes(attrs);
+    match r.schema_url() {
+        Maybe.Some(_) => panic("expected None"),
+        Maybe.None => assert(true),
+    }
+}
+
+// =============================================================================
+// Section 4: Resource.with_schema_url builder
+// =============================================================================
+
+@test
+fn test_with_schema_url_sets_schema() {
+    let r = Resource.empty().with_schema_url("https://opentelemetry.io/schemas/1.0".clone());
+    match r.schema_url() {
+        Maybe.Some(u) => assert_eq(*u, "https://opentelemetry.io/schemas/1.0"),
+        Maybe.None => panic("expected Some(url)"),
+    }
+}
+
+@test
+fn test_with_schema_url_preserves_attributes() {
+    let mut attrs = AttributeSet.new();
+    attrs.set("k".clone(), AttributeValue.Text("v".clone()));
+    let r = Resource.from_attributes(attrs).with_schema_url("u".clone());
+    assert_eq(r.attributes().len(), 1);
+}
+
+// =============================================================================
+// Section 5: Resource.with_attribute builder
+// =============================================================================
+
+@test
+fn test_with_attribute_adds_entry() {
+    let r = Resource.empty().with_attribute(
+        "host".clone(),
+        AttributeValue.Text("server-1".clone()),
+    );
+    assert_eq(r.attributes().len(), 1);
+}
+
+@test
+fn test_with_attribute_chain_two_entries() {
+    let r = Resource.empty()
+        .with_attribute("host".clone(), AttributeValue.Text("h1".clone()))
+        .with_attribute("region".clone(), AttributeValue.Text("us-west".clone()));
+    assert_eq(r.attributes().len(), 2);
+}
+
+// =============================================================================
+// Section 6: Resource.merge — other wins on conflict
+// =============================================================================
+
+@test
+fn test_merge_empty_with_empty_is_empty() {
+    let a = Resource.empty();
+    let b = Resource.empty();
+    let m = a.merge(&b);
+    assert(m.attributes().is_empty());
+}
+
+@test
+fn test_merge_empty_with_nonempty_takes_nonempty() {
+    let a = Resource.empty();
+    let b = Resource.empty().with_attribute(
+        "k".clone(), AttributeValue.Text("v".clone()),
+    );
+    let m = a.merge(&b);
+    assert_eq(m.attributes().len(), 1);
+}
+
+@test
+fn test_merge_nonempty_with_empty_keeps_self() {
+    let a = Resource.empty().with_attribute(
+        "k".clone(), AttributeValue.Text("v".clone()),
+    );
+    let b = Resource.empty();
+    let m = a.merge(&b);
+    assert_eq(m.attributes().len(), 1);
+}
+
+@test
+fn test_merge_two_disjoint_combines() {
+    let a = Resource.empty().with_attribute(
+        "a".clone(), AttributeValue.Int(1),
+    );
+    let b = Resource.empty().with_attribute(
+        "b".clone(), AttributeValue.Int(2),
+    );
+    let m = a.merge(&b);
+    assert_eq(m.attributes().len(), 2);
+}
+
+// =============================================================================
+// Section 7: Resource.clone preserves attributes + schema
+// =============================================================================
+
+@test
+fn test_clone_empty_is_empty() {
+    let r = Resource.empty();
+    let c = r.clone();
+    assert(c.attributes().is_empty());
+}
+
+@test
+fn test_clone_preserves_attribute_count() {
+    let r = Resource.empty()
+        .with_attribute("a".clone(), AttributeValue.Int(1))
+        .with_attribute("b".clone(), AttributeValue.Int(2))
+        .with_attribute("c".clone(), AttributeValue.Int(3));
+    let c = r.clone();
+    assert_eq(c.attributes().len(), 3);
+}
+
+@test
+fn test_clone_preserves_schema_url() {
+    let r = Resource.empty().with_schema_url("schema-v1".clone());
+    let c = r.clone();
+    match c.schema_url() {
+        Maybe.Some(u) => assert_eq(*u, "schema-v1"),
+        Maybe.None => panic("clone lost schema_url"),
+    }
+}
