@@ -71,7 +71,7 @@ mount core.database.postgres.connection.{
 };
 mount core.database.postgres.config.PgConfig;
 mount core.database.postgres.pg_stmt_cache.{
-    PgStmtCache, fingerprint as pg_stmt_fingerprint,
+    PgStmtCache, fingerprint,
 };
 mount core.async.channel.{
     Sender, Receiver, OneshotSender, OneshotReceiver,
@@ -629,7 +629,7 @@ fn run_actor(mut conn: PgConnection, mut rx: Receiver<PgRequest>) {
                 run_copy_out_subloop(&mut conn, &sql, chunk_tx, ack);
             }
             ReqPrepare { sql, reply } => {
-                let fp = pg_stmt_fingerprint(&sql);
+                let fp = core.database.postgres.pg_stmt_cache.fingerprint(&sql);
                 let r = match cache.lookup(fp) {
                     Some(cached) => Ok(cached),
                     None => {
@@ -660,7 +660,7 @@ fn run_actor(mut conn: PgConnection, mut rx: Receiver<PgRequest>) {
                 // Drop the cache slot so a subsequent `prepare(same sql)`
                 // re-prepares cleanly. Wire-level Close still goes
                 // through.
-                let fp = pg_stmt_fingerprint(&stmt.sql);
+                let fp = core.database.postgres.pg_stmt_cache.fingerprint(&stmt.sql);
                 let _ = cache.invalidate(fp);
                 let r = conn.close_prepared(&stmt);
                 let _ = reply.send(r);
