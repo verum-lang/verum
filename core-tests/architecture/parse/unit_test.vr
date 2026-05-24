@@ -1,0 +1,201 @@
+// =============================================================================
+// core-tests/architecture/parse/unit_test.vr
+// =============================================================================
+//
+// `core/architecture/parse.vr` — ATS-V @arch_module(...) parser surface.
+//
+// Surface:
+//   * ArchParseError 5-variant (UnknownField / InvalidValue /
+//     MissingRequired / UnknownVariant / NotAnArchModuleAttribute)
+//   * arch_parse_error_tag stable diagnostic tag
+//   * arch_module_canonical_fields 13-field roster
+//   * arch_module_field_count_invariant pin
+// =============================================================================
+
+mount core.architecture.parse.{
+    ArchParseError, arch_parse_error_tag,
+    arch_module_canonical_fields, arch_module_field_count_invariant,
+};
+
+// =============================================================================
+// Section 1: ArchParseError 5-variant
+// =============================================================================
+
+@test
+fn test_arch_parse_error_unknown_field() {
+    let e: ArchParseError = ArchParseError.UnknownField {
+        name:       Text.from("bogus"),
+        suggestion: Maybe.None,
+    };
+    assert(e is ArchParseError.UnknownField);
+}
+
+@test
+fn test_arch_parse_error_unknown_field_with_suggestion() {
+    let e: ArchParseError = ArchParseError.UnknownField {
+        name:       Text.from("expose"),
+        suggestion: Maybe.Some(Text.from("exposes")),
+    };
+    assert(e is ArchParseError.UnknownField);
+}
+
+@test
+fn test_arch_parse_error_invalid_value() {
+    let e: ArchParseError = ArchParseError.InvalidValue {
+        field:    Text.from("at_tier"),
+        expected: Text.from("Tier variant"),
+    };
+    assert(e is ArchParseError.InvalidValue);
+}
+
+@test
+fn test_arch_parse_error_missing_required() {
+    let e: ArchParseError = ArchParseError.MissingRequired {
+        field: Text.from("foundation"),
+    };
+    assert(e is ArchParseError.MissingRequired);
+}
+
+@test
+fn test_arch_parse_error_unknown_variant() {
+    let e: ArchParseError = ArchParseError.UnknownVariant {
+        kind:  Text.from("ResourceTag"),
+        value: Text.from("BogusTag"),
+    };
+    assert(e is ArchParseError.UnknownVariant);
+}
+
+@test
+fn test_arch_parse_error_not_an_arch_module_attribute() {
+    let e: ArchParseError = ArchParseError.NotAnArchModuleAttribute;
+    assert(e is ArchParseError.NotAnArchModuleAttribute);
+}
+
+@test
+fn test_arch_parse_error_variants_pairwise_disjoint() {
+    let a: ArchParseError = ArchParseError.UnknownField { name: Text.from("x"), suggestion: Maybe.None };
+    let b: ArchParseError = ArchParseError.InvalidValue { field: Text.from("y"), expected: Text.from("T") };
+    let c: ArchParseError = ArchParseError.NotAnArchModuleAttribute;
+    assert(a is ArchParseError.UnknownField && !(a is ArchParseError.InvalidValue));
+    assert(b is ArchParseError.InvalidValue && !(b is ArchParseError.NotAnArchModuleAttribute));
+    assert(c is ArchParseError.NotAnArchModuleAttribute && !(c is ArchParseError.UnknownField));
+}
+
+// =============================================================================
+// Section 2: arch_parse_error_tag — stable diagnostic strings
+// =============================================================================
+
+@test
+fn test_tag_unknown_field() {
+    let e = ArchParseError.UnknownField { name: Text.from("x"), suggestion: Maybe.None };
+    assert(arch_parse_error_tag(e) == Text.from("unknown_field"));
+}
+
+@test
+fn test_tag_invalid_value() {
+    let e = ArchParseError.InvalidValue { field: Text.from("x"), expected: Text.from("T") };
+    assert(arch_parse_error_tag(e) == Text.from("invalid_value"));
+}
+
+@test
+fn test_tag_missing_required() {
+    let e = ArchParseError.MissingRequired { field: Text.from("x") };
+    assert(arch_parse_error_tag(e) == Text.from("missing_required"));
+}
+
+@test
+fn test_tag_unknown_variant() {
+    let e = ArchParseError.UnknownVariant { kind: Text.from("K"), value: Text.from("V") };
+    assert(arch_parse_error_tag(e) == Text.from("unknown_variant"));
+}
+
+@test
+fn test_tag_not_an_arch_module_attribute() {
+    let e = ArchParseError.NotAnArchModuleAttribute;
+    assert(arch_parse_error_tag(e) == Text.from("not_an_arch_module_attribute"));
+}
+
+@test
+fn test_tags_all_distinct() {
+    let tags: List<Text> = [
+        arch_parse_error_tag(ArchParseError.UnknownField { name: Text.from("a"), suggestion: Maybe.None }),
+        arch_parse_error_tag(ArchParseError.InvalidValue { field: Text.from("a"), expected: Text.from("T") }),
+        arch_parse_error_tag(ArchParseError.MissingRequired { field: Text.from("a") }),
+        arch_parse_error_tag(ArchParseError.UnknownVariant { kind: Text.from("K"), value: Text.from("V") }),
+        arch_parse_error_tag(ArchParseError.NotAnArchModuleAttribute),
+    ];
+    let mut i: Int = 0;
+    while i < tags.len() {
+        let mut j: Int = i + 1;
+        while j < tags.len() {
+            assert(tags[i] != tags[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 3: canonical field roster
+// =============================================================================
+
+@test
+fn test_canonical_fields_count_is_13() {
+    assert(arch_module_canonical_fields().len() == 13);
+}
+
+@test
+fn test_canonical_fields_includes_exposes() {
+    let fields = arch_module_canonical_fields();
+    let mut found = false;
+    let mut i: Int = 0;
+    while i < fields.len() {
+        if fields[i] == Text.from("exposes") { found = true; }
+        i = i + 1;
+    }
+    assert(found);
+}
+
+@test
+fn test_canonical_fields_includes_foundation() {
+    let fields = arch_module_canonical_fields();
+    let mut found = false;
+    let mut i: Int = 0;
+    while i < fields.len() {
+        if fields[i] == Text.from("foundation") { found = true; }
+        i = i + 1;
+    }
+    assert(found);
+}
+
+@test
+fn test_canonical_fields_includes_strict() {
+    let fields = arch_module_canonical_fields();
+    let mut found = false;
+    let mut i: Int = 0;
+    while i < fields.len() {
+        if fields[i] == Text.from("strict") { found = true; }
+        i = i + 1;
+    }
+    assert(found);
+}
+
+@test
+fn test_canonical_fields_all_distinct() {
+    let fields = arch_module_canonical_fields();
+    let mut i: Int = 0;
+    while i < fields.len() {
+        let mut j: Int = i + 1;
+        while j < fields.len() {
+            assert(fields[i] != fields[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn test_arch_module_field_count_invariant_holds() {
+    // Pin: exactly 13 canonical fields.
+    assert(arch_module_field_count_invariant());
+}
