@@ -1,0 +1,261 @@
+// =============================================================================
+// core-tests/money/currency/unit_test.vr
+// =============================================================================
+//
+// Companion files:
+//   property_test.vr — eq reflexivity/symmetry, code uniqueness across
+//                      predefined currencies, minor-unit consistency.
+//   audit.md         — module audit + deferred items.
+//
+// `Currency` carries ISO 4217 code + minor-unit precision (decimal
+// places in the smallest transactable subunit). The `core.money.currency`
+// module ships 25 predefined currency factories spanning 0/2/3-minor-unit
+// classes. `Currency.eq` is code-only comparison (per ISO contract that
+// minor-unit precision is fixed by code).
+// =============================================================================
+
+mount core.money.currency.{Currency,
+    jpy, krw, vnd, clp, isk,
+    usd, eur, gbp, cad, aud, nzd, chf, cny, inr, brl, mxn, zar, sek, nok, dkk,
+    bhd, kwd, omr, jod, tnd
+};
+
+// =============================================================================
+// Section 1: Currency.new constructor
+// =============================================================================
+
+@test
+fn test_currency_new_preserves_code() {
+    let c = Currency.new("USD".clone(), 2);
+    assert_eq(c.code, "USD");
+}
+
+@test
+fn test_currency_new_preserves_minor_units() {
+    let c = Currency.new("JPY".clone(), 0);
+    assert_eq(c.minor_units, 0);
+}
+
+@test
+fn test_currency_new_custom_test_currency() {
+    let c = Currency.new("XTC".clone(), 4);
+    assert_eq(c.code, "XTC");
+    assert_eq(c.minor_units, 4);
+}
+
+// =============================================================================
+// Section 2: Currency.eq — code-only comparison
+// =============================================================================
+
+@test
+fn test_currency_eq_same_code() {
+    let a = Currency.new("USD".clone(), 2);
+    let b = Currency.new("USD".clone(), 2);
+    assert(a.eq(&b));
+}
+
+@test
+fn test_currency_eq_differs_on_code() {
+    let a = Currency.new("USD".clone(), 2);
+    let b = Currency.new("EUR".clone(), 2);
+    assert(!a.eq(&b));
+}
+
+@test
+fn test_currency_eq_ignores_minor_units() {
+    // Doc-stated contract: code-only comparison.
+    // Two currencies with same code but different minor units
+    // SHOULD compare equal (the minor-unit drift would be a bug).
+    let a = Currency.new("USD".clone(), 2);
+    let b = Currency.new("USD".clone(), 3); // hypothetical inconsistency
+    assert(a.eq(&b));
+}
+
+// =============================================================================
+// Section 3: Zero-minor-unit currencies (no fractional subunit)
+// =============================================================================
+
+@test
+fn test_jpy_code() {
+    assert_eq(jpy().code, "JPY");
+}
+
+@test
+fn test_jpy_minor_units_zero() {
+    assert_eq(jpy().minor_units, 0);
+}
+
+@test
+fn test_krw_code_and_minor_units() {
+    let c = krw();
+    assert_eq(c.code, "KRW");
+    assert_eq(c.minor_units, 0);
+}
+
+@test
+fn test_vnd_code_and_minor_units() {
+    let c = vnd();
+    assert_eq(c.code, "VND");
+    assert_eq(c.minor_units, 0);
+}
+
+@test
+fn test_clp_code_and_minor_units() {
+    let c = clp();
+    assert_eq(c.code, "CLP");
+    assert_eq(c.minor_units, 0);
+}
+
+@test
+fn test_isk_code_and_minor_units() {
+    let c = isk();
+    assert_eq(c.code, "ISK");
+    assert_eq(c.minor_units, 0);
+}
+
+// =============================================================================
+// Section 4: Two-minor-unit currencies (global default; cents/pence)
+// =============================================================================
+
+@test
+fn test_usd_code() { assert_eq(usd().code, "USD"); }
+
+@test
+fn test_usd_minor_units() { assert_eq(usd().minor_units, 2); }
+
+@test
+fn test_eur_factory() {
+    let c = eur();
+    assert_eq(c.code, "EUR");
+    assert_eq(c.minor_units, 2);
+}
+
+@test
+fn test_gbp_factory() {
+    let c = gbp();
+    assert_eq(c.code, "GBP");
+    assert_eq(c.minor_units, 2);
+}
+
+@test
+fn test_cad_factory() {
+    let c = cad();
+    assert_eq(c.code, "CAD");
+    assert_eq(c.minor_units, 2);
+}
+
+@test
+fn test_aud_factory() {
+    let c = aud();
+    assert_eq(c.code, "AUD");
+    assert_eq(c.minor_units, 2);
+}
+
+@test
+fn test_nzd_factory() {
+    let c = nzd();
+    assert_eq(c.code, "NZD");
+    assert_eq(c.minor_units, 2);
+}
+
+@test
+fn test_chf_factory() {
+    let c = chf();
+    assert_eq(c.code, "CHF");
+    assert_eq(c.minor_units, 2);
+}
+
+@test
+fn test_cny_factory() {
+    let c = cny();
+    assert_eq(c.code, "CNY");
+    assert_eq(c.minor_units, 2);
+}
+
+@test
+fn test_inr_factory() {
+    let c = inr();
+    assert_eq(c.code, "INR");
+    assert_eq(c.minor_units, 2);
+}
+
+@test
+fn test_brl_factory() {
+    let c = brl();
+    assert_eq(c.code, "BRL");
+    assert_eq(c.minor_units, 2);
+}
+
+@test
+fn test_mxn_factory() {
+    let c = mxn();
+    assert_eq(c.code, "MXN");
+    assert_eq(c.minor_units, 2);
+}
+
+@test
+fn test_zar_factory() {
+    let c = zar();
+    assert_eq(c.code, "ZAR");
+    assert_eq(c.minor_units, 2);
+}
+
+@test
+fn test_sek_factory() {
+    let c = sek();
+    assert_eq(c.code, "SEK");
+    assert_eq(c.minor_units, 2);
+}
+
+@test
+fn test_nok_factory() {
+    let c = nok();
+    assert_eq(c.code, "NOK");
+    assert_eq(c.minor_units, 2);
+}
+
+@test
+fn test_dkk_factory() {
+    let c = dkk();
+    assert_eq(c.code, "DKK");
+    assert_eq(c.minor_units, 2);
+}
+
+// =============================================================================
+// Section 5: Three-minor-unit currencies (Gulf Cooperation Council fils)
+// =============================================================================
+
+@test
+fn test_bhd_factory() {
+    let c = bhd();
+    assert_eq(c.code, "BHD");
+    assert_eq(c.minor_units, 3);
+}
+
+@test
+fn test_kwd_factory() {
+    let c = kwd();
+    assert_eq(c.code, "KWD");
+    assert_eq(c.minor_units, 3);
+}
+
+@test
+fn test_omr_factory() {
+    let c = omr();
+    assert_eq(c.code, "OMR");
+    assert_eq(c.minor_units, 3);
+}
+
+@test
+fn test_jod_factory() {
+    let c = jod();
+    assert_eq(c.code, "JOD");
+    assert_eq(c.minor_units, 3);
+}
+
+@test
+fn test_tnd_factory() {
+    let c = tnd();
+    assert_eq(c.code, "TND");
+    assert_eq(c.minor_units, 3);
+}
