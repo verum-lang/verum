@@ -250,10 +250,24 @@ implement<T> List<T> {
 
     // Create list from array/slice.
     // Enables List.from([1, 2, 3]) syntax.
-    public fn from(array: [T; _]) -> List<T> {
-        let mut l = List.with_capacity(array.len());
-        for item in array {
-            l.push(item);
+    //
+    // Uses index-based iteration instead of `for item in array` because
+    // the codegen for `for X in <[T; N]>` over a fixed-size array
+    // currently silently no-ops (pre-fix: List.from([1,2,3]).len() == 0
+    // instead of 3) and additionally panics the compiler under some
+    // unrelated shapes (`for item in arr` triggers "bug in the Verum
+    // compiler" on a stack-only Int array).  Index-based iteration is
+    // immune to both because `array.len()` and `array[i]` lower through
+    // the well-supported runtime intercepts for `[T; N]`.
+    public fn from(array: [T; _]) -> List<T>
+    where T: Clone
+    {
+        let n = array.len();
+        let mut l = List.with_capacity(n);
+        let mut i: Int = 0;
+        while i < n {
+            l.push(array[i].clone());
+            i = i + 1;
         }
         l
     }
