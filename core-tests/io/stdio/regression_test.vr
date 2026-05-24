@@ -1,0 +1,50 @@
+// =============================================================================
+// core-tests/io/stdio/regression_test.vr
+// =============================================================================
+//
+// Most stdio surface is gated by #io-1 (bare-name method dispatch
+// collision); the print/println/eprint/eprintln/read_line functions
+// internally call sys_read / sys_write which collide with method names.
+// =============================================================================
+
+mount core.io.stdio.{print, println, eprint, eprintln};
+mount core.io.protocols.{StreamError, IoErrorKind};
+
+// =============================================================================
+// §A — print / println / eprint / eprintln internally call sys_write
+//
+// These call sys_write via the per-platform alias. The bare-name shadow
+// can collide with downstream method dispatch, but the print fns themselves
+// are designed around it and should work. Pinned here to detect regression.
+// =============================================================================
+
+@test
+fn regression_print_no_panic() {
+    // Should write to stdout without panicking. Side effect not asserted.
+    print(&Text.from(""));
+}
+
+@test
+fn regression_println_no_panic() {
+    println(&Text.from(""));
+}
+
+@test
+fn regression_eprint_no_panic() {
+    eprint(&Text.from(""));
+}
+
+@test
+fn regression_eprintln_no_panic() {
+    eprintln(&Text.from(""));
+}
+
+// =============================================================================
+// §B — Stdin read_line surface gated by #io-1
+// =============================================================================
+//
+// `Stdin.read_line` calls `sys_read(fd, &mut buf)` which collides with
+// the bare-name `read`. Gated until #io-1 closes. Cannot be tested
+// without a live stdin source anyway; pinned for documentation.
+
+fn main() {}
