@@ -702,6 +702,13 @@ impl Serializer {
             || !module.ffi_layouts.is_empty();
         let has_dependencies = !module.dependencies.is_empty();
         let has_external_funcs = !module.external_function_names.is_empty();
+        // Task #11 Phase 3: mount_aliases trailing record gates
+        // extensions section emission too — otherwise a module
+        // whose ONLY non-default extension is the alias table
+        // (typical for selectively-mount-rename stdlib modules)
+        // would skip serialize_extensions entirely and lose the
+        // alias data at the archive boundary.
+        let has_mount_aliases = !module.mount_aliases.is_empty();
 
         if !has_shapes
             && !has_device_hints
@@ -711,6 +718,7 @@ impl Serializer {
             && !has_ffi
             && !has_dependencies
             && !has_external_funcs
+            && !has_mount_aliases
         {
             // No extensions, return zeros
             return Ok((0, 0, VbcFlags::empty()));

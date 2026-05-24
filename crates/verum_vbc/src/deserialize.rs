@@ -1607,6 +1607,53 @@ mod tests {
  assert!(matches!(result, Err(VbcError::InvalidMagic(_))));
  }
 
+ /// **Task #11 Phase 3 drift-pin**: the trailing `mount_aliases`
+ /// record in the extensions region must round-trip through
+ /// serialize → deserialize.  Pre-fix the field existed in the
+ /// `VbcModule` struct (Phase 1) but the serializer didn't write it
+ /// and the deserializer didn't read it — every alias entry silently
+ /// vanished at the archive boundary, defeating Phase 4's loader-side
+ /// replay.
+ #[test]
+ fn test_roundtrip_mount_aliases() {
+ use crate::module::FunctionId;
+
+ let mut module = VbcModule::new("test_mount_aliases".to_string());
+ let alias_a = module.intern_string("alias_a");
+ let alias_b = module.intern_string("renamed_b");
+ module.mount_aliases.push((alias_a, FunctionId(101)));
+ module.mount_aliases.push((alias_b, FunctionId(202)));
+
+ let bytes = serialize_module(&module).unwrap();
+ let loaded = deserialize_module(&bytes).unwrap();
+
+ assert_eq!(loaded.mount_aliases.len(), 2);
+ assert_eq!(loaded.mount_aliases[0].1, FunctionId(101));
+ assert_eq!(loaded.mount_aliases[1].1, FunctionId(202));
+ // Resolve the alias names through the loaded module's string
+ // table to confirm the StringId payload survived re-interning.
+ let name_a = loaded.get_string(loaded.mount_aliases[0].0);
+ let name_b = loaded.get_string(loaded.mount_aliases[1].0);
+ assert_eq!(name_a, Some("alias_a"));
+ assert_eq!(name_b, Some("renamed_b"));
+ }
+
+ /// **Task #11 Phase 3 backward-compat drift-pin**: a legacy archive
+ /// with no trailing `mount_aliases` record must still deserialize
+ /// successfully, leaving the field empty.  Pre-fix any reader that
+ /// unconditionally probed for the record would crash on legacy
+ /// archives produced before the addition.
+ #[test]
+ fn test_roundtrip_empty_mount_aliases_is_legacy_compat() {
+ let module = VbcModule::new("legacy_no_aliases".to_string());
+ assert!(module.mount_aliases.is_empty());
+
+ let bytes = serialize_module(&module).unwrap();
+ let loaded = deserialize_module(&bytes).unwrap();
+
+ assert!(loaded.mount_aliases.is_empty());
+ }
+
  #[test]
  fn test_truncated_header() {
  let data = b"VBC1"; // Too short
