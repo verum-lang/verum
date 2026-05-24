@@ -817,13 +817,13 @@ public type Iterator is protocol {
 
     /// Execute function for each element, short-circuiting on error.
     fn try_for_each<E, F: fn(Self.Item) -> Result<(), E>>(&mut self, f: F) -> Result<(), E> {
-        while let Some(x) = self.next() {
+        while let Maybe.Some(x) = self.next() {
             match f(x) {
-                Ok(()) => {}
-                Err(e) => { return Err(e); }
+                Result.Ok(()) => {}
+                Result.Err(e) => { return Result.Err(e); }
             }
         }
-        Ok(())
+        Result.Ok(())
     }
 
     // =========================================================================
@@ -833,14 +833,14 @@ public type Iterator is protocol {
     /// Find the first element for which the predicate returns `Ok(true)`.
     /// Short-circuits on `Err`.
     fn try_find<E, F: fn(&Self.Item) -> Result<Bool, E>>(&mut self, f: F) -> Result<Maybe<Self.Item>, E> {
-        while let Some(x) = self.next() {
+        while let Maybe.Some(x) = self.next() {
             match f(&x) {
-                Ok(true) => { return Ok(Some(x)); }
-                Ok(false) => {}
-                Err(e) => { return Err(e); }
+                Result.Ok(true) => { return Result.Ok(Maybe.Some(x)); }
+                Result.Ok(false) => {}
+                Result.Err(e) => { return Result.Err(e); }
             }
         }
-        Ok(None)
+        Result.Ok(Maybe.None)
     }
 
     // =========================================================================
