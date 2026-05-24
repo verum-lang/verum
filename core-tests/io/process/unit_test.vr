@@ -1,0 +1,144 @@
+// =============================================================================
+// core-tests/io/process/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.io.process`. Live process spawn requires syscalls
+// and side-effects (subprocess + waitpid); tests here exercise the data
+// types and ExitStatus/Output construction surface.
+// =============================================================================
+
+mount core.io.process.{
+    Stdio, ExitStatus, Output, Command, Child,
+};
+
+// =============================================================================
+// Section 1: Stdio 3-variant
+// =============================================================================
+
+@test
+fn test_stdio_inherit_construction() {
+    let s = Stdio.Inherit;
+    assert(s is Inherit);
+}
+
+@test
+fn test_stdio_piped_construction() {
+    let s = Stdio.Piped;
+    assert(s is Piped);
+}
+
+@test
+fn test_stdio_null_construction() {
+    let s = Stdio.Null;
+    assert(s is Null);
+}
+
+@test
+fn test_stdio_variants_distinct() {
+    assert(!(Stdio.Inherit is Piped));
+    assert(!(Stdio.Inherit is Null));
+    assert(!(Stdio.Piped is Inherit));
+    assert(!(Stdio.Piped is Null));
+    assert(!(Stdio.Null is Inherit));
+    assert(!(Stdio.Null is Piped));
+}
+
+// =============================================================================
+// Section 2: ExitStatus — construction via field literal
+// =============================================================================
+//
+// ExitStatus.success/is_exited/is_signaled/signal/code rely on @cfg-gated
+// arithmetic over the raw waitpid status. We test the contract on a
+// known POSIX-encoded value:
+//   raw = 0  → exited with code 0 (success)
+//   raw = 0x0100 (256) → exited with code 1
+//   raw = 9  → terminated by SIGKILL (sig=9, exited=false)
+
+@test
+fn test_exit_status_zero_is_success() {
+    let s = ExitStatus { raw: 0 };
+    assert(s.success());
+    assert(s.is_exited());
+    assert(!s.is_signaled());
+    assert_eq(s.code(), 0);
+    assert_eq(s.signal(), 0);
+}
+
+@test
+fn test_exit_status_exit_code_one() {
+    let s = ExitStatus { raw: 0x0100 };  // 256 = (1 << 8) | 0
+    assert(!s.success());
+    assert(s.is_exited());
+    assert(!s.is_signaled());
+    assert_eq(s.code(), 1);
+}
+
+@test
+fn test_exit_status_signaled() {
+    let s = ExitStatus { raw: 9 };  // SIGKILL — low bits = 9 ≠ 0
+    assert(!s.success());
+    assert(!s.is_exited());
+    assert(s.is_signaled());
+    assert_eq(s.signal(), 9);
+}
+
+// =============================================================================
+// Section 3: Output — value-shape construction
+// =============================================================================
+//
+// Output is `{ status, stdout_bytes, stderr_bytes }`. Direct record-literal
+// instantiation tests the field shape — exact field names depend on the
+// source.
+
+@test
+fn test_output_stdout_stderr_accessors_return_text() {
+    // Construct an Output with empty bytes via Command (requires spawn).
+    // Direct record literal needs internal field names which are private.
+    // Here we just verify the accessor return types exist; semantics
+    // require a real spawn.
+    let _: fn(&Output) -> Text = Output.stdout;
+    let _: fn(&Output) -> Text = Output.stderr;
+}
+
+// =============================================================================
+// Section 4: Command — fluent builder construction
+// =============================================================================
+
+@test
+fn test_command_new() {
+    let _c = Command.new(Text.from("/bin/echo"));
+}
+
+@test
+fn test_command_arg_chains() {
+    let mut c = Command.new(Text.from("/bin/echo"));
+    let _ = c.arg(Text.from("hello"));
+}
+
+@test
+fn test_command_args() {
+    let mut c = Command.new(Text.from("/bin/echo"));
+    let _ = c.args(&[Text.from("a"), Text.from("b")]);
+}
+
+@test
+fn test_command_env() {
+    let mut c = Command.new(Text.from("/bin/echo"));
+    let _ = c.env(Text.from("KEY"), Text.from("VAL"));
+}
+
+@test
+fn test_command_current_dir() {
+    let mut c = Command.new(Text.from("/bin/echo"));
+    let _ = c.current_dir(Text.from("/tmp"));
+}
+
+@test
+fn test_command_stdio_config() {
+    let mut c = Command.new(Text.from("/bin/echo"));
+    let _ = c.stdout(Stdio.Piped);
+    let _ = c.stderr(Stdio.Null);
+    let _ = c.stdin(Stdio.Inherit);
+}
+
+fn main() {}

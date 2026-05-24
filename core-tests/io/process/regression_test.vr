@@ -1,0 +1,60 @@
+// =============================================================================
+// core-tests/io/process/regression_test.vr
+// =============================================================================
+//
+// Live process spawn is gated by syscall surface (fork/exec/waitpid)
+// which collides with #io-1 + needs cross-platform testing harness.
+// =============================================================================
+
+mount core.io.process.{Command, Stdio};
+
+// =============================================================================
+// §A — Command.spawn / Command.output / Command.status — gated by #io-1
+// =============================================================================
+
+@ignore
+@test
+fn regression_command_spawn_true_no_panic() {
+    let cmd = Command.new(Text.from("/usr/bin/true"));
+    match cmd.spawn() {
+        Ok(_) => {}
+        Err(_) => assert(false),
+    }
+}
+
+@ignore
+@test
+fn regression_command_output_echo_captures_stdout() {
+    let mut cmd = Command.new(Text.from("/bin/echo"));
+    let _ = cmd.arg(Text.from("hello"));
+    let _ = cmd.stdout(Stdio.Piped);
+    match cmd.output() {
+        Ok(o) => assert_eq(o.stdout(), Text.from("hello\n")),
+        Err(_) => assert(false),
+    }
+}
+
+@ignore
+@test
+fn regression_command_status_true_returns_success() {
+    let mut cmd = Command.new(Text.from("/usr/bin/true"));
+    match cmd.status() {
+        Ok(s) => assert(s.success()),
+        Err(_) => assert(false),
+    }
+}
+
+@ignore
+@test
+fn regression_command_status_false_returns_non_success() {
+    let mut cmd = Command.new(Text.from("/usr/bin/false"));
+    match cmd.status() {
+        Ok(s) => {
+            assert(!s.success());
+            assert_eq(s.code(), 1);
+        }
+        Err(_) => assert(false),
+    }
+}
+
+fn main() {}
