@@ -1,0 +1,259 @@
+// =============================================================================
+// core-tests/verify/level/unit_test.vr
+// =============================================================================
+//
+// `core/verify/level.vr` — VVA §2.3 nine-strategy verification ladder.
+//
+// Surface:
+//   * VerificationLevel 12-variant
+//   * parse_level + to_annotation round-trip
+//   * nu_omega_coeff / nu_finite_offset
+//   * requires_smt / allows_runtime_fallback
+// =============================================================================
+
+mount core.verify.level.{
+    VerificationLevel, parse_level, to_annotation,
+    nu_omega_coeff, nu_finite_offset,
+    requires_smt, allows_runtime_fallback,
+};
+
+// =============================================================================
+// Section 1: VerificationLevel 12-variant
+// =============================================================================
+
+@test
+fn test_level_runtime() {
+    let l: VerificationLevel = VerificationLevel.Runtime;
+    assert(l is VerificationLevel.Runtime);
+}
+
+@test
+fn test_level_static() {
+    let l: VerificationLevel = VerificationLevel.Static;
+    assert(l is VerificationLevel.Static);
+}
+
+@test
+fn test_level_fast() {
+    let l: VerificationLevel = VerificationLevel.Fast;
+    assert(l is VerificationLevel.Fast);
+}
+
+@test
+fn test_level_formal() {
+    let l: VerificationLevel = VerificationLevel.Formal;
+    assert(l is VerificationLevel.Formal);
+}
+
+@test
+fn test_level_proof() {
+    let l: VerificationLevel = VerificationLevel.Proof;
+    assert(l is VerificationLevel.Proof);
+}
+
+@test
+fn test_level_thorough() {
+    let l: VerificationLevel = VerificationLevel.Thorough;
+    assert(l is VerificationLevel.Thorough);
+}
+
+@test
+fn test_level_reliable() {
+    let l: VerificationLevel = VerificationLevel.Reliable;
+    assert(l is VerificationLevel.Reliable);
+}
+
+@test
+fn test_level_certified() {
+    let l: VerificationLevel = VerificationLevel.Certified;
+    assert(l is VerificationLevel.Certified);
+}
+
+@test
+fn test_level_coherent_static() {
+    let l: VerificationLevel = VerificationLevel.CoherentStatic;
+    assert(l is VerificationLevel.CoherentStatic);
+}
+
+@test
+fn test_level_coherent_runtime() {
+    let l: VerificationLevel = VerificationLevel.CoherentRuntime;
+    assert(l is VerificationLevel.CoherentRuntime);
+}
+
+@test
+fn test_level_coherent() {
+    let l: VerificationLevel = VerificationLevel.Coherent;
+    assert(l is VerificationLevel.Coherent);
+}
+
+@test
+fn test_level_synthesize() {
+    let l: VerificationLevel = VerificationLevel.Synthesize;
+    assert(l is VerificationLevel.Synthesize);
+}
+
+// =============================================================================
+// Section 2: parse_level
+// =============================================================================
+
+@test
+fn test_parse_level_runtime() {
+    assert(parse_level(Text.from("runtime")) is Maybe.Some);
+}
+
+@test
+fn test_parse_level_formal() {
+    assert(parse_level(Text.from("formal")) is Maybe.Some);
+}
+
+@test
+fn test_parse_level_coherent() {
+    assert(parse_level(Text.from("coherent")) is Maybe.Some);
+}
+
+@test
+fn test_parse_level_synthesize() {
+    assert(parse_level(Text.from("synthesize")) is Maybe.Some);
+}
+
+@test
+fn test_parse_level_unknown_is_none() {
+    assert(parse_level(Text.from("garbage")) is Maybe.None);
+}
+
+@test
+fn test_parse_level_empty_is_none() {
+    assert(parse_level(Text.from("")) is Maybe.None);
+}
+
+@test
+fn test_parse_level_case_sensitive() {
+    assert(parse_level(Text.from("RUNTIME")) is Maybe.None);
+}
+
+// =============================================================================
+// Section 3: to_annotation
+// =============================================================================
+
+@test
+fn test_to_annotation_runtime() {
+    assert(to_annotation(VerificationLevel.Runtime) == Text.from("runtime"));
+}
+
+@test
+fn test_to_annotation_formal() {
+    assert(to_annotation(VerificationLevel.Formal) == Text.from("formal"));
+}
+
+@test
+fn test_to_annotation_certified() {
+    assert(to_annotation(VerificationLevel.Certified) == Text.from("certified"));
+}
+
+@test
+fn test_to_annotation_coherent() {
+    assert(to_annotation(VerificationLevel.Coherent) == Text.from("coherent"));
+}
+
+@test
+fn test_to_annotation_synthesize() {
+    assert(to_annotation(VerificationLevel.Synthesize) == Text.from("synthesize"));
+}
+
+// =============================================================================
+// Section 4: ν-ordinal projection
+// =============================================================================
+
+@test
+fn test_nu_omega_coeff_runtime_zero() {
+    assert(nu_omega_coeff(VerificationLevel.Runtime) == 0);
+}
+
+@test
+fn test_nu_omega_coeff_fast_zero() {
+    assert(nu_omega_coeff(VerificationLevel.Fast) == 0);
+}
+
+@test
+fn test_nu_omega_coeff_formal_one() {
+    assert(nu_omega_coeff(VerificationLevel.Formal) == 1);
+}
+
+@test
+fn test_nu_omega_coeff_certified_two() {
+    assert(nu_omega_coeff(VerificationLevel.Certified) == 2);
+}
+
+@test
+fn test_nu_omega_coeff_synthesize_three() {
+    assert(nu_omega_coeff(VerificationLevel.Synthesize) == 3);
+}
+
+@test
+fn test_nu_finite_offset_runtime_zero() {
+    assert(nu_finite_offset(VerificationLevel.Runtime) == 0);
+}
+
+@test
+fn test_nu_finite_offset_fast_two() {
+    assert(nu_finite_offset(VerificationLevel.Fast) == 2);
+}
+
+@test
+fn test_nu_finite_offset_certified_two() {
+    assert(nu_finite_offset(VerificationLevel.Certified) == 2);
+}
+
+@test
+fn test_nu_finite_offset_coherent_five() {
+    assert(nu_finite_offset(VerificationLevel.Coherent) == 5);
+}
+
+// =============================================================================
+// Section 5: requires_smt
+// =============================================================================
+
+@test
+fn test_requires_smt_runtime_no() {
+    assert(!requires_smt(VerificationLevel.Runtime));
+}
+
+@test
+fn test_requires_smt_static_yes() {
+    assert(requires_smt(VerificationLevel.Static));
+}
+
+@test
+fn test_requires_smt_formal_yes() {
+    assert(requires_smt(VerificationLevel.Formal));
+}
+
+@test
+fn test_requires_smt_synthesize_yes() {
+    assert(requires_smt(VerificationLevel.Synthesize));
+}
+
+// =============================================================================
+// Section 6: allows_runtime_fallback
+// =============================================================================
+
+@test
+fn test_allows_runtime_fallback_runtime_yes() {
+    assert(allows_runtime_fallback(VerificationLevel.Runtime));
+}
+
+@test
+fn test_allows_runtime_fallback_fast_yes() {
+    assert(allows_runtime_fallback(VerificationLevel.Fast));
+}
+
+@test
+fn test_allows_runtime_fallback_formal_no() {
+    assert(!allows_runtime_fallback(VerificationLevel.Formal));
+}
+
+@test
+fn test_allows_runtime_fallback_certified_no() {
+    assert(!allows_runtime_fallback(VerificationLevel.Certified));
+}
