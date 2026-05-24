@@ -1,0 +1,247 @@
+// =============================================================================
+// core-tests/shell/result/unit_test.vr
+// =============================================================================
+//
+// `core/shell/result.vr` — outcome + error types for shell command execution.
+//
+// Surface:
+//   * ShellResult record (stdout_bytes / stderr_bytes / status / command / duration)
+//   * ShellError 6-variant (NonZeroExit / SpawnFailed / Timeout /
+//     PermissionDenied / ParseError / Cancelled)
+//   * .command(), .to_string() routing across variants
+// =============================================================================
+
+mount core.shell.result.{ShellError, ShellResult};
+mount core.io.process.{ExitStatus};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Section 1: ShellError 6-variant
+// =============================================================================
+
+@test
+fn test_shell_error_non_zero_exit() {
+    let e: ShellError = ShellError.NonZeroExit {
+        command: Text.from("ls"),
+        status:  ExitStatus { raw: (1 << 8) },
+        stderr:  Text.from("no such file"),
+    };
+    assert(e is ShellError.NonZeroExit);
+}
+
+@test
+fn test_shell_error_spawn_failed() {
+    let e: ShellError = ShellError.SpawnFailed {
+        command: Text.from("/nonexistent"),
+        reason:  Text.from("ENOENT"),
+    };
+    assert(e is ShellError.SpawnFailed);
+}
+
+@test
+fn test_shell_error_timeout() {
+    let e: ShellError = ShellError.Timeout {
+        command:  Text.from("sleep 60"),
+        after_ms: 5000,
+    };
+    assert(e is ShellError.Timeout);
+}
+
+@test
+fn test_shell_error_permission_denied() {
+    let e: ShellError = ShellError.PermissionDenied {
+        command: Text.from("/etc/shadow"),
+        kind:    Text.from("read"),
+    };
+    assert(e is ShellError.PermissionDenied);
+}
+
+@test
+fn test_shell_error_parse_error() {
+    let e: ShellError = ShellError.ParseError {
+        command: Text.from("jq ."),
+        format:  Text.from("JSON"),
+        cause:   Text.from("unexpected EOF"),
+    };
+    assert(e is ShellError.ParseError);
+}
+
+@test
+fn test_shell_error_cancelled() {
+    let e: ShellError = ShellError.Cancelled {
+        command: Text.from("long_task"),
+        reason:  Text.from("SIGINT"),
+    };
+    assert(e is ShellError.Cancelled);
+}
+
+@test
+fn test_shell_error_variants_pairwise_disjoint() {
+    let a: ShellError = ShellError.NonZeroExit {
+        command: Text.from("a"),
+        status:  ExitStatus { raw: 256 },
+        stderr:  Text.from("err"),
+    };
+    let b: ShellError = ShellError.SpawnFailed {
+        command: Text.from("b"),
+        reason:  Text.from("err"),
+    };
+    let c: ShellError = ShellError.Timeout {
+        command:  Text.from("c"),
+        after_ms: 1000,
+    };
+    assert(a is ShellError.NonZeroExit && !(a is ShellError.SpawnFailed));
+    assert(b is ShellError.SpawnFailed && !(b is ShellError.Timeout));
+    assert(c is ShellError.Timeout && !(c is ShellError.NonZeroExit));
+}
+
+// =============================================================================
+// Section 2: ShellError.command() — extract field across variants
+// =============================================================================
+
+@test
+fn test_shell_error_command_non_zero_exit() {
+    let e = ShellError.NonZeroExit {
+        command: Text.from("ls -la"),
+        status:  ExitStatus { raw: 256 },
+        stderr:  Text.from("e"),
+    };
+    assert(e.command() == &Text.from("ls -la"));
+}
+
+@test
+fn test_shell_error_command_spawn_failed() {
+    let e = ShellError.SpawnFailed {
+        command: Text.from("missing"),
+        reason:  Text.from("ENOENT"),
+    };
+    assert(e.command() == &Text.from("missing"));
+}
+
+@test
+fn test_shell_error_command_timeout() {
+    let e = ShellError.Timeout {
+        command:  Text.from("sleep"),
+        after_ms: 100,
+    };
+    assert(e.command() == &Text.from("sleep"));
+}
+
+@test
+fn test_shell_error_command_cancelled() {
+    let e = ShellError.Cancelled {
+        command: Text.from("worker"),
+        reason:  Text.from("user"),
+    };
+    assert(e.command() == &Text.from("worker"));
+}
+
+// =============================================================================
+// Section 3: ShellError.to_string() — diagnostic rendering
+// =============================================================================
+
+@test
+fn test_shell_error_to_string_contains_command() {
+    let e = ShellError.SpawnFailed {
+        command: Text.from("uniquecmd"),
+        reason:  Text.from("ENOENT"),
+    };
+    let s = e.to_string();
+    assert(s.contains(&Text.from("uniquecmd")));
+}
+
+@test
+fn test_shell_error_to_string_contains_reason() {
+    let e = ShellError.SpawnFailed {
+        command: Text.from("cmd"),
+        reason:  Text.from("UNIQUEREASON"),
+    };
+    let s = e.to_string();
+    assert(s.contains(&Text.from("UNIQUEREASON")));
+}
+
+@test
+fn test_shell_error_to_string_timeout_includes_ms() {
+    let e = ShellError.Timeout {
+        command:  Text.from("cmd"),
+        after_ms: 7777,
+    };
+    let s = e.to_string();
+    assert(s.contains(&Text.from("7777")));
+}
+
+// =============================================================================
+// Section 4: ShellResult construction + accessors
+// =============================================================================
+
+@test
+fn test_shell_result_new_zero_status() {
+    let r = ShellResult.new(
+        ExitStatus { raw: 0 },
+        [],
+        [],
+        Text.from("true"),
+        Duration.from_millis(0),
+    );
+    assert(r.code() == 0);
+}
+
+@test
+fn test_shell_result_success_zero_exit() {
+    let r = ShellResult.new(
+        ExitStatus { raw: 0 },
+        [],
+        [],
+        Text.from("true"),
+        Duration.from_millis(0),
+    );
+    assert(r.success());
+}
+
+@test
+fn test_shell_result_non_zero_not_success() {
+    let r = ShellResult.new(
+        ExitStatus { raw: (1 << 8) },
+        [],
+        [],
+        Text.from("false"),
+        Duration.from_millis(0),
+    );
+    assert(!r.success());
+}
+
+@test
+fn test_shell_result_is_empty_no_stdout() {
+    let r = ShellResult.new(
+        ExitStatus { raw: 0 },
+        [],
+        [],
+        Text.from("true"),
+        Duration.from_millis(0),
+    );
+    assert(r.is_empty());
+}
+
+@test
+fn test_shell_result_is_empty_with_stdout() {
+    let r = ShellResult.new(
+        ExitStatus { raw: 0 },
+        [(b'a') as Byte, (b'b') as Byte],
+        [],
+        Text.from("echo"),
+        Duration.from_millis(0),
+    );
+    assert(!r.is_empty());
+}
+
+@test
+fn test_shell_result_command_text_round_trip() {
+    let r = ShellResult.new(
+        ExitStatus { raw: 0 },
+        [],
+        [],
+        Text.from("uniquecmd"),
+        Duration.from_millis(0),
+    );
+    assert(r.command_text() == &Text.from("uniquecmd"));
+}
