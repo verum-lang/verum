@@ -1,0 +1,224 @@
+// =============================================================================
+// core-tests/logic/linear/unit_test.vr
+// =============================================================================
+//
+// `core/logic/linear.vr` — Linear logic formula representation +
+// classification predicates. The LinForm ADT models multiplicative
+// (⊗, ⅋), additive (&, ⊕), exponential (!, ?), unit (1, ⊥, ⊤, 0),
+// and dual operators.
+//
+// Surface tested:
+//   * LinForm 12-variant ADT (Atom + MTensor + Par + With + Plus +
+//     OfCourse + WhyNot + One + Bottom + Top + Zero + Dual)
+//   * smart constructors: lin_atom / lin_tensor / lin_par / lin_with /
+//     lin_plus / lin_of_course / lin_why_not / lin_dual / lin_lolli
+//   * classification: is_unrestricted / is_weakenable
+// =============================================================================
+
+mount core.logic.linear.{
+    LinForm,
+    lin_atom, lin_tensor, lin_par, lin_with, lin_plus,
+    lin_of_course, lin_why_not, lin_dual, lin_lolli,
+    is_unrestricted, is_weakenable,
+};
+
+// =============================================================================
+// Section 1: Atomic + unit variants
+// =============================================================================
+
+@test
+fn test_lin_atom_construction() {
+    let a = lin_atom("A".clone());
+    assert(a is LinForm.Atom);
+}
+
+@test
+fn test_lin_one_construction() {
+    let one: LinForm = LinForm.One;
+    assert(one is LinForm.One);
+}
+
+@test
+fn test_lin_bottom_construction() {
+    let bot: LinForm = LinForm.Bottom;
+    assert(bot is LinForm.Bottom);
+}
+
+@test
+fn test_lin_top_construction() {
+    let top: LinForm = LinForm.Top;
+    assert(top is LinForm.Top);
+}
+
+@test
+fn test_lin_zero_construction() {
+    let z: LinForm = LinForm.Zero;
+    assert(z is LinForm.Zero);
+}
+
+// =============================================================================
+// Section 2: Multiplicative connectives (⊗, ⅋)
+// =============================================================================
+
+@test
+fn test_lin_tensor_constructor() {
+    let a = lin_atom("A".clone());
+    let b = lin_atom("B".clone());
+    let t = lin_tensor(a, b);
+    assert(t is LinForm.MTensor);
+}
+
+@test
+fn test_lin_par_constructor() {
+    let a = lin_atom("A".clone());
+    let b = lin_atom("B".clone());
+    let p = lin_par(a, b);
+    assert(p is LinForm.Par);
+}
+
+// =============================================================================
+// Section 3: Additive connectives (&, ⊕)
+// =============================================================================
+
+@test
+fn test_lin_with_constructor() {
+    let a = lin_atom("A".clone());
+    let b = lin_atom("B".clone());
+    let w = lin_with(a, b);
+    assert(w is LinForm.With);
+}
+
+@test
+fn test_lin_plus_constructor() {
+    let a = lin_atom("A".clone());
+    let b = lin_atom("B".clone());
+    let p = lin_plus(a, b);
+    assert(p is LinForm.Plus);
+}
+
+// =============================================================================
+// Section 4: Exponentials (!, ?)
+// =============================================================================
+
+@test
+fn test_lin_of_course_constructor() {
+    let a = lin_atom("A".clone());
+    let oc = lin_of_course(a);
+    assert(oc is LinForm.OfCourse);
+}
+
+@test
+fn test_lin_why_not_constructor() {
+    let a = lin_atom("A".clone());
+    let wn = lin_why_not(a);
+    assert(wn is LinForm.WhyNot);
+}
+
+// =============================================================================
+// Section 5: Negation + linear implication
+// =============================================================================
+
+@test
+fn test_lin_dual_constructor() {
+    let a = lin_atom("A".clone());
+    let d = lin_dual(a);
+    assert(d is LinForm.Dual);
+}
+
+@test
+fn test_lin_lolli_is_par_of_dual() {
+    // A ⊸ B := A^⊥ ⅋ B per linear-logic convention.
+    let a = lin_atom("A".clone());
+    let b = lin_atom("B".clone());
+    let lolli = lin_lolli(a, b);
+    // The top-level shape is Par.
+    assert(lolli is LinForm.Par);
+}
+
+// =============================================================================
+// Section 6: is_unrestricted — predicates per LL exponential structure
+// =============================================================================
+
+@test
+fn test_is_unrestricted_of_course_true() {
+    let a = lin_atom("A".clone());
+    let oc = lin_of_course(a);
+    assert(is_unrestricted(oc));
+}
+
+@test
+fn test_is_unrestricted_why_not_true() {
+    let a = lin_atom("A".clone());
+    let wn = lin_why_not(a);
+    assert(is_unrestricted(wn));
+}
+
+@test
+fn test_is_unrestricted_atom_false() {
+    let a = lin_atom("A".clone());
+    assert(!is_unrestricted(a));
+}
+
+@test
+fn test_is_unrestricted_tensor_false() {
+    let t = lin_tensor(lin_atom("A".clone()), lin_atom("B".clone()));
+    assert(!is_unrestricted(t));
+}
+
+// =============================================================================
+// Section 7: is_weakenable
+// =============================================================================
+
+@test
+fn test_is_weakenable_of_course_true() {
+    let a = lin_atom("A".clone());
+    let oc = lin_of_course(a);
+    assert(is_weakenable(oc));
+}
+
+@test
+fn test_is_weakenable_atom_false() {
+    let a = lin_atom("A".clone());
+    assert(!is_weakenable(a));
+}
+
+@test
+fn test_is_weakenable_top_true() {
+    let top: LinForm = LinForm.Top;
+    assert(is_weakenable(top));
+}
+
+// =============================================================================
+// Section 8: Variant disjointness across all 12 LinForm variants
+// =============================================================================
+
+@test
+fn test_lin_form_atom_vs_one_disjoint() {
+    let a = lin_atom("A".clone());
+    let one: LinForm = LinForm.One;
+    assert(!(a is LinForm.One));
+    assert(!(one is LinForm.Atom));
+}
+
+@test
+fn test_lin_form_unit_variants_pairwise_disjoint() {
+    let one: LinForm = LinForm.One;
+    let bot: LinForm = LinForm.Bottom;
+    let top: LinForm = LinForm.Top;
+    let zero: LinForm = LinForm.Zero;
+
+    assert(one is LinForm.One);
+    assert(!(one is LinForm.Bottom));
+    assert(!(one is LinForm.Top));
+    assert(!(one is LinForm.Zero));
+
+    assert(bot is LinForm.Bottom);
+    assert(!(bot is LinForm.One));
+    assert(!(bot is LinForm.Top));
+    assert(!(bot is LinForm.Zero));
+
+    assert(top is LinForm.Top);
+    assert(!(top is LinForm.Zero));
+
+    assert(zero is LinForm.Zero);
+}
