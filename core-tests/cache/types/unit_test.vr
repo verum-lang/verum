@@ -1,0 +1,248 @@
+// =============================================================================
+// core-tests/cache/types/unit_test.vr
+// =============================================================================
+//
+// Companion files:
+//   property_test.vr — algebraic laws (Eq reflexivity/symmetry,
+//                      variant disjointness, Display determinism).
+//   audit.md         — module audit + deferred items.
+//
+// `core/cache/types.vr` defines three data ADTs that back the
+// CacheBackend protocol:
+//
+//   * `CacheValue` — 4-variant: Bytes / TextValue / Counter / StringSet
+//   * `CacheTtl`   — 3-variant: Persistent / Seconds(N>=1) / Millis(N>=1)
+//   * `CacheError` — 7-variant: NotFound / Network / Encoding /
+//                    TypeMismatch / TooLarge / InvalidKey / Backend
+//
+// All three derive Eq + Clone + Debug; CacheError additionally has a
+// custom Display impl.
+// =============================================================================
+
+mount core.cache.types.{CacheValue, CacheTtl, CacheError};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: CacheValue.Bytes
+// =============================================================================
+
+@test
+fn test_cache_value_bytes_construction() {
+    let v: CacheValue = CacheValue.Bytes([0_u8, 1_u8, 2_u8]);
+    assert(v is CacheValue.Bytes);
+}
+
+@test
+fn test_cache_value_bytes_empty() {
+    let v: CacheValue = CacheValue.Bytes([]);
+    assert(v is CacheValue.Bytes);
+}
+
+// =============================================================================
+// Section 2: CacheValue.TextValue
+// =============================================================================
+
+@test
+fn test_cache_value_text_construction() {
+    let v: CacheValue = CacheValue.TextValue("hello".clone());
+    assert(v is CacheValue.TextValue);
+}
+
+@test
+fn test_cache_value_text_empty() {
+    let v: CacheValue = CacheValue.TextValue("".clone());
+    assert(v is CacheValue.TextValue);
+}
+
+// =============================================================================
+// Section 3: CacheValue.Counter
+// =============================================================================
+
+@test
+fn test_cache_value_counter_zero() {
+    let v: CacheValue = CacheValue.Counter(0);
+    assert(v is CacheValue.Counter);
+}
+
+@test
+fn test_cache_value_counter_positive() {
+    let v: CacheValue = CacheValue.Counter(100);
+    assert(v is CacheValue.Counter);
+}
+
+@test
+fn test_cache_value_counter_negative() {
+    let v: CacheValue = CacheValue.Counter(-42);
+    assert(v is CacheValue.Counter);
+}
+
+// =============================================================================
+// Section 4: CacheValue.StringSet
+// =============================================================================
+
+@test
+fn test_cache_value_string_set_empty() {
+    let v: CacheValue = CacheValue.StringSet([]);
+    assert(v is CacheValue.StringSet);
+}
+
+@test
+fn test_cache_value_string_set_multi() {
+    let v: CacheValue = CacheValue.StringSet([
+        "tag1".clone(),
+        "tag2".clone(),
+        "tag3".clone(),
+    ]);
+    assert(v is CacheValue.StringSet);
+}
+
+// =============================================================================
+// Section 5: CacheValue variant disjointness
+// =============================================================================
+
+@test
+fn test_cache_value_variants_disjoint() {
+    let b: CacheValue = CacheValue.Bytes([]);
+    let t: CacheValue = CacheValue.TextValue("".clone());
+    let c: CacheValue = CacheValue.Counter(0);
+    let s: CacheValue = CacheValue.StringSet([]);
+
+    assert(b is CacheValue.Bytes);
+    assert(t is CacheValue.TextValue);
+    assert(c is CacheValue.Counter);
+    assert(s is CacheValue.StringSet);
+
+    assert(!(b is CacheValue.TextValue));
+    assert(!(t is CacheValue.Counter));
+    assert(!(c is CacheValue.StringSet));
+    assert(!(s is CacheValue.Bytes));
+}
+
+// =============================================================================
+// Section 6: CacheTtl variant construction
+// =============================================================================
+
+@test
+fn test_cache_ttl_persistent_construction() {
+    let t: CacheTtl = CacheTtl.Persistent;
+    assert(t is CacheTtl.Persistent);
+}
+
+@test
+fn test_cache_ttl_seconds_construction() {
+    let t: CacheTtl = CacheTtl.Seconds(60);
+    assert(t is CacheTtl.Seconds);
+}
+
+@test
+fn test_cache_ttl_millis_construction() {
+    let t: CacheTtl = CacheTtl.Millis(500);
+    assert(t is CacheTtl.Millis);
+}
+
+@test
+fn test_cache_ttl_variants_disjoint() {
+    let p: CacheTtl = CacheTtl.Persistent;
+    let s: CacheTtl = CacheTtl.Seconds(1);
+    let m: CacheTtl = CacheTtl.Millis(1);
+
+    assert(p is CacheTtl.Persistent);
+    assert(s is CacheTtl.Seconds);
+    assert(m is CacheTtl.Millis);
+
+    assert(!(p is CacheTtl.Seconds));
+    assert(!(s is CacheTtl.Millis));
+    assert(!(m is CacheTtl.Persistent));
+}
+
+// =============================================================================
+// Section 7: CacheError 7-variant construction
+// =============================================================================
+
+@test
+fn test_cache_error_not_found_construction() {
+    let e: CacheError = CacheError.NotFound("key1".clone());
+    assert(e is CacheError.NotFound);
+}
+
+@test
+fn test_cache_error_network_construction() {
+    let e: CacheError = CacheError.Network("connection refused".clone());
+    assert(e is CacheError.Network);
+}
+
+@test
+fn test_cache_error_encoding_construction() {
+    let e: CacheError = CacheError.Encoding("invalid utf-8".clone());
+    assert(e is CacheError.Encoding);
+}
+
+@test
+fn test_cache_error_type_mismatch_construction() {
+    let e: CacheError = CacheError.TypeMismatch {
+        expected: "Text".clone(),
+        found: "Bytes".clone(),
+    };
+    assert(e is CacheError.TypeMismatch);
+}
+
+@test
+fn test_cache_error_too_large_construction() {
+    let e: CacheError = CacheError.TooLarge { size: 1024, limit: 512 };
+    assert(e is CacheError.TooLarge);
+}
+
+@test
+fn test_cache_error_invalid_key_construction() {
+    let e: CacheError = CacheError.InvalidKey("empty key".clone());
+    assert(e is CacheError.InvalidKey);
+}
+
+@test
+fn test_cache_error_backend_construction() {
+    let e: CacheError = CacheError.Backend("connection pool exhausted".clone());
+    assert(e is CacheError.Backend);
+}
+
+// =============================================================================
+// Section 8: CacheError Display
+// =============================================================================
+
+@test
+fn test_cache_error_display_not_found() {
+    let e = CacheError.NotFound("xkey".clone());
+    let s = f"{e}";
+    assert(s.contains("xkey"));
+    assert(s.contains("not found"));
+    assert(s.contains("cache"));
+}
+
+@test
+fn test_cache_error_display_network() {
+    let e = CacheError.Network("timeout".clone());
+    let s = f"{e}";
+    assert(s.contains("timeout"));
+    assert(s.contains("network"));
+}
+
+@test
+fn test_cache_error_display_type_mismatch() {
+    let e = CacheError.TypeMismatch {
+        expected: "Text".clone(),
+        found: "Bytes".clone(),
+    };
+    let s = f"{e}";
+    assert(s.contains("Text"));
+    assert(s.contains("Bytes"));
+    assert(s.contains("expected"));
+    assert(s.contains("found"));
+}
+
+@test
+fn test_cache_error_display_too_large() {
+    let e = CacheError.TooLarge { size: 1024, limit: 256 };
+    let s = f"{e}";
+    assert(s.contains("1024"));
+    assert(s.contains("256"));
+    assert(s.contains("large"));
+}
