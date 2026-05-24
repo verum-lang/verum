@@ -54,7 +54,7 @@ mount core.database.sqlite.native.l3_btree.btree.{
 mount core.database.sqlite.native.l3_btree.cursor_seek.{
     PageStore, page_store_new,
     SeekOutcome, SoExactMatch, SoFoundLarger, SoFoundSmaller, SoEmpty, SoPastEnd,
-    cursor_seek, cursor_next as bt_cursor_next, cursor_prev as bt_cursor_prev,
+    cursor_seek, cursor_next, cursor_prev,
     cursor_first as bt_cursor_first, cursor_last as bt_cursor_last,
 };
 mount core.database.sqlite.native.l3_btree.comparator.{
@@ -396,14 +396,14 @@ fn bytes_to_utf8_text(buf: &List<Byte>) -> Text {
 /// `Ok(false)` if the cursor fell off the end (the interpreter
 /// then jumps to `jump_target`).
 public fn op_next(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
-    match bt_cursor_next(c, pages) {
+    match core.database.sqlite.native.l3_btree.cursor_seek.cursor_next(c, pages) {
         Ok(b)  => Ok(b),
         Err(e) => Err(BeBtree(e)),
     }
 }
 
 public fn op_prev(c: &mut BtreeCursor, pages: &PageStore) -> Result<Bool, CursorBridgeError> {
-    match bt_cursor_prev(c, pages) {
+    match core.database.sqlite.native.l3_btree.cursor_seek.cursor_prev(c, pages) {
         Ok(b)  => Ok(b),
         Err(e) => Err(BeBtree(e)),
     }
