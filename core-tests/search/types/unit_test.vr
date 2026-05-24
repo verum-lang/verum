@@ -1,0 +1,182 @@
+// =============================================================================
+// core-tests/search/types/unit_test.vr
+// =============================================================================
+//
+// `core/search/types.vr` defines the abstract search-index protocol +
+// data ADTs. Testable surface (without a backend instance):
+//
+//   * `SortDirection`  — 2-variant: Asc / Desc
+//   * `SearchError`    — 7-variant error ADT + Display
+//   * default factory constructors (search_query_match_all,
+//     index_config_default)
+// =============================================================================
+
+mount core.search.types.{
+    SortDirection, SearchError,
+};
+
+// =============================================================================
+// Section 1: SortDirection variants
+// =============================================================================
+
+@test
+fn test_sort_direction_asc_construction() {
+    let d: SortDirection = SortDirection.Asc;
+    assert(d is SortDirection.Asc);
+}
+
+@test
+fn test_sort_direction_desc_construction() {
+    let d: SortDirection = SortDirection.Desc;
+    assert(d is SortDirection.Desc);
+}
+
+@test
+fn test_sort_direction_variants_disjoint() {
+    let a: SortDirection = SortDirection.Asc;
+    let d: SortDirection = SortDirection.Desc;
+    assert(a is SortDirection.Asc);
+    assert(d is SortDirection.Desc);
+    assert(!(a is SortDirection.Desc));
+    assert(!(d is SortDirection.Asc));
+}
+
+// =============================================================================
+// Section 2: SearchError 7-variant construction
+// =============================================================================
+
+@test
+fn test_search_error_network_construction() {
+    let e: SearchError = SearchError.Network("conn refused".clone());
+    assert(e is SearchError.Network);
+}
+
+@test
+fn test_search_error_invalid_query_construction() {
+    let e: SearchError = SearchError.InvalidQuery("bad syntax".clone());
+    assert(e is SearchError.InvalidQuery);
+}
+
+@test
+fn test_search_error_index_not_found_construction() {
+    let e: SearchError = SearchError.IndexNotFound("my-index".clone());
+    assert(e is SearchError.IndexNotFound);
+}
+
+@test
+fn test_search_error_document_not_found_construction() {
+    let e: SearchError = SearchError.DocumentNotFound("doc-42".clone());
+    assert(e is SearchError.DocumentNotFound);
+}
+
+@test
+fn test_search_error_schema_conflict_construction() {
+    let e: SearchError = SearchError.SchemaConflict("field type mismatch".clone());
+    assert(e is SearchError.SchemaConflict);
+}
+
+@test
+fn test_search_error_too_many_documents_construction() {
+    let e: SearchError = SearchError.TooManyDocuments {
+        count: 10000,
+        limit: 1000,
+    };
+    assert(e is SearchError.TooManyDocuments);
+}
+
+@test
+fn test_search_error_backend_construction() {
+    let e: SearchError = SearchError.Backend("internal".clone());
+    assert(e is SearchError.Backend);
+}
+
+// =============================================================================
+// Section 3: SearchError variant disjointness
+// =============================================================================
+
+@test
+fn test_search_error_variants_disjoint() {
+    let net: SearchError = SearchError.Network("r".clone());
+    let iq: SearchError = SearchError.InvalidQuery("r".clone());
+    let inf: SearchError = SearchError.IndexNotFound("r".clone());
+    let dnf: SearchError = SearchError.DocumentNotFound("r".clone());
+    let sc: SearchError = SearchError.SchemaConflict("r".clone());
+    let tmd: SearchError = SearchError.TooManyDocuments { count: 0, limit: 0 };
+    let be: SearchError = SearchError.Backend("r".clone());
+
+    assert(net is SearchError.Network);
+    assert(iq is SearchError.InvalidQuery);
+    assert(inf is SearchError.IndexNotFound);
+    assert(dnf is SearchError.DocumentNotFound);
+    assert(sc is SearchError.SchemaConflict);
+    assert(tmd is SearchError.TooManyDocuments);
+    assert(be is SearchError.Backend);
+
+    // Sample cross-disjointness
+    assert(!(net is SearchError.Backend));
+    assert(!(iq is SearchError.SchemaConflict));
+    assert(!(inf is SearchError.DocumentNotFound));
+    assert(!(tmd is SearchError.Network));
+}
+
+// =============================================================================
+// Section 4: SearchError.Display rendering
+// =============================================================================
+
+@test
+fn test_display_network() {
+    let e = SearchError.Network("dial tcp timeout".clone());
+    let s = f"{e}";
+    assert(s.contains("dial tcp timeout"));
+    assert(s.contains("network"));
+    assert(s.contains("search"));
+}
+
+@test
+fn test_display_invalid_query() {
+    let e = SearchError.InvalidQuery("unexpected `}`".clone());
+    let s = f"{e}";
+    assert(s.contains("unexpected"));
+    assert(s.contains("invalid query"));
+}
+
+@test
+fn test_display_index_not_found() {
+    let e = SearchError.IndexNotFound("articles".clone());
+    let s = f"{e}";
+    assert(s.contains("articles"));
+    assert(s.contains("index not found"));
+}
+
+@test
+fn test_display_document_not_found() {
+    let e = SearchError.DocumentNotFound("doc-99".clone());
+    let s = f"{e}";
+    assert(s.contains("doc-99"));
+    assert(s.contains("document not found"));
+}
+
+@test
+fn test_display_schema_conflict() {
+    let e = SearchError.SchemaConflict("field 'price' redefined".clone());
+    let s = f"{e}";
+    assert(s.contains("price"));
+    assert(s.contains("schema conflict"));
+}
+
+@test
+fn test_display_too_many_documents() {
+    let e = SearchError.TooManyDocuments { count: 50_000, limit: 10_000 };
+    let s = f"{e}";
+    assert(s.contains("50000"));
+    assert(s.contains("10000"));
+    assert(s.contains("too many"));
+}
+
+@test
+fn test_display_backend() {
+    let e = SearchError.Backend("503 Service Unavailable".clone());
+    let s = f"{e}";
+    assert(s.contains("503"));
+    assert(s.contains("backend"));
+}
