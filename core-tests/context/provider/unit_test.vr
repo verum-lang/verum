@@ -1,0 +1,170 @@
+// =============================================================================
+// core-tests/context/provider/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.context.provider`:
+//   * `Provider<T>`      — lazy factory with caching (`new`, `of`, `get`,
+//                          `get_ref`, `is_resolved`, `reset`)
+//   * `ScopedProvider<T>`— RAII-style block-scoped context provision
+//                          (`new`, `run`)
+//   * `get_context<T>`   — runtime accessor for context slot
+//   * `has_context`      — runtime predicate
+//
+// NOTE: `ScopedProvider.run`, `get_context`, and `has_context` exercise
+// the `ctx_bridge` TLS slot store. Tests of those functions are kept
+// minimal and gated on standalone correctness — full provide/using
+// runtime semantics are tested at the language level, not here.
+// =============================================================================
+
+mount core.context.provider.{Provider, LazyProvider, ScopedProvider, has_context};
+
+// =============================================================================
+// Section 1: Provider<T> — basic factory + caching contract
+// =============================================================================
+
+/// Provider constructed from a closure produces the factory's value on first get().
+@test
+fn test_provider_new_then_get_returns_factory_value() {
+    let mut p = Provider.new(fn() -> Int { 42 });
+    assert_eq(p.get(), 42);
+}
+
+/// Provider.of(value) wraps a pre-computed value so get() returns it immediately.
+@test
+fn test_provider_of_then_get_returns_value() {
+    let mut p = Provider.of(123);
+    assert_eq(p.get(), 123);
+}
+
+/// Provider caches the factory result — subsequent gets return clone-equal value.
+@test
+fn test_provider_get_caches_factory_result() {
+    let mut p = Provider.new(fn() -> Int { 7 });
+    let a = p.get();
+    let b = p.get();
+    assert_eq(a, b);
+    assert_eq(a, 7);
+}
+
+// =============================================================================
+// Section 2: Provider<T>.is_resolved — lifecycle predicate
+// =============================================================================
+
+@test
+fn test_provider_new_starts_unresolved() {
+    let p: Provider<Int> = Provider.new(fn() -> Int { 100 });
+    assert(!p.is_resolved());
+}
+
+@test
+fn test_provider_of_starts_resolved() {
+    let p = Provider.of(99);
+    assert(p.is_resolved());
+}
+
+@test
+fn test_provider_after_get_is_resolved() {
+    let mut p = Provider.new(fn() -> Int { 5 });
+    let _ = p.get();
+    assert(p.is_resolved());
+}
+
+// =============================================================================
+// Section 3: Provider<T>.reset — invalidate cache
+// =============================================================================
+
+@test
+fn test_provider_reset_clears_cache() {
+    let mut p = Provider.new(fn() -> Int { 11 });
+    let _ = p.get();
+    assert(p.is_resolved());
+    p.reset();
+    assert(!p.is_resolved());
+}
+
+@test
+fn test_provider_reset_then_get_reruns_factory() {
+    let mut p = Provider.new(fn() -> Int { 13 });
+    let first = p.get();
+    p.reset();
+    let second = p.get();
+    // Factory is deterministic → same value, but the cache was cleared.
+    assert_eq(first, 13);
+    assert_eq(second, 13);
+}
+
+// =============================================================================
+// Section 4: Provider<T>.get_ref — non-cloning accessor
+// =============================================================================
+
+@test
+fn test_provider_get_ref_returns_value() {
+    let mut p = Provider.new(fn() -> Int { 21 });
+    let r = p.get_ref();
+    assert_eq(*r, 21);
+}
+
+@test
+fn test_provider_get_ref_sets_resolved() {
+    let mut p = Provider.new(fn() -> Int { 22 });
+    let _r = p.get_ref();
+    assert(p.is_resolved());
+}
+
+// =============================================================================
+// Section 5: LazyProvider<T> — alias to Provider<T>
+// =============================================================================
+
+@test
+fn test_lazy_provider_is_alias_for_provider() {
+    // LazyProvider<T> is documented as a backwards-compatibility alias.
+    // Construct via Provider and prove the LazyProvider name resolves.
+    let mut p: LazyProvider<Int> = Provider.new(fn() -> Int { 33 });
+    assert_eq(p.get(), 33);
+}
+
+// =============================================================================
+// Section 6: ScopedProvider<T> — construction
+// =============================================================================
+//
+// ScopedProvider stores (slot_id, value) for compiler-emitted
+// `provide ... in { ... }` lowering. `run` pushes the value into TLS
+// slot, runs the body, pops the value out. Tests below construct
+// ScopedProviders and assert structural properties only.
+
+@test
+fn test_scoped_provider_new_holds_slot_id_and_value() {
+    let sp = ScopedProvider.new(42, 100);
+    // Implementation-private access via the structural fields would
+    // require the type to expose them; we instead trust `run` end-to-end.
+    // Here, sanity-check: the value passed survives construction.
+    assert_eq(sp.value, 100);
+    assert_eq(sp.slot_id, 42);
+}
+
+// =============================================================================
+// Section 7: has_context — empty TLS slot returns false
+// =============================================================================
+//
+// In a fresh execution environment, no context is provided in slot
+// 99 (well above any compiler-assigned default slot). has_context
+// must return false.
+
+@test
+fn test_has_context_returns_false_when_slot_not_provided() {
+    // Use a high slot id outside the compiler-allocated standard-context
+    // range so we can be sure nothing was injected at process start.
+    assert(!has_context(200));
+}
+
+@test
+fn test_has_context_returns_false_for_negative_slot() {
+    // Out-of-range slot id must be defended against by the ctx_bridge.
+    assert(!has_context(-1));
+}
+
+@test
+fn test_has_context_returns_false_for_very_high_slot() {
+    // Way beyond CONTEXT_SLOT_COUNT.
+    assert(!has_context(1000000));
+}

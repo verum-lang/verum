@@ -1,0 +1,276 @@
+// =============================================================================
+// core-tests/context/scope/unit_test.vr
+// =============================================================================
+//
+// Companion files in this directory:
+//   property_test.vr     — algebraic laws over the 3-valued Scope domain and
+//                          the monotonic depth chain of ContextScope.
+//   integration_test.vr  — cross-type interaction (Scope used in error
+//                          payloads, ContextScope nested in collections).
+//   regression_test.vr   — pinned regressions surfaced while building the
+//                          context test suite.
+//   audit.md             — implementation audit, drift surfaces, deferrals.
+//
+// The `core.context.scope` module defines:
+//   * `Scope`               — the 3-valued DI scope ADT (Singleton/Request/Transient)
+//   * `Scope.can_depend_on` — scope-compatibility predicate
+//   * `Scope.name`          — variant → display name
+//   * `Scope.rank`          — variant → ordinal (Singleton=0 .. Transient=2)
+//   * `ContextScope`        — runtime context-nesting depth record
+//   * `ContextScope.root / enter / current_depth / parent`
+//
+// !!! CROSS-MODULE NAME COLLISION & BARE-VARIANT METHOD DISPATCH HAZARD
+//     (audit.md §3.1 + §3.2):
+//   * `Transient` collides with `RestartStrategy.Transient` in 4 sibling
+//     modules; bare `Transient` references fail to compile.
+//   * `Request` collides with `core.net.http.Request` (record type).
+//   * EVEN FOR THE UNIQUELY-DEFINED `Singleton`, bare `Singleton.name()` or
+//     `Singleton.can_depend_on(...)` dispatches to the WRONG method (the
+//     bare-variant value carries no enclosing-type info for method lookup).
+// This file uses the qualified form `Scope.Singleton` / `Scope.Request` /
+// `Scope.Transient` exclusively. The bare-name failures are pinned in
+// regression_test.vr until task #17/#39 closes (mount-scope-aware lookup).
+// =============================================================================
+
+mount core.context.scope.{Scope, ContextScope};
+
+// =============================================================================
+// Section 1: Scope variant construction & disjointness
+// =============================================================================
+
+@test
+fn test_scope_singleton_construction() {
+    let s: Scope = Scope.Singleton;
+    assert(s is Scope.Singleton);
+}
+
+@test
+fn test_scope_request_construction() {
+    let s: Scope = Scope.Request;
+    assert(s is Scope.Request);
+}
+
+@test
+fn test_scope_transient_construction() {
+    let s: Scope = Scope.Transient;
+    assert(s is Scope.Transient);
+}
+
+/// Variants are mutually disjoint — the `is` operator rejects all
+/// non-matching tags. This pins the variant-tag layout.
+@test
+fn test_scope_variants_are_disjoint() {
+    let singleton: Scope = Scope.Singleton;
+    let request: Scope = Scope.Request;
+    let transient: Scope = Scope.Transient;
+
+    assert(!(singleton is Scope.Request));
+    assert(!(singleton is Scope.Transient));
+    assert(!(request is Scope.Singleton));
+    assert(!(request is Scope.Transient));
+    assert(!(transient is Scope.Singleton));
+    assert(!(transient is Scope.Request));
+}
+
+// =============================================================================
+// Section 2: Scope.name — display name for each variant
+// =============================================================================
+
+@test
+fn test_scope_name_singleton() {
+    assert_eq(Scope.Singleton.name(), "Singleton");
+}
+
+@test
+fn test_scope_name_request() {
+    assert_eq(Scope.Request.name(), "Request");
+}
+
+@test
+fn test_scope_name_transient() {
+    assert_eq(Scope.Transient.name(), "Transient");
+}
+
+// =============================================================================
+// Section 3: Scope.rank — ordinal rank (shorter-lived → higher rank)
+// =============================================================================
+
+@test
+fn test_scope_rank_singleton_is_zero() {
+    assert_eq(Scope.Singleton.rank(), 0);
+}
+
+@test
+fn test_scope_rank_request_is_one() {
+    assert_eq(Scope.Request.rank(), 1);
+}
+
+@test
+fn test_scope_rank_transient_is_two() {
+    assert_eq(Scope.Transient.rank(), 2);
+}
+
+@test
+fn test_scope_ranks_strictly_increasing() {
+    // Pin: rank order corresponds to lifetime ordering. Any swap here is
+    // a breaking change in the scope-hierarchy enforcer.
+    assert(Scope.Singleton.rank() < Scope.Request.rank());
+    assert(Scope.Request.rank() < Scope.Transient.rank());
+}
+
+// =============================================================================
+// Section 4: Scope.can_depend_on — hierarchy rules (full 3×3 matrix)
+// =============================================================================
+//
+// The contract (from scope.vr docstring):
+//   * Singleton can ONLY depend on Singleton.
+//   * Request can depend on Singleton or Request.
+//   * Transient can depend on any scope.
+
+// --- Singleton row ---
+@test
+fn test_singleton_can_depend_on_singleton() {
+    assert(Scope.Singleton.can_depend_on(Scope.Singleton));
+}
+
+@test
+fn test_singleton_cannot_depend_on_request() {
+    assert(!Scope.Singleton.can_depend_on(Scope.Request));
+}
+
+@test
+fn test_singleton_cannot_depend_on_transient() {
+    assert(!Scope.Singleton.can_depend_on(Scope.Transient));
+}
+
+// --- Request row ---
+@test
+fn test_request_can_depend_on_singleton() {
+    assert(Scope.Request.can_depend_on(Scope.Singleton));
+}
+
+@test
+fn test_request_can_depend_on_request() {
+    assert(Scope.Request.can_depend_on(Scope.Request));
+}
+
+@test
+fn test_request_cannot_depend_on_transient() {
+    assert(!Scope.Request.can_depend_on(Scope.Transient));
+}
+
+// --- Transient row ---
+@test
+fn test_transient_can_depend_on_singleton() {
+    assert(Scope.Transient.can_depend_on(Scope.Singleton));
+}
+
+@test
+fn test_transient_can_depend_on_request() {
+    assert(Scope.Transient.can_depend_on(Scope.Request));
+}
+
+@test
+fn test_transient_can_depend_on_transient() {
+    assert(Scope.Transient.can_depend_on(Scope.Transient));
+}
+
+// =============================================================================
+// Section 5: ContextScope construction
+// =============================================================================
+
+@test
+fn test_contextscope_root_has_depth_zero() {
+    let s = ContextScope.root();
+    assert_eq(s.current_depth(), 0);
+}
+
+@test
+fn test_contextscope_root_parent_is_zero() {
+    let s = ContextScope.root();
+    assert_eq(s.parent(), 0);
+}
+
+// =============================================================================
+// Section 6: ContextScope.enter — single descent
+// =============================================================================
+
+@test
+fn test_contextscope_enter_once_depth_one() {
+    let root = ContextScope.root();
+    let child = root.enter();
+    assert_eq(child.current_depth(), 1);
+}
+
+@test
+fn test_contextscope_enter_once_parent_is_zero() {
+    let root = ContextScope.root();
+    let child = root.enter();
+    assert_eq(child.parent(), 0);
+}
+
+@test
+fn test_contextscope_root_unchanged_after_enter() {
+    // `enter` returns a NEW ContextScope; it must not mutate self.
+    let root = ContextScope.root();
+    let _child = root.enter();
+    assert_eq(root.current_depth(), 0);
+    assert_eq(root.parent(), 0);
+}
+
+// =============================================================================
+// Section 7: ContextScope.enter — nested descent
+// =============================================================================
+
+@test
+fn test_contextscope_two_levels() {
+    let root = ContextScope.root();
+    let l1 = root.enter();
+    let l2 = l1.enter();
+    assert_eq(l2.current_depth(), 2);
+    assert_eq(l2.parent(), 1);
+}
+
+@test
+fn test_contextscope_three_levels() {
+    let root = ContextScope.root();
+    let l1 = root.enter();
+    let l2 = l1.enter();
+    let l3 = l2.enter();
+    assert_eq(l3.current_depth(), 3);
+    assert_eq(l3.parent(), 2);
+}
+
+@test
+fn test_contextscope_intermediate_levels_preserved() {
+    let root = ContextScope.root();
+    let l1 = root.enter();
+    let l2 = l1.enter();
+    let l3 = l2.enter();
+
+    // No previously-derived scope is mutated by later enters.
+    assert_eq(l1.current_depth(), 1);
+    assert_eq(l1.parent(), 0);
+    assert_eq(l2.current_depth(), 2);
+    assert_eq(l2.parent(), 1);
+    assert_eq(l3.current_depth(), 3);
+    assert_eq(l3.parent(), 2);
+}
+
+// =============================================================================
+// Section 8: ContextScope.enter — deep nesting (stress)
+// =============================================================================
+
+@test
+fn test_contextscope_deep_chain_depth_monotonic() {
+    let mut cur = ContextScope.root();
+    let mut depth = 0;
+    while depth < 100 {
+        let next = cur.enter();
+        assert_eq(next.current_depth(), depth + 1);
+        assert_eq(next.parent(), depth);
+        cur = next;
+        depth = depth + 1;
+    }
+    assert_eq(cur.current_depth(), 100);
+}

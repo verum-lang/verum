@@ -1,0 +1,90 @@
+// =============================================================================
+// core-tests/context/provider/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `Provider<T>` (using Int as the carrier; the
+// laws generalize to any Clone-able T).
+//
+//   §1  Provider.of(v).get() == v
+//   §2  Provider.new(|| v).get() == v
+//   §3  Provider.of is already resolved
+//   §4  Provider.new starts unresolved
+//   §5  Provider.get is idempotent (cache pinned)
+//   §6  reset cancels resolution
+//   §7  reset then get re-runs factory (here deterministic, so same result)
+//   §8  Provider.of marks resolved immediately
+// =============================================================================
+
+mount core.context.provider.{Provider};
+
+@test
+fn property_of_value_get_returns_value() {
+    let mut p = Provider.of(7);
+    assert_eq(p.get(), 7);
+}
+
+@test
+fn property_new_factory_get_returns_factory_value() {
+    let mut p = Provider.new(fn() -> Int { 11 });
+    assert_eq(p.get(), 11);
+}
+
+@test
+fn property_of_is_resolved_immediately() {
+    let p = Provider.of(0);
+    assert(p.is_resolved());
+}
+
+@test
+fn property_new_starts_unresolved() {
+    let p: Provider<Int> = Provider.new(fn() -> Int { 42 });
+    assert(!p.is_resolved());
+}
+
+@test
+fn property_get_idempotent_three_calls() {
+    let mut p = Provider.new(fn() -> Int { 100 });
+    let a = p.get();
+    let b = p.get();
+    let c = p.get();
+    assert_eq(a, b);
+    assert_eq(b, c);
+    assert_eq(a, 100);
+}
+
+@test
+fn property_reset_clears_resolution_state() {
+    let mut p = Provider.new(fn() -> Int { 13 });
+    let _ = p.get();
+    assert(p.is_resolved());
+    p.reset();
+    assert(!p.is_resolved());
+}
+
+@test
+fn property_reset_then_get_yields_same_value() {
+    // Factory is deterministic, so the value is the same — what we
+    // assert here is that the FACTORY ran again (not the cache),
+    // observable via is_resolved transitioning false → true.
+    let mut p = Provider.new(fn() -> Int { 5 });
+    let v1 = p.get();
+    p.reset();
+    assert(!p.is_resolved());
+    let v2 = p.get();
+    assert(p.is_resolved());
+    assert_eq(v1, v2);
+    assert_eq(v1, 5);
+}
+
+@test
+fn property_get_after_of_does_not_run_factory() {
+    // `Provider.of(v)` constructs a resolved provider with a
+    // never-invoked panic factory. `get()` returns v WITHOUT
+    // calling the factory. The success of the next assertion
+    // proves the factory wasn't called (else the panic in `of`'s
+    // factory would fire).
+    let mut p = Provider.of(99);
+    assert(p.is_resolved());
+    let v = p.get();
+    assert_eq(v, 99);
+}

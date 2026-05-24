@@ -1,0 +1,334 @@
+// =============================================================================
+// core-tests/context/standard/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.context.standard`:
+//   * `ContextLogLevel` ADT (6 variants: Trace/Debug/Info/Warn/Error/Fatal)
+//     with `severity`, `name`, `is_enabled` methods
+//     and `Eq`, `Ord`, `Clone`, `Copy`, `Debug`, `Display` impls.
+//   * `ContextLogRecord` record (Display/Debug)
+//   * `Row` record (get, get_index, Display/Debug)
+//   * `QueryResult` record (Display/Debug)
+//   * `AuthUser` record (has_role, Display/Debug)
+//
+// The `context` protocols defined in `standard.vr` (Logger / Database /
+// Auth / Config / Cache / Metrics / Tracer / Clock / Random /
+// FileSystem) are language-level surface that requires `provide`/`using`
+// runtime support; they are tested at the language level, not here.
+// This file covers the DATA TYPES that back them.
+// =============================================================================
+
+mount core.context.standard.{ContextLogLevel, ContextLogRecord, Row, QueryResult, AuthUser};
+mount core.collections.list.List;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: ContextLogLevel variant construction
+// =============================================================================
+
+@test
+fn test_log_level_trace_construction() {
+    let l: ContextLogLevel = ContextLogLevel.Trace;
+    assert(l is ContextLogLevel.Trace);
+}
+
+@test
+fn test_log_level_debug_construction() {
+    let l: ContextLogLevel = ContextLogLevel.Debug;
+    assert(l is ContextLogLevel.Debug);
+}
+
+@test
+fn test_log_level_info_construction() {
+    let l: ContextLogLevel = ContextLogLevel.Info;
+    assert(l is ContextLogLevel.Info);
+}
+
+@test
+fn test_log_level_warn_construction() {
+    let l: ContextLogLevel = ContextLogLevel.Warn;
+    assert(l is ContextLogLevel.Warn);
+}
+
+@test
+fn test_log_level_error_construction() {
+    let l: ContextLogLevel = ContextLogLevel.Error;
+    assert(l is ContextLogLevel.Error);
+}
+
+@test
+fn test_log_level_fatal_construction() {
+    let l: ContextLogLevel = ContextLogLevel.Fatal;
+    assert(l is ContextLogLevel.Fatal);
+}
+
+// =============================================================================
+// Section 2: ContextLogLevel.severity — ordinal 0..5
+// =============================================================================
+
+@test
+fn test_severity_trace_is_zero() {
+    assert_eq(ContextLogLevel.Trace.severity(), 0);
+}
+
+@test
+fn test_severity_debug_is_one() {
+    assert_eq(ContextLogLevel.Debug.severity(), 1);
+}
+
+@test
+fn test_severity_info_is_two() {
+    assert_eq(ContextLogLevel.Info.severity(), 2);
+}
+
+@test
+fn test_severity_warn_is_three() {
+    assert_eq(ContextLogLevel.Warn.severity(), 3);
+}
+
+@test
+fn test_severity_error_is_four() {
+    assert_eq(ContextLogLevel.Error.severity(), 4);
+}
+
+@test
+fn test_severity_fatal_is_five() {
+    assert_eq(ContextLogLevel.Fatal.severity(), 5);
+}
+
+@test
+fn test_severities_strictly_increasing() {
+    assert(ContextLogLevel.Trace.severity() < ContextLogLevel.Debug.severity());
+    assert(ContextLogLevel.Debug.severity() < ContextLogLevel.Info.severity());
+    assert(ContextLogLevel.Info.severity()  < ContextLogLevel.Warn.severity());
+    assert(ContextLogLevel.Warn.severity()  < ContextLogLevel.Error.severity());
+    assert(ContextLogLevel.Error.severity() < ContextLogLevel.Fatal.severity());
+}
+
+// =============================================================================
+// Section 3: ContextLogLevel.name — display name
+// =============================================================================
+
+@test
+fn test_name_trace() { assert_eq(ContextLogLevel.Trace.name(), "TRACE"); }
+
+@test
+fn test_name_debug() { assert_eq(ContextLogLevel.Debug.name(), "DEBUG"); }
+
+@test
+fn test_name_info()  { assert_eq(ContextLogLevel.Info.name(),  "INFO"); }
+
+@test
+fn test_name_warn()  { assert_eq(ContextLogLevel.Warn.name(),  "WARN"); }
+
+@test
+fn test_name_error() { assert_eq(ContextLogLevel.Error.name(), "ERROR"); }
+
+@test
+fn test_name_fatal() { assert_eq(ContextLogLevel.Fatal.name(), "FATAL"); }
+
+// =============================================================================
+// Section 4: ContextLogLevel.is_enabled — severity-gated predicate
+// =============================================================================
+
+@test
+fn test_is_enabled_self_returns_true() {
+    // Each level is enabled at its own min — `severity >= severity` is true.
+    assert(ContextLogLevel.Trace.is_enabled(ContextLogLevel.Trace));
+    assert(ContextLogLevel.Info.is_enabled(ContextLogLevel.Info));
+    assert(ContextLogLevel.Fatal.is_enabled(ContextLogLevel.Fatal));
+}
+
+@test
+fn test_is_enabled_more_severe_passes() {
+    // Error log enabled when min is Info.
+    assert(ContextLogLevel.Error.is_enabled(ContextLogLevel.Info));
+    // Fatal enabled when min is Debug.
+    assert(ContextLogLevel.Fatal.is_enabled(ContextLogLevel.Debug));
+}
+
+@test
+fn test_is_enabled_less_severe_fails() {
+    // Trace log disabled when min is Info.
+    assert(!ContextLogLevel.Trace.is_enabled(ContextLogLevel.Info));
+    // Debug disabled when min is Warn.
+    assert(!ContextLogLevel.Debug.is_enabled(ContextLogLevel.Warn));
+}
+
+// =============================================================================
+// Section 5: ContextLogLevel Eq / Ord
+// =============================================================================
+
+@test
+fn test_log_level_eq_reflexive() {
+    assert(ContextLogLevel.Info == ContextLogLevel.Info);
+}
+
+@test
+fn test_log_level_eq_disjoint() {
+    assert(ContextLogLevel.Trace != ContextLogLevel.Fatal);
+    assert(ContextLogLevel.Info != ContextLogLevel.Error);
+}
+
+@test
+fn test_log_level_ord_less_than() {
+    assert(ContextLogLevel.Trace < ContextLogLevel.Debug);
+    assert(ContextLogLevel.Info  < ContextLogLevel.Warn);
+    assert(ContextLogLevel.Warn  < ContextLogLevel.Fatal);
+}
+
+@test
+fn test_log_level_ord_greater_than() {
+    assert(ContextLogLevel.Fatal > ContextLogLevel.Error);
+    assert(ContextLogLevel.Error > ContextLogLevel.Warn);
+}
+
+// =============================================================================
+// Section 6: ContextLogLevel Clone / Copy
+// =============================================================================
+
+@test
+fn test_log_level_clone() {
+    let l = ContextLogLevel.Info;
+    let c = l.clone();
+    assert(l == c);
+    assert_eq(l.severity(), c.severity());
+}
+
+// =============================================================================
+// Section 7: ContextLogLevel Display / Debug
+// =============================================================================
+
+@test
+fn test_log_level_display_returns_name() {
+    let s = f"{ContextLogLevel.Warn}";
+    assert(s.contains("WARN"));
+}
+
+@test
+fn test_log_level_debug_returns_name() {
+    let s = f"{ContextLogLevel.Error:?}";
+    assert(s.contains("ERROR"));
+}
+
+// =============================================================================
+// Section 8: AuthUser — has_role / Display
+// =============================================================================
+
+@test
+fn test_auth_user_construction() {
+    let u = AuthUser {
+        id: "u1".clone(),
+        name: "alice".clone(),
+        roles: ["admin".clone(), "editor".clone()],
+    };
+    assert_eq(u.id, "u1");
+    assert_eq(u.name, "alice");
+    assert_eq(u.roles.len(), 2);
+}
+
+@test
+fn test_auth_user_has_role_present() {
+    let u = AuthUser {
+        id: "u1".clone(),
+        name: "alice".clone(),
+        roles: ["admin".clone(), "editor".clone()],
+    };
+    let admin = "admin".clone();
+    assert(u.has_role(&admin));
+}
+
+@test
+fn test_auth_user_has_role_absent() {
+    let u = AuthUser {
+        id: "u1".clone(),
+        name: "alice".clone(),
+        roles: ["admin".clone()],
+    };
+    let other = "guest".clone();
+    assert(!u.has_role(&other));
+}
+
+@test
+fn test_auth_user_empty_roles_has_no_roles() {
+    let u = AuthUser {
+        id: "u1".clone(),
+        name: "alice".clone(),
+        roles: [],
+    };
+    let admin = "admin".clone();
+    assert(!u.has_role(&admin));
+}
+
+@test
+fn test_auth_user_display_contains_name_and_id() {
+    let u = AuthUser {
+        id: "u1".clone(),
+        name: "alice".clone(),
+        roles: [],
+    };
+    let s = f"{u}";
+    assert(s.contains("alice"));
+    assert(s.contains("u1"));
+}
+
+// =============================================================================
+// Section 9: Row — get_index
+// =============================================================================
+
+@test
+fn test_row_get_index_in_range() {
+    let r = Row {
+        columns: ["name".clone(), "email".clone()],
+        values: [Some("alice".clone()), Some("a@b".clone())],
+    };
+    let v0 = r.get_index(0);
+    match v0 {
+        Some(s) => assert_eq(*s, "alice"),
+        None => panic("expected Some(alice)"),
+    }
+}
+
+@test
+fn test_row_get_index_out_of_range_returns_none() {
+    let r = Row {
+        columns: ["name".clone()],
+        values: [Some("alice".clone())],
+    };
+    let v = r.get_index(99);
+    match v {
+        Some(_) => panic("expected None for out-of-range index"),
+        None => assert(true),
+    }
+}
+
+@test
+fn test_row_get_index_negative_returns_none() {
+    let r = Row {
+        columns: ["x".clone()],
+        values: [Some("y".clone())],
+    };
+    let v = r.get_index(-1);
+    match v {
+        Some(_) => panic("expected None for negative index"),
+        None => assert(true),
+    }
+}
+
+// =============================================================================
+// Section 10: QueryResult — Display
+// =============================================================================
+
+@test
+fn test_query_result_display_format() {
+    let qr = QueryResult {
+        rows: [],
+        rows_affected: 3,
+    };
+    let s = f"{qr}";
+    assert(s.contains("QueryResult"));
+    assert(s.contains("3"));
+    assert(s.contains("0"));
+    assert(s.contains("rows"));
+    assert(s.contains("affected"));
+}
