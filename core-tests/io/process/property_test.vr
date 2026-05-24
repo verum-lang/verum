@@ -1,0 +1,75 @@
+// =============================================================================
+// core-tests/io/process/property_test.vr
+// =============================================================================
+
+mount core.io.process.{Stdio, ExitStatus};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — Stdio 3-variant pairwise distinct (exhaustive)
+// =============================================================================
+
+@test
+fn law_stdio_3_variants_pairwise_distinct() {
+    // is-pattern triangulation
+    let inh = Stdio.Inherit;
+    let pip = Stdio.Piped;
+    let nul = Stdio.Null;
+    assert(inh is Inherit);
+    assert(pip is Piped);
+    assert(nul is Null);
+    assert(!(inh is Piped));
+    assert(!(inh is Null));
+    assert(!(pip is Inherit));
+    assert(!(pip is Null));
+    assert(!(nul is Inherit));
+    assert(!(nul is Piped));
+}
+
+// =============================================================================
+// §B — ExitStatus laws over representative raw values
+// =============================================================================
+
+@test
+fn law_exit_status_zero_implies_success() {
+    let s = ExitStatus { raw: 0 };
+    assert(s.success());
+}
+
+@test
+fn law_exit_status_signaled_implies_not_success() {
+    // Any signal-terminated status (low 7 bits non-zero and not 0x7F)
+    // must NOT be classified as success.
+    let signals: List<Int> = [1, 2, 3, 6, 9, 11, 15];  // SIGHUP, SIGINT, ..., SIGTERM
+    for sig in signals.iter() {
+        let s = ExitStatus { raw: *sig };
+        assert(!s.success());
+        assert(s.is_signaled());
+        assert_eq(s.signal(), *sig);
+    }
+}
+
+@test
+fn law_exit_status_exit_code_one_to_255() {
+    let codes: List<Int> = [1, 2, 5, 10, 100, 127, 255];
+    for c in codes.iter() {
+        let raw = *c << 8;  // encode as POSIX waitpid status
+        let s = ExitStatus { raw: raw };
+        assert(!s.success());
+        assert(s.is_exited());
+        assert(!s.is_signaled());
+        assert_eq(s.code(), *c);
+    }
+}
+
+@test
+fn law_exit_status_signal_is_zero_for_normal_exits() {
+    let codes: List<Int> = [0, 1, 42, 100];
+    for c in codes.iter() {
+        let raw = *c << 8;
+        let s = ExitStatus { raw: raw };
+        assert_eq(s.signal(), 0);
+    }
+}
+
+fn main() {}

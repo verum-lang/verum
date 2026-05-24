@@ -1,0 +1,63 @@
+// =============================================================================
+// core-tests/io/process/integration_test.vr
+// =============================================================================
+
+mount core.io.process.{Stdio, ExitStatus, Command};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 — Stdio variants in a List for declarative pipeline config
+// =============================================================================
+
+@test
+fn integration_stdio_list_pattern_match() {
+    let configs: List<Stdio> = [Stdio.Inherit, Stdio.Piped, Stdio.Null, Stdio.Piped];
+    let mut piped: Int = 0;
+    let mut nulls: Int = 0;
+    let mut inherit: Int = 0;
+    for c in configs.iter() {
+        match c {
+            Inherit => inherit = inherit + 1,
+            Piped => piped = piped + 1,
+            Null => nulls = nulls + 1,
+        }
+    }
+    assert_eq(piped, 2);
+    assert_eq(nulls, 1);
+    assert_eq(inherit, 1);
+}
+
+// =============================================================================
+// §2 — Command builder composes args & env
+// =============================================================================
+
+@test
+fn integration_command_full_builder_chain() {
+    let mut cmd = Command.new(Text.from("/bin/echo"));
+    let _ = cmd.arg(Text.from("hello"));
+    let _ = cmd.arg(Text.from("world"));
+    let _ = cmd.env(Text.from("LANG"), Text.from("C"));
+    let _ = cmd.current_dir(Text.from("/tmp"));
+    let _ = cmd.stdout(Stdio.Piped);
+    let _ = cmd.stderr(Stdio.Null);
+    let _ = cmd.stdin(Stdio.Null);
+}
+
+// =============================================================================
+// §3 — ExitStatus classifies in caller code
+// =============================================================================
+
+@test
+fn integration_exit_status_classifier() {
+    fn classify(s: &ExitStatus) -> Text {
+        if s.success() { Text.from("success") }
+        else if s.is_signaled() { Text.from("signaled") }
+        else if s.is_exited() { Text.from("exited-nonzero") }
+        else { Text.from("unknown") }
+    }
+    assert_eq(classify(&ExitStatus { raw: 0 }), Text.from("success"));
+    assert_eq(classify(&ExitStatus { raw: 0x0100 }), Text.from("exited-nonzero"));
+    assert_eq(classify(&ExitStatus { raw: 9 }), Text.from("signaled"));
+}
+
+fn main() {}
