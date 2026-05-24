@@ -43,16 +43,19 @@ public type ContextError is
 
 implement ContextError {
     fn message(&self) -> Text {
+        // Qualify variants (task #17/#39 workaround) — bare-name
+        // first-wins routes patterns to the wrong sibling-module
+        // variant otherwise.
         match self {
-            NotFound { context_name } =>
+            ContextError.NotFound { context_name } =>
                 f"Context '{context_name}' not found in current environment",
-            NotProvided { context_name, function_name } =>
+            ContextError.NotProvided { context_name, function_name } =>
                 f"Context '{context_name}' not provided before use in '{function_name}'",
-            TypeMismatch { context_name, expected, found } =>
+            ContextError.TypeMismatch { context_name, expected, found } =>
                 f"Context '{context_name}': expected type '{expected}', found '{found}'",
-            CircularDependency { chain } =>
+            ContextError.CircularDependency { chain } =>
                 f"Circular dependency detected: {chain.join(\" -> \")}",
-            ScopeViolation { dependent, dependency, dependent_scope, dependency_scope } =>
+            ContextError.ScopeViolation { dependent, dependency, dependent_scope, dependency_scope } =>
                 f"Scope violation: '{dependent}' ({dependent_scope}) cannot depend on '{dependency}' ({dependency_scope})",
         }
     }
@@ -66,16 +69,17 @@ implement Display for ContextError {
 
 implement Debug for ContextError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        // Qualify variants (task #17/#39 workaround) — same root.
         match self {
-            NotFound { context_name } =>
+            ContextError.NotFound { context_name } =>
                 f.write_str(f"NotFound {{ context_name: {context_name} }}".as_str()),
-            NotProvided { context_name, function_name } =>
+            ContextError.NotProvided { context_name, function_name } =>
                 f.write_str(f"NotProvided {{ context_name: {context_name}, function_name: {function_name} }}".as_str()),
-            TypeMismatch { context_name, expected, found } =>
+            ContextError.TypeMismatch { context_name, expected, found } =>
                 f.write_str(f"TypeMismatch {{ context_name: {context_name}, expected: {expected}, found: {found} }}".as_str()),
-            CircularDependency { chain } =>
+            ContextError.CircularDependency { chain } =>
                 f.write_str(f"CircularDependency {{ chain: <{chain.len()} entries> }}".as_str()),
-            ScopeViolation { dependent, dependency, dependent_scope, dependency_scope } =>
+            ContextError.ScopeViolation { dependent, dependency, dependent_scope, dependency_scope } =>
                 f.write_str(f"ScopeViolation {{ dependent: {dependent}, dependency: {dependency}, dependent_scope: {dependent_scope}, dependency_scope: {dependency_scope} }}".as_str()),
         }
     }
@@ -83,19 +87,32 @@ implement Debug for ContextError {
 
 implement Eq for ContextError {
     fn eq(&self, other: &ContextError) -> Bool {
+        // FUNDAMENTAL: qualify variants `ContextError.<Variant>` in
+        // BOTH match-arm sides to avoid bare-name first-wins
+        // collision (task #17/#39). Pre-fix `NotFound` / `NotProvided`
+        // / `TypeMismatch` / `CircularDependency` / `ScopeViolation`
+        // bare names resolved to the first sibling-module variant
+        // registered with that name; the match arm then never fired
+        // on a real ContextError value, falling through to `_ => false`.
+        // Symptom: every `a == b` with same-variant + same-fields
+        // returned `false` (audit.md §3.1 + scope/audit.md §3.2).
         match (self, other) {
-            (NotFound { context_name: a }, NotFound { context_name: b }) =>
+            (ContextError.NotFound { context_name: a },
+             ContextError.NotFound { context_name: b }) =>
                 a == b,
-            (NotProvided { context_name: ca, function_name: fa },
-             NotProvided { context_name: cb, function_name: fb }) =>
+            (ContextError.NotProvided { context_name: ca, function_name: fa },
+             ContextError.NotProvided { context_name: cb, function_name: fb }) =>
                 ca == cb && fa == fb,
-            (TypeMismatch { context_name: ca, expected: ea, found: fa },
-             TypeMismatch { context_name: cb, expected: eb, found: fb }) =>
+            (ContextError.TypeMismatch { context_name: ca, expected: ea, found: fa },
+             ContextError.TypeMismatch { context_name: cb, expected: eb, found: fb }) =>
                 ca == cb && ea == eb && fa == fb,
-            (CircularDependency { chain: a }, CircularDependency { chain: b }) =>
+            (ContextError.CircularDependency { chain: a },
+             ContextError.CircularDependency { chain: b }) =>
                 a == b,
-            (ScopeViolation { dependent: da, dependency: ya, dependent_scope: dsa, dependency_scope: ysa },
-             ScopeViolation { dependent: db, dependency: yb, dependent_scope: dsb, dependency_scope: ysb }) =>
+            (ContextError.ScopeViolation { dependent: da, dependency: ya,
+                                            dependent_scope: dsa, dependency_scope: ysa },
+             ContextError.ScopeViolation { dependent: db, dependency: yb,
+                                            dependent_scope: dsb, dependency_scope: ysb }) =>
                 da == db && ya == yb && dsa == dsb && ysa == ysb,
             _ => false,
         }

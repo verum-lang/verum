@@ -1,0 +1,120 @@
+// =============================================================================
+// core-tests/diagnostics/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.diagnostics`:
+//   * PanicReport composes PanicInfo + Location
+//   * Display interpolation in larger error chains
+//   * Multi-line format_panic_context assembly with all subsystems
+// =============================================================================
+
+mount core.diagnostics.{PanicReport, PanicInfo, Location};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: PanicReport carries Location through builder
+// =============================================================================
+
+@test
+fn integration_panic_report_with_location() {
+    let info = PanicInfo {
+        message: "nil deref".clone(),
+        location: Maybe.Some(Location {
+            file: "src/lib.vr".clone(),
+            line: 100,
+            column: 5,
+        }),
+    };
+    let r = PanicReport.from_info(info);
+    // Location field accessible through info.location.
+    match r.info.location {
+        Maybe.Some(loc) => {
+            assert_eq(loc.file, "src/lib.vr");
+            assert_eq(loc.line, 100);
+            assert_eq(loc.column, 5);
+        },
+        Maybe.None => panic("expected Some(Location)"),
+    }
+}
+
+// =============================================================================
+// Section 2: format_panic_context renders Location coordinates
+// =============================================================================
+
+@test
+fn integration_format_panic_context_renders_location() {
+    let info = PanicInfo {
+        message: "x".clone(),
+        location: Maybe.Some(Location {
+            file: "test.vr".clone(),
+            line: 42,
+            column: 13,
+        }),
+    };
+    let r = PanicReport.from_info(info);
+    let s = r.format_panic_context();
+    // Must contain the file:line:column triple per the doc-stated format.
+    assert(s.contains("test.vr"));
+    assert(s.contains("42"));
+    assert(s.contains("13"));
+}
+
+// =============================================================================
+// Section 3: Display composes in larger log entry
+// =============================================================================
+
+@test
+fn integration_panic_report_display_in_log_entry() {
+    let info = PanicInfo {
+        message: "boom".clone(),
+        location: Maybe.None,
+    };
+    let r = PanicReport.from_info(info);
+    let log_line = f"[FATAL] {r} (giving up)";
+    assert(log_line.contains("FATAL"));
+    assert(log_line.contains("boom"));
+    assert(log_line.contains("giving up"));
+    assert(log_line.contains("panic"));
+}
+
+// =============================================================================
+// Section 4: Builder chain composes all setters
+// =============================================================================
+
+@test
+fn integration_builder_chain_with_thread_name() {
+    let info = PanicInfo {
+        message: "boom".clone(),
+        location: Maybe.None,
+    };
+    let r = PanicReport.from_info(info)
+        .with_thread_name("worker-pool-3".clone());
+
+    assert(r.has_thread_name());
+    assert_eq(r.thread_name, "worker-pool-3");
+
+    let s = r.format_panic_context();
+    assert(s.contains("worker-pool-3"));
+    assert(s.contains("thread:"));
+}
+
+// =============================================================================
+// Section 5: PanicInfo Location with all-zero coordinates
+// =============================================================================
+
+@test
+fn integration_panic_report_with_zero_location() {
+    // Edge case: location at file:0:0 (e.g. inline/synthetic source)
+    let info = PanicInfo {
+        message: "synth".clone(),
+        location: Maybe.Some(Location {
+            file: "<inline>".clone(),
+            line: 0,
+            column: 0,
+        }),
+    };
+    let r = PanicReport.from_info(info);
+    let s = r.format_panic_context();
+    assert(s.contains("<inline>"));
+    assert(s.contains("0:0"));
+}

@@ -1,0 +1,212 @@
+// =============================================================================
+// core-tests/diagnostics/unit_test.vr
+// =============================================================================
+//
+// Companion files in this directory:
+//   property_test.vr     — algebraic laws over PanicReport's builder pattern
+//                          (commutativity of independent setters, idempotence
+//                          of has_*, format determinism).
+//   integration_test.vr  — cross-module composition (PanicReport composes
+//                          PanicInfo + TaskInfo + MemHeaderView snapshots).
+//   audit.md             — implementation audit, drift surfaces, deferrals.
+//
+// The `core.diagnostics` module is the umbrella for user-facing
+// observability. It re-exports:
+//   * `MemHeaderView`, `header_view_of`, `live_allocations`, …
+//     (from core.mem.diagnostics)
+//   * `CapEvent`, `CapEventKind`, `record_*`, ring-buffer accessors
+//     (from core.mem.cap_audit / cap_audit_ring)
+//   * `TaskInfo`, `TaskLifecycleState` (from core.async.diagnostics)
+//   * `PanicInfo`, `Location` (from core.base.panic)
+//
+// Plus the umbrella-local `PanicReport` composing record + its builder
+// methods (with_*, has_*, format_panic_context).
+// =============================================================================
+
+mount core.diagnostics.{PanicReport, PanicInfo, Location};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: PanicReport.from_info — minimal construction
+// =============================================================================
+
+@test
+fn test_panic_report_from_info_preserves_message() {
+    let info = PanicInfo {
+        message: "boom".clone(),
+        location: Maybe.None,
+    };
+    let r = PanicReport.from_info(info);
+    assert_eq(r.info.message, "boom");
+}
+
+@test
+fn test_panic_report_from_info_no_task() {
+    let info = PanicInfo {
+        message: "test".clone(),
+        location: Maybe.None,
+    };
+    let r = PanicReport.from_info(info);
+    assert(!r.has_task());
+}
+
+@test
+fn test_panic_report_from_info_no_header() {
+    let info = PanicInfo {
+        message: "test".clone(),
+        location: Maybe.None,
+    };
+    let r = PanicReport.from_info(info);
+    assert(!r.has_header());
+}
+
+@test
+fn test_panic_report_from_info_no_thread_name() {
+    let info = PanicInfo {
+        message: "test".clone(),
+        location: Maybe.None,
+    };
+    let r = PanicReport.from_info(info);
+    assert(!r.has_thread_name());
+}
+
+@test
+fn test_panic_report_from_info_no_call_stack() {
+    let info = PanicInfo {
+        message: "test".clone(),
+        location: Maybe.None,
+    };
+    let r = PanicReport.from_info(info);
+    assert(!r.has_call_stack());
+}
+
+// =============================================================================
+// Section 2: PanicReport.with_thread_name builder
+// =============================================================================
+
+@test
+fn test_with_thread_name_sets_has_thread_name() {
+    let info = PanicInfo {
+        message: "x".clone(),
+        location: Maybe.None,
+    };
+    let r = PanicReport.from_info(info).with_thread_name("worker-7".clone());
+    assert(r.has_thread_name());
+}
+
+@test
+fn test_with_thread_name_preserves_value() {
+    let info = PanicInfo {
+        message: "x".clone(),
+        location: Maybe.None,
+    };
+    let r = PanicReport.from_info(info).with_thread_name("alpha".clone());
+    assert_eq(r.thread_name, "alpha");
+}
+
+@test
+fn test_with_thread_name_empty_string_is_no_name() {
+    let info = PanicInfo {
+        message: "x".clone(),
+        location: Maybe.None,
+    };
+    let r = PanicReport.from_info(info).with_thread_name("".clone());
+    // Documented contract: empty Text → has_thread_name returns false
+    assert(!r.has_thread_name());
+}
+
+// =============================================================================
+// Section 3: PanicReport Display & Debug
+// =============================================================================
+
+@test
+fn test_panic_report_display_includes_message() {
+    let info = PanicInfo {
+        message: "boom".clone(),
+        location: Maybe.None,
+    };
+    let r = PanicReport.from_info(info);
+    let s = f"{r}";
+    assert(s.contains("boom"));
+    assert(s.contains("panic"));
+}
+
+@test
+fn test_panic_report_debug_includes_struct_name() {
+    let info = PanicInfo {
+        message: "boom".clone(),
+        location: Maybe.None,
+    };
+    let r = PanicReport.from_info(info);
+    let s = f"{r:?}";
+    assert(s.contains("PanicReport"));
+    assert(s.contains("info"));
+}
+
+// =============================================================================
+// Section 4: PanicReport.format_panic_context
+// =============================================================================
+
+@test
+fn test_format_panic_context_minimal() {
+    let info = PanicInfo {
+        message: "blew up".clone(),
+        location: Maybe.None,
+    };
+    let r = PanicReport.from_info(info);
+    let s = r.format_panic_context();
+    assert(s.contains("PanicReport"));
+    assert(s.contains("blew up"));
+    assert(s.contains("panic:"));
+}
+
+@test
+fn test_format_panic_context_with_thread_name() {
+    let info = PanicInfo {
+        message: "x".clone(),
+        location: Maybe.None,
+    };
+    let r = PanicReport.from_info(info).with_thread_name("worker-7".clone());
+    let s = r.format_panic_context();
+    assert(s.contains("worker-7"));
+    assert(s.contains("thread:"));
+}
+
+@test
+fn test_format_panic_context_with_location() {
+    let info = PanicInfo {
+        message: "x".clone(),
+        location: Maybe.Some(Location {
+            file: "test.vr".clone(),
+            line: 42,
+            column: 7,
+        }),
+    };
+    let r = PanicReport.from_info(info);
+    let s = r.format_panic_context();
+    assert(s.contains("test.vr"));
+    assert(s.contains("42"));
+    assert(s.contains("7"));
+    assert(s.contains("at:"));
+}
+
+// =============================================================================
+// Section 5: has_* predicates respect empty fields
+// =============================================================================
+
+@test
+fn test_has_thread_name_distinguishes_empty_vs_set() {
+    let info = PanicInfo {
+        message: "x".clone(),
+        location: Maybe.None,
+    };
+    let base = PanicReport.from_info(info);
+    assert(!base.has_thread_name());
+
+    let info2 = PanicInfo {
+        message: "x".clone(),
+        location: Maybe.None,
+    };
+    let named = PanicReport.from_info(info2).with_thread_name("t1".clone());
+    assert(named.has_thread_name());
+}

@@ -85,25 +85,29 @@ public type ContextLogLevel is
 implement ContextLogLevel {
     /// Get the numeric severity (higher = more severe).
     public fn severity(&self) -> Int {
+        // Qualify variants to dodge task #17/#39 bare-name first-wins.
+        // `Trace/Debug/Info/Warn/Error/Fatal` overlap with sibling-
+        // module LogLevel (`core.base.log`), Tracer span events,
+        // and SystemLogLevel variants — bare matches mis-dispatch.
         match self {
-            Trace => 0,
-            Debug => 1,
-            Info  => 2,
-            Warn  => 3,
-            Error => 4,
-            Fatal => 5,
+            ContextLogLevel.Trace => 0,
+            ContextLogLevel.Debug => 1,
+            ContextLogLevel.Info  => 2,
+            ContextLogLevel.Warn  => 3,
+            ContextLogLevel.Error => 4,
+            ContextLogLevel.Fatal => 5,
         }
     }
 
     /// Get the level name as a string.
     public fn name(&self) -> Text {
         match self {
-            Trace => "TRACE",
-            Debug => "DEBUG",
-            Info  => "INFO",
-            Warn  => "WARN",
-            Error => "ERROR",
-            Fatal => "FATAL",
+            ContextLogLevel.Trace => "TRACE",
+            ContextLogLevel.Debug => "DEBUG",
+            ContextLogLevel.Info  => "INFO",
+            ContextLogLevel.Warn  => "WARN",
+            ContextLogLevel.Error => "ERROR",
+            ContextLogLevel.Fatal => "FATAL",
         }
     }
 
