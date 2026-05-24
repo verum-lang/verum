@@ -93,15 +93,16 @@ public type Algorithm is
 
 implement Algorithm {
     /// Content-Encoding token used over HTTP.
+    /// Qualify `Algorithm.<Variant>` (task #17/#39 workaround).
     public fn content_encoding(self) -> &'static Text {
         match self {
-            Gzip => "gzip",
-            Deflate => "deflate",
-            Zlib => "deflate",      // shares HTTP token with raw deflate
-            Brotli => "br",
-            Zstd => "zstd",
-            Lz4 => "lz4",
-            Identity => "identity",
+            Algorithm.Gzip => "gzip",
+            Algorithm.Deflate => "deflate",
+            Algorithm.Zlib => "deflate",      // shares HTTP token with raw deflate
+            Algorithm.Brotli => "br",
+            Algorithm.Zstd => "zstd",
+            Algorithm.Lz4 => "lz4",
+            Algorithm.Identity => "identity",
         }
     }
 
@@ -144,21 +145,21 @@ public type CompressError is
 
 fn algorithm_name(a: &Algorithm) -> Text {
     match a {
-        Gzip     => "gzip".clone(),
-        Deflate  => "deflate".clone(),
-        Zlib     => "zlib".clone(),
-        Brotli   => "brotli".clone(),
-        Zstd     => "zstd".clone(),
-        Lz4      => "lz4".clone(),
-        Identity => "identity".clone(),
+        Algorithm.Gzip     => "gzip".clone(),
+        Algorithm.Deflate  => "deflate".clone(),
+        Algorithm.Zlib     => "zlib".clone(),
+        Algorithm.Brotli   => "brotli".clone(),
+        Algorithm.Zstd     => "zstd".clone(),
+        Algorithm.Lz4      => "lz4".clone(),
+        Algorithm.Identity => "identity".clone(),
     }
 }
 
 fn algorithm_tag(a: &Algorithm) -> Int {
     match a {
-        Gzip     => 0, Deflate  => 1, Zlib    => 2,
-        Brotli   => 3, Zstd     => 4, Lz4     => 5,
-        Identity => 6,
+        Algorithm.Gzip     => 0, Algorithm.Deflate  => 1, Algorithm.Zlib    => 2,
+        Algorithm.Brotli   => 3, Algorithm.Zstd     => 4, Algorithm.Lz4     => 5,
+        Algorithm.Identity => 6,
     }
 }
 
