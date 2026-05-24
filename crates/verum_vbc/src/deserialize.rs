@@ -56,6 +56,11 @@ struct ExtensionsData {
  /// here so the deserializer can carry it from the legacy `.vbc`
  /// format into the runtime `VbcModule`.
  external_function_names: Vec<(FunctionId, StringId)>,
+ /// Mount-rename alias table (Task #11 Phase 3 trailing record).
+ /// Mirrors `VbcModule::mount_aliases`; populated only when the
+ /// serializer wrote the optional trailing record at the end of the
+ /// extensions region.
+ mount_aliases: Vec<(StringId, FunctionId)>,
 }
 
 /// Deserializes a VBC module from binary data.
@@ -454,12 +459,10 @@ impl<'a> Deserializer<'a> {
  framework_provenance: crate::module::FrameworkProvenance::default(),
  discharge_receipts: Vec::new(),
  external_function_names: extensions.external_function_names,
- // Phase 1 of task #11 fundamental fix — empty by default.
- // The legacy `.vbc` binary format doesn't yet carry the
- // `mount_aliases` section; populated only by the sectioned
- // `.vbca` archive deserializer when the precompile starts
- // emitting alias entries.
- mount_aliases: Vec::new(),
+ // Task #11 Phase 3 — populated from the optional trailing
+ // mount_aliases record in the extensions region, or empty
+ // for legacy archives that predate the record.
+ mount_aliases: extensions.mount_aliases,
  })
  }
 
@@ -1393,8 +1396,15 @@ impl<'a> Deserializer<'a> {
  /// - 0x10: mlir_hints (optimization hints)
  /// - 0x20: ffi_tables (libraries, symbols, layouts)
  /// - 0x40: dependencies (module dependencies)
+ /// - 0x80: external_function_names (cross-module Call name table)
  /// - For each present section: u32 length + bincode data
- fn parse_extensions(&mut self, _size: u32) -> VbcResult<ExtensionsData> {
+ /// - Trailing optional records (only present in new archives):
+ ///   - mount_aliases: u32 length + bincode(Vec<(StringId, FunctionId)>)
+ fn parse_extensions(&mut self, size: u32) -> VbcResult<ExtensionsData> {
+ // Record the start of the extensions section so we can detect
+ // trailing optional records added after the legacy `section_mask`
+ // exhausted its 8 bits.
+ let extensions_start = self.offset;
  // Read section mask
  let section_mask = decode_u8(self.data, &mut self.offset)?;
 
@@ -1497,6 +1507,34 @@ impl<'a> Deserializer<'a> {
  VbcError::Deserialization(format!("external_function_names: {}", e))
  })?;
  self.offset += len;
+ }
+
+ // Task #11 Phase 3: trailing mount_aliases record.
+ //
+ // Legacy archives end the extensions region at the last
+ // section_mask-flagged record.  New archives may append a
+ // length-prefixed `mount_aliases` table after `external_function_names`.
+ // Detect by checking whether bytes remain in the extensions
+ // region (`extensions_start + size`) before attempting to read.
+ // Reading at most 4 bytes for the length probe is bounded by
+ // the same end-of-region check.
+ let extensions_end = extensions_start + size as usize;
+ if extensions_end > self.data.len() {
+ return Err(VbcError::eof(extensions_start, size as usize));
+ }
+ if self.offset + 4 <= extensions_end {
+ let len = decode_u32(self.data, &mut self.offset)? as usize;
+ if len > 0 {
+ if self.offset + len > extensions_end {
+ return Err(VbcError::eof(self.offset, len));
+ }
+ result.mount_aliases =
+ bincode::deserialize(&self.data[self.offset..self.offset + len])
+ .map_err(|e| {
+ VbcError::Deserialization(format!("mount_aliases: {}", e))
+ })?;
+ self.offset += len;
+ }
  }
 
  Ok(result)

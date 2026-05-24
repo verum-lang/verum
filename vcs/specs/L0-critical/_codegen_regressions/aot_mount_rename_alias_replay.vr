@@ -1,0 +1,45 @@
+// @test: run
+// @level: L0
+// @tier: 2
+// @tags: codegen, aot, mount-rename, archive, task-11
+// @timeout: 480000
+// @expected-stdout: 42
+// @expected-exit: 0
+// @description: Task #11 — mount-rename alias archive replay regression.
+//
+// 2026-05-24 task #11: `mount X.{NAME as ALIAS}` declarations inside
+// stdlib modules were lost at the precompile/archive boundary.  The
+// precompile-side `register_function_authoritative` registered the
+// alias in the live `CodegenContext`, but the alias mapping never
+// surfaced to `VbcModule.mount_aliases` and so the user-side AOT
+// loader had no way to replay it.  Every stdlib body that referenced
+// an aliased symbol fell back to bare-name resolution and resolved
+// to whatever sibling won the first-wins archive load race —
+// surfacing as `wrong number of arguments` or `undefined function`
+// errors at AOT codegen time depending on which sibling claimed the
+// bare-name slot.
+//
+// Phase 1 (commit 8fd58d28d): schema field on `VbcModule`.
+// Phase 2: capture at the 12 `register_function_authoritative` /
+//   `register_function` call sites in `process_import_tree` and
+//   `resolve_pending_imports` (`crates/verum_vbc/src/codegen/mod.rs`).
+// Phase 3: trailing optional `mount_aliases` record in the
+//   extensions region of the `.vbc` archive format
+//   (`crates/verum_vbc/src/serialize.rs` /
+//   `crates/verum_vbc/src/deserialize.rs`).
+// Phase 4: user-side replay in
+//   `crates/verum_compiler/src/archive_ctx_loader.rs::replay_mount_aliases`.
+//
+// This test pins the contract that the four-phase chain holds end-to-end:
+// a program that depends on stdlib mount-rename aliases must AOT-compile
+// and produce the expected output.  The reduction-via-`fold` path
+// exercises iterator stdlib internals that historically tripped on
+// mount-rename regressions (`fold` body calls aliased identity helpers
+// through bare names).
+
+fn main() -> Int {
+    let xs: List<Int> = [10, 15, 17];
+    let total = xs.iter().fold(0, |acc, x| acc + x);
+    print(f"{total}");
+    0
+}
