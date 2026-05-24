@@ -1,0 +1,30 @@
+// =============================================================================
+// core-tests/io/mod/integration_test.vr
+// =============================================================================
+//
+// Cross-module integration via the io.* re-exports.
+// =============================================================================
+
+mount core.io.{StreamError, IoError, IoErrorKind, IoResult};
+
+// =============================================================================
+// §1 — IoResult constructed via top-level Ok/Err using IoError alias
+// =============================================================================
+
+@test
+fn integration_io_result_with_io_error_alias() {
+    let r: IoResult<Int> = Err(IoError.new(IoErrorKind.NotFound));
+    assert(r.is_err());
+    match r {
+        Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
+        Ok(_) => assert(false),
+    }
+}
+
+@test
+fn integration_io_result_with_stream_error_direct() {
+    let r: IoResult<Int> = Err(StreamError.new(IoErrorKind.PermissionDenied));
+    assert(r.is_err());
+}
+
+fn main() {}

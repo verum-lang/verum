@@ -1,0 +1,33 @@
+// =============================================================================
+// core-tests/io/async_protocols/integration_test.vr
+// =============================================================================
+
+mount core.io.async_protocols.{read_async, write_async, flush_async};
+mount core.io.protocols.{empty_reader, sink};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 — Free factories produce Future values
+// =============================================================================
+
+@test
+fn integration_read_async_returns_read_future() {
+    let r = empty_reader();
+    let buf: List<Byte> = List.new();
+    let _f = read_async(r, buf);
+}
+
+@test
+fn integration_write_async_returns_write_future() {
+    let w = sink();
+    let buf: List<Byte> = List.new();
+    let _f = write_async(w, buf);
+}
+
+@test
+fn integration_flush_async_returns_flush_future() {
+    let w = sink();
+    let _f = flush_async(w);
+}
+
+fn main() {}

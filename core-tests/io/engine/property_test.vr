@@ -1,0 +1,54 @@
+// =============================================================================
+// core-tests/io/engine/property_test.vr
+// =============================================================================
+
+mount core.io.engine.{
+    IoEvent,
+    IO_ENGINE_DEFAULT_CAPACITY, IO_ENGINE_MAX_CAPACITY, IO_ENGINE_MAX_POLL_EVENTS,
+};
+
+// =============================================================================
+// §A — Constants are positive and ordered correctly
+// =============================================================================
+
+@test
+fn law_engine_constants_positive() {
+    assert(IO_ENGINE_DEFAULT_CAPACITY > 0);
+    assert(IO_ENGINE_MAX_CAPACITY > 0);
+    assert(IO_ENGINE_MAX_POLL_EVENTS > 0);
+}
+
+@test
+fn law_engine_constants_ordering() {
+    // default <= max_poll_events <= max_capacity (or default <= max_capacity at least)
+    assert(IO_ENGINE_DEFAULT_CAPACITY <= IO_ENGINE_MAX_CAPACITY);
+    assert(IO_ENGINE_MAX_POLL_EVENTS <= IO_ENGINE_MAX_CAPACITY);
+}
+
+@test
+fn law_engine_max_capacity_power_of_two() {
+    let c = IO_ENGINE_MAX_CAPACITY;
+    assert_eq(c & (c - 1), 0);
+}
+
+// =============================================================================
+// §B — IoEvent flag composition
+// =============================================================================
+
+@test
+fn law_io_event_read_write_disjoint_bits() {
+    let r = IoEvent.Read();
+    let w = IoEvent.Write();
+    // Read and Write should be different single bits — read & write = 0
+    assert_eq(r.flags & w.flags, 0);
+}
+
+@test
+fn law_io_event_readwrite_is_or() {
+    let r = IoEvent.Read();
+    let w = IoEvent.Write();
+    let rw = IoEvent.ReadWrite();
+    assert_eq(rw.flags, r.flags | w.flags);
+}
+
+fn main() {}

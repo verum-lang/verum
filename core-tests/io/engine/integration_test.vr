@@ -1,0 +1,36 @@
+// =============================================================================
+// core-tests/io/engine/integration_test.vr
+// =============================================================================
+
+mount core.io.engine.{IoEvent};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 — IoEvent.Read / .Write / .ReadWrite all distinct
+// =============================================================================
+
+@test
+fn integration_io_event_three_constructors_distinct_flags() {
+    let r = IoEvent.Read();
+    let w = IoEvent.Write();
+    let rw = IoEvent.ReadWrite();
+    assert(r.flags != w.flags);
+    assert(w.flags != rw.flags);
+    assert(r.flags != rw.flags);
+}
+
+// =============================================================================
+// §2 — IoEvent in a list (registered events)
+// =============================================================================
+
+@test
+fn integration_io_event_list_aggregate_flags() {
+    let events: List<IoEvent> = [IoEvent.Read(), IoEvent.Write()];
+    let mut total: Int = 0;
+    for e in events.iter() {
+        total = total | e.flags;
+    }
+    assert_eq(total, 3);  // 1 | 2 = 3
+}
+
+fn main() {}

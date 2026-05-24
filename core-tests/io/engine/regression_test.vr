@@ -1,0 +1,32 @@
+// =============================================================================
+// core-tests/io/engine/regression_test.vr
+// =============================================================================
+//
+// IoEngine construction/destroy and register/poll/deregister cycles
+// allocate kernel resources. Need a sandboxed harness; gated under
+// task #io-16.
+// =============================================================================
+
+mount core.io.engine.{IoEngine, IO_ENGINE_DEFAULT_CAPACITY};
+
+// =============================================================================
+// §A — IoEngine.new / .destroy lifecycle — gated by harness availability
+// =============================================================================
+
+@ignore
+@test
+fn regression_io_engine_new_then_destroy() {
+    let e = IoEngine.new();
+    assert(e.is_valid());
+    e.destroy();
+}
+
+@ignore
+@test
+fn regression_io_engine_with_capacity_clamps_at_max() {
+    let e = IoEngine.with_capacity(IO_ENGINE_DEFAULT_CAPACITY);
+    assert(e.is_valid());
+    e.destroy();
+}
+
+fn main() {}

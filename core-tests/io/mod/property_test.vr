@@ -1,0 +1,23 @@
+// =============================================================================
+// core-tests/io/mod/property_test.vr
+// =============================================================================
+
+mount core.io.{StreamError, IoError, IoErrorKind};
+
+// =============================================================================
+// §A — IoError == StreamError at the type-equality level
+// =============================================================================
+
+@test
+fn law_io_error_alias_is_stream_error_type_eq() {
+    fn takes_stream_error(_: StreamError) -> Int { 1 }
+    fn takes_io_error(_: IoError) -> Int { 2 }
+    let e: IoError = StreamError.new(IoErrorKind.Other);
+    // Both functions must accept the same value at this site
+    let a = takes_stream_error(e.clone());
+    let b = takes_io_error(e);
+    assert_eq(a, 1);
+    assert_eq(b, 2);
+}
+
+fn main() {}

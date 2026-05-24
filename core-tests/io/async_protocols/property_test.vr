@@ -1,0 +1,33 @@
+// =============================================================================
+// core-tests/io/async_protocols/property_test.vr
+// =============================================================================
+
+mount core.io.async_protocols.{ReadFuture, WriteFuture, FlushFuture};
+mount core.io.protocols.{empty_reader, sink};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — Future construction is total over (reader/writer, buf)
+// =============================================================================
+
+@test
+fn law_read_future_total_over_buf_sizes() {
+    let sizes: List<Int> = [0, 1, 16, 256, 8192];
+    for s in sizes.iter() {
+        let buf: List<Byte> = List.from_elem(0_u8, *s);
+        let r = empty_reader();
+        let _f = ReadFuture.new(r, buf);
+    }
+}
+
+@test
+fn law_write_future_total_over_buf_sizes() {
+    let sizes: List<Int> = [0, 1, 16, 256, 8192];
+    for s in sizes.iter() {
+        let buf: List<Byte> = List.from_elem(0_u8, *s);
+        let w = sink();
+        let _f = WriteFuture.new(w, buf);
+    }
+}
+
+fn main() {}
