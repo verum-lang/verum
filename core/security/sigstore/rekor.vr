@@ -73,7 +73,7 @@ mount encoding.base64.{
     encode_standard as b64_encode, decode_standard as b64_decode,
 };
 mount encoding.hex.{encode as hex_encode, decode as hex_decode};
-mount encoding.jcs.{canonicalize as jcs_canonicalize};
+mount encoding.jcs.{canonicalize};
 mount net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError};
 mount security.ecc.p256.{P256, P256PublicKey, P256Signature};
 mount security.hash.sha256.{Sha256, digest};
@@ -277,7 +277,7 @@ public fn verify_entry_set(
         });
     }
     let payload = build_set_payload(entry);
-    let payload_bytes = jcs_canonicalize(&payload)
+    let payload_bytes = encoding.jcs.canonicalize(&payload)
         .map_err(|e| InvalidJson(f"jcs: {e}"))?;
     let digest = Sha256.digest(payload_bytes.as_slice());
     let sig_bytes = b64_decode(&entry.set.signature_b64)
