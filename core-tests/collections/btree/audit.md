@@ -100,6 +100,58 @@ won't close the class.
    sidestepping the entire `Maybe<Heap<T>>` chain at runtime.
    Heaviest but most contained fix.
 
+### Deeper investigation 2026-05-24
+
+Isolated probes narrowed the failure to **pattern-matching codegen
+on `&Maybe<Heap<RecordWithGenericParams>>`**:
+
+| Scrutinee shape | Behaviour |
+|---|---|
+| `match m { Some(_) => …, None => … }` (value match) | ✅ correct — takes Some branch |
+| `match &m { Some(_) => …, None => … }` (ref match, generic-parameterised inner) | ❌ takes None branch (variant tag mis-read) |
+| `match m.clone() { Some(h) => helper(&h), … }` (clone + value match + helper fn) | ✅ correct field access |
+| `if let Some(ref h) = self.root { h.<field> }` | ❌ field index 7 OOB (destructured `h` has wrong type info → global-intern fallback) |
+
+`Heap.new(node)` preserves data correctly when accessed via explicit
+double-deref `*(*h)` (verified empirically: pushes to `node.keys`
+ARE visible post-`Heap.new`).  So defect (b) is NOT a Heap value-
+loss issue — it's the SAME defect (a) re-surfacing through the
+destructured-binding type-loss.
+
+**Single underlying root cause**: pattern-matching codegen for ref
+scrutinees on `Maybe<Heap<T>>` where `T` is parameterised by generic
+params loses the inner-type binding.  The variant-tag read goes to
+the wrong offset (taking None branch) AND the destructured payload
+binding doesn't carry `T`'s field layout (taking global-intern
+fallback for `h.<field>` resolution).
+
+### Tactical workaround (NOT applied to btree.vr)
+
+`match self.root.clone() { Some(h) => helper(&h, ...), None => ... }`
+with `helper<K, V>(h: &Heap<BTreeNode<K, V>>, ...)` explicitly typed
+WORKS for the read path — value-match + helper bypasses both
+sub-defects.
+
+Mutation path (`&mut self` methods) still fails because
+`&mut h` from a cloned Heap doesn't reach the original heap data
+(empirical: `mutate_node(&mut cloned_h, ...)` doesn't persist).
+
+So the read path is workaround-able with btree.vr source refactor,
+but the mutation path requires the underlying codegen fix.  Partial
+refactor would land read-side green tests but leave write-side
+defective — not landed because it would produce a confusing
+asymmetric API.
+
+### Architectural fix
+
+Trace the pattern-matching codegen in `verum_vbc/src/codegen/`
+(likely `expressions.rs::compile_match` and
+`pattern_matching.rs::handle_make_variant`'s GetVariantData read)
+for the `&Maybe<Heap<T>>` shape.  The variant-tag offset must
+account for the through-reference + through-Heap chain, AND the
+destructured binding's type must carry the inner `T` for downstream
+field resolution.  Multi-day VBC codegen investigation.
+
 Working surface today: only the empty-state surface (new, get on
 absent key, contains_key absent, remove absent, get_or_default on
 absent, is_empty/len coherence) — 6 unit + 5 property + 2
