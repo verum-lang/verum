@@ -1,0 +1,115 @@
+// =============================================================================
+// core-tests/io/file/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.io.file`. File I/O operations require a real
+// filesystem and route through sys_read/sys_write which hits #io-1.
+// Tests here exercise constants, OpenOptions construction, and
+// the static surface that doesn't open a real fd.
+// =============================================================================
+
+mount core.io.file.{
+    OpenOptions, File,
+    O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC, O_APPEND,
+};
+
+// =============================================================================
+// Section 1: Open-flag constants
+// =============================================================================
+
+@test
+fn test_o_rdonly_is_zero() { assert_eq(O_RDONLY, 0x0000); }
+
+@test
+fn test_o_wronly_is_one() { assert_eq(O_WRONLY, 0x0001); }
+
+@test
+fn test_o_rdwr_is_two() { assert_eq(O_RDWR, 0x0002); }
+
+@test
+fn test_o_creat_value() { assert_eq(O_CREAT, 0x0200); }
+
+@test
+fn test_o_excl_value() { assert_eq(O_EXCL, 0x0800); }
+
+@test
+fn test_o_trunc_value() { assert_eq(O_TRUNC, 0x0400); }
+
+@test
+fn test_o_append_value() { assert_eq(O_APPEND, 0x0008); }
+
+@test
+fn test_o_flags_distinct() {
+    // RDONLY/WRONLY/RDWR are 3 distinct mode bits
+    assert(O_RDONLY != O_WRONLY);
+    assert(O_WRONLY != O_RDWR);
+    assert(O_RDONLY != O_RDWR);
+    // Modifier bits are powers of 2 in their own space
+    assert(O_CREAT != O_EXCL);
+    assert(O_TRUNC != O_APPEND);
+}
+
+// =============================================================================
+// Section 2: OpenOptions construction & fluent builder
+// =============================================================================
+
+@test
+fn test_open_options_new_default() {
+    let _opts = OpenOptions.new();
+}
+
+@test
+fn test_open_options_read_builder() {
+    let mut opts = OpenOptions.new();
+    let _ = opts.read(true);
+}
+
+@test
+fn test_open_options_write_builder() {
+    let mut opts = OpenOptions.new();
+    let _ = opts.write(true);
+}
+
+@test
+fn test_open_options_append_builder() {
+    let mut opts = OpenOptions.new();
+    let _ = opts.append(true);
+}
+
+@test
+fn test_open_options_truncate_builder() {
+    let mut opts = OpenOptions.new();
+    let _ = opts.truncate(true);
+}
+
+@test
+fn test_open_options_create_builder() {
+    let mut opts = OpenOptions.new();
+    let _ = opts.create(true);
+}
+
+@test
+fn test_open_options_create_new_builder() {
+    let mut opts = OpenOptions.new();
+    let _ = opts.create_new(true);
+}
+
+@test
+fn test_open_options_chained() {
+    let mut opts = OpenOptions.new();
+    let _ = opts.read(true);
+    let _ = opts.write(true);
+    let _ = opts.create(true);
+    let _ = opts.truncate(true);
+}
+
+// =============================================================================
+// Section 3: File.options factory
+// =============================================================================
+
+@test
+fn test_file_options_returns_open_options() {
+    let _: OpenOptions = File.options();
+}
+
+fn main() {}

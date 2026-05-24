@@ -1,0 +1,63 @@
+// =============================================================================
+// core-tests/io/file/regression_test.vr
+// =============================================================================
+//
+// Every actual file-I/O test requires a real filesystem, and the
+// underlying read/write/seek operations go through `sys_read`/`sys_write`
+// aliases which collide with method-call dispatch (#io-1). Until #io-1
+// closes and a temp-file harness is wired into core-tests, these stay
+// `@ignore`'d.
+// =============================================================================
+
+mount core.io.file.{File, OpenOptions, read, write, read_to_string};
+mount core.io.protocols.{IoErrorKind};
+
+// =============================================================================
+// §A — File.open / File.create / File.create_new — gated by #io-1 + needs FS
+// =============================================================================
+
+@ignore
+@test
+fn regression_file_open_nonexistent_returns_not_found() {
+    match File.open(&Text.from("/nonexistent-path-12345/foo.txt")) {
+        Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
+        Ok(_) => assert(false),
+    }
+}
+
+@ignore
+@test
+fn regression_file_create_in_unwritable_dir_returns_permission_denied() {
+    match File.create(&Text.from("/etc/protected-file-12345")) {
+        Err(e) => {
+            assert(e.kind() == IoErrorKind.PermissionDenied
+                || e.kind() == IoErrorKind.NotFound
+                || e.kind() == IoErrorKind.AlreadyExists);
+        }
+        Ok(_) => {}  // unexpected success — skipped
+    }
+}
+
+// =============================================================================
+// §B — Convenience `read` / `write` / `read_to_string` — gated by #io-1
+// =============================================================================
+
+@ignore
+@test
+fn regression_read_nonexistent_returns_not_found() {
+    match read(&Text.from("/nonexistent-path-12345/foo.txt")) {
+        Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
+        Ok(_) => assert(false),
+    }
+}
+
+@ignore
+@test
+fn regression_read_to_string_nonexistent_returns_not_found() {
+    match read_to_string(&Text.from("/nonexistent-path-12345/foo.txt")) {
+        Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
+        Ok(_) => assert(false),
+    }
+}
+
+fn main() {}

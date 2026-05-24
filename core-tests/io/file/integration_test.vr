@@ -1,0 +1,52 @@
+// =============================================================================
+// core-tests/io/file/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.io.file`. Live I/O is gated by #io-1
+// + temp-dir harness availability. Structural tests only.
+// =============================================================================
+
+mount core.io.file.{File, OpenOptions, O_RDONLY, O_WRONLY, O_CREAT};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 — OpenOptions can be configured for read-only access pattern
+// =============================================================================
+
+@test
+fn integration_open_options_read_only_pattern() {
+    let mut opts = OpenOptions.new();
+    let _ = opts.read(true);
+    // No actual open — would require a real file.
+}
+
+@test
+fn integration_open_options_write_create_truncate_pattern() {
+    let mut opts = OpenOptions.new();
+    let _ = opts.write(true);
+    let _ = opts.create(true);
+    let _ = opts.truncate(true);
+}
+
+// =============================================================================
+// §2 — O_* constants compose via OR
+// =============================================================================
+
+@test
+fn integration_open_flag_or_composition() {
+    let combined = O_WRONLY | O_CREAT;
+    assert(combined != O_WRONLY);
+    assert(combined != O_CREAT);
+    // Both bits set
+    assert_eq(combined & O_WRONLY, O_WRONLY);
+    assert_eq(combined & O_CREAT, O_CREAT);
+}
+
+@test
+fn integration_o_rdonly_or_nothing_is_rdonly() {
+    // O_RDONLY is 0, so OR doesn't add anything to it.
+    let combined = O_RDONLY | O_CREAT;
+    assert_eq(combined, O_CREAT);
+}
+
+fn main() {}
