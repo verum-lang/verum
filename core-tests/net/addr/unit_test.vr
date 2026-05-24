@@ -1,0 +1,231 @@
+// =============================================================================
+// core-tests/net/addr/unit_test.vr
+// =============================================================================
+//
+// `core/net/addr.vr` — IP address primitives.
+//   * Ipv4Addr: new / localhost / unspecified / broadcast + octets +
+//     is_loopback / is_unspecified / is_private / is_multicast /
+//     is_broadcast + to_u32 / from_u32 + parse
+// =============================================================================
+
+mount core.net.addr.{Ipv4Addr};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Ipv4Addr.new + octets accessor
+// =============================================================================
+
+@test
+fn test_ipv4_new_preserves_octets() {
+    let a = Ipv4Addr.new(192_u8, 168_u8, 1_u8, 100_u8);
+    let (o0, o1, o2, o3) = a.octets();
+    assert_eq(o0, 192_u8);
+    assert_eq(o1, 168_u8);
+    assert_eq(o2, 1_u8);
+    assert_eq(o3, 100_u8);
+}
+
+@test
+fn test_ipv4_new_zero() {
+    let a = Ipv4Addr.new(0_u8, 0_u8, 0_u8, 0_u8);
+    let (o0, _, _, _) = a.octets();
+    assert_eq(o0, 0_u8);
+}
+
+@test
+fn test_ipv4_new_max() {
+    let a = Ipv4Addr.new(255_u8, 255_u8, 255_u8, 255_u8);
+    let (_, _, _, o3) = a.octets();
+    assert_eq(o3, 255_u8);
+}
+
+// =============================================================================
+// Section 2: Canonical addresses
+// =============================================================================
+
+@test
+fn test_localhost_is_127_0_0_1() {
+    let l = Ipv4Addr.localhost();
+    let (o0, o1, o2, o3) = l.octets();
+    assert_eq(o0, 127_u8);
+    assert_eq(o1, 0_u8);
+    assert_eq(o2, 0_u8);
+    assert_eq(o3, 1_u8);
+}
+
+@test
+fn test_unspecified_is_0_0_0_0() {
+    let u = Ipv4Addr.unspecified();
+    let (o0, o1, o2, o3) = u.octets();
+    assert_eq(o0, 0_u8);
+    assert_eq(o1, 0_u8);
+    assert_eq(o2, 0_u8);
+    assert_eq(o3, 0_u8);
+}
+
+@test
+fn test_broadcast_is_255_255_255_255() {
+    let b = Ipv4Addr.broadcast();
+    let (o0, o1, o2, o3) = b.octets();
+    assert_eq(o0, 255_u8);
+    assert_eq(o1, 255_u8);
+    assert_eq(o2, 255_u8);
+    assert_eq(o3, 255_u8);
+}
+
+// =============================================================================
+// Section 3: is_loopback — RFC 5735 §3 loopback 127.0.0.0/8
+// =============================================================================
+
+@test
+fn test_is_loopback_127_0_0_1() {
+    assert(Ipv4Addr.localhost().is_loopback());
+}
+
+@test
+fn test_is_loopback_127_anything() {
+    // Entire 127/8 is loopback
+    assert(Ipv4Addr.new(127_u8, 0_u8, 0_u8, 1_u8).is_loopback());
+    assert(Ipv4Addr.new(127_u8, 255_u8, 255_u8, 254_u8).is_loopback());
+}
+
+@test
+fn test_is_not_loopback_public() {
+    assert(!Ipv4Addr.new(8_u8, 8_u8, 8_u8, 8_u8).is_loopback());
+    assert(!Ipv4Addr.new(192_u8, 168_u8, 1_u8, 1_u8).is_loopback());
+}
+
+// =============================================================================
+// Section 4: is_unspecified — only 0.0.0.0
+// =============================================================================
+
+@test
+fn test_is_unspecified_zero() {
+    assert(Ipv4Addr.unspecified().is_unspecified());
+}
+
+@test
+fn test_is_not_unspecified_localhost() {
+    assert(!Ipv4Addr.localhost().is_unspecified());
+}
+
+// =============================================================================
+// Section 5: is_private — RFC 1918 ranges
+// =============================================================================
+
+@test
+fn test_is_private_10_0_0_0() {
+    // 10.0.0.0/8
+    assert(Ipv4Addr.new(10_u8, 0_u8, 0_u8, 1_u8).is_private());
+    assert(Ipv4Addr.new(10_u8, 255_u8, 255_u8, 254_u8).is_private());
+}
+
+@test
+fn test_is_private_172_16_to_31() {
+    // 172.16.0.0/12 = 172.16.0.0 - 172.31.255.255
+    assert(Ipv4Addr.new(172_u8, 16_u8, 0_u8, 0_u8).is_private());
+    assert(Ipv4Addr.new(172_u8, 20_u8, 1_u8, 1_u8).is_private());
+    assert(Ipv4Addr.new(172_u8, 31_u8, 255_u8, 255_u8).is_private());
+}
+
+@test
+fn test_is_not_private_172_15() {
+    // 172.15.0.0 is OUTSIDE the 172.16-31 private range
+    assert(!Ipv4Addr.new(172_u8, 15_u8, 0_u8, 0_u8).is_private());
+}
+
+@test
+fn test_is_not_private_172_32() {
+    // 172.32.0.0 is also OUTSIDE
+    assert(!Ipv4Addr.new(172_u8, 32_u8, 0_u8, 0_u8).is_private());
+}
+
+@test
+fn test_is_private_192_168() {
+    // 192.168.0.0/16
+    assert(Ipv4Addr.new(192_u8, 168_u8, 0_u8, 1_u8).is_private());
+    assert(Ipv4Addr.new(192_u8, 168_u8, 255_u8, 254_u8).is_private());
+}
+
+@test
+fn test_is_not_private_192_167() {
+    assert(!Ipv4Addr.new(192_u8, 167_u8, 0_u8, 0_u8).is_private());
+}
+
+@test
+fn test_is_not_private_8_8_8_8() {
+    // Google DNS — public
+    assert(!Ipv4Addr.new(8_u8, 8_u8, 8_u8, 8_u8).is_private());
+}
+
+// =============================================================================
+// Section 6: is_multicast — RFC 5771 224.0.0.0/4
+// =============================================================================
+
+@test
+fn test_is_multicast_224() {
+    // 224.0.0.0 - 239.255.255.255
+    assert(Ipv4Addr.new(224_u8, 0_u8, 0_u8, 1_u8).is_multicast());
+    assert(Ipv4Addr.new(239_u8, 255_u8, 255_u8, 254_u8).is_multicast());
+}
+
+@test
+fn test_is_not_multicast_223() {
+    assert(!Ipv4Addr.new(223_u8, 255_u8, 255_u8, 255_u8).is_multicast());
+}
+
+@test
+fn test_is_not_multicast_240() {
+    assert(!Ipv4Addr.new(240_u8, 0_u8, 0_u8, 0_u8).is_multicast());
+}
+
+// =============================================================================
+// Section 7: is_broadcast — only 255.255.255.255
+// =============================================================================
+
+@test
+fn test_is_broadcast_global() {
+    assert(Ipv4Addr.broadcast().is_broadcast());
+}
+
+@test
+fn test_is_not_broadcast_subnet_max() {
+    // 192.168.1.255 is a SUBNET broadcast, not global
+    assert(!Ipv4Addr.new(192_u8, 168_u8, 1_u8, 255_u8).is_broadcast());
+}
+
+// =============================================================================
+// Section 8: to_u32 / from_u32 round-trip
+// =============================================================================
+
+@test
+fn test_to_u32_localhost() {
+    // 127.0.0.1 = 0x7F000001 = 2_130_706_433
+    let l = Ipv4Addr.localhost();
+    assert_eq(l.to_u32(), 0x7F000001);
+}
+
+@test
+fn test_to_u32_zero() {
+    assert_eq(Ipv4Addr.unspecified().to_u32(), 0);
+}
+
+@test
+fn test_from_u32_localhost() {
+    let l = Ipv4Addr.from_u32(0x7F000001);
+    let (o0, _, _, o3) = l.octets();
+    assert_eq(o0, 127_u8);
+    assert_eq(o3, 1_u8);
+}
+
+@test
+fn test_to_from_u32_round_trip() {
+    let original = Ipv4Addr.new(10_u8, 0_u8, 0_u8, 1_u8);
+    let bits = original.to_u32();
+    let recovered = Ipv4Addr.from_u32(bits);
+    let (a, b, c, d) = recovered.octets();
+    assert_eq(a, 10_u8);
+    assert_eq(b, 0_u8);
+    assert_eq(c, 0_u8);
+    assert_eq(d, 1_u8);
+}
