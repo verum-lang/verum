@@ -1,0 +1,242 @@
+// =============================================================================
+// core-tests/net/http/unit_test.vr
+// =============================================================================
+//
+// `core/net/http.vr` defines HTTP/1.x primitives. Coverage:
+//   * Method 9-variant (RFC 7231 + RFC 5789): Get/Head/Post/Put/
+//     Delete/Connect/Options/Trace/Patch
+//   * Method.as_str canonical wire-format names
+//   * Method.from_str case-insensitive parser
+//   * Method.is_safe / is_idempotent / has_body predicates
+// =============================================================================
+
+mount core.net.http.{Method};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Method 9-variant construction
+// =============================================================================
+
+@test
+fn test_method_get_construction() {
+    let m: Method = Method.Get;
+    assert(m is Method.Get);
+}
+
+@test
+fn test_method_head_construction() {
+    let m: Method = Method.Head;
+    assert(m is Method.Head);
+}
+
+@test
+fn test_method_post_construction() {
+    let m: Method = Method.Post;
+    assert(m is Method.Post);
+}
+
+@test
+fn test_method_put_construction() {
+    let m: Method = Method.Put;
+    assert(m is Method.Put);
+}
+
+@test
+fn test_method_delete_construction() {
+    let m: Method = Method.Delete;
+    assert(m is Method.Delete);
+}
+
+@test
+fn test_method_connect_construction() {
+    let m: Method = Method.Connect;
+    assert(m is Method.Connect);
+}
+
+@test
+fn test_method_options_construction() {
+    let m: Method = Method.Options;
+    assert(m is Method.Options);
+}
+
+@test
+fn test_method_trace_construction() {
+    let m: Method = Method.Trace;
+    assert(m is Method.Trace);
+}
+
+@test
+fn test_method_patch_construction() {
+    let m: Method = Method.Patch;
+    assert(m is Method.Patch);
+}
+
+// =============================================================================
+// Section 2: Method.as_str — canonical uppercase wire-format names
+// =============================================================================
+
+@test
+fn test_as_str_get() { assert_eq(Method.Get.as_str(), "GET"); }
+
+@test
+fn test_as_str_head() { assert_eq(Method.Head.as_str(), "HEAD"); }
+
+@test
+fn test_as_str_post() { assert_eq(Method.Post.as_str(), "POST"); }
+
+@test
+fn test_as_str_put() { assert_eq(Method.Put.as_str(), "PUT"); }
+
+@test
+fn test_as_str_delete() { assert_eq(Method.Delete.as_str(), "DELETE"); }
+
+@test
+fn test_as_str_connect() { assert_eq(Method.Connect.as_str(), "CONNECT"); }
+
+@test
+fn test_as_str_options() { assert_eq(Method.Options.as_str(), "OPTIONS"); }
+
+@test
+fn test_as_str_trace() { assert_eq(Method.Trace.as_str(), "TRACE"); }
+
+@test
+fn test_as_str_patch() { assert_eq(Method.Patch.as_str(), "PATCH"); }
+
+// =============================================================================
+// Section 3: Method.from_str case-insensitive parser
+// =============================================================================
+
+@test
+fn test_from_str_get() {
+    let s = "GET".clone();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Get),
+        None => panic("GET should parse"),
+    }
+}
+
+@test
+fn test_from_str_lowercase_post() {
+    let s = "post".clone();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Post),
+        None => panic("'post' (lowercase) should parse"),
+    }
+}
+
+@test
+fn test_from_str_mixed_case_patch() {
+    let s = "PaTcH".clone();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Patch),
+        None => panic("'PaTcH' (mixed-case) should parse"),
+    }
+}
+
+@test
+fn test_from_str_unknown_returns_none() {
+    let s = "BREW".clone();
+    match Method.from_str(&s) {
+        Some(_) => panic("'BREW' is not RFC 7231 method"),
+        None => assert(true),
+    }
+}
+
+@test
+fn test_from_str_empty_returns_none() {
+    let s = "".clone();
+    match Method.from_str(&s) {
+        Some(_) => panic("empty string should fail"),
+        None => assert(true),
+    }
+}
+
+// =============================================================================
+// Section 4: Method.is_safe — RFC 7231 §4.2.1
+// =============================================================================
+
+@test
+fn test_is_safe_get() { assert(Method.Get.is_safe()); }
+
+@test
+fn test_is_safe_head() { assert(Method.Head.is_safe()); }
+
+@test
+fn test_is_safe_options() { assert(Method.Options.is_safe()); }
+
+@test
+fn test_is_safe_trace() { assert(Method.Trace.is_safe()); }
+
+@test
+fn test_is_not_safe_post() { assert(!Method.Post.is_safe()); }
+
+@test
+fn test_is_not_safe_put() { assert(!Method.Put.is_safe()); }
+
+@test
+fn test_is_not_safe_delete() { assert(!Method.Delete.is_safe()); }
+
+@test
+fn test_is_not_safe_patch() { assert(!Method.Patch.is_safe()); }
+
+@test
+fn test_is_not_safe_connect() { assert(!Method.Connect.is_safe()); }
+
+// =============================================================================
+// Section 5: Method.is_idempotent — RFC 7231 §4.2.2
+// =============================================================================
+
+@test
+fn test_is_idempotent_get() { assert(Method.Get.is_idempotent()); }
+
+@test
+fn test_is_idempotent_head() { assert(Method.Head.is_idempotent()); }
+
+@test
+fn test_is_idempotent_put() { assert(Method.Put.is_idempotent()); }
+
+@test
+fn test_is_idempotent_delete() { assert(Method.Delete.is_idempotent()); }
+
+@test
+fn test_is_idempotent_options() { assert(Method.Options.is_idempotent()); }
+
+@test
+fn test_is_idempotent_trace() { assert(Method.Trace.is_idempotent()); }
+
+@test
+fn test_is_not_idempotent_post() { assert(!Method.Post.is_idempotent()); }
+
+@test
+fn test_is_not_idempotent_patch() { assert(!Method.Patch.is_idempotent()); }
+
+@test
+fn test_is_not_idempotent_connect() { assert(!Method.Connect.is_idempotent()); }
+
+// =============================================================================
+// Section 6: Method.has_body — RFC 7230 §3.3 typical bodies
+// =============================================================================
+
+@test
+fn test_has_body_post() { assert(Method.Post.has_body()); }
+
+@test
+fn test_has_body_put() { assert(Method.Put.has_body()); }
+
+@test
+fn test_has_body_patch() { assert(Method.Patch.has_body()); }
+
+@test
+fn test_no_body_get() { assert(!Method.Get.has_body()); }
+
+@test
+fn test_no_body_head() { assert(!Method.Head.has_body()); }
+
+@test
+fn test_no_body_delete() { assert(!Method.Delete.has_body()); }
+
+@test
+fn test_no_body_options() { assert(!Method.Options.has_body()); }
+
+@test
+fn test_no_body_trace() { assert(!Method.Trace.has_body()); }
