@@ -1,0 +1,209 @@
+// =============================================================================
+// core-tests/encoding/base64/unit_test.vr
+// =============================================================================
+//
+// `core/encoding/base64.vr` provides RFC 4648 base64 encoding:
+//   * encode(&[Byte]) -> Text                 (standard alphabet + padding)
+//   * encode_url(&[Byte]) -> Text             (URL-safe, no padding)
+//   * encode_url_no_pad(&[Byte]) -> Text      (alias for encode_url)
+//   * decode(&Text) -> Result<List<Byte>, _>  (standard alphabet)
+//   * decode_url(&Text) -> Result<List<Byte>, _>
+//   * decode_url_no_pad(&Text) -> Result<List<Byte>, _>
+//   * Base64Error + Base64ErrorKind (InvalidChar / InvalidLength / InvalidPadding)
+// =============================================================================
+
+mount core.encoding.base64.{
+    encode, encode_url, encode_url_no_pad,
+    decode, decode_url, decode_url_no_pad,
+    Base64Error, Base64ErrorKind,
+};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: encode — standard alphabet
+// =============================================================================
+
+@test
+fn test_encode_empty() {
+    let input: [Byte; 0] = [];
+    assert_eq(encode(&input), "");
+}
+
+@test
+fn test_encode_single_byte() {
+    // 'f' (0x66) → "Zg==" (RFC 4648 canonical)
+    let input: [Byte; 1] = [0x66_u8];
+    assert_eq(encode(&input), "Zg==");
+}
+
+@test
+fn test_encode_two_bytes() {
+    // "fo" (0x66, 0x6F) → "Zm8="
+    let input: [Byte; 2] = [0x66_u8, 0x6F_u8];
+    assert_eq(encode(&input), "Zm8=");
+}
+
+@test
+fn test_encode_three_bytes() {
+    // "foo" (0x66, 0x6F, 0x6F) → "Zm9v"
+    let input: [Byte; 3] = [0x66_u8, 0x6F_u8, 0x6F_u8];
+    assert_eq(encode(&input), "Zm9v");
+}
+
+@test
+fn test_encode_six_bytes() {
+    // "foobar" → "Zm9vYmFy"
+    let input: [Byte; 6] = [0x66_u8, 0x6F_u8, 0x6F_u8, 0x62_u8, 0x61_u8, 0x72_u8];
+    assert_eq(encode(&input), "Zm9vYmFy");
+}
+
+// =============================================================================
+// Section 2: decode — standard alphabet round-trip
+// =============================================================================
+
+@test
+fn test_decode_empty() {
+    let s = "".clone();
+    match decode(&s) {
+        Ok(bytes) => assert_eq(bytes.len(), 0),
+        Err(_) => panic("empty should decode to empty"),
+    }
+}
+
+@test
+fn test_decode_zg_padded() {
+    let s = "Zg==".clone();
+    match decode(&s) {
+        Ok(bytes) => {
+            assert_eq(bytes.len(), 1);
+            assert_eq(bytes[0], 0x66_u8);
+        },
+        Err(_) => panic("'Zg==' should decode to 'f'"),
+    }
+}
+
+@test
+fn test_decode_zm8_padded() {
+    let s = "Zm8=".clone();
+    match decode(&s) {
+        Ok(bytes) => {
+            assert_eq(bytes.len(), 2);
+            assert_eq(bytes[0], 0x66_u8);
+            assert_eq(bytes[1], 0x6F_u8);
+        },
+        Err(_) => panic("'Zm8=' should decode to 'fo'"),
+    }
+}
+
+@test
+fn test_decode_zm9v_no_pad() {
+    let s = "Zm9v".clone();
+    match decode(&s) {
+        Ok(bytes) => {
+            assert_eq(bytes.len(), 3);
+            assert_eq(bytes[0], 0x66_u8);
+            assert_eq(bytes[1], 0x6F_u8);
+            assert_eq(bytes[2], 0x6F_u8);
+        },
+        Err(_) => panic("'Zm9v' should decode to 'foo'"),
+    }
+}
+
+@test
+fn test_decode_six_bytes() {
+    let s = "Zm9vYmFy".clone();
+    match decode(&s) {
+        Ok(bytes) => {
+            assert_eq(bytes.len(), 6);
+            assert_eq(bytes[5], 0x72_u8); // 'r'
+        },
+        Err(_) => panic("'Zm9vYmFy' should decode to 'foobar'"),
+    }
+}
+
+// =============================================================================
+// Section 3: encode_url — URL-safe alphabet, no padding
+// =============================================================================
+
+@test
+fn test_encode_url_empty() {
+    let input: [Byte; 0] = [];
+    assert_eq(encode_url(&input), "");
+}
+
+@test
+fn test_encode_url_no_padding() {
+    let input: [Byte; 1] = [0x66_u8];
+    let out = encode_url(&input);
+    // URL-safe encoding omits trailing padding
+    assert(!out.contains("="));
+}
+
+@test
+fn test_encode_url_no_pad_alias_matches() {
+    let input: [Byte; 3] = [0x01_u8, 0x02_u8, 0x03_u8];
+    let a = encode_url(&input);
+    let b = encode_url_no_pad(&input);
+    assert_eq(a, b);
+}
+
+// =============================================================================
+// Section 4: Base64ErrorKind 3-variant
+// =============================================================================
+
+@test
+fn test_base64_error_kind_invalid_char() {
+    let k: Base64ErrorKind = Base64ErrorKind.InvalidChar;
+    assert(k is Base64ErrorKind.InvalidChar);
+}
+
+@test
+fn test_base64_error_kind_invalid_length() {
+    let k: Base64ErrorKind = Base64ErrorKind.InvalidLength;
+    assert(k is Base64ErrorKind.InvalidLength);
+}
+
+@test
+fn test_base64_error_kind_invalid_padding() {
+    let k: Base64ErrorKind = Base64ErrorKind.InvalidPadding;
+    assert(k is Base64ErrorKind.InvalidPadding);
+}
+
+@test
+fn test_base64_error_kind_variants_disjoint() {
+    let ic: Base64ErrorKind = Base64ErrorKind.InvalidChar;
+    let il: Base64ErrorKind = Base64ErrorKind.InvalidLength;
+    let ip: Base64ErrorKind = Base64ErrorKind.InvalidPadding;
+
+    assert(ic is Base64ErrorKind.InvalidChar);
+    assert(il is Base64ErrorKind.InvalidLength);
+    assert(ip is Base64ErrorKind.InvalidPadding);
+
+    assert(!(ic is Base64ErrorKind.InvalidLength));
+    assert(!(il is Base64ErrorKind.InvalidPadding));
+    assert(!(ip is Base64ErrorKind.InvalidChar));
+}
+
+// =============================================================================
+// Section 5: decode — invalid input rejection
+// =============================================================================
+
+@test
+fn test_decode_invalid_char_at() {
+    // '@' is not a base64 char
+    let s = "Z@==".clone();
+    match decode(&s) {
+        Ok(_) => panic("'@' is not a base64 character"),
+        Err(e) => assert(e.kind is Base64ErrorKind.InvalidChar),
+    }
+}
+
+@test
+fn test_decode_invalid_length_3() {
+    // 3 chars without padding is invalid (base64 requires multiples of 4)
+    let s = "Zg=".clone();
+    match decode(&s) {
+        Ok(_) => panic("3-char input should fail"),
+        Err(_) => assert(true),
+    }
+}
