@@ -1,0 +1,171 @@
+// =============================================================================
+// core-tests/security/jwt/unit_test.vr
+// =============================================================================
+//
+// `core/security/jwt.vr` — JSON Web Token (RFC 7519 + RFC 7515).
+//   * JwtAlgorithm 4-variant (HS256/HS384/HS512/EdDSA)
+//   * JwtError 12-variant
+//   * Live sign/verify path needs crypto backend — tested at L2.
+// =============================================================================
+
+mount core.security.jwt.{JwtAlgorithm, JwtError};
+
+// =============================================================================
+// Section 1: JwtAlgorithm 4-variant construction
+// =============================================================================
+
+@test
+fn test_jwt_algorithm_hs256() {
+    let a: JwtAlgorithm = JwtAlgorithm.HS256;
+    assert(a is JwtAlgorithm.HS256);
+}
+
+@test
+fn test_jwt_algorithm_hs384() {
+    let a: JwtAlgorithm = JwtAlgorithm.HS384;
+    assert(a is JwtAlgorithm.HS384);
+}
+
+@test
+fn test_jwt_algorithm_hs512() {
+    let a: JwtAlgorithm = JwtAlgorithm.HS512;
+    assert(a is JwtAlgorithm.HS512);
+}
+
+@test
+fn test_jwt_algorithm_eddsa() {
+    let a: JwtAlgorithm = JwtAlgorithm.EdDSA;
+    assert(a is JwtAlgorithm.EdDSA);
+}
+
+@test
+fn test_jwt_algorithm_variants_disjoint() {
+    let h256: JwtAlgorithm = JwtAlgorithm.HS256;
+    let h384: JwtAlgorithm = JwtAlgorithm.HS384;
+    let h512: JwtAlgorithm = JwtAlgorithm.HS512;
+    let ed: JwtAlgorithm = JwtAlgorithm.EdDSA;
+
+    assert(h256 is JwtAlgorithm.HS256);
+    assert(h384 is JwtAlgorithm.HS384);
+    assert(h512 is JwtAlgorithm.HS512);
+    assert(ed is JwtAlgorithm.EdDSA);
+
+    assert(!(h256 is JwtAlgorithm.HS384));
+    assert(!(h384 is JwtAlgorithm.HS512));
+    assert(!(h512 is JwtAlgorithm.EdDSA));
+    assert(!(ed is JwtAlgorithm.HS256));
+}
+
+// =============================================================================
+// Section 2: JwtError 12-variant construction
+// =============================================================================
+
+@test
+fn test_jwt_error_malformed_token() {
+    let e: JwtError = JwtError.MalformedToken;
+    assert(e is JwtError.MalformedToken);
+}
+
+@test
+fn test_jwt_error_token_too_long() {
+    let e: JwtError = JwtError.TokenTooLong;
+    assert(e is JwtError.TokenTooLong);
+}
+
+@test
+fn test_jwt_error_base64_decode() {
+    let e: JwtError = JwtError.Base64Decode;
+    assert(e is JwtError.Base64Decode);
+}
+
+@test
+fn test_jwt_error_json_decode() {
+    let e: JwtError = JwtError.JsonDecode;
+    assert(e is JwtError.JsonDecode);
+}
+
+@test
+fn test_jwt_error_algorithm_mismatch() {
+    let e: JwtError = JwtError.AlgorithmMismatch;
+    assert(e is JwtError.AlgorithmMismatch);
+}
+
+@test
+fn test_jwt_error_alg_none() {
+    // CVE-2015-2951 — explicit alg:none rejection
+    let e: JwtError = JwtError.AlgNone;
+    assert(e is JwtError.AlgNone);
+}
+
+@test
+fn test_jwt_error_signature_mismatch() {
+    let e: JwtError = JwtError.SignatureMismatch;
+    assert(e is JwtError.SignatureMismatch);
+}
+
+@test
+fn test_jwt_error_expired() {
+    let e: JwtError = JwtError.Expired;
+    assert(e is JwtError.Expired);
+}
+
+@test
+fn test_jwt_error_not_yet_valid() {
+    let e: JwtError = JwtError.NotYetValid;
+    assert(e is JwtError.NotYetValid);
+}
+
+@test
+fn test_jwt_error_issuer_mismatch() {
+    let e: JwtError = JwtError.IssuerMismatch;
+    assert(e is JwtError.IssuerMismatch);
+}
+
+@test
+fn test_jwt_error_audience_mismatch() {
+    let e: JwtError = JwtError.AudienceMismatch;
+    assert(e is JwtError.AudienceMismatch);
+}
+
+@test
+fn test_jwt_error_wrong_key_kind() {
+    // Algorithm-confusion prevention: HMAC key handed to asymmetric
+    // verifier (or vice versa) gets WrongKeyKind, not SignatureMismatch.
+    let e: JwtError = JwtError.WrongKeyKind;
+    assert(e is JwtError.WrongKeyKind);
+}
+
+@test
+fn test_jwt_error_signing_failure() {
+    let e: JwtError = JwtError.SigningFailure;
+    assert(e is JwtError.SigningFailure);
+}
+
+// =============================================================================
+// Section 3: JwtError variant disjointness sample
+// =============================================================================
+
+@test
+fn test_jwt_error_security_critical_variants_disjoint() {
+    // The 3 security-critical variants must never collapse:
+    // AlgNone (CVE-2015-2951), SignatureMismatch, WrongKeyKind (alg confusion)
+    let alg_none = JwtError.AlgNone;
+    let sig_mm = JwtError.SignatureMismatch;
+    let wrong_key = JwtError.WrongKeyKind;
+
+    assert(!(alg_none is JwtError.SignatureMismatch));
+    assert(!(alg_none is JwtError.WrongKeyKind));
+    assert(!(sig_mm is JwtError.AlgNone));
+    assert(!(sig_mm is JwtError.WrongKeyKind));
+    assert(!(wrong_key is JwtError.AlgNone));
+    assert(!(wrong_key is JwtError.SignatureMismatch));
+}
+
+@test
+fn test_jwt_error_time_variants_disjoint() {
+    // Expired (past) vs NotYetValid (future) must never collapse.
+    let exp = JwtError.Expired;
+    let nyv = JwtError.NotYetValid;
+    assert(!(exp is JwtError.NotYetValid));
+    assert(!(nyv is JwtError.Expired));
+}
