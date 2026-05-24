@@ -250,7 +250,31 @@ fn size_to_bin_large(wsize: Int) -> Int {
     // Subtract 1 so wsize=129 (just over the lookup-table top
     // of 1024 bytes) correctly maps into the next bin family.
     let w = wsize - 1;
-    let b = 63 - clz_u64(w as UInt64) as Int;
+    // Compute `b` = position of highest set bit (0-indexed) via
+    // manual bit-scan instead of `clz_u64(w as UInt64)`.
+    //
+    // The clz_u64 intrinsic-dispatch path has been observed
+    // returning a wrong value through this specific call site
+    // (#24 cluster — 5 regression tests `regression_size_to_bin_large_*`
+    // were failing with bin=16 instead of 24, which corresponds to
+    // clz_u64 returning 58 instead of 56 for input 128).  Root
+    // cause is in the cross-module @intrinsic("ctlz", x) dispatch
+    // through the stage-3 stub registration path, not in the
+    // interpreter's Clz handler (which is correct).  Manual
+    // bit-scan sidesteps the dispatch entirely.
+    //
+    // Architectural rule: when a stdlib body's correctness
+    // depends on `@intrinsic("ctlz")` / `@intrinsic("cttz")` /
+    // `@intrinsic("ctpop")` through a cross-module Call site,
+    // prefer a pure-Verum computation until the intrinsic-dispatch
+    // path through stage-3 stubs is fully closed.
+    let mut b: Int = 0;
+    let mut v = w;
+    while v > 0 {
+        v = v >> 1;
+        b = b + 1;
+    }
+    b = b - 1;
     let sub_bin = (w >> (b - 2)) & 0x03;
     let bin = (b << 2) + sub_bin - 4;
 
