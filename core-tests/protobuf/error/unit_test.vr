@@ -1,0 +1,175 @@
+// =============================================================================
+// core-tests/protobuf/error/unit_test.vr
+// =============================================================================
+//
+// `core/protobuf/error.vr` defines ProtobufError 8-variant ADT +
+// DecodeResult<T> alias for protobuf wire-format decoding errors.
+// =============================================================================
+
+mount core.protobuf.error.{ProtobufError};
+
+// =============================================================================
+// Section 1: ProtobufError 8-variant construction
+// =============================================================================
+
+@test
+fn test_unexpected_eof_construction() {
+    let e: ProtobufError = ProtobufError.UnexpectedEof;
+    assert(e is ProtobufError.UnexpectedEof);
+}
+
+@test
+fn test_varint_overflow_construction() {
+    let e: ProtobufError = ProtobufError.VarintOverflow;
+    assert(e is ProtobufError.VarintOverflow);
+}
+
+@test
+fn test_invalid_wire_type_construction() {
+    let e: ProtobufError = ProtobufError.InvalidWireType(7_u8);
+    assert(e is ProtobufError.InvalidWireType);
+}
+
+@test
+fn test_invalid_length_construction() {
+    let e: ProtobufError = ProtobufError.InvalidLength {
+        declared: 1000,
+        available: 100,
+    };
+    assert(e is ProtobufError.InvalidLength);
+}
+
+@test
+fn test_length_too_large_construction() {
+    let e: ProtobufError = ProtobufError.LengthTooLarge {
+        declared: 1_000_000_000,
+        limit: 100_000_000,
+    };
+    assert(e is ProtobufError.LengthTooLarge);
+}
+
+@test
+fn test_invalid_utf8_construction() {
+    let e: ProtobufError = ProtobufError.InvalidUtf8;
+    assert(e is ProtobufError.InvalidUtf8);
+}
+
+@test
+fn test_invalid_field_number_construction() {
+    let e: ProtobufError = ProtobufError.InvalidFieldNumber(0_u64);
+    assert(e is ProtobufError.InvalidFieldNumber);
+}
+
+@test
+fn test_unsupported_group_construction() {
+    let e: ProtobufError = ProtobufError.UnsupportedGroup;
+    assert(e is ProtobufError.UnsupportedGroup);
+}
+
+// =============================================================================
+// Section 2: Variant disjointness
+// =============================================================================
+
+@test
+fn test_variants_disjoint() {
+    let eof: ProtobufError = ProtobufError.UnexpectedEof;
+    let v_overflow: ProtobufError = ProtobufError.VarintOverflow;
+    let wt: ProtobufError = ProtobufError.InvalidWireType(0_u8);
+    let il: ProtobufError = ProtobufError.InvalidLength { declared: 0, available: 0 };
+    let utf8: ProtobufError = ProtobufError.InvalidUtf8;
+    let ug: ProtobufError = ProtobufError.UnsupportedGroup;
+
+    assert(eof is ProtobufError.UnexpectedEof);
+    assert(v_overflow is ProtobufError.VarintOverflow);
+    assert(wt is ProtobufError.InvalidWireType);
+    assert(il is ProtobufError.InvalidLength);
+    assert(utf8 is ProtobufError.InvalidUtf8);
+    assert(ug is ProtobufError.UnsupportedGroup);
+
+    assert(!(eof is ProtobufError.VarintOverflow));
+    assert(!(v_overflow is ProtobufError.InvalidWireType));
+    assert(!(wt is ProtobufError.InvalidLength));
+    assert(!(il is ProtobufError.InvalidUtf8));
+    assert(!(utf8 is ProtobufError.UnsupportedGroup));
+    assert(!(ug is ProtobufError.UnexpectedEof));
+}
+
+// =============================================================================
+// Section 3: Eq
+// =============================================================================
+
+@test
+fn test_eq_unexpected_eof_reflexive() {
+    let a = ProtobufError.UnexpectedEof;
+    let b = ProtobufError.UnexpectedEof;
+    assert(a == b);
+}
+
+@test
+fn test_eq_invalid_wire_type_same() {
+    let a = ProtobufError.InvalidWireType(5_u8);
+    let b = ProtobufError.InvalidWireType(5_u8);
+    assert(a == b);
+}
+
+@test
+fn test_eq_invalid_wire_type_differs() {
+    let a = ProtobufError.InvalidWireType(5_u8);
+    let b = ProtobufError.InvalidWireType(7_u8);
+    assert(a != b);
+}
+
+@test
+fn test_eq_invalid_length_same_fields() {
+    let a = ProtobufError.InvalidLength { declared: 100, available: 50 };
+    let b = ProtobufError.InvalidLength { declared: 100, available: 50 };
+    assert(a == b);
+}
+
+@test
+fn test_eq_cross_variant_inequality() {
+    let eof = ProtobufError.UnexpectedEof;
+    let ov = ProtobufError.VarintOverflow;
+    assert(eof != ov);
+}
+
+// =============================================================================
+// Section 4: Display
+// =============================================================================
+
+@test
+fn test_display_unexpected_eof() {
+    let e = ProtobufError.UnexpectedEof;
+    let s = f"{e}";
+    assert(s.contains("protobuf"));
+    assert(s.contains("unexpected EOF"));
+}
+
+@test
+fn test_display_invalid_field_number() {
+    let e = ProtobufError.InvalidFieldNumber(0_u64);
+    let s = f"{e}";
+    assert(s.contains("protobuf"));
+    assert(s.contains("invalid field number"));
+    assert(s.contains("0"));
+}
+
+@test
+fn test_display_invalid_length_format() {
+    let e = ProtobufError.InvalidLength { declared: 5000, available: 200 };
+    let s = f"{e}";
+    assert(s.contains("5000"));
+    assert(s.contains("200"));
+}
+
+// =============================================================================
+// Section 5: Debug
+// =============================================================================
+
+@test
+fn test_debug_includes_variant_name() {
+    let e1 = ProtobufError.UnexpectedEof;
+    let e2 = ProtobufError.VarintOverflow;
+    assert(f"{e1:?}".contains("UnexpectedEof"));
+    assert(f"{e2:?}".contains("VarintOverflow"));
+}
