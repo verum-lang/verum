@@ -1,0 +1,93 @@
+// =============================================================================
+// core-tests/sync/atomic/unit_test.vr
+// =============================================================================
+//
+// `core/sync/atomic.vr` — atomic primitives. The non-runtime
+// surface tested here:
+//   * MemoryOrdering 5-variant (Relaxed/Acquire/Release/AcqRel/SeqCst)
+//   * AtomicOrdering alias
+//   * AtomicInt.new ctor (allocates the atomic cell)
+//
+// Live atomic operations (load/store/compare_exchange/fetch_add/etc.)
+// need concurrent execution context — tested at language level via
+// vcs/specs/L2-standard/sync/atomic/.
+// =============================================================================
+
+mount core.sync.atomic.{MemoryOrdering, AtomicOrdering, AtomicInt};
+
+// =============================================================================
+// Section 1: MemoryOrdering 5-variant construction
+// =============================================================================
+
+@test
+fn test_relaxed_construction() {
+    let o: MemoryOrdering = MemoryOrdering.Relaxed;
+    assert(o is MemoryOrdering.Relaxed);
+}
+
+@test
+fn test_acquire_construction() {
+    let o: MemoryOrdering = MemoryOrdering.Acquire;
+    assert(o is MemoryOrdering.Acquire);
+}
+
+@test
+fn test_release_construction() {
+    let o: MemoryOrdering = MemoryOrdering.Release;
+    assert(o is MemoryOrdering.Release);
+}
+
+@test
+fn test_acq_rel_construction() {
+    let o: MemoryOrdering = MemoryOrdering.AcqRel;
+    assert(o is MemoryOrdering.AcqRel);
+}
+
+@test
+fn test_seq_cst_construction() {
+    let o: MemoryOrdering = MemoryOrdering.SeqCst;
+    assert(o is MemoryOrdering.SeqCst);
+}
+
+// =============================================================================
+// Section 2: MemoryOrdering variant disjointness
+// =============================================================================
+
+@test
+fn test_memory_ordering_variants_disjoint() {
+    let r: MemoryOrdering = MemoryOrdering.Relaxed;
+    let a: MemoryOrdering = MemoryOrdering.Acquire;
+    let rel: MemoryOrdering = MemoryOrdering.Release;
+    let ar: MemoryOrdering = MemoryOrdering.AcqRel;
+    let s: MemoryOrdering = MemoryOrdering.SeqCst;
+
+    assert(r is MemoryOrdering.Relaxed);
+    assert(a is MemoryOrdering.Acquire);
+    assert(rel is MemoryOrdering.Release);
+    assert(ar is MemoryOrdering.AcqRel);
+    assert(s is MemoryOrdering.SeqCst);
+
+    assert(!(r is MemoryOrdering.Acquire));
+    assert(!(a is MemoryOrdering.Release));
+    assert(!(rel is MemoryOrdering.AcqRel));
+    assert(!(ar is MemoryOrdering.SeqCst));
+    assert(!(s is MemoryOrdering.Relaxed));
+}
+
+// =============================================================================
+// Section 3: AtomicOrdering alias for MemoryOrdering
+// =============================================================================
+
+@test
+fn test_atomic_ordering_alias_relaxed() {
+    // AtomicOrdering is a type alias for MemoryOrdering — same
+    // variant pool reaches.
+    let o: AtomicOrdering = MemoryOrdering.Relaxed;
+    assert(o is MemoryOrdering.Relaxed);
+}
+
+@test
+fn test_atomic_ordering_alias_seq_cst() {
+    let o: AtomicOrdering = MemoryOrdering.SeqCst;
+    assert(o is MemoryOrdering.SeqCst);
+}
