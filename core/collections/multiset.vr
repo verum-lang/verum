@@ -177,8 +177,8 @@ implement<T: Hash + Eq> Multiset<T> {
     /// Multiplicity of `value`. Zero when absent.
     public fn count(&self, value: &T) -> Int {
         match self.inner.get(value) {
-            None    => 0,
-            Some(k) => *k,
+            Maybe.None    => 0,
+            Maybe.Some(k) => *k,
         }
     }
 
@@ -201,8 +201,8 @@ implement<T: Hash + Eq> Multiset<T> {
     public fn insert_n(&mut self, value: T, n: Int) -> Int {
         if n <= 0 { return self.count(&value); }
         let next = match self.inner.get(&value) {
-            None    => n,
-            Some(k) => *k + n,
+            Maybe.None    => n,
+            Maybe.Some(k) => *k + n,
         };
         self.inner.insert(value, next);
         self.cardinality = self.cardinality + n;
@@ -217,8 +217,8 @@ implement<T: Hash + Eq> Multiset<T> {
     public fn try_insert_n(&mut self, value: T, n: Int) -> Result<Int, AllocError> {
         if n <= 0 { return Ok(self.count(&value)); }
         let next = match self.inner.get(&value) {
-            None    => n,
-            Some(k) => *k + n,
+            Maybe.None    => n,
+            Maybe.Some(k) => *k + n,
         };
         match self.inner.try_insert(value, next) {
             Ok(_)  => {
