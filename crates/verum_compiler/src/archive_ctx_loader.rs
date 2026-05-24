@@ -1796,6 +1796,20 @@ impl ArchiveCtxCache {
                     codegen.record_archive_function_name(name, user_fid);
                 }
             }
+            // Task #11 Phase 4: replay mount-rename aliases captured at
+            // precompile.  Each (alias_str_id, archive_fid) entry maps
+            // an alias name (interned in this module's string table) to
+            // the archive-local FunctionId of its target.  We remap the
+            // archive-local fid to the user-side fid via `func_id_remap`,
+            // look up the resulting FunctionInfo from `ctx.functions`,
+            // and re-install the alias via
+            // `register_function_authoritative` so user-side bare-name
+            // lookup sees identical alias bindings to what the precompile
+            // stage observed.  Targets filtered out of `wanted` by
+            // `register_module_filtered` produce a `func_id_remap` miss
+            // and we silently skip — matching the rest of the loader's
+            // filter discipline.
+            replay_mount_aliases(module, &func_id_remap, codegen);
             per_archive_remaps.push((entry_name.clone(), func_id_remap));
         }
         // Phase 2: body merges now see every loaded archive's name
@@ -1954,9 +1968,67 @@ impl ArchiveCtxCache {
                 // same Phase 2 path as the primary pass above. See
                 // that site for rationale.
                 codegen.merge_archive_function_bodies(module, &func_id_remap);
+                // Task #11 Phase 4: alias replay in the unqualified
+                // second pass too — symmetric with the Phase-1 site
+                // above.  Aliases captured by stdlib modules brought
+                // in through the bare-name fallback need the same
+                // user-side reinstall as those from explicit-mount
+                // modules in the primary pass.
+                replay_mount_aliases(module, &func_id_remap, codegen);
             }
         }
         (fn_modules, type_modules)
+    }
+}
+
+/// Task #11 Phase 4: replay mount-rename aliases captured in a
+/// precompiled module into the user-side codegen context.
+///
+/// For each `(alias_str_id, archive_fid)` entry recorded by the
+/// precompile-side `VbcCodegen::build_module` drain, we resolve
+/// the alias name from the module's string table, remap the
+/// archive-local FunctionId through `func_id_remap`, look up the
+/// resulting user-side `FunctionInfo`, and re-install the binding
+/// via `register_function_authoritative` so user-side bare-name
+/// lookup sees the identical alias mapping the precompile stage
+/// observed.
+///
+/// Misses (target filtered out of `wanted`, missing string entry,
+/// empty alias name) are silently skipped to match the rest of the
+/// loader's filter discipline.
+fn replay_mount_aliases(
+    module: &VbcModule,
+    func_id_remap: &std::collections::HashMap<u32, verum_vbc::module::FunctionId>,
+    codegen: &mut verum_vbc::codegen::VbcCodegen,
+) {
+    if module.mount_aliases.is_empty() {
+        return;
+    }
+    // Pre-resolve (alias_name, user_fid) pairs in a single read pass
+    // so the subsequent register loop can hold &mut codegen.ctx
+    // without aliasing the immutable module borrow.
+    let mut pairs: Vec<(String, verum_vbc::module::FunctionId)> =
+        Vec::with_capacity(module.mount_aliases.len());
+    for (alias_str_id, archive_fid) in module.mount_aliases.iter() {
+        let alias_name = match module.get_string(*alias_str_id) {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => continue,
+        };
+        let Some(&user_fid) = func_id_remap.get(&archive_fid.0) else {
+            continue;
+        };
+        pairs.push((alias_name, user_fid));
+    }
+    if pairs.is_empty() {
+        return;
+    }
+    let ctx = codegen.ctx_mut();
+    for (alias_name, user_fid) in pairs {
+        let info = match ctx.lookup_function_by_id(user_fid) {
+            Some(info) => info.clone(),
+            None => continue,
+        };
+        ctx.register_function_authoritative(alias_name, info);
     }
 }
 

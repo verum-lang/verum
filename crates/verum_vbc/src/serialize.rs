@@ -831,6 +831,27 @@ impl Serializer {
             self.output.extend_from_slice(&data);
         }
 
+        // Task #11 Phase 3: mount_aliases trailing section (continuation).
+        //
+        // The legacy `section_mask` byte exhausted all 8 bits at the
+        // `external_function_names` (0x80) addition, so any further
+        // archive section needs a continuation slot.  We append
+        // mount_aliases here as a length-prefixed trailing record,
+        // present iff `mount_aliases` is non-empty.  The deserializer
+        // reads this slot only when there are bytes left in the
+        // extensions region — so old archives without the trailing
+        // record stay structurally valid (their extensions region
+        // ends right after `external_function_names`).
+        //
+        // Wire form: `u32 byte_len + bincode(Vec<(StringId, FunctionId)>)`.
+        if !module.mount_aliases.is_empty() {
+            let data = bincode::serialize(&module.mount_aliases).map_err(|e| {
+                crate::error::VbcError::Serialization(format!("mount_aliases: {}", e))
+            })?;
+            encode_u32(data.len() as u32, &mut self.output);
+            self.output.extend_from_slice(&data);
+        }
+
         Ok((
             start as u32,
             (self.output.len() - start) as u32,
