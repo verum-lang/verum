@@ -408,8 +408,14 @@ public type Iterator is protocol {
     // =========================================================================
 
     /// Check if all elements satisfy predicate.
+    //
+    // `while let Maybe.Some(...)` (not bare `Some`) so cross-module
+    // monomorphisation can't resolve bare-name to a sibling
+    // variant (e.g. `RetryBackoff.None`, `Poll.Pending`).  See the
+    // bare-variant defect class doc in `core/collections/list.vr::
+    // filter_map`.
     fn all<P: fn(&Self.Item) -> Bool>(&mut self, predicate: P) -> Bool {
-        while let Some(ref x) = self.next() {
+        while let Maybe.Some(ref x) = self.next() {
             if !predicate(x) {
                 return false;
             }
@@ -419,7 +425,7 @@ public type Iterator is protocol {
 
     /// Check if any element satisfies predicate.
     fn any<P: fn(&Self.Item) -> Bool>(&mut self, predicate: P) -> Bool {
-        while let Some(ref x) = self.next() {
+        while let Maybe.Some(ref x) = self.next() {
             if predicate(x) {
                 return true;
             }
@@ -433,34 +439,34 @@ public type Iterator is protocol {
 
     /// Find first element satisfying predicate.
     fn find<P: fn(&Self.Item) -> Bool>(&mut self, predicate: P) -> Maybe<Self.Item> {
-        while let Some(x) = self.next() {
+        while let Maybe.Some(x) = self.next() {
             if predicate(&x) {
-                return Some(x);
+                return Maybe.Some(x);
             }
         }
-        None
+        Maybe.None
     }
 
     /// Find && transform in one step.
     fn find_map<B, F: fn(Self.Item) -> Maybe<B>>(&mut self, f: F) -> Maybe<B> {
-        while let Some(x) = self.next() {
-            if let Some(b) = f(x) {
-                return Some(b);
+        while let Maybe.Some(x) = self.next() {
+            if let Maybe.Some(b) = f(x) {
+                return Maybe.Some(b);
             }
         }
-        None
+        Maybe.None
     }
 
     /// Find position of first matching element.
     fn position<P: fn(&Self.Item) -> Bool>(&mut self, predicate: P) -> Maybe<Int> {
         let mut i = 0;
-        while let Some(ref x) = self.next() {
+        while let Maybe.Some(ref x) = self.next() {
             if predicate(x) {
-                return Some(i);
+                return Maybe.Some(i);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     // =========================================================================

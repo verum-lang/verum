@@ -1868,12 +1868,18 @@ implement<T> List<T> {
     /// assert_eq(evens_doubled, list([4, 8]));
     /// ```
     public fn filter_map<U, F: fn(&T) -> Maybe<U>>(&self, f: F) -> List<U> {
+        // Qualify `Maybe.Some` / `Maybe.None` in match arms so
+        // bare `Some` / `None` resolution can't pick sibling
+        // variants (`RetryBackoff.None`, `Poll.Pending` etc.) when
+        // this generic body is monomorphised in a consumer module
+        // where the bare-name shadow differs.  Pinned by
+        // `core-tests/base/iterator/regression_test.vr::regression_bare_none_in_closure_body`.
         let mut result: List<U> = List.new();
         for i in range(0, self.len) {
             let item: &T = unsafe { &*self.ptr.offset(i) };
             match f(item) {
-                Some(val) => result.push(val),
-                None => {},
+                Maybe.Some(val) => result.push(val),
+                Maybe.None => {},
             }
         }
         result
