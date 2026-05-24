@@ -136,6 +136,33 @@ pub struct CodegenContext {
     /// Used when importing stdlib modules after user code has been registered.
     pub prefer_existing_functions: bool,
 
+    /// **Task #47 stage-3 stub-id preservation** (architectural fix
+    /// for the cascade where stub-ids leak into runtime as orphan
+    /// `[lenient] stage-3 ... stub never resolved` panics).
+    ///
+    /// Records the original `(stub_id -> name)` mapping for every
+    /// stage-3 stub-id (range `[u32::MAX - 0x100_0000 - 0x10_0000,
+    /// u32::MAX - 0x100_0000]`) ever registered, regardless of
+    /// whether a subsequent `register_function` call OVERWRITES
+    /// the bare-name slot in `functions` with a real-id `FunctionInfo`.
+    ///
+    /// The cascade root cause: when module B emits `Call(stub_id)`
+    /// referencing module A's `foo`, the consumer-side bytecode
+    /// holds the stub_id.  When module A later compiles and
+    /// overwrites `functions["foo"]` with the real_id, the
+    /// stub_id -> "foo" mapping is lost from `functions`.
+    /// `emit_stage3_stub_descriptors` then iterates `functions` and
+    /// CANNOT synthesize a descriptor for stub_id (no matching name
+    /// in `functions`), so the archive lacks the
+    /// `external_function_names[stub_id]` -> "foo" mapping that
+    /// `ArchiveBodyRemap::map_function` needs to chase the real body.
+    /// The stub_id leaks to runtime as orphan -> panic.
+    ///
+    /// This side table preserves the original stub_id -> name
+    /// regardless of subsequent overwrites, so the stage-3 emit
+    /// pass can always synthesize the descriptor.
+    pub stage3_stub_names: HashMap<u32, String>,
+
     /// Dotted module path for functions currently being collected/compiled.
     ///
 
@@ -1073,6 +1100,7 @@ impl CodegenContext {
             functions: HashMap::new(),
             scoped_functions: HashMap::new(),
             prefer_existing_functions: false,
+            stage3_stub_names: HashMap::new(),
             current_source_module: None,
             stats: CodegenStats::default(),
             tier_context: TierContext::new(),
@@ -2061,6 +2089,33 @@ impl CodegenContext {
                 self.scoped_functions.insert(key, info.clone());
             }
         }
+        // **Task #47 stage-3 stub-name preservation** — record
+        // every stub-id we observe BEFORE the bare-name slot in
+        // `functions` potentially gets overwritten by a real-id
+        // registration.  See `stage3_stub_names` field doc.
+        //
+        // The stage-3 sentinel range is
+        // `[u32::MAX - 0x100_0000 - 0x10_0000, u32::MAX - 0x100_0000]`
+        // = `[0xFEEFFFFF, 0xFEFFFFFF]`.  We check BOTH the incoming
+        // info AND any existing entry so we catch the stub-id at
+        // either side of the overwrite.
+        const STAGE3_BASE: u32 = u32::MAX - 0x100_0000;
+        const STAGE3_WIDTH: u32 = 0x10_0000;
+        let is_stage3 = |id: u32| -> bool {
+            id <= STAGE3_BASE && id >= STAGE3_BASE.saturating_sub(STAGE3_WIDTH)
+        };
+        if is_stage3(info.id.0) {
+            self.stage3_stub_names
+                .entry(info.id.0)
+                .or_insert_with(|| name.clone());
+        }
+        if let Some(existing) = self.functions.get(&name)
+            && is_stage3(existing.id.0)
+        {
+            self.stage3_stub_names
+                .entry(existing.id.0)
+                .or_insert_with(|| name.clone());
+        }
         if self.prefer_existing_functions {
             self.functions.entry(name).or_insert(info);
         } else {
@@ -2727,6 +2782,15 @@ impl CodegenContext {
         self.strings.clear();
         self.string_intern.clear();
         self.functions.clear();
+        // Stage-3 stub-name preservation map — cleared at the per-
+        // module reset boundary along with `functions`.  Accumulates
+        // stub_id -> name mappings during a single module's compile
+        // walk; consulted by `emit_stage3_stub_descriptors` at
+        // build_module time to recover stub-ids whose bare-name slot
+        // got overwritten by a real-id `FunctionInfo` (the cascade
+        // root cause for orphan `[lenient] stage-3 ... stub never
+        // resolved` panics — see field doc on `stage3_stub_names`).
+        self.stage3_stub_names.clear();
         self.stats = CodegenStats::default();
         self.variable_types.clear();
         if !self.variable_type_names.is_empty() {
