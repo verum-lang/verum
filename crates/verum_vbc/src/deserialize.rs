@@ -454,6 +454,12 @@ impl<'a> Deserializer<'a> {
  framework_provenance: crate::module::FrameworkProvenance::default(),
  discharge_receipts: Vec::new(),
  external_function_names: extensions.external_function_names,
+ // Phase 1 of task #11 fundamental fix — empty by default.
+ // The legacy `.vbc` binary format doesn't yet carry the
+ // `mount_aliases` section; populated only by the sectioned
+ // `.vbca` archive deserializer when the precompile starts
+ // emitting alias entries.
+ mount_aliases: Vec::new(),
  })
  }
 
