@@ -57,7 +57,11 @@ public mount .protocols.BufRead;
 public mount .protocols.EmptyReader;
 public mount .protocols.ByteRepeat;
 public mount .protocols.Sink;
-public mount .protocols.Cursor;
+// NOTE (task #io-2 close-out): Cursor was previously duplicated in
+// `protocols.vr` AND `buffer.vr` (with a `Cursor<T> = BufferCursor<T>`
+// alias).  The protocols.vr type was removed; the canonical Cursor
+// lives in buffer.vr and is re-exported via the BufferCursor mount
+// below (the alias `Cursor` follows).
 public mount .protocols.Chain;
 public mount .protocols.Take;
 public mount .protocols.BytesIter;
