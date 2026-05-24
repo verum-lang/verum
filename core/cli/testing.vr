@@ -135,14 +135,14 @@ public fn fuzz_one(spec: &CommandSpec, argv: List<Text>) -> SimResult {
     match parse_argv(spec, argv) {
         Ok(o) => SimResult {
             exit_code: 0,
-            stdout: Text.empty(),
-            stderr: Text.empty(),
+            stdout: "".clone(),
+            stderr: "".clone(),
             outcome: Some(o),
             parse_err: None,
         },
         Err(e) => SimResult {
             exit_code: e.exit_code().code(),
-            stdout: Text.empty(),
+            stdout: "".clone(),
             stderr: e.message.clone(),
             outcome: None,
             parse_err: Some(e),
