@@ -497,6 +497,16 @@ implement<T: Clone> Iterator for RepeatGenerator<T> {
     }
 }
 
+implement<T: Clone> RepeatGenerator<T> {
+    /// Generator-style introspection: a RepeatGenerator is infinite,
+    /// so `has_next()` is always true.  Provided as a dedicated
+    /// method (rather than inheriting from `Generator<T>`) because
+    /// `Generator<T>` is a concrete record-type, not a protocol —
+    /// RepeatGenerator only implements `Iterator`.  Pinned by
+    /// `regression_generator_repeat_initial_state_is_live`.
+    public fn has_next(&self) -> Bool { true }
+}
+
 /// Create a generator that yields values from successive function calls.
 ///
 
