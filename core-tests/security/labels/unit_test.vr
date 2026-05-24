@@ -1,0 +1,246 @@
+// =============================================================================
+// core-tests/security/labels/unit_test.vr
+// =============================================================================
+//
+// `core/security/labels.vr` — security labels for information-flow
+// control. Canonical chain Public ⊑ Internal ⊑ Secret ⊑ TopSecret
+// plus user-defined Custom labels.
+//
+// Surface tested:
+//   * Label 5-variant (Public/Internal/Secret/TopSecret/Custom)
+//   * Labeled<T> wrapper + labeled() ctor
+//   * flows_to(lo, hi) lattice ordering predicate
+//   * join(a, b) least upper bound
+// =============================================================================
+
+mount core.security.labels.{Label, Labeled, labeled, flows_to, join};
+
+// =============================================================================
+// Section 1: Label variant construction
+// =============================================================================
+
+@test
+fn test_label_public_construction() {
+    let l: Label = Label.Public;
+    assert(l is Label.Public);
+}
+
+@test
+fn test_label_internal_construction() {
+    let l: Label = Label.Internal;
+    assert(l is Label.Internal);
+}
+
+@test
+fn test_label_secret_construction() {
+    let l: Label = Label.Secret;
+    assert(l is Label.Secret);
+}
+
+@test
+fn test_label_top_secret_construction() {
+    let l: Label = Label.TopSecret;
+    assert(l is Label.TopSecret);
+}
+
+@test
+fn test_label_custom_construction() {
+    let l: Label = Label.Custom { name: "MyDomain".clone() };
+    assert(l is Label.Custom);
+}
+
+// =============================================================================
+// Section 2: Labeled<T>.labeled ctor
+// =============================================================================
+
+@test
+fn test_labeled_preserves_value() {
+    let v = labeled(Label.Secret, 42);
+    assert_eq(v.value, 42);
+}
+
+@test
+fn test_labeled_preserves_label() {
+    let v = labeled(Label.Public, 100);
+    assert(v.label is Label.Public);
+}
+
+@test
+fn test_labeled_custom() {
+    let v = labeled(Label.Custom { name: "FINANCE".clone() }, "balance".clone());
+    assert(v.label is Label.Custom);
+    assert_eq(v.value, "balance");
+}
+
+// =============================================================================
+// Section 3: flows_to — reflexivity (every label flows to itself)
+// =============================================================================
+
+@test
+fn test_flows_to_public_reflexive() {
+    assert(flows_to(Label.Public, Label.Public));
+}
+
+@test
+fn test_flows_to_internal_reflexive() {
+    assert(flows_to(Label.Internal, Label.Internal));
+}
+
+@test
+fn test_flows_to_secret_reflexive() {
+    assert(flows_to(Label.Secret, Label.Secret));
+}
+
+@test
+fn test_flows_to_top_secret_reflexive() {
+    assert(flows_to(Label.TopSecret, Label.TopSecret));
+}
+
+// =============================================================================
+// Section 4: flows_to — canonical chain (Public → Internal → Secret → TopSecret)
+// =============================================================================
+
+@test
+fn test_public_flows_to_internal() {
+    assert(flows_to(Label.Public, Label.Internal));
+}
+
+@test
+fn test_public_flows_to_secret() {
+    assert(flows_to(Label.Public, Label.Secret));
+}
+
+@test
+fn test_public_flows_to_top_secret() {
+    assert(flows_to(Label.Public, Label.TopSecret));
+}
+
+@test
+fn test_internal_flows_to_secret() {
+    assert(flows_to(Label.Internal, Label.Secret));
+}
+
+@test
+fn test_internal_flows_to_top_secret() {
+    assert(flows_to(Label.Internal, Label.TopSecret));
+}
+
+@test
+fn test_secret_flows_to_top_secret() {
+    assert(flows_to(Label.Secret, Label.TopSecret));
+}
+
+// =============================================================================
+// Section 5: flows_to — downward direction REJECTED (info-leak prevention)
+// =============================================================================
+
+@test
+fn test_top_secret_does_not_flow_to_secret() {
+    assert(!flows_to(Label.TopSecret, Label.Secret));
+}
+
+@test
+fn test_top_secret_does_not_flow_to_internal() {
+    assert(!flows_to(Label.TopSecret, Label.Internal));
+}
+
+@test
+fn test_top_secret_does_not_flow_to_public() {
+    assert(!flows_to(Label.TopSecret, Label.Public));
+}
+
+@test
+fn test_secret_does_not_flow_to_public() {
+    assert(!flows_to(Label.Secret, Label.Public));
+}
+
+@test
+fn test_internal_does_not_flow_to_public() {
+    assert(!flows_to(Label.Internal, Label.Public));
+}
+
+// =============================================================================
+// Section 6: flows_to — Custom labels reflexivity-only
+// =============================================================================
+
+@test
+fn test_custom_flows_to_same_name() {
+    let a = Label.Custom { name: "FINANCE".clone() };
+    let b = Label.Custom { name: "FINANCE".clone() };
+    assert(flows_to(a, b));
+}
+
+@test
+fn test_custom_does_not_flow_to_different_name() {
+    let a = Label.Custom { name: "FINANCE".clone() };
+    let b = Label.Custom { name: "MEDICAL".clone() };
+    assert(!flows_to(a, b));
+}
+
+@test
+fn test_custom_does_not_flow_to_chain_label() {
+    let a = Label.Custom { name: "X".clone() };
+    let b = Label.Public;
+    assert(!flows_to(a, b));
+}
+
+@test
+fn test_chain_label_does_not_flow_to_custom() {
+    let a = Label.Public;
+    let b = Label.Custom { name: "X".clone() };
+    assert(!flows_to(a, b));
+}
+
+// =============================================================================
+// Section 7: join — least upper bound on canonical chain
+// =============================================================================
+
+@test
+fn test_join_same_label_idempotent() {
+    assert(join(Label.Public, Label.Public) is Label.Public);
+    assert(join(Label.Secret, Label.Secret) is Label.Secret);
+}
+
+@test
+fn test_join_public_and_internal_is_internal() {
+    let j = join(Label.Public, Label.Internal);
+    assert(j is Label.Internal);
+}
+
+@test
+fn test_join_public_and_top_secret_is_top_secret() {
+    let j = join(Label.Public, Label.TopSecret);
+    assert(j is Label.TopSecret);
+}
+
+@test
+fn test_join_internal_and_secret_is_secret() {
+    let j = join(Label.Internal, Label.Secret);
+    assert(j is Label.Secret);
+}
+
+@test
+fn test_join_secret_and_top_secret_is_top_secret() {
+    let j = join(Label.Secret, Label.TopSecret);
+    assert(j is Label.TopSecret);
+}
+
+@test
+fn test_join_commutative_public_secret() {
+    // join is commutative on the canonical chain
+    let j1 = join(Label.Public, Label.Secret);
+    let j2 = join(Label.Secret, Label.Public);
+    // Both should be Secret
+    assert(j1 is Label.Secret);
+    assert(j2 is Label.Secret);
+}
+
+@test
+fn test_join_custom_incompatible_falls_back_to_top_secret() {
+    // Doc-stated: incompatible custom labels join to TopSecret as
+    // conservative upper bound.
+    let a = Label.Custom { name: "A".clone() };
+    let b = Label.Custom { name: "B".clone() };
+    let j = join(a, b);
+    assert(j is Label.TopSecret);
+}
