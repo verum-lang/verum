@@ -1,0 +1,394 @@
+// =============================================================================
+// core-tests/eval/cbpv/unit_test.vr
+// =============================================================================
+//
+// `core/eval/cbpv.vr` — Call-By-Push-Value calculus as data + reduction.
+//
+// Surface:
+//   * CbpvKind 2-variant (Value / Computation)
+//   * CbpvTerm 7-variant (Var / Lam / Thunk / Return / SeqTo / Force / App)
+//   * Smart ctors: cbpv_var / cbpv_lam / cbpv_thunk / cbpv_return /
+//     cbpv_seq_to / cbpv_force / cbpv_app
+//   * cbpv_kind_of, cbpv_is_canonical, cbpv_occurs_free
+//   * cbpv_substitute (capture-avoiding)
+//   * CbpvStep 2-variant + cbpv_step + cbpv_normalise
+//   * cbpv_alpha_eq
+// =============================================================================
+
+mount core.eval.cbpv.{
+    CbpvKind, CbpvTerm,
+    cbpv_var, cbpv_lam, cbpv_thunk, cbpv_return, cbpv_seq_to, cbpv_force, cbpv_app,
+    cbpv_kind_of, cbpv_is_canonical, cbpv_occurs_free, cbpv_substitute,
+    CbpvStep, cbpv_step, cbpv_normalise, cbpv_alpha_eq,
+};
+
+// =============================================================================
+// Section 1: CbpvKind 2-variant
+// =============================================================================
+
+@test
+fn test_cbpv_kind_value() {
+    let k: CbpvKind = CbpvKind.Value;
+    assert(k is CbpvKind.Value);
+}
+
+@test
+fn test_cbpv_kind_computation() {
+    let k: CbpvKind = CbpvKind.Computation;
+    assert(k is CbpvKind.Computation);
+}
+
+@test
+fn test_cbpv_kind_disjoint() {
+    let v: CbpvKind = CbpvKind.Value;
+    let c: CbpvKind = CbpvKind.Computation;
+    assert(v is CbpvKind.Value && !(v is CbpvKind.Computation));
+    assert(c is CbpvKind.Computation && !(c is CbpvKind.Value));
+}
+
+// =============================================================================
+// Section 2: CbpvTerm 7-variant construction
+// =============================================================================
+
+@test
+fn test_cbpv_var_construction() {
+    let t = cbpv_var(Text.from("x"));
+    assert(t is CbpvTerm.Var);
+}
+
+@test
+fn test_cbpv_lam_construction() {
+    let t = cbpv_lam(Text.from("x"), cbpv_return(cbpv_var(Text.from("x"))));
+    assert(t is CbpvTerm.Lam);
+}
+
+@test
+fn test_cbpv_thunk_construction() {
+    let t = cbpv_thunk(cbpv_return(cbpv_var(Text.from("x"))));
+    assert(t is CbpvTerm.Thunk);
+}
+
+@test
+fn test_cbpv_return_construction() {
+    let t = cbpv_return(cbpv_var(Text.from("x")));
+    assert(t is CbpvTerm.Return);
+}
+
+@test
+fn test_cbpv_seq_to_construction() {
+    let t = cbpv_seq_to(
+        cbpv_return(cbpv_var(Text.from("x"))),
+        Text.from("y"),
+        cbpv_return(cbpv_var(Text.from("y"))),
+    );
+    assert(t is CbpvTerm.SeqTo);
+}
+
+@test
+fn test_cbpv_force_construction() {
+    let t = cbpv_force(cbpv_thunk(cbpv_return(cbpv_var(Text.from("x")))));
+    assert(t is CbpvTerm.Force);
+}
+
+@test
+fn test_cbpv_app_construction() {
+    let t = cbpv_app(cbpv_var(Text.from("f")), cbpv_var(Text.from("x")));
+    assert(t is CbpvTerm.App);
+}
+
+// =============================================================================
+// Section 3: cbpv_kind_of — syntactic-category classification
+// =============================================================================
+
+@test
+fn test_cbpv_kind_of_var_is_value() {
+    let k = cbpv_kind_of(cbpv_var(Text.from("x")));
+    assert(k is CbpvKind.Value);
+}
+
+@test
+fn test_cbpv_kind_of_lam_is_value() {
+    let k = cbpv_kind_of(cbpv_lam(
+        Text.from("x"),
+        cbpv_return(cbpv_var(Text.from("x"))),
+    ));
+    assert(k is CbpvKind.Value);
+}
+
+@test
+fn test_cbpv_kind_of_thunk_is_value() {
+    let k = cbpv_kind_of(cbpv_thunk(cbpv_return(cbpv_var(Text.from("x")))));
+    assert(k is CbpvKind.Value);
+}
+
+@test
+fn test_cbpv_kind_of_return_is_computation() {
+    let k = cbpv_kind_of(cbpv_return(cbpv_var(Text.from("x"))));
+    assert(k is CbpvKind.Computation);
+}
+
+@test
+fn test_cbpv_kind_of_seq_is_computation() {
+    let k = cbpv_kind_of(cbpv_seq_to(
+        cbpv_return(cbpv_var(Text.from("x"))),
+        Text.from("y"),
+        cbpv_return(cbpv_var(Text.from("y"))),
+    ));
+    assert(k is CbpvKind.Computation);
+}
+
+@test
+fn test_cbpv_kind_of_force_is_computation() {
+    let k = cbpv_kind_of(cbpv_force(cbpv_thunk(cbpv_return(cbpv_var(Text.from("x"))))));
+    assert(k is CbpvKind.Computation);
+}
+
+@test
+fn test_cbpv_kind_of_app_is_computation() {
+    let k = cbpv_kind_of(cbpv_app(cbpv_var(Text.from("f")), cbpv_var(Text.from("x"))));
+    assert(k is CbpvKind.Computation);
+}
+
+// =============================================================================
+// Section 4: cbpv_is_canonical — Lam/Thunk only
+// =============================================================================
+
+@test
+fn test_cbpv_canonical_lam() {
+    assert(cbpv_is_canonical(cbpv_lam(
+        Text.from("x"),
+        cbpv_return(cbpv_var(Text.from("x"))),
+    )));
+}
+
+@test
+fn test_cbpv_canonical_thunk() {
+    assert(cbpv_is_canonical(cbpv_thunk(cbpv_return(cbpv_var(Text.from("x"))))));
+}
+
+@test
+fn test_cbpv_canonical_var_is_not() {
+    assert(!cbpv_is_canonical(cbpv_var(Text.from("x"))));
+}
+
+@test
+fn test_cbpv_canonical_return_is_not() {
+    assert(!cbpv_is_canonical(cbpv_return(cbpv_var(Text.from("x")))));
+}
+
+@test
+fn test_cbpv_canonical_app_is_not() {
+    assert(!cbpv_is_canonical(cbpv_app(
+        cbpv_var(Text.from("f")),
+        cbpv_var(Text.from("x")),
+    )));
+}
+
+// =============================================================================
+// Section 5: cbpv_occurs_free
+// =============================================================================
+
+@test
+fn test_cbpv_occurs_free_var_match() {
+    assert(cbpv_occurs_free(cbpv_var(Text.from("x")), Text.from("x")));
+}
+
+@test
+fn test_cbpv_occurs_free_var_miss() {
+    assert(!cbpv_occurs_free(cbpv_var(Text.from("x")), Text.from("y")));
+}
+
+@test
+fn test_cbpv_occurs_free_lam_shadows() {
+    // λx. x — `x` bound, NOT free
+    let t = cbpv_lam(Text.from("x"), cbpv_return(cbpv_var(Text.from("x"))));
+    assert(!cbpv_occurs_free(t, Text.from("x")));
+}
+
+@test
+fn test_cbpv_occurs_free_seq_binder_shadows_body() {
+    // (return x) to x. (return x) — `x` is free in producer, bound in body
+    let t = cbpv_seq_to(
+        cbpv_return(cbpv_var(Text.from("x"))),
+        Text.from("x"),
+        cbpv_return(cbpv_var(Text.from("x"))),
+    );
+    // Producer wins — `x` IS free
+    assert(cbpv_occurs_free(t, Text.from("x")));
+}
+
+@test
+fn test_cbpv_occurs_free_thunk_descends() {
+    let t = cbpv_thunk(cbpv_return(cbpv_var(Text.from("y"))));
+    assert(cbpv_occurs_free(t, Text.from("y")));
+}
+
+@test
+fn test_cbpv_occurs_free_force_descends() {
+    let t = cbpv_force(cbpv_var(Text.from("y")));
+    assert(cbpv_occurs_free(t, Text.from("y")));
+}
+
+@test
+fn test_cbpv_occurs_free_app_either_side() {
+    let t = cbpv_app(cbpv_var(Text.from("f")), cbpv_var(Text.from("x")));
+    assert(cbpv_occurs_free(t, Text.from("f")));
+    let t2 = cbpv_app(cbpv_var(Text.from("f")), cbpv_var(Text.from("x")));
+    assert(cbpv_occurs_free(t2, Text.from("x")));
+}
+
+// =============================================================================
+// Section 6: cbpv_substitute
+// =============================================================================
+
+@test
+fn test_cbpv_substitute_var_match() {
+    let r = cbpv_substitute(
+        cbpv_var(Text.from("x")),
+        Text.from("x"),
+        cbpv_var(Text.from("y")),
+    );
+    assert(r is CbpvTerm.Var);
+}
+
+@test
+fn test_cbpv_substitute_var_miss() {
+    let r = cbpv_substitute(
+        cbpv_var(Text.from("z")),
+        Text.from("x"),
+        cbpv_var(Text.from("y")),
+    );
+    assert(r is CbpvTerm.Var);
+}
+
+@test
+fn test_cbpv_substitute_lam_shadowed_no_op() {
+    let r = cbpv_substitute(
+        cbpv_lam(Text.from("x"), cbpv_return(cbpv_var(Text.from("x")))),
+        Text.from("x"),
+        cbpv_var(Text.from("v")),
+    );
+    assert(r is CbpvTerm.Lam);
+}
+
+// =============================================================================
+// Section 7: CbpvStep 2-variant
+// =============================================================================
+
+@test
+fn test_cbpv_step_stepped() {
+    let s: CbpvStep = CbpvStep.Stepped { next: cbpv_var(Text.from("x")) };
+    assert(s is CbpvStep.Stepped);
+}
+
+@test
+fn test_cbpv_step_normal() {
+    let s: CbpvStep = CbpvStep.Normal { term: cbpv_var(Text.from("x")) };
+    assert(s is CbpvStep.Normal);
+}
+
+// =============================================================================
+// Section 8: cbpv_step — reduction rules
+// =============================================================================
+
+@test
+fn test_cbpv_step_force_thunk() {
+    // force (thunk C) ↦ C
+    let t = cbpv_force(cbpv_thunk(cbpv_return(cbpv_var(Text.from("x")))));
+    let r = cbpv_step(t);
+    assert(r is CbpvStep.Stepped);
+}
+
+@test
+fn test_cbpv_step_seq_to_return() {
+    // (return v) to x. (return x) ↦ (return x)[x := v] = return v
+    let t = cbpv_seq_to(
+        cbpv_return(cbpv_var(Text.from("v"))),
+        Text.from("x"),
+        cbpv_return(cbpv_var(Text.from("x"))),
+    );
+    let r = cbpv_step(t);
+    assert(r is CbpvStep.Stepped);
+}
+
+@test
+fn test_cbpv_step_beta() {
+    // (λx. return x) v ↦ return v
+    let t = cbpv_app(
+        cbpv_lam(Text.from("x"), cbpv_return(cbpv_var(Text.from("x")))),
+        cbpv_var(Text.from("v")),
+    );
+    let r = cbpv_step(t);
+    assert(r is CbpvStep.Stepped);
+}
+
+@test
+fn test_cbpv_step_var_normal() {
+    let r = cbpv_step(cbpv_var(Text.from("x")));
+    assert(r is CbpvStep.Normal);
+}
+
+@test
+fn test_cbpv_step_lam_normal() {
+    let r = cbpv_step(cbpv_lam(
+        Text.from("x"),
+        cbpv_return(cbpv_var(Text.from("x"))),
+    ));
+    assert(r is CbpvStep.Normal);
+}
+
+// =============================================================================
+// Section 9: cbpv_normalise — driver
+// =============================================================================
+
+@test
+fn test_cbpv_normalise_value_zero_steps() {
+    let (_t, steps) = cbpv_normalise(cbpv_var(Text.from("x")), 100);
+    assert(steps == 0);
+}
+
+@test
+fn test_cbpv_normalise_force_thunk_one_step() {
+    let t = cbpv_force(cbpv_thunk(cbpv_return(cbpv_var(Text.from("x")))));
+    let (_t, steps) = cbpv_normalise(t, 100);
+    assert(steps >= 1);
+}
+
+@test
+fn test_cbpv_normalise_respects_gas() {
+    let t = cbpv_force(cbpv_thunk(cbpv_return(cbpv_var(Text.from("x")))));
+    let (_t, steps) = cbpv_normalise(t, 5);
+    assert(steps <= 5);
+}
+
+// =============================================================================
+// Section 10: cbpv_alpha_eq
+// =============================================================================
+
+@test
+fn test_cbpv_alpha_eq_var_self() {
+    let t = cbpv_var(Text.from("x"));
+    assert(cbpv_alpha_eq(t.clone(), t));
+}
+
+@test
+fn test_cbpv_alpha_eq_lam_rename_bound() {
+    // λx. return x  =α=  λy. return y
+    let a = cbpv_lam(Text.from("x"), cbpv_return(cbpv_var(Text.from("x"))));
+    let b = cbpv_lam(Text.from("y"), cbpv_return(cbpv_var(Text.from("y"))));
+    assert(cbpv_alpha_eq(a, b));
+}
+
+@test
+fn test_cbpv_alpha_eq_var_different_free_distinct() {
+    let a = cbpv_var(Text.from("x"));
+    let b = cbpv_var(Text.from("y"));
+    assert(!cbpv_alpha_eq(a, b));
+}
+
+@test
+fn test_cbpv_alpha_eq_different_variants_distinct() {
+    let v = cbpv_var(Text.from("x"));
+    let r = cbpv_return(cbpv_var(Text.from("x")));
+    assert(!cbpv_alpha_eq(v, r));
+}
