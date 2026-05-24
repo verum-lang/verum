@@ -410,8 +410,8 @@ implement<T: Ord> BinaryHeap<T> {
         let mut i = 0;
         while i < count {
             match clone.pop() {
-                Some(val) => result.push(val),
-                None => { break; },
+                Maybe.Some(val) => result.push(val),
+                Maybe.None => { break; },
             }
             i = i + 1;
         }
@@ -526,8 +526,8 @@ implement<T: Ord> BinaryHeap<T> {
         let mut result: BinaryHeap<U> = BinaryHeap.new();
         for item in self.data.iter() {
             match f(item) {
-                Some(v) => result.push(v),
-                None => {}
+                Maybe.Some(v) => result.push(v),
+                Maybe.None => {}
             }
         }
         result
