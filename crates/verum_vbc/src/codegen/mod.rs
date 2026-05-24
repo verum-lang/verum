@@ -13599,6 +13599,33 @@ impl VbcCodegen {
                 return pos as u32;
             }
             if candidates.len() > 1 {
+                // **Task #8 fix 2026-05-24** — scope-aware tie-break.
+                // When the calling codegen has a `current_source_module`
+                // (typical for stdlib bootstrap + user compile),
+                // prefer a candidate whose qualified type_name STARTS
+                // WITH that module.  Closes the user-type-shadowed-
+                // by-stdlib defect class — e.g. user `type Node` in
+                // `my_module` should resolve to `my_module.Node`'s
+                // field layout, not `core.net.weft.router.Node`'s
+                // (which would otherwise be picked by the most-fields
+                // fallback below and produce wrong field indices).
+                if let Some(scope) = &self.ctx.current_source_module {
+                    let scope_prefix = format!("{}.", scope);
+                    for c in candidates.iter() {
+                        if c.0.starts_with(&scope_prefix) || c.0 == *scope {
+                            if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
+                                tracing::debug!(
+                                    "[FIELD] scan: field '{}' scope-prefer {}.{} idx {}",
+                                    field_name,
+                                    c.0,
+                                    field_name,
+                                    c.1
+                                );
+                            }
+                            return c.1 as u32;
+                        }
+                    }
+                }
                 // All at same position? Use that.
                 let first_pos = candidates[0].1;
                 if candidates.iter().all(|(_, p)| *p == first_pos) {
