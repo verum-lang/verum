@@ -278,16 +278,16 @@ implement<T> Maybe<T> {
     /// Zip with another Maybe to create a tuple.
     public fn zip<U>(self, other: Maybe<U>) -> Maybe<(T, U)> {
         match (self, other) {
-            (Some(a), Some(b)) => Some((a, b)),
-            _ => None,
+            (Maybe.Some(a), Maybe.Some(b)) => Maybe.Some((a, b)),
+            _ => Maybe.None,
         }
     }
 
     /// Zip with another Maybe using a combining function.
     public fn zip_with<U, R, F: fn(T, U) -> R>(self, other: Maybe<U>, f: F) -> Maybe<R> {
         match (self, other) {
-            (Some(a), Some(b)) => Some(f(a, b)),
-            _ => None,
+            (Maybe.Some(a), Maybe.Some(b)) => Maybe.Some(f(a, b)),
+            _ => Maybe.None,
         }
     }
 
