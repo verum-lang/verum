@@ -1,0 +1,238 @@
+// =============================================================================
+// core-tests/runtime/env/unit_test.vr
+// =============================================================================
+//
+// `core/runtime/env.vr` — runtime environment + execution-tier types.
+//
+// Surface tested here (pure-data subset):
+//   * ExecutionTier 4-variant (Tier0_Full / Tier1_Epoch / Tier2_Gen /
+//     Tier3_Unchecked) + .overhead_ns + .requires_generation + .requires_epoch
+//   * EnvIsolationLevel 3-variant (Shared / SendOnly / Full)
+//   * CpuAffinity 3-variant (None / Auto / Explicit)
+//   * EnvTaskId record + .main + parent_id field
+// =============================================================================
+
+mount core.runtime.env.{
+    ExecutionTier, EnvIsolationLevel, CpuAffinity, EnvTaskId,
+};
+
+// =============================================================================
+// Section 1: ExecutionTier 4-variant
+// =============================================================================
+
+@test
+fn test_execution_tier_tier0_full() {
+    let t: ExecutionTier = ExecutionTier.Tier0_Full;
+    assert(t is ExecutionTier.Tier0_Full);
+}
+
+@test
+fn test_execution_tier_tier1_epoch() {
+    let t: ExecutionTier = ExecutionTier.Tier1_Epoch;
+    assert(t is ExecutionTier.Tier1_Epoch);
+}
+
+@test
+fn test_execution_tier_tier2_gen() {
+    let t: ExecutionTier = ExecutionTier.Tier2_Gen;
+    assert(t is ExecutionTier.Tier2_Gen);
+}
+
+@test
+fn test_execution_tier_tier3_unchecked() {
+    let t: ExecutionTier = ExecutionTier.Tier3_Unchecked;
+    assert(t is ExecutionTier.Tier3_Unchecked);
+}
+
+@test
+fn test_execution_tier_pairwise_disjoint() {
+    let t0: ExecutionTier = ExecutionTier.Tier0_Full;
+    let t1: ExecutionTier = ExecutionTier.Tier1_Epoch;
+    let t2: ExecutionTier = ExecutionTier.Tier2_Gen;
+    let t3: ExecutionTier = ExecutionTier.Tier3_Unchecked;
+    assert(t0 is ExecutionTier.Tier0_Full && !(t0 is ExecutionTier.Tier1_Epoch));
+    assert(t1 is ExecutionTier.Tier1_Epoch && !(t1 is ExecutionTier.Tier2_Gen));
+    assert(t2 is ExecutionTier.Tier2_Gen && !(t2 is ExecutionTier.Tier3_Unchecked));
+    assert(t3 is ExecutionTier.Tier3_Unchecked && !(t3 is ExecutionTier.Tier0_Full));
+}
+
+// =============================================================================
+// Section 2: ExecutionTier.overhead_ns — CBGR cost contract
+// =============================================================================
+
+@test
+fn test_execution_tier_overhead_tier0_full_15ns() {
+    assert(ExecutionTier.Tier0_Full.overhead_ns() == 15);
+}
+
+@test
+fn test_execution_tier_overhead_tier1_epoch_8ns() {
+    assert(ExecutionTier.Tier1_Epoch.overhead_ns() == 8);
+}
+
+@test
+fn test_execution_tier_overhead_tier2_gen_3ns() {
+    assert(ExecutionTier.Tier2_Gen.overhead_ns() == 3);
+}
+
+@test
+fn test_execution_tier_overhead_tier3_unchecked_zero() {
+    assert(ExecutionTier.Tier3_Unchecked.overhead_ns() == 0);
+}
+
+@test
+fn test_execution_tier_overhead_monotone_decreasing() {
+    // Spec: t0 > t1 > t2 > t3 (more checks = more cost)
+    let t0 = ExecutionTier.Tier0_Full.overhead_ns();
+    let t1 = ExecutionTier.Tier1_Epoch.overhead_ns();
+    let t2 = ExecutionTier.Tier2_Gen.overhead_ns();
+    let t3 = ExecutionTier.Tier3_Unchecked.overhead_ns();
+    assert(t0 > t1);
+    assert(t1 > t2);
+    assert(t2 > t3);
+}
+
+// =============================================================================
+// Section 3: ExecutionTier.requires_generation — Tier 0/1/2 yes, Tier 3 no
+// =============================================================================
+
+@test
+fn test_execution_tier_requires_gen_tier0_yes() {
+    assert(ExecutionTier.Tier0_Full.requires_generation());
+}
+
+@test
+fn test_execution_tier_requires_gen_tier1_yes() {
+    assert(ExecutionTier.Tier1_Epoch.requires_generation());
+}
+
+@test
+fn test_execution_tier_requires_gen_tier2_yes() {
+    assert(ExecutionTier.Tier2_Gen.requires_generation());
+}
+
+@test
+fn test_execution_tier_requires_gen_tier3_no() {
+    assert(!ExecutionTier.Tier3_Unchecked.requires_generation());
+}
+
+// =============================================================================
+// Section 4: ExecutionTier.requires_epoch — Tier 0/1 yes, Tier 2/3 no
+// =============================================================================
+
+@test
+fn test_execution_tier_requires_epoch_tier0_yes() {
+    assert(ExecutionTier.Tier0_Full.requires_epoch());
+}
+
+@test
+fn test_execution_tier_requires_epoch_tier1_yes() {
+    assert(ExecutionTier.Tier1_Epoch.requires_epoch());
+}
+
+@test
+fn test_execution_tier_requires_epoch_tier2_no() {
+    assert(!ExecutionTier.Tier2_Gen.requires_epoch());
+}
+
+@test
+fn test_execution_tier_requires_epoch_tier3_no() {
+    assert(!ExecutionTier.Tier3_Unchecked.requires_epoch());
+}
+
+// =============================================================================
+// Section 5: EnvIsolationLevel 3-variant
+// =============================================================================
+
+@test
+fn test_env_isolation_level_shared() {
+    let l: EnvIsolationLevel = EnvIsolationLevel.Shared;
+    assert(l is EnvIsolationLevel.Shared);
+}
+
+@test
+fn test_env_isolation_level_send_only() {
+    let l: EnvIsolationLevel = EnvIsolationLevel.SendOnly;
+    assert(l is EnvIsolationLevel.SendOnly);
+}
+
+@test
+fn test_env_isolation_level_full() {
+    let l: EnvIsolationLevel = EnvIsolationLevel.Full;
+    assert(l is EnvIsolationLevel.Full);
+}
+
+@test
+fn test_env_isolation_level_pairwise_disjoint() {
+    let s: EnvIsolationLevel = EnvIsolationLevel.Shared;
+    let so: EnvIsolationLevel = EnvIsolationLevel.SendOnly;
+    let f: EnvIsolationLevel = EnvIsolationLevel.Full;
+    assert(s is EnvIsolationLevel.Shared && !(s is EnvIsolationLevel.SendOnly));
+    assert(so is EnvIsolationLevel.SendOnly && !(so is EnvIsolationLevel.Full));
+    assert(f is EnvIsolationLevel.Full && !(f is EnvIsolationLevel.Shared));
+}
+
+// =============================================================================
+// Section 6: CpuAffinity 3-variant
+// =============================================================================
+
+@test
+fn test_cpu_affinity_none() {
+    let a: CpuAffinity = CpuAffinity.None;
+    assert(a is CpuAffinity.None);
+}
+
+@test
+fn test_cpu_affinity_auto() {
+    let a: CpuAffinity = CpuAffinity.Auto;
+    assert(a is CpuAffinity.Auto);
+}
+
+@test
+fn test_cpu_affinity_explicit() {
+    let a: CpuAffinity = CpuAffinity.Explicit(0xFF_u64);
+    assert(a is CpuAffinity.Explicit);
+}
+
+@test
+fn test_cpu_affinity_pairwise_disjoint() {
+    let n: CpuAffinity = CpuAffinity.None;
+    let auto: CpuAffinity = CpuAffinity.Auto;
+    let e: CpuAffinity = CpuAffinity.Explicit(1_u64);
+    assert(n is CpuAffinity.None && !(n is CpuAffinity.Auto));
+    assert(auto is CpuAffinity.Auto && !(auto is CpuAffinity.Explicit));
+    assert(e is CpuAffinity.Explicit && !(e is CpuAffinity.None));
+}
+
+// =============================================================================
+// Section 7: EnvTaskId — record + .main
+// =============================================================================
+//
+// task #17/#39: EnvTaskId.main() collides with a same-named static method
+// (likely Application/Task main) that takes a wider record. Field index 2
+// is written past the 2-field EnvTaskId (id, parent_id) data size. @ignore
+// until #28 closes.
+//
+
+@ignore
+@test
+fn test_env_task_id_main_is_zero() {
+    let t = EnvTaskId.main();
+    assert(t.id == 0_u64);
+}
+
+@ignore
+@test
+fn test_env_task_id_main_no_parent() {
+    let t = EnvTaskId.main();
+    assert(t.parent_id is Maybe.None);
+}
+
+@ignore
+@test
+fn test_env_task_id_construct_with_parent() {
+    let parent = EnvTaskId.main();
+    let t = EnvTaskId { id: 42_u64, parent_id: Maybe.Some(parent.id) };
+    assert(t.id == 42_u64);
+    assert(t.parent_id is Maybe.Some);
+}
