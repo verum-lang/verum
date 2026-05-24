@@ -1,0 +1,61 @@
+// =============================================================================
+// core-tests/io/fs/property_test.vr
+// =============================================================================
+
+mount core.io.fs.{FileType, Permissions};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — FileType: Eq exhaustive over 4 variants
+// =============================================================================
+
+@test
+fn law_file_type_eq_reflexive_exhaustive() {
+    let kinds: List<FileType> = [FileType.File, FileType.Dir, FileType.Symlink, FileType.Unknown];
+    for k in kinds.iter() {
+        match k {
+            File => assert_eq(*k, FileType.File),
+            Dir => assert_eq(*k, FileType.Dir),
+            Symlink => assert_eq(*k, FileType.Symlink),
+            Unknown => assert_eq(*k, FileType.Unknown),
+        }
+    }
+}
+
+// =============================================================================
+// §B — FileType predicates are mutually exclusive for File/Dir/Symlink
+// =============================================================================
+
+@test
+fn law_file_type_predicates_at_most_one_true() {
+    let kinds: List<FileType> = [FileType.File, FileType.Dir, FileType.Symlink];
+    for k in kinds.iter() {
+        let n = (if k.is_file() { 1 } else { 0 })
+              + (if k.is_dir() { 1 } else { 0 })
+              + (if k.is_symlink() { 1 } else { 0 });
+        assert_eq(n, 1);
+    }
+}
+
+@test
+fn law_file_type_unknown_all_predicates_false() {
+    let k = FileType.Unknown;
+    assert(!k.is_file());
+    assert(!k.is_dir());
+    assert(!k.is_symlink());
+}
+
+// =============================================================================
+// §C — Permissions: mode round-trip is identity (modulo PERM_MASK)
+// =============================================================================
+
+@test
+fn law_permissions_mode_round_trip_common_values() {
+    let modes: List<Int> = [0, 0o644, 0o755, 0o777, 0o400, 0o600, 0o700];
+    for m in modes.iter() {
+        let p = Permissions.from_mode(*m);
+        assert_eq(p.mode(), *m);
+    }
+}
+
+fn main() {}

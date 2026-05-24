@@ -1,0 +1,61 @@
+// =============================================================================
+// core-tests/io/fs/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.io.fs`. Most fs ops require a real
+// FS; structural cross-type tests only.
+// =============================================================================
+
+mount core.io.fs.{FileType, Permissions};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 — FileType in a List for filtering
+// =============================================================================
+
+@test
+fn integration_file_type_filter_files_from_mixed() {
+    let entries: List<FileType> = [
+        FileType.File, FileType.Dir, FileType.File,
+        FileType.Symlink, FileType.File, FileType.Unknown,
+    ];
+    let mut file_count: Int = 0;
+    for f in entries.iter() {
+        if f.is_file() {
+            file_count = file_count + 1;
+        }
+    }
+    assert_eq(file_count, 3);
+}
+
+@test
+fn integration_file_type_filter_dirs_from_mixed() {
+    let entries: List<FileType> = [
+        FileType.File, FileType.Dir, FileType.File,
+        FileType.Symlink, FileType.File, FileType.Unknown,
+        FileType.Dir,
+    ];
+    let mut dir_count: Int = 0;
+    for f in entries.iter() {
+        if f.is_dir() {
+            dir_count = dir_count + 1;
+        }
+    }
+    assert_eq(dir_count, 2);
+}
+
+// =============================================================================
+// §2 — Permissions can be cloned/round-tripped through mode value
+// =============================================================================
+
+@test
+fn integration_permissions_via_mode_round_trip() {
+    let modes: List<Int> = [0o400, 0o600, 0o644, 0o755];
+    for m in modes.iter() {
+        let p1 = Permissions.from_mode(*m);
+        let p2 = Permissions.from_mode(p1.mode());
+        assert_eq(p1.mode(), p2.mode());
+    }
+}
+
+fn main() {}
