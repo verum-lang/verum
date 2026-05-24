@@ -1,0 +1,167 @@
+// =============================================================================
+// core-tests/proof/pcc/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `core/proof/pcc.vr`:
+//
+//   §1  bundle_size invariant: size = number of add(distinct h) - remove
+//   §2  bundle_add idempotent on goal-hash (multi-step)
+//   §3  bundle_remove inverse of bundle_add when last
+//   §4  bundle_clear yields zero-size bundle preserving compiler_version
+//   §5  Successive bundle_add increments cert count by N
+// =============================================================================
+
+mount core.proof.pcc.{
+    GoalHash, ProofCertificate, BundleMetadata, ProofBundle,
+    goal_hash, proof_certificate, empty_bundle, bundle_add,
+    bundle_remove, bundle_clear, bundle_lookup, bundle_size,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// §1 bundle_size invariant
+// =============================================================================
+
+@test
+fn property_bundle_size_zero_initially() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    assert_eq(bundle_size(&b), 0);
+}
+
+@test
+fn property_bundle_size_one_after_single_add() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let h = goal_hash("g1".clone());
+    let c = proof_certificate("g".clone(), "z3".clone(), "p".clone(), 1, "t".clone());
+    let b2 = bundle_add(b, h, c);
+    assert_eq(bundle_size(&b2), 1);
+}
+
+@test
+fn property_bundle_size_n_after_n_distinct_adds() {
+    let mut b = empty_bundle("v".clone(), "s".clone());
+    let c = proof_certificate("g".clone(), "z3".clone(), "p".clone(), 1, "t".clone());
+    let mut i = 0;
+    while i < 5 {
+        let digest = f"g{i}";
+        b = bundle_add(b, goal_hash(digest), c.clone());
+        i = i + 1;
+    }
+    assert_eq(bundle_size(&b), 5);
+}
+
+// =============================================================================
+// §2 bundle_add idempotent on goal-hash (size stays, latest cert wins)
+// =============================================================================
+
+@test
+fn property_bundle_add_idempotent_size() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let h = goal_hash("k".clone());
+    let c1 = proof_certificate("g1".clone(), "z3".clone(), "p1".clone(), 50, "t".clone());
+    let c2 = proof_certificate("g2".clone(), "z3".clone(), "p2".clone(), 100, "t".clone());
+    let c3 = proof_certificate("g3".clone(), "z3".clone(), "p3".clone(), 150, "t".clone());
+
+    let b1 = bundle_add(b, h, c1);
+    let h2 = goal_hash("k".clone());
+    let b2 = bundle_add(b1, h2, c2);
+    let h3 = goal_hash("k".clone());
+    let b3 = bundle_add(b2, h3, c3);
+
+    // Same goal hash 3 times → size stays at 1
+    assert_eq(bundle_size(&b3), 1);
+}
+
+@test
+fn property_bundle_add_idempotent_latest_wins() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let c1 = proof_certificate("first".clone(), "z3".clone(), "p1".clone(), 1, "t".clone());
+    let c3 = proof_certificate("third".clone(), "z3".clone(), "p3".clone(), 3, "t".clone());
+
+    let b1 = bundle_add(b, goal_hash("k".clone()), c1);
+    let b3 = bundle_add(b1, goal_hash("k".clone()), c3);
+
+    let r = bundle_lookup(&b3, "k".clone());
+    match r {
+        Maybe.Some(cert) => assert_eq(cert.goal_text, "third"),
+        Maybe.None => panic("latest cert should win"),
+    }
+}
+
+// =============================================================================
+// §3 bundle_remove inverse of bundle_add when last operation
+// =============================================================================
+
+@test
+fn property_bundle_remove_decrements_size() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let c = proof_certificate("g".clone(), "z3".clone(), "p".clone(), 1, "t".clone());
+    let b1 = bundle_add(b, goal_hash("k".clone()), c);
+    assert_eq(bundle_size(&b1), 1);
+    let b2 = bundle_remove(b1, goal_hash("k".clone()));
+    assert_eq(bundle_size(&b2), 0);
+}
+
+@test
+fn property_bundle_remove_missing_is_noop() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let c = proof_certificate("g".clone(), "z3".clone(), "p".clone(), 1, "t".clone());
+    let b1 = bundle_add(b, goal_hash("present".clone()), c);
+    // Remove a hash that doesn't exist
+    let b2 = bundle_remove(b1, goal_hash("absent".clone()));
+    // Size unchanged
+    assert_eq(bundle_size(&b2), 1);
+}
+
+@test
+fn property_bundle_remove_adjusts_duration() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let c = proof_certificate("g".clone(), "z3".clone(), "p".clone(), 100, "t".clone());
+    let b1 = bundle_add(b, goal_hash("k".clone()), c);
+    assert_eq(b1.metadata.total_duration_ms, 100);
+
+    let b2 = bundle_remove(b1, goal_hash("k".clone()));
+    assert_eq(b2.metadata.total_duration_ms, 0);
+}
+
+// =============================================================================
+// §4 bundle_clear yields zero-size + preserves audit metadata
+// =============================================================================
+
+@test
+fn property_bundle_clear_zero_size() {
+    let b = empty_bundle("verum-0.1.0".clone(), "src.vr".clone());
+    let c = proof_certificate("g".clone(), "z3".clone(), "p".clone(), 1, "t".clone());
+    let b1 = bundle_add(b, goal_hash("a".clone()), c.clone());
+    let b2 = bundle_add(b1, goal_hash("b".clone()), c);
+    assert_eq(bundle_size(&b2), 2);
+    let b3 = bundle_clear(b2);
+    assert_eq(bundle_size(&b3), 0);
+}
+
+@test
+fn property_bundle_clear_preserves_compiler_version() {
+    let b = empty_bundle("verum-1.0.0".clone(), "src.vr".clone());
+    let c = proof_certificate("g".clone(), "z3".clone(), "p".clone(), 1, "t".clone());
+    let b1 = bundle_add(b, goal_hash("a".clone()), c);
+    let b2 = bundle_clear(b1);
+    assert_eq(b2.metadata.compiler_version, "verum-1.0.0");
+}
+
+@test
+fn property_bundle_clear_preserves_source_path() {
+    let b = empty_bundle("v".clone(), "/path/to/file.vr".clone());
+    let c = proof_certificate("g".clone(), "z3".clone(), "p".clone(), 1, "t".clone());
+    let b1 = bundle_add(b, goal_hash("a".clone()), c);
+    let b2 = bundle_clear(b1);
+    assert_eq(b2.metadata.source_path, "/path/to/file.vr");
+}
+
+@test
+fn property_bundle_clear_resets_duration() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let c = proof_certificate("g".clone(), "z3".clone(), "p".clone(), 500, "t".clone());
+    let b1 = bundle_add(b, goal_hash("a".clone()), c);
+    let b2 = bundle_clear(b1);
+    assert_eq(b2.metadata.total_duration_ms, 0);
+}
