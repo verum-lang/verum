@@ -138,6 +138,8 @@ naturally expand once it closes.
 | § | scope | tracking | est. |
 |---|---|---|---|
 | §A residual | extend intrinsic dispatcher to `replace`/`insert` | task #6 | 1d |
-| §B | `T.clone` codegen intercept + literal substitution | task #7 | 2-3d |
+| §B | `T.clone` codegen intercept + literal substitution | **task #7 BLOCKED by #9** (task #47 stage-3 stub cascade) | multi-day; depends on #9 close |
 | §C | constrained-implement-block dispatch (combinator chains) | task #22 | multi-week |
 | §D | `Stream → AsyncIterator` blanket via protocol-resolver projection reduction | upstream | gated on protocol-resolver work |
+| §E | runtime-bridge FFI symbol intercept (executor / RuntimeBuilder) | **task #8 BLOCKED by #9** (task #47 stage-3 stub cascade) | multi-day; depends on #9 close |
+| §F | task #47 stage-3 stub resolution cascade | **task #9 (NEW)** — blocking all post-#47 downstream test stability | multi-day investigation |
