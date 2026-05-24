@@ -1,0 +1,197 @@
+// =============================================================================
+// core-tests/architecture/corpus/unit_test.vr
+// =============================================================================
+//
+// `core/architecture/corpus.vr` — ATS-V cross-cog corpus invariants.
+//
+// Surface:
+//   * CorpusInvariant 4-variant + tag + name
+//   * corpus_invariant_full_list + roster_size_invariant pin
+//   * CorpusReport record + empty + is_load_bearing
+//   * CorpusViolation record
+// =============================================================================
+
+mount core.architecture.corpus.{
+    CorpusInvariant, corpus_invariant_tag, corpus_invariant_name,
+    corpus_invariant_full_list, corpus_invariant_roster_size_invariant,
+    CorpusViolation, CorpusReport,
+    corpus_report_empty, corpus_report_is_load_bearing,
+};
+
+// =============================================================================
+// Section 1: CorpusInvariant 4-variant
+// =============================================================================
+
+@test
+fn test_corpus_invariant_no_circular_dependencies() {
+    let c: CorpusInvariant = CorpusInvariant.NoCircularDependencies;
+    assert(c is CorpusInvariant.NoCircularDependencies);
+}
+
+@test
+fn test_corpus_invariant_foundation_consistency() {
+    let c: CorpusInvariant = CorpusInvariant.FoundationConsistency;
+    assert(c is CorpusInvariant.FoundationConsistency);
+}
+
+@test
+fn test_corpus_invariant_no_l_abs_claim() {
+    let c: CorpusInvariant = CorpusInvariant.NoLAbsClaim;
+    assert(c is CorpusInvariant.NoLAbsClaim);
+}
+
+@test
+fn test_corpus_invariant_capability_closure() {
+    let c: CorpusInvariant = CorpusInvariant.CapabilityClosure;
+    assert(c is CorpusInvariant.CapabilityClosure);
+}
+
+@test
+fn test_corpus_invariant_pairwise_disjoint() {
+    let a: CorpusInvariant = CorpusInvariant.NoCircularDependencies;
+    let b: CorpusInvariant = CorpusInvariant.FoundationConsistency;
+    let c: CorpusInvariant = CorpusInvariant.NoLAbsClaim;
+    let d: CorpusInvariant = CorpusInvariant.CapabilityClosure;
+    assert(a is CorpusInvariant.NoCircularDependencies && !(a is CorpusInvariant.FoundationConsistency));
+    assert(b is CorpusInvariant.FoundationConsistency && !(b is CorpusInvariant.NoLAbsClaim));
+    assert(c is CorpusInvariant.NoLAbsClaim && !(c is CorpusInvariant.CapabilityClosure));
+    assert(d is CorpusInvariant.CapabilityClosure && !(d is CorpusInvariant.NoCircularDependencies));
+}
+
+// =============================================================================
+// Section 2: corpus_invariant_tag — stable diagnostic strings
+// =============================================================================
+
+@test
+fn test_tag_no_circular_dependencies() {
+    assert(corpus_invariant_tag(CorpusInvariant.NoCircularDependencies) == Text.from("no_circular_dependencies"));
+}
+
+@test
+fn test_tag_foundation_consistency() {
+    assert(corpus_invariant_tag(CorpusInvariant.FoundationConsistency) == Text.from("foundation_consistency"));
+}
+
+@test
+fn test_tag_no_l_abs_claim() {
+    assert(corpus_invariant_tag(CorpusInvariant.NoLAbsClaim) == Text.from("no_l_abs_claim"));
+}
+
+@test
+fn test_tag_capability_closure() {
+    assert(corpus_invariant_tag(CorpusInvariant.CapabilityClosure) == Text.from("capability_closure"));
+}
+
+@test
+fn test_tags_all_distinct() {
+    let tags: List<Text> = [
+        corpus_invariant_tag(CorpusInvariant.NoCircularDependencies),
+        corpus_invariant_tag(CorpusInvariant.FoundationConsistency),
+        corpus_invariant_tag(CorpusInvariant.NoLAbsClaim),
+        corpus_invariant_tag(CorpusInvariant.CapabilityClosure),
+    ];
+    let mut i: Int = 0;
+    while i < tags.len() {
+        let mut j: Int = i + 1;
+        while j < tags.len() {
+            assert(tags[i] != tags[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 3: corpus_invariant_name — human-friendly identifiers
+// =============================================================================
+
+@test
+fn test_name_no_circular_dependencies() {
+    assert(corpus_invariant_name(CorpusInvariant.NoCircularDependencies) == Text.from("NoCircularDependencies"));
+}
+
+@test
+fn test_name_capability_closure() {
+    assert(corpus_invariant_name(CorpusInvariant.CapabilityClosure) == Text.from("CapabilityClosure"));
+}
+
+@test
+fn test_names_all_distinct() {
+    let names: List<Text> = [
+        corpus_invariant_name(CorpusInvariant.NoCircularDependencies),
+        corpus_invariant_name(CorpusInvariant.FoundationConsistency),
+        corpus_invariant_name(CorpusInvariant.NoLAbsClaim),
+        corpus_invariant_name(CorpusInvariant.CapabilityClosure),
+    ];
+    let mut i: Int = 0;
+    while i < names.len() {
+        let mut j: Int = i + 1;
+        while j < names.len() {
+            assert(names[i] != names[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 4: full_list + roster_size_invariant
+// =============================================================================
+
+@test
+fn test_full_list_size_is_4() {
+    assert(corpus_invariant_full_list().len() == 4);
+}
+
+@test
+fn test_roster_size_invariant_holds() {
+    // Pin: exactly 4 corpus invariants.
+    assert(corpus_invariant_roster_size_invariant());
+}
+
+// =============================================================================
+// Section 5: CorpusReport
+// =============================================================================
+
+@test
+fn test_corpus_report_empty_construction() {
+    let r = corpus_report_empty();
+    assert(r.total_cogs == 0);
+}
+
+@test
+fn test_corpus_report_empty_zero_violations() {
+    let r = corpus_report_empty();
+    assert(r.violations.len() == 0);
+}
+
+@test
+fn test_corpus_report_empty_is_load_bearing() {
+    let r = corpus_report_empty();
+    // No violations ⇒ load-bearing
+    assert(corpus_report_is_load_bearing(r));
+}
+
+@test
+fn test_corpus_report_record_construction() {
+    let r = CorpusReport {
+        total_cogs: 42,
+        violations: [],
+    };
+    assert(r.total_cogs == 42);
+}
+
+@test
+fn test_corpus_report_with_one_violation_not_load_bearing() {
+    let v = CorpusViolation {
+        kind:          CorpusInvariant.NoCircularDependencies,
+        summary:       Text.from("cycle detected"),
+        human_message: Text.from("module A depends on B which depends on A"),
+        affected_cogs: [Text.from("A"), Text.from("B")],
+    };
+    let r = CorpusReport {
+        total_cogs: 2,
+        violations: [v],
+    };
+    assert(!corpus_report_is_load_bearing(r));
+}
