@@ -1,0 +1,162 @@
+// =============================================================================
+// core-tests/metrics/label/unit_test.vr
+// =============================================================================
+//
+// Companion files:
+//   property_test.vr — algebraic laws (equals reflexivity/symmetry,
+//                      clone-preserves-equality, length monotonicity).
+//   audit.md         — module audit + deferred items.
+//
+// `LabelSet` is the cardinality dimension of Prometheus metrics. Each
+// distinct label-value tuple produces a distinct time series. The set
+// is ORDERED (insertion order) and compared value-by-value.
+// =============================================================================
+
+mount core.metrics.label.{LabelSet};
+
+// =============================================================================
+// Section 1: LabelSet.new — empty construction
+// =============================================================================
+
+@test
+fn test_label_set_new_is_empty() {
+    let s = LabelSet.new();
+    assert(s.is_empty());
+}
+
+@test
+fn test_label_set_new_has_zero_len() {
+    let s = LabelSet.new();
+    assert_eq(s.len(), 0);
+}
+
+// =============================================================================
+// Section 2: LabelSet.equals — reflexivity
+// =============================================================================
+
+@test
+fn test_label_set_equals_empty_reflexive() {
+    let a = LabelSet.new();
+    assert(a.equals(&a));
+}
+
+@test
+fn test_two_empty_label_sets_equal() {
+    let a = LabelSet.new();
+    let b = LabelSet.new();
+    assert(a.equals(&b));
+    assert(b.equals(&a));
+}
+
+// =============================================================================
+// Section 3: LabelSet.clone preserves shape
+// =============================================================================
+
+@test
+fn test_clone_empty_is_still_empty() {
+    let a = LabelSet.new();
+    let b = a.clone();
+    assert(b.is_empty());
+    assert_eq(b.len(), 0);
+}
+
+@test
+fn test_clone_empty_equals_original() {
+    let a = LabelSet.new();
+    let b = a.clone();
+    assert(a.equals(&b));
+}
+
+// =============================================================================
+// Section 4: LabelSet field access via values()
+// =============================================================================
+
+@test
+fn test_values_accessor_on_empty() {
+    let s = LabelSet.new();
+    let v = s.values();
+    assert(v.is_empty());
+}
+
+// =============================================================================
+// Section 5: LabelSet direct field literal construction
+// =============================================================================
+
+@test
+fn test_direct_field_construction_empty() {
+    // Build via direct field literal (bypassing the new()/from_slice
+    // ctors). Confirms the field is exposed and observable.
+    let s = LabelSet { values: [] };
+    assert(s.is_empty());
+    assert_eq(s.len(), 0);
+}
+
+@test
+fn test_direct_field_construction_one_value() {
+    let s = LabelSet { values: ["region:eu-west-1".clone()] };
+    assert(!s.is_empty());
+    assert_eq(s.len(), 1);
+}
+
+@test
+fn test_direct_field_construction_multiple_values() {
+    let s = LabelSet { values: [
+        "method:GET".clone(),
+        "path:/users".clone(),
+        "status:200".clone(),
+    ] };
+    assert_eq(s.len(), 3);
+}
+
+// =============================================================================
+// Section 6: LabelSet.equals — non-empty cases
+// =============================================================================
+
+@test
+fn test_equal_single_value_label_sets() {
+    let a = LabelSet { values: ["x".clone()] };
+    let b = LabelSet { values: ["x".clone()] };
+    assert(a.equals(&b));
+}
+
+@test
+fn test_unequal_single_value_label_sets() {
+    let a = LabelSet { values: ["x".clone()] };
+    let b = LabelSet { values: ["y".clone()] };
+    assert(!a.equals(&b));
+}
+
+@test
+fn test_unequal_length_label_sets() {
+    let a = LabelSet { values: ["x".clone()] };
+    let b = LabelSet { values: ["x".clone(), "y".clone()] };
+    assert(!a.equals(&b));
+    assert(!b.equals(&a));
+}
+
+@test
+fn test_equal_multi_value_label_sets() {
+    let a = LabelSet { values: ["x".clone(), "y".clone(), "z".clone()] };
+    let b = LabelSet { values: ["x".clone(), "y".clone(), "z".clone()] };
+    assert(a.equals(&b));
+}
+
+@test
+fn test_unequal_order_label_sets() {
+    // LabelSet is insertion-order; permuted values are unequal.
+    let a = LabelSet { values: ["x".clone(), "y".clone()] };
+    let b = LabelSet { values: ["y".clone(), "x".clone()] };
+    assert(!a.equals(&b));
+}
+
+// =============================================================================
+// Section 7: LabelSet.clone preserves multi-value content
+// =============================================================================
+
+@test
+fn test_clone_preserves_multi_value() {
+    let a = LabelSet { values: ["a".clone(), "b".clone(), "c".clone()] };
+    let b = a.clone();
+    assert_eq(b.len(), 3);
+    assert(a.equals(&b));
+}

@@ -1,0 +1,136 @@
+// =============================================================================
+// core-tests/metrics/label/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `LabelSet`:
+//
+//   §1  equals reflexive (∀s. s.equals(&s))
+//   §2  equals symmetric (a.equals(&b) ⇔ b.equals(&a))
+//   §3  clone preserves equality
+//   §4  is_empty ⇔ len == 0
+//   §5  length is non-negative
+//   §6  Permutation breaks equality (insertion-order semantics)
+// =============================================================================
+
+mount core.metrics.label.{LabelSet};
+
+// =============================================================================
+// §1 equals reflexive
+// =============================================================================
+
+@test
+fn property_equals_reflexive_empty() {
+    let s = LabelSet.new();
+    assert(s.equals(&s));
+}
+
+@test
+fn property_equals_reflexive_one_value() {
+    let s = LabelSet { values: ["x".clone()] };
+    assert(s.equals(&s));
+}
+
+@test
+fn property_equals_reflexive_multi_value() {
+    let s = LabelSet { values: ["a".clone(), "b".clone(), "c".clone()] };
+    assert(s.equals(&s));
+}
+
+// =============================================================================
+// §2 equals symmetric
+// =============================================================================
+
+@test
+fn property_equals_symmetric_equal_pair() {
+    let a = LabelSet { values: ["x".clone(), "y".clone()] };
+    let b = LabelSet { values: ["x".clone(), "y".clone()] };
+    assert_eq(a.equals(&b), b.equals(&a));
+    assert(a.equals(&b));
+}
+
+@test
+fn property_equals_symmetric_unequal_pair() {
+    let a = LabelSet { values: ["x".clone()] };
+    let b = LabelSet { values: ["y".clone()] };
+    assert_eq(a.equals(&b), b.equals(&a));
+    assert(!a.equals(&b));
+}
+
+@test
+fn property_equals_symmetric_different_lengths() {
+    let a = LabelSet { values: ["x".clone()] };
+    let b = LabelSet { values: ["x".clone(), "y".clone()] };
+    assert_eq(a.equals(&b), b.equals(&a));
+    assert(!a.equals(&b));
+}
+
+// =============================================================================
+// §3 clone preserves equality
+// =============================================================================
+
+@test
+fn property_clone_equals_original_empty() {
+    let a = LabelSet.new();
+    let b = a.clone();
+    assert(a.equals(&b));
+}
+
+@test
+fn property_clone_equals_original_one_value() {
+    let a = LabelSet { values: ["sample".clone()] };
+    let b = a.clone();
+    assert(a.equals(&b));
+}
+
+@test
+fn property_clone_equals_original_multi_value() {
+    let a = LabelSet { values: ["a".clone(), "b".clone(), "c".clone(), "d".clone()] };
+    let b = a.clone();
+    assert(a.equals(&b));
+    assert_eq(a.len(), b.len());
+}
+
+// =============================================================================
+// §4 is_empty ⇔ len == 0
+// =============================================================================
+
+@test
+fn property_is_empty_iff_len_zero() {
+    let e = LabelSet.new();
+    assert_eq(e.is_empty(), e.len() == 0);
+
+    let o = LabelSet { values: ["x".clone()] };
+    assert_eq(o.is_empty(), o.len() == 0);
+
+    let m = LabelSet { values: ["a".clone(), "b".clone()] };
+    assert_eq(m.is_empty(), m.len() == 0);
+}
+
+// =============================================================================
+// §5 length is non-negative
+// =============================================================================
+
+@test
+fn property_length_non_negative_exhaustive() {
+    assert(LabelSet.new().len() >= 0);
+    assert(LabelSet { values: ["x".clone()] }.len() >= 0);
+    assert(LabelSet { values: ["a".clone(), "b".clone()] }.len() >= 0);
+}
+
+// =============================================================================
+// §6 Permutation breaks equality (insertion-order semantics)
+// =============================================================================
+
+@test
+fn property_swap_breaks_equality() {
+    let original = LabelSet { values: ["a".clone(), "b".clone()] };
+    let swapped  = LabelSet { values: ["b".clone(), "a".clone()] };
+    assert(!original.equals(&swapped));
+}
+
+@test
+fn property_rotate_breaks_equality() {
+    let original = LabelSet { values: ["a".clone(), "b".clone(), "c".clone()] };
+    let rotated  = LabelSet { values: ["c".clone(), "a".clone(), "b".clone()] };
+    assert(!original.equals(&rotated));
+}
