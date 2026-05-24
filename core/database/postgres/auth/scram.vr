@@ -54,7 +54,7 @@ mount collections.List;
 mount core.security.hash.sha256.Sha256;
 mount core.security.mac.hmac.hmac_sha256;
 mount core.security.kdf.pbkdf2.pbkdf2_hmac_sha256;
-mount core.encoding.base64.{encode as b64_encode, decode as b64_decode};
+mount core.encoding.base64.{encode, decode};
 
 // -----------------------------------------------------------------------------
 // Errors
@@ -282,7 +282,7 @@ fn parse_server_first(s: &Text) -> Result<ServerFirst, ScramError> {
                     if kb.len() == 1 && kb[0] == (0x72 as Byte) {        // 'r'
                         nonce = Some(value);
                     } else if kb.len() == 1 && kb[0] == (0x73 as Byte) {  // 's'
-                        match b64_decode(&value) {
+                        match core.encoding.base64.decode(&value) {
                             Ok(v)  => { salt = Some(v); }
                             Err(_) => { return Err(SeBase64DecodeFailed); }
                         }
@@ -390,7 +390,7 @@ implement ScramClient {
 
         // ClientProof = ClientKey ⊕ ClientSignature
         let proof = xor_bytes(&client_key, &client_signature);
-        let proof_b64 = b64_encode(proof.as_slice());
+        let proof_b64 = core.encoding.base64.encode(proof.as_slice());
 
         // Stash the expected ServerSignature for phase-3 verification.
         let server_key_arr = hmac_sha256(salted.as_slice(), "Server Key".as_bytes());
@@ -459,7 +459,7 @@ implement ScramClient {
             });
         }
         let sig_b64 = take_after_eq(&trimmed);
-        let server_sig = match b64_decode(&sig_b64) {
+        let server_sig = match core.encoding.base64.decode(&sig_b64) {
             Ok(v)  => v,
             Err(_) => {
                 self.state = SsFailed;
@@ -505,7 +505,7 @@ fn channel_binding_base64(cb: &ChannelBinding) -> Text {
         }
         CbNone => {}
     }
-    b64_encode(bytes.as_slice())
+    core.encoding.base64.encode(bytes.as_slice())
 }
 
 fn format_client_first_bare(username: &Text, nonce: &Text) -> Text {

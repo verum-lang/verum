@@ -70,7 +70,7 @@ mount encoding.json.{
     json_array, decode, encode,
 };
 mount encoding.base64.{
-    encode_standard as b64_encode, decode_standard as b64_decode,
+    encode_standard, decode_standard,
 };
 mount encoding.hex.{encode as hex_encode, decode as hex_decode};
 mount encoding.jcs.{canonicalize};
@@ -280,7 +280,7 @@ public fn verify_entry_set(
     let payload_bytes = encoding.jcs.canonicalize(&payload)
         .map_err(|e| InvalidJson(f"jcs: {e}"))?;
     let digest = Sha256.digest(payload_bytes.as_slice());
-    let sig_bytes = b64_decode(&entry.set.signature_b64)
+    let sig_bytes = core.encoding.base64.decode_standard(&entry.set.signature_b64)
         .map_err(|e| InvalidBase64(f"set sig: {e}"))?;
     let sig = P256Signature.from_der(sig_bytes.as_slice())
         .map_err(|_| InvalidEntry("malformed SET ECDSA signature".to_text()))?;
@@ -315,7 +315,7 @@ public fn verify_inclusion_proof(entry: &LogEntry) -> Result<(), RekorError> {
         Some(p) => p,
         None    => return Err(InvalidEntry("entry lacks inclusion proof".to_text())),
     };
-    let body_bytes = b64_decode(&entry.body_b64)
+    let body_bytes = core.encoding.base64.decode_standard(&entry.body_b64)
         .map_err(|e| InvalidBase64(f"body: {e}"))?;
     // RFC 6962 leaf hash = SHA-256(0x00 || leaf_data).
     let mut leaf_input: List<Byte> = List.with_capacity(1 + body_bytes.len());
@@ -418,7 +418,7 @@ fn parse_log_entry(uuid: Text, value: &JsonValue) -> Result<LogEntry, RekorError
         None     => None,
     };
 
-    let body_bytes = b64_decode(&body_b64)
+    let body_bytes = core.encoding.base64.decode_standard(&body_b64)
         .map_err(|e| InvalidBase64(f"body: {e}"))?;
     let body_value = encoding.json.decode(body_bytes.as_slice())
         .map_err(|e| InvalidJson(f"body json: {e}"))?;
