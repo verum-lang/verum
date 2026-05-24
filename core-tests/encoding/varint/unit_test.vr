@@ -1,0 +1,126 @@
+// =============================================================================
+// core-tests/encoding/varint/unit_test.vr
+// =============================================================================
+//
+// `core/encoding/varint.vr` provides SQLite-style varint encoding
+// (1..9-byte big-endian variable-length integer per SQLite file
+// format spec).
+//
+// Tests cover the `sqlite_encoded_len` length classifier (the
+// boundary-value table determines all encode/decode behaviour),
+// the VarintErrorKind ADT, and a sample of canonical SQLite-format
+// values from the module doc-comment.
+//
+// Full encode/decode round-trip + canonical-vector tests live in
+// `vcs/specs/L2-standard/database/sqlite/l2_record/varint_roundtrip.vr`
+// — this file pins only the testable static surface on the public API.
+// =============================================================================
+
+mount core.encoding.varint.{
+    VarintError, VarintErrorKind, sqlite_encoded_len,
+};
+
+// =============================================================================
+// Section 1: VarintErrorKind variants
+// =============================================================================
+
+@test
+fn test_varint_error_kind_truncated_construction() {
+    let k: VarintErrorKind = VarintErrorKind.Truncated;
+    assert(k is VarintErrorKind.Truncated);
+}
+
+@test
+fn test_varint_error_kind_overflow_construction() {
+    let k: VarintErrorKind = VarintErrorKind.Overflow;
+    assert(k is VarintErrorKind.Overflow);
+}
+
+@test
+fn test_varint_error_kind_variants_disjoint() {
+    let t: VarintErrorKind = VarintErrorKind.Truncated;
+    let o: VarintErrorKind = VarintErrorKind.Overflow;
+    assert(t is VarintErrorKind.Truncated);
+    assert(o is VarintErrorKind.Overflow);
+    assert(!(t is VarintErrorKind.Overflow));
+    assert(!(o is VarintErrorKind.Truncated));
+}
+
+// =============================================================================
+// Section 2: sqlite_encoded_len — boundary value table
+// =============================================================================
+//
+// Per SQLite varint spec: lengths 1..9 by value-range thresholds:
+//   len 1: 0..127 (7-bit)
+//   len 2: 128..16383 (14-bit)
+//   len 3: 16384..2097151 (21-bit)
+//   len 4: 2097152..268435455 (28-bit)
+//   len 5: 268435456..(2^35-1)
+//   ... etc.
+
+@test
+fn test_encoded_len_zero_is_one() {
+    assert_eq(sqlite_encoded_len(0_i64), 1);
+}
+
+@test
+fn test_encoded_len_max_1byte_is_one() {
+    assert_eq(sqlite_encoded_len(127_i64), 1);
+}
+
+@test
+fn test_encoded_len_min_2byte_is_two() {
+    assert_eq(sqlite_encoded_len(128_i64), 2);
+}
+
+@test
+fn test_encoded_len_max_2byte_is_two() {
+    assert_eq(sqlite_encoded_len(16383_i64), 2);
+}
+
+@test
+fn test_encoded_len_min_3byte_is_three() {
+    assert_eq(sqlite_encoded_len(16384_i64), 3);
+}
+
+@test
+fn test_encoded_len_max_3byte_is_three() {
+    assert_eq(sqlite_encoded_len(2097151_i64), 3);
+}
+
+@test
+fn test_encoded_len_min_4byte_is_four() {
+    assert_eq(sqlite_encoded_len(2097152_i64), 4);
+}
+
+@test
+fn test_encoded_len_max_4byte_is_four() {
+    assert_eq(sqlite_encoded_len(268435455_i64), 4);
+}
+
+@test
+fn test_encoded_len_min_5byte_is_five() {
+    assert_eq(sqlite_encoded_len(268435456_i64), 5);
+}
+
+// =============================================================================
+// Section 3: Negative numbers use full 9-byte form (signed bits encoded as-is)
+// =============================================================================
+
+@test
+fn test_encoded_len_neg_one_is_nine_bytes() {
+    // -1 → 0xFFFF_FFFF_FFFF_FFFF as UInt64 → 9-byte form
+    assert_eq(sqlite_encoded_len(-1_i64), 9);
+}
+
+@test
+fn test_encoded_len_neg_two_is_nine_bytes() {
+    assert_eq(sqlite_encoded_len(-2_i64), 9);
+}
+
+@test
+fn test_encoded_len_int64_min_is_nine_bytes() {
+    // Most negative i64 value also uses 9-byte form
+    let neg_max: Int64 = -9_223_372_036_854_775_808_i64;
+    assert_eq(sqlite_encoded_len(neg_max), 9);
+}
