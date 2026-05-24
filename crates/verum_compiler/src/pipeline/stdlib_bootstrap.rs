@@ -491,6 +491,87 @@ impl<'s> CompilationPipeline<'s> {
         self.pre_register_canonical_variant_constructors(&all_parsed_modules)?;
 
         // ====================================================================
+        // STEP 3.7 (Task #47) — Pre-register every uniquely-named public
+        //                       free function globally as a stub
+        //                       FunctionInfo + a placeholder body slot.
+        // ====================================================================
+        //
+        // Closes the cross-module-Call-resolution defect class
+        // documented at `crates/verum_vbc/src/codegen/mod.rs:5687-5750`
+        // and re-diagnosed for the CSPRNG / Bloom / HyperLogLog /
+        // CountMin / AliasSampler family on 2026-05-23
+        // (`csprng_collections_cross_module_class.md` memory entry).
+        //
+        // **Two-part architectural fix** (the missing piece is part
+        // (b) at finalize-time — see `finalize_module_from_state`'s
+        // `emit_missing_stub_descriptors_with_callm(false)` call):
+        //
+        //  (a) Pre-register every public free fn with a globally-
+        //      unique simple name as a stub in
+        //      `global_function_registry`.  This makes
+        //      `lookup_function("fill_secure")` succeed at any
+        //      consumer's compile-time regardless of topo-sort
+        //      order, so consumer bodies emit clean
+        //      `Call(stub_id, args)` instead of being replaced by
+        //      lenient panic-stubs.
+        //
+        //  (b) At per-module `finalize_module_from_state`,
+        //      synthesise minimal extern-style FunctionDescriptors
+        //      for every stub id that the LOCAL bytecode actually
+        //      references via `Call`/`CallG`/`TailCall`/etc.  Each
+        //      descriptor carries the stub's NAME — the only
+        //      essential piece for the archive-load remap path.
+        //      The bytecode itself stays as `Call(stub_id)`; at
+        //      archive load time, `ArchiveBodyRemap::map_function`'s
+        //      Tier-2b name-fallback consults the descriptor's
+        //      name and resolves stub_id → real user-side
+        //      FunctionId via the archive-wide `archive_func_by_name`
+        //      index (populated by `archive_ctx_loader` for every
+        //      loaded archive function regardless of mount set).
+        //
+        // Per-module stub-descriptor count is bounded by the actual
+        // number of distinct cross-module free-fn IDs the module
+        // references — typically tens, never thousands.  The
+        // historical 134 MB explosion documented at codegen/mod.rs:
+        // 5687-5750 came from a different shape of pass that
+        // synthesised stubs for EVERY entry in `ctx.functions`
+        // including the >7000 transitively-imported entries; the
+        // current `emit_missing_stub_descriptors_with_callm(false)`
+        // filter at `codegen/mod.rs:14157` restricts to the
+        // `referenced` set extracted from emitted bytecode, which
+        // is per-module bounded.
+        //
+        // Collision discipline (preserved from earlier stages):
+        //   * Names with > 1 definition site are SKIPPED
+        //     (`monotonic_nanos`, `classify`, `new`, etc. —
+        //     platform-specific or intentionally-duplicated).
+        //   * Already-registered names (canonical static methods,
+        //     variant constructors) are NOT overwritten.
+        //   * Stub `FunctionInfo` carries the real `param_count`
+        //     recovered from the AST.  Real bodies' later
+        //     `register_function` calls overlay the stub via the
+        //     richer-info promotion at `context.rs:1950`
+        //     (`new_is_richer` / `new_is_real_over_stub` arms).
+        //
+        // Sentinel id range: `u32::MAX - 0x100_0000 ..`
+        // (distinct from stage-1's `u32::MAX - 0x40_0000` and
+        //  stage-2's `u32::MAX - 0xC0_0000`).  Mirrored in the
+        //  `is_in_stub_range` check below so the post-compile
+        //  global-registry update overwrites these stubs with
+        //  real bodies' info.
+        //
+        // Architectural rule pinned in-tree:  every public free fn
+        // with a GLOBALLY UNIQUE simple name across the stdlib MUST
+        // be addressable by bare name from any cross-module call
+        // site regardless of topo-sort cycle direction.
+        if config.verbose {
+            eprintln!(
+                "Phase 2.7 (task #47): Pre-registering uniquely-named public free functions globally..."
+            );
+        }
+        self.pre_register_unique_public_free_functions(&all_parsed_modules)?;
+
+        // ====================================================================
         // STEP 4: Compile each module to VBC
         // ====================================================================
         if config.verbose {
@@ -987,6 +1068,120 @@ impl<'s> CompilationPipeline<'s> {
             eprintln!(
                 "[task #16 stage-2] pre-registered {} canonical-stdlib variant-constructor stubs",
                 variants_registered
+            );
+        }
+        Ok(())
+    }
+
+    /// **Task #47 stage-3** — pre-register every public free function
+    /// whose simple name is GLOBALLY UNIQUE across the stdlib as a
+    /// stub `FunctionInfo` in `global_function_registry` BEFORE
+    /// per-module compilation.
+    ///
+    /// Paired with `emit_missing_stub_descriptors_with_callm(false)`
+    /// in `finalize_module_from_state` — the call site bytecode emits
+    /// `Call(stub_id)` with the stub-id from this pre-registration;
+    /// the finalize step then synthesises a minimal extern-shaped
+    /// `FunctionDescriptor` carrying the function's NAME for every
+    /// stub id the local bytecode actually references.  At archive
+    /// load, `ArchiveBodyRemap::map_function`'s Tier-2b name-fallback
+    /// resolves stub_id → real user-side FunctionId by walking the
+    /// archive-wide `archive_func_by_name` index (populated for every
+    /// loaded archive function regardless of mount set).
+    ///
+    /// See the top-of-function comment in `compile_core` at the
+    /// "Phase 2.7 (task #47)" banner for full architectural rationale
+    /// and history.
+    fn pre_register_unique_public_free_functions(
+        &mut self,
+        all_modules: &[(String, Vec<(PathBuf, verum_ast::Module)>)],
+    ) -> Result<()> {
+        use verum_ast::decl::Visibility;
+        use verum_ast::ItemKind;
+        use verum_vbc::codegen::FunctionInfo;
+        use verum_vbc::module::FunctionId;
+
+        // Pass 1: count occurrences of each public free-fn simple name
+        // across the entire parsed stdlib.  Collision-prone names get
+        // skipped in pass 2.
+        let mut name_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for (_module_name, ast_modules) in all_modules {
+            for (_file_path, ast_module) in ast_modules {
+                for item in ast_module.items.iter() {
+                    if let ItemKind::Function(func) = &item.kind
+                        && matches!(func.visibility, Visibility::Public)
+                    {
+                        let name = func.name.name.to_string();
+                        *name_counts.entry(name).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
+        // Pass 2: register only the uniquely-named functions.
+        let mut stubs_registered: usize = 0;
+        for (_module_name, ast_modules) in all_modules {
+            for (_file_path, ast_module) in ast_modules {
+                for item in ast_module.items.iter() {
+                    let func = match &item.kind {
+                        ItemKind::Function(f) => f,
+                        _ => continue,
+                    };
+                    if !matches!(func.visibility, Visibility::Public) {
+                        continue;
+                    }
+                    let name = func.name.name.to_string();
+                    // Skip cross-module collisions — bare-name
+                    // first-wins would arbitrarily lock in the wrong
+                    // platform / impl.  Per-module mount-resolution
+                    // continues to handle these.
+                    if name_counts.get(&name).copied().unwrap_or(0) != 1 {
+                        continue;
+                    }
+                    // Don't shadow earlier-stage stubs (canonical
+                    // static methods, variant constructors) — those
+                    // carry richer info that this stub would strip.
+                    if self.global_function_registry.contains_key(&name) {
+                        continue;
+                    }
+                    let stub_id =
+                        FunctionId(u32::MAX - 0x100_0000 - stubs_registered as u32);
+                    let param_count = func.params.len();
+                    let param_names: Vec<String> = (0..param_count)
+                        .map(|i| format!("_arg{}", i))
+                        .collect();
+                    let info = FunctionInfo {
+                        id: stub_id,
+                        param_count,
+                        param_names,
+                        param_type_names: vec![],
+                        is_async: func.is_async,
+                        is_generator: false,
+                        contexts: vec![],
+                        return_type: None,
+                        yield_type: None,
+                        intrinsic_name: None,
+                        variant_tag: None,
+                        parent_type_name: None,
+                        variant_payload_types: None,
+                        is_partial_pattern: false,
+                        takes_self_mut_ref: false,
+                        return_type_name: None,
+                        return_type_inner: None,
+                        is_const: false,
+                        is_transparent_wrapper: false,
+                        param_closure_return_type_names: Vec::new(),
+                    };
+                    self.global_function_registry.insert(name, info);
+                    stubs_registered += 1;
+                }
+            }
+        }
+        if std::env::var("VERUM_TRACE_STUB").is_ok() {
+            eprintln!(
+                "[task #47 stage-3] pre-registered {} uniquely-named public free-fn stubs",
+                stubs_registered
             );
         }
         Ok(())
@@ -1553,11 +1748,16 @@ impl<'s> CompilationPipeline<'s> {
         // gets the direction right: check `BASE - WIDTH <= id <= BASE`.
         const STAGE1_BASE: u32 = u32::MAX - 0x40_0000;
         const STAGE2_BASE: u32 = u32::MAX - 0xC0_0000;
+        // Stage-3 (task #47): uniquely-named public free-fn stubs
+        // pre-registered by `pre_register_unique_public_free_functions`.
+        // Base must mirror that helper's id assignment exactly.
+        const STAGE3_BASE: u32 = u32::MAX - 0x100_0000;
         const STUB_RANGE_WIDTH: u32 = 0x10_0000; // 1M slots/stage
         let is_in_stub_range = |id: u32| -> bool {
             let in_stage1 = id <= STAGE1_BASE && id >= STAGE1_BASE - STUB_RANGE_WIDTH;
             let in_stage2 = id <= STAGE2_BASE && id >= STAGE2_BASE - STUB_RANGE_WIDTH;
-            in_stage1 || in_stage2
+            let in_stage3 = id <= STAGE3_BASE && id >= STAGE3_BASE - STUB_RANGE_WIDTH;
+            in_stage1 || in_stage2 || in_stage3
         };
         let new_functions = codegen.export_functions();
         for (name, info) in new_functions {
