@@ -32,18 +32,19 @@ public type ProtobufError is
     | UnsupportedGroup;
 
 implement Display for ProtobufError {
+    /// Qualify variants to dodge task #17/#39 bare-name first-wins.
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            UnexpectedEof                    => f.write_str("protobuf: unexpected EOF"),
-            VarintOverflow                   => f.write_str("protobuf: varint exceeded 10 bytes"),
-            InvalidWireType(b)               => f.write_str(f"protobuf: invalid wire-type tag {b}".as_str()),
-            InvalidLength { declared, available } =>
+            ProtobufError.UnexpectedEof                    => f.write_str("protobuf: unexpected EOF"),
+            ProtobufError.VarintOverflow                   => f.write_str("protobuf: varint exceeded 10 bytes"),
+            ProtobufError.InvalidWireType(b)               => f.write_str(f"protobuf: invalid wire-type tag {b}".as_str()),
+            ProtobufError.InvalidLength { declared, available } =>
                 f.write_str(f"protobuf: declared length {declared} exceeds available {available}".as_str()),
-            LengthTooLarge { declared, limit } =>
+            ProtobufError.LengthTooLarge { declared, limit } =>
                 f.write_str(f"protobuf: declared length {declared} exceeds safety limit {limit}".as_str()),
-            InvalidUtf8                      => f.write_str("protobuf: invalid UTF-8 in string field"),
-            InvalidFieldNumber(n)            => f.write_str(f"protobuf: invalid field number {n}".as_str()),
-            UnsupportedGroup                 => f.write_str("protobuf: deprecated group wire type"),
+            ProtobufError.InvalidUtf8                      => f.write_str("protobuf: invalid UTF-8 in string field"),
+            ProtobufError.InvalidFieldNumber(n)            => f.write_str(f"protobuf: invalid field number {n}".as_str()),
+            ProtobufError.UnsupportedGroup                 => f.write_str("protobuf: deprecated group wire type"),
         }
     }
 }
@@ -51,16 +52,16 @@ implement Display for ProtobufError {
 implement Debug for ProtobufError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            UnexpectedEof                    => f.write_str("UnexpectedEof"),
-            VarintOverflow                   => f.write_str("VarintOverflow"),
-            InvalidWireType(b)               => f.write_str(f"InvalidWireType({b})".as_str()),
-            InvalidLength { declared, available } =>
+            ProtobufError.UnexpectedEof                    => f.write_str("UnexpectedEof"),
+            ProtobufError.VarintOverflow                   => f.write_str("VarintOverflow"),
+            ProtobufError.InvalidWireType(b)               => f.write_str(f"InvalidWireType({b})".as_str()),
+            ProtobufError.InvalidLength { declared, available } =>
                 f.write_str(f"InvalidLength {{ declared: {declared}, available: {available} }}".as_str()),
-            LengthTooLarge { declared, limit } =>
+            ProtobufError.LengthTooLarge { declared, limit } =>
                 f.write_str(f"LengthTooLarge {{ declared: {declared}, limit: {limit} }}".as_str()),
-            InvalidUtf8                      => f.write_str("InvalidUtf8"),
-            InvalidFieldNumber(n)            => f.write_str(f"InvalidFieldNumber({n})".as_str()),
-            UnsupportedGroup                 => f.write_str("UnsupportedGroup"),
+            ProtobufError.InvalidUtf8                      => f.write_str("InvalidUtf8"),
+            ProtobufError.InvalidFieldNumber(n)            => f.write_str(f"InvalidFieldNumber({n})".as_str()),
+            ProtobufError.UnsupportedGroup                 => f.write_str("UnsupportedGroup"),
         }
     }
 }
@@ -68,16 +69,16 @@ implement Debug for ProtobufError {
 implement Eq for ProtobufError {
     fn eq(&self, other: &ProtobufError) -> Bool {
         match (self, other) {
-            (UnexpectedEof,                  UnexpectedEof)                  => true,
-            (VarintOverflow,                 VarintOverflow)                 => true,
-            (InvalidWireType(a),             InvalidWireType(b))             => a == b,
-            (InvalidLength { declared: da, available: aa },
-             InvalidLength { declared: db, available: ab }) => da == db && aa == ab,
-            (LengthTooLarge { declared: da, limit: la },
-             LengthTooLarge { declared: db, limit: lb })   => da == db && la == lb,
-            (InvalidUtf8,                    InvalidUtf8)                    => true,
-            (InvalidFieldNumber(a),          InvalidFieldNumber(b))          => a == b,
-            (UnsupportedGroup,               UnsupportedGroup)               => true,
+            (ProtobufError.UnexpectedEof,                  ProtobufError.UnexpectedEof)                  => true,
+            (ProtobufError.VarintOverflow,                 ProtobufError.VarintOverflow)                 => true,
+            (ProtobufError.InvalidWireType(a),             ProtobufError.InvalidWireType(b))             => a == b,
+            (ProtobufError.InvalidLength { declared: da, available: aa },
+             ProtobufError.InvalidLength { declared: db, available: ab }) => da == db && aa == ab,
+            (ProtobufError.LengthTooLarge { declared: da, limit: la },
+             ProtobufError.LengthTooLarge { declared: db, limit: lb })   => da == db && la == lb,
+            (ProtobufError.InvalidUtf8,                    ProtobufError.InvalidUtf8)                    => true,
+            (ProtobufError.InvalidFieldNumber(a),          ProtobufError.InvalidFieldNumber(b))          => a == b,
+            (ProtobufError.UnsupportedGroup,               ProtobufError.UnsupportedGroup)               => true,
             _ => false,
         }
     }
