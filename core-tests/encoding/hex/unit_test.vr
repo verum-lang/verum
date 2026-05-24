@@ -1,0 +1,248 @@
+// =============================================================================
+// core-tests/encoding/hex/unit_test.vr
+// =============================================================================
+//
+// `core/encoding/hex.vr` provides hex encoding:
+//   * encode(&[Byte]) -> Text          (lowercase)
+//   * encode_upper(&[Byte]) -> Text    (uppercase)
+//   * decode(&Text) -> Result<List<Byte>, HexError>  (case-insensitive)
+//   * HexError + HexErrorKind (InvalidChar / InvalidLength)
+// =============================================================================
+
+mount core.encoding.hex.{encode, encode_upper, decode, HexError, HexErrorKind};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: encode — lowercase
+// =============================================================================
+
+@test
+fn test_encode_empty() {
+    let input: [Byte; 0] = [];
+    let out = encode(&input);
+    assert_eq(out, "");
+}
+
+@test
+fn test_encode_single_zero() {
+    let input: [Byte; 1] = [0_u8];
+    assert_eq(encode(&input), "00");
+}
+
+@test
+fn test_encode_single_ff() {
+    let input: [Byte; 1] = [0xFF_u8];
+    assert_eq(encode(&input), "ff");
+}
+
+@test
+fn test_encode_two_bytes() {
+    let input: [Byte; 2] = [0xDE_u8, 0xAD_u8];
+    assert_eq(encode(&input), "dead");
+}
+
+@test
+fn test_encode_four_bytes_canonical_dead_beef() {
+    let input: [Byte; 4] = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8];
+    assert_eq(encode(&input), "deadbeef");
+}
+
+@test
+fn test_encode_all_low_digits() {
+    let input: [Byte; 1] = [0x09_u8];
+    assert_eq(encode(&input), "09");
+}
+
+@test
+fn test_encode_mid_value() {
+    let input: [Byte; 1] = [0x5A_u8];
+    assert_eq(encode(&input), "5a");
+}
+
+// =============================================================================
+// Section 2: encode_upper
+// =============================================================================
+
+@test
+fn test_encode_upper_empty() {
+    let input: [Byte; 0] = [];
+    assert_eq(encode_upper(&input), "");
+}
+
+@test
+fn test_encode_upper_ff() {
+    let input: [Byte; 1] = [0xFF_u8];
+    assert_eq(encode_upper(&input), "FF");
+}
+
+@test
+fn test_encode_upper_dead_beef() {
+    let input: [Byte; 4] = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8];
+    assert_eq(encode_upper(&input), "DEADBEEF");
+}
+
+// =============================================================================
+// Section 3: decode — happy path
+// =============================================================================
+
+@test
+fn test_decode_empty() {
+    let s = "".clone();
+    let r = decode(&s);
+    match r {
+        Ok(bytes) => assert_eq(bytes.len(), 0),
+        Err(_) => panic("empty hex string should decode to empty bytes"),
+    }
+}
+
+@test
+fn test_decode_zero_zero() {
+    let s = "00".clone();
+    let r = decode(&s);
+    match r {
+        Ok(bytes) => {
+            assert_eq(bytes.len(), 1);
+            assert_eq(bytes[0], 0_u8);
+        },
+        Err(_) => panic("decode of '00' should succeed"),
+    }
+}
+
+@test
+fn test_decode_ff() {
+    let s = "ff".clone();
+    let r = decode(&s);
+    match r {
+        Ok(bytes) => {
+            assert_eq(bytes.len(), 1);
+            assert_eq(bytes[0], 0xFF_u8);
+        },
+        Err(_) => panic("decode of 'ff' should succeed"),
+    }
+}
+
+@test
+fn test_decode_uppercase_ff() {
+    // Decode is case-insensitive per the module contract.
+    let s = "FF".clone();
+    let r = decode(&s);
+    match r {
+        Ok(bytes) => {
+            assert_eq(bytes.len(), 1);
+            assert_eq(bytes[0], 0xFF_u8);
+        },
+        Err(_) => panic("decode of 'FF' should succeed"),
+    }
+}
+
+@test
+fn test_decode_dead_beef() {
+    let s = "deadbeef".clone();
+    let r = decode(&s);
+    match r {
+        Ok(bytes) => {
+            assert_eq(bytes.len(), 4);
+            assert_eq(bytes[0], 0xDE_u8);
+            assert_eq(bytes[1], 0xAD_u8);
+            assert_eq(bytes[2], 0xBE_u8);
+            assert_eq(bytes[3], 0xEF_u8);
+        },
+        Err(_) => panic("decode of 'deadbeef' should succeed"),
+    }
+}
+
+// =============================================================================
+// Section 4: decode — error paths
+// =============================================================================
+
+@test
+fn test_decode_odd_length_is_invalid_length() {
+    let s = "abc".clone();
+    let r = decode(&s);
+    match r {
+        Ok(_) => panic("odd-length hex string should fail"),
+        Err(e) => assert(e.kind is HexErrorKind.InvalidLength),
+    }
+}
+
+@test
+fn test_decode_invalid_char_g() {
+    let s = "0g".clone();
+    let r = decode(&s);
+    match r {
+        Ok(_) => panic("invalid hex char should fail"),
+        Err(e) => assert(e.kind is HexErrorKind.InvalidChar),
+    }
+}
+
+@test
+fn test_decode_invalid_char_space() {
+    let s = "0 ".clone();
+    let r = decode(&s);
+    match r {
+        Ok(_) => panic("space is not a hex digit"),
+        Err(e) => assert(e.kind is HexErrorKind.InvalidChar),
+    }
+}
+
+@test
+fn test_decode_invalid_char_z() {
+    let s = "zz".clone();
+    let r = decode(&s);
+    match r {
+        Ok(_) => panic("z is not a hex digit"),
+        Err(e) => assert(e.kind is HexErrorKind.InvalidChar),
+    }
+}
+
+@test
+fn test_decode_invalid_char_position_zero() {
+    let s = "x0".clone();
+    let r = decode(&s);
+    match r {
+        Ok(_) => panic("x at position 0 should fail"),
+        Err(e) => {
+            assert(e.kind is HexErrorKind.InvalidChar);
+            assert_eq(e.position, 0);
+        },
+    }
+}
+
+@test
+fn test_decode_invalid_char_position_one() {
+    let s = "0x".clone();
+    let r = decode(&s);
+    match r {
+        Ok(_) => panic("x at position 1 should fail"),
+        Err(e) => {
+            assert(e.kind is HexErrorKind.InvalidChar);
+            assert_eq(e.position, 1);
+        },
+    }
+}
+
+// =============================================================================
+// Section 5: HexErrorKind disjointness
+// =============================================================================
+
+@test
+fn test_hex_error_kind_invalid_char_construction() {
+    let k: HexErrorKind = HexErrorKind.InvalidChar;
+    assert(k is HexErrorKind.InvalidChar);
+}
+
+@test
+fn test_hex_error_kind_invalid_length_construction() {
+    let k: HexErrorKind = HexErrorKind.InvalidLength;
+    assert(k is HexErrorKind.InvalidLength);
+}
+
+@test
+fn test_hex_error_kind_variants_disjoint() {
+    let ic: HexErrorKind = HexErrorKind.InvalidChar;
+    let il: HexErrorKind = HexErrorKind.InvalidLength;
+    assert(ic is HexErrorKind.InvalidChar);
+    assert(il is HexErrorKind.InvalidLength);
+    assert(!(ic is HexErrorKind.InvalidLength));
+    assert(!(il is HexErrorKind.InvalidChar));
+}
