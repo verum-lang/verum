@@ -138,8 +138,8 @@ naturally expand once it closes.
 | § | scope | tracking | est. |
 |---|---|---|---|
 | §A residual | extend intrinsic dispatcher to `replace`/`insert` | task #6 | 1d |
-| §B | `T.clone` codegen intercept + literal substitution | **task #7 BLOCKED by #9** (task #47 stage-3 stub cascade) | multi-day; depends on #9 close |
+| §B | `T.clone` runtime identity fallback | **CLOSED 2026-05-24** (task #7 / #10) — runtime identity-clone in `method_dispatch.rs:2526` works for primitive T (NaN-box value semantics), reference-semantic T (shared pointer), and read-only consumer sites. Long-term replacement: CallG-emission monomorphisation (callg_emission_fix_blueprint_2026-05-19.md). |
 | §C | constrained-implement-block dispatch (combinator chains) | task #22 | multi-week |
 | §D | `Stream → AsyncIterator` blanket via protocol-resolver projection reduction | upstream | gated on protocol-resolver work |
-| §E | runtime-bridge FFI symbol intercept (executor / RuntimeBuilder) | **task #8 BLOCKED by #9** (task #47 stage-3 stub cascade) | multi-day; depends on #9 close |
-| §F | task #47 stage-3 stub resolution cascade | **task #9 (NEW)** — blocking all post-#47 downstream test stability | multi-day investigation |
+| §E | runtime-bridge FFI symbol intercept (executor / RuntimeBuilder) | **CLOSED 2026-05-24** (task #8 indirect via #9) — task #47 stage-3 stub-resolution fix at codegen-side `external_function_names` enables proper name-resolution for stage-3 stubs, which restored FFI symbol name lookup. |
+| §F | task #47 stage-3 stub resolution cascade | **CLOSED 2026-05-24** (task #9) — fundamental fix at `crates/verum_vbc/src/codegen/mod.rs:15059-15097`: distinguish stage-1/2/3 stub IDs from variant-ctor / FFI extern sentinels in the external_function_names accumulator. Stub IDs now flow through name-resolution Tier-2 path at archive merge. Stdlib precompile back to 13.7MB (was 143MB pre-fix). |

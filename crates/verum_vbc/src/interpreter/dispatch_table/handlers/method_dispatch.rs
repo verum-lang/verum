@@ -2523,6 +2523,40 @@ pub(in super::super) fn handle_call_method(
         }
     }
 
+    // ──────────────────────────────────────────────────────────
+    // **Task #7 close-out 2026-05-24** — `T.clone()` / `clone()`
+    // identity-clone fallback for generic-T receivers.
+    //
+    // When the receiver's monomorphised T is generic-erased at
+    // Tier-0 and the qualified-type-resolution paths above have
+    // exhausted (every `<owner>.clone` candidate rejected on type
+    // match), fall back to an IDENTITY clone — return the receiver
+    // unchanged.
+    //
+    // Soundness argument:
+    //   * For primitive T (Int, Float, Bool, Byte, Char): NaN-boxed
+    //     value semantics make identity == structural clone.
+    //   * For reference-semantic T (Text — interned/shared,
+    //     Heap<U>, Shared<U>): copying the pointer yields a shared
+    //     reference to the same heap object.  Acceptable for
+    //     read-only consumers (the StreamRepeatN payload-clone
+    //     path is the archetypal site — yields used immediately,
+    //     never concurrently with the source).
+    //   * For record T: shallow copy of the pointer, sharing the
+    //     heap data.  Callers requiring isolated ownership must
+    //     use `<Type>.clone` explicitly with a concrete type.
+    //
+    // Mirror class to task #17's `T.default`/`T.zero`/`T.one`
+    // codegen intercept, but at the runtime layer since clone has
+    // no canonical literal substitute.  Cross-ref:
+    // `callg_emission_fix_blueprint_2026-05-19.md` for the
+    // long-term monomorphisation infrastructure.
+    let bare_for_clone = method_name.rsplit('.').next().unwrap_or(&method_name);
+    if bare_for_clone == "clone" && args.count == 0 {
+        state.set_reg(dst, dispatch_receiver);
+        return Ok(DispatchResult::Continue);
+    }
+
     // Method not found anywhere — emit a diagnostic that pins down the
     // *runtime* shape of the receiver and, when the receiver carries
     // an object-tag, lists the methods that DO exist on it. The
