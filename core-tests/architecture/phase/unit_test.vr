@@ -1,0 +1,147 @@
+// =============================================================================
+// core-tests/architecture/phase/unit_test.vr
+// =============================================================================
+//
+// `core/architecture/phase.vr` — ATS-V phase 6.5 surface mirror.
+//
+// Surface:
+//   * ModuleArchResult record + module_arch_result_is_load_bearing
+//   * ArchPhaseReport + 5 helpers (empty / is_load_bearing /
+//     total_violations / total_parse_errors / annotated_count)
+//   * CompositionStep + CompositionVerificationReport +
+//     composition_verification_is_load_bearing
+// =============================================================================
+
+mount core.architecture.phase.{
+    ModuleArchResult, module_arch_result_is_load_bearing,
+    ArchPhaseReport, arch_phase_report_empty,
+    arch_phase_report_is_load_bearing,
+    arch_phase_report_total_violations,
+    arch_phase_report_total_parse_errors,
+    arch_phase_report_annotated_count,
+    CompositionStep, CompositionVerificationReport,
+    composition_verification_is_load_bearing,
+};
+
+// =============================================================================
+// Section 1: ArchPhaseReport — empty
+// =============================================================================
+
+@test
+fn test_arch_phase_report_empty_construction() {
+    let r = arch_phase_report_empty();
+    assert(r.modules.len() == 0);
+}
+
+@test
+fn test_arch_phase_report_empty_is_load_bearing() {
+    let r = arch_phase_report_empty();
+    assert(arch_phase_report_is_load_bearing(r));
+}
+
+@test
+fn test_arch_phase_report_empty_zero_violations() {
+    let r = arch_phase_report_empty();
+    assert(arch_phase_report_total_violations(r) == 0);
+}
+
+@test
+fn test_arch_phase_report_empty_zero_parse_errors() {
+    let r = arch_phase_report_empty();
+    assert(arch_phase_report_total_parse_errors(r) == 0);
+}
+
+@test
+fn test_arch_phase_report_empty_zero_annotated() {
+    let r = arch_phase_report_empty();
+    assert(arch_phase_report_annotated_count(r) == 0);
+}
+
+// =============================================================================
+// Section 2: ModuleArchResult — load-bearing semantics
+// =============================================================================
+
+@test
+fn test_module_arch_result_clean_is_load_bearing() {
+    let r = ModuleArchResult {
+        module_name: Text.from("foo"),
+        shape: Maybe.None,
+        parse_errors: [],
+        violations: [],
+    };
+    assert(module_arch_result_is_load_bearing(r));
+}
+
+@test
+fn test_module_arch_result_record_construction() {
+    let r = ModuleArchResult {
+        module_name: Text.from("bar"),
+        shape: Maybe.None,
+        parse_errors: [],
+        violations: [],
+    };
+    assert(r.module_name == Text.from("bar"));
+}
+
+// =============================================================================
+// Section 3: CompositionStep + report
+// =============================================================================
+
+@test
+fn test_composition_step_record_construction() {
+    let s = CompositionStep {
+        left:       Text.from("a"),
+        right:      Text.from("b"),
+        composed:   true,
+        violations: [],
+    };
+    assert(s.composed);
+}
+
+@test
+fn test_composition_verification_empty_is_load_bearing() {
+    let r = CompositionVerificationReport { steps: [] };
+    assert(composition_verification_is_load_bearing(r));
+}
+
+@test
+fn test_composition_verification_all_composed_load_bearing() {
+    let r = CompositionVerificationReport {
+        steps: [
+            CompositionStep {
+                left:       Text.from("a"),
+                right:      Text.from("b"),
+                composed:   true,
+                violations: [],
+            },
+            CompositionStep {
+                left:       Text.from("b"),
+                right:      Text.from("c"),
+                composed:   true,
+                violations: [],
+            },
+        ],
+    };
+    assert(composition_verification_is_load_bearing(r));
+}
+
+@test
+fn test_composition_verification_one_failure_not_load_bearing() {
+    let r = CompositionVerificationReport {
+        steps: [
+            CompositionStep {
+                left:       Text.from("a"),
+                right:      Text.from("b"),
+                composed:   true,
+                violations: [],
+            },
+            CompositionStep {
+                left:       Text.from("b"),
+                right:      Text.from("c"),
+                composed:   false,
+                violations: [],
+            },
+        ],
+    };
+    assert(!composition_verification_is_load_bearing(r));
+}
