@@ -1,0 +1,234 @@
+// =============================================================================
+// core-tests/redis/protocol/unit_test.vr
+// =============================================================================
+//
+// `core/redis/protocol.vr` defines:
+//   * RespValue 16-variant — every RESP3 type (SimpleString/Error/
+//     Integer/BulkString/NullBulk/NullArray/Array/Boolean/Double/
+//     BigNumber/BulkError/VerbatimString/Map/Set/Push/Nil)
+//   * RespError 8-variant error ADT + Display
+// =============================================================================
+
+mount core.redis.protocol.{RespValue, RespError};
+
+// =============================================================================
+// Section 1: RespValue scalar variants
+// =============================================================================
+
+@test
+fn test_simple_string_construction() {
+    let v: RespValue = RespValue.SimpleString("OK".clone());
+    assert(v is RespValue.SimpleString);
+}
+
+@test
+fn test_error_construction() {
+    let v: RespValue = RespValue.Error_("WRONGTYPE".clone());
+    assert(v is RespValue.Error_);
+}
+
+@test
+fn test_integer_construction() {
+    let v: RespValue = RespValue.Integer(42);
+    assert(v is RespValue.Integer);
+}
+
+@test
+fn test_bulk_string_construction() {
+    let v: RespValue = RespValue.BulkString([0x68_u8, 0x69_u8]); // "hi"
+    assert(v is RespValue.BulkString);
+}
+
+@test
+fn test_null_bulk_construction() {
+    let v: RespValue = RespValue.NullBulk;
+    assert(v is RespValue.NullBulk);
+}
+
+@test
+fn test_null_array_construction() {
+    let v: RespValue = RespValue.NullArray;
+    assert(v is RespValue.NullArray);
+}
+
+@test
+fn test_boolean_construction() {
+    let v: RespValue = RespValue.Boolean(true);
+    assert(v is RespValue.Boolean);
+}
+
+@test
+fn test_double_construction() {
+    let v: RespValue = RespValue.Double(3.14);
+    assert(v is RespValue.Double);
+}
+
+@test
+fn test_big_number_construction() {
+    let v: RespValue = RespValue.BigNumber("123456789012345678901234567890".clone());
+    assert(v is RespValue.BigNumber);
+}
+
+@test
+fn test_nil_construction() {
+    let v: RespValue = RespValue.Nil_;
+    assert(v is RespValue.Nil_);
+}
+
+// =============================================================================
+// Section 2: RespValue compound variants
+// =============================================================================
+
+@test
+fn test_array_empty() {
+    let v: RespValue = RespValue.Array([]);
+    assert(v is RespValue.Array);
+}
+
+@test
+fn test_array_single() {
+    let v: RespValue = RespValue.Array([RespValue.Integer(1)]);
+    assert(v is RespValue.Array);
+}
+
+@test
+fn test_bulk_error_construction() {
+    let v: RespValue = RespValue.BulkError {
+        code: "WRONGTYPE".clone(),
+        message: "Operation against wrong type".clone(),
+    };
+    assert(v is RespValue.BulkError);
+}
+
+@test
+fn test_verbatim_string_construction() {
+    let v: RespValue = RespValue.VerbatimString {
+        format: "txt".clone(),
+        content: "hello".clone(),
+    };
+    assert(v is RespValue.VerbatimString);
+}
+
+@test
+fn test_map_value_construction() {
+    let v: RespValue = RespValue.MapValue([
+        (RespValue.SimpleString("key".clone()), RespValue.Integer(42)),
+    ]);
+    assert(v is RespValue.MapValue);
+}
+
+@test
+fn test_set_value_construction() {
+    let v: RespValue = RespValue.SetValue([
+        RespValue.Integer(1),
+        RespValue.Integer(2),
+    ]);
+    assert(v is RespValue.SetValue);
+}
+
+@test
+fn test_push_construction() {
+    let v: RespValue = RespValue.Push([
+        RespValue.SimpleString("channel".clone()),
+    ]);
+    assert(v is RespValue.Push);
+}
+
+// =============================================================================
+// Section 3: RespError 8-variant
+// =============================================================================
+
+@test
+fn test_resp_error_unexpected_eof() {
+    let e: RespError = RespError.UnexpectedEof;
+    assert(e is RespError.UnexpectedEof);
+}
+
+@test
+fn test_resp_error_invalid_prefix() {
+    let e: RespError = RespError.InvalidPrefix(0x40_u8); // '@'
+    assert(e is RespError.InvalidPrefix);
+}
+
+@test
+fn test_resp_error_invalid_utf8() {
+    let e: RespError = RespError.InvalidUtf8("bad sequence".clone());
+    assert(e is RespError.InvalidUtf8);
+}
+
+@test
+fn test_resp_error_invalid_integer() {
+    let e: RespError = RespError.InvalidInteger("abc".clone());
+    assert(e is RespError.InvalidInteger);
+}
+
+@test
+fn test_resp_error_invalid_bulk_length() {
+    let e: RespError = RespError.InvalidBulkLength(-2);
+    assert(e is RespError.InvalidBulkLength);
+}
+
+@test
+fn test_resp_error_invalid_array_length() {
+    let e: RespError = RespError.InvalidArrayLength(-5);
+    assert(e is RespError.InvalidArrayLength);
+}
+
+@test
+fn test_resp_error_too_deep() {
+    let e: RespError = RespError.TooDeep { depth: 100, limit: 64 };
+    assert(e is RespError.TooDeep);
+}
+
+@test
+fn test_resp_error_too_large() {
+    let e: RespError = RespError.TooLarge { size: 1_000_000_000, limit: 536_870_912 };
+    assert(e is RespError.TooLarge);
+}
+
+// =============================================================================
+// Section 4: RespError variant disjointness
+// =============================================================================
+
+@test
+fn test_resp_error_variants_disjoint() {
+    let eof: RespError = RespError.UnexpectedEof;
+    let ip: RespError = RespError.InvalidPrefix(0_u8);
+    let td: RespError = RespError.TooDeep { depth: 1, limit: 0 };
+
+    assert(eof is RespError.UnexpectedEof);
+    assert(ip is RespError.InvalidPrefix);
+    assert(td is RespError.TooDeep);
+
+    assert(!(eof is RespError.InvalidPrefix));
+    assert(!(ip is RespError.TooDeep));
+    assert(!(td is RespError.UnexpectedEof));
+}
+
+// =============================================================================
+// Section 5: RespError Display
+// =============================================================================
+
+@test
+fn test_display_unexpected_eof() {
+    let e = RespError.UnexpectedEof;
+    let s = f"{e}";
+    assert(s.contains("resp"));
+    assert(s.contains("unexpected EOF"));
+}
+
+@test
+fn test_display_invalid_prefix_includes_byte() {
+    let e = RespError.InvalidPrefix(0x40_u8);
+    let s = f"{e}";
+    assert(s.contains("resp"));
+    assert(s.contains("invalid prefix"));
+}
+
+@test
+fn test_display_too_deep_includes_numbers() {
+    let e = RespError.TooDeep { depth: 100, limit: 64 };
+    let s = f"{e}";
+    assert(s.contains("100"));
+    assert(s.contains("64"));
+}
