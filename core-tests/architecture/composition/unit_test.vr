@@ -1,0 +1,72 @@
+// =============================================================================
+// core-tests/architecture/composition/unit_test.vr
+// =============================================================================
+//
+// `core/architecture/composition.vr` — ATS-V composition algebra surface.
+//
+// Surface tested (pure-data subset):
+//   * CompositionResult 2-variant (Composed(Shape) / Rejected(List<…>))
+//   * composition_result_is_composed
+//   * composition_result_tag
+//   * composition_result_violation_count
+//
+// Live kernel discharge (kernel_arch_composition_engine) requires
+// kernel-side axiom evaluation; covered at vcs/specs/L1-core/.
+// =============================================================================
+
+mount core.architecture.composition.{
+    CompositionResult,
+    composition_result_is_composed,
+    composition_result_tag,
+    composition_result_violation_count,
+};
+
+// =============================================================================
+// Section 1: CompositionResult — Rejected variant (testable without Shape)
+// =============================================================================
+
+@test
+fn test_composition_result_rejected_empty() {
+    let r: CompositionResult = CompositionResult.Rejected([]);
+    assert(r is CompositionResult.Rejected);
+}
+
+@test
+fn test_composition_result_rejected_is_composed_false() {
+    let r: CompositionResult = CompositionResult.Rejected([]);
+    assert(!composition_result_is_composed(r));
+}
+
+@test
+fn test_composition_result_rejected_tag_rejected() {
+    let r: CompositionResult = CompositionResult.Rejected([]);
+    assert(composition_result_tag(r) == Text.from("rejected"));
+}
+
+@test
+fn test_composition_result_rejected_empty_violation_count_zero() {
+    let r: CompositionResult = CompositionResult.Rejected([]);
+    assert(composition_result_violation_count(r) == 0);
+}
+
+// =============================================================================
+// Section 2: Aggregator semantics on empty Rejected
+// =============================================================================
+
+@test
+fn test_composition_rejected_zero_violations_still_rejected() {
+    // An empty rejection list is still a rejection — the parser may
+    // produce an empty list when the composition fails for a
+    // structural reason that doesn't cite a specific AP code.
+    let r: CompositionResult = CompositionResult.Rejected([]);
+    assert(composition_result_tag(r.clone()) == Text.from("rejected"));
+    assert(!composition_result_is_composed(r));
+}
+
+@test
+fn test_composition_rejected_tag_distinct_from_composed() {
+    // The tag string must be stable + distinct between variants.
+    let r: CompositionResult = CompositionResult.Rejected([]);
+    let tag = composition_result_tag(r);
+    assert(tag != Text.from("composed"));
+}
