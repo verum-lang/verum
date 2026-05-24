@@ -82,6 +82,52 @@ public type MoneyError is
     | InvalidSplit     { reason: Text }
     | Underlying       { source: BigDecimalError };
 
+implement Display for MoneyError {
+    /// Single-line human-readable error message. Format follows the
+    /// same `<domain>: <variant>: <payload>` convention as
+    /// `CacheError` / `StorageError` / `ContextError`.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            MoneyError.CurrencyMismatch { left, right } => f.write_str(
+                f"money: currency mismatch ({left} vs {right})".as_str()),
+            MoneyError.ScaleMismatch { expected, actual } => f.write_str(
+                f"money: scale mismatch (expected {expected}, got {actual})".as_str()),
+            MoneyError.DivByZero => f.write_str("money: division by zero"),
+            MoneyError.InvalidSplit { reason } => f.write_str(
+                f"money: invalid split ({reason})".as_str()),
+            MoneyError.Underlying { source: _ } => f.write_str(
+                "money: underlying BigDecimal error"),
+        }
+    }
+}
+
+implement Debug for MoneyError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        Display.fmt(self, f)
+    }
+}
+
+implement Eq for MoneyError {
+    /// Per-variant payload-equal. `Underlying` is treated as
+    /// opaque-equal — two Underlying wrappers compare equal iff
+    /// both are Underlying (BigDecimalError doesn't have Eq today).
+    /// Qualified `MoneyError.<Variant>` patterns dodge task #17/#39.
+    fn eq(&self, other: &MoneyError) -> Bool {
+        match (self, other) {
+            (MoneyError.CurrencyMismatch { left: la, right: ra },
+             MoneyError.CurrencyMismatch { left: lb, right: rb }) => la == lb && ra == rb,
+            (MoneyError.ScaleMismatch { expected: ea, actual: aa },
+             MoneyError.ScaleMismatch { expected: eb, actual: ab }) => ea == eb && aa == ab,
+            (MoneyError.DivByZero, MoneyError.DivByZero) => true,
+            (MoneyError.InvalidSplit { reason: a },
+             MoneyError.InvalidSplit { reason: b }) => a == b,
+            (MoneyError.Underlying { source: _ },
+             MoneyError.Underlying { source: _ }) => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Constructors
 // =============================================================================

@@ -40,6 +40,44 @@ public type OnceState is
     | Done          // Successfully completed
     | Poisoned;     // Panicked during execution
 
+implement OnceState {
+    /// Canonical short-form name. Useful for state-machine assertion
+    /// messages in tests: `assert_eq!(once.state().name(), "Done")`.
+    public fn name(&self) -> Text {
+        match self {
+            OnceState.New        => "New".clone(),
+            OnceState.InProgress => "InProgress".clone(),
+            OnceState.Done       => "Done".clone(),
+            OnceState.Poisoned   => "Poisoned".clone(),
+        }
+    }
+}
+
+implement Display for OnceState {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.name().as_str())
+    }
+}
+
+implement Debug for OnceState {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.name().as_str())
+    }
+}
+
+implement Eq for OnceState {
+    /// Tag-only equality — variants are unit.
+    fn eq(&self, other: &OnceState) -> Bool {
+        match (self, other) {
+            (OnceState.New,        OnceState.New)        => true,
+            (OnceState.InProgress, OnceState.InProgress) => true,
+            (OnceState.Done,       OnceState.Done)       => true,
+            (OnceState.Poisoned,   OnceState.Poisoned)   => true,
+            _ => false,
+        }
+    }
+}
+
 // Guard that sets POISONED if dropped without completing.
 // This handles the case where the initialization function panics.
 type OnceGuard is {

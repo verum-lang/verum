@@ -143,6 +143,50 @@ public fn bundle_size(b: &ProofBundle) -> Int {
     b.certificates.len()
 }
 
+/// Remove a certificate from the bundle by its goal hash digest.
+/// Returns the prior bundle with metadata adjusted: certificate_count
+/// decrements by 1 and total_duration_ms decreases by the removed
+/// certificate's duration. If the digest is not in the bundle,
+/// returns the bundle unchanged.
+///
+/// Use for incremental verification when re-checking a module after
+/// edit — drop the stale certificates before re-running the prover.
+public fn bundle_remove(b: ProofBundle, h: GoalHash) -> ProofBundle {
+    let digest = h.digest;
+    let mut certs = b.certificates;
+    let prior_dur: Int = match certs.get(digest.clone()) {
+        Some(prior) => prior.duration_ms,
+        None        => return ProofBundle { certificates: certs, metadata: b.metadata },
+    };
+    certs.remove(digest);
+    let new_count = b.metadata.certificate_count - 1;
+    let new_dur = b.metadata.total_duration_ms - prior_dur;
+    ProofBundle {
+        certificates: certs,
+        metadata: BundleMetadata {
+            compiler_version: b.metadata.compiler_version,
+            source_path: b.metadata.source_path,
+            certificate_count: new_count,
+            total_duration_ms: new_dur,
+        },
+    }
+}
+
+/// Drop every certificate from the bundle, returning a bundle with
+/// zero certificates and zero accumulated duration but preserving
+/// the original compiler_version + source_path audit fields.
+public fn bundle_clear(b: ProofBundle) -> ProofBundle {
+    ProofBundle {
+        certificates: Map.new(),
+        metadata: BundleMetadata {
+            compiler_version: b.metadata.compiler_version,
+            source_path: b.metadata.source_path,
+            certificate_count: 0,
+            total_duration_ms: 0,
+        },
+    }
+}
+
 // =============================================================================
 // Foundation Protocol Impls — Display + Debug + Eq for GoalHash / ProofCertificate
 // =============================================================================

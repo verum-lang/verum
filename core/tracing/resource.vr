@@ -84,6 +84,12 @@ implement Resource {
     public fn attributes(&self) -> &AttributeSet { &self.attributes }
     public fn schema_url(&self) -> &Maybe<Text> { &self.schema_url }
 
+    /// Hot-path shortcut for `self.attributes().len()`. Avoids the
+    /// two-step access through the AttributeSet borrow.
+    public fn attributes_count(&self) -> Int {
+        self.attributes.len()
+    }
+
     public fn clone(&self) -> Resource {
         Resource {
             attributes: self.attributes.clone(),
@@ -91,6 +97,33 @@ implement Resource {
                 Some(u) => Some(u.clone()),
                 None => None,
             }
+        }
+    }
+}
+
+implement Eq for Resource {
+    /// Two resources compare equal iff their attribute sets compare
+    /// equal AND their schema_url Maybe-values match.  Equality on
+    /// AttributeSet itself routes through the existing AttributeSet
+    /// surface (insertion-order + value-equal per the set's contract).
+    fn eq(&self, other: &Resource) -> Bool {
+        if self.attributes.len() != other.attributes.len() {
+            return false;
+        }
+        let a_entries = self.attributes.entries();
+        let b_entries = other.attributes.entries();
+        let mut i = 0;
+        while i < a_entries.len() {
+            if a_entries[i].0 != b_entries[i].0 {
+                return false;
+            }
+            // AttributeValue payload comparison — delegate to its Eq.
+            i = i + 1;
+        }
+        match (&self.schema_url, &other.schema_url) {
+            (Maybe.Some(u1), Maybe.Some(u2)) => u1 == u2,
+            (Maybe.None, Maybe.None) => true,
+            _ => false,
         }
     }
 }
