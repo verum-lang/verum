@@ -1,0 +1,74 @@
+// =============================================================================
+// core-tests/io/engine/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.io.engine`. Engine construction allocates kernel
+// resources (kqueue/epoll/IOCP handle) — those tests need an actual
+// running engine. Construction-only tests are exercised here.
+// =============================================================================
+
+mount core.io.engine.{
+    IoEvent,
+    IO_ENGINE_DEFAULT_CAPACITY, IO_ENGINE_MAX_CAPACITY, IO_ENGINE_MAX_POLL_EVENTS,
+};
+
+// =============================================================================
+// Section 1: Constants
+// =============================================================================
+
+@test
+fn test_io_engine_default_capacity_is_256() {
+    assert_eq(IO_ENGINE_DEFAULT_CAPACITY, 256);
+}
+
+@test
+fn test_io_engine_max_capacity_is_65536() {
+    assert_eq(IO_ENGINE_MAX_CAPACITY, 65536);
+}
+
+@test
+fn test_io_engine_max_poll_events_is_4096() {
+    assert_eq(IO_ENGINE_MAX_POLL_EVENTS, 4096);
+}
+
+@test
+fn test_default_below_max_capacity() {
+    assert(IO_ENGINE_DEFAULT_CAPACITY < IO_ENGINE_MAX_CAPACITY);
+}
+
+@test
+fn test_max_poll_below_max_capacity() {
+    assert(IO_ENGINE_MAX_POLL_EVENTS < IO_ENGINE_MAX_CAPACITY);
+}
+
+// =============================================================================
+// Section 2: IoEvent flag constants
+// =============================================================================
+
+@test
+fn test_io_event_read_flag_value() {
+    let e = IoEvent.Read();
+    assert_eq(e.flags, 1);
+}
+
+@test
+fn test_io_event_write_flag_value() {
+    let e = IoEvent.Write();
+    assert_eq(e.flags, 2);
+}
+
+@test
+fn test_io_event_readwrite_combines_flags() {
+    let e = IoEvent.ReadWrite();
+    assert_eq(e.flags, 3);
+}
+
+@test
+fn test_io_event_read_or_write_equals_readwrite() {
+    let r = IoEvent.Read();
+    let w = IoEvent.Write();
+    let rw = IoEvent.ReadWrite();
+    assert_eq(r.flags | w.flags, rw.flags);
+}
+
+fn main() {}

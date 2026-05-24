@@ -1,0 +1,48 @@
+// =============================================================================
+// core-tests/io/async_protocols/regression_test.vr
+// =============================================================================
+//
+// AsyncRead / AsyncWrite / AsyncBufRead live polling routes through the
+// same sys_read/sys_write aliases as their sync counterparts (#io-1).
+// Plus the async executor itself needs a runtime — most tests gated.
+// =============================================================================
+
+mount core.io.async_protocols.{ReadFuture, WriteFuture, FlushFuture, read_async, write_async, flush_async};
+mount core.io.protocols.{empty_reader, sink};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — read_async / write_async / flush_async factory functions
+//
+// CLOSED — these are generic constructors that don't trigger method
+// dispatch on their inner reader/writer; they just wrap into a Future.
+// =============================================================================
+
+@test
+fn regression_read_async_factory_constructs() {
+    let r = empty_reader();
+    let buf: List<Byte> = List.new();
+    let _f = read_async(r, buf);
+}
+
+@test
+fn regression_write_async_factory_constructs() {
+    let w = sink();
+    let buf: List<Byte> = List.new();
+    let _f = write_async(w, buf);
+}
+
+@test
+fn regression_flush_async_factory_constructs() {
+    let w = sink();
+    let _f = flush_async(w);
+}
+
+// =============================================================================
+// §B — Awaiting Future bodies — gated by #io-1
+// =============================================================================
+//
+// AsyncRead::poll_read body calls inner.read which collides. Pinned for
+// future once #io-1 + runtime harness land.
+
+fn main() {}

@@ -1,0 +1,52 @@
+// =============================================================================
+// core-tests/io/mod/unit_test.vr
+// =============================================================================
+//
+// Tests for `core.io.mod` re-exports — verifies the prelude surface
+// of `core.io.*` is reachable and the IoError = StreamError alias holds.
+// =============================================================================
+
+mount core.io.{
+    StreamError, IoError, IoErrorKind, IoResult, SeekFrom,
+};
+
+// =============================================================================
+// Section 1: IoError alias = StreamError
+// =============================================================================
+
+@test
+fn test_io_error_alias_is_stream_error() {
+    // Construct via IoError, observe via StreamError
+    let e: IoError = StreamError.new(IoErrorKind.NotFound);
+    let _: StreamError = e;  // assignment must succeed (alias holds)
+}
+
+@test
+fn test_stream_error_construct_passes_as_io_error() {
+    let e = StreamError.new(IoErrorKind.PermissionDenied);
+    let _ : IoError = e;
+}
+
+// =============================================================================
+// Section 2: io.* re-exports reachable through `core.io.*`
+// =============================================================================
+
+@test
+fn test_io_error_kind_reexported() {
+    let k = IoErrorKind.BrokenPipe;
+    assert(k is BrokenPipe);
+}
+
+@test
+fn test_io_seekfrom_reexported() {
+    let s = SeekFrom.Start(0);
+    assert(s is Start);
+}
+
+@test
+fn test_io_result_reexported() {
+    let r: IoResult<Int> = Ok(7);
+    assert_eq(r.unwrap(), 7);
+}
+
+fn main() {}

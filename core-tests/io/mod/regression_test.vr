@@ -1,0 +1,38 @@
+// =============================================================================
+// core-tests/io/mod/regression_test.vr
+// =============================================================================
+//
+// `core.io.prelude` module re-exports a subset of the io surface; full
+// prelude verification requires `mount core.io.prelude.*` which would
+// pull in additional method-dispatch sites and is gated by #io-1.
+// =============================================================================
+
+mount core.io.{
+    print, println, eprint, eprintln,
+};
+
+// =============================================================================
+// §A — Free print functions reachable through `core.io`
+// =============================================================================
+
+@test
+fn regression_io_print_reachable_via_mod() {
+    print(&Text.from(""));
+}
+
+@test
+fn regression_io_println_reachable_via_mod() {
+    println(&Text.from(""));
+}
+
+@test
+fn regression_io_eprint_reachable_via_mod() {
+    eprint(&Text.from(""));
+}
+
+@test
+fn regression_io_eprintln_reachable_via_mod() {
+    eprintln(&Text.from(""));
+}
+
+fn main() {}

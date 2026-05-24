@@ -1,0 +1,60 @@
+// =============================================================================
+// core-tests/io/async_protocols/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.io.async_protocols`. The protocols themselves are
+// type-shape declarations; structural construction tests for the Future
+// wrappers exercise the data path.
+// =============================================================================
+
+mount core.io.async_protocols.{ReadFuture, WriteFuture, FlushFuture};
+mount core.io.protocols.{EmptyReader, Sink, empty_reader, sink};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: ReadFuture construction
+// =============================================================================
+
+@test
+fn test_read_future_new_with_empty_reader() {
+    let r = empty_reader();
+    let buf: List<Byte> = [0_u8, 0_u8, 0_u8, 0_u8];
+    let _f = ReadFuture.new(r, buf);
+}
+
+@test
+fn test_read_future_new_with_zero_buf() {
+    let r = empty_reader();
+    let buf: List<Byte> = List.new();
+    let _f = ReadFuture.new(r, buf);
+}
+
+// =============================================================================
+// Section 2: WriteFuture construction
+// =============================================================================
+
+@test
+fn test_write_future_new_with_sink() {
+    let w = sink();
+    let buf: List<Byte> = [1_u8, 2_u8, 3_u8];
+    let _f = WriteFuture.new(w, buf);
+}
+
+@test
+fn test_write_future_new_with_zero_buf() {
+    let w = sink();
+    let buf: List<Byte> = List.new();
+    let _f = WriteFuture.new(w, buf);
+}
+
+// =============================================================================
+// Section 3: FlushFuture construction
+// =============================================================================
+
+@test
+fn test_flush_future_new_with_sink() {
+    let w = sink();
+    let _f = FlushFuture.new(w);
+}
+
+fn main() {}
