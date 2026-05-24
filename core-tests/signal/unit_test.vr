@@ -1,0 +1,151 @@
+// =============================================================================
+// core-tests/signal/unit_test.vr
+// =============================================================================
+//
+// Companion files in this directory:
+//   property_test.vr     — algebraic laws over Signal.to_raw mapping
+//                          (injectivity within a target_os, kill always 9
+//                          on Unix, etc.)
+//   audit.md             — implementation audit, drift surfaces, deferrals.
+//
+// The `core.signal` module is the high-level async wrapper around
+// `core.sys.signal.Signal`. Most of its surface is `async fn` that
+// requires a runtime; the testable surface here is the underlying
+// `Signal` enum (18 POSIX signals) and its `to_raw()` mapping
+// to platform-specific signal numbers.
+//
+// Async fns (ctrl_c, signal_stream, on_signal_first, etc.) are tested
+// at the language level via vcs/specs/L2-standard/signal/ — not here.
+// =============================================================================
+
+mount core.sys.signal.{Signal};
+
+// =============================================================================
+// Section 1: Signal variant construction
+// =============================================================================
+
+@test
+fn test_signal_hup_construction() {
+    let s: Signal = Signal.Hup;
+    assert(s is Signal.Hup);
+}
+
+@test
+fn test_signal_int_construction() {
+    let s: Signal = Signal.Int;
+    assert(s is Signal.Int);
+}
+
+@test
+fn test_signal_term_construction() {
+    let s: Signal = Signal.Term;
+    assert(s is Signal.Term);
+}
+
+@test
+fn test_signal_kill_construction() {
+    let s: Signal = Signal.Kill;
+    assert(s is Signal.Kill);
+}
+
+@test
+fn test_signal_usr1_construction() {
+    let s: Signal = Signal.Usr1;
+    assert(s is Signal.Usr1);
+}
+
+@test
+fn test_signal_usr2_construction() {
+    let s: Signal = Signal.Usr2;
+    assert(s is Signal.Usr2);
+}
+
+// =============================================================================
+// Section 2: Signal variants disjoint
+// =============================================================================
+
+@test
+fn test_signals_are_disjoint_int_vs_term() {
+    let int_sig: Signal = Signal.Int;
+    let term_sig: Signal = Signal.Term;
+    assert(!(int_sig is Signal.Term));
+    assert(!(term_sig is Signal.Int));
+}
+
+@test
+fn test_signals_are_disjoint_kill_vs_hup() {
+    let kill_sig: Signal = Signal.Kill;
+    let hup_sig: Signal = Signal.Hup;
+    assert(!(kill_sig is Signal.Hup));
+    assert(!(hup_sig is Signal.Kill));
+}
+
+// =============================================================================
+// Section 3: Signal.to_raw — canonical POSIX numbering
+// =============================================================================
+//
+// On Linux + macOS the to_raw mapping is identical for the canonical
+// signals (Hup=1, Int=2, Quit=3, Ill=4, Abort=6, Fpe=8, Kill=9,
+// Segv=11, Pipe=13, Alarm=14, Term=15). User signals (Usr1/Usr2),
+// child status (Child), continue (Cont), stop (Stop), and terminal
+// stop (Tstp) differ per OS.
+
+@test
+fn test_signal_hup_is_one() {
+    assert_eq(Signal.Hup.to_raw(), 1);
+}
+
+@test
+fn test_signal_int_is_two() {
+    assert_eq(Signal.Int.to_raw(), 2);
+}
+
+@test
+fn test_signal_quit_is_three() {
+    assert_eq(Signal.Quit.to_raw(), 3);
+}
+
+@test
+fn test_signal_ill_is_four() {
+    assert_eq(Signal.Ill.to_raw(), 4);
+}
+
+@test
+fn test_signal_abort_is_six() {
+    assert_eq(Signal.Abort.to_raw(), 6);
+}
+
+@test
+fn test_signal_fpe_is_eight() {
+    assert_eq(Signal.Fpe.to_raw(), 8);
+}
+
+@test
+fn test_signal_kill_is_nine() {
+    assert_eq(Signal.Kill.to_raw(), 9);
+}
+
+@test
+fn test_signal_segv_is_eleven() {
+    assert_eq(Signal.Segv.to_raw(), 11);
+}
+
+@test
+fn test_signal_pipe_is_thirteen() {
+    assert_eq(Signal.Pipe.to_raw(), 13);
+}
+
+@test
+fn test_signal_alarm_is_fourteen() {
+    assert_eq(Signal.Alarm.to_raw(), 14);
+}
+
+@test
+fn test_signal_term_is_fifteen() {
+    assert_eq(Signal.Term.to_raw(), 15);
+}
+
+@test
+fn test_signal_winch_is_twentyeight() {
+    assert_eq(Signal.Winch.to_raw(), 28);
+}

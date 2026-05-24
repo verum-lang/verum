@@ -1,0 +1,120 @@
+// =============================================================================
+// core-tests/signal/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `Signal` + `Signal.to_raw`:
+//
+//   §1  Canonical signal numbers are positive (no 0-valued signal)
+//   §2  Kill (9) is uncatchable across Linux/macOS — pin its number
+//   §3  to_raw distinct for distinct canonical signals
+//   §4  to_raw within POSIX-valid range (1..=31)
+//   §5  Standard signals: SIGINT (2), SIGTERM (15), SIGKILL (9) form
+//       a triple distinct from each other
+// =============================================================================
+
+mount core.sys.signal.{Signal};
+
+// =============================================================================
+// §1 All canonical signal numbers are positive
+// =============================================================================
+
+@test
+fn property_signal_numbers_positive_canonical() {
+    assert(Signal.Hup.to_raw()    > 0);
+    assert(Signal.Int.to_raw()    > 0);
+    assert(Signal.Quit.to_raw()   > 0);
+    assert(Signal.Ill.to_raw()    > 0);
+    assert(Signal.Abort.to_raw()  > 0);
+    assert(Signal.Fpe.to_raw()    > 0);
+    assert(Signal.Kill.to_raw()   > 0);
+    assert(Signal.Segv.to_raw()   > 0);
+    assert(Signal.Pipe.to_raw()   > 0);
+    assert(Signal.Alarm.to_raw()  > 0);
+    assert(Signal.Term.to_raw()   > 0);
+}
+
+// =============================================================================
+// §2 Kill is canonically 9 across Linux + macOS
+// =============================================================================
+
+@test
+fn property_kill_is_canonically_nine() {
+    // Kill is reserved as SIGKILL = 9 across all POSIX systems.
+    // Any divergence would break userland that probes signal numbers
+    // directly (Python's signal.SIGKILL, JVM's Runtime.exec).
+    assert_eq(Signal.Kill.to_raw(), 9);
+}
+
+// =============================================================================
+// §3 to_raw is injective for canonical signals (distinct → distinct)
+// =============================================================================
+
+@test
+fn property_to_raw_injective_canonical_pairs() {
+    // 11×10/2 = 55 distinct pairs on the canonical signals.
+    let canonical_values: [Int; 11] = [
+        Signal.Hup.to_raw(),
+        Signal.Int.to_raw(),
+        Signal.Quit.to_raw(),
+        Signal.Ill.to_raw(),
+        Signal.Abort.to_raw(),
+        Signal.Fpe.to_raw(),
+        Signal.Kill.to_raw(),
+        Signal.Segv.to_raw(),
+        Signal.Pipe.to_raw(),
+        Signal.Alarm.to_raw(),
+        Signal.Term.to_raw(),
+    ];
+    let mut i = 0;
+    while i < 11 {
+        let mut j = i + 1;
+        while j < 11 {
+            assert(canonical_values[i] != canonical_values[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §4 All canonical signal numbers within POSIX-valid range (1..=31)
+// =============================================================================
+
+@test
+fn property_canonical_signals_within_posix_range() {
+    // POSIX defines signals 1..=31 as the real-time-free range; 32+
+    // are SIGRTMIN..SIGRTMAX. Canonical signals must fit in 1..=31.
+    let canonical_values: [Int; 11] = [
+        Signal.Hup.to_raw(),
+        Signal.Int.to_raw(),
+        Signal.Quit.to_raw(),
+        Signal.Ill.to_raw(),
+        Signal.Abort.to_raw(),
+        Signal.Fpe.to_raw(),
+        Signal.Kill.to_raw(),
+        Signal.Segv.to_raw(),
+        Signal.Pipe.to_raw(),
+        Signal.Alarm.to_raw(),
+        Signal.Term.to_raw(),
+    ];
+    let mut i = 0;
+    while i < 11 {
+        assert(canonical_values[i] >= 1);
+        assert(canonical_values[i] <= 31);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §5 Standard shutdown triple is distinct: SIGINT, SIGTERM, SIGKILL
+// =============================================================================
+
+@test
+fn property_shutdown_signal_triple_distinct() {
+    let sigint  = Signal.Int.to_raw();
+    let sigterm = Signal.Term.to_raw();
+    let sigkill = Signal.Kill.to_raw();
+    assert(sigint  != sigterm);
+    assert(sigint  != sigkill);
+    assert(sigterm != sigkill);
+}
