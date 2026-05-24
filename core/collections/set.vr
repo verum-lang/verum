@@ -288,8 +288,8 @@ implement<T: Hash + Eq> Set<T> {
         let mut iter = other.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(val) => {
+                Maybe.None => break,
+                Maybe.Some(val) => {
                     res.insert(val);
                 }
             }
@@ -305,8 +305,8 @@ implement<T: Hash + Eq> Set<T> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(val) => {
+                Maybe.None => break,
+                Maybe.Some(val) => {
                     if other.contains(val) {
                         res.insert(val);
                     }
@@ -324,8 +324,8 @@ implement<T: Hash + Eq> Set<T> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(val) => {
+                Maybe.None => break,
+                Maybe.Some(val) => {
                     if !other.contains(val) {
                         res.insert(val);
                     }
@@ -372,8 +372,8 @@ implement<T: Hash + Eq> Set<T> {
         let mut iter = other.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(val) => {
+                Maybe.None => break,
+                Maybe.Some(val) => {
                     self.insert(val);
                 }
             }
@@ -390,8 +390,8 @@ implement<T: Hash + Eq> Set<T> {
         let mut iter = other.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(val) => {
+                Maybe.None => break,
+                Maybe.Some(val) => {
                     self.remove(val);
                 }
             }
@@ -405,8 +405,8 @@ implement<T: Hash + Eq> Set<T> {
         let mut iter = other.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(val) => {
+                Maybe.None => break,
+                Maybe.Some(val) => {
                     if self.contains(val) {
                         self.remove(val);
                     } else {
