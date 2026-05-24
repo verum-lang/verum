@@ -1,0 +1,70 @@
+// =============================================================================
+// core-tests/io/buffer/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.io.buffer`. Structural-only tests
+// (no method dispatch beyond accessors). See regression_test.vr for the
+// method-call surface gated by task #io-1.
+// =============================================================================
+
+mount core.io.buffer.{
+    DEFAULT_BUF_CAPACITY, MIN_BUF_CAPACITY,
+    BufReader, BufWriter, BufferCursor, FdReader,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 — BufferCursor wraps a List<Byte> and exposes position
+// =============================================================================
+
+@test
+fn integration_buffer_cursor_over_list_byte() {
+    let data: List<Byte> = [1, 2, 3];
+    let c: BufferCursor<List<Byte>> = BufferCursor.new(data);
+    assert_eq(c.position(), 0);
+    let inner = c.into_inner();
+    assert_eq(inner.len(), 3);
+}
+
+// =============================================================================
+// §2 — BufReader composes over a BufferCursor
+// =============================================================================
+
+@test
+fn integration_buf_reader_constructs_over_buffer_cursor() {
+    let cursor = BufferCursor.new(List.new());
+    let reader = BufReader.new(cursor);
+    assert_eq(reader.capacity(), DEFAULT_BUF_CAPACITY);
+}
+
+// =============================================================================
+// §3 — BufWriter composes over a BufferCursor
+// =============================================================================
+
+@test
+fn integration_buf_writer_constructs_over_buffer_cursor() {
+    let cursor = BufferCursor.new(List.new());
+    let writer = BufWriter.new(cursor);
+    assert(writer.capacity() >= MIN_BUF_CAPACITY);
+    assert_eq(writer.buffer_len(), 0);
+}
+
+// =============================================================================
+// §4 — FdReader as a value in a List
+// =============================================================================
+
+@test
+fn integration_fd_reader_in_list() {
+    let readers: List<FdReader> = [
+        FdReader.from_borrowed_fd(0),
+        FdReader.from_borrowed_fd(1),
+        FdReader.from_borrowed_fd(2),
+    ];
+    let mut sum: Int = 0;
+    for r in readers.iter() {
+        sum = sum + r.raw_fd();
+    }
+    assert_eq(sum, 3);
+}
+
+fn main() {}
