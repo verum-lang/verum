@@ -99,3 +99,4 @@ parsing → emit_runtime_globals → LLVM IR), not here.
 | §A.2 | `AsyncSemaphore.new` chain (executor worker-pool semaphore) | task #12 | 1-2d |
 | §B | `mut self` consume-and-return idiom audit across stdlib | upstream | gated on grammar profile review |
 | §C | manifest-bridge end-to-end test from Verum.toml | upstream | build-system layer |
+| §D | FFI symbol intercept lookup gap | **task #8 BLOCKED by #9** (task #47 stage-3 stub cascade) — both attempted runtime-side and codegen-side fixes blocked by post-#47 stub-resolution failures during stdlib precompile | multi-day; depends on #9 close |
