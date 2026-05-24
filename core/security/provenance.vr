@@ -82,7 +82,7 @@ mount encoding.json.{
 };
 mount encoding.jcs.{canonicalize};
 mount encoding.base64.{
-    encode_standard as b64_encode, decode_standard as b64_decode,
+    encode_standard, decode_standard,
 };
 mount encoding.hex.{encode as hex_encode};
 mount time.rfc3339.{Rfc3339Time, now_utc, format_rfc3339, parse_rfc3339};
@@ -498,13 +498,13 @@ pub fn dsse_sign_statement(
     let mut i: Int = 0;
     while i < 64 { sig_bytes.push(sig[i]); i = i + 1; }
     Ok(DsseEnvelope {
-        payload_b64: b64_encode(&payload_bytes),
+        payload_b64: core.encoding.base64.encode_standard(&payload_bytes),
         payload_type: DSSE_PAYLOAD_TYPE_INTOTO.to_text(),
         signatures: {
             let mut sigs: List<DsseSignature> = List.new();
             sigs.push(DsseSignature {
                 keyid: keyid.clone(),
-                sig_b64: b64_encode(&sig_bytes),
+                sig_b64: core.encoding.base64.encode_standard(&sig_bytes),
             });
             sigs
         },
@@ -541,7 +541,7 @@ pub fn dsse_verify_statement(
         return Err(DsseVerifyError.InvalidPayload(
             f"expected {DSSE_PAYLOAD_TYPE_INTOTO}, got {envelope.payload_type}"));
     }
-    let payload_bytes = b64_decode(&envelope.payload_b64)
+    let payload_bytes = core.encoding.base64.decode_standard(&envelope.payload_b64)
         .map_err(|e| DsseVerifyError.DecodeError(f"payload b64: {e}"))?;
     let pae = dsse_pae(&envelope.payload_type, &payload_bytes);
 
@@ -551,7 +551,7 @@ pub fn dsse_verify_statement(
         let sig = &envelope.signatures[i];
         match keys.get(&sig.keyid) {
             Some(pubkey) => {
-                let sig_bytes = b64_decode(&sig.sig_b64)
+                let sig_bytes = core.encoding.base64.decode_standard(&sig.sig_b64)
                     .map_err(|e| DsseVerifyError.DecodeError(f"sig b64: {e}"))?;
                 if sig_bytes.len() == 64 {
                     let mut arr: [Byte; 64] = [0_u8; 64];
