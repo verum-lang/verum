@@ -110,25 +110,30 @@ public type Scope is Singleton | Request | Transient;
 /// ```
 implement Scope {
     fn can_depend_on(&self, dependency: Scope) -> Bool {
+        // Qualify variants `Scope.<Variant>` in match arms to avoid
+        // task #17/#39 bare-name first-wins (Transient collides with
+        // 4 sibling RestartStrategy variants; Request with
+        // `core.net.http.Request`). Pre-fix bare arms silently
+        // mis-dispatched, returning wrong booleans.
         match self {
-            Singleton => match dependency {
-                Singleton => true,
+            Scope.Singleton => match dependency {
+                Scope.Singleton => true,
                 _ => false,
             },
-            Request => match dependency {
-                Singleton => true,
-                Request => true,
+            Scope.Request => match dependency {
+                Scope.Singleton => true,
+                Scope.Request => true,
                 _ => false,
             },
-            Transient => true,
+            Scope.Transient => true,
         }
     }
 
     fn name(&self) -> Text {
         match self {
-            Singleton => "Singleton",
-            Request => "Request",
-            Transient => "Transient",
+            Scope.Singleton => "Singleton",
+            Scope.Request => "Request",
+            Scope.Transient => "Transient",
         }
     }
 
@@ -136,9 +141,9 @@ implement Scope {
     /// Used internally for scope compatibility checks.
     fn rank(&self) -> Int {
         match self {
-            Singleton => 0,
-            Request => 1,
-            Transient => 2,
+            Scope.Singleton => 0,
+            Scope.Request => 1,
+            Scope.Transient => 2,
         }
     }
 }

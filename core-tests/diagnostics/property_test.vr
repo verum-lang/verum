@@ -1,0 +1,133 @@
+// =============================================================================
+// core-tests/diagnostics/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `PanicReport`'s builder pattern:
+//
+//   §1  from_info → has_*() all false  (minimal report carries no extras)
+//   §2  with_thread_name is idempotent on the predicate
+//   §3  with_thread_name overwrites previous value (last-wins)
+//   §4  Display ≡ contains(message)
+//   §5  Debug always includes "PanicReport"
+//   §6  format_panic_context starts with "PanicReport at panic site"
+//   §7  format_panic_context preserves message verbatim
+//   §8  empty-string thread name = no thread name
+// =============================================================================
+
+mount core.diagnostics.{PanicReport, PanicInfo, Location};
+mount core.base.maybe.{Maybe, Some, None};
+
+// -----------------------------------------------------------------------------
+// Helper — fresh PanicInfo (avoid clone-twice in tests).
+// -----------------------------------------------------------------------------
+
+fn fresh_info(msg: Text) -> PanicInfo {
+    PanicInfo {
+        message: msg,
+        location: Maybe.None,
+    }
+}
+
+// =============================================================================
+// §1 from_info: all has_*() return false
+// =============================================================================
+
+@test
+fn property_from_info_predicates_all_false() {
+    let r = PanicReport.from_info(fresh_info("a".clone()));
+    assert(!r.has_task());
+    assert(!r.has_header());
+    assert(!r.has_thread_name());
+    assert(!r.has_call_stack());
+}
+
+// =============================================================================
+// §2 with_thread_name is idempotent on the predicate (calling twice with the
+//    same name doesn't toggle off has_thread_name)
+// =============================================================================
+
+@test
+fn property_with_thread_name_predicate_idempotent() {
+    let r = PanicReport.from_info(fresh_info("a".clone()))
+        .with_thread_name("t".clone())
+        .with_thread_name("t".clone());
+    assert(r.has_thread_name());
+}
+
+// =============================================================================
+// §3 with_thread_name: last call wins
+// =============================================================================
+
+@test
+fn property_with_thread_name_last_wins() {
+    let r = PanicReport.from_info(fresh_info("a".clone()))
+        .with_thread_name("first".clone())
+        .with_thread_name("second".clone());
+    assert_eq(r.thread_name, "second");
+}
+
+// =============================================================================
+// §4 Display contains the message
+// =============================================================================
+
+@test
+fn property_display_contains_message_exhaustive_samples() {
+    let messages: [Text; 4] = [
+        "short".clone(),
+        "longer message with spaces".clone(),
+        "with-dashes-and_underscores".clone(),
+        "numbers123".clone(),
+    ];
+    let mut i = 0;
+    while i < 4 {
+        let r = PanicReport.from_info(fresh_info(messages[i].clone()));
+        let s = f"{r}";
+        assert(s.contains(&messages[i]));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §5 Debug always includes "PanicReport"
+// =============================================================================
+
+@test
+fn property_debug_includes_struct_name() {
+    let r = PanicReport.from_info(fresh_info("any".clone()));
+    let s = f"{r:?}";
+    assert(s.contains("PanicReport"));
+}
+
+// =============================================================================
+// §6 format_panic_context starts with "PanicReport at panic site"
+// =============================================================================
+
+@test
+fn property_format_panic_context_has_canonical_header() {
+    let r = PanicReport.from_info(fresh_info("x".clone()));
+    let s = r.format_panic_context();
+    assert(s.contains("PanicReport at panic site"));
+}
+
+// =============================================================================
+// §7 format_panic_context preserves message verbatim
+// =============================================================================
+
+@test
+fn property_format_panic_context_preserves_message() {
+    let m = "very specific message 47-alpha".clone();
+    let r = PanicReport.from_info(fresh_info(m.clone()));
+    let s = r.format_panic_context();
+    assert(s.contains(&m));
+}
+
+// =============================================================================
+// §8 empty-string thread name → has_thread_name returns false
+// =============================================================================
+
+@test
+fn property_empty_thread_name_is_no_thread_name() {
+    let r = PanicReport.from_info(fresh_info("x".clone()))
+        .with_thread_name("".clone());
+    assert(!r.has_thread_name());
+}

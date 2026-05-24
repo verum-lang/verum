@@ -43,12 +43,17 @@ public type Provider<T> is {
 implement<T: Clone> Provider<T> {
     /// Create a new provider with the given factory function.
     public fn new(factory: fn() -> T) -> Self {
-        Provider { factory: factory, cached: None }
+        // Qualify `Maybe.None` (task #17/#39 workaround). Bare `None`
+        // pre-fix resolved to the wrong sibling-variant (e.g.
+        // `Backend.None` instead of `Maybe.None`), constructing a
+        // record with a corrupted `cached` field. Subsequent
+        // `is_none()` / pattern-match dispatch mis-fires.
+        Provider { factory: factory, cached: Maybe.None }
     }
 
     /// Create an already-resolved provider with a concrete value.
     public fn of(value: T) -> Self {
-        Provider { factory: fn() -> T { panic("Provider.of: already resolved") }, cached: Some(value) }
+        Provider { factory: fn() -> T { panic("Provider.of: already resolved") }, cached: Maybe.Some(value) }
     }
 
     /// Get the provided value, invoking the factory on first access.
@@ -78,15 +83,24 @@ implement<T: Clone> Provider<T> {
     /// Callers needing reference-back without clone should use the
     /// new `get_ref` accessor below.
     public fn get(&mut self) -> T {
-        if self.cached.is_none() {
-            self.cached = Some((self.factory)());
-        }
-        match &self.cached {
-            Some(value) => value.clone(),
-            // Invariant: the `is_none()` guard above just stored
-            // Some(...). Reaching None here is a bug — concurrent
-            // mutation, or factory-stored-None somehow.
-            None => unreachable("Provider::get: self.cached must be Some after the populate-guard ran"),
+        // FUNDAMENTAL: extract via single `match` over qualified
+        // variants `Maybe.Some` / `Maybe.None` instead of the prior
+        // `is_none()` + field-assign + re-match shape that tripped
+        // the `Maybe<T>` field-tracking gap (same class as
+        // `BTreeMap.get` at `btree.vr:200`). Pre-fix symptom:
+        // `Unreachable { pc: 80 }` from the unreachable arm firing
+        // even though the line above just stored Some.
+        //
+        // Bare `Some` / `None` resolved to the wrong sibling-variant
+        // under task #17/#39 bare-name first-wins; `Maybe.Some` /
+        // `Maybe.None` is type-anchored and routes correctly.
+        match self.cached.clone() {
+            Maybe.Some(value) => value,
+            Maybe.None => {
+                let v = (self.factory)();
+                self.cached = Maybe.Some(v.clone());
+                v
+            },
         }
     }
 
@@ -100,27 +114,33 @@ implement<T: Clone> Provider<T> {
     /// reference's lifetime is tied to `&mut self` — callers can hold
     /// it only while no other call mutates the provider.
     public fn get_ref(&mut self) -> &T {
-        if self.cached.is_none() {
-            self.cached = Some((self.factory)());
-        }
+        // Same Maybe<T> field-tracking gap as `get` above — populate
+        // via qualified-variant match-extract single-pass. Bare
+        // `Some/None` patterns mis-resolve under task #17/#39.
+        match self.cached {
+            Maybe.Some(_) => {},
+            Maybe.None => {
+                self.cached = Maybe.Some((self.factory)());
+            },
+        };
         match &self.cached {
-            Some(value) => value,
-            // See `get` above — same invariant.
-            None => unreachable("Provider::get_ref: self.cached must be Some after the populate-guard ran"),
+            Maybe.Some(value) => value,
+            Maybe.None => unreachable("Provider::get_ref: self.cached must be Some after the populate match"),
         }
     }
 
     /// Returns true if the provider has already produced a value.
     public fn is_resolved(&self) -> Bool {
+        // Qualify `Maybe.Some`/`Maybe.None` (task #17/#39 workaround).
         match self.cached {
-            Some(_) => true,
-            None => false,
+            Maybe.Some(_) => true,
+            Maybe.None => false,
         }
     }
 
     /// Reset the provider, forcing re-evaluation on next access.
     public fn reset(&mut self) {
-        self.cached = None;
+        self.cached = Maybe.None;
     }
 }
 
