@@ -219,6 +219,24 @@ pub struct VbcModule {
     /// user scripts that import nothing).
     #[serde(default)]
     pub external_function_names: Vec<(FunctionId, StringId)>,
+
+    /// Mount-rename alias table — Phase 1 of task #11 fundamental fix
+    /// (see `internal/specs/task11-mount-alias-aot-fix.md`).
+    ///
+    /// Each entry records a `mount X.{NAME as ALIAS}` rename that the
+    /// module declared via a top-level `MountDecl`.  At precompile time
+    /// `register_import_aliases` resolves `X.NAME` to its canonical
+    /// FunctionId; this table preserves the `ALIAS → FunctionId` pair
+    /// across the archive boundary so the user-side AOT loader can
+    /// re-establish the alias in `ctx.functions` before re-compiling
+    /// any function body from this module.
+    ///
+    /// Carries `(alias-name StringId, canonical-FunctionId)`.  Empty
+    /// when the module declares no mount-rename aliases.  Loader-side
+    /// consumer: `crates/verum_compiler/src/archive_ctx_loader.rs::
+    /// apply_lazy_with_types` (planned).
+    #[serde(default)]
+    pub mount_aliases: Vec<(StringId, FunctionId)>,
 }
 
 impl Default for VbcModule {
@@ -277,6 +295,7 @@ impl VbcModule {
             framework_provenance: FrameworkProvenance::default(),
             discharge_receipts: Vec::new(),
             external_function_names: Vec::new(),
+            mount_aliases: Vec::new(),
         }
     }
 
