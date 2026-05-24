@@ -96,16 +96,17 @@ public type EntryType is
     | PaxGlobalHeader;         // ʼgʼ — applies to ALL subsequent entries
 
 public fn entry_type_byte(t: &EntryType) -> Byte {
+    // Qualify variants (task #17/#39 workaround).
     match t {
-        RegularFile        => 0x30_u8,  // '0'
-        Directory          => 0x35_u8,  // '5'
-        Symlink(_)         => 0x32_u8,  // '2'
-        Hardlink(_)        => 0x31_u8,  // '1'
-        CharDevice         => 0x33_u8,  // '3'
-        BlockDevice        => 0x34_u8,  // '4'
-        Fifo               => 0x36_u8,  // '6'
-        PaxExtendedHeader  => 0x78_u8,  // 'x'
-        PaxGlobalHeader    => 0x67_u8,  // 'g'
+        EntryType.RegularFile        => 0x30_u8,  // '0'
+        EntryType.Directory          => 0x35_u8,  // '5'
+        EntryType.Symlink(_)         => 0x32_u8,  // '2'
+        EntryType.Hardlink(_)        => 0x31_u8,  // '1'
+        EntryType.CharDevice         => 0x33_u8,  // '3'
+        EntryType.BlockDevice        => 0x34_u8,  // '4'
+        EntryType.Fifo               => 0x36_u8,  // '6'
+        EntryType.PaxExtendedHeader  => 0x78_u8,  // 'x'
+        EntryType.PaxGlobalHeader    => 0x67_u8,  // 'g'
     }
 }
 

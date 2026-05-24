@@ -1,0 +1,243 @@
+// =============================================================================
+// core-tests/archive/tar/unit_test.vr
+// =============================================================================
+//
+// `core/archive/tar.vr` defines POSIX/USTAR/PAX tar archive types:
+//   * EntryType 9-variant (RegularFile/Directory/Symlink/Hardlink/
+//     CharDevice/BlockDevice/Fifo/PaxExtendedHeader/PaxGlobalHeader)
+//   * TarEntry record with path/mode/uid/gid/size/mtime/entry_type/
+//     uname/gname/content
+//   * TarError 9-variant
+//   * entry_for_file / entry_for_directory / entry_for_symlink ctors
+//   * entry_type_byte mapping to USTAR typeflag bytes
+// =============================================================================
+
+mount core.archive.tar.{
+    EntryType, TarEntry, TarError, entry_type_byte,
+    entry_for_file, entry_for_directory, entry_for_symlink,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: EntryType 9-variant construction
+// =============================================================================
+
+@test
+fn test_entry_type_regular_file() {
+    let t: EntryType = EntryType.RegularFile;
+    assert(t is EntryType.RegularFile);
+}
+
+@test
+fn test_entry_type_directory() {
+    let t: EntryType = EntryType.Directory;
+    assert(t is EntryType.Directory);
+}
+
+@test
+fn test_entry_type_symlink_with_target() {
+    let t: EntryType = EntryType.Symlink("/path/to/target".clone());
+    assert(t is EntryType.Symlink);
+}
+
+@test
+fn test_entry_type_hardlink_with_target() {
+    let t: EntryType = EntryType.Hardlink("original.txt".clone());
+    assert(t is EntryType.Hardlink);
+}
+
+@test
+fn test_entry_type_char_device() {
+    let t: EntryType = EntryType.CharDevice;
+    assert(t is EntryType.CharDevice);
+}
+
+@test
+fn test_entry_type_block_device() {
+    let t: EntryType = EntryType.BlockDevice;
+    assert(t is EntryType.BlockDevice);
+}
+
+@test
+fn test_entry_type_fifo() {
+    let t: EntryType = EntryType.Fifo;
+    assert(t is EntryType.Fifo);
+}
+
+@test
+fn test_entry_type_pax_extended_header() {
+    let t: EntryType = EntryType.PaxExtendedHeader;
+    assert(t is EntryType.PaxExtendedHeader);
+}
+
+@test
+fn test_entry_type_pax_global_header() {
+    let t: EntryType = EntryType.PaxGlobalHeader;
+    assert(t is EntryType.PaxGlobalHeader);
+}
+
+// =============================================================================
+// Section 2: entry_type_byte — canonical USTAR typeflag mapping
+// =============================================================================
+
+@test
+fn test_entry_type_byte_regular_file_is_30() {
+    // '0' = 0x30
+    assert_eq(entry_type_byte(&EntryType.RegularFile), 0x30_u8);
+}
+
+@test
+fn test_entry_type_byte_directory_is_35() {
+    // '5' = 0x35
+    assert_eq(entry_type_byte(&EntryType.Directory), 0x35_u8);
+}
+
+@test
+fn test_entry_type_byte_symlink_is_32() {
+    // '2' = 0x32
+    assert_eq(entry_type_byte(&EntryType.Symlink("x".clone())), 0x32_u8);
+}
+
+@test
+fn test_entry_type_byte_hardlink_is_31() {
+    // '1' = 0x31
+    assert_eq(entry_type_byte(&EntryType.Hardlink("x".clone())), 0x31_u8);
+}
+
+@test
+fn test_entry_type_byte_char_device_is_33() {
+    // '3' = 0x33
+    assert_eq(entry_type_byte(&EntryType.CharDevice), 0x33_u8);
+}
+
+@test
+fn test_entry_type_byte_block_device_is_34() {
+    // '4' = 0x34
+    assert_eq(entry_type_byte(&EntryType.BlockDevice), 0x34_u8);
+}
+
+@test
+fn test_entry_type_byte_fifo_is_36() {
+    // '6' = 0x36
+    assert_eq(entry_type_byte(&EntryType.Fifo), 0x36_u8);
+}
+
+@test
+fn test_entry_type_byte_pax_extended_is_x() {
+    // 'x' = 0x78
+    assert_eq(entry_type_byte(&EntryType.PaxExtendedHeader), 0x78_u8);
+}
+
+@test
+fn test_entry_type_byte_pax_global_is_g() {
+    // 'g' = 0x67
+    assert_eq(entry_type_byte(&EntryType.PaxGlobalHeader), 0x67_u8);
+}
+
+// =============================================================================
+// Section 3: TarError 9-variant
+// =============================================================================
+
+@test
+fn test_tar_error_truncated_archive() {
+    let e: TarError = TarError.TruncatedArchive;
+    assert(e is TarError.TruncatedArchive);
+}
+
+@test
+fn test_tar_error_bad_magic() {
+    let e: TarError = TarError.BadMagic;
+    assert(e is TarError.BadMagic);
+}
+
+@test
+fn test_tar_error_invalid_numeric() {
+    let e: TarError = TarError.InvalidNumeric("size".clone());
+    assert(e is TarError.InvalidNumeric);
+}
+
+@test
+fn test_tar_error_invalid_checksum() {
+    let e: TarError = TarError.InvalidChecksum;
+    assert(e is TarError.InvalidChecksum);
+}
+
+@test
+fn test_tar_error_unsupported_typeflag() {
+    let e: TarError = TarError.UnsupportedTypeflag(0xFF_u8);
+    assert(e is TarError.UnsupportedTypeflag);
+}
+
+@test
+fn test_tar_error_name_too_long() {
+    let e: TarError = TarError.NameTooLong;
+    assert(e is TarError.NameTooLong);
+}
+
+@test
+fn test_tar_error_pax_parse_error() {
+    let e: TarError = TarError.PaxParseError("bad PAX hdr".clone());
+    assert(e is TarError.PaxParseError);
+}
+
+@test
+fn test_tar_error_invalid_utf8() {
+    let e: TarError = TarError.InvalidUtf8;
+    assert(e is TarError.InvalidUtf8);
+}
+
+@test
+fn test_tar_error_unexpected_eof() {
+    let e: TarError = TarError.UnexpectedEof;
+    assert(e is TarError.UnexpectedEof);
+}
+
+// =============================================================================
+// Section 4: entry_for_file constructor
+// =============================================================================
+
+@test
+fn test_entry_for_file_basic() {
+    let content: List<Byte> = [0x68_u8, 0x69_u8, 0x0A_u8]; // "hi\n"
+    let e = entry_for_file("file.txt".clone(), content, 0o644, 1_700_000_000);
+    assert_eq(e.path, "file.txt");
+    assert_eq(e.mode, 0o644);
+    assert_eq(e.mtime, 1_700_000_000);
+    assert(e.entry_type is EntryType.RegularFile);
+}
+
+@test
+fn test_entry_for_file_size_matches_content_length() {
+    let content: List<Byte> = [0_u8, 1_u8, 2_u8, 3_u8, 4_u8];
+    let e = entry_for_file("data.bin".clone(), content, 0o600, 0);
+    assert_eq(e.size, 5);
+}
+
+// =============================================================================
+// Section 5: entry_for_directory constructor
+// =============================================================================
+
+@test
+fn test_entry_for_directory_basic() {
+    let e = entry_for_directory("docs/".clone(), 0o755, 1_700_000_000);
+    assert_eq(e.path, "docs/");
+    assert_eq(e.mode, 0o755);
+    assert(e.entry_type is EntryType.Directory);
+}
+
+@test
+fn test_entry_for_directory_zero_size() {
+    let e = entry_for_directory("empty/".clone(), 0o755, 0);
+    assert_eq(e.size, 0);
+}
+
+// =============================================================================
+// Section 6: entry_for_symlink constructor
+// =============================================================================
+
+@test
+fn test_entry_for_symlink_basic() {
+    let e = entry_for_symlink("link".clone(), "target/file.txt".clone(), 1_700_000_000);
+    assert_eq(e.path, "link");
+    assert(e.entry_type is EntryType.Symlink);
+}
