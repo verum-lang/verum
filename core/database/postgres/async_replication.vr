@@ -413,7 +413,9 @@ public async fn connect_replication_async(
     let rtt_samples_for_actor = rtt_samples.clone();
 
     let join = spawn_blocking(move || -> () {
-        run_actor(
+        // Fully-qualified — bare `run_actor` collides with 2-arg
+        // sibling in async_connection.vr (task #11 defect class).
+        core.database.postgres.async_replication.run_actor(
             conn, cmd_rx, status_rx, msg_tx,
             rtt_estimate_for_actor, rtt_samples_for_actor,
         );
