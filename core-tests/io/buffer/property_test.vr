@@ -1,0 +1,87 @@
+// =============================================================================
+// core-tests/io/buffer/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.io.buffer`. Most properties require method
+// dispatch (read/write/seek), which is gated by task #io-1. Properties
+// here exercise the structural invariants that work cross-tier.
+// =============================================================================
+
+mount core.io.buffer.{
+    DEFAULT_BUF_CAPACITY, MIN_BUF_CAPACITY,
+    BufReader, BufWriter, BufferCursor, Cursor,
+    FdReader,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — BufReader.with_capacity always satisfies cap >= MIN_BUF_CAPACITY
+// =============================================================================
+
+@test
+fn law_buf_reader_capacity_min_clamp_exhaustive() {
+    let small_caps: List<Int> = [0, 1, 16, 32, 63, MIN_BUF_CAPACITY];
+    for c in small_caps.iter() {
+        let inner: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
+        let r = BufReader.with_capacity(*c, inner);
+        assert(r.capacity() >= MIN_BUF_CAPACITY);
+    }
+}
+
+@test
+fn law_buf_reader_capacity_above_min_preserved() {
+    let big_caps: List<Int> = [64, 128, 1024, 4096, 8192, 16384, 65536];
+    for c in big_caps.iter() {
+        let inner: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
+        let r = BufReader.with_capacity(*c, inner);
+        assert_eq(r.capacity(), *c);
+    }
+}
+
+// =============================================================================
+// §B — BufferCursor: position is preserved across set_position
+// =============================================================================
+
+@test
+fn law_buffer_cursor_position_round_trip() {
+    let positions: List<Int> = [-100, -1, 0, 1, 10, 100, 1000];
+    for p in positions.iter() {
+        let mut c: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
+        c.set_position(*p);
+        assert_eq(c.position(), *p);
+    }
+}
+
+// =============================================================================
+// §C — FdReader.raw_fd is identity for both construction modes
+// =============================================================================
+
+@test
+fn law_fd_reader_raw_fd_identity_exhaustive() {
+    let fds: List<Int> = [-1, 0, 1, 2, 3, 100, 1024];
+    for fd in fds.iter() {
+        let r1 = FdReader.from_borrowed_fd(*fd);
+        let r2 = FdReader.from_owned_fd(*fd);
+        assert_eq(r1.raw_fd(), *fd);
+        assert_eq(r2.raw_fd(), *fd);
+    }
+}
+
+// =============================================================================
+// §D — Constants relationship
+// =============================================================================
+
+@test
+fn law_default_buf_capacity_is_power_of_two() {
+    let cap = DEFAULT_BUF_CAPACITY;
+    // Power of 2: cap & (cap - 1) == 0
+    assert_eq(cap & (cap - 1), 0);
+}
+
+@test
+fn law_min_buf_capacity_is_power_of_two() {
+    let cap = MIN_BUF_CAPACITY;
+    assert_eq(cap & (cap - 1), 0);
+}
+
+fn main() {}

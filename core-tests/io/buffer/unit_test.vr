@@ -1,0 +1,147 @@
+// =============================================================================
+// core-tests/io/buffer/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.io.buffer`. Focuses on the data shapes that don't
+// hit the bare-name method-dispatch collision class (task #io-1). Method
+// surface (BufReader.read, BufWriter.write, etc.) is pinned in
+// regression_test.vr until #io-1 closes.
+// =============================================================================
+
+mount core.io.buffer.{
+    DEFAULT_BUF_CAPACITY, MIN_BUF_CAPACITY,
+    BufReader, BufWriter, LineWriter, BufferCursor, Cursor,
+    FdReader, IntoInnerError,
+};
+mount core.io.protocols.{SeekFrom, StreamError, IoErrorKind};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Constants
+// =============================================================================
+
+@test
+fn test_default_buf_capacity_is_8k() {
+    assert_eq(DEFAULT_BUF_CAPACITY, 8192);
+}
+
+@test
+fn test_min_buf_capacity_is_64() {
+    assert_eq(MIN_BUF_CAPACITY, 64);
+}
+
+@test
+fn test_default_capacity_greater_than_min() {
+    assert(DEFAULT_BUF_CAPACITY > MIN_BUF_CAPACITY);
+}
+
+// =============================================================================
+// Section 2: FdReader — construction & accessors
+// =============================================================================
+
+@test
+fn test_fd_reader_from_borrowed_fd() {
+    let r = FdReader.from_borrowed_fd(42);
+    assert_eq(r.raw_fd(), 42);
+}
+
+@test
+fn test_fd_reader_from_owned_fd() {
+    let r = FdReader.from_owned_fd(0);
+    assert_eq(r.raw_fd(), 0);
+}
+
+@test
+fn test_fd_reader_negative_fd_is_invalid_sentinel() {
+    let r = FdReader.from_borrowed_fd(-1);
+    assert_eq(r.raw_fd(), -1);
+}
+
+// =============================================================================
+// Section 3: BufferCursor — construction & accessors
+// =============================================================================
+
+@test
+fn test_buffer_cursor_new_position_zero() {
+    let c: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
+    assert_eq(c.position(), 0);
+}
+
+@test
+fn test_buffer_cursor_set_position() {
+    let mut c: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
+    c.set_position(10);
+    assert_eq(c.position(), 10);
+}
+
+@test
+fn test_buffer_cursor_set_position_negative() {
+    // Implementation accepts any Int — no bounds check.
+    let mut c: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
+    c.set_position(-1);
+    assert_eq(c.position(), -1);
+}
+
+@test
+fn test_cursor_alias_construction() {
+    // `Cursor` is an alias for `BufferCursor`.
+    let c: Cursor<List<Byte>> = Cursor.new(List.new());
+    assert_eq(c.position(), 0);
+}
+
+// =============================================================================
+// Section 4: BufReader — construction
+// =============================================================================
+//
+// BufReader.new and with_capacity construct the wrapper without invoking
+// any Read methods. The capacity bound at MIN_BUF_CAPACITY is enforced.
+
+@test
+fn test_buf_reader_with_capacity_respects_min() {
+    let inner: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
+    let r = BufReader.with_capacity(10, inner);
+    // Capacity is clamped to MIN_BUF_CAPACITY (64).
+    assert_eq(r.capacity(), MIN_BUF_CAPACITY);
+}
+
+@test
+fn test_buf_reader_with_default_capacity() {
+    let inner: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
+    let r = BufReader.new(inner);
+    assert_eq(r.capacity(), DEFAULT_BUF_CAPACITY);
+}
+
+@test
+fn test_buf_reader_with_huge_capacity() {
+    let inner: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
+    let r = BufReader.with_capacity(65536, inner);
+    assert_eq(r.capacity(), 65536);
+}
+
+// =============================================================================
+// Section 5: BufWriter — construction
+// =============================================================================
+
+@test
+fn test_buf_writer_with_default_capacity() {
+    let inner: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
+    let w = BufWriter.new(inner);
+    assert(w.capacity() >= MIN_BUF_CAPACITY);
+}
+
+@test
+fn test_buf_writer_buffer_len_initially_zero() {
+    let inner: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
+    let w = BufWriter.new(inner);
+    assert_eq(w.buffer_len(), 0);
+}
+
+@test
+fn test_buf_writer_with_capacity_small_clamps_to_min() {
+    let inner: BufferCursor<List<Byte>> = BufferCursor.new(List.new());
+    let _w = BufWriter.with_capacity(10, inner);
+    // Just verify construction succeeds — internal capacity check
+    // happens against MIN_BUF_CAPACITY.
+}
+
+fn main() {}

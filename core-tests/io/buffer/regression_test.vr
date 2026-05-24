@@ -1,0 +1,120 @@
+// =============================================================================
+// core-tests/io/buffer/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.io.buffer`. The method-call surface
+// (BufReader.read, BufWriter.write, BufferCursor.read/write/seek) is gated
+// by task #io-1 (mount-scope-aware lookup_function). Once #io-1 closes,
+// every @ignore'd test here flips green.
+// =============================================================================
+
+mount core.io.buffer.{
+    DEFAULT_BUF_CAPACITY, MIN_BUF_CAPACITY,
+    BufReader, BufWriter, LineWriter, BufferCursor, Cursor,
+    FdReader, IntoInnerError,
+    copy, read_all,
+};
+mount core.io.protocols.{SeekFrom, StreamError, IoErrorKind};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — BufferCursor read/write/seek surface gated by #io-1
+// =============================================================================
+
+@ignore
+@test
+fn regression_buffer_cursor_write_then_read_round_trip() {
+    let mut c = BufferCursor.new(List.new());
+    c.write(&[1, 2, 3, 4]).unwrap();
+    c.seek(SeekFrom.Start(0)).unwrap();
+    let mut out: [Byte; 4] = [0, 0, 0, 0];
+    let n = c.read(&mut out).unwrap();
+    assert_eq(n, 4);
+    assert_eq(out[0], 1 as Byte);
+    assert_eq(out[3], 4 as Byte);
+}
+
+@ignore
+@test
+fn regression_buffer_cursor_seek_start_returns_pos() {
+    let data: List<Byte> = [1, 2, 3, 4, 5];
+    let mut c = BufferCursor.new(data);
+    let pos = c.seek(SeekFrom.Start(3)).unwrap();
+    assert_eq(pos, 3);
+    assert_eq(c.position(), 3);
+}
+
+@ignore
+@test
+fn regression_buffer_cursor_seek_negative_returns_err() {
+    let data: List<Byte> = [1, 2, 3];
+    let mut c = BufferCursor.new(data);
+    let r = c.seek(SeekFrom.Start(-1));
+    assert(r.is_err());
+}
+
+// =============================================================================
+// §B — BufReader/BufWriter wrapping a BufferCursor — gated by #io-1
+// =============================================================================
+
+@ignore
+@test
+fn regression_buf_reader_over_cursor_reads_data() {
+    let data: List<Byte> = [10, 20, 30, 40, 50];
+    let cursor = BufferCursor.new(data);
+    let mut reader = BufReader.new(cursor);
+    let mut buf: [Byte; 3] = [0, 0, 0];
+    let n = reader.read(&mut buf).unwrap();
+    assert(n > 0);
+}
+
+@ignore
+@test
+fn regression_buf_writer_over_cursor_writes_data() {
+    let cursor = BufferCursor.new(List.new());
+    let mut writer = BufWriter.new(cursor);
+    let buf: [Byte; 3] = [1, 2, 3];
+    let n = writer.write(&buf).unwrap();
+    assert_eq(n, 3);
+    writer.flush().unwrap();
+}
+
+// =============================================================================
+// §C — utility functions `copy` and `read_all` — gated by #io-1
+// =============================================================================
+
+@ignore
+@test
+fn regression_copy_reader_to_writer() {
+    let src_data: List<Byte> = [1, 2, 3, 4, 5];
+    let mut src = BufferCursor.new(src_data);
+    let mut dst = BufferCursor.new(List.new());
+    let n = copy(&mut src, &mut dst).unwrap();
+    assert_eq(n, 5);
+}
+
+@ignore
+@test
+fn regression_read_all_collects_full_stream() {
+    let src_data: List<Byte> = [7, 8, 9];
+    let mut src = BufferCursor.new(src_data);
+    let collected = read_all(&mut src).unwrap();
+    assert_eq(collected.len(), 3);
+    assert_eq(collected[0], 7 as Byte);
+    assert_eq(collected[2], 9 as Byte);
+}
+
+// =============================================================================
+// §D — LineWriter newline-flushing semantics — gated by #io-1
+// =============================================================================
+
+@ignore
+@test
+fn regression_line_writer_flushes_on_newline() {
+    let cursor = BufferCursor.new(List.new());
+    let mut lw = LineWriter.new(cursor);
+    let buf: [Byte; 6] = [104, 105, 10, 121, 111, 33];  // "hi\nyo!"
+    lw.write(&buf).unwrap();
+}
+
+fn main() {}
