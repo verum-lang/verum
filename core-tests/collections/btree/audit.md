@@ -11,52 +11,94 @@ populated BTreeMap panics with
   "field access out of bounds: field index 0 (offset 0+8 = 8)
    exceeds object data size 0".
 
-### Re-diagnosis 2026-05-23
+### Re-diagnosis 2026-05-23 + 2026-05-24
 
-The original audit attributed this to the same architectural class as
-the closed `List` / `Map` layout drift (stdlib `type X is { ... }`
-field order mismatching the runtime intercept allocation).  That
-framing is **not** accurate for BTreeMap — there is NO Rust-side
-runtime intercept for BTreeMap construction or field access (only the
-iterator-wrapper types `BTreeMapIter` / `BTreeMapKeys` / `BTreeMapRange`
-appear in `crates/verum_vbc/src/interpreter/dispatch_table/handlers/
-method_dispatch.rs:2381`).  So this isn't layout drift between two
-authorities — it's a pure codegen + runtime SetF defect.
+**Dual-defect** — investigation surfaced two distinct architectural
+defects, both inside the `Maybe<Heap<T>>` value-shape chain.  Closing
+either one in isolation surfaces the other; both must be closed
+together to make BTreeMap functional.
 
-Minimal reproduction:
+#### Defect (a) — type-inference loss in `.as_ref()` / `.as_mut()`
+
+`Maybe<Heap<T>>.as_ref()` returns `Maybe<&Heap<T>>` syntactically,
+but the codegen's type-inference loses the inner `T` parameter
+through the `.expect(...)` unwrap.  Subsequent field access on the
+resulting `&Heap<T>` mis-resolves through `resolve_field_index`'s
+scan-all-types fallback, landing on a wrong type's field layout.
+
+Minimal reproduction (no stdlib involvement):
+
+```verum
+type GenericNode<K: Ord, V> is { keys: List<K>, values: List<V>, is_leaf: Bool };
+type Container<K: Ord, V> is { root: Maybe<Heap<GenericNode<K, V>>> };
+implement<K: Ord, V> Container<K, V> {
+    fn populate(&mut self) {
+        self.root = Some(Heap.new(GenericNode { keys: [], values: [], is_leaf: true }));
+    }
+    fn root_leaf(&self) -> Bool {
+        let r = self.root.as_ref().expect("some");
+        r.is_leaf   // ← panics: field access OOB, data size 0
+    }
+}
+```
+
+Same code with `match &self.root { Some(heap) => heap.is_leaf, ... }`
+works correctly — match-destructure preserves the inner type binding.
+
+#### Defect (b) — `Heap.new(node)` value-loss for generic record args
+
+Refactoring `btree.vr`'s `.as_mut().expect(...)` sites to
+`match &mut self.root { Some(root_ref) => ..., None => ... }` (the
+workaround for defect (a)) made `insert` no longer panic — but
+surfaced defect (b): the inserted key/value pair is silently lost.
+`m.len()` reports 1 after insert; `m.contains_key(&1)` returns
+`false`; `m.get(&1)` returns `None`.
+
+Reproduction post-workaround:
 
 ```verum
 let mut m: BTreeMap<Int,Int> = BTreeMap.new();
-m.insert(1, 100);   // ← succeeds
-m.get(&1);          // ← panics: field index 0 (offset 0+8 = 8)
-                    //   exceeds object data size 0
+m.insert(1, 100);
+m.len();             // ← 1 (correct)
+m.contains_key(&1);  // ← false (WRONG — should be true)
 ```
 
-The `BTreeMap.new()` returns a fresh 2-field record `{ root: None,
-len: 0 }` via standard `MakeRecord` (no intercept).  The `insert`
-body at `core/collections/btree.vr:200` writes
-`self.root = Some(Heap.new(node))` via `SetF` — and *that write*
-somehow corrupts the BTreeMap record's storage so the subsequent
-`self.root` read sees object data size 0.
+The chain is `BTreeNode.new_leaf()` → `node.keys.push(key)` →
+`Heap.new(node)` → `self.root = Some(...)`.  After this sequence,
+the wrapped node accessible through `self.root` does not contain
+the pushed keys.  `Heap.new(node)` appears to wrap a value that
+lost its mutations across the generic-argument boundary.
 
-The `Maybe<Heap<BTreeNode<K,V>>>` field type is the suspicious
-shape — a 2-field record (Maybe variant + Heap wrapper) holding a
-nested-Heap value.  No other BTreeMap field assignment fails (the
-`self.len = 1` write at `btree.vr:201` is fine because Int is a
-scalar that fits a single record slot).
+### Workaround NOT viable
+
+Refactoring to `match`-extract patterns (the obvious workaround
+for defect (a)) was attempted on 2026-05-24 and reverted because
+it surfaces defect (b), turning a loud panic into silent data
+loss.  Two-defect interaction means surface-level stdlib refactors
+won't close the class.
 
 ### Fix paths
 
-1. **Audit `SetF` for nested-Heap fields** — find the codegen +
-   runtime arm that writes a `Maybe<Heap<T>>` value into a record
-   field and see where the size-0 reset comes from.  Likely a
-   record-allocation slot-count miscount where `Maybe<Heap<T>>` is
-   treated as a 0-byte type (or perhaps a header-size confusion).
+1. **(a)** Type-inference: trace `.as_ref()` / `.as_mut()` on
+   `Maybe<Heap<T>>` through the typechecker.  The inner `T` should
+   propagate through `.expect(...)` so subsequent field access
+   resolves to the right field layout.  Likely in
+   `verum_types/src/infer/expr.rs`'s MethodCall arm or
+   `extract_expr_type_name` for chained `.expect()`.
 
-2. **Add explicit BTreeMap runtime intercept** — mirror the
+2. **(b)** `Heap.new(node)` value preservation: trace how the
+   generic argument's value is captured.  The runtime intercept
+   at `interpreter/dispatch_table/handlers/method_dispatch.rs:
+   1091-1163` allocates a CBGR slot and stores `value` (the node
+   pointer).  If the node was modified post-creation but before
+   the Heap.new call, the modifications might be on a different
+   register / freshly-allocated slot than what Heap.new captures.
+
+3. **Add explicit BTreeMap runtime intercept** — mirror the
    `MakeRecord` discipline used for `List`/`Map` and stamp a
-   known-good 2-slot allocation for BTreeMap on construction.
-   Sidesteps the generic SetF defect for this specific record shape.
+   known-good 2-slot allocation for BTreeMap on construction,
+   sidestepping the entire `Maybe<Heap<T>>` chain at runtime.
+   Heaviest but most contained fix.
 
 Working surface today: only the empty-state surface (new, get on
 absent key, contains_key absent, remove absent, get_or_default on

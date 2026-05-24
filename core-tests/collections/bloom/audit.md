@@ -8,14 +8,22 @@ approximated from a small table.
 
 ## Status
 
-**regression-only** — Every BloomFilter constructor routes through
-`fill_secure(&mut key[..])` from `core.security.util.rng`.  The
-cross-module dispatch fails at archive load time — not because the
-underlying CSPRNG intrinsic is missing, but because of a fundamental
-gap in the VBC bytecode format (see "Re-diagnosis 2026-05-23" below).
+**partial** — All 4 non-`@ignore`'d regressions green (`new`,
+`with_target`, `with_defaults`, `try_with_target`).  The 4
+`@ignore`'d §B pins are gated on a SEPARATE defect class
+(HMAC-SHA256 internal `[Byte; 64]` IndexOutOfBounds), not the
+cross-module dispatch defect that was the original blocker.
 
-Failure surface — every constructor (`new`, `with_target`,
-`with_defaults`, `try_new`, `try_with_target`) panics with:
+**Task #47 CLOSED 2026-05-24** — cross-module Call name-encoding
+via stage-3 stub pre-register + finalize-time
+`emit_missing_stub_descriptors_with_callm(false)` descriptor
+synthesis.  `BloomFilter.try_new`'s body now compiles cleanly
+without panic-stub; at archive load, `ArchiveBodyRemap`'s Tier-2b
+name fallback resolves the cross-module `Call(stub_id)` to the
+real `core.sys.common.random_bytes` user-side FunctionId.
+
+Original pre-fix failure surface (preserved for historical
+context):
 
 ```
 [lenient] BloomFilter.try_new compiled to panic-stub:

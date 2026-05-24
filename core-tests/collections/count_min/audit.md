@@ -5,22 +5,18 @@ sketch (Cormode-Muthukrishnan 2005).  HMAC-SHA256 keyed.
 
 ## Status
 
-**regression-only** — Construction gated on the cross-module Call
-defect class shared with Bloom + HyperLogLog + AliasSampler.
-Working surface: `CountMinError` variant construction and pattern-
-match — 1 unit + 1 property + 1 integration + 5 regressions (1
-PASS-GUARD + 4 @ignore'd construction-gated pins).
+**partial** — 6/8 green on `--interp` (2 `@ignore`'d for
+`add_increments_total` / `estimate_non_negative` populated-state
+semantic, separate defect class — likely the same HMAC-SHA256
+`[Byte; 64]` IndexOutOfBounds that gates Bloom §B).
 
-### Re-diagnosis 2026-05-23
-
-The blocker is NOT a missing CSPRNG intrinsic.  The cross-module
-`mount core.security.util.rng.{fill_secure};` chain hits a topo-
-sort gap; same root cause as Bloom — full analysis at
-`core-tests/collections/bloom/audit.md`.
+**Task #47 CLOSED 2026-05-24** — cross-module Call name-encoding
+via stage-3 stub pre-register + finalize-time descriptor synthesis.
+Full root-cause analysis at `core-tests/collections/bloom/audit.md`.
+All CountMinSketch construction tests + CountMinError variant
+algebra now green.
 
 ## Action items
 
-* **Architectural fix — task #47**: change cross-module Call encoding
-  from raw `func_id` to `StringId` (function name).  Closes this
-  defect class universally across Bloom / HLL / CountMin /
-  AliasSampler.
+* (post-#47) HMAC-SHA256 `[Byte; 64]` IndexOutOfBounds fix to
+  unblock the populated-state `add`/`estimate` round-trip pins.
