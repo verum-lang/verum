@@ -541,11 +541,18 @@ public type Iterator is protocol {
     }
 
     /// Find maximum by comparator function.
+    //
+    // Qualified `Ordering.Greater` / `Ordering.Less` to dodge the
+    // bare-variant first-wins shadow class (`type Ordering` is
+    // duplicated across `core/base/ordering.vr` AND
+    // `core/collections/list.vr` to avoid the `MemoryOrdering` name
+    // collision, so bare `Greater` / `Less` resolution is
+    // first-wins arbitrary across modules).
     fn max_by<F: fn(&Self.Item, &Self.Item) -> Ordering>(mut self, cmp: F) -> Maybe<Self.Item> {
         let first = self.next()?;
-        Some(self.fold(first, |max_item, item| {
+        Maybe.Some(self.fold(first, |max_item, item| {
             match cmp(&item, &max_item) {
-                Greater => item,
+                Ordering.Greater => item,
                 _ => max_item,
             }
         }))
@@ -554,9 +561,9 @@ public type Iterator is protocol {
     /// Find minimum by comparator function.
     fn min_by<F: fn(&Self.Item, &Self.Item) -> Ordering>(mut self, cmp: F) -> Maybe<Self.Item> {
         let first = self.next()?;
-        Some(self.fold(first, |min_item, item| {
+        Maybe.Some(self.fold(first, |min_item, item| {
             match cmp(&item, &min_item) {
-                Less => item,
+                Ordering.Less => item,
                 _ => min_item,
             }
         }))
@@ -714,10 +721,10 @@ public type Iterator is protocol {
     where Self.Item: Ord
     {
         let mut prev = match self.next() {
-            Some(v) => v,
-            None => { return true; }
+            Maybe.Some(v) => v,
+            Maybe.None => { return true; }
         };
-        while let Some(curr) = self.next() {
+        while let Maybe.Some(curr) = self.next() {
             if prev > curr {
                 return false;
             }
@@ -729,10 +736,10 @@ public type Iterator is protocol {
     /// Returns `true` if the iterator is sorted according to the given comparator.
     fn is_sorted_by<F: fn(&Self.Item, &Self.Item) -> Ordering>(mut self, cmp: F) -> Bool {
         let mut prev = match self.next() {
-            Some(v) => v,
-            None => { return true; }
+            Maybe.Some(v) => v,
+            Maybe.None => { return true; }
         };
-        while let Some(curr) = self.next() {
+        while let Maybe.Some(curr) = self.next() {
             match cmp(&prev, &curr) {
                 Ordering.Greater => { return false; }
                 _ => {}
@@ -745,10 +752,10 @@ public type Iterator is protocol {
     /// Returns `true` if the iterator is sorted by the given key function.
     fn is_sorted_by_key<K: Ord, F: fn(&Self.Item) -> K>(mut self, key_fn: F) -> Bool {
         let mut prev = match self.next() {
-            Some(v) => v,
-            None => { return true; }
+            Maybe.Some(v) => v,
+            Maybe.None => { return true; }
         };
-        while let Some(curr) = self.next() {
+        while let Maybe.Some(curr) = self.next() {
             if key_fn(&prev) > key_fn(&curr) {
                 return false;
             }
