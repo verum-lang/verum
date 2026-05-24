@@ -1,0 +1,170 @@
+// =============================================================================
+// core-tests/action/articulation/unit_test.vr
+// =============================================================================
+//
+// `core/action/articulation.vr` — OC-side counterpart of Enactment.
+//
+// Surface:
+//   * Articulation record (framework / citation / lineage)
+//   * articulation_new + raw_actic_articulation + primitive_articulation
+//   * articulation_eq + articulation_as_text + is_raw_actic
+//   * Display + Debug + Eq + Hash protocol impls
+// =============================================================================
+
+mount core.action.articulation.{
+    Articulation, articulation_new,
+    raw_actic_articulation, primitive_articulation,
+    articulation_eq, articulation_as_text, is_raw_actic,
+};
+mount core.action.primitives.{Primitive};
+
+// =============================================================================
+// Section 1: articulation_new construction
+// =============================================================================
+
+@test
+fn test_articulation_new_three_fields() {
+    let a = articulation_new(
+        Text.from("zfc"),
+        Text.from("Hartogs"),
+        Text.from("succ"),
+    );
+    assert(a.framework == Text.from("zfc"));
+}
+
+@test
+fn test_articulation_new_citation_preserved() {
+    let a = articulation_new(
+        Text.from("zfc"),
+        Text.from("Hartogs"),
+        Text.from("succ"),
+    );
+    assert(a.citation == Text.from("Hartogs"));
+}
+
+@test
+fn test_articulation_new_lineage_preserved() {
+    let a = articulation_new(
+        Text.from("zfc"),
+        Text.from("Hartogs"),
+        Text.from("succ"),
+    );
+    assert(a.lineage == Text.from("succ"));
+}
+
+// =============================================================================
+// Section 2: raw_actic_articulation — neutral Actic
+// =============================================================================
+
+@test
+fn test_raw_actic_framework() {
+    let a = raw_actic_articulation();
+    assert(a.framework == Text.from("actic.raw"));
+}
+
+@test
+fn test_raw_actic_is_raw_actic_yes() {
+    let a = raw_actic_articulation();
+    assert(is_raw_actic(a));
+}
+
+@test
+fn test_raw_actic_idempotent() {
+    let a = raw_actic_articulation();
+    let b = raw_actic_articulation();
+    assert(articulation_eq(a, b));
+}
+
+// =============================================================================
+// Section 3: primitive_articulation — per-Primitive lineage
+// =============================================================================
+
+@test
+fn test_primitive_articulation_math_lineage() {
+    let a = primitive_articulation(Primitive.EpsilonMath);
+    assert(a.lineage == Text.from("ε_math"));
+}
+
+@test
+fn test_primitive_articulation_classify_lineage() {
+    let a = primitive_articulation(Primitive.EpsilonClassify);
+    assert(a.lineage == Text.from("ε_classify"));
+}
+
+@test
+fn test_primitive_articulation_framework_raw() {
+    let a = primitive_articulation(Primitive.EpsilonProve);
+    assert(a.framework == Text.from("actic.raw"));
+}
+
+@test
+fn test_primitive_articulation_is_raw_actic() {
+    let a = primitive_articulation(Primitive.EpsilonObserve);
+    assert(is_raw_actic(a));
+}
+
+// =============================================================================
+// Section 4: articulation_eq + Eq protocol
+// =============================================================================
+
+@test
+fn test_articulation_eq_self() {
+    let a = articulation_new(Text.from("a"), Text.from("b"), Text.from("c"));
+    let b = articulation_new(Text.from("a"), Text.from("b"), Text.from("c"));
+    assert(articulation_eq(a, b));
+}
+
+@test
+fn test_articulation_eq_different_framework() {
+    let a = articulation_new(Text.from("a1"), Text.from("b"), Text.from("c"));
+    let b = articulation_new(Text.from("a2"), Text.from("b"), Text.from("c"));
+    assert(!articulation_eq(a, b));
+}
+
+@test
+fn test_articulation_eq_different_lineage() {
+    let a = articulation_new(Text.from("a"), Text.from("b"), Text.from("c1"));
+    let b = articulation_new(Text.from("a"), Text.from("b"), Text.from("c2"));
+    assert(!articulation_eq(a, b));
+}
+
+@test
+fn test_articulation_eq_protocol() {
+    let a = articulation_new(Text.from("a"), Text.from("b"), Text.from("c"));
+    let b = articulation_new(Text.from("a"), Text.from("b"), Text.from("c"));
+    assert(a == b);
+}
+
+// =============================================================================
+// Section 5: articulation_as_text — canonical framework:lineage
+// =============================================================================
+
+@test
+fn test_articulation_as_text_contains_framework() {
+    let a = articulation_new(Text.from("zfc"), Text.from("C"), Text.from("succ"));
+    let s = articulation_as_text(a);
+    assert(s.contains(&Text.from("zfc")));
+}
+
+@test
+fn test_articulation_as_text_contains_lineage() {
+    let a = articulation_new(Text.from("zfc"), Text.from("C"), Text.from("succ"));
+    let s = articulation_as_text(a);
+    assert(s.contains(&Text.from("succ")));
+}
+
+// =============================================================================
+// Section 6: is_raw_actic
+// =============================================================================
+
+@test
+fn test_is_raw_actic_non_raw_no() {
+    let a = articulation_new(Text.from("zfc"), Text.from("C"), Text.from("succ"));
+    assert(!is_raw_actic(a));
+}
+
+@test
+fn test_is_raw_actic_raw_yes() {
+    let a = raw_actic_articulation();
+    assert(is_raw_actic(a));
+}

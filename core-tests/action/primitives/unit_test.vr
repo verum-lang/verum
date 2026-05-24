@@ -1,0 +1,200 @@
+// =============================================================================
+// core-tests/action/primitives/unit_test.vr
+// =============================================================================
+//
+// `core/action/primitives.vr` — eight Diakrisis Actic ε-primitives.
+// =============================================================================
+
+mount core.action.primitives.{
+    Primitive, primitive_as_text, primitive_eq,
+    is_observational, is_constructive, is_proof_producing,
+    is_decision_point, is_translation, is_classification,
+};
+
+// =============================================================================
+// Section 1: Primitive 8-variant
+// =============================================================================
+
+@test
+fn test_primitive_epsilon_math() {
+    let p: Primitive = Primitive.EpsilonMath;
+    assert(p is Primitive.EpsilonMath);
+}
+
+@test
+fn test_primitive_epsilon_compute() {
+    let p: Primitive = Primitive.EpsilonCompute;
+    assert(p is Primitive.EpsilonCompute);
+}
+
+@test
+fn test_primitive_epsilon_observe() {
+    let p: Primitive = Primitive.EpsilonObserve;
+    assert(p is Primitive.EpsilonObserve);
+}
+
+@test
+fn test_primitive_epsilon_prove() {
+    let p: Primitive = Primitive.EpsilonProve;
+    assert(p is Primitive.EpsilonProve);
+}
+
+@test
+fn test_primitive_epsilon_decide() {
+    let p: Primitive = Primitive.EpsilonDecide;
+    assert(p is Primitive.EpsilonDecide);
+}
+
+@test
+fn test_primitive_epsilon_translate() {
+    let p: Primitive = Primitive.EpsilonTranslate;
+    assert(p is Primitive.EpsilonTranslate);
+}
+
+@test
+fn test_primitive_epsilon_construct() {
+    let p: Primitive = Primitive.EpsilonConstruct;
+    assert(p is Primitive.EpsilonConstruct);
+}
+
+@test
+fn test_primitive_epsilon_classify() {
+    let p: Primitive = Primitive.EpsilonClassify;
+    assert(p is Primitive.EpsilonClassify);
+}
+
+// =============================================================================
+// Section 2: primitive_as_text — canonical ε-tag
+// =============================================================================
+
+@test
+fn test_primitive_as_text_math() {
+    assert(primitive_as_text(Primitive.EpsilonMath) == Text.from("ε_math"));
+}
+
+@test
+fn test_primitive_as_text_compute() {
+    assert(primitive_as_text(Primitive.EpsilonCompute) == Text.from("ε_compute"));
+}
+
+@test
+fn test_primitive_as_text_observe() {
+    assert(primitive_as_text(Primitive.EpsilonObserve) == Text.from("ε_observe"));
+}
+
+@test
+fn test_primitive_as_text_prove() {
+    assert(primitive_as_text(Primitive.EpsilonProve) == Text.from("ε_prove"));
+}
+
+@test
+fn test_primitive_as_text_classify() {
+    assert(primitive_as_text(Primitive.EpsilonClassify) == Text.from("ε_classify"));
+}
+
+// =============================================================================
+// Section 3: predicates — is_observational / is_constructive / etc.
+// =============================================================================
+
+@test
+fn test_is_observational_observe_yes() {
+    assert(is_observational(Primitive.EpsilonObserve));
+}
+
+@test
+fn test_is_observational_others_no() {
+    assert(!is_observational(Primitive.EpsilonMath));
+    assert(!is_observational(Primitive.EpsilonProve));
+    assert(!is_observational(Primitive.EpsilonClassify));
+}
+
+@test
+fn test_is_constructive_construct_yes() {
+    assert(is_constructive(Primitive.EpsilonConstruct));
+}
+
+@test
+fn test_is_constructive_math_yes() {
+    assert(is_constructive(Primitive.EpsilonMath));
+}
+
+@test
+fn test_is_constructive_compute_yes() {
+    assert(is_constructive(Primitive.EpsilonCompute));
+}
+
+@test
+fn test_is_constructive_observe_no() {
+    assert(!is_constructive(Primitive.EpsilonObserve));
+}
+
+@test
+fn test_is_constructive_classify_no() {
+    assert(!is_constructive(Primitive.EpsilonClassify));
+}
+
+@test
+fn test_is_proof_producing_prove_yes() {
+    assert(is_proof_producing(Primitive.EpsilonProve));
+}
+
+@test
+fn test_is_proof_producing_others_no() {
+    assert(!is_proof_producing(Primitive.EpsilonMath));
+    assert(!is_proof_producing(Primitive.EpsilonDecide));
+}
+
+@test
+fn test_is_decision_point_decide_yes() {
+    assert(is_decision_point(Primitive.EpsilonDecide));
+}
+
+@test
+fn test_is_decision_point_others_no() {
+    assert(!is_decision_point(Primitive.EpsilonProve));
+}
+
+@test
+fn test_is_translation_translate_yes() {
+    assert(is_translation(Primitive.EpsilonTranslate));
+}
+
+@test
+fn test_is_translation_others_no() {
+    assert(!is_translation(Primitive.EpsilonMath));
+}
+
+@test
+fn test_is_classification_classify_yes() {
+    assert(is_classification(Primitive.EpsilonClassify));
+}
+
+@test
+fn test_is_classification_others_no() {
+    assert(!is_classification(Primitive.EpsilonProve));
+    assert(!is_classification(Primitive.EpsilonDecide));
+}
+
+// =============================================================================
+// Section 4: primitive_eq + Eq protocol
+// =============================================================================
+
+@test
+fn test_primitive_eq_same() {
+    assert(primitive_eq(Primitive.EpsilonMath, Primitive.EpsilonMath));
+}
+
+@test
+fn test_primitive_eq_different() {
+    assert(!primitive_eq(Primitive.EpsilonMath, Primitive.EpsilonCompute));
+}
+
+@test
+fn test_primitive_eq_protocol_same() {
+    assert(Primitive.EpsilonMath == Primitive.EpsilonMath);
+}
+
+@test
+fn test_primitive_eq_protocol_different() {
+    assert(!(Primitive.EpsilonMath == Primitive.EpsilonObserve));
+}
