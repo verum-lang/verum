@@ -1,0 +1,246 @@
+// =============================================================================
+// core-tests/io/protocols/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions surfaced while building the `core.io.protocols`
+// conformance suite. Every `@ignore`d test reproduces a specific
+// language / stdlib defect in the minimum form possible — kept here
+// forever as a guardrail against re-regression once the underlying
+// defect closes.
+//
+// Cross-ref `audit.md` for the cause analysis and tracking tasks.
+// =============================================================================
+
+mount core.io.protocols.{
+    StreamError, IoErrorKind, IoResult, SeekFrom,
+    EmptyReader, ByteRepeat, Sink, Cursor, Chain, Take,
+    Read, Write, BufRead,
+    empty_reader, repeat_byte, sink,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — Bare-name method dispatch collision (task #17/#39 class)
+// =============================================================================
+//
+// `s.read(buf)` / `s.write(buf)` on protocols.vr-defined Sink/EmptyReader/
+// ByteRepeat misdispatches to `sys.linux.syscall.read` / `sys_write` (or
+// similar bare-name global fn) instead of routing to the type's protocol
+// impl method. Root cause: `compile_method_call`'s pre-resolved fast path
+// emits `Call <fn-id>` against the first-suffix-wins entry in the global
+// function index when the typechecker has annotated the call as a
+// `StaticCall`. The Sink/EmptyReader/ByteRepeat types' Write/Read impls
+// register under their own qualified names, but the bare-name `write` /
+// `read` shadow wins at codegen time.
+//
+// Evidence: `verum test --interp --filter test_sink_accepts_bytes` shows
+// `runtime: NullPointerAt { op: "opcode 0x66", site: "sys.linux.syscall.write" }`
+// — the function executed IS `sys.linux.syscall.write`, not `Sink::write`.
+//
+// Tracking task #17/#39: mount-scope-aware `lookup_function` for method-call
+// dispatch sites in `crates/verum_vbc/src/codegen/expressions.rs::compile_method_call`
+// and the resolved-call-target fast path
+// `compile_resolved_call_target_with_receiver`.
+//
+// Closes when the codegen routes `<receiver>.<method>` through the
+// type-table CallM emission unconditionally for protocol method calls.
+// =============================================================================
+
+@ignore
+@test
+fn regression_sink_write_dispatches_to_sink_write_not_sys_write() {
+    let mut s = sink();
+    let buf: [Byte; 3] = [1, 2, 3];
+    let n = s.write(&buf).unwrap();
+    assert_eq(n, 3);
+}
+
+@ignore
+@test
+fn regression_empty_reader_read_dispatches_to_empty_reader_read_not_sys_read() {
+    let mut r = empty_reader();
+    let mut buf = [0_u8; 4];
+    let n = r.read(&mut buf).unwrap();
+    assert_eq(n, 0);
+}
+
+@ignore
+@test
+fn regression_repeat_byte_read_dispatches_correctly() {
+    let mut r = repeat_byte(7 as Byte);
+    let mut buf = [0_u8; 3];
+    let n = r.read(&mut buf).unwrap();
+    assert_eq(n, 3);
+    for i in 0..3 {
+        assert_eq(buf[i], 7 as Byte);
+    }
+}
+
+@ignore
+@test
+fn regression_cursor_slice_read_dispatches_correctly() {
+    let data: [Byte; 5] = [10, 20, 30, 40, 50];
+    let mut c = Cursor.new(&data[..]);
+    let mut buf = [0_u8; 3];
+    let n = c.read(&mut buf).unwrap();
+    assert_eq(n, 3);
+    assert_eq(buf[0], 10 as Byte);
+    assert_eq(buf[2], 30 as Byte);
+}
+
+@ignore
+@test
+fn regression_cursor_seek_start_dispatches_correctly() {
+    let data: [Byte; 5] = [1, 2, 3, 4, 5];
+    let mut c = Cursor.new(&data[..]);
+    let pos = c.seek(SeekFrom.Start(3)).unwrap();
+    assert_eq(pos, 3);
+}
+
+@ignore
+@test
+fn regression_sink_flush_dispatches_correctly() {
+    let mut s = sink();
+    s.flush().unwrap();  // should not error
+}
+
+// =============================================================================
+// §B — Default-method dispatch on Read protocol (read_exact / read_to_end)
+// =============================================================================
+//
+// Even when the underlying `read` works, the protocol default methods
+// (`read_exact`, `read_to_end`, `read_to_string`) chain through `self.read(...)`
+// internally — same collision class. Pin both layers.
+// =============================================================================
+
+@ignore
+@test
+fn regression_read_exact_default_method_dispatch() {
+    let data: [Byte; 5] = [1, 2, 3, 4, 5];
+    let mut c = Cursor.new(&data[..]);
+    let mut buf = [0_u8; 3];
+    c.read_exact(&mut buf).unwrap();
+    assert_eq(buf[0], 1 as Byte);
+}
+
+@ignore
+@test
+fn regression_read_to_end_default_method_dispatch() {
+    let data: [Byte; 4] = [10, 20, 30, 40];
+    let mut c = Cursor.new(&data[..]);
+    let mut out: List<Byte> = List.new();
+    let n = c.read_to_end(&mut out).unwrap();
+    assert_eq(n, 4);
+}
+
+@ignore
+@test
+fn regression_write_all_default_method_dispatch() {
+    let mut s = sink();
+    let buf: [Byte; 5] = [1, 2, 3, 4, 5];
+    s.write_all(&buf).unwrap();
+}
+
+// =============================================================================
+// §C — Take<T> / Chain<T,U> wrapper method dispatch
+// =============================================================================
+//
+// Even if the inner reader works, the wrapper types (Take, Chain) re-emit
+// `inner.read(...)` calls — same dispatch collision.
+// =============================================================================
+
+@ignore
+@test
+fn regression_take_read_limits_correctly() {
+    let data: [Byte; 10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let c = Cursor.new(&data[..]);
+    let mut t = c.take(3);
+    let mut buf = [0_u8; 10];
+    let n = t.read(&mut buf).unwrap();
+    assert_eq(n, 3);
+}
+
+@ignore
+@test
+fn regression_chain_reads_across_boundary() {
+    let a: [Byte; 2] = [1, 2];
+    let b: [Byte; 2] = [3, 4];
+    let ca = Cursor.new(&a[..]);
+    let cb = Cursor.new(&b[..]);
+    let mut chained = ca.chain(cb);
+    let mut buf = [0_u8; 4];
+    let n = chained.read(&mut buf).unwrap();
+    // First read returns first reader's bytes (could be partial)
+    assert(n >= 1);
+}
+
+// =============================================================================
+// §D — `?` operator on `IoResult<T>` loses StreamError.kind through error path
+// =============================================================================
+//
+// `?` short-circuits an Err correctly (we still observe `is_err() == true`),
+// but the kind() of the propagated StreamError does NOT survive across the
+// short-circuit return in Tier 0 — the receiver-side `e.kind()` returns a
+// different variant than what was stored in the Err arm before `?`.
+//
+// Likely root cause: the `?` lowering at `crates/verum_vbc/src/codegen/`
+// emits a path that clones/copies the StreamError record before re-wrapping
+// it in the outer Err — and the StreamError variant tag (IoErrorKind) is
+// either being cleared, default-initialised, or re-tagged in the process.
+//
+// Same defect class as several other "post-? value loss" patterns; the
+// Ok-path equivalent (`test_io_result_ok_path_question_mark` in
+// unit_test.vr) preserves the inner value correctly, so the bug is
+// specifically in the Err arm of the `?` lowering.
+//
+// Tracking task: investigate `?` lowering for Result<_, StreamError> in
+// codegen/expressions.rs (look for the try-operator desugaring).
+// =============================================================================
+
+@ignore
+@test
+fn regression_question_mark_preserves_kind() {
+    fn helper() -> IoResult<Int> {
+        let r: IoResult<Int> = Err(StreamError.new(IoErrorKind.NotFound));
+        let _v = r?;
+        Ok(0)
+    }
+    match helper() {
+        Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
+        Ok(_) => assert(false),
+    }
+}
+
+// =============================================================================
+// §E — Cursor<T> generic instantiation collision
+// =============================================================================
+//
+// `core.io.protocols.Cursor<T>` and `core.io.buffer.BufferCursor<T>` (with
+// the `Cursor<T>` alias) coexist in the io module surface. When users
+// `mount core.io.*`, both `Cursor` definitions are in scope and the
+// codegen resolves to whichever was registered first. The buffer.vr
+// Cursor has Read/Write/Seek/BufRead impls for List<Byte>; the protocols.vr
+// Cursor has them for &[Byte] and &mut List<Byte>. Misresolution silently
+// changes which receiver shapes are valid.
+//
+// Tracking task: deduplicate Cursor<T> across the io.protocols / io.buffer
+// boundary — drop the protocols.vr definition in favour of buffer.vr's
+// since buffer.vr has the richer surface. Update protocols.vr to re-export
+// `mount super.buffer.Cursor`.
+// =============================================================================
+
+@ignore
+@test
+fn regression_cursor_alias_collision_between_protocols_and_buffer() {
+    // If both Cursor types live in the io surface, this construction
+    // silently picks one based on lookup ordering — exercise both shapes
+    // to surface the collision.
+    let data: List<Byte> = [1, 2, 3];
+    let _c = Cursor.new(data);
+    // No assert — the bug manifests as a type-mismatch at the next op,
+    // not at construction. See audit.md §E for full repro.
+}
+
+fn main() {}

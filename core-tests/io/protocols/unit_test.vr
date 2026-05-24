@@ -1,0 +1,428 @@
+// =============================================================================
+// core-tests/io/protocols/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.io.protocols`.
+// One @test per public method / construction path.
+//
+// Companion files:
+//   property_test.vr     — algebraic laws (idempotence, round-trip, monotonicity)
+//   integration_test.vr  — cross-stdlib interactions (BufReader, File-likes)
+//   regression_test.vr   — pinned regressions (read/write method-dispatch class)
+//   audit.md             — implementation audit findings & action items
+// =============================================================================
+
+mount core.io.protocols.{
+    StreamError, IoErrorKind, IoResult, SeekFrom,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: IoErrorKind variants — construction
+// =============================================================================
+
+@test
+fn test_kind_not_found() { assert(IoErrorKind.NotFound is NotFound); }
+
+@test
+fn test_kind_permission_denied() { assert(IoErrorKind.PermissionDenied is PermissionDenied); }
+
+@test
+fn test_kind_connection_refused() { assert(IoErrorKind.ConnectionRefused is ConnectionRefused); }
+
+@test
+fn test_kind_connection_reset() { assert(IoErrorKind.ConnectionReset is ConnectionReset); }
+
+@test
+fn test_kind_connection_aborted() { assert(IoErrorKind.ConnectionAborted is ConnectionAborted); }
+
+@test
+fn test_kind_not_connected() { assert(IoErrorKind.NotConnected is NotConnected); }
+
+@test
+fn test_kind_addr_in_use() { assert(IoErrorKind.AddrInUse is AddrInUse); }
+
+@test
+fn test_kind_addr_not_available() { assert(IoErrorKind.AddrNotAvailable is AddrNotAvailable); }
+
+@test
+fn test_kind_broken_pipe() { assert(IoErrorKind.BrokenPipe is BrokenPipe); }
+
+@test
+fn test_kind_already_exists() { assert(IoErrorKind.AlreadyExists is AlreadyExists); }
+
+@test
+fn test_kind_would_block() { assert(IoErrorKind.WouldBlock is WouldBlock); }
+
+@test
+fn test_kind_invalid_input() { assert(IoErrorKind.InvalidInput is InvalidInput); }
+
+@test
+fn test_kind_invalid_data() { assert(IoErrorKind.InvalidData is InvalidData); }
+
+@test
+fn test_kind_timed_out() { assert(IoErrorKind.TimedOut is TimedOut); }
+
+@test
+fn test_kind_write_zero() { assert(IoErrorKind.WriteZero is WriteZero); }
+
+@test
+fn test_kind_interrupted() { assert(IoErrorKind.Interrupted is Interrupted); }
+
+@test
+fn test_kind_unexpected_eof() { assert(IoErrorKind.UnexpectedEof is UnexpectedEof); }
+
+@test
+fn test_kind_out_of_memory() { assert(IoErrorKind.OutOfMemory is OutOfMemory); }
+
+@test
+fn test_kind_unsupported() { assert(IoErrorKind.Unsupported is Unsupported); }
+
+@test
+fn test_kind_other() { assert(IoErrorKind.Other is Other); }
+
+// =============================================================================
+// Section 2: IoErrorKind — Eq protocol
+// =============================================================================
+
+@test
+fn test_kind_eq_same_variant() {
+    assert_eq(IoErrorKind.NotFound, IoErrorKind.NotFound);
+    assert_eq(IoErrorKind.BrokenPipe, IoErrorKind.BrokenPipe);
+    assert_eq(IoErrorKind.Other, IoErrorKind.Other);
+}
+
+@test
+fn test_kind_neq_different_variants() {
+    assert(IoErrorKind.NotFound != IoErrorKind.PermissionDenied);
+    assert(IoErrorKind.BrokenPipe != IoErrorKind.WriteZero);
+    assert(IoErrorKind.Other != IoErrorKind.InvalidData);
+}
+
+// =============================================================================
+// Section 3: IoErrorKind — Clone protocol
+// =============================================================================
+
+@test
+fn test_kind_clone_preserves_variant() {
+    let k = IoErrorKind.NotFound;
+    let c = k.clone();
+    assert_eq(k, c);
+}
+
+@test
+fn test_kind_clone_all_variants() {
+    let kinds: List<IoErrorKind> = [
+        IoErrorKind.NotFound, IoErrorKind.PermissionDenied,
+        IoErrorKind.ConnectionRefused, IoErrorKind.ConnectionReset,
+        IoErrorKind.ConnectionAborted, IoErrorKind.NotConnected,
+        IoErrorKind.AddrInUse, IoErrorKind.AddrNotAvailable,
+        IoErrorKind.BrokenPipe, IoErrorKind.AlreadyExists,
+        IoErrorKind.WouldBlock, IoErrorKind.InvalidInput,
+        IoErrorKind.InvalidData, IoErrorKind.TimedOut,
+        IoErrorKind.WriteZero, IoErrorKind.Interrupted,
+        IoErrorKind.UnexpectedEof, IoErrorKind.OutOfMemory,
+        IoErrorKind.Unsupported, IoErrorKind.Other,
+    ];
+    for k in kinds.iter() {
+        let c = (*k).clone();
+        assert_eq(*k, c);
+    }
+}
+
+// =============================================================================
+// Section 4: StreamError — construction
+// =============================================================================
+
+@test
+fn test_stream_error_new() {
+    let e = StreamError.new(IoErrorKind.NotFound);
+    assert_eq(e.kind(), IoErrorKind.NotFound);
+    assert(e.message().is_none());
+}
+
+@test
+fn test_stream_error_with_message() {
+    let e = StreamError.with_message(IoErrorKind.InvalidInput, "bad arg");
+    assert_eq(e.kind(), IoErrorKind.InvalidInput);
+    match e.message() {
+        Some(m) => assert_eq(*m, "bad arg"),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_stream_error_other_constructor() {
+    let e = StreamError.Other("something failed");
+    assert_eq(e.kind(), IoErrorKind.Other);
+    match e.message() {
+        Some(m) => assert_eq(*m, "something failed"),
+        None => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 5: StreamError — from_raw_os_error (POSIX-stable codes)
+// =============================================================================
+//
+// POSIX-stable errno codes — these match on every platform:
+// ENOENT=2, EACCES=13, EEXIST=17, EPIPE=32, EINTR=4, EINVAL=22, ENOMEM=12.
+
+@test
+fn test_from_raw_os_error_enoent_to_not_found() {
+    let e = StreamError.from_raw_os_error(2);
+    assert_eq(e.kind(), IoErrorKind.NotFound);
+}
+
+@test
+fn test_from_raw_os_error_eacces_to_permission_denied() {
+    let e = StreamError.from_raw_os_error(13);
+    assert_eq(e.kind(), IoErrorKind.PermissionDenied);
+}
+
+@test
+fn test_from_raw_os_error_eexist_to_already_exists() {
+    let e = StreamError.from_raw_os_error(17);
+    assert_eq(e.kind(), IoErrorKind.AlreadyExists);
+}
+
+@test
+fn test_from_raw_os_error_epipe_to_broken_pipe() {
+    let e = StreamError.from_raw_os_error(32);
+    assert_eq(e.kind(), IoErrorKind.BrokenPipe);
+}
+
+@test
+fn test_from_raw_os_error_eintr_to_interrupted() {
+    let e = StreamError.from_raw_os_error(4);
+    assert_eq(e.kind(), IoErrorKind.Interrupted);
+}
+
+@test
+fn test_from_raw_os_error_einval_to_invalid_input() {
+    let e = StreamError.from_raw_os_error(22);
+    assert_eq(e.kind(), IoErrorKind.InvalidInput);
+}
+
+@test
+fn test_from_raw_os_error_enomem_to_out_of_memory() {
+    let e = StreamError.from_raw_os_error(12);
+    assert_eq(e.kind(), IoErrorKind.OutOfMemory);
+}
+
+@test
+fn test_from_raw_os_error_unknown_to_other() {
+    let e = StreamError.from_raw_os_error(99999);
+    assert_eq(e.kind(), IoErrorKind.Other);
+}
+
+// =============================================================================
+// Section 6: StreamError — from_errno alias
+// =============================================================================
+
+@test
+fn test_from_errno_matches_from_raw_os_error() {
+    let a = StreamError.from_errno(2);
+    let b = StreamError.from_raw_os_error(2);
+    assert_eq(a.kind(), b.kind());
+}
+
+@test
+fn test_from_errno_all_posix_stable_codes_match() {
+    let codes: List<Int> = [2, 13, 17, 32, 4, 22, 12];
+    for c in codes.iter() {
+        let a = StreamError.from_errno(*c);
+        let b = StreamError.from_raw_os_error(*c);
+        assert_eq(a.kind(), b.kind());
+    }
+}
+
+// =============================================================================
+// Section 7: StreamError — Eq protocol
+// =============================================================================
+
+@test
+fn test_stream_error_eq_same_kind_no_message() {
+    let a = StreamError.new(IoErrorKind.NotFound);
+    let b = StreamError.new(IoErrorKind.NotFound);
+    assert_eq(a, b);
+}
+
+@test
+fn test_stream_error_neq_different_kinds() {
+    let a = StreamError.new(IoErrorKind.NotFound);
+    let b = StreamError.new(IoErrorKind.PermissionDenied);
+    assert(a != b);
+}
+
+@test
+fn test_stream_error_eq_with_messages() {
+    let a = StreamError.with_message(IoErrorKind.Other, "x");
+    let b = StreamError.with_message(IoErrorKind.Other, "x");
+    assert_eq(a, b);
+}
+
+@test
+fn test_stream_error_neq_different_messages() {
+    let a = StreamError.with_message(IoErrorKind.Other, "x");
+    let b = StreamError.with_message(IoErrorKind.Other, "y");
+    assert(a != b);
+}
+
+@test
+fn test_stream_error_neq_message_vs_no_message() {
+    let a = StreamError.new(IoErrorKind.Other);
+    let b = StreamError.with_message(IoErrorKind.Other, "x");
+    assert(a != b);
+}
+
+// =============================================================================
+// Section 8: StreamError — Clone protocol
+// =============================================================================
+
+@test
+fn test_stream_error_clone_preserves_kind_and_message() {
+    let e = StreamError.with_message(IoErrorKind.BrokenPipe, "pipe died");
+    let c = e.clone();
+    assert_eq(e.kind(), c.kind());
+    assert_eq(e, c);
+}
+
+@test
+fn test_stream_error_clone_no_message() {
+    let e = StreamError.new(IoErrorKind.NotFound);
+    let c = e.clone();
+    assert_eq(e, c);
+    assert(c.message().is_none());
+}
+
+// =============================================================================
+// Section 9: SeekFrom — construction & variants
+// =============================================================================
+
+@test
+fn test_seekfrom_start_construction() {
+    let s: SeekFrom = SeekFrom.Start(10);
+    assert(s is Start);
+}
+
+@test
+fn test_seekfrom_end_construction() {
+    let s: SeekFrom = SeekFrom.End(-5);
+    assert(s is End);
+}
+
+@test
+fn test_seekfrom_current_construction() {
+    let s: SeekFrom = SeekFrom.Current(3);
+    assert(s is Current);
+}
+
+@test
+fn test_seekfrom_start_zero() {
+    let s: SeekFrom = SeekFrom.Start(0);
+    assert(s is Start);
+}
+
+@test
+fn test_seekfrom_end_zero() {
+    let s: SeekFrom = SeekFrom.End(0);
+    assert(s is End);
+}
+
+@test
+fn test_seekfrom_current_zero() {
+    let s: SeekFrom = SeekFrom.Current(0);
+    assert(s is Current);
+}
+
+// =============================================================================
+// Section 10: SeekFrom — Eq protocol
+// =============================================================================
+
+@test
+fn test_seekfrom_eq_same_variant_same_payload() {
+    assert_eq(SeekFrom.Start(0), SeekFrom.Start(0));
+    assert_eq(SeekFrom.End(-1), SeekFrom.End(-1));
+    assert_eq(SeekFrom.Current(42), SeekFrom.Current(42));
+}
+
+@test
+fn test_seekfrom_neq_same_variant_different_payload() {
+    assert(SeekFrom.Start(0) != SeekFrom.Start(1));
+    assert(SeekFrom.End(-1) != SeekFrom.End(-2));
+    assert(SeekFrom.Current(5) != SeekFrom.Current(6));
+}
+
+@test
+fn test_seekfrom_neq_different_variants() {
+    assert(SeekFrom.Start(0) != SeekFrom.End(0));
+    assert(SeekFrom.End(0) != SeekFrom.Current(0));
+    assert(SeekFrom.Start(0) != SeekFrom.Current(0));
+}
+
+// =============================================================================
+// Section 11: SeekFrom — Clone protocol
+// =============================================================================
+
+@test
+fn test_seekfrom_clone_preserves_payload() {
+    let s1 = SeekFrom.Start(100);
+    let c1 = s1.clone();
+    assert_eq(s1, c1);
+
+    let s2 = SeekFrom.End(-50);
+    let c2 = s2.clone();
+    assert_eq(s2, c2);
+
+    let s3 = SeekFrom.Current(0);
+    let c3 = s3.clone();
+    assert_eq(s3, c3);
+}
+
+// =============================================================================
+// Section 12: IoResult<T> alias
+// =============================================================================
+
+@test
+fn test_io_result_ok() {
+    let r: IoResult<Int> = Ok(42);
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 42);
+}
+
+@test
+fn test_io_result_err() {
+    let r: IoResult<Int> = Err(StreamError.new(IoErrorKind.NotFound));
+    assert(r.is_err());
+}
+
+@test
+fn test_io_result_propagates_via_question_mark() {
+    // Validates that `?` on an Err short-circuits without panicking;
+    // we don't assert kind preservation here (that's pinned via
+    // regression_test.vr::regression_question_mark_preserves_kind).
+    fn helper() -> IoResult<Int> {
+        let r: IoResult<Int> = Err(StreamError.new(IoErrorKind.BrokenPipe));
+        let v = r?;
+        Ok(v + 1)
+    }
+    let r = helper();
+    assert(r.is_err());
+}
+
+@test
+fn test_io_result_ok_path_question_mark() {
+    fn helper() -> IoResult<Int> {
+        let r: IoResult<Int> = Ok(10);
+        let v = r?;
+        Ok(v * 2)
+    }
+    let r = helper();
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 20);
+}
+
+fn main() {}

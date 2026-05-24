@@ -1,0 +1,215 @@
+// =============================================================================
+// core-tests/io/protocols/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.io.protocols`.
+//
+// Routes:
+//   * StreamError flows through Result<T, StreamError> = IoResult<T>.
+//   * IoErrorKind is consumed by callers in core.io.{file, fs, stdio, process}.
+//   * SeekFrom is consumed by Seek implementors.
+//
+// We test the data-flow paths that DON'T trigger the method-dispatch
+// collision class (see regression_test.vr §A) — namely, type-level
+// composition, value passing, and pattern matching across module
+// boundaries.
+// =============================================================================
+
+mount core.io.protocols.{StreamError, IoErrorKind, IoResult, SeekFrom};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 — IoResult<T> composes via Result combinators
+// =============================================================================
+
+@test
+fn integration_io_result_map_on_ok() {
+    let r: IoResult<Int> = Ok(10);
+    let r2 = r.map(|x| x * 2);
+    assert_eq(r2.unwrap(), 20);
+}
+
+@test
+fn integration_io_result_map_on_err() {
+    let r: IoResult<Int> = Err(StreamError.new(IoErrorKind.NotFound));
+    let r2: IoResult<Int> = r.map(|x| x * 2);
+    assert(r2.is_err());
+}
+
+@test
+fn integration_io_result_map_err_transforms_error() {
+    let r: IoResult<Int> = Err(StreamError.new(IoErrorKind.NotFound));
+    let r2: Result<Int, IoErrorKind> = r.map_err(|e| e.kind());
+    match r2 {
+        Err(k) => assert_eq(k, IoErrorKind.NotFound),
+        Ok(_) => assert(false),
+    }
+}
+
+// =============================================================================
+// §2 — IoErrorKind pattern matching across stdlib boundary
+// =============================================================================
+
+@test
+fn integration_pattern_match_kind_to_error_message() {
+    fn message_for(k: IoErrorKind) -> Text {
+        match k {
+            NotFound => "entity not found",
+            PermissionDenied => "permission denied",
+            BrokenPipe => "broken pipe",
+            _ => "other",
+        }
+    }
+    assert_eq(message_for(IoErrorKind.NotFound), "entity not found");
+    assert_eq(message_for(IoErrorKind.PermissionDenied), "permission denied");
+    assert_eq(message_for(IoErrorKind.BrokenPipe), "broken pipe");
+    assert_eq(message_for(IoErrorKind.WriteZero), "other");
+}
+
+@test
+fn integration_kind_inside_stream_error_via_question_mark() {
+    fn make_error(k: IoErrorKind) -> IoResult<Int> {
+        Err(StreamError.new(k))
+    }
+
+    fn caller() -> IoResult<Text> {
+        let _ = make_error(IoErrorKind.BrokenPipe)?;
+        Ok("never reached")
+    }
+
+    match caller() {
+        Err(e) => {
+            assert_eq(e.kind(), IoErrorKind.BrokenPipe);
+        }
+        Ok(_) => assert(false),
+    }
+}
+
+// =============================================================================
+// §3 — SeekFrom in Maybe<SeekFrom> / List<SeekFrom>
+// =============================================================================
+
+@test
+fn integration_seekfrom_in_maybe() {
+    let positions: List<Maybe<SeekFrom>> = [
+        Some(SeekFrom.Start(0)),
+        None,
+        Some(SeekFrom.End(-1)),
+        Some(SeekFrom.Current(10)),
+    ];
+    let mut some_count: Int = 0;
+    for p in positions.iter() {
+        match p {
+            Some(_) => some_count = some_count + 1,
+            None => {}
+        }
+    }
+    assert_eq(some_count, 3);
+}
+
+@test
+fn integration_seekfrom_in_list_pattern_match() {
+    let seeks: List<SeekFrom> = [
+        SeekFrom.Start(10),
+        SeekFrom.End(-5),
+        SeekFrom.Current(0),
+        SeekFrom.Start(20),
+    ];
+    let mut starts: Int = 0;
+    let mut ends: Int = 0;
+    let mut currents: Int = 0;
+    for s in seeks.iter() {
+        match s {
+            Start(_) => starts = starts + 1,
+            End(_)   => ends = ends + 1,
+            Current(_) => currents = currents + 1,
+        }
+    }
+    assert_eq(starts, 2);
+    assert_eq(ends, 1);
+    assert_eq(currents, 1);
+}
+
+// =============================================================================
+// §4 — StreamError flow through composite Result types
+// =============================================================================
+
+@test
+fn integration_stream_error_propagates_through_nested_call() {
+    fn level_a() -> IoResult<Int> {
+        Err(StreamError.with_message(IoErrorKind.PermissionDenied, "denied at A"))
+    }
+
+    fn level_b() -> IoResult<Int> {
+        let v = level_a()?;
+        Ok(v + 1)
+    }
+
+    fn level_c() -> IoResult<Int> {
+        let v = level_b()?;
+        Ok(v * 2)
+    }
+
+    match level_c() {
+        Err(e) => {
+            assert_eq(e.kind(), IoErrorKind.PermissionDenied);
+            match e.message() {
+                Some(m) => assert_eq(*m, "denied at A"),
+                None => assert(false),
+            }
+        }
+        Ok(_) => assert(false),
+    }
+}
+
+// =============================================================================
+// §5 — IoErrorKind round-trips through from_raw_os_error → kind() → ...
+// =============================================================================
+
+@test
+fn integration_os_error_code_to_kind_round_trip() {
+    // Same code in twice produces same kind.
+    let codes: List<Int> = [2, 4, 13, 17, 22, 32];
+    for c in codes.iter() {
+        let e1 = StreamError.from_raw_os_error(*c);
+        let e2 = StreamError.from_raw_os_error(*c);
+        assert_eq(e1.kind(), e2.kind());
+    }
+}
+
+@test
+fn integration_distinct_os_codes_distinct_kinds() {
+    // Different recognised codes produce different kinds.
+    assert(StreamError.from_raw_os_error(2).kind() !=
+           StreamError.from_raw_os_error(13).kind());
+    assert(StreamError.from_raw_os_error(13).kind() !=
+           StreamError.from_raw_os_error(17).kind());
+    assert(StreamError.from_raw_os_error(17).kind() !=
+           StreamError.from_raw_os_error(32).kind());
+}
+
+// =============================================================================
+// §6 — StreamError equality used as Map / Set membership predicate proxy
+// =============================================================================
+
+@test
+fn integration_stream_error_eq_in_list_contains() {
+    let errors: List<StreamError> = [
+        StreamError.new(IoErrorKind.NotFound),
+        StreamError.new(IoErrorKind.PermissionDenied),
+        StreamError.new(IoErrorKind.BrokenPipe),
+    ];
+
+    let target = StreamError.new(IoErrorKind.PermissionDenied);
+    let mut found: Bool = false;
+    for e in errors.iter() {
+        if *e == target {
+            found = true;
+        }
+    }
+    assert(found);
+}
+
+fn main() {}
