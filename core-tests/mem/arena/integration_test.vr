@@ -11,12 +11,15 @@
 //       → `destroy`.  Exercises bump-pointer allocation, generation
 //       bump on reset, and is_destroyed flag on destroy.
 //
-// Live arena lifecycle tests are presently @ignore'd pending the
-// fundamental fix for task #8 (GenerationalArena value broken at GetF
-// after constructor return — symptom of cross-module method shadow
-// class shared with #17 / #39 lookup-by-receiver-type work).  Tests are
-// kept here in their final form so they flip to active the moment the
-// underlying defect closes.
+// Live arena lifecycle tests run unconditionally as of task #8 close
+// (2026-05-24).  The fundamental fix lives at
+// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/log_extended.rs::handle_mem_extended`
+// where `_operand_len` is now authoritative — the handler force-aligns
+// PC to `operand_start + operand_len` after the sub-op handler returns,
+// tolerating short-operand emissions from intrinsic calls whose Verum
+// signature binds a subset of the registry's declared params (the
+// canonical example is `__alloc_zeroed_raw(size)` against the
+// 2-param `alloc_zeroed(size, align)` registry intrinsic).
 // =============================================================================
 
 mount core.prelude.*;
@@ -54,11 +57,14 @@ fn probe_arenaconfig_fixed_field_access() {
     assert_eq(cfg.growth_factor, 100);
 }
 
-// Probe: bypass the method, read the field directly.  Pinned
-// @ignore'd until task #8 closes — see file header comment for the
-// triangulation that points the defect at the precompiled
-// `GenerationalArena.new` body specifically.
-@ignore
+// Probe: bypass the method, read the field directly.  Closed by
+// task #8 fundamental fix (commit forthcoming) — handler-side
+// `_operand_len`-bounded PC advancement in
+// `interpreter/dispatch_table/handlers/log_extended.rs::handle_mem_extended`
+// realigns past `__alloc_zeroed_raw(size)`'s short-operand emission,
+// which was desynchronising the PC for the rest of the
+// `GenerationalArena.new` body and surfacing as a downstream
+// `NullPointer` at the first `SetF`.
 @test
 fn probe_generationalarena_direct_field_read() {
     let arena = GenerationalArena.new(1024);
@@ -126,15 +132,14 @@ fn probe_user_record_with_nested_constructor_field() {
 // If it WORKS, the defect is specific to `new(capacity: Int)` —
 // most likely because its body contains `__alloc_zeroed_raw` AND
 // `ArenaConfig.fixed(...)` inside the record-literal initializer.
-@ignore
 @test
 fn probe_arena_with_config_constructor() {
-    // Pinned @ignore until task #8 closes.  This probe fails
-    // differently than `.new(N)` — at SetF (opcode 0x63) PC 88 inside
-    // `GenerationalArena.with_config` body — confirming the defect is
-    // in the heap-allocation step of MakeRecord for GenerationalArena
-    // (after the precompile archive load, the resulting record type
-    // can't be heap-allocated).
+    // Closed by task #8 fundamental fix — same `__alloc_zeroed_raw`-
+    // induced PC desync as `probe_generationalarena_direct_field_read`
+    // above.  `with_config` historically failed at SetF (opcode 0x63)
+    // PC 88 inside the body; the handler-side `operand_end`-forcing
+    // PC fix-up in `handle_mem_extended` realigns the stream and the
+    // record allocation succeeds.
     let arena = GenerationalArena.with_config(ArenaConfig.default());
     let c = arena.capacity();
     assert(c > 0);
@@ -173,21 +178,29 @@ fn integration_arena_alignment_matches_word_size() {
 }
 
 // -----------------------------------------------------------------------------
-// §2  Live arena lifecycle — pinned @ignore until task #8 closes
+// §2  Live arena lifecycle — CLOSED by task #8 (2026-05-24)
 //
-// REGRESSION (task #8): `GenerationalArena.new(1024)` returns a value
-// where `arena.capacity()` (and every other &self method) fails with
-// `NullPointerAt opcode 0x62 (GetF), site: GenerationalArena.capacity,
-// pc: 0`.  The interpreter's bare-name lookup for `capacity` (20+
-// stdlib types declare `fn capacity(&self)`) appears to resolve to the
-// right symbol — the error site IS "GenerationalArena.capacity" — but
-// the receiver passed in is null at PC 0.  Same defect class as the
-// closed List / Map / BinaryHeap layout-drift fixes.  Until the
-// fundamental fix lands, the live lifecycle stays unobservable from
-// the user-facing surface.
+// Pre-close failure: every `&self` method on a fresh
+// `GenerationalArena.new(N)` panicked with `NullPointerAt opcode 0x62
+// (GetF)` at PC 0 of the method — the receiver materialised as a null
+// pointer because the `New { type_id, field_count }` allocation inside
+// the constructor's body never completed.  The root cause was a
+// PC-desync in `handle_mem_extended` (logged at
+// `interpreter/dispatch_table/handlers/log_extended.rs`): the AllocZeroed
+// sub-op read THREE register operands while the codegen for the
+// 1-arg `__alloc_zeroed_raw(size)` Verum signature emitted only TWO
+// — handler read one byte past the instruction boundary, the next
+// `New` opcode decoded from a misaligned offset, the resulting object
+// pointer was non-pointer garbage, and the first `SetF` on it
+// null-derefed.
+//
+// Fundamental fix: `handle_mem_extended` now treats `_operand_len`
+// as authoritative and force-realigns PC to `operand_start +
+// operand_len` after the sub-op handler returns.  Tolerates any
+// short-operand emission from intrinsics whose Verum signature
+// binds a subset of the registry's declared params.
 // -----------------------------------------------------------------------------
 
-@ignore
 @test
 fn integration_arena_new_initial_state() {
     let arena = GenerationalArena.new(1024);
@@ -199,7 +212,6 @@ fn integration_arena_new_initial_state() {
     assert(!arena.is_destroyed());
 }
 
-@ignore
 @test
 fn integration_arena_new_capacity_only() {
     let arena = GenerationalArena.new(1024);
@@ -207,7 +219,6 @@ fn integration_arena_new_capacity_only() {
     assert(c >= 1024);
 }
 
-@ignore
 @test
 fn integration_arena_alloc_advances_used() {
     let mut arena = GenerationalArena.new(1024);
@@ -220,7 +231,6 @@ fn integration_arena_alloc_advances_used() {
     assert_eq(arena.alloc_count(), 1);
 }
 
-@ignore
 @test
 fn integration_arena_reset_bumps_generation() {
     let mut arena = GenerationalArena.new(1024);
@@ -236,7 +246,6 @@ fn integration_arena_reset_bumps_generation() {
     assert_eq(arena.reset_count(), 1);
 }
 
-@ignore
 @test
 fn integration_arena_reset_does_not_decrease_capacity() {
     let mut arena = GenerationalArena.new(1024);
@@ -247,7 +256,6 @@ fn integration_arena_reset_does_not_decrease_capacity() {
     assert_eq(arena.capacity(), cap_before);
 }
 
-@ignore
 @test
 fn integration_arena_destroy_marks_arena_dead() {
     let mut arena = GenerationalArena.new(1024);
@@ -259,7 +267,6 @@ fn integration_arena_destroy_marks_arena_dead() {
     assert_eq(p2, 0);
 }
 
-@ignore
 @test
 fn integration_arena_repeated_alloc_increments_counter() {
     let mut arena = GenerationalArena.new(2048);
@@ -270,7 +277,6 @@ fn integration_arena_repeated_alloc_increments_counter() {
     assert(arena.used() >= 1024);
 }
 
-@ignore
 @test
 fn integration_arena_reset_reuses_memory() {
     let mut arena = GenerationalArena.new(1024);
@@ -282,7 +288,6 @@ fn integration_arena_reset_reuses_memory() {
     assert_eq(p_before, p_after);
 }
 
-@ignore
 @test
 fn integration_arena_snapshot_captures_state() {
     let mut arena = GenerationalArena.new(1024);
