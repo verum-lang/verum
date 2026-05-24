@@ -1,0 +1,174 @@
+// =============================================================================
+// core-tests/tracing/id/unit_test.vr
+// =============================================================================
+//
+// Companion files:
+//   property_test.vr — algebraic laws (hex round-trip, invalid sentinel,
+//                      is_invalid consistency).
+//   audit.md         — module audit + deferred items.
+//
+// `core/tracing/id.vr` defines:
+//   * `TraceId` — 128-bit (16-byte) W3C Trace Context §2.2.2 identifier
+//   * `SpanId`  — 64-bit (8-byte) W3C Trace Context §2.2.3 identifier
+//
+// Both store as fixed-size `[UInt8; N]` arrays for zero-copy hex
+// encoding/decoding. The all-zero value is reserved as "invalid".
+// =============================================================================
+
+mount core.tracing.id.{TraceId, SpanId};
+
+// =============================================================================
+// Section 1: TraceId.invalid + is_invalid
+// =============================================================================
+
+@test
+fn test_trace_id_invalid_is_all_zero() {
+    let t = TraceId.invalid();
+    assert(t.is_invalid());
+}
+
+@test
+fn test_trace_id_from_bytes_all_zero_is_invalid() {
+    let t = TraceId.from_bytes([0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8,
+                                 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8]);
+    assert(t.is_invalid());
+}
+
+@test
+fn test_trace_id_nonzero_is_not_invalid() {
+    let t = TraceId.from_bytes([1_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8,
+                                 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8]);
+    assert(!t.is_invalid());
+}
+
+@test
+fn test_trace_id_last_byte_nonzero_is_not_invalid() {
+    let t = TraceId.from_bytes([0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8,
+                                 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 1_u8]);
+    assert(!t.is_invalid());
+}
+
+// =============================================================================
+// Section 2: TraceId.to_hex
+// =============================================================================
+
+@test
+fn test_trace_id_invalid_to_hex_is_32_zeros() {
+    let t = TraceId.invalid();
+    let h = t.to_hex();
+    assert_eq(h, "00000000000000000000000000000000");
+}
+
+@test
+fn test_trace_id_max_byte_to_hex() {
+    let t = TraceId.from_bytes([0xFF_u8; 16]);
+    let h = t.to_hex();
+    assert_eq(h, "ffffffffffffffffffffffffffffffff");
+}
+
+@test
+fn test_trace_id_single_high_byte_to_hex() {
+    // First byte 0xAB, rest zeros.
+    let t = TraceId.from_bytes([0xAB_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8,
+                                 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8]);
+    let h = t.to_hex();
+    assert_eq(h, "ab000000000000000000000000000000");
+}
+
+// =============================================================================
+// Section 3: TraceId hex length always 32
+// =============================================================================
+
+@test
+fn test_trace_id_to_hex_is_32_chars_invalid() {
+    let t = TraceId.invalid();
+    assert_eq(t.to_hex().len(), 32);
+}
+
+@test
+fn test_trace_id_to_hex_is_32_chars_max() {
+    let t = TraceId.from_bytes([0xFF_u8; 16]);
+    assert_eq(t.to_hex().len(), 32);
+}
+
+// =============================================================================
+// Section 4: SpanId.invalid + is_invalid
+// =============================================================================
+
+@test
+fn test_span_id_invalid_is_all_zero() {
+    let s = SpanId.invalid();
+    assert(s.is_invalid());
+}
+
+@test
+fn test_span_id_from_bytes_all_zero_is_invalid() {
+    let s = SpanId.from_bytes([0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8]);
+    assert(s.is_invalid());
+}
+
+@test
+fn test_span_id_nonzero_is_not_invalid() {
+    let s = SpanId.from_bytes([1_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8]);
+    assert(!s.is_invalid());
+}
+
+@test
+fn test_span_id_last_byte_nonzero_is_not_invalid() {
+    let s = SpanId.from_bytes([0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 1_u8]);
+    assert(!s.is_invalid());
+}
+
+// =============================================================================
+// Section 5: SpanId.to_hex
+// =============================================================================
+
+@test
+fn test_span_id_invalid_to_hex_is_16_zeros() {
+    let s = SpanId.invalid();
+    let h = s.to_hex();
+    assert_eq(h, "0000000000000000");
+}
+
+@test
+fn test_span_id_max_byte_to_hex() {
+    let s = SpanId.from_bytes([0xFF_u8; 8]);
+    let h = s.to_hex();
+    assert_eq(h, "ffffffffffffffff");
+}
+
+@test
+fn test_span_id_to_hex_is_16_chars() {
+    let s = SpanId.invalid();
+    assert_eq(s.to_hex().len(), 16);
+}
+
+// =============================================================================
+// Section 6: TraceId.as_bytes
+// =============================================================================
+
+@test
+fn test_trace_id_as_bytes_preserves_input() {
+    let raw: [UInt8; 16] = [
+        0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8, 0x05_u8, 0x06_u8, 0x07_u8, 0x08_u8,
+        0x09_u8, 0x0A_u8, 0x0B_u8, 0x0C_u8, 0x0D_u8, 0x0E_u8, 0x0F_u8, 0x10_u8,
+    ];
+    let t = TraceId.from_bytes(raw);
+    let b = t.as_bytes();
+    assert_eq(b[0], 0x01_u8);
+    assert_eq(b[15], 0x10_u8);
+}
+
+// =============================================================================
+// Section 7: SpanId.as_bytes
+// =============================================================================
+
+@test
+fn test_span_id_as_bytes_preserves_input() {
+    let raw: [UInt8; 8] = [0x11_u8, 0x22_u8, 0x33_u8, 0x44_u8,
+                             0x55_u8, 0x66_u8, 0x77_u8, 0x88_u8];
+    let s = SpanId.from_bytes(raw);
+    let b = s.as_bytes();
+    assert_eq(b[0], 0x11_u8);
+    assert_eq(b[7], 0x88_u8);
+}
