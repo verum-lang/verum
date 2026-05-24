@@ -80,7 +80,7 @@ mount encoding.json.{
     json_array, json_null, json_bool,
     encode, decode,
 };
-mount encoding.jcs.{canonicalize as jcs_canonicalize};
+mount encoding.jcs.{canonicalize};
 mount encoding.base64.{
     encode_standard as b64_encode, decode_standard as b64_decode,
 };
@@ -490,7 +490,7 @@ pub fn dsse_sign_statement(
     let payload_json = statement_to_json(statement);
     // Use JCS canonicalisation — same payload bytes regardless of
     // map insertion order, important for reproducible attestations.
-    let payload_bytes = jcs_canonicalize(&payload_json)
+    let payload_bytes = encoding.jcs.canonicalize(&payload_json)
         .map_err(|e| f"dsse: jcs canonicalise: {e}")?;
     let pae = dsse_pae(&DSSE_PAYLOAD_TYPE_INTOTO.to_text(), &payload_bytes);
     let sig = security.ecc.ed25519.sign(seed, &pae);

@@ -54,7 +54,7 @@ mount encoding.json.{
     JsonValue, JsonObject, json_object, json_string, json_bool,
     json_number, json_null, json_array,
 };
-mount encoding.jcs.{canonicalize as jcs_canonicalize, JcsError};
+mount encoding.jcs.{canonicalize, JcsError};
 mount encoding.hex.{encode as hex_encode};
 mount security.hash.sha256.{digest};
 mount security.tuf.types.{
@@ -94,7 +94,7 @@ implement Debug for CanonicalError {
 /// this is a thin wrapper around JCS so the signing pipeline has a
 /// single, named choke point.
 public fn canonical_signing_payload(signed: &JsonValue) -> Result<List<Byte>, CanonicalError> {
-    jcs_canonicalize(signed).map_err(|e| JcsFailed(e))
+    encoding.jcs.canonicalize(signed).map_err(|e| JcsFailed(e))
 }
 
 /// TUF spec §4.2.2 keyid computation:
