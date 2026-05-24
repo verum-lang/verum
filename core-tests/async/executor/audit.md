@@ -99,4 +99,4 @@ parsing → emit_runtime_globals → LLVM IR), not here.
 | §A.2 | `AsyncSemaphore.new` chain (executor worker-pool semaphore) | task #12 | 1-2d |
 | §B | `mut self` consume-and-return idiom audit across stdlib | upstream | gated on grammar profile review |
 | §C | manifest-bridge end-to-end test from Verum.toml | upstream | build-system layer |
-| §D | FFI symbol intercept lookup gap | **task #8 BLOCKED by #9** (task #47 stage-3 stub cascade) — both attempted runtime-side and codegen-side fixes blocked by post-#47 stub-resolution failures during stdlib precompile | multi-day; depends on #9 close |
+| §D | FFI symbol intercept lookup gap | **CLOSED 2026-05-24 (task #8 indirect via #9)** — fundamental fix in `crates/verum_vbc/src/codegen/mod.rs:15059-15097` distinguishes stage-1/2/3 stub IDs from variant-ctor / FFI extern sentinels. Stub IDs now flow through Tier-2 name-resolution at archive merge, restoring FFI symbol name lookup for runtime-bridge intercept. All 25 contract-surface tests now active (un-@ignore'd). |

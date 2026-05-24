@@ -182,12 +182,6 @@ fn property_stream_repeat_n_yields_exactly_n_items_n_eq_zero() {
     }
 }
 
-// @ignore'd pending task #7 — StreamRepeatN<T>.poll_next calls
-// `self.value.as_ref().expect(...).clone()` where T is generic,
-// and `T.clone` dispatch finds no monomorphised method-table entry.
-// Same defect class as task #17 close-out for T.default/T.zero/T.one;
-// fix is the analogous codegen intercept for T.clone.
-@ignore
 @test
 fn property_stream_repeat_n_yields_exactly_n_items_n_eq_three() {
     let mut s = stream_repeat_n(7, 3);
@@ -256,12 +250,6 @@ fn property_stream_from_fn_follows_generator_termination() {
 //   contract that combinators MUST respect.
 // =============================================================================
 
-// @ignore'd pending task #7 — same `T.clone` defect class as the
-// `_yields_exactly_n_items_n_eq_three` test above.  Even though
-// this test only inspects `size_hint`, the `poll_next` call
-// reaches `self.value.as_ref().clone()` along the Some-arm and
-// trips on T.clone dispatch before reaching the size_hint read.
-@ignore
 @test
 fn property_size_hint_lower_bound_monotone_non_increasing_repeat_n() {
     let mut s = stream_repeat_n("x", 4);

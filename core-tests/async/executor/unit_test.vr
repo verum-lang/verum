@@ -23,20 +23,15 @@
 // are deferred to integration tests in `tests/` once the executor
 // dispatcher gap closes.
 //
-// **Currently @ignore'd**: every `RuntimeBuilder.new()` /
-// `AsyncRuntimeConfig.default()|cpu_bound()|io_bound()` invocation
-// routes through the `verum_get_runtime_task_stack_size` /
-// `verum_get_runtime_async_worker_threads` extern symbols (manifest-
-// bridge globals from task #261).  Under the Tier-0 interpreter these
-// MUST be intercepted by the runtime-bridge layer in
-// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/ffi_extended.rs:1639`
-// before hitting FFI resolution, but the intercept's symbol-table
-// lookup currently returns an empty `getter_name` for `FfiSymbolId(1)`
-// — so the allow-list never matches and the call falls through to
-// the real FFI runtime, which fails with `FFI symbol not found:
-// FfiSymbolId(1)`.  Tracking task: **#8**.  The full contract
-// surface stays as the canonical pin so the moment the lookup
-// closes, all tests below flip back to active without rewriting.
+// **Task #8 + #9 CLOSED 2026-05-24** — the runtime-bridge FFI
+// intercept was previously gated by an empty-getter-name lookup
+// (FfiSymbolId(1) → empty string) AND task #47's stage-3 stub
+// cascade was breaking global_ctors at the same time.  Both
+// resolved by task #9 fix in `crates/verum_vbc/src/codegen/mod.rs`
+// — the external_function_names skip-gate at line ~15074 now
+// distinguishes stage-1/2/3 stub IDs from variant-ctor / FFI
+// extern sentinels, so cross-module stub references get proper
+// name-based resolution at archive merge.
 // =============================================================================
 
 mount core.async.executor.{
@@ -47,14 +42,12 @@ mount core.async.executor.{
 // Section 1: RuntimeBuilder.new() default state
 // =============================================================================
 
-@ignore
 @test
 fn test_executor_runtime_builder_new_constructs() {
     let _b = RuntimeBuilder.new();
     assert(true);
 }
 
-@ignore
 @test
 fn test_executor_runtime_builder_independent_constructions() {
     let _b1 = RuntimeBuilder.new();
@@ -67,28 +60,24 @@ fn test_executor_runtime_builder_independent_constructions() {
 // Section 2: AsyncRuntimeConfig.default() / cpu_bound() / io_bound()
 // =============================================================================
 
-@ignore
 @test
 fn test_executor_async_runtime_config_default_constructs() {
     let _c = AsyncRuntimeConfig.default();
     assert(true);
 }
 
-@ignore
 @test
 fn test_executor_async_runtime_config_cpu_bound_constructs() {
     let _c = AsyncRuntimeConfig.cpu_bound();
     assert(true);
 }
 
-@ignore
 @test
 fn test_executor_async_runtime_config_io_bound_constructs() {
     let _c = AsyncRuntimeConfig.io_bound();
     assert(true);
 }
 
-@ignore
 @test
 fn test_executor_runtime_config_alias_mounts() {
     // RuntimeConfig is the canonical short-name alias for
@@ -102,35 +91,30 @@ fn test_executor_runtime_config_alias_mounts() {
 // Section 3: Builder setters — single-knob composition
 // =============================================================================
 
-@ignore
 @test
 fn test_executor_runtime_builder_max_tasks_chains() {
     let _b = RuntimeBuilder.new().max_tasks(128);
     assert(true);
 }
 
-@ignore
 @test
 fn test_executor_runtime_builder_stack_size_chains() {
     let _b = RuntimeBuilder.new().stack_size(8192);
     assert(true);
 }
 
-@ignore
 @test
 fn test_executor_runtime_builder_enable_work_stealing_chains() {
     let _b = RuntimeBuilder.new().enable_work_stealing();
     assert(true);
 }
 
-@ignore
 @test
 fn test_executor_runtime_builder_enable_io_chains() {
     let _b = RuntimeBuilder.new().enable_io();
     assert(true);
 }
 
-@ignore
 @test
 fn test_executor_runtime_builder_enable_time_chains() {
     let _b = RuntimeBuilder.new().enable_time();
@@ -141,7 +125,6 @@ fn test_executor_runtime_builder_enable_time_chains() {
 // Section 4: Builder fluent chain — multi-knob composition
 // =============================================================================
 
-@ignore
 @test
 fn test_executor_runtime_builder_full_chain() {
     let _b = RuntimeBuilder.new()
@@ -153,7 +136,6 @@ fn test_executor_runtime_builder_full_chain() {
     assert(true);
 }
 
-@ignore
 @test
 fn test_executor_runtime_builder_partial_chains_compose_independently() {
     let _b1 = RuntimeBuilder.new().max_tasks(8);
@@ -166,21 +148,18 @@ fn test_executor_runtime_builder_partial_chains_compose_independently() {
 // Section 5: AsyncRuntimeConfig setter fluents
 // =============================================================================
 
-@ignore
 @test
 fn test_executor_async_runtime_config_max_tasks_chains() {
     let _c = AsyncRuntimeConfig.default().max_tasks(256);
     assert(true);
 }
 
-@ignore
 @test
 fn test_executor_async_runtime_config_task_stack_size_chains() {
     let _c = AsyncRuntimeConfig.default().task_stack_size(4096);
     assert(true);
 }
 
-@ignore
 @test
 fn test_executor_async_runtime_config_work_stealing_chains() {
     let _c_off = AsyncRuntimeConfig.default().work_stealing(false);
@@ -188,7 +167,6 @@ fn test_executor_async_runtime_config_work_stealing_chains() {
     assert(true);
 }
 
-@ignore
 @test
 fn test_executor_async_runtime_config_poll_budget_chains() {
     let _c = AsyncRuntimeConfig.default().poll_budget(512);

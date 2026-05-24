@@ -25,7 +25,6 @@ mount core.collections.list.List;
 //   builders can be held in a List and accessed.
 // =============================================================================
 
-@ignore
 @test
 fn integration_executor_list_of_builders_constructs() {
     let mut bs: List<RuntimeBuilder> = [];
@@ -39,7 +38,6 @@ fn integration_executor_list_of_builders_constructs() {
 // Section B: List<AsyncRuntimeConfig> — config presets ingested in bulk
 // =============================================================================
 
-@ignore
 @test
 fn integration_executor_list_of_config_presets() {
     let mut cs: List<AsyncRuntimeConfig> = [];
@@ -58,7 +56,6 @@ fn config_round_trip(c: RuntimeConfig) -> RuntimeConfig {
     c
 }
 
-@ignore
 @test
 fn integration_executor_runtime_config_alias_function_boundary() {
     let c = AsyncRuntimeConfig.default();

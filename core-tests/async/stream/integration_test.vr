@@ -71,8 +71,6 @@ fn integration_drain_stream_empty_into_list_is_empty() {
     assert_eq(out.len(), 0);
 }
 
-// @ignore'd pending task #7 — same T.clone class as property_test.
-@ignore
 @test
 fn integration_drain_stream_repeat_n_collects_exact_count() {
     let mut s = stream_repeat_n(11, 4);
@@ -145,8 +143,6 @@ fn integration_stream_from_fn_drains_captured_list() {
 //   on for List capacity reservation.
 // =============================================================================
 
-// @ignore'd pending task #7 — same T.clone class as property_test.
-@ignore
 @test
 fn integration_size_hint_upper_bound_matches_drain_count_for_repeat_n() {
     let mut s = stream_repeat_n("a", 6);

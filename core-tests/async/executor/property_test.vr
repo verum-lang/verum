@@ -27,7 +27,6 @@ mount core.async.executor.{RuntimeBuilder, AsyncRuntimeConfig};
 // Section A: Builder chain commutativity on independent knobs
 // =============================================================================
 
-@ignore
 @test
 fn property_executor_builder_max_tasks_stack_size_commute() {
     let _a = RuntimeBuilder.new().max_tasks(64).stack_size(8192);
@@ -35,7 +34,6 @@ fn property_executor_builder_max_tasks_stack_size_commute() {
     assert(true);
 }
 
-@ignore
 @test
 fn property_executor_builder_enable_flags_commute() {
     let _a = RuntimeBuilder.new().enable_io().enable_time();
@@ -47,7 +45,6 @@ fn property_executor_builder_enable_flags_commute() {
 // Section B: Builder construction independence
 // =============================================================================
 
-@ignore
 @test
 fn property_executor_builder_new_independent_across_5_constructions() {
     let mut i = 0;
@@ -62,7 +59,6 @@ fn property_executor_builder_new_independent_across_5_constructions() {
 // Section C: N-fold associative composition over the setter surface
 // =============================================================================
 
-@ignore
 @test
 fn property_executor_builder_associates_over_full_setter_set() {
     // Order 1
@@ -97,7 +93,6 @@ fn property_executor_builder_associates_over_full_setter_set() {
 //   and returns a fresh config.
 // =============================================================================
 
-@ignore
 @test
 fn property_executor_config_presets_independent() {
     let _c1 = AsyncRuntimeConfig.cpu_bound();
@@ -108,7 +103,6 @@ fn property_executor_config_presets_independent() {
     assert(true);
 }
 
-@ignore
 @test
 fn property_executor_config_default_idempotent_under_repeated_construction() {
     let mut i = 0;
