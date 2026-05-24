@@ -1,0 +1,148 @@
+// =============================================================================
+// core-tests/context/error/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `ContextError`:
+//   * Result<T, ContextError> usage (the natural fallible-context return type).
+//   * Maybe<ContextError> wrapping in error-recovery code.
+//   * List<ContextError> aggregation for batched diagnostics.
+//   * Display in f-string composition with other types.
+// =============================================================================
+
+mount core.context.error.{ContextError, NotFound, NotProvided, TypeMismatch, CircularDependency, ScopeViolation};
+mount core.collections.list.List;
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Result<T, ContextError> roundtrip
+// =============================================================================
+
+@test
+fn integration_result_ok_carries_value() {
+    let r: Result<Int, ContextError> = Result.Ok(42);
+    match r {
+        Ok(n) => assert_eq(n, 42),
+        Err(_) => panic("expected Ok(42)"),
+    }
+}
+
+@test
+fn integration_result_err_carries_context_error() {
+    let err = ContextError.NotFound { context_name: "Database".clone() };
+    let r: Result<Int, ContextError> = Result.Err(err);
+    match r {
+        Ok(_) => panic("expected Err"),
+        Err(e) => {
+            assert(e is ContextError.NotFound);
+            let msg = e.message();
+            assert(msg.contains("Database"));
+        },
+    }
+}
+
+// =============================================================================
+// Section 2: Maybe<ContextError> wrapping
+// =============================================================================
+
+@test
+fn integration_maybe_some_context_error() {
+    let opt: Maybe<ContextError> = Some(ContextError.NotFound {
+        context_name: "Logger".clone(),
+    });
+    match opt {
+        Some(e) => assert(e is ContextError.NotFound),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn integration_maybe_none_no_error() {
+    let opt: Maybe<ContextError> = None;
+    match opt {
+        Some(_) => panic("expected None"),
+        None => assert(true),
+    }
+}
+
+// =============================================================================
+// Section 3: List<ContextError> aggregation
+// =============================================================================
+
+@test
+fn integration_list_aggregates_context_errors() {
+    let errs: List<ContextError> = [
+        ContextError.NotFound { context_name: "X".clone() },
+        ContextError.NotProvided { context_name: "Y".clone(), function_name: "f".clone() },
+        ContextError.TypeMismatch {
+            context_name: "Z".clone(), expected: "A".clone(), found: "B".clone(),
+        },
+    ];
+    assert_eq(errs.len(), 3);
+}
+
+@test
+fn integration_list_context_errors_each_keeps_identity() {
+    let errs: List<ContextError> = [
+        ContextError.NotFound { context_name: "Cache".clone() },
+        ContextError.NotProvided { context_name: "Auth".clone(), function_name: "h".clone() },
+    ];
+    // Index each, verify variant tag survived collection-storage round-trip.
+    assert(errs[0] is ContextError.NotFound);
+    assert(errs[1] is ContextError.NotProvided);
+}
+
+// =============================================================================
+// Section 4: Display interpolation in larger messages
+// =============================================================================
+
+@test
+fn integration_display_composes_in_larger_message() {
+    let err = ContextError.NotFound { context_name: "Database".clone() };
+    let banner = f"FATAL: {err} (giving up)";
+    assert(banner.contains("FATAL"));
+    assert(banner.contains("Database"));
+    assert(banner.contains("not found"));
+    assert(banner.contains("giving up"));
+}
+
+@test
+fn integration_display_in_error_chain_simulation() {
+    let inner = ContextError.NotProvided {
+        context_name: "Database".clone(),
+        function_name: "handle_request".clone(),
+    };
+    let wrap = f"request failed: {inner}";
+    assert(wrap.contains("request failed"));
+    assert(wrap.contains("Database"));
+    assert(wrap.contains("handle_request"));
+}
+
+// =============================================================================
+// Section 5: ScopeViolation reflects scope.name() output
+// =============================================================================
+//
+// Live cross-module integration: the ScopeViolation variant stores Text
+// scope names that are conventionally produced by `Scope.name()`. Verify
+// both ends of that round-trip stay aligned.
+
+mount core.context.scope.{Scope};
+
+@test
+fn integration_scope_violation_uses_scope_name_text() {
+    let dependent_scope = Scope.Singleton.name();
+    let dependency_scope = Scope.Request.name();
+
+    let err = ContextError.ScopeViolation {
+        dependent: "AppPool".clone(),
+        dependency: "RequestData".clone(),
+        dependent_scope: dependent_scope,
+        dependency_scope: dependency_scope,
+    };
+
+    let msg = err.message();
+    assert(msg.contains("Singleton"));
+    assert(msg.contains("Request"));
+    assert(msg.contains("AppPool"));
+    assert(msg.contains("RequestData"));
+}

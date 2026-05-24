@@ -1,0 +1,64 @@
+// =============================================================================
+// core-tests/context/mod/integration_test.vr
+// =============================================================================
+//
+// Verifies the umbrella re-exports of `core.context` — every key type
+// must be reachable via the bare `core.context.*` mount, not just via
+// the submodule-specific paths.
+// =============================================================================
+
+mount core.context.*;
+
+// =============================================================================
+// Section 1: re-exports — Provider / ScopedProvider / Scope / ContextScope / ContextError
+// =============================================================================
+
+@test
+fn integration_mod_reexports_provider_via_umbrella() {
+    let mut p = Provider.new(fn() -> Int { 1 });
+    assert_eq(p.get(), 1);
+}
+
+@test
+fn integration_mod_reexports_scoped_provider_via_umbrella() {
+    let sp = ScopedProvider.new(0, 99);
+    assert_eq(sp.value, 99);
+}
+
+@test
+fn integration_mod_reexports_scope_via_umbrella() {
+    let s: Scope = Scope.Singleton;
+    assert(s is Scope.Singleton);
+}
+
+@test
+fn integration_mod_reexports_context_scope_via_umbrella() {
+    let cs = ContextScope.root();
+    assert_eq(cs.current_depth(), 0);
+}
+
+@test
+fn integration_mod_reexports_context_error_via_umbrella() {
+    let e: ContextError = ContextError.NotFound { context_name: "X".clone() };
+    assert(e is ContextError.NotFound);
+}
+
+@test
+fn integration_mod_reexports_has_context_via_umbrella() {
+    // `has_context` is a free fn exported by `provider.{...}` —
+    // confirm reachable.
+    assert(!has_context(199));
+}
+
+// =============================================================================
+// Section 2: re-exports — standard module
+// =============================================================================
+//
+// `mount core.context.*` should pull in `standard.*` per mod.vr's
+// `public mount self.standard.*;`. Verify ContextLogLevel reachable.
+
+@test
+fn integration_mod_reexports_standard_log_level() {
+    let l: ContextLogLevel = ContextLogLevel.Info;
+    assert(l is ContextLogLevel.Info);
+}

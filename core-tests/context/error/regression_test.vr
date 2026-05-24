@@ -1,0 +1,137 @@
+// =============================================================================
+// core-tests/context/error/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.context.error`. Each test names the defect,
+// the workaround, and the upstream task to close it.
+// =============================================================================
+
+mount core.context.error.{ContextError, NotFound, NotProvided, TypeMismatch, CircularDependency, ScopeViolation};
+mount core.collections.list.List;
+
+// =============================================================================
+// REGRESSION §1: bare variant constructor `NotFound { ... }` may collide
+// =============================================================================
+//
+// The bare unit-variant constructors `NotFound`, `NotProvided`, etc. are
+// not GLOBALLY unique:
+//   * `NotFound` collides with HTTP 404 status (`core.net.http`),
+//     redis MISS, cache miss, etc.
+//   * `NotProvided` may collide with future capability-not-provided errors.
+// To avoid the bare-name collision hazard (task #17/#39), always
+// construct via the qualified form `ContextError.NotFound { ... }`.
+//
+// Pin the qualified form as the canonical construction.
+
+@test
+fn regression_construct_via_qualified_form_not_found() {
+    let err: ContextError = ContextError.NotFound { context_name: "X".clone() };
+    assert(err is ContextError.NotFound);
+}
+
+@test
+fn regression_construct_via_qualified_form_all_variants() {
+    let _a: ContextError = ContextError.NotFound { context_name: "X".clone() };
+    let _b: ContextError = ContextError.NotProvided {
+        context_name: "X".clone(), function_name: "f".clone(),
+    };
+    let _c: ContextError = ContextError.TypeMismatch {
+        context_name: "X".clone(), expected: "A".clone(), found: "B".clone(),
+    };
+    let _d: ContextError = ContextError.CircularDependency { chain: [] };
+    let _e: ContextError = ContextError.ScopeViolation {
+        dependent: "a".clone(), dependency: "b".clone(),
+        dependent_scope: "S".clone(), dependency_scope: "R".clone(),
+    };
+    // All 5 variants must be constructible without compile-time errors.
+    assert(true);
+}
+
+// =============================================================================
+// REGRESSION §2: message() Field ordering — preserve doc-stated format
+// =============================================================================
+//
+// `NotProvided.message()` is documented to render as:
+//   "Context '{context_name}' not provided before use in '{function_name}'"
+// Pin the doc-stated order so re-ordering is caught.
+
+@test
+fn regression_not_provided_message_preserves_field_order() {
+    let err = ContextError.NotProvided {
+        context_name: "Database".clone(),
+        function_name: "handle".clone(),
+    };
+    let msg = err.message();
+    // Find the positions; context_name must come before function_name.
+    let idx_ctx = msg.find("Database");
+    let idx_fn = msg.find("handle");
+    match (idx_ctx, idx_fn) {
+        (Some(a), Some(b)) => assert(a < b),
+        _ => panic("expected both substrings present in message"),
+    }
+}
+
+// =============================================================================
+// REGRESSION §3: CircularDependency.message() uses " -> " separator
+// =============================================================================
+//
+// The chain rendering uses ` -> ` (with spaces). Pin that exact
+// separator — switching to "," would silently drop the visual cue
+// that this is a directed traversal.
+
+@test
+fn regression_circular_dep_uses_arrow_separator() {
+    let chain: List<Text> = ["A".clone(), "B".clone(), "C".clone()];
+    let err = ContextError.CircularDependency { chain: chain };
+    let msg = err.message();
+    assert(msg.contains(" -> "));
+}
+
+// =============================================================================
+// REGRESSION §4: Eq treats CircularDependency chain as list equality
+// =============================================================================
+//
+// The Eq impl matches the `chain: List<Text>` payload via List's
+// element-wise equality. A naive impl might compare by pointer or by
+// length only — pin the element-wise contract.
+
+@test
+fn regression_circular_dep_eq_compares_element_wise() {
+    let a = ContextError.CircularDependency { chain: ["A".clone(), "B".clone()] };
+    let b = ContextError.CircularDependency { chain: ["A".clone(), "B".clone()] };
+    let c = ContextError.CircularDependency { chain: ["A".clone(), "C".clone()] };
+    let d = ContextError.CircularDependency { chain: ["A".clone(), "B".clone(), "C".clone()] };
+
+    assert(a == b);
+    assert(a != c); // same length, different content
+    assert(a != d); // shorter prefix
+}
+
+// =============================================================================
+// REGRESSION §5: Debug format includes variant name
+// =============================================================================
+//
+// `f"{err:?}"` must include the variant name as a leading prefix —
+// stripping it would make Debug indistinguishable from Display.
+
+@test
+fn regression_debug_includes_variant_name_for_each_variant() {
+    let nf = ContextError.NotFound { context_name: "x".clone() };
+    let np = ContextError.NotProvided {
+        context_name: "x".clone(), function_name: "f".clone(),
+    };
+    let tm = ContextError.TypeMismatch {
+        context_name: "x".clone(), expected: "A".clone(), found: "B".clone(),
+    };
+    let cd = ContextError.CircularDependency { chain: [] };
+    let sv = ContextError.ScopeViolation {
+        dependent: "a".clone(), dependency: "b".clone(),
+        dependent_scope: "S".clone(), dependency_scope: "R".clone(),
+    };
+
+    assert(f"{nf:?}".contains("NotFound"));
+    assert(f"{np:?}".contains("NotProvided"));
+    assert(f"{tm:?}".contains("TypeMismatch"));
+    assert(f"{cd:?}".contains("CircularDependency"));
+    assert(f"{sv:?}".contains("ScopeViolation"));
+}

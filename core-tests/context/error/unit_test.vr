@@ -1,0 +1,330 @@
+// =============================================================================
+// core-tests/context/error/unit_test.vr
+// =============================================================================
+//
+// Companion files in this directory:
+//   property_test.vr     — algebraic laws (Eq reflexivity, message
+//                          determinism, Display ⇔ message).
+//   integration_test.vr  — cross-stdlib (Maybe/Result wrapping, Display
+//                          via `f"…"`, Eq inside Maybe/Result/List).
+//   regression_test.vr   — pinned defects surfaced while building the suite.
+//   audit.md             — drift, gaps, deferrals.
+//
+// The `core.context.error` module defines:
+//   * `ContextError` — 5-variant sum:
+//       - NotFound { context_name: Text }
+//       - NotProvided { context_name: Text, function_name: Text }
+//       - TypeMismatch { context_name: Text, expected: Text, found: Text }
+//       - CircularDependency { chain: List<Text> }
+//       - ScopeViolation { dependent, dependency, dependent_scope, dependency_scope: Text }
+//   * `message(&self) -> Text` — human-formatted message
+//   * `implement Display for ContextError`
+//   * `implement Debug for ContextError`
+//   * `implement Eq for ContextError`
+// =============================================================================
+
+mount core.context.error.{ContextError, NotFound, NotProvided, TypeMismatch, CircularDependency, ScopeViolation};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: NotFound variant
+// =============================================================================
+
+@test
+fn test_not_found_construction() {
+    let err: ContextError = ContextError.NotFound { context_name: "Database".clone() };
+    assert(err is ContextError.NotFound);
+}
+
+@test
+fn test_not_found_message_contains_context_name() {
+    let err = ContextError.NotFound { context_name: "Logger".clone() };
+    let msg = err.message();
+    assert(msg.contains("Logger"));
+    assert(msg.contains("not found"));
+}
+
+@test
+fn test_not_found_message_for_empty_name() {
+    // Edge case — empty context name must not crash the formatter.
+    let err = ContextError.NotFound { context_name: "".clone() };
+    let msg = err.message();
+    // The literal name is empty but the surrounding text must remain.
+    assert(msg.contains("not found"));
+}
+
+// =============================================================================
+// Section 2: NotProvided variant
+// =============================================================================
+
+@test
+fn test_not_provided_construction() {
+    let err: ContextError = ContextError.NotProvided {
+        context_name: "Auth".clone(),
+        function_name: "login".clone(),
+    };
+    assert(err is ContextError.NotProvided);
+}
+
+@test
+fn test_not_provided_message_contains_both_names() {
+    let err = ContextError.NotProvided {
+        context_name: "Cache".clone(),
+        function_name: "get_user".clone(),
+    };
+    let msg = err.message();
+    assert(msg.contains("Cache"));
+    assert(msg.contains("get_user"));
+    assert(msg.contains("not provided"));
+}
+
+// =============================================================================
+// Section 3: TypeMismatch variant
+// =============================================================================
+
+@test
+fn test_type_mismatch_construction() {
+    let err: ContextError = ContextError.TypeMismatch {
+        context_name: "Database".clone(),
+        expected: "PostgresPool".clone(),
+        found: "SqliteConnection".clone(),
+    };
+    assert(err is ContextError.TypeMismatch);
+}
+
+@test
+fn test_type_mismatch_message_contains_all_three_fields() {
+    let err = ContextError.TypeMismatch {
+        context_name: "Tracer".clone(),
+        expected: "OpenTelemetryTracer".clone(),
+        found: "NoopTracer".clone(),
+    };
+    let msg = err.message();
+    assert(msg.contains("Tracer"));
+    assert(msg.contains("OpenTelemetryTracer"));
+    assert(msg.contains("NoopTracer"));
+    assert(msg.contains("expected"));
+    assert(msg.contains("found"));
+}
+
+// =============================================================================
+// Section 4: CircularDependency variant
+// =============================================================================
+
+@test
+fn test_circular_dependency_construction() {
+    let chain: List<Text> = ["A".clone(), "B".clone(), "C".clone(), "A".clone()];
+    let err: ContextError = ContextError.CircularDependency { chain: chain };
+    assert(err is ContextError.CircularDependency);
+}
+
+@test
+fn test_circular_dependency_message_joins_with_arrow() {
+    let chain: List<Text> = ["Database".clone(), "Logger".clone(), "Database".clone()];
+    let err = ContextError.CircularDependency { chain: chain };
+    let msg = err.message();
+    assert(msg.contains("Circular dependency"));
+    assert(msg.contains("Database"));
+    assert(msg.contains("Logger"));
+    assert(msg.contains("->"));
+}
+
+@test
+fn test_circular_dependency_empty_chain_does_not_crash() {
+    let chain: List<Text> = [];
+    let err = ContextError.CircularDependency { chain: chain };
+    let msg = err.message();
+    assert(msg.contains("Circular dependency"));
+}
+
+// =============================================================================
+// Section 5: ScopeViolation variant
+// =============================================================================
+
+@test
+fn test_scope_violation_construction() {
+    let err: ContextError = ContextError.ScopeViolation {
+        dependent: "AppPool".clone(),
+        dependency: "RequestLogger".clone(),
+        dependent_scope: "Singleton".clone(),
+        dependency_scope: "Request".clone(),
+    };
+    assert(err is ContextError.ScopeViolation);
+}
+
+@test
+fn test_scope_violation_message_contains_all_four_fields() {
+    let err = ContextError.ScopeViolation {
+        dependent: "DbPool".clone(),
+        dependency: "RequestCtx".clone(),
+        dependent_scope: "Singleton".clone(),
+        dependency_scope: "Request".clone(),
+    };
+    let msg = err.message();
+    assert(msg.contains("Scope violation"));
+    assert(msg.contains("DbPool"));
+    assert(msg.contains("RequestCtx"));
+    assert(msg.contains("Singleton"));
+    assert(msg.contains("Request"));
+}
+
+// =============================================================================
+// Section 6: Variant disjointness
+// =============================================================================
+
+@test
+fn test_variants_are_disjoint() {
+    let nf: ContextError = ContextError.NotFound { context_name: "x".clone() };
+    let np: ContextError = ContextError.NotProvided {
+        context_name: "x".clone(),
+        function_name: "f".clone(),
+    };
+    let tm: ContextError = ContextError.TypeMismatch {
+        context_name: "x".clone(),
+        expected: "A".clone(),
+        found: "B".clone(),
+    };
+    let cd: ContextError = ContextError.CircularDependency { chain: [] };
+    let sv: ContextError = ContextError.ScopeViolation {
+        dependent: "a".clone(),
+        dependency: "b".clone(),
+        dependent_scope: "S".clone(),
+        dependency_scope: "R".clone(),
+    };
+
+    assert(nf is ContextError.NotFound);
+    assert(np is ContextError.NotProvided);
+    assert(tm is ContextError.TypeMismatch);
+    assert(cd is ContextError.CircularDependency);
+    assert(sv is ContextError.ScopeViolation);
+
+    // Cross-disjointness — each is NOT any of the others.
+    assert(!(nf is ContextError.NotProvided));
+    assert(!(nf is ContextError.TypeMismatch));
+    assert(!(np is ContextError.NotFound));
+    assert(!(tm is ContextError.CircularDependency));
+    assert(!(cd is ContextError.ScopeViolation));
+    assert(!(sv is ContextError.NotFound));
+}
+
+// =============================================================================
+// Section 7: Eq — same-variant equality
+// =============================================================================
+
+@test
+fn test_eq_same_not_found() {
+    let a = ContextError.NotFound { context_name: "X".clone() };
+    let b = ContextError.NotFound { context_name: "X".clone() };
+    assert(a == b);
+}
+
+@test
+fn test_eq_differs_on_not_found_name() {
+    let a = ContextError.NotFound { context_name: "X".clone() };
+    let b = ContextError.NotFound { context_name: "Y".clone() };
+    assert(a != b);
+}
+
+@test
+fn test_eq_same_not_provided() {
+    let a = ContextError.NotProvided { context_name: "X".clone(), function_name: "f".clone() };
+    let b = ContextError.NotProvided { context_name: "X".clone(), function_name: "f".clone() };
+    assert(a == b);
+}
+
+@test
+fn test_eq_differs_on_not_provided_function_name() {
+    let a = ContextError.NotProvided { context_name: "X".clone(), function_name: "f".clone() };
+    let b = ContextError.NotProvided { context_name: "X".clone(), function_name: "g".clone() };
+    assert(a != b);
+}
+
+@test
+fn test_eq_same_type_mismatch() {
+    let a = ContextError.TypeMismatch { context_name: "X".clone(), expected: "A".clone(), found: "B".clone() };
+    let b = ContextError.TypeMismatch { context_name: "X".clone(), expected: "A".clone(), found: "B".clone() };
+    assert(a == b);
+}
+
+@test
+fn test_eq_differs_on_type_mismatch_expected() {
+    let a = ContextError.TypeMismatch { context_name: "X".clone(), expected: "A".clone(), found: "B".clone() };
+    let b = ContextError.TypeMismatch { context_name: "X".clone(), expected: "AA".clone(), found: "B".clone() };
+    assert(a != b);
+}
+
+@test
+fn test_eq_same_scope_violation() {
+    let a = ContextError.ScopeViolation {
+        dependent: "a".clone(), dependency: "b".clone(),
+        dependent_scope: "S".clone(), dependency_scope: "R".clone(),
+    };
+    let b = ContextError.ScopeViolation {
+        dependent: "a".clone(), dependency: "b".clone(),
+        dependent_scope: "S".clone(), dependency_scope: "R".clone(),
+    };
+    assert(a == b);
+}
+
+// =============================================================================
+// Section 8: Eq — cross-variant inequality
+// =============================================================================
+
+@test
+fn test_eq_cross_variant_inequality() {
+    let nf = ContextError.NotFound { context_name: "x".clone() };
+    let np = ContextError.NotProvided { context_name: "x".clone(), function_name: "f".clone() };
+    let tm = ContextError.TypeMismatch { context_name: "x".clone(), expected: "A".clone(), found: "B".clone() };
+
+    assert(nf != np);
+    assert(nf != tm);
+    assert(np != tm);
+}
+
+// =============================================================================
+// Section 9: Display — `f"..."` interpolation
+// =============================================================================
+
+@test
+fn test_display_not_found_via_format_literal() {
+    let err = ContextError.NotFound { context_name: "Cache".clone() };
+    let s = f"{err}";
+    assert(s.contains("Cache"));
+    assert(s.contains("not found"));
+}
+
+@test
+fn test_display_scope_violation_via_format_literal() {
+    let err = ContextError.ScopeViolation {
+        dependent: "X".clone(), dependency: "Y".clone(),
+        dependent_scope: "Singleton".clone(), dependency_scope: "Request".clone(),
+    };
+    let s = f"{err}";
+    assert(s.contains("X"));
+    assert(s.contains("Y"));
+    assert(s.contains("Singleton"));
+    assert(s.contains("Request"));
+}
+
+// =============================================================================
+// Section 10: Debug — `f"{x:?}"` shows the variant name
+// =============================================================================
+
+@test
+fn test_debug_not_found_names_variant() {
+    let err = ContextError.NotFound { context_name: "X".clone() };
+    let s = f"{err:?}";
+    assert(s.contains("NotFound"));
+    assert(s.contains("X"));
+}
+
+@test
+fn test_debug_circular_dependency_summarises_chain_length() {
+    let chain: List<Text> = ["a".clone(), "b".clone(), "c".clone(), "a".clone()];
+    let err = ContextError.CircularDependency { chain: chain };
+    let s = f"{err:?}";
+    assert(s.contains("CircularDependency"));
+    // Debug renders `<N entries>` not the full chain
+    assert(s.contains("entries"));
+    assert(s.contains("4"));
+}

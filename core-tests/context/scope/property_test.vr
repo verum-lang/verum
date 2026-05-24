@@ -1,0 +1,239 @@
+// =============================================================================
+// core-tests/context/scope/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over the `core.context.scope` types. The Scope domain is
+// 3-valued; we hand-unroll the Cartesian sweep rather than going through
+// a `List<Scope>` helper to dodge a global_ctor / cross-archive
+// FunctionNotFound hazard observed when a free fn in this file returns
+// `List<Scope>` (see regression_test.vr + audit.md §3.3). The ContextScope
+// depth chain is unbounded; we sweep a representative span.
+//
+// Laws verified:
+//   §1  Scope.name is injective                           ∀a,b. a ≠ b ⇒ name(a) ≠ name(b)
+//   §2  Scope.rank is injective + total                   ∀a,b. a ≠ b ⇒ rank(a) ≠ rank(b)
+//   §3  rank: Singleton < Request < Transient             rank monotone w.r.t. lifetime
+//   §4  can_depend_on reflexive                           ∀x. x.can_depend_on(x)
+//   §5  can_depend_on coheres with rank order             dep.rank ≤ self.rank ⇔ allowed
+//   §6  Singleton row exact                               only can_depend_on(Singleton)
+//   §7  Request row exact                                 only can_depend_on(Sng) and can_depend_on(Req)
+//   §8  Transient row exact                               can_depend_on for all 3
+//   §9  ContextScope.root.depth = 0
+//   §10 ContextScope.enter monotone                       enter(s).depth = s.depth + 1
+//   §11 ContextScope.enter parent linkage                 enter(s).parent = s.depth
+//   §12 enter is non-mutating (immutable derivation)
+//   §13 enter chain n times yields depth n
+// =============================================================================
+
+mount core.context.scope.{Scope, ContextScope};
+
+// =============================================================================
+// §1 Scope.name is injective — full 3×3 pair sweep
+// =============================================================================
+
+@test
+fn property_name_injective_exhaustive() {
+    assert(Scope.Singleton.name() != Scope.Request.name());
+    assert(Scope.Singleton.name() != Scope.Transient.name());
+    assert(Scope.Request.name()   != Scope.Transient.name());
+}
+
+// =============================================================================
+// §2 Scope.rank is injective — full 3×3 pair sweep
+// =============================================================================
+
+@test
+fn property_rank_injective_exhaustive() {
+    assert(Scope.Singleton.rank() != Scope.Request.rank());
+    assert(Scope.Singleton.rank() != Scope.Transient.rank());
+    assert(Scope.Request.rank()   != Scope.Transient.rank());
+}
+
+// =============================================================================
+// §3 rank: Singleton < Request < Transient
+// =============================================================================
+
+@test
+fn property_rank_monotone_by_lifetime() {
+    assert(Scope.Singleton.rank() < Scope.Request.rank());
+    assert(Scope.Request.rank()   < Scope.Transient.rank());
+    // Transitivity check (trivial in a 3-element total order).
+    assert(Scope.Singleton.rank() < Scope.Transient.rank());
+}
+
+// =============================================================================
+// §4 can_depend_on reflexive: ∀x. x.can_depend_on(x)
+// =============================================================================
+
+@test
+fn property_can_depend_on_reflexive() {
+    assert(Scope.Singleton.can_depend_on(Scope.Singleton));
+    assert(Scope.Request.can_depend_on(Scope.Request));
+    assert(Scope.Transient.can_depend_on(Scope.Transient));
+}
+
+// =============================================================================
+// §5 can_depend_on iff dep.rank ≤ self.rank — full 3×3 matrix
+// =============================================================================
+//
+// The dependency must be at LEAST as long-lived (≤ rank) as the
+// dependent. So self.rank ≥ dep.rank ⇔ allowed.
+
+@test
+fn property_can_depend_on_iff_dep_rank_le_self_rank_singleton() {
+    // self = Singleton (rank 0)
+    assert_eq(Scope.Singleton.can_depend_on(Scope.Singleton),
+              Scope.Singleton.rank() <= Scope.Singleton.rank());
+    assert_eq(Scope.Singleton.can_depend_on(Scope.Request),
+              Scope.Request.rank() <= Scope.Singleton.rank());
+    assert_eq(Scope.Singleton.can_depend_on(Scope.Transient),
+              Scope.Transient.rank() <= Scope.Singleton.rank());
+}
+
+@test
+fn property_can_depend_on_iff_dep_rank_le_self_rank_request() {
+    // self = Request (rank 1)
+    assert_eq(Scope.Request.can_depend_on(Scope.Singleton),
+              Scope.Singleton.rank() <= Scope.Request.rank());
+    assert_eq(Scope.Request.can_depend_on(Scope.Request),
+              Scope.Request.rank() <= Scope.Request.rank());
+    assert_eq(Scope.Request.can_depend_on(Scope.Transient),
+              Scope.Transient.rank() <= Scope.Request.rank());
+}
+
+@test
+fn property_can_depend_on_iff_dep_rank_le_self_rank_transient() {
+    // self = Transient (rank 2)
+    assert_eq(Scope.Transient.can_depend_on(Scope.Singleton),
+              Scope.Singleton.rank() <= Scope.Transient.rank());
+    assert_eq(Scope.Transient.can_depend_on(Scope.Request),
+              Scope.Request.rank() <= Scope.Transient.rank());
+    assert_eq(Scope.Transient.can_depend_on(Scope.Transient),
+              Scope.Transient.rank() <= Scope.Transient.rank());
+}
+
+// =============================================================================
+// §6/§7/§8 Per-row exactness (audit pin — survives if matrix flips)
+// =============================================================================
+
+@test
+fn property_singleton_row_exact() {
+    assert(Scope.Singleton.can_depend_on(Scope.Singleton));
+    assert(!Scope.Singleton.can_depend_on(Scope.Request));
+    assert(!Scope.Singleton.can_depend_on(Scope.Transient));
+}
+
+@test
+fn property_request_row_exact() {
+    assert(Scope.Request.can_depend_on(Scope.Singleton));
+    assert(Scope.Request.can_depend_on(Scope.Request));
+    assert(!Scope.Request.can_depend_on(Scope.Transient));
+}
+
+@test
+fn property_transient_row_exact() {
+    assert(Scope.Transient.can_depend_on(Scope.Singleton));
+    assert(Scope.Transient.can_depend_on(Scope.Request));
+    assert(Scope.Transient.can_depend_on(Scope.Transient));
+}
+
+// =============================================================================
+// §9 ContextScope.root.depth = 0
+// =============================================================================
+
+@test
+fn property_root_depth_zero() {
+    assert_eq(ContextScope.root().current_depth(), 0);
+    assert_eq(ContextScope.root().parent(), 0);
+}
+
+// =============================================================================
+// §10 ContextScope.enter monotone: enter(s).depth = s.depth + 1
+// =============================================================================
+
+@test
+fn property_enter_depth_monotone() {
+    let mut cur = ContextScope.root();
+    let mut expected = 0;
+    while expected < 64 {
+        assert_eq(cur.current_depth(), expected);
+        cur = cur.enter();
+        expected = expected + 1;
+    }
+    assert_eq(cur.current_depth(), 64);
+}
+
+// =============================================================================
+// §11 ContextScope.enter parent linkage: enter(s).parent = s.depth
+// =============================================================================
+
+@test
+fn property_enter_parent_linkage() {
+    let mut cur = ContextScope.root();
+    let mut n = 0;
+    while n < 32 {
+        let next = cur.enter();
+        assert_eq(next.parent(), cur.current_depth());
+        cur = next;
+        n = n + 1;
+    }
+}
+
+// =============================================================================
+// §12 enter is non-mutating
+// =============================================================================
+
+@test
+fn property_enter_does_not_mutate_self() {
+    let root = ContextScope.root();
+    let _a = root.enter();
+    let _b = root.enter();
+    let _c = root.enter();
+    // root is still root after three derived calls
+    assert_eq(root.current_depth(), 0);
+    assert_eq(root.parent(), 0);
+}
+
+// =============================================================================
+// §13 enter chain n times yields depth n
+// =============================================================================
+
+@test
+fn property_enter_chain_one() {
+    let s = ContextScope.root().enter();
+    assert_eq(s.current_depth(), 1);
+}
+
+@test
+fn property_enter_chain_two() {
+    let s = ContextScope.root().enter().enter();
+    assert_eq(s.current_depth(), 2);
+}
+
+@test
+fn property_enter_chain_five() {
+    let s = ContextScope.root().enter().enter().enter().enter().enter();
+    assert_eq(s.current_depth(), 5);
+}
+
+@test
+fn property_enter_chain_ten() {
+    let mut s = ContextScope.root();
+    let mut k = 0;
+    while k < 10 {
+        s = s.enter();
+        k = k + 1;
+    }
+    assert_eq(s.current_depth(), 10);
+}
+
+@test
+fn property_enter_chain_fifty() {
+    let mut s = ContextScope.root();
+    let mut k = 0;
+    while k < 50 {
+        s = s.enter();
+        k = k + 1;
+    }
+    assert_eq(s.current_depth(), 50);
+}

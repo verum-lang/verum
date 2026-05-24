@@ -1,0 +1,124 @@
+// =============================================================================
+// core-tests/context/standard/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for ContextLogLevel + supporting data types.
+// =============================================================================
+
+mount core.context.standard.{ContextLogLevel, AuthUser, Row, QueryResult};
+mount core.collections.list.List;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: ContextLogLevel inside List
+// =============================================================================
+
+@test
+fn integration_log_level_in_list_preserves_identity() {
+    let levels: List<ContextLogLevel> = [
+        ContextLogLevel.Trace,
+        ContextLogLevel.Debug,
+        ContextLogLevel.Info,
+        ContextLogLevel.Warn,
+        ContextLogLevel.Error,
+        ContextLogLevel.Fatal,
+    ];
+    assert_eq(levels.len(), 6);
+    // Index 0 must still be Trace after List round-trip.
+    assert(levels[0] is ContextLogLevel.Trace);
+    assert(levels[5] is ContextLogLevel.Fatal);
+}
+
+@test
+fn integration_log_level_in_list_severity_iteration() {
+    let levels: List<ContextLogLevel> = [
+        ContextLogLevel.Trace,
+        ContextLogLevel.Debug,
+        ContextLogLevel.Info,
+    ];
+    // Sum of severities of first 3 levels: 0 + 1 + 2 = 3.
+    let mut total = 0;
+    for l in levels.iter() {
+        total = total + (*l).severity();
+    }
+    assert_eq(total, 3);
+}
+
+// =============================================================================
+// Section 2: ContextLogLevel composition with Maybe
+// =============================================================================
+
+@test
+fn integration_log_level_some_unwrap() {
+    let m: Maybe<ContextLogLevel> = Some(ContextLogLevel.Warn);
+    match m {
+        Some(l) => {
+            assert(l is ContextLogLevel.Warn);
+            assert_eq(l.severity(), 3);
+        },
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn integration_log_level_none_default_to_info() {
+    // Common pattern: get level from config or default to Info.
+    let configured: Maybe<ContextLogLevel> = None;
+    let actual = match configured {
+        Some(l) => l,
+        None => ContextLogLevel.Info,
+    };
+    assert(actual is ContextLogLevel.Info);
+}
+
+// =============================================================================
+// Section 3: AuthUser sample usage — role-gated dispatch
+// =============================================================================
+
+@test
+fn integration_auth_user_role_check_decides_action() {
+    let admin = AuthUser {
+        id: "u1".clone(),
+        name: "alice".clone(),
+        roles: ["admin".clone(), "editor".clone()],
+    };
+    let guest = AuthUser {
+        id: "u2".clone(),
+        name: "bob".clone(),
+        roles: ["viewer".clone()],
+    };
+    let admin_role = "admin".clone();
+    let viewer_role = "viewer".clone();
+
+    // Admin can perform admin actions.
+    assert(admin.has_role(&admin_role));
+    // Guest cannot.
+    assert(!guest.has_role(&admin_role));
+    // Both have view-related access checks. Guest does, admin does not (no viewer role).
+    assert(!admin.has_role(&viewer_role));
+    assert(guest.has_role(&viewer_role));
+}
+
+// =============================================================================
+// Section 4: Row + QueryResult composition
+// =============================================================================
+
+@test
+fn integration_query_result_with_multiple_rows() {
+    let r1 = Row {
+        columns: ["id".clone(), "name".clone()],
+        values: [Some("1".clone()), Some("alice".clone())],
+    };
+    let r2 = Row {
+        columns: ["id".clone(), "name".clone()],
+        values: [Some("2".clone()), Some("bob".clone())],
+    };
+    let qr = QueryResult {
+        rows: [r1, r2],
+        rows_affected: 0,
+    };
+    assert_eq(qr.rows.len(), 2);
+    let display = f"{qr}";
+    assert(display.contains("2"));
+    assert(display.contains("rows"));
+}

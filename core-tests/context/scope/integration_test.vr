@@ -1,0 +1,167 @@
+// =============================================================================
+// core-tests/context/scope/integration_test.vr
+// =============================================================================
+//
+// Cross-type interactions for `core.context.scope`:
+//   * Scope used as the discriminant of dependency-graph predicates
+//     across a representative DI graph (Singleton-only / mixed / wide).
+//   * ContextScope used to model a nested provide/using-style hierarchy
+//     (without runtime ctx_bridge; that's the provider module's surface).
+//   * Scope formatting through `name()` composed with `f"..."` interpolation.
+// =============================================================================
+
+mount core.context.scope.{Scope, ContextScope};
+
+// =============================================================================
+// Section 1: DI-graph compatibility check (Scope ∋ {Sng,Req,Trn})
+// =============================================================================
+//
+// Helper that asserts a hand-rolled dependency graph is well-scoped.
+// Each (dependent, dependency) pair gets checked through `can_depend_on`.
+
+fn check_pair(dependent: Scope, dependency: Scope) -> Bool {
+    dependent.can_depend_on(dependency)
+}
+
+@test
+fn integration_singleton_only_graph_well_scoped() {
+    // db_pool: Singleton, depends on config: Singleton, depends on env: Singleton.
+    assert(check_pair(Scope.Singleton, Scope.Singleton));
+    // chain ok — Singleton -> Singleton -> Singleton
+    let chain_ok = check_pair(Scope.Singleton, Scope.Singleton)
+        && check_pair(Scope.Singleton, Scope.Singleton);
+    assert(chain_ok);
+}
+
+@test
+fn integration_request_scope_can_consume_singleton() {
+    // request_handler: Request, uses db_pool: Singleton.
+    assert(check_pair(Scope.Request, Scope.Singleton));
+    // and also request_logger: Request consuming request_id: Request.
+    assert(check_pair(Scope.Request, Scope.Request));
+}
+
+@test
+fn integration_singleton_cannot_consume_request_or_transient() {
+    // Negative case: singleton service depending on request-scoped data
+    // would leak request state across requests — must be rejected.
+    assert(!check_pair(Scope.Singleton, Scope.Request));
+    assert(!check_pair(Scope.Singleton, Scope.Transient));
+}
+
+@test
+fn integration_transient_consumes_anything() {
+    // Transient: fresh per use, can pull from any scope.
+    assert(check_pair(Scope.Transient, Scope.Singleton));
+    assert(check_pair(Scope.Transient, Scope.Request));
+    assert(check_pair(Scope.Transient, Scope.Transient));
+}
+
+// =============================================================================
+// Section 2: Mixed graph — typical web request handler shape
+// =============================================================================
+
+@test
+fn integration_typical_web_handler_dependency_chain_well_scoped() {
+    // Realistic chain:
+    //   ConfigService:    Singleton
+    //   ConnectionPool:   Singleton  ← ConfigService
+    //   RequestId:        Request
+    //   Logger:           Request    ← ConfigService
+    //   Database:         Request    ← ConnectionPool
+    //   AuthMiddleware:   Request    ← Logger, Database
+    //   ResponseBuilder:  Transient  ← Logger, RequestId
+    //
+    // All edges must satisfy `can_depend_on`.
+
+    // Singleton edges (config-pool)
+    assert(check_pair(Scope.Singleton, Scope.Singleton));
+
+    // Request → Singleton edges
+    assert(check_pair(Scope.Request, Scope.Singleton)); // Logger → Config
+    assert(check_pair(Scope.Request, Scope.Singleton)); // Database → Pool
+
+    // Request → Request edges
+    assert(check_pair(Scope.Request, Scope.Request)); // Auth → Logger
+    assert(check_pair(Scope.Request, Scope.Request)); // Auth → Database
+
+    // Transient → Request / Singleton edges
+    assert(check_pair(Scope.Transient, Scope.Request));   // Builder → Logger
+    assert(check_pair(Scope.Transient, Scope.Request));   // Builder → RequestId
+}
+
+// =============================================================================
+// Section 3: ContextScope nesting models provide/using hierarchy
+// =============================================================================
+
+@test
+fn integration_contextscope_nested_provide_models() {
+    // Models:
+    //   provide Logger = ... in {            // depth 1
+    //       provide Database = ... in {      // depth 2
+    //           provide Auth = ... in {      // depth 3
+    //               // handler body
+    //           }
+    //       }
+    //   }
+    let root = ContextScope.root();
+    let with_logger = root.enter();
+    let with_db = with_logger.enter();
+    let with_auth = with_db.enter();
+
+    assert_eq(root.current_depth(), 0);
+    assert_eq(with_logger.current_depth(), 1);
+    assert_eq(with_db.current_depth(), 2);
+    assert_eq(with_auth.current_depth(), 3);
+
+    // Each child's `parent` equals the depth of the surrounding `provide`.
+    assert_eq(with_logger.parent(), 0);
+    assert_eq(with_db.parent(), 1);
+    assert_eq(with_auth.parent(), 2);
+}
+
+// =============================================================================
+// Section 4: Scope.name composes with f-string interpolation
+// =============================================================================
+
+@test
+fn integration_scope_name_in_format_literal() {
+    let s = Scope.Singleton;
+    let msg = f"scope is {s.name()}";
+    assert(msg.contains("Singleton"));
+    assert(msg.contains("scope is"));
+}
+
+@test
+fn integration_scope_name_used_in_error_message_shape() {
+    // The ContextError.ScopeViolation variant stores `dependent_scope`
+    // and `dependency_scope` as Text — those Text values come from
+    // `Scope.name()` at the violation site. Pin that round-trip here.
+    let dep = Scope.Singleton;
+    let depy = Scope.Request;
+    let msg = f"{dep.name()} depends on {depy.name()}";
+    assert(msg.contains("Singleton"));
+    assert(msg.contains("Request"));
+    assert(msg.contains(" depends on "));
+}
+
+// =============================================================================
+// Section 5: ContextScope deep nesting interop
+// =============================================================================
+
+@test
+fn integration_contextscope_deep_nesting_via_chain() {
+    // Equivalent to `provide A in { provide B in { provide C in { ... } } }`
+    // 8 levels deep — typical for a multi-layered request middleware stack.
+    let s = ContextScope.root()
+        .enter()        // depth 1: Tracer
+        .enter()        // depth 2: Logger
+        .enter()        // depth 3: Config
+        .enter()        // depth 4: Database
+        .enter()        // depth 5: Auth
+        .enter()        // depth 6: Cache
+        .enter()        // depth 7: Metrics
+        .enter();       // depth 8: RequestId
+    assert_eq(s.current_depth(), 8);
+    assert_eq(s.parent(), 7);
+}

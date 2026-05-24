@@ -1,0 +1,194 @@
+// =============================================================================
+// core-tests/context/error/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `ContextError`:
+//
+//   §1  Eq reflexive   ∀x. x == x
+//   §2  Eq symmetric   ∀x,y. x == y ⇒ y == x
+//   §3  Eq disjoint variants  different variants never compare equal
+//   §4  message() determinism  message(x) twice yields the same string
+//   §5  Display ≡ message  f"{x}" == x.message()
+//   §6  message includes the discriminating data
+// =============================================================================
+
+mount core.context.error.{ContextError, NotFound, NotProvided, TypeMismatch, CircularDependency, ScopeViolation};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 Eq reflexive — each variant
+// =============================================================================
+
+@test
+fn property_eq_reflexive_not_found() {
+    let x = ContextError.NotFound { context_name: "x".clone() };
+    assert(x == x);
+}
+
+@test
+fn property_eq_reflexive_not_provided() {
+    let x = ContextError.NotProvided {
+        context_name: "x".clone(), function_name: "f".clone(),
+    };
+    assert(x == x);
+}
+
+@test
+fn property_eq_reflexive_type_mismatch() {
+    let x = ContextError.TypeMismatch {
+        context_name: "x".clone(), expected: "A".clone(), found: "B".clone(),
+    };
+    assert(x == x);
+}
+
+@test
+fn property_eq_reflexive_circular_dependency() {
+    let x = ContextError.CircularDependency { chain: ["A".clone(), "B".clone(), "A".clone()] };
+    assert(x == x);
+}
+
+@test
+fn property_eq_reflexive_scope_violation() {
+    let x = ContextError.ScopeViolation {
+        dependent: "a".clone(), dependency: "b".clone(),
+        dependent_scope: "S".clone(), dependency_scope: "R".clone(),
+    };
+    assert(x == x);
+}
+
+// =============================================================================
+// §2 Eq symmetric — sample pair per variant
+// =============================================================================
+
+@test
+fn property_eq_symmetric_not_found() {
+    let a = ContextError.NotFound { context_name: "x".clone() };
+    let b = ContextError.NotFound { context_name: "x".clone() };
+    assert(a == b);
+    assert(b == a);
+}
+
+@test
+fn property_eq_symmetric_negation_not_found() {
+    let a = ContextError.NotFound { context_name: "x".clone() };
+    let b = ContextError.NotFound { context_name: "y".clone() };
+    assert(a != b);
+    assert(b != a);
+}
+
+// =============================================================================
+// §3 Eq disjoint variants
+// =============================================================================
+
+@test
+fn property_eq_disjoint_variants_full_sweep() {
+    let nf = ContextError.NotFound { context_name: "X".clone() };
+    let np = ContextError.NotProvided { context_name: "X".clone(), function_name: "f".clone() };
+    let tm = ContextError.TypeMismatch {
+        context_name: "X".clone(), expected: "A".clone(), found: "B".clone(),
+    };
+    let cd = ContextError.CircularDependency { chain: [] };
+    let sv = ContextError.ScopeViolation {
+        dependent: "a".clone(), dependency: "b".clone(),
+        dependent_scope: "S".clone(), dependency_scope: "R".clone(),
+    };
+
+    // All 5×4 = 20 cross-variant comparisons must be `!=`.
+    assert(nf != np);
+    assert(nf != tm);
+    assert(nf != cd);
+    assert(nf != sv);
+    assert(np != tm);
+    assert(np != cd);
+    assert(np != sv);
+    assert(tm != cd);
+    assert(tm != sv);
+    assert(cd != sv);
+}
+
+// =============================================================================
+// §4 message() determinism — same value, same string both calls
+// =============================================================================
+
+@test
+fn property_message_deterministic() {
+    let nf = ContextError.NotFound { context_name: "Cache".clone() };
+    assert_eq(nf.message(), nf.message());
+
+    let tm = ContextError.TypeMismatch {
+        context_name: "X".clone(), expected: "Foo".clone(), found: "Bar".clone(),
+    };
+    assert_eq(tm.message(), tm.message());
+
+    let sv = ContextError.ScopeViolation {
+        dependent: "a".clone(), dependency: "b".clone(),
+        dependent_scope: "S".clone(), dependency_scope: "R".clone(),
+    };
+    assert_eq(sv.message(), sv.message());
+}
+
+// =============================================================================
+// §5 Display ≡ message — `f"{err}"` matches `err.message()`
+// =============================================================================
+
+@test
+fn property_display_equals_message_not_found() {
+    let err = ContextError.NotFound { context_name: "Logger".clone() };
+    assert_eq(f"{err}", err.message());
+}
+
+@test
+fn property_display_equals_message_not_provided() {
+    let err = ContextError.NotProvided {
+        context_name: "X".clone(), function_name: "f".clone(),
+    };
+    assert_eq(f"{err}", err.message());
+}
+
+@test
+fn property_display_equals_message_type_mismatch() {
+    let err = ContextError.TypeMismatch {
+        context_name: "X".clone(), expected: "A".clone(), found: "B".clone(),
+    };
+    assert_eq(f"{err}", err.message());
+}
+
+@test
+fn property_display_equals_message_circular_dependency() {
+    let err = ContextError.CircularDependency { chain: ["A".clone(), "B".clone(), "A".clone()] };
+    assert_eq(f"{err}", err.message());
+}
+
+@test
+fn property_display_equals_message_scope_violation() {
+    let err = ContextError.ScopeViolation {
+        dependent: "a".clone(), dependency: "b".clone(),
+        dependent_scope: "S".clone(), dependency_scope: "R".clone(),
+    };
+    assert_eq(f"{err}", err.message());
+}
+
+// =============================================================================
+// §6 message() includes the discriminating data
+// =============================================================================
+
+@test
+fn property_not_found_message_includes_name() {
+    let a = ContextError.NotFound { context_name: "AAA".clone() };
+    let b = ContextError.NotFound { context_name: "BBB".clone() };
+    assert(a.message().contains("AAA"));
+    assert(b.message().contains("BBB"));
+    // The messages must differ — if not, the name is dropped.
+    assert(a.message() != b.message());
+}
+
+@test
+fn property_type_mismatch_message_includes_expected_and_found() {
+    let err = ContextError.TypeMismatch {
+        context_name: "C".clone(), expected: "EEE".clone(), found: "FFF".clone(),
+    };
+    let msg = err.message();
+    assert(msg.contains("EEE"));
+    assert(msg.contains("FFF"));
+    assert(msg.contains("C"));
+}

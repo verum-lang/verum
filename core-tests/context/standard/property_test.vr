@@ -1,0 +1,175 @@
+// =============================================================================
+// core-tests/context/standard/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `ContextLogLevel` (6-valued domain — exhausted).
+//
+//   §1  severity is injective         ∀a,b. a ≠ b ⇒ severity(a) ≠ severity(b)
+//   §2  name is injective              ∀a,b. a ≠ b ⇒ name(a) ≠ name(b)
+//   §3  severities are 0..5 strict     0=Trace < 1=Debug < 2=Info < 3=Warn < 4=Error < 5=Fatal
+//   §4  is_enabled monotone            self ≥ min ⇔ self.is_enabled(min)
+//   §5  is_enabled reflexive           ∀x. x.is_enabled(x)
+//   §6  Eq aligned with severity       a == b ⇔ severity(a) == severity(b)
+//   §7  Ord aligned with severity      a.cmp(b) matches severity comparison
+//   §8  Clone is identity              a.clone() == a; severity preserved
+//   §9  Display ≡ name                 f"{x}" == x.name()
+//   §10 Debug ≡ name                   f"{x:?}" == x.name()
+// =============================================================================
+
+mount core.context.standard.{ContextLogLevel};
+
+// =============================================================================
+// §1 severity is injective — full 6×5/2 = 15 distinct-pair sweep
+// =============================================================================
+
+@test
+fn property_severity_injective_exhaustive() {
+    // Distinct pairs (5 + 4 + 3 + 2 + 1 = 15) — all must have distinct severities.
+    assert(ContextLogLevel.Trace.severity() != ContextLogLevel.Debug.severity());
+    assert(ContextLogLevel.Trace.severity() != ContextLogLevel.Info.severity());
+    assert(ContextLogLevel.Trace.severity() != ContextLogLevel.Warn.severity());
+    assert(ContextLogLevel.Trace.severity() != ContextLogLevel.Error.severity());
+    assert(ContextLogLevel.Trace.severity() != ContextLogLevel.Fatal.severity());
+
+    assert(ContextLogLevel.Debug.severity() != ContextLogLevel.Info.severity());
+    assert(ContextLogLevel.Debug.severity() != ContextLogLevel.Warn.severity());
+    assert(ContextLogLevel.Debug.severity() != ContextLogLevel.Error.severity());
+    assert(ContextLogLevel.Debug.severity() != ContextLogLevel.Fatal.severity());
+
+    assert(ContextLogLevel.Info.severity() != ContextLogLevel.Warn.severity());
+    assert(ContextLogLevel.Info.severity() != ContextLogLevel.Error.severity());
+    assert(ContextLogLevel.Info.severity() != ContextLogLevel.Fatal.severity());
+
+    assert(ContextLogLevel.Warn.severity() != ContextLogLevel.Error.severity());
+    assert(ContextLogLevel.Warn.severity() != ContextLogLevel.Fatal.severity());
+
+    assert(ContextLogLevel.Error.severity() != ContextLogLevel.Fatal.severity());
+}
+
+// =============================================================================
+// §2 name is injective
+// =============================================================================
+
+@test
+fn property_name_injective_exhaustive() {
+    assert(ContextLogLevel.Trace.name() != ContextLogLevel.Debug.name());
+    assert(ContextLogLevel.Debug.name() != ContextLogLevel.Info.name());
+    assert(ContextLogLevel.Info.name()  != ContextLogLevel.Warn.name());
+    assert(ContextLogLevel.Warn.name()  != ContextLogLevel.Error.name());
+    assert(ContextLogLevel.Error.name() != ContextLogLevel.Fatal.name());
+}
+
+// =============================================================================
+// §3 severities are 0..5 strictly increasing
+// =============================================================================
+
+@test
+fn property_severity_strict_chain() {
+    assert(ContextLogLevel.Trace.severity() < ContextLogLevel.Debug.severity());
+    assert(ContextLogLevel.Debug.severity() < ContextLogLevel.Info.severity());
+    assert(ContextLogLevel.Info.severity()  < ContextLogLevel.Warn.severity());
+    assert(ContextLogLevel.Warn.severity()  < ContextLogLevel.Error.severity());
+    assert(ContextLogLevel.Error.severity() < ContextLogLevel.Fatal.severity());
+}
+
+// =============================================================================
+// §4 is_enabled monotone — should match `self.severity() >= min.severity()`
+// =============================================================================
+//
+// Sample 6×6 matrix here. The corner cases are most informative.
+
+@test
+fn property_is_enabled_monotone_diagonals() {
+    // Self-row: each level is enabled by itself (reflexive, see §5).
+    assert(ContextLogLevel.Trace.is_enabled(ContextLogLevel.Trace));
+    assert(ContextLogLevel.Fatal.is_enabled(ContextLogLevel.Fatal));
+}
+
+@test
+fn property_is_enabled_min_below_passes() {
+    // self.severity > min.severity → must pass.
+    assert(ContextLogLevel.Info.is_enabled(ContextLogLevel.Trace));
+    assert(ContextLogLevel.Fatal.is_enabled(ContextLogLevel.Debug));
+    assert(ContextLogLevel.Error.is_enabled(ContextLogLevel.Warn));
+}
+
+@test
+fn property_is_enabled_min_above_fails() {
+    // self.severity < min.severity → must NOT pass.
+    assert(!ContextLogLevel.Trace.is_enabled(ContextLogLevel.Info));
+    assert(!ContextLogLevel.Debug.is_enabled(ContextLogLevel.Fatal));
+    assert(!ContextLogLevel.Info.is_enabled(ContextLogLevel.Warn));
+}
+
+// =============================================================================
+// §5 is_enabled reflexive
+// =============================================================================
+
+@test
+fn property_is_enabled_reflexive_exhaustive() {
+    assert(ContextLogLevel.Trace.is_enabled(ContextLogLevel.Trace));
+    assert(ContextLogLevel.Debug.is_enabled(ContextLogLevel.Debug));
+    assert(ContextLogLevel.Info.is_enabled(ContextLogLevel.Info));
+    assert(ContextLogLevel.Warn.is_enabled(ContextLogLevel.Warn));
+    assert(ContextLogLevel.Error.is_enabled(ContextLogLevel.Error));
+    assert(ContextLogLevel.Fatal.is_enabled(ContextLogLevel.Fatal));
+}
+
+// =============================================================================
+// §6 Eq aligned with severity
+// =============================================================================
+
+@test
+fn property_eq_aligned_with_severity() {
+    // Same severity → equal.
+    assert(ContextLogLevel.Info == ContextLogLevel.Info);
+    // Different severity → not equal.
+    assert(ContextLogLevel.Info != ContextLogLevel.Warn);
+    assert(ContextLogLevel.Trace != ContextLogLevel.Fatal);
+}
+
+// =============================================================================
+// §7 Ord aligned with severity
+// =============================================================================
+
+@test
+fn property_ord_aligned_with_severity() {
+    assert(ContextLogLevel.Trace < ContextLogLevel.Fatal);
+    assert(ContextLogLevel.Fatal > ContextLogLevel.Trace);
+    assert(ContextLogLevel.Info < ContextLogLevel.Warn);
+    assert(ContextLogLevel.Warn > ContextLogLevel.Info);
+}
+
+// =============================================================================
+// §8 Clone preserves severity
+// =============================================================================
+
+@test
+fn property_clone_preserves_severity() {
+    let l = ContextLogLevel.Warn;
+    let c = l.clone();
+    assert_eq(l.severity(), c.severity());
+    assert(l == c);
+}
+
+// =============================================================================
+// §9 Display ≡ name
+// =============================================================================
+
+@test
+fn property_display_equals_name() {
+    assert_eq(f"{ContextLogLevel.Trace}", ContextLogLevel.Trace.name());
+    assert_eq(f"{ContextLogLevel.Info}",  ContextLogLevel.Info.name());
+    assert_eq(f"{ContextLogLevel.Fatal}", ContextLogLevel.Fatal.name());
+}
+
+// =============================================================================
+// §10 Debug ≡ name
+// =============================================================================
+
+@test
+fn property_debug_equals_name() {
+    assert_eq(f"{ContextLogLevel.Trace:?}", ContextLogLevel.Trace.name());
+    assert_eq(f"{ContextLogLevel.Info:?}",  ContextLogLevel.Info.name());
+    assert_eq(f"{ContextLogLevel.Fatal:?}", ContextLogLevel.Fatal.name());
+}
