@@ -115,14 +115,19 @@ implement<T: Clone> Provider<T> {
     /// it only while no other call mutates the provider.
     public fn get_ref(&mut self) -> &T {
         // Same Maybe<T> field-tracking gap as `get` above — populate
-        // via qualified-variant match-extract single-pass. Bare
-        // `Some/None` patterns mis-resolve under task #17/#39.
-        match self.cached {
-            Maybe.Some(_) => {},
-            Maybe.None => {
-                self.cached = Maybe.Some((self.factory)());
-            },
+        // via qualified-variant `&match` borrow single-pass. The first
+        // pre-fix attempt at `match self.cached { Some(_) => {}, None
+        // => self.cached = Some(...) }` MOVED self.cached then tried
+        // to borrow it — same `Unreachable {pc:74}` failure mode the
+        // bare-`Some`/`None` pattern had. Use `&self.cached` to borrow
+        // explicitly in the discriminator match.
+        let needs_populate = match &self.cached {
+            Maybe.Some(_) => false,
+            Maybe.None => true,
         };
+        if needs_populate {
+            self.cached = Maybe.Some((self.factory)());
+        }
         match &self.cached {
             Maybe.Some(value) => value,
             Maybe.None => unreachable("Provider::get_ref: self.cached must be Some after the populate match"),
