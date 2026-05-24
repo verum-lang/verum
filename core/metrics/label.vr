@@ -38,6 +38,21 @@ implement LabelSet {
         LabelSet { values: out }
     }
 
+    /// Ergonomic constructor from an owned `List<LabelValue>`.
+    /// Useful in tests + builders that already hold a List —
+    /// avoids the `&[&Text]` slice indirection that `from_slice`
+    /// requires.
+    public fn from_list(values: List<LabelValue>) -> LabelSet {
+        LabelSet { values: values }
+    }
+
+    /// Append a value to the end of the set. Insertion-order is
+    /// preserved (the set is ordered, see module doc-comment).
+    /// O(amortised-1) via the underlying List.push.
+    public fn push(&mut self, value: LabelValue) {
+        self.values.push(value);
+    }
+
     public fn values(&self) -> &List<LabelValue> { &self.values }
     public fn len(&self) -> Int { self.values.len() }
     public fn is_empty(&self) -> Bool { self.values.is_empty() }

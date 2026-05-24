@@ -88,6 +88,19 @@ public type SortDirection is
     | Asc
     | Desc;
 
+implement SortDirection {
+    /// Swap the sort direction. `Asc.reverse() == Desc`,
+    /// `Desc.reverse() == Asc`. Useful for the common
+    /// `if user_wants_descending { dir.reverse() } else { dir }`
+    /// pattern.
+    public fn reverse(&self) -> SortDirection {
+        match self {
+            SortDirection.Asc => SortDirection.Desc,
+            SortDirection.Desc => SortDirection.Asc,
+        }
+    }
+}
+
 @derive(Clone, Debug)
 public type SortSpec is {
     field: Text,
@@ -235,6 +248,26 @@ implement Display for SearchError {
 
 implement Debug for SearchError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { Display.fmt(self, f) }
+}
+
+implement Eq for SearchError {
+    /// Per-variant payload-equal: same-tag variants with same payload
+    /// compare equal; different tags never compare equal.
+    /// Qualified `SearchError.<Variant>` pattern to dodge task #17/#39
+    /// bare-name collisions.
+    fn eq(&self, other: &SearchError) -> Bool {
+        match (self, other) {
+            (SearchError.Network(a),         SearchError.Network(b))         => a == b,
+            (SearchError.InvalidQuery(a),    SearchError.InvalidQuery(b))    => a == b,
+            (SearchError.IndexNotFound(a),   SearchError.IndexNotFound(b))   => a == b,
+            (SearchError.DocumentNotFound(a),SearchError.DocumentNotFound(b))=> a == b,
+            (SearchError.SchemaConflict(a),  SearchError.SchemaConflict(b))  => a == b,
+            (SearchError.TooManyDocuments { count: c1, limit: l1 },
+             SearchError.TooManyDocuments { count: c2, limit: l2 })          => c1 == c2 && l1 == l2,
+            (SearchError.Backend(a),         SearchError.Backend(b))         => a == b,
+            _ => false,
+        }
+    }
 }
 
 // =============================================================================

@@ -239,6 +239,37 @@ public fn quantity_eq(a: Quantity, b: Quantity) -> Bool {
     }
 }
 
+implement Display for Quantity {
+    /// Compact canonical short-forms for log lines:
+    ///   * `[Zero]` for the erased quantity
+    ///   * `[1]` for the linear quantity
+    ///   * `[Many]` for the cardinal (unrestricted) quantity
+    ///   * `[≤N]` for affine bounded with N as the cap
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Quantity.Zero => f.write_str("[Zero]"),
+            Quantity.One => f.write_str("[1]"),
+            Quantity.Many => f.write_str("[Many]"),
+            Quantity.AtMost { n } => f.write_str(f"[≤{n}]".as_str()),
+        }
+    }
+}
+
+implement Debug for Quantity {
+    /// Same canonical short-forms as Display.
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        Display.fmt(self, f)
+    }
+}
+
+implement Eq for Quantity {
+    /// Use the `quantity_eq` decision procedure (post-normalisation
+    /// + structural compare).
+    fn eq(&self, other: &Quantity) -> Bool {
+        quantity_eq(*self, *other)
+    }
+}
+
 // =============================================================================
 // 2. Usage tracking
 // =============================================================================

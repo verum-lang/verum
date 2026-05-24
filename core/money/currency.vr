@@ -61,6 +61,29 @@ implement Currency {
     }
 }
 
+implement Display for Currency {
+    /// Render as the ISO 4217 code — `"USD"` / `"JPY"` / `"EUR"` /
+    /// etc. Canonical for log lines and human-readable output.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.code.as_str())
+    }
+}
+
+implement Debug for Currency {
+    /// Render as `Currency { code: "USD", minor_units: 2 }` for
+    /// diagnostic dumps.
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"Currency {{ code: \"{self.code}\", minor_units: {self.minor_units} }}".as_str())
+    }
+}
+
+implement Eq for Currency {
+    /// Code-only equality — same contract as `Currency.eq` method.
+    fn eq(&self, other: &Currency) -> Bool {
+        self.code == other.code
+    }
+}
+
 // =============================================================================
 // Predefined currencies — V0 covers the most common 20 worldwide
 // =============================================================================
