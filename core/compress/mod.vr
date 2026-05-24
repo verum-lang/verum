@@ -182,15 +182,16 @@ implement Eq for Algorithm {
 }
 
 implement Display for CompressError {
+    /// Qualify variants (task #17/#39 workaround).
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            UnsupportedAlgorithm(a)        => f.write_str(f"compress: unsupported algorithm {a}".as_str()),
-            CorruptInput(reason)           => f.write_str(f"compress: corrupt input ({reason})".as_str()),
-            BufferTooSmall { need, have }  => f.write_str(f"compress: buffer too small (need {need}, have {have})".as_str()),
-            InvalidLevel { algo, level }   => f.write_str(f"compress {algo}: invalid level {level}".as_str()),
-            DictionaryMismatch             => f.write_str("compress: dictionary mismatch"),
-            OutputTooLarge { limit }       => f.write_str(f"compress: decompressed output exceeds limit {limit}".as_str()),
-            IoError(reason)                => f.write_str(f"compress I/O error: {reason}".as_str()),
+            CompressError.UnsupportedAlgorithm(a)        => f.write_str(f"compress: unsupported algorithm {a}".as_str()),
+            CompressError.CorruptInput(reason)           => f.write_str(f"compress: corrupt input ({reason})".as_str()),
+            CompressError.BufferTooSmall { need, have }  => f.write_str(f"compress: buffer too small (need {need}, have {have})".as_str()),
+            CompressError.InvalidLevel { algo, level }   => f.write_str(f"compress {algo}: invalid level {level}".as_str()),
+            CompressError.DictionaryMismatch             => f.write_str("compress: dictionary mismatch"),
+            CompressError.OutputTooLarge { limit }       => f.write_str(f"compress: decompressed output exceeds limit {limit}".as_str()),
+            CompressError.IoError(reason)                => f.write_str(f"compress I/O error: {reason}".as_str()),
         }
     }
 }
@@ -198,13 +199,13 @@ implement Display for CompressError {
 implement Debug for CompressError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            UnsupportedAlgorithm(a)        => f.write_str(f"UnsupportedAlgorithm({a})".as_str()),
-            CorruptInput(reason)           => f.write_str(f"CorruptInput({reason})".as_str()),
-            BufferTooSmall { need, have }  => f.write_str(f"BufferTooSmall {{ need: {need}, have: {have} }}".as_str()),
-            InvalidLevel { algo, level }   => f.write_str(f"InvalidLevel {{ algo: {algo}, level: {level} }}".as_str()),
-            DictionaryMismatch             => f.write_str("DictionaryMismatch"),
-            OutputTooLarge { limit }       => f.write_str(f"OutputTooLarge {{ limit: {limit} }}".as_str()),
-            IoError(reason)                => f.write_str(f"IoError({reason})".as_str()),
+            CompressError.UnsupportedAlgorithm(a)        => f.write_str(f"UnsupportedAlgorithm({a})".as_str()),
+            CompressError.CorruptInput(reason)           => f.write_str(f"CorruptInput({reason})".as_str()),
+            CompressError.BufferTooSmall { need, have }  => f.write_str(f"BufferTooSmall {{ need: {need}, have: {have} }}".as_str()),
+            CompressError.InvalidLevel { algo, level }   => f.write_str(f"InvalidLevel {{ algo: {algo}, level: {level} }}".as_str()),
+            CompressError.DictionaryMismatch             => f.write_str("DictionaryMismatch"),
+            CompressError.OutputTooLarge { limit }       => f.write_str(f"OutputTooLarge {{ limit: {limit} }}".as_str()),
+            CompressError.IoError(reason)                => f.write_str(f"IoError({reason})".as_str()),
         }
     }
 }
@@ -212,15 +213,15 @@ implement Debug for CompressError {
 implement Eq for CompressError {
     fn eq(&self, other: &CompressError) -> Bool {
         match (self, other) {
-            (UnsupportedAlgorithm(a),       UnsupportedAlgorithm(b))       => a == b,
-            (CorruptInput(a),               CorruptInput(b))               => a == b,
-            (BufferTooSmall { need: na, have: ha },
-             BufferTooSmall { need: nb, have: hb })                        => na == nb && ha == hb,
-            (InvalidLevel { algo: aa, level: la },
-             InvalidLevel { algo: ab, level: lb })                         => aa == ab && la == lb,
-            (DictionaryMismatch,            DictionaryMismatch)            => true,
-            (OutputTooLarge { limit: a },   OutputTooLarge { limit: b })   => a == b,
-            (IoError(a),                    IoError(b))                    => a == b,
+            (CompressError.UnsupportedAlgorithm(a),       CompressError.UnsupportedAlgorithm(b))       => a == b,
+            (CompressError.CorruptInput(a),               CompressError.CorruptInput(b))               => a == b,
+            (CompressError.BufferTooSmall { need: na, have: ha },
+             CompressError.BufferTooSmall { need: nb, have: hb })                        => na == nb && ha == hb,
+            (CompressError.InvalidLevel { algo: aa, level: la },
+             CompressError.InvalidLevel { algo: ab, level: lb })                         => aa == ab && la == lb,
+            (CompressError.DictionaryMismatch,            CompressError.DictionaryMismatch)            => true,
+            (CompressError.OutputTooLarge { limit: a },   CompressError.OutputTooLarge { limit: b })   => a == b,
+            (CompressError.IoError(a),                    CompressError.IoError(b))                    => a == b,
             _ => false,
         }
     }

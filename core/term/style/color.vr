@@ -320,3 +320,61 @@ fn nearest_cube_index(val: Int, levels: &List<Int>) -> Int {
     }
     best
 }
+
+// =============================================================================
+// Protocol implementations — Eq for color types
+// =============================================================================
+
+implement Eq for Rgb {
+    /// Channel-wise byte equality.
+    fn eq(&self, other: &Rgb) -> Bool {
+        self.r == other.r && self.g == other.g && self.b == other.b
+    }
+}
+
+implement Eq for Hsl {
+    /// Float-equal on all three channels — exact comparison, no
+    /// epsilon tolerance. Callers needing approximate equality
+    /// should compare individual fields with their own threshold.
+    fn eq(&self, other: &Hsl) -> Bool {
+        self.h == other.h && self.s == other.s && self.l == other.l
+    }
+}
+
+implement Eq for Lab {
+    /// Float-equal on all three channels — exact comparison.
+    fn eq(&self, other: &Lab) -> Bool {
+        self.l == other.l && self.a == other.a && self.b == other.b
+    }
+}
+
+implement Eq for Color {
+    /// Variant-equal — named colors compare by tag; payload-carrying
+    /// variants (Ansi256/TrueColor/FromHsl) compare by payload. Uses
+    /// qualified `Color.<Variant>` patterns per task #17/#39 discipline.
+    fn eq(&self, other: &Color) -> Bool {
+        match (self, other) {
+            (Color.Reset,       Color.Reset)       => true,
+            (Color.Black,       Color.Black)       => true,
+            (Color.DarkGrey,    Color.DarkGrey)    => true,
+            (Color.Red,         Color.Red)         => true,
+            (Color.DarkRed,     Color.DarkRed)     => true,
+            (Color.Green,       Color.Green)       => true,
+            (Color.DarkGreen,   Color.DarkGreen)   => true,
+            (Color.Yellow,      Color.Yellow)      => true,
+            (Color.DarkYellow,  Color.DarkYellow)  => true,
+            (Color.Blue,        Color.Blue)        => true,
+            (Color.DarkBlue,    Color.DarkBlue)    => true,
+            (Color.Magenta,     Color.Magenta)     => true,
+            (Color.DarkMagenta, Color.DarkMagenta) => true,
+            (Color.Cyan,        Color.Cyan)        => true,
+            (Color.DarkCyan,    Color.DarkCyan)    => true,
+            (Color.White,       Color.White)       => true,
+            (Color.Grey,        Color.Grey)        => true,
+            (Color.Ansi256(a),  Color.Ansi256(b))  => a == b,
+            (Color.TrueColor(a),Color.TrueColor(b))=> a == b,
+            (Color.FromHsl(a),  Color.FromHsl(b))  => a == b,
+            _ => false,
+        }
+    }
+}
