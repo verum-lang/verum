@@ -5766,6 +5766,64 @@ impl VbcCodegen {
         // `@thread_local static` inits with non-trivial initialisers.
         self.compile_pending_constants()?;
         self.compile_pending_tls_inits()?;
+
+        // **Task #47 stage-3 finalize (paired with
+        // `pre_register_unique_public_free_functions` in
+        // `verum_compiler::pipeline::stdlib_bootstrap`).**
+        //
+        // For every `Call`/`CallG`/`TailCall`/`NewClosure`/`Spawn`/
+        // `GenCreate` instruction emitted into THIS module's bytecode
+        // whose `func_id` operand points to a stage-3-pre-registered
+        // stub (id in the `u32::MAX - 0x100_0000 ..` sentinel range),
+        // synthesise a minimal extern-shaped `FunctionDescriptor` with
+        // the function's NAME.  The descriptor has no body (panic-stub
+        // body emitter is the existing fallback for the few stubs that
+        // remain unresolved at runtime — see below); the body for the
+        // real function lives in its producing module's archive entry.
+        //
+        // At archive load time, `ArchiveBodyRemap::map_function`
+        // (`codegen/mod.rs:16314+`) follows three tiers:
+        //
+        //   * Tier 1: per-module remap (in-module bodies) — irrelevant
+        //     for stub ids since the body lives elsewhere.
+        //   * Tier 2a: `archive_id_to_name.get(stub_id)` → look up name
+        //     in user codegen's mount-filtered `ctx.functions`.  Hits
+        //     when the user code directly mounted the producing
+        //     module's function.
+        //   * Tier 2b: same name → archive-wide `archive_func_by_name`
+        //     index (populated for EVERY archive function regardless
+        //     of mount-set membership — see `archive_ctx_loader.rs:
+        //     1796`).  Hits when the producing module is transitively
+        //     loaded but not directly mounted by the user.
+        //   * Tier 3: identity fallback — the silent-miscompile case
+        //     this fix eliminates.
+        //
+        // Without the descriptor here, the stub_id leaks past Tier 1
+        // into Tier 3 identity fallback (the failure mode observed in
+        // the 2026-05-23 investigation: bloom.try_new's Call landing
+        // on `DequeIntoIter.zip_longest` / `DequeDrain.map`).
+        //
+        // **Why this isn't the historical 110-134 MB explosion**:
+        // `emit_missing_stub_descriptors_with_callm(false)` iterates
+        // `self.functions` (only the LOCAL bytecode), extracts the
+        // `referenced: HashSet<u32>` of `Call.func_id` operands
+        // present in emitted instructions, and synthesises a stub
+        // ONLY for ids in that set.  Per stdlib module this is bounded
+        // by actual cross-module call count (typically tens), not by
+        // the >7000 transitively-imported `ctx.functions` entries the
+        // earlier failed pass walked unconditionally.  The CallM half
+        // — which DID explode at 1M synthesized stubs — is gated off
+        // by `include_callm=false`.
+        //
+        // Pin: `pre_register_unique_public_free_functions` in
+        // `verum_compiler::pipeline::stdlib_bootstrap` MUST register
+        // stubs with id in the `u32::MAX - 0x100_0000 ..` band, AND
+        // the same module's `is_in_stub_range` check (in the post-
+        // compile global-registry update loop) MUST recognise the
+        // stage-3 band — otherwise the real bodies' subsequent
+        // `register_function` won't overwrite the stub's id mapping.
+        self.emit_missing_stub_descriptors_with_callm(false);
+
         self.build_module()
     }
 
