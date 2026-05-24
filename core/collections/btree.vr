@@ -150,22 +150,26 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// assert_eq(map.get(&2), None);
     /// ```
     public fn get(&self, key: &K) -> Maybe<V> {
-        if self.root.is_none() {
-            return None;
+        // Match-extract preserves the inner `Heap<BTreeNode<K, V>>`
+        // through the typechecker.  Previously `.as_ref().expect()`
+        // lost the inner T at codegen, falling through
+        // `resolve_field_index` to global-intern (closed via
+        // interpreter pattern-match ref-deref fix in `pattern_
+        // matching.rs::handle_match_tag` / `handle_get_variant_data` /
+        // `handle_as_var` + this stdlib-side refactor on 2026-05-24).
+        match &self.root {
+            Some(node) => self.search_node(node, key),
+            None       => None,
         }
-        let node = self.root.as_ref()
-            .expect("BTreeMap.get: root is_some by guard above");
-        self.search_node(node, key)
     }
 
     /// Returns a mutable reference to the value corresponding to the key.
     public fn get_mut(&mut self, key: &K) -> Maybe<&mut V> {
-        if self.root.is_none() {
-            return None;
+        // See `get` for the match-extract rationale.
+        match &mut self.root {
+            Some(node) => self.search_node_mut(node, key),
+            None       => None,
         }
-        let node = self.root.as_mut()
-            .expect("BTreeMap.get_mut: root is_some by guard above");
-        self.search_node_mut(node, key)
     }
 
     /// Returns true if the map contains a value for the specified key.
@@ -204,28 +208,33 @@ implement<K: Ord, V> BTreeMap<K, V> {
 
         // Check if key exists — replace value directly via SetE (no &mut references)
         // Pass key by value (not &key) to avoid alloca/deref mismatch in VBC generics.
-        let root_ref = self.root.as_mut()
-            .expect("BTreeMap.insert: root is_some after the empty-tree initial-insert branch above");
-        match self.replace_value_in_node(root_ref, key, value) {
+        // Match-extract used instead of `.as_mut().expect()` — see `get` for the
+        // codegen type-inference root cause that makes the latter mis-resolve.
+        let replace_outcome = match &mut self.root {
+            Some(root_ref) => self.replace_value_in_node(root_ref, key, value),
+            None           => None,
+        };
+        match replace_outcome {
             Some(old_val) => {
                 return Some(old_val);
             },
             None => {},
         }
 
-        // Insert into tree
-        let root = self.root.as_mut()
-            .expect("BTreeMap.insert: root is_some (still) after the replace-in-node branch above");
-
-        // If root is full, split it
-        if root.keys.len() == MAX_KEYS {
-            let new_root = BTreeNode.new_internal();
-            let old_root = replace(root, Heap.new(new_root));
-            root.children.push(old_root);
-            self.split_child(root, 0);
+        // Insert into tree — match-extract instead of `.as_mut().expect()`.
+        match &mut self.root {
+            Some(root) => {
+                // If root is full, split it
+                if root.keys.len() == MAX_KEYS {
+                    let new_root = BTreeNode.new_internal();
+                    let old_root = replace(root, Heap.new(new_root));
+                    root.children.push(old_root);
+                    self.split_child(root, 0);
+                }
+                self.insert_non_full(root, key, value);
+            },
+            None => {},
         }
-
-        self.insert_non_full(root, key, value);
         self.len = self.len + 1;
         None
     }
@@ -249,11 +258,11 @@ implement<K: Ord, V> BTreeMap<K, V> {
             return None;
         }
 
-        let res = self.remove_from_node(
-            self.root.as_mut()
-                .expect("BTreeMap.remove: root is_some by guard above"),
-            key,
-        );
+        // Match-extract instead of `.as_mut().expect()` — see `get` for rationale.
+        let res = match &mut self.root {
+            Some(root_ref) => self.remove_from_node(root_ref, key),
+            None           => None,
+        };
 
         // If root became empty && has a child, make child the new root
         if let Some(ref mut root) = self.root {
