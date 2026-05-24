@@ -400,11 +400,28 @@ impl Interpreter {
         if self.state.module.global_ctors.is_empty() {
             return Ok(());
         }
+        // Stub-id ranges from `stdlib_bootstrap` — skip any ctor whose
+        // id lives in a stage-1/2/3 stub range. The producing module's
+        // real body wasn't merged (e.g. its archive failed to load),
+        // so invoking it would FunctionNotFound. The pre-fix behavior
+        // crashed the entire test-runner; skipping these ctors lets
+        // tests that DON'T touch the un-resolved static still run.
+        const STAGE1_STUB_BASE: u32 = u32::MAX - 0x40_0000;
+        const STAGE2_STUB_BASE: u32 = u32::MAX - 0xC0_0000;
+        const STAGE3_STUB_BASE: u32 = u32::MAX - 0x100_0000;
+        const STUB_RANGE_WIDTH: u32 = 0x10_0000;
+        let is_stub_id = |id: u32| -> bool {
+            let s1 = id <= STAGE1_STUB_BASE && id >= STAGE1_STUB_BASE - STUB_RANGE_WIDTH;
+            let s2 = id <= STAGE2_STUB_BASE && id >= STAGE2_STUB_BASE - STUB_RANGE_WIDTH;
+            let s3 = id <= STAGE3_STUB_BASE && id >= STAGE3_STUB_BASE - STUB_RANGE_WIDTH;
+            s1 || s2 || s3
+        };
         let mut ctors: Vec<(u32, FunctionId)> = self
             .state
             .module
             .global_ctors
             .iter()
+            .filter(|(id, _prio)| !is_stub_id(id.0))
             .map(|(id, prio)| (*prio, *id))
             .collect();
         ctors.sort_by_key(|(prio, _)| *prio);
@@ -417,7 +434,38 @@ impl Interpreter {
                 .map(|name| name.starts_with("__tls_init_"))
                 .unwrap_or(false);
             if is_tls_init {
-                self.execute_function(ctor)?;
+                // **Lenient stage-N stub recovery (task #47 close-out)**:
+                // if a TLS init body's execution panics because it called
+                // a stage-N stub that never got a real body, emit the
+                // warning but DO NOT abort the test runner. The user's
+                // test may not touch the unresolved static at all — the
+                // panic only matters if the test code subsequently
+                // dereferences a null TLS slot. By skipping the failed
+                // ctor, tests that DON'T touch the affected static can
+                // still run, while tests that DO will hit a clear
+                // null-deref pointing at the unresolved name.
+                if let Err(e) = self.execute_function(ctor) {
+                    let is_lenient_stub_panic = matches!(
+                        &e,
+                        crate::interpreter::error::InterpreterError::Panic { message }
+                            if message.starts_with("[lenient] stage-")
+                    );
+                    if is_lenient_stub_panic {
+                        let ctor_name = self
+                            .state
+                            .module
+                            .get_function(ctor)
+                            .and_then(|d| self.state.module.get_string(d.name))
+                            .unwrap_or("<unknown>")
+                            .to_string();
+                        eprintln!(
+                            "[run_global_ctors] WARN: TLS init '{}' (fid={}) crashed via lenient-stub panic: {:?}. Continuing — tests not touching its static will still run.",
+                            ctor_name, ctor.0, e
+                        );
+                        continue;
+                    }
+                    return Err(e);
+                }
             }
         }
         Ok(())
