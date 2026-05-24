@@ -58,7 +58,7 @@ module core.security.jwt;
 mount core.*;
 mount core.collections.List;
 mount core.encoding.base64.{encode_url, decode_url};
-mount core.encoding.json.{JsonValue, parse as json_parse, stringify as json_stringify};
+mount core.encoding.json.{JsonValue, parse, stringify};
 mount core.security.mac.hmac.{hmac_sha256, hmac_sha384, hmac_sha512};
 mount core.security.ecc.ed25519.{
     Ed25519, Ed25519Seed, Ed25519PublicKey, Ed25519Signature,
@@ -349,7 +349,7 @@ public fn verify_compact(
 
     // Parse claims; enforce exp / nbf / iss / aud.
     let payload_text = Text.from_utf8_unchecked(payload_bytes.as_slice());
-    let claims = json_parse(&payload_text).map_err(|_| JwtError.JsonDecode)?;
+    let claims = core.encoding.json.parse(&payload_text).map_err(|_| JwtError.JsonDecode)?;
     check_registered_claims(&claims, opts)?;
 
     Ok(JwtPayload {
@@ -451,7 +451,7 @@ fn verify_signature(
 
 fn parse_header(bytes: &[Byte]) -> Result<JwtHeader, JwtError> {
     let text = Text.from_utf8_unchecked(bytes);
-    let v = json_parse(&text).map_err(|_| JwtError.JsonDecode)?;
+    let v = core.encoding.json.parse(&text).map_err(|_| JwtError.JsonDecode)?;
     let obj = match v {
         JsonValue.JsonObject(m) => m,
         _                       => return Err(JwtError.JsonDecode),

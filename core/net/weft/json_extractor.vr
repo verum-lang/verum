@@ -45,7 +45,7 @@ module core.net.weft.json_extractor;
 mount core.*;
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
-mount core.encoding.json.{JsonValue, JsonError, parse as json_parse};
+mount core.encoding.json.{JsonValue, JsonError, parse};
 mount core.net.http.{Response, StatusCode, Headers, Version};
 mount core.net.weft.handler.{WeftRequest, FromRequest};
 mount core.net.weft.error.{WeftError};
@@ -346,7 +346,7 @@ public fn extract_json<T>(req: &WeftRequest, cfg: &JsonExtractorConfig)
         Err(offset) => return Err(JsonExtractError.InvalidUtf8 { offset: offset }),
     };
     // Gate 4: syntax parse.
-    let value = match json_parse(&text) {
+    let value = match core.encoding.json.parse(&text) {
         Ok(v) => v,
         Err(e) => return Err(JsonExtractError.ParseError { json_err: e }),
     };

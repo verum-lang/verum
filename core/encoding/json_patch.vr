@@ -63,7 +63,7 @@ module core.encoding.json_patch;
 mount core.*;
 mount core.collections.List;
 mount core.collections.map.{Map};
-mount core.encoding.json.{JsonValue, JsonError, parse_value as json_parse};
+mount core.encoding.json.{JsonValue, JsonError, parse_value};
 mount core.encoding.json_pointer.{JsonPointer, parse as pointer_parse};
 
 // =============================================================================
@@ -135,7 +135,7 @@ implement Eq for JsonPatchError {
 // =============================================================================
 
 public fn parse(patch_text: &Text) -> Result<JsonPatch, JsonPatchError> {
-    let v = json_parse(patch_text).map_err(|_| JsonPatchError.Malformed(
+    let v = core.encoding.json.parse_value(patch_text).map_err(|_| JsonPatchError.Malformed(
         Text.from("not valid JSON")))?;
     let arr = match v {
         JsonValue.JsonArray(a) => a,
