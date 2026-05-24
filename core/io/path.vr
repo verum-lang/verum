@@ -650,21 +650,20 @@ implement PathBuf {
     /// assert_eq(path.to_str(), "/home/user/docs/file.txt");
     /// ```
     public fn push(&mut self, component: &Path) {
-        // SOUNDNESS: extract `component.inner` once into a local Text so
-        // the subsequent ops route through a single-step field access at
-        // the call site, not the nested `self.path.inner.push_str(&component.inner)`
-        // chain.  The nested form sporadically lowers `&component.inner`
-        // to a wrong field — pushing the Path record header (~13 extra
-        // bytes per push, observed via len-after-push diagnostic) instead
-        // of the inner Text.  Same defect class as the BTreeMap nested-
-        // generic-field-access pinned in [[btree_pattern_match_ref_generic_class]].
-        // Closing this surgically here unblocks PathBuf.{push,push_str,
-        // set_extension,set_file_name,pop} and the entire `join` /
-        // `with_extension` / `with_file_name` surface above.
+        // SOUNDNESS (closes task #io-4): write back through SINGLE-level
+        // field assignment `self.path = Path { inner: local }` instead of
+        // double-level `self.path.inner = local`.  The double-level form
+        // routes through nested GetF/SetF in VBC codegen which sporadically
+        // mis-reads the inner Text field — observed as "bytes look right
+        // when probed directly but Text.eq fails between push-built and
+        // literal-built Text".  Going through a single-level Path
+        // replacement bypasses the nested-field hazard.
+        // Same defect class as the BTreeMap nested-generic-field-access
+        // pinned in [[btree_pattern_match_ref_generic_class]].
         let inner_text = component.inner.clone();
 
         if component.is_absolute() {
-            self.path.inner = inner_text;
+            self.path = Path { inner: inner_text };
             return;
         }
 
@@ -672,11 +671,14 @@ implement PathBuf {
             return;
         }
 
-        if !self.path.inner.is_empty() && !self.path.inner.ends_with_char(MAIN_SEPARATOR) {
-            self.path.inner.push(MAIN_SEPARATOR);
+        // Extract self.path.inner to a local, mutate, write back via
+        // single-level field assignment (replacing the entire `path` field).
+        let mut local = self.path.inner.clone();
+        if !local.is_empty() && !local.ends_with_char(MAIN_SEPARATOR) {
+            local.push(MAIN_SEPARATOR);
         }
-
-        self.path.inner.push_str(&inner_text);
+        local.push_str(&inner_text);
+        self.path = Path { inner: local };
     }
 
     /// Push a string component.

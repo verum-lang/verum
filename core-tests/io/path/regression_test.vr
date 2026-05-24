@@ -41,6 +41,15 @@ mount core.collections.list.List;
 // `[[btree_pattern_match_ref_generic_class]]`.
 // =============================================================================
 
+// PARTIAL CLOSE 2026-05-24 — surgical fix in `core/io/path.vr::push`
+// (single-level Path assignment + clone-extract) closes the LENGTH
+// defect (pre-fix: 28 bytes garbage instead of 15-byte correct
+// "/home/user/docs").  Residual Text.eq drift remains: byte-by-byte
+// content matches but direct Text.eq returns false.  Root cause
+// suspected at a deeper VBC layer — possibly `Text.as_bytes()`
+// returning a different view depending on the Text's construction
+// shape (push-built vs literal-built).  Multi-day investigation
+// required.
 @ignore
 @test
 fn regression_pathbuf_push_text_equality_drift() {
