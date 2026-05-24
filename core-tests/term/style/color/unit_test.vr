@@ -1,0 +1,245 @@
+// =============================================================================
+// core-tests/term/style/color/unit_test.vr
+// =============================================================================
+//
+// `core/term/style/color.vr` defines:
+//   * Rgb (r/g/b UInt8 channels)
+//   * Hsl (h Float [0,360), s/l Float [0,1])
+//   * Color 18-variant terminal color sum (Reset + 16 named + Ansi256 +
+//     TrueColor + FromHsl)
+//   * Lab (CIELAB for perceptual distance)
+//
+// This file covers the testable static surface: Rgb.new, Rgb.from_hex,
+// Color variants, Hsl record construction.
+// =============================================================================
+
+mount core.term.style.color.{Rgb, Hsl, Color, Lab};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Rgb.new
+// =============================================================================
+
+@test
+fn test_rgb_new_preserves_channels() {
+    let c = Rgb.new(255_u8, 128_u8, 0_u8);
+    assert_eq(c.r, 255_u8);
+    assert_eq(c.g, 128_u8);
+    assert_eq(c.b, 0_u8);
+}
+
+@test
+fn test_rgb_new_black() {
+    let c = Rgb.new(0_u8, 0_u8, 0_u8);
+    assert_eq(c.r, 0_u8);
+    assert_eq(c.g, 0_u8);
+    assert_eq(c.b, 0_u8);
+}
+
+@test
+fn test_rgb_new_white() {
+    let c = Rgb.new(255_u8, 255_u8, 255_u8);
+    assert_eq(c.r, 255_u8);
+    assert_eq(c.g, 255_u8);
+    assert_eq(c.b, 255_u8);
+}
+
+// =============================================================================
+// Section 2: Rgb.from_hex — happy paths
+// =============================================================================
+
+@test
+fn test_rgb_from_hex_with_pound_prefix() {
+    let s = "#FF8800".clone();
+    let r = Rgb.from_hex(&s);
+    match r {
+        Some(c) => {
+            assert_eq(c.r, 0xFF_u8);
+            assert_eq(c.g, 0x88_u8);
+            assert_eq(c.b, 0x00_u8);
+        },
+        None => panic("'#FF8800' should parse"),
+    }
+}
+
+@test
+fn test_rgb_from_hex_without_prefix() {
+    let s = "00FF00".clone();
+    let r = Rgb.from_hex(&s);
+    match r {
+        Some(c) => {
+            assert_eq(c.r, 0_u8);
+            assert_eq(c.g, 0xFF_u8);
+            assert_eq(c.b, 0_u8);
+        },
+        None => panic("'00FF00' should parse"),
+    }
+}
+
+@test
+fn test_rgb_from_hex_black() {
+    let s = "000000".clone();
+    let r = Rgb.from_hex(&s);
+    match r {
+        Some(c) => {
+            assert_eq(c.r, 0_u8);
+            assert_eq(c.g, 0_u8);
+            assert_eq(c.b, 0_u8);
+        },
+        None => panic("black should parse"),
+    }
+}
+
+@test
+fn test_rgb_from_hex_white() {
+    let s = "FFFFFF".clone();
+    let r = Rgb.from_hex(&s);
+    match r {
+        Some(c) => assert_eq(c.r, 0xFF_u8),
+        None => panic("white should parse"),
+    }
+}
+
+// =============================================================================
+// Section 3: Rgb.from_hex — invalid input
+// =============================================================================
+
+@test
+fn test_rgb_from_hex_too_short() {
+    let s = "FF".clone();
+    let r = Rgb.from_hex(&s);
+    match r {
+        Some(_) => panic("2-char hex should fail"),
+        None => assert(true),
+    }
+}
+
+@test
+fn test_rgb_from_hex_too_long() {
+    let s = "FF8800AA".clone();
+    let r = Rgb.from_hex(&s);
+    match r {
+        Some(_) => panic("8-char hex should fail"),
+        None => assert(true),
+    }
+}
+
+@test
+fn test_rgb_from_hex_invalid_char() {
+    let s = "GGGGGG".clone();
+    let r = Rgb.from_hex(&s);
+    match r {
+        Some(_) => panic("'GGGGGG' is not hex"),
+        None => assert(true),
+    }
+}
+
+// =============================================================================
+// Section 4: Color named-color variants
+// =============================================================================
+
+@test
+fn test_color_reset_construction() {
+    let c: Color = Color.Reset;
+    assert(c is Color.Reset);
+}
+
+@test
+fn test_color_black_construction() {
+    let c: Color = Color.Black;
+    assert(c is Color.Black);
+}
+
+@test
+fn test_color_red_construction() {
+    let c: Color = Color.Red;
+    assert(c is Color.Red);
+}
+
+@test
+fn test_color_dark_red_construction() {
+    let c: Color = Color.DarkRed;
+    assert(c is Color.DarkRed);
+}
+
+@test
+fn test_color_green_white_construction() {
+    let g: Color = Color.Green;
+    let w: Color = Color.White;
+    assert(g is Color.Green);
+    assert(w is Color.White);
+}
+
+@test
+fn test_color_named_variants_disjoint() {
+    let r: Color = Color.Red;
+    let g: Color = Color.Green;
+    let b: Color = Color.Blue;
+
+    assert(r is Color.Red);
+    assert(g is Color.Green);
+    assert(b is Color.Blue);
+
+    assert(!(r is Color.Green));
+    assert(!(g is Color.Blue));
+    assert(!(b is Color.Red));
+}
+
+// =============================================================================
+// Section 5: Color compound variants
+// =============================================================================
+
+@test
+fn test_color_ansi256_construction() {
+    let c: Color = Color.Ansi256(123);
+    assert(c is Color.Ansi256);
+}
+
+@test
+fn test_color_true_color_construction() {
+    let c: Color = Color.TrueColor(Rgb.new(100_u8, 200_u8, 50_u8));
+    assert(c is Color.TrueColor);
+}
+
+@test
+fn test_color_from_hsl_construction() {
+    let c: Color = Color.FromHsl(Hsl { h: 120.0, s: 0.5, l: 0.5 });
+    assert(c is Color.FromHsl);
+}
+
+// =============================================================================
+// Section 6: Hsl record construction
+// =============================================================================
+
+@test
+fn test_hsl_zero_construction() {
+    let h = Hsl { h: 0.0, s: 0.0, l: 0.0 };
+    assert_eq(h.h, 0.0);
+    assert_eq(h.s, 0.0);
+    assert_eq(h.l, 0.0);
+}
+
+@test
+fn test_hsl_max_construction() {
+    let h = Hsl { h: 359.9, s: 1.0, l: 1.0 };
+    assert_eq(h.s, 1.0);
+    assert_eq(h.l, 1.0);
+}
+
+// =============================================================================
+// Section 7: Lab record construction
+// =============================================================================
+
+@test
+fn test_lab_zero_construction() {
+    let l = Lab { l: 0.0, a: 0.0, b: 0.0 };
+    assert_eq(l.l, 0.0);
+    assert_eq(l.a, 0.0);
+    assert_eq(l.b, 0.0);
+}
+
+@test
+fn test_lab_white_l_at_100() {
+    let l = Lab { l: 100.0, a: 0.0, b: 0.0 };
+    assert_eq(l.l, 100.0);
+}
