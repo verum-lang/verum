@@ -1,0 +1,85 @@
+// =============================================================================
+// core-tests/io/fs/regression_test.vr
+// =============================================================================
+//
+// All live filesystem operations are gated by task #io-1 + need for a
+// temp-fixture harness. Pinned `@ignore`'d until both close.
+// =============================================================================
+
+mount core.io.fs.{
+    metadata, exists, is_file, is_dir, is_symlink,
+    create_dir, remove_dir, read_dir, remove_file,
+    rename, copy, canonicalize, temp_dir, current_dir,
+};
+mount core.io.path.{Path};
+mount core.io.protocols.{IoErrorKind};
+
+// =============================================================================
+// §A — exists / is_file / is_dir / is_symlink — gated by #io-1 + need temp dir
+// =============================================================================
+
+@ignore
+@test
+fn regression_exists_nonexistent_returns_false() {
+    let p = Path.new(&Text.from("/nonexistent-path-12345/foo.txt"));
+    assert(!exists(&p));
+}
+
+@ignore
+@test
+fn regression_exists_root_returns_true() {
+    let p = Path.new(&Text.from("/"));
+    assert(exists(&p));
+}
+
+@ignore
+@test
+fn regression_is_dir_root_returns_true() {
+    let p = Path.new(&Text.from("/"));
+    assert(is_dir(&p));
+}
+
+@ignore
+@test
+fn regression_is_file_root_returns_false() {
+    let p = Path.new(&Text.from("/"));
+    assert(!is_file(&p));
+}
+
+// =============================================================================
+// §B — metadata / read_dir — gated by #io-1
+// =============================================================================
+
+@ignore
+@test
+fn regression_metadata_nonexistent_returns_err() {
+    let p = Path.new(&Text.from("/nonexistent-path-12345/foo.txt"));
+    match metadata(&p) {
+        Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
+        Ok(_) => assert(false),
+    }
+}
+
+// =============================================================================
+// §C — current_dir / temp_dir — gated by #io-1 (return values readable)
+// =============================================================================
+
+@ignore
+@test
+fn regression_current_dir_returns_ok() {
+    match current_dir() {
+        Ok(_) => {}
+        Err(_) => assert(false),
+    }
+}
+
+@ignore
+@test
+fn regression_temp_dir_is_absolute_path() {
+    let t = temp_dir();
+    // No-direct-assert because t is a PathBuf and PathBuf.is_absolute()
+    // also walks through nested Path field.
+    // Pinned for future: t.is_absolute() should be true.
+}
+
+fn main() {}

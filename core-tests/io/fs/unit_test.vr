@@ -1,0 +1,147 @@
+// =============================================================================
+// core-tests/io/fs/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.io.fs`.
+// =============================================================================
+
+mount core.io.fs.{FileType, Permissions};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: FileType — 4 variants (File, Dir, Symlink, Unknown)
+// =============================================================================
+
+@test
+fn test_file_type_file_construction() {
+    let ft = FileType.File;
+    assert(ft is File);
+}
+
+@test
+fn test_file_type_dir_construction() {
+    let ft = FileType.Dir;
+    assert(ft is Dir);
+}
+
+@test
+fn test_file_type_symlink_construction() {
+    let ft = FileType.Symlink;
+    assert(ft is Symlink);
+}
+
+@test
+fn test_file_type_unknown_construction() {
+    let ft = FileType.Unknown;
+    assert(ft is Unknown);
+}
+
+@test
+fn test_file_type_variants_distinct() {
+    assert(FileType.File != FileType.Dir);
+    assert(FileType.Dir != FileType.Symlink);
+    assert(FileType.Symlink != FileType.Unknown);
+    assert(FileType.File != FileType.Unknown);
+}
+
+// =============================================================================
+// Section 2: FileType.is_file / is_dir / is_symlink predicates
+// =============================================================================
+
+@test
+fn test_file_type_is_file_true_for_file() {
+    assert(FileType.File.is_file());
+}
+
+@test
+fn test_file_type_is_file_false_for_dir() {
+    assert(!FileType.Dir.is_file());
+}
+
+@test
+fn test_file_type_is_file_false_for_symlink() {
+    assert(!FileType.Symlink.is_file());
+}
+
+@test
+fn test_file_type_is_dir_true_for_dir() {
+    assert(FileType.Dir.is_dir());
+}
+
+@test
+fn test_file_type_is_dir_false_for_file() {
+    assert(!FileType.File.is_dir());
+}
+
+@test
+fn test_file_type_is_symlink_true_for_symlink() {
+    assert(FileType.Symlink.is_symlink());
+}
+
+@test
+fn test_file_type_is_symlink_false_for_file() {
+    assert(!FileType.File.is_symlink());
+}
+
+@test
+fn test_file_type_predicates_exclusive_unknown() {
+    // Unknown is none of file/dir/symlink
+    assert(!FileType.Unknown.is_file());
+    assert(!FileType.Unknown.is_dir());
+    assert(!FileType.Unknown.is_symlink());
+}
+
+// =============================================================================
+// Section 3: FileType — Eq protocol
+// =============================================================================
+
+@test
+fn test_file_type_eq_reflexive() {
+    assert_eq(FileType.File, FileType.File);
+    assert_eq(FileType.Dir, FileType.Dir);
+    assert_eq(FileType.Symlink, FileType.Symlink);
+    assert_eq(FileType.Unknown, FileType.Unknown);
+}
+
+// =============================================================================
+// Section 4: Permissions (Unix)
+// =============================================================================
+
+@test
+fn test_permissions_from_mode_644() {
+    let p = Permissions.from_mode(0o644);
+    assert_eq(p.mode(), 0o644);
+}
+
+@test
+fn test_permissions_from_mode_755() {
+    let p = Permissions.from_mode(0o755);
+    assert_eq(p.mode(), 0o755);
+}
+
+@test
+fn test_permissions_from_mode_zero() {
+    let p = Permissions.from_mode(0);
+    assert_eq(p.mode(), 0);
+}
+
+@test
+fn test_permissions_readonly_when_no_write_bits() {
+    let p = Permissions.from_mode(0o444);
+    assert(p.readonly());
+}
+
+@test
+fn test_permissions_not_readonly_when_owner_write() {
+    let p = Permissions.from_mode(0o644);
+    assert(!p.readonly());
+}
+
+@test
+fn test_permissions_set_readonly_makes_readonly() {
+    let mut p = Permissions.from_mode(0o755);
+    p.set_readonly(true);
+    assert(p.readonly());
+}
+
+fn main() {}
