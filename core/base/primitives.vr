@@ -64,7 +64,9 @@ mount core.intrinsics.runtime.text.{
 // Aliases for backward compatibility with code using intrinsic_min/max/clamp names
 fn intrinsic_min<T>(a: T, b: T) -> T { min(a, b) }
 fn intrinsic_max<T>(a: T, b: T) -> T { max(a, b) }
-fn intrinsic_clamp<T>(val: T, lo: T, hi: T) -> T { clamp(val, lo, hi) }
+// Fully-qualified path — bare `clamp` resolves to a 2-arg variant
+// at AOT (task #11 defect class).  Use the 3-arg `core.math.libm.clamp`.
+fn intrinsic_clamp<T>(val: T, lo: T, hi: T) -> T { core.math.libm.clamp(val, lo, hi) }
 
 // Popcount and bitreverse: provide as direct intrinsic calls
 fn popcnt<T>(x: T) -> T { @intrinsic("ctpop", x) }
