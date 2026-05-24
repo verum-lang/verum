@@ -456,27 +456,27 @@ implement LogRecordBuilder {
 
 /// Log a message at Trace level.
 public fn trace(msg: &Text) using [Logger] {
-    Logger.log(Trace, msg);
+    Logger.log(LogLevel.Trace, msg);
 }
 
 /// Log a message at Debug level.
 public fn debug(msg: &Text) using [Logger] {
-    Logger.log(Debug, msg);
+    Logger.log(LogLevel.Debug, msg);
 }
 
 /// Log a message at Info level.
 public fn info(msg: &Text) using [Logger] {
-    Logger.log(Info, msg);
+    Logger.log(LogLevel.Info, msg);
 }
 
 /// Log a message at Warn level.
 public fn warn(msg: &Text) using [Logger] {
-    Logger.log(Warn, msg);
+    Logger.log(LogLevel.Warn, msg);
 }
 
 /// Log a message at Error level.
 public fn error(msg: &Text) using [Logger] {
-    Logger.log(Error, msg);
+    Logger.log(LogLevel.Error, msg);
 }
 
 // =============================================================================
