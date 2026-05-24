@@ -52,10 +52,15 @@ fn regression_alignment_is_8_bytes() {
     assert_eq(ARENA_ALIGNMENT, 8);
 }
 
-// REGRESSION: task #8 — GenerationalArena.new(N) returns a non-pointer
-// Value; first field access fails NullPointer at GetF.  Flips active
-// when the fundamental fix closes.
-@ignore
+// REGRESSION: task #8 — CLOSED 2026-05-24.  Pre-close failure was
+// `NullPointer` at the first `SetF` inside `GenerationalArena.new`'s
+// body, caused by a PC-desync in `handle_mem_extended` AllocZeroed
+// sub-op which read 3 register operands while the 1-arg
+// `__alloc_zeroed_raw(size)` codegen emitted only 2.  Fix:
+// `interpreter/dispatch_table/handlers/log_extended.rs::handle_mem_extended`
+// now treats `_operand_len` as authoritative and force-realigns PC
+// to `operand_start + operand_len` after the sub-op handler returns.
+// Both round-trip and direct-field tests pin the closed contract.
 @test
 fn regression_task_8_generational_arena_constructor_round_trip() {
     let arena = GenerationalArena.new(1024);
@@ -63,7 +68,6 @@ fn regression_task_8_generational_arena_constructor_round_trip() {
     assert(c >= 1024);
 }
 
-@ignore
 @test
 fn regression_task_8_generational_arena_direct_field() {
     let arena = GenerationalArena.new(1024);
