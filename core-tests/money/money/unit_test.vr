@@ -1,0 +1,153 @@
+// =============================================================================
+// core-tests/money/money/unit_test.vr
+// =============================================================================
+//
+// Companion files:
+//   audit.md — module audit + deferred items.
+//
+// `Money` pairs a `BigDecimal` amount with a `Currency` to enforce
+// currency-correct arithmetic. The amount's scale must match the
+// currency's `minor_units` invariant.
+//
+// This file focuses on the `MoneyError` 5-variant ADT (testable
+// without needing the full BigDecimal Money round-trip surface).
+// The Money round-trip surface depends on `core.text.numeric.BigDecimal`
+// which has its own conformance gaps; broader Money tests are deferred
+// until the BigDecimal surface stabilises.
+// =============================================================================
+
+mount core.money.money.{MoneyError};
+
+// =============================================================================
+// Section 1: MoneyError variant construction
+// =============================================================================
+
+@test
+fn test_money_error_currency_mismatch_construction() {
+    let e: MoneyError = MoneyError.CurrencyMismatch {
+        left: "USD".clone(),
+        right: "EUR".clone(),
+    };
+    assert(e is MoneyError.CurrencyMismatch);
+}
+
+@test
+fn test_money_error_scale_mismatch_construction() {
+    let e: MoneyError = MoneyError.ScaleMismatch {
+        expected: 2,
+        actual: 3,
+    };
+    assert(e is MoneyError.ScaleMismatch);
+}
+
+@test
+fn test_money_error_div_by_zero_construction() {
+    let e: MoneyError = MoneyError.DivByZero;
+    assert(e is MoneyError.DivByZero);
+}
+
+@test
+fn test_money_error_invalid_split_construction() {
+    let e: MoneyError = MoneyError.InvalidSplit {
+        reason: "negative count".clone(),
+    };
+    assert(e is MoneyError.InvalidSplit);
+}
+
+// =============================================================================
+// Section 2: Variants are mutually disjoint
+// =============================================================================
+
+@test
+fn test_money_error_variants_are_disjoint() {
+    let cm: MoneyError = MoneyError.CurrencyMismatch {
+        left: "X".clone(),
+        right: "Y".clone(),
+    };
+    let sm: MoneyError = MoneyError.ScaleMismatch {
+        expected: 1,
+        actual: 2,
+    };
+    let dbz: MoneyError = MoneyError.DivByZero;
+    let is_: MoneyError = MoneyError.InvalidSplit {
+        reason: "x".clone(),
+    };
+
+    assert(cm is MoneyError.CurrencyMismatch);
+    assert(sm is MoneyError.ScaleMismatch);
+    assert(dbz is MoneyError.DivByZero);
+    assert(is_ is MoneyError.InvalidSplit);
+
+    // Cross-disjointness
+    assert(!(cm is MoneyError.ScaleMismatch));
+    assert(!(cm is MoneyError.DivByZero));
+    assert(!(sm is MoneyError.CurrencyMismatch));
+    assert(!(sm is MoneyError.DivByZero));
+    assert(!(dbz is MoneyError.CurrencyMismatch));
+    assert(!(dbz is MoneyError.ScaleMismatch));
+    assert(!(dbz is MoneyError.InvalidSplit));
+    assert(!(is_ is MoneyError.DivByZero));
+}
+
+// =============================================================================
+// Section 3: CurrencyMismatch field preservation
+// =============================================================================
+
+@test
+fn test_currency_mismatch_preserves_left() {
+    let e = MoneyError.CurrencyMismatch {
+        left: "USD".clone(),
+        right: "EUR".clone(),
+    };
+    match e {
+        MoneyError.CurrencyMismatch { left, right: _ } => assert_eq(left, "USD"),
+        _ => panic("expected CurrencyMismatch"),
+    }
+}
+
+@test
+fn test_currency_mismatch_preserves_right() {
+    let e = MoneyError.CurrencyMismatch {
+        left: "USD".clone(),
+        right: "EUR".clone(),
+    };
+    match e {
+        MoneyError.CurrencyMismatch { left: _, right } => assert_eq(right, "EUR"),
+        _ => panic("expected CurrencyMismatch"),
+    }
+}
+
+// =============================================================================
+// Section 4: ScaleMismatch field preservation
+// =============================================================================
+
+@test
+fn test_scale_mismatch_preserves_expected() {
+    let e = MoneyError.ScaleMismatch { expected: 2, actual: 5 };
+    match e {
+        MoneyError.ScaleMismatch { expected, actual: _ } => assert_eq(expected, 2),
+        _ => panic("expected ScaleMismatch"),
+    }
+}
+
+@test
+fn test_scale_mismatch_preserves_actual() {
+    let e = MoneyError.ScaleMismatch { expected: 2, actual: 5 };
+    match e {
+        MoneyError.ScaleMismatch { expected: _, actual } => assert_eq(actual, 5),
+        _ => panic("expected ScaleMismatch"),
+    }
+}
+
+// =============================================================================
+// Section 5: InvalidSplit field preservation
+// =============================================================================
+
+@test
+fn test_invalid_split_preserves_reason() {
+    let e = MoneyError.InvalidSplit { reason: "n < 1".clone() };
+    match e {
+        MoneyError.InvalidSplit { reason } => assert_eq(reason, "n < 1"),
+        _ => panic("expected InvalidSplit"),
+    }
+}
