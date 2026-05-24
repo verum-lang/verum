@@ -1,0 +1,273 @@
+// =============================================================================
+// core-tests/encoding/json_pointer/unit_test.vr
+// =============================================================================
+//
+// `core/encoding/json_pointer.vr` — RFC 6901 JSON Pointer.
+//   * JsonPointer record (tokens: List<Text>) — empty = root
+//   * JsonPointerError (Malformed / InvalidEscape / PointerTooLong)
+//   * parse(&Text) -> Result<JsonPointer, JsonPointerError>
+//   * format_json_pointer(&JsonPointer) -> Text
+//   * JsonPointer.{root, from_tokens, is_root, depth, push, parent}
+//   * MAX_JSON_POINTER_BYTES = 65536
+// =============================================================================
+
+mount core.encoding.json_pointer.{
+    JsonPointer, JsonPointerError,
+    parse, format_json_pointer, MAX_JSON_POINTER_BYTES,
+};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: MAX_JSON_POINTER_BYTES constant
+// =============================================================================
+
+@test
+fn test_max_pointer_bytes_is_64kib() {
+    assert_eq(MAX_JSON_POINTER_BYTES, 64 * 1024);
+}
+
+// =============================================================================
+// Section 2: JsonPointerError variants
+// =============================================================================
+
+@test
+fn test_json_pointer_error_malformed() {
+    let e: JsonPointerError = JsonPointerError.Malformed("missing slash".clone());
+    assert(e is JsonPointerError.Malformed);
+}
+
+@test
+fn test_json_pointer_error_invalid_escape() {
+    let e: JsonPointerError = JsonPointerError.InvalidEscape("~3".clone());
+    assert(e is JsonPointerError.InvalidEscape);
+}
+
+@test
+fn test_json_pointer_error_pointer_too_long() {
+    let e: JsonPointerError = JsonPointerError.PointerTooLong { limit_bytes: 65536 };
+    assert(e is JsonPointerError.PointerTooLong);
+}
+
+@test
+fn test_json_pointer_error_variants_disjoint() {
+    let m = JsonPointerError.Malformed("x".clone());
+    let i = JsonPointerError.InvalidEscape("y".clone());
+    let t = JsonPointerError.PointerTooLong { limit_bytes: 0 };
+    assert(m is JsonPointerError.Malformed);
+    assert(i is JsonPointerError.InvalidEscape);
+    assert(t is JsonPointerError.PointerTooLong);
+    assert(!(m is JsonPointerError.InvalidEscape));
+    assert(!(i is JsonPointerError.PointerTooLong));
+    assert(!(t is JsonPointerError.Malformed));
+}
+
+// =============================================================================
+// Section 3: JsonPointer.root + is_root
+// =============================================================================
+
+@test
+fn test_root_is_root() {
+    let p = JsonPointer.root();
+    assert(p.is_root());
+}
+
+@test
+fn test_root_depth_zero() {
+    let p = JsonPointer.root();
+    assert_eq(p.depth(), 0);
+}
+
+@test
+fn test_root_tokens_empty() {
+    let p = JsonPointer.root();
+    assert_eq(p.tokens.len(), 0);
+}
+
+// =============================================================================
+// Section 4: parse — RFC 6901 §5 fixtures
+// =============================================================================
+
+@test
+fn test_parse_empty_is_root() {
+    let s = "".clone();
+    match parse(&s) {
+        Ok(p) => {
+            assert(p.is_root());
+            assert_eq(p.depth(), 0);
+        },
+        Err(_) => panic("empty string should parse to root"),
+    }
+}
+
+@test
+fn test_parse_single_token_foo() {
+    // RFC 6901 §5: "/foo" → ["foo"]
+    let s = "/foo".clone();
+    match parse(&s) {
+        Ok(p) => {
+            assert_eq(p.depth(), 1);
+            assert_eq(p.tokens[0], "foo");
+        },
+        Err(_) => panic("'/foo' should parse"),
+    }
+}
+
+@test
+fn test_parse_two_tokens() {
+    // "/foo/0" → ["foo", "0"]
+    let s = "/foo/0".clone();
+    match parse(&s) {
+        Ok(p) => {
+            assert_eq(p.depth(), 2);
+            assert_eq(p.tokens[0], "foo");
+            assert_eq(p.tokens[1], "0");
+        },
+        Err(_) => panic("'/foo/0' should parse"),
+    }
+}
+
+@test
+fn test_parse_no_leading_slash_is_malformed() {
+    // RFC 6901 §3: every non-root pointer MUST start with '/'
+    let s = "no-slash".clone();
+    match parse(&s) {
+        Ok(_) => panic("missing leading slash should fail"),
+        Err(e) => assert(e is JsonPointerError.Malformed),
+    }
+}
+
+@test
+fn test_parse_escaped_tilde_in_token() {
+    // RFC 6901 §3: "~0" decodes to "~"
+    let s = "/~0".clone();
+    match parse(&s) {
+        Ok(p) => {
+            assert_eq(p.depth(), 1);
+            assert_eq(p.tokens[0], "~");
+        },
+        Err(_) => panic("'/~0' should parse to '~'"),
+    }
+}
+
+@test
+fn test_parse_escaped_slash_in_token() {
+    // RFC 6901 §3: "~1" decodes to "/"
+    let s = "/~1".clone();
+    match parse(&s) {
+        Ok(p) => {
+            assert_eq(p.depth(), 1);
+            assert_eq(p.tokens[0], "/");
+        },
+        Err(_) => panic("'/~1' should parse to '/'"),
+    }
+}
+
+@test
+fn test_parse_invalid_escape_tilde_3() {
+    // RFC 6901 §4: only ~0 / ~1 valid; ~2/~3/etc. invalid
+    let s = "/~3".clone();
+    match parse(&s) {
+        Ok(_) => panic("'~3' is not a valid escape"),
+        Err(e) => assert(e is JsonPointerError.InvalidEscape),
+    }
+}
+
+// =============================================================================
+// Section 5: format_json_pointer round-trip
+// =============================================================================
+
+@test
+fn test_format_root_is_empty_string() {
+    let p = JsonPointer.root();
+    assert_eq(format_json_pointer(&p), "");
+}
+
+@test
+fn test_format_single_token() {
+    let s = "/foo".clone();
+    match parse(&s) {
+        Ok(p) => assert_eq(format_json_pointer(&p), "/foo"),
+        Err(_) => panic("parse should succeed"),
+    }
+}
+
+@test
+fn test_round_trip_two_tokens() {
+    let original = "/users/123".clone();
+    match parse(&original) {
+        Ok(p) => assert_eq(format_json_pointer(&p), "/users/123"),
+        Err(_) => panic("parse should succeed"),
+    }
+}
+
+@test
+fn test_round_trip_escapes() {
+    // Round-trip preserves escapes: "/a~1b" (token "a/b") → "/a~1b"
+    let original = "/a~1b".clone();
+    match parse(&original) {
+        Ok(p) => {
+            assert_eq(p.tokens[0], "a/b");
+            assert_eq(format_json_pointer(&p), "/a~1b");
+        },
+        Err(_) => panic("parse should succeed"),
+    }
+}
+
+// =============================================================================
+// Section 6: JsonPointer push + parent
+// =============================================================================
+
+@test
+fn test_push_increases_depth() {
+    let p1 = JsonPointer.root().push("foo".clone());
+    assert_eq(p1.depth(), 1);
+    let p2 = p1.push("bar".clone());
+    assert_eq(p2.depth(), 2);
+}
+
+@test
+fn test_push_preserves_existing_tokens() {
+    let p = JsonPointer.root()
+        .push("a".clone())
+        .push("b".clone())
+        .push("c".clone());
+    assert_eq(p.depth(), 3);
+    assert_eq(p.tokens[0], "a");
+    assert_eq(p.tokens[1], "b");
+    assert_eq(p.tokens[2], "c");
+}
+
+@test
+fn test_parent_of_root_is_root() {
+    // Documented behavior: parent of root stays root.
+    let p = JsonPointer.root().parent();
+    assert(p.is_root());
+}
+
+@test
+fn test_parent_drops_last_token() {
+    let p = JsonPointer.root().push("a".clone()).push("b".clone());
+    let parent = p.parent();
+    assert_eq(parent.depth(), 1);
+    assert_eq(parent.tokens[0], "a");
+}
+
+// =============================================================================
+// Section 7: JsonPointer.from_tokens
+// =============================================================================
+
+@test
+fn test_from_tokens_empty() {
+    let toks: [Text; 0] = [];
+    let p = JsonPointer.from_tokens(&toks);
+    assert(p.is_root());
+}
+
+@test
+fn test_from_tokens_multi() {
+    let toks: [Text; 3] = ["x".clone(), "y".clone(), "z".clone()];
+    let p = JsonPointer.from_tokens(&toks);
+    assert_eq(p.depth(), 3);
+    assert_eq(p.tokens[0], "x");
+    assert_eq(p.tokens[2], "z");
+}
