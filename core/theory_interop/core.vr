@@ -243,7 +243,7 @@ public fn translate(
         original_values.push(j);  // identity: each claim maps to itself
         j += 1;
     }
-    let obstruction = compute_obstruction(&k_values, &f_values, &original_values);
+    let obstruction = core.math.kan_extension.compute_obstruction(&k_values, &f_values, &original_values);
 
     TranslationResult {
         optimistic: optimistic,
