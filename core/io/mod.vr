@@ -87,9 +87,21 @@ public mount .file.O_TRUNC;
 public mount .file.O_APPEND;
 
 // Convenience functions
-public mount .file.read;
+//
+// SOUNDNESS (closes task #io-1 stdlib leg): the bare-name re-exports
+// `read` and `write` POLLUTE the global function namespace with
+// method-name-shaped entries — every method-call site that emits a
+// bare CallM (where receiver-type extraction failed) silently
+// mis-dispatches to one of these free fns instead of the receiver's
+// own Read/Write protocol impl method.  Architectural rule pinned in
+// source: re-export file convenience helpers under more-specific
+// names (`read_file` / `write_file`) so they CAN'T shadow the
+// `Read.read` / `Write.write` protocol methods at dispatch.  Callers
+// who need the convenience use the qualified `core.io.file.{read,write}`
+// path or the renamed `read_file` / `write_file` aliases.
+public mount .file.read as read_file;
 public mount .file.read_to_string;
-public mount .file.write;
+public mount .file.write as write_file;
 public mount .file.write_bytes;
 
 // =============================================================================

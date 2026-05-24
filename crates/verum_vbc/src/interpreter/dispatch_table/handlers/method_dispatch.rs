@@ -1926,6 +1926,44 @@ pub(in super::super) fn handle_call_method(
 
                 for func in &state.module.functions {
                     let func_name = state.module.strings.get(func.name).unwrap_or("");
+                    // SOUNDNESS (task #io-1 dispatcher leg): syscall /
+                    // libsystem free fns CANNOT be invoked as instance
+                    // methods even when their qualified name ends with
+                    // a common method suffix (`.read` / `.write` /
+                    // `.close` / `.seek` / `.flush`).  The bare-suffix
+                    // scan was previously accepting them, mis-dispatching
+                    // `s.write(buf)` for `s: Sink` to
+                    // `sys.linux.syscall.write` /
+                    // `sys.darwin.libsystem.safe_write`.
+                    //
+                    // The filter additionally excludes the convenience
+                    // free fns from `core.io.{file,fs}` (`write`, `read`,
+                    // `read_to_string` etc.) that are namespace-shaped
+                    // method-name aliases — they're for use as
+                    // `io.read(path)` / `io.write(path, contents)`, NOT
+                    // as receiver-method calls.  Their bare-name slot
+                    // shadows the Read/Write protocol's `.read` / `.write`
+                    // when the codegen-side receiver-type extraction
+                    // misses.
+                    //
+                    // Architectural rule pinned in source: free fns
+                    // whose qualified name lives under `sys.*` /
+                    // `core.sys.*` / `core.io.fs.*` / `core.io.file.*` /
+                    // `core.shell.*` participate ONLY in `Call(fn_id)`
+                    // dispatch, never in `CallM(receiver, method_id)`
+                    // bare-suffix scan.
+                    let is_namespace_shadow = func.parent_type.is_none() && (
+                           func_name.starts_with("sys.")
+                        || func_name.starts_with("core.sys.")
+                        || func_name.starts_with("core.io.fs.")
+                        || func_name.starts_with("core.io.file.")
+                        || func_name.starts_with("core.shell.")
+                        || func_name.starts_with("core.net.")
+                        || func_name.starts_with("core.database.")
+                    );
+                    if is_namespace_shadow {
+                        continue;
+                    }
                     let matches = if is_already_qualified {
                         // For qualified names, require the qualified suffix to match
                         // (prevents "Result.unwrap_or" matching when looking for
@@ -2807,6 +2845,33 @@ fn func_id_parent_compatible_with_receiver(
     func: &crate::module::FunctionDescriptor,
     dispatch_receiver: &Value,
 ) -> bool {
+    // SOUNDNESS (task #io-1 dispatcher leg): reject namespace-shaped
+    // free-fn candidates from method dispatch.  Functions whose
+    // qualified name lives under `sys.*` / `core.sys.*` /
+    // `core.io.fs.*` / `core.io.file.*` / `core.shell.*` etc. CANNOT
+    // be invoked as instance methods — yet their qualified names end
+    // with common method suffixes (`.read`, `.write`, `.close`,
+    // `.seek`, `.flush`).  The bare-suffix scan was previously
+    // accepting them as valid method-call targets because their
+    // parent_type is None, dispatching `s.write(buf)` for `s: Sink`
+    // to `sys.linux.syscall.write` / `sys.darwin.libsystem.safe_write`.
+    // Architectural rule pinned in source: namespace-qualified free
+    // fns participate ONLY in `Call(fn_id)` dispatch, never in
+    // `CallM(receiver, method_id)` bare-suffix scan.
+    if let Some(func_name) = state.module.strings.get(func.name)
+        && func.parent_type.is_none()
+        && (
+               func_name.starts_with("sys.")
+            || func_name.starts_with("core.sys.")
+            || func_name.starts_with("core.io.fs.")
+            || func_name.starts_with("core.io.file.")
+            || func_name.starts_with("core.shell.")
+            || func_name.starts_with("core.net.")
+            || func_name.starts_with("core.database.")
+        )
+    {
+        return false;
+    }
     if !dispatch_receiver.is_ptr() || dispatch_receiver.is_nil() {
         // Non-pointer receiver — accept parent-less or primitive-bound
         // parents only.
