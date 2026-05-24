@@ -1,0 +1,277 @@
+// =============================================================================
+// core-tests/math/checked/unit_test.vr
+// =============================================================================
+//
+// `core/math/checked.vr` — overflow-checked + saturating integer arithmetic.
+//
+// Surface:
+//   * CheckedResult<T> 2-variant (Ok / Overflow)
+//   * checked_add / checked_sub / checked_mul / checked_div / checked_neg /
+//     checked_abs — signed Int64
+//   * checked_*_u — UInt64 variants
+//   * checked_*_i32 / _u32 — 32-bit variants
+//   * saturating_add / saturating_sub / saturating_mul / saturating_neg /
+//     saturating_abs — clamp to bounds instead of overflow
+// =============================================================================
+
+mount core.math.checked.{
+    CheckedResult,
+    checked_add, checked_sub, checked_mul, checked_div, checked_neg, checked_abs,
+    saturating_add, saturating_sub, saturating_mul, saturating_neg, saturating_abs,
+};
+
+// =============================================================================
+// Section 1: CheckedResult 2-variant
+// =============================================================================
+
+@test
+fn test_checked_result_ok_construction() {
+    let r: CheckedResult<Int64> = CheckedResult.Ok(42_i64);
+    assert(r is CheckedResult.Ok);
+}
+
+@test
+fn test_checked_result_overflow_construction() {
+    let r: CheckedResult<Int64> = CheckedResult.Overflow;
+    assert(r is CheckedResult.Overflow);
+}
+
+@test
+fn test_checked_result_variants_disjoint() {
+    let ok: CheckedResult<Int64> = CheckedResult.Ok(0_i64);
+    let ov: CheckedResult<Int64> = CheckedResult.Overflow;
+    assert(ok is CheckedResult.Ok);
+    assert(ov is CheckedResult.Overflow);
+    assert(!(ok is CheckedResult.Overflow));
+    assert(!(ov is CheckedResult.Ok));
+}
+
+// =============================================================================
+// Section 2: checked_add — signed
+// =============================================================================
+
+@test
+fn test_checked_add_no_overflow() {
+    let r = checked_add(100_i64, 200_i64);
+    match r {
+        CheckedResult.Ok(v) => assert_eq(v, 300_i64),
+        CheckedResult.Overflow => panic("100+200 should not overflow"),
+    }
+}
+
+@test
+fn test_checked_add_zero_identity() {
+    let r = checked_add(42_i64, 0_i64);
+    match r {
+        CheckedResult.Ok(v) => assert_eq(v, 42_i64),
+        CheckedResult.Overflow => panic("0 is identity"),
+    }
+}
+
+@test
+fn test_checked_add_overflow_max() {
+    let r = checked_add(Int64.MAX, 1_i64);
+    assert(r is CheckedResult.Overflow);
+}
+
+@test
+fn test_checked_add_overflow_min() {
+    let r = checked_add(Int64.MIN, -1_i64);
+    assert(r is CheckedResult.Overflow);
+}
+
+// =============================================================================
+// Section 3: checked_sub
+// =============================================================================
+
+@test
+fn test_checked_sub_no_overflow() {
+    let r = checked_sub(100_i64, 30_i64);
+    match r {
+        CheckedResult.Ok(v) => assert_eq(v, 70_i64),
+        CheckedResult.Overflow => panic("100-30 should not overflow"),
+    }
+}
+
+@test
+fn test_checked_sub_overflow_min() {
+    let r = checked_sub(Int64.MIN, 1_i64);
+    assert(r is CheckedResult.Overflow);
+}
+
+// =============================================================================
+// Section 4: checked_mul
+// =============================================================================
+
+@test
+fn test_checked_mul_no_overflow() {
+    let r = checked_mul(7_i64, 6_i64);
+    match r {
+        CheckedResult.Ok(v) => assert_eq(v, 42_i64),
+        CheckedResult.Overflow => panic("7*6 should not overflow"),
+    }
+}
+
+@test
+fn test_checked_mul_zero_absorbing() {
+    let r = checked_mul(Int64.MAX, 0_i64);
+    match r {
+        CheckedResult.Ok(v) => assert_eq(v, 0_i64),
+        CheckedResult.Overflow => panic("MAX*0 = 0"),
+    }
+}
+
+@test
+fn test_checked_mul_overflow() {
+    let r = checked_mul(Int64.MAX, 2_i64);
+    assert(r is CheckedResult.Overflow);
+}
+
+// =============================================================================
+// Section 5: checked_div — div by zero + MIN / -1 special cases
+// =============================================================================
+
+@test
+fn test_checked_div_normal() {
+    let r = checked_div(100_i64, 4_i64);
+    match r {
+        CheckedResult.Ok(v) => assert_eq(v, 25_i64),
+        CheckedResult.Overflow => panic("100/4 = 25"),
+    }
+}
+
+@test
+fn test_checked_div_by_zero_is_overflow() {
+    let r = checked_div(42_i64, 0_i64);
+    assert(r is CheckedResult.Overflow);
+}
+
+@test
+fn test_checked_div_min_by_neg_one_is_overflow() {
+    // -MIN overflows in two's complement
+    let r = checked_div(Int64.MIN, -1_i64);
+    assert(r is CheckedResult.Overflow);
+}
+
+// =============================================================================
+// Section 6: checked_neg
+// =============================================================================
+
+@test
+fn test_checked_neg_normal() {
+    let r = checked_neg(42_i64);
+    match r {
+        CheckedResult.Ok(v) => assert_eq(v, -42_i64),
+        CheckedResult.Overflow => panic("-42 is OK"),
+    }
+}
+
+@test
+fn test_checked_neg_zero() {
+    let r = checked_neg(0_i64);
+    match r {
+        CheckedResult.Ok(v) => assert_eq(v, 0_i64),
+        CheckedResult.Overflow => panic("-0 = 0"),
+    }
+}
+
+@test
+fn test_checked_neg_min_overflows() {
+    // -Int64.MIN overflows in two's complement
+    let r = checked_neg(Int64.MIN);
+    assert(r is CheckedResult.Overflow);
+}
+
+// =============================================================================
+// Section 7: checked_abs
+// =============================================================================
+
+@test
+fn test_checked_abs_positive() {
+    let r = checked_abs(42_i64);
+    match r {
+        CheckedResult.Ok(v) => assert_eq(v, 42_i64),
+        CheckedResult.Overflow => panic("abs(42) = 42"),
+    }
+}
+
+@test
+fn test_checked_abs_negative() {
+    let r = checked_abs(-42_i64);
+    match r {
+        CheckedResult.Ok(v) => assert_eq(v, 42_i64),
+        CheckedResult.Overflow => panic("abs(-42) = 42"),
+    }
+}
+
+@test
+fn test_checked_abs_min_overflows() {
+    let r = checked_abs(Int64.MIN);
+    assert(r is CheckedResult.Overflow);
+}
+
+// =============================================================================
+// Section 8: saturating_add
+// =============================================================================
+
+@test
+fn test_saturating_add_normal() {
+    assert_eq(saturating_add(100_i64, 200_i64), 300_i64);
+}
+
+@test
+fn test_saturating_add_clamps_to_max() {
+    // MAX + 1 saturates to MAX (no panic)
+    assert_eq(saturating_add(Int64.MAX, 1_i64), Int64.MAX);
+}
+
+@test
+fn test_saturating_add_clamps_to_min() {
+    assert_eq(saturating_add(Int64.MIN, -1_i64), Int64.MIN);
+}
+
+// =============================================================================
+// Section 9: saturating_sub
+// =============================================================================
+
+@test
+fn test_saturating_sub_normal() {
+    assert_eq(saturating_sub(100_i64, 30_i64), 70_i64);
+}
+
+@test
+fn test_saturating_sub_clamps_to_min() {
+    assert_eq(saturating_sub(Int64.MIN, 1_i64), Int64.MIN);
+}
+
+// =============================================================================
+// Section 10: saturating_mul + saturating_neg + saturating_abs
+// =============================================================================
+
+@test
+fn test_saturating_mul_normal() {
+    assert_eq(saturating_mul(7_i64, 6_i64), 42_i64);
+}
+
+@test
+fn test_saturating_mul_overflow_to_max() {
+    // Positive × positive that overflows saturates positive
+    let r = saturating_mul(Int64.MAX, 2_i64);
+    assert_eq(r, Int64.MAX);
+}
+
+@test
+fn test_saturating_neg_min_clamps_to_max() {
+    // -MIN would overflow → clamps to MAX
+    assert_eq(saturating_neg(Int64.MIN), Int64.MAX);
+}
+
+@test
+fn test_saturating_abs_min_clamps_to_max() {
+    assert_eq(saturating_abs(Int64.MIN), Int64.MAX);
+}
+
+@test
+fn test_saturating_abs_negative() {
+    assert_eq(saturating_abs(-42_i64), 42_i64);
+}
