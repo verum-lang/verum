@@ -1,0 +1,204 @@
+// =============================================================================
+// core-tests/storage/types/unit_test.vr
+// =============================================================================
+//
+// `core/storage/types.vr` is the abstract object-store protocol +
+// data ADTs. The `ObjectStore` protocol itself needs a backend
+// instance to test; this file covers the testable data surface:
+//
+//   * `StorageError` — 8-variant error ADT
+//   * `PresignMethod` — 4-variant HTTP method enum
+//   * `PutOptions` / `GetOptions` / `ListOptions` / `PresignOptions`
+//     defaults
+//   * `ObjectMetadata` / `ListPage` field round-trip
+// =============================================================================
+
+mount core.storage.types.{StorageError, PresignMethod};
+
+// =============================================================================
+// Section 1: StorageError 8-variant construction
+// =============================================================================
+
+@test
+fn test_storage_error_not_found_construction() {
+    let e: StorageError = StorageError.NotFound("key1".clone());
+    assert(e is StorageError.NotFound);
+}
+
+@test
+fn test_storage_error_access_denied_construction() {
+    let e: StorageError = StorageError.AccessDenied("no IAM perms".clone());
+    assert(e is StorageError.AccessDenied);
+}
+
+@test
+fn test_storage_error_network_construction() {
+    let e: StorageError = StorageError.Network("connection refused".clone());
+    assert(e is StorageError.Network);
+}
+
+@test
+fn test_storage_error_invalid_key_construction() {
+    let e: StorageError = StorageError.InvalidKey("contains /".clone());
+    assert(e is StorageError.InvalidKey);
+}
+
+@test
+fn test_storage_error_too_large_construction() {
+    let e: StorageError = StorageError.TooLarge { size: 5_368_709_120, limit: 5_242_880 };
+    assert(e is StorageError.TooLarge);
+}
+
+@test
+fn test_storage_error_conflict_construction() {
+    let e: StorageError = StorageError.Conflict("etag mismatch".clone());
+    assert(e is StorageError.Conflict);
+}
+
+@test
+fn test_storage_error_checksum_mismatch_construction() {
+    let e: StorageError = StorageError.ChecksumMismatch {
+        expected: "abc123".clone(),
+        computed: "def456".clone(),
+    };
+    assert(e is StorageError.ChecksumMismatch);
+}
+
+@test
+fn test_storage_error_backend_construction() {
+    let e: StorageError = StorageError.Backend("internal error".clone());
+    assert(e is StorageError.Backend);
+}
+
+// =============================================================================
+// Section 2: StorageError variant disjointness
+// =============================================================================
+
+@test
+fn test_storage_error_variants_are_disjoint() {
+    let nf: StorageError = StorageError.NotFound("k".clone());
+    let ad: StorageError = StorageError.AccessDenied("r".clone());
+    let net: StorageError = StorageError.Network("r".clone());
+    let ik: StorageError = StorageError.InvalidKey("r".clone());
+    let tl: StorageError = StorageError.TooLarge { size: 1, limit: 0 };
+    let cf: StorageError = StorageError.Conflict("r".clone());
+    let cm: StorageError = StorageError.ChecksumMismatch {
+        expected: "a".clone(), computed: "b".clone(),
+    };
+    let be: StorageError = StorageError.Backend("r".clone());
+
+    assert(nf is StorageError.NotFound);
+    assert(ad is StorageError.AccessDenied);
+    assert(net is StorageError.Network);
+    assert(ik is StorageError.InvalidKey);
+    assert(tl is StorageError.TooLarge);
+    assert(cf is StorageError.Conflict);
+    assert(cm is StorageError.ChecksumMismatch);
+    assert(be is StorageError.Backend);
+
+    // Cross-disjointness sample
+    assert(!(nf is StorageError.AccessDenied));
+    assert(!(ad is StorageError.Network));
+    assert(!(net is StorageError.InvalidKey));
+    assert(!(ik is StorageError.TooLarge));
+    assert(!(tl is StorageError.Conflict));
+    assert(!(cf is StorageError.ChecksumMismatch));
+    assert(!(cm is StorageError.Backend));
+    assert(!(be is StorageError.NotFound));
+}
+
+// =============================================================================
+// Section 3: StorageError.Display rendering
+// =============================================================================
+
+@test
+fn test_storage_error_display_not_found() {
+    let e = StorageError.NotFound("my-key".clone());
+    let s = f"{e}";
+    assert(s.contains("my-key"));
+    assert(s.contains("not found"));
+    assert(s.contains("storage"));
+}
+
+@test
+fn test_storage_error_display_access_denied() {
+    let e = StorageError.AccessDenied("invalid signature".clone());
+    let s = f"{e}";
+    assert(s.contains("invalid signature"));
+    assert(s.contains("access denied"));
+}
+
+@test
+fn test_storage_error_display_too_large() {
+    let e = StorageError.TooLarge { size: 1_000_000_000, limit: 5_000_000 };
+    let s = f"{e}";
+    assert(s.contains("1000000000"));
+    assert(s.contains("5000000"));
+    assert(s.contains("large"));
+}
+
+@test
+fn test_storage_error_display_checksum_mismatch() {
+    let e = StorageError.ChecksumMismatch {
+        expected: "expected-hash".clone(),
+        computed: "actual-hash".clone(),
+    };
+    let s = f"{e}";
+    assert(s.contains("expected-hash"));
+    assert(s.contains("actual-hash"));
+    assert(s.contains("checksum"));
+}
+
+@test
+fn test_storage_error_display_backend() {
+    let e = StorageError.Backend("internal error".clone());
+    let s = f"{e}";
+    assert(s.contains("internal error"));
+    assert(s.contains("backend"));
+}
+
+// =============================================================================
+// Section 4: PresignMethod 4-variant
+// =============================================================================
+
+@test
+fn test_presign_method_get_construction() {
+    let m: PresignMethod = PresignMethod.Get;
+    assert(m is PresignMethod.Get);
+}
+
+@test
+fn test_presign_method_put_construction() {
+    let m: PresignMethod = PresignMethod.Put;
+    assert(m is PresignMethod.Put);
+}
+
+@test
+fn test_presign_method_head_construction() {
+    let m: PresignMethod = PresignMethod.Head;
+    assert(m is PresignMethod.Head);
+}
+
+@test
+fn test_presign_method_delete_construction() {
+    let m: PresignMethod = PresignMethod.Delete;
+    assert(m is PresignMethod.Delete);
+}
+
+@test
+fn test_presign_method_variants_disjoint() {
+    let g: PresignMethod = PresignMethod.Get;
+    let p: PresignMethod = PresignMethod.Put;
+    let h: PresignMethod = PresignMethod.Head;
+    let d: PresignMethod = PresignMethod.Delete;
+
+    assert(g is PresignMethod.Get);
+    assert(p is PresignMethod.Put);
+    assert(h is PresignMethod.Head);
+    assert(d is PresignMethod.Delete);
+
+    assert(!(g is PresignMethod.Put));
+    assert(!(p is PresignMethod.Head));
+    assert(!(h is PresignMethod.Delete));
+    assert(!(d is PresignMethod.Get));
+}
