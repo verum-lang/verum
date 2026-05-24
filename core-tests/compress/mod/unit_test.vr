@@ -1,0 +1,235 @@
+// =============================================================================
+// core-tests/compress/mod/unit_test.vr
+// =============================================================================
+//
+// `core/compress/mod.vr` defines Algorithm 7-variant + CompressError
+// 7-variant + the abstract Codec protocol.
+//
+// Surface tested:
+//   * Algorithm — Gzip / Deflate / Zlib / Brotli / Zstd / Lz4 / Identity
+//   * Algorithm.content_encoding — HTTP Content-Encoding tokens
+//   * Algorithm.from_content_encoding — inverse mapping
+//   * CompressError — 7-variant ADT
+// =============================================================================
+
+mount core.compress.{Algorithm, CompressError};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Algorithm variant construction
+// =============================================================================
+
+@test
+fn test_algorithm_gzip_construction() {
+    let a: Algorithm = Algorithm.Gzip;
+    assert(a is Algorithm.Gzip);
+}
+
+@test
+fn test_algorithm_deflate_construction() {
+    let a: Algorithm = Algorithm.Deflate;
+    assert(a is Algorithm.Deflate);
+}
+
+@test
+fn test_algorithm_zlib_construction() {
+    let a: Algorithm = Algorithm.Zlib;
+    assert(a is Algorithm.Zlib);
+}
+
+@test
+fn test_algorithm_brotli_construction() {
+    let a: Algorithm = Algorithm.Brotli;
+    assert(a is Algorithm.Brotli);
+}
+
+@test
+fn test_algorithm_zstd_construction() {
+    let a: Algorithm = Algorithm.Zstd;
+    assert(a is Algorithm.Zstd);
+}
+
+@test
+fn test_algorithm_lz4_construction() {
+    let a: Algorithm = Algorithm.Lz4;
+    assert(a is Algorithm.Lz4);
+}
+
+@test
+fn test_algorithm_identity_construction() {
+    let a: Algorithm = Algorithm.Identity;
+    assert(a is Algorithm.Identity);
+}
+
+// =============================================================================
+// Section 2: Algorithm.content_encoding — HTTP tokens
+// =============================================================================
+
+@test
+fn test_content_encoding_gzip() {
+    assert_eq(Algorithm.Gzip.content_encoding(), &"gzip");
+}
+
+@test
+fn test_content_encoding_deflate() {
+    assert_eq(Algorithm.Deflate.content_encoding(), &"deflate");
+}
+
+@test
+fn test_content_encoding_zlib_shares_deflate_token() {
+    // Documented contract: Zlib uses "deflate" HTTP token (same wire)
+    assert_eq(Algorithm.Zlib.content_encoding(), &"deflate");
+}
+
+@test
+fn test_content_encoding_brotli_is_br() {
+    assert_eq(Algorithm.Brotli.content_encoding(), &"br");
+}
+
+@test
+fn test_content_encoding_zstd() {
+    assert_eq(Algorithm.Zstd.content_encoding(), &"zstd");
+}
+
+@test
+fn test_content_encoding_lz4() {
+    assert_eq(Algorithm.Lz4.content_encoding(), &"lz4");
+}
+
+@test
+fn test_content_encoding_identity() {
+    assert_eq(Algorithm.Identity.content_encoding(), &"identity");
+}
+
+// =============================================================================
+// Section 3: Algorithm.from_content_encoding — inverse mapping
+// =============================================================================
+
+@test
+fn test_from_content_encoding_gzip() {
+    let s = "gzip".clone();
+    let r = Algorithm.from_content_encoding(&s);
+    match r {
+        Some(a) => assert(a is Algorithm.Gzip),
+        None => panic("gzip should parse"),
+    }
+}
+
+@test
+fn test_from_content_encoding_br_is_brotli() {
+    let s = "br".clone();
+    let r = Algorithm.from_content_encoding(&s);
+    match r {
+        Some(a) => assert(a is Algorithm.Brotli),
+        None => panic("br should parse to Brotli"),
+    }
+}
+
+@test
+fn test_from_content_encoding_case_insensitive_gzip() {
+    let s = "GZIP".clone();
+    let r = Algorithm.from_content_encoding(&s);
+    match r {
+        Some(a) => assert(a is Algorithm.Gzip),
+        None => panic("GZIP should parse (case-insensitive)"),
+    }
+}
+
+@test
+fn test_from_content_encoding_unknown_returns_none() {
+    let s = "xz".clone();
+    let r = Algorithm.from_content_encoding(&s);
+    match r {
+        Some(_) => panic("'xz' is not a known content-encoding"),
+        None => assert(true),
+    }
+}
+
+@test
+fn test_from_content_encoding_identity() {
+    let s = "identity".clone();
+    let r = Algorithm.from_content_encoding(&s);
+    match r {
+        Some(a) => assert(a is Algorithm.Identity),
+        None => panic("identity should parse"),
+    }
+}
+
+// =============================================================================
+// Section 4: Algorithm Eq
+// =============================================================================
+
+@test
+fn test_algorithm_eq_same() {
+    assert(Algorithm.Gzip == Algorithm.Gzip);
+    assert(Algorithm.Brotli == Algorithm.Brotli);
+    assert(Algorithm.Identity == Algorithm.Identity);
+}
+
+@test
+fn test_algorithm_eq_distinct() {
+    assert(Algorithm.Gzip != Algorithm.Deflate);
+    assert(Algorithm.Brotli != Algorithm.Zstd);
+    assert(Algorithm.Lz4 != Algorithm.Identity);
+}
+
+// =============================================================================
+// Section 5: Algorithm Display
+// =============================================================================
+
+@test
+fn test_algorithm_display_gzip() {
+    assert_eq(f"{Algorithm.Gzip}", "gzip");
+}
+
+@test
+fn test_algorithm_display_brotli_is_brotli_not_br() {
+    // Display uses canonical algorithm_name (brotli) not HTTP token (br)
+    assert_eq(f"{Algorithm.Brotli}", "brotli");
+}
+
+// =============================================================================
+// Section 6: CompressError 7-variant construction
+// =============================================================================
+
+@test
+fn test_compress_error_unsupported_algorithm() {
+    let e: CompressError = CompressError.UnsupportedAlgorithm(Algorithm.Zstd);
+    assert(e is CompressError.UnsupportedAlgorithm);
+}
+
+@test
+fn test_compress_error_corrupt_input() {
+    let e: CompressError = CompressError.CorruptInput("bad header".clone());
+    assert(e is CompressError.CorruptInput);
+}
+
+@test
+fn test_compress_error_buffer_too_small() {
+    let e: CompressError = CompressError.BufferTooSmall { need: 1024, have: 256 };
+    assert(e is CompressError.BufferTooSmall);
+}
+
+@test
+fn test_compress_error_invalid_level() {
+    let e: CompressError = CompressError.InvalidLevel { algo: Algorithm.Zstd, level: 100 };
+    assert(e is CompressError.InvalidLevel);
+}
+
+@test
+fn test_compress_error_dictionary_mismatch() {
+    let e: CompressError = CompressError.DictionaryMismatch;
+    assert(e is CompressError.DictionaryMismatch);
+}
+
+@test
+fn test_compress_error_output_too_large() {
+    let e: CompressError = CompressError.OutputTooLarge { limit: 1_000_000 };
+    assert(e is CompressError.OutputTooLarge);
+}
+
+@test
+fn test_compress_error_io_error() {
+    let e: CompressError = CompressError.IoError("disk full".clone());
+    assert(e is CompressError.IoError);
+}
