@@ -1,0 +1,284 @@
+// =============================================================================
+// core-tests/proof/pcc/unit_test.vr
+// =============================================================================
+//
+// `core/proof/pcc.vr` — Proof-Carrying Code certificate bundle API.
+//
+// Surface:
+//   * GoalHash { digest: Text }
+//   * ProofCertificate { goal_text, solver, proof_object, duration_ms, timestamp }
+//   * BundleMetadata { compiler_version, source_path, certificate_count, total_duration_ms }
+//   * ProofBundle { certificates: Map<Text, ProofCertificate>, metadata }
+//   * goal_hash(digest) ctor
+//   * proof_certificate(...) ctor
+//   * empty_bundle(compiler, source) ctor
+//   * bundle_add(b, h, c) — idempotent on goal-hash collision
+//   * bundle_lookup(&b, digest) -> Maybe<ProofCertificate>
+//   * bundle_size(&b) -> Int
+// =============================================================================
+
+mount core.proof.pcc.{
+    GoalHash, ProofCertificate, BundleMetadata, ProofBundle,
+    goal_hash, proof_certificate, empty_bundle, bundle_add,
+    bundle_lookup, bundle_size,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: goal_hash + GoalHash field
+// =============================================================================
+
+@test
+fn test_goal_hash_preserves_digest() {
+    let h = goal_hash("abc123".clone());
+    assert_eq(h.digest, "abc123");
+}
+
+@test
+fn test_goal_hash_empty_digest() {
+    let h = goal_hash("".clone());
+    assert_eq(h.digest, "");
+}
+
+// =============================================================================
+// Section 2: proof_certificate constructor
+// =============================================================================
+
+@test
+fn test_proof_certificate_preserves_fields() {
+    let c = proof_certificate(
+        "x > 0".clone(),
+        "z3".clone(),
+        "proof-payload-bytes".clone(),
+        42,
+        "2026-05-24T11:00:00Z".clone(),
+    );
+    assert_eq(c.goal_text, "x > 0");
+    assert_eq(c.solver, "z3");
+    assert_eq(c.proof_object, "proof-payload-bytes");
+    assert_eq(c.duration_ms, 42);
+    assert_eq(c.timestamp, "2026-05-24T11:00:00Z");
+}
+
+@test
+fn test_proof_certificate_zero_duration() {
+    let c = proof_certificate(
+        "trivially-true".clone(),
+        "tautology".clone(),
+        "".clone(),
+        0,
+        "now".clone(),
+    );
+    assert_eq(c.duration_ms, 0);
+}
+
+// =============================================================================
+// Section 3: empty_bundle
+// =============================================================================
+
+@test
+fn test_empty_bundle_initial_size_zero() {
+    let b = empty_bundle("verum-0.1.0".clone(), "tests.vr".clone());
+    assert_eq(bundle_size(&b), 0);
+}
+
+@test
+fn test_empty_bundle_metadata_compiler_version() {
+    let b = empty_bundle("verum-0.1.0".clone(), "src.vr".clone());
+    assert_eq(b.metadata.compiler_version, "verum-0.1.0");
+}
+
+@test
+fn test_empty_bundle_metadata_source_path() {
+    let b = empty_bundle("v0.1".clone(), "/path/to/file.vr".clone());
+    assert_eq(b.metadata.source_path, "/path/to/file.vr");
+}
+
+@test
+fn test_empty_bundle_metadata_zero_count() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    assert_eq(b.metadata.certificate_count, 0);
+}
+
+@test
+fn test_empty_bundle_metadata_zero_duration() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    assert_eq(b.metadata.total_duration_ms, 0);
+}
+
+// =============================================================================
+// Section 4: bundle_add increments count + duration
+// =============================================================================
+
+@test
+fn test_bundle_add_increments_size() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let h = goal_hash("g1".clone());
+    let c = proof_certificate(
+        "goal1".clone(),
+        "z3".clone(),
+        "p".clone(),
+        100,
+        "now".clone(),
+    );
+    let b2 = bundle_add(b, h, c);
+    assert_eq(bundle_size(&b2), 1);
+}
+
+@test
+fn test_bundle_add_updates_certificate_count() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let h = goal_hash("g1".clone());
+    let c = proof_certificate(
+        "g".clone(), "z3".clone(), "p".clone(), 50, "t".clone(),
+    );
+    let b2 = bundle_add(b, h, c);
+    assert_eq(b2.metadata.certificate_count, 1);
+}
+
+@test
+fn test_bundle_add_updates_total_duration_ms() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let h = goal_hash("g1".clone());
+    let c = proof_certificate(
+        "g".clone(), "z3".clone(), "p".clone(), 75, "t".clone(),
+    );
+    let b2 = bundle_add(b, h, c);
+    assert_eq(b2.metadata.total_duration_ms, 75);
+}
+
+@test
+fn test_bundle_add_two_distinct_hashes_increments_twice() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let h1 = goal_hash("g1".clone());
+    let h2 = goal_hash("g2".clone());
+    let c1 = proof_certificate(
+        "g1-text".clone(), "z3".clone(), "p1".clone(), 100, "t1".clone(),
+    );
+    let c2 = proof_certificate(
+        "g2-text".clone(), "z3".clone(), "p2".clone(), 200, "t2".clone(),
+    );
+    let b2 = bundle_add(b, h1, c1);
+    let b3 = bundle_add(b2, h2, c2);
+    assert_eq(bundle_size(&b3), 2);
+    assert_eq(b3.metadata.certificate_count, 2);
+    assert_eq(b3.metadata.total_duration_ms, 300);
+}
+
+// =============================================================================
+// Section 5: bundle_add idempotent on goal-hash collision
+// =============================================================================
+
+@test
+fn test_bundle_add_same_hash_count_stays_one() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let h = goal_hash("g1".clone());
+    let c1 = proof_certificate(
+        "g".clone(), "z3".clone(), "p1".clone(), 100, "t1".clone(),
+    );
+    let c2 = proof_certificate(
+        "g".clone(), "z3".clone(), "p2".clone(), 250, "t2".clone(),
+    );
+    let b2 = bundle_add(b, h, c1);
+    let h2 = goal_hash("g1".clone());
+    let b3 = bundle_add(b2, h2, c2);
+    // certificate_count stays at 1 — re-add of same hash replaces
+    assert_eq(b3.metadata.certificate_count, 1);
+}
+
+@test
+fn test_bundle_add_same_hash_duration_adjusts_to_new() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let h = goal_hash("g1".clone());
+    let c1 = proof_certificate(
+        "g".clone(), "z3".clone(), "p1".clone(), 100, "t1".clone(),
+    );
+    let c2 = proof_certificate(
+        "g".clone(), "z3".clone(), "p2".clone(), 250, "t2".clone(),
+    );
+    let b2 = bundle_add(b, h, c1);
+    let h2 = goal_hash("g1".clone());
+    let b3 = bundle_add(b2, h2, c2);
+    // total_duration_ms adjusted: 100 (prior) - 100 (subtract) + 250 (new)
+    // = 250 (replaces, not accumulates)
+    assert_eq(b3.metadata.total_duration_ms, 250);
+}
+
+// =============================================================================
+// Section 6: bundle_lookup
+// =============================================================================
+
+@test
+fn test_bundle_lookup_missing_returns_none() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let r = bundle_lookup(&b, "missing".clone());
+    match r {
+        Maybe.Some(_) => panic("expected None for missing digest"),
+        Maybe.None => assert(true),
+    }
+}
+
+@test
+fn test_bundle_lookup_finds_added_certificate() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let h = goal_hash("xyz".clone());
+    let c = proof_certificate(
+        "the-goal".clone(),
+        "z3".clone(),
+        "proof".clone(),
+        50,
+        "ts".clone(),
+    );
+    let b2 = bundle_add(b, h, c);
+    let r = bundle_lookup(&b2, "xyz".clone());
+    match r {
+        Maybe.Some(cert) => {
+            assert_eq(cert.goal_text, "the-goal");
+            assert_eq(cert.solver, "z3");
+            assert_eq(cert.duration_ms, 50);
+        },
+        Maybe.None => panic("expected Some(certificate)"),
+    }
+}
+
+@test
+fn test_bundle_lookup_returns_latest_on_replace() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    let h = goal_hash("k".clone());
+    let c1 = proof_certificate(
+        "old".clone(), "z3".clone(), "p1".clone(), 10, "t1".clone(),
+    );
+    let c2 = proof_certificate(
+        "new".clone(), "z3".clone(), "p2".clone(), 20, "t2".clone(),
+    );
+    let b2 = bundle_add(b, h, c1);
+    let h2 = goal_hash("k".clone());
+    let b3 = bundle_add(b2, h2, c2);
+    let r = bundle_lookup(&b3, "k".clone());
+    match r {
+        Maybe.Some(cert) => assert_eq(cert.goal_text, "new"),
+        Maybe.None => panic("expected the replaced cert"),
+    }
+}
+
+// =============================================================================
+// Section 7: bundle_size
+// =============================================================================
+
+@test
+fn test_bundle_size_zero_on_empty() {
+    let b = empty_bundle("v".clone(), "s".clone());
+    assert_eq(bundle_size(&b), 0);
+}
+
+@test
+fn test_bundle_size_three_after_three_distinct_adds() {
+    let b0 = empty_bundle("v".clone(), "s".clone());
+    let c = proof_certificate(
+        "g".clone(), "z3".clone(), "p".clone(), 1, "t".clone(),
+    );
+    let b1 = bundle_add(b0, goal_hash("a".clone()), c.clone());
+    let b2 = bundle_add(b1, goal_hash("b".clone()), c.clone());
+    let b3 = bundle_add(b2, goal_hash("c".clone()), c);
+    assert_eq(bundle_size(&b3), 3);
+}
