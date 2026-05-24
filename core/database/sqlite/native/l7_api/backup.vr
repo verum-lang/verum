@@ -169,7 +169,7 @@ public fn backup_init_into(
         return Err(DbCorrupt("backup_init: invalid page size on src".clone()));
     }
     let total = read_total_pages(src);
-    let progress = new_handle(
+    let progress = core.database.sqlite.native.backup_api.handle.new_handle(
         0 as Int64,
         0 as Int64, "main".clone(),
         0 as Int64, "main".clone(),
