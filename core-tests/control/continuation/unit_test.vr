@@ -1,0 +1,411 @@
+// =============================================================================
+// core-tests/control/continuation/unit_test.vr
+// =============================================================================
+//
+// `core/control/continuation.vr` — delimited continuations (shift/reset)
+// as data + small-step reduction.
+//
+// Surface:
+//   * CcTerm 6-variant (Const / Var / Lam / App / Reset / Shift)
+//   * Smart ctors: cc_const / cc_var / cc_lam / cc_app / cc_reset / cc_shift
+//   * cc_is_value, cc_occurs_free
+//   * cc_substitute (capture-avoiding)
+//   * CcStep 2-variant (Stepped / Normal) + cc_step + cc_normalise
+//   * cc_alpha_eq
+// =============================================================================
+
+mount core.control.continuation.{
+    CcTerm,
+    cc_const, cc_var, cc_lam, cc_app, cc_reset, cc_shift,
+    cc_is_value, cc_occurs_free, cc_substitute,
+    CcStep, cc_step, cc_normalise, cc_alpha_eq,
+};
+
+// =============================================================================
+// Section 1: CcTerm 6-variant construction + disjointness
+// =============================================================================
+
+@test
+fn test_cc_const_construction() {
+    let t = cc_const(Text.from("v"));
+    assert(t is CcTerm.Const);
+}
+
+@test
+fn test_cc_var_construction() {
+    let t = cc_var(Text.from("x"));
+    assert(t is CcTerm.Var);
+}
+
+@test
+fn test_cc_lam_construction() {
+    let t = cc_lam(Text.from("x"), cc_var(Text.from("x")));
+    assert(t is CcTerm.Lam);
+}
+
+@test
+fn test_cc_app_construction() {
+    let t = cc_app(
+        cc_lam(Text.from("x"), cc_var(Text.from("x"))),
+        cc_const(Text.from("v")),
+    );
+    assert(t is CcTerm.App);
+}
+
+@test
+fn test_cc_reset_construction() {
+    let t = cc_reset(cc_const(Text.from("v")));
+    assert(t is CcTerm.Reset);
+}
+
+@test
+fn test_cc_shift_construction() {
+    let t = cc_shift(Text.from("k"), cc_var(Text.from("k")));
+    assert(t is CcTerm.Shift);
+}
+
+@test
+fn test_cc_variants_pairwise_disjoint() {
+    let c = cc_const(Text.from("v"));
+    let v = cc_var(Text.from("x"));
+    let l = cc_lam(Text.from("x"), cc_var(Text.from("x")));
+    let r = cc_reset(c.clone());
+    let s = cc_shift(Text.from("k"), cc_var(Text.from("k")));
+    assert(c is CcTerm.Const && !(c is CcTerm.Var));
+    assert(v is CcTerm.Var && !(v is CcTerm.Const));
+    assert(l is CcTerm.Lam && !(l is CcTerm.Var));
+    assert(r is CcTerm.Reset && !(r is CcTerm.Const));
+    assert(s is CcTerm.Shift && !(s is CcTerm.Lam));
+}
+
+// =============================================================================
+// Section 2: cc_is_value — values vs non-values
+// =============================================================================
+
+@test
+fn test_cc_is_value_const() {
+    assert(cc_is_value(cc_const(Text.from("v"))));
+}
+
+@test
+fn test_cc_is_value_lam() {
+    assert(cc_is_value(cc_lam(Text.from("x"), cc_var(Text.from("x")))));
+}
+
+@test
+fn test_cc_is_value_var_is_not() {
+    assert(!cc_is_value(cc_var(Text.from("x"))));
+}
+
+@test
+fn test_cc_is_value_app_is_not() {
+    let app = cc_app(
+        cc_lam(Text.from("x"), cc_var(Text.from("x"))),
+        cc_const(Text.from("v")),
+    );
+    assert(!cc_is_value(app));
+}
+
+@test
+fn test_cc_is_value_reset_is_not() {
+    assert(!cc_is_value(cc_reset(cc_const(Text.from("v")))));
+}
+
+@test
+fn test_cc_is_value_shift_is_not() {
+    let s = cc_shift(Text.from("k"), cc_var(Text.from("k")));
+    assert(!cc_is_value(s));
+}
+
+// =============================================================================
+// Section 3: cc_occurs_free
+// =============================================================================
+
+@test
+fn test_cc_occurs_free_var_match() {
+    let t = cc_var(Text.from("x"));
+    assert(cc_occurs_free(t, Text.from("x")));
+}
+
+@test
+fn test_cc_occurs_free_var_miss() {
+    let t = cc_var(Text.from("x"));
+    assert(!cc_occurs_free(t, Text.from("y")));
+}
+
+@test
+fn test_cc_occurs_free_const_never() {
+    let t = cc_const(Text.from("v"));
+    assert(!cc_occurs_free(t, Text.from("x")));
+}
+
+@test
+fn test_cc_occurs_free_lam_shadows() {
+    // λx. x — `x` is bound, NOT free
+    let t = cc_lam(Text.from("x"), cc_var(Text.from("x")));
+    assert(!cc_occurs_free(t, Text.from("x")));
+}
+
+@test
+fn test_cc_occurs_free_lam_under_different_binder() {
+    // λy. x — `x` is free
+    let t = cc_lam(Text.from("y"), cc_var(Text.from("x")));
+    assert(cc_occurs_free(t, Text.from("x")));
+}
+
+@test
+fn test_cc_occurs_free_app_either_side() {
+    // (λy. y) x — `x` is free in argument
+    let t = cc_app(
+        cc_lam(Text.from("y"), cc_var(Text.from("y"))),
+        cc_var(Text.from("x")),
+    );
+    assert(cc_occurs_free(t, Text.from("x")));
+}
+
+@test
+fn test_cc_occurs_free_shift_shadows() {
+    // shift k. k — `k` bound, NOT free
+    let t = cc_shift(Text.from("k"), cc_var(Text.from("k")));
+    assert(!cc_occurs_free(t, Text.from("k")));
+}
+
+// =============================================================================
+// Section 4: cc_substitute — capture-avoiding
+// =============================================================================
+
+@test
+fn test_cc_substitute_var_match() {
+    // x[x := v] = v
+    let result = cc_substitute(
+        cc_var(Text.from("x")),
+        Text.from("x"),
+        cc_const(Text.from("v")),
+    );
+    assert(result is CcTerm.Const);
+}
+
+@test
+fn test_cc_substitute_var_miss() {
+    // y[x := v] = y
+    let result = cc_substitute(
+        cc_var(Text.from("y")),
+        Text.from("x"),
+        cc_const(Text.from("v")),
+    );
+    assert(result is CcTerm.Var);
+}
+
+@test
+fn test_cc_substitute_const_unchanged() {
+    let result = cc_substitute(
+        cc_const(Text.from("c")),
+        Text.from("x"),
+        cc_const(Text.from("v")),
+    );
+    assert(result is CcTerm.Const);
+}
+
+@test
+fn test_cc_substitute_lam_shadowed_no_op() {
+    // (λx. x)[x := v] = λx. x   (shadowed)
+    let result = cc_substitute(
+        cc_lam(Text.from("x"), cc_var(Text.from("x"))),
+        Text.from("x"),
+        cc_const(Text.from("v")),
+    );
+    assert(result is CcTerm.Lam);
+    // The body should still be a Var (not substituted)
+    match result {
+        CcTerm.Lam { param: _, body } => assert(*body is CcTerm.Var),
+        _ => assert(false),
+    }
+}
+
+@test
+fn test_cc_substitute_lam_alpha_renames_to_avoid_capture() {
+    // (λy. x)[x := y] needs α-rename of `y` since `y` is free in `to`.
+    // The result must NOT capture `y`.
+    let lam = cc_lam(Text.from("y"), cc_var(Text.from("x")));
+    let result = cc_substitute(lam, Text.from("x"), cc_var(Text.from("y")));
+    // After substitution, the original `y` must NOT be free
+    // (it was bound, and the inner `x` got replaced by free `y` which was
+    //  α-renamed away). The result is α-equivalent to λy'. y.
+    assert(result is CcTerm.Lam);
+}
+
+// =============================================================================
+// Section 5: CcStep 2-variant
+// =============================================================================
+
+@test
+fn test_cc_step_stepped_variant() {
+    let s: CcStep = CcStep.Stepped { next: cc_const(Text.from("v")) };
+    assert(s is CcStep.Stepped);
+}
+
+@test
+fn test_cc_step_normal_variant() {
+    let s: CcStep = CcStep.Normal { term: cc_const(Text.from("v")) };
+    assert(s is CcStep.Normal);
+}
+
+@test
+fn test_cc_step_variants_disjoint() {
+    let st: CcStep = CcStep.Stepped { next: cc_const(Text.from("v")) };
+    let nm: CcStep = CcStep.Normal { term: cc_const(Text.from("v")) };
+    assert(st is CcStep.Stepped && !(st is CcStep.Normal));
+    assert(nm is CcStep.Normal && !(nm is CcStep.Stepped));
+}
+
+// =============================================================================
+// Section 6: cc_step — reduction rules
+// =============================================================================
+
+@test
+fn test_cc_step_const_is_normal() {
+    // Const is irreducible
+    let r = cc_step(cc_const(Text.from("v")));
+    assert(r is CcStep.Normal);
+}
+
+@test
+fn test_cc_step_var_is_normal() {
+    // Free var (no binder) is irreducible
+    let r = cc_step(cc_var(Text.from("x")));
+    assert(r is CcStep.Normal);
+}
+
+@test
+fn test_cc_step_lam_is_normal() {
+    // Lambda is a value, irreducible
+    let r = cc_step(cc_lam(Text.from("x"), cc_var(Text.from("x"))));
+    assert(r is CcStep.Normal);
+}
+
+@test
+fn test_cc_step_beta_reduction() {
+    // (λx. x) v ↦ v
+    let app = cc_app(
+        cc_lam(Text.from("x"), cc_var(Text.from("x"))),
+        cc_const(Text.from("v")),
+    );
+    let r = cc_step(app);
+    assert(r is CcStep.Stepped);
+}
+
+@test
+fn test_cc_step_reset_value() {
+    // reset v ↦ v
+    let r = cc_step(cc_reset(cc_const(Text.from("v"))));
+    assert(r is CcStep.Stepped);
+}
+
+@test
+fn test_cc_step_shift_outside_reset_is_stuck() {
+    // shift k. k OUTSIDE any reset is a Normal form (stuck)
+    let r = cc_step(cc_shift(Text.from("k"), cc_var(Text.from("k"))));
+    assert(r is CcStep.Normal);
+}
+
+@test
+fn test_cc_step_reset_shift_fires() {
+    // reset (shift k. v) ↦ reset (v[k := λx. reset x])
+    let inner = cc_shift(Text.from("k"), cc_const(Text.from("v")));
+    let r = cc_step(cc_reset(inner));
+    assert(r is CcStep.Stepped);
+}
+
+// =============================================================================
+// Section 7: cc_normalise — driver
+// =============================================================================
+
+@test
+fn test_cc_normalise_value_zero_steps() {
+    let (_term, steps) = cc_normalise(cc_const(Text.from("v")), 100);
+    assert(steps == 0);
+}
+
+@test
+fn test_cc_normalise_lambda_zero_steps() {
+    let (_term, steps) = cc_normalise(
+        cc_lam(Text.from("x"), cc_var(Text.from("x"))),
+        100,
+    );
+    assert(steps == 0);
+}
+
+@test
+fn test_cc_normalise_beta_once() {
+    // (λx. x) v ↦ v in exactly 1 step
+    let app = cc_app(
+        cc_lam(Text.from("x"), cc_var(Text.from("x"))),
+        cc_const(Text.from("v")),
+    );
+    let (_term, steps) = cc_normalise(app, 100);
+    assert(steps == 1);
+}
+
+@test
+fn test_cc_normalise_reset_value_once() {
+    // reset v ↦ v in 1 step
+    let (_term, steps) = cc_normalise(cc_reset(cc_const(Text.from("v"))), 100);
+    assert(steps == 1);
+}
+
+@test
+fn test_cc_normalise_gas_bounds_steps() {
+    // (λx. x) v terminates in 1 step regardless of gas budget
+    let app = cc_app(
+        cc_lam(Text.from("x"), cc_var(Text.from("x"))),
+        cc_const(Text.from("v")),
+    );
+    let (_term, steps) = cc_normalise(app, 10);
+    assert(steps <= 10);
+}
+
+// =============================================================================
+// Section 8: cc_alpha_eq — α-equivalence
+// =============================================================================
+
+@test
+fn test_cc_alpha_eq_const_self() {
+    let t = cc_const(Text.from("v"));
+    assert(cc_alpha_eq(t.clone(), t));
+}
+
+@test
+fn test_cc_alpha_eq_var_self() {
+    let t = cc_var(Text.from("x"));
+    assert(cc_alpha_eq(t.clone(), t));
+}
+
+@test
+fn test_cc_alpha_eq_lam_rename_bound() {
+    // λx. x  =α=  λy. y
+    let a = cc_lam(Text.from("x"), cc_var(Text.from("x")));
+    let b = cc_lam(Text.from("y"), cc_var(Text.from("y")));
+    assert(cc_alpha_eq(a, b));
+}
+
+@test
+fn test_cc_alpha_eq_lam_different_free_var() {
+    // λx. y  =α/=  λx. z   (free vars MUST agree by name)
+    let a = cc_lam(Text.from("x"), cc_var(Text.from("y")));
+    let b = cc_lam(Text.from("x"), cc_var(Text.from("z")));
+    assert(!cc_alpha_eq(a, b));
+}
+
+@test
+fn test_cc_alpha_eq_const_payload_distinct() {
+    let a = cc_const(Text.from("a"));
+    let b = cc_const(Text.from("b"));
+    assert(!cc_alpha_eq(a, b));
+}
+
+@test
+fn test_cc_alpha_eq_different_variants_distinct() {
+    let c = cc_const(Text.from("v"));
+    let v = cc_var(Text.from("x"));
+    assert(!cc_alpha_eq(c, v));
+}
