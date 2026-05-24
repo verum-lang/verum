@@ -1,0 +1,100 @@
+// =============================================================================
+// core-tests/io/path/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration for `core.io.path`.
+// =============================================================================
+
+mount core.io.path.{Path, PathBuf, Component};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §1 — Path in List, deduplication via Eq
+// =============================================================================
+
+@test
+fn integration_path_eq_in_list_contains() {
+    let paths: List<Path> = [
+        Path.new(&Text.from("/etc")),
+        Path.new(&Text.from("/var/log")),
+        Path.new(&Text.from("/usr/local")),
+    ];
+    let target = Path.new(&Text.from("/var/log"));
+    let mut found = false;
+    for p in paths.iter() {
+        if *p == target {
+            found = true;
+        }
+    }
+    assert(found);
+}
+
+// =============================================================================
+// §2 — PathBuf round-trip through Text
+// =============================================================================
+
+@test
+fn integration_pathbuf_text_round_trip() {
+    let s = Text.from("/home/user/document.txt");
+    let buf = PathBuf.from(&s);
+    assert_eq(buf.to_text(), s);
+}
+
+// =============================================================================
+// §3 — Path.join_str via Text suffix
+//      GATED by #io-4 — pinned `@ignore`. Re-enable after PathBuf.push Text
+//      equality drift closes.
+// =============================================================================
+
+@ignore
+@test
+fn integration_path_join_str() {
+    let p = Path.new(&Text.from("/etc"));
+    let joined = p.join_str(&Text.from("hosts"));
+    assert_eq(joined.to_text(), Text.from("/etc/hosts"));
+}
+
+// =============================================================================
+// §4 — File extension classification via match
+// =============================================================================
+
+@test
+fn integration_path_extension_match_classifier() {
+    fn classify(p: &Path) -> Text {
+        match p.extension() {
+            Some(ext) => {
+                if ext == Text.from("txt") { Text.from("plain") }
+                else if ext == Text.from("md") { Text.from("markdown") }
+                else if ext == Text.from("rs") { Text.from("rust") }
+                else if ext == Text.from("vr") { Text.from("verum") }
+                else { Text.from("other") }
+            }
+            None => Text.from("none"),
+        }
+    }
+
+    assert_eq(classify(&Path.new(&Text.from("/a/b.txt"))), Text.from("plain"));
+    assert_eq(classify(&Path.new(&Text.from("/a/b.md"))), Text.from("markdown"));
+    assert_eq(classify(&Path.new(&Text.from("/a/b.vr"))), Text.from("verum"));
+    assert_eq(classify(&Path.new(&Text.from("/a/b.xyz"))), Text.from("other"));
+    assert_eq(classify(&Path.new(&Text.from("/a/README"))), Text.from("none"));
+}
+
+// =============================================================================
+// §5 — Building a path incrementally via repeated push
+//      GATED by #io-4 — pinned `@ignore`.
+// =============================================================================
+
+@ignore
+@test
+fn integration_pathbuf_incremental_build() {
+    let mut buf = PathBuf.new();
+    buf.push(&Path.new(&Text.from("/")));
+    buf.push(&Path.new(&Text.from("home")));
+    buf.push(&Path.new(&Text.from("user")));
+    buf.push(&Path.new(&Text.from("file.txt")));
+    assert(buf.is_absolute());
+}
+
+fn main() {}

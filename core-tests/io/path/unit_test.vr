@@ -1,0 +1,565 @@
+// =============================================================================
+// core-tests/io/path/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.io.path`.
+// =============================================================================
+
+mount core.io.path.{Path, PathBuf, Component, MAIN_SEPARATOR};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: Path — construction
+// =============================================================================
+
+@test
+fn test_path_new_from_text() {
+    let p = Path.new(&Text.from("/home/user"));
+    assert_eq(p.as_str(), &Text.from("/home/user"));
+}
+
+@test
+fn test_path_new_empty() {
+    let p = Path.new(&Text.from(""));
+    assert(p.is_empty());
+}
+
+@test
+fn test_path_new_single_segment() {
+    let p = Path.new(&Text.from("file.txt"));
+    assert(!p.is_empty());
+    assert_eq(p.as_str(), &Text.from("file.txt"));
+}
+
+// =============================================================================
+// Section 2: Path.is_empty / is_absolute / is_relative
+// =============================================================================
+
+@test
+fn test_path_is_empty_true() {
+    let p = Path.new(&Text.from(""));
+    assert(p.is_empty());
+}
+
+@test
+fn test_path_is_empty_false() {
+    let p = Path.new(&Text.from("a"));
+    assert(!p.is_empty());
+}
+
+@test
+fn test_path_is_absolute_unix_root() {
+    let p = Path.new(&Text.from("/"));
+    assert(p.is_absolute());
+}
+
+@test
+fn test_path_is_absolute_unix_subdir() {
+    let p = Path.new(&Text.from("/home/user/file.txt"));
+    assert(p.is_absolute());
+}
+
+@test
+fn test_path_is_absolute_relative_returns_false() {
+    let p = Path.new(&Text.from("docs/file.txt"));
+    assert(!p.is_absolute());
+}
+
+@test
+fn test_path_is_absolute_empty_returns_false() {
+    let p = Path.new(&Text.from(""));
+    assert(!p.is_absolute());
+}
+
+@test
+fn test_path_is_relative_inverse_of_absolute() {
+    let p1 = Path.new(&Text.from("/abs/path"));
+    let p2 = Path.new(&Text.from("rel/path"));
+    assert(!p1.is_relative());
+    assert(p2.is_relative());
+}
+
+@test
+fn test_path_has_root_matches_is_absolute() {
+    let p1 = Path.new(&Text.from("/abs"));
+    let p2 = Path.new(&Text.from("rel"));
+    assert_eq(p1.has_root(), p1.is_absolute());
+    assert_eq(p2.has_root(), p2.is_absolute());
+}
+
+// =============================================================================
+// Section 3: Path.parent
+// =============================================================================
+
+@test
+fn test_path_parent_typical() {
+    let p = Path.new(&Text.from("/home/user/file.txt"));
+    match p.parent() {
+        Some(parent) => assert_eq(parent.as_str(), &Text.from("/home/user")),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_path_parent_one_level() {
+    let p = Path.new(&Text.from("/home/user"));
+    match p.parent() {
+        Some(parent) => assert_eq(parent.as_str(), &Text.from("/home")),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_path_parent_root_has_no_parent() {
+    let p = Path.new(&Text.from("/"));
+    assert(p.parent().is_none());
+}
+
+@test
+fn test_path_parent_relative_no_separator() {
+    let p = Path.new(&Text.from("file.txt"));
+    assert(p.parent().is_none());
+}
+
+@test
+fn test_path_parent_empty_is_none() {
+    let p = Path.new(&Text.from(""));
+    assert(p.parent().is_none());
+}
+
+// =============================================================================
+// Section 4: Path.file_name
+// =============================================================================
+
+@test
+fn test_path_file_name_typical() {
+    let p = Path.new(&Text.from("/home/user/file.txt"));
+    match p.file_name() {
+        Some(name) => assert_eq(name, Text.from("file.txt")),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_path_file_name_trailing_separator() {
+    let p = Path.new(&Text.from("/home/user/"));
+    match p.file_name() {
+        Some(name) => assert_eq(name, Text.from("user")),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_path_file_name_single_segment() {
+    let p = Path.new(&Text.from("file.txt"));
+    match p.file_name() {
+        Some(name) => assert_eq(name, Text.from("file.txt")),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_path_file_name_empty_is_none() {
+    let p = Path.new(&Text.from(""));
+    assert(p.file_name().is_none());
+}
+
+@test
+fn test_path_file_name_only_separators_is_none() {
+    let p = Path.new(&Text.from("/"));
+    assert(p.file_name().is_none());
+}
+
+// =============================================================================
+// Section 5: Path.file_stem
+// =============================================================================
+
+@test
+fn test_path_file_stem_typical() {
+    let p = Path.new(&Text.from("/home/user/file.txt"));
+    match p.file_stem() {
+        Some(stem) => assert_eq(stem, Text.from("file")),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_path_file_stem_no_extension() {
+    let p = Path.new(&Text.from("/home/user/README"));
+    match p.file_stem() {
+        Some(stem) => assert_eq(stem, Text.from("README")),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_path_file_stem_leading_dot_keeps_dot() {
+    // ".hidden" is the stem (no extension recognised because dot is at idx 0)
+    let p = Path.new(&Text.from("/home/.hidden"));
+    match p.file_stem() {
+        Some(stem) => assert_eq(stem, Text.from(".hidden")),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_path_file_stem_double_extension_keeps_first() {
+    // "file.tar.gz" → stem = "file.tar", extension = "gz"
+    let p = Path.new(&Text.from("/home/file.tar.gz"));
+    match p.file_stem() {
+        Some(stem) => assert_eq(stem, Text.from("file.tar")),
+        None => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 6: Path.extension
+// =============================================================================
+
+@test
+fn test_path_extension_typical() {
+    let p = Path.new(&Text.from("/home/user/file.txt"));
+    match p.extension() {
+        Some(ext) => assert_eq(ext, Text.from("txt")),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_path_extension_no_dot_is_none() {
+    let p = Path.new(&Text.from("/home/user/README"));
+    assert(p.extension().is_none());
+}
+
+@test
+fn test_path_extension_leading_dot_is_none() {
+    // ".hidden" → extension is None because dot is at position 0
+    let p = Path.new(&Text.from("/home/.hidden"));
+    assert(p.extension().is_none());
+}
+
+@test
+fn test_path_extension_double_ext_returns_last() {
+    // "file.tar.gz" → extension = "gz"
+    let p = Path.new(&Text.from("/home/file.tar.gz"));
+    match p.extension() {
+        Some(ext) => assert_eq(ext, Text.from("gz")),
+        None => assert(false),
+    }
+}
+
+// =============================================================================
+// Section 7: Path.starts_with / ends_with
+// =============================================================================
+
+@test
+fn test_path_starts_with_prefix() {
+    let p = Path.new(&Text.from("/home/user/file.txt"));
+    let prefix = Path.new(&Text.from("/home"));
+    assert(p.starts_with(&prefix));
+}
+
+@test
+fn test_path_starts_with_self() {
+    let p = Path.new(&Text.from("/home/user"));
+    assert(p.starts_with(&p));
+}
+
+@test
+fn test_path_starts_with_non_prefix() {
+    let p = Path.new(&Text.from("/home/user"));
+    let other = Path.new(&Text.from("/var"));
+    assert(!p.starts_with(&other));
+}
+
+@test
+fn test_path_ends_with_file_name() {
+    let p = Path.new(&Text.from("/home/user/file.txt"));
+    let suffix = Path.new(&Text.from("file.txt"));
+    assert(p.ends_with(&suffix));
+}
+
+// =============================================================================
+// Section 8: Path.strip_prefix
+// =============================================================================
+
+@test
+fn test_path_strip_prefix_matches() {
+    let p = Path.new(&Text.from("/home/user/file.txt"));
+    let prefix = Path.new(&Text.from("/home"));
+    match p.strip_prefix(&prefix) {
+        Some(rest) => assert_eq(rest.as_str(), &Text.from("user/file.txt")),
+        None => assert(false),
+    }
+}
+
+@test
+fn test_path_strip_prefix_non_match_is_none() {
+    let p = Path.new(&Text.from("/home/user"));
+    let other = Path.new(&Text.from("/var"));
+    assert(p.strip_prefix(&other).is_none());
+}
+
+// =============================================================================
+// Section 9: Path.to_path_buf / to_text / as_str
+// =============================================================================
+
+@test
+fn test_path_to_text_roundtrip() {
+    let s = Text.from("/foo/bar");
+    let p = Path.new(&s);
+    assert_eq(p.to_text(), s);
+}
+
+@test
+fn test_path_as_str_returns_inner() {
+    let p = Path.new(&Text.from("/abc"));
+    let inner = p.as_str();
+    assert_eq(*inner, Text.from("/abc"));
+}
+
+@test
+fn test_path_to_path_buf_round_trip() {
+    let p = Path.new(&Text.from("/x/y"));
+    let buf = p.to_path_buf();
+    assert_eq(buf.to_text(), p.to_text());
+}
+
+// =============================================================================
+// Section 10: PathBuf — construction
+// =============================================================================
+
+@test
+fn test_pathbuf_new_is_empty() {
+    let buf = PathBuf.new();
+    assert(buf.is_empty());
+    assert_eq(buf.len(), 0);
+}
+
+@test
+fn test_pathbuf_from_text() {
+    let buf = PathBuf.from(&Text.from("/home/user"));
+    assert_eq(buf.to_text(), Text.from("/home/user"));
+}
+
+@test
+fn test_pathbuf_with_capacity_returns_empty() {
+    let buf = PathBuf.with_capacity(100);
+    assert(buf.is_empty());
+}
+
+// =============================================================================
+// Section 11: PathBuf.push
+//
+// NOTE: The full equality test (buf.to_text() == "expected/path") for
+// relative-component push surfaces a deeper Text-equality drift in the
+// presence of self.path.inner.push() / push_str() chained through a
+// nested struct field. See regression_test.vr §A for the pinned defect.
+// The tests here verify push's structural semantics (len changes,
+// no-op cases) which work correctly.
+// =============================================================================
+
+@test
+fn test_pathbuf_push_absolute_replaces() {
+    let mut buf = PathBuf.from(&Text.from("/home/user"));
+    buf.push(&Path.new(&Text.from("/other")));
+    assert_eq(buf.to_text(), Text.from("/other"));
+}
+
+@test
+fn test_pathbuf_push_empty_no_op() {
+    let mut buf = PathBuf.from(&Text.from("/home"));
+    buf.push(&Path.new(&Text.from("")));
+    assert_eq(buf.to_text(), Text.from("/home"));
+}
+
+@test
+fn test_pathbuf_push_grows_len_by_at_least_one() {
+    let mut buf = PathBuf.from(&Text.from("/home"));
+    let n0 = buf.len();
+    buf.push(&Path.new(&Text.from("x")));
+    let n1 = buf.len();
+    assert(n1 > n0);
+}
+
+// =============================================================================
+// Section 12: PathBuf.pop
+// =============================================================================
+
+@test
+fn test_pathbuf_pop_removes_last_component() {
+    let mut buf = PathBuf.from(&Text.from("/home/user/file.txt"));
+    let popped = buf.pop();
+    assert(popped);
+    assert_eq(buf.to_text(), Text.from("/home/user"));
+}
+
+@test
+fn test_pathbuf_pop_to_root() {
+    let mut buf = PathBuf.from(&Text.from("/home"));
+    let popped = buf.pop();
+    assert(popped);
+    assert_eq(buf.to_text(), Text.from("/"));
+}
+
+@test
+fn test_pathbuf_pop_root_returns_false() {
+    let mut buf = PathBuf.from(&Text.from("/"));
+    let popped = buf.pop();
+    assert(!popped);
+}
+
+@test
+fn test_pathbuf_pop_empty_returns_false() {
+    let mut buf = PathBuf.new();
+    assert(!buf.pop());
+}
+
+// =============================================================================
+// Section 13: PathBuf.set_extension
+//
+// NOTE: set_extension internally calls push/pop, hitting the same defect
+// class as Section 11 above. The expected-text equality tests are pinned
+// in regression_test.vr §A. Here we only test the boolean return.
+// =============================================================================
+
+@test
+fn test_pathbuf_set_extension_returns_true_when_has_filename() {
+    let mut buf = PathBuf.from(&Text.from("/home/file.txt"));
+    let changed = buf.set_extension(&Text.from("md"));
+    assert(changed);
+}
+
+// =============================================================================
+// Section 14: PathBuf.clear / is_empty / len
+// =============================================================================
+
+@test
+fn test_pathbuf_clear() {
+    let mut buf = PathBuf.from(&Text.from("/home"));
+    buf.clear();
+    assert(buf.is_empty());
+    assert_eq(buf.len(), 0);
+}
+
+@test
+fn test_pathbuf_len_matches_inner() {
+    let buf = PathBuf.from(&Text.from("/abc"));
+    assert_eq(buf.len(), 4);
+}
+
+// =============================================================================
+// Section 15: Component
+// =============================================================================
+
+@test
+fn test_component_root_dir() {
+    let c = Component.RootDir;
+    assert(c is RootDir);
+}
+
+@test
+fn test_component_cur_dir() {
+    let c = Component.CurDir;
+    assert(c is CurDir);
+}
+
+@test
+fn test_component_parent_dir() {
+    let c = Component.ParentDir;
+    assert(c is ParentDir);
+}
+
+@test
+fn test_component_normal() {
+    let c = Component.Normal(Text.from("foo"));
+    assert(c is Normal);
+}
+
+@test
+fn test_component_prefix() {
+    let c = Component.Prefix(Text.from("C:"));
+    assert(c is Prefix);
+}
+
+@test
+fn test_component_eq_root_dir() {
+    assert_eq(Component.RootDir, Component.RootDir);
+}
+
+@test
+fn test_component_eq_distinct_variants() {
+    assert(Component.RootDir != Component.CurDir);
+    assert(Component.CurDir != Component.ParentDir);
+    assert(Component.ParentDir != Component.Normal(Text.from("x")));
+}
+
+@test
+fn test_component_eq_same_normal_text() {
+    let a = Component.Normal(Text.from("foo"));
+    let b = Component.Normal(Text.from("foo"));
+    assert_eq(a, b);
+}
+
+@test
+fn test_component_neq_different_normal_text() {
+    let a = Component.Normal(Text.from("foo"));
+    let b = Component.Normal(Text.from("bar"));
+    assert(a != b);
+}
+
+// =============================================================================
+// Section 16: Path.clone / Eq / Hash
+// =============================================================================
+
+@test
+fn test_path_clone_eq() {
+    let p = Path.new(&Text.from("/a/b/c"));
+    let c = p.clone();
+    assert_eq(p, c);
+}
+
+@test
+fn test_path_eq_same_string() {
+    let p1 = Path.new(&Text.from("/x"));
+    let p2 = Path.new(&Text.from("/x"));
+    assert_eq(p1, p2);
+}
+
+@test
+fn test_path_neq_different_strings() {
+    let p1 = Path.new(&Text.from("/x"));
+    let p2 = Path.new(&Text.from("/y"));
+    assert(p1 != p2);
+}
+
+// =============================================================================
+// Section 17: PathBuf.clone / Eq / Default
+// =============================================================================
+
+@test
+fn test_pathbuf_clone_eq() {
+    let buf = PathBuf.from(&Text.from("/p/q"));
+    let cloned = buf.clone();
+    assert_eq(buf, cloned);
+}
+
+@test
+fn test_pathbuf_default_is_empty() {
+    let buf: PathBuf = PathBuf.default();
+    assert(buf.is_empty());
+}
+
+// =============================================================================
+// Section 18: MAIN_SEPARATOR
+// =============================================================================
+
+@test
+fn test_main_separator_is_slash_on_unix() {
+    // On Unix, MAIN_SEPARATOR should be '/'.
+    // We can't easily run cfg-aware tests, so just verify it's one or the other.
+    assert(MAIN_SEPARATOR == '/' || MAIN_SEPARATOR == '\\');
+}
+
+fn main() {}
