@@ -1,0 +1,35 @@
+// =============================================================================
+// core-tests/io/stdio/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.io.stdio`.
+// =============================================================================
+
+mount core.io.stdio.{Stdin, Stdout, Stderr, stdin, stdout, stderr};
+
+// =============================================================================
+// §1 — stdin / stdout / stderr factories work in sequence
+// =============================================================================
+
+@test
+fn integration_three_factories_in_sequence() {
+    let _i = stdin();
+    let _o = stdout();
+    let _e = stderr();
+}
+
+// =============================================================================
+// §2 — Locks compose with factories
+// =============================================================================
+
+@test
+fn integration_lock_factories_construct() {
+    let i = stdin();
+    let o = stdout();
+    let e = stderr();
+    let _il = i.lock();
+    let _ol = o.lock();
+    let _el = e.lock();
+}
+
+fn main() {}

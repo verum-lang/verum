@@ -1,0 +1,33 @@
+// =============================================================================
+// core-tests/io/stdio/property_test.vr
+// =============================================================================
+//
+// Properties for `core.io.stdio`. Most stdio properties (write/read
+// idempotence, etc.) require kernel-level I/O which is gated by #io-1.
+// =============================================================================
+
+mount core.io.stdio.{Stdin, Stdout, Stderr, stdin, stdout, stderr};
+
+// =============================================================================
+// §A — Factory functions are deterministic — return same logical handle
+// =============================================================================
+
+@test
+fn law_stdin_factory_idempotent() {
+    let _s1: Stdin = stdin();
+    let _s2: Stdin = stdin();
+}
+
+@test
+fn law_stdout_factory_idempotent() {
+    let _s1: Stdout = stdout();
+    let _s2: Stdout = stdout();
+}
+
+@test
+fn law_stderr_factory_idempotent() {
+    let _s1: Stderr = stderr();
+    let _s2: Stderr = stderr();
+}
+
+fn main() {}
