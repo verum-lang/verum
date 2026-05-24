@@ -1,0 +1,233 @@
+// =============================================================================
+// core-tests/concurrency/session/unit_test.vr
+// =============================================================================
+//
+// `core/concurrency/session.vr` — session-typed channel protocols.
+//
+// Surface:
+//   * Protocol 5-variant (Send / Recv / Offer / Select / End)
+//   * Smart ctors: send / recv / offer / select / end
+//   * dual (involution)
+//   * compatible (deadlock-freedom)
+//   * protocols_equal (structural equality)
+// =============================================================================
+
+mount core.concurrency.session.{
+    Protocol, send, recv, offer, select, end,
+    dual, compatible, protocols_equal,
+};
+
+// =============================================================================
+// Section 1: Protocol 5-variant construction
+// =============================================================================
+
+@test
+fn test_protocol_send_construction() {
+    let p = send(Text.from("Int"), end());
+    assert(p is Protocol.Send);
+}
+
+@test
+fn test_protocol_recv_construction() {
+    let p = recv(Text.from("Int"), end());
+    assert(p is Protocol.Recv);
+}
+
+@test
+fn test_protocol_offer_construction() {
+    let p = offer(end(), end());
+    assert(p is Protocol.Offer);
+}
+
+@test
+fn test_protocol_select_construction() {
+    let p = select(end(), end());
+    assert(p is Protocol.Select);
+}
+
+@test
+fn test_protocol_end_construction() {
+    let p = end();
+    assert(p is Protocol.End);
+}
+
+@test
+fn test_protocol_pairwise_disjoint() {
+    let s = send(Text.from("T"), end());
+    let r = recv(Text.from("T"), end());
+    let o = offer(end(), end());
+    let l = select(end(), end());
+    let e = end();
+    assert(s is Protocol.Send && !(s is Protocol.Recv));
+    assert(r is Protocol.Recv && !(r is Protocol.Offer));
+    assert(o is Protocol.Offer && !(o is Protocol.Select));
+    assert(l is Protocol.Select && !(l is Protocol.End));
+    assert(e is Protocol.End && !(e is Protocol.Send));
+}
+
+// =============================================================================
+// Section 2: dual — involution
+// =============================================================================
+
+@test
+fn test_dual_send_becomes_recv() {
+    let p = send(Text.from("Int"), end());
+    let d = dual(p);
+    assert(d is Protocol.Recv);
+}
+
+@test
+fn test_dual_recv_becomes_send() {
+    let p = recv(Text.from("Int"), end());
+    let d = dual(p);
+    assert(d is Protocol.Send);
+}
+
+@test
+fn test_dual_offer_becomes_select() {
+    let p = offer(end(), end());
+    let d = dual(p);
+    assert(d is Protocol.Select);
+}
+
+@test
+fn test_dual_select_becomes_offer() {
+    let p = select(end(), end());
+    let d = dual(p);
+    assert(d is Protocol.Offer);
+}
+
+@test
+fn test_dual_end_stays_end() {
+    let p = end();
+    let d = dual(p);
+    assert(d is Protocol.End);
+}
+
+// =============================================================================
+// Section 3: protocols_equal — structural equality
+// =============================================================================
+
+@test
+fn test_protocols_equal_send_same() {
+    let a = send(Text.from("Int"), end());
+    let b = send(Text.from("Int"), end());
+    assert(protocols_equal(a, b));
+}
+
+@test
+fn test_protocols_equal_send_different_payload() {
+    let a = send(Text.from("Int"), end());
+    let b = send(Text.from("Text"), end());
+    assert(!protocols_equal(a, b));
+}
+
+@test
+fn test_protocols_equal_end_self() {
+    assert(protocols_equal(end(), end()));
+}
+
+@test
+fn test_protocols_equal_different_variants_distinct() {
+    let a = send(Text.from("Int"), end());
+    let b = recv(Text.from("Int"), end());
+    assert(!protocols_equal(a, b));
+}
+
+@test
+fn test_protocols_equal_offer_same() {
+    let a = offer(end(), end());
+    let b = offer(end(), end());
+    assert(protocols_equal(a, b));
+}
+
+// =============================================================================
+// Section 4: dual is an involution: dual(dual(p)) == p
+// =============================================================================
+
+@test
+fn test_dual_involution_send() {
+    let p = send(Text.from("Int"), end());
+    let dd = dual(dual(p.clone()));
+    assert(protocols_equal(p, dd));
+}
+
+@test
+fn test_dual_involution_recv() {
+    let p = recv(Text.from("Int"), end());
+    let dd = dual(dual(p.clone()));
+    assert(protocols_equal(p, dd));
+}
+
+@test
+fn test_dual_involution_offer() {
+    let p = offer(end(), end());
+    let dd = dual(dual(p.clone()));
+    assert(protocols_equal(p, dd));
+}
+
+@test
+fn test_dual_involution_end() {
+    let p = end();
+    let dd = dual(dual(p.clone()));
+    assert(protocols_equal(p, dd));
+}
+
+// =============================================================================
+// Section 5: compatible — deadlock-freedom (a, dual(a))
+// =============================================================================
+
+@test
+fn test_compatible_send_with_recv() {
+    // !Int.end is compatible with ?Int.end (its dual)
+    let client = send(Text.from("Int"), end());
+    let server = dual(client.clone());
+    assert(compatible(client, server));
+}
+
+@test
+fn test_compatible_two_sends_not_compatible() {
+    // !Int.end with !Int.end is NOT compatible (both sending)
+    let a = send(Text.from("Int"), end());
+    let b = send(Text.from("Int"), end());
+    assert(!compatible(a, b));
+}
+
+@test
+fn test_compatible_end_with_end() {
+    // end is compatible with end (both terminate)
+    assert(compatible(end(), end()));
+}
+
+@test
+fn test_compatible_different_payload_not_compatible() {
+    // !Int.end with ?Text.end is NOT compatible (payload type mismatch)
+    let a = send(Text.from("Int"), end());
+    let b = recv(Text.from("Text"), end());
+    assert(!compatible(a, b));
+}
+
+// =============================================================================
+// Section 6: Eq protocol via ==
+// =============================================================================
+
+@test
+fn test_protocol_eq_protocol_send_same() {
+    let a = send(Text.from("Int"), end());
+    let b = send(Text.from("Int"), end());
+    assert(a == b);
+}
+
+@test
+fn test_protocol_eq_protocol_send_different() {
+    let a = send(Text.from("Int"), end());
+    let b = send(Text.from("Text"), end());
+    assert(!(a == b));
+}
+
+@test
+fn test_protocol_eq_protocol_different_variant() {
+    let a = send(Text.from("Int"), end());
+    let b = recv(Text.from("Int"), end());
+    assert(!(a == b));
+}
