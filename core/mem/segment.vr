@@ -59,8 +59,9 @@ mount core.intrinsics.atomic.{
 // The centralised intrinsic returns `Int`; local wrapper preserves
 // the historical `UInt64` return type used by the segment-mask
 // arithmetic below.
-mount core.intrinsics.bitwise.{popcnt_u64 as __popcnt_u64};
-fn popcnt_u64(x: UInt64) -> UInt64 { __popcnt_u64(x) as UInt64 }
+// `mount X.{popcnt_u64 as __popcnt_u64}` rename dropped — task #11.
+// Use fully-qualified path.
+fn popcnt_u64(x: UInt64) -> UInt64 { core.intrinsics.bitwise.popcnt_u64(x) as UInt64 }
 
 // Platform-specific memory operations
 @cfg(target_os = "linux")
