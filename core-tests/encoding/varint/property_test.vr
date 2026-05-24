@@ -1,0 +1,119 @@
+// =============================================================================
+// core-tests/encoding/varint/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `core/encoding/varint.vr` SQLite varint codec:
+//
+//   §1  encoded_len boundary values pin (cross-class)
+//   §2  encoded_len always 1..9 (no out-of-range)
+//   §3  encoded_len for typical i64 values
+//   §4  encoded_len monotonic per-class (non-decreasing on |value|)
+//
+// Full round-trip + canonical fixtures at vcs/specs/L2-standard/
+// database/sqlite/.
+// =============================================================================
+
+mount core.encoding.varint.{sqlite_encoded_len};
+
+// =============================================================================
+// §1 encoded_len boundary values
+// =============================================================================
+
+@test
+fn property_encoded_len_zero_is_1() {
+    assert_eq(sqlite_encoded_len(0_i64), 1);
+}
+
+@test
+fn property_encoded_len_127_is_1() {
+    assert_eq(sqlite_encoded_len(127_i64), 1);
+}
+
+@test
+fn property_encoded_len_128_is_2() {
+    assert_eq(sqlite_encoded_len(128_i64), 2);
+}
+
+@test
+fn property_encoded_len_16383_is_2() {
+    assert_eq(sqlite_encoded_len(16383_i64), 2);
+}
+
+@test
+fn property_encoded_len_16384_is_3() {
+    assert_eq(sqlite_encoded_len(16384_i64), 3);
+}
+
+// =============================================================================
+// §2 encoded_len always in 1..9
+// =============================================================================
+
+@test
+fn property_encoded_len_in_valid_range_for_zero() {
+    let n = sqlite_encoded_len(0_i64);
+    assert(n >= 1);
+    assert(n <= 9);
+}
+
+@test
+fn property_encoded_len_in_valid_range_for_typical() {
+    let n1 = sqlite_encoded_len(1_i64);
+    let n100 = sqlite_encoded_len(100_i64);
+    let n1m = sqlite_encoded_len(1_000_000_i64);
+    let nmax = sqlite_encoded_len(9_223_372_036_854_775_807_i64);
+    let nmin = sqlite_encoded_len(-9_223_372_036_854_775_808_i64);
+    let nneg1 = sqlite_encoded_len(-1_i64);
+
+    assert(n1 >= 1 && n1 <= 9);
+    assert(n100 >= 1 && n100 <= 9);
+    assert(n1m >= 1 && n1m <= 9);
+    assert(nmax >= 1 && nmax <= 9);
+    assert(nmin >= 1 && nmin <= 9);
+    assert(nneg1 >= 1 && nneg1 <= 9);
+}
+
+// =============================================================================
+// §3 encoded_len for typical i64 values
+// =============================================================================
+
+@test
+fn property_encoded_len_typical_small() {
+    // Small positives fit in 1 byte
+    assert_eq(sqlite_encoded_len(1_i64), 1);
+    assert_eq(sqlite_encoded_len(63_i64), 1);
+    assert_eq(sqlite_encoded_len(100_i64), 2);
+}
+
+@test
+fn property_encoded_len_typical_medium() {
+    // Medium values
+    assert_eq(sqlite_encoded_len(1_000_i64), 2);
+    assert_eq(sqlite_encoded_len(1_000_000_i64), 3);
+    assert_eq(sqlite_encoded_len(100_000_000_i64), 4);
+}
+
+@test
+fn property_encoded_len_negatives_always_nine() {
+    // Negatives use 9-byte form per varint.vr:42 (top bit always set)
+    assert_eq(sqlite_encoded_len(-1_i64), 9);
+    assert_eq(sqlite_encoded_len(-100_i64), 9);
+    assert_eq(sqlite_encoded_len(-1_000_000_i64), 9);
+    assert_eq(sqlite_encoded_len(-9_223_372_036_854_775_808_i64), 9);
+}
+
+// =============================================================================
+// §4 encoded_len non-decreasing on |value| within positive range
+// =============================================================================
+
+@test
+fn property_encoded_len_monotonic_positive() {
+    // Strictly increasing values cross length classes in non-decreasing way
+    let l1 = sqlite_encoded_len(50_i64);
+    let l2 = sqlite_encoded_len(500_i64);
+    let l3 = sqlite_encoded_len(50_000_i64);
+    let l4 = sqlite_encoded_len(5_000_000_i64);
+
+    assert(l1 <= l2);
+    assert(l2 <= l3);
+    assert(l3 <= l4);
+}

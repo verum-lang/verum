@@ -1,0 +1,183 @@
+// =============================================================================
+// core-tests/logic/linear/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `LinForm`:
+//
+//   §1  Reflexivity of lin_eq
+//   §2  Symmetry of lin_eq
+//   §3  Atom equality is name-equality
+//   §4  lin_lolli expansion: lin_lolli(a, b) = lin_par(lin_dual(a), b)
+//   §5  Dual involution at form level (Dual(Dual(A))) — via lin_to_nnf
+//   §6  NNF idempotence: lin_is_nnf(lin_to_nnf(f))
+//   §7  is_unrestricted exhaustive over unit variants
+//   §8  is_weakenable exhaustive (Top admits, Atom rejects)
+// =============================================================================
+
+mount core.logic.linear.{
+    LinForm,
+    lin_atom, lin_tensor, lin_par, lin_with, lin_plus,
+    lin_of_course, lin_why_not, lin_dual, lin_lolli,
+    is_unrestricted, is_weakenable, lin_eq, lin_to_nnf, lin_is_nnf,
+};
+
+// =============================================================================
+// §1 lin_eq reflexivity
+// =============================================================================
+
+@test
+fn property_lin_eq_reflexive_atom() {
+    let a = lin_atom("A".clone());
+    assert(lin_eq(a, lin_atom("A".clone())));
+}
+
+@test
+fn property_lin_eq_reflexive_tensor() {
+    let t = lin_tensor(lin_atom("A".clone()), lin_atom("B".clone()));
+    let t2 = lin_tensor(lin_atom("A".clone()), lin_atom("B".clone()));
+    assert(lin_eq(t, t2));
+}
+
+@test
+fn property_lin_eq_reflexive_unit_variants() {
+    let one: LinForm = LinForm.One;
+    let one2: LinForm = LinForm.One;
+    assert(lin_eq(one, one2));
+
+    let top: LinForm = LinForm.Top;
+    let top2: LinForm = LinForm.Top;
+    assert(lin_eq(top, top2));
+}
+
+// =============================================================================
+// §2 lin_eq symmetry
+// =============================================================================
+
+@test
+fn property_lin_eq_symmetric_atom() {
+    let a1 = lin_atom("X".clone());
+    let a2 = lin_atom("X".clone());
+    assert_eq(lin_eq(a1, lin_atom("X".clone())),
+              lin_eq(lin_atom("X".clone()), a2));
+}
+
+@test
+fn property_lin_eq_negation_symmetric() {
+    let a = lin_atom("A".clone());
+    let b = lin_atom("B".clone());
+    assert_eq(lin_eq(a, lin_atom("B".clone())),
+              lin_eq(b, lin_atom("A".clone())));
+}
+
+// =============================================================================
+// §3 Atom equality is name-equality
+// =============================================================================
+
+@test
+fn property_atom_eq_by_name() {
+    assert(lin_eq(lin_atom("FOO".clone()), lin_atom("FOO".clone())));
+    assert(!lin_eq(lin_atom("FOO".clone()), lin_atom("BAR".clone())));
+}
+
+// =============================================================================
+// §4 lin_lolli is defined as par(dual(a), b) — verify top shape
+// =============================================================================
+
+@test
+fn property_lin_lolli_top_shape_is_par() {
+    let a = lin_atom("A".clone());
+    let b = lin_atom("B".clone());
+    let lolli = lin_lolli(a, b);
+    assert(lolli is LinForm.Par);
+}
+
+// =============================================================================
+// §5 lin_to_nnf removes double-Dual (Dual(Dual(A)) → A)
+// =============================================================================
+
+@test
+fn property_double_dual_atom_collapses_via_nnf() {
+    // Dual(Dual(Atom("A"))) — should normalize to Atom("A")
+    let inner = lin_atom("A".clone());
+    let dd = lin_dual(lin_dual(inner));
+    let normalized = lin_to_nnf(dd);
+    // After NNF normalization, the double-dual should be gone
+    // and the result should equal Atom("A")
+    assert(lin_eq(normalized, lin_atom("A".clone())));
+}
+
+// =============================================================================
+// §6 NNF idempotence: lin_to_nnf(lin_to_nnf(f)) is NNF
+// =============================================================================
+
+@test
+fn property_nnf_idempotent_on_atom() {
+    let a = lin_atom("X".clone());
+    let nnf_once = lin_to_nnf(a);
+    assert(lin_is_nnf(nnf_once));
+}
+
+@test
+fn property_nnf_idempotent_on_tensor() {
+    let t = lin_tensor(lin_atom("A".clone()), lin_atom("B".clone()));
+    let nnf_once = lin_to_nnf(t);
+    assert(lin_is_nnf(nnf_once));
+}
+
+@test
+fn property_nnf_idempotent_on_double_dual() {
+    let dd = lin_dual(lin_dual(lin_atom("X".clone())));
+    let nnf_once = lin_to_nnf(dd);
+    assert(lin_is_nnf(nnf_once));
+}
+
+// =============================================================================
+// §7 is_unrestricted — only OfCourse / WhyNot / Top
+// =============================================================================
+
+@test
+fn property_is_unrestricted_exhaustive_pos() {
+    // The 3 unrestricted variants:
+    assert(is_unrestricted(lin_of_course(lin_atom("A".clone()))));
+    assert(is_unrestricted(lin_why_not(lin_atom("B".clone()))));
+    let top: LinForm = LinForm.Top;
+    assert(is_unrestricted(top));
+}
+
+@test
+fn property_is_unrestricted_exhaustive_neg() {
+    // Atom + Tensor + Par + With + Plus + units (1/⊥/0) + Dual — none unrestricted
+    assert(!is_unrestricted(lin_atom("X".clone())));
+    assert(!is_unrestricted(lin_tensor(lin_atom("A".clone()), lin_atom("B".clone()))));
+    let one: LinForm = LinForm.One;
+    assert(!is_unrestricted(one));
+    let zero: LinForm = LinForm.Zero;
+    assert(!is_unrestricted(zero));
+    let bot: LinForm = LinForm.Bottom;
+    assert(!is_unrestricted(bot));
+}
+
+// =============================================================================
+// §8 is_weakenable — Top admits, Atom rejects
+// =============================================================================
+
+@test
+fn property_is_weakenable_top() {
+    let top: LinForm = LinForm.Top;
+    assert(is_weakenable(top));
+}
+
+@test
+fn property_is_weakenable_of_course_yes() {
+    assert(is_weakenable(lin_of_course(lin_atom("X".clone()))));
+}
+
+@test
+fn property_is_weakenable_atom_no() {
+    assert(!is_weakenable(lin_atom("X".clone())));
+}
+
+@test
+fn property_is_weakenable_tensor_no() {
+    assert(!is_weakenable(lin_tensor(lin_atom("A".clone()), lin_atom("B".clone()))));
+}

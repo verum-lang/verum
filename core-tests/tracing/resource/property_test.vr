@@ -1,0 +1,151 @@
+// =============================================================================
+// core-tests/tracing/resource/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `core/tracing/resource.vr` Resource:
+//
+//   §1  merge identity: merge(empty, r) preserves r's attribute count
+//   §2  merge identity right: merge(r, empty) preserves r's attribute count
+//   §3  merge precedence: other wins on conflict (per OTel SDK §6.3)
+//   §4  schema_url precedence: other's schema_url wins if both present
+//   §5  with_attribute idempotent on same key (last-wins)
+//   §6  Eq reflexive on empty + non-empty
+//   §7  clone preserves count + schema_url
+// =============================================================================
+
+mount core.tracing.resource.{Resource};
+mount core.tracing.attribute.{AttributeValue, AttributeSet};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// §1 merge identity from left: merge(empty, r) preserves r
+// =============================================================================
+
+@test
+fn property_merge_empty_left_preserves_count() {
+    let r = Resource.empty()
+        .with_attribute("a".clone(), AttributeValue.Int(1))
+        .with_attribute("b".clone(), AttributeValue.Int(2));
+    let m = Resource.empty().merge(&r);
+    assert_eq(m.attributes_count(), 2);
+}
+
+// =============================================================================
+// §2 merge identity from right: merge(r, empty) preserves r
+// =============================================================================
+
+@test
+fn property_merge_empty_right_preserves_count() {
+    let r = Resource.empty()
+        .with_attribute("a".clone(), AttributeValue.Int(1))
+        .with_attribute("b".clone(), AttributeValue.Int(2));
+    let m = r.merge(&Resource.empty());
+    assert_eq(m.attributes_count(), 2);
+}
+
+// =============================================================================
+// §3 merge precedence: other wins on conflict
+// =============================================================================
+
+@test
+fn property_merge_other_wins_on_conflict_count() {
+    let a = Resource.empty()
+        .with_attribute("env".clone(), AttributeValue.Text("dev".clone()));
+    let b = Resource.empty()
+        .with_attribute("env".clone(), AttributeValue.Text("prod".clone()));
+    let m = a.merge(&b);
+    // Same key — count stays at 1, not 2
+    assert_eq(m.attributes_count(), 1);
+}
+
+// =============================================================================
+// §4 schema_url precedence
+// =============================================================================
+
+@test
+fn property_merge_schema_url_other_wins() {
+    let a = Resource.empty().with_schema_url("schema-v1".clone());
+    let b = Resource.empty().with_schema_url("schema-v2".clone());
+    let m = a.merge(&b);
+    match m.schema_url() {
+        Maybe.Some(u) => assert_eq(*u, "schema-v2"),
+        Maybe.None => panic("expected schema_url from other"),
+    }
+}
+
+@test
+fn property_merge_schema_url_other_missing_keeps_self() {
+    let a = Resource.empty().with_schema_url("schema-v1".clone());
+    let b = Resource.empty();
+    let m = a.merge(&b);
+    match m.schema_url() {
+        Maybe.Some(u) => assert_eq(*u, "schema-v1"),
+        Maybe.None => panic("expected self's schema_url when other has none"),
+    }
+}
+
+@test
+fn property_merge_both_missing_stays_none() {
+    let a = Resource.empty();
+    let b = Resource.empty();
+    let m = a.merge(&b);
+    match m.schema_url() {
+        Maybe.Some(_) => panic("expected None"),
+        Maybe.None => assert(true),
+    }
+}
+
+// =============================================================================
+// §5 with_attribute idempotent on same key (last-wins)
+// =============================================================================
+
+@test
+fn property_with_attribute_same_key_count_stays() {
+    let r = Resource.empty()
+        .with_attribute("k".clone(), AttributeValue.Int(1))
+        .with_attribute("k".clone(), AttributeValue.Int(2))
+        .with_attribute("k".clone(), AttributeValue.Int(3));
+    assert_eq(r.attributes_count(), 1);
+}
+
+// =============================================================================
+// §6 Eq reflexive
+// =============================================================================
+
+@test
+fn property_eq_reflexive_empty() {
+    let r = Resource.empty();
+    assert(r == r);
+}
+
+@test
+fn property_eq_reflexive_with_attributes() {
+    let r = Resource.empty()
+        .with_attribute("a".clone(), AttributeValue.Int(1))
+        .with_schema_url("schema".clone());
+    assert(r == r);
+}
+
+// =============================================================================
+// §7 clone preserves count + schema_url
+// =============================================================================
+
+@test
+fn property_clone_preserves_count_three_attrs() {
+    let r = Resource.empty()
+        .with_attribute("a".clone(), AttributeValue.Int(1))
+        .with_attribute("b".clone(), AttributeValue.Int(2))
+        .with_attribute("c".clone(), AttributeValue.Int(3));
+    let c = r.clone();
+    assert_eq(c.attributes_count(), 3);
+}
+
+@test
+fn property_clone_preserves_schema_url() {
+    let r = Resource.empty().with_schema_url("schema-clone-test".clone());
+    let c = r.clone();
+    match c.schema_url() {
+        Maybe.Some(u) => assert_eq(*u, "schema-clone-test"),
+        Maybe.None => panic("clone lost schema_url"),
+    }
+}
