@@ -1,0 +1,275 @@
+// =============================================================================
+// core-tests/types/qtt/unit_test.vr
+// =============================================================================
+//
+// `core/types/qtt.vr` — Quantitative Type Theory: tracks the number
+// of runtime uses of each binding. Lattice: Zero (linear erased) /
+// One (linear) / Many (cardinal) / AtMost(n) (affine bounded).
+//
+// Surface:
+//   * Quantity 4-variant
+//   * normalize_quantity — canonical form
+//   * allows(q, uses) — does q allow `uses` occurrences?
+//   * add_quantity — sequential composition (saturates at QTT_SATURATION)
+//   * mul_quantity — multiplicative scaling under binder
+//   * top_quantity / bottom_quantity
+//   * is_sub — subquantity ordering
+//   * quantity_eq — structural eq
+// =============================================================================
+
+mount core.types.qtt.{
+    Quantity, normalize_quantity, allows, add_quantity, mul_quantity,
+    top_quantity, bottom_quantity, is_sub, quantity_eq,
+    QTT_SATURATION,
+};
+
+// =============================================================================
+// Section 1: Quantity variant construction
+// =============================================================================
+
+@test
+fn test_quantity_zero_construction() {
+    let q: Quantity = Quantity.Zero;
+    assert(q is Quantity.Zero);
+}
+
+@test
+fn test_quantity_one_construction() {
+    let q: Quantity = Quantity.One;
+    assert(q is Quantity.One);
+}
+
+@test
+fn test_quantity_many_construction() {
+    let q: Quantity = Quantity.Many;
+    assert(q is Quantity.Many);
+}
+
+@test
+fn test_quantity_at_most_construction() {
+    let q: Quantity = Quantity.AtMost { n: 5 };
+    assert(q is Quantity.AtMost);
+}
+
+@test
+fn test_quantity_variants_disjoint() {
+    let z: Quantity = Quantity.Zero;
+    let o: Quantity = Quantity.One;
+    let m: Quantity = Quantity.Many;
+    let a: Quantity = Quantity.AtMost { n: 0 };
+
+    assert(z is Quantity.Zero);
+    assert(o is Quantity.One);
+    assert(m is Quantity.Many);
+    assert(a is Quantity.AtMost);
+
+    assert(!(z is Quantity.One));
+    assert(!(o is Quantity.Many));
+    assert(!(m is Quantity.AtMost));
+    assert(!(a is Quantity.Zero));
+}
+
+// =============================================================================
+// Section 2: normalize_quantity
+// =============================================================================
+
+@test
+fn test_normalize_at_most_zero_becomes_zero() {
+    let q = Quantity.AtMost { n: 0 };
+    let n = normalize_quantity(q);
+    assert(n is Quantity.Zero);
+}
+
+@test
+fn test_normalize_at_most_one_stays_at_most_one() {
+    // Doc-stated: AtMost(1) is intentionally NOT normalised to One
+    let q = Quantity.AtMost { n: 1 };
+    let n = normalize_quantity(q);
+    assert(n is Quantity.AtMost);
+}
+
+@test
+fn test_normalize_at_most_above_saturation_collapses_to_many() {
+    let q = Quantity.AtMost { n: QTT_SATURATION + 1 };
+    let n = normalize_quantity(q);
+    assert(n is Quantity.Many);
+}
+
+@test
+fn test_normalize_zero_is_idempotent() {
+    let n = normalize_quantity(Quantity.Zero);
+    assert(n is Quantity.Zero);
+}
+
+@test
+fn test_normalize_one_is_idempotent() {
+    let n = normalize_quantity(Quantity.One);
+    assert(n is Quantity.One);
+}
+
+@test
+fn test_normalize_many_is_idempotent() {
+    let n = normalize_quantity(Quantity.Many);
+    assert(n is Quantity.Many);
+}
+
+// =============================================================================
+// Section 3: allows
+// =============================================================================
+
+@test
+fn test_allows_zero_only_zero_uses() {
+    assert(allows(Quantity.Zero, 0));
+    assert(!allows(Quantity.Zero, 1));
+    assert(!allows(Quantity.Zero, 100));
+}
+
+@test
+fn test_allows_one_only_one_use() {
+    assert(!allows(Quantity.One, 0));
+    assert(allows(Quantity.One, 1));
+    assert(!allows(Quantity.One, 2));
+}
+
+@test
+fn test_allows_many_all_uses() {
+    assert(allows(Quantity.Many, 0));
+    assert(allows(Quantity.Many, 1));
+    assert(allows(Quantity.Many, 1000));
+}
+
+@test
+fn test_allows_at_most_zero_to_n() {
+    let q = Quantity.AtMost { n: 3 };
+    assert(allows(q, 0));
+    assert(allows(q, 1));
+    assert(allows(q, 2));
+    assert(allows(q, 3));
+    assert(!allows(q, 4));
+}
+
+// =============================================================================
+// Section 4: top_quantity / bottom_quantity
+// =============================================================================
+
+@test
+fn test_top_quantity_is_many() {
+    assert(top_quantity() is Quantity.Many);
+}
+
+@test
+fn test_bottom_quantity_is_zero() {
+    assert(bottom_quantity() is Quantity.Zero);
+}
+
+// =============================================================================
+// Section 5: add_quantity — identity + absorbing element laws
+// =============================================================================
+
+@test
+fn test_add_zero_left_identity() {
+    let q1 = add_quantity(Quantity.Zero, Quantity.One);
+    assert(q1 is Quantity.One);
+    let q2 = add_quantity(Quantity.Zero, Quantity.Many);
+    assert(q2 is Quantity.Many);
+}
+
+@test
+fn test_add_zero_right_identity() {
+    let q1 = add_quantity(Quantity.One, Quantity.Zero);
+    assert(q1 is Quantity.One);
+    let q2 = add_quantity(Quantity.Many, Quantity.Zero);
+    assert(q2 is Quantity.Many);
+}
+
+@test
+fn test_add_many_absorbing_left() {
+    let q = add_quantity(Quantity.Many, Quantity.One);
+    assert(q is Quantity.Many);
+}
+
+@test
+fn test_add_many_absorbing_right() {
+    let q = add_quantity(Quantity.One, Quantity.Many);
+    assert(q is Quantity.Many);
+}
+
+@test
+fn test_add_one_plus_one_is_at_most_two() {
+    let q = add_quantity(Quantity.One, Quantity.One);
+    assert(q is Quantity.AtMost);
+}
+
+// =============================================================================
+// Section 6: mul_quantity — identity + absorbing element laws
+// =============================================================================
+
+@test
+fn test_mul_one_left_identity() {
+    let q1 = mul_quantity(Quantity.One, Quantity.Many);
+    assert(q1 is Quantity.Many);
+    let q2 = mul_quantity(Quantity.One, Quantity.Zero);
+    assert(q2 is Quantity.Zero);
+}
+
+@test
+fn test_mul_one_right_identity() {
+    let q1 = mul_quantity(Quantity.Many, Quantity.One);
+    assert(q1 is Quantity.Many);
+    let q2 = mul_quantity(Quantity.Zero, Quantity.One);
+    assert(q2 is Quantity.Zero);
+}
+
+@test
+fn test_mul_zero_absorbing_left() {
+    let q1 = mul_quantity(Quantity.Zero, Quantity.Many);
+    assert(q1 is Quantity.Zero);
+    let q2 = mul_quantity(Quantity.Zero, Quantity.AtMost { n: 100 });
+    assert(q2 is Quantity.Zero);
+}
+
+@test
+fn test_mul_zero_absorbing_right() {
+    let q1 = mul_quantity(Quantity.Many, Quantity.Zero);
+    assert(q1 is Quantity.Zero);
+}
+
+@test
+fn test_mul_many_times_many_is_many() {
+    let q = mul_quantity(Quantity.Many, Quantity.Many);
+    assert(q is Quantity.Many);
+}
+
+// =============================================================================
+// Section 7: quantity_eq
+// =============================================================================
+
+@test
+fn test_quantity_eq_zero_eq_zero() {
+    assert(quantity_eq(Quantity.Zero, Quantity.Zero));
+}
+
+@test
+fn test_quantity_eq_one_eq_one() {
+    assert(quantity_eq(Quantity.One, Quantity.One));
+}
+
+@test
+fn test_quantity_eq_many_eq_many() {
+    assert(quantity_eq(Quantity.Many, Quantity.Many));
+}
+
+@test
+fn test_quantity_eq_zero_neq_one() {
+    assert(!quantity_eq(Quantity.Zero, Quantity.One));
+}
+
+@test
+fn test_quantity_eq_one_neq_many() {
+    assert(!quantity_eq(Quantity.One, Quantity.Many));
+}
+
+@test
+fn test_quantity_eq_zero_neq_many() {
+    assert(!quantity_eq(Quantity.Zero, Quantity.Many));
+}
