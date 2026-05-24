@@ -474,7 +474,7 @@ async fn exec_on_connection(conn: &mut RedisConnection, args: &[Text]) -> Result
 
 async fn read_one_frame(conn: &mut RedisConnection) -> Result<RespValue, RedisError> {
     loop {
-        let cur = cursor_new(conn.rx_buffer.clone());
+        let cur = core.redis.protocol.cursor_new(conn.rx_buffer.clone());
         match decode(&cur) {
             Ok((v, after)) => {
                 let mut tail: List<Byte> = List.new();
