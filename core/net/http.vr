@@ -70,17 +70,19 @@ public type Method is
 
 implement Method {
     /// Get the method as a string (e.g., "GET", "POST").
+    /// Qualify variants (task #17/#39 workaround) — bare `Get` etc.
+    /// collide with sibling-module variants under first-wins.
     public fn as_str(&self) -> Text {
         match self {
-            Get     => "GET",
-            Head    => "HEAD",
-            Post    => "POST",
-            Put     => "PUT",
-            Delete  => "DELETE",
-            Connect => "CONNECT",
-            Options => "OPTIONS",
-            Trace   => "TRACE",
-            Patch   => "PATCH",
+            Method.Get     => "GET",
+            Method.Head    => "HEAD",
+            Method.Post    => "POST",
+            Method.Put     => "PUT",
+            Method.Delete  => "DELETE",
+            Method.Connect => "CONNECT",
+            Method.Options => "OPTIONS",
+            Method.Trace   => "TRACE",
+            Method.Patch   => "PATCH",
         }
     }
 
@@ -103,7 +105,7 @@ implement Method {
     /// Check if this method is safe (no side effects).
     public fn is_safe(&self) -> Bool {
         match self {
-            Get | Head | Options | Trace => true,
+            Method.Get | Method.Head | Method.Options | Method.Trace => true,
             _ => false,
         }
     }
@@ -111,7 +113,8 @@ implement Method {
     /// Check if this method is idempotent.
     public fn is_idempotent(&self) -> Bool {
         match self {
-            Get | Head | Put | Delete | Options | Trace => true,
+            Method.Get | Method.Head | Method.Put | Method.Delete
+            | Method.Options | Method.Trace => true,
             _ => false,
         }
     }
@@ -119,7 +122,7 @@ implement Method {
     /// Check if this method typically has a request body.
     public fn has_body(&self) -> Bool {
         match self {
-            Post | Put | Patch => true,
+            Method.Post | Method.Put | Method.Patch => true,
             _ => false,
         }
     }
@@ -146,6 +149,15 @@ implement Debug for Method {
 implement Display for Method {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(self.as_str())
+    }
+}
+
+implement Hash for Method {
+    /// Hash via the as_str canonical name. Stable across calls so
+    /// `Map<Method, EndpointHandler>` lookups are O(1) amortised.
+    /// Routes through Text.hash for the actual mixing.
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        self.as_str().hash(h);
     }
 }
 
