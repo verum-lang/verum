@@ -1,0 +1,289 @@
+// =============================================================================
+// core-tests/cog/manifest/unit_test.vr
+// =============================================================================
+//
+// `core/cog/manifest.vr` — Cog (package) manifest parsing + types.
+//
+// Surface:
+//   * LanguageProfile 3-variant + language_profile_tag + parse_language_profile
+//   * GitRevision 4-variant (Branch / Tag / Commit / Default)
+//   * DependencySource 4-variant (Registry / Path / Git / Workspace)
+//   * ManifestError 9-variant
+// =============================================================================
+
+mount core.cog.manifest.{
+    LanguageProfile, language_profile_tag, parse_language_profile,
+    GitRevision, DependencySource, ManifestError,
+};
+
+// =============================================================================
+// Section 1: LanguageProfile 3-variant
+// =============================================================================
+
+@test
+fn test_language_profile_application() {
+    let p: LanguageProfile = LanguageProfile.Application;
+    assert(p is LanguageProfile.Application);
+}
+
+@test
+fn test_language_profile_systems() {
+    let p: LanguageProfile = LanguageProfile.Systems;
+    assert(p is LanguageProfile.Systems);
+}
+
+@test
+fn test_language_profile_research() {
+    let p: LanguageProfile = LanguageProfile.Research;
+    assert(p is LanguageProfile.Research);
+}
+
+@test
+fn test_language_profile_pairwise_disjoint() {
+    let a: LanguageProfile = LanguageProfile.Application;
+    let s: LanguageProfile = LanguageProfile.Systems;
+    let r: LanguageProfile = LanguageProfile.Research;
+    assert(a is LanguageProfile.Application && !(a is LanguageProfile.Systems));
+    assert(s is LanguageProfile.Systems && !(s is LanguageProfile.Research));
+    assert(r is LanguageProfile.Research && !(r is LanguageProfile.Application));
+}
+
+// =============================================================================
+// Section 2: language_profile_tag
+// =============================================================================
+
+@test
+fn test_language_profile_tag_application() {
+    let p = LanguageProfile.Application;
+    assert(language_profile_tag(&p) == Text.from("application"));
+}
+
+@test
+fn test_language_profile_tag_systems() {
+    let p = LanguageProfile.Systems;
+    assert(language_profile_tag(&p) == Text.from("systems"));
+}
+
+@test
+fn test_language_profile_tag_research() {
+    let p = LanguageProfile.Research;
+    assert(language_profile_tag(&p) == Text.from("research"));
+}
+
+@test
+fn test_language_profile_tags_all_distinct() {
+    let a = language_profile_tag(&LanguageProfile.Application);
+    let s = language_profile_tag(&LanguageProfile.Systems);
+    let r = language_profile_tag(&LanguageProfile.Research);
+    assert(a != s);
+    assert(s != r);
+    assert(a != r);
+}
+
+// =============================================================================
+// Section 3: parse_language_profile
+// =============================================================================
+
+@test
+fn test_parse_language_profile_application() {
+    let p = parse_language_profile(&Text.from("application"));
+    assert(p is Maybe.Some);
+}
+
+@test
+fn test_parse_language_profile_systems() {
+    let p = parse_language_profile(&Text.from("systems"));
+    assert(p is Maybe.Some);
+}
+
+@test
+fn test_parse_language_profile_research() {
+    let p = parse_language_profile(&Text.from("research"));
+    assert(p is Maybe.Some);
+}
+
+@test
+fn test_parse_language_profile_unknown_is_none() {
+    let p = parse_language_profile(&Text.from("xyz"));
+    assert(p is Maybe.None);
+}
+
+@test
+fn test_parse_language_profile_case_sensitive() {
+    // ASCII-lowercase only per spec
+    let p = parse_language_profile(&Text.from("Application"));
+    assert(p is Maybe.None);
+}
+
+@test
+fn test_parse_language_profile_empty_is_none() {
+    let p = parse_language_profile(&Text.from(""));
+    assert(p is Maybe.None);
+}
+
+@test
+fn test_parse_language_profile_roundtrip() {
+    let profiles: List<LanguageProfile> = [
+        LanguageProfile.Application,
+        LanguageProfile.Systems,
+        LanguageProfile.Research,
+    ];
+    let mut i: Int = 0;
+    while i < profiles.len() {
+        let tag = language_profile_tag(&profiles[i]);
+        let parsed = parse_language_profile(&tag);
+        assert(parsed is Maybe.Some);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 4: GitRevision 4-variant
+// =============================================================================
+
+@test
+fn test_git_revision_branch() {
+    let r: GitRevision = GitRevision.Branch(Text.from("main"));
+    assert(r is GitRevision.Branch);
+}
+
+@test
+fn test_git_revision_tag() {
+    let r: GitRevision = GitRevision.Tag(Text.from("v1.0.0"));
+    assert(r is GitRevision.Tag);
+}
+
+@test
+fn test_git_revision_commit() {
+    let r: GitRevision = GitRevision.Commit(Text.from("abcdef1"));
+    assert(r is GitRevision.Commit);
+}
+
+@test
+fn test_git_revision_default() {
+    let r: GitRevision = GitRevision.Default;
+    assert(r is GitRevision.Default);
+}
+
+@test
+fn test_git_revision_pairwise_disjoint() {
+    let b: GitRevision = GitRevision.Branch(Text.from("main"));
+    let t: GitRevision = GitRevision.Tag(Text.from("v1"));
+    let c: GitRevision = GitRevision.Commit(Text.from("abc"));
+    let d: GitRevision = GitRevision.Default;
+    assert(b is GitRevision.Branch && !(b is GitRevision.Tag));
+    assert(t is GitRevision.Tag && !(t is GitRevision.Commit));
+    assert(c is GitRevision.Commit && !(c is GitRevision.Default));
+    assert(d is GitRevision.Default && !(d is GitRevision.Branch));
+}
+
+// =============================================================================
+// Section 5: DependencySource 4-variant
+// =============================================================================
+
+@test
+fn test_dependency_source_registry_with_url() {
+    let s: DependencySource = DependencySource.Registry {
+        registry_url: Maybe.Some(Text.from("https://example.com")),
+    };
+    assert(s is DependencySource.Registry);
+}
+
+@test
+fn test_dependency_source_registry_default() {
+    let s: DependencySource = DependencySource.Registry { registry_url: Maybe.None };
+    assert(s is DependencySource.Registry);
+}
+
+@test
+fn test_dependency_source_path() {
+    let s: DependencySource = DependencySource.Path { rel_path: Text.from("../lib") };
+    assert(s is DependencySource.Path);
+}
+
+@test
+fn test_dependency_source_git_with_branch() {
+    let s: DependencySource = DependencySource.Git {
+        url: Text.from("https://github.com/foo/bar"),
+        revision: GitRevision.Branch(Text.from("main")),
+    };
+    assert(s is DependencySource.Git);
+}
+
+@test
+fn test_dependency_source_workspace() {
+    let s: DependencySource = DependencySource.Workspace;
+    assert(s is DependencySource.Workspace);
+}
+
+// =============================================================================
+// Section 6: ManifestError 9-variant
+// =============================================================================
+
+@test
+fn test_manifest_error_invalid_toml() {
+    let e: ManifestError = ManifestError.InvalidToml(Text.from("syntax"));
+    assert(e is ManifestError.InvalidToml);
+}
+
+@test
+fn test_manifest_error_missing_field() {
+    let e: ManifestError = ManifestError.MissingField(Text.from("cog"));
+    assert(e is ManifestError.MissingField);
+}
+
+@test
+fn test_manifest_error_type_mismatch() {
+    let e: ManifestError = ManifestError.TypeMismatch {
+        field: Text.from("name"),
+        expected: Text.from("string"),
+        found: Text.from("int"),
+    };
+    assert(e is ManifestError.TypeMismatch);
+}
+
+@test
+fn test_manifest_error_invalid_name() {
+    let e: ManifestError = ManifestError.InvalidName(Text.from("BADNAME!"));
+    assert(e is ManifestError.InvalidName);
+}
+
+@test
+fn test_manifest_error_invalid_version() {
+    let e: ManifestError = ManifestError.InvalidVersion(Text.from("not-semver"));
+    assert(e is ManifestError.InvalidVersion);
+}
+
+@test
+fn test_manifest_error_invalid_constraint() {
+    let e: ManifestError = ManifestError.InvalidConstraint(Text.from("^^^"));
+    assert(e is ManifestError.InvalidConstraint);
+}
+
+@test
+fn test_manifest_error_invalid_language_profile() {
+    let e: ManifestError = ManifestError.InvalidLanguageProfile(Text.from("garbage"));
+    assert(e is ManifestError.InvalidLanguageProfile);
+}
+
+@test
+fn test_manifest_error_invalid_dependency_source() {
+    let e: ManifestError = ManifestError.InvalidDependencySource(Text.from("???"));
+    assert(e is ManifestError.InvalidDependencySource);
+}
+
+@test
+fn test_manifest_error_invalid_license() {
+    let e: ManifestError = ManifestError.InvalidLicense(Text.from("invalid-spdx"));
+    assert(e is ManifestError.InvalidLicense);
+}
+
+@test
+fn test_manifest_error_variants_pairwise_disjoint() {
+    let a: ManifestError = ManifestError.InvalidToml(Text.from("x"));
+    let b: ManifestError = ManifestError.MissingField(Text.from("y"));
+    let c: ManifestError = ManifestError.InvalidName(Text.from("z"));
+    assert(a is ManifestError.InvalidToml && !(a is ManifestError.MissingField));
+    assert(b is ManifestError.MissingField && !(b is ManifestError.InvalidName));
+    assert(c is ManifestError.InvalidName && !(c is ManifestError.InvalidToml));
+}
