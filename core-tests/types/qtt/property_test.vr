@@ -1,0 +1,220 @@
+// =============================================================================
+// core-tests/types/qtt/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `Quantity`:
+//
+//   §1  add commutativity: ∀a,b. add(a, b) = add(b, a)
+//   §2  add associativity: ∀a,b,c. add(add(a, b), c) = add(a, add(b, c))
+//   §3  mul commutativity: ∀a,b. mul(a, b) = mul(b, a)
+//   §4  mul associativity: ∀a,b,c. mul(mul(a, b), c) = mul(a, mul(b, c))
+//   §5  Zero is add identity: add(Zero, q) = q (and symmetrically)
+//   §6  One is mul identity: mul(One, q) = q (and symmetrically)
+//   §7  Zero is mul absorbing: mul(Zero, q) = Zero (and symmetrically)
+//   §8  Many is add absorbing: add(Many, q) = Many (for any q)
+//   §9  is_sub reflexivity: ∀q. is_sub(q, q)
+//   §10 quantity_eq reflexivity: ∀q. quantity_eq(q, q)
+//
+// Exhaustive over the 4-element scalar lattice (Zero / One / Many /
+// AtMost{n=5}); the AtMost subspace's Int-parameterised behaviour
+// is covered by boundary tests in unit_test.vr.
+// =============================================================================
+
+mount core.types.qtt.{
+    Quantity, add_quantity, mul_quantity, is_sub, quantity_eq,
+};
+
+// =============================================================================
+// §1 add commutativity (4×3/2 = 6 distinct ordered pairs + 4 diagonals)
+// =============================================================================
+
+@test
+fn property_add_commutativity_unit_variants() {
+    let z = Quantity.Zero;
+    let o = Quantity.One;
+    let m = Quantity.Many;
+    let a = Quantity.AtMost { n: 5 };
+
+    assert(quantity_eq(add_quantity(z, o), add_quantity(o, z)));
+    assert(quantity_eq(add_quantity(z, m), add_quantity(m, z)));
+    assert(quantity_eq(add_quantity(z, a), add_quantity(a, z)));
+    assert(quantity_eq(add_quantity(o, m), add_quantity(m, o)));
+    assert(quantity_eq(add_quantity(o, a), add_quantity(a, o)));
+    assert(quantity_eq(add_quantity(m, a), add_quantity(a, m)));
+}
+
+// =============================================================================
+// §2 add associativity (sample triples)
+// =============================================================================
+
+@test
+fn property_add_associativity_zero_one_many() {
+    let z = Quantity.Zero;
+    let o = Quantity.One;
+    let m = Quantity.Many;
+    assert(quantity_eq(
+        add_quantity(add_quantity(z, o), m),
+        add_quantity(z, add_quantity(o, m)),
+    ));
+}
+
+@test
+fn property_add_associativity_one_one_one() {
+    let o = Quantity.One;
+    assert(quantity_eq(
+        add_quantity(add_quantity(o, o), o),
+        add_quantity(o, add_quantity(o, o)),
+    ));
+}
+
+@test
+fn property_add_associativity_all_many() {
+    let m = Quantity.Many;
+    assert(quantity_eq(
+        add_quantity(add_quantity(m, m), m),
+        add_quantity(m, add_quantity(m, m)),
+    ));
+}
+
+// =============================================================================
+// §3 mul commutativity
+// =============================================================================
+
+@test
+fn property_mul_commutativity_unit_variants() {
+    let z = Quantity.Zero;
+    let o = Quantity.One;
+    let m = Quantity.Many;
+    let a = Quantity.AtMost { n: 5 };
+
+    assert(quantity_eq(mul_quantity(z, o), mul_quantity(o, z)));
+    assert(quantity_eq(mul_quantity(z, m), mul_quantity(m, z)));
+    assert(quantity_eq(mul_quantity(z, a), mul_quantity(a, z)));
+    assert(quantity_eq(mul_quantity(o, m), mul_quantity(m, o)));
+    assert(quantity_eq(mul_quantity(o, a), mul_quantity(a, o)));
+    assert(quantity_eq(mul_quantity(m, a), mul_quantity(a, m)));
+}
+
+// =============================================================================
+// §4 mul associativity
+// =============================================================================
+
+@test
+fn property_mul_associativity_one_many_many() {
+    let o = Quantity.One;
+    let m = Quantity.Many;
+    assert(quantity_eq(
+        mul_quantity(mul_quantity(o, m), m),
+        mul_quantity(o, mul_quantity(m, m)),
+    ));
+}
+
+@test
+fn property_mul_associativity_zero_anywhere_is_zero() {
+    let z = Quantity.Zero;
+    let o = Quantity.One;
+    let m = Quantity.Many;
+    // mul(mul(z, o), m) = mul(z, m) = Zero
+    // mul(z, mul(o, m)) = mul(z, m) = Zero
+    assert(quantity_eq(
+        mul_quantity(mul_quantity(z, o), m),
+        mul_quantity(z, mul_quantity(o, m)),
+    ));
+}
+
+// =============================================================================
+// §5 Zero is add identity
+// =============================================================================
+
+@test
+fn property_add_identity_zero_exhaustive() {
+    let z = Quantity.Zero;
+    let queries: [Quantity; 4] = [
+        Quantity.Zero, Quantity.One, Quantity.Many, Quantity.AtMost { n: 7 },
+    ];
+    let mut i = 0;
+    while i < 4 {
+        assert(quantity_eq(add_quantity(z, queries[i]), queries[i]));
+        assert(quantity_eq(add_quantity(queries[i], z), queries[i]));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §6 One is mul identity
+// =============================================================================
+
+@test
+fn property_mul_identity_one_exhaustive() {
+    let o = Quantity.One;
+    let queries: [Quantity; 4] = [
+        Quantity.Zero, Quantity.One, Quantity.Many, Quantity.AtMost { n: 7 },
+    ];
+    let mut i = 0;
+    while i < 4 {
+        assert(quantity_eq(mul_quantity(o, queries[i]), queries[i]));
+        assert(quantity_eq(mul_quantity(queries[i], o), queries[i]));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §7 Zero is mul absorbing
+// =============================================================================
+
+@test
+fn property_mul_absorbing_zero_exhaustive() {
+    let z = Quantity.Zero;
+    let queries: [Quantity; 4] = [
+        Quantity.Zero, Quantity.One, Quantity.Many, Quantity.AtMost { n: 7 },
+    ];
+    let mut i = 0;
+    while i < 4 {
+        assert(quantity_eq(mul_quantity(z, queries[i]), z));
+        assert(quantity_eq(mul_quantity(queries[i], z), z));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §8 Many is add absorbing (for non-Zero — Zero+Many=Many, not Zero)
+// =============================================================================
+
+@test
+fn property_add_absorbing_many_exhaustive() {
+    let m = Quantity.Many;
+    let queries: [Quantity; 4] = [
+        Quantity.Zero, Quantity.One, Quantity.Many, Quantity.AtMost { n: 7 },
+    ];
+    let mut i = 0;
+    while i < 4 {
+        assert(quantity_eq(add_quantity(m, queries[i]), m));
+        assert(quantity_eq(add_quantity(queries[i], m), m));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §9 is_sub reflexivity
+// =============================================================================
+
+@test
+fn property_is_sub_reflexive_exhaustive() {
+    assert(is_sub(Quantity.Zero, Quantity.Zero));
+    assert(is_sub(Quantity.One, Quantity.One));
+    assert(is_sub(Quantity.Many, Quantity.Many));
+    assert(is_sub(Quantity.AtMost { n: 3 }, Quantity.AtMost { n: 3 }));
+}
+
+// =============================================================================
+// §10 quantity_eq reflexivity
+// =============================================================================
+
+@test
+fn property_quantity_eq_reflexive_exhaustive() {
+    assert(quantity_eq(Quantity.Zero, Quantity.Zero));
+    assert(quantity_eq(Quantity.One, Quantity.One));
+    assert(quantity_eq(Quantity.Many, Quantity.Many));
+    assert(quantity_eq(Quantity.AtMost { n: 0 }, Quantity.AtMost { n: 0 }));
+    assert(quantity_eq(Quantity.AtMost { n: 100 }, Quantity.AtMost { n: 100 }));
+}
