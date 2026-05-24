@@ -1,0 +1,250 @@
+// =============================================================================
+// core-tests/action/effects/unit_test.vr
+// =============================================================================
+//
+// `core/action/effects.vr` — Effect taxonomy + commutativity gate
+// for parallel composition coherence (Theorem 17.T1 + Corollary
+// 17.C2).
+//
+// Surface tested:
+//   * EffectKind 8-variant (Pure/Reader/Writer/Probability/List/
+//     State/Exception/Io)
+//   * is_commutative_effect predicate
+//   * effect_epsilon_coord (Diakrisis coordinate: "0"/"ω"/"ω + 1")
+//   * effect_kind_name canonical name
+//   * parallel_coherent — whole-list coherence test
+// =============================================================================
+
+mount core.action.effects.{
+    EffectKind, is_commutative_effect, effect_epsilon_coord,
+    effect_kind_name, parallel_coherent,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// Section 1: EffectKind 8-variant construction
+// =============================================================================
+
+@test
+fn test_pure_effect() {
+    let e: EffectKind = EffectKind.PureEffect;
+    assert(e is EffectKind.PureEffect);
+}
+
+@test
+fn test_reader_effect() {
+    let e: EffectKind = EffectKind.ReaderEffect;
+    assert(e is EffectKind.ReaderEffect);
+}
+
+@test
+fn test_writer_effect() {
+    let e: EffectKind = EffectKind.WriterEffect;
+    assert(e is EffectKind.WriterEffect);
+}
+
+@test
+fn test_probability_effect() {
+    let e: EffectKind = EffectKind.ProbabilityEffect;
+    assert(e is EffectKind.ProbabilityEffect);
+}
+
+@test
+fn test_list_effect() {
+    let e: EffectKind = EffectKind.ListEffect;
+    assert(e is EffectKind.ListEffect);
+}
+
+@test
+fn test_state_effect() {
+    let e: EffectKind = EffectKind.StateEffect;
+    assert(e is EffectKind.StateEffect);
+}
+
+@test
+fn test_exception_effect() {
+    let e: EffectKind = EffectKind.ExceptionEffect;
+    assert(e is EffectKind.ExceptionEffect);
+}
+
+@test
+fn test_io_effect() {
+    let e: EffectKind = EffectKind.IoEffect;
+    assert(e is EffectKind.IoEffect);
+}
+
+// =============================================================================
+// Section 2: is_commutative_effect — Theorem 17.T1
+// =============================================================================
+
+@test
+fn test_pure_is_commutative() {
+    assert(is_commutative_effect(EffectKind.PureEffect));
+}
+
+@test
+fn test_reader_is_commutative() {
+    assert(is_commutative_effect(EffectKind.ReaderEffect));
+}
+
+@test
+fn test_writer_is_commutative() {
+    assert(is_commutative_effect(EffectKind.WriterEffect));
+}
+
+@test
+fn test_probability_is_commutative() {
+    assert(is_commutative_effect(EffectKind.ProbabilityEffect));
+}
+
+@test
+fn test_list_is_commutative() {
+    assert(is_commutative_effect(EffectKind.ListEffect));
+}
+
+@test
+fn test_state_is_not_commutative() {
+    // State has observable order — read-after-write ≠ write-after-read
+    assert(!is_commutative_effect(EffectKind.StateEffect));
+}
+
+@test
+fn test_exception_is_not_commutative() {
+    // Exception order matters — first-throw wins
+    assert(!is_commutative_effect(EffectKind.ExceptionEffect));
+}
+
+@test
+fn test_io_is_not_commutative() {
+    // I/O has observable ordering — print order matters
+    assert(!is_commutative_effect(EffectKind.IoEffect));
+}
+
+// =============================================================================
+// Section 3: effect_epsilon_coord — Diakrisis ε-coordinate
+// =============================================================================
+
+@test
+fn test_pure_epsilon_is_zero() {
+    // Pure: no observable enactment → coord 0
+    assert_eq(effect_epsilon_coord(EffectKind.PureEffect), "0");
+}
+
+@test
+fn test_commutative_effects_at_omega() {
+    // Commutative non-Pure → ω
+    assert_eq(effect_epsilon_coord(EffectKind.ReaderEffect), "ω");
+    assert_eq(effect_epsilon_coord(EffectKind.WriterEffect), "ω");
+    assert_eq(effect_epsilon_coord(EffectKind.ProbabilityEffect), "ω");
+    assert_eq(effect_epsilon_coord(EffectKind.ListEffect), "ω");
+}
+
+@test
+fn test_non_commutative_effects_at_omega_plus_one() {
+    // Non-commutative → ω + 1 (ordinal-irreducible action-order)
+    assert_eq(effect_epsilon_coord(EffectKind.StateEffect), "ω + 1");
+    assert_eq(effect_epsilon_coord(EffectKind.ExceptionEffect), "ω + 1");
+    assert_eq(effect_epsilon_coord(EffectKind.IoEffect), "ω + 1");
+}
+
+// =============================================================================
+// Section 4: effect_kind_name — canonical audit name
+// =============================================================================
+
+@test
+fn test_kind_name_pure() {
+    assert_eq(effect_kind_name(EffectKind.PureEffect), "Pure");
+}
+
+@test
+fn test_kind_name_reader() {
+    assert_eq(effect_kind_name(EffectKind.ReaderEffect), "Reader");
+}
+
+@test
+fn test_kind_name_writer() {
+    assert_eq(effect_kind_name(EffectKind.WriterEffect), "Writer");
+}
+
+@test
+fn test_kind_name_probability() {
+    assert_eq(effect_kind_name(EffectKind.ProbabilityEffect), "Probability");
+}
+
+@test
+fn test_kind_name_list() {
+    assert_eq(effect_kind_name(EffectKind.ListEffect), "List");
+}
+
+@test
+fn test_kind_name_state() {
+    assert_eq(effect_kind_name(EffectKind.StateEffect), "State");
+}
+
+@test
+fn test_kind_name_exception() {
+    assert_eq(effect_kind_name(EffectKind.ExceptionEffect), "Exception");
+}
+
+@test
+fn test_kind_name_io() {
+    assert_eq(effect_kind_name(EffectKind.IoEffect), "Io");
+}
+
+// =============================================================================
+// Section 5: parallel_coherent — Corollary 17.C2
+// =============================================================================
+
+@test
+fn test_parallel_coherent_empty_is_vacuously_true() {
+    let empty_list: List<EffectKind> = [];
+    assert(parallel_coherent(empty_list));
+}
+
+@test
+fn test_parallel_coherent_all_pure() {
+    let kinds: List<EffectKind> = [
+        EffectKind.PureEffect,
+        EffectKind.PureEffect,
+        EffectKind.PureEffect,
+    ];
+    assert(parallel_coherent(kinds));
+}
+
+@test
+fn test_parallel_coherent_all_commutative() {
+    let kinds: List<EffectKind> = [
+        EffectKind.ReaderEffect,
+        EffectKind.WriterEffect,
+        EffectKind.ProbabilityEffect,
+        EffectKind.ListEffect,
+    ];
+    assert(parallel_coherent(kinds));
+}
+
+@test
+fn test_parallel_coherent_with_state_fails() {
+    let kinds: List<EffectKind> = [
+        EffectKind.PureEffect,
+        EffectKind.StateEffect,    // breaks coherence
+        EffectKind.ReaderEffect,
+    ];
+    assert(!parallel_coherent(kinds));
+}
+
+@test
+fn test_parallel_coherent_with_io_fails() {
+    let kinds: List<EffectKind> = [
+        EffectKind.IoEffect,    // breaks coherence
+    ];
+    assert(!parallel_coherent(kinds));
+}
+
+@test
+fn test_parallel_coherent_with_exception_fails() {
+    let kinds: List<EffectKind> = [
+        EffectKind.PureEffect,
+        EffectKind.ExceptionEffect,
+    ];
+    assert(!parallel_coherent(kinds));
+}

@@ -273,15 +273,16 @@ public type EffectKind is
 /// preserves @verify(coherent) iff every effect in either branch
 /// satisfies this predicate.
 public fn is_commutative_effect(kind: EffectKind) -> Bool {
+    // Qualify variants (task #17/#39 workaround).
     match kind {
-        PureEffect        => true,
-        ReaderEffect      => true,
-        WriterEffect      => true,
-        ProbabilityEffect => true,
-        ListEffect        => true,
-        StateEffect       => false,
-        ExceptionEffect   => false,
-        IoEffect          => false,
+        EffectKind.PureEffect        => true,
+        EffectKind.ReaderEffect      => true,
+        EffectKind.WriterEffect      => true,
+        EffectKind.ProbabilityEffect => true,
+        EffectKind.ListEffect        => true,
+        EffectKind.StateEffect       => false,
+        EffectKind.ExceptionEffect   => false,
+        EffectKind.IoEffect          => false,
     }
 }
 
@@ -293,28 +294,28 @@ public fn is_commutative_effect(kind: EffectKind) -> Bool {
 /// dependency on action-order.
 public fn effect_epsilon_coord(kind: EffectKind) -> Text {
     match kind {
-        PureEffect        => "0",
-        ReaderEffect      => "ω",
-        WriterEffect      => "ω",
-        ProbabilityEffect => "ω",
-        ListEffect        => "ω",
-        StateEffect       => "ω + 1",
-        ExceptionEffect   => "ω + 1",
-        IoEffect          => "ω + 1",
+        EffectKind.PureEffect        => "0",
+        EffectKind.ReaderEffect      => "ω",
+        EffectKind.WriterEffect      => "ω",
+        EffectKind.ProbabilityEffect => "ω",
+        EffectKind.ListEffect        => "ω",
+        EffectKind.StateEffect       => "ω + 1",
+        EffectKind.ExceptionEffect   => "ω + 1",
+        EffectKind.IoEffect          => "ω + 1",
     }
 }
 
 /// Canonical name for audit / JSON-RPC emission.
 public fn effect_kind_name(kind: EffectKind) -> Text {
     match kind {
-        PureEffect        => "Pure",
-        ReaderEffect      => "Reader",
-        WriterEffect      => "Writer",
-        ProbabilityEffect => "Probability",
-        ListEffect        => "List",
-        StateEffect       => "State",
-        ExceptionEffect   => "Exception",
-        IoEffect          => "Io",
+        EffectKind.PureEffect        => "Pure",
+        EffectKind.ReaderEffect      => "Reader",
+        EffectKind.WriterEffect      => "Writer",
+        EffectKind.ProbabilityEffect => "Probability",
+        EffectKind.ListEffect        => "List",
+        EffectKind.StateEffect       => "State",
+        EffectKind.ExceptionEffect   => "Exception",
+        EffectKind.IoEffect          => "Io",
     }
 }
 
