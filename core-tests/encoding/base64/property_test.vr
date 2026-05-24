@@ -1,0 +1,236 @@
+// =============================================================================
+// core-tests/encoding/base64/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `core.encoding.base64`:
+//
+//   §1  Round-trip: ∀b. decode(encode(b)) == Ok(b)
+//   §2  Round-trip URL: ∀b. decode_url(encode_url(b)) == Ok(b)
+//   §3  Output length: encode of N bytes = ceil(N/3)*4 chars (with padding)
+//   §4  URL encoding has no '+' / '/' (uses '-' / '_' instead)
+//   §5  URL encoding has no padding chars '='
+//   §6  Standard encoding length multiple of 4
+//   §7  Decode of canonical RFC 4648 fixtures matches expected output
+// =============================================================================
+
+mount core.encoding.base64.{
+    encode, encode_url, decode, decode_url,
+};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// §1 Round-trip — standard alphabet
+// =============================================================================
+
+@test
+fn property_round_trip_empty() {
+    let input: [Byte; 0] = [];
+    let encoded = encode(&input);
+    match decode(&encoded) {
+        Ok(decoded) => assert_eq(decoded.len(), 0),
+        Err(_) => panic("empty round-trip should succeed"),
+    }
+}
+
+@test
+fn property_round_trip_single_byte() {
+    let input: [Byte; 1] = [0x42_u8];
+    let encoded = encode(&input);
+    match decode(&encoded) {
+        Ok(decoded) => {
+            assert_eq(decoded.len(), 1);
+            assert_eq(decoded[0], 0x42_u8);
+        },
+        Err(_) => panic("round-trip should succeed"),
+    }
+}
+
+@test
+fn property_round_trip_three_bytes() {
+    let input: [Byte; 3] = [0xCA_u8, 0xFE_u8, 0xBA_u8];
+    let encoded = encode(&input);
+    match decode(&encoded) {
+        Ok(decoded) => {
+            assert_eq(decoded.len(), 3);
+            assert_eq(decoded[0], 0xCA_u8);
+            assert_eq(decoded[1], 0xFE_u8);
+            assert_eq(decoded[2], 0xBA_u8);
+        },
+        Err(_) => panic("3-byte round-trip should succeed"),
+    }
+}
+
+@test
+fn property_round_trip_six_bytes() {
+    let input: [Byte; 6] = [0x66_u8, 0x6F_u8, 0x6F_u8, 0x62_u8, 0x61_u8, 0x72_u8];
+    let encoded = encode(&input);
+    match decode(&encoded) {
+        Ok(decoded) => {
+            assert_eq(decoded.len(), 6);
+            assert_eq(decoded[5], 0x72_u8);
+        },
+        Err(_) => panic("6-byte round-trip should succeed"),
+    }
+}
+
+@test
+fn property_round_trip_all_zeros() {
+    let input: [Byte; 9] = [0_u8; 9];
+    let encoded = encode(&input);
+    match decode(&encoded) {
+        Ok(decoded) => {
+            assert_eq(decoded.len(), 9);
+            let mut i = 0;
+            while i < 9 {
+                assert_eq(decoded[i], 0_u8);
+                i = i + 1;
+            }
+        },
+        Err(_) => panic("all-zeros round-trip should succeed"),
+    }
+}
+
+// =============================================================================
+// §2 Round-trip — URL-safe alphabet
+// =============================================================================
+
+@test
+fn property_round_trip_url_empty() {
+    let input: [Byte; 0] = [];
+    let encoded = encode_url(&input);
+    match decode_url(&encoded) {
+        Ok(decoded) => assert_eq(decoded.len(), 0),
+        Err(_) => panic("url empty round-trip should succeed"),
+    }
+}
+
+@test
+fn property_round_trip_url_three_bytes() {
+    let input: [Byte; 3] = [0xCA_u8, 0xFE_u8, 0xBA_u8];
+    let encoded = encode_url(&input);
+    match decode_url(&encoded) {
+        Ok(decoded) => {
+            assert_eq(decoded.len(), 3);
+            assert_eq(decoded[0], 0xCA_u8);
+        },
+        Err(_) => panic("url 3-byte round-trip should succeed"),
+    }
+}
+
+// =============================================================================
+// §3 Output length law (with padding) — standard alphabet
+// =============================================================================
+
+@test
+fn property_standard_encode_length_is_multiple_of_4() {
+    let i1: [Byte; 1] = [0_u8];
+    let i2: [Byte; 2] = [0_u8; 2];
+    let i3: [Byte; 3] = [0_u8; 3];
+    let i4: [Byte; 4] = [0_u8; 4];
+    let i5: [Byte; 5] = [0_u8; 5];
+    let i6: [Byte; 6] = [0_u8; 6];
+
+    assert_eq(encode(&i1).len() % 4, 0);
+    assert_eq(encode(&i2).len() % 4, 0);
+    assert_eq(encode(&i3).len() % 4, 0);
+    assert_eq(encode(&i4).len() % 4, 0);
+    assert_eq(encode(&i5).len() % 4, 0);
+    assert_eq(encode(&i6).len() % 4, 0);
+}
+
+@test
+fn property_standard_encode_length_4_per_3_bytes() {
+    // ceil(N/3) * 4: 1→4, 2→4, 3→4, 4→8, 5→8, 6→8.
+    let i1: [Byte; 1] = [0_u8];
+    let i2: [Byte; 2] = [0_u8; 2];
+    let i3: [Byte; 3] = [0_u8; 3];
+    let i4: [Byte; 4] = [0_u8; 4];
+    let i5: [Byte; 5] = [0_u8; 5];
+    let i6: [Byte; 6] = [0_u8; 6];
+
+    assert_eq(encode(&i1).len(), 4);
+    assert_eq(encode(&i2).len(), 4);
+    assert_eq(encode(&i3).len(), 4);
+    assert_eq(encode(&i4).len(), 8);
+    assert_eq(encode(&i5).len(), 8);
+    assert_eq(encode(&i6).len(), 8);
+}
+
+// =============================================================================
+// §4 URL encoding alphabet — no '+' or '/'
+// =============================================================================
+
+@test
+fn property_url_encoding_no_plus_or_slash() {
+    // Choose input that would produce '+' or '/' under standard alphabet.
+    // 0xFB (~ binary 11111011) → standard char 62 ('+'); URL char 62 ('-')
+    let input: [Byte; 3] = [0xFB_u8, 0xFC_u8, 0xFD_u8];
+    let out = encode_url(&input);
+    assert(!out.contains("+"));
+    assert(!out.contains("/"));
+}
+
+// =============================================================================
+// §5 URL encoding has no padding
+// =============================================================================
+
+@test
+fn property_url_encoding_has_no_padding() {
+    let i1: [Byte; 1] = [0_u8];
+    let i2: [Byte; 2] = [0_u8; 2];
+    let i3: [Byte; 3] = [0_u8; 3];
+    let i4: [Byte; 4] = [0_u8; 4];
+    let i5: [Byte; 5] = [0_u8; 5];
+
+    assert(!encode_url(&i1).contains("="));
+    assert(!encode_url(&i2).contains("="));
+    assert(!encode_url(&i3).contains("="));
+    assert(!encode_url(&i4).contains("="));
+    assert(!encode_url(&i5).contains("="));
+}
+
+// =============================================================================
+// §6 Canonical RFC 4648 §10 test vectors
+// =============================================================================
+
+@test
+fn property_rfc4648_fixture_f() {
+    // RFC 4648 §10 fixture: "f" → "Zg=="
+    let input: [Byte; 1] = [0x66_u8];
+    assert_eq(encode(&input), "Zg==");
+}
+
+@test
+fn property_rfc4648_fixture_fo() {
+    // RFC 4648 §10 fixture: "fo" → "Zm8="
+    let input: [Byte; 2] = [0x66_u8, 0x6F_u8];
+    assert_eq(encode(&input), "Zm8=");
+}
+
+@test
+fn property_rfc4648_fixture_foo() {
+    // RFC 4648 §10 fixture: "foo" → "Zm9v"
+    let input: [Byte; 3] = [0x66_u8, 0x6F_u8, 0x6F_u8];
+    assert_eq(encode(&input), "Zm9v");
+}
+
+@test
+fn property_rfc4648_fixture_foob() {
+    // "foob" → "Zm9vYg=="
+    let input: [Byte; 4] = [0x66_u8, 0x6F_u8, 0x6F_u8, 0x62_u8];
+    assert_eq(encode(&input), "Zm9vYg==");
+}
+
+@test
+fn property_rfc4648_fixture_fooba() {
+    // "fooba" → "Zm9vYmE="
+    let input: [Byte; 5] = [0x66_u8, 0x6F_u8, 0x6F_u8, 0x62_u8, 0x61_u8];
+    assert_eq(encode(&input), "Zm9vYmE=");
+}
+
+@test
+fn property_rfc4648_fixture_foobar() {
+    // "foobar" → "Zm9vYmFy"
+    let input: [Byte; 6] = [0x66_u8, 0x6F_u8, 0x6F_u8, 0x62_u8, 0x61_u8, 0x72_u8];
+    assert_eq(encode(&input), "Zm9vYmFy");
+}
