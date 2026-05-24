@@ -1,0 +1,397 @@
+// =============================================================================
+// core-tests/cli/error/unit_test.vr
+// =============================================================================
+//
+// `core/cli/error.vr` — CLI error types + POSIX exit-code mapping.
+//
+// Surface:
+//   * ExitCode 18-variant + code() returns POSIX integer + helpers
+//   * ParseDiagnostic 5-variant + to_text() renders single-line hints
+//   * ParseErrorKind 13-variant + to_exit() → ExitCode + tag() → stable text
+// =============================================================================
+
+mount core.cli.error.{ExitCode, ParseDiagnostic, ParseErrorKind};
+
+// =============================================================================
+// Section 1: ExitCode 18-variant construction
+// =============================================================================
+
+@test
+fn test_exit_code_ok_variant() {
+    let e: ExitCode = ExitCode.Ok;
+    assert(e is ExitCode.Ok);
+}
+
+@test
+fn test_exit_code_generic_error_variant() {
+    let e: ExitCode = ExitCode.GenericError;
+    assert(e is ExitCode.GenericError);
+}
+
+@test
+fn test_exit_code_usage_variant() {
+    let e: ExitCode = ExitCode.Usage;
+    assert(e is ExitCode.Usage);
+}
+
+@test
+fn test_exit_code_custom_payload() {
+    let e: ExitCode = ExitCode.Custom(42);
+    assert(e is ExitCode.Custom);
+}
+
+// =============================================================================
+// Section 2: ExitCode.code() — POSIX integer mapping (sysexits.h)
+// =============================================================================
+
+@test
+fn test_exit_code_ok_is_zero() {
+    assert(ExitCode.Ok.code() == 0);
+}
+
+@test
+fn test_exit_code_generic_error_is_one() {
+    assert(ExitCode.GenericError.code() == 1);
+}
+
+@test
+fn test_exit_code_usage_is_two() {
+    assert(ExitCode.Usage.code() == 2);
+}
+
+@test
+fn test_exit_code_data_err_is_65() {
+    assert(ExitCode.DataErr.code() == 65);
+}
+
+@test
+fn test_exit_code_no_input_is_66() {
+    assert(ExitCode.NoInput.code() == 66);
+}
+
+@test
+fn test_exit_code_no_user_is_67() {
+    assert(ExitCode.NoUser.code() == 67);
+}
+
+@test
+fn test_exit_code_no_host_is_68() {
+    assert(ExitCode.NoHost.code() == 68);
+}
+
+@test
+fn test_exit_code_unavailable_is_69() {
+    assert(ExitCode.Unavailable.code() == 69);
+}
+
+@test
+fn test_exit_code_software_is_70() {
+    assert(ExitCode.Software.code() == 70);
+}
+
+@test
+fn test_exit_code_os_err_is_71() {
+    assert(ExitCode.OsErr.code() == 71);
+}
+
+@test
+fn test_exit_code_cant_create_is_73() {
+    assert(ExitCode.CantCreate.code() == 73);
+}
+
+@test
+fn test_exit_code_io_err_is_74() {
+    assert(ExitCode.IoErr.code() == 74);
+}
+
+@test
+fn test_exit_code_temp_fail_is_75() {
+    assert(ExitCode.TempFail.code() == 75);
+}
+
+@test
+fn test_exit_code_no_perm_is_77() {
+    assert(ExitCode.NoPerm.code() == 77);
+}
+
+@test
+fn test_exit_code_config_err_is_78() {
+    assert(ExitCode.ConfigErr.code() == 78);
+}
+
+@test
+fn test_exit_code_sig_int_is_130() {
+    assert(ExitCode.SigInt.code() == 130);
+}
+
+@test
+fn test_exit_code_sig_term_is_143() {
+    assert(ExitCode.SigTerm.code() == 143);
+}
+
+@test
+fn test_exit_code_custom_passes_through() {
+    assert(ExitCode.Custom(99).code() == 99);
+    assert(ExitCode.Custom(0).code() == 0);
+    assert(ExitCode.Custom(255).code() == 255);
+}
+
+// =============================================================================
+// Section 3: ExitCode helper ctors
+// =============================================================================
+
+// task #17/#39: `ExitCode.ok()` is routed to a colliding bare `ok` returning ()
+// instead of the static method. usage()/fail() helpers don't collide and work.
+@ignore
+@test
+fn test_exit_code_ok_helper() {
+    let e = ExitCode.ok();
+    assert(e.code() == 0);
+}
+
+@test
+fn test_exit_code_usage_helper() {
+    let e = ExitCode.usage();
+    assert(e.code() == 2);
+}
+
+@test
+fn test_exit_code_fail_helper() {
+    let e = ExitCode.fail();
+    assert(e.code() == 1);
+}
+
+// =============================================================================
+// Section 4: ParseDiagnostic 5-variant
+// =============================================================================
+
+@test
+fn test_parse_diagnostic_did_you_mean() {
+    let d: ParseDiagnostic = ParseDiagnostic.DidYouMean(Text.from("help"));
+    assert(d is ParseDiagnostic.DidYouMean);
+}
+
+@test
+fn test_parse_diagnostic_expected_one_of() {
+    let opts: List<Text> = [Text.from("a"), Text.from("b")];
+    let d: ParseDiagnostic = ParseDiagnostic.ExpectedOneOf(opts);
+    assert(d is ParseDiagnostic.ExpectedOneOf);
+}
+
+@test
+fn test_parse_diagnostic_valid_range() {
+    let d: ParseDiagnostic = ParseDiagnostic.ValidRange(Text.from("[0..=100]"));
+    assert(d is ParseDiagnostic.ValidRange);
+}
+
+@test
+fn test_parse_diagnostic_see_help() {
+    let d: ParseDiagnostic = ParseDiagnostic.SeeHelp(Text.from("vrm"));
+    assert(d is ParseDiagnostic.SeeHelp);
+}
+
+@test
+fn test_parse_diagnostic_note() {
+    let d: ParseDiagnostic = ParseDiagnostic.Note(Text.from("free-form"));
+    assert(d is ParseDiagnostic.Note);
+}
+
+@test
+fn test_parse_diagnostic_variants_pairwise_disjoint() {
+    let a: ParseDiagnostic = ParseDiagnostic.DidYouMean(Text.from("x"));
+    let b: ParseDiagnostic = ParseDiagnostic.Note(Text.from("x"));
+    assert(a is ParseDiagnostic.DidYouMean && !(a is ParseDiagnostic.Note));
+    assert(b is ParseDiagnostic.Note && !(b is ParseDiagnostic.DidYouMean));
+}
+
+// =============================================================================
+// Section 5: ParseDiagnostic.to_text()
+// =============================================================================
+
+@test
+fn test_parse_diagnostic_did_you_mean_renders() {
+    let d = ParseDiagnostic.DidYouMean(Text.from("help"));
+    let s = d.to_text();
+    assert(s.contains(&Text.from("help")));
+}
+
+@test
+fn test_parse_diagnostic_note_renders_payload() {
+    let d = ParseDiagnostic.Note(Text.from("free-form note"));
+    let s = d.to_text();
+    assert(s.contains(&Text.from("free-form note")));
+}
+
+// =============================================================================
+// Section 6: ParseErrorKind 13-variant
+// =============================================================================
+
+@test
+fn test_parse_error_kind_unknown_flag() {
+    let k: ParseErrorKind = ParseErrorKind.UnknownFlag;
+    assert(k is ParseErrorKind.UnknownFlag);
+}
+
+@test
+fn test_parse_error_kind_unknown_subcommand() {
+    let k: ParseErrorKind = ParseErrorKind.UnknownSubcommand;
+    assert(k is ParseErrorKind.UnknownSubcommand);
+}
+
+@test
+fn test_parse_error_kind_missing_required() {
+    let k: ParseErrorKind = ParseErrorKind.MissingRequired;
+    assert(k is ParseErrorKind.MissingRequired);
+}
+
+@test
+fn test_parse_error_kind_missing_value() {
+    let k: ParseErrorKind = ParseErrorKind.MissingValue;
+    assert(k is ParseErrorKind.MissingValue);
+}
+
+@test
+fn test_parse_error_kind_invalid_value() {
+    let k: ParseErrorKind = ParseErrorKind.InvalidValue;
+    assert(k is ParseErrorKind.InvalidValue);
+}
+
+@test
+fn test_parse_error_kind_duplicate_flag() {
+    let k: ParseErrorKind = ParseErrorKind.DuplicateFlag;
+    assert(k is ParseErrorKind.DuplicateFlag);
+}
+
+@test
+fn test_parse_error_kind_too_few_values() {
+    let k: ParseErrorKind = ParseErrorKind.TooFewValues;
+    assert(k is ParseErrorKind.TooFewValues);
+}
+
+@test
+fn test_parse_error_kind_too_many_values() {
+    let k: ParseErrorKind = ParseErrorKind.TooManyValues;
+    assert(k is ParseErrorKind.TooManyValues);
+}
+
+@test
+fn test_parse_error_kind_refinement_failed() {
+    let k: ParseErrorKind = ParseErrorKind.RefinementFailed;
+    assert(k is ParseErrorKind.RefinementFailed);
+}
+
+@test
+fn test_parse_error_kind_mutex_conflict() {
+    let k: ParseErrorKind = ParseErrorKind.MutexConflict;
+    assert(k is ParseErrorKind.MutexConflict);
+}
+
+@test
+fn test_parse_error_kind_requires_missing() {
+    let k: ParseErrorKind = ParseErrorKind.RequiresMissing;
+    assert(k is ParseErrorKind.RequiresMissing);
+}
+
+@test
+fn test_parse_error_kind_not_a_tty() {
+    let k: ParseErrorKind = ParseErrorKind.NotATty;
+    assert(k is ParseErrorKind.NotATty);
+}
+
+@test
+fn test_parse_error_kind_internal_error() {
+    let k: ParseErrorKind = ParseErrorKind.InternalError;
+    assert(k is ParseErrorKind.InternalError);
+}
+
+// =============================================================================
+// Section 7: ParseErrorKind.to_exit() — clig.dev mapping
+// =============================================================================
+
+@test
+fn test_kind_to_exit_unknown_flag_is_usage() {
+    assert(ParseErrorKind.UnknownFlag.to_exit().code() == 2);
+}
+
+@test
+fn test_kind_to_exit_unknown_subcommand_is_usage() {
+    assert(ParseErrorKind.UnknownSubcommand.to_exit().code() == 2);
+}
+
+@test
+fn test_kind_to_exit_missing_required_is_usage() {
+    assert(ParseErrorKind.MissingRequired.to_exit().code() == 2);
+}
+
+@test
+fn test_kind_to_exit_invalid_value_is_data_err() {
+    assert(ParseErrorKind.InvalidValue.to_exit().code() == 65);
+}
+
+@test
+fn test_kind_to_exit_refinement_failed_is_data_err() {
+    assert(ParseErrorKind.RefinementFailed.to_exit().code() == 65);
+}
+
+@test
+fn test_kind_to_exit_not_a_tty_is_generic() {
+    assert(ParseErrorKind.NotATty.to_exit().code() == 1);
+}
+
+@test
+fn test_kind_to_exit_internal_error_is_software() {
+    assert(ParseErrorKind.InternalError.to_exit().code() == 70);
+}
+
+// =============================================================================
+// Section 8: ParseErrorKind.tag() — stable JSON output string
+// =============================================================================
+
+@test
+fn test_kind_tag_unknown_flag() {
+    assert(ParseErrorKind.UnknownFlag.tag() == Text.from("UnknownFlag"));
+}
+
+@test
+fn test_kind_tag_missing_required() {
+    assert(ParseErrorKind.MissingRequired.tag() == Text.from("MissingRequired"));
+}
+
+@test
+fn test_kind_tag_refinement_failed() {
+    assert(ParseErrorKind.RefinementFailed.tag() == Text.from("RefinementFailed"));
+}
+
+@test
+fn test_kind_tag_internal_error() {
+    assert(ParseErrorKind.InternalError.tag() == Text.from("InternalError"));
+}
+
+@test
+fn test_kind_tag_all_distinct() {
+    let tags: List<Text> = [
+        ParseErrorKind.UnknownFlag.tag(),
+        ParseErrorKind.UnknownSubcommand.tag(),
+        ParseErrorKind.MissingRequired.tag(),
+        ParseErrorKind.MissingValue.tag(),
+        ParseErrorKind.InvalidValue.tag(),
+        ParseErrorKind.DuplicateFlag.tag(),
+        ParseErrorKind.TooFewValues.tag(),
+        ParseErrorKind.TooManyValues.tag(),
+        ParseErrorKind.RefinementFailed.tag(),
+        ParseErrorKind.MutexConflict.tag(),
+        ParseErrorKind.RequiresMissing.tag(),
+        ParseErrorKind.NotATty.tag(),
+        ParseErrorKind.InternalError.tag(),
+    ];
+    // 13 entries, all distinct
+    let mut i: Int = 0;
+    while i < tags.len() {
+        let mut j: Int = i + 1;
+        while j < tags.len() {
+            assert(tags[i] != tags[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
