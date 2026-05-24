@@ -1231,8 +1231,8 @@ implement<T> Deque<T> {
         for i in range(0, self.len) {
             let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             match f(item) {
-                Some(v) => result.push_back(v),
-                None => {}
+                Maybe.Some(v) => result.push_back(v),
+                Maybe.None => {}
             }
         }
         result
@@ -2021,8 +2021,8 @@ implement<T: Debug> Debug for Deque<T> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(v) => {
+                Maybe.None => break,
+                Maybe.Some(v) => {
                     if !first {
                         f.write_str(", ")?;
                     }
@@ -2043,8 +2043,8 @@ implement<T: Display> Display for Deque<T> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(v) => {
+                Maybe.None => break,
+                Maybe.Some(v) => {
                     if !first {
                         f.write_str(", ")?;
                     }
