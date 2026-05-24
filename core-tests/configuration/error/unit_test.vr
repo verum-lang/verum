@@ -1,0 +1,332 @@
+// =============================================================================
+// core-tests/configuration/error/unit_test.vr
+// =============================================================================
+//
+// `core/configuration/error.vr` defines:
+//   * `FormatId` — refined Text matching `^[a-z][a-z0-9_-]{0,31}$`
+//   * `ConfigError` — record with format_id/kind/line/column/byte_offset/
+//                     message/path
+//   * `ConfigErrorKind` — 32-variant tag
+//   * `ConfigErrorCategory` — 5-variant (EcClient / EcUpstream /
+//                              EcResource / EcConversion / EcInternal)
+//   * `category()` — routes ConfigErrorKind → ConfigErrorCategory
+//   * `config_err()` / `with_path()` — constructors
+//
+// 12 canonical FormatId factories: toml/yaml/jsonc/json5/ini/properties/
+// hcl/hocon/nestedtext/kdl/cue/dhall.
+// =============================================================================
+
+mount core.configuration.error.{
+    FormatId, ConfigError, ConfigErrorKind, ConfigErrorCategory,
+    config_err, with_path, category, config_error_kind_name,
+    format_id_toml, format_id_yaml, format_id_jsonc, format_id_json5,
+    format_id_ini, format_id_properties, format_id_hcl, format_id_hocon,
+    format_id_nestedtext, format_id_kdl, format_id_cue, format_id_dhall,
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: format_id_* canonical IDs
+// =============================================================================
+
+@test
+fn test_format_id_toml() { assert_eq(format_id_toml(), "toml"); }
+
+@test
+fn test_format_id_yaml() { assert_eq(format_id_yaml(), "yaml"); }
+
+@test
+fn test_format_id_jsonc() { assert_eq(format_id_jsonc(), "jsonc"); }
+
+@test
+fn test_format_id_json5() { assert_eq(format_id_json5(), "json5"); }
+
+@test
+fn test_format_id_ini() { assert_eq(format_id_ini(), "ini"); }
+
+@test
+fn test_format_id_properties() { assert_eq(format_id_properties(), "properties"); }
+
+@test
+fn test_format_id_hcl() { assert_eq(format_id_hcl(), "hcl"); }
+
+@test
+fn test_format_id_hocon() { assert_eq(format_id_hocon(), "hocon"); }
+
+@test
+fn test_format_id_nestedtext() { assert_eq(format_id_nestedtext(), "nestedtext"); }
+
+@test
+fn test_format_id_kdl() { assert_eq(format_id_kdl(), "kdl"); }
+
+@test
+fn test_format_id_cue() { assert_eq(format_id_cue(), "cue"); }
+
+@test
+fn test_format_id_dhall() { assert_eq(format_id_dhall(), "dhall"); }
+
+// =============================================================================
+// Section 2: ConfigErrorKind 32-variant construction
+// =============================================================================
+
+@test
+fn test_kind_unexpected_eof() {
+    let k: ConfigErrorKind = ConfigErrorKind.UnexpectedEof;
+    assert(k is ConfigErrorKind.UnexpectedEof);
+}
+
+@test
+fn test_kind_unexpected_char() {
+    let k: ConfigErrorKind = ConfigErrorKind.UnexpectedChar;
+    assert(k is ConfigErrorKind.UnexpectedChar);
+}
+
+@test
+fn test_kind_invalid_escape() {
+    let k: ConfigErrorKind = ConfigErrorKind.InvalidEscape;
+    assert(k is ConfigErrorKind.InvalidEscape);
+}
+
+@test
+fn test_kind_invalid_number() {
+    let k: ConfigErrorKind = ConfigErrorKind.InvalidNumber;
+    assert(k is ConfigErrorKind.InvalidNumber);
+}
+
+@test
+fn test_kind_duplicate_key() {
+    let k: ConfigErrorKind = ConfigErrorKind.DuplicateKey;
+    assert(k is ConfigErrorKind.DuplicateKey);
+}
+
+@test
+fn test_kind_depth_limit() {
+    let k: ConfigErrorKind = ConfigErrorKind.DepthLimit;
+    assert(k is ConfigErrorKind.DepthLimit);
+}
+
+@test
+fn test_kind_schema_violation() {
+    let k: ConfigErrorKind = ConfigErrorKind.SchemaViolation;
+    assert(k is ConfigErrorKind.SchemaViolation);
+}
+
+@test
+fn test_kind_io_file_not_found() {
+    let k: ConfigErrorKind = ConfigErrorKind.IoFileNotFound;
+    assert(k is ConfigErrorKind.IoFileNotFound);
+}
+
+@test
+fn test_kind_io_other() {
+    let k: ConfigErrorKind = ConfigErrorKind.IoOther;
+    assert(k is ConfigErrorKind.IoOther);
+}
+
+// =============================================================================
+// Section 3: ConfigErrorCategory 5-variant
+// =============================================================================
+
+@test
+fn test_category_client_construction() {
+    let c: ConfigErrorCategory = ConfigErrorCategory.EcClient;
+    assert(c is ConfigErrorCategory.EcClient);
+}
+
+@test
+fn test_category_upstream_construction() {
+    let c: ConfigErrorCategory = ConfigErrorCategory.EcUpstream;
+    assert(c is ConfigErrorCategory.EcUpstream);
+}
+
+@test
+fn test_category_resource_construction() {
+    let c: ConfigErrorCategory = ConfigErrorCategory.EcResource;
+    assert(c is ConfigErrorCategory.EcResource);
+}
+
+@test
+fn test_category_conversion_construction() {
+    let c: ConfigErrorCategory = ConfigErrorCategory.EcConversion;
+    assert(c is ConfigErrorCategory.EcConversion);
+}
+
+@test
+fn test_category_internal_construction() {
+    let c: ConfigErrorCategory = ConfigErrorCategory.EcInternal;
+    assert(c is ConfigErrorCategory.EcInternal);
+}
+
+// =============================================================================
+// Section 4: category() — variant → category routing
+// =============================================================================
+
+@test
+fn test_category_unexpected_eof_is_client() {
+    let k = ConfigErrorKind.UnexpectedEof;
+    assert(category(&k) is ConfigErrorCategory.EcClient);
+}
+
+@test
+fn test_category_duplicate_key_is_client() {
+    let k = ConfigErrorKind.DuplicateKey;
+    assert(category(&k) is ConfigErrorCategory.EcClient);
+}
+
+@test
+fn test_category_schema_violation_is_client() {
+    let k = ConfigErrorKind.SchemaViolation;
+    assert(category(&k) is ConfigErrorCategory.EcClient);
+}
+
+@test
+fn test_category_depth_limit_is_resource() {
+    let k = ConfigErrorKind.DepthLimit;
+    assert(category(&k) is ConfigErrorCategory.EcResource);
+}
+
+@test
+fn test_category_table_too_large_is_resource() {
+    let k = ConfigErrorKind.TableTooLarge;
+    assert(category(&k) is ConfigErrorCategory.EcResource);
+}
+
+@test
+fn test_category_lossy_conversion_is_conversion() {
+    let k = ConfigErrorKind.LossyConversion;
+    assert(category(&k) is ConfigErrorCategory.EcConversion);
+}
+
+@test
+fn test_category_unsupported_feature_is_conversion() {
+    let k = ConfigErrorKind.UnsupportedFeature;
+    assert(category(&k) is ConfigErrorCategory.EcConversion);
+}
+
+@test
+fn test_category_io_file_not_found_is_upstream() {
+    let k = ConfigErrorKind.IoFileNotFound;
+    assert(category(&k) is ConfigErrorCategory.EcUpstream);
+}
+
+@test
+fn test_category_io_permission_denied_is_upstream() {
+    let k = ConfigErrorKind.IoPermissionDenied;
+    assert(category(&k) is ConfigErrorCategory.EcUpstream);
+}
+
+@test
+fn test_category_io_other_is_upstream() {
+    let k = ConfigErrorKind.IoOther;
+    assert(category(&k) is ConfigErrorCategory.EcUpstream);
+}
+
+// =============================================================================
+// Section 5: config_error_kind_name — fixed typo regressions
+// =============================================================================
+//
+// Three typos in pre-fix source (commit 793269375 in branch):
+// "UnexpectedCha" / "InvalidNumbe" / "IoOthe". Pin the correct
+// canonical names.
+
+@test
+fn test_kind_name_unexpected_char_no_typo() {
+    let k = ConfigErrorKind.UnexpectedChar;
+    assert_eq(config_error_kind_name(&k), "UnexpectedChar");
+}
+
+@test
+fn test_kind_name_invalid_number_no_typo() {
+    let k = ConfigErrorKind.InvalidNumber;
+    assert_eq(config_error_kind_name(&k), "InvalidNumber");
+}
+
+@test
+fn test_kind_name_io_other_no_typo() {
+    let k = ConfigErrorKind.IoOther;
+    assert_eq(config_error_kind_name(&k), "IoOther");
+}
+
+@test
+fn test_kind_name_unexpected_eof() {
+    let k = ConfigErrorKind.UnexpectedEof;
+    assert_eq(config_error_kind_name(&k), "UnexpectedEof");
+}
+
+@test
+fn test_kind_name_schema_violation() {
+    let k = ConfigErrorKind.SchemaViolation;
+    assert_eq(config_error_kind_name(&k), "SchemaViolation");
+}
+
+// =============================================================================
+// Section 6: config_err constructor + with_path
+// =============================================================================
+
+@test
+fn test_config_err_basic_construction() {
+    let e = config_err(
+        format_id_toml(),
+        ConfigErrorKind.UnexpectedEof,
+        10,
+        5,
+        100,
+        "EOF in string".clone(),
+    );
+    assert_eq(e.line, 10);
+    assert_eq(e.column, 5);
+    assert_eq(e.byte_offset, 100);
+    assert_eq(e.message, "EOF in string");
+    assert_eq(e.format_id, "toml");
+}
+
+@test
+fn test_config_err_default_path_is_none() {
+    let e = config_err(
+        format_id_yaml(),
+        ConfigErrorKind.InvalidIndent,
+        1,
+        1,
+        0,
+        "bad indent".clone(),
+    );
+    match e.path {
+        Maybe.Some(_) => panic("expected default path = None"),
+        Maybe.None => assert(true),
+    }
+}
+
+@test
+fn test_with_path_attaches_path_string() {
+    let base = config_err(
+        format_id_jsonc(),
+        ConfigErrorKind.UnknownField,
+        3,
+        9,
+        42,
+        "unknown".clone(),
+    );
+    let with_p = with_path(base, "server.host".clone());
+    match with_p.path {
+        Maybe.Some(p) => assert_eq(p, "server.host"),
+        Maybe.None => panic("expected Some(path)"),
+    }
+}
+
+@test
+fn test_with_path_preserves_other_fields() {
+    let base = config_err(
+        format_id_hcl(),
+        ConfigErrorKind.InvalidReference,
+        20,
+        7,
+        200,
+        "bad ref".clone(),
+    );
+    let with_p = with_path(base.clone(), "module.network".clone());
+    assert_eq(with_p.format_id, "hcl");
+    assert_eq(with_p.line, 20);
+    assert_eq(with_p.column, 7);
+    assert_eq(with_p.byte_offset, 200);
+    assert_eq(with_p.message, "bad ref");
+}
