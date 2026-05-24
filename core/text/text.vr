@@ -800,6 +800,50 @@ implement Text {
         true
     }
 
+    /// Check if the text ends with the given character.
+    ///
+    /// Equivalent to `ends_with(&Text.from(ch))` but avoids the
+    /// intermediate allocation — directly compares the trailing UTF-8
+    /// bytes of `self` against the UTF-8 encoding of `ch`.
+    public fn ends_with_char(&self, ch: Char) -> Bool {
+        let mut buf = [0_u8; 4];
+        let n = ch.encode_utf8(&mut buf);
+        let self_bytes = self.as_bytes();
+        if n > self_bytes.len() {
+            return false;
+        }
+        let offset = self_bytes.len() - n;
+        let mut i = 0;
+        while i < n {
+            if self_bytes[offset + i] != buf[i] {
+                return false;
+            }
+            i = i + 1;
+        }
+        true
+    }
+
+    /// Check if the text starts with the given character.
+    ///
+    /// Equivalent to `starts_with(&Text.from(ch))` but avoids the
+    /// intermediate allocation.
+    public fn starts_with_char(&self, ch: Char) -> Bool {
+        let mut buf = [0_u8; 4];
+        let n = ch.encode_utf8(&mut buf);
+        let self_bytes = self.as_bytes();
+        if n > self_bytes.len() {
+            return false;
+        }
+        let mut i = 0;
+        while i < n {
+            if self_bytes[i] != buf[i] {
+                return false;
+            }
+            i = i + 1;
+        }
+        true
+    }
+
     /// Check if contains substring.
     /// Linear-time substring containment via KMP. Pre-fix: nested
     /// O(n·m) byte search.

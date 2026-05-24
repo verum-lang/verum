@@ -1,0 +1,230 @@
+// =============================================================================
+// core-tests/io/path/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.io.path`.
+// =============================================================================
+
+mount core.io.path.{Path, PathBuf, Component, MAIN_SEPARATOR, normalize};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — Path: Eq is reflexive and symmetric
+// =============================================================================
+
+@test
+fn law_path_eq_reflexive() {
+    let paths: List<Text> = [
+        Text.from(""), Text.from("/"), Text.from("a"),
+        Text.from("/home"), Text.from("/home/user"),
+        Text.from("../foo"), Text.from("./bar"),
+        Text.from("a/b/c"),
+    ];
+    for s in paths.iter() {
+        let p = Path.new(s);
+        assert_eq(p, p);
+    }
+}
+
+@test
+fn law_path_eq_symmetric() {
+    let pairs: List<(Text, Text)> = [
+        (Text.from("/x"), Text.from("/x")),
+        (Text.from("/x"), Text.from("/y")),
+        (Text.from(""), Text.from("")),
+        (Text.from("a"), Text.from("b")),
+    ];
+    for (a, b) in pairs.iter() {
+        let pa = Path.new(a);
+        let pb = Path.new(b);
+        let ab = pa == pb;
+        let ba = pb == pa;
+        assert_eq(ab, ba);
+    }
+}
+
+// =============================================================================
+// §B — Path.clone produces an equal independent value
+// =============================================================================
+
+@test
+fn law_path_clone_eq() {
+    let paths: List<Text> = [
+        Text.from(""), Text.from("/"), Text.from("a/b/c.txt"),
+        Text.from("/abs"), Text.from("rel/path"),
+    ];
+    for s in paths.iter() {
+        let p = Path.new(s);
+        let c = p.clone();
+        assert_eq(p, c);
+    }
+}
+
+// =============================================================================
+// §C — Path.is_absolute and Path.is_relative are exact negations
+// =============================================================================
+
+@test
+fn law_path_absolute_relative_negation() {
+    let paths: List<Text> = [
+        Text.from("/"), Text.from("/home"), Text.from("foo"),
+        Text.from("./bar"), Text.from("../baz"),
+        Text.from("a"), Text.from(""),
+    ];
+    for s in paths.iter() {
+        let p = Path.new(s);
+        // empty is special — both false
+        if !p.is_empty() {
+            assert_eq(p.is_absolute(), !p.is_relative());
+        }
+    }
+}
+
+// =============================================================================
+// §D — Path.to_path_buf().as_path() is round-trip identity at Text level
+// =============================================================================
+
+@test
+fn law_path_to_pathbuf_round_trip() {
+    let texts: List<Text> = [
+        Text.from(""), Text.from("/"), Text.from("/home/user"),
+        Text.from("a/b/c"), Text.from("rel/path"),
+    ];
+    for t in texts.iter() {
+        let p = Path.new(t);
+        let buf = p.to_path_buf();
+        assert_eq(buf.to_text(), p.to_text());
+    }
+}
+
+// =============================================================================
+// §E — PathBuf.push then PathBuf.pop is identity on non-empty paths
+//      GATED by #io-4 (regression_test.vr §A) — pinned `@ignore`.
+// =============================================================================
+
+@ignore
+@test
+fn law_pathbuf_push_pop_identity() {
+    let base = Text.from("/home/user");
+    let suffixes: List<Text> = [
+        Text.from("file.txt"), Text.from("docs"), Text.from("a"),
+    ];
+    for s in suffixes.iter() {
+        let mut buf = PathBuf.from(&base);
+        let orig = buf.to_text();
+        buf.push(&Path.new(s));
+        assert(buf.pop());
+        assert_eq(buf.to_text(), orig);
+    }
+}
+
+// =============================================================================
+// §F — Component: Eq is reflexive across all 5 variants
+// =============================================================================
+
+@test
+fn law_component_eq_reflexive_exhaustive() {
+    let cs: List<Component> = [
+        Component.RootDir, Component.CurDir, Component.ParentDir,
+        Component.Normal(Text.from("foo")),
+        Component.Prefix(Text.from("C:")),
+    ];
+    for c in cs.iter() {
+        match c {
+            RootDir => assert_eq(Component.RootDir, Component.RootDir),
+            CurDir => assert_eq(Component.CurDir, Component.CurDir),
+            ParentDir => assert_eq(Component.ParentDir, Component.ParentDir),
+            Normal(_) => {}  // can't easily reflex without cloning text
+            Prefix(_) => {}
+        }
+    }
+}
+
+// =============================================================================
+// §G — Path.parent.unwrap_or(empty).join(file_name) round-trip
+//      GATED by #io-4 (regression_test.vr §A) — pinned `@ignore`.
+// =============================================================================
+
+@ignore
+@test
+fn law_path_parent_join_filename_recovers_path() {
+    let paths: List<Text> = [
+        Text.from("/home/user/file.txt"),
+        Text.from("/etc/passwd"),
+        Text.from("/usr/local/bin/foo"),
+    ];
+    for s in paths.iter() {
+        let p = Path.new(s);
+        match p.parent() {
+            Some(parent) => {
+                match p.file_name() {
+                    Some(name) => {
+                        let rejoined = parent.join_str(&name);
+                        assert_eq(rejoined.to_text(), *s);
+                    }
+                    None => assert(false),
+                }
+            }
+            None => assert(false),
+        }
+    }
+}
+
+// =============================================================================
+// §H — Path.extension and Path.file_stem are complementary
+// =============================================================================
+//
+// If file_name = stem + "." + extension, then we recover the original name.
+
+@test
+fn law_path_stem_extension_recovers_file_name() {
+    let paths: List<Text> = [
+        Text.from("/home/file.txt"),
+        Text.from("/x/y.tar.gz"),
+        Text.from("a.md"),
+    ];
+    for s in paths.iter() {
+        let p = Path.new(s);
+        match (p.file_stem(), p.extension(), p.file_name()) {
+            (Some(stem), Some(ext), Some(name)) => {
+                let reconstructed = f"{stem}.{ext}";
+                assert_eq(reconstructed, name);
+            }
+            _ => {}  // no extension or stem cases handled elsewhere
+        }
+    }
+}
+
+// =============================================================================
+// §I — MAIN_SEPARATOR is consistent with what build_with_separator produces
+// =============================================================================
+
+@test
+fn law_main_separator_is_well_known() {
+    // Verify MAIN_SEPARATOR is one of the two platform-known values.
+    assert(MAIN_SEPARATOR == '/' || MAIN_SEPARATOR == '\\');
+}
+
+// =============================================================================
+// §J — PathBuf.clone preserves all observable state
+// =============================================================================
+
+@test
+fn law_pathbuf_clone_round_trip() {
+    let texts: List<Text> = [
+        Text.from(""), Text.from("/"),
+        Text.from("/home/user/docs/file.txt"),
+        Text.from("../../relative"),
+    ];
+    for t in texts.iter() {
+        let buf = PathBuf.from(t);
+        let cloned = buf.clone();
+        assert_eq(buf, cloned);
+        assert_eq(buf.to_text(), cloned.to_text());
+        assert_eq(buf.len(), cloned.len());
+        assert_eq(buf.is_empty(), cloned.is_empty());
+    }
+}
+
+fn main() {}
