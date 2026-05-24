@@ -214,7 +214,10 @@ fn regression_chain_reads_across_boundary() {
 // codegen/expressions.rs (look for the try-operator desugaring).
 // =============================================================================
 
-@ignore
+// CLOSED 2026-05-24 — compile_try alias resolution.  Pre-fix
+// `IoResult<Int>` failed `WKT::Result.matches("IoResult")` (alias not
+// resolved before classifier).  Now `?` correctly classifies aliased
+// Result types and preserves StreamError.kind through Err propagation.
 @test
 fn regression_question_mark_preserves_kind() {
     fn helper() -> IoResult<Int> {

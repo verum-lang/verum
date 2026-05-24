@@ -17190,10 +17190,23 @@ impl VbcCodegen {
 
         // Classify the inner expression's type using canonical constants.
         // Strip generic parameters to get the base name for WKT matching.
+        // SOUNDNESS (closes task #io-14 codegen leg): resolve type aliases
+        // BEFORE the WKT match so `IoResult<T>` (= `Result<T, StreamError>`)
+        // and similar stdlib aliases (`PathResult`, `FsResult`, …) classify
+        // as Result correctly.  Without this, base_name "IoResult" fails
+        // WKT::Result.matches and the ? operator falls into the
+        // "user-defined Try type" branch with success_tag=0 default —
+        // which happens to coincide with Result.Ok=0 so propagation
+        // appeared to work for the Ok path, but cross-type residual
+        // conversion (`from_residual` lookup) silently mis-routed for
+        // the Err arm.
         let type_name = self.extract_expr_type_name(inner);
-        let base_name: Option<&str> = type_name
-            .as_deref()
-            .map(|n| n.split('<').next().unwrap_or(n).trim());
+        let base_name_owned: Option<String> = type_name.as_deref().map(|n| {
+            let stripped = n.split('<').next().unwrap_or(n).trim();
+            let resolved = self.resolve_type_alias(stripped);
+            VbcCodegen::strip_generic_args(&resolved).to_string()
+        });
+        let base_name: Option<&str> = base_name_owned.as_deref();
 
         // Three-way classification: Maybe, Result, or user-defined Try type.
         let is_maybe_type = base_name.is_some_and(|n| WKT::Maybe.matches(n));
@@ -17262,11 +17275,20 @@ impl VbcCodegen {
             //
             // Cross-type: Maybe→Result, or Result→Result with different error types.
             //   Must call `from_residual(residual)` on the outer return type.
+            // SOUNDNESS (task #io-14): resolve aliases on the OUTER return
+            // type too — `fn helper() -> IoResult<Int>` has outer name
+            // "IoResult" which must reduce to "Result" before the WKT match
+            // so the same-type fast-path correctly identifies Result→Result
+            // propagation.
             let outer_base: Option<String> = self
                 .ctx
                 .current_return_type_name
                 .as_deref()
-                .map(|n| n.split('<').next().unwrap_or(n).trim().to_owned());
+                .map(|n| {
+                    let stripped = n.split('<').next().unwrap_or(n).trim();
+                    let resolved = self.resolve_type_alias(stripped);
+                    VbcCodegen::strip_generic_args(&resolved).to_string()
+                });
 
             let same_type = match (&outer_base.as_deref(), is_maybe_type, is_result_type) {
                 (Some(o), true, _) => WKT::Maybe.matches(o),

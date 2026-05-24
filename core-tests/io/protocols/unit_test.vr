@@ -402,8 +402,11 @@ fn test_io_result_err() {
 @test
 fn test_io_result_propagates_via_question_mark() {
     // Validates that `?` on an Err short-circuits without panicking;
-    // we don't assert kind preservation here (that's pinned via
-    // regression_test.vr::regression_question_mark_preserves_kind).
+    // full kind-preservation through `?` is pinned via
+    // regression_test.vr::regression_question_mark_preserves_kind.
+    // (This file exhibits a file-level codegen state interaction
+    // between test functions that masks the alias-resolved kind
+    // recovery; pinned for separate investigation.)
     fn helper() -> IoResult<Int> {
         let r: IoResult<Int> = Err(StreamError.new(IoErrorKind.BrokenPipe));
         let v = r?;
