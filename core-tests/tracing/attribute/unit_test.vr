@@ -1,0 +1,255 @@
+// =============================================================================
+// core-tests/tracing/attribute/unit_test.vr
+// =============================================================================
+//
+// `core/tracing/attribute.vr` defines OpenTelemetry-compatible attribute
+// values + sets attached to spans, events, links, resources.
+//
+//   * `AttributeValue` — 8-variant: Text/Bool/Int/Float +
+//                        TextArray/BoolArray/IntArray/FloatArray
+//   * `AttributeKind`  — 8-variant: KText/KBool/KInt/KFloat +
+//                        KTextArray/KBoolArray/KIntArray/KFloatArray
+//   * `AttributeSet`   — ordered list of (Text, AttributeValue) with
+//                        ATTRIBUTE_COUNT_LIMIT=128 cap.
+// =============================================================================
+
+mount core.tracing.attribute.{
+    AttributeValue, AttributeKind, AttributeSet,
+    ATTRIBUTE_COUNT_LIMIT,
+};
+
+// =============================================================================
+// Section 1: ATTRIBUTE_COUNT_LIMIT constant
+// =============================================================================
+
+@test
+fn test_attribute_count_limit_is_128() {
+    assert_eq(ATTRIBUTE_COUNT_LIMIT, 128);
+}
+
+// =============================================================================
+// Section 2: AttributeValue scalar variants
+// =============================================================================
+
+@test
+fn test_attribute_value_text_construction() {
+    let v: AttributeValue = AttributeValue.Text("hello".clone());
+    assert(v is AttributeValue.Text);
+}
+
+@test
+fn test_attribute_value_bool_construction() {
+    let v: AttributeValue = AttributeValue.Bool(true);
+    assert(v is AttributeValue.Bool);
+}
+
+@test
+fn test_attribute_value_int_construction() {
+    let v: AttributeValue = AttributeValue.Int(42);
+    assert(v is AttributeValue.Int);
+}
+
+@test
+fn test_attribute_value_float_construction() {
+    let v: AttributeValue = AttributeValue.Float(3.14);
+    assert(v is AttributeValue.Float);
+}
+
+// =============================================================================
+// Section 3: AttributeValue array variants
+// =============================================================================
+
+@test
+fn test_attribute_value_text_array_construction() {
+    let v: AttributeValue = AttributeValue.TextArray(["a".clone(), "b".clone()]);
+    assert(v is AttributeValue.TextArray);
+}
+
+@test
+fn test_attribute_value_bool_array_construction() {
+    let v: AttributeValue = AttributeValue.BoolArray([true, false, true]);
+    assert(v is AttributeValue.BoolArray);
+}
+
+@test
+fn test_attribute_value_int_array_construction() {
+    let v: AttributeValue = AttributeValue.IntArray([1, 2, 3]);
+    assert(v is AttributeValue.IntArray);
+}
+
+@test
+fn test_attribute_value_float_array_construction() {
+    let v: AttributeValue = AttributeValue.FloatArray([1.0, 2.0]);
+    assert(v is AttributeValue.FloatArray);
+}
+
+// =============================================================================
+// Section 4: AttributeValue.kind() — kind dispatch
+// =============================================================================
+
+@test
+fn test_kind_text() {
+    let v = AttributeValue.Text("x".clone());
+    assert(v.kind() is AttributeKind.KText);
+}
+
+@test
+fn test_kind_bool() {
+    let v = AttributeValue.Bool(false);
+    assert(v.kind() is AttributeKind.KBool);
+}
+
+@test
+fn test_kind_int() {
+    let v = AttributeValue.Int(0);
+    assert(v.kind() is AttributeKind.KInt);
+}
+
+@test
+fn test_kind_float() {
+    let v = AttributeValue.Float(0.0);
+    assert(v.kind() is AttributeKind.KFloat);
+}
+
+@test
+fn test_kind_text_array() {
+    let v = AttributeValue.TextArray([]);
+    assert(v.kind() is AttributeKind.KTextArray);
+}
+
+@test
+fn test_kind_bool_array() {
+    let v = AttributeValue.BoolArray([]);
+    assert(v.kind() is AttributeKind.KBoolArray);
+}
+
+@test
+fn test_kind_int_array() {
+    let v = AttributeValue.IntArray([]);
+    assert(v.kind() is AttributeKind.KIntArray);
+}
+
+@test
+fn test_kind_float_array() {
+    let v = AttributeValue.FloatArray([]);
+    assert(v.kind() is AttributeKind.KFloatArray);
+}
+
+// =============================================================================
+// Section 5: AttributeKind 8-variant disjointness
+// =============================================================================
+
+@test
+fn test_attribute_kind_variants_disjoint() {
+    let kt: AttributeKind = AttributeKind.KText;
+    let kb: AttributeKind = AttributeKind.KBool;
+    let ki: AttributeKind = AttributeKind.KInt;
+    let kf: AttributeKind = AttributeKind.KFloat;
+    let kta: AttributeKind = AttributeKind.KTextArray;
+    let kba: AttributeKind = AttributeKind.KBoolArray;
+    let kia: AttributeKind = AttributeKind.KIntArray;
+    let kfa: AttributeKind = AttributeKind.KFloatArray;
+
+    assert(kt is AttributeKind.KText);
+    assert(kb is AttributeKind.KBool);
+    assert(ki is AttributeKind.KInt);
+    assert(kf is AttributeKind.KFloat);
+    assert(kta is AttributeKind.KTextArray);
+    assert(kba is AttributeKind.KBoolArray);
+    assert(kia is AttributeKind.KIntArray);
+    assert(kfa is AttributeKind.KFloatArray);
+
+    // Sample cross-disjointness
+    assert(!(kt is AttributeKind.KBool));
+    assert(!(kf is AttributeKind.KFloatArray));
+    assert(!(kta is AttributeKind.KText));
+}
+
+// =============================================================================
+// Section 6: AttributeSet construction
+// =============================================================================
+
+@test
+fn test_attribute_set_new_is_empty() {
+    let s = AttributeSet.new();
+    assert(s.is_empty());
+    assert_eq(s.len(), 0);
+}
+
+@test
+fn test_attribute_set_with_capacity_is_empty() {
+    let s = AttributeSet.with_capacity(16);
+    assert(s.is_empty());
+}
+
+// =============================================================================
+// Section 7: AttributeSet.set + get
+// =============================================================================
+
+@test
+fn test_attribute_set_set_then_get() {
+    let mut s = AttributeSet.new();
+    s.set("env".clone(), AttributeValue.Text("prod".clone()));
+    let key = "env".clone();
+    let got = s.get(&key);
+    match got {
+        Maybe.Some(v) => assert(v is AttributeValue.Text),
+        Maybe.None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_attribute_set_set_increments_len() {
+    let mut s = AttributeSet.new();
+    s.set("a".clone(), AttributeValue.Int(1));
+    assert_eq(s.len(), 1);
+    s.set("b".clone(), AttributeValue.Int(2));
+    assert_eq(s.len(), 2);
+}
+
+@test
+fn test_attribute_set_set_same_key_replaces() {
+    let mut s = AttributeSet.new();
+    s.set("k".clone(), AttributeValue.Int(1));
+    s.set("k".clone(), AttributeValue.Int(2));
+    // Length stays 1 — same key replaced not appended.
+    assert_eq(s.len(), 1);
+}
+
+@test
+fn test_attribute_set_get_missing_returns_none() {
+    let s = AttributeSet.new();
+    let missing = "missing".clone();
+    let got = s.get(&missing);
+    match got {
+        Maybe.Some(_) => panic("expected None"),
+        Maybe.None => assert(true),
+    }
+}
+
+// =============================================================================
+// Section 8: AttributeSet.clone preserves entries
+// =============================================================================
+
+@test
+fn test_attribute_set_clone_preserves_len() {
+    let mut s = AttributeSet.new();
+    s.set("a".clone(), AttributeValue.Int(1));
+    s.set("b".clone(), AttributeValue.Int(2));
+    s.set("c".clone(), AttributeValue.Int(3));
+    let c = s.clone();
+    assert_eq(c.len(), 3);
+}
+
+@test
+fn test_attribute_set_clone_preserves_lookup() {
+    let mut s = AttributeSet.new();
+    s.set("color".clone(), AttributeValue.Text("blue".clone()));
+    let c = s.clone();
+    let key = "color".clone();
+    let got = c.get(&key);
+    match got {
+        Maybe.Some(v) => assert(v is AttributeValue.Text),
+        Maybe.None => panic("clone lost the entry"),
+    }
+}
