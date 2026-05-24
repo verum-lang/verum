@@ -833,8 +833,8 @@ implement<T> Deque<T> {
         let mut i = at;
         while i < self.len {
             match self.get(i) {
-                Some(v) => other.push_back(v.clone()),
-                None => break,
+                Maybe.Some(v) => other.push_back(v.clone()),
+                Maybe.None => break,
             }
             i = i + 1;
         }
