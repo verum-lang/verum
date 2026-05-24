@@ -1,0 +1,106 @@
+// =============================================================================
+// core-tests/sync/once/unit_test.vr
+// =============================================================================
+//
+// `core/sync/once.vr` defines `Once` (one-time initialization
+// synchronization primitive) + `OnceState` enum + `OnceLock<T>` (lazy
+// init container).
+//
+// This file covers the testable static surface: OnceState 4-variant
+// disjointness. Live Once.call_once / call_once_force /
+// try_call_once / state() interactions require concurrent execution
+// + need a multi-threaded test harness — tested at the language
+// level in `vcs/specs/L2-standard/sync/once/`.
+// =============================================================================
+
+mount core.sync.once.{OnceState};
+
+// =============================================================================
+// Section 1: OnceState variant construction
+// =============================================================================
+
+@test
+fn test_once_state_new_construction() {
+    let s: OnceState = OnceState.New;
+    assert(s is OnceState.New);
+}
+
+@test
+fn test_once_state_in_progress_construction() {
+    let s: OnceState = OnceState.InProgress;
+    assert(s is OnceState.InProgress);
+}
+
+@test
+fn test_once_state_done_construction() {
+    let s: OnceState = OnceState.Done;
+    assert(s is OnceState.Done);
+}
+
+@test
+fn test_once_state_poisoned_construction() {
+    let s: OnceState = OnceState.Poisoned;
+    assert(s is OnceState.Poisoned);
+}
+
+// =============================================================================
+// Section 2: OnceState variant disjointness
+// =============================================================================
+
+@test
+fn test_once_state_variants_disjoint() {
+    let n: OnceState = OnceState.New;
+    let ip: OnceState = OnceState.InProgress;
+    let d: OnceState = OnceState.Done;
+    let p: OnceState = OnceState.Poisoned;
+
+    assert(n is OnceState.New);
+    assert(ip is OnceState.InProgress);
+    assert(d is OnceState.Done);
+    assert(p is OnceState.Poisoned);
+
+    // Cross-disjointness sample
+    assert(!(n is OnceState.InProgress));
+    assert(!(n is OnceState.Done));
+    assert(!(n is OnceState.Poisoned));
+
+    assert(!(ip is OnceState.New));
+    assert(!(ip is OnceState.Done));
+    assert(!(ip is OnceState.Poisoned));
+
+    assert(!(d is OnceState.New));
+    assert(!(d is OnceState.InProgress));
+    assert(!(d is OnceState.Poisoned));
+
+    assert(!(p is OnceState.New));
+    assert(!(p is OnceState.InProgress));
+    assert(!(p is OnceState.Done));
+}
+
+// =============================================================================
+// Section 3: OnceState semantic ordering (state machine)
+// =============================================================================
+//
+// Documented state transitions:
+//   New → InProgress → Done   (success path)
+//   New → InProgress → Poisoned (panic path)
+// New, InProgress, Done, Poisoned are all distinct terminal
+// observation points. This test pins the 4 variants exist + are
+// distinct so consumers can dispatch on them without ambiguity.
+
+@test
+fn test_state_machine_all_four_states_exist() {
+    let states: [OnceState; 4] = [
+        OnceState.New,
+        OnceState.InProgress,
+        OnceState.Done,
+        OnceState.Poisoned,
+    ];
+    // All variants constructible — pins that the ADT shape didn't
+    // collapse to 3-variant under task #47 stage-3 cascade.
+    assert_eq(4, 4); // sanity
+    assert(states[0] is OnceState.New);
+    assert(states[1] is OnceState.InProgress);
+    assert(states[2] is OnceState.Done);
+    assert(states[3] is OnceState.Poisoned);
+}
