@@ -1,0 +1,67 @@
+// =============================================================================
+// core-tests/io/file/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core.io.file`.
+// =============================================================================
+
+mount core.io.file.{
+    O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC, O_APPEND,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A — O_* mode flags are mutually exclusive in their 2-bit field
+// =============================================================================
+
+@test
+fn law_o_mode_flags_distinct() {
+    assert(O_RDONLY != O_WRONLY);
+    assert(O_WRONLY != O_RDWR);
+    assert(O_RDONLY != O_RDWR);
+}
+
+// =============================================================================
+// §B — Modifier flags are powers of 2 (single-bit set)
+// =============================================================================
+
+@test
+fn law_o_creat_power_of_two() {
+    assert_eq(O_CREAT & (O_CREAT - 1), 0);
+}
+
+@test
+fn law_o_excl_power_of_two() {
+    assert_eq(O_EXCL & (O_EXCL - 1), 0);
+}
+
+@test
+fn law_o_trunc_power_of_two() {
+    assert_eq(O_TRUNC & (O_TRUNC - 1), 0);
+}
+
+@test
+fn law_o_append_power_of_two() {
+    assert_eq(O_APPEND & (O_APPEND - 1), 0);
+}
+
+// =============================================================================
+// §C — Modifier flags are bitwise-disjoint
+// =============================================================================
+
+@test
+fn law_modifier_flags_pairwise_disjoint() {
+    let flags: List<Int> = [O_CREAT, O_EXCL, O_TRUNC, O_APPEND];
+    let n = flags.len();
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n {
+            assert_eq(flags[i] & flags[j], 0);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn main() {}
