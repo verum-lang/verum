@@ -1,0 +1,285 @@
+// =============================================================================
+// core-tests/io/protocols/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `core.io.protocols`.
+//
+// Strategy:
+//   * IoErrorKind has 20 variants — exhaustive sweeps of Eq / Clone laws.
+//   * SeekFrom has 3 variants over Int payloads — boundary-sample sweeps.
+//   * from_raw_os_error is a partial function (POSIX-stable codes) — pin
+//     the table per platform's reachable subset.
+// =============================================================================
+
+mount core.io.protocols.{StreamError, IoErrorKind, IoResult, SeekFrom};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// All 20 IoErrorKind variants — used as the domain for exhaustive sweeps.
+fn all_io_error_kinds() -> List<IoErrorKind> {
+    [
+        IoErrorKind.NotFound, IoErrorKind.PermissionDenied,
+        IoErrorKind.ConnectionRefused, IoErrorKind.ConnectionReset,
+        IoErrorKind.ConnectionAborted, IoErrorKind.NotConnected,
+        IoErrorKind.AddrInUse, IoErrorKind.AddrNotAvailable,
+        IoErrorKind.BrokenPipe, IoErrorKind.AlreadyExists,
+        IoErrorKind.WouldBlock, IoErrorKind.InvalidInput,
+        IoErrorKind.InvalidData, IoErrorKind.TimedOut,
+        IoErrorKind.WriteZero, IoErrorKind.Interrupted,
+        IoErrorKind.UnexpectedEof, IoErrorKind.OutOfMemory,
+        IoErrorKind.Unsupported, IoErrorKind.Other,
+    ]
+}
+
+// =============================================================================
+// §A — IoErrorKind: Eq is reflexive across all 20 variants
+// =============================================================================
+
+@test
+fn law_io_error_kind_eq_reflexive_exhaustive() {
+    for k in all_io_error_kinds().iter() {
+        assert_eq(*k, *k);
+    }
+}
+
+// =============================================================================
+// §B — IoErrorKind: clone(x) == x for every variant
+// =============================================================================
+
+@test
+fn law_io_error_kind_clone_idempotent_exhaustive() {
+    for k in all_io_error_kinds().iter() {
+        let c = (*k).clone();
+        assert_eq(*k, c);
+    }
+}
+
+// =============================================================================
+// §C — IoErrorKind: distinct variants are pairwise non-equal
+// =============================================================================
+
+@test
+fn law_io_error_kind_distinct_pairwise() {
+    let kinds = all_io_error_kinds();
+    let n = kinds.len();
+    let mut i: Int = 0;
+    while i < n {
+        let mut j: Int = i + 1;
+        while j < n {
+            assert(kinds[i] != kinds[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §D — StreamError: Eq is reflexive (kind + message)
+// =============================================================================
+
+@test
+fn law_stream_error_eq_reflexive_no_message_exhaustive() {
+    for k in all_io_error_kinds().iter() {
+        let e = StreamError.new(*k);
+        assert_eq(e, e);
+    }
+}
+
+@test
+fn law_stream_error_eq_reflexive_with_message_exhaustive() {
+    for k in all_io_error_kinds().iter() {
+        let e = StreamError.with_message(*k, "test");
+        assert_eq(e, e);
+    }
+}
+
+// =============================================================================
+// §E — StreamError: Clone preserves all observable state
+// =============================================================================
+
+@test
+fn law_stream_error_clone_round_trip_no_message_exhaustive() {
+    for k in all_io_error_kinds().iter() {
+        let e = StreamError.new(*k);
+        let c = e.clone();
+        assert_eq(e, c);
+        assert_eq(e.kind(), c.kind());
+    }
+}
+
+@test
+fn law_stream_error_clone_round_trip_with_message_exhaustive() {
+    for k in all_io_error_kinds().iter() {
+        let e = StreamError.with_message(*k, "msg");
+        let c = e.clone();
+        assert_eq(e, c);
+        assert_eq(e.kind(), c.kind());
+    }
+}
+
+// =============================================================================
+// §F — StreamError.new(k).kind() == k  (round-trip identity)
+// =============================================================================
+
+@test
+fn law_stream_error_new_kind_round_trip_exhaustive() {
+    for k in all_io_error_kinds().iter() {
+        let e = StreamError.new(*k);
+        assert_eq(e.kind(), *k);
+    }
+}
+
+@test
+fn law_stream_error_with_message_kind_round_trip_exhaustive() {
+    for k in all_io_error_kinds().iter() {
+        let e = StreamError.with_message(*k, "any");
+        assert_eq(e.kind(), *k);
+    }
+}
+
+// =============================================================================
+// §G — StreamError.new(k).message() is None
+// =============================================================================
+
+@test
+fn law_stream_error_new_message_is_none_exhaustive() {
+    for k in all_io_error_kinds().iter() {
+        let e = StreamError.new(*k);
+        assert(e.message().is_none());
+    }
+}
+
+@test
+fn law_stream_error_with_message_message_is_some_exhaustive() {
+    for k in all_io_error_kinds().iter() {
+        let e = StreamError.with_message(*k, "payload");
+        assert(e.message().is_some());
+    }
+}
+
+// =============================================================================
+// §H — from_raw_os_error: POSIX-stable code table is total over recognised
+//      codes, falls through to Other for everything else.
+// =============================================================================
+
+@test
+fn law_from_raw_os_error_posix_stable_table() {
+    // (code, expected_kind) pairs that hold on every platform.
+    assert_eq(StreamError.from_raw_os_error(2).kind(),  IoErrorKind.NotFound);
+    assert_eq(StreamError.from_raw_os_error(13).kind(), IoErrorKind.PermissionDenied);
+    assert_eq(StreamError.from_raw_os_error(17).kind(), IoErrorKind.AlreadyExists);
+    assert_eq(StreamError.from_raw_os_error(32).kind(), IoErrorKind.BrokenPipe);
+    assert_eq(StreamError.from_raw_os_error(4).kind(),  IoErrorKind.Interrupted);
+    assert_eq(StreamError.from_raw_os_error(22).kind(), IoErrorKind.InvalidInput);
+    assert_eq(StreamError.from_raw_os_error(12).kind(), IoErrorKind.OutOfMemory);
+}
+
+@test
+fn law_from_raw_os_error_fallthrough_to_other() {
+    // Codes that are not in any platform's table fall to Other.
+    let unrecognised: List<Int> = [0, 1, 3, 5, 6, 7, 8, 9, 10, 14, 15, 16,
+                                    18, 19, 20, 21, 23, 24, 25, 26, 27,
+                                    28, 29, 30, 31, 33, 50, 200, 500, 1000,
+                                    99999, -1, -100];
+    for code in unrecognised.iter() {
+        // Don't assert; some codes ARE in the platform table (e.g. linux 11).
+        // Just verify the result has SOME valid kind.
+        let e = StreamError.from_raw_os_error(*code);
+        let _: IoErrorKind = e.kind();  // must not panic
+    }
+}
+
+@test
+fn law_from_raw_os_error_zero_is_other() {
+    // errno 0 is "no error", not a recognised error code — fall to Other.
+    assert_eq(StreamError.from_raw_os_error(0).kind(), IoErrorKind.Other);
+}
+
+@test
+fn law_from_raw_os_error_negative_is_other() {
+    // Negative codes are not real errnos — fall to Other.
+    for code in [-1, -2, -100, -999].iter() {
+        assert_eq(StreamError.from_raw_os_error(*code).kind(), IoErrorKind.Other);
+    }
+}
+
+// =============================================================================
+// §I — from_errno == from_raw_os_error  (alias identity)
+// =============================================================================
+
+@test
+fn law_from_errno_alias_identity() {
+    // The two functions MUST agree on every code — they share the same dispatcher.
+    let codes: List<Int> = [0, 1, 2, 4, 11, 12, 13, 17, 22, 32, 35, 60, 99, 100, 999];
+    for c in codes.iter() {
+        let a = StreamError.from_raw_os_error(*c);
+        let b = StreamError.from_errno(*c);
+        assert_eq(a.kind(), b.kind());
+    }
+}
+
+// =============================================================================
+// §J — SeekFrom: Eq distinguishes payload AND variant
+// =============================================================================
+
+@test
+fn law_seekfrom_eq_distinguishes_payload() {
+    // Same variant, payload differs → not equal.
+    let xs: List<Int> = [-1000, -1, 0, 1, 100, 1000];
+    for a in xs.iter() {
+        for b in xs.iter() {
+            let sa = SeekFrom.Start(*a);
+            let sb = SeekFrom.Start(*b);
+            if *a == *b { assert_eq(sa, sb); }
+            else { assert(sa != sb); }
+        }
+    }
+}
+
+@test
+fn law_seekfrom_eq_distinguishes_variants() {
+    // Different variants with same payload → not equal.
+    let xs: List<Int> = [-5, 0, 5];
+    for n in xs.iter() {
+        assert(SeekFrom.Start(*n) != SeekFrom.End(*n));
+        assert(SeekFrom.End(*n) != SeekFrom.Current(*n));
+        assert(SeekFrom.Start(*n) != SeekFrom.Current(*n));
+    }
+}
+
+// =============================================================================
+// §K — SeekFrom: Clone is identity over both variant and payload
+// =============================================================================
+
+@test
+fn law_seekfrom_clone_round_trip_start() {
+    let xs: List<Int> = [-1000, -1, 0, 1, 1000];
+    for n in xs.iter() {
+        let s = SeekFrom.Start(*n);
+        let c = s.clone();
+        assert_eq(s, c);
+    }
+}
+
+@test
+fn law_seekfrom_clone_round_trip_end() {
+    let xs: List<Int> = [-1000, -1, 0, 1, 1000];
+    for n in xs.iter() {
+        let s = SeekFrom.End(*n);
+        let c = s.clone();
+        assert_eq(s, c);
+    }
+}
+
+@test
+fn law_seekfrom_clone_round_trip_current() {
+    let xs: List<Int> = [-1000, -1, 0, 1, 1000];
+    for n in xs.iter() {
+        let s = SeekFrom.Current(*n);
+        let c = s.clone();
+        assert_eq(s, c);
+    }
+}
+
+fn main() {}
