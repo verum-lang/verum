@@ -219,7 +219,7 @@ implement<T> [T] {
     /// "non-pointer" }` because `&value` is dispatched as if it were a
     /// closure.  Mirror this naming on `rindex_of`.  Pinned in
     /// `core-tests/collections/slice/regression_test.vr` §C.
-    fn index_of(&self, value: &T) -> Maybe<Int>
+    public fn index_of(&self, value: &T) -> Maybe<Int>
     where T: Eq
     {
         for i in range(0, self.len()) {
@@ -234,7 +234,7 @@ implement<T> [T] {
     }
 
     /// Find last index of element matching `value`.
-    fn rindex_of(&self, value: &T) -> Maybe<Int>
+    public fn rindex_of(&self, value: &T) -> Maybe<Int>
     where T: Eq
     {
         let mut i = self.len();
