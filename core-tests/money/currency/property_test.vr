@@ -1,0 +1,181 @@
+// =============================================================================
+// core-tests/money/currency/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `Currency`:
+//
+//   §1  eq reflexive (∀c. c.eq(&c))
+//   §2  eq symmetric (a.eq(&b) ⇒ b.eq(&a))
+//   §3  Codes of predefined factories are pairwise distinct
+//   §4  Minor units in [0, 4] for all predefined factories (ISO range)
+//   §5  Codes of 2-minor-unit currencies form the largest class
+//   §6  Repeated factory calls return code-equal values (idempotent)
+// =============================================================================
+
+mount core.money.currency.{Currency,
+    jpy, krw, vnd, clp, isk,
+    usd, eur, gbp, cad, aud, nzd, chf, cny, inr, brl, mxn, zar, sek, nok, dkk,
+    bhd, kwd, omr, jod, tnd
+};
+
+// =============================================================================
+// §1 eq reflexive — every predefined currency equals itself
+// =============================================================================
+
+@test
+fn property_eq_reflexive_for_predefined_currencies() {
+    assert(jpy().eq(&jpy()));
+    assert(usd().eq(&usd()));
+    assert(eur().eq(&eur()));
+    assert(bhd().eq(&bhd()));
+    assert(krw().eq(&krw()));
+}
+
+// =============================================================================
+// §2 eq symmetric — for custom + predefined
+// =============================================================================
+
+@test
+fn property_eq_symmetric_same_code() {
+    let a = Currency.new("XYZ".clone(), 2);
+    let b = Currency.new("XYZ".clone(), 2);
+    assert_eq(a.eq(&b), b.eq(&a));
+    assert(a.eq(&b));
+}
+
+@test
+fn property_eq_symmetric_different_codes() {
+    let a = Currency.new("FOO".clone(), 2);
+    let b = Currency.new("BAR".clone(), 2);
+    assert_eq(a.eq(&b), b.eq(&a));
+    assert(!a.eq(&b));
+}
+
+// =============================================================================
+// §3 Pairwise distinct codes across the 25 predefined factories
+// =============================================================================
+
+@test
+fn property_zero_minor_unit_codes_distinct() {
+    let codes: [Text; 5] = [
+        jpy().code, krw().code, vnd().code, clp().code, isk().code,
+    ];
+    let mut i = 0;
+    while i < 5 {
+        let mut j = i + 1;
+        while j < 5 {
+            assert(codes[i] != codes[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn property_two_minor_unit_codes_distinct() {
+    // 15 predefined currencies with minor_units=2.
+    let codes: [Text; 15] = [
+        usd().code, eur().code, gbp().code, cad().code, aud().code,
+        nzd().code, chf().code, cny().code, inr().code, brl().code,
+        mxn().code, zar().code, sek().code, nok().code, dkk().code,
+    ];
+    let mut i = 0;
+    while i < 15 {
+        let mut j = i + 1;
+        while j < 15 {
+            assert(codes[i] != codes[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@test
+fn property_three_minor_unit_codes_distinct() {
+    let codes: [Text; 5] = [
+        bhd().code, kwd().code, omr().code, jod().code, tnd().code,
+    ];
+    let mut i = 0;
+    while i < 5 {
+        let mut j = i + 1;
+        while j < 5 {
+            assert(codes[i] != codes[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// §4 Minor units in [0, 4] for predefined factories (ISO range)
+// =============================================================================
+
+@test
+fn property_zero_minor_unit_factories_have_zero() {
+    assert_eq(jpy().minor_units, 0);
+    assert_eq(krw().minor_units, 0);
+    assert_eq(vnd().minor_units, 0);
+    assert_eq(clp().minor_units, 0);
+    assert_eq(isk().minor_units, 0);
+}
+
+@test
+fn property_two_minor_unit_factories_have_two() {
+    assert_eq(usd().minor_units, 2);
+    assert_eq(eur().minor_units, 2);
+    assert_eq(gbp().minor_units, 2);
+    assert_eq(cad().minor_units, 2);
+    assert_eq(aud().minor_units, 2);
+    assert_eq(nzd().minor_units, 2);
+    assert_eq(chf().minor_units, 2);
+    assert_eq(cny().minor_units, 2);
+    assert_eq(inr().minor_units, 2);
+    assert_eq(brl().minor_units, 2);
+    assert_eq(mxn().minor_units, 2);
+    assert_eq(zar().minor_units, 2);
+    assert_eq(sek().minor_units, 2);
+    assert_eq(nok().minor_units, 2);
+    assert_eq(dkk().minor_units, 2);
+}
+
+@test
+fn property_three_minor_unit_factories_have_three() {
+    assert_eq(bhd().minor_units, 3);
+    assert_eq(kwd().minor_units, 3);
+    assert_eq(omr().minor_units, 3);
+    assert_eq(jod().minor_units, 3);
+    assert_eq(tnd().minor_units, 3);
+}
+
+// =============================================================================
+// §5 Repeated factory calls return code-equal values (idempotent)
+// =============================================================================
+
+@test
+fn property_factory_idempotent_usd() {
+    let a = usd();
+    let b = usd();
+    assert(a.eq(&b));
+    assert_eq(a.code, b.code);
+    assert_eq(a.minor_units, b.minor_units);
+}
+
+@test
+fn property_factory_idempotent_jpy() {
+    let a = jpy();
+    let b = jpy();
+    assert(a.eq(&b));
+    assert_eq(a.minor_units, b.minor_units);
+}
+
+// =============================================================================
+// §6 Cross-class disjointness — a JPY (0-minor) is never equal to a USD (2)
+// =============================================================================
+
+@test
+fn property_cross_class_codes_disjoint() {
+    assert(!jpy().eq(&usd()));
+    assert(!jpy().eq(&bhd()));
+    assert(!usd().eq(&bhd()));
+    assert(!krw().eq(&eur()));
+}
