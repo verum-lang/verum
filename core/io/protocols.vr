@@ -879,111 +879,14 @@ public fn sink() -> Sink {
 // =============================================================================
 // Cursor (in-memory)
 // =============================================================================
-
-// In-memory buffer with position.
-public type Cursor<T> is {
-    inner: T,
-    pos: Int,
-};
-
-implement<T> Cursor<T> {
-    // Create cursor at position 0.
-    public fn new(inner: T) -> Cursor<T> {
-        Cursor {
-            inner: inner,
-            pos: 0,
-        }
-    }
-
-    // Get reference to inner data.
-    public fn get_ref(&self) -> &T {
-        &self.inner
-    }
-
-    // Get mutable reference.
-    public fn get_mut(&mut self) -> &mut T {
-        &mut self.inner
-    }
-
-    // Consume && return inner.
-    public fn into_inner(self) -> T {
-        self.inner
-    }
-
-    // Get current position.
-    public fn position(&self) -> Int {
-        self.pos
-    }
-
-    // Set position.
-    public fn set_position(&mut self, pos: Int) {
-        self.pos = pos;
-    }
-}
-
-implement Read for Cursor<&[Byte]> {
-    fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
-        let remaining = &self.inner[self.pos..];
-        let n = buf.len().min(remaining.len());
-        buf[..n].copy_from_slice(&remaining[..n]);
-        self.pos = self.pos + n;
-        Ok(n)
-    }
-}
-
-// NOTE: Read for Cursor<List<Byte>> is defined in core/io/buffer.vr (canonical source).
-// Do NOT duplicate it here.
-
-implement Seek for Cursor<&[Byte]> {
-    fn seek(&mut self, pos: SeekFrom) -> IoResult<Int> {
-        let new_pos = match pos {
-            Start(n) => n,
-            End(n) => self.inner.len() as Int + n,
-            Current(n) => self.pos + n,
-        };
-
-        if new_pos < 0 {
-            return Err(StreamError.new(IoErrorKind.InvalidInput));
-        }
-
-        self.pos = new_pos;
-        Ok(self.pos)
-    }
-}
-
-implement Seek for Cursor<List<Byte>> {
-    fn seek(&mut self, pos: SeekFrom) -> IoResult<Int> {
-        let new_pos = match pos {
-            Start(n) => n,
-            End(n) => self.inner.len() as Int + n,
-            Current(n) => self.pos + n,
-        };
-
-        if new_pos < 0 {
-            return Err(StreamError.new(IoErrorKind.InvalidInput));
-        }
-
-        self.pos = new_pos;
-        Ok(self.pos)
-    }
-}
-
-implement Write for Cursor<&mut List<Byte>> {
-    fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
-        // Extend if needed
-        while self.inner.len() < self.pos + buf.len() {
-            self.inner.push(0);
-        }
-
-        // Write bytes
-        for (i, b) in buf.iter().enumerate() {
-            self.inner[self.pos + i] = *b;
-        }
-        self.pos = self.pos + buf.len();
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> IoResult<()> {
-        Ok(())
-    }
-}
+//
+// SOUNDNESS (closes task #io-2): the canonical Cursor type lives in
+// `core/io/buffer.vr` as `BufferCursor<T>` with a `Cursor<T>` alias.
+// Re-declaring `Cursor<T>` here was producing two distinct type
+// registrations under the same simple name — mounting both via
+// `core.io.*` silently picked one by mount order, masking impl-set
+// mismatches.  Architectural rule pinned: io.* re-exports exactly
+// ONE Cursor type, defined in `core/io/buffer.vr`.  The Read/Seek
+// impls for `Cursor<&[Byte]>` + Write impl for `Cursor<&mut List<Byte>>`
+// that previously lived here have moved to buffer.vr alongside the
+// canonical type definition.

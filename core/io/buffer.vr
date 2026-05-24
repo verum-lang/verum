@@ -781,6 +781,58 @@ implement BufRead for BufferCursor<List<Byte>> {
 }
 
 // =============================================================================
+// Slice & mutable-list BufferCursor impls
+// =============================================================================
+//
+// Migrated from `core/io/protocols.vr` (task #io-2 close-out): these
+// keep the canonical Cursor type in one place AND extend its impl
+// surface to the borrowed-slice / mutable-list-borrow shapes that
+// protocols.vr previously owned.  Architectural rule pinned: ALL
+// Cursor<T> impls live alongside the canonical type definition.
+
+implement Read for BufferCursor<&[Byte]> {
+    fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
+        let remaining = &self.inner[self.pos..];
+        let n = buf.len().min(remaining.len());
+        buf[..n].copy_from_slice(&remaining[..n]);
+        self.pos = self.pos + n;
+        Ok(n)
+    }
+}
+
+implement Seek for BufferCursor<&[Byte]> {
+    fn seek(&mut self, pos: SeekFrom) -> IoResult<Int> {
+        let new_pos = match pos {
+            SeekFrom.Start(n) => n,
+            SeekFrom.End(n) => self.inner.len() as Int + n,
+            SeekFrom.Current(n) => self.pos + n,
+        };
+        if new_pos < 0 {
+            return Err(IoError.with_message(IoErrorKind.InvalidInput, "seek to negative position"));
+        }
+        self.pos = new_pos;
+        Ok(self.pos)
+    }
+}
+
+implement Write for BufferCursor<&mut List<Byte>> {
+    fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
+        while self.inner.len() < self.pos + buf.len() {
+            self.inner.push(0);
+        }
+        for (i, b) in buf.iter().enumerate() {
+            self.inner[self.pos + i] = *b;
+        }
+        self.pos = self.pos + buf.len();
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        Ok(())
+    }
+}
+
+// =============================================================================
 // Utility Functions
 // =============================================================================
 
