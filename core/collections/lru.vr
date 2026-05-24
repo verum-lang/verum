@@ -111,11 +111,11 @@ implement<K: Hash + Eq, V> LruCache<K, V> {
     public fn insert(&mut self, key: K, value: V) -> Maybe<V> {
         let prior = self.store.remove(key.clone());
         match &prior {
-            Some(_) => self.remove_from_order(&key),
-            None    => {},
+            Maybe.Some(_) => self.remove_from_order(&key),
+            Maybe.None    => {},
         }
         // Evict LRU if we're at capacity and this is a net-new key.
-        let is_new = match &prior { Some(_) => false, None => true };
+        let is_new = match &prior { Maybe.Some(_) => false, Maybe.None => true };
         if is_new && self.store.len() >= self.capacity {
             self.evict_one();
         }
@@ -132,7 +132,7 @@ implement<K: Hash + Eq, V> LruCache<K, V> {
         let present = self.store.contains_key(key.clone());
         if !present {
             self.misses = self.misses + 1_u64;
-            return None;
+            return Maybe.None;
         }
         self.hits = self.hits + 1_u64;
         self.touch(key);
