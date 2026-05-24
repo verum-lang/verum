@@ -48,11 +48,12 @@ public type Base32Error is
     | TrailingBits;
 
 implement Display for Base32Error {
+    /// Qualify variants (task #17/#39 workaround).
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            InvalidCharacter(b) => f.write_str(f"base32: invalid character 0x{b:x}".as_str()),
-            InvalidLength(n)    => f.write_str(f"base32: invalid length {n}".as_str()),
-            TrailingBits        => f.write_str("base32: non-zero trailing bits"),
+            Base32Error.InvalidCharacter(b) => f.write_str(f"base32: invalid character 0x{b:x}".as_str()),
+            Base32Error.InvalidLength(n)    => f.write_str(f"base32: invalid length {n}".as_str()),
+            Base32Error.TrailingBits        => f.write_str("base32: non-zero trailing bits"),
         }
     }
 }
@@ -60,9 +61,9 @@ implement Display for Base32Error {
 implement Debug for Base32Error {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            InvalidCharacter(b) => f.write_str(f"InvalidCharacter(0x{b:x})".as_str()),
-            InvalidLength(n)    => f.write_str(f"InvalidLength({n})".as_str()),
-            TrailingBits        => f.write_str("TrailingBits"),
+            Base32Error.InvalidCharacter(b) => f.write_str(f"InvalidCharacter(0x{b:x})".as_str()),
+            Base32Error.InvalidLength(n)    => f.write_str(f"InvalidLength({n})".as_str()),
+            Base32Error.TrailingBits        => f.write_str("TrailingBits"),
         }
     }
 }
@@ -70,9 +71,9 @@ implement Debug for Base32Error {
 implement Eq for Base32Error {
     fn eq(&self, other: &Base32Error) -> Bool {
         match (self, other) {
-            (InvalidCharacter(a), InvalidCharacter(b)) => a == b,
-            (InvalidLength(a),    InvalidLength(b))    => a == b,
-            (TrailingBits,        TrailingBits)        => true,
+            (Base32Error.InvalidCharacter(a), Base32Error.InvalidCharacter(b)) => a == b,
+            (Base32Error.InvalidLength(a),    Base32Error.InvalidLength(b))    => a == b,
+            (Base32Error.TrailingBits,        Base32Error.TrailingBits)        => true,
             _ => false,
         }
     }

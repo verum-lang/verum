@@ -79,11 +79,12 @@ public type JsonPointerError is
     | PointerTooLong { limit_bytes: Int };
 
 implement Display for JsonPointerError {
+    /// Qualify variants (task #17/#39 workaround).
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            Malformed(reason)             => f.write_str(f"JSON pointer: malformed ({reason})".as_str()),
-            InvalidEscape(reason)         => f.write_str(f"JSON pointer: invalid escape ({reason})".as_str()),
-            PointerTooLong { limit_bytes }=> f.write_str(f"JSON pointer: exceeds {limit_bytes} bytes".as_str()),
+            JsonPointerError.Malformed(reason)             => f.write_str(f"JSON pointer: malformed ({reason})".as_str()),
+            JsonPointerError.InvalidEscape(reason)         => f.write_str(f"JSON pointer: invalid escape ({reason})".as_str()),
+            JsonPointerError.PointerTooLong { limit_bytes }=> f.write_str(f"JSON pointer: exceeds {limit_bytes} bytes".as_str()),
         }
     }
 }
@@ -91,9 +92,9 @@ implement Display for JsonPointerError {
 implement Debug for JsonPointerError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            Malformed(reason)             => f.write_str(f"Malformed({reason})".as_str()),
-            InvalidEscape(reason)         => f.write_str(f"InvalidEscape({reason})".as_str()),
-            PointerTooLong { limit_bytes }=> f.write_str(f"PointerTooLong {{ limit_bytes: {limit_bytes} }}".as_str()),
+            JsonPointerError.Malformed(reason)             => f.write_str(f"Malformed({reason})".as_str()),
+            JsonPointerError.InvalidEscape(reason)         => f.write_str(f"InvalidEscape({reason})".as_str()),
+            JsonPointerError.PointerTooLong { limit_bytes }=> f.write_str(f"PointerTooLong {{ limit_bytes: {limit_bytes} }}".as_str()),
         }
     }
 }
@@ -101,9 +102,10 @@ implement Debug for JsonPointerError {
 implement Eq for JsonPointerError {
     fn eq(&self, other: &JsonPointerError) -> Bool {
         match (self, other) {
-            (Malformed(a),     Malformed(b))     => a == b,
-            (InvalidEscape(a), InvalidEscape(b)) => a == b,
-            (PointerTooLong { limit_bytes: a }, PointerTooLong { limit_bytes: b }) => a == b,
+            (JsonPointerError.Malformed(a),     JsonPointerError.Malformed(b))     => a == b,
+            (JsonPointerError.InvalidEscape(a), JsonPointerError.InvalidEscape(b)) => a == b,
+            (JsonPointerError.PointerTooLong { limit_bytes: a },
+             JsonPointerError.PointerTooLong { limit_bytes: b }) => a == b,
             _ => false,
         }
     }

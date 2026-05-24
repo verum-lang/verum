@@ -1,0 +1,245 @@
+// =============================================================================
+// core-tests/encoding/base32/unit_test.vr
+// =============================================================================
+//
+// `core/encoding/base32.vr` — RFC 4648 §6 Base32 codec.
+//   * encode(&[Byte]) -> List<Byte> — alphabet A-Z + 2-7, uppercase, '=' pad
+//   * decode(&[Byte]) -> Result<List<Byte>, Base32Error> — case-insensitive
+//   * decode_no_pad(&[Byte]) — for OTP QR codes
+//   * encode_hex / decode_hex / decode_hex_no_pad — extended hex alphabet
+//   * Base32Error (InvalidCharacter / InvalidLength / TrailingBits)
+// =============================================================================
+
+mount core.encoding.base32.{
+    encode, decode, decode_no_pad,
+    encode_hex, decode_hex, decode_hex_no_pad,
+    Base32Error,
+};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Base32Error 3-variant
+// =============================================================================
+
+@test
+fn test_base32_error_invalid_character() {
+    let e: Base32Error = Base32Error.InvalidCharacter(0x21_u8); // '!'
+    assert(e is Base32Error.InvalidCharacter);
+}
+
+@test
+fn test_base32_error_invalid_length() {
+    let e: Base32Error = Base32Error.InvalidLength(7);
+    assert(e is Base32Error.InvalidLength);
+}
+
+@test
+fn test_base32_error_trailing_bits() {
+    let e: Base32Error = Base32Error.TrailingBits;
+    assert(e is Base32Error.TrailingBits);
+}
+
+@test
+fn test_base32_error_variants_disjoint() {
+    let ic = Base32Error.InvalidCharacter(0_u8);
+    let il = Base32Error.InvalidLength(0);
+    let tb = Base32Error.TrailingBits;
+    assert(ic is Base32Error.InvalidCharacter);
+    assert(il is Base32Error.InvalidLength);
+    assert(tb is Base32Error.TrailingBits);
+    assert(!(ic is Base32Error.InvalidLength));
+    assert(!(il is Base32Error.TrailingBits));
+    assert(!(tb is Base32Error.InvalidCharacter));
+}
+
+// =============================================================================
+// Section 2: encode — RFC 4648 §10 fixtures
+// =============================================================================
+
+@test
+fn test_encode_empty() {
+    let input: [Byte; 0] = [];
+    let out = encode(&input);
+    assert_eq(out.len(), 0);
+}
+
+@test
+fn test_encode_single_byte_f() {
+    // RFC 4648 §10: "f" → "MY======"
+    let input: [Byte; 1] = [0x66_u8];
+    let out = encode(&input);
+    assert_eq(out.len(), 8);
+    assert_eq(out[0], 0x4D_u8); // 'M'
+    assert_eq(out[1], 0x59_u8); // 'Y'
+    // remaining 6 bytes are '=' padding
+    assert_eq(out[2], 0x3D_u8); // '='
+    assert_eq(out[7], 0x3D_u8); // '='
+}
+
+@test
+fn test_encode_three_bytes_foo() {
+    // RFC 4648 §10: "foo" → "MZXW6==="
+    let input: [Byte; 3] = [0x66_u8, 0x6F_u8, 0x6F_u8];
+    let out = encode(&input);
+    assert_eq(out.len(), 8);
+    assert_eq(out[0], 0x4D_u8); // 'M'
+    assert_eq(out[1], 0x5A_u8); // 'Z'
+    assert_eq(out[2], 0x58_u8); // 'X'
+    assert_eq(out[3], 0x57_u8); // 'W'
+    assert_eq(out[4], 0x36_u8); // '6'
+    assert_eq(out[5], 0x3D_u8); // '='
+}
+
+@test
+fn test_encode_five_bytes_no_padding() {
+    // 5 bytes → exactly 8 base32 chars, no padding needed
+    let input: [Byte; 5] = [0_u8, 0_u8, 0_u8, 0_u8, 0_u8];
+    let out = encode(&input);
+    assert_eq(out.len(), 8);
+    // All zero bytes encode to "AAAAAAAA" (8 'A's)
+    let mut i = 0;
+    while i < 8 {
+        assert_eq(out[i], 0x41_u8); // 'A'
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 3: encode output length is multiple of 8
+// =============================================================================
+
+@test
+fn test_encode_output_length_multiple_of_8() {
+    let i1: [Byte; 1] = [0_u8];
+    let i3: [Byte; 3] = [0_u8; 3];
+    let i5: [Byte; 5] = [0_u8; 5];
+    let i7: [Byte; 7] = [0_u8; 7];
+
+    assert_eq(encode(&i1).len() % 8, 0);
+    assert_eq(encode(&i3).len() % 8, 0);
+    assert_eq(encode(&i5).len() % 8, 0);
+    assert_eq(encode(&i7).len() % 8, 0);
+}
+
+// =============================================================================
+// Section 4: round-trip (encode → decode)
+// =============================================================================
+
+@test
+fn test_round_trip_empty() {
+    let input: [Byte; 0] = [];
+    let encoded = encode(&input);
+    match decode(&encoded) {
+        Ok(decoded) => assert_eq(decoded.len(), 0),
+        Err(_) => panic("empty round-trip should succeed"),
+    }
+}
+
+@test
+fn test_round_trip_single_byte() {
+    let input: [Byte; 1] = [0x42_u8];
+    let encoded = encode(&input);
+    match decode(&encoded) {
+        Ok(decoded) => {
+            assert_eq(decoded.len(), 1);
+            assert_eq(decoded[0], 0x42_u8);
+        },
+        Err(_) => panic("1-byte round-trip should succeed"),
+    }
+}
+
+@test
+fn test_round_trip_three_bytes() {
+    let input: [Byte; 3] = [0xCA_u8, 0xFE_u8, 0xBA_u8];
+    let encoded = encode(&input);
+    match decode(&encoded) {
+        Ok(decoded) => {
+            assert_eq(decoded.len(), 3);
+            assert_eq(decoded[0], 0xCA_u8);
+            assert_eq(decoded[1], 0xFE_u8);
+            assert_eq(decoded[2], 0xBA_u8);
+        },
+        Err(_) => panic("3-byte round-trip should succeed"),
+    }
+}
+
+@test
+fn test_round_trip_five_bytes() {
+    let input: [Byte; 5] = [0xFF_u8; 5];
+    let encoded = encode(&input);
+    match decode(&encoded) {
+        Ok(decoded) => {
+            assert_eq(decoded.len(), 5);
+            let mut i = 0;
+            while i < 5 {
+                assert_eq(decoded[i], 0xFF_u8);
+                i = i + 1;
+            }
+        },
+        Err(_) => panic("5-byte all-ones round-trip should succeed"),
+    }
+}
+
+// =============================================================================
+// Section 5: decode — case-insensitive
+// =============================================================================
+
+@test
+fn test_decode_lowercase_my() {
+    // "my======" should decode to "f" (case-insensitive)
+    let input: [Byte; 8] = [
+        0x6D_u8, 0x79_u8, 0x3D_u8, 0x3D_u8,
+        0x3D_u8, 0x3D_u8, 0x3D_u8, 0x3D_u8,
+    ];
+    match decode(&input) {
+        Ok(decoded) => {
+            assert_eq(decoded.len(), 1);
+            assert_eq(decoded[0], 0x66_u8); // 'f'
+        },
+        Err(_) => panic("lowercase 'my======' should decode to 'f'"),
+    }
+}
+
+// =============================================================================
+// Section 6: decode_no_pad for OTP-style inputs
+// =============================================================================
+
+@test
+fn test_decode_no_pad_two_chars() {
+    // "MY" (no padding) should decode to "f"
+    let input: [Byte; 2] = [0x4D_u8, 0x59_u8];
+    match decode_no_pad(&input) {
+        Ok(decoded) => {
+            assert_eq(decoded.len(), 1);
+            assert_eq(decoded[0], 0x66_u8); // 'f'
+        },
+        Err(_) => panic("'MY' (no padding) should decode to 'f'"),
+    }
+}
+
+// =============================================================================
+// Section 7: decode error paths
+// =============================================================================
+
+@test
+fn test_decode_invalid_character_exclaim() {
+    // '!' is not in the base32 alphabet
+    let input: [Byte; 8] = [
+        0x21_u8, 0x4D_u8, 0x59_u8, 0x3D_u8,
+        0x3D_u8, 0x3D_u8, 0x3D_u8, 0x3D_u8,
+    ];
+    match decode(&input) {
+        Ok(_) => panic("'!' is not base32"),
+        Err(e) => assert(e is Base32Error.InvalidCharacter),
+    }
+}
+
+@test
+fn test_decode_invalid_length_3() {
+    // Length 3 — not a multiple of 8 for padded base32
+    let input: [Byte; 3] = [0x4D_u8, 0x59_u8, 0x3D_u8];
+    match decode(&input) {
+        Ok(_) => panic("length-3 input should fail"),
+        Err(e) => assert(e is Base32Error.InvalidLength),
+    }
+}
