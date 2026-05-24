@@ -505,12 +505,53 @@ implement<K: Hash + Eq, V> Map<K, V> {
                 return None;
             }
 
-            psl = psl + 1;
             idx = (idx + 1) & mask;
+            psl = psl + 1;
+        }
+    }
 
-            if psl > self.cap {
+    /// Mutable counterpart of [`get`].  Returns `Some(&mut V)` for an
+    /// existing key, `None` otherwise.  Used by mutator chains that
+    /// walk through a Map<K, Heap<…>> without taking ownership
+    /// (e.g. trie descent, btree-like child traversal).
+    ///
+    /// Lifetime contract: the returned `&mut V` is valid as long as
+    /// the underlying entry slot is not removed / re-hashed.  Caller
+    /// MUST NOT mutate the Map shape (insert / remove / clear) while
+    /// holding the reference.
+    public fn get_mut(&mut self, key: &K) -> Maybe<&mut V>
+    where K: Clone
+    {
+        if self.cap == 0 {
+            return None;
+        }
+
+        let key_owned = (*key).clone();
+        let hash = self.make_hash_val(key_owned);
+        let mask = self.cap - 1;
+        let mut idx = (hash as Int) & mask;
+        let mut psl = 0;
+
+        loop {
+            // SAFETY: `idx` is bounded by `mask = cap - 1`, so the
+            // offset stays within the entries array.  `cap > 0` is
+            // guarded above.
+            let entry = unsafe { &mut *self.entries.offset(idx) };
+
+            if entry.hash == 0 {
                 return None;
             }
+
+            if entry.hash > 0 && entry.hash == hash && entry.key == *key {
+                return Some(unsafe { &mut (*self.entries.offset(idx)).value });
+            }
+
+            if entry.hash > 0 && psl > entry.psl {
+                return None;
+            }
+
+            idx = (idx + 1) & mask;
+            psl = psl + 1;
         }
     }
 
