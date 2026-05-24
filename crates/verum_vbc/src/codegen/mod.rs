@@ -5822,7 +5822,19 @@ impl VbcCodegen {
         // compile global-registry update loop) MUST recognise the
         // stage-3 band — otherwise the real bodies' subsequent
         // `register_function` won't overwrite the stub's id mapping.
-        self.emit_missing_stub_descriptors_with_callm(false);
+        //
+        // **IMPORTANT** — calling the FULL `emit_missing_stub_descriptors_with_callm(false)`
+        // here would synthesise stubs for EVERY referenced cross-
+        // module Call target, producing ~800K stubs at stdlib scale
+        // and blowing `runtime.vbca` from ~13 MB to ~145 MB (docs at
+        // `mod.rs:5687-5750`).  The stage-3-only variant
+        // `emit_stage3_stub_descriptors` filters strictly to the
+        // sentinel-range stage-3 ids registered by
+        // `pre_register_unique_public_free_functions`, keeping the
+        // archive growth bounded to the ~hundreds of stage-3 stubs
+        // actually referenced by stdlib bodies (typical: ~100 KB
+        // total archive growth across all modules).
+        self.emit_stage3_stub_descriptors();
 
         self.build_module()
     }
@@ -14220,6 +14232,162 @@ impl VbcCodegen {
         self.emit_missing_stub_descriptors_with_callm(true);
     }
 
+    /// **Task #47 stage-3-only stub descriptor emission.**
+    ///
+    /// Surgical counterpart to `emit_missing_stub_descriptors_with_callm`
+    /// for the stdlib-bootstrap `finalize_module_from_state` path.
+    ///
+    /// Walks every emitted function's instruction stream collecting
+    /// Call / CallG / TailCall / NewClosure / Spawn / GenCreate target
+    /// ids that fall in the **stage-3 sentinel range**
+    /// (`u32::MAX - 0x100_0000 .. u32::MAX - 0xF0_0000`).  For each
+    /// such id that has NO corresponding `VbcFunction` in
+    /// `self.functions` but DOES appear in `ctx.functions`, synthesises
+    /// a minimal extern-shaped `FunctionDescriptor` carrying just the
+    /// function's NAME so `ArchiveBodyRemap::map_function`'s Tier-2b
+    /// name-fallback can resolve `Call(stub_id)` to the real
+    /// user-side FunctionId at archive load.
+    ///
+    /// **Why this exists alongside the legacy `_with_callm` variant**:
+    /// the legacy pass processes EVERY referenced id (including
+    /// legitimate cross-module Call targets with non-sentinel ids),
+    /// which produces ~800K stub descriptors at stdlib scale and
+    /// blows `runtime.vbca` from ~13 MB to ~145 MB (documented at
+    /// `mod.rs:5687-5750`).  This variant filters strictly to the
+    /// stage-3 sentinel range (registered by
+    /// `verum_compiler::pipeline::stdlib_bootstrap::
+    /// pre_register_unique_public_free_functions`), keeping the
+    /// archive growth bounded to ~100 KB.
+    ///
+    /// Idempotent + bounded: only adds stubs for IDs that are both
+    /// (a) referenced by emitted bytecode AND (b) in the stage-3
+    /// sentinel range AND (c) registered in `ctx.functions`.  Bodies
+    /// are zero-instruction `RetV` stubs — the archive loader
+    /// rewrites the Call's `func_id` via name lookup before the
+    /// stub body is ever executed.
+    fn emit_stage3_stub_descriptors(&mut self) {
+        use std::collections::HashSet;
+        // Mirror the STAGE3 range from
+        // `verum_compiler::pipeline::stdlib_bootstrap`.
+        const STAGE3_BASE: u32 = u32::MAX - 0x100_0000;
+        const STUB_RANGE_WIDTH: u32 = 0x10_0000; // 1M slots
+        let is_stage3 = |id: u32| -> bool {
+            id <= STAGE3_BASE && id >= STAGE3_BASE.saturating_sub(STUB_RANGE_WIDTH)
+        };
+
+        // 1. Collect stage-3 referenced ids from emitted bytecode.
+        let mut referenced: HashSet<u32> = HashSet::new();
+        for vbc_func in self.functions.iter() {
+            for instr in &vbc_func.instructions {
+                match instr {
+                    Instruction::Call { func_id, .. }
+                    | Instruction::CallG { func_id, .. }
+                    | Instruction::TailCall { func_id, .. }
+                    | Instruction::NewClosure { func_id, .. }
+                    | Instruction::Spawn { func_id, .. }
+                    | Instruction::GenCreate { func_id, .. } => {
+                        if is_stage3(*func_id) {
+                            referenced.insert(*func_id);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if referenced.is_empty() {
+            return;
+        }
+
+        // 2. Already-emitted IDs.
+        let emitted: HashSet<u32> = self
+            .functions
+            .iter()
+            .map(|f| f.descriptor.id.0)
+            .collect();
+
+        // 3. Build id → (name, info) map for referenced stage-3 ids.
+        // PREFER qualified names (more dots → canonical).
+        let mut id_to_entry: std::collections::HashMap<u32, (String, crate::codegen::FunctionInfo)> =
+            std::collections::HashMap::new();
+        for (name, info) in self.ctx.functions.iter() {
+            if !is_stage3(info.id.0) {
+                continue;
+            }
+            if !referenced.contains(&info.id.0) {
+                continue;
+            }
+            id_to_entry
+                .entry(info.id.0)
+                .and_modify(|(existing_name, _)| {
+                    let existing_dots = existing_name.matches('.').count();
+                    let new_dots = name.matches('.').count();
+                    if new_dots > existing_dots {
+                        *existing_name = name.clone();
+                    }
+                })
+                .or_insert_with(|| (name.clone(), info.clone()));
+        }
+
+        // 4. Synthesise minimal descriptor for each id not in emitted.
+        let mut to_push: Vec<(u32, String, crate::codegen::FunctionInfo)> = Vec::new();
+        for (&id, (name, info)) in id_to_entry.iter() {
+            if emitted.contains(&id) {
+                continue;
+            }
+            to_push.push((id, name.clone(), info.clone()));
+        }
+
+        for (id, name, info) in to_push {
+            let name_id = StringId(self.ctx.intern_string_raw(&name));
+            let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
+            descriptor.id = crate::module::FunctionId(id);
+            descriptor.register_count = 1;
+            descriptor.locals_count = info.param_count as u16;
+            for (i, pname) in info.param_names.iter().enumerate() {
+                let pname_to_use = if pname.is_empty() {
+                    format!("_arg{}", i)
+                } else {
+                    pname.clone()
+                };
+                let pname_id =
+                    StringId(self.ctx.intern_string_raw(&pname_to_use));
+                descriptor.params.push(crate::module::ParamDescriptor {
+                    name: pname_id,
+                    type_ref: TypeRef::Concrete(TypeId::UNIT),
+                    is_mut: false,
+                    default: None,
+                });
+            }
+            while descriptor.params.len() < info.param_count {
+                let i = descriptor.params.len();
+                let pname_id = StringId(
+                    self.ctx.intern_string_raw(&format!("_arg{}", i)),
+                );
+                descriptor.params.push(crate::module::ParamDescriptor {
+                    name: pname_id,
+                    type_ref: TypeRef::Concrete(TypeId::UNIT),
+                    is_mut: false,
+                    default: None,
+                });
+            }
+            if info.is_async {
+                descriptor.properties |= crate::types::PropertySet::ASYNC;
+            }
+            descriptor.is_generator = info.is_generator;
+            if let Some(parent_name) = info.parent_type_name.as_deref()
+                && let Some(&parent_tid) = self.type_name_to_id.get(parent_name)
+            {
+                descriptor.parent_type = Some(parent_tid);
+            }
+            descriptor.is_const = info.is_const;
+            let vbc_func = crate::module::VbcFunction::new(
+                descriptor,
+                vec![Instruction::RetV],
+            );
+            self.functions.push(vbc_func);
+        }
+    }
+
     /// Surgical variant of `emit_missing_stub_descriptors`.
     ///
     /// When `include_callm = false`, runs ONLY the Call-id-driven pass
@@ -16487,6 +16655,29 @@ struct ArchiveBodyRemap<'a> {
 
 impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
     fn map_function(&self, src: crate::module::FunctionId) -> crate::module::FunctionId {
+        // Stage-1/2/3 stub-id range definitions (mirrored from
+        // `stdlib_bootstrap::merge_codegen_into_self`). A user-side
+        // `ctx_func_by_name` mapping that points to a stub-range id
+        // means the producing module's REAL body wasn't merged into
+        // ctx yet — bypassing the Tier 2a return below avoids freezing
+        // the unresolved stub id into the rewritten body. Tier 2b
+        // (archive-wide name index) then has a chance to find the
+        // real body that's already loaded as part of a later archive.
+        //
+        // Without this gate, task #47's `global_ctors` cascade fires
+        // FunctionNotFound(0xFEFF****) at runtime for every cross-
+        // module Call whose target's stub_id leaked into ctx because
+        // the dependency was loaded out of resolution order.
+        const STAGE1_STUB_BASE: u32 = u32::MAX - 0x40_0000;
+        const STAGE2_STUB_BASE: u32 = u32::MAX - 0xC0_0000;
+        const STAGE3_STUB_BASE: u32 = u32::MAX - 0x100_0000;
+        const STUB_RANGE_WIDTH: u32 = 0x10_0000;
+        let is_stub_id = |id: u32| -> bool {
+            let s1 = id <= STAGE1_STUB_BASE && id >= STAGE1_STUB_BASE - STUB_RANGE_WIDTH;
+            let s2 = id <= STAGE2_STUB_BASE && id >= STAGE2_STUB_BASE - STUB_RANGE_WIDTH;
+            let s3 = id <= STAGE3_STUB_BASE && id >= STAGE3_STUB_BASE - STUB_RANGE_WIDTH;
+            s1 || s2 || s3
+        };
         // Tier 1: per-module remap (archive function ids whose body
         // lives in *this* archive module).
         if let Some(&fid) = self.funcs.get(&src.0) {
@@ -16504,10 +16695,21 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
         // `Text.grow → alloc` dispatching to `Unfold.fuse`).
         if let Some(name) = self.archive_id_to_name.get(&src.0) {
             if let Some(&fid) = self.ctx_func_by_name.get(name) {
-                if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
-                    eprintln!("[remap-fallback] tier2a OK archive_id={} → name={:?} → user_fid={}", src.0, name, fid.0);
+                // **Stub-id reject** (task #47 close-out): if the user-
+                // side ctx maps `name` to a stub-range id, the producing
+                // module's real body hasn't been merged yet. Skip Tier
+                // 2a so Tier 2b's archive-wide index can find the real
+                // body in another loaded archive. The stub itself has
+                // no executable body, so returning it here would cause
+                // FunctionNotFound at runtime.
+                if !is_stub_id(fid.0) {
+                    if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
+                        eprintln!("[remap-fallback] tier2a OK archive_id={} → name={:?} → user_fid={}", src.0, name, fid.0);
+                    }
+                    return fid;
+                } else if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
+                    eprintln!("[remap-fallback] tier2a REJECT-STUB archive_id={} → name={:?} → ctx_fid={} (stub-range) — falling through to tier2b", src.0, name, fid.0);
                 }
-                return fid;
             }
             // **Tier-2b** (task #12): the user-facing `ctx.functions`
             // table is filtered by the mount set (only names the user
@@ -16525,10 +16727,16 @@ impl crate::bytecode_remap::IdRemap for ArchiveBodyRemap<'_> {
             // `Phaser.arrive_and_await$closure$4` because the user only
             // mounted `core.async.semaphore.AsyncSemaphore`.
             if let Some(&fid) = self.archive_func_by_name.get(name) {
-                if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
-                    eprintln!("[remap-fallback] tier2b OK archive_id={} → name={:?} → user_fid={} (archive-wide)", src.0, name, fid.0);
+                // Same stub-id reject as Tier 2a — never freeze a
+                // stub-range id into rewritten bytecode (task #47).
+                if !is_stub_id(fid.0) {
+                    if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
+                        eprintln!("[remap-fallback] tier2b OK archive_id={} → name={:?} → user_fid={} (archive-wide)", src.0, name, fid.0);
+                    }
+                    return fid;
+                } else if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
+                    eprintln!("[remap-fallback] tier2b REJECT-STUB archive_id={} → name={:?} → archive_fid={} (stub-range)", src.0, name, fid.0);
                 }
-                return fid;
             }
             if std::env::var("VERUM_TRACE_REMAP_FALLBACK").is_ok() {
                 eprintln!("[remap-fallback] tier2 MISS archive_id={} archive_name={:?} not in ctx_func_by_name OR archive_func_by_name", src.0, name);
