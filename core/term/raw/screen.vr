@@ -208,11 +208,12 @@ fn write_to_stdout(s: &Text) -> IoResult<()> {
 /// Write a string to a file descriptor.
 @cfg(not(target_os = "windows"))
 fn write_to_fd(fd: FileDesc, s: &Text) -> IoResult<()> {
-    mount super.termios.write as raw_write;
+    // In-body mount rename `as raw_write` doesn't surface to AOT
+    // codegen — task #11.  Use fully-qualified call instead.
     let bytes = s.as_bytes();
     let mut written = 0;
     while written < bytes.len() {
-        let n = raw_write(fd.0, &bytes[written], bytes.len() - written);
+        let n = super.termios.write(fd.0, &bytes[written], bytes.len() - written);
         if n < 0 {
             return Err(StreamError.from_errno());
         }
