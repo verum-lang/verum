@@ -15060,6 +15060,33 @@ impl VbcCodegen {
             std::collections::HashSet::new();
         let mut external_pending: Vec<u32> = Vec::new();
         const EXTERN_SENTINEL_THRESHOLD: u32 = u32::MAX / 4;
+        // **Task #9 close-out 2026-05-24** — distinguish stage-1/2/3
+        // pre-register stubs from variant-ctor / FFI-extern sentinels.
+        // Stub ids carry a NAME (the producing function's identifier)
+        // and need name-based resolution at user-side archive merge
+        // (Tier 2 of `ArchiveBodyRemap::map_function`).  Pre-fix the
+        // simple `fid >= EXTERN_SENTINEL_THRESHOLD` gate skipped
+        // BOTH classes — sentinel-dispatched IDs (variant ctor tags
+        // `u32::MAX - tag`, FFI extern sentinels) AND stage-3 stub
+        // IDs.  Stage-3 stubs then never made it into
+        // `module.external_function_names`, so cross-module Call(stub)
+        // sites in stdlib bodies kept the raw stub id (Tier 3
+        // identity fallback) and tripped the lenient panic in
+        // `calls.rs:117` at runtime.
+        //
+        // Range definitions mirror `stdlib_bootstrap::pre_register_*`
+        // and `interpreter/dispatch_table/handlers/calls.rs:69-72`.
+        // Width is 0x10_0000 (1M slots per stage).
+        const STAGE1_STUB_BASE: u32 = u32::MAX - 0x40_0000;
+        const STAGE2_STUB_BASE: u32 = u32::MAX - 0xC0_0000;
+        const STAGE3_STUB_BASE: u32 = u32::MAX - 0x100_0000;
+        const STUB_RANGE_WIDTH: u32 = 0x10_0000;
+        let is_stage_stub = |id: u32| -> bool {
+            let s1 = id <= STAGE1_STUB_BASE && id >= STAGE1_STUB_BASE - STUB_RANGE_WIDTH;
+            let s2 = id <= STAGE2_STUB_BASE && id >= STAGE2_STUB_BASE - STUB_RANGE_WIDTH;
+            let s3 = id <= STAGE3_STUB_BASE && id >= STAGE3_STUB_BASE - STUB_RANGE_WIDTH;
+            s1 || s2 || s3
+        };
         for func in &self.functions {
             for instr in &func.instructions {
                 let fid = match instr {
@@ -15071,10 +15098,23 @@ impl VbcCodegen {
                     | Instruction::GenCreate { func_id, .. } => *func_id,
                     _ => continue,
                 };
+                // STAGE STUB IDs go through the same name-resolution
+                // path as cross-module Calls — they're known-name
+                // entries in `ctx.functions` that need Tier 2 lookup
+                // at user-side merge to reach the real body.
+                if is_stage_stub(fid) {
+                    if func_id_remap.contains_key(&fid) {
+                        continue;
+                    }
+                    if external_seen.insert(fid) {
+                        external_pending.push(fid);
+                    }
+                    continue;
+                }
                 if fid >= EXTERN_SENTINEL_THRESHOLD {
-                    // FFI extern, variant-ctor tag, newtype-ctor —
-                    // dispatched out-of-band; runtime calls.rs handles
-                    // the stage-1/stage-2 stub-not-resolved panic.
+                    // Variant-ctor tag (`u32::MAX - tag`), FFI extern,
+                    // newtype-ctor — dispatched out-of-band by the
+                    // runtime; no name-resolution needed.
                     continue;
                 }
                 if func_id_remap.contains_key(&fid) {

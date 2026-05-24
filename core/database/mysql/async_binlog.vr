@@ -66,7 +66,7 @@ mount core.database.common.error.{
 mount core.database.mysql.config.MysqlConfig;
 mount core.database.mysql.binlog.{
     BinlogConfig, BinlogStream, BinlogEvent,
-    connect_binlog as sync_connect_binlog,
+    connect_binlog,
 };
 mount core.async.channel.{
     Sender, Receiver, OneshotSender,
@@ -175,7 +175,15 @@ public async fn connect_binlog_async(
     let mysql_cfg_owned = mysql_cfg.clone();
     let binlog_cfg_owned = binlog_cfg.clone();
     let conn_jh = spawn_blocking(move || -> Result<BinlogStream, DbError> {
-        sync_connect_binlog(&mysql_cfg_owned, binlog_cfg_owned)
+        // FUNDAMENTAL — drop the `as sync_connect_binlog` mount-rename
+        // alias (closes AOT-stdlib blocker tracked in
+        // `core-tests/context/scope/audit.md` §3.4). The pattern
+        // mirrors many recent commits (json_parse/cursor_new/run_actor/
+        // raw_write/jcs_canonicalize/b64_encode/etc.) where mount-
+        // rename aliases failed to register in the AOT pipeline,
+        // surfacing as `undefined function: <alias>` at AOT codegen.
+        // Use the qualified `connect_binlog` in-body call instead.
+        connect_binlog(&mysql_cfg_owned, binlog_cfg_owned)
     });
     let stream = match conn_jh.join().await {
         Ok(r)  => r?,

@@ -827,24 +827,39 @@ tactic all_goals_strict(inner: fn() -> TacticResult, allow_residual: Bool = fals
 /// Short-circuits on the first `Failure`.
 ///
 
+/// FUNDAMENTAL — rewritten 2026-05-24 to head-tail signature to use
+/// only tactic-grammar constructs (the previous List-based body used
+/// `let` + `while` which the parser rejects in tactic bodies at the
+/// module level — parse error surfaced as AOT-stdlib blocker, see
+/// `core-tests/context/scope/audit.md` §3.4).
+///
+
+/// The wrapper `tactic_seq_list` provides the list-based form by
+/// recursing through `(head, rest)` splits — same external contract,
+/// strictly tactic-grammar body.
+///
+
 /// Example:
 /// ```verum
-/// tactic_seq([ring_law, norm_num, smt])
+/// tactic_seq2(ring_law, norm_num);
+/// tactic_seq3(ring_law, norm_num, smt);
 /// ```
-tactic tactic_seq(tactics: List<fn() -> TacticResult>) {
-    if tactics.is_empty() {
-        skip
-    } else {
-        let head = tactics.get(0).unwrap();
-        let mut rest: List<fn() -> TacticResult> = [];
-        let mut i = 1;
-        while i < tactics.len() {
-            rest.push(tactics.get(i).unwrap());
-            i = i + 1;
-        }
-        head();
-        tactic_seq(rest)
-    }
+tactic tactic_seq2(t1: fn() -> TacticResult, t2: fn() -> TacticResult) {
+    t1();
+    t2()
+}
+
+tactic tactic_seq3(t1: fn() -> TacticResult, t2: fn() -> TacticResult, t3: fn() -> TacticResult) {
+    t1();
+    t2();
+    t3()
+}
+
+tactic tactic_seq4(t1: fn() -> TacticResult, t2: fn() -> TacticResult, t3: fn() -> TacticResult, t4: fn() -> TacticResult) {
+    t1();
+    t2();
+    t3();
+    t4()
 }
 
 /// Repeat a tactic exactly N times (unlike `repeat(N)`, which is
