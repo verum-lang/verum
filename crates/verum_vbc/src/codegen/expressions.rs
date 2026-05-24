@@ -18772,6 +18772,53 @@ impl VbcCodegen {
                         if name.chars().next().is_some_and(|c| c.is_uppercase()) {
                             return Some(name.to_string());
                         }
+                        // SOUNDNESS (closes task #io-1 codegen leg): when the bare-
+                        // name lookup misses but a UNIQUE qualified entry ending
+                        // in `.<name>` exists in the function table — typically a
+                        // mounted stdlib free fn whose bare-name slot was either
+                        // taken by a shadow or never populated — surface its
+                        // return type so receiver-type extraction for downstream
+                        // method calls works.  Pinned in
+                        // `core-tests/io/protocols/regression_test.vr` §A:
+                        // `let s = sink();` (where `sink` is `public fn sink()
+                        // -> Sink` in `core/io/protocols.vr`) populates
+                        // `variable_type_names["s"] = "Sink"` so the subsequent
+                        // `s.write(buf)` lowers to qualified `Sink.write` CallM
+                        // instead of bare `write` (which mis-dispatched to a
+                        // namespace-shadow free fn).
+                        let suffix = format!(".{}", name);
+                        let mut unique_match: Option<&FunctionInfo> = None;
+                        let mut ambiguous = false;
+                        for (fn_name, fn_info) in &self.ctx.functions {
+                            if fn_name.ends_with(&suffix)
+                                && fn_info.param_count == args.len()
+                                && fn_info.return_type_name.is_some()
+                                // Ignore variant ctors (uppercase path) and
+                                // method-like entries (parent_type_name set).
+                                && fn_info.variant_tag.is_none()
+                                && fn_info.parent_type_name.is_none()
+                            {
+                                if unique_match.is_some() {
+                                    ambiguous = true;
+                                    break;
+                                }
+                                unique_match = Some(fn_info);
+                            }
+                        }
+                        if !ambiguous
+                            && let Some(info) = unique_match
+                            && let Some(ref rt) = info.return_type_name
+                        {
+                            // Compose generic form when inner args carry
+                            // concrete instantiation info.
+                            if let Some(ref inner) = info.return_type_inner
+                                && !inner.is_empty()
+                                && !rt.contains('<')
+                            {
+                                return Some(format!("{}<{}>", rt, inner.join(", ")));
+                            }
+                            return Some(rt.clone());
+                        }
                     }
                     // Handle qualified paths like module.function()
                     if path.segments.len() > 1 {

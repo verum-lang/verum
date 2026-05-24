@@ -57,10 +57,20 @@ public module time;
 // =============================================================================
 
 // File I/O
+//
+// SOUNDNESS: bare-name aliases `read` / `write` / `close` are
+// DELIBERATELY OMITTED here.  Re-exporting them at the global
+// function level pollutes the namespace with method-name-shaped
+// entries, which shadow user-defined type methods at VBC method
+// dispatch (`s.write(buf)` for `s: Sink` mis-dispatched to
+// `sys.darwin.libsystem.safe_write` aliased as `write`).  Same
+// defect class as task #17/#39.  Every consumer mounts the
+// `safe_*` originals directly (qualified by `as sys_read` /
+// `as sys_write` at the call site).  Architectural rule pinned:
+// stdlib MUST NOT re-export libsystem / syscall functions with
+// bare method-name-shaped aliases (`read` / `write` / `close` /
+// `seek` / `flush`).  Closes task #io-1 at the stdlib level.
 public mount .libsystem.{
-    safe_read as read,
-    safe_write as write,
-    safe_close as close,
     safe_mmap as mmap,
     safe_munmap as munmap,
     safe_madvise as madvise,

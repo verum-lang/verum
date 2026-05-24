@@ -429,17 +429,34 @@ impl VbcCodegen {
                 }
             });
 
-            // Use annotation type name if available, otherwise infer from expression
+            // Use annotation type name if available, otherwise infer from expression.
+            //
+            // SOUNDNESS (closes task #io-1 codegen leg): when the annotation
+            // is absent, fall back through BOTH `extract_expr_type_name` AND
+            // `infer_expr_type_name` — the latter handles a richer set of
+            // expression shapes (in particular `Call(simple_path)` with
+            // arity-aware lookup + variant-disambiguating fallback). Without
+            // this `let s = sink();` left `variable_type_names["s"]` unset
+            // when extract_expr_type_name couldn't resolve `sink` to its
+            // return type (registration ordering / shadow class), and every
+            // subsequent `s.write(buf)` emitted a BARE `write` CallM that
+            // dispatched to whichever `.write` suffix won the runtime
+            // bare-suffix scan (typically `sys.linux.syscall.write`).  With
+            // both paths consulted, `let s = sink();` now records
+            // `variable_type_names["s"] = "Sink"` reliably and the
+            // method-call site emits the qualified `Sink.write` CallM.
             if let Some(type_name) = type_name_from_annotation {
                 self.ctx
                     .variable_type_names
                     .insert(var_name.clone(), type_name);
-            } else if let Some(expr) = value
-                && let Some(type_name) = self.extract_expr_type_name(expr)
-            {
-                self.ctx
-                    .variable_type_names
-                    .insert(var_name.clone(), type_name);
+            } else if let Some(expr) = value {
+                let extracted = self.extract_expr_type_name(expr)
+                    .or_else(|| self.infer_expr_type_name(expr));
+                if let Some(type_name) = extracted {
+                    self.ctx
+                        .variable_type_names
+                        .insert(var_name.clone(), type_name);
+                }
             }
         }
 

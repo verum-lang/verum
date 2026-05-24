@@ -252,12 +252,15 @@ public mount .no_runtime.{
 // Linux: Direct syscalls for maximum performance
 // =============================================================================
 
+// SOUNDNESS: bare-name aliases `read` / `write` / `close` are
+// DELIBERATELY OMITTED here.  See `core/sys/linux/mod.vr` and
+// `core/sys/darwin/mod.vr` for the architectural rule pinned
+// at the stdlib level — re-exporting libsystem/syscall fns
+// with bare method-name-shaped aliases shadows user-defined
+// type methods at VBC method dispatch.
 @cfg(target_os = "linux")
 public mount .linux.syscall.{
     syscall_raw,
-    read,
-    write,
-    close,
     mmap,
     munmap,
     getpid,
@@ -332,11 +335,12 @@ public mount .linux.time.{
 // =============================================================================
 
 // Core I/O functions
+//
+// SOUNDNESS: bare-name aliases `read` / `write` / `close` are
+// DELIBERATELY OMITTED here.  See `core/sys/darwin/mod.vr` for
+// the architectural rule.
 @cfg(target_os = "macos")
 public mount .darwin.{
-    read,
-    write,
-    close,
     mmap,
     munmap,
     getpid,

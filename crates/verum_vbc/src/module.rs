@@ -555,13 +555,51 @@ impl VbcModule {
     /// `infer_expr_type_name` couldn't statically determine the
     /// receiver's type at codegen time).
     pub fn find_function_by_unique_bare_suffix(&self, bare_name: &str) -> Option<FunctionId> {
+        // SOUNDNESS (task #io-1 dispatcher leg): namespace-shaped free
+        // fns (sys.linux.syscall.read, sys.darwin.libsystem.safe_write,
+        // core.io.fs.write, core.io.file.write, core.shell.builtins.write,
+        // etc.) CANNOT be invoked as instance methods — even when their
+        // qualified name ends with a common method suffix (`.read` /
+        // `.write` / `.close` / `.seek` / `.flush`).  When a user
+        // method-call site emits a bare CallM (because the codegen
+        // couldn't extract the receiver's static type), the
+        // bare-suffix scan was previously accepting these free fns as
+        // targets, mis-dispatching `s.write(buf)` for `s: Sink` to
+        // `sys.linux.syscall.write`.  Reject them here so the scan
+        // falls through to the legitimate user-typed method.
+        // Architectural rule pinned in source: namespace-qualified
+        // free fns (sys / core.sys / core.io.fs / core.io.file /
+        // core.shell / core.net / core.database) participate ONLY in
+        // `Call(fn_id)` dispatch, never in `CallM(receiver, method_id)`
+        // bare-suffix scan.
+        let is_namespace_shadow = |fname: &str| -> bool {
+            fname.starts_with("sys.")
+                || fname.starts_with("core.sys.")
+                || fname.starts_with("core.io.fs.")
+                || fname.starts_with("core.io.file.")
+                || fname.starts_with("core.shell.")
+                || fname.starts_with("core.net.")
+                || fname.starts_with("core.database.")
+        };
         if let Some(id) = self.find_function_by_name(bare_name) {
-            return Some(id);
+            // Don't accept a bare-name exact match that is itself a
+            // namespace shadow.
+            if let Some(desc) = self.functions.get(id.0 as usize)
+                && let Some(fname) = self.get_string(desc.name)
+                && is_namespace_shadow(fname)
+            {
+                // Fall through to suffix-scan in the namespace-shadow case.
+            } else {
+                return Some(id);
+            }
         }
         let suffix = format!(".{}", bare_name);
         let mut found: Option<FunctionId> = None;
         for (idx, desc) in self.functions.iter().enumerate() {
             if let Some(fname) = self.get_string(desc.name) {
+                if is_namespace_shadow(fname) {
+                    continue;
+                }
                 if fname.ends_with(&suffix) {
                     if found.is_some() {
                         // Ambiguous — multiple types own a method

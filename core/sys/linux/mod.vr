@@ -71,14 +71,18 @@ public module auxv;
 // Core Syscall Re-exports
 // =============================================================================
 
+// SOUNDNESS: bare-name aliases `read` / `write` / `close` are
+// DELIBERATELY OMITTED here.  Re-exporting them at the global
+// function level pollutes the namespace with method-name-shaped
+// entries, which shadow user-defined type methods at VBC method
+// dispatch.  See `core/sys/darwin/mod.vr` for the architectural
+// rule and the matching pattern.  Consumers MUST mount the
+// syscall fns directly with `as sys_read` / `as sys_write`
+// aliases at their call site (`core/io/stdio.vr`,
+// `core/io/file.vr`, `core/io/fs.vr`, …).
 public mount .syscall.{
     // Intrinsic
     syscall_raw,
-
-    // Basic I/O
-    read,
-    write,
-    close,
 
     // Memory mapping
     mmap,
