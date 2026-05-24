@@ -686,13 +686,13 @@ public type Iterator is protocol {
     fn try_collect<T, E, C: Default + Extend<T>>(mut self) -> Result<C, E>
     where Self.Item = Result<T, E> {
         let mut acc = C.default();
-        while let Some(item) = self.next() {
+        while let Maybe.Some(item) = self.next() {
             match item {
-                Ok(v) => { acc.extend_one(v); }
-                Err(e) => { return Err(e); }
+                Result.Ok(v) => { acc.extend_one(v); }
+                Result.Err(e) => { return Result.Err(e); }
             }
         }
-        Ok(acc)
+        Result.Ok(acc)
     }
 
     /// Partition by predicate.
@@ -702,7 +702,7 @@ public type Iterator is protocol {
     ) -> (C, C) {
         let mut left = C.default();
         let mut right = C.default();
-        while let Some(x) = self.next() {
+        while let Maybe.Some(x) = self.next() {
             if predicate(&x) {
                 left.extend_one(x);
             } else {
