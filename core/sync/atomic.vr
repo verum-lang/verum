@@ -110,13 +110,14 @@ public type AtomicOrdering is MemoryOrdering;
 
 // Convert Ordering enum to UInt8 for intrinsic calls.
 // This maps to the ordering constants from stdlib.intrinsics.
+// Qualify variants per task #17/#39 workaround.
 fn ordering_to_u8(order: MemoryOrdering) -> UInt8 {
     match order {
-        Relaxed => ORDERING_RELAXED,
-        Acquire => ORDERING_ACQUIRE,
-        Release => ORDERING_RELEASE,
-        AcqRel => ORDERING_ACQ_REL,
-        SeqCst => ORDERING_SEQ_CST,
+        MemoryOrdering.Relaxed => ORDERING_RELAXED,
+        MemoryOrdering.Acquire => ORDERING_ACQUIRE,
+        MemoryOrdering.Release => ORDERING_RELEASE,
+        MemoryOrdering.AcqRel => ORDERING_ACQ_REL,
+        MemoryOrdering.SeqCst => ORDERING_SEQ_CST,
     }
 }
 
