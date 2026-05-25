@@ -1,0 +1,314 @@
+// =============================================================================
+// core-tests/database/common/types/unit_test.vr
+// =============================================================================
+//
+// `core/database/common/types.vr` — wire-format types shared by every
+// Spindle adapter (Postgres / MySQL / SQLite).
+//
+// Surface tested here (pure-data subset):
+//   * 21 canonical TypeOid value constants (OID_NULL..OID_UNKNOWN)
+//   * WireFormat 2-variant (FmtText / FmtBinary)
+//   * WireValue 2-variant (WvNull / WvPresent)
+//   * WireReadError 2-variant (WrShortRead / WrInvalidUtf8) +
+//     Eq matrix
+//
+// TypeOid / ColumnSchema / RowSchema / WireRow / WireBuf / WireReader /
+// ArenaSlice / ArenaWireBuf / ArenaWireValue / ArenaWireRow are record
+// types whose factory ctors return Self records — same cross-module
+// record-return defect class as `meta/span` audit §3.1. Deferred.
+// =============================================================================
+
+mount core.database.common.types.{
+    WireFormat, WireValue, WireReadError,
+    OID_NULL, OID_BOOL, OID_INT2, OID_INT4, OID_INT8,
+    OID_FLOAT4, OID_FLOAT8, OID_TEXT, OID_BYTEA, OID_UUID,
+    OID_DATE, OID_TIME, OID_TIMESTAMP, OID_TIMESTAMPTZ, OID_INTERVAL,
+    OID_NUMERIC, OID_JSON, OID_JSONB, OID_ARRAY, OID_RECORD, OID_UNKNOWN,
+};
+
+// =============================================================================
+// Section 1: TypeOid value constants — 21 canonical OIDs
+// =============================================================================
+
+@test
+fn test_oid_null_value() {
+    assert(OID_NULL == 0);
+}
+
+@test
+fn test_oid_bool_value() {
+    assert(OID_BOOL == 1);
+}
+
+@test
+fn test_oid_int2_value() {
+    assert(OID_INT2 == 2);
+}
+
+@test
+fn test_oid_int4_value() {
+    assert(OID_INT4 == 3);
+}
+
+@test
+fn test_oid_int8_value() {
+    assert(OID_INT8 == 4);
+}
+
+@test
+fn test_oid_float4_value() {
+    assert(OID_FLOAT4 == 5);
+}
+
+@test
+fn test_oid_float8_value() {
+    assert(OID_FLOAT8 == 6);
+}
+
+@test
+fn test_oid_text_value() {
+    assert(OID_TEXT == 7);
+}
+
+@test
+fn test_oid_bytea_value() {
+    assert(OID_BYTEA == 8);
+}
+
+@test
+fn test_oid_uuid_value() {
+    assert(OID_UUID == 9);
+}
+
+@test
+fn test_oid_date_value() {
+    assert(OID_DATE == 10);
+}
+
+@test
+fn test_oid_time_value() {
+    assert(OID_TIME == 11);
+}
+
+@test
+fn test_oid_timestamp_value() {
+    assert(OID_TIMESTAMP == 12);
+}
+
+@test
+fn test_oid_timestamptz_value() {
+    assert(OID_TIMESTAMPTZ == 13);
+}
+
+@test
+fn test_oid_interval_value() {
+    assert(OID_INTERVAL == 14);
+}
+
+@test
+fn test_oid_numeric_value() {
+    assert(OID_NUMERIC == 15);
+}
+
+@test
+fn test_oid_json_value() {
+    assert(OID_JSON == 16);
+}
+
+@test
+fn test_oid_jsonb_value() {
+    assert(OID_JSONB == 17);
+}
+
+@test
+fn test_oid_array_value() {
+    assert(OID_ARRAY == 18);
+}
+
+@test
+fn test_oid_record_value() {
+    assert(OID_RECORD == 19);
+}
+
+@test
+fn test_oid_unknown_value() {
+    assert(OID_UNKNOWN == 20);
+}
+
+// =============================================================================
+// Section 2: OID values are pairwise-distinct
+// =============================================================================
+
+@test
+fn test_oid_constants_pairwise_distinct_numeric_family() {
+    // Integer family: NULL=0, BOOL=1, INT2=2, INT4=3, INT8=4
+    assert(OID_NULL != OID_BOOL);
+    assert(OID_BOOL != OID_INT2);
+    assert(OID_INT2 != OID_INT4);
+    assert(OID_INT4 != OID_INT8);
+    assert(OID_NULL != OID_INT8);  // span check
+}
+
+@test
+fn test_oid_constants_pairwise_distinct_float_family() {
+    assert(OID_FLOAT4 != OID_FLOAT8);
+    assert(OID_FLOAT4 != OID_NUMERIC);
+    assert(OID_FLOAT8 != OID_NUMERIC);
+}
+
+@test
+fn test_oid_constants_pairwise_distinct_text_family() {
+    assert(OID_TEXT != OID_BYTEA);
+    assert(OID_TEXT != OID_UUID);
+    assert(OID_TEXT != OID_JSON);
+    assert(OID_TEXT != OID_JSONB);
+}
+
+@test
+fn test_oid_constants_pairwise_distinct_temporal_family() {
+    assert(OID_DATE != OID_TIME);
+    assert(OID_TIME != OID_TIMESTAMP);
+    assert(OID_TIMESTAMP != OID_TIMESTAMPTZ);
+    assert(OID_TIMESTAMPTZ != OID_INTERVAL);
+    assert(OID_DATE != OID_INTERVAL);
+}
+
+@test
+fn test_oid_constants_pairwise_distinct_composite_family() {
+    assert(OID_ARRAY != OID_RECORD);
+    assert(OID_ARRAY != OID_UNKNOWN);
+    assert(OID_RECORD != OID_UNKNOWN);
+}
+
+@test
+fn test_oid_unknown_is_sentinel() {
+    // OID_UNKNOWN must be distinct from every other OID.
+    assert(OID_UNKNOWN != OID_NULL);
+    assert(OID_UNKNOWN != OID_BOOL);
+    assert(OID_UNKNOWN != OID_TEXT);
+    assert(OID_UNKNOWN != OID_TIMESTAMPTZ);
+    assert(OID_UNKNOWN != OID_ARRAY);
+    assert(OID_UNKNOWN != OID_RECORD);
+}
+
+// =============================================================================
+// Section 3: WireFormat 2-variant
+// =============================================================================
+
+@test
+fn test_wire_format_text() {
+    let f: WireFormat = WireFormat.FmtText;
+    assert(f is WireFormat.FmtText);
+}
+
+@test
+fn test_wire_format_binary() {
+    let f: WireFormat = WireFormat.FmtBinary;
+    assert(f is WireFormat.FmtBinary);
+}
+
+@test
+fn test_wire_format_disjoint() {
+    let t: WireFormat = WireFormat.FmtText;
+    let b: WireFormat = WireFormat.FmtBinary;
+    assert(t is WireFormat.FmtText && !(t is WireFormat.FmtBinary));
+    assert(b is WireFormat.FmtBinary && !(b is WireFormat.FmtText));
+}
+
+// =============================================================================
+// Section 4: WireValue 2-variant
+// =============================================================================
+
+@test
+fn test_wire_value_null() {
+    let v: WireValue = WireValue.WvNull;
+    assert(v is WireValue.WvNull);
+}
+
+@test
+fn test_wire_value_present_binary() {
+    let v: WireValue = WireValue.WvPresent {
+        bytes: List.new(),
+        format: WireFormat.FmtBinary,
+    };
+    assert(v is WireValue.WvPresent);
+}
+
+@test
+fn test_wire_value_present_text() {
+    let v: WireValue = WireValue.WvPresent {
+        bytes: List.new(),
+        format: WireFormat.FmtText,
+    };
+    assert(v is WireValue.WvPresent);
+}
+
+@test
+fn test_wire_value_disjoint() {
+    let n: WireValue = WireValue.WvNull;
+    let p: WireValue = WireValue.WvPresent {
+        bytes: List.new(),
+        format: WireFormat.FmtBinary,
+    };
+    assert(n is WireValue.WvNull && !(n is WireValue.WvPresent));
+    assert(p is WireValue.WvPresent && !(p is WireValue.WvNull));
+}
+
+// =============================================================================
+// Section 5: WireReadError 2-variant + Eq
+// =============================================================================
+
+@test
+fn test_wire_read_error_short_read() {
+    let e: WireReadError = WireReadError.WrShortRead { wanted: 4, available: 2 };
+    assert(e is WireReadError.WrShortRead);
+}
+
+@test
+fn test_wire_read_error_invalid_utf8() {
+    let e: WireReadError = WireReadError.WrInvalidUtf8;
+    assert(e is WireReadError.WrInvalidUtf8);
+}
+
+@test
+fn test_wire_read_error_disjoint() {
+    let sr: WireReadError = WireReadError.WrShortRead { wanted: 0, available: 0 };
+    let iu: WireReadError = WireReadError.WrInvalidUtf8;
+    assert(sr is WireReadError.WrShortRead && !(sr is WireReadError.WrInvalidUtf8));
+    assert(iu is WireReadError.WrInvalidUtf8 && !(iu is WireReadError.WrShortRead));
+}
+
+@test
+fn test_wire_read_error_eq_short_read_reflexive() {
+    let a: WireReadError = WireReadError.WrShortRead { wanted: 4, available: 2 };
+    let b: WireReadError = WireReadError.WrShortRead { wanted: 4, available: 2 };
+    assert(a == b);
+}
+
+@test
+fn test_wire_read_error_eq_short_read_wanted_differs() {
+    let a: WireReadError = WireReadError.WrShortRead { wanted: 4, available: 2 };
+    let b: WireReadError = WireReadError.WrShortRead { wanted: 8, available: 2 };
+    assert(!(a == b));
+}
+
+@test
+fn test_wire_read_error_eq_short_read_available_differs() {
+    let a: WireReadError = WireReadError.WrShortRead { wanted: 4, available: 2 };
+    let b: WireReadError = WireReadError.WrShortRead { wanted: 4, available: 0 };
+    assert(!(a == b));
+}
+
+@test
+fn test_wire_read_error_eq_invalid_utf8_singletons() {
+    let a: WireReadError = WireReadError.WrInvalidUtf8;
+    let b: WireReadError = WireReadError.WrInvalidUtf8;
+    assert(a == b);
+}
+
+@test
+fn test_wire_read_error_eq_cross_variant_false() {
+    let sr: WireReadError = WireReadError.WrShortRead { wanted: 1, available: 0 };
+    let iu: WireReadError = WireReadError.WrInvalidUtf8;
+    assert(!(sr == iu));
+}
