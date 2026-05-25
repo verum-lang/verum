@@ -11197,6 +11197,22 @@ impl VbcCodegen {
             ExprKind::Literal(lit) => match &lit.kind {
                 LiteralKind::Int(int_lit) => Some(int_lit.value as i64),
                 LiteralKind::Bool(b) => Some(if *b { 1 } else { 0 }),
+                // SOUNDNESS (closes task #io-16): Char literals must also
+                // be inlinable as const values.  Without this, every
+                // `public const X: Char = '/';` declaration falls through
+                // to body-compilation (a queued function that returns the
+                // literal), and the inline-const fast-path in the
+                // typechecker / dispatcher misses.  At the use site
+                // `local.push(X)` may then load a value with the wrong
+                // NaN-box tag (Int vs Char), causing `Text.push` /
+                // `Text.ends_with_char` to operate on the wrong codepoint
+                // — pinned by
+                // `core-tests/io/path/regression_test.vr::regression_main_separator_equals_slash`
+                // (assert_eq(MAIN_SEPARATOR, '/') FAILS).  Char is
+                // ABI-equivalent to UInt32 (Unicode codepoint), so the
+                // i64 representation is the codepoint cast to i64.
+                LiteralKind::Char(c) => Some(*c as i64),
+                LiteralKind::ByteChar(b) => Some(*b as i64),
                 _ => None,
             },
             ExprKind::Paren(inner) => Self::extract_const_literal_value(inner),

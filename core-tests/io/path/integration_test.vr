@@ -43,11 +43,8 @@ fn integration_pathbuf_text_round_trip() {
 
 // =============================================================================
 // §3 — Path.join_str via Text suffix
-//      GATED by #io-4 — pinned `@ignore`. Re-enable after PathBuf.push Text
-//      equality drift closes.
 // =============================================================================
 
-@ignore
 @test
 fn integration_path_join_str() {
     let p = Path.new(&Text.from("/etc"));
@@ -83,7 +80,13 @@ fn integration_path_extension_match_classifier() {
 
 // =============================================================================
 // §5 — Building a path incrementally via repeated push
-//      GATED by #io-4 — pinned `@ignore`.
+//
+// NOTE: `buf.is_absolute()` requires Deref<Target=Path> dispatch which
+// auto-forwards to Path.is_absolute.  The auto-deref currently mis-fires
+// at runtime — the candidate list shows `Path.is_absolute` is
+// registered but the receiver is reported as PathBuf and no `PathBuf.
+// is_absolute` exists.  Pinned `@ignore` until the Deref-based method
+// dispatch retry surfaces this case.
 // =============================================================================
 
 @ignore

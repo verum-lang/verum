@@ -1454,6 +1454,18 @@ impl VbcCodegen {
             PathSegment::Name(ident) => {
                 let name = &ident.name;
 
+                // Diagnostic: trace bare `None`/`Some` resolution for
+                // bare-variant-closure-body defect investigation.
+                if std::env::var("VERUM_TRACE_BARE_VARIANT").is_ok()
+                    && (name.as_str() == "None" || name.as_str() == "Some")
+                {
+                    eprintln!(
+                        "[bare-variant-trace] compile_simple_path name={:?} current_return_type_name={:?}",
+                        name.as_str(),
+                        self.ctx.current_return_type_name
+                    );
+                }
+
                 // First, try to find as a local variable
                 if let Ok(reg) = self.ctx.get_var_reg(name) {
                     // Cell-wrapped mutable capture: dereference through GetF
@@ -1513,7 +1525,18 @@ impl VbcCodegen {
                     .map(|t| t.split('<').next().unwrap_or(t).to_string())
                     .and_then(|prefix| {
                         let qualified = format!("{}.{}", prefix, name);
-                        self.ctx.lookup_function(&qualified).cloned()
+                        let r = self.ctx.lookup_function(&qualified).cloned();
+                        if std::env::var("VERUM_TRACE_BARE_VARIANT").is_ok()
+                            && (name.as_str() == "None" || name.as_str() == "Some")
+                        {
+                            eprintln!(
+                                "[bare-variant-trace] expected_prefixed qualified={} found={} variant_tag={:?}",
+                                qualified,
+                                r.is_some(),
+                                r.as_ref().and_then(|i| i.variant_tag)
+                            );
+                        }
+                        r
                     });
                 //
                 // **Qualified-suffix fallback (task #138)**. The archive

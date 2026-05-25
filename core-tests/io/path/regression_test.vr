@@ -41,16 +41,22 @@ mount core.collections.list.List;
 // `[[btree_pattern_match_ref_generic_class]]`.
 // =============================================================================
 
-// PARTIAL CLOSE 2026-05-24 — surgical fix in `core/io/path.vr::push`
-// (single-level Path assignment + clone-extract) closes the LENGTH
-// defect (pre-fix: 28 bytes garbage instead of 15-byte correct
-// "/home/user/docs").  Residual Text.eq drift remains: byte-by-byte
-// content matches but direct Text.eq returns false.  Root cause
-// suspected at a deeper VBC layer — possibly `Text.as_bytes()`
-// returning a different view depending on the Text's construction
-// shape (push-built vs literal-built).  Multi-day investigation
-// required.
-@ignore
+// CLOSED §A 2026-05-25 (multi-layer fix):
+//
+// 1. `core/io/path.vr::push` extracts both `component.inner.clone()` and
+//    `self.path.inner.clone()` to locals, mutates the local via
+//    single-step `push`/`push_str`, writes back via single-level
+//    `self.path = Path { inner: local }` — single-level field write-back
+//    avoids the nested GetF/SetF chain mis-read.
+//
+// 2. Inlines literal `'/'` / `'\\'` `@cfg`-gated instead of using the
+//    `MAIN_SEPARATOR` const (Char-typed const eval is still partially
+//    broken at the load-site — see §B-ignored).
+//
+// 3. VBC codegen `extract_const_literal_value` (crates/verum_vbc/src/codegen/mod.rs)
+//    now handles `Char` and `ByteChar` literals — partial codegen-side
+//    close-out.
+
 @test
 fn regression_pathbuf_push_text_equality_drift() {
     let mut buf = PathBuf.from(&Text.from("/home/user"));
@@ -58,7 +64,22 @@ fn regression_pathbuf_push_text_equality_drift() {
     assert_eq(buf.to_text(), Text.from("/home/user/docs"));
 }
 
+// =============================================================================
+// §B-ignored — Char-typed `public const` value-load
+//
+// `extract_const_literal_value` now handles `LiteralKind::Char`, but the
+// downstream load-site for mount-imported stdlib consts still doesn't
+// reach the `__const_val_N` LoadI fast-path.  `MAIN_SEPARATOR` reads
+// back to a value that's NOT 47.  Path.vr inlines literal '/' as the
+// proven workaround.
+// =============================================================================
+
 @ignore
+@test
+fn regression_main_separator_equals_slash() {
+    assert_eq(MAIN_SEPARATOR, '/');
+}
+
 @test
 fn regression_pathbuf_push_when_already_has_trailing_separator() {
     let mut buf = PathBuf.from(&Text.from("/home/user/"));
@@ -66,7 +87,6 @@ fn regression_pathbuf_push_when_already_has_trailing_separator() {
     assert_eq(buf.to_text(), Text.from("/home/user/file.txt"));
 }
 
-@ignore
 @test
 fn regression_pathbuf_pop_after_push_returns_to_base() {
     let base = Text.from("/home/user");
@@ -76,7 +96,6 @@ fn regression_pathbuf_pop_after_push_returns_to_base() {
     assert_eq(buf.to_text(), base);
 }
 
-@ignore
 @test
 fn regression_pathbuf_set_extension_text_equality() {
     let mut buf = PathBuf.from(&Text.from("/home/file.txt"));

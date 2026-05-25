@@ -100,10 +100,8 @@ fn law_path_to_pathbuf_round_trip() {
 
 // =============================================================================
 // §E — PathBuf.push then PathBuf.pop is identity on non-empty paths
-//      GATED by #io-4 (regression_test.vr §A) — pinned `@ignore`.
 // =============================================================================
 
-@ignore
 @test
 fn law_pathbuf_push_pop_identity() {
     let base = Text.from("/home/user");
@@ -143,10 +141,8 @@ fn law_component_eq_reflexive_exhaustive() {
 
 // =============================================================================
 // §G — Path.parent.unwrap_or(empty).join(file_name) round-trip
-//      GATED by #io-4 (regression_test.vr §A) — pinned `@ignore`.
 // =============================================================================
 
-@ignore
 @test
 fn law_path_parent_join_filename_recovers_path() {
     let paths: List<Text> = [
