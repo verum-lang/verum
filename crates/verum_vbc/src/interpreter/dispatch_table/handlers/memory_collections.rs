@@ -345,14 +345,41 @@ pub(in super::super) fn handle_get_field(
             message: "field end offset overflow".into(),
         })?;
     if field_end > header.size as usize {
+        // Diagnostic: capture backtrace + type info for OOB GetF.
+        // Helps localise codegen mis-allocations where the runtime
+        // receiver is smaller than the codegen-resolved field index
+        // expects.
+        let backtrace: Vec<String> = state
+            .call_stack
+            .iter_rev()
+            .take(8)
+            .map(|frame| {
+                state
+                    .module
+                    .get_function(frame.function)
+                    .and_then(|f| state.module.strings.get(f.name))
+                    .map(|s| format!("{}@pc={}", s, frame.pc))
+                    .unwrap_or_else(|| format!("?@pc={}", frame.pc))
+            })
+            .collect();
+        let type_name = state
+            .module
+            .types
+            .iter()
+            .find(|t| t.id == header.type_id)
+            .and_then(|t| state.module.strings.get(t.name))
+            .unwrap_or("?");
         return Err(InterpreterError::Panic {
             message: format!(
-                "field access out of bounds: field index {} (offset {}+{} = {}) exceeds object data size {}",
+                "field access out of bounds: field index {} (offset {}+{} = {}) exceeds object data size {} type_id={} type='{}' backtrace=[{}]",
                 field_idx,
                 field_offset,
                 std::mem::size_of::<Value>(),
                 field_end,
-                header.size
+                header.size,
+                header.type_id.0,
+                type_name,
+                backtrace.join(" <- ")
             ),
         });
     }
