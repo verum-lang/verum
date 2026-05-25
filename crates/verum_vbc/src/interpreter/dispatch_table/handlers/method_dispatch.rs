@@ -1144,7 +1144,20 @@ pub(in super::super) fn handle_call_method(
                     *(raw_ptr.add(8) as *mut u32) = generation; // offset 8: generation
                     *(raw_ptr.add(12) as *mut u16) = epoch; // offset 12: epoch (u16)
                     *(raw_ptr.add(14) as *mut u16) = 0x03; // offset 14: capabilities (read+write)
-                    *(raw_ptr.add(16) as *mut u32) = 0; // offset 16: type_id
+                    // **Task #18 fix 2026-05-25** — stamp TypeId::HEAP
+                    // (519) into the CBGR header instead of the
+                    // default 0.  Pre-fix the runtime saw the
+                    // receiver's kind as `MemoryOrder` (TypeId 0
+                    // happens to alias to that enum), causing
+                    // `h.into_inner()` method dispatch to miss the
+                    // Heap.into_inner entry and surface as
+                    // "method 'Heap.into_inner' not found on
+                    // receiver of runtime kind `MemoryOrder`".
+                    // The TypeId stamped here is consulted by
+                    // dispatch_table/handlers/method_dispatch.rs
+                    // when reading `header.type_id` to classify
+                    // the receiver's runtime kind.
+                    *(raw_ptr.add(16) as *mut u32) = crate::types::TypeId::HEAP.0;
                     *(raw_ptr.add(20) as *mut u32) = 0; // offset 20: flags (0 = allocated)
                     // offsets 24-31: reserved (already zeroed)
                     // Write user data value after the header

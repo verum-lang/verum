@@ -53,6 +53,10 @@ fn regression_bloom_with_defaults_constructible() {
 // SHA-256 block processing, an index 64 access on a 64-element
 // buffer fires.  Class to investigate: `[Byte; 64]` array
 // indexing in hmac/sha256 internals.
+//
+// Re-checked 2026-05-25 — also surfaces a GetE pointer-mismatch
+// (post task #47 stage-3 stubs) when called with proper slices.
+// Tracked as task #17.
 @ignore
 @test
 fn regression_bloom_insert_contains_round_trip() {
