@@ -94,6 +94,11 @@ fn regression_repeat_byte_read_dispatches_correctly() {
     }
 }
 
+// Cursor<&[Byte]> read — the receiver `c` is reported as `Text` at
+// dispatch (despite being a BufferCursor<&[Byte]>).  Separate type-
+// tracking defect: when `Cursor.new(&[Byte])` constructs the alias-
+// resolved BufferCursor<&[Byte]>, the variable type-name isn't
+// preserved.  Pinned `@ignore`.
 @ignore
 @test
 fn regression_cursor_slice_read_dispatches_correctly() {
