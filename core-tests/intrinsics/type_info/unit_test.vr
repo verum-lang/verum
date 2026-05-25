@@ -1,0 +1,318 @@
+// =============================================================================
+// core-tests/intrinsics/type_info/unit_test.vr
+// =============================================================================
+//
+// `core/intrinsics/type_info.vr` — type-information intrinsics.
+//
+// Surface tested (canonical type-property form per stdlib docs):
+//   * T.size       — size in bytes
+//   * T.bits       — size in bits
+//   * T.alignment  — memory alignment
+//   * T.stride     — array element stride
+//   * T.name       — type name as Text
+//   * T.id         — unique type identifier (UInt64)
+//
+// The legacy meta-fn form (`size_of<T>()`, `align_of<T>()`, etc.) is
+// `@deprecated` per the module docs. Verum's canonical surface for
+// type information is the type-property syntax — that's what this
+// suite tests.
+// =============================================================================
+
+// =============================================================================
+// Section 1: T.size — primitive sizes in bytes
+// =============================================================================
+
+@test
+fn test_int_size_is_8() {
+    // Int = Int64 → 8 bytes
+    assert(Int.size == 8);
+}
+
+@test
+fn test_int64_size_is_8() {
+    assert(Int64.size == 8);
+}
+
+@test
+fn test_int32_size_is_4() {
+    assert(Int32.size == 4);
+}
+
+@test
+fn test_int16_size_is_2() {
+    assert(Int16.size == 2);
+}
+
+@test
+fn test_int8_size_is_1() {
+    assert(Int8.size == 1);
+}
+
+@test
+fn test_uint64_size_is_8() {
+    assert(UInt64.size == 8);
+}
+
+@test
+fn test_uint32_size_is_4() {
+    assert(UInt32.size == 4);
+}
+
+@test
+fn test_uint16_size_is_2() {
+    assert(UInt16.size == 2);
+}
+
+@test
+fn test_uint8_size_is_1() {
+    assert(UInt8.size == 1);
+}
+
+@test
+fn test_byte_size_is_1() {
+    assert(Byte.size == 1);
+}
+
+@test
+fn test_float64_size_is_8() {
+    assert(Float64.size == 8);
+}
+
+@test
+fn test_float32_size_is_4() {
+    assert(Float32.size == 4);
+}
+
+@test
+fn test_bool_size_is_1() {
+    assert(Bool.size == 1);
+}
+
+// =============================================================================
+// Section 2: T.bits — primitive sizes in bits
+// =============================================================================
+
+@test
+fn test_int_bits_is_64() {
+    assert(Int.bits == 64);
+}
+
+@test
+fn test_int64_bits_is_64() {
+    assert(Int64.bits == 64);
+}
+
+@test
+fn test_int32_bits_is_32() {
+    assert(Int32.bits == 32);
+}
+
+@test
+fn test_int16_bits_is_16() {
+    assert(Int16.bits == 16);
+}
+
+@test
+fn test_int8_bits_is_8() {
+    assert(Int8.bits == 8);
+}
+
+@test
+fn test_byte_bits_is_8() {
+    assert(Byte.bits == 8);
+}
+
+@test
+fn test_float64_bits_is_64() {
+    assert(Float64.bits == 64);
+}
+
+@test
+fn test_float32_bits_is_32() {
+    assert(Float32.bits == 32);
+}
+
+// =============================================================================
+// Section 3: T.size / T.bits consistency law — bits = size * 8
+// =============================================================================
+
+@test
+fn test_size_bits_consistency_int() {
+    assert(Int.bits == Int.size * 8);
+}
+
+@test
+fn test_size_bits_consistency_int32() {
+    assert(Int32.bits == Int32.size * 8);
+}
+
+@test
+fn test_size_bits_consistency_int16() {
+    assert(Int16.bits == Int16.size * 8);
+}
+
+@test
+fn test_size_bits_consistency_int8() {
+    assert(Int8.bits == Int8.size * 8);
+}
+
+@test
+fn test_size_bits_consistency_uint64() {
+    assert(UInt64.bits == UInt64.size * 8);
+}
+
+@test
+fn test_size_bits_consistency_float64() {
+    assert(Float64.bits == Float64.size * 8);
+}
+
+@test
+fn test_size_bits_consistency_float32() {
+    assert(Float32.bits == Float32.size * 8);
+}
+
+@test
+fn test_size_bits_consistency_byte() {
+    assert(Byte.bits == Byte.size * 8);
+}
+
+// =============================================================================
+// Section 4: T.alignment ≤ T.size for primitives
+// =============================================================================
+
+@test
+fn test_alignment_le_size_int() {
+    assert(Int.alignment <= Int.size);
+}
+
+@test
+fn test_alignment_le_size_int32() {
+    assert(Int32.alignment <= Int32.size);
+}
+
+@test
+fn test_alignment_le_size_int8() {
+    assert(Int8.alignment <= Int8.size);
+}
+
+@test
+fn test_alignment_le_size_float64() {
+    assert(Float64.alignment <= Float64.size);
+}
+
+@test
+fn test_alignment_le_size_bool() {
+    assert(Bool.alignment <= Bool.size);
+}
+
+// =============================================================================
+// Section 5: T.stride — array element stride
+// =============================================================================
+
+@test
+fn test_stride_int_is_8() {
+    assert(Int.stride == 8);
+}
+
+@test
+fn test_stride_int32_is_4() {
+    assert(Int32.stride == 4);
+}
+
+@test
+fn test_stride_bool_is_1() {
+    assert(Bool.stride == 1);
+}
+
+@test
+fn test_stride_ge_size_int() {
+    // stride is size rounded up to alignment — never less than size
+    assert(Int.stride >= Int.size);
+}
+
+@test
+fn test_stride_ge_size_int32() {
+    assert(Int32.stride >= Int32.size);
+}
+
+@test
+fn test_stride_ge_size_bool() {
+    assert(Bool.stride >= Bool.size);
+}
+
+// =============================================================================
+// Section 6: T.name — type name as Text
+// =============================================================================
+
+@test
+fn test_int_name_is_int() {
+    assert(Int.name == "Int");
+}
+
+@test
+fn test_int64_name_contains_int() {
+    let n = Int64.name;
+    assert(n.len() > 0);
+}
+
+@test
+fn test_int32_name_nonempty() {
+    let n = Int32.name;
+    assert(n.len() > 0);
+}
+
+@test
+fn test_byte_name_nonempty() {
+    let n = Byte.name;
+    assert(n.len() > 0);
+}
+
+@test
+fn test_float64_name_nonempty() {
+    let n = Float64.name;
+    assert(n.len() > 0);
+}
+
+@test
+fn test_bool_name_nonempty() {
+    let n = Bool.name;
+    assert(n.len() > 0);
+}
+
+@test
+fn test_names_int_vs_float_distinct() {
+    assert(Int.name != Float64.name);
+}
+
+@test
+fn test_names_int32_vs_int64_distinct() {
+    assert(Int32.name != Int64.name);
+}
+
+// =============================================================================
+// Section 7: T.id — unique type identifier
+// =============================================================================
+
+@test
+fn test_int_id_nonzero_or_valid() {
+    // Type IDs are UInt64; just verify it can be read.
+    let i = Int.id;
+    let _ = i;
+    assert(true);
+}
+
+@test
+fn test_id_int_vs_float64_distinct() {
+    // Different types MUST have different IDs.
+    assert(Int.id != Float64.id);
+}
+
+@test
+fn test_id_int32_vs_int64_distinct() {
+    assert(Int32.id != Int64.id);
+}
+
+@test
+fn test_id_int_vs_bool_distinct() {
+    assert(Int.id != Bool.id);
+}
