@@ -1,0 +1,229 @@
+// =============================================================================
+// core-tests/types/two_level/unit_test.vr
+// =============================================================================
+//
+// `core/types/two_level.vr` — Two-Level Type Theory (2LTT).
+// Voevodsky/ACK stratification of universes into fibrant (HoTT/cubical)
+// and strict (UIP-holding, decidable equality) layers.
+//
+// Surface tested here:
+//   * Layer 2-variant (Fibrant / Strict) + Eq + variant disjointness
+//   * layer_flows_to truth table — `Fibrant ≼ Strict` ordering rule
+//   * layer_mix truth table — strictness-contagion rule (Strict wins)
+//   * LayerVerdict 3-variant (LayerOk / StrictInFibrant / LevelMismatch)
+//     + Eq matrix
+//   * Layer-flow soundness via check_layer_flow boundary cases (deferred
+//     to integration after cross-module record-return fix)
+// =============================================================================
+
+mount core.types.two_level.{Layer, LayerVerdict, layer_flows_to, layer_mix};
+
+// =============================================================================
+// Section 1: Layer 2-variant
+// =============================================================================
+
+@test
+fn test_layer_fibrant() {
+    let l: Layer = Layer.Fibrant;
+    assert(l is Layer.Fibrant);
+}
+
+@test
+fn test_layer_strict() {
+    let l: Layer = Layer.Strict;
+    assert(l is Layer.Strict);
+}
+
+@test
+fn test_layer_pairwise_disjoint() {
+    let f: Layer = Layer.Fibrant;
+    let s: Layer = Layer.Strict;
+    assert(f is Layer.Fibrant && !(f is Layer.Strict));
+    assert(s is Layer.Strict && !(s is Layer.Fibrant));
+}
+
+// =============================================================================
+// Section 2: Layer Eq matrix
+// =============================================================================
+
+@test
+fn test_layer_eq_fibrant_reflexive() {
+    let a: Layer = Layer.Fibrant;
+    let b: Layer = Layer.Fibrant;
+    assert(a == b);
+}
+
+@test
+fn test_layer_eq_strict_reflexive() {
+    let a: Layer = Layer.Strict;
+    let b: Layer = Layer.Strict;
+    assert(a == b);
+}
+
+@test
+fn test_layer_eq_cross_variant_false() {
+    let f: Layer = Layer.Fibrant;
+    let s: Layer = Layer.Strict;
+    assert(!(f == s));
+    assert(!(s == f));
+}
+
+// =============================================================================
+// Section 3: layer_flows_to truth table (Fibrant ≼ Strict ordering)
+// =============================================================================
+
+@test
+fn test_layer_flows_to_fibrant_to_fibrant_true() {
+    assert(layer_flows_to(Layer.Fibrant, Layer.Fibrant));
+}
+
+@test
+fn test_layer_flows_to_fibrant_to_strict_true() {
+    // Every fibrant is also strict (strictness is "more permissive").
+    assert(layer_flows_to(Layer.Fibrant, Layer.Strict));
+}
+
+@test
+fn test_layer_flows_to_strict_to_strict_true() {
+    assert(layer_flows_to(Layer.Strict, Layer.Strict));
+}
+
+@test
+fn test_layer_flows_to_strict_to_fibrant_false() {
+    // Strict types do NOT live in fibrant universes (UIP would leak).
+    assert(!layer_flows_to(Layer.Strict, Layer.Fibrant));
+}
+
+// =============================================================================
+// Section 4: layer_mix truth table (strictness contagion)
+// =============================================================================
+
+@test
+fn test_layer_mix_fibrant_fibrant_yields_fibrant() {
+    let r = layer_mix(Layer.Fibrant, Layer.Fibrant);
+    assert(r is Layer.Fibrant);
+}
+
+@test
+fn test_layer_mix_strict_fibrant_yields_strict() {
+    let r = layer_mix(Layer.Strict, Layer.Fibrant);
+    assert(r is Layer.Strict);
+}
+
+@test
+fn test_layer_mix_fibrant_strict_yields_strict() {
+    let r = layer_mix(Layer.Fibrant, Layer.Strict);
+    assert(r is Layer.Strict);
+}
+
+@test
+fn test_layer_mix_strict_strict_yields_strict() {
+    let r = layer_mix(Layer.Strict, Layer.Strict);
+    assert(r is Layer.Strict);
+}
+
+@test
+fn test_layer_mix_strict_contagion_property() {
+    // If either input is Strict, output is Strict (4-corner truth table).
+    assert(layer_mix(Layer.Fibrant, Layer.Fibrant) is Layer.Fibrant);
+    assert(layer_mix(Layer.Strict, Layer.Fibrant) is Layer.Strict);
+    assert(layer_mix(Layer.Fibrant, Layer.Strict) is Layer.Strict);
+    assert(layer_mix(Layer.Strict, Layer.Strict) is Layer.Strict);
+}
+
+// =============================================================================
+// Section 5: layer_mix commutativity (algebraic law)
+// =============================================================================
+
+@test
+fn law_layer_mix_commutative_fibrant_strict() {
+    let ab = layer_mix(Layer.Fibrant, Layer.Strict);
+    let ba = layer_mix(Layer.Strict, Layer.Fibrant);
+    assert(ab is Layer.Strict);
+    assert(ba is Layer.Strict);
+    // Both yield Strict — symmetric.
+}
+
+@test
+fn law_layer_mix_idempotent_fibrant() {
+    let r = layer_mix(Layer.Fibrant, Layer.Fibrant);
+    assert(r is Layer.Fibrant);
+}
+
+@test
+fn law_layer_mix_idempotent_strict() {
+    let r = layer_mix(Layer.Strict, Layer.Strict);
+    assert(r is Layer.Strict);
+}
+
+@test
+fn law_layer_mix_strict_absorbing() {
+    // Strict ⊗ Anything = Strict (left and right absorbing).
+    let l = layer_mix(Layer.Strict, Layer.Fibrant);
+    let r = layer_mix(Layer.Fibrant, Layer.Strict);
+    assert(l is Layer.Strict);
+    assert(r is Layer.Strict);
+}
+
+// =============================================================================
+// Section 6: LayerVerdict 3-variant
+// =============================================================================
+
+@test
+fn test_layer_verdict_ok_variant() {
+    let v: LayerVerdict = LayerVerdict.LayerOk;
+    assert(v is LayerVerdict.LayerOk);
+}
+
+@test
+fn test_layer_verdict_level_mismatch_variant() {
+    let v: LayerVerdict = LayerVerdict.LevelMismatch { from_level: 0, to_level: 1 };
+    assert(v is LayerVerdict.LevelMismatch);
+}
+
+@test
+fn test_layer_verdict_pairwise_disjoint_singletons() {
+    let ok: LayerVerdict = LayerVerdict.LayerOk;
+    let lm: LayerVerdict = LayerVerdict.LevelMismatch { from_level: 0, to_level: 0 };
+    assert(ok is LayerVerdict.LayerOk && !(ok is LayerVerdict.LevelMismatch));
+    assert(lm is LayerVerdict.LevelMismatch && !(lm is LayerVerdict.LayerOk));
+}
+
+// =============================================================================
+// Section 7: LayerVerdict.Eq matrix — payload-sensitive
+// =============================================================================
+
+@test
+fn test_layer_verdict_eq_ok_singletons() {
+    let a: LayerVerdict = LayerVerdict.LayerOk;
+    let b: LayerVerdict = LayerVerdict.LayerOk;
+    assert(a == b);
+}
+
+@test
+fn test_layer_verdict_eq_level_mismatch_reflexive() {
+    let a: LayerVerdict = LayerVerdict.LevelMismatch { from_level: 2, to_level: 1 };
+    let b: LayerVerdict = LayerVerdict.LevelMismatch { from_level: 2, to_level: 1 };
+    assert(a == b);
+}
+
+@test
+fn test_layer_verdict_eq_level_mismatch_from_differs() {
+    let a: LayerVerdict = LayerVerdict.LevelMismatch { from_level: 2, to_level: 1 };
+    let b: LayerVerdict = LayerVerdict.LevelMismatch { from_level: 3, to_level: 1 };
+    assert(!(a == b));
+}
+
+@test
+fn test_layer_verdict_eq_level_mismatch_to_differs() {
+    let a: LayerVerdict = LayerVerdict.LevelMismatch { from_level: 2, to_level: 1 };
+    let b: LayerVerdict = LayerVerdict.LevelMismatch { from_level: 2, to_level: 0 };
+    assert(!(a == b));
+}
+
+@test
+fn test_layer_verdict_eq_cross_variant_false() {
+    let ok: LayerVerdict = LayerVerdict.LayerOk;
+    let lm: LayerVerdict = LayerVerdict.LevelMismatch { from_level: 0, to_level: 0 };
+    assert(!(ok == lm));
+}
