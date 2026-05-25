@@ -1,0 +1,185 @@
+// =============================================================================
+// core-tests/simd/gpu/unit_test.vr
+// =============================================================================
+//
+// `core/simd/gpu.vr` — GPU compute types (CUDA / ROCm / Metal / Vulkan).
+//
+// Surface tested here (pure-data ADTs only):
+//   * GpuBackend 4-variant (Cuda / Rocm / Metal / Vulkan)
+//   * TransferKind 3-variant (HostToDevice / DeviceToHost / DeviceToDevice)
+//   * Grid record + .d1 / .d2 / .d3 ctors (sidestepped via direct
+//     record-literal construction)
+//   * GpuBlock record + .d1 / .d2 / .d3 ctors + .total_threads
+//
+// All GPU operations (memcpy, kernel launch, thread intrinsics) are
+// `@intrinsic("gpu_*")` and require a real GPU + target compilation.
+// Tested at the verum_runtime level.
+// =============================================================================
+
+mount core.simd.gpu.{GpuBackend, TransferKind, Grid, GpuBlock};
+
+// =============================================================================
+// Section 1: GpuBackend 4-variant
+// =============================================================================
+
+@test
+fn test_gpu_backend_cuda() {
+    let b: GpuBackend = GpuBackend.Cuda;
+    assert(b is GpuBackend.Cuda);
+}
+
+@test
+fn test_gpu_backend_rocm() {
+    let b: GpuBackend = GpuBackend.Rocm;
+    assert(b is GpuBackend.Rocm);
+}
+
+@test
+fn test_gpu_backend_metal() {
+    let b: GpuBackend = GpuBackend.Metal;
+    assert(b is GpuBackend.Metal);
+}
+
+@test
+fn test_gpu_backend_vulkan() {
+    let b: GpuBackend = GpuBackend.Vulkan;
+    assert(b is GpuBackend.Vulkan);
+}
+
+@test
+fn test_gpu_backend_pairwise_disjoint() {
+    let c: GpuBackend = GpuBackend.Cuda;
+    let r: GpuBackend = GpuBackend.Rocm;
+    let m: GpuBackend = GpuBackend.Metal;
+    let v: GpuBackend = GpuBackend.Vulkan;
+    assert(c is GpuBackend.Cuda && !(c is GpuBackend.Rocm));
+    assert(r is GpuBackend.Rocm && !(r is GpuBackend.Metal));
+    assert(m is GpuBackend.Metal && !(m is GpuBackend.Vulkan));
+    assert(v is GpuBackend.Vulkan && !(v is GpuBackend.Cuda));
+}
+
+// =============================================================================
+// Section 2: TransferKind 3-variant
+// =============================================================================
+
+@test
+fn test_transfer_kind_host_to_device() {
+    let t: TransferKind = TransferKind.HostToDevice;
+    assert(t is TransferKind.HostToDevice);
+}
+
+@test
+fn test_transfer_kind_device_to_host() {
+    let t: TransferKind = TransferKind.DeviceToHost;
+    assert(t is TransferKind.DeviceToHost);
+}
+
+@test
+fn test_transfer_kind_device_to_device() {
+    let t: TransferKind = TransferKind.DeviceToDevice;
+    assert(t is TransferKind.DeviceToDevice);
+}
+
+@test
+fn test_transfer_kind_pairwise_disjoint() {
+    let h2d: TransferKind = TransferKind.HostToDevice;
+    let d2h: TransferKind = TransferKind.DeviceToHost;
+    let d2d: TransferKind = TransferKind.DeviceToDevice;
+    assert(h2d is TransferKind.HostToDevice && !(h2d is TransferKind.DeviceToHost));
+    assert(d2h is TransferKind.DeviceToHost && !(d2h is TransferKind.DeviceToDevice));
+    assert(d2d is TransferKind.DeviceToDevice && !(d2d is TransferKind.HostToDevice));
+}
+
+// =============================================================================
+// Section 3: Grid record direct construction
+// =============================================================================
+
+@test
+fn test_grid_direct_1d() {
+    let g = Grid { x: 256, y: 1, z: 1 };
+    assert(g.x == 256);
+    assert(g.y == 1);
+    assert(g.z == 1);
+}
+
+@test
+fn test_grid_direct_2d() {
+    let g = Grid { x: 64, y: 64, z: 1 };
+    assert(g.x == 64);
+    assert(g.y == 64);
+    assert(g.z == 1);
+}
+
+@test
+fn test_grid_direct_3d() {
+    let g = Grid { x: 16, y: 16, z: 4 };
+    assert(g.x == 16);
+    assert(g.y == 16);
+    assert(g.z == 4);
+}
+
+@test
+fn test_grid_minimum_dimensions() {
+    let g = Grid { x: 1, y: 1, z: 1 };
+    assert(g.x == 1);
+    assert(g.y == 1);
+    assert(g.z == 1);
+}
+
+// =============================================================================
+// Section 4: GpuBlock record direct construction
+// =============================================================================
+
+@test
+fn test_gpu_block_direct_1d() {
+    let b = GpuBlock { x: 256, y: 1, z: 1 };
+    assert(b.x == 256);
+    assert(b.y == 1);
+    assert(b.z == 1);
+}
+
+@test
+fn test_gpu_block_direct_2d() {
+    let b = GpuBlock { x: 16, y: 16, z: 1 };
+    assert(b.x == 16);
+    assert(b.y == 16);
+}
+
+@test
+fn test_gpu_block_direct_3d() {
+    let b = GpuBlock { x: 8, y: 8, z: 4 };
+    assert(b.x == 8);
+    assert(b.y == 8);
+    assert(b.z == 4);
+}
+
+@test
+fn test_gpu_block_total_threads_1d() {
+    let b = GpuBlock { x: 256, y: 1, z: 1 };
+    assert(b.total_threads() == 256);
+}
+
+@test
+fn test_gpu_block_total_threads_2d() {
+    let b = GpuBlock { x: 16, y: 16, z: 1 };
+    assert(b.total_threads() == 256);
+}
+
+@test
+fn test_gpu_block_total_threads_3d() {
+    let b = GpuBlock { x: 8, y: 8, z: 4 };
+    assert(b.total_threads() == 256);
+}
+
+@test
+fn test_gpu_block_total_threads_max_cuda() {
+    // CUDA max block size = 1024 threads.
+    let b = GpuBlock { x: 32, y: 32, z: 1 };
+    assert(b.total_threads() == 1024);
+}
+
+@test
+fn test_gpu_block_total_threads_unit_block() {
+    let b = GpuBlock { x: 1, y: 1, z: 1 };
+    assert(b.total_threads() == 1);
+}
