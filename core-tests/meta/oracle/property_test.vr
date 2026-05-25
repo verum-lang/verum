@@ -1,0 +1,170 @@
+// =============================================================================
+// core-tests/meta/oracle/property_test.vr
+// =============================================================================
+//
+// Laws of the oracle filter / count surface:
+//   * L1  filter monotonicity: raising threshold can only remove candidates
+//   * L2  count monotonicity: raising threshold can only decrease count
+//   * L3  count agreement: count_above(r, c) == filter_by_confidence(r, c).len()
+//   * L4  has_viable agreement: has_viable_candidate(r, cfg) iff
+//         count_above(r, cfg.min_confidence) > 0
+//   * L5  default vs aggressive: default min_confidence > aggressive
+//         min_confidence; default max_candidates < aggressive max_candidates;
+//         default timeout < aggressive timeout
+//
+// =============================================================================
+
+mount core.meta.oracle.{
+    OracleConfig, OracleCandidate, OracleResponse,
+    default_oracle_config, aggressive_oracle_config,
+    has_viable_candidate, filter_by_confidence, candidate_count_above,
+};
+
+fn sample_response() -> OracleResponse {
+    let c1 = OracleCandidate { proof_term: Text.from("a"), confidence: 0.2, justification: Text.from("") };
+    let c2 = OracleCandidate { proof_term: Text.from("b"), confidence: 0.5, justification: Text.from("") };
+    let c3 = OracleCandidate { proof_term: Text.from("c"), confidence: 0.75, justification: Text.from("") };
+    let c4 = OracleCandidate { proof_term: Text.from("d"), confidence: 0.95, justification: Text.from("") };
+    OracleResponse {
+        candidates: List.of(c1).append(List.of(c2)).append(List.of(c3)).append(List.of(c4)),
+        goal: Text.from("g"),
+        elapsed_ms: 0,
+    }
+}
+
+// =============================================================================
+// L1: filter monotonicity in threshold
+// =============================================================================
+
+@test
+fn law_filter_monotone_threshold_strict_increase() {
+    let r1 = sample_response();
+    let r2 = sample_response();
+    let low_kept  = filter_by_confidence(r1, 0.3);
+    let high_kept = filter_by_confidence(r2, 0.7);
+    assert(high_kept.len() <= low_kept.len());
+}
+
+@test
+fn law_filter_monotone_threshold_zero_keeps_all() {
+    let r = sample_response();
+    let total = r.candidates.len();
+    let kept = filter_by_confidence(r, 0.0);
+    assert(kept.len() == total);
+}
+
+@test
+fn law_filter_monotone_threshold_above_max_drops_all() {
+    let r = sample_response();
+    // All sample confidences are below 1.0 except 0.95 — threshold 1.0 drops all.
+    let kept = filter_by_confidence(r, 1.0);
+    assert(kept.is_empty());
+}
+
+// =============================================================================
+// L2: count monotonicity in threshold
+// =============================================================================
+
+@test
+fn law_count_monotone_threshold() {
+    let r = sample_response();
+    let low  = candidate_count_above(&r, 0.3);
+    let mid  = candidate_count_above(&r, 0.6);
+    let high = candidate_count_above(&r, 0.9);
+    assert(low >= mid);
+    assert(mid >= high);
+}
+
+@test
+fn law_count_zero_threshold_equals_total() {
+    let r = sample_response();
+    let total = r.candidates.len();
+    let n = candidate_count_above(&r, 0.0);
+    assert(n == total);
+}
+
+@test
+fn law_count_threshold_one_excludes_below() {
+    let r = sample_response();
+    // No candidate in `sample_response` has confidence == 1.0; expect 0.
+    let n = candidate_count_above(&r, 1.0);
+    assert(n == 0);
+}
+
+// =============================================================================
+// L3: count_above(r, c) == filter_by_confidence(r, c).len()
+// =============================================================================
+
+@test
+fn law_count_matches_filter_length_low() {
+    let r1 = sample_response();
+    let r2 = sample_response();
+    let c1 = candidate_count_above(&r1, 0.3);
+    let f1 = filter_by_confidence(r2, 0.3).len();
+    assert(c1 == f1);
+}
+
+@test
+fn law_count_matches_filter_length_mid() {
+    let r1 = sample_response();
+    let r2 = sample_response();
+    let c = candidate_count_above(&r1, 0.6);
+    let f = filter_by_confidence(r2, 0.6).len();
+    assert(c == f);
+}
+
+@test
+fn law_count_matches_filter_length_high() {
+    let r1 = sample_response();
+    let r2 = sample_response();
+    let c = candidate_count_above(&r1, 0.9);
+    let f = filter_by_confidence(r2, 0.9).len();
+    assert(c == f);
+}
+
+// =============================================================================
+// L4: has_viable iff count_above(min_confidence) > 0
+// =============================================================================
+
+@test
+fn law_has_viable_agrees_with_count_default_cfg() {
+    let r = sample_response();
+    let cfg = default_oracle_config(); // 0.7
+    let viable = has_viable_candidate(&r, &cfg);
+    let count  = candidate_count_above(&r, cfg.min_confidence);
+    assert(viable == (count > 0));
+}
+
+@test
+fn law_has_viable_agrees_with_count_aggressive_cfg() {
+    let r = sample_response();
+    let cfg = aggressive_oracle_config(); // 0.4
+    let viable = has_viable_candidate(&r, &cfg);
+    let count  = candidate_count_above(&r, cfg.min_confidence);
+    assert(viable == (count > 0));
+}
+
+// =============================================================================
+// L5: default vs aggressive comparison axes
+// =============================================================================
+
+@test
+fn law_default_more_conservative_than_aggressive_confidence() {
+    let d = default_oracle_config();
+    let a = aggressive_oracle_config();
+    assert(d.min_confidence > a.min_confidence);
+}
+
+@test
+fn law_default_less_aggressive_in_candidate_count() {
+    let d = default_oracle_config();
+    let a = aggressive_oracle_config();
+    assert(d.max_candidates < a.max_candidates);
+}
+
+@test
+fn law_default_shorter_timeout_than_aggressive() {
+    let d = default_oracle_config();
+    let a = aggressive_oracle_config();
+    assert(d.timeout_ms < a.timeout_ms);
+}

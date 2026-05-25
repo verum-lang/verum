@@ -1,0 +1,345 @@
+// =============================================================================
+// core-tests/meta/tactic/unit_test.vr
+// =============================================================================
+//
+// `core/meta/tactic.vr` — tactic-metaprogramming abstract algebra over the
+// `MetaTerm` analysis type. Pure-data; no @compiler_intrinsic.
+//
+// Surface tested here:
+//   * MetaTerm 6-variant (Quote / Splice / Reflect / Custom / Seq / Const)
+//     and variant-disjointness
+//   * Smart ctors: meta_quote / meta_splice / meta_reflect / meta_custom /
+//     meta_seq / meta_const
+//   * Predicates: is_meta_value / references_elaborator
+//   * Reduction: beta_cancel (β-cancellation)
+//   * Normalisation: meta_normalise / meta_is_normal
+//
+// Algebraic laws (β-cancellation, seq-elim, normalisation idempotence,
+// references_elaborator recursion) live in property_test.vr.
+// =============================================================================
+
+mount core.meta.tactic.{
+    MetaTerm,
+    meta_quote, meta_splice, meta_reflect, meta_custom, meta_seq, meta_const,
+    is_meta_value, references_elaborator,
+    beta_cancel, meta_normalise, meta_is_normal,
+};
+
+// =============================================================================
+// Section 1: MetaTerm 6-variant ctors
+// =============================================================================
+
+@test
+fn test_meta_quote_constructs_quote_variant() {
+    let t = meta_quote(Text.from("e"));
+    assert(t is MetaTerm.Quote);
+}
+
+@test
+fn test_meta_splice_constructs_splice_variant() {
+    let t = meta_splice(meta_quote(Text.from("e")));
+    assert(t is MetaTerm.Splice);
+}
+
+@test
+fn test_meta_reflect_constructs_reflect_variant() {
+    let t = meta_reflect(Text.from("goal_x"));
+    assert(t is MetaTerm.Reflect);
+}
+
+@test
+fn test_meta_custom_constructs_custom_variant() {
+    let t = meta_custom(Text.from("simp"), meta_quote(Text.from("x")));
+    assert(t is MetaTerm.Custom);
+}
+
+@test
+fn test_meta_seq_constructs_seq_variant() {
+    let t = meta_seq(meta_quote(Text.from("a")), meta_quote(Text.from("b")));
+    assert(t is MetaTerm.Seq);
+}
+
+@test
+fn test_meta_const_constructs_const_variant() {
+    let t = meta_const(Text.from("c"));
+    assert(t is MetaTerm.Const);
+}
+
+// =============================================================================
+// Section 2: Variant pairwise disjointness
+// =============================================================================
+
+@test
+fn test_meta_term_quote_disjoint_from_splice() {
+    let q = meta_quote(Text.from("e"));
+    let s = meta_splice(meta_const(Text.from("c")));
+    assert(q is MetaTerm.Quote && !(q is MetaTerm.Splice));
+    assert(s is MetaTerm.Splice && !(s is MetaTerm.Quote));
+}
+
+@test
+fn test_meta_term_reflect_disjoint_from_const() {
+    let r = meta_reflect(Text.from("g"));
+    let c = meta_const(Text.from("v"));
+    assert(r is MetaTerm.Reflect && !(r is MetaTerm.Const));
+    assert(c is MetaTerm.Const && !(c is MetaTerm.Reflect));
+}
+
+@test
+fn test_meta_term_custom_disjoint_from_seq() {
+    let cu = meta_custom(Text.from("f"), meta_quote(Text.from("x")));
+    let se = meta_seq(meta_quote(Text.from("a")), meta_quote(Text.from("b")));
+    assert(cu is MetaTerm.Custom && !(cu is MetaTerm.Seq));
+    assert(se is MetaTerm.Seq && !(se is MetaTerm.Custom));
+}
+
+// =============================================================================
+// Section 3: is_meta_value predicate
+// =============================================================================
+
+@test
+fn test_is_meta_value_quote_is_value() {
+    assert(is_meta_value(meta_quote(Text.from("e"))));
+}
+
+@test
+fn test_is_meta_value_const_is_value() {
+    assert(is_meta_value(meta_const(Text.from("c"))));
+}
+
+@test
+fn test_is_meta_value_splice_is_not_value() {
+    assert(!is_meta_value(meta_splice(meta_quote(Text.from("e")))));
+}
+
+@test
+fn test_is_meta_value_reflect_is_not_value() {
+    assert(!is_meta_value(meta_reflect(Text.from("g"))));
+}
+
+@test
+fn test_is_meta_value_custom_is_not_value() {
+    assert(!is_meta_value(meta_custom(Text.from("f"), meta_quote(Text.from("x")))));
+}
+
+@test
+fn test_is_meta_value_seq_is_not_value() {
+    assert(!is_meta_value(meta_seq(meta_quote(Text.from("a")), meta_quote(Text.from("b")))));
+}
+
+// =============================================================================
+// Section 4: references_elaborator
+// =============================================================================
+
+@test
+fn test_references_elaborator_quote_does_not_reference() {
+    let t = meta_quote(Text.from("e"));
+    assert(!references_elaborator(t, Text.from("simp")));
+}
+
+@test
+fn test_references_elaborator_direct_custom_match() {
+    let t = meta_custom(Text.from("simp"), meta_quote(Text.from("x")));
+    assert(references_elaborator(t, Text.from("simp")));
+}
+
+@test
+fn test_references_elaborator_direct_custom_mismatch() {
+    let t = meta_custom(Text.from("simp"), meta_quote(Text.from("x")));
+    assert(!references_elaborator(t, Text.from("auto")));
+}
+
+@test
+fn test_references_elaborator_inside_splice() {
+    let inner = meta_custom(Text.from("ring"), meta_quote(Text.from("x")));
+    let t = meta_splice(inner);
+    assert(references_elaborator(t, Text.from("ring")));
+}
+
+@test
+fn test_references_elaborator_seq_first() {
+    let first = meta_custom(Text.from("auto"), meta_quote(Text.from("x")));
+    let second = meta_quote(Text.from("e"));
+    let t = meta_seq(first, second);
+    assert(references_elaborator(t, Text.from("auto")));
+}
+
+@test
+fn test_references_elaborator_seq_second() {
+    let first = meta_quote(Text.from("e"));
+    let second = meta_custom(Text.from("nlinarith"), meta_quote(Text.from("x")));
+    let t = meta_seq(first, second);
+    assert(references_elaborator(t, Text.from("nlinarith")));
+}
+
+@test
+fn test_references_elaborator_nested_custom_arg() {
+    let inner = meta_custom(Text.from("deep"), meta_quote(Text.from("x")));
+    let outer = meta_custom(Text.from("outer"), inner);
+    assert(references_elaborator(outer, Text.from("deep")));
+}
+
+// =============================================================================
+// Section 5: beta_cancel reduction rule
+// =============================================================================
+// Rule:  splice(quote(e)) ↦ quote(e)
+//        everything else  ↦ unchanged
+
+@test
+fn test_beta_cancel_splice_of_quote_yields_quote() {
+    let original = meta_splice(meta_quote(Text.from("e")));
+    let reduced  = beta_cancel(original);
+    assert(reduced is MetaTerm.Quote);
+}
+
+@test
+fn test_beta_cancel_quote_unchanged() {
+    let q = meta_quote(Text.from("v"));
+    let r = beta_cancel(q);
+    assert(r is MetaTerm.Quote);
+}
+
+@test
+fn test_beta_cancel_const_unchanged() {
+    let c = meta_const(Text.from("v"));
+    let r = beta_cancel(c);
+    assert(r is MetaTerm.Const);
+}
+
+@test
+fn test_beta_cancel_reflect_unchanged() {
+    let r = meta_reflect(Text.from("g"));
+    let out = beta_cancel(r);
+    assert(out is MetaTerm.Reflect);
+}
+
+@test
+fn test_beta_cancel_seq_unchanged() {
+    let s = meta_seq(meta_quote(Text.from("a")), meta_quote(Text.from("b")));
+    let r = beta_cancel(s);
+    assert(r is MetaTerm.Seq);
+}
+
+@test
+fn test_beta_cancel_splice_of_non_quote_stays_splice() {
+    let s = meta_splice(meta_const(Text.from("c")));
+    let r = beta_cancel(s);
+    assert(r is MetaTerm.Splice);
+}
+
+@test
+fn test_beta_cancel_splice_of_reflect_stays_splice() {
+    let s = meta_splice(meta_reflect(Text.from("g")));
+    let r = beta_cancel(s);
+    assert(r is MetaTerm.Splice);
+}
+
+// =============================================================================
+// Section 6: meta_normalise — recursive normalisation
+// =============================================================================
+
+@test
+fn test_meta_normalise_quote_idempotent() {
+    let q = meta_quote(Text.from("e"));
+    let n = meta_normalise(q);
+    assert(n is MetaTerm.Quote);
+}
+
+@test
+fn test_meta_normalise_const_idempotent() {
+    let c = meta_const(Text.from("v"));
+    let n = meta_normalise(c);
+    assert(n is MetaTerm.Const);
+}
+
+@test
+fn test_meta_normalise_splice_of_quote_collapses() {
+    let s = meta_splice(meta_quote(Text.from("e")));
+    let n = meta_normalise(s);
+    assert(n is MetaTerm.Quote);
+}
+
+@test
+fn test_meta_normalise_seq_after_value_reduces_to_second() {
+    // seq(quote(a), const(b)) — first is value → reduces to const(b)
+    let s = meta_seq(meta_quote(Text.from("a")), meta_const(Text.from("b")));
+    let n = meta_normalise(s);
+    assert(n is MetaTerm.Const);
+}
+
+@test
+fn test_meta_normalise_nested_splice_chain() {
+    // splice(splice(quote(e))) — outer splice fires only after inner reduces;
+    // bottom-up: inner splice(quote(e)) → quote(e); then outer splice(quote(e)) → quote(e)
+    let s = meta_splice(meta_splice(meta_quote(Text.from("e"))));
+    let n = meta_normalise(s);
+    assert(n is MetaTerm.Quote);
+}
+
+@test
+fn test_meta_normalise_preserves_custom_when_no_reduction() {
+    let c = meta_custom(Text.from("simp"), meta_quote(Text.from("x")));
+    let n = meta_normalise(c);
+    assert(n is MetaTerm.Custom);
+}
+
+@test
+fn test_meta_normalise_normalises_custom_arg() {
+    // Custom's arg of splice(quote(e)) should normalise to quote(e),
+    // but the outer Custom remains.
+    let inner = meta_splice(meta_quote(Text.from("e")));
+    let c = meta_custom(Text.from("f"), inner);
+    let n = meta_normalise(c);
+    assert(n is MetaTerm.Custom);
+}
+
+// =============================================================================
+// Section 7: meta_is_normal predicate
+// =============================================================================
+
+@test
+fn test_meta_is_normal_quote() {
+    assert(meta_is_normal(meta_quote(Text.from("e"))));
+}
+
+@test
+fn test_meta_is_normal_const() {
+    assert(meta_is_normal(meta_const(Text.from("v"))));
+}
+
+@test
+fn test_meta_is_normal_reflect() {
+    assert(meta_is_normal(meta_reflect(Text.from("g"))));
+}
+
+@test
+fn test_meta_is_normal_splice_of_quote_is_not_normal() {
+    // splice(quote(e)) admits β-cancellation → not normal.
+    assert(!meta_is_normal(meta_splice(meta_quote(Text.from("e")))));
+}
+
+@test
+fn test_meta_is_normal_splice_of_reflect_is_normal() {
+    // splice(reflect(g)) is normal because reflect is normal at this layer
+    // and splice's reduction rule only fires on Quote.
+    assert(meta_is_normal(meta_splice(meta_reflect(Text.from("g")))));
+}
+
+@test
+fn test_meta_is_normal_seq_with_first_value_not_normal() {
+    // seq(quote, ...) — first is value → seq-elim applies → not normal.
+    let s = meta_seq(meta_quote(Text.from("a")), meta_const(Text.from("b")));
+    assert(!meta_is_normal(s));
+}
+
+@test
+fn test_meta_is_normal_custom_with_normal_arg() {
+    let c = meta_custom(Text.from("f"), meta_quote(Text.from("x")));
+    assert(meta_is_normal(c));
+}
+
+@test
+fn test_meta_is_normal_custom_with_redex_arg_not_normal() {
+    let c = meta_custom(Text.from("f"), meta_splice(meta_quote(Text.from("x"))));
+    assert(!meta_is_normal(c));
+}

@@ -1,0 +1,359 @@
+// =============================================================================
+// core-tests/meta/oracle/unit_test.vr
+// =============================================================================
+//
+// `core/meta/oracle.vr` — LLM oracle tactic types (Phase D.5,
+// experimental, @cfg(feature = "oracle")). Pure-data surface — the
+// MCP bridge / actual LLM call lives in `core/meta/contexts.vr`
+// MetaRuntime context and is exercised at the compiler level.
+//
+// Surface tested here:
+//   * OracleConfig 4-field record + default_oracle_config /
+//     aggressive_oracle_config
+//   * OracleCandidate 3-field record
+//   * OracleResponse 3-field record
+//   * OracleOutcome 5-variant + variant-disjointness
+//   * has_viable_candidate / filter_by_confidence /
+//     candidate_count_above
+// =============================================================================
+
+mount core.meta.oracle.{
+    OracleConfig, OracleCandidate, OracleResponse, OracleOutcome,
+    default_oracle_config, aggressive_oracle_config,
+    has_viable_candidate, filter_by_confidence, candidate_count_above,
+};
+
+// =============================================================================
+// Section 1: OracleConfig defaults
+// =============================================================================
+
+@test
+fn test_default_oracle_config_min_confidence() {
+    let c = default_oracle_config();
+    assert(c.min_confidence == 0.7);
+}
+
+@test
+fn test_default_oracle_config_max_candidates() {
+    let c = default_oracle_config();
+    assert(c.max_candidates == 4);
+}
+
+@test
+fn test_default_oracle_config_timeout_ms() {
+    let c = default_oracle_config();
+    assert(c.timeout_ms == 5000);
+}
+
+@test
+fn test_default_oracle_config_empty_model() {
+    let c = default_oracle_config();
+    assert(c.model == "");
+}
+
+@test
+fn test_aggressive_oracle_config_lower_confidence_than_default() {
+    let d = default_oracle_config();
+    let a = aggressive_oracle_config();
+    assert(a.min_confidence < d.min_confidence);
+}
+
+@test
+fn test_aggressive_oracle_config_more_candidates_than_default() {
+    let d = default_oracle_config();
+    let a = aggressive_oracle_config();
+    assert(a.max_candidates > d.max_candidates);
+}
+
+@test
+fn test_aggressive_oracle_config_longer_timeout_than_default() {
+    let d = default_oracle_config();
+    let a = aggressive_oracle_config();
+    assert(a.timeout_ms > d.timeout_ms);
+}
+
+@test
+fn test_aggressive_oracle_config_specific_values() {
+    let a = aggressive_oracle_config();
+    assert(a.min_confidence == 0.4);
+    assert(a.max_candidates == 16);
+    assert(a.timeout_ms == 30000);
+}
+
+// =============================================================================
+// Section 2: OracleConfig direct field construction
+// =============================================================================
+
+@test
+fn test_oracle_config_custom_construction() {
+    let c = OracleConfig {
+        min_confidence: 0.55,
+        max_candidates: 8,
+        timeout_ms: 10000,
+        model: Text.from("claude-sonnet"),
+    };
+    assert(c.min_confidence == 0.55);
+    assert(c.max_candidates == 8);
+    assert(c.timeout_ms == 10000);
+    assert(c.model == "claude-sonnet");
+}
+
+// =============================================================================
+// Section 3: OracleCandidate record
+// =============================================================================
+
+@test
+fn test_oracle_candidate_construction() {
+    let c = OracleCandidate {
+        proof_term: Text.from("by simp"),
+        confidence: 0.9,
+        justification: Text.from("recognised pattern"),
+    };
+    assert(c.proof_term == "by simp");
+    assert(c.confidence == 0.9);
+    assert(c.justification == "recognised pattern");
+}
+
+@test
+fn test_oracle_candidate_zero_confidence_allowed() {
+    // Range: [0.0, 1.0] — boundary values must construct.
+    let c = OracleCandidate {
+        proof_term: Text.from("?"),
+        confidence: 0.0,
+        justification: Text.from(""),
+    };
+    assert(c.confidence == 0.0);
+}
+
+@test
+fn test_oracle_candidate_max_confidence_allowed() {
+    let c = OracleCandidate {
+        proof_term: Text.from("trivial"),
+        confidence: 1.0,
+        justification: Text.from(""),
+    };
+    assert(c.confidence == 1.0);
+}
+
+// =============================================================================
+// Section 4: OracleResponse record
+// =============================================================================
+
+@test
+fn test_oracle_response_empty_candidates() {
+    let r = OracleResponse {
+        candidates: List.new(),
+        goal: Text.from("∀x, x + 0 = x"),
+        elapsed_ms: 100,
+    };
+    assert(r.candidates.is_empty());
+    assert(r.goal == "∀x, x + 0 = x");
+    assert(r.elapsed_ms == 100);
+}
+
+@test
+fn test_oracle_response_with_candidates() {
+    let c1 = OracleCandidate {
+        proof_term: Text.from("by ring"),
+        confidence: 0.9,
+        justification: Text.from(""),
+    };
+    let r = OracleResponse {
+        candidates: List.of(c1),
+        goal: Text.from("x*1 = x"),
+        elapsed_ms: 250,
+    };
+    assert(r.candidates.len() == 1);
+}
+
+// =============================================================================
+// Section 5: OracleOutcome 5-variant
+// =============================================================================
+
+@test
+fn test_oracle_outcome_verified_variant() {
+    let c = OracleCandidate {
+        proof_term: Text.from("by auto"),
+        confidence: 1.0,
+        justification: Text.from(""),
+    };
+    let o: OracleOutcome = OracleOutcome.Verified(c);
+    assert(o is OracleOutcome.Verified);
+}
+
+@test
+fn test_oracle_outcome_no_candidate_verified_variant() {
+    let r = OracleResponse {
+        candidates: List.new(),
+        goal: Text.from("g"),
+        elapsed_ms: 0,
+    };
+    let o: OracleOutcome = OracleOutcome.NoCandidateVerified(r);
+    assert(o is OracleOutcome.NoCandidateVerified);
+}
+
+@test
+fn test_oracle_outcome_timeout_variant() {
+    let o: OracleOutcome = OracleOutcome.Timeout;
+    assert(o is OracleOutcome.Timeout);
+}
+
+@test
+fn test_oracle_outcome_unavailable_variant() {
+    let o: OracleOutcome = OracleOutcome.Unavailable;
+    assert(o is OracleOutcome.Unavailable);
+}
+
+@test
+fn test_oracle_outcome_below_confidence_threshold_variant() {
+    let o: OracleOutcome = OracleOutcome.BelowConfidenceThreshold;
+    assert(o is OracleOutcome.BelowConfidenceThreshold);
+}
+
+@test
+fn test_oracle_outcome_variants_pairwise_disjoint() {
+    let t: OracleOutcome  = OracleOutcome.Timeout;
+    let u: OracleOutcome  = OracleOutcome.Unavailable;
+    let bc: OracleOutcome = OracleOutcome.BelowConfidenceThreshold;
+
+    assert(t  is OracleOutcome.Timeout && !(t  is OracleOutcome.Unavailable));
+    assert(u  is OracleOutcome.Unavailable && !(u  is OracleOutcome.Timeout));
+    assert(bc is OracleOutcome.BelowConfidenceThreshold && !(bc is OracleOutcome.Timeout));
+}
+
+// =============================================================================
+// Section 6: has_viable_candidate
+// =============================================================================
+
+@test
+fn test_has_viable_candidate_empty_response() {
+    let r = OracleResponse {
+        candidates: List.new(),
+        goal: Text.from("g"),
+        elapsed_ms: 0,
+    };
+    let cfg = default_oracle_config();
+    assert(!has_viable_candidate(&r, &cfg));
+}
+
+@test
+fn test_has_viable_candidate_all_below_threshold() {
+    let c1 = OracleCandidate { proof_term: Text.from("?"), confidence: 0.3, justification: Text.from("") };
+    let c2 = OracleCandidate { proof_term: Text.from("?"), confidence: 0.5, justification: Text.from("") };
+    let r = OracleResponse {
+        candidates: List.of(c1).append(List.of(c2)),
+        goal: Text.from("g"),
+        elapsed_ms: 0,
+    };
+    let cfg = default_oracle_config(); // min_confidence 0.7
+    assert(!has_viable_candidate(&r, &cfg));
+}
+
+@test
+fn test_has_viable_candidate_one_above_threshold() {
+    let c1 = OracleCandidate { proof_term: Text.from("?"), confidence: 0.3, justification: Text.from("") };
+    let c2 = OracleCandidate { proof_term: Text.from("ok"), confidence: 0.85, justification: Text.from("") };
+    let r = OracleResponse {
+        candidates: List.of(c1).append(List.of(c2)),
+        goal: Text.from("g"),
+        elapsed_ms: 0,
+    };
+    let cfg = default_oracle_config(); // 0.7
+    assert(has_viable_candidate(&r, &cfg));
+}
+
+@test
+fn test_has_viable_candidate_exact_threshold_counts_as_viable() {
+    // ">=" semantics — equality is viable.
+    let c = OracleCandidate { proof_term: Text.from("ok"), confidence: 0.7, justification: Text.from("") };
+    let r = OracleResponse {
+        candidates: List.of(c),
+        goal: Text.from("g"),
+        elapsed_ms: 0,
+    };
+    let cfg = default_oracle_config(); // 0.7
+    assert(has_viable_candidate(&r, &cfg));
+}
+
+// =============================================================================
+// Section 7: filter_by_confidence
+// =============================================================================
+
+@test
+fn test_filter_by_confidence_empty_input() {
+    let r = OracleResponse {
+        candidates: List.new(),
+        goal: Text.from("g"),
+        elapsed_ms: 0,
+    };
+    let out = filter_by_confidence(r, 0.5);
+    assert(out.is_empty());
+}
+
+@test
+fn test_filter_by_confidence_drops_below_threshold() {
+    let c1 = OracleCandidate { proof_term: Text.from("a"), confidence: 0.3, justification: Text.from("") };
+    let c2 = OracleCandidate { proof_term: Text.from("b"), confidence: 0.8, justification: Text.from("") };
+    let r = OracleResponse {
+        candidates: List.of(c1).append(List.of(c2)),
+        goal: Text.from("g"),
+        elapsed_ms: 0,
+    };
+    let out = filter_by_confidence(r, 0.5);
+    assert(out.len() == 1);
+}
+
+@test
+fn test_filter_by_confidence_keeps_all_when_threshold_zero() {
+    let c1 = OracleCandidate { proof_term: Text.from("a"), confidence: 0.1, justification: Text.from("") };
+    let c2 = OracleCandidate { proof_term: Text.from("b"), confidence: 0.2, justification: Text.from("") };
+    let r = OracleResponse {
+        candidates: List.of(c1).append(List.of(c2)),
+        goal: Text.from("g"),
+        elapsed_ms: 0,
+    };
+    let out = filter_by_confidence(r, 0.0);
+    assert(out.len() == 2);
+}
+
+@test
+fn test_filter_by_confidence_drops_all_when_threshold_one() {
+    let c1 = OracleCandidate { proof_term: Text.from("a"), confidence: 0.4, justification: Text.from("") };
+    let c2 = OracleCandidate { proof_term: Text.from("b"), confidence: 0.99, justification: Text.from("") };
+    let r = OracleResponse {
+        candidates: List.of(c1).append(List.of(c2)),
+        goal: Text.from("g"),
+        elapsed_ms: 0,
+    };
+    let out = filter_by_confidence(r, 1.0);
+    assert(out.is_empty());
+}
+
+// =============================================================================
+// Section 8: candidate_count_above
+// =============================================================================
+
+@test
+fn test_candidate_count_above_empty_is_zero() {
+    let r = OracleResponse {
+        candidates: List.new(),
+        goal: Text.from("g"),
+        elapsed_ms: 0,
+    };
+    assert(candidate_count_above(&r, 0.5) == 0);
+}
+
+@test
+fn test_candidate_count_above_mixed_threshold() {
+    let c1 = OracleCandidate { proof_term: Text.from("a"), confidence: 0.4, justification: Text.from("") };
+    let c2 = OracleCandidate { proof_term: Text.from("b"), confidence: 0.6, justification: Text.from("") };
+    let c3 = OracleCandidate { proof_term: Text.from("c"), confidence: 0.9, justification: Text.from("") };
+    let r = OracleResponse {
+        candidates: List.of(c1).append(List.of(c2)).append(List.of(c3)),
+        goal: Text.from("g"),
+        elapsed_ms: 0,
+    };
+    assert(candidate_count_above(&r, 0.5) == 2);
+    assert(candidate_count_above(&r, 0.7) == 1);
+    assert(candidate_count_above(&r, 0.95) == 0);
+}

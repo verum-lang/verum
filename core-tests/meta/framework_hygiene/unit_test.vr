@@ -1,0 +1,318 @@
+// =============================================================================
+// core-tests/meta/framework_hygiene/unit_test.vr
+// =============================================================================
+//
+// `core/meta/framework_hygiene.vr` — compile-time discipline for
+// `@framework(name, citation)` + `@enact(epsilon = "...")` declarations
+// (VVA Part B). Three rules R1/R2/R3 + helper types.
+//
+// Surface tested here (pure-data subset):
+//   * HygieneSeverity 3-variant (Info / Warning / Error)
+//   * HygieneDiagnostic record + hygiene_diagnostic ctor
+//   * severity_as_text mapping
+//   * name_has_brand_prefix — 5 banned prefixes
+//   * MetaClassifierTally + meta_classifier_tally_new
+//   * validate_foundation_neutral_name (R1)
+//   * validate_meta_classifier_uniqueness (R3)
+//
+// R2 (validate_epsilon_canonicalisable) currently returns
+// Maybe.None for every input — its loop body is empty (see source
+// §3.2 / `all_admissible: Bool = true` never updated). Tracked in
+// audit.md §3.1. Tests pin the current behaviour without claiming
+// it is correct.
+//
+// `run_all_hygiene_rules` requires a `Span` to be constructed at
+// runtime; covered via SpanFlags-direct construction (mirroring
+// `core-tests/meta/span/`).
+// =============================================================================
+
+mount core.meta.framework_hygiene.{
+    HygieneSeverity, HygieneDiagnostic, MetaClassifierTally,
+    hygiene_diagnostic, severity_as_text,
+    name_has_brand_prefix,
+    validate_foundation_neutral_name,
+    validate_epsilon_canonicalisable,
+    validate_meta_classifier_uniqueness,
+    meta_classifier_tally_new,
+};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+fn synthetic_span() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+// =============================================================================
+// Section 1: HygieneSeverity 3-variant
+// =============================================================================
+
+@test
+fn test_severity_info() {
+    let s: HygieneSeverity = HygieneSeverity.Info;
+    assert(s is HygieneSeverity.Info);
+}
+
+@test
+fn test_severity_warning() {
+    let s: HygieneSeverity = HygieneSeverity.Warning;
+    assert(s is HygieneSeverity.Warning);
+}
+
+@test
+fn test_severity_error() {
+    let s: HygieneSeverity = HygieneSeverity.Error;
+    assert(s is HygieneSeverity.Error);
+}
+
+@test
+fn test_severity_variants_pairwise_disjoint() {
+    let i: HygieneSeverity = HygieneSeverity.Info;
+    let w: HygieneSeverity = HygieneSeverity.Warning;
+    let e: HygieneSeverity = HygieneSeverity.Error;
+    assert(i is HygieneSeverity.Info && !(i is HygieneSeverity.Warning));
+    assert(w is HygieneSeverity.Warning && !(w is HygieneSeverity.Error));
+    assert(e is HygieneSeverity.Error && !(e is HygieneSeverity.Info));
+}
+
+// =============================================================================
+// Section 2: severity_as_text mapping
+// =============================================================================
+
+@test
+fn test_severity_as_text_info() {
+    assert(severity_as_text(HygieneSeverity.Info) == "info");
+}
+
+@test
+fn test_severity_as_text_warning() {
+    assert(severity_as_text(HygieneSeverity.Warning) == "warning");
+}
+
+@test
+fn test_severity_as_text_error() {
+    assert(severity_as_text(HygieneSeverity.Error) == "error");
+}
+
+// =============================================================================
+// Section 3: hygiene_diagnostic ctor
+// =============================================================================
+
+@test
+fn test_hygiene_diagnostic_fields() {
+    let d = hygiene_diagnostic(
+        Text.from("R1"),
+        HygieneSeverity.Warning,
+        Text.from("test message"),
+        synthetic_span(),
+    );
+    assert(d.rule == "R1");
+    assert(d.severity is HygieneSeverity.Warning);
+    assert(d.message == "test message");
+}
+
+@test
+fn test_hygiene_diagnostic_preserves_rule() {
+    let d = hygiene_diagnostic(
+        Text.from("R3"),
+        HygieneSeverity.Error,
+        Text.from("conflict"),
+        synthetic_span(),
+    );
+    assert(d.rule == "R3");
+    assert(d.severity is HygieneSeverity.Error);
+}
+
+// =============================================================================
+// Section 4: name_has_brand_prefix — 5 banned prefixes
+// =============================================================================
+
+@test
+fn test_name_has_brand_prefix_diakrisis() {
+    assert(name_has_brand_prefix(Text.from("diakrisis_substrate")));
+}
+
+@test
+fn test_name_has_brand_prefix_actic() {
+    assert(name_has_brand_prefix(Text.from("actic_foundation")));
+}
+
+@test
+fn test_name_has_brand_prefix_msfs() {
+    assert(name_has_brand_prefix(Text.from("msfs_stratum")));
+}
+
+@test
+fn test_name_has_brand_prefix_uhm() {
+    assert(name_has_brand_prefix(Text.from("uhm_hierarchy")));
+}
+
+@test
+fn test_name_has_brand_prefix_noesis() {
+    assert(name_has_brand_prefix(Text.from("noesis_layer")));
+}
+
+@test
+fn test_name_has_brand_prefix_neutral_name_accepted() {
+    assert(!name_has_brand_prefix(Text.from("substrate")));
+    assert(!name_has_brand_prefix(Text.from("foundation")));
+    assert(!name_has_brand_prefix(Text.from("stratum")));
+    assert(!name_has_brand_prefix(Text.from("hierarchy")));
+    assert(!name_has_brand_prefix(Text.from("layer")));
+}
+
+@test
+fn test_name_has_brand_prefix_empty_name_accepted() {
+    assert(!name_has_brand_prefix(Text.from("")));
+}
+
+@test
+fn test_name_has_brand_prefix_partial_match_rejected() {
+    // "diakrisis" alone (no trailing _) is not a prefix match.
+    assert(!name_has_brand_prefix(Text.from("diakrisis")));
+}
+
+@test
+fn test_name_has_brand_prefix_case_sensitive() {
+    // The check is byte-exact; uppercase variants are NOT banned.
+    assert(!name_has_brand_prefix(Text.from("DIAKRISIS_FOO")));
+    assert(!name_has_brand_prefix(Text.from("Actic_foo")));
+}
+
+// =============================================================================
+// Section 5: validate_foundation_neutral_name (R1)
+// =============================================================================
+
+@test
+fn test_validate_foundation_neutral_name_neutral_returns_none() {
+    let result = validate_foundation_neutral_name(
+        Text.from("foundational_axiom"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.None);
+}
+
+@test
+fn test_validate_foundation_neutral_name_branded_returns_some() {
+    let result = validate_foundation_neutral_name(
+        Text.from("diakrisis_substrate_axiom"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.Some);
+}
+
+@test
+fn test_validate_foundation_neutral_name_emits_R1_diagnostic() {
+    let result = validate_foundation_neutral_name(
+        Text.from("actic_constant"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.Some);
+    match result {
+        Maybe.Some(d) => {
+            assert(d.rule == "R1");
+            assert(d.severity is HygieneSeverity.Warning);
+        },
+        Maybe.None => panic("R1 should emit a diagnostic for branded name"),
+    }
+}
+
+// =============================================================================
+// Section 6: MetaClassifierTally + ctor
+// =============================================================================
+
+@test
+fn test_meta_classifier_tally_new_empty() {
+    let t = meta_classifier_tally_new();
+    assert(t.candidates.is_empty());
+}
+
+// =============================================================================
+// Section 7: validate_meta_classifier_uniqueness (R3)
+// =============================================================================
+
+@test
+fn test_validate_meta_classifier_empty_tally_returns_none() {
+    let t = meta_classifier_tally_new();
+    let result = validate_meta_classifier_uniqueness(t, synthetic_span());
+    assert(result is Maybe.None);
+}
+
+@test
+fn test_validate_meta_classifier_single_candidate_returns_none() {
+    let t = MetaClassifierTally {
+        candidates: List.of(Text.from("Diakrisis")),
+    };
+    let result = validate_meta_classifier_uniqueness(t, synthetic_span());
+    assert(result is Maybe.None);
+}
+
+@test
+fn test_validate_meta_classifier_two_candidates_returns_some() {
+    let t = MetaClassifierTally {
+        candidates: List.of(Text.from("Diakrisis")).append(List.of(Text.from("ACTIC"))),
+    };
+    let result = validate_meta_classifier_uniqueness(t, synthetic_span());
+    assert(result is Maybe.Some);
+}
+
+@test
+fn test_validate_meta_classifier_emits_R3_error_diagnostic() {
+    let t = MetaClassifierTally {
+        candidates: List.of(Text.from("A")).append(List.of(Text.from("B"))),
+    };
+    let result = validate_meta_classifier_uniqueness(t, synthetic_span());
+    match result {
+        Maybe.Some(d) => {
+            assert(d.rule == "R3");
+            assert(d.severity is HygieneSeverity.Error);
+        },
+        Maybe.None => panic("R3 should emit a diagnostic for two candidates"),
+    }
+}
+
+// =============================================================================
+// Section 8: validate_epsilon_canonicalisable (R2) — CURRENT BEHAVIOUR PIN
+// =============================================================================
+//
+// The source loop body in `validate_epsilon_canonicalisable` is empty
+// (`all_admissible: Bool = true` never updated by any iteration).
+// Every non-ε-prefixed string returns Maybe.None because the early
+// return on `s.starts_with("ε_")` / `s.starts_with("epsilon_")` only
+// fires for those two patterns. The ordinal-form path never emits.
+//
+// These tests pin the current behaviour. Once the loop body is filled
+// in (or the function is rewritten), the pinned expectations may need
+// to flip — at which point the audit's §3.1 deferral closes.
+
+@test
+fn test_validate_epsilon_eps_prefix_returns_none() {
+    let result = validate_epsilon_canonicalisable(
+        Text.from("ε_math"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.None);
+}
+
+@test
+fn test_validate_epsilon_epsilon_prefix_returns_none() {
+    let result = validate_epsilon_canonicalisable(
+        Text.from("epsilon_compute"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.None);
+}
+
+@test
+fn test_validate_epsilon_ordinal_form_returns_none() {
+    // Ordinal coordinate; current impl returns None because the loop
+    // body is empty. Pin behaviour.
+    let result = validate_epsilon_canonicalisable(
+        Text.from("ω+1"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.None);
+}

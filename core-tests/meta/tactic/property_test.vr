@@ -1,0 +1,196 @@
+// =============================================================================
+// core-tests/meta/tactic/property_test.vr
+// =============================================================================
+//
+// Algebraic laws of the tactic MetaTerm algebra:
+//   * L1  β-cancellation:  beta_cancel(splice(quote(e))) == quote(e)
+//   * L2  beta_cancel is involution on values + idempotent at the head
+//   * L3  meta_normalise idempotent at the surface module layer
+//   * L4  meta_normalise consumes head redex (splice/quote)
+//   * L5  seq with first-value normalises to second's normal form
+//   * L6  references_elaborator is monotone under Seq composition
+//   * L7  references_elaborator passes through Splice (single-step)
+//   * L8  is_meta_value matches the head-Quote / head-Const surface
+//
+// =============================================================================
+
+mount core.meta.tactic.{
+    MetaTerm,
+    meta_quote, meta_splice, meta_reflect, meta_custom, meta_seq, meta_const,
+    is_meta_value, references_elaborator,
+    beta_cancel, meta_normalise, meta_is_normal,
+};
+
+// =============================================================================
+// L1: β-cancellation rule fires exactly when expected
+// =============================================================================
+
+@test
+fn law_beta_cancel_fires_on_splice_quote() {
+    let t = meta_splice(meta_quote(Text.from("e")));
+    let r = beta_cancel(t);
+    assert(r is MetaTerm.Quote);
+}
+
+@test
+fn law_beta_cancel_inert_on_non_splice() {
+    // For every non-Splice variant, beta_cancel is identity (variant-preserving).
+    let q = meta_quote(Text.from("e"));
+    let c = meta_const(Text.from("v"));
+    let r = meta_reflect(Text.from("g"));
+    let cu = meta_custom(Text.from("f"), meta_quote(Text.from("x")));
+    let s = meta_seq(meta_quote(Text.from("a")), meta_quote(Text.from("b")));
+
+    assert(beta_cancel(q)  is MetaTerm.Quote);
+    assert(beta_cancel(c)  is MetaTerm.Const);
+    assert(beta_cancel(r)  is MetaTerm.Reflect);
+    assert(beta_cancel(cu) is MetaTerm.Custom);
+    assert(beta_cancel(s)  is MetaTerm.Seq);
+}
+
+// =============================================================================
+// L2: beta_cancel is idempotent at the head
+// =============================================================================
+
+@test
+fn law_beta_cancel_idempotent_on_quote() {
+    let t = beta_cancel(meta_quote(Text.from("e")));
+    let tt = beta_cancel(t);
+    assert(tt is MetaTerm.Quote);
+}
+
+@test
+fn law_beta_cancel_idempotent_after_one_reduction() {
+    // splice(quote(e)) → quote(e), and beta_cancel(quote(e)) = quote(e).
+    let t = beta_cancel(meta_splice(meta_quote(Text.from("e"))));
+    let tt = beta_cancel(t);
+    assert(tt is MetaTerm.Quote);
+}
+
+// =============================================================================
+// L3: meta_normalise is idempotent at the surface layer
+// =============================================================================
+
+@test
+fn law_meta_normalise_idempotent_on_values() {
+    let q  = meta_normalise(meta_quote(Text.from("e")));
+    let qq = meta_normalise(q);
+    assert(qq is MetaTerm.Quote);
+
+    let c  = meta_normalise(meta_const(Text.from("v")));
+    let cc = meta_normalise(c);
+    assert(cc is MetaTerm.Const);
+}
+
+@test
+fn law_meta_normalise_idempotent_after_redex_elim() {
+    let s = meta_splice(meta_quote(Text.from("e")));
+    let n  = meta_normalise(s);
+    let nn = meta_normalise(n);
+    assert(nn is MetaTerm.Quote);
+}
+
+@test
+fn law_meta_normalise_idempotent_on_seq_first_value() {
+    // seq(quote(a), const(b)) → const(b). Re-normalising stays const.
+    let s = meta_seq(meta_quote(Text.from("a")), meta_const(Text.from("b")));
+    let n  = meta_normalise(s);
+    let nn = meta_normalise(n);
+    assert(nn is MetaTerm.Const);
+}
+
+// =============================================================================
+// L4: meta_normalise consumes head redex even when buried under another splice
+// =============================================================================
+
+@test
+fn law_meta_normalise_collapses_double_splice() {
+    // splice(splice(quote(e))) — bottom-up:
+    //   inner splice(quote(e)) → quote(e)
+    //   then outer splice(quote(e)) → quote(e)
+    let t = meta_splice(meta_splice(meta_quote(Text.from("e"))));
+    let n = meta_normalise(t);
+    assert(n is MetaTerm.Quote);
+}
+
+@test
+fn law_meta_normalise_collapses_triple_splice() {
+    let t = meta_splice(meta_splice(meta_splice(meta_quote(Text.from("e")))));
+    let n = meta_normalise(t);
+    assert(n is MetaTerm.Quote);
+}
+
+// =============================================================================
+// L5: seq with first-value normalises to second's normal form
+// =============================================================================
+
+@test
+fn law_seq_first_value_reduces_to_second() {
+    let s = meta_seq(meta_quote(Text.from("a")), meta_const(Text.from("b")));
+    let n = meta_normalise(s);
+    assert(n is MetaTerm.Const);
+}
+
+@test
+fn law_seq_first_value_then_redex_second_normalises_second() {
+    // seq(quote(a), splice(quote(b))) — first is value, second normalises to quote(b)
+    let inner = meta_splice(meta_quote(Text.from("b")));
+    let s = meta_seq(meta_quote(Text.from("a")), inner);
+    let n = meta_normalise(s);
+    assert(n is MetaTerm.Quote);
+}
+
+// =============================================================================
+// L6: references_elaborator is monotone under Seq composition
+// =============================================================================
+
+@test
+fn law_references_monotone_seq_left() {
+    let with_ref = meta_custom(Text.from("simp"), meta_quote(Text.from("x")));
+    let no_ref   = meta_quote(Text.from("e"));
+    let t = meta_seq(with_ref, no_ref);
+    assert(references_elaborator(t, Text.from("simp")));
+}
+
+@test
+fn law_references_monotone_seq_right() {
+    let no_ref   = meta_quote(Text.from("e"));
+    let with_ref = meta_custom(Text.from("ring"), meta_quote(Text.from("x")));
+    let t = meta_seq(no_ref, with_ref);
+    assert(references_elaborator(t, Text.from("ring")));
+}
+
+@test
+fn law_references_unaffected_by_unrelated_seq() {
+    let a = meta_quote(Text.from("e1"));
+    let b = meta_quote(Text.from("e2"));
+    let t = meta_seq(a, b);
+    assert(!references_elaborator(t, Text.from("simp")));
+}
+
+// =============================================================================
+// L7: references_elaborator descends through Splice (single-step)
+// =============================================================================
+
+@test
+fn law_references_descends_into_splice() {
+    let inner = meta_custom(Text.from("deep"), meta_quote(Text.from("x")));
+    let t = meta_splice(inner);
+    assert(references_elaborator(t, Text.from("deep")));
+}
+
+// =============================================================================
+// L8: is_meta_value matches head-Quote / head-Const surface
+// =============================================================================
+
+@test
+fn law_is_meta_value_disjoint_from_redex_heads() {
+    // Reflect, Splice, Custom, Seq — none are values.
+    assert(!is_meta_value(meta_reflect(Text.from("g"))));
+    assert(!is_meta_value(meta_splice(meta_quote(Text.from("e")))));
+    assert(!is_meta_value(meta_custom(Text.from("f"), meta_quote(Text.from("x")))));
+    assert(!is_meta_value(meta_seq(meta_quote(Text.from("a")), meta_quote(Text.from("b")))));
+    // Only Quote, Const are values.
+    assert(is_meta_value(meta_quote(Text.from("v"))));
+    assert(is_meta_value(meta_const(Text.from("v"))));
+}

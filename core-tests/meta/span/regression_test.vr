@@ -1,0 +1,87 @@
+// =============================================================================
+// core-tests/meta/span/regression_test.vr
+// =============================================================================
+//
+// Pinned regression tests for `core/meta/span.vr`.
+// =============================================================================
+
+mount core.meta.span.{MetaSpan, Span, SourceLocation, SpanRange, MultiSpan, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+// =============================================================================
+// §1: cross-module SourceLocation.new return-value field access (OOB at runtime)
+// =============================================================================
+//
+// REGRESSION (2026-05-25, span#1): calling `SourceLocation.new(...)` from a
+// different module than `core.meta.span` returns a Self record whose layout
+// is lost in VBC codegen — subsequent field access reads at a misresolved
+// (intern-fallback) field index and panics with:
+//
+//   field access out of bounds: field index 12 (offset 96+8 = 104)
+//   exceeds object data size 32
+//
+// Same defect class as `[[enactment_field_access_oob_2026-05-24]]` and
+// `[[btree_pattern_match_ref_generic_class]]` (cross-module record return
+// + downstream `.field` access).
+//
+// Workaround: direct record construction at the call site
+//   `let loc = SourceLocation { file: ..., line: ..., column: ..., offset: ... }`.
+//
+// The regression below pins the **failing path**; flip to GREEN once the
+// cross-module fn-return record layout is preserved through codegen.
+//
+
+@ignore
+@test
+fn regression_source_location_new_cross_module_return() {
+    let loc = SourceLocation.new(Text.from("foo.vr"), 1, 1, 0);
+    assert(loc.line == 1);
+}
+
+// =============================================================================
+// §2: cross-module SpanRange.new return-value field access (same class as §1)
+// =============================================================================
+
+@ignore
+@test
+fn regression_span_range_new_cross_module_return() {
+    let s1 = MetaSpan { id: 1, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    let s2 = MetaSpan { id: 2, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    let r = SpanRange.new(s1, s2);
+    assert(r.start == s1);
+}
+
+// =============================================================================
+// §3: cross-module SpanRange.single return-value field access
+// =============================================================================
+
+@ignore
+@test
+fn regression_span_range_single_cross_module_return() {
+    let s = MetaSpan { id: 9, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    let r = SpanRange.single(s);
+    assert(r.start == r.end);
+}
+
+// =============================================================================
+// §4: cross-module MultiSpan.empty return-value field access
+// =============================================================================
+
+@ignore
+@test
+fn regression_multi_span_empty_cross_module_return() {
+    let m = MultiSpan.empty();
+    assert(m.is_empty());
+}
+
+// =============================================================================
+// §5: cross-module MultiSpan.from_span return-value field access
+// =============================================================================
+
+@ignore
+@test
+fn regression_multi_span_from_span_cross_module_return() {
+    let s = MetaSpan { id: 1, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    let m = MultiSpan.from_span(s);
+    assert(!m.is_empty());
+}

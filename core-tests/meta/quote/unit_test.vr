@@ -1,0 +1,77 @@
+// =============================================================================
+// core-tests/meta/quote/unit_test.vr
+// =============================================================================
+//
+// `core/meta/quote.vr` — quasi-quotation builder.
+//
+// Most of `QuoteBuilder` calls `keyword_from_str` (a
+// `@compiler_intrinsic`) or references variant names that don't
+// match the canonical `core.meta.token` definitions (audit §3.1):
+//
+//   `TokenTree.Token(...)`   — but token.vr says `TokenTree.Leaf(t)`
+//   `TokenKind.Keyword(kw)`  — but token.vr says `TokenKind.Kw(kw)`
+//
+// Until those are realigned (or a `Token` / `Keyword` alias is
+// added), the builder API can't be exercised at runtime. This
+// regression is pinned in `regression_test.vr`.
+//
+// The pure-data surface that IS testable at this layer:
+//
+//   * QuotePart 3-variant (Literal / Interpolate / Repeat) +
+//     variant disjointness
+//   * Convenience module-level fns over Tier-0 TokenStream
+//     construction (`empty`, `parens`, `braces`, `brackets`,
+//     `ident`, `int`, `string`, `join_with`) — these only use
+//     direct ctors and `.wrap` (data-only).
+// =============================================================================
+
+mount core.meta.quote.{QuotePart};
+mount core.meta.token.{TokenStream, TokenTree, Token, TokenKind, Delimiter};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+fn synthetic_span() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+// =============================================================================
+// Section 1: QuotePart 3-variant
+// =============================================================================
+
+@test
+fn test_quote_part_literal_variant() {
+    let p: QuotePart = QuotePart.Literal(Text.from("let x = "));
+    assert(p is QuotePart.Literal);
+}
+
+@test
+fn test_quote_part_interpolate_variant() {
+    let ts = TokenStream { tokens: List.new(), span: synthetic_span() };
+    let p: QuotePart = QuotePart.Interpolate(ts);
+    assert(p is QuotePart.Interpolate);
+}
+
+@test
+fn test_quote_part_repeat_variant() {
+    let iter = TokenStream { tokens: List.new(), span: synthetic_span() };
+    let p: QuotePart = QuotePart.Repeat {
+        var_name: Text.from("x"),
+        iterator: iter,
+        body: List.new(),
+        separator: Maybe.None,
+    };
+    assert(p is QuotePart.Repeat);
+}
+
+@test
+fn test_quote_part_variants_pairwise_disjoint() {
+    let ts = TokenStream { tokens: List.new(), span: synthetic_span() };
+    let l: QuotePart = QuotePart.Literal(Text.from("a"));
+    let i: QuotePart = QuotePart.Interpolate(ts);
+    assert(l is QuotePart.Literal && !(l is QuotePart.Interpolate));
+    assert(i is QuotePart.Interpolate && !(i is QuotePart.Literal));
+}
