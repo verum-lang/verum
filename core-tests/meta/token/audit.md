@@ -32,44 +32,16 @@ Tests: 56 unit tests over the pure-data subset that does NOT call
 
 ## 3. Language-implementation gaps
 
-### §3.1 Variant-name drift: `TokenTree.Leaf` vs `TokenTree.Token` (medium)
+### §3.1 Variant-name drift: `TokenTree.Leaf` vs `TokenTree.Token` — CLOSED 2026-05-25
 
-`token.vr` defines:
+Closed by realigning `core/meta/quote.vr` (13 sites).
+See [meta/quote audit §3.1](../quote/audit.md).
 
-```verum
-public type TokenTree is
-    | Leaf(Token)
-    | Grouped(Group);
-```
+### §3.2 Variant-name drift: `TokenKind.Keyword` vs `TokenKind.Kw` — CLOSED 2026-05-25
 
-But `quote.vr` references:
-
-```verum
-self.tokens.push(TokenTree.Token(Token.ident_spanned(name, self.span)));
-```
-
-`TokenTree.Token` is **not a variant** of TokenTree — it's a name
-that aliases the `Token` *type* under the wrong namespace. This
-mismatch silently disables `QuoteBuilder.ident` /
-`QuoteBuilder.punct` / `QuoteBuilder.int_lit` / etc. at compile
-time (the `.push` call cannot resolve).
-
-**Fix path (5 min):** rename `TokenTree.Token` → `TokenTree.Leaf`
-in `core/meta/quote.vr` (16 occurrences).
-
-### §3.2 Variant-name drift: `TokenKind.Keyword` vs `TokenKind.Kw` (medium)
-
-`token.vr` defines:
-
-```verum
-public type TokenKind is
-    | Ident(Text)
-    | Kw(Keyword)
-    | ...
-```
-
-But `quote.vr` references `TokenKind.Keyword(keyword_from_str(kw))`.
-Same fix-class as §3.1; rename to `TokenKind.Kw`.
+Closed by realigning `core/meta/quote.vr` (2 sites).
+Plus one additional drift uncovered: `TokenTree.Group` → `Grouped`
+(2 sites). See [meta/quote audit §3.1](../quote/audit.md).
 
 ### §3.3 `Group { delimiter, tokens, span }` field order in TokenStream.wrap
 
@@ -119,9 +91,7 @@ artificially inflated.
 
 | Item | Scope | Estimated effort |
 |---|---|---|
-| Rename `TokenTree.Token` → `TokenTree.Leaf` in quote.vr (§3.1) | core/meta/quote.vr | 5 min |
-| Rename `TokenKind.Keyword` → `TokenKind.Kw` in quote.vr (§3.2) | core/meta/quote.vr | 5 min |
 | Regression-pin Token ctor cross-module paths (§3.5) once cross-module fix lands | this folder | 30 min |
-| Integration test: build TokenStream via QuoteBuilder + assert round-trip with Display | this folder | 1 h post-§3.1 |
+| Integration test: build TokenStream via QuoteBuilder + assert round-trip with Display | this folder | 1 h |
 | Drift-pinning Rust unit test mirroring Keyword/Delimiter/Literal/TokenKind enums | crates/verum_lexer/src/tests/ | 1 h |
 | Property test: `Spacing` 2-valued domain + `Delimiter.open` / `.close` returns matched pair | this folder | 30 min |

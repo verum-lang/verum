@@ -33,39 +33,35 @@ validate_epsilon_canonicalisable (R2 — current behaviour pin).
 
 ## 3. Language-implementation gaps
 
-### §3.1 `validate_epsilon_canonicalisable` body is empty (medium)
+### §3.1 `validate_epsilon_canonicalisable` body is empty — CLOSED 2026-05-25
+
+Originally documented: the loop body never updated `all_admissible`,
+so R2 returned `Maybe.None` for every input.
+
+**Closed by porting the per-Char ordinal-grammar predicate**:
 
 ```verum
-let mut i: Int = 0;
-let mut all_admissible: Bool = true;
-while i < s.len() as Int {
-    // Per-byte check would go here; this uses a simpler
-    // structural test (the AST canonicaliser is the source of
-    // truth and emits its own diagnostic on rejection).
-    i = i + 1;
+fn ordinal_char_admissible(ch: Char) -> Bool {
+    if ch >= '0' && ch <= '9' { return true; }   // ASCII digits
+    if ch == '+'              { return true; }   // ordinal addition
+    if ch == 'ω'              { return true; }   // U+03C9
+    if ch == 'Ω'              { return true; }   // U+03A9
+    if ch == '·'              { return true; }   // U+00B7 (ordinal mult)
+    if ch == '²'              { return true; }   // U+00B2 (omega-squared)
+    false
 }
-if !all_admissible { ... }
 ```
 
-The loop body never updates `all_admissible`, so every input
-takes the early-return path (returning `Maybe.None` whenever
-the string starts with `ε_` / `epsilon_`) or the loop's
-post-condition (`all_admissible == true` always → `Maybe.None`).
+The outer fn iterates `s.chars()` and rejects the string if **any**
+char is non-admissible. Empty string is explicitly inadmissible.
+Primitive `ε_` / `epsilon_` prefix still trusts the AST
+canonicaliser to vet the suffix.
 
-**Result:** R2 is currently a **no-op** for all inputs.
-
-The header comment justifies this by deferring to "the AST
-canonicaliser is the source of truth", but the *meta-layer*
-discipline file should still surface the diagnostic when called
-with a non-primitive non-ordinal string at runtime.
-
-**Fix path (~1h):** port the AST canonicaliser's predicate
-(8 primitive names + `0`/`ω`/`ω+k`/`ω·n`/`ω·n+k`/`ω²`/`Ω`
-ordinal grammar) to this function.
-
-**Pinned in `unit_test.vr` Section 8** as the *current behaviour*
-(`Maybe.None` for ordinal inputs too); once the loop body lands,
-those tests should flip and the audit deferral closes.
+Anchor: 15 tests in `unit_test.vr` Section 8 cover canonical
+forms (`ω`, `Ω`, `ω+1`, `ω·2`, `ω²`, `ω·3+2`, `0`) and
+inadmissible inputs (empty string, letter, space, minus sign,
+garbage). Every inadmissible case emits an R2 Warning with
+the correct rule/severity fields.
 
 ### §3.2 R4 / R5 / R6 not yet implemented
 
@@ -78,18 +74,19 @@ When they land, drop sister tests mirroring §5 / §7's pattern.
 
 ## Action items landed in this branch
 
-* `core-tests/meta/framework_hygiene/unit_test.vr` — 27 unit tests
-  covering HygieneSeverity + HygieneDiagnostic + severity_as_text +
-  name_has_brand_prefix + validate_foundation_neutral_name +
-  validate_meta_classifier_uniqueness + R2 current-behaviour pin.
+* `core/meta/framework_hygiene.vr` — ported the ordinal-grammar
+  predicate (`ordinal_char_admissible`) and per-Char loop in
+  `validate_epsilon_canonicalisable`. Closes §3.1.
+* `core-tests/meta/framework_hygiene/unit_test.vr` — 39 unit tests
+  (was 27): + 12 new R2 tests in Section 8 covering canonical
+  ordinal forms (`ω`, `Ω`, `0`, `ω+1`, `ω·2`, `ω²`, `ω·3+2`) +
+  inadmissible inputs (empty / letter / space / minus / garbage).
 * `core-tests/meta/framework_hygiene/audit.md` — this file.
 
 ## Action items deferred
 
 | Item | Scope | Estimated effort |
 |---|---|---|
-| Fill in `validate_epsilon_canonicalisable` body (§3.1) | core/meta/framework_hygiene.vr | 1 h |
-| Flip R2 tests from "current-behaviour pin" to true validation | this folder | 30 min after §3.1 |
 | R4 / R5 / R6 implementation + tests | core/meta/framework_hygiene.vr + this folder | 2-3 days |
 | Integration test: `run_all_hygiene_rules` over a 5-decl batch | this folder | 30 min |
 | Drift-pinning Rust unit test for brand-prefix list | crates/verum_compiler/src/audit_walker.rs | 30 min |

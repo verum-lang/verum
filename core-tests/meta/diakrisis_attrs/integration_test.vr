@@ -1,0 +1,459 @@
+// =============================================================================
+// core-tests/meta/diakrisis_attrs/integration_test.vr
+// =============================================================================
+//
+// Integration tests for the five `parse_*` functions in
+// `core/meta/diakrisis_attrs.vr` — now that the `AttributeArg` schema
+// drift (audit §3.1) is closed and the parsers actually match the
+// record-form `AttributeArg`.
+//
+// Construction discipline: direct record literal at the test site for
+// `Attribute` / `AttributeArg` / `TokenStream` / `Span` — avoids the
+// cross-module record-return field-access OOB defect (see
+// meta/span audit §3.1).
+// =============================================================================
+
+mount core.meta.diakrisis_attrs.{
+    DiakrisisEffectKind, EffectAttr,
+    InfinityLevel, InfinityCategoryAttr,
+    AutopoieticAttr, LudicDesignAttr, CutEliminationAttr,
+    CUT_ELIMINATION_DEFAULT_BOUND,
+    parse_effect_attr, parse_infinity_category, parse_autopoietic,
+    parse_ludic_design, parse_cut_elimination,
+};
+mount core.meta.attribute.{Attribute, AttributeStyle, AttributeArg, MetaAttributeValue};
+mount core.meta.token.{TokenStream};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+// =============================================================================
+// Helpers (direct record construction — sidesteps cross-module .new ctors)
+// =============================================================================
+
+fn syn_span() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+fn empty_tokens() -> TokenStream {
+    TokenStream { tokens: List.new(), span: syn_span() }
+}
+
+fn positional_arg(value: MetaAttributeValue) -> AttributeArg {
+    AttributeArg { name: Maybe.None, value, span: syn_span() }
+}
+
+fn named_arg(name: Text, value: MetaAttributeValue) -> AttributeArg {
+    AttributeArg { name: Maybe.Some(name), value, span: syn_span() }
+}
+
+fn attr_with(name: Text, args: List<AttributeArg>) -> Attribute {
+    Attribute {
+        name,
+        style: AttributeStyle.Call,
+        args,
+        tokens: empty_tokens(),
+        span: syn_span(),
+    }
+}
+
+fn simple_attr(name: Text) -> Attribute {
+    Attribute {
+        name,
+        style: AttributeStyle.Word,
+        args: List.new(),
+        tokens: empty_tokens(),
+        span: syn_span(),
+    }
+}
+
+// =============================================================================
+// Section 1: parse_effect_attr — 7 canonical kinds + 2 aliases
+// =============================================================================
+
+@test
+fn test_parse_effect_attr_pure() {
+    let attr = attr_with(
+        Text.from("effect"),
+        List.of(positional_arg(MetaAttributeValue.Ident(Text.from("pure")))),
+    );
+    let r = parse_effect_attr(&attr);
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_parse_effect_attr_io() {
+    let attr = attr_with(
+        Text.from("effect"),
+        List.of(positional_arg(MetaAttributeValue.Ident(Text.from("io")))),
+    );
+    assert(parse_effect_attr(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_effect_attr_state() {
+    let attr = attr_with(
+        Text.from("effect"),
+        List.of(positional_arg(MetaAttributeValue.Ident(Text.from("state")))),
+    );
+    assert(parse_effect_attr(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_effect_attr_async() {
+    let attr = attr_with(
+        Text.from("effect"),
+        List.of(positional_arg(MetaAttributeValue.Ident(Text.from("async")))),
+    );
+    assert(parse_effect_attr(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_effect_attr_exception() {
+    let attr = attr_with(
+        Text.from("effect"),
+        List.of(positional_arg(MetaAttributeValue.Ident(Text.from("exception")))),
+    );
+    assert(parse_effect_attr(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_effect_attr_exn_alias() {
+    let attr = attr_with(
+        Text.from("effect"),
+        List.of(positional_arg(MetaAttributeValue.Ident(Text.from("exn")))),
+    );
+    assert(parse_effect_attr(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_effect_attr_nondet() {
+    let attr = attr_with(
+        Text.from("effect"),
+        List.of(positional_arg(MetaAttributeValue.Ident(Text.from("nondet")))),
+    );
+    assert(parse_effect_attr(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_effect_attr_non_det_alias() {
+    let attr = attr_with(
+        Text.from("effect"),
+        List.of(positional_arg(MetaAttributeValue.Ident(Text.from("non_det")))),
+    );
+    assert(parse_effect_attr(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_effect_attr_quantum() {
+    let attr = attr_with(
+        Text.from("effect"),
+        List.of(positional_arg(MetaAttributeValue.Ident(Text.from("quantum")))),
+    );
+    assert(parse_effect_attr(&attr) is Maybe.Some);
+}
+
+// =============================================================================
+// Section 2: parse_effect_attr — rejections
+// =============================================================================
+
+@test
+fn test_parse_effect_attr_wrong_name_rejected() {
+    let attr = attr_with(
+        Text.from("not_effect"),
+        List.of(positional_arg(MetaAttributeValue.Ident(Text.from("pure")))),
+    );
+    assert(parse_effect_attr(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_effect_attr_no_args_rejected() {
+    let attr = attr_with(Text.from("effect"), List.new());
+    assert(parse_effect_attr(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_effect_attr_string_arg_rejected() {
+    let attr = attr_with(
+        Text.from("effect"),
+        List.of(positional_arg(MetaAttributeValue.String(Text.from("pure")))),
+    );
+    assert(parse_effect_attr(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_effect_attr_unknown_ident_rejected() {
+    let attr = attr_with(
+        Text.from("effect"),
+        List.of(positional_arg(MetaAttributeValue.Ident(Text.from("frobnicate")))),
+    );
+    assert(parse_effect_attr(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_effect_attr_named_arg_rejected() {
+    // Positional-only contract; named-form must be rejected.
+    let attr = attr_with(
+        Text.from("effect"),
+        List.of(named_arg(
+            Text.from("kind"),
+            MetaAttributeValue.Ident(Text.from("pure")),
+        )),
+    );
+    assert(parse_effect_attr(&attr) is Maybe.None);
+}
+
+// =============================================================================
+// Section 3: parse_infinity_category — Finite N + Omega + OmegaOmega
+// =============================================================================
+
+@test
+fn test_parse_infinity_category_finite_zero() {
+    let attr = attr_with(
+        Text.from("infinity_category"),
+        List.of(positional_arg(MetaAttributeValue.Int(0))),
+    );
+    assert(parse_infinity_category(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_infinity_category_finite_two() {
+    let attr = attr_with(
+        Text.from("infinity_category"),
+        List.of(positional_arg(MetaAttributeValue.Int(2))),
+    );
+    assert(parse_infinity_category(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_infinity_category_omega() {
+    let attr = attr_with(
+        Text.from("infinity_category"),
+        List.of(positional_arg(MetaAttributeValue.Ident(Text.from("omega")))),
+    );
+    assert(parse_infinity_category(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_infinity_category_omega_omega() {
+    let attr = attr_with(
+        Text.from("infinity_category"),
+        List.of(positional_arg(MetaAttributeValue.Ident(Text.from("omega_omega")))),
+    );
+    assert(parse_infinity_category(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_infinity_category_negative_int_rejected() {
+    let attr = attr_with(
+        Text.from("infinity_category"),
+        List.of(positional_arg(MetaAttributeValue.Int(-1))),
+    );
+    assert(parse_infinity_category(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_infinity_category_unknown_ident_rejected() {
+    let attr = attr_with(
+        Text.from("infinity_category"),
+        List.of(positional_arg(MetaAttributeValue.Ident(Text.from("alpha")))),
+    );
+    assert(parse_infinity_category(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_infinity_category_wrong_name_rejected() {
+    let attr = attr_with(
+        Text.from("category"),
+        List.of(positional_arg(MetaAttributeValue.Int(1))),
+    );
+    assert(parse_infinity_category(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_infinity_category_no_args_rejected() {
+    let attr = attr_with(Text.from("infinity_category"), List.new());
+    assert(parse_infinity_category(&attr) is Maybe.None);
+}
+
+// =============================================================================
+// Section 4: parse_autopoietic — named-args, order-independent
+// =============================================================================
+
+@test
+fn test_parse_autopoietic_both_present() {
+    let attr = attr_with(
+        Text.from("autopoietic"),
+        List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("ε_math"))))
+            .append(List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(3)))),
+    );
+    assert(parse_autopoietic(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_autopoietic_order_independent() {
+    // depth first, epsilon second — same result.
+    let attr = attr_with(
+        Text.from("autopoietic"),
+        List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(5)))
+            .append(List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("ε_compute"))))),
+    );
+    assert(parse_autopoietic(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_autopoietic_missing_epsilon_rejected() {
+    let attr = attr_with(
+        Text.from("autopoietic"),
+        List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(2))),
+    );
+    assert(parse_autopoietic(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_autopoietic_missing_depth_rejected() {
+    let attr = attr_with(
+        Text.from("autopoietic"),
+        List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("ε_math")))),
+    );
+    assert(parse_autopoietic(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_autopoietic_negative_depth_rejected() {
+    let attr = attr_with(
+        Text.from("autopoietic"),
+        List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("ε_math"))))
+            .append(List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(-1)))),
+    );
+    assert(parse_autopoietic(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_autopoietic_wrong_name_rejected() {
+    let attr = attr_with(
+        Text.from("not_autopoietic"),
+        List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.String(Text.from("x"))))
+            .append(List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(1)))),
+    );
+    assert(parse_autopoietic(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_autopoietic_epsilon_int_value_rejected() {
+    // Wrong value type for epsilon: needs String, given Int.
+    let attr = attr_with(
+        Text.from("autopoietic"),
+        List.of(named_arg(Text.from("epsilon"), MetaAttributeValue.Int(42)))
+            .append(List.of(named_arg(Text.from("depth"), MetaAttributeValue.Int(1)))),
+    );
+    assert(parse_autopoietic(&attr) is Maybe.None);
+}
+
+// =============================================================================
+// Section 5: parse_ludic_design — zero args
+// =============================================================================
+
+@test
+fn test_parse_ludic_design_zero_args() {
+    let attr = simple_attr(Text.from("ludic_design"));
+    assert(parse_ludic_design(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_ludic_design_with_args_rejected() {
+    let attr = attr_with(
+        Text.from("ludic_design"),
+        List.of(positional_arg(MetaAttributeValue.Int(1))),
+    );
+    assert(parse_ludic_design(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_ludic_design_wrong_name_rejected() {
+    let attr = simple_attr(Text.from("ludic"));
+    assert(parse_ludic_design(&attr) is Maybe.None);
+}
+
+// =============================================================================
+// Section 6: parse_cut_elimination — default / named-arg / bare-int forms
+// =============================================================================
+
+@test
+fn test_parse_cut_elimination_zero_args_uses_default() {
+    let attr = simple_attr(Text.from("cut_elimination"));
+    assert(parse_cut_elimination(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_cut_elimination_bare_int_form() {
+    let attr = attr_with(
+        Text.from("cut_elimination"),
+        List.of(positional_arg(MetaAttributeValue.Int(500))),
+    );
+    assert(parse_cut_elimination(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_cut_elimination_named_arg_form() {
+    let attr = attr_with(
+        Text.from("cut_elimination"),
+        List.of(named_arg(Text.from("bound"), MetaAttributeValue.Int(750))),
+    );
+    assert(parse_cut_elimination(&attr) is Maybe.Some);
+}
+
+@test
+fn test_parse_cut_elimination_negative_int_rejected() {
+    let attr = attr_with(
+        Text.from("cut_elimination"),
+        List.of(positional_arg(MetaAttributeValue.Int(-1))),
+    );
+    assert(parse_cut_elimination(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_cut_elimination_negative_named_arg_rejected() {
+    let attr = attr_with(
+        Text.from("cut_elimination"),
+        List.of(named_arg(Text.from("bound"), MetaAttributeValue.Int(-100))),
+    );
+    assert(parse_cut_elimination(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_cut_elimination_wrong_named_key_rejected() {
+    let attr = attr_with(
+        Text.from("cut_elimination"),
+        List.of(named_arg(Text.from("limit"), MetaAttributeValue.Int(100))),
+    );
+    assert(parse_cut_elimination(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_cut_elimination_named_string_value_rejected() {
+    let attr = attr_with(
+        Text.from("cut_elimination"),
+        List.of(named_arg(Text.from("bound"), MetaAttributeValue.String(Text.from("100")))),
+    );
+    assert(parse_cut_elimination(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_cut_elimination_two_args_rejected() {
+    let attr = attr_with(
+        Text.from("cut_elimination"),
+        List.of(positional_arg(MetaAttributeValue.Int(1)))
+            .append(List.of(positional_arg(MetaAttributeValue.Int(2)))),
+    );
+    assert(parse_cut_elimination(&attr) is Maybe.None);
+}
+
+@test
+fn test_parse_cut_elimination_wrong_attr_name_rejected() {
+    let attr = simple_attr(Text.from("elim"));
+    assert(parse_cut_elimination(&attr) is Maybe.None);
+}

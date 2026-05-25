@@ -275,18 +275,16 @@ fn test_validate_meta_classifier_emits_R3_error_diagnostic() {
 }
 
 // =============================================================================
-// Section 8: validate_epsilon_canonicalisable (R2) — CURRENT BEHAVIOUR PIN
+// Section 8: validate_epsilon_canonicalisable (R2) — full predicate
 // =============================================================================
 //
-// The source loop body in `validate_epsilon_canonicalisable` is empty
-// (`all_admissible: Bool = true` never updated by any iteration).
-// Every non-ε-prefixed string returns Maybe.None because the early
-// return on `s.starts_with("ε_")` / `s.starts_with("epsilon_")` only
-// fires for those two patterns. The ordinal-form path never emits.
+// R2 now performs per-Char admissibility checks against the ordinal
+// grammar (digits, '+', 'ω', 'Ω', '·', '²'). Primitive forms with
+// `ε_` / `epsilon_` prefix are still accepted unconditionally
+// (the AST canonicaliser vets the suffix at @enact parse time).
 //
-// These tests pin the current behaviour. Once the loop body is filled
-// in (or the function is rewritten), the pinned expectations may need
-// to flip — at which point the audit's §3.1 deferral closes.
+// Empty string is explicitly **inadmissible** — R2 emits a Warning
+// diagnostic.
 
 @test
 fn test_validate_epsilon_eps_prefix_returns_none() {
@@ -307,12 +305,126 @@ fn test_validate_epsilon_epsilon_prefix_returns_none() {
 }
 
 @test
-fn test_validate_epsilon_ordinal_form_returns_none() {
-    // Ordinal coordinate; current impl returns None because the loop
-    // body is empty. Pin behaviour.
+fn test_validate_epsilon_ordinal_omega_only_returns_none() {
+    let result = validate_epsilon_canonicalisable(
+        Text.from("ω"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.None);
+}
+
+@test
+fn test_validate_epsilon_ordinal_capital_omega_returns_none() {
+    let result = validate_epsilon_canonicalisable(
+        Text.from("Ω"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.None);
+}
+
+@test
+fn test_validate_epsilon_ordinal_omega_plus_int_returns_none() {
     let result = validate_epsilon_canonicalisable(
         Text.from("ω+1"),
         synthetic_span(),
     );
     assert(result is Maybe.None);
+}
+
+@test
+fn test_validate_epsilon_ordinal_omega_times_int_returns_none() {
+    let result = validate_epsilon_canonicalisable(
+        Text.from("ω·2"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.None);
+}
+
+@test
+fn test_validate_epsilon_ordinal_omega_squared_returns_none() {
+    let result = validate_epsilon_canonicalisable(
+        Text.from("ω²"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.None);
+}
+
+@test
+fn test_validate_epsilon_ordinal_complex_returns_none() {
+    // `ω·3+2` is fully canonical.
+    let result = validate_epsilon_canonicalisable(
+        Text.from("ω·3+2"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.None);
+}
+
+@test
+fn test_validate_epsilon_ordinal_zero_returns_none() {
+    let result = validate_epsilon_canonicalisable(
+        Text.from("0"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.None);
+}
+
+@test
+fn test_validate_epsilon_empty_string_emits_R2() {
+    let result = validate_epsilon_canonicalisable(
+        Text.from(""),
+        synthetic_span(),
+    );
+    assert(result is Maybe.Some);
+    match result {
+        Maybe.Some(d) => {
+            assert(d.rule == "R2");
+            assert(d.severity is HygieneSeverity.Warning);
+        },
+        Maybe.None => panic("R2 should emit for empty string"),
+    }
+}
+
+@test
+fn test_validate_epsilon_alpha_letter_emits_R2() {
+    // 'a' is not in {digit, '+', 'ω', 'Ω', '·', '²'}.
+    let result = validate_epsilon_canonicalisable(
+        Text.from("ω+a"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.Some);
+}
+
+@test
+fn test_validate_epsilon_space_emits_R2() {
+    let result = validate_epsilon_canonicalisable(
+        Text.from("ω + 1"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.Some);
+}
+
+@test
+fn test_validate_epsilon_minus_sign_emits_R2() {
+    // '-' is not in the admissible set.
+    let result = validate_epsilon_canonicalisable(
+        Text.from("ω-1"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.Some);
+}
+
+@test
+fn test_validate_epsilon_garbage_emits_R2_with_warning() {
+    let result = validate_epsilon_canonicalisable(
+        Text.from("frobnicate"),
+        synthetic_span(),
+    );
+    assert(result is Maybe.Some);
+    match result {
+        Maybe.Some(d) => {
+            assert(d.rule == "R2");
+            assert(d.severity is HygieneSeverity.Warning);
+        },
+        Maybe.None => panic("R2 should emit for unknown garbage"),
+    }
 }
