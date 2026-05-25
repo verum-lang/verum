@@ -3319,6 +3319,33 @@ pub(super) fn dispatch_primitive_method(
         let header_addr = data_ptr.wrapping_sub(32); // 32-byte AllocationHeader
         if state.cbgr_allocations.contains(&header_addr) {
             match method {
+                // **Task #18 fix 2026-05-25** — Heap.into_inner intercept.
+                // The stdlib `Heap.into_inner` body reads `self.ptr`
+                // then `ptr_read(self.ptr)`, but `self` for a Heap.new-
+                // produced value is a CBGR data-area pointer (not a
+                // 3-field record).  Method dispatch fails because the
+                // receiver_type_name lookup hits the user-side type
+                // registry where TypeId::HEAP=519 has been re-assigned
+                // to an unrelated stdlib type (see Heap.new TypeId
+                // stamp comment).  Direct intercept reads the stored
+                // Value from the CBGR data slot and frees the
+                // allocation via the dealloc bookkeeping that
+                // sys_dealloc/cbgr_dealloc usually run.
+                "into_inner" => {
+                    // SAFETY: CBGR alloc layout is OBJECT_HEADER (32B)
+                    // + payload (8B Value).  data_ptr points at the
+                    // payload; reading 8 bytes yields the stored
+                    // Value (the wrapped T).
+                    let inner = unsafe { *(data_ptr as *const Value) };
+                    // Mark the CBGR allocation as freed by removing
+                    // it from the live-set and bumping generation.
+                    // Mirrors the stdlib body's `cbgr_dealloc` call.
+                    state.cbgr_allocations.remove(&header_addr);
+                    // Note: we don't actually free the memory here
+                    // (matching cbgr_dealloc's semantics — it bumps
+                    // generation but keeps the pointer live until GC).
+                    return Ok(Some(inner));
+                }
                 // AllocationHeader layout: [size:4][align:4][generation:4][epoch:2][caps:2][type_id:4][flags:4][reserved:8]
                 "generation" | "stored_generation" => {
                     let generation = unsafe { *((header_addr + 8) as *const u32) };
