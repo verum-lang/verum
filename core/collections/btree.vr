@@ -153,10 +153,15 @@ implement<K: Ord, V> BTreeMap<K, V> {
         // Match-extract preserves the inner `Heap<BTreeNode<K, V>>`
         // through the typechecker.  Previously `.as_ref().expect()`
         // lost the inner T at codegen, falling through
-        // `resolve_field_index` to global-intern (closed via
-        // interpreter pattern-match ref-deref fix in `pattern_
-        // matching.rs::handle_match_tag` / `handle_get_variant_data` /
-        // `handle_as_var` + this stdlib-side refactor on 2026-05-24).
+        // `resolve_field_index` to global-intern.  Closed via
+        // interpreter pattern-match ref-deref fix in
+        // `pattern_matching.rs::handle_match_tag` / `handle_get_variant_data` /
+        // `handle_as_var` (commit 9d39011e1) + this stdlib-side refactor.
+        //
+        // NOTE: a residual codegen defect on the BTreeNode literal
+        // allocation path (field count miscount producing 24B records
+        // when 32B records are expected) blocks the full get/insert
+        // round-trip — tracked in `core-tests/collections/btree/audit.md`.
         match &self.root {
             Some(node) => self.search_node(node, key),
             None       => None,
