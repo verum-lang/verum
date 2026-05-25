@@ -1,0 +1,162 @@
+// =============================================================================
+// core-tests/mesh/k8s/config/unit_test.vr
+// =============================================================================
+//
+// `core/mesh/k8s/config.vr` — kubeconfig + in-cluster auth ADTs.
+//
+// Surface tested here (pure-data):
+//   * KubeConfigError 5-variant (NotFound / InvalidYaml / ContextNotFound /
+//     NoAuth / IoError) + variant disjointness + Eq matrix
+//   * AuthInfo 4-variant (Token / ClientCertificate / ExecPlugin / InCluster)
+//     + variant disjointness
+//
+// Live load_default / load_context paths are `@intrinsic("verum.k8s.*")`
+// and require runtime FS / env access; covered at the verum_compiler /
+// vcs/specs/L2 test layer.
+// =============================================================================
+
+mount core.mesh.k8s.config.{KubeConfigError, AuthInfo};
+
+// =============================================================================
+// Section 1: KubeConfigError 5-variant construction
+// =============================================================================
+
+@test
+fn test_kube_config_error_not_found() {
+    let e: KubeConfigError = KubeConfigError.NotFound(Text.from("~/.kube/config"));
+    assert(e is KubeConfigError.NotFound);
+}
+
+@test
+fn test_kube_config_error_invalid_yaml() {
+    let e: KubeConfigError = KubeConfigError.InvalidYaml(Text.from("mapping values are not allowed here"));
+    assert(e is KubeConfigError.InvalidYaml);
+}
+
+@test
+fn test_kube_config_error_context_not_found() {
+    let e: KubeConfigError = KubeConfigError.ContextNotFound(Text.from("prod-east"));
+    assert(e is KubeConfigError.ContextNotFound);
+}
+
+@test
+fn test_kube_config_error_no_auth() {
+    let e: KubeConfigError = KubeConfigError.NoAuth(Text.from("no token, no cert, no exec plugin"));
+    assert(e is KubeConfigError.NoAuth);
+}
+
+@test
+fn test_kube_config_error_io_error() {
+    let e: KubeConfigError = KubeConfigError.IoError(Text.from("permission denied"));
+    assert(e is KubeConfigError.IoError);
+}
+
+@test
+fn test_kube_config_error_pairwise_disjoint() {
+    let nf: KubeConfigError = KubeConfigError.NotFound(Text.from("X"));
+    let iy: KubeConfigError = KubeConfigError.InvalidYaml(Text.from("X"));
+    let cn: KubeConfigError = KubeConfigError.ContextNotFound(Text.from("X"));
+    let na: KubeConfigError = KubeConfigError.NoAuth(Text.from("X"));
+    let io: KubeConfigError = KubeConfigError.IoError(Text.from("X"));
+
+    assert(nf is KubeConfigError.NotFound && !(nf is KubeConfigError.InvalidYaml));
+    assert(iy is KubeConfigError.InvalidYaml && !(iy is KubeConfigError.ContextNotFound));
+    assert(cn is KubeConfigError.ContextNotFound && !(cn is KubeConfigError.NoAuth));
+    assert(na is KubeConfigError.NoAuth && !(na is KubeConfigError.IoError));
+    assert(io is KubeConfigError.IoError && !(io is KubeConfigError.NotFound));
+}
+
+// =============================================================================
+// Section 2: KubeConfigError Eq matrix
+// =============================================================================
+
+@test
+fn test_kube_config_error_eq_not_found_reflexive() {
+    let a: KubeConfigError = KubeConfigError.NotFound(Text.from("~/.kube/config"));
+    let b: KubeConfigError = KubeConfigError.NotFound(Text.from("~/.kube/config"));
+    assert(a == b);
+}
+
+@test
+fn test_kube_config_error_eq_invalid_yaml_payload_differs() {
+    let a: KubeConfigError = KubeConfigError.InvalidYaml(Text.from("X"));
+    let b: KubeConfigError = KubeConfigError.InvalidYaml(Text.from("Y"));
+    assert(!(a == b));
+}
+
+@test
+fn test_kube_config_error_eq_cross_variant_inequality() {
+    // Same payload Text, different variant → not equal.
+    let a: KubeConfigError = KubeConfigError.NotFound(Text.from("oops"));
+    let b: KubeConfigError = KubeConfigError.IoError(Text.from("oops"));
+    assert(!(a == b));
+}
+
+@test
+fn test_kube_config_error_eq_no_auth_payload_differs() {
+    let a: KubeConfigError = KubeConfigError.NoAuth(Text.from("token expired"));
+    let b: KubeConfigError = KubeConfigError.NoAuth(Text.from("cert revoked"));
+    assert(!(a == b));
+}
+
+@test
+fn test_kube_config_error_eq_context_not_found_payload_differs() {
+    let a: KubeConfigError = KubeConfigError.ContextNotFound(Text.from("prod"));
+    let b: KubeConfigError = KubeConfigError.ContextNotFound(Text.from("staging"));
+    assert(!(a == b));
+}
+
+// =============================================================================
+// Section 3: AuthInfo 4-variant
+// =============================================================================
+
+@test
+fn test_auth_info_token() {
+    let a: AuthInfo = AuthInfo.Token(Text.from("eyJhbGciOiJSUzI1NiJ9..."));
+    assert(a is AuthInfo.Token);
+}
+
+@test
+fn test_auth_info_client_certificate() {
+    let a: AuthInfo = AuthInfo.ClientCertificate {
+        cert_pem: Text.from("-----BEGIN CERTIFICATE-----"),
+        key_pem: Text.from("-----BEGIN PRIVATE KEY-----"),
+    };
+    assert(a is AuthInfo.ClientCertificate);
+}
+
+@test
+fn test_auth_info_exec_plugin() {
+    let a: AuthInfo = AuthInfo.ExecPlugin {
+        command: Text.from("aws"),
+        args: List.new(),
+        env_json: Text.from("{}"),
+    };
+    assert(a is AuthInfo.ExecPlugin);
+}
+
+@test
+fn test_auth_info_in_cluster() {
+    let a: AuthInfo = AuthInfo.InCluster;
+    assert(a is AuthInfo.InCluster);
+}
+
+@test
+fn test_auth_info_pairwise_disjoint() {
+    let t: AuthInfo = AuthInfo.Token(Text.from("X"));
+    let cc: AuthInfo = AuthInfo.ClientCertificate {
+        cert_pem: Text.from(""),
+        key_pem: Text.from(""),
+    };
+    let ep: AuthInfo = AuthInfo.ExecPlugin {
+        command: Text.from(""),
+        args: List.new(),
+        env_json: Text.from(""),
+    };
+    let ic: AuthInfo = AuthInfo.InCluster;
+
+    assert(t is AuthInfo.Token && !(t is AuthInfo.ClientCertificate));
+    assert(cc is AuthInfo.ClientCertificate && !(cc is AuthInfo.ExecPlugin));
+    assert(ep is AuthInfo.ExecPlugin && !(ep is AuthInfo.InCluster));
+    assert(ic is AuthInfo.InCluster && !(ic is AuthInfo.Token));
+}

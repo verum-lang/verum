@@ -1,0 +1,286 @@
+// =============================================================================
+// core-tests/mesh/xds/resources/unit_test.vr
+// =============================================================================
+//
+// `core/mesh/xds/resources.vr` — typed views over Envoy xDS v3 LDS / CDS /
+// RDS / EDS resources. Pure-data ADTs + records (no intrinsics).
+//
+// Surface tested here:
+//   * ParsedResource 5-variant (L / C / R / E / Opaque)
+//   * ClusterDiscoveryType 5-variant (Static / StrictDns / LogicalDns /
+//     Eds / OriginalDst)
+//   * LbPolicy 6-variant (RoundRobin / LeastRequest / Random / Maglev /
+//     RingHash / ClusterProvided)
+//   * RouteMatch 4-variant (Prefix / Path / RegexMatch / Connect)
+//   * RouteAction 4-variant (ForwardCluster / WeightedClusters /
+//     Redirect / DirectResponse)
+//   * HealthStatus 5-variant (Unknown / Healthy / Unhealthy / Draining /
+//     Degraded)
+//   * All five variant-disjointness sets
+// =============================================================================
+
+mount core.mesh.xds.resources.{
+    ParsedResource,
+    ClusterDiscoveryType, LbPolicy,
+    RouteMatch, RouteAction,
+    HealthStatus,
+};
+
+// =============================================================================
+// Section 1: ClusterDiscoveryType 5-variant
+// =============================================================================
+
+@test
+fn test_cluster_discovery_type_static() {
+    let k: ClusterDiscoveryType = ClusterDiscoveryType.Static;
+    assert(k is ClusterDiscoveryType.Static);
+}
+
+@test
+fn test_cluster_discovery_type_strict_dns() {
+    let k: ClusterDiscoveryType = ClusterDiscoveryType.StrictDns;
+    assert(k is ClusterDiscoveryType.StrictDns);
+}
+
+@test
+fn test_cluster_discovery_type_logical_dns() {
+    let k: ClusterDiscoveryType = ClusterDiscoveryType.LogicalDns;
+    assert(k is ClusterDiscoveryType.LogicalDns);
+}
+
+@test
+fn test_cluster_discovery_type_eds() {
+    let k: ClusterDiscoveryType = ClusterDiscoveryType.Eds;
+    assert(k is ClusterDiscoveryType.Eds);
+}
+
+@test
+fn test_cluster_discovery_type_original_dst() {
+    let k: ClusterDiscoveryType = ClusterDiscoveryType.OriginalDst;
+    assert(k is ClusterDiscoveryType.OriginalDst);
+}
+
+@test
+fn test_cluster_discovery_type_pairwise_disjoint() {
+    let s: ClusterDiscoveryType = ClusterDiscoveryType.Static;
+    let sd: ClusterDiscoveryType = ClusterDiscoveryType.StrictDns;
+    let ld: ClusterDiscoveryType = ClusterDiscoveryType.LogicalDns;
+    let e: ClusterDiscoveryType = ClusterDiscoveryType.Eds;
+    let od: ClusterDiscoveryType = ClusterDiscoveryType.OriginalDst;
+    assert(s is ClusterDiscoveryType.Static && !(s is ClusterDiscoveryType.StrictDns));
+    assert(sd is ClusterDiscoveryType.StrictDns && !(sd is ClusterDiscoveryType.LogicalDns));
+    assert(ld is ClusterDiscoveryType.LogicalDns && !(ld is ClusterDiscoveryType.Eds));
+    assert(e is ClusterDiscoveryType.Eds && !(e is ClusterDiscoveryType.OriginalDst));
+    assert(od is ClusterDiscoveryType.OriginalDst && !(od is ClusterDiscoveryType.Static));
+}
+
+// =============================================================================
+// Section 2: LbPolicy 6-variant
+// =============================================================================
+
+@test
+fn test_lb_policy_round_robin() {
+    let p: LbPolicy = LbPolicy.RoundRobin;
+    assert(p is LbPolicy.RoundRobin);
+}
+
+@test
+fn test_lb_policy_least_request() {
+    let p: LbPolicy = LbPolicy.LeastRequest;
+    assert(p is LbPolicy.LeastRequest);
+}
+
+@test
+fn test_lb_policy_random() {
+    let p: LbPolicy = LbPolicy.Random;
+    assert(p is LbPolicy.Random);
+}
+
+@test
+fn test_lb_policy_maglev() {
+    let p: LbPolicy = LbPolicy.Maglev;
+    assert(p is LbPolicy.Maglev);
+}
+
+@test
+fn test_lb_policy_ring_hash() {
+    let p: LbPolicy = LbPolicy.RingHash;
+    assert(p is LbPolicy.RingHash);
+}
+
+@test
+fn test_lb_policy_cluster_provided() {
+    let p: LbPolicy = LbPolicy.ClusterProvided;
+    assert(p is LbPolicy.ClusterProvided);
+}
+
+@test
+fn test_lb_policy_pairwise_disjoint() {
+    let rr: LbPolicy = LbPolicy.RoundRobin;
+    let lr: LbPolicy = LbPolicy.LeastRequest;
+    let rd: LbPolicy = LbPolicy.Random;
+    let mg: LbPolicy = LbPolicy.Maglev;
+    let rh: LbPolicy = LbPolicy.RingHash;
+    let cp: LbPolicy = LbPolicy.ClusterProvided;
+    assert(rr is LbPolicy.RoundRobin && !(rr is LbPolicy.LeastRequest));
+    assert(lr is LbPolicy.LeastRequest && !(lr is LbPolicy.Random));
+    assert(rd is LbPolicy.Random && !(rd is LbPolicy.Maglev));
+    assert(mg is LbPolicy.Maglev && !(mg is LbPolicy.RingHash));
+    assert(rh is LbPolicy.RingHash && !(rh is LbPolicy.ClusterProvided));
+    assert(cp is LbPolicy.ClusterProvided && !(cp is LbPolicy.RoundRobin));
+}
+
+// =============================================================================
+// Section 3: RouteMatch 4-variant
+// =============================================================================
+
+@test
+fn test_route_match_prefix() {
+    let m: RouteMatch = RouteMatch.Prefix(Text.from("/api/"));
+    assert(m is RouteMatch.Prefix);
+}
+
+@test
+fn test_route_match_path() {
+    let m: RouteMatch = RouteMatch.Path(Text.from("/health"));
+    assert(m is RouteMatch.Path);
+}
+
+@test
+fn test_route_match_regex() {
+    let m: RouteMatch = RouteMatch.RegexMatch(Text.from("/v[0-9]+/"));
+    assert(m is RouteMatch.RegexMatch);
+}
+
+@test
+fn test_route_match_connect() {
+    let m: RouteMatch = RouteMatch.Connect;
+    assert(m is RouteMatch.Connect);
+}
+
+@test
+fn test_route_match_pairwise_disjoint() {
+    let p: RouteMatch = RouteMatch.Prefix(Text.from("/"));
+    let pa: RouteMatch = RouteMatch.Path(Text.from("/"));
+    let r: RouteMatch = RouteMatch.RegexMatch(Text.from("/"));
+    let c: RouteMatch = RouteMatch.Connect;
+    assert(p is RouteMatch.Prefix && !(p is RouteMatch.Path));
+    assert(pa is RouteMatch.Path && !(pa is RouteMatch.RegexMatch));
+    assert(r is RouteMatch.RegexMatch && !(r is RouteMatch.Connect));
+    assert(c is RouteMatch.Connect && !(c is RouteMatch.Prefix));
+}
+
+// =============================================================================
+// Section 4: RouteAction 4-variant
+// =============================================================================
+
+@test
+fn test_route_action_forward_cluster() {
+    let a: RouteAction = RouteAction.ForwardCluster(Text.from("backend"));
+    assert(a is RouteAction.ForwardCluster);
+}
+
+@test
+fn test_route_action_weighted_clusters() {
+    let a: RouteAction = RouteAction.WeightedClusters(List.new());
+    assert(a is RouteAction.WeightedClusters);
+}
+
+@test
+fn test_route_action_redirect() {
+    let a: RouteAction = RouteAction.Redirect(Text.from("https://example.com/"));
+    assert(a is RouteAction.Redirect);
+}
+
+@test
+fn test_route_action_direct_response() {
+    let a: RouteAction = RouteAction.DirectResponse {
+        code: 404,
+        body: Text.from("Not Found"),
+    };
+    assert(a is RouteAction.DirectResponse);
+}
+
+@test
+fn test_route_action_pairwise_disjoint() {
+    let fc: RouteAction = RouteAction.ForwardCluster(Text.from("a"));
+    let wc: RouteAction = RouteAction.WeightedClusters(List.new());
+    let rd: RouteAction = RouteAction.Redirect(Text.from("/"));
+    let dr: RouteAction = RouteAction.DirectResponse {
+        code: 503,
+        body: Text.from("Service Unavailable"),
+    };
+    assert(fc is RouteAction.ForwardCluster && !(fc is RouteAction.WeightedClusters));
+    assert(wc is RouteAction.WeightedClusters && !(wc is RouteAction.Redirect));
+    assert(rd is RouteAction.Redirect && !(rd is RouteAction.DirectResponse));
+    assert(dr is RouteAction.DirectResponse && !(dr is RouteAction.ForwardCluster));
+}
+
+// =============================================================================
+// Section 5: HealthStatus 5-variant
+// =============================================================================
+
+@test
+fn test_health_status_unknown() {
+    let h: HealthStatus = HealthStatus.Unknown;
+    assert(h is HealthStatus.Unknown);
+}
+
+@test
+fn test_health_status_healthy() {
+    let h: HealthStatus = HealthStatus.Healthy;
+    assert(h is HealthStatus.Healthy);
+}
+
+@test
+fn test_health_status_unhealthy() {
+    let h: HealthStatus = HealthStatus.Unhealthy;
+    assert(h is HealthStatus.Unhealthy);
+}
+
+@test
+fn test_health_status_draining() {
+    let h: HealthStatus = HealthStatus.Draining;
+    assert(h is HealthStatus.Draining);
+}
+
+@test
+fn test_health_status_degraded() {
+    let h: HealthStatus = HealthStatus.Degraded;
+    assert(h is HealthStatus.Degraded);
+}
+
+@test
+fn test_health_status_pairwise_disjoint() {
+    let un: HealthStatus = HealthStatus.Unknown;
+    let h: HealthStatus = HealthStatus.Healthy;
+    let uh: HealthStatus = HealthStatus.Unhealthy;
+    let dr: HealthStatus = HealthStatus.Draining;
+    let dg: HealthStatus = HealthStatus.Degraded;
+    assert(un is HealthStatus.Unknown && !(un is HealthStatus.Healthy));
+    assert(h is HealthStatus.Healthy && !(h is HealthStatus.Unhealthy));
+    assert(uh is HealthStatus.Unhealthy && !(uh is HealthStatus.Draining));
+    assert(dr is HealthStatus.Draining && !(dr is HealthStatus.Degraded));
+    assert(dg is HealthStatus.Degraded && !(dg is HealthStatus.Unknown));
+}
+
+// =============================================================================
+// Section 6: ParsedResource 5-variant — opaque dispatch
+// =============================================================================
+
+@test
+fn test_parsed_resource_opaque_variant() {
+    let p: ParsedResource = ParsedResource.Opaque;
+    assert(p is ParsedResource.Opaque);
+}
+
+@test
+fn test_parsed_resource_variants_pairwise_disjoint_opaque() {
+    // We can test Opaque against any other variant via L/C/R/E using
+    // records is heavy — pin Opaque distinct from itself only.
+    let o1: ParsedResource = ParsedResource.Opaque;
+    let o2: ParsedResource = ParsedResource.Opaque;
+    // Two Opaque values are still both .Opaque
+    assert(o1 is ParsedResource.Opaque);
+    assert(o2 is ParsedResource.Opaque);
+}

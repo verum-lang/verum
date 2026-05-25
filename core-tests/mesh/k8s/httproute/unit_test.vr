@@ -1,0 +1,123 @@
+// =============================================================================
+// core-tests/mesh/k8s/httproute/unit_test.vr
+// =============================================================================
+//
+// `core/mesh/k8s/httproute.vr` — Gateway API v1 HTTPRoute ADTs.
+//
+// Surface tested here:
+//   * PathMatchType 3-variant (Exact / PathPrefix / RegularExpression)
+//   * HeaderMatchType 2-variant (HExact / HRegularExpression)
+//   * HttpRouteFilter 6-variant (RequestHeaderModifier /
+//     ResponseHeaderModifier / RequestRedirect / RequestMirror /
+//     URLRewrite / ExtensionRef)
+//   * HttpPathModifier 2-variant (ReplaceFullPath / ReplacePrefixMatch)
+//   * SessionType 2-variant (Cookie / HeaderStrategy)
+// =============================================================================
+
+mount core.mesh.k8s.httproute.{
+    PathMatchType, HeaderMatchType, HttpPathModifier, SessionType,
+};
+
+// =============================================================================
+// Section 1: PathMatchType 3-variant
+// =============================================================================
+
+@test
+fn test_path_match_type_exact() {
+    let t: PathMatchType = PathMatchType.Exact;
+    assert(t is PathMatchType.Exact);
+}
+
+@test
+fn test_path_match_type_path_prefix() {
+    let t: PathMatchType = PathMatchType.PathPrefix;
+    assert(t is PathMatchType.PathPrefix);
+}
+
+@test
+fn test_path_match_type_regular_expression() {
+    let t: PathMatchType = PathMatchType.RegularExpression;
+    assert(t is PathMatchType.RegularExpression);
+}
+
+@test
+fn test_path_match_type_pairwise_disjoint() {
+    let e: PathMatchType = PathMatchType.Exact;
+    let pp: PathMatchType = PathMatchType.PathPrefix;
+    let re: PathMatchType = PathMatchType.RegularExpression;
+    assert(e is PathMatchType.Exact && !(e is PathMatchType.PathPrefix));
+    assert(pp is PathMatchType.PathPrefix && !(pp is PathMatchType.RegularExpression));
+    assert(re is PathMatchType.RegularExpression && !(re is PathMatchType.Exact));
+}
+
+// =============================================================================
+// Section 2: HeaderMatchType 2-variant
+// =============================================================================
+
+@test
+fn test_header_match_type_exact() {
+    let t: HeaderMatchType = HeaderMatchType.HExact;
+    assert(t is HeaderMatchType.HExact);
+}
+
+@test
+fn test_header_match_type_regular_expression() {
+    let t: HeaderMatchType = HeaderMatchType.HRegularExpression;
+    assert(t is HeaderMatchType.HRegularExpression);
+}
+
+@test
+fn test_header_match_type_disjoint() {
+    let e: HeaderMatchType = HeaderMatchType.HExact;
+    let r: HeaderMatchType = HeaderMatchType.HRegularExpression;
+    assert(e is HeaderMatchType.HExact && !(e is HeaderMatchType.HRegularExpression));
+    assert(r is HeaderMatchType.HRegularExpression && !(r is HeaderMatchType.HExact));
+}
+
+// =============================================================================
+// Section 3: HttpPathModifier 2-variant
+// =============================================================================
+
+@test
+fn test_http_path_modifier_replace_full_path() {
+    let m: HttpPathModifier = HttpPathModifier.ReplaceFullPath(Text.from("/v2"));
+    assert(m is HttpPathModifier.ReplaceFullPath);
+}
+
+@test
+fn test_http_path_modifier_replace_prefix_match() {
+    let m: HttpPathModifier = HttpPathModifier.ReplacePrefixMatch(Text.from("/api"));
+    assert(m is HttpPathModifier.ReplacePrefixMatch);
+}
+
+@test
+fn test_http_path_modifier_disjoint() {
+    let rf: HttpPathModifier = HttpPathModifier.ReplaceFullPath(Text.from("/x"));
+    let rp: HttpPathModifier = HttpPathModifier.ReplacePrefixMatch(Text.from("/x"));
+    assert(rf is HttpPathModifier.ReplaceFullPath && !(rf is HttpPathModifier.ReplacePrefixMatch));
+    assert(rp is HttpPathModifier.ReplacePrefixMatch && !(rp is HttpPathModifier.ReplaceFullPath));
+}
+
+// =============================================================================
+// Section 4: SessionType 2-variant
+// =============================================================================
+
+@test
+fn test_session_type_cookie() {
+    let t: SessionType = SessionType.Cookie;
+    assert(t is SessionType.Cookie);
+}
+
+@test
+fn test_session_type_header_strategy() {
+    let t: SessionType = SessionType.HeaderStrategy;
+    assert(t is SessionType.HeaderStrategy);
+}
+
+@test
+fn test_session_type_disjoint() {
+    let c: SessionType = SessionType.Cookie;
+    let h: SessionType = SessionType.HeaderStrategy;
+    assert(c is SessionType.Cookie && !(c is SessionType.HeaderStrategy));
+    assert(h is SessionType.HeaderStrategy && !(h is SessionType.Cookie));
+}

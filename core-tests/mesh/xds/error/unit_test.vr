@@ -1,0 +1,283 @@
+// =============================================================================
+// core-tests/mesh/xds/error/unit_test.vr
+// =============================================================================
+//
+// `core/mesh/xds/error.vr` — xDS v3 (ADS) control-plane error ADT.
+// 8 variants covering connection / auth / decode / NACK / over-limit /
+// unsupported-type / cancellation / closure scenarios.
+//
+// Surface tested here (pure-data):
+//   * XdsError 8-variant + variant disjointness
+//   * Eq matrix across all 8 variants (reflexivity + payload-sensitivity
+//     + cross-variant inequality)
+//
+// AuthFailed Display surfaces no payload detail by design (mTLS / SPIFFE
+// auth oracle-attack discipline) — pinned by
+// test_xds_error_auth_failed_construction + Eq tests below.
+// =============================================================================
+
+mount core.mesh.xds.error.{XdsError};
+
+// =============================================================================
+// Section 1: XdsError 8-variant construction
+// =============================================================================
+
+@test
+fn test_xds_error_connection_lost_variant() {
+    let e: XdsError = XdsError.ConnectionLost(Text.from("peer closed"));
+    assert(e is XdsError.ConnectionLost);
+}
+
+@test
+fn test_xds_error_auth_failed_variant() {
+    let e: XdsError = XdsError.AuthFailed(Text.from("cert chain invalid"));
+    assert(e is XdsError.AuthFailed);
+}
+
+@test
+fn test_xds_error_invalid_resource_variant() {
+    let e: XdsError = XdsError.InvalidResource {
+        type_url: Text.from("type.googleapis.com/envoy.config.listener.v3.Listener"),
+        reason: Text.from("missing required field name"),
+    };
+    assert(e is XdsError.InvalidResource);
+}
+
+@test
+fn test_xds_error_nack_variant() {
+    let e: XdsError = XdsError.Nack {
+        message: Text.from("control plane rejected our ACK"),
+        detail: Text.from("nonce mismatch"),
+    };
+    assert(e is XdsError.Nack);
+}
+
+@test
+fn test_xds_error_over_limit_variant() {
+    let e: XdsError = XdsError.OverLimit { limit: 1024 };
+    assert(e is XdsError.OverLimit);
+}
+
+@test
+fn test_xds_error_unsupported_type_variant() {
+    let e: XdsError = XdsError.UnsupportedType(Text.from("ScopedRouteConfiguration"));
+    assert(e is XdsError.UnsupportedType);
+}
+
+@test
+fn test_xds_error_cancelled_variant() {
+    let e: XdsError = XdsError.Cancelled;
+    assert(e is XdsError.Cancelled);
+}
+
+@test
+fn test_xds_error_closed_variant() {
+    let e: XdsError = XdsError.Closed;
+    assert(e is XdsError.Closed);
+}
+
+// =============================================================================
+// Section 2: Variant pairwise disjointness
+// =============================================================================
+
+@test
+fn test_xds_error_connection_lost_disjoint_from_auth_failed() {
+    let cl: XdsError = XdsError.ConnectionLost(Text.from("x"));
+    let af: XdsError = XdsError.AuthFailed(Text.from("y"));
+    assert(cl is XdsError.ConnectionLost && !(cl is XdsError.AuthFailed));
+    assert(af is XdsError.AuthFailed && !(af is XdsError.ConnectionLost));
+}
+
+@test
+fn test_xds_error_invalid_resource_disjoint_from_nack() {
+    let ir: XdsError = XdsError.InvalidResource {
+        type_url: Text.from("a"),
+        reason: Text.from("b"),
+    };
+    let nk: XdsError = XdsError.Nack {
+        message: Text.from("a"),
+        detail: Text.from("b"),
+    };
+    assert(ir is XdsError.InvalidResource && !(ir is XdsError.Nack));
+    assert(nk is XdsError.Nack && !(nk is XdsError.InvalidResource));
+}
+
+@test
+fn test_xds_error_terminal_pair_disjoint() {
+    let c: XdsError = XdsError.Cancelled;
+    let cl: XdsError = XdsError.Closed;
+    assert(c is XdsError.Cancelled && !(c is XdsError.Closed));
+    assert(cl is XdsError.Closed && !(cl is XdsError.Cancelled));
+}
+
+@test
+fn test_xds_error_over_limit_disjoint_from_unsupported() {
+    let ol: XdsError = XdsError.OverLimit { limit: 64 };
+    let ut: XdsError = XdsError.UnsupportedType(Text.from("X"));
+    assert(ol is XdsError.OverLimit && !(ol is XdsError.UnsupportedType));
+    assert(ut is XdsError.UnsupportedType && !(ut is XdsError.OverLimit));
+}
+
+// =============================================================================
+// Section 3: Eq matrix — reflexivity per variant
+// =============================================================================
+
+@test
+fn test_xds_error_eq_connection_lost_reflexive() {
+    let a: XdsError = XdsError.ConnectionLost(Text.from("peer closed"));
+    let b: XdsError = XdsError.ConnectionLost(Text.from("peer closed"));
+    assert(a == b);
+}
+
+@test
+fn test_xds_error_eq_invalid_resource_reflexive() {
+    let a: XdsError = XdsError.InvalidResource {
+        type_url: Text.from("X"),
+        reason: Text.from("Y"),
+    };
+    let b: XdsError = XdsError.InvalidResource {
+        type_url: Text.from("X"),
+        reason: Text.from("Y"),
+    };
+    assert(a == b);
+}
+
+@test
+fn test_xds_error_eq_nack_reflexive() {
+    let a: XdsError = XdsError.Nack {
+        message: Text.from("M"),
+        detail: Text.from("D"),
+    };
+    let b: XdsError = XdsError.Nack {
+        message: Text.from("M"),
+        detail: Text.from("D"),
+    };
+    assert(a == b);
+}
+
+@test
+fn test_xds_error_eq_cancelled_singletons() {
+    let a: XdsError = XdsError.Cancelled;
+    let b: XdsError = XdsError.Cancelled;
+    assert(a == b);
+}
+
+@test
+fn test_xds_error_eq_closed_singletons() {
+    let a: XdsError = XdsError.Closed;
+    let b: XdsError = XdsError.Closed;
+    assert(a == b);
+}
+
+@test
+fn test_xds_error_eq_over_limit_same_limit() {
+    let a: XdsError = XdsError.OverLimit { limit: 1024 };
+    let b: XdsError = XdsError.OverLimit { limit: 1024 };
+    assert(a == b);
+}
+
+// =============================================================================
+// Section 4: Eq matrix — payload sensitivity
+// =============================================================================
+
+@test
+fn test_xds_error_eq_connection_lost_payload_differs() {
+    let a: XdsError = XdsError.ConnectionLost(Text.from("reset"));
+    let b: XdsError = XdsError.ConnectionLost(Text.from("timeout"));
+    assert(!(a == b));
+}
+
+@test
+fn test_xds_error_eq_invalid_resource_type_url_differs() {
+    let a: XdsError = XdsError.InvalidResource {
+        type_url: Text.from("envoy.config.listener.v3.Listener"),
+        reason: Text.from("same"),
+    };
+    let b: XdsError = XdsError.InvalidResource {
+        type_url: Text.from("envoy.config.cluster.v3.Cluster"),
+        reason: Text.from("same"),
+    };
+    assert(!(a == b));
+}
+
+@test
+fn test_xds_error_eq_invalid_resource_reason_differs() {
+    let a: XdsError = XdsError.InvalidResource {
+        type_url: Text.from("envoy.X"),
+        reason: Text.from("missing name"),
+    };
+    let b: XdsError = XdsError.InvalidResource {
+        type_url: Text.from("envoy.X"),
+        reason: Text.from("decode failed"),
+    };
+    assert(!(a == b));
+}
+
+@test
+fn test_xds_error_eq_nack_message_differs() {
+    let a: XdsError = XdsError.Nack {
+        message: Text.from("nonce mismatch"),
+        detail: Text.from("0xABCD"),
+    };
+    let b: XdsError = XdsError.Nack {
+        message: Text.from("version mismatch"),
+        detail: Text.from("0xABCD"),
+    };
+    assert(!(a == b));
+}
+
+@test
+fn test_xds_error_eq_nack_detail_differs() {
+    let a: XdsError = XdsError.Nack {
+        message: Text.from("M"),
+        detail: Text.from("0xAAAA"),
+    };
+    let b: XdsError = XdsError.Nack {
+        message: Text.from("M"),
+        detail: Text.from("0xBBBB"),
+    };
+    assert(!(a == b));
+}
+
+@test
+fn test_xds_error_eq_over_limit_limit_differs() {
+    let a: XdsError = XdsError.OverLimit { limit: 1024 };
+    let b: XdsError = XdsError.OverLimit { limit: 2048 };
+    assert(!(a == b));
+}
+
+@test
+fn test_xds_error_eq_unsupported_type_payload_differs() {
+    let a: XdsError = XdsError.UnsupportedType(Text.from("ScopedRoute"));
+    let b: XdsError = XdsError.UnsupportedType(Text.from("VirtualHost"));
+    assert(!(a == b));
+}
+
+// =============================================================================
+// Section 5: Eq matrix — cross-variant inequality
+// =============================================================================
+
+@test
+fn test_xds_error_eq_connection_lost_neq_auth_failed_same_payload() {
+    // Same payload Text but different variant → not equal.
+    let cl: XdsError = XdsError.ConnectionLost(Text.from("oops"));
+    let af: XdsError = XdsError.AuthFailed(Text.from("oops"));
+    assert(!(cl == af));
+}
+
+@test
+fn test_xds_error_eq_cancelled_neq_closed() {
+    let c: XdsError = XdsError.Cancelled;
+    let cl: XdsError = XdsError.Closed;
+    assert(!(c == cl));
+}
+
+@test
+fn test_xds_error_eq_unsupported_neq_invalid_resource() {
+    let ut: XdsError = XdsError.UnsupportedType(Text.from("X"));
+    let ir: XdsError = XdsError.InvalidResource {
+        type_url: Text.from("X"),
+        reason: Text.from("any"),
+    };
+    assert(!(ut == ir));
+}
