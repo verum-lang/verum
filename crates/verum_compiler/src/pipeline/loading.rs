@@ -1377,12 +1377,43 @@ impl<'s> CompilationPipeline<'s> {
             }
 
             if path.is_dir() {
-                // Skip examples directory - it contains demo code with unsupported features
-                let dir_name = path.file_name().map(|n| n.to_string_lossy());
-                if dir_name.as_deref() != Some("examples") {
-                    self.discover_stdlib_files_recursive(&path, files, depth + 1)?;
+                // Skip directories that contain non-stdlib source:
+                //  * `examples/` — demo code with unsupported features.
+                //  * `target/`   — build artefacts.  Cargo emits compiled
+                //    bytecode here AND the test runner stages merged
+                //    test sources (`target/test/test_*.merged.vr`) which,
+                //    if walked, get precompiled as `core.target.test.<fn>`
+                //    and shadow user-side `@test` functions of the same
+                //    bare name at archive-load time — root cause of the
+                //    "test fails with stale assertion at pc=N" class.
+                //  * `node_modules/` — JS dependency tree from any
+                //    embedded tooling; not Verum source.
+                //  * `.git/` / dotted — VCS and hidden tooling caches.
+                let dir_name = path.file_name().and_then(|n| n.to_str());
+                if matches!(
+                    dir_name,
+                    Some("examples")
+                        | Some("target")
+                        | Some("node_modules")
+                ) {
+                    continue;
                 }
+                if dir_name.is_some_and(|n| n.starts_with('.')) {
+                    continue;
+                }
+                self.discover_stdlib_files_recursive(&path, files, depth + 1)?;
             } else if path.extension().is_some_and(|ext| ext == "vr") {
+                // Defence-in-depth: even when the target/ exclusion
+                // above eventually misses (e.g. a future refactor
+                // changes the dir layout), test merged files have
+                // a recognisable name shape (`test_*.merged.vr`) and
+                // are skipped by stem — they are output of the test
+                // runner's `synthesise_test_input_with_crate_root`
+                // helper, never authored source.
+                let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                if stem.starts_with("test_") && stem.ends_with(".merged") {
+                    continue;
+                }
                 files.push(path);
             }
         }
