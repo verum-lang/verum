@@ -150,21 +150,37 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// assert_eq(map.get(&2), None);
     /// ```
     public fn get(&self, key: &K) -> Maybe<V> {
-        // Match-extract preserves the inner `Heap<BTreeNode<K, V>>`
-        // through the typechecker.  Previously `.as_ref().expect()`
-        // lost the inner T at codegen, falling through
-        // `resolve_field_index` to global-intern.  Closed via
-        // interpreter pattern-match ref-deref fix in
-        // `pattern_matching.rs::handle_match_tag` / `handle_get_variant_data` /
-        // `handle_as_var` (commit 9d39011e1) + this stdlib-side refactor.
-        //
-        // NOTE: a residual codegen defect on the BTreeNode literal
-        // allocation path (field count miscount producing 24B records
-        // when 32B records are expected) blocks the full get/insert
-        // round-trip — tracked in `core-tests/collections/btree/audit.md`.
+        // FULLY INLINED for the single-node-leaf case to bypass the
+        // codegen register-reuse defect that breaks self.search_node
+        // dispatch chains (task #16).  For deeper trees we still
+        // delegate to search_node; the residual is documented in
+        // `core-tests/collections/btree/audit.md`.
         match &self.root {
-            Some(node) => self.search_node(node, key),
-            None       => None,
+            None => None,
+            Some(node) => {
+                // Direct field access via destructured `node`
+                // (a &Heap<BTreeNode<K, V>> from the match arm).
+                let klen = node.keys.len();
+                let mut i = 0;
+                while i < klen {
+                    if *key > node.keys[i] {
+                        i = i + 1;
+                    } else {
+                        break;
+                    }
+                }
+                if i < klen && *key == node.keys[i] {
+                    return Some(node.values[i]);
+                }
+                // Multi-level descent — only fires for non-empty
+                // children; for leaf nodes (children empty) the
+                // loop above already returned.
+                if node.children.len() == 0 {
+                    None
+                } else {
+                    self.search_node(&node.children[i], key)
+                }
+            },
         }
     }
 
@@ -610,10 +626,16 @@ implement<K: Ord, V> BTreeMap<K, V> {
     }
 
     fn search_node(&self, node: &Heap<BTreeNode<K, V>>, key: &K) -> Maybe<V> {
-        let klen = node.keys.len();
+        // Access keys/values FIRST (fields 0, 1) before is_leaf (field 3)
+        // — works around the codegen register-reuse defect that
+        // surfaces when accessing the higher-index field on
+        // `&Heap<BTreeNode<K, V>>` (task #16).
+        let keys_ref = &node.keys;
+        let values_ref = &node.values;
+        let klen = keys_ref.len();
         let mut i = 0;
         while i < klen {
-            if *key > node.keys[i] {
+            if *key > keys_ref[i] {
                 i = i + 1;
             } else {
                 break;
@@ -621,16 +643,22 @@ implement<K: Ord, V> BTreeMap<K, V> {
         }
 
         if i < klen {
-            if *key == node.keys[i] {
-                return Some(node.values[i]);
+            if *key == keys_ref[i] {
+                return Some(values_ref[i]);
             }
         }
 
-        if node.is_leaf {
+        // Defer is_leaf check — the codegen mis-binds `node` to a
+        // List (keys field) after intermediate accesses. Use the
+        // children list's emptiness as a proxy for leaf-vs-internal
+        // distinction (leaf has empty children, internal has at
+        // least keys.len()+1 children).
+        let children_ref = &node.children;
+        if children_ref.len() == 0 {
             return None;
         }
 
-        self.search_node(&node.children[i], key)
+        self.search_node(&children_ref[i], key)
     }
 
     fn search_node_mut(&mut self, node: &mut Heap<BTreeNode<K, V>>, key: &K) -> Maybe<&mut V> {
