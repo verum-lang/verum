@@ -16473,6 +16473,15 @@ impl VbcCodegen {
 
     /// Compiles tuple index.
     fn compile_tuple_index(&mut self, base: &Expr, index: u32) -> CodegenResult<Option<Reg>> {
+        if std::env::var("VERUM_TRACE_TUPLE_IDX").is_ok() {
+            let inferred = self.infer_expr_type_name(base);
+            eprintln!(
+                "[tuple-idx] index={} inferred_type={:?} newtype_names_has={}",
+                index,
+                inferred,
+                inferred.as_ref().is_some_and(|t| self.ctx.newtype_names.contains(t)),
+            );
+        }
         // Newtype .0 access: the value IS the single field, emit Mov.
         // e.g. `let fd = FileDesc(42); fd.0` → just copy the register.
         if index == 0
@@ -19196,6 +19205,48 @@ impl VbcCodegen {
                 }
             }
             ExprKind::Paren(inner) => self.infer_expr_type_name(inner),
+            // Unary deref: `*r` where `r: &T` should infer as `T`.
+            //
+            // Without this arm, `(*f).0` where f is a closure-captured
+            // `&MemoryFlags` (a transparent newtype around UInt32)
+            // infers `*f` as None — the tuple-index `.0` fast-path then
+            // misses the newtype-Mov optimisation and falls through to
+            // `GetF` on a transparent wrapper, null-derefing on the
+            // absent ObjectHeader.  Closes the
+            // `flags.iter().map(|f| (*f).0).collect()` pattern in
+            // `core-tests/sys/mmio/integration_test.vr::test_memory_flags_in_list_filter`.
+            //
+            // Strip a leading `&` / `&mut` / `&checked` / `&unsafe`
+            // prefix from the inner expression's inferred type and
+            // return the inner type.  Identity-pass when the inner
+            // isn't a reference type (the deref is a no-op at the
+            // type-name level: `*v` where v: T still has type T).
+            ExprKind::Unary {
+                op: UnOp::Deref,
+                expr: inner,
+            } => {
+                let inner_ty = self.infer_expr_type_name(inner)?;
+                let stripped = inner_ty
+                    .strip_prefix("&checked ")
+                    .or_else(|| inner_ty.strip_prefix("&unsafe "))
+                    .or_else(|| inner_ty.strip_prefix("&mut "))
+                    .or_else(|| inner_ty.strip_prefix('&'))
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or(inner_ty);
+                Some(stripped)
+            }
+            // Reference-of: `&x` / `&mut x` where `x: T` should
+            // infer as `&T` / `&mut T`.  Some downstream consumers
+            // (e.g. the static-mut-field-addr probe) expect a
+            // reference-shaped type name to fall through cleanly.
+            ExprKind::Unary {
+                op: UnOp::Ref,
+                expr: inner,
+            } => self.infer_expr_type_name(inner).map(|t| format!("&{}", t)),
+            ExprKind::Unary {
+                op: UnOp::RefMut,
+                expr: inner,
+            } => self.infer_expr_type_name(inner).map(|t| format!("&mut {}", t)),
             // Suffix-typed literal — `123_u64`, `-1_i32`, `4_usize`, etc.
             // Without this arm, `18_446_744_073_709_551_615_u64 / 10_u64`
             // inferred neither operand as `UInt64`, so the
@@ -19331,6 +19382,26 @@ impl VbcCodegen {
                         if info.variant_tag.is_some()
                             && let Some(parent) = &info.parent_type_name
                         {
+                            // **Variant ctor type-arg surfacing** (closes the
+                            // `Some(Foo(99)).unwrap().0` newtype-field chain).
+                            // Bare `parent.clone()` returns just `Maybe` /
+                            // `Result` — losing the type-arg.  Downstream
+                            // `.unwrap()` lookup on `Maybe` returns `T`
+                            // (the generic param), which the read-site
+                            // `resolve_generic_return_type` cannot resolve
+                            // without type args on the receiver type.
+                            // Folding the inferred type of args[0] into
+                            // `Maybe<X>` gives the resolver everything it
+                            // needs to map `T → X` correctly, which in
+                            // turn enables the `compile_tuple_index`
+                            // newtype `.0 → Mov` fast-path at the leaf
+                            // (otherwise the leaf emits GetF on a
+                            // transparent newtype and null-derefs).
+                            if let Some(first_arg) = args.first()
+                                && let Some(inner) = self.infer_expr_type_name(first_arg)
+                            {
+                                return Some(format!("{}<{}>", parent, inner));
+                            }
                             return Some(parent.clone());
                         }
                         // Task #26/#39 surgical disambiguation —
@@ -19398,6 +19469,12 @@ impl VbcCodegen {
                         .ctx
                         .find_variant_parent_type_by_args(&func_name, args.len())
                     {
+                        // Same type-arg surfacing as the primary arm above.
+                        if let Some(first_arg) = args.first()
+                            && let Some(inner) = self.infer_expr_type_name(first_arg)
+                        {
+                            return Some(format!("{}<{}>", parent, inner));
+                        }
                         return Some(parent);
                     }
                     None
@@ -19412,6 +19489,10 @@ impl VbcCodegen {
                 args,
                 ..
             } => {
+                let trace = std::env::var("VERUM_TRACE_TUPLE_IDX").is_ok();
+                if trace {
+                    eprintln!("[infer-mcall] method={}", method.name);
+                }
                 // Heap.new(x) / Shared.new(x): return the inner type for field access
                 if let ExprKind::Path(ref path) = receiver.kind
                     && path.segments.len() == 1
@@ -19425,7 +19506,11 @@ impl VbcCodegen {
                 }
                 // Try to get receiver type; if it's a static call like TypeName.method(),
                 // the receiver is the type name itself (not in variable_type_names).
-                let receiver_type = self.infer_expr_type_name(receiver).or_else(|| {
+                let receiver_type_pre = self.infer_expr_type_name(receiver);
+                if trace {
+                    eprintln!("[infer-mcall] receiver_type={:?}", receiver_type_pre);
+                }
+                let receiver_type = receiver_type_pre.or_else(|| {
                     // For static calls like MyRange.new() where receiver is a Path("MyRange")
                     if let ExprKind::Path(ref path) = receiver.kind
                         && path.segments.len() == 1
@@ -19440,12 +19525,55 @@ impl VbcCodegen {
                     }
                     None
                 })?;
+                // **Sum-type unwrap-class inner extraction** (mirror of
+                // `extract_expr_type_name`'s sibling arm, closes the
+                // `expr.unwrap().<newtype-field>` chain when no
+                // intermediate `let` records the inner type into
+                // `variable_type_names`).
+                //
+                // Without this, `Some(Foo(99)).unwrap().0` (where
+                // `Foo` is a transparent newtype) infers the
+                // `.unwrap()` return as `T` (the generic), the
+                // tuple-index `.0` falls through to `GetF` on a
+                // transparent wrapper, and the runtime null-derefs
+                // reading an absent ObjectHeader.  Inline-bound
+                // chains lose the type info because
+                // `extract_expr_type_name`'s `Path` precondition
+                // doesn't match — the receiver shape here is a
+                // MethodCall, not a Path.
+                //
+                // The unwrap-class methods all return the FIRST inner
+                // type arg of the receiver's generic (Maybe<T>.unwrap →
+                // T, Result<T, E>.unwrap → T, etc.).  Cover
+                // `unwrap_err` separately as the SECOND inner type.
+                if matches!(
+                    &*method.name,
+                    "unwrap" | "expect" | "unwrap_or" | "unwrap_or_else" | "unwrap_or_default"
+                ) {
+                    let inner_types = self.extract_inner_types(&receiver_type);
+                    if let Some(first_inner) = inner_types.first() {
+                        if trace {
+                            eprintln!("[infer-mcall] unwrap-shortcut → {:?}", first_inner);
+                        }
+                        return Some(first_inner.clone());
+                    }
+                }
+                if method.name.as_str() == "unwrap_err" {
+                    let inner_types = self.extract_inner_types(&receiver_type);
+                    if let Some(err_type) = inner_types.get(1) {
+                        return Some(err_type.clone());
+                    }
+                }
                 // Try exact match first
                 let method_name = format!("{}.{}", receiver_type, method.name);
-                if let Some(ret) = self
+                let exact_ret = self
                     .ctx
                     .lookup_function(&method_name)
-                    .and_then(|info| info.return_type_name.clone())
+                    .and_then(|info| info.return_type_name.clone());
+                if trace {
+                    eprintln!("[infer-mcall] exact method_name={} ret={:?}", method_name, exact_ret);
+                }
+                if let Some(ret) = exact_ret
                 {
                     // **Self → concrete substitution at the READ-site**
                     // (task #11): protocol default methods declared as
@@ -19466,12 +19594,19 @@ impl VbcCodegen {
                 }
                 // Try with generic params stripped (e.g., "Slot<K, V>" → "Slot")
                 let base_type = VbcCodegen::strip_generic_args(&receiver_type);
+                if trace {
+                    eprintln!("[infer-mcall] base_type={} (stripped from {})", base_type, receiver_type);
+                }
                 if base_type != receiver_type {
                     let method_name = format!("{}.{}", base_type, method.name);
-                    if let Some(ret) = self
+                    let stripped_ret = self
                         .ctx
                         .lookup_function(&method_name)
-                        .and_then(|info| info.return_type_name.clone())
+                        .and_then(|info| info.return_type_name.clone());
+                    if trace {
+                        eprintln!("[infer-mcall] stripped method_name={} ret={:?}", method_name, stripped_ret);
+                    }
+                    if let Some(ret) = stripped_ret
                     {
                         // Resolve generic return types from receiver's type args.
                         // E.g., Map<Int, Node>.get() returns "V" → resolve to "Node"
