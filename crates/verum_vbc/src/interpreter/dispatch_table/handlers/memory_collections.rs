@@ -661,11 +661,25 @@ pub(in super::super) fn handle_get_index(
             state.set_reg(dst, arr_val);
             return Ok(DispatchResult::Continue);
         }
+        let backtrace: Vec<String> = state
+            .call_stack
+            .iter_rev()
+            .take(8)
+            .map(|frame| {
+                state
+                    .module
+                    .get_function(frame.function)
+                    .and_then(|f| state.module.strings.get(f.name))
+                    .map(|s| format!("{}@pc={}", s, frame.pc))
+                    .unwrap_or_else(|| format!("?@pc={}", frame.pc))
+            })
+            .collect();
         return Err(InterpreterError::InvalidOperand {
             message: format!(
-                "GetE: expected pointer in R{}, got tag={:?}",
+                "GetE: expected pointer in R{}, got tag={:?} backtrace=[{}]",
                 arr.0,
-                arr_val.tag()
+                arr_val.tag(),
+                backtrace.join(" <- ")
             ),
         });
     }
