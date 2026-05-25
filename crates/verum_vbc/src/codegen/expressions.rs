@@ -3545,6 +3545,26 @@ impl VbcCodegen {
         // underlying List. Emit `RefListElement` so the ref carries
         // a pointer into the List's backing storage and DerefMut
         // writes through to `arr[i]` directly.
+        //
+        // **TYPED-ARRAY PRIORITY** (closes the `&a[0]` on `[Byte; N]`
+        // fixed-array class).  For fixed-size byte / typed arrays
+        // (`let a: [Byte; 5] = [..]`) the storage layout is a packed
+        // byte buffer, NOT a List<T>.  RefListElement would walk the
+        // (empty) list-style backing and panic
+        // `IndexOutOfBounds {index:0, length:0}` — observed in
+        // `core-tests/base/memory/cbgr_test.vr::test_memcmp_*` whose
+        // `memcmp(&a[0], &b[0], 5)` couldn't pass the address
+        // through the generic path.  Without an explicit `as *const T`
+        // cast, the existing `try_compile_byte_array_element_addr`
+        // helper gated inside `compile_cast` never fired.  Routing
+        // through it from the bare `&arr[i]` arm covers the
+        // intrinsic-pointer-argument case where no syntactic cast
+        // is present.
+        if matches!(op, UnOp::Ref | UnOp::RefMut)
+            && let Some(result) = self.try_compile_byte_array_element_addr(inner)?
+        {
+            return Ok(Some(result));
+        }
         if matches!(op, UnOp::Ref | UnOp::RefMut)
             && let ExprKind::Index {
                 expr: arr_expr,
