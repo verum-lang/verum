@@ -126,9 +126,22 @@ fn test_memory_region_contains_in_list() {
         let mut i: Int = 0;
         let n = regions.len();
         while i < n {
-            if regions.get(i as USize).contains(addr) {
-                return Some(i as USize);
-            }
+            // `regions.get(...)` returns `Maybe<&MemoryRegion>`.  Naïvely
+            // writing `regions.get(i).contains(addr)` dispatches against
+            // `Maybe<T>.contains(value: &T)` (the structural equality
+            // probe) NOT `MemoryRegion.contains(addr: USize)` — the
+            // method-resolution order picks the receiver's concrete
+            // type first, so the user-intended unwrap-then-call must
+            // be written explicitly.  Match-and-bind is the canonical
+            // unwrap pattern in `core/`.
+            match regions.get(i as USize) {
+                Some(r) => {
+                    if r.contains(addr) {
+                        return Some(i as USize);
+                    }
+                }
+                None => {}
+            };
             i = i + 1;
         }
         None
