@@ -8744,6 +8744,48 @@ impl VbcCodegen {
                     .filter(|fi| fi.param_count == args.len() + 1)
             })
             .cloned();
+
+        // **Empty-param_closure_return_type_names fallback** (fundamental
+        // fix for the bare-variant cross-module dispatch defect class).
+        //
+        // Multiple stdlib paths register FunctionInfo with
+        // `param_closure_return_type_names: Vec::new()` (intrinsic-only,
+        // variant-ctor, stub, archive-loaded paths — 18+ sites in
+        // `crates/verum_vbc/src/codegen/mod.rs`).  When the
+        // `lookup_function_with_arity` first-wins probe finds one of
+        // these EMPTY-vec variants of the named method, the subsequent
+        // `param_closure_return_type_names.get(i+1)` returns None and
+        // the disambig context is NEVER pushed — so closure-body bare
+        // `Some` / `None` fall through to first-wins cross-module
+        // shadow resolution and pick wrong-type variants.  Pinned by
+        // `core-tests/base/iterator/regression_test.vr::regression_bare_none_in_closure_body`.
+        //
+        // Fallback: if the looked-up entry has empty
+        // `param_closure_return_type_names`, scan
+        // `ctx.functions` for any other registration of the same
+        // arity + simple-name with a NON-empty
+        // `param_closure_return_type_names` and prefer that.
+        let closure_disambig_lookup = closure_disambig_lookup.or_else(|| None).map(|fi| {
+            if fi.param_closure_return_type_names.is_empty() {
+                let target_arity = args.len() + 1;
+                let simple_name = method.name.as_str();
+                let dot_suffix = format!(".{}", simple_name);
+                let richer = self
+                    .ctx
+                    .functions
+                    .iter()
+                    .find(|(name, info)| {
+                        info.param_count == target_arity
+                            && !info.param_closure_return_type_names.is_empty()
+                            && (name.as_str() == simple_name
+                                || name.ends_with(&dot_suffix))
+                    })
+                    .map(|(_, info)| info.clone());
+                richer.unwrap_or(fi)
+            } else {
+                fi
+            }
+        });
         let args_start = if !args.is_empty() {
             let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
             for (i, arg) in args.iter().enumerate() {
