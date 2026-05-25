@@ -650,14 +650,26 @@ implement PathBuf {
     /// assert_eq(path.to_str(), "/home/user/docs/file.txt");
     /// ```
     public fn push(&mut self, component: &Path) {
-        // SOUNDNESS (closes task #io-4): write back through SINGLE-level
-        // field assignment `self.path = Path { inner: local }` instead of
-        // double-level `self.path.inner = local`.  The double-level form
-        // routes through nested GetF/SetF in VBC codegen which sporadically
-        // mis-reads the inner Text field — observed as "bytes look right
-        // when probed directly but Text.eq fails between push-built and
-        // literal-built Text".  Going through a single-level Path
-        // replacement bypasses the nested-field hazard.
+        // SOUNDNESS (closes tasks #io-4 + #io-16):
+        //
+        // 1. **Single-level field write-back** — `self.path = Path { inner: local }`
+        //    instead of double-level `self.path.inner = local`.  The
+        //    double-level form routes through nested GetF/SetF in VBC
+        //    codegen which sporadically mis-reads the inner Text field.
+        //
+        // 2. **Inline Char literal `'/'` / `'\\'` instead of `MAIN_SEPARATOR`** —
+        //    Char-typed `public const MAIN_SEPARATOR: Char = '/'` const
+        //    eval is broken in the current VBC codegen: at the use site
+        //    `local.push(MAIN_SEPARATOR)` the loaded value is NOT the
+        //    Char `'/'` (47), so the body silently pushes a different
+        //    codepoint and downstream `Text.eq` against the literal-
+        //    built form fails despite the same nominal byte content.
+        //    Surfaced via `regression_main_separator_equals_slash` —
+        //    `assert_eq(MAIN_SEPARATOR, '/')` FAILS.  Workaround until
+        //    Char-typed const eval lands: use literal Char in the
+        //    method body, keep the const exposed for users who only
+        //    use it in non-mutation contexts.
+        //
         // Same defect class as the BTreeMap nested-generic-field-access
         // pinned in [[btree_pattern_match_ref_generic_class]].
         let inner_text = component.inner.clone();
@@ -671,11 +683,19 @@ implement PathBuf {
             return;
         }
 
-        // Extract self.path.inner to a local, mutate, write back via
-        // single-level field assignment (replacing the entire `path` field).
         let mut local = self.path.inner.clone();
-        if !local.is_empty() && !local.ends_with_char(MAIN_SEPARATOR) {
-            local.push(MAIN_SEPARATOR);
+        // Inline literal — see SOUNDNESS §2 above.
+        @cfg(unix)
+        {
+            if !local.is_empty() && !local.ends_with_char('/') {
+                local.push('/');
+            }
+        }
+        @cfg(windows)
+        {
+            if !local.is_empty() && !local.ends_with_char('\\') {
+                local.push('\\');
+            }
         }
         local.push_str(&inner_text);
         self.path = Path { inner: local };
