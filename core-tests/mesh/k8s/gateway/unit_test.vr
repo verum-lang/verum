@@ -1,0 +1,160 @@
+// =============================================================================
+// core-tests/mesh/k8s/gateway/unit_test.vr
+// =============================================================================
+//
+// `core/mesh/k8s/gateway.vr` — Gateway API v1 ADTs.
+//
+// Surface tested here:
+//   * ListenerProtocol 6-variant (Http / Https / Tcp / Tls / Udp / Grpc)
+//   * TlsMode 2-variant (Terminate / Passthrough)
+//   * AddressType 3-variant (IPAddress / Hostname / NamedAddress)
+//   * FromNamespaces 3-variant (All / Selector / Same)
+// =============================================================================
+
+mount core.mesh.k8s.gateway.{
+    ListenerProtocol, TlsMode, AddressType, FromNamespaces,
+};
+
+// =============================================================================
+// Section 1: ListenerProtocol 6-variant
+// =============================================================================
+
+@test
+fn test_listener_protocol_http() {
+    let p: ListenerProtocol = ListenerProtocol.Http;
+    assert(p is ListenerProtocol.Http);
+}
+
+@test
+fn test_listener_protocol_https() {
+    let p: ListenerProtocol = ListenerProtocol.Https;
+    assert(p is ListenerProtocol.Https);
+}
+
+@test
+fn test_listener_protocol_tcp() {
+    let p: ListenerProtocol = ListenerProtocol.Tcp;
+    assert(p is ListenerProtocol.Tcp);
+}
+
+@test
+fn test_listener_protocol_tls() {
+    let p: ListenerProtocol = ListenerProtocol.Tls;
+    assert(p is ListenerProtocol.Tls);
+}
+
+@test
+fn test_listener_protocol_udp() {
+    let p: ListenerProtocol = ListenerProtocol.Udp;
+    assert(p is ListenerProtocol.Udp);
+}
+
+@test
+fn test_listener_protocol_grpc() {
+    let p: ListenerProtocol = ListenerProtocol.Grpc;
+    assert(p is ListenerProtocol.Grpc);
+}
+
+@test
+fn test_listener_protocol_pairwise_disjoint() {
+    let h: ListenerProtocol = ListenerProtocol.Http;
+    let hs: ListenerProtocol = ListenerProtocol.Https;
+    let t: ListenerProtocol = ListenerProtocol.Tcp;
+    let tl: ListenerProtocol = ListenerProtocol.Tls;
+    let u: ListenerProtocol = ListenerProtocol.Udp;
+    let g: ListenerProtocol = ListenerProtocol.Grpc;
+    assert(h is ListenerProtocol.Http && !(h is ListenerProtocol.Https));
+    assert(hs is ListenerProtocol.Https && !(hs is ListenerProtocol.Tcp));
+    assert(t is ListenerProtocol.Tcp && !(t is ListenerProtocol.Tls));
+    assert(tl is ListenerProtocol.Tls && !(tl is ListenerProtocol.Udp));
+    assert(u is ListenerProtocol.Udp && !(u is ListenerProtocol.Grpc));
+    assert(g is ListenerProtocol.Grpc && !(g is ListenerProtocol.Http));
+}
+
+// =============================================================================
+// Section 2: TlsMode 2-variant
+// =============================================================================
+
+@test
+fn test_tls_mode_terminate() {
+    let m: TlsMode = TlsMode.Terminate;
+    assert(m is TlsMode.Terminate);
+}
+
+@test
+fn test_tls_mode_passthrough() {
+    let m: TlsMode = TlsMode.Passthrough;
+    assert(m is TlsMode.Passthrough);
+}
+
+@test
+fn test_tls_mode_disjoint() {
+    let t: TlsMode = TlsMode.Terminate;
+    let p: TlsMode = TlsMode.Passthrough;
+    assert(t is TlsMode.Terminate && !(t is TlsMode.Passthrough));
+    assert(p is TlsMode.Passthrough && !(p is TlsMode.Terminate));
+}
+
+// =============================================================================
+// Section 3: AddressType 3-variant
+// =============================================================================
+
+@test
+fn test_address_type_ip_address() {
+    let a: AddressType = AddressType.IPAddress;
+    assert(a is AddressType.IPAddress);
+}
+
+@test
+fn test_address_type_hostname() {
+    let a: AddressType = AddressType.Hostname;
+    assert(a is AddressType.Hostname);
+}
+
+@test
+fn test_address_type_named_address() {
+    let a: AddressType = AddressType.NamedAddress;
+    assert(a is AddressType.NamedAddress);
+}
+
+@test
+fn test_address_type_pairwise_disjoint() {
+    let ip: AddressType = AddressType.IPAddress;
+    let hn: AddressType = AddressType.Hostname;
+    let na: AddressType = AddressType.NamedAddress;
+    assert(ip is AddressType.IPAddress && !(ip is AddressType.Hostname));
+    assert(hn is AddressType.Hostname && !(hn is AddressType.NamedAddress));
+    assert(na is AddressType.NamedAddress && !(na is AddressType.IPAddress));
+}
+
+// =============================================================================
+// Section 4: FromNamespaces 3-variant
+// =============================================================================
+
+@test
+fn test_from_namespaces_all() {
+    let f: FromNamespaces = FromNamespaces.All;
+    assert(f is FromNamespaces.All);
+}
+
+@test
+fn test_from_namespaces_selector() {
+    let f: FromNamespaces = FromNamespaces.Selector(Text.from("env=prod"));
+    assert(f is FromNamespaces.Selector);
+}
+
+@test
+fn test_from_namespaces_same() {
+    let f: FromNamespaces = FromNamespaces.Same;
+    assert(f is FromNamespaces.Same);
+}
+
+@test
+fn test_from_namespaces_pairwise_disjoint() {
+    let a: FromNamespaces = FromNamespaces.All;
+    let s: FromNamespaces = FromNamespaces.Selector(Text.from(""));
+    let sm: FromNamespaces = FromNamespaces.Same;
+    assert(a is FromNamespaces.All && !(a is FromNamespaces.Selector));
+    assert(s is FromNamespaces.Selector && !(s is FromNamespaces.Same));
+    assert(sm is FromNamespaces.Same && !(sm is FromNamespaces.All));
+}

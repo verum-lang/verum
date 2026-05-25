@@ -1,0 +1,125 @@
+// =============================================================================
+// core-tests/mesh/xds/types/unit_test.vr
+// =============================================================================
+//
+// `core/mesh/xds/types.vr` — xDS v3 type URLs + XdsNode + AdsAuth + AdsConfig.
+//
+// Surface tested here (pure-data subset; .new ctors avoided where
+// possible to sidestep cross-module record-return defect — see
+// meta/span audit §3.1):
+//
+//   * TypeUrl 8 canonical Envoy v3 type URLs (constants only)
+//   * AdsAuth 3-variant (None / MutualTls / Bearer)
+// =============================================================================
+
+mount core.mesh.xds.types.{TypeUrl, AdsAuth};
+mount core.base.maybe.{Maybe};
+
+// =============================================================================
+// Section 1: TypeUrl canonical constants — Envoy v3 type URLs
+// =============================================================================
+
+@test
+fn test_type_url_listener() {
+    assert(TypeUrl.LISTENER == "type.googleapis.com/envoy.config.listener.v3.Listener");
+}
+
+@test
+fn test_type_url_cluster() {
+    assert(TypeUrl.CLUSTER == "type.googleapis.com/envoy.config.cluster.v3.Cluster");
+}
+
+@test
+fn test_type_url_route_configuration() {
+    assert(TypeUrl.ROUTE_CONFIGURATION == "type.googleapis.com/envoy.config.route.v3.RouteConfiguration");
+}
+
+@test
+fn test_type_url_cluster_load_assignment() {
+    assert(TypeUrl.CLUSTER_LOAD_ASSIGNMENT == "type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment");
+}
+
+@test
+fn test_type_url_secret() {
+    assert(TypeUrl.SECRET == "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret");
+}
+
+@test
+fn test_type_url_scoped_route_configuration() {
+    assert(TypeUrl.SCOPED_ROUTE_CONFIGURATION == "type.googleapis.com/envoy.config.route.v3.ScopedRouteConfiguration");
+}
+
+@test
+fn test_type_url_virtual_host() {
+    assert(TypeUrl.VIRTUAL_HOST == "type.googleapis.com/envoy.config.route.v3.VirtualHost");
+}
+
+@test
+fn test_type_url_runtime() {
+    assert(TypeUrl.RUNTIME == "type.googleapis.com/envoy.service.runtime.v3.Runtime");
+}
+
+@test
+fn test_type_url_constants_all_pairwise_distinct() {
+    // Sanity-pin that no two TypeUrl constants collide (e.g. typo
+    // assigning two consts the same Envoy URL).
+    assert(TypeUrl.LISTENER != TypeUrl.CLUSTER);
+    assert(TypeUrl.LISTENER != TypeUrl.ROUTE_CONFIGURATION);
+    assert(TypeUrl.CLUSTER != TypeUrl.CLUSTER_LOAD_ASSIGNMENT);
+    assert(TypeUrl.SECRET != TypeUrl.VIRTUAL_HOST);
+    assert(TypeUrl.RUNTIME != TypeUrl.SCOPED_ROUTE_CONFIGURATION);
+}
+
+@test
+fn test_type_url_all_use_envoy_namespace() {
+    // Every canonical xDS TypeUrl must begin with the Envoy v3 prefix.
+    let prefix = "type.googleapis.com/envoy.";
+    assert(TypeUrl.LISTENER.starts_with(prefix));
+    assert(TypeUrl.CLUSTER.starts_with(prefix));
+    assert(TypeUrl.ROUTE_CONFIGURATION.starts_with(prefix));
+    assert(TypeUrl.CLUSTER_LOAD_ASSIGNMENT.starts_with(prefix));
+    assert(TypeUrl.SECRET.starts_with(prefix));
+    assert(TypeUrl.SCOPED_ROUTE_CONFIGURATION.starts_with(prefix));
+    assert(TypeUrl.VIRTUAL_HOST.starts_with(prefix));
+    assert(TypeUrl.RUNTIME.starts_with(prefix));
+}
+
+// =============================================================================
+// Section 2: AdsAuth 3-variant
+// =============================================================================
+
+@test
+fn test_ads_auth_none() {
+    let a: AdsAuth = AdsAuth.None;
+    assert(a is AdsAuth.None);
+}
+
+@test
+fn test_ads_auth_mutual_tls() {
+    let a: AdsAuth = AdsAuth.MutualTls {
+        cert_chain_pem: Text.from("-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----"),
+        private_key_pem: Text.from("-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----"),
+        ca_bundle_pem: Text.from("-----BEGIN CERTIFICATE-----\nMIIC...\n-----END CERTIFICATE-----"),
+    };
+    assert(a is AdsAuth.MutualTls);
+}
+
+@test
+fn test_ads_auth_bearer() {
+    let a: AdsAuth = AdsAuth.Bearer(Text.from("eyJhbGciOiJSUzI1NiJ9..."));
+    assert(a is AdsAuth.Bearer);
+}
+
+@test
+fn test_ads_auth_pairwise_disjoint() {
+    let n: AdsAuth = AdsAuth.None;
+    let mt: AdsAuth = AdsAuth.MutualTls {
+        cert_chain_pem: Text.from(""),
+        private_key_pem: Text.from(""),
+        ca_bundle_pem: Text.from(""),
+    };
+    let b: AdsAuth = AdsAuth.Bearer(Text.from("x"));
+    assert(n is AdsAuth.None && !(n is AdsAuth.MutualTls));
+    assert(mt is AdsAuth.MutualTls && !(mt is AdsAuth.Bearer));
+    assert(b is AdsAuth.Bearer && !(b is AdsAuth.None));
+}
