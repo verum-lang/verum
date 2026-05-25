@@ -28,93 +28,92 @@ record construction, lookup tables, the default-bound constant).
 
 ## 3. Language-implementation gaps
 
-### §3.1 `AttributeArg` schema drift (HIGH)
+### §3.1 `AttributeArg` schema drift — CLOSED 2026-05-25
 
-`diakrisis_attrs.vr` matches on `AttributeArg` as if it were an
-**enum**:
+Originally documented: `diakrisis_attrs.vr` matched on
+`AttributeArg.Ident(...)` / `AttributeArg.Int(...)` /
+`AttributeArg.Str(...)` / `AttributeArg.Named { ... }` — but
+`core/meta/attribute.vr` declares `AttributeArg` as a **record**
+`{ name: Maybe<Text>, value: MetaAttributeValue, span: Span }`.
+The match arms silently missed every input.
 
-```verum
-match attr.args.get(0) {
-    Maybe.Some(AttributeArg.Ident(name)) => ...,
-    Maybe.Some(AttributeArg.Int(n)) => ...,
-    Maybe.Some(AttributeArg.Str(s)) => ...,
-    Maybe.Some(AttributeArg.Named { name, value }) => ...,
-    _ => ...,
-}
-```
-
-But `core/meta/attribute.vr` defines `AttributeArg` as a **record**:
-
-```verum
-public type AttributeArg is {
-    name: Maybe<Text>,
-    value: MetaAttributeValue,
-    span: Span,
-};
-```
-
-`AttributeArg.Ident(...)` / `AttributeArg.Int(...)` / `AttributeArg.Str(...)` /
-`AttributeArg.Named { ... }` are **not valid** constructors of the record-form
-`AttributeArg`. The parse-functions either don't compile, or compile and
-silently miss every match arm (returning `Maybe.None` for every input).
-
-**Fix path (1-2h):** rewrite each `parse_*` in
-`core/meta/diakrisis_attrs.vr` against the record-form:
+**Closed by realigning all 5 `parse_*` against the record-form
++ canonical `MetaAttributeValue` enum**:
 
 ```verum
 match attr.args.get(0) {
-    Maybe.Some(arg) => match arg.value {
-        MetaAttributeValue.Ident(name) => ...,
-        MetaAttributeValue.Int(n)      => ...,
-        MetaAttributeValue.String(s)   => ...,
-        _ => Maybe.None,
+    Maybe.Some(arg) => {
+        if arg.name is Maybe.Some { Maybe.None }     // positional contract
+        else {
+            match arg.value {
+                MetaAttributeValue.Ident(name) => ...,
+                MetaAttributeValue.Int(n)      => ...,
+                MetaAttributeValue.String(s)   => ...,
+                _ => Maybe.None,
+            }
+        }
     },
     Maybe.None => Maybe.None,
 }
 ```
 
-This is a stdlib-source-level defect, NOT a language defect. The
-audit pins it but the test layer cannot exercise the parse_*
-functions until they are realigned.
+The `Str` value-variant was also renamed to its canonical name
+`String` (matches `MetaAttributeValue.String(Text)` in
+`core/meta/attribute.vr`).
 
-### §3.2 `parse_autopoietic` named-args support
+Anchor: `core-tests/meta/diakrisis_attrs/integration_test.vr` —
+45 tests across all 5 parsers covering happy paths + every
+rejection mode (wrong attr name, wrong arg count, wrong value
+variant, wrong arg-name in named form, negative-N rejection).
 
-Once §3.1 is resolved, the named-args path (which currently uses
-`AttributeArg.Named { name, value }`) needs to be rewritten to
-match on the record's `arg.name == Maybe.Some("epsilon")` form
-plus the value-side `MetaAttributeValue.String(s)` /
-`MetaAttributeValue.Int(n)` arms.
+### §3.2 `parse_autopoietic` named-args support — CLOSED 2026-05-25
 
-### §3.3 Tests for parse_* are deferred until §3.1 closes
+Closed as part of §3.1 — `parse_autopoietic` now matches on
+`arg.name == Maybe.Some("epsilon")` / `Maybe.Some("depth")` and
+inspects `arg.value` for `MetaAttributeValue.String` /
+`MetaAttributeValue.Int`. Order-independent property pinned by
+`test_parse_autopoietic_order_independent`.
 
-Once `core/meta/diakrisis_attrs.vr` matches the record-form
-`AttributeArg`, add unit tests in this folder for:
+### §3.3 Tests for parse_* — CLOSED 2026-05-25
 
-* `parse_effect_attr` happy path (each of the 7 known kinds + 2 aliases)
-* `parse_effect_attr` rejects wrong arg count / non-Ident arg
-* `parse_infinity_category` happy path (Finite N / "omega" /
-  "omega_omega" idents)
-* `parse_infinity_category` rejects negative Int
-* `parse_autopoietic` (named-args, order-independent)
-* `parse_autopoietic` rejects negative depth
-* `parse_ludic_design` (zero args)
-* `parse_cut_elimination` (default / named-arg / bare-int forms)
+`integration_test.vr` lands 45 tests across all 5 parsers:
+
+* `parse_effect_attr` — 7 canonical kinds (Pure/Io/State/Async/
+  Exception/Nondet/Quantum) + 2 aliases (exn / non_det) + 5
+  rejection modes (wrong attr name / no args / String arg /
+  unknown ident / named-arg)
+* `parse_infinity_category` — Finite (0, 2) + "omega" /
+  "omega_omega" idents + 4 rejection modes (negative Int /
+  unknown ident / wrong name / no args)
+* `parse_autopoietic` — both-present + order-independent + 5
+  rejection modes (missing epsilon / missing depth / negative
+  depth / wrong attr name / wrong epsilon value type)
+* `parse_ludic_design` — zero-args happy + arg-present rejection
+  + wrong-name rejection
+* `parse_cut_elimination` — default (zero args uses
+  CUT_ELIMINATION_DEFAULT_BOUND) + bare-int + named-arg + 5
+  rejection modes (negative bare-int / negative named-arg /
+  wrong named key / non-Int named value / two-args /
+  wrong attr name)
 
 ## Action items landed in this branch
 
+* `core/meta/diakrisis_attrs.vr` — realigned all 5 `parse_*` to
+  record-form `AttributeArg` + canonical `MetaAttributeValue` enum.
+  Closes §3.1 and §3.2.
 * `core-tests/meta/diakrisis_attrs/unit_test.vr` — 38 unit tests:
   DiakrisisEffectKind 7-variant + .from_ident / .as_str /
   case-insensitive parse + InfinityLevel 3-variant + EffectAttr /
   InfinityCategoryAttr / AutopoieticAttr / LudicDesignAttr /
   CutEliminationAttr record construction + CUT_ELIMINATION_DEFAULT_BOUND
   constant.
+* `core-tests/meta/diakrisis_attrs/integration_test.vr` — 45 tests
+  across all 5 `parse_*` functions. Closes §3.3.
 * `core-tests/meta/diakrisis_attrs/audit.md` — this file.
 
 ## Action items deferred
 
 | Item | Scope | Estimated effort |
 |---|---|---|
-| Realign `parse_*` to record-form `AttributeArg` (§3.1) | core/meta/diakrisis_attrs.vr | 1-2 h |
-| `parse_*` unit tests (§3.3) | this folder | 1 h after §3.1 |
 | Property test: `from_ident` ∘ `as_str` is identity on the 7 canonical kinds | this folder | 30 min |
 | Remove legacy Rust typed-attr file post-migration | crates/verum_compiler/src/diakrisis_typed_attrs.rs | 30 min |

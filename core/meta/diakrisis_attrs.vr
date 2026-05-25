@@ -56,7 +56,7 @@
 module meta.diakrisis_attrs;
 
 mount core.{Text, List, Maybe, Result};
-mount meta.attribute.{Attribute, AttributeArg};
+mount meta.attribute.{Attribute, AttributeArg, MetaAttributeValue};
 mount meta.span.{Span};
 
 // -----------------------------------------------------------------------------
@@ -121,13 +121,22 @@ public type EffectAttr is {
 /// attribute, or `Maybe.None` when the shape doesn't match.
 ///
 
-/// Accepts: `@effect(<kind-ident>)` exactly one arg, identifier.
+/// Accepts: `@effect(<kind-ident>)` exactly one positional arg, identifier.
 public fn parse_effect_attr(attr: &Attribute) -> Maybe<EffectAttr> {
     if attr.name != "effect" { return Maybe.None; }
     if attr.args.len() != 1 { return Maybe.None; }
     let arg_kind = match attr.args.get(0) {
-        Maybe.Some(AttributeArg.Ident(name)) => DiakrisisEffectKind.from_ident(name),
-        _                                    => Maybe.None,
+        Maybe.Some(arg) => {
+            // Positional only — reject named form here.
+            if arg.name is Maybe.Some { Maybe.None }
+            else {
+                match arg.value {
+                    MetaAttributeValue.Ident(name) => DiakrisisEffectKind.from_ident(name),
+                    _                              => Maybe.None,
+                }
+            }
+        },
+        Maybe.None => Maybe.None,
     };
     match arg_kind {
         Maybe.Some(k) => Maybe.Some(EffectAttr { kind: k, span: attr.span }),
@@ -163,22 +172,31 @@ public type InfinityCategoryAttr is {
 };
 
 /// Meta-fn: extract `InfinityCategoryAttr` from generic attribute.
-/// Accepts: `@infinity_category(<int|omega|omega_omega>)`.
+/// Accepts: `@infinity_category(<int|omega|omega_omega>)` — exactly one
+/// positional arg.
 public fn parse_infinity_category(attr: &Attribute) -> Maybe<InfinityCategoryAttr> {
     if attr.name != "infinity_category" { return Maybe.None; }
     if attr.args.len() != 1 { return Maybe.None; }
     let level = match attr.args.get(0) {
-        Maybe.Some(AttributeArg.Int(n)) => {
-            if n < 0 { Maybe.None }
-            else     { Maybe.Some(InfinityLevel.Finite(n)) }
+        Maybe.Some(arg) => {
+            if arg.name is Maybe.Some { Maybe.None }
+            else {
+                match arg.value {
+                    MetaAttributeValue.Int(n) => {
+                        if n < 0 { Maybe.None }
+                        else     { Maybe.Some(InfinityLevel.Finite(n)) }
+                    },
+                    MetaAttributeValue.Ident(name) => {
+                        let lower = name.to_ascii_lowercase();
+                        if lower == "omega"             { Maybe.Some(InfinityLevel.Omega) }
+                        else if lower == "omega_omega"  { Maybe.Some(InfinityLevel.OmegaOmega) }
+                        else                            { Maybe.None }
+                    },
+                    _ => Maybe.None,
+                }
+            }
         },
-        Maybe.Some(AttributeArg.Ident(name)) => {
-            let lower = name.to_ascii_lowercase();
-            if lower == "omega"             { Maybe.Some(InfinityLevel.Omega) }
-            else if lower == "omega_omega"  { Maybe.Some(InfinityLevel.OmegaOmega) }
-            else                            { Maybe.None }
-        },
-        _ => Maybe.None,
+        Maybe.None => Maybe.None,
     };
     match level {
         Maybe.Some(l) => Maybe.Some(InfinityCategoryAttr { level: l, span: attr.span }),
@@ -205,19 +223,23 @@ public fn parse_autopoietic(attr: &Attribute) -> Maybe<AutopoieticAttr> {
     let mut epsilon: Maybe<Text> = Maybe.None;
     let mut depth:   Maybe<Int>  = Maybe.None;
     for arg in &attr.args {
-        match arg {
-            AttributeArg.Named { name, value } => {
-                if name == "epsilon" {
-                    if let AttributeArg.Str(s) = *value {
-                        epsilon = Maybe.Some(s);
+        match arg.name {
+            Maybe.Some(n) => {
+                if n == "epsilon" {
+                    match arg.value {
+                        MetaAttributeValue.String(s) => { epsilon = Maybe.Some(s); },
+                        _                            => {},
                     }
-                } else if name == "depth" {
-                    if let AttributeArg.Int(n) = *value {
-                        if n >= 0 { depth = Maybe.Some(n); }
+                } else if n == "depth" {
+                    match arg.value {
+                        MetaAttributeValue.Int(d) => {
+                            if d >= 0 { depth = Maybe.Some(d); }
+                        },
+                        _ => {},
                     }
                 }
             },
-            _ => {},
+            Maybe.None => {},
         }
     }
     match (epsilon, depth) {
@@ -273,15 +295,29 @@ public fn parse_cut_elimination(attr: &Attribute) -> Maybe<CutEliminationAttr> {
     }
     if attr.args.len() != 1 { return Maybe.None; }
     let bound = match attr.args.get(0) {
-        Maybe.Some(AttributeArg.Int(n)) =>
-            if n >= 0 { Maybe.Some(n) } else { Maybe.None },
-        Maybe.Some(AttributeArg.Named { name, value }) =>
-            if name == "bound" {
-                if let AttributeArg.Int(n) = *value {
-                    if n >= 0 { Maybe.Some(n) } else { Maybe.None }
-                } else { Maybe.None }
-            } else { Maybe.None },
-        _ => Maybe.None,
+        Maybe.Some(arg) => {
+            match arg.name {
+                // bare-int form: positional Int value
+                Maybe.None => {
+                    match arg.value {
+                        MetaAttributeValue.Int(n) =>
+                            if n >= 0 { Maybe.Some(n) } else { Maybe.None },
+                        _ => Maybe.None,
+                    }
+                },
+                // named-arg form: bound = <int>
+                Maybe.Some(name) => {
+                    if name == "bound" {
+                        match arg.value {
+                            MetaAttributeValue.Int(n) =>
+                                if n >= 0 { Maybe.Some(n) } else { Maybe.None },
+                            _ => Maybe.None,
+                        }
+                    } else { Maybe.None }
+                },
+            }
+        },
+        Maybe.None => Maybe.None,
     };
     match bound {
         Maybe.Some(b) =>

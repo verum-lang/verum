@@ -26,22 +26,31 @@ documented in [meta/token audit §3.1 / §3.2](../token/audit.md).
 
 ## 3. Language-implementation gaps
 
-### §3.1 Variant-name drift blocks every QuoteBuilder API (HIGH)
+### §3.1 Variant-name drift blocks every QuoteBuilder API — CLOSED 2026-05-25
 
-```verum
-self.tokens.push(TokenTree.Token(Token.ident_spanned(name, self.span)));
-```
+Originally documented: `core/meta/quote.vr` referenced
+`TokenTree.Token(...)` (correct: `Leaf`), `TokenKind.Keyword(kw)`
+(correct: `Kw`), and `TokenTree.Group(g)` (correct: `Grouped`).
+All three are mechanical typos against the canonical variant
+names declared in `core/meta/token.vr`.
 
-`TokenTree.Token` is not a valid TokenTree variant (correct name:
-`TokenTree.Leaf`). Same drift affects `TokenKind.Keyword` (correct
-name: `TokenKind.Kw`).
+**Closed by rewriting all 18 drift sites**:
 
-**Fix:** in `core/meta/quote.vr`, replace:
-* `TokenTree.Token` → `TokenTree.Leaf` (16 occurrences)
-* `TokenKind.Keyword` → `TokenKind.Kw` (3 occurrences)
+* `TokenTree.Token(...)` → `TokenTree.Leaf(...)` (13 sites:
+  `ident`/`keyword`/`punct_joint`/`punct`/`operator`/`int_lit`/
+  `float_lit`/`string_lit`/`char_lit`/`bool_lit` in QuoteBuilder
+  + `ident`/`punct`/`keyword` in GroupBuilder)
+* `TokenKind.Keyword(...)` → `TokenKind.Kw(...)` (2 sites:
+  QuoteBuilder.keyword + GroupBuilder.keyword)
+* `TokenTree.Group(...)` → `TokenTree.Grouped(...)` (2 sites:
+  QuoteBuilder.group + GroupBuilder.close)
 
-5-minute fix; immediately unlocks the entire programmatic QuoteBuilder
-surface for testing.
+Verified clear via
+`grep "TokenTree\.Token\|TokenKind\.Keyword\|TokenTree\.Group\b" core/meta/quote.vr`.
+
+QuoteBuilder API surface is now syntactically valid; runtime
+testing still gated on §3.2 (`keyword_from_str`
+`@compiler_intrinsic`) and §3.4 (TokenStream cross-module ctors).
 
 ### §3.2 `keyword_from_str` is `@compiler_intrinsic`
 
@@ -64,6 +73,7 @@ depend on TokenStream cross-module ctors
 
 ## Action items landed in this branch
 
+* `core/meta/quote.vr` — closed §3.1 (18 drift sites realigned).
 * `core-tests/meta/quote/unit_test.vr` — 4 unit tests over QuotePart
   3-variant + variant-disjointness.
 * `core-tests/meta/quote/audit.md` — this file.
@@ -72,9 +82,7 @@ depend on TokenStream cross-module ctors
 
 | Item | Scope | Estimated effort |
 |---|---|---|
-| Rename TokenTree.Token → TokenTree.Leaf in quote.vr (§3.1) | core/meta/quote.vr | 5 min |
-| Rename TokenKind.Keyword → TokenKind.Kw in quote.vr (§3.1) | core/meta/quote.vr | 5 min |
-| Full QuoteBuilder API tests post-§3.1 (chain ident/keyword/punct/lit/group/build, 30+ tests) | this folder | 2 h |
+| Full QuoteBuilder API tests (chain ident/keyword/punct/lit/group/build, 30+ tests) post-(§3.2+§3.4) cross-module-ctor fix | this folder | 2 h |
 | Integration test: QuoteBuilder → TokenStream → Display round-trip | this folder | 1 h |
 | Convenience fn tests post-cross-module-fix | this folder | 30 min |
 | Property tests for `QuotePart`-list-equality after macro expansion | this folder | 1 h |
