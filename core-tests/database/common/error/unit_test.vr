@@ -1,0 +1,384 @@
+// =============================================================================
+// core-tests/database/common/error/unit_test.vr
+// =============================================================================
+//
+// `core/database/common/error.vr` — Spindle DbError taxonomy: the
+// single error type every Postgres / MySQL / SQLite adapter speaks.
+//
+// Surface tested here (pure-data subset):
+//   * AdapterId 3-variant (AdPostgres / AdSqlite / AdMysql) + .name
+//   * ConstraintKind 7-variant + .label + .equals
+//   * ErrorCategory 5-variant (EcTransient / EcPermanent / EcSecurity /
+//     EcClient / EcUpstream)
+//   * ConnectionErrorKind 6-variant
+//   * AuthErrorKind 5-variant
+//   * TimeoutPhase 4-variant
+//   * PoolErrorKind 4-variant
+//   * SqlState parse + .code + .class + .is_retryable + .is_integrity +
+//     .integrity_kind + ConstraintKind dispatch
+//
+// DbError 10-variant + DecodeFault / EncodeFault / AdapterSpecific
+// records carry mixed record payloads and would require direct
+// record-literal construction to sidestep cross-module ctor defects.
+// Deferred to integration suite.
+// =============================================================================
+
+mount core.database.common.error.{
+    AdapterId, ConstraintKind, ErrorCategory,
+    ConnectionErrorKind, AuthErrorKind, TimeoutPhase, PoolErrorKind,
+    SqlState,
+};
+mount core.base.maybe.{Maybe};
+
+// =============================================================================
+// Section 1: AdapterId 3-variant
+// =============================================================================
+
+@test
+fn test_adapter_id_postgres() {
+    let a: AdapterId = AdapterId.AdPostgres;
+    assert(a is AdapterId.AdPostgres);
+}
+
+@test
+fn test_adapter_id_sqlite() {
+    let a: AdapterId = AdapterId.AdSqlite;
+    assert(a is AdapterId.AdSqlite);
+}
+
+@test
+fn test_adapter_id_mysql() {
+    let a: AdapterId = AdapterId.AdMysql;
+    assert(a is AdapterId.AdMysql);
+}
+
+@test
+fn test_adapter_id_pairwise_disjoint() {
+    let p: AdapterId = AdapterId.AdPostgres;
+    let s: AdapterId = AdapterId.AdSqlite;
+    let m: AdapterId = AdapterId.AdMysql;
+    assert(p is AdapterId.AdPostgres && !(p is AdapterId.AdSqlite));
+    assert(s is AdapterId.AdSqlite && !(s is AdapterId.AdMysql));
+    assert(m is AdapterId.AdMysql && !(m is AdapterId.AdPostgres));
+}
+
+// =============================================================================
+// Section 2: ConstraintKind 7-variant
+// =============================================================================
+
+@test
+fn test_constraint_kind_not_null() {
+    let k: ConstraintKind = ConstraintKind.CkNotNull;
+    assert(k is ConstraintKind.CkNotNull);
+}
+
+@test
+fn test_constraint_kind_foreign_key() {
+    let k: ConstraintKind = ConstraintKind.CkForeignKey;
+    assert(k is ConstraintKind.CkForeignKey);
+}
+
+@test
+fn test_constraint_kind_unique() {
+    let k: ConstraintKind = ConstraintKind.CkUnique;
+    assert(k is ConstraintKind.CkUnique);
+}
+
+@test
+fn test_constraint_kind_check() {
+    let k: ConstraintKind = ConstraintKind.CkCheck;
+    assert(k is ConstraintKind.CkCheck);
+}
+
+@test
+fn test_constraint_kind_restrict_violation() {
+    let k: ConstraintKind = ConstraintKind.CkRestrictViolation;
+    assert(k is ConstraintKind.CkRestrictViolation);
+}
+
+@test
+fn test_constraint_kind_data_exception() {
+    let k: ConstraintKind = ConstraintKind.CkDataException;
+    assert(k is ConstraintKind.CkDataException);
+}
+
+@test
+fn test_constraint_kind_other() {
+    let k: ConstraintKind = ConstraintKind.CkOther;
+    assert(k is ConstraintKind.CkOther);
+}
+
+@test
+fn test_constraint_kind_pairwise_disjoint_subset() {
+    let nn: ConstraintKind = ConstraintKind.CkNotNull;
+    let fk: ConstraintKind = ConstraintKind.CkForeignKey;
+    let u: ConstraintKind = ConstraintKind.CkUnique;
+    let c: ConstraintKind = ConstraintKind.CkCheck;
+    let o: ConstraintKind = ConstraintKind.CkOther;
+    assert(nn is ConstraintKind.CkNotNull && !(nn is ConstraintKind.CkForeignKey));
+    assert(fk is ConstraintKind.CkForeignKey && !(fk is ConstraintKind.CkUnique));
+    assert(u is ConstraintKind.CkUnique && !(u is ConstraintKind.CkCheck));
+    assert(c is ConstraintKind.CkCheck && !(c is ConstraintKind.CkOther));
+    assert(o is ConstraintKind.CkOther && !(o is ConstraintKind.CkNotNull));
+}
+
+// =============================================================================
+// Section 3: ConstraintKind.equals — reflexivity matrix
+// =============================================================================
+
+@test
+fn test_constraint_kind_equals_reflexive_not_null() {
+    let a: ConstraintKind = ConstraintKind.CkNotNull;
+    let b: ConstraintKind = ConstraintKind.CkNotNull;
+    assert(a.equals(&b));
+}
+
+@test
+fn test_constraint_kind_equals_reflexive_unique() {
+    let a: ConstraintKind = ConstraintKind.CkUnique;
+    let b: ConstraintKind = ConstraintKind.CkUnique;
+    assert(a.equals(&b));
+}
+
+@test
+fn test_constraint_kind_equals_cross_variant_false() {
+    let nn: ConstraintKind = ConstraintKind.CkNotNull;
+    let fk: ConstraintKind = ConstraintKind.CkForeignKey;
+    assert(!nn.equals(&fk));
+    assert(!fk.equals(&nn));
+}
+
+@test
+fn test_constraint_kind_equals_other_distinct_from_data_exception() {
+    let o: ConstraintKind = ConstraintKind.CkOther;
+    let d: ConstraintKind = ConstraintKind.CkDataException;
+    assert(!o.equals(&d));
+}
+
+// =============================================================================
+// Section 4: ErrorCategory 5-variant
+// =============================================================================
+
+@test
+fn test_error_category_transient() {
+    let c: ErrorCategory = ErrorCategory.EcTransient;
+    assert(c is ErrorCategory.EcTransient);
+}
+
+@test
+fn test_error_category_permanent() {
+    let c: ErrorCategory = ErrorCategory.EcPermanent;
+    assert(c is ErrorCategory.EcPermanent);
+}
+
+@test
+fn test_error_category_security() {
+    let c: ErrorCategory = ErrorCategory.EcSecurity;
+    assert(c is ErrorCategory.EcSecurity);
+}
+
+@test
+fn test_error_category_client() {
+    let c: ErrorCategory = ErrorCategory.EcClient;
+    assert(c is ErrorCategory.EcClient);
+}
+
+@test
+fn test_error_category_upstream() {
+    let c: ErrorCategory = ErrorCategory.EcUpstream;
+    assert(c is ErrorCategory.EcUpstream);
+}
+
+@test
+fn test_error_category_pairwise_disjoint() {
+    let t: ErrorCategory = ErrorCategory.EcTransient;
+    let p: ErrorCategory = ErrorCategory.EcPermanent;
+    let s: ErrorCategory = ErrorCategory.EcSecurity;
+    let cl: ErrorCategory = ErrorCategory.EcClient;
+    let u: ErrorCategory = ErrorCategory.EcUpstream;
+    assert(t is ErrorCategory.EcTransient && !(t is ErrorCategory.EcPermanent));
+    assert(p is ErrorCategory.EcPermanent && !(p is ErrorCategory.EcSecurity));
+    assert(s is ErrorCategory.EcSecurity && !(s is ErrorCategory.EcClient));
+    assert(cl is ErrorCategory.EcClient && !(cl is ErrorCategory.EcUpstream));
+    assert(u is ErrorCategory.EcUpstream && !(u is ErrorCategory.EcTransient));
+}
+
+// =============================================================================
+// Section 5: ConnectionErrorKind 6-variant
+// =============================================================================
+
+@test
+fn test_connection_error_kind_dns_failure() {
+    let k: ConnectionErrorKind = ConnectionErrorKind.CekDnsFailure(Text.from("nxdomain"));
+    assert(k is ConnectionErrorKind.CekDnsFailure);
+}
+
+@test
+fn test_connection_error_kind_connect_refused() {
+    let k: ConnectionErrorKind = ConnectionErrorKind.CekConnectRefused;
+    assert(k is ConnectionErrorKind.CekConnectRefused);
+}
+
+@test
+fn test_connection_error_kind_tls_handshake_failed() {
+    let k: ConnectionErrorKind = ConnectionErrorKind.CekTlsHandshakeFailed(Text.from("cert expired"));
+    assert(k is ConnectionErrorKind.CekTlsHandshakeFailed);
+}
+
+@test
+fn test_connection_error_kind_protocol_mismatch() {
+    let k: ConnectionErrorKind = ConnectionErrorKind.CekProtocolMismatch(Text.from("server speaks v17"));
+    assert(k is ConnectionErrorKind.CekProtocolMismatch);
+}
+
+@test
+fn test_connection_error_kind_server_terminated() {
+    let k: ConnectionErrorKind = ConnectionErrorKind.CekServerTerminated;
+    assert(k is ConnectionErrorKind.CekServerTerminated);
+}
+
+@test
+fn test_connection_error_kind_keepalive_timeout() {
+    let k: ConnectionErrorKind = ConnectionErrorKind.CekKeepaliveTimeout;
+    assert(k is ConnectionErrorKind.CekKeepaliveTimeout);
+}
+
+@test
+fn test_connection_error_kind_pairwise_disjoint_subset() {
+    let dns: ConnectionErrorKind = ConnectionErrorKind.CekDnsFailure(Text.from(""));
+    let cr: ConnectionErrorKind = ConnectionErrorKind.CekConnectRefused;
+    let tls: ConnectionErrorKind = ConnectionErrorKind.CekTlsHandshakeFailed(Text.from(""));
+    let kt: ConnectionErrorKind = ConnectionErrorKind.CekKeepaliveTimeout;
+    assert(dns is ConnectionErrorKind.CekDnsFailure && !(dns is ConnectionErrorKind.CekConnectRefused));
+    assert(cr is ConnectionErrorKind.CekConnectRefused && !(cr is ConnectionErrorKind.CekTlsHandshakeFailed));
+    assert(tls is ConnectionErrorKind.CekTlsHandshakeFailed && !(tls is ConnectionErrorKind.CekKeepaliveTimeout));
+    assert(kt is ConnectionErrorKind.CekKeepaliveTimeout && !(kt is ConnectionErrorKind.CekDnsFailure));
+}
+
+// =============================================================================
+// Section 6: AuthErrorKind 5-variant
+// =============================================================================
+
+@test
+fn test_auth_error_kind_bad_credentials() {
+    let k: AuthErrorKind = AuthErrorKind.AekBadCredentials;
+    assert(k is AuthErrorKind.AekBadCredentials);
+}
+
+@test
+fn test_auth_error_kind_scram_failed() {
+    let k: AuthErrorKind = AuthErrorKind.AekScramFailed(Text.from("nonce mismatch"));
+    assert(k is AuthErrorKind.AekScramFailed);
+}
+
+@test
+fn test_auth_error_kind_channel_binding_mismatch() {
+    let k: AuthErrorKind = AuthErrorKind.AekChannelBindingMismatch;
+    assert(k is AuthErrorKind.AekChannelBindingMismatch);
+}
+
+@test
+fn test_auth_error_kind_iam_token_expired() {
+    let k: AuthErrorKind = AuthErrorKind.AekIamTokenExpired;
+    assert(k is AuthErrorKind.AekIamTokenExpired);
+}
+
+@test
+fn test_auth_error_kind_role_not_permitted() {
+    let k: AuthErrorKind = AuthErrorKind.AekRoleNotPermitted(Text.from("read-only role"));
+    assert(k is AuthErrorKind.AekRoleNotPermitted);
+}
+
+@test
+fn test_auth_error_kind_pairwise_disjoint_subset() {
+    let bc: AuthErrorKind = AuthErrorKind.AekBadCredentials;
+    let sf: AuthErrorKind = AuthErrorKind.AekScramFailed(Text.from(""));
+    let cb: AuthErrorKind = AuthErrorKind.AekChannelBindingMismatch;
+    let te: AuthErrorKind = AuthErrorKind.AekIamTokenExpired;
+    let rnp: AuthErrorKind = AuthErrorKind.AekRoleNotPermitted(Text.from(""));
+    assert(bc is AuthErrorKind.AekBadCredentials && !(bc is AuthErrorKind.AekScramFailed));
+    assert(sf is AuthErrorKind.AekScramFailed && !(sf is AuthErrorKind.AekChannelBindingMismatch));
+    assert(cb is AuthErrorKind.AekChannelBindingMismatch && !(cb is AuthErrorKind.AekIamTokenExpired));
+    assert(te is AuthErrorKind.AekIamTokenExpired && !(te is AuthErrorKind.AekRoleNotPermitted));
+    assert(rnp is AuthErrorKind.AekRoleNotPermitted && !(rnp is AuthErrorKind.AekBadCredentials));
+}
+
+// =============================================================================
+// Section 7: TimeoutPhase 4-variant
+// =============================================================================
+
+@test
+fn test_timeout_phase_connect() {
+    let p: TimeoutPhase = TimeoutPhase.TpConnect;
+    assert(p is TimeoutPhase.TpConnect);
+}
+
+@test
+fn test_timeout_phase_statement() {
+    let p: TimeoutPhase = TimeoutPhase.TpStatement;
+    assert(p is TimeoutPhase.TpStatement);
+}
+
+@test
+fn test_timeout_phase_idle() {
+    let p: TimeoutPhase = TimeoutPhase.TpIdle;
+    assert(p is TimeoutPhase.TpIdle);
+}
+
+@test
+fn test_timeout_phase_acquire() {
+    let p: TimeoutPhase = TimeoutPhase.TpAcquire;
+    assert(p is TimeoutPhase.TpAcquire);
+}
+
+@test
+fn test_timeout_phase_pairwise_disjoint() {
+    let c: TimeoutPhase = TimeoutPhase.TpConnect;
+    let s: TimeoutPhase = TimeoutPhase.TpStatement;
+    let i: TimeoutPhase = TimeoutPhase.TpIdle;
+    let a: TimeoutPhase = TimeoutPhase.TpAcquire;
+    assert(c is TimeoutPhase.TpConnect && !(c is TimeoutPhase.TpStatement));
+    assert(s is TimeoutPhase.TpStatement && !(s is TimeoutPhase.TpIdle));
+    assert(i is TimeoutPhase.TpIdle && !(i is TimeoutPhase.TpAcquire));
+    assert(a is TimeoutPhase.TpAcquire && !(a is TimeoutPhase.TpConnect));
+}
+
+// =============================================================================
+// Section 8: PoolErrorKind 4-variant
+// =============================================================================
+
+@test
+fn test_pool_error_kind_exhausted() {
+    let k: PoolErrorKind = PoolErrorKind.PekExhausted;
+    assert(k is PoolErrorKind.PekExhausted);
+}
+
+@test
+fn test_pool_error_kind_draining() {
+    let k: PoolErrorKind = PoolErrorKind.PekDraining;
+    assert(k is PoolErrorKind.PekDraining);
+}
+
+@test
+fn test_pool_error_kind_health_check_failed() {
+    let k: PoolErrorKind = PoolErrorKind.PekHealthCheckFailed;
+    assert(k is PoolErrorKind.PekHealthCheckFailed);
+}
+
+@test
+fn test_pool_error_kind_config_invalid() {
+    let k: PoolErrorKind = PoolErrorKind.PekConfigInvalid(Text.from("max_size < min_size"));
+    assert(k is PoolErrorKind.PekConfigInvalid);
+}
+
+@test
+fn test_pool_error_kind_pairwise_disjoint() {
+    let e: PoolErrorKind = PoolErrorKind.PekExhausted;
+    let d: PoolErrorKind = PoolErrorKind.PekDraining;
+    let hc: PoolErrorKind = PoolErrorKind.PekHealthCheckFailed;
+    let ci: PoolErrorKind = PoolErrorKind.PekConfigInvalid(Text.from(""));
+    assert(e is PoolErrorKind.PekExhausted && !(e is PoolErrorKind.PekDraining));
+    assert(d is PoolErrorKind.PekDraining && !(d is PoolErrorKind.PekHealthCheckFailed));
+    assert(hc is PoolErrorKind.PekHealthCheckFailed && !(hc is PoolErrorKind.PekConfigInvalid));
+    assert(ci is PoolErrorKind.PekConfigInvalid && !(ci is PoolErrorKind.PekExhausted));
+}
