@@ -1,0 +1,329 @@
+// =============================================================================
+// core-tests/meta/diakrisis_attrs/unit_test.vr
+// =============================================================================
+//
+// `core/meta/diakrisis_attrs.vr` — VVA Part B advisory attribute
+// parsers (Diakrisis-Quality meta-system). Five attribute families:
+//
+//   @effect(<kind>)             — EffectAttr     / DiakrisisEffectKind
+//   @infinity_category(<lvl>)   — InfinityCategoryAttr / InfinityLevel
+//   @autopoietic(eps, depth)    — AutopoieticAttr
+//   @ludic_design               — LudicDesignAttr
+//   @cut_elimination[(bound)]   — CutEliminationAttr
+//
+// Surface tested here (pure-data subset):
+//   * DiakrisisEffectKind 7-variant + .from_ident + .as_str
+//   * InfinityLevel 3-variant (Finite/Omega/OmegaOmega) + .as_str
+//   * The validated attribute record types are pure data and
+//     constructible.
+//   * CUT_ELIMINATION_DEFAULT_BOUND constant
+//
+// The parse_* functions are NOT tested at this layer because
+// `AttributeArg` is currently a record `{ name, value, span }`
+// in `core/meta/attribute.vr` but `diakrisis_attrs.vr` matches on
+// `AttributeArg.Ident(...)` / `AttributeArg.Int(...)` /
+// `AttributeArg.Str(...)` / `AttributeArg.Named { ... }` —
+// constructors that no longer exist on the record-form. The
+// parse-functions can only succeed once `AttributeArg` is realigned.
+// See audit.md §3.2 (open defect).
+// =============================================================================
+
+mount core.meta.diakrisis_attrs.{
+    DiakrisisEffectKind, EffectKind, EffectAttr,
+    InfinityLevel, InfinityCategoryAttr,
+    AutopoieticAttr, LudicDesignAttr, CutEliminationAttr,
+    CUT_ELIMINATION_DEFAULT_BOUND,
+};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+fn synthetic_span() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+// =============================================================================
+// Section 1: DiakrisisEffectKind 7-variant
+// =============================================================================
+
+@test
+fn test_effect_kind_pure() {
+    let k: DiakrisisEffectKind = DiakrisisEffectKind.Pure;
+    assert(k is DiakrisisEffectKind.Pure);
+}
+
+@test
+fn test_effect_kind_io() {
+    let k: DiakrisisEffectKind = DiakrisisEffectKind.Io;
+    assert(k is DiakrisisEffectKind.Io);
+}
+
+@test
+fn test_effect_kind_state() {
+    let k: DiakrisisEffectKind = DiakrisisEffectKind.State;
+    assert(k is DiakrisisEffectKind.State);
+}
+
+@test
+fn test_effect_kind_async() {
+    let k: DiakrisisEffectKind = DiakrisisEffectKind.Async;
+    assert(k is DiakrisisEffectKind.Async);
+}
+
+@test
+fn test_effect_kind_exception() {
+    let k: DiakrisisEffectKind = DiakrisisEffectKind.Exception;
+    assert(k is DiakrisisEffectKind.Exception);
+}
+
+@test
+fn test_effect_kind_nondet() {
+    let k: DiakrisisEffectKind = DiakrisisEffectKind.Nondet;
+    assert(k is DiakrisisEffectKind.Nondet);
+}
+
+@test
+fn test_effect_kind_quantum() {
+    let k: DiakrisisEffectKind = DiakrisisEffectKind.Quantum;
+    assert(k is DiakrisisEffectKind.Quantum);
+}
+
+@test
+fn test_effect_kind_variants_pairwise_disjoint() {
+    let p: DiakrisisEffectKind = DiakrisisEffectKind.Pure;
+    let i: DiakrisisEffectKind = DiakrisisEffectKind.Io;
+    let s: DiakrisisEffectKind = DiakrisisEffectKind.State;
+    assert(p is DiakrisisEffectKind.Pure && !(p is DiakrisisEffectKind.Io));
+    assert(i is DiakrisisEffectKind.Io && !(i is DiakrisisEffectKind.State));
+    assert(s is DiakrisisEffectKind.State && !(s is DiakrisisEffectKind.Pure));
+}
+
+// =============================================================================
+// Section 2: DiakrisisEffectKind.from_ident
+// =============================================================================
+
+@test
+fn test_effect_kind_from_ident_pure() {
+    let r = DiakrisisEffectKind.from_ident(Text.from("pure"));
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_effect_kind_from_ident_io() {
+    let r = DiakrisisEffectKind.from_ident(Text.from("io"));
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_effect_kind_from_ident_state() {
+    let r = DiakrisisEffectKind.from_ident(Text.from("state"));
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_effect_kind_from_ident_async() {
+    let r = DiakrisisEffectKind.from_ident(Text.from("async"));
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_effect_kind_from_ident_exception_long() {
+    let r = DiakrisisEffectKind.from_ident(Text.from("exception"));
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_effect_kind_from_ident_exception_alias_exn() {
+    let r = DiakrisisEffectKind.from_ident(Text.from("exn"));
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_effect_kind_from_ident_nondet_long() {
+    let r = DiakrisisEffectKind.from_ident(Text.from("nondet"));
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_effect_kind_from_ident_nondet_alias_non_det() {
+    let r = DiakrisisEffectKind.from_ident(Text.from("non_det"));
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_effect_kind_from_ident_quantum() {
+    let r = DiakrisisEffectKind.from_ident(Text.from("quantum"));
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_effect_kind_from_ident_unknown() {
+    let r = DiakrisisEffectKind.from_ident(Text.from("frobnicate"));
+    assert(r is Maybe.None);
+}
+
+@test
+fn test_effect_kind_from_ident_empty() {
+    let r = DiakrisisEffectKind.from_ident(Text.from(""));
+    assert(r is Maybe.None);
+}
+
+@test
+fn test_effect_kind_from_ident_case_insensitive() {
+    // .from_ident calls .to_ascii_lowercase first.
+    let r = DiakrisisEffectKind.from_ident(Text.from("PURE"));
+    assert(r is Maybe.Some);
+    let r2 = DiakrisisEffectKind.from_ident(Text.from("Io"));
+    assert(r2 is Maybe.Some);
+}
+
+// =============================================================================
+// Section 3: DiakrisisEffectKind.as_str canonical mapping
+// =============================================================================
+
+@test
+fn test_effect_kind_as_str_pure() {
+    let k: DiakrisisEffectKind = DiakrisisEffectKind.Pure;
+    assert(k.as_str() == "pure");
+}
+
+@test
+fn test_effect_kind_as_str_io() {
+    let k: DiakrisisEffectKind = DiakrisisEffectKind.Io;
+    assert(k.as_str() == "io");
+}
+
+@test
+fn test_effect_kind_as_str_exception() {
+    let k: DiakrisisEffectKind = DiakrisisEffectKind.Exception;
+    assert(k.as_str() == "exception");
+}
+
+@test
+fn test_effect_kind_as_str_nondet() {
+    let k: DiakrisisEffectKind = DiakrisisEffectKind.Nondet;
+    assert(k.as_str() == "nondet");
+}
+
+@test
+fn test_effect_kind_as_str_quantum() {
+    let k: DiakrisisEffectKind = DiakrisisEffectKind.Quantum;
+    assert(k.as_str() == "quantum");
+}
+
+// =============================================================================
+// Section 4: EffectKind public alias
+// =============================================================================
+
+@test
+fn test_effect_kind_public_alias_resolves() {
+    let k: EffectKind = DiakrisisEffectKind.State;
+    assert(k is DiakrisisEffectKind.State);
+}
+
+// =============================================================================
+// Section 5: InfinityLevel 3-variant
+// =============================================================================
+
+@test
+fn test_infinity_level_finite_zero() {
+    let l: InfinityLevel = InfinityLevel.Finite(0);
+    assert(l is InfinityLevel.Finite);
+}
+
+@test
+fn test_infinity_level_finite_two() {
+    let l: InfinityLevel = InfinityLevel.Finite(2);
+    assert(l is InfinityLevel.Finite);
+}
+
+@test
+fn test_infinity_level_omega() {
+    let l: InfinityLevel = InfinityLevel.Omega;
+    assert(l is InfinityLevel.Omega);
+}
+
+@test
+fn test_infinity_level_omega_omega() {
+    let l: InfinityLevel = InfinityLevel.OmegaOmega;
+    assert(l is InfinityLevel.OmegaOmega);
+}
+
+@test
+fn test_infinity_level_variants_pairwise_disjoint() {
+    let f: InfinityLevel = InfinityLevel.Finite(1);
+    let o: InfinityLevel = InfinityLevel.Omega;
+    let oo: InfinityLevel = InfinityLevel.OmegaOmega;
+    assert(f is InfinityLevel.Finite && !(f is InfinityLevel.Omega));
+    assert(o is InfinityLevel.Omega && !(o is InfinityLevel.OmegaOmega));
+    assert(oo is InfinityLevel.OmegaOmega && !(oo is InfinityLevel.Finite));
+}
+
+// =============================================================================
+// Section 6: InfinityLevel.as_str
+// =============================================================================
+
+@test
+fn test_infinity_level_as_str_omega() {
+    let l: InfinityLevel = InfinityLevel.Omega;
+    assert(l.as_str() == "omega");
+}
+
+@test
+fn test_infinity_level_as_str_omega_omega() {
+    let l: InfinityLevel = InfinityLevel.OmegaOmega;
+    assert(l.as_str() == "omega_omega");
+}
+
+// =============================================================================
+// Section 7: EffectAttr / InfinityCategoryAttr / AutopoieticAttr /
+//            LudicDesignAttr / CutEliminationAttr — record construction
+// =============================================================================
+
+@test
+fn test_effect_attr_record_construction() {
+    let a = EffectAttr { kind: DiakrisisEffectKind.Io, span: synthetic_span() };
+    assert(a.kind is DiakrisisEffectKind.Io);
+}
+
+@test
+fn test_infinity_category_attr_record_construction() {
+    let a = InfinityCategoryAttr { level: InfinityLevel.Omega, span: synthetic_span() };
+    assert(a.level is InfinityLevel.Omega);
+}
+
+@test
+fn test_autopoietic_attr_record_construction() {
+    let a = AutopoieticAttr {
+        epsilon: Text.from("ε_math"),
+        depth: 3,
+        span: synthetic_span(),
+    };
+    assert(a.epsilon == "ε_math");
+    assert(a.depth == 3);
+}
+
+@test
+fn test_ludic_design_attr_record_construction() {
+    let a = LudicDesignAttr { span: synthetic_span() };
+    // No payload — construction is the assertion.
+    let _ = a;
+}
+
+@test
+fn test_cut_elimination_attr_record_construction() {
+    let a = CutEliminationAttr { bound: 500, span: synthetic_span() };
+    assert(a.bound == 500);
+}
+
+// =============================================================================
+// Section 8: CUT_ELIMINATION_DEFAULT_BOUND constant
+// =============================================================================
+
+@test
+fn test_cut_elimination_default_bound_value() {
+    assert(CUT_ELIMINATION_DEFAULT_BOUND == 1000);
+}

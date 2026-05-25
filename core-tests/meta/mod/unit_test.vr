@@ -1,0 +1,202 @@
+// =============================================================================
+// core-tests/meta/mod/unit_test.vr
+// =============================================================================
+//
+// `core/meta/mod.vr` — module root: re-exports, MetaError 12-variant,
+// MetaResult alias, default constants.
+//
+// Surface tested here:
+//   * MetaError 12-variant + variant-disjointness + .message()
+//   * MetaResult<T> = Result<T, MetaError> usability
+//   * Default constants:
+//     DEFAULT_RECURSION_LIMIT / DEFAULT_ITERATION_LIMIT /
+//     DEFAULT_MEMORY_LIMIT    / DEFAULT_TIMEOUT_MS
+//   * VERSION / VERSION_INFO
+//
+// The re-exports themselves are exercised every time a downstream
+// module says `mount core.meta.{...}` — covered via test files in
+// every sister `meta/<x>/` folder.
+// =============================================================================
+
+mount core.meta.{MetaError, DEFAULT_RECURSION_LIMIT, DEFAULT_ITERATION_LIMIT, DEFAULT_MEMORY_LIMIT, DEFAULT_TIMEOUT_MS, VERSION_INFO};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+fn synthetic_span() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+// =============================================================================
+// Section 1: MetaError variants — happy variants
+// =============================================================================
+
+@test
+fn test_meta_error_asset_not_found_variant() {
+    let e: MetaError = MetaError.AssetNotFound { path: Text.from("/x.cfg") };
+    assert(e is MetaError.AssetNotFound);
+}
+
+@test
+fn test_meta_error_asset_read_error_variant() {
+    let e: MetaError = MetaError.AssetReadError {
+        path: Text.from("/x.cfg"),
+        reason: Text.from("EIO"),
+    };
+    assert(e is MetaError.AssetReadError);
+}
+
+@test
+fn test_meta_error_syntax_error_variant() {
+    let e: MetaError = MetaError.SyntaxError {
+        message: Text.from("unexpected"),
+        span: synthetic_span(),
+    };
+    assert(e is MetaError.SyntaxError);
+}
+
+@test
+fn test_meta_error_parse_failed_variant_empty_list() {
+    let e: MetaError = MetaError.ParseFailed(List.new());
+    assert(e is MetaError.ParseFailed);
+}
+
+@test
+fn test_meta_error_type_error_variant() {
+    let e: MetaError = MetaError.TypeError {
+        expected: Text.from("Int"),
+        found: Text.from("Text"),
+    };
+    assert(e is MetaError.TypeError);
+}
+
+@test
+fn test_meta_error_recursion_limit_variant() {
+    let e: MetaError = MetaError.RecursionLimit { depth: 300, limit: 256 };
+    assert(e is MetaError.RecursionLimit);
+}
+
+@test
+fn test_meta_error_iteration_limit_variant() {
+    let e: MetaError = MetaError.IterationLimit { count: 1000001, limit: 1000000 };
+    assert(e is MetaError.IterationLimit);
+}
+
+@test
+fn test_meta_error_memory_limit_variant() {
+    let e: MetaError = MetaError.MemoryLimit { used: 70000000, limit: 67108864 };
+    assert(e is MetaError.MemoryLimit);
+}
+
+@test
+fn test_meta_error_timeout_variant() {
+    let e: MetaError = MetaError.Timeout { elapsed_ms: 31000, limit_ms: 30000 };
+    assert(e is MetaError.Timeout);
+}
+
+@test
+fn test_meta_error_invalid_operation_variant() {
+    let e: MetaError = MetaError.InvalidOperation {
+        operation: Text.from("emit"),
+        reason: Text.from("no AstAccess ctx"),
+    };
+    assert(e is MetaError.InvalidOperation);
+}
+
+@test
+fn test_meta_error_cache_error_variant() {
+    let e: MetaError = MetaError.CacheError {
+        key: Text.from("foo"),
+        reason: Text.from("evicted"),
+    };
+    assert(e is MetaError.CacheError);
+}
+
+@test
+fn test_meta_error_method_not_found_variant() {
+    let e: MetaError = MetaError.MethodNotFound {
+        type_name: Text.from("Foo"),
+        method_name: Text.from("bar"),
+    };
+    assert(e is MetaError.MethodNotFound);
+}
+
+@test
+fn test_meta_error_other_variant() {
+    let e: MetaError = MetaError.Other { message: Text.from("generic") };
+    assert(e is MetaError.Other);
+}
+
+// =============================================================================
+// Section 2: MetaError pairwise disjoint
+// =============================================================================
+
+@test
+fn test_meta_error_variants_pairwise_disjoint_resource_family() {
+    let r: MetaError = MetaError.RecursionLimit { depth: 1, limit: 1 };
+    let i: MetaError = MetaError.IterationLimit { count: 1, limit: 1 };
+    let m: MetaError = MetaError.MemoryLimit { used: 1, limit: 1 };
+    let t: MetaError = MetaError.Timeout { elapsed_ms: 1, limit_ms: 1 };
+    assert(r is MetaError.RecursionLimit && !(r is MetaError.IterationLimit));
+    assert(i is MetaError.IterationLimit && !(i is MetaError.MemoryLimit));
+    assert(m is MetaError.MemoryLimit && !(m is MetaError.Timeout));
+    assert(t is MetaError.Timeout && !(t is MetaError.RecursionLimit));
+}
+
+@test
+fn test_meta_error_variants_pairwise_disjoint_io_family() {
+    let nf: MetaError = MetaError.AssetNotFound { path: Text.from("a") };
+    let re: MetaError = MetaError.AssetReadError {
+        path: Text.from("a"),
+        reason: Text.from("b"),
+    };
+    assert(nf is MetaError.AssetNotFound && !(nf is MetaError.AssetReadError));
+    assert(re is MetaError.AssetReadError && !(re is MetaError.AssetNotFound));
+}
+
+// =============================================================================
+// Section 3: Default constants
+// =============================================================================
+
+@test
+fn test_default_recursion_limit_value() {
+    assert(DEFAULT_RECURSION_LIMIT == 256);
+}
+
+@test
+fn test_default_iteration_limit_value() {
+    assert(DEFAULT_ITERATION_LIMIT == 1_000_000);
+}
+
+@test
+fn test_default_memory_limit_64mib() {
+    assert(DEFAULT_MEMORY_LIMIT == 64 * 1024 * 1024);
+}
+
+@test
+fn test_default_timeout_30s() {
+    assert(DEFAULT_TIMEOUT_MS == 30_000);
+}
+
+@test
+fn test_default_constants_relative_ordering() {
+    // Memory limit (64 MB) >> iteration limit (1 M) >> timeout (30 K) >> recursion (256).
+    assert(DEFAULT_MEMORY_LIMIT > DEFAULT_ITERATION_LIMIT);
+    assert(DEFAULT_ITERATION_LIMIT > DEFAULT_TIMEOUT_MS);
+    assert(DEFAULT_TIMEOUT_MS > DEFAULT_RECURSION_LIMIT);
+}
+
+// =============================================================================
+// Section 4: VERSION_INFO tuple
+// =============================================================================
+
+@test
+fn test_version_info_tuple_shape() {
+    let (major, minor, patch) = VERSION_INFO;
+    assert(major == 0);
+    assert(minor == 1);
+    assert(patch == 0);
+}

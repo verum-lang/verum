@@ -1,0 +1,689 @@
+// =============================================================================
+// core-tests/meta/token/unit_test.vr
+// =============================================================================
+//
+// `core/meta/token.vr` — Token streams + tokens + delimited groups.
+// Pure-data subset that does NOT call @compiler_intrinsic ctors at
+// runtime (`Span.call_site`, `TokenStream.from_str`,
+// `keyword_from_str`).
+//
+// Surface tested here:
+//   * Delimiter 4-variant (Parenthesis / Brace / Bracket / Invisible)
+//     + .open / .close
+//   * Spacing 2-variant (Joint / Alone)
+//   * Keyword 38-variant (sample of representative members)
+//   * StringKind 4-variant (Normal / Format / Raw / RawFormat)
+//   * TokenKind 6-variant (Ident / Kw / Lit / Punct / DocComment / Eof)
+//   * Literal 6-variant (Int / Float / String / Char / Bool / ByteString)
+//     + Literal ctors (.int / .float / .string / .char / .bool /
+//                      .format_string / .raw_string)
+//   * Token record direct construction + .is_ident / .as_ident /
+//     .is_keyword / .is_literal / .is_punct / .as_punct
+//   * TokenTree.Leaf / TokenTree.Grouped variant disjointness +
+//     .is_token / .is_group / .as_token / .as_group
+//   * TokenStream record direct construction + .is_empty / .len /
+//     .span / .first / .last / .trees / .to_trees
+//   * Group record + .delimiter / .tokens
+//   * LexError record + .new + Eq derived
+// =============================================================================
+
+mount core.meta.token.{
+    TokenStream, Token, TokenTree, TokenKind, Token as TokenStruct,
+    Delimiter, Spacing, Keyword, Literal, StringKind, Group, LexError,
+};
+mount core.meta.span.{MetaSpan, Span, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+fn synthetic_span() -> Span {
+    MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    }
+}
+
+fn span_with_id(id: UInt64) -> Span {
+    MetaSpan {
+        id,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false },
+    }
+}
+
+// =============================================================================
+// Section 1: Delimiter 4-variant
+// =============================================================================
+
+@test
+fn test_delimiter_parenthesis() {
+    let d: Delimiter = Delimiter.Parenthesis;
+    assert(d is Delimiter.Parenthesis);
+}
+
+@test
+fn test_delimiter_brace() {
+    let d: Delimiter = Delimiter.Brace;
+    assert(d is Delimiter.Brace);
+}
+
+@test
+fn test_delimiter_bracket() {
+    let d: Delimiter = Delimiter.Bracket;
+    assert(d is Delimiter.Bracket);
+}
+
+@test
+fn test_delimiter_invisible() {
+    let d: Delimiter = Delimiter.Invisible;
+    assert(d is Delimiter.Invisible);
+}
+
+@test
+fn test_delimiter_pairwise_disjoint() {
+    let p: Delimiter = Delimiter.Parenthesis;
+    let br: Delimiter = Delimiter.Brace;
+    let bk: Delimiter = Delimiter.Bracket;
+    let iv: Delimiter = Delimiter.Invisible;
+    assert(p is Delimiter.Parenthesis && !(p is Delimiter.Brace));
+    assert(br is Delimiter.Brace && !(br is Delimiter.Bracket));
+    assert(bk is Delimiter.Bracket && !(bk is Delimiter.Invisible));
+    assert(iv is Delimiter.Invisible && !(iv is Delimiter.Parenthesis));
+}
+
+// =============================================================================
+// Section 2: Delimiter.open / .close
+// =============================================================================
+
+@test
+fn test_delimiter_open_parenthesis() {
+    let d: Delimiter = Delimiter.Parenthesis;
+    let r = d.open();
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_delimiter_close_brace() {
+    let d: Delimiter = Delimiter.Brace;
+    let r = d.close();
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_delimiter_open_invisible_is_none() {
+    let d: Delimiter = Delimiter.Invisible;
+    let r = d.open();
+    assert(r is Maybe.None);
+}
+
+@test
+fn test_delimiter_close_invisible_is_none() {
+    let d: Delimiter = Delimiter.Invisible;
+    let r = d.close();
+    assert(r is Maybe.None);
+}
+
+// =============================================================================
+// Section 3: Spacing 2-variant
+// =============================================================================
+
+@test
+fn test_spacing_joint() {
+    let s: Spacing = Spacing.Joint;
+    assert(s is Spacing.Joint);
+}
+
+@test
+fn test_spacing_alone() {
+    let s: Spacing = Spacing.Alone;
+    assert(s is Spacing.Alone);
+}
+
+@test
+fn test_spacing_variants_disjoint() {
+    let j: Spacing = Spacing.Joint;
+    let a: Spacing = Spacing.Alone;
+    assert(j is Spacing.Joint && !(j is Spacing.Alone));
+    assert(a is Spacing.Alone && !(a is Spacing.Joint));
+}
+
+// =============================================================================
+// Section 4: Keyword 38-variant (representative sample)
+// =============================================================================
+
+@test
+fn test_keyword_let() {
+    let k: Keyword = Keyword.Let;
+    assert(k is Keyword.Let);
+}
+
+@test
+fn test_keyword_fn() {
+    let k: Keyword = Keyword.Fn;
+    assert(k is Keyword.Fn);
+}
+
+@test
+fn test_keyword_is() {
+    let k: Keyword = Keyword.Is;
+    assert(k is Keyword.Is);
+}
+
+@test
+fn test_keyword_type() {
+    let k: Keyword = Keyword.Type;
+    assert(k is Keyword.Type);
+}
+
+@test
+fn test_keyword_implement() {
+    let k: Keyword = Keyword.Implement;
+    assert(k is Keyword.Implement);
+}
+
+@test
+fn test_keyword_protocol() {
+    let k: Keyword = Keyword.Protocol;
+    assert(k is Keyword.Protocol);
+}
+
+@test
+fn test_keyword_using() {
+    let k: Keyword = Keyword.Using;
+    assert(k is Keyword.Using);
+}
+
+@test
+fn test_keyword_provide() {
+    let k: Keyword = Keyword.Provide;
+    assert(k is Keyword.Provide);
+}
+
+@test
+fn test_keyword_context() {
+    let k: Keyword = Keyword.Context;
+    assert(k is Keyword.Context);
+}
+
+@test
+fn test_keyword_meta() {
+    let k: Keyword = Keyword.Meta;
+    assert(k is Keyword.Meta);
+}
+
+@test
+fn test_keyword_pure() {
+    let k: Keyword = Keyword.Pure;
+    assert(k is Keyword.Pure);
+}
+
+@test
+fn test_keyword_async() {
+    let k: Keyword = Keyword.Async;
+    assert(k is Keyword.Async);
+}
+
+@test
+fn test_keyword_match() {
+    let k: Keyword = Keyword.Match;
+    assert(k is Keyword.Match);
+}
+
+@test
+fn test_keyword_for() {
+    let k: Keyword = Keyword.For;
+    assert(k is Keyword.For);
+}
+
+@test
+fn test_keyword_self() {
+    let k: Keyword = Keyword.Self_;
+    assert(k is Keyword.Self_);
+}
+
+@test
+fn test_keyword_super() {
+    let k: Keyword = Keyword.Super;
+    assert(k is Keyword.Super);
+}
+
+// =============================================================================
+// Section 5: StringKind 4-variant
+// =============================================================================
+
+@test
+fn test_string_kind_normal() {
+    let k: StringKind = StringKind.Normal;
+    assert(k is StringKind.Normal);
+}
+
+@test
+fn test_string_kind_format() {
+    let k: StringKind = StringKind.Format;
+    assert(k is StringKind.Format);
+}
+
+@test
+fn test_string_kind_raw() {
+    let k: StringKind = StringKind.Raw;
+    assert(k is StringKind.Raw);
+}
+
+@test
+fn test_string_kind_raw_format() {
+    let k: StringKind = StringKind.RawFormat;
+    assert(k is StringKind.RawFormat);
+}
+
+@test
+fn test_string_kind_variants_pairwise_disjoint() {
+    let n: StringKind = StringKind.Normal;
+    let f: StringKind = StringKind.Format;
+    let r: StringKind = StringKind.Raw;
+    let rf: StringKind = StringKind.RawFormat;
+    assert(n is StringKind.Normal && !(n is StringKind.Format));
+    assert(f is StringKind.Format && !(f is StringKind.Raw));
+    assert(r is StringKind.Raw && !(r is StringKind.RawFormat));
+    assert(rf is StringKind.RawFormat && !(rf is StringKind.Normal));
+}
+
+// =============================================================================
+// Section 6: Literal 6-variant
+// =============================================================================
+
+@test
+fn test_literal_int_variant() {
+    let l: Literal = Literal.Int { value: 42, suffix: Maybe.None };
+    assert(l is Literal.Int);
+}
+
+@test
+fn test_literal_float_variant() {
+    let l: Literal = Literal.Float { value: 3.14, suffix: Maybe.None };
+    assert(l is Literal.Float);
+}
+
+@test
+fn test_literal_string_variant() {
+    let l: Literal = Literal.String { value: Text.from("hi"), kind: StringKind.Normal };
+    assert(l is Literal.String);
+}
+
+@test
+fn test_literal_char_variant() {
+    let l: Literal = Literal.Char('a');
+    assert(l is Literal.Char);
+}
+
+@test
+fn test_literal_bool_variant() {
+    let l: Literal = Literal.Bool(true);
+    assert(l is Literal.Bool);
+}
+
+@test
+fn test_literal_variants_pairwise_disjoint() {
+    let i: Literal = Literal.Int { value: 0, suffix: Maybe.None };
+    let b: Literal = Literal.Bool(false);
+    let c: Literal = Literal.Char('x');
+    assert(i is Literal.Int && !(i is Literal.Bool));
+    assert(b is Literal.Bool && !(b is Literal.Char));
+    assert(c is Literal.Char && !(c is Literal.Int));
+}
+
+// =============================================================================
+// Section 7: Literal ctors
+// =============================================================================
+
+@test
+fn test_literal_int_ctor() {
+    let l = Literal.int(7);
+    assert(l is Literal.Int);
+}
+
+@test
+fn test_literal_float_ctor() {
+    let l = Literal.float(2.5);
+    assert(l is Literal.Float);
+}
+
+@test
+fn test_literal_string_ctor() {
+    let l = Literal.string(Text.from("abc"));
+    assert(l is Literal.String);
+}
+
+@test
+fn test_literal_format_string_ctor() {
+    let l = Literal.format_string(Text.from("x={}"));
+    assert(l is Literal.String);
+}
+
+@test
+fn test_literal_raw_string_ctor() {
+    let l = Literal.raw_string(Text.from("\\n"));
+    assert(l is Literal.String);
+}
+
+@test
+fn test_literal_char_ctor() {
+    let l = Literal.char('Z');
+    assert(l is Literal.Char);
+}
+
+@test
+fn test_literal_bool_ctor_true() {
+    let l = Literal.bool(true);
+    assert(l is Literal.Bool);
+}
+
+@test
+fn test_literal_bool_ctor_false() {
+    let l = Literal.bool(false);
+    assert(l is Literal.Bool);
+}
+
+// =============================================================================
+// Section 8: TokenKind 6-variant
+// =============================================================================
+
+@test
+fn test_token_kind_ident_variant() {
+    let k: TokenKind = TokenKind.Ident(Text.from("foo"));
+    assert(k is TokenKind.Ident);
+}
+
+@test
+fn test_token_kind_kw_variant() {
+    let k: TokenKind = TokenKind.Kw(Keyword.Let);
+    assert(k is TokenKind.Kw);
+}
+
+@test
+fn test_token_kind_lit_variant() {
+    let k: TokenKind = TokenKind.Lit(Literal.int(0));
+    assert(k is TokenKind.Lit);
+}
+
+@test
+fn test_token_kind_punct_variant() {
+    let k: TokenKind = TokenKind.Punct('+', Spacing.Alone);
+    assert(k is TokenKind.Punct);
+}
+
+@test
+fn test_token_kind_doc_comment_variant() {
+    let k: TokenKind = TokenKind.DocComment(Text.from("/// doc"));
+    assert(k is TokenKind.DocComment);
+}
+
+@test
+fn test_token_kind_eof_variant() {
+    let k: TokenKind = TokenKind.Eof;
+    assert(k is TokenKind.Eof);
+}
+
+@test
+fn test_token_kind_pairwise_disjoint() {
+    let i: TokenKind = TokenKind.Ident(Text.from("a"));
+    let kw: TokenKind = TokenKind.Kw(Keyword.Let);
+    let l: TokenKind = TokenKind.Lit(Literal.int(1));
+    let e: TokenKind = TokenKind.Eof;
+    assert(i is TokenKind.Ident && !(i is TokenKind.Kw));
+    assert(kw is TokenKind.Kw && !(kw is TokenKind.Lit));
+    assert(l is TokenKind.Lit && !(l is TokenKind.Eof));
+    assert(e is TokenKind.Eof && !(e is TokenKind.Ident));
+}
+
+// =============================================================================
+// Section 9: Token record + properties
+// =============================================================================
+
+@test
+fn test_token_direct_construction_ident() {
+    let t = Token { kind: TokenKind.Ident(Text.from("foo")), span: synthetic_span() };
+    assert(t.is_ident());
+}
+
+@test
+fn test_token_is_ident_returns_false_for_keyword() {
+    let t = Token { kind: TokenKind.Kw(Keyword.Let), span: synthetic_span() };
+    assert(!t.is_ident());
+}
+
+@test
+fn test_token_as_ident_some_for_ident() {
+    let t = Token { kind: TokenKind.Ident(Text.from("foo")), span: synthetic_span() };
+    let r = t.as_ident();
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_token_as_ident_none_for_literal() {
+    let t = Token { kind: TokenKind.Lit(Literal.int(5)), span: synthetic_span() };
+    let r = t.as_ident();
+    assert(r is Maybe.None);
+}
+
+@test
+fn test_token_is_keyword_true() {
+    let t = Token { kind: TokenKind.Kw(Keyword.Fn), span: synthetic_span() };
+    assert(t.is_keyword());
+}
+
+@test
+fn test_token_is_keyword_false_for_ident() {
+    let t = Token { kind: TokenKind.Ident(Text.from("bar")), span: synthetic_span() };
+    assert(!t.is_keyword());
+}
+
+@test
+fn test_token_is_literal_true() {
+    let t = Token { kind: TokenKind.Lit(Literal.bool(true)), span: synthetic_span() };
+    assert(t.is_literal());
+}
+
+@test
+fn test_token_is_punct_true() {
+    let t = Token { kind: TokenKind.Punct(',', Spacing.Alone), span: synthetic_span() };
+    assert(t.is_punct());
+}
+
+@test
+fn test_token_is_punct_false_for_ident() {
+    let t = Token { kind: TokenKind.Ident(Text.from("x")), span: synthetic_span() };
+    assert(!t.is_punct());
+}
+
+@test
+fn test_token_as_punct_some_for_punct() {
+    let t = Token { kind: TokenKind.Punct(';', Spacing.Joint), span: synthetic_span() };
+    let r = t.as_punct();
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_token_as_punct_none_for_ident() {
+    let t = Token { kind: TokenKind.Ident(Text.from("x")), span: synthetic_span() };
+    let r = t.as_punct();
+    assert(r is Maybe.None);
+}
+
+// =============================================================================
+// Section 10: TokenTree 2-variant + properties
+// =============================================================================
+
+fn sample_ident_token() -> Token {
+    Token { kind: TokenKind.Ident(Text.from("x")), span: synthetic_span() }
+}
+
+@test
+fn test_token_tree_leaf_variant() {
+    let t: TokenTree = TokenTree.Leaf(sample_ident_token());
+    assert(t is TokenTree.Leaf);
+}
+
+@test
+fn test_token_tree_grouped_variant() {
+    let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
+    let g = Group { delimiter: Delimiter.Parenthesis, tokens: inner, span: synthetic_span() };
+    let t: TokenTree = TokenTree.Grouped(g);
+    assert(t is TokenTree.Grouped);
+}
+
+@test
+fn test_token_tree_variants_disjoint() {
+    let leaf: TokenTree = TokenTree.Leaf(sample_ident_token());
+    let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
+    let g = Group { delimiter: Delimiter.Brace, tokens: inner, span: synthetic_span() };
+    let grouped: TokenTree = TokenTree.Grouped(g);
+    assert(leaf is TokenTree.Leaf && !(leaf is TokenTree.Grouped));
+    assert(grouped is TokenTree.Grouped && !(grouped is TokenTree.Leaf));
+}
+
+@test
+fn test_token_tree_is_token_for_leaf() {
+    let t: TokenTree = TokenTree.Leaf(sample_ident_token());
+    assert(t.is_token());
+    assert(!t.is_group());
+}
+
+@test
+fn test_token_tree_is_group_for_grouped() {
+    let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
+    let g = Group { delimiter: Delimiter.Bracket, tokens: inner, span: synthetic_span() };
+    let t: TokenTree = TokenTree.Grouped(g);
+    assert(t.is_group());
+    assert(!t.is_token());
+}
+
+@test
+fn test_token_tree_as_token_some_for_leaf() {
+    let t: TokenTree = TokenTree.Leaf(sample_ident_token());
+    let r = t.as_token();
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_token_tree_as_group_some_for_grouped() {
+    let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
+    let g = Group { delimiter: Delimiter.Brace, tokens: inner, span: synthetic_span() };
+    let t: TokenTree = TokenTree.Grouped(g);
+    let r = t.as_group();
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_token_tree_as_token_none_for_grouped() {
+    let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
+    let g = Group { delimiter: Delimiter.Parenthesis, tokens: inner, span: synthetic_span() };
+    let t: TokenTree = TokenTree.Grouped(g);
+    let r = t.as_token();
+    assert(r is Maybe.None);
+}
+
+@test
+fn test_token_tree_as_group_none_for_leaf() {
+    let t: TokenTree = TokenTree.Leaf(sample_ident_token());
+    let r = t.as_group();
+    assert(r is Maybe.None);
+}
+
+// =============================================================================
+// Section 11: TokenStream record direct construction
+// =============================================================================
+
+@test
+fn test_token_stream_empty_record() {
+    let ts = TokenStream { tokens: List.new(), span: synthetic_span() };
+    assert(ts.is_empty());
+    assert(ts.len() == 0);
+}
+
+@test
+fn test_token_stream_single_leaf() {
+    let leaf: TokenTree = TokenTree.Leaf(sample_ident_token());
+    let ts = TokenStream { tokens: List.of(leaf), span: synthetic_span() };
+    assert(!ts.is_empty());
+    assert(ts.len() == 1);
+}
+
+@test
+fn test_token_stream_first_some_after_push() {
+    let leaf: TokenTree = TokenTree.Leaf(sample_ident_token());
+    let ts = TokenStream { tokens: List.of(leaf), span: synthetic_span() };
+    let r = ts.first();
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_token_stream_first_none_when_empty() {
+    let ts = TokenStream { tokens: List.new(), span: synthetic_span() };
+    let r = ts.first();
+    assert(r is Maybe.None);
+}
+
+@test
+fn test_token_stream_last_some_after_push() {
+    let leaf: TokenTree = TokenTree.Leaf(sample_ident_token());
+    let ts = TokenStream { tokens: List.of(leaf), span: synthetic_span() };
+    let r = ts.last();
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_token_stream_last_none_when_empty() {
+    let ts = TokenStream { tokens: List.new(), span: synthetic_span() };
+    let r = ts.last();
+    assert(r is Maybe.None);
+}
+
+// =============================================================================
+// Section 12: Group record + accessors
+// =============================================================================
+
+@test
+fn test_group_record_construction_parenthesis() {
+    let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
+    let g = Group { delimiter: Delimiter.Parenthesis, tokens: inner, span: synthetic_span() };
+    let d = g.delimiter();
+    assert(d is Delimiter.Parenthesis);
+}
+
+@test
+fn test_group_record_construction_brace() {
+    let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
+    let g = Group { delimiter: Delimiter.Brace, tokens: inner, span: synthetic_span() };
+    assert(g.delimiter() is Delimiter.Brace);
+}
+
+@test
+fn test_group_record_construction_bracket() {
+    let inner = TokenStream { tokens: List.new(), span: synthetic_span() };
+    let g = Group { delimiter: Delimiter.Bracket, tokens: inner, span: synthetic_span() };
+    assert(g.delimiter() is Delimiter.Bracket);
+}
+
+// =============================================================================
+// Section 13: LexError record
+// =============================================================================
+
+@test
+fn test_lex_error_new_construction() {
+    let e = LexError.new(Text.from("unexpected"), synthetic_span());
+    assert(e.message == "unexpected");
+}
+
+@test
+fn test_lex_error_eq_by_message() {
+    let a = LexError.new(Text.from("err1"), synthetic_span());
+    let b = LexError.new(Text.from("err1"), span_with_id(99));
+    // Eq impl compares message only.
+    assert(a == b);
+}
+
+@test
+fn test_lex_error_neq_by_message() {
+    let a = LexError.new(Text.from("err1"), synthetic_span());
+    let b = LexError.new(Text.from("err2"), synthetic_span());
+    assert(!(a == b));
+}

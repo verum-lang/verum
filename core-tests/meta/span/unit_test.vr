@@ -1,0 +1,290 @@
+// =============================================================================
+// core-tests/meta/span/unit_test.vr
+// =============================================================================
+//
+// `core/meta/span.vr` — source span and location tracking types.
+//
+// **Construction discipline.**  Cross-module factory functions
+// (`Span.call_site`, `SourceLocation.new`, `SpanRange.new`,
+// `MultiSpan.empty`, etc.) currently trip the **cross-module record
+// return-value path** in VBC codegen (audit.md §3.1 / referenced in
+// `[[enactment_field_access_oob_2026-05-24]]`):
+//
+//     let loc = SourceLocation.new(...);
+//     loc.file == "..."     // ← field-access OOB at runtime
+//
+// To exercise the data surface without depending on that defect's
+// fix, every test below uses **direct record construction** at the
+// test site (e.g. `SourceLocation { file: ..., ... }`).
+//
+// Surface tested:
+//   * SpanFlags 3-Bool record + independent bits
+//   * MetaSpan direct-field construction + .is_expansion /
+//     .is_synthetic + Eq/Ord-by-(id, hygiene)
+//   * Span alias resolves to MetaSpan
+//   * SourceLocation 4-field record (direct construction)
+//   * SpanRange 2-field record (direct construction)
+//   * MultiSpan record (direct construction) + .is_empty +
+//     .primary_span
+//
+// The cross-module ctor paths are pinned in `regression_test.vr`.
+// Compiler-intrinsic methods (.start / .end / .join / .source_text /
+// resolution variants) belong at the verum_compiler test layer.
+// =============================================================================
+
+mount core.meta.span.{MetaSpan, Span, SourceLocation, SpanRange, MultiSpan, SpanFlags};
+mount core.base.maybe.{Maybe};
+
+// =============================================================================
+// Section 1: SpanFlags 3-Bool record
+// =============================================================================
+
+@test
+fn test_span_flags_all_false() {
+    let f = SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false };
+    assert(!f.is_expansion);
+    assert(!f.is_synthetic);
+    assert(!f.is_hidden);
+}
+
+@test
+fn test_span_flags_all_true() {
+    let f = SpanFlags { is_expansion: true, is_synthetic: true, is_hidden: true };
+    assert(f.is_expansion);
+    assert(f.is_synthetic);
+    assert(f.is_hidden);
+}
+
+@test
+fn test_span_flags_only_expansion() {
+    let f = SpanFlags { is_expansion: true, is_synthetic: false, is_hidden: false };
+    assert(f.is_expansion);
+    assert(!f.is_synthetic);
+    assert(!f.is_hidden);
+}
+
+@test
+fn test_span_flags_only_synthetic() {
+    let f = SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false };
+    assert(!f.is_expansion);
+    assert(f.is_synthetic);
+    assert(!f.is_hidden);
+}
+
+@test
+fn test_span_flags_only_hidden() {
+    let f = SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: true };
+    assert(!f.is_expansion);
+    assert(!f.is_synthetic);
+    assert(f.is_hidden);
+}
+
+// =============================================================================
+// Section 2: MetaSpan direct-field construction + predicates
+// =============================================================================
+
+@test
+fn test_meta_span_synthetic_predicate_true() {
+    let s = MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    };
+    assert(s.is_synthetic());
+}
+
+@test
+fn test_meta_span_synthetic_predicate_false() {
+    let s = MetaSpan {
+        id: 1,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false },
+    };
+    assert(!s.is_synthetic());
+}
+
+@test
+fn test_meta_span_expansion_predicate_true() {
+    let s = MetaSpan {
+        id: 2,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: true, is_synthetic: false, is_hidden: false },
+    };
+    assert(s.is_expansion());
+}
+
+@test
+fn test_meta_span_expansion_predicate_false() {
+    let s = MetaSpan {
+        id: 3,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false },
+    };
+    assert(!s.is_expansion());
+}
+
+// =============================================================================
+// Section 3: MetaSpan Eq impl — by (id, hygiene), flags excluded
+// =============================================================================
+
+@test
+fn test_meta_span_eq_same_id_and_hygiene() {
+    let a = MetaSpan { id: 5, hygiene: 1, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    let b = MetaSpan { id: 5, hygiene: 1, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    assert(a == b);
+}
+
+@test
+fn test_meta_span_eq_flags_excluded() {
+    let a = MetaSpan { id: 5, hygiene: 1, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    let b = MetaSpan { id: 5, hygiene: 1, flags: SpanFlags { is_expansion: true,  is_synthetic: true,  is_hidden: true  } };
+    // Eq compares id + hygiene only.
+    assert(a == b);
+}
+
+@test
+fn test_meta_span_neq_different_id() {
+    let a = MetaSpan { id: 5, hygiene: 1, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    let b = MetaSpan { id: 6, hygiene: 1, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    assert(!(a == b));
+}
+
+@test
+fn test_meta_span_neq_different_hygiene() {
+    let a = MetaSpan { id: 5, hygiene: 1, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    let b = MetaSpan { id: 5, hygiene: 2, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    assert(!(a == b));
+}
+
+// =============================================================================
+// Section 4: Span public alias is MetaSpan
+// =============================================================================
+
+@test
+fn test_span_alias_accepts_meta_span_value() {
+    let s: Span = MetaSpan {
+        id: 0,
+        hygiene: 0,
+        flags: SpanFlags { is_expansion: false, is_synthetic: true, is_hidden: false },
+    };
+    assert(s.is_synthetic());
+}
+
+// =============================================================================
+// Section 5: SourceLocation 4-field record (direct construction)
+// =============================================================================
+
+@test
+fn test_source_location_direct_construction() {
+    let loc = SourceLocation {
+        file: Text.from("foo.vr"),
+        line: 1,
+        column: 1,
+        offset: 0,
+    };
+    assert(loc.line == 1);
+    assert(loc.column == 1);
+    assert(loc.offset == 0);
+}
+
+@test
+fn test_source_location_nonzero_fields() {
+    let loc = SourceLocation {
+        file: Text.from("bar.vr"),
+        line: 42,
+        column: 17,
+        offset: 1024,
+    };
+    assert(loc.line == 42);
+    assert(loc.column == 17);
+    assert(loc.offset == 1024);
+}
+
+@test
+fn test_source_location_eq_by_file_line_column_offset_excluded() {
+    let a = SourceLocation { file: Text.from("a.vr"), line: 1, column: 2, offset: 0 };
+    let b = SourceLocation { file: Text.from("a.vr"), line: 1, column: 2, offset: 99 };
+    // Eq impl compares file/line/column only; offset excluded.
+    assert(a == b);
+}
+
+@test
+fn test_source_location_neq_by_line() {
+    let a = SourceLocation { file: Text.from("a.vr"), line: 1, column: 1, offset: 0 };
+    let b = SourceLocation { file: Text.from("a.vr"), line: 2, column: 1, offset: 0 };
+    assert(!(a == b));
+}
+
+@test
+fn test_source_location_neq_by_column() {
+    let a = SourceLocation { file: Text.from("a.vr"), line: 1, column: 1, offset: 0 };
+    let b = SourceLocation { file: Text.from("a.vr"), line: 1, column: 2, offset: 0 };
+    assert(!(a == b));
+}
+
+// =============================================================================
+// Section 6: SpanRange 2-field record (direct construction)
+// =============================================================================
+
+@test
+fn test_span_range_distinct_endpoints() {
+    let s1 = MetaSpan { id: 1, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    let s2 = MetaSpan { id: 2, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    let r = SpanRange { start: s1, end: s2 };
+    assert(r.start == s1);
+    assert(r.end == s2);
+}
+
+@test
+fn test_span_range_collapsed_endpoints() {
+    let s = MetaSpan { id: 9, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    let r = SpanRange { start: s, end: s };
+    assert(r.start == r.end);
+}
+
+// =============================================================================
+// Section 7: MultiSpan record (direct construction)
+// =============================================================================
+
+@test
+fn test_multi_span_empty_via_direct_construction() {
+    let m = MultiSpan {
+        primary: Maybe.None,
+        spans: List.new(),
+    };
+    assert(m.is_empty());
+}
+
+@test
+fn test_multi_span_with_primary_via_direct_construction() {
+    let s = MetaSpan { id: 1, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    let m = MultiSpan {
+        primary: Maybe.Some(s),
+        spans: List.new(),
+    };
+    assert(!m.is_empty());
+    assert(m.primary_span() is Maybe.Some);
+}
+
+@test
+fn test_multi_span_with_labeled_no_primary() {
+    let s = MetaSpan { id: 2, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    let m = MultiSpan {
+        primary: Maybe.None,
+        spans: List.of((s, Text.from("label"))),
+    };
+    assert(!m.is_empty());
+    assert(m.primary_span() is Maybe.None);
+}
+
+@test
+fn test_multi_span_with_primary_and_labeled() {
+    let s1 = MetaSpan { id: 1, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    let s2 = MetaSpan { id: 2, hygiene: 0, flags: SpanFlags { is_expansion: false, is_synthetic: false, is_hidden: false } };
+    let m = MultiSpan {
+        primary: Maybe.Some(s1),
+        spans: List.of((s2, Text.from("note"))),
+    };
+    assert(!m.is_empty());
+    assert(m.primary_span() is Maybe.Some);
+}

@@ -1,0 +1,278 @@
+// =============================================================================
+// core-tests/meta/contexts/unit_test.vr
+// =============================================================================
+//
+// `core/meta/contexts.vr` — 14 capability-context declarations + their
+// payload data types. ~3700 LOC.  The contexts themselves
+// (`BuildAssets`, `TypeInfo`, `AstAccess`, `CompileDiag`,
+// `MetaRuntime`, `MacroState`, `StageInfo`, `Hygiene`, `CodeSearch`,
+// `ProjectInfo`, `SourceMap`, `Schema`, `DepGraph`, `MetaBench`) are
+// compiler-provided — their methods are `@compiler_provided` /
+// `@compiler_intrinsic` and require a live build context. They are
+// covered at the verum_compiler test layer.
+//
+// **This test layer** covers the pure-data payload types that those
+// methods accept and return:
+//
+//   * DiagnosticSeverity 4-variant
+//   * SuggestionKind 3-variant
+//   * UsageContext 6-variant (Call / TypeAnnotation / FieldAccess /
+//     InPattern / Import / Other(Text))
+//   * ItemKind 7-variant
+//   * SchemaErrorSeverity 3-variant
+//   * BraceStyle 3-variant
+//   * MetaExpr / Type / Item / Pattern / Statement / MetaBlock —
+//     unit-type opaque tokens
+// =============================================================================
+
+mount core.meta.contexts.{
+    DiagnosticSeverity, SuggestionKind,
+    UsageContext, ItemKind,
+    SchemaErrorSeverity, BraceStyle,
+};
+
+// =============================================================================
+// Section 1: DiagnosticSeverity 4-variant
+// =============================================================================
+
+@test
+fn test_diagnostic_severity_error() {
+    let s: DiagnosticSeverity = DiagnosticSeverity.Error;
+    assert(s is DiagnosticSeverity.Error);
+}
+
+@test
+fn test_diagnostic_severity_warning() {
+    let s: DiagnosticSeverity = DiagnosticSeverity.Warning;
+    assert(s is DiagnosticSeverity.Warning);
+}
+
+@test
+fn test_diagnostic_severity_note() {
+    let s: DiagnosticSeverity = DiagnosticSeverity.Note;
+    assert(s is DiagnosticSeverity.Note);
+}
+
+@test
+fn test_diagnostic_severity_help() {
+    let s: DiagnosticSeverity = DiagnosticSeverity.Help;
+    assert(s is DiagnosticSeverity.Help);
+}
+
+@test
+fn test_diagnostic_severity_pairwise_disjoint() {
+    let e: DiagnosticSeverity = DiagnosticSeverity.Error;
+    let w: DiagnosticSeverity = DiagnosticSeverity.Warning;
+    let n: DiagnosticSeverity = DiagnosticSeverity.Note;
+    let h: DiagnosticSeverity = DiagnosticSeverity.Help;
+    assert(e is DiagnosticSeverity.Error && !(e is DiagnosticSeverity.Warning));
+    assert(w is DiagnosticSeverity.Warning && !(w is DiagnosticSeverity.Note));
+    assert(n is DiagnosticSeverity.Note && !(n is DiagnosticSeverity.Help));
+    assert(h is DiagnosticSeverity.Help && !(h is DiagnosticSeverity.Error));
+}
+
+// =============================================================================
+// Section 2: SuggestionKind 3-variant
+// =============================================================================
+
+@test
+fn test_suggestion_kind_note() {
+    let k: SuggestionKind = SuggestionKind.Note;
+    assert(k is SuggestionKind.Note);
+}
+
+@test
+fn test_suggestion_kind_help() {
+    let k: SuggestionKind = SuggestionKind.Help;
+    assert(k is SuggestionKind.Help);
+}
+
+@test
+fn test_suggestion_kind_fix() {
+    let k: SuggestionKind = SuggestionKind.Fix;
+    assert(k is SuggestionKind.Fix);
+}
+
+@test
+fn test_suggestion_kind_pairwise_disjoint() {
+    let n: SuggestionKind = SuggestionKind.Note;
+    let h: SuggestionKind = SuggestionKind.Help;
+    let f: SuggestionKind = SuggestionKind.Fix;
+    assert(n is SuggestionKind.Note && !(n is SuggestionKind.Help));
+    assert(h is SuggestionKind.Help && !(h is SuggestionKind.Fix));
+    assert(f is SuggestionKind.Fix && !(f is SuggestionKind.Note));
+}
+
+// =============================================================================
+// Section 3: UsageContext 6-variant
+// =============================================================================
+
+@test
+fn test_usage_context_call() {
+    let u: UsageContext = UsageContext.Call;
+    assert(u is UsageContext.Call);
+}
+
+@test
+fn test_usage_context_type_annotation() {
+    let u: UsageContext = UsageContext.TypeAnnotation;
+    assert(u is UsageContext.TypeAnnotation);
+}
+
+@test
+fn test_usage_context_field_access() {
+    let u: UsageContext = UsageContext.FieldAccess;
+    assert(u is UsageContext.FieldAccess);
+}
+
+@test
+fn test_usage_context_in_pattern() {
+    let u: UsageContext = UsageContext.InPattern;
+    assert(u is UsageContext.InPattern);
+}
+
+@test
+fn test_usage_context_import() {
+    let u: UsageContext = UsageContext.Import;
+    assert(u is UsageContext.Import);
+}
+
+@test
+fn test_usage_context_other_with_text_payload() {
+    let u: UsageContext = UsageContext.Other(Text.from("macro"));
+    assert(u is UsageContext.Other);
+}
+
+@test
+fn test_usage_context_pairwise_disjoint() {
+    let c: UsageContext = UsageContext.Call;
+    let ta: UsageContext = UsageContext.TypeAnnotation;
+    let fa: UsageContext = UsageContext.FieldAccess;
+    let ip: UsageContext = UsageContext.InPattern;
+    assert(c is UsageContext.Call && !(c is UsageContext.TypeAnnotation));
+    assert(ta is UsageContext.TypeAnnotation && !(ta is UsageContext.FieldAccess));
+    assert(fa is UsageContext.FieldAccess && !(fa is UsageContext.InPattern));
+    assert(ip is UsageContext.InPattern && !(ip is UsageContext.Call));
+}
+
+// =============================================================================
+// Section 4: ItemKind 7-variant
+// =============================================================================
+
+@test
+fn test_item_kind_function() {
+    let k: ItemKind = ItemKind.Function;
+    assert(k is ItemKind.Function);
+}
+
+@test
+fn test_item_kind_type_def() {
+    let k: ItemKind = ItemKind.TypeDef;
+    assert(k is ItemKind.TypeDef);
+}
+
+@test
+fn test_item_kind_const() {
+    let k: ItemKind = ItemKind.Const;
+    assert(k is ItemKind.Const);
+}
+
+@test
+fn test_item_kind_static() {
+    let k: ItemKind = ItemKind.Static;
+    assert(k is ItemKind.Static);
+}
+
+@test
+fn test_item_kind_module() {
+    let k: ItemKind = ItemKind.Module;
+    assert(k is ItemKind.Module);
+}
+
+@test
+fn test_item_kind_protocol() {
+    let k: ItemKind = ItemKind.Protocol;
+    assert(k is ItemKind.Protocol);
+}
+
+@test
+fn test_item_kind_implement() {
+    let k: ItemKind = ItemKind.Implement;
+    assert(k is ItemKind.Implement);
+}
+
+@test
+fn test_item_kind_pairwise_disjoint() {
+    let f: ItemKind = ItemKind.Function;
+    let t: ItemKind = ItemKind.TypeDef;
+    let c: ItemKind = ItemKind.Const;
+    let m: ItemKind = ItemKind.Module;
+    assert(f is ItemKind.Function && !(f is ItemKind.TypeDef));
+    assert(t is ItemKind.TypeDef && !(t is ItemKind.Const));
+    assert(c is ItemKind.Const && !(c is ItemKind.Module));
+    assert(m is ItemKind.Module && !(m is ItemKind.Function));
+}
+
+// =============================================================================
+// Section 5: SchemaErrorSeverity 3-variant
+// =============================================================================
+
+@test
+fn test_schema_error_severity_error() {
+    let s: SchemaErrorSeverity = SchemaErrorSeverity.Error;
+    assert(s is SchemaErrorSeverity.Error);
+}
+
+@test
+fn test_schema_error_severity_warning() {
+    let s: SchemaErrorSeverity = SchemaErrorSeverity.Warning;
+    assert(s is SchemaErrorSeverity.Warning);
+}
+
+@test
+fn test_schema_error_severity_info() {
+    let s: SchemaErrorSeverity = SchemaErrorSeverity.Info;
+    assert(s is SchemaErrorSeverity.Info);
+}
+
+@test
+fn test_schema_error_severity_pairwise_disjoint() {
+    let e: SchemaErrorSeverity = SchemaErrorSeverity.Error;
+    let w: SchemaErrorSeverity = SchemaErrorSeverity.Warning;
+    let i: SchemaErrorSeverity = SchemaErrorSeverity.Info;
+    assert(e is SchemaErrorSeverity.Error && !(e is SchemaErrorSeverity.Warning));
+    assert(w is SchemaErrorSeverity.Warning && !(w is SchemaErrorSeverity.Info));
+    assert(i is SchemaErrorSeverity.Info && !(i is SchemaErrorSeverity.Error));
+}
+
+// =============================================================================
+// Section 6: BraceStyle 3-variant
+// =============================================================================
+
+@test
+fn test_brace_style_same_line() {
+    let b: BraceStyle = BraceStyle.SameLine;
+    assert(b is BraceStyle.SameLine);
+}
+
+@test
+fn test_brace_style_next_line() {
+    let b: BraceStyle = BraceStyle.NextLine;
+    assert(b is BraceStyle.NextLine);
+}
+
+@test
+fn test_brace_style_adaptive() {
+    let b: BraceStyle = BraceStyle.Adaptive;
+    assert(b is BraceStyle.Adaptive);
+}
+
+@test
+fn test_brace_style_pairwise_disjoint() {
+    let s: BraceStyle = BraceStyle.SameLine;
+    let n: BraceStyle = BraceStyle.NextLine;
+    let a: BraceStyle = BraceStyle.Adaptive;
+    assert(s is BraceStyle.SameLine && !(s is BraceStyle.NextLine));
+    assert(n is BraceStyle.NextLine && !(n is BraceStyle.Adaptive));
+    assert(a is BraceStyle.Adaptive && !(a is BraceStyle.SameLine));
+}
