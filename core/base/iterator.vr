@@ -1945,22 +1945,22 @@ implement<I: Iterator> Iterator for PeekableIter<I> {
 
     fn next(&mut self) -> Maybe<I.Item> {
         match self.peeked.take() {
-            Some(v) => v,
-            None => self.iter.next(),
+            Maybe.Some(v) => v,
+            Maybe.None => self.iter.next(),
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let (lower, upper) = self.iter.size_hint();
         let peek_len = match self.peeked {
-            Some(Some(_)) => 1,
-            Some(None) => 0,
-            None => 0,
+            Maybe.Some(Maybe.Some(_)) => 1,
+            Maybe.Some(Maybe.None) => 0,
+            Maybe.None => 0,
         };
         let new_lower = lower + peek_len;
         let new_upper = match upper {
-            Some(u) => Some(u + peek_len),
-            None => None,
+            Maybe.Some(u) => Maybe.Some(u + peek_len),
+            Maybe.None => Maybe.None,
         };
         (new_lower, new_upper)
     }
