@@ -2042,12 +2042,12 @@ implement<I: Iterator> Iterator for StepByIter<I> {
         let (lower, upper) = self.iter.size_hint();
         let step = self.step;
         if step == 0 {
-            (0, Some(0))
+            (0, Maybe.Some(0))
         } else {
             let new_lower = (lower + step - 1) / step;
             let new_upper = match upper {
-                Some(u) => Some((u + step - 1) / step),
-                None => None,
+                Maybe.Some(u) => Maybe.Some((u + step - 1) / step),
+                Maybe.None => Maybe.None,
             };
             (new_lower, new_upper)
         }
@@ -2061,7 +2061,7 @@ implement<I: Iterator, F: fn(&I.Item)> Iterator for InspectIter<I, F> {
     fn next(&mut self) -> Maybe<I.Item> {
         let item = self.iter.next()?;
         (self.f)(&item);
-        Some(item)
+        Maybe.Some(item)
     }
 
     @inline(always)
