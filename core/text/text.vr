@@ -288,6 +288,21 @@ implement Text {
         }
     }
 
+    /// Inherent static-method form of the `From<&str> for Text`
+    /// protocol implementation — used at call sites that prefer the
+    /// `Text.from(literal)` shape over `From::from(literal)` or
+    /// protocol dispatch (which lenient-stubs in the current
+    /// codegen when the receiver type cannot be tracked).
+    ///
+    /// `Text.from("literal")` is the canonical empty-or-clone
+    /// constructor when the source is already a string literal /
+    /// `&Text`. For other source types use the specialised
+    /// `Text.from_utf8` / `.from_char` / `.from_int` / `.from_float` /
+    /// `.from_bool` factories.
+    public fn from(s: &Text) -> Text {
+        unsafe { Text.from_utf8_unchecked(s.as_bytes()) }
+    }
+
     /// Create text with a given capacity.
     ///
 

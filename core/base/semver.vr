@@ -457,6 +457,54 @@ public fn format_semver(v: &SemVer) -> Text {
 }
 
 // =============================================================================
+// `mount core.base.semver.{parse_semver, semver_compare, SemVerOrdering,
+// semver_zero}` import-site aliases used by downstream consumers
+// (`core/cog/resolve.vr`). Without these the dependency resolver
+// fails AOT compilation with `undefined function: semver_compare`,
+// blocking the entire stdlib-wide AOT pipeline (task #7).
+// =============================================================================
+
+/// Free-function alias for `parse` — matches the
+/// `mount core.base.semver.{parse_semver}` import style.
+public fn parse_semver(s: &Text) -> Result<SemVer, SemVerError> {
+    parse(s)
+}
+
+/// Three-way comparison verdict for `semver_compare`. Equivalent to
+/// `Ordering` but exposed under a SemVer-specific name so call sites
+/// can pattern-match without confusion against other orderings in
+/// scope.
+public type SemVerOrdering is
+      Less
+    | Equal
+    | Greater;
+
+/// Three-way comparison of two SemVers. Equivalent to `cmp(a, b)`
+/// but returns the SemVer-flavoured `SemVerOrdering` rather than the
+/// general `Ordering` type. Used by `core/cog/resolve.vr` for
+/// dependency-resolution comparisons.
+public fn semver_compare(a: &SemVer, b: &SemVer) -> SemVerOrdering {
+    match cmp(a, b) {
+        Ordering.Less    => SemVerOrdering.Less,
+        Ordering.Equal   => SemVerOrdering.Equal,
+        Ordering.Greater => SemVerOrdering.Greater,
+    }
+}
+
+/// The all-zero SemVer (`0.0.0` with no pre-release / build-meta).
+/// Convenience sentinel for "no version pinned yet" and lower-bound
+/// initialiser for cog version resolution loops.
+public fn semver_zero() -> SemVer {
+    SemVer {
+        major: 0_u64,
+        minor: 0_u64,
+        patch: 0_u64,
+        pre_release: List.new(),
+        build_meta:  List.new(),
+    }
+}
+
+// =============================================================================
 // Helpers
 // =============================================================================
 
