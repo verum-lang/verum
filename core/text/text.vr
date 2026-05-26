@@ -452,7 +452,7 @@ implement Text {
     /// Create text from bytes without validation.
     /// # Safety
     /// The bytes must be valid UTF-8.
-    unsafe fn from_utf8_unchecked(bytes: &[Byte]) -> Text {
+    public unsafe fn from_utf8_unchecked(bytes: &[Byte]) -> Text {
         let len = bytes.len();
         if len == 0 {
             return Text.new();
