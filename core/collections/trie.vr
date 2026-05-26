@@ -109,7 +109,13 @@ implement<V: Clone> Trie<V> {
         while i < key.len() {
             let b = key[i];
             if !node.children.contains_key(b.clone()) {
-                node.children.insert(b, Heap(empty_node<V>()));
+                // Use Heap.new (canonical static-method form) instead
+                // of the tuple-call `Heap(...)` form — the latter
+                // resolves to a 3-field record constructor (matching
+                // stdlib `type Heap<T> is { ptr, gen, epoch }`) and
+                // mis-allocates with single-arg, surfacing as
+                // FuseIter.next null-deref downstream.
+                node.children.insert(b, Heap.new(empty_node<V>()));
             }
             // Descend — we need the &mut inside the Heap.
             match node.children.get_mut(&b) {
