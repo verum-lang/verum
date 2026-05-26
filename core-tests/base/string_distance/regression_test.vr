@@ -1,0 +1,141 @@
+// =============================================================================
+// core-tests/base/string_distance/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.string_distance`. Each entry ties a
+// previously-observed defect or a public-API contract to a single
+// executable @test so re-regressions surface as named test failures
+// rather than green-suite drops.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.string_distance.{
+    levenshtein, levenshtein_bounded, levenshtein_text,
+    jaro, jaro_winkler,
+    closest_text, closest_n,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// REGRESSION §A: pre-fix unit_test.vr and property_test.vr used a
+// hand-rolled `fn bytes(s: &str) -> List<Byte>` helper that called
+// `s.chars()` on a `&str` parameter. Verum does NOT have a public
+// `&str` type — the canonical text-slice form is `&Text`. The pre-fix
+// helper panicked with:
+//   method 'str.chars' not found on receiver of runtime kind `Text<small>`
+// Fix: rewrite tests to use `Text.as_bytes()` directly.
+// =============================================================================
+
+@test
+fn regression_levenshtein_uses_text_as_bytes() {
+    let a = "kitten".to_text();
+    let b = "sitting".to_text();
+    assert_eq(levenshtein(a.as_bytes(), b.as_bytes()), 3);
+}
+
+// =============================================================================
+// REGRESSION §B: pre-fix integration_test.vr referenced a hallucinated
+// `StringDistanceOptions` type via `mount`, and called
+// `"hello".bytes()` expecting a `Bytes` (List<Byte>) — actually
+// `.bytes()` returns a `ByteIter`. There is also no `[].to_bytes()`
+// inherent. Fix: rewrite using `Text.as_bytes()` exclusively.
+// =============================================================================
+
+@test
+fn regression_jaro_text_form_via_as_bytes() {
+    let a = "MARTHA".to_text();
+    let b = "MARHTA".to_text();
+    let v = jaro(a.as_bytes(), b.as_bytes());
+    assert(v >= 0.0 && v <= 1.0);
+}
+
+// =============================================================================
+// REGRESSION §C: `closest_text` has an `Int = 3` default parameter
+// but the call-site syntax requires an explicit 3rd arg in the
+// current compiler. The pre-fix tests called `closest_text(q, &dict)`
+// with 2 args; the new tests pass `max_distance` explicitly.
+// =============================================================================
+
+@test
+fn regression_closest_text_requires_explicit_max_distance() {
+    let dict: List<Text> = ["cat".to_text(), "car".to_text()];
+    let q = "car".to_text();
+    let r = closest_text(&q, &dict, 3);   // explicit
+    assert(r.is_some());
+    assert_eq(r.unwrap(), "car".to_text());
+}
+
+// =============================================================================
+// REGRESSION §D: Levenshtein on empty input — both sides empty must
+// be 0, and (empty, nonempty) must equal the nonempty length. A
+// previous off-by-one defect here silently shifted distance by 1.
+// =============================================================================
+
+@test
+fn regression_levenshtein_empty_string_axioms() {
+    let empty = "".to_text();
+    let s = "hello".to_text();
+    assert_eq(levenshtein(empty.as_bytes(), empty.as_bytes()), 0);
+    assert_eq(levenshtein(empty.as_bytes(), s.as_bytes()),     5);
+    assert_eq(levenshtein(s.as_bytes(),     empty.as_bytes()), 5);
+}
+
+// =============================================================================
+// REGRESSION §E: Levenshtein-bounded must early-stop above the
+// threshold. The function returns `Maybe<Int>` — `Some(d)` when
+// `d <= threshold`, `None` otherwise. A defect that returned the
+// raw distance regardless would silently defeat the bounded optimisation.
+// =============================================================================
+
+@test
+fn regression_levenshtein_bounded_returns_none_above_threshold() {
+    let a = "kitten".to_text();
+    let b = "sitting".to_text();
+    // True distance is 3; bounded at 1 must return None.
+    let r = levenshtein_bounded(a.as_bytes(), b.as_bytes(), 1);
+    assert(r.is_none());
+}
+
+// =============================================================================
+// REGRESSION §F: Jaro-Winkler must be >= Jaro on inputs with a common
+// prefix (the prefix bonus is non-negative). A defect that swapped
+// the sign would surface here.
+// =============================================================================
+
+@test
+fn regression_jaro_winkler_ge_jaro_on_common_prefix() {
+    let a = "DWAYNE".to_text();
+    let b = "DUANE".to_text();
+    let j  = jaro(a.as_bytes(), b.as_bytes());
+    let jw = jaro_winkler(a.as_bytes(), b.as_bytes());
+    assert(jw >= j - 0.001);
+}
+
+// =============================================================================
+// REGRESSION §G (@ignore'd): direct tuple-field access on a
+// List<(Text, Int)> subscript loses the element type and routes the
+// `.0` / `.1` field-index resolver to a wider stdlib type's offset.
+// Same defect class as
+// `[[btree_pattern_match_ref_generic_class]]` /
+// `[[enactment_field_access_oob_2026-05-24]]`. Workaround: clone the
+// element into an explicitly-typed local first
+// (`let entry: (Text, Int) = list[i].clone(); let (a, b) = entry;`).
+// =============================================================================
+
+@ignore("[[btree_pattern_match_ref_generic_class]] — tuple-field access on List<(Text, Int)> subscript loses element type; .0 / .1 mis-resolve. Workaround: clone+destructure via typed local.")
+@test
+fn regression_pin_closest_n_tuple_field_access() {
+    let dict: List<Text> = [
+        "process".to_text(),
+        "progress".to_text(),
+        "promise".to_text(),
+    ];
+    let q = "proces".to_text();
+    let r = closest_n(&q, &dict, 3);
+    // Direct tuple-field access through subscript: this is the exact
+    // shape that mis-resolves today.
+    assert_eq(r[0].0, "process".to_text());
+    assert_eq(r[0].1, 1);
+}
+
+fn main() {}

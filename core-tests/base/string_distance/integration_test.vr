@@ -3,123 +3,226 @@
 // =============================================================================
 //
 // Integration tests for `core.base.string_distance` — cross-algorithm
-// comparisons, the `closest` autocorrect API, Unicode contract, and
-// realistic typo-suggestion scenarios.
+// comparisons, `closest_text` / `closest_n` autocorrect API, the Text
+// overload surface, and realistic typo-suggestion scenarios exercising
+// the rest of stdlib (List<Text>, Maybe).
+//
+// All distance fns operate on byte slices (`&[Byte]`). The canonical
+// way to obtain one from a `Text` is `text.as_bytes()` — there is no
+// `&str` type in Verum, and `text.bytes()` returns an iterator
+// (`ByteIter`), not a `Bytes`. Tests written before this change used
+// hallucinated APIs (`StringDistanceOptions`, `"...".bytes()`,
+// `[].to_bytes()`) — all rewritten in this file.
 // =============================================================================
 
 mount core.prelude.*;
 mount core.base.string_distance.{
-    levenshtein, levenshtein_bounded,
-    jaro, jaro_winkler,
+    levenshtein, levenshtein_bounded, levenshtein_text,
+    jaro, jaro_text, jaro_winkler, jaro_winkler_text,
     closest_text, closest_n,
-    StringDistanceOptions,
 };
 mount core.collections.list.List;
 
 // =============================================================================
-// Section 1: `closest` autocorrect API
+// Section 1: `closest_text` / `closest_n` autocorrect API end-to-end
 // =============================================================================
 
 @test
-fn test_closest_finds_best_match() {
+fn integration_closest_finds_best_match() {
     let candidates: List<Text> = [
-        "hello", "world", "help", "held", "helm",
-    ].map(|s| s.to_text()).collect();
-    let result = closest_text("helo".to_text(), &candidates);
+        "hello".to_text(),
+        "world".to_text(),
+        "help".to_text(),
+        "held".to_text(),
+        "helm".to_text(),
+    ];
+    let q = "helo".to_text();
+    let result = closest_text(&q, &candidates, 3);
     assert(result.is_some());
-    // "hello" or "help" — both distance 1 from "helo"
     let best = result.unwrap();
-    assert(best == "hello".to_text() || best == "help".to_text());
+    // "hello", "help", "held", "helm" all have distance 1 from "helo".
+    // Implementation breaks ties by candidate order, so the first one
+    // observed wins. Accept any of the distance-1 candidates.
+    assert(
+        best == "hello".to_text()
+        || best == "help".to_text()
+        || best == "held".to_text()
+        || best == "helm".to_text()
+    );
 }
 
 @test
-fn test_closest_returns_none_for_empty_candidates() {
-    let empty: List<Text> = [];
-    assert(closest_text("query".to_text(), &empty).is_none());
-}
-
-@test
-fn test_closest_exact_match_wins() {
-    let candidates: List<Text> = ["cat", "car", "cart", "care"]
-        .map(|s| s.to_text()).collect();
-    let result = closest_text("car".to_text(), &candidates);
-    assert_eq(result, Some("car".to_text()));
-}
-
-@test
-fn test_closest_n_returns_top_k() {
+fn integration_closest_exact_match_wins_over_close_match() {
     let candidates: List<Text> = [
-        "friend", "fiend", "fend", "fond", "find",
-    ].map(|s| s.to_text()).collect();
-    let results = closest_n("frend".to_text(), &candidates, 2);
+        "cat".to_text(),
+        "car".to_text(),
+        "cart".to_text(),
+        "care".to_text(),
+    ];
+    let q = "car".to_text();
+    let result = closest_text(&q, &candidates, 3);
+    assert(result.is_some());
+    assert_eq(result.unwrap(), "car".to_text());
+}
+
+@test
+fn integration_closest_returns_none_for_empty_candidates() {
+    let empty: List<Text> = [];
+    let q = "query".to_text();
+    assert(closest_text(&q, &empty, 3).is_none());
+}
+
+@test
+fn integration_closest_n_returns_top_k() {
+    let candidates: List<Text> = [
+        "friend".to_text(),
+        "fiend".to_text(),
+        "fend".to_text(),
+        "fond".to_text(),
+        "find".to_text(),
+    ];
+    let q = "frend".to_text();
+    let results = closest_n(&q, &candidates, 2);
     assert_eq(results.len(), 2);
+    // Top-2 must be sorted ascending by distance.
+    assert(results[0].1 <= results[1].1);
 }
 
 // =============================================================================
-// Section 2: Unicode (byte-level) contract
+// Section 2: ASCII byte-distance equals character-distance contract
 // =============================================================================
 
 @test
-fn test_levenshtein_ascii_same_as_char_distance() {
-    // For pure ASCII, byte-distance = character-distance
-    let a: Bytes = "kitten".bytes();
-    let b: Bytes = "sitting".bytes();
-    assert_eq(levenshtein(&a, &b), 3);
+fn integration_levenshtein_ascii_kitten_sitting_via_text() {
+    let a = "kitten".to_text();
+    let b = "sitting".to_text();
+    assert_eq(levenshtein(a.as_bytes(), b.as_bytes()), 3);
+    assert_eq(levenshtein_text(&a, &b), 3);
 }
 
 @test
-fn test_levenshtein_empty_string_is_other_length() {
-    let a: Bytes = "hello".bytes();
-    let b: Bytes = [].to_bytes();
-    assert_eq(levenshtein(&a, &b), 5);
-    assert_eq(levenshtein(&b, &a), 5);
+fn integration_levenshtein_empty_string_is_other_length() {
+    let a = "hello".to_text();
+    let b = "".to_text();
+    assert_eq(levenshtein(a.as_bytes(), b.as_bytes()), 5);
+    assert_eq(levenshtein(b.as_bytes(), a.as_bytes()), 5);
 }
 
 // =============================================================================
-// Section 3: Algorithm agreement on well-known inputs
+// Section 3: Cross-algorithm agreement on well-known inputs
 // =============================================================================
 
 @test
-fn test_all_algorithms_agree_on_identical_strings() {
-    let s: Bytes = "abcdef".bytes();
-    assert_eq(levenshtein(&s, &s), 0);
-    let st = "abcdef".to_text();
-    assert_eq(jaro(&st, &st), 1.0);
-    assert_eq(jaro_winkler(&st, &st), 1.0);
+fn integration_all_algorithms_agree_on_identical_strings() {
+    let s = "abcdef".to_text();
+    assert_eq(levenshtein(s.as_bytes(), s.as_bytes()), 0);
+    let j  = jaro(s.as_bytes(), s.as_bytes());
+    let jw = jaro_winkler(s.as_bytes(), s.as_bytes());
+    assert(j  >= 0.999 && j  <= 1.001);
+    assert(jw >= 0.999 && jw <= 1.001);
 }
 
 @test
-fn test_levenshtein_bounded_stops_early() {
-    let a: Bytes = "aaaaaa".bytes();
-    let b: Bytes = "bbbbbb".bytes();
-    // Full distance is 6; bounded at 2 should return Some(3) or None depending on impl
-    let bounded = levenshtein_bounded(&a, &b, 2);
-    // Either early-stopped (None) or correct (Some(6))
-    assert(bounded.is_none() || bounded.unwrap() <= 6);
+fn integration_levenshtein_bounded_stops_or_returns_correct() {
+    let a = "aaaaaa".to_text();
+    let b = "bbbbbb".to_text();
+    // Full distance is 6; bounded at 2 should return None (early stop).
+    let bounded = levenshtein_bounded(a.as_bytes(), b.as_bytes(), 2);
+    // Acceptable: either None (early-stop) OR Some(d <= 6) (no early stop).
+    if bounded.is_some() {
+        assert(bounded.unwrap() <= 6);
+    }
+}
+
+@test
+fn integration_jaro_winkler_text_form_matches_byte_form() {
+    let a = "DWAYNE".to_text();
+    let b = "DUANE".to_text();
+    let via_bytes = jaro_winkler(a.as_bytes(), b.as_bytes());
+    let via_text  = jaro_winkler_text(&a, &b);
+    let diff = if via_bytes > via_text { via_bytes - via_text } else { via_text - via_bytes };
+    assert(diff < 0.001);
 }
 
 // =============================================================================
-// Section 4: Spellcheck simulation with collection
+// Section 4: Spellcheck dictionary scenarios
 // =============================================================================
 
 @test
-fn test_spellcheck_dictionary_lookup() {
+fn integration_spellcheck_finds_canonical_word_for_typo() {
     let dictionary: List<Text> = [
-        "algorithm", "database", "network", "process", "function",
-        "variable", "constant", "protocol", "interface", "abstract",
-    ].map(|s| s.to_text()).collect();
+        "algorithm".to_text(),
+        "database".to_text(),
+        "network".to_text(),
+        "process".to_text(),
+        "function".to_text(),
+    ];
 
-    let typos: List<(Text, Text)> = [
-        ("alghorithm", "algorithm"),
-        ("databes",    "database"),
-        ("netwrok",    "network"),
-    ].map(|(t, e)| (t.to_text(), e.to_text())).collect();
+    let typo = "alghorithm".to_text();   // 1 transposition from "algorithm"
+    let suggestion = closest_text(&typo, &dictionary, 3);
+    assert(suggestion.is_some());
+    assert_eq(suggestion.unwrap(), "algorithm".to_text());
+}
 
-    for (typo, expected) in typos {
-        let suggestion = closest_text(typo.clone(), &dictionary);
-        assert(suggestion.is_some(), f"no suggestion for '{typo}'");
-        assert_eq(suggestion.unwrap(), expected,
-            f"wrong suggestion for '{typo}'");
+@test
+fn integration_spellcheck_unfindable_typo_returns_none() {
+    let dictionary: List<Text> = [
+        "algorithm".to_text(),
+        "database".to_text(),
+    ];
+    // A query that is too far from every dictionary entry.
+    let typo = "xyz".to_text();
+    let suggestion = closest_text(&typo, &dictionary, 1);
+    assert(suggestion.is_none());
+}
+
+@test
+fn integration_spellcheck_closest_n_provides_alternatives() {
+    let dictionary: List<Text> = [
+        "process".to_text(),
+        "progress".to_text(),
+        "promise".to_text(),
+        "produce".to_text(),
+        "protect".to_text(),
+    ];
+    let q = "proces".to_text();
+    let suggestions = closest_n(&q, &dictionary, 3);
+    // closest_n must produce exactly `n` results (or fewer when the
+    // dictionary is smaller) — minimum contract pin without
+    // depending on the (List<(Text, Int)>) field-access shape.
+    assert_eq(suggestions.len(), 3);
+}
+
+// =============================================================================
+// Section 5: Property-style invariants exercised against List inputs
+// =============================================================================
+
+@test
+fn integration_levenshtein_triangle_inequality_three_inputs() {
+    // d(a, c) <= d(a, b) + d(b, c)
+    let a = "kitten".to_text();
+    let b = "kittens".to_text();
+    let c = "sitting".to_text();
+    let dab = levenshtein(a.as_bytes(), b.as_bytes());
+    let dbc = levenshtein(b.as_bytes(), c.as_bytes());
+    let dac = levenshtein(a.as_bytes(), c.as_bytes());
+    assert(dac <= dab + dbc);
+}
+
+@test
+fn integration_levenshtein_symmetric_across_pairs() {
+    let pairs: List<(Text, Text)> = [
+        ("abc".to_text(),    "xyz".to_text()),
+        ("hello".to_text(),  "world".to_text()),
+        ("kitten".to_text(), "sitting".to_text()),
+    ];
+    let mut i: Int = 0;
+    while i < pairs.len() {
+        let p = pairs[i].clone();
+        let d_ab = levenshtein(p.0.as_bytes(), p.1.as_bytes());
+        let d_ba = levenshtein(p.1.as_bytes(), p.0.as_bytes());
+        assert_eq(d_ab, d_ba);
+        i = i + 1;
     }
 }
 

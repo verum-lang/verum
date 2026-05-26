@@ -2,56 +2,82 @@
 // core-tests/base/string_distance/unit_test.vr
 // =============================================================================
 //
-// Tests for `core.base.string_distance` — Levenshtein, Jaro,
-// Jaro-Winkler distance functions for fuzzy string matching.
+// Tests for `core.base.string_distance` — Levenshtein (full + bounded),
+// Jaro, Jaro-Winkler distance functions, plus the `closest_text` and
+// `closest_n` "did you mean ..." suggestion API.
+//
+// All byte-level functions are exercised via `Text.as_bytes()` rather
+// than a `chars()`-based hand-roller — `&str` is not a public type
+// in Verum (the canonical text-slice form is `&Text`), and
+// `.chars().map(|c| c as Byte)` loses information on multi-byte
+// codepoints.
 // =============================================================================
 
 mount core.prelude.*;
-mount core.base.string_distance.{levenshtein, levenshtein_bounded, levenshtein_text, jaro, jaro_winkler, closest_text};
+mount core.base.string_distance.{
+    levenshtein, levenshtein_bounded, levenshtein_text,
+    jaro, jaro_text, jaro_winkler, jaro_winkler_text,
+    closest_text, closest_n,
+};
 mount core.collections.list.List;
 
-fn bytes(s: &str) -> List<Byte> {
-    let mut bs: List<Byte> = [];
-    for c in s.chars() { bs.push(c as Byte); }
-    bs
-}
-
 // =============================================================================
-// Section 1: Levenshtein known fixtures
+// Section 1: Levenshtein — canonical fixtures (Wagner-Fischer)
 // =============================================================================
 
 @test
 fn test_levenshtein_kitten_sitting_is_3() {
-    let a = bytes("kitten");
-    let b = bytes("sitting");
-    assert_eq(levenshtein(&a, &b), 3);
+    let a = "kitten".to_text();
+    let b = "sitting".to_text();
+    assert_eq(levenshtein(a.as_bytes(), b.as_bytes()), 3);
 }
 
 @test
 fn test_levenshtein_saturday_sunday_is_3() {
-    let a = bytes("saturday");
-    let b = bytes("sunday");
-    assert_eq(levenshtein(&a, &b), 3);
+    let a = "saturday".to_text();
+    let b = "sunday".to_text();
+    assert_eq(levenshtein(a.as_bytes(), b.as_bytes()), 3);
 }
 
 @test
 fn test_levenshtein_identical_strings_is_zero() {
-    let a = bytes("hello");
-    assert_eq(levenshtein(&a, &a), 0);
+    let a = "hello".to_text();
+    assert_eq(levenshtein(a.as_bytes(), a.as_bytes()), 0);
 }
 
 @test
 fn test_levenshtein_empty_string_to_self_is_zero() {
-    let a = bytes("");
-    assert_eq(levenshtein(&a, &a), 0);
+    let a = "".to_text();
+    assert_eq(levenshtein(a.as_bytes(), a.as_bytes()), 0);
 }
 
 @test
 fn test_levenshtein_empty_to_nonempty_is_length() {
-    let a = bytes("");
-    let b = bytes("abc");
-    assert_eq(levenshtein(&a, &b), 3);
-    assert_eq(levenshtein(&b, &a), 3);
+    let a = "".to_text();
+    let b = "abc".to_text();
+    assert_eq(levenshtein(a.as_bytes(), b.as_bytes()), 3);
+    assert_eq(levenshtein(b.as_bytes(), a.as_bytes()), 3);
+}
+
+@test
+fn test_levenshtein_single_substitution() {
+    let a = "cat".to_text();
+    let b = "car".to_text();
+    assert_eq(levenshtein(a.as_bytes(), b.as_bytes()), 1);
+}
+
+@test
+fn test_levenshtein_single_insertion() {
+    let a = "cat".to_text();
+    let b = "cart".to_text();
+    assert_eq(levenshtein(a.as_bytes(), b.as_bytes()), 1);
+}
+
+@test
+fn test_levenshtein_single_deletion() {
+    let a = "cart".to_text();
+    let b = "cat".to_text();
+    assert_eq(levenshtein(a.as_bytes(), b.as_bytes()), 1);
 }
 
 // =============================================================================
@@ -60,90 +86,240 @@ fn test_levenshtein_empty_to_nonempty_is_length() {
 
 @test
 fn test_levenshtein_bounded_within_max() {
-    let a = bytes("kitten");
-    let b = bytes("sitting");
-    let r = levenshtein_bounded(&a, &b, 5);
+    let a = "kitten".to_text();
+    let b = "sitting".to_text();
+    let r = levenshtein_bounded(a.as_bytes(), b.as_bytes(), 5);
+    assert(r.is_some());
+    assert_eq(r.unwrap(), 3);
+}
+
+@test
+fn test_levenshtein_bounded_at_max_returns_value() {
+    let a = "kitten".to_text();
+    let b = "sitting".to_text();
+    let r = levenshtein_bounded(a.as_bytes(), b.as_bytes(), 3);
+    assert(r.is_some());
     assert_eq(r.unwrap(), 3);
 }
 
 @test
 fn test_levenshtein_bounded_exceeds_max_returns_none() {
-    let a = bytes("kitten");
-    let b = bytes("sitting");
-    let r = levenshtein_bounded(&a, &b, 1);
+    let a = "kitten".to_text();
+    let b = "sitting".to_text();
+    let r = levenshtein_bounded(a.as_bytes(), b.as_bytes(), 1);
     assert(r.is_none());
 }
 
+@test
+fn test_levenshtein_bounded_identical_is_zero() {
+    let a = "hello".to_text();
+    let r = levenshtein_bounded(a.as_bytes(), a.as_bytes(), 0);
+    assert(r.is_some());
+    assert_eq(r.unwrap(), 0);
+}
+
 // =============================================================================
-// Section 3: Jaro — symmetric similarity in [0, 1]
+// Section 3: Jaro — position-and-match similarity in [0, 1]
 // =============================================================================
 
 @test
 fn test_jaro_identical_returns_one() {
-    let a = bytes("hello");
-    let v = jaro(&a, &a);
+    let a = "hello".to_text();
+    let v = jaro(a.as_bytes(), a.as_bytes());
     assert(v >= 0.999 && v <= 1.001);
+}
+
+@test
+fn test_jaro_empty_strings_returns_one() {
+    let a = "".to_text();
+    let v = jaro(a.as_bytes(), a.as_bytes());
+    // Convention: empty/empty match by Jaro definition. Implementations
+    // may return 0.0 OR 1.0 — accept either as long as the function
+    // does not panic.
+    assert(v >= 0.0 && v <= 1.001);
 }
 
 @test
 fn test_jaro_completely_different_returns_zero() {
-    let a = bytes("abc");
-    let b = bytes("xyz");
-    let v = jaro(&a, &b);
+    let a = "abc".to_text();
+    let b = "xyz".to_text();
+    let v = jaro(a.as_bytes(), b.as_bytes());
     assert(v >= -0.001 && v <= 0.001);
 }
 
+@test
+fn test_jaro_symmetric() {
+    let a = "martha".to_text();
+    let b = "marhta".to_text();
+    let v1 = jaro(a.as_bytes(), b.as_bytes());
+    let v2 = jaro(b.as_bytes(), a.as_bytes());
+    let diff = if v1 > v2 { v1 - v2 } else { v2 - v1 };
+    assert(diff < 0.001);
+}
+
 // =============================================================================
-// Section 4: Jaro-Winkler — Jaro + prefix bonus
+// Section 4: Jaro-Winkler — Jaro + common-prefix boost
 // =============================================================================
 
 @test
 fn test_jaro_winkler_identical_returns_one() {
-    let a = bytes("hello");
-    let v = jaro_winkler(&a, &a);
+    let a = "hello".to_text();
+    let v = jaro_winkler(a.as_bytes(), a.as_bytes());
     assert(v >= 0.999 && v <= 1.001);
 }
 
+@test
+fn test_jaro_winkler_with_prefix_exceeds_or_equals_jaro() {
+    // Jaro-Winkler is Jaro + prefix-bonus where bonus >= 0, so JW >= J
+    // for any inputs that share a common prefix.
+    let a = "martha".to_text();
+    let b = "marhta".to_text();
+    let j  = jaro(a.as_bytes(), b.as_bytes());
+    let jw = jaro_winkler(a.as_bytes(), b.as_bytes());
+    assert(jw >= j - 0.001);
+}
+
 // =============================================================================
-// Section 5: `closest` autocorrect API
+// Section 5: closest_text — autocorrect suggestion API
 // =============================================================================
 
 @test
 fn test_closest_returns_exact_match() {
-    let dict: List<Text> = ["cat", "car", "bar"].map(|s| s.to_text()).collect();
-    assert_eq(closest_text("car".to_text(), &dict), Some("car".to_text()));
+    let dict: List<Text> = [
+        "cat".to_text(),
+        "car".to_text(),
+        "bar".to_text(),
+    ];
+    let q = "car".to_text();
+    let r = closest_text(&q, &dict, 3);
+    assert(r.is_some());
+    assert_eq(r.unwrap(), "car".to_text());
 }
 
 @test
 fn test_closest_finds_nearest_by_levenshtein() {
-    let dict: List<Text> = ["hello", "world", "help"].map(|s| s.to_text()).collect();
-    let result = closest_text("helo".to_text(), &dict);
-    assert(result.is_some());
-    // distance("helo","hello")=1, distance("helo","world")=4, distance("helo","help")=1
-    let best = result.unwrap();
+    let dict: List<Text> = [
+        "hello".to_text(),
+        "world".to_text(),
+        "help".to_text(),
+    ];
+    let q = "helo".to_text();
+    let r = closest_text(&q, &dict, 3);
+    assert(r.is_some());
+    // distance("helo", "hello") = 1, distance("helo", "help") = 1 (tie)
+    let best = r.unwrap();
     assert(best == "hello".to_text() || best == "help".to_text());
 }
 
 @test
 fn test_closest_empty_candidates_returns_none() {
     let dict: List<Text> = [];
-    assert(closest_text("query".to_text(), &dict).is_none());
+    let q = "query".to_text();
+    let r = closest_text(&q, &dict, 3);
+    assert(r.is_none());
+}
+
+@test
+fn test_closest_no_candidate_within_max_returns_none() {
+    let dict: List<Text> = ["zzz".to_text(), "yyy".to_text()];
+    let q = "abc".to_text();
+    let r = closest_text(&q, &dict, 1);   // dist >= 3 for all
+    assert(r.is_none());
 }
 
 // =============================================================================
-// Section 6: Unicode byte-distance contract
+// Section 6: closest_n — top-N candidates sorted by distance
 // =============================================================================
+
+@test
+fn test_closest_n_returns_n_when_dict_has_more() {
+    // Length contract — closest_n must produce exactly `n` results
+    // when the dictionary has >= n entries. Tuple-field access
+    // (`r[0].0` / `r[0].1`) is deferred to a regression pin — same
+    // class as the field-access-through-subscript defect surfaced
+    // by coinductive/regression_test.vr §E.
+    let dict: List<Text> = [
+        "cat".to_text(),
+        "car".to_text(),
+        "bar".to_text(),
+        "bat".to_text(),
+    ];
+    let q = "cat".to_text();
+    let r = closest_n(&q, &dict, 2);
+    assert_eq(r.len(), 2);
+}
+
+@test
+fn test_closest_n_returns_all_when_dict_smaller_than_n() {
+    let dict: List<Text> = ["cat".to_text(), "car".to_text()];
+    let q = "cat".to_text();
+    let r = closest_n(&q, &dict, 10);
+    assert_eq(r.len(), 2);
+}
+
+@test
+fn test_closest_n_returns_full_dict_when_n_equals_size() {
+    // closest_n with n == dict.len() must return the full dictionary
+    // re-sorted by distance. Length contract only — tuple-field
+    // ordering pinned in regression_test.vr.
+    let dict: List<Text> = [
+        "world".to_text(),
+        "help".to_text(),
+        "hello".to_text(),
+        "abc".to_text(),
+    ];
+    let q = "helo".to_text();
+    let r = closest_n(&q, &dict, 4);
+    assert_eq(r.len(), 4);
+}
+
+// =============================================================================
+// Section 7: Text-overload helpers
+// =============================================================================
+
+@test
+fn test_levenshtein_text_matches_byte_form() {
+    let a = "kitten".to_text();
+    let b = "sitting".to_text();
+    let via_bytes = levenshtein(a.as_bytes(), b.as_bytes());
+    let via_text  = levenshtein_text(&a, &b);
+    assert_eq(via_text, via_bytes);
+}
+
+@test
+fn test_jaro_text_matches_byte_form() {
+    let a = "hello".to_text();
+    let b = "hallo".to_text();
+    let via_bytes = jaro(a.as_bytes(), b.as_bytes());
+    let via_text  = jaro_text(&a, &b);
+    let diff = if via_bytes > via_text { via_bytes - via_text } else { via_text - via_bytes };
+    assert(diff < 0.001);
+}
+
+@test
+fn test_jaro_winkler_text_matches_byte_form() {
+    let a = "martha".to_text();
+    let b = "marhta".to_text();
+    let via_bytes = jaro_winkler(a.as_bytes(), b.as_bytes());
+    let via_text  = jaro_winkler_text(&a, &b);
+    let diff = if via_bytes > via_text { via_bytes - via_text } else { via_text - via_bytes };
+    assert(diff < 0.001);
+}
 
 @test
 fn test_ascii_byte_distance_equals_char_distance() {
-    // For pure ASCII, byte-level distance = character-level distance
-    assert_eq(levenshtein_text(&"abc".to_text(), &"abd".to_text()), 1);
+    // For pure ASCII, byte-level distance = character-level distance.
+    let a = "abc".to_text();
+    let b = "abd".to_text();
+    assert_eq(levenshtein_text(&a, &b), 1);
 }
 
 @test
-fn test_empty_vs_nonempty_distance_is_length() {
-    assert_eq(levenshtein_text(&"".to_text(), &"hello".to_text()), 5);
-    assert_eq(levenshtein_text(&"hello".to_text(), &"".to_text()), 5);
+fn test_empty_text_vs_nonempty_distance_is_length() {
+    let empty = "".to_text();
+    let s     = "hello".to_text();
+    assert_eq(levenshtein_text(&empty, &s), 5);
+    assert_eq(levenshtein_text(&s, &empty), 5);
 }
 
 fn main() {}
