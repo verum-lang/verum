@@ -135,10 +135,18 @@ implement<T: Hash + Eq> Multiset<T> {
     /// assert_eq(m.count(&2), 2);
     /// assert_eq(m.count(&3), 3);
     /// ```
-    public fn from(values: [T; _]) -> Multiset<T> {
-        let mut m = Multiset.with_capacity(values.len());
-        for item in values {
-            m.insert(item);
+    public fn from(values: [T; _]) -> Multiset<T>
+    where T: Clone
+    {
+        // Index-based iteration — `for item in [T; N]` silently
+        // no-ops in current codegen (see List.from commit
+        // 0360a343e for the same fix class).
+        let n = values.len();
+        let mut m = Multiset.with_capacity(n);
+        let mut i: Int = 0;
+        while i < n {
+            m.insert(values[i].clone());
+            i = i + 1;
         }
         m
     }
@@ -146,10 +154,16 @@ implement<T: Hash + Eq> Multiset<T> {
     /// Build from `(element, multiplicity)` pairs. Multiplicities ≤ 0
     /// are silently dropped — the multiset invariant is "every key has
     /// strictly positive count".
-    public fn from_counts(pairs: [(T, Int); _]) -> Multiset<T> {
-        let mut m = Multiset.with_capacity(pairs.len());
-        for (item, k) in pairs {
+    public fn from_counts(pairs: [(T, Int); _]) -> Multiset<T>
+    where T: Clone
+    {
+        let n = pairs.len();
+        let mut m = Multiset.with_capacity(n);
+        let mut i: Int = 0;
+        while i < n {
+            let (item, k) = pairs[i].clone();
             if k > 0 { m.insert_n(item, k); }
+            i = i + 1;
         }
         m
     }
