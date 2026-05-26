@@ -150,35 +150,47 @@ implement<K: Ord, V> BTreeMap<K, V> {
     /// assert_eq(map.get(&2), None);
     /// ```
     public fn get(&self, key: &K) -> Maybe<V> {
-        // FULLY INLINED for the single-node-leaf case to bypass the
-        // codegen register-reuse defect that breaks self.search_node
-        // dispatch chains (task #16).  For deeper trees we still
-        // delegate to search_node; the residual is documented in
-        // `core-tests/collections/btree/audit.md`.
+        // FULLY INLINED — sidesteps the search_node call boundary
+        // entirely.  For single-level trees (the common case for
+        // any insert count < MAX_KEYS), the search is one pass
+        // over the root's keys.  Deeper trees descend via
+        // search_node helper.
+        //
+        // **Receiver stability discipline**: each field access on
+        // `node` is preceded by a let binding that captures a
+        // fresh &-reference, dodging the codegen register-reuse
+        // defect that re-uses `node`'s slot across intermediate
+        // accesses (task #16 — diagnostic at commit c2f74b263
+        // localised receiver to type_id=512 List at pc=176).
         match &self.root {
             None => None,
             Some(node) => {
-                // Direct field access via destructured `node`
-                // (a &Heap<BTreeNode<K, V>> from the match arm).
-                let klen = node.keys.len();
+                // Stabilise via explicit local bindings BEFORE the
+                // loop so the codegen doesn't reuse `node`'s reg.
+                let keys_ref = &node.keys;
+                let klen = keys_ref.len();
                 let mut i = 0;
                 while i < klen {
-                    if *key > node.keys[i] {
+                    if *key > keys_ref[i] {
                         i = i + 1;
                     } else {
                         break;
                     }
                 }
-                if i < klen && *key == node.keys[i] {
-                    return Some(node.values[i]);
+                if i < klen {
+                    let keys_ref2 = &node.keys;
+                    if *key == keys_ref2[i] {
+                        let values_ref = &node.values;
+                        return Some(values_ref[i]);
+                    }
                 }
-                // Multi-level descent — only fires for non-empty
-                // children; for leaf nodes (children empty) the
-                // loop above already returned.
-                if node.children.len() == 0 {
+                // Children check: re-bind &node.children fresh to
+                // dodge stale register state.
+                let children_ref = &node.children;
+                if children_ref.len() == 0 {
                     None
                 } else {
-                    self.search_node(&node.children[i], key)
+                    self.search_node(&children_ref[i], key)
                 }
             },
         }
