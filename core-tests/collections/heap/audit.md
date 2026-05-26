@@ -5,10 +5,8 @@ max-heap priority queue backed by List<T>).
 
 ## Status
 
-**partial** — Unit / property / integration coverage spans construction
-(new, with_capacity, from_list), basic priority-queue ops (push, pop,
-peek, clear), and full-drain sorted output (into_sorted_list). Two
-architectural fixes landed in this branch:
+**stable** — 11/11 regressions green on `--interp` validated 2026-05-25.
+Three architectural fixes landed across sessions:
 
 1. **Cross-module name table for non-intercepted static constructors**
    — `BinaryHeap.with_capacity(n)` / `BinaryHeap.from_list(xs)` now
@@ -18,6 +16,13 @@ architectural fixes landed in this branch:
    gating on the positive `header.type_id.is_array_dispatchable()`
    predicate instead of the broken negative `is_value_array && type_id
    < 256` pair. See regression §C for full root-cause analysis.
+3. **Heap.into_inner CBGR intercept** (commit `bd2553407` 2026-05-25)
+   — Heap-wrapper unwrapping was failing dispatch because the
+   CBGR allocation header carried TypeId=0 (aliased to MemoryOrder
+   in user-side type registry).  Direct runtime intercept in
+   method_dispatch.rs reads the stored Value from the CBGR data
+   slot and dealloc-bookkeeps.  Closes the last gating defect
+   for regression_heap_into_inner_returns_value.
 
 ## 1. Cross-stdlib usage
 
