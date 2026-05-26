@@ -2823,13 +2823,13 @@ implement Text {
 
         while pos < bytes.len() && replaced < count {
             match self.slice(pos, bytes.len()).find(pattern) {
-                Some(offset) => {
+                Maybe.Some(offset) => {
                     res.push_str(&self.slice(pos, pos + offset));
                     res.push_str(replacement);
                     pos = pos + offset + pattern.len();
                     replaced = replaced + 1;
                 }
-                None => {
+                Maybe.None => {
                     break;
                 }
             }
