@@ -1543,13 +1543,106 @@ pub(in super::super) fn handle_list_pop(
     Ok(DispatchResult::Continue)
 }
 
+/// Detect whether a value is a heap-allocated variant object.
+/// Variants live at type IDs:
+///   * `0x8000+tag` (synthetic, untyped MakeVariant)
+///   * `MAYBE=515` / `RESULT=516` / `ORDERING=517` (typed)
+///
+/// Both layouts begin with the canonical `(tag:u32, field_count:u32)`
+/// pair at `VARIANT_TAG_OFFSET` followed by `field_count` `Value`
+/// payload slots.  Used by `value_hash` / `value_eq` to switch from
+/// pointer-bit hashing/equality (which silently de-dedups two
+/// semantically-equal variants like `Some(1)` allocated separately)
+/// to tag+payload-recursive hashing/equality.
+#[inline]
+fn variant_layout(v: &Value) -> Option<(*const u8, u32, u32)> {
+    if !v.is_ptr() || v.is_nil() {
+        return None;
+    }
+    let ptr = v.as_ptr::<u8>();
+    if ptr.is_null() {
+        return None;
+    }
+    // SAFETY: any non-null pointer in a well-formed value points to
+    // a heap allocation whose header we can read.  Misaligned /
+    // sentinel pointers return a stub header via `ref_or_stub`.
+    let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
+    let type_id = header.type_id.0;
+    let is_well_known = type_id == crate::types::TypeId::MAYBE.0
+        || type_id == crate::types::TypeId::RESULT.0
+        || type_id == 517 /* ORDERING — see TypeId well-known range */;
+    let is_synthetic = verum_common::layout::is_synthetic_variant_type_id(type_id);
+    if !is_well_known && !is_synthetic {
+        return None;
+    }
+    // Bounds: the data section must be large enough for the
+    // `(tag:u32, field_count:u32)` pair = 8 bytes.  `header.size`
+    // is the DATA-section size (not total object size), so a
+    // 1-payload variant has data size 8 (tag+fc) + 8 (payload Value)
+    // = 16 bytes; a 0-payload variant has data size 8.
+    if header.size < 8 {
+        return None;
+    }
+    let (tag, field_count) = unsafe { heap::variant_header_pair(ptr) };
+    Some((ptr, tag, field_count))
+}
+
 /// Compute hash for a Value using FNV-1a.
 /// For heap-allocated strings (>6 bytes), hashes the string content
 /// rather than the pointer address to ensure consistent hashing.
+/// For variant heap objects (Maybe / Result / Ordering / any
+/// synthetic-tagged sum-type variant), hashes the tag + payload
+/// values recursively so two semantically-equal variants allocated
+/// at different addresses produce the same hash.
 #[inline]
 pub(crate) fn value_hash(v: Value) -> usize {
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
+
+    // **Variant fast-path** (closes `Set<Maybe<T>>` / `Set<Result<T>>`
+    // / `Map<Maybe<T>, _>` dedup-and-lookup class).  Pre-fix the bit-
+    // pattern fall-through hashed two distinct `Some(1)` allocations
+    // to different values because their pointer bits differed —
+    // every duplicate insert landed in a fresh slot and every
+    // `contains(&Some(1))` produced a slot miss.
+    //
+    // Architectural rule: variant equality is structural (tag +
+    // payload), so the value-hash MUST be structural too —
+    // otherwise the (hash, eq) pair violates the equivalence
+    // contract that Map/Set's bucket walk depends on.
+    if let Some((ptr, tag, field_count)) = variant_layout(&v) {
+        let mut hash = FNV_OFFSET;
+        // Mix in a variant discriminator so variants don't collide
+        // with integers / strings.
+        hash ^= 0xCE;
+        hash = hash.wrapping_mul(FNV_PRIME);
+        // Tag bytes (4)
+        for byte in tag.to_le_bytes() {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+        // Field count bytes (4) — mixes in arity so unit / tuple /
+        // record variants with the same tag don't collide.
+        for byte in field_count.to_le_bytes() {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+        // Payload values — recursive hash of each Value in the
+        // payload area.  Recursion depth is bounded by user-program
+        // type depth; pathological deep variants (a Maybe of a
+        // Maybe of a Maybe …) are rare and the recursion eventually
+        // grounds on primitives.
+        for i in 0..(field_count as usize) {
+            let inner = unsafe { heap::variant_payload(ptr, i) };
+            let inner_hash = value_hash(inner) as u64;
+            // Mix inner hash byte-wise to spread bits through FNV-1a.
+            for byte in inner_hash.to_le_bytes() {
+                hash ^= byte as u64;
+                hash = hash.wrapping_mul(FNV_PRIME);
+            }
+        }
+        return hash as usize;
+    }
 
     // For heap strings, hash the actual string bytes, not the pointer.
     // Text objects come in two layouts under `TypeId::TEXT`:
@@ -1622,6 +1715,9 @@ pub(crate) fn value_hash(v: Value) -> usize {
 /// For heap strings, compares string content rather than pointer addresses.
 /// Small strings (≤6 bytes) are inline in the NaN-box and use bitwise equality.
 /// A small string (≤6 bytes) can never equal a heap string (>6 bytes).
+/// For variant heap objects, compares tag + payload values recursively
+/// so two semantically-equal variants allocated at different addresses
+/// compare equal — the (hash, eq) contract that `value_hash` requires.
 #[inline]
 pub(crate) fn value_eq(a: Value, b: Value) -> bool {
     // Fast path: identical bits (covers small strings, ints, bools, same-address pointers)
@@ -1632,6 +1728,36 @@ pub(crate) fn value_eq(a: Value, b: Value) -> bool {
     // Heap string comparison: two different allocations may hold the same content
     if super::string_helpers::is_heap_string(&a) && super::string_helpers::is_heap_string(&b) {
         return heap_string_content_eq(&a, &b);
+    }
+
+    // **Variant structural equality** (closes `Set<Maybe<T>>` /
+    // `Set<Result<T>>` / `Map<Maybe<T>, _>` dedup-and-lookup
+    // class — sibling of the `value_hash` variant-layout
+    // fast-path).  Two heap variants compare equal iff their type
+    // ids, tags, field counts AND each payload Value all compare
+    // equal recursively.
+    let a_v = variant_layout(&a);
+    let b_v = variant_layout(&b);
+    if let (Some((a_ptr, a_tag, a_fc)), Some((b_ptr, b_tag, b_fc))) = (a_v, b_v) {
+        // Require type-id parity so e.g. Maybe.None (tag=0) doesn't
+        // accidentally compare equal to Result.Ok (tag=0) — both
+        // share tag 0 but their parent type ids differ.
+        let a_header = unsafe { heap::ObjectHeader::ref_or_stub(a_ptr) };
+        let b_header = unsafe { heap::ObjectHeader::ref_or_stub(b_ptr) };
+        if a_header.type_id.0 != b_header.type_id.0 {
+            return false;
+        }
+        if a_tag != b_tag || a_fc != b_fc {
+            return false;
+        }
+        for i in 0..(a_fc as usize) {
+            let ai = unsafe { heap::variant_payload(a_ptr, i) };
+            let bi = unsafe { heap::variant_payload(b_ptr, i) };
+            if !value_eq(ai, bi) {
+                return false;
+            }
+        }
+        return true;
     }
 
     false
