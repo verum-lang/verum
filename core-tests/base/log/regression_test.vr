@@ -1,0 +1,155 @@
+// =============================================================================
+// core-tests/base/log/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.log` — LogLevel ADT + LogRecord +
+// LogRecordBuilder + Logger protocol.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.log.{
+    LogLevel, LogRecord, LogRecordBuilder,
+    level_trace, level_debug, level_info, level_warn, level_error,
+    NullLogger, Logger,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// REGRESSION §A (@ignore'd): chained-builder return-value field access.
+// `let rec = LogRecordBuilder.new().level(L).message(M).field(...).build();
+//  rec.level.name()` mis-resolves the `.level` field offset, returning
+// a non-LogLevel value. Downstream `.name()` / `.severity()` /
+// arithmetic comparison fails. Same defect class as
+// [[btree_pattern_match_ref_generic_class]] applied to the LogRecord
+// returned by the builder's `.build()` method.
+//
+// Workaround in integration_test: assert only the structural
+// invariants (`.fields.len() == N`) that don't traverse through the
+// level field on the builder-returned value. This @ignore'd pin
+// flips green when VBC codegen propagates type info through chained-
+// builder return values.
+// =============================================================================
+
+@ignore("[[btree_pattern_match_ref_generic_class]] — chained-builder .build() return loses LogRecord type; rec.level mis-resolves. Multi-day VBC codegen fix.")
+@test
+fn regression_pin_builder_chain_level_field_access() {
+    let rec: LogRecord = LogRecordBuilder.new()
+        .level(level_warn())
+        .message("disk full".to_text())
+        .field("disk".to_text(), "/var".to_text())
+        .build();
+    let lvl: LogLevel = rec.level;
+    assert_eq(lvl.severity(), 3);   // Warn == severity 3 (per source line 71)
+}
+
+// =============================================================================
+// REGRESSION §B: LogLevel severity ordering is strictly monotone
+// Trace < Debug < Info < Warn < Error. A defect that reordered or
+// merged levels would silently break log filtering across stdlib.
+// =============================================================================
+
+@test
+fn regression_log_level_severity_strict_total_order() {
+    let trace = LogLevel.Trace;
+    let debug = LogLevel.Debug;
+    let info  = LogLevel.Info;
+    let warn  = LogLevel.Warn;
+    let error = LogLevel.Error;
+    assert(trace.severity() < debug.severity());
+    assert(debug.severity() < info.severity());
+    assert(info.severity() < warn.severity());
+    assert(warn.severity() < error.severity());
+}
+
+@test
+fn regression_log_level_canonical_severity_values() {
+    assert_eq(LogLevel.Trace.severity(), 0);
+    assert_eq(LogLevel.Debug.severity(), 1);
+    assert_eq(LogLevel.Info.severity(),  2);
+    assert_eq(LogLevel.Warn.severity(),  3);
+    assert_eq(LogLevel.Error.severity(), 4);
+}
+
+// =============================================================================
+// REGRESSION §C: LogLevel.name() returns canonical UPPERCASE strings
+// per the logging convention. A defect that lowercased or aliased
+// any name would silently drift the wire-format / output.
+// =============================================================================
+
+@test
+fn regression_log_level_name_canonical_uppercase() {
+    assert_eq(LogLevel.Trace.name(), "TRACE");
+    assert_eq(LogLevel.Debug.name(), "DEBUG");
+    assert_eq(LogLevel.Info.name(),  "INFO");
+    assert_eq(LogLevel.Warn.name(),  "WARN");
+    assert_eq(LogLevel.Error.name(), "ERROR");
+}
+
+// =============================================================================
+// REGRESSION §D: level_trace / level_debug / level_info / level_warn /
+// level_error free-fn constructors are aliases for the corresponding
+// LogLevel variants. A defect that returned a wrong variant from any
+// alias would silently break every `using [Logger]` call site.
+// =============================================================================
+
+@test
+fn regression_free_fn_constructors_return_correct_variants() {
+    assert_eq(level_trace().severity(), LogLevel.Trace.severity());
+    assert_eq(level_debug().severity(), LogLevel.Debug.severity());
+    assert_eq(level_info().severity(),  LogLevel.Info.severity());
+    assert_eq(level_warn().severity(),  LogLevel.Warn.severity());
+    assert_eq(level_error().severity(), LogLevel.Error.severity());
+}
+
+// =============================================================================
+// REGRESSION §E: LogRecord.new constructs with empty fields when
+// passed `[]`. A defect that defaulted to non-empty fields would
+// surface here.
+// =============================================================================
+
+@test
+fn regression_log_record_new_with_empty_fields() {
+    let rec = LogRecord.new(LogLevel.Info, "hello".to_text(), []);
+    assert_eq(rec.message, "hello".to_text());
+    assert_eq(rec.fields.len(), 0);
+}
+
+// =============================================================================
+// REGRESSION §F: LogRecord.simple constructs without fields argument.
+// A defect that lost the empty-fields invariant would break the
+// common "level + message only" log-site form.
+// =============================================================================
+
+@test
+fn regression_log_record_simple_has_empty_fields() {
+    let rec = LogRecord.simple(LogLevel.Info, "hello".to_text());
+    assert_eq(rec.fields.len(), 0);
+    assert_eq(rec.message, "hello".to_text());
+}
+
+// =============================================================================
+// REGRESSION §G: NullLogger.new constructs cleanly + is_enabled
+// returns false for every level (per source line 504-506).
+// =============================================================================
+
+@test
+fn regression_null_logger_is_enabled_always_false() {
+    let logger = NullLogger.new();
+    assert(!logger.is_enabled(LogLevel.Trace));
+    assert(!logger.is_enabled(LogLevel.Debug));
+    assert(!logger.is_enabled(LogLevel.Info));
+    assert(!logger.is_enabled(LogLevel.Warn));
+    assert(!logger.is_enabled(LogLevel.Error));
+}
+
+// =============================================================================
+// REGRESSION §H: LogLevel.default() == Info (per source line 148).
+// =============================================================================
+
+@test
+fn regression_log_level_default_is_info() {
+    let l = LogLevel.default();
+    assert_eq(l.severity(), 2);   // Info == severity 2
+}
+
+fn main() {}
