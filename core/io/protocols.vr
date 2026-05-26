@@ -217,12 +217,12 @@ implement Debug for StreamError {
         f.write_str("StreamError { kind: ")?;
         self.kind.fmt_debug(f)?;
         match &self.message {
-            Some(msg) => {
+            Maybe.Some(msg) => {
                 f.write_str(", message: \"")?;
                 f.write_str(msg)?;
                 f.write_str("\"")?;
             }
-            None => {}
+            Maybe.None => {}
         }
         f.write_str(" }")
     }
@@ -268,10 +268,10 @@ implement Clone for StreamError {
 implement Display for StreamError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match &self.message {
-            Some(msg) => {
+            Maybe.Some(msg) => {
                 f.write_str(msg)
             }
-            None => {
+            Maybe.None => {
                 self.kind.fmt(f)
             }
         }
@@ -749,16 +749,16 @@ public type Chain<T: Read, U: Read> is {
 implement<T: Read, U: Read> Read for Chain<T, U> {
     fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
         match &mut self.first {
-            Some(first) => {
+            Maybe.Some(first) => {
                 let n = first.read(buf)?;
                 if n == 0 {
-                    self.first = None;
+                    self.first = Maybe.None;
                     self.second.read(buf)
                 } else {
                     Ok(n)
                 }
             }
-            None => self.second.read(buf),
+            Maybe.None => self.second.read(buf),
         }
     }
 }
