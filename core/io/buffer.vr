@@ -595,7 +595,7 @@ implement<W: Write> Write for LineWriter<W> {
         }
 
         match last_newline {
-            Some(pos) => {
+            Maybe.Some(pos) => {
                 // Write everything up to && including the newline
                 let n = self.inner.write(&buf[0..pos + 1])?;
                 self.inner.flush()?;
@@ -608,7 +608,7 @@ implement<W: Write> Write for LineWriter<W> {
                     Ok(n)
                 }
             }
-            None => {
+            Maybe.None => {
                 // No newline, just buffer
                 self.inner.write(buf)
             }
