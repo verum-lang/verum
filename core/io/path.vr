@@ -953,19 +953,19 @@ implement Iterator for Components {
         // semantics as the documented `pos >= path.len()` exit.
         while self.pos < self.path.len() {
             match self.path.char_at(self.pos) {
-                Some(c) => {
+                Maybe.Some(c) => {
                     if is_separator(c) {
                         self.pos = self.pos + 1;
                     } else {
                         break;
                     }
                 }
-                None => break,
+                Maybe.None => break,
             }
         }
 
         if self.pos >= self.path.len() {
-            return None;
+            return Maybe.None;
         }
 
         // Find the end of this component. Same defensive handling
