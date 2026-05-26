@@ -350,11 +350,14 @@ implement<T> List<T> {
     // Get mutable element by index (returns copy of element value).
     @inline(always)
     public fn get_mut(&mut self, idx: Int) -> Maybe<T> {
-        if idx >= 0 && idx < self.len {
-            unsafe { Some(*self.ptr.offset(idx)) }
-        } else {
-            None
-        }
+        // Route through `self.get(idx)` which is intercept-routed
+        // through the canonical [len@0, cap@1, backing_ptr@2] layout
+        // (see `method_dispatch.rs`). The historical raw
+        // `*self.ptr.offset(idx)` returned bytes from the heap object
+        // header (codegen resolves `self.ptr` to the start of the
+        // backing heap object, not past `OBJECT_HEADER_SIZE`). Same
+        // defect class as `pop_front` / `split_off`.
+        self.get(idx)
     }
 
     // Set element at index.
@@ -456,19 +459,26 @@ implement<T> List<T> {
 
     // Pop element from front (index 0), shifting elements left.
     public fn pop_front(&mut self) -> Maybe<T> {
+        // Safe-operation pop_front: `self.get(0)` resolves through the
+        // runtime intercept (canonical [len@0, cap@1, backing_ptr@2]
+        // layout); `self.remove(0)` is likewise intercepted at
+        // `method_dispatch.rs::remove`. The original raw `self.ptr`
+        // + `memmove` body assumed `self.ptr` pointed past the heap
+        // object's ObjectHeader, but codegen actually resolves
+        // `self.ptr` to the start of the backing heap object — so
+        // `ptr_read(self.ptr)` returned the header bytes and `memmove`
+        // shifted header memory into element slots. Same defect class
+        // as `index_of` / `position` (cross-module direct-ptr drift);
+        // see audit.md §E.
         if self.len == 0 {
             return None;
         }
-        unsafe {
-            let value = ptr_read(self.ptr);
-            // Shift elements left
-            if self.len > 1 {
-                let dst = self.ptr as &unsafe Byte;
-                let src = self.ptr.offset(1) as &unsafe Byte;
-                memmove(dst, src, (self.len - 1) * T.size);
-            }
-            self.len = self.len - 1;
-            Some(value)
+        match self.get(0) {
+            Some(value) => {
+                self.remove(0);
+                Some(value)
+            },
+            None => None,
         }
     }
 
@@ -859,12 +869,24 @@ implement<T> List<T> {
     public fn position(&self, value: &T) -> Maybe<Int>
     where T: Eq
     {
-        // Direct iteration to avoid associated type issues
-        for i in range(0, self.len) {
-            let item: &T = unsafe { &*self.ptr.offset(i) };
-            if *item == *value {
-                return Some(i);
+        // Method-form `self.len()` + `self.get(i)` mirrors
+        // `index_of` below. Avoids the `for i in range(0, self.len)`
+        // path whose iterator-closure dispatch trips the
+        // call_closure_sync TypeMismatch on cross-module user-side
+        // call sites (same defect class as the
+        // bare-name-collision/closure-id-remap path documented
+        // for `index_of`). Until task #28/#47 fully closes, all
+        // List search methods use this dispatch shape.
+        let n = self.len();
+        let mut i: Int = 0;
+        while i < n {
+            match self.get(i) {
+                Some(item) => {
+                    if *item == *value { return Some(i); }
+                },
+                None => return None,
             }
+            i = i + 1;
         }
         None
     }
@@ -1378,15 +1400,23 @@ implement<T> List<T> {
     public fn binary_search(&self, value: &T) -> Result<Int, Int>
     where T: Ord
     {
-        let mut low = 0;
-        let mut high = self.len;
+        // Element access via intercept-routed `self.get(mid)` (see
+        // pop_front / split_off audit.md §E). Raw `self.ptr.offset(mid)`
+        // returned header bytes because codegen resolves `self.ptr` to
+        // the start of the backing heap object, not past `OBJECT_HEADER_SIZE`.
+        let mut low: Int = 0;
+        let mut high: Int = self.len();
         while low < high {
             let mid = low + (high - low) / 2;
-            let item: &T = unsafe { &*self.ptr.offset(mid) };
-            match item.cmp(value) {
-                Ordering.Less => { low = mid + 1; },
-                Ordering.Greater => { high = mid; },
-                Ordering.Equal => { return Ok(mid); },
+            match self.get(mid) {
+                Some(item) => {
+                    match item.cmp(value) {
+                        Ordering.Less => { low = mid + 1; },
+                        Ordering.Greater => { high = mid; },
+                        Ordering.Equal => { return Ok(mid); },
+                    }
+                },
+                None => return Err(low),
             }
         }
         Err(low)
@@ -1394,15 +1424,19 @@ implement<T> List<T> {
 
     // Binary search with comparator. Returns Ok(index) if found, or Err(insertion_point).
     public fn binary_search_by(&self, f: fn(&T) -> Ordering) -> Result<Int, Int> {
-        let mut low = 0;
-        let mut high = self.len;
+        let mut low: Int = 0;
+        let mut high: Int = self.len();
         while low < high {
             let mid = low + (high - low) / 2;
-            let item: &T = unsafe { &*self.ptr.offset(mid) };
-            match f(item) {
-                Ordering.Less => { low = mid + 1; },
-                Ordering.Greater => { high = mid; },
-                Ordering.Equal => { return Ok(mid); },
+            match self.get(mid) {
+                Some(item) => {
+                    match f(&item) {
+                        Ordering.Less => { low = mid + 1; },
+                        Ordering.Greater => { high = mid; },
+                        Ordering.Equal => { return Ok(mid); },
+                    }
+                },
+                None => return Err(low),
             }
         }
         Err(low)
@@ -1414,15 +1448,22 @@ implement<T> List<T> {
     // Returns the index of the first element where predicate returns true,
     // or len() if predicate never returns true.
     public fn partition_point(&self, predicate: fn(&T) -> Bool) -> Int {
-        let mut low = 0;
-        let mut high = self.len;
+        // Element access via intercept-routed `self.get(mid)` (see
+        // audit.md §E). Raw `self.ptr.offset(mid)` deref returned
+        // ObjectHeader bytes from heap-object start, not element data.
+        let mut low: Int = 0;
+        let mut high: Int = self.len();
         while low < high {
             let mid = low + (high - low) / 2;
-            let item: &T = unsafe { &*self.ptr.offset(mid) };
-            if predicate(item) {
-                high = mid;
-            } else {
-                low = mid + 1;
+            match self.get(mid) {
+                Some(item) => {
+                    if predicate(&item) {
+                        high = mid;
+                    } else {
+                        low = mid + 1;
+                    }
+                },
+                None => return low,
             }
         }
         low
@@ -1611,11 +1652,19 @@ implement<T> List<T> {
     public fn rposition(&self, value: &T) -> Maybe<Int>
     where T: Eq
     {
-        let mut i = self.len - 1;
+        // Method-form `self.len()` + `self.get(i)` mirrors the
+        // discipline of `index_of` / `position` (post-task#17/#39
+        // workaround). Avoids the bare `self.ptr.offset(i)` deref
+        // that mis-dispatches under cross-module call from user code
+        // and tracks the value-via-Maybe dispatch shape.
+        let n = self.len();
+        let mut i: Int = n - 1;
         while i >= 0 {
-            let item: &T = unsafe { &*self.ptr.offset(i) };
-            if *item == *value {
-                return Some(i);
+            match self.get(i) {
+                Some(item) => {
+                    if *item == *value { return Some(i); }
+                },
+                None => return None,
             }
             i = i - 1;
         }
@@ -1707,16 +1756,25 @@ implement<T> List<T> {
     /// Split the list at the given index, returning the tail.
     /// The original list is truncated to `at`.
     public fn split_off(&mut self, at: Int) -> List<T> {
-        assert(at <= self.len, "split_off index out of bounds");
-        let tail_len = self.len - at;
-        let mut tail = List.with_capacity(tail_len);
-        for i in range(at, self.len) {
-            unsafe {
-                let item: T = ptr_read(self.ptr.offset(i) as &unsafe T);
-                tail.push(item);
+        // Safe-operation split_off; same rationale as `pop_front` —
+        // the raw `self.ptr.offset(i)` read assumed ptr points past
+        // the heap-object header, but codegen resolves ptr to header
+        // start. `self.get(i)` is intercept-routed through the
+        // canonical layout and returns the element value correctly.
+        // See audit.md §E.
+        let n = self.len();
+        assert(at <= n, "split_off index out of bounds");
+        let tail_len = n - at;
+        let mut tail: List<T> = List.with_capacity(tail_len);
+        let mut i: Int = at;
+        while i < n {
+            match self.get(i) {
+                Some(item) => tail.push(item),
+                None => return tail,
             }
+            i = i + 1;
         }
-        self.len = at;
+        self.truncate(at);
         tail
     }
 
