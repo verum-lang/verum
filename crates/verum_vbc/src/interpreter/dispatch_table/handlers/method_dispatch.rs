@@ -63,9 +63,12 @@ pub(in super::super) fn handle_call_method(
 
     if std::env::var("VERUM_TRACE_CALLM_EQ").is_ok() {
         let mname = state.module.strings.get(StringId(method_id)).unwrap_or("?");
+        let cbgr = super::cbgr_helpers::is_cbgr_ref(&receiver);
+        let is_int = receiver.is_int();
+        let is_nil = receiver.is_nil();
         eprintln!(
-            "[callm] method='{}' receiver.is_ptr={} receiver.bits=0x{:x}",
-            mname, receiver.is_ptr(), receiver.to_bits(),
+            "[callm] method='{}' is_ptr={} is_int={} is_nil={} is_cbgr_ref={} bits=0x{:x}",
+            mname, receiver.is_ptr(), is_int, is_nil, cbgr, receiver.to_bits(),
         );
     }
 
@@ -9238,20 +9241,48 @@ pub(super) fn dispatch_array_method(
             Ok(Some(none_val))
         }
         "position" => {
-            let closure_val = state.registers.get(caller_base, Reg(args.start.0));
-            let mut elems = Vec::with_capacity(len);
-            for i in 0..len {
-                elems.push(get_array_element(ptr, header, i)?);
-            }
-            for (i, elem) in elems.into_iter().enumerate() {
-                let result = call_closure_sync(state, closure_val, &[elem])?;
-                if result.as_bool() {
-                    let some_val = make_some_value(state, Value::from_i64(i as i64))?;
-                    return Ok(Some(some_val));
+            // `position` is bi-modal:
+            //   Iterator.position(predicate: F)        — closure form
+            //   List.position(value: &T) -> Maybe<Int> — value-equality form (sister of `contains`)
+            //   Slice.position(value: &T) -> Maybe<Int>
+            // The mount-scope-aware lookup at task #17/#39 still routes both
+            // into this single name-only intercept, so we discriminate by arg
+            // shape: a func-ref arg means the iterator-protocol call site;
+            // anything else (NaN-boxed primitive or a CBGR-ref needle) means
+            // the value-equality call site and we mirror the `contains`
+            // intercept above. Without this, every value-form `position`
+            // panics with "expected closure, got non-pointer".
+            let arg0 = state.registers.get(caller_base, Reg(args.start.0));
+            if arg0.is_func_ref() {
+                let mut elems = Vec::with_capacity(len);
+                for i in 0..len {
+                    elems.push(get_array_element(ptr, header, i)?);
                 }
+                for (i, elem) in elems.into_iter().enumerate() {
+                    let result = call_closure_sync(state, arg0, &[elem])?;
+                    if result.as_bool() {
+                        let some_val = make_some_value(state, Value::from_i64(i as i64))?;
+                        return Ok(Some(some_val));
+                    }
+                }
+                let none_val = make_none_value(state)?;
+                Ok(Some(none_val))
+            } else {
+                // Value-equality form. `resolve_arg_value` auto-derefs the
+                // CBGR-ref needle (mirrors the `contains` intercept at
+                // line 4386–4409); without the deref the bitwise compare
+                // never matches NaN-boxed primitives in the list.
+                let needle = resolve_arg_value(state, arg0);
+                for i in 0..len {
+                    let elem = get_array_element(ptr, header, i)?;
+                    if value_eq(elem, needle) {
+                        let some_val = make_some_value(state, Value::from_i64(i as i64))?;
+                        return Ok(Some(some_val));
+                    }
+                }
+                let none_val = make_none_value(state)?;
+                Ok(Some(none_val))
             }
-            let none_val = make_none_value(state)?;
-            Ok(Some(none_val))
         }
         "flat_map" => {
             let closure_val = state.registers.get(caller_base, Reg(args.start.0));
