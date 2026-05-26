@@ -1999,14 +1999,14 @@ implement<T, A: Iterator<Item>, B: Iterator<Item>> Iterator for InterleaveIter<A
         if self.turn_a {
             self.turn_a = false;
             match self.a.next() {
-                Some(x) => Some(x),
-                None => self.b.next(),
+                Maybe.Some(x) => Maybe.Some(x),
+                Maybe.None => self.b.next(),
             }
         } else {
             self.turn_a = true;
             match self.b.next() {
-                Some(x) => Some(x),
-                None => self.a.next(),
+                Maybe.Some(x) => Maybe.Some(x),
+                Maybe.None => self.a.next(),
             }
         }
     }
@@ -2016,8 +2016,8 @@ implement<T, A: Iterator<Item>, B: Iterator<Item>> Iterator for InterleaveIter<A
         let (b_lower, b_upper) = self.b.size_hint();
         let lower = a_lower + b_lower;
         let upper = match (a_upper, b_upper) {
-            (Some(au), Some(bu)) => Some(au + bu),
-            _ => None,
+            (Maybe.Some(au), Maybe.Some(bu)) => Maybe.Some(au + bu),
+            _ => Maybe.None,
         };
         (lower, upper)
     }
