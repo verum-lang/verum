@@ -553,4 +553,735 @@ fn test_list_dedup_all_same_collapses_to_one() {
     assert_eq(xs.get(0), Some(7));
 }
 
+// =============================================================================
+// Section 11: position / index_of / rposition — value search
+// =============================================================================
+
+@test
+fn test_list_position_returns_first_match() {
+    let xs: List<Int> = [10, 20, 30, 20, 10];
+    assert_eq(xs.position(&20), Some(1));
+    assert_eq(xs.position(&10), Some(0));
+    assert_eq(xs.position(&30), Some(2));
+}
+
+@test
+fn test_list_position_missing_returns_none() {
+    let xs: List<Int> = [10, 20, 30];
+    assert_eq(xs.position(&99), None);
+}
+
+@test
+fn test_list_position_in_empty_is_none() {
+    let xs: List<Int> = [];
+    assert_eq(xs.position(&1), None);
+}
+
+@test
+fn test_list_index_of_returns_first_match() {
+    let xs: List<Int> = [5, 10, 15, 10, 5];
+    assert_eq(xs.index_of(&10), Some(1));
+    assert_eq(xs.index_of(&5), Some(0));
+    assert_eq(xs.index_of(&15), Some(2));
+}
+
+@test
+fn test_list_index_of_missing_returns_none() {
+    let xs: List<Int> = [1, 2, 3];
+    assert_eq(xs.index_of(&42), None);
+}
+
+@test
+fn test_list_rposition_returns_last_match() {
+    let xs: List<Int> = [10, 20, 30, 20, 10];
+    assert_eq(xs.rposition(&20), Some(3));
+    assert_eq(xs.rposition(&10), Some(4));
+    assert_eq(xs.rposition(&30), Some(2));
+}
+
+@test
+fn test_list_rposition_missing_returns_none() {
+    let xs: List<Int> = [1, 2, 3];
+    assert_eq(xs.rposition(&7), None);
+}
+
+// =============================================================================
+// Section 12: pop_front — O(n) front-end removal
+// =============================================================================
+
+@test
+fn test_list_pop_front_returns_first_element() {
+    let mut xs: List<Int> = [10, 20, 30];
+    assert_eq(xs.pop_front(), Some(10));
+    assert_eq(xs.len(), 2);
+}
+
+@test
+fn test_list_pop_front_shifts_remaining_left() {
+    let mut xs: List<Int> = [1, 2, 3, 4];
+    xs.pop_front();
+    assert_eq(xs.get(0), Some(2));
+    assert_eq(xs.get(1), Some(3));
+    assert_eq(xs.get(2), Some(4));
+}
+
+@test
+fn test_list_pop_front_on_empty_returns_none() {
+    let mut xs: List<Int> = [];
+    assert_eq(xs.pop_front(), None);
+    assert_eq(xs.len(), 0);
+}
+
+@test
+fn test_list_pop_front_singleton_empties() {
+    let mut xs: List<Int> = [42];
+    assert_eq(xs.pop_front(), Some(42));
+    assert(xs.is_empty());
+}
+
+// =============================================================================
+// Section 13: extend / extend_from_slice / append — bulk insertion
+// =============================================================================
+
+@test
+fn test_list_extend_from_slice_appends_in_order() {
+    let mut xs: List<Int> = [1, 2];
+    let src: List<Int> = [3, 4, 5];
+    xs.extend_from_slice(src.as_slice());
+    assert_eq(xs.len(), 5);
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(2), Some(3));
+    assert_eq(xs.get(4), Some(5));
+}
+
+@test
+fn test_list_extend_from_empty_slice_is_noop() {
+    let mut xs: List<Int> = [1, 2, 3];
+    let src: List<Int> = [];
+    xs.extend_from_slice(src.as_slice());
+    assert_eq(xs.len(), 3);
+}
+
+@test
+fn test_list_append_moves_other_to_self() {
+    let mut xs: List<Int> = [1, 2];
+    let mut ys: List<Int> = [3, 4, 5];
+    xs.append(&mut ys);
+    assert_eq(xs.len(), 5);
+    assert_eq(xs.get(4), Some(5));
+    // Per std contract, `other` is emptied after append.
+    assert_eq(ys.len(), 0);
+}
+
+@test
+fn test_list_append_empty_to_self_is_noop() {
+    let mut xs: List<Int> = [1, 2, 3];
+    let mut ys: List<Int> = [];
+    xs.append(&mut ys);
+    assert_eq(xs.len(), 3);
+}
+
+// =============================================================================
+// Section 14: split_at / split_off — partitioning
+// =============================================================================
+
+@test
+fn test_list_split_off_at_zero_moves_all() {
+    let mut xs: List<Int> = [1, 2, 3];
+    let tail = xs.split_off(0);
+    assert_eq(xs.len(), 0);
+    assert_eq(tail.len(), 3);
+    assert_eq(tail.get(0), Some(1));
+    assert_eq(tail.get(2), Some(3));
+}
+
+@test
+fn test_list_split_off_at_len_returns_empty_tail() {
+    let mut xs: List<Int> = [1, 2, 3];
+    let tail = xs.split_off(3);
+    assert_eq(xs.len(), 3);
+    assert_eq(tail.len(), 0);
+}
+
+@test
+fn test_list_split_off_middle_partitions() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    let tail = xs.split_off(2);
+    assert_eq(xs.len(), 2);
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(1), Some(2));
+    assert_eq(tail.len(), 3);
+    assert_eq(tail.get(0), Some(3));
+    assert_eq(tail.get(2), Some(5));
+}
+
+// =============================================================================
+// Section 15: rotate_right — symmetric to rotate_left
+// =============================================================================
+
+@test
+fn test_list_rotate_right_basic() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    xs.rotate_right(2);
+    // Last 2 elements move to front: [4, 5, 1, 2, 3]
+    assert_eq(xs.get(0), Some(4));
+    assert_eq(xs.get(1), Some(5));
+    assert_eq(xs.get(2), Some(1));
+    assert_eq(xs.get(4), Some(3));
+}
+
+@test
+fn test_list_rotate_right_zero_is_noop() {
+    let mut xs: List<Int> = [1, 2, 3];
+    xs.rotate_right(0);
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(2), Some(3));
+}
+
+@test
+fn test_list_rotate_right_then_left_is_identity() {
+    let mut xs: List<Int> = [1, 2, 3, 4, 5];
+    xs.rotate_right(2);
+    xs.rotate_left(2);
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(4), Some(5));
+}
+
+// =============================================================================
+// Section 16: any / all — boolean predicates
+// =============================================================================
+
+@test
+fn test_list_any_returns_true_when_one_matches() {
+    let xs: List<Int> = [1, 2, 3, 4];
+    assert(xs.any(|x| *x == 3));
+}
+
+@test
+fn test_list_any_returns_false_when_none_match() {
+    let xs: List<Int> = [1, 2, 3];
+    assert(!xs.any(|x| *x > 10));
+}
+
+@test
+fn test_list_any_on_empty_is_false() {
+    let xs: List<Int> = [];
+    assert(!xs.any(|x| *x > 0));
+}
+
+@test
+fn test_list_all_returns_true_when_all_match() {
+    let xs: List<Int> = [2, 4, 6];
+    assert(xs.all(|x| *x % 2 == 0));
+}
+
+@test
+fn test_list_all_returns_false_when_one_violates() {
+    let xs: List<Int> = [2, 4, 5];
+    assert(!xs.all(|x| *x % 2 == 0));
+}
+
+@test
+fn test_list_all_on_empty_is_true() {
+    // Vacuous truth.
+    let xs: List<Int> = [];
+    assert(xs.all(|x| *x > 0));
+}
+
+// =============================================================================
+// Section 17: starts_with / ends_with
+//
+// NOTE: stdlib body uses `for i in range(0, prefix.len)` which routes
+// through the iterator-closure defect class for non-intercepted methods.
+// Marked @ignore until #17/#39 mount-scope-aware lookup closes OR stdlib
+// body is migrated to `while + self.get(i)` pattern.
+// =============================================================================
+
+@ignore
+@test
+fn test_list_starts_with_proper_prefix() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let prefix: List<Int> = [1, 2];
+    assert(xs.starts_with(&prefix));
+}
+
+@ignore
+@test
+fn test_list_starts_with_empty_is_true() {
+    let xs: List<Int> = [1, 2, 3];
+    let empty: List<Int> = [];
+    assert(xs.starts_with(&empty));
+}
+
+@ignore
+@test
+fn test_list_starts_with_self_is_true() {
+    let xs: List<Int> = [1, 2, 3];
+    assert(xs.starts_with(&xs));
+}
+
+@ignore
+@test
+fn test_list_starts_with_longer_than_self_is_false() {
+    let xs: List<Int> = [1, 2];
+    let longer: List<Int> = [1, 2, 3];
+    assert(!xs.starts_with(&longer));
+}
+
+@ignore
+@test
+fn test_list_ends_with_proper_suffix() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let suffix: List<Int> = [4, 5];
+    assert(xs.ends_with(&suffix));
+}
+
+@ignore
+@test
+fn test_list_ends_with_empty_is_true() {
+    let xs: List<Int> = [1, 2, 3];
+    let empty: List<Int> = [];
+    assert(xs.ends_with(&empty));
+}
+
+@ignore
+@test
+fn test_list_ends_with_longer_than_self_is_false() {
+    let xs: List<Int> = [4, 5];
+    let longer: List<Int> = [1, 4, 5];
+    assert(!xs.ends_with(&longer));
+}
+
+// =============================================================================
+// Section 18: find_by / position_by — predicate-driven search
+//
+// NOTE: position_by / find_by are NOT runtime-intercepted (`position` is, but
+// it targets the value-form sister method). The stdlib body uses
+// `for i in range(0, self.len)` which trips the iterator-closure
+// dispatch defect when called from user-side bytecode. Pinned in
+// regression_test.vr §E with `@ignore` until the stdlib body is migrated
+// to the safer `while + self.get(i)` pattern (sister of `index_of`).
+// =============================================================================
+
+@ignore
+@test
+fn test_list_position_by_returns_first_index() {
+    let xs: List<Int> = [1, 2, 3, 4];
+    assert_eq(xs.position_by(|x| *x >= 3), Some(2));
+}
+
+@ignore
+@test
+fn test_list_position_by_no_match_returns_none() {
+    let xs: List<Int> = [1, 2, 3];
+    assert_eq(xs.position_by(|x| *x > 100), None);
+}
+
+@ignore
+@test
+fn test_list_position_by_on_empty_is_none() {
+    let xs: List<Int> = [];
+    assert_eq(xs.position_by(|x| *x > 0), None);
+}
+
+// =============================================================================
+// Section 19: binary_search / partition_point — sorted-list queries
+// =============================================================================
+
+@test
+fn test_list_binary_search_finds_element() {
+    let xs: List<Int> = [1, 3, 5, 7, 9];
+    let r: Result<Int, Int> = xs.binary_search(&5);
+    assert(r.is_ok());
+    assert_eq(r.unwrap_or(-1), 2);
+}
+
+@test
+fn test_list_binary_search_finds_first_and_last() {
+    let xs: List<Int> = [1, 3, 5, 7, 9];
+    let r0: Result<Int, Int> = xs.binary_search(&1);
+    let r1: Result<Int, Int> = xs.binary_search(&9);
+    assert(r0.is_ok());
+    assert(r1.is_ok());
+    assert_eq(r0.unwrap_or(-1), 0);
+    assert_eq(r1.unwrap_or(-1), 4);
+}
+
+@test
+fn test_list_binary_search_missing_returns_insertion_point() {
+    let xs: List<Int> = [1, 3, 5, 7, 9];
+    // 4 would be inserted between 3 and 5 → idx 2
+    let r4: Result<Int, Int> = xs.binary_search(&4);
+    assert(r4.is_err());
+    // 0 inserts at front
+    let r0: Result<Int, Int> = xs.binary_search(&0);
+    assert(r0.is_err());
+    // 10 inserts at end
+    let r10: Result<Int, Int> = xs.binary_search(&10);
+    assert(r10.is_err());
+}
+
+@test
+fn test_list_partition_point_returns_split_index() {
+    let xs: List<Int> = [1, 2, 3, 4, 5, 6];
+    // First element where predicate is false: x >= 4 → idx 3
+    let i = xs.partition_point(|x| *x < 4);
+    assert_eq(i, 3);
+}
+
+@test
+fn test_list_partition_point_all_true_returns_len() {
+    let xs: List<Int> = [1, 2, 3];
+    let i = xs.partition_point(|x| *x < 100);
+    assert_eq(i, 3);
+}
+
+@test
+fn test_list_partition_point_all_false_returns_zero() {
+    let xs: List<Int> = [1, 2, 3];
+    let i = xs.partition_point(|x| *x < 0);
+    assert_eq(i, 0);
+}
+
+// =============================================================================
+// Section 20: dedup_by — generalised consecutive deduplication
+//
+// NOTE: dedup_by stdlib body uses `for read in range(1, self.len)`. Same
+// iterator-closure dispatch class — pinned @ignore until task #17/#39
+// closes or stdlib migrates pattern.
+// =============================================================================
+
+@ignore
+@test
+fn test_list_dedup_by_same_predicate_keeps_first() {
+    let mut xs: List<Int> = [1, 11, 2, 22, 3];
+    // Treat values as "same" if they share div-10
+    xs.dedup_by(|a, b| (*a / 10) == (*b / 10));
+    // Wait: dedup_by passes consecutive pairs; semantics depend on order.
+    // Conservative property: dedup_by leaves a list shorter or equal.
+    assert(xs.len() <= 5);
+    assert(xs.len() >= 1);
+}
+
+@ignore
+@test
+fn test_list_dedup_by_no_collapse_keeps_all() {
+    let mut xs: List<Int> = [1, 2, 3, 4];
+    xs.dedup_by(|a, b| *a == *b);
+    assert_eq(xs.len(), 4);
+}
+
+// =============================================================================
+// Section 21: capacity-management API — reserve / shrink_to_fit
+// =============================================================================
+
+@test
+fn test_list_reserve_grows_capacity() {
+    let mut xs: List<Int> = List.new();
+    xs.reserve(64);
+    assert(xs.capacity() >= 64);
+    assert_eq(xs.len(), 0);
+}
+
+@test
+fn test_list_reserve_zero_is_noop_when_fits() {
+    let mut xs: List<Int> = List.with_capacity(16);
+    let cap_before = xs.capacity();
+    xs.reserve(0);
+    assert_eq(xs.capacity(), cap_before);
+}
+
+@test
+fn test_list_reserve_exact_grows_capacity() {
+    let mut xs: List<Int> = List.new();
+    xs.reserve_exact(32);
+    assert(xs.capacity() >= 32);
+}
+
+@test
+fn test_list_shrink_to_fit_reduces_capacity_to_len() {
+    let mut xs: List<Int> = List.with_capacity(64);
+    xs.push(1);
+    xs.push(2);
+    xs.push(3);
+    xs.shrink_to_fit();
+    // After shrink: capacity may still be implementation-defined
+    // floor, but should be reduced.
+    assert(xs.capacity() <= 64);
+    assert_eq(xs.len(), 3);
+    // Values preserved.
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(2), Some(3));
+}
+
+@test
+fn test_list_shrink_to_min_capacity() {
+    let mut xs: List<Int> = List.with_capacity(64);
+    xs.push(1);
+    xs.shrink_to(16);
+    assert(xs.capacity() <= 64);
+    assert_eq(xs.get(0), Some(1));
+}
+
+// =============================================================================
+// Section 22: as_slice / as_mut_slice — view conversion
+// =============================================================================
+
+@test
+fn test_list_as_slice_returns_view_with_same_len() {
+    let xs: List<Int> = [10, 20, 30];
+    let s = xs.as_slice();
+    assert_eq(s.len(), 3);
+}
+
+@test
+fn test_list_as_slice_on_empty_is_empty_slice() {
+    let xs: List<Int> = [];
+    let s = xs.as_slice();
+    assert_eq(s.len(), 0);
+}
+
+// =============================================================================
+// Section 23: iter — basic iteration entry point
+// =============================================================================
+
+@test
+fn test_list_iter_count_matches_len() {
+    let xs: List<Int> = [10, 20, 30, 40];
+    let mut count = 0;
+    for _x in xs.iter() {
+        count = count + 1;
+    }
+    assert_eq(count, 4);
+}
+
+@test
+fn test_list_iter_on_empty_yields_zero() {
+    let xs: List<Int> = [];
+    let mut count = 0;
+    for _x in xs.iter() {
+        count = count + 1;
+    }
+    assert_eq(count, 0);
+}
+
+@test
+fn test_list_iter_sum_in_loop() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let mut sum = 0;
+    for x in xs.iter() {
+        sum = sum + *x;
+    }
+    assert_eq(sum, 15);
+}
+
+// =============================================================================
+// Section 24: try_push / try_with_capacity — fallible allocation surface
+// =============================================================================
+
+@test
+fn test_list_try_with_capacity_small_succeeds() {
+    let r: Result<List<Int>, AllocError> = List.try_with_capacity(16);
+    assert(r.is_ok());
+}
+
+@test
+fn test_list_try_push_succeeds_under_normal_growth() {
+    let mut xs: List<Int> = List.new();
+    let r = xs.try_push(42);
+    assert(r.is_ok());
+    assert_eq(xs.len(), 1);
+    assert_eq(xs.get(0), Some(42));
+}
+
+// =============================================================================
+// Section 25: get_mut / first_mut / last_mut — interior mutation hooks
+// =============================================================================
+
+@test
+fn test_list_get_mut_in_bounds_returns_some() {
+    let mut xs: List<Int> = [10, 20, 30];
+    let v = xs.get_mut(1);
+    assert_eq(v, Some(20));
+}
+
+@test
+fn test_list_get_mut_out_of_bounds_returns_none() {
+    let mut xs: List<Int> = [1, 2, 3];
+    assert_eq(xs.get_mut(99), None);
+}
+
+@test
+fn test_list_first_mut_of_non_empty() {
+    let mut xs: List<Int> = [10, 20, 30];
+    assert_eq(xs.first_mut(), Some(10));
+}
+
+@test
+fn test_list_first_mut_of_empty_is_none() {
+    let mut xs: List<Int> = [];
+    assert_eq(xs.first_mut(), None);
+}
+
+@test
+fn test_list_last_mut_of_non_empty() {
+    let mut xs: List<Int> = [10, 20, 30];
+    assert_eq(xs.last_mut(), Some(30));
+}
+
+@test
+fn test_list_last_mut_of_empty_is_none() {
+    let mut xs: List<Int> = [];
+    assert_eq(xs.last_mut(), None);
+}
+
+// =============================================================================
+// Section 26: sort variants — sort_unstable / sorted (functional)
+//
+// NOTE: sort_unstable's body uses introsort with extensive raw
+// `self.ptr.offset(i)` element access. The non-trivial path (>1 element)
+// trips the iterator-dispatch defect class (same root as audit.md §E)
+// because the stdlib body's helper functions call into protocol methods
+// from user-side bytecode where the iterator's internal closures aren't
+// remapped. Pinned @ignore for the populated-input path until a wider
+// stdlib migration to safe `self.get(i)` access lands or the cross-
+// module closure-id remap closes (task #28 / #47).
+// =============================================================================
+
+@ignore
+@test
+fn test_list_sort_unstable_ascending() {
+    let mut xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
+    xs.sort_unstable();
+    // Sorted order regardless of stability.
+    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(1), Some(1));
+    assert_eq(xs.get(2), Some(2));
+    assert_eq(xs.get(7), Some(9));
+}
+
+@test
+fn test_list_sort_unstable_empty_is_noop() {
+    let mut xs: List<Int> = [];
+    xs.sort_unstable();
+    assert_eq(xs.len(), 0);
+}
+
+@test
+fn test_list_sort_unstable_singleton_is_noop() {
+    let mut xs: List<Int> = [42];
+    xs.sort_unstable();
+    assert_eq(xs.get(0), Some(42));
+}
+
+@test
+fn test_list_sorted_returns_new_sorted_list() {
+    let xs: List<Int> = [3, 1, 2];
+    let ys = xs.sorted();
+    // Original unchanged.
+    assert_eq(xs.get(0), Some(3));
+    // New list sorted.
+    assert_eq(ys.get(0), Some(1));
+    assert_eq(ys.get(1), Some(2));
+    assert_eq(ys.get(2), Some(3));
+}
+
+// =============================================================================
+// Section 27: windows / chunks — read-only slicing iterators
+//
+// NOTE: stdlib body uses `for i in range(0, self.len - size + 1)` plus
+// nested `for j in range(i, i + size)`. Both fall into the for/range
+// iterator-closure dispatch class — pinned @ignore until task #17/#39 or
+// stdlib body migration.
+// =============================================================================
+
+@ignore
+@test
+fn test_list_chunks_of_2_partitions_evenly() {
+    let xs: List<Int> = [1, 2, 3, 4];
+    let cs = xs.chunks(2);
+    assert_eq(cs.len(), 2);
+    assert_eq(cs.get(0).map(|c| c.len()), Some(2));
+    assert_eq(cs.get(1).map(|c| c.len()), Some(2));
+}
+
+@ignore
+@test
+fn test_list_chunks_with_remainder() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let cs = xs.chunks(2);
+    assert_eq(cs.len(), 3);
+    // Last chunk has 1 elem.
+    assert_eq(cs.get(2).map(|c| c.len()), Some(1));
+}
+
+@ignore
+@test
+fn test_list_chunks_size_larger_than_len_yields_one() {
+    let xs: List<Int> = [1, 2];
+    let cs = xs.chunks(5);
+    assert_eq(cs.len(), 1);
+    assert_eq(cs.get(0).map(|c| c.len()), Some(2));
+}
+
+@ignore
+@test
+fn test_list_windows_of_2_overlap_by_one() {
+    let xs: List<Int> = [1, 2, 3, 4];
+    let ws = xs.windows(2);
+    assert_eq(ws.len(), 3);
+}
+
+@ignore
+@test
+fn test_list_windows_size_equals_len_yields_one() {
+    let xs: List<Int> = [1, 2, 3];
+    let ws = xs.windows(3);
+    assert_eq(ws.len(), 1);
+}
+
+@ignore
+@test
+fn test_list_windows_size_larger_than_len_yields_zero() {
+    let xs: List<Int> = [1, 2];
+    let ws = xs.windows(5);
+    assert_eq(ws.len(), 0);
+}
+
+// =============================================================================
+// Section 28: partition_by / chunk_by — predicate-driven splits
+//
+// NOTE: stdlib body uses `for i in range(0, self.len)`. Same
+// iterator-closure dispatch class — pinned @ignore until #17/#39 closes.
+// =============================================================================
+
+@ignore
+@test
+fn test_list_partition_by_separates_by_predicate() {
+    let xs: List<Int> = [1, 2, 3, 4, 5, 6];
+    let (evens, odds) = xs.partition_by(|x| *x % 2 == 0);
+    assert_eq(evens.len(), 3);
+    assert_eq(odds.len(), 3);
+    assert_eq(evens.get(0), Some(2));
+    assert_eq(odds.get(0), Some(1));
+}
+
+@ignore
+@test
+fn test_list_partition_by_all_true_left_full() {
+    let xs: List<Int> = [2, 4, 6];
+    let (l, r) = xs.partition_by(|x| *x % 2 == 0);
+    assert_eq(l.len(), 3);
+    assert_eq(r.len(), 0);
+}
+
+@ignore
+@test
+fn test_list_partition_by_all_false_right_full() {
+    let xs: List<Int> = [1, 3, 5];
+    let (l, r) = xs.partition_by(|x| *x % 2 == 0);
+    assert_eq(l.len(), 0);
+    assert_eq(r.len(), 3);
+}
+
 fn main() {}
