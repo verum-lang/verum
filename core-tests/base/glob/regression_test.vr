@@ -1,0 +1,142 @@
+// =============================================================================
+// core-tests/base/glob/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.glob` — POSIX shell-style globs.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.glob.{
+    GlobPattern, GlobError,
+    compile, compile_with, matches,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// REGRESSION §A: pre-fix integration_test referenced a hallucinated
+// `GlobOptions.new().case_insensitive(true)` API. The actual surface
+// is `compile_with(pattern: &Text, case_sensitive: Bool)` — a single
+// Bool argument, not an opaque options record. Pins the canonical
+// signature.
+// =============================================================================
+
+@test
+fn regression_compile_with_takes_bool_not_options_record() {
+    let r_cs = compile_with(&"*.TXT".to_text(), true);
+    let r_ci = compile_with(&"*.TXT".to_text(), false);
+    assert(r_cs.is_ok());
+    assert(r_ci.is_ok());
+    let pat_cs: GlobPattern = r_cs.unwrap();
+    let pat_ci: GlobPattern = r_ci.unwrap();
+    // case-sensitive rejects lowercase extension
+    assert(!pat_cs.matches_path(&"foo.txt".to_text()));
+    // case-insensitive accepts lowercase extension
+    assert(pat_ci.matches_path(&"foo.txt".to_text()));
+}
+
+// =============================================================================
+// REGRESSION §B: pre-fix integration_test called `.matches(path)` on
+// a `Result<GlobPattern, _>`. Result has no `.matches` method — the
+// dispatcher tried 8 candidates ending in `.matches`:
+//   core.base.glob.matches (free fn, arity 2)
+//   core.base.semver_constraint.matches (arity 3)
+//   Char.matches / core.text.char.matches / AnyChar.matches /
+//   CharRange.matches / Text.matches / Principal.matches
+// Workaround: unwrap the Result first, OR use the free function
+// `matches(pattern, path)` directly.
+// =============================================================================
+
+@test
+fn regression_result_must_be_unwrapped_before_matches_path() {
+    let r = compile(&"*.txt".to_text());
+    assert(r.is_ok());
+    let pat: GlobPattern = r.unwrap();
+    assert(pat.matches_path(&"foo.txt".to_text()));
+}
+
+// =============================================================================
+// REGRESSION §C: globstar (`**`) must cross path separators —
+// `**/*.vr` matches `foo.vr` at depth 0 AND `dir/foo.vr` at depth 1.
+// A defect that confused `*` and `**` would silently break recursive
+// directory globs.
+// =============================================================================
+
+@test
+fn regression_globstar_crosses_separators() {
+    assert(matches(&"**/*.vr".to_text(), &"foo.vr".to_text()));
+    assert(matches(&"**/*.vr".to_text(), &"dir/foo.vr".to_text()));
+    assert(matches(&"**/*.vr".to_text(), &"dir/sub/foo.vr".to_text()));
+}
+
+// =============================================================================
+// REGRESSION §D: single-star `*` MUST NOT cross path separators —
+// this is the defining difference between `*` and `**`. A defect
+// that conflated them would silently let `*.vr` capture `src/main.vr`.
+// =============================================================================
+
+@test
+fn regression_star_does_not_cross_separator() {
+    assert(!matches(&"*.vr".to_text(), &"src/main.vr".to_text()));
+    assert(matches(&"*.vr".to_text(), &"main.vr".to_text()));
+}
+
+// =============================================================================
+// REGRESSION §E: `?` matches EXACTLY one character. A defect that
+// allowed empty or multi-char matches would silently break filename
+// wildcards.
+// =============================================================================
+
+@test
+fn regression_question_matches_exactly_one_char() {
+    assert(matches(&"file?.txt".to_text(), &"file1.txt".to_text()));
+    assert(matches(&"file?.txt".to_text(), &"fileA.txt".to_text()));
+    assert(!matches(&"file?.txt".to_text(), &"file.txt".to_text()));    // 0 chars
+    assert(!matches(&"file?.txt".to_text(), &"file12.txt".to_text()));   // 2 chars
+}
+
+// =============================================================================
+// REGRESSION §F: Negated character class `[!...]` excludes the
+// listed chars / ranges. A defect that confused `[!]` with `[^]` (the
+// regex form) — or that ignored the `!` prefix — would silently
+// invert filename filters.
+// =============================================================================
+
+@test
+fn regression_negated_class_with_explicit_list() {
+    assert(matches(&"[!aeiou]at".to_text(), &"cat".to_text()));
+    assert(matches(&"[!aeiou]at".to_text(), &"bat".to_text()));
+    assert(!matches(&"[!aeiou]at".to_text(), &"aat".to_text()));
+    assert(!matches(&"[!aeiou]at".to_text(), &"iat".to_text()));
+}
+
+@test
+fn regression_negated_class_with_digit_range() {
+    assert(matches(&"[!0-9]oo".to_text(), &"foo".to_text()));
+    assert(!matches(&"[!0-9]oo".to_text(), &"5oo".to_text()));
+}
+
+// =============================================================================
+// REGRESSION §G: backslash-escape allows literal special chars
+// (`\*`, `\?`, `\[`). A defect that lost the escape would silently
+// turn `file\*.txt` into a wildcard.
+// =============================================================================
+
+@test
+fn regression_backslash_escape_star() {
+    let r = compile(&"file\\*.txt".to_text());
+    assert(r.is_ok());
+    let pat: GlobPattern = r.unwrap();
+    assert(pat.matches_path(&"file*.txt".to_text()));
+    assert(!pat.matches_path(&"fileX.txt".to_text()));
+}
+
+@test
+fn regression_backslash_escape_question() {
+    let r = compile(&"item\\?.txt".to_text());
+    assert(r.is_ok());
+    let pat: GlobPattern = r.unwrap();
+    assert(pat.matches_path(&"item?.txt".to_text()));
+    assert(!pat.matches_path(&"itemX.txt".to_text()));
+}
+
+fn main() {}
