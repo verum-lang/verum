@@ -1,0 +1,153 @@
+// =============================================================================
+// core-tests/base/retry/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.retry`. Each entry ties a previously-
+// observed defect or canonical-shape contract to a single @test so
+// re-regressions surface as named test failures.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.retry.{
+    RetryBackoff, RetryOptions,
+    retry, retry_immediate, retry_with_strategy,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// REGRESSION §A (@ignore'd): closure mutable-state defect. Any retry
+// closure that mutates an outer-scope counter trips a downstream
+// method-dispatch panic:
+//   method 'next' not found on receiver of runtime kind `Int` ...
+//   8 candidate(s) end with `.next`
+//   (SignalStream / KqueueEventIter / IocpEventIter / Args / Vars /
+//    ErrorChain / Rev / MappedIter)
+//
+// Symptom: `counter = counter + 1` inside the closure body mis-routes
+// through the iterator `.next` method on `Int` because the codegen
+// loses receiver-type tracking when the closure crosses the retry
+// helper's call boundary.
+//
+// Workaround: tests that succeed on the FIRST attempt (closure never
+// retries, counter never increments) bypass the defect. Multi-attempt
+// retry / abort-on-permanent-error / transient-then-permanent are
+// pinned `@ignore`'d here.
+//
+// Multi-day VBC codegen fix; tracked alongside task #17/#39 class.
+// =============================================================================
+
+@ignore("Closure mutable-state defect — counter increment in retry body trips .next-on-Int dispatch.")
+@test
+fn regression_pin_retry_succeeds_after_failures() {
+    let mut counter: Int = 0;
+    let r: Result<Int, Text> = retry(5, || {
+        counter = counter + 1;
+        if counter < 3 {
+            Err("transient".to_text())
+        } else {
+            Ok(99)
+        }
+    });
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 99);
+    assert_eq(counter, 3);
+}
+
+@ignore("Same closure mutable-state defect — exhaust-attempts path.")
+@test
+fn regression_pin_retry_exhausts_returns_last_err() {
+    let mut counter: Int = 0;
+    let r: Result<Int, Text> = retry(3, || {
+        counter = counter + 1;
+        Err("always".to_text())
+    });
+    assert(r.is_err());
+    assert_eq(counter, 3);
+}
+
+@ignore("Same closure mutable-state defect — abort-on-permanent path.")
+@test
+fn regression_pin_retry_aborts_on_permanent_error() {
+    let mut counter: Int = 0;
+    let opts: RetryOptions<Text> = RetryOptions.simple(10)
+        .with_should_retry(|e: &Text| { *e == "transient".to_text() });
+    let r: Result<Int, Text> = retry_with_strategy(|| {
+        counter = counter + 1;
+        Err("permanent".to_text())
+    }, opts);
+    assert(r.is_err());
+    assert_eq(counter, 1);
+}
+
+// =============================================================================
+// REGRESSION §B: RetryBackoff is a 3-variant ADT (None / Linear /
+// Exponential). A defect that re-ordered or merged any variant would
+// silently change every consumer's match dispatch.
+// =============================================================================
+
+@test
+fn regression_retry_backoff_three_variant_adt() {
+    let none_v = RetryBackoff.None;
+    let lin_v  = RetryBackoff.Linear { delay_ms: 100 };
+    let exp_v  = RetryBackoff.Exponential {
+        initial_ms: 10,
+        max_ms:     1_000,
+        multiplier: 2.0,
+    };
+    let _: RetryBackoff = none_v;
+    let _: RetryBackoff = lin_v;
+    let _: RetryBackoff = exp_v;
+}
+
+// =============================================================================
+// REGRESSION §C: RetryOptions.simple preserves max_attempts argument.
+// A defect that defaulted max_attempts would silently break
+// caller-specified retry budgets.
+// =============================================================================
+
+@test
+fn regression_retry_options_simple_round_trip() {
+    let cases: List<Int> = [1, 2, 5, 10, 100, 1000];
+    let mut i: Int = 0;
+    while i < cases.len() {
+        let n = cases[i].clone();
+        let opts: RetryOptions<Text> = RetryOptions.simple(n);
+        assert_eq(opts.max_attempts, n);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// REGRESSION §D: First-attempt success returns the closure's value
+// unchanged. A defect that wrapped / unwrapped / re-resulted the
+// closure return would surface here as a value mismatch.
+// =============================================================================
+
+@test
+fn regression_retry_first_attempt_returns_exact_value() {
+    let r: Result<Int, Text> = retry(3, || { Ok(123_456) });
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 123_456);
+}
+
+@test
+fn regression_retry_immediate_first_attempt_returns_exact_value() {
+    let r: Result<Int, Text> = retry_immediate(3, || { Ok(7_777) });
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 7_777);
+}
+
+// =============================================================================
+// REGRESSION §E: Builder chain `.simple(N).with_should_retry(p)`
+// preserves max_attempts. A defect that reset max_attempts to its
+// default during the chain would surface here.
+// =============================================================================
+
+@test
+fn regression_builder_chain_preserves_max_attempts() {
+    let opts: RetryOptions<Text> = RetryOptions.simple(42)
+        .with_should_retry(|_e: &Text| { true });
+    assert_eq(opts.max_attempts, 42);
+}
+
+fn main() {}
