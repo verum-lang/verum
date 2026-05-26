@@ -182,7 +182,7 @@ public fn which(program: &Text) -> Maybe<PathBuf> {
             let suffixes: List<Text> = [".exe".into(), ".cmd".into(), ".bat".into()];
             for suffix in suffixes.iter() {
                 let mut with_suf = candidate.clone();
-                with_suf.set_extension(suffix.trim_start_matches('.'));
+                with_suf.set_extension(suffix.trim_start_matches_char('.'));
                 if is_file(with_suf.as_path()) { return Some(with_suf); }
             }
         }

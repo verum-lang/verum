@@ -357,32 +357,15 @@ implement Path {
         // SOUNDNESS (closes file_name trailing-separator defect): the
         // previous body called `self.inner.trim_end_matches(is_separator)`
         // — but `Text.trim_end_matches` takes a `&Text` pattern, NOT a
-        // predicate function.  The type-mismatch silently let the wrong
-        // value through and `path` ended up as something other than the
-        // trimmed string, so `file_name()` for `"/home/user/"` returned
-        // None instead of Some("user").  Inline the trim loop using the
-        // platform separator literal directly.
-        //
-        // Build the trimmed copy by hand: walk backwards skipping
-        // separator characters.
-        let raw_bytes = self.inner.as_bytes();
-        let mut end: Int = raw_bytes.len();
+        // predicate function.  Replaced with `trim_end_matches_char`
+        // (added to `core/text/text.vr`) which accepts a Char pattern
+        // — type-correct.  On Windows both '/' and '\' are separators;
+        // strip them in two passes.
+        let trimmed_once = self.inner.trim_end_matches_char('/');
         @cfg(unix)
-        {
-            while end > 0 && raw_bytes[end - 1] == ('/' as Byte) {
-                end = end - 1;
-            }
-        }
+        let path = trimmed_once;
         @cfg(windows)
-        {
-            while end > 0
-                && (raw_bytes[end - 1] == ('/' as Byte)
-                    || raw_bytes[end - 1] == ('\\' as Byte))
-            {
-                end = end - 1;
-            }
-        }
-        let path = self.inner.slice(0, end);
+        let path = trimmed_once.trim_end_matches_char('\\');
         if path.is_empty() {
             return None;
         }
@@ -532,19 +515,12 @@ implement Path {
         if self.starts_with(prefix) {
             let remaining = self.inner.slice(prefix.inner.len(), self.inner.len());
             // SOUNDNESS: `trim_start_matches` takes `&Text`, not a
-            // predicate fn — the previous `trim_start_matches(is_separator)`
-            // call was a silent type-mismatch.  Inline byte-walk
-            // accepts BOTH '/' and '\\' so Windows paths normalise
-            // correctly here too.
-            let rem_bytes = remaining.as_bytes();
-            let mut start: Int = 0;
-            while start < rem_bytes.len()
-                && (rem_bytes[start] == ('/' as Byte)
-                    || rem_bytes[start] == ('\\' as Byte))
-            {
-                start = start + 1;
-            }
-            let trimmed = remaining.slice(start, remaining.len());
+            // predicate fn — use the new `trim_start_matches_char`
+            // overload.  Two passes to accept both '/' and '\\' so
+            // Windows paths normalise correctly here too.
+            let trimmed = remaining
+                .trim_start_matches_char('/')
+                .trim_start_matches_char('\\');
             Some(Path.new(&trimmed))
         } else {
             None

@@ -1360,6 +1360,62 @@ implement Text {
         self.trim_start_matches(pattern).trim_end_matches(pattern)
     }
 
+    /// Trim a leading character (single-codepoint pattern) repeatedly.
+    ///
+    /// Convenience overload for the common case where the pattern is a
+    /// single character literal — `s.trim_start_matches_char('/')` is
+    /// noisier in source than `s.trim_start_matches("/")` but more
+    /// efficient (no allocation of a 1-char Text intermediary) AND
+    /// type-correct.  Pre-existing stdlib code called
+    /// `trim_start_matches('/')` and `trim_end_matches(is_separator)` —
+    /// both type-mismatches that the codegen let through silently.
+    /// Architectural rule pinned: when the pattern is a Char or fn,
+    /// route through these overloads, never the &Text-pattern overload.
+    public fn trim_start_matches_char(&self, ch: Char) -> Text {
+        let mut buf = [0_u8; 4];
+        let n = ch.encode_utf8(&mut buf);
+        let self_bytes = self.as_bytes();
+        let total = self_bytes.len();
+        let mut start = 0;
+        while start + n <= total {
+            let mut i = 0;
+            while i < n && self_bytes[start + i] == buf[i] {
+                i = i + 1;
+            }
+            if i < n {
+                break;
+            }
+            start = start + n;
+        }
+        self.slice(start, total)
+    }
+
+    /// Trim a trailing character (single-codepoint pattern) repeatedly.
+    public fn trim_end_matches_char(&self, ch: Char) -> Text {
+        let mut buf = [0_u8; 4];
+        let n = ch.encode_utf8(&mut buf);
+        let self_bytes = self.as_bytes();
+        let total = self_bytes.len();
+        let mut end = total;
+        while end >= n {
+            let base = end - n;
+            let mut i = 0;
+            while i < n && self_bytes[base + i] == buf[i] {
+                i = i + 1;
+            }
+            if i < n {
+                break;
+            }
+            end = base;
+        }
+        self.slice(0, end)
+    }
+
+    /// Trim a character (single-codepoint pattern) from both ends repeatedly.
+    public fn trim_matches_char(&self, ch: Char) -> Text {
+        self.trim_start_matches_char(ch).trim_end_matches_char(ch)
+    }
+
     /// Split by ASCII whitespace (space, tab, newline, carriage return).
     /// Faster than split_whitespace for ASCII-only text since it only
     /// checks single bytes rather than decoding Unicode characters.
