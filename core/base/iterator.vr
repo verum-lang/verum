@@ -1842,12 +1842,12 @@ implement<T, A: Iterator<Item>, B: Iterator<Item>> Iterator for ChainIter<A, B> 
                 let (a_lower, a_upper) = a.size_hint();
                 let lower = a_lower + b_lower;
                 let upper = match (a_upper, b_upper) {
-                    (Some(au), Some(bu)) => Some(au + bu),
-                    _ => None,
+                    (Maybe.Some(au), Maybe.Some(bu)) => Maybe.Some(au + bu),
+                    _ => Maybe.None,
                 };
                 (lower, upper)
             },
-            None => (b_lower, b_upper),
+            Maybe.None => (b_lower, b_upper),
         }
     }
 }
@@ -1855,10 +1855,10 @@ implement<T, A: Iterator<Item>, B: Iterator<Item>> Iterator for ChainIter<A, B> 
 implement<T, A: DoubleEndedIterator<Item>, B: DoubleEndedIterator<Item>> DoubleEndedIterator for ChainIter<A, B> {
     fn next_back(&mut self) -> Maybe<T> {
         match self.second.next_back() {
-            Some(x) => Some(x),
-            None => match self.first {
-                Some(ref mut first) => first.next_back(),
-                None => None,
+            Maybe.Some(x) => Maybe.Some(x),
+            Maybe.None => match self.first {
+                Maybe.Some(ref mut first) => first.next_back(),
+                Maybe.None => Maybe.None,
             },
         }
     }
