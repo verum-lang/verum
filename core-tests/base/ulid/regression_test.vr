@@ -1,0 +1,154 @@
+// =============================================================================
+// core-tests/base/ulid/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.ulid`. Each entry ties a previously-
+// observed defect or canonical-shape contract to a single @test so
+// re-regressions surface as named test failures.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.ulid.{
+    Ulid, UlidError, parse, from_parts,
+    ULID_ALPHABET,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// REGRESSION §A (@ignore'd): `Ulid.to_text()` is lenient-stubbed
+// because it references `Text.from_utf8_unchecked` which was
+// declared private (`unsafe fn` without `public`) at
+// `core/text/text.vr:455`. Every call to `.to_text()` panics with:
+//   [lenient] Ulid.to_text compiled to panic-stub:
+//   undefined function: Text.from_utf8_unchecked (in function Ulid.to_text)
+//
+// Fix staged in this branch: `text.vr:455` now reads
+// `public unsafe fn from_utf8_unchecked(...)`. The new visibility
+// activates after the next precompiled-stdlib refresh; this pin
+// flips green at that point.
+// =============================================================================
+
+@ignore("Text.from_utf8_unchecked is private in the precompiled stdlib; visibility fix staged in this branch awaits a runtime.vbca regeneration.")
+@test
+fn regression_pin_ulid_to_text_panics_on_stub() {
+    let u = from_parts(1_000_000, 42);
+    let s = u.to_text();
+    assert_eq(s.len(), 26);
+}
+
+@ignore("Text.from_utf8_unchecked is private in the precompiled stdlib; round-trip via to_text gated on visibility fix landing.")
+@test
+fn regression_pin_parse_round_trip_via_to_text() {
+    let original = from_parts(1_000_000, 42);
+    let s = original.to_text();
+    let parsed = parse(&s);
+    assert(parsed.is_ok());
+    assert_eq(parsed.unwrap().timestamp_ms(), 1_000_000_u64);
+}
+
+// =============================================================================
+// REGRESSION §B (@ignore'd): `Ulid.new()` / `Ulid.now()` /
+// `generate()` all internally call `SystemTime.now().timestamp_millis()`.
+// The static-method dispatcher mis-routes `SystemTime.now` to
+// `SysTimeOpsInstant.now()` via the same bare-name first-suffix-wins
+// root as task #17/#39. Every live-clock construction panics with:
+//   field access out of bounds: field index 1 (offset 8+8 = 16)
+//   exceeds object data size 8 type_id=... type='SysTimeOpsInstant'
+//
+// Workaround in tests: `from_parts(ts, seed)` factory only, never
+// `Ulid.new()`. Flips green when the dispatcher closes task #17/#39
+// (multi-day VBC codegen work).
+// =============================================================================
+
+@ignore("task #17/#39 — Ulid.new internally calls SystemTime.now(), which mis-dispatches to SysTimeOpsInstant.now().")
+@test
+fn regression_pin_ulid_new_static_dispatch() {
+    let u = Ulid.new();
+    let _ = u.timestamp_ms();   // any access on the live Ulid triggers the SysTimeOpsInstant.now() panic upstream
+}
+
+// =============================================================================
+// REGRESSION §C: 48-bit timestamp boundary — `from_parts` must accept
+// the full 2^48 - 1 range and round-trip via `timestamp_ms`. A defect
+// that masked the timestamp at the wrong width (e.g. 32-bit) would
+// surface here as a smaller value.
+// =============================================================================
+
+@test
+fn regression_from_parts_max_48_bit_round_trips() {
+    let max_ts: Int = 281_474_976_710_655;
+    let u = from_parts(max_ts, 0);
+    assert_eq(u.timestamp_ms(), max_ts as UInt64);
+}
+
+// =============================================================================
+// REGRESSION §D: negative timestamp passed to free-fn `from_parts`
+// must clamp to 0 (source line 239-241). A defect that wrapped
+// negatives into UInt64 (so `-1` → `UInt64.MAX`) would silently break
+// the time-sortable invariant.
+// =============================================================================
+
+@test
+fn regression_from_parts_negative_clamps_to_zero() {
+    let u = from_parts(-1, 0);
+    assert_eq(u.timestamp_ms(), 0_u64);
+    let u2 = from_parts(-281_474_976_710_655, 0);
+    assert_eq(u2.timestamp_ms(), 0_u64);
+}
+
+// =============================================================================
+// REGRESSION §E: ULID_ALPHABET must contain exactly the Crockford
+// Base32 alphabet (32 chars, no I/L/O/U). A defect introducing a
+// banned char would corrupt every encoded ULID.
+// =============================================================================
+
+@test
+fn regression_alphabet_excludes_banned_chars() {
+    let banned: List<Byte> = [0x49_u8, 0x4C_u8, 0x4F_u8, 0x55_u8];
+    let mut bi: Int = 0;
+    while bi < banned.len() {
+        let bad = banned[bi];
+        let mut ai: Int = 0;
+        while ai < ULID_ALPHABET.len() {
+            assert(ULID_ALPHABET[ai] != bad);
+            ai = ai + 1;
+        }
+        bi = bi + 1;
+    }
+}
+
+// =============================================================================
+// REGRESSION §F: parse must reject every non-26 input length. A
+// defect that accepted shorter strings would silently produce
+// truncated payloads.
+// =============================================================================
+
+@test
+fn regression_parse_rejects_short_input() {
+    let s = "0".to_text();
+    let r = parse(&s);
+    assert(r.is_err());
+    match r {
+        Err(e) => match e {
+            UlidError.InvalidLength(n) => assert_eq(n, 1),
+            UlidError.InvalidCharacter(_) => panic("expected InvalidLength"),
+        },
+        Ok(_) => panic("expected Err on length-1 input"),
+    }
+}
+
+// =============================================================================
+// REGRESSION §G: all-zero canonical string must parse to the all-zero
+// ULID. This is the simplest possible parse-round-trip pin that
+// bypasses the `to_text` panic-stub defect.
+// =============================================================================
+
+@test
+fn regression_parse_all_zero_canonical_string() {
+    let s = "00000000000000000000000000".to_text();
+    let r = parse(&s);
+    assert(r.is_ok());
+    assert_eq(r.unwrap().timestamp_ms(), 0_u64);
+}
+
+fn main() {}
