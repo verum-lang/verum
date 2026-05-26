@@ -1,0 +1,143 @@
+// =============================================================================
+// core-tests/base/nanoid/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.nanoid`. Each entry ties a previously-
+// observed defect or canonical-shape contract to a single @test so
+// re-regressions surface as named test failures.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.nanoid.{
+    generate, generate_len, generate_with_alphabet,
+    NANOID_ALPHABET, NANOID_DEFAULT_LENGTH, DEFAULT_LEN,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// REGRESSION §A (@ignore'd): `core/base/nanoid.vr:138` referenced
+// `Text.from("")` — a function that does NOT exist on `Text`.
+// Available factories: `Text.new()`, `Text.from_utf8`, `Text.from_bytes`,
+// `Text.from_char`, `Text.from_int`, `Text.from_float`, `Text.from_bool`.
+// The precompile pass lenient-stubbed `generate_with_alphabet` because
+// `Text.from` was unresolvable. Every call into the generation surface
+// panics with:
+//   [lenient] generate_with_alphabet compiled to panic-stub:
+//   undefined function: Text.from (in function generate_with_alphabet)
+//
+// Fix landed in this branch: `Text.from("")` → `Text.new()` at
+// nanoid.vr:138. Activates after next precompiled-stdlib refresh.
+// =============================================================================
+
+@ignore("`Text.from` does not exist; fixed in stdlib to use Text.new(). Activates on next precompiled-stdlib refresh.")
+@test
+fn regression_pin_generate_with_alphabet_panic_stub() {
+    // Smallest input that hits the early-return short-circuit at
+    // nanoid.vr:138 — alpha_size = 0 forces the `return Text.from("")`
+    // path, which is the lenient-stubbed branch.
+    let empty: &[Byte] = "".as_bytes();
+    let _ = generate_with_alphabet(empty, 21);
+}
+
+// =============================================================================
+// REGRESSION §B (@ignore'd): `core/base/nanoid.vr:170` calls
+// `Text.from_utf8_unchecked(out.as_slice())` which was declared
+// private (`unsafe fn` instead of `public unsafe fn`) at
+// `core/text/text.vr:455`. Cross-module resolution failed at
+// precompile and lenient-stubbed `generate_with_alphabet`. Same
+// defect class as core-tests/base/ulid/regression_test.vr §A.
+//
+// Fix landed in this branch (via the ulid work — text.vr:455 now
+// `public unsafe fn`). Activates on next precompiled-stdlib refresh.
+// =============================================================================
+
+@ignore("Text.from_utf8_unchecked was private; visibility fix landed in this branch. Activates on next precompiled-stdlib refresh.")
+@test
+fn regression_pin_generate_len_panic_stub() {
+    let _ = generate_len(8);
+}
+
+@ignore("Same Text.from_utf8_unchecked defect — `generate()` is the canonical user-facing entry.")
+@test
+fn regression_pin_generate_default_panic_stub() {
+    let _ = generate();
+}
+
+// =============================================================================
+// REGRESSION §C: NANOID_ALPHABET length and constant are stable. A
+// defect that resized the alphabet would change the entropy-per-char
+// and break the 126-bit invariant.
+// =============================================================================
+
+@test
+fn regression_alphabet_length_pinned_at_64() {
+    assert_eq(NANOID_ALPHABET.len(), 64);
+}
+
+@test
+fn regression_default_length_pinned_at_21() {
+    assert_eq(NANOID_DEFAULT_LENGTH, 21);
+    assert_eq(DEFAULT_LEN, 21);
+}
+
+// =============================================================================
+// REGRESSION §D: alphabet positions must remain stable. Reordering
+// the alphabet would not change entropy but would break any decoder
+// that assumes positional encoding.
+// =============================================================================
+
+@test
+fn regression_alphabet_first_position_is_uppercase_a() {
+    assert_eq(NANOID_ALPHABET[0], 0x41_u8);
+}
+
+@test
+fn regression_alphabet_uppercase_z_at_position_25() {
+    assert_eq(NANOID_ALPHABET[25], 0x5A_u8);
+}
+
+@test
+fn regression_alphabet_lowercase_a_at_position_26() {
+    assert_eq(NANOID_ALPHABET[26], 0x61_u8);
+}
+
+@test
+fn regression_alphabet_digit_zero_at_position_52() {
+    assert_eq(NANOID_ALPHABET[52], 0x30_u8);
+}
+
+@test
+fn regression_alphabet_underscore_at_position_62() {
+    assert_eq(NANOID_ALPHABET[62], 0x5F_u8);
+}
+
+@test
+fn regression_alphabet_hyphen_at_position_63() {
+    assert_eq(NANOID_ALPHABET[63], 0x2D_u8);
+}
+
+// =============================================================================
+// REGRESSION §E: alphabet excludes URL-reserved chars per RFC 3986.
+// A defect that introduced '+' or '/' would break URL-safety.
+// =============================================================================
+
+@test
+fn regression_alphabet_excludes_url_reserved() {
+    let reserved: List<Byte> = [
+        0x2B_u8,   // '+'
+        0x2F_u8,   // '/'
+        0x3D_u8,   // '='
+    ];
+    let mut ri: Int = 0;
+    while ri < reserved.len() {
+        let bad = reserved[ri];
+        let mut ai: Int = 0;
+        while ai < NANOID_ALPHABET.len() {
+            assert(NANOID_ALPHABET[ai] != bad);
+            ai = ai + 1;
+        }
+        ri = ri + 1;
+    }
+}
+
+fn main() {}
