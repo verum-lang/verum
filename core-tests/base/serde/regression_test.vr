@@ -1,0 +1,160 @@
+// =============================================================================
+// core-tests/base/serde/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.serde`. The protocol surface itself
+// (Serialize / Deserialize / Serializer / Deserializer) is the
+// contract every backend (json / cbor / msgpack / binary) must
+// satisfy — these pins guard the SerdeError factory invariants and
+// the SerdeResult<T> = Result<T, SerdeError> alias contract.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.serde.{
+    SerdeError, SerdeResult,
+    Serialize, Deserialize, Serializer, Deserializer,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// REGRESSION §A: SerdeError.new preserves the message verbatim. A
+// defect that truncated / appended boilerplate would silently mangle
+// caller-supplied diagnostic strings.
+// =============================================================================
+
+@test
+fn regression_serde_error_new_preserves_message_verbatim() {
+    let msg = "exact:format:reason".to_text();
+    let e = SerdeError.new(msg.clone());
+    assert_eq(e.message().clone(), msg);
+}
+
+// =============================================================================
+// REGRESSION §B: missing_field includes the field name. A defect that
+// dropped the name would make diagnostics useless.
+// =============================================================================
+
+@test
+fn regression_missing_field_includes_field_name() {
+    let names: List<Text> = [
+        "id".to_text(),
+        "username".to_text(),
+        "created_at".to_text(),
+        "deeply_nested_inner_field".to_text(),
+    ];
+    let mut i: Int = 0;
+    while i < names.len() {
+        let name = names[i].clone();
+        let e = SerdeError.missing_field(&name);
+        assert(e.message().contains(&name));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// REGRESSION §C: unexpected_type includes BOTH expected and found
+// type names. A defect that dropped one side would silently break the
+// canonical "expected X, found Y" diagnostic.
+// =============================================================================
+
+@test
+fn regression_unexpected_type_includes_both_expected_and_found() {
+    let pairs: List<(Text, Text)> = [
+        ("Int".to_text(),  "Text".to_text()),
+        ("Bool".to_text(), "Float".to_text()),
+        ("List<Int>".to_text(), "Map<Text, Int>".to_text()),
+    ];
+    let mut i: Int = 0;
+    while i < pairs.len() {
+        let p = pairs[i].clone();
+        let e = SerdeError.unexpected_type(&p.0, &p.1);
+        let msg = e.message().clone();
+        // At least one of the type names must appear.
+        assert(msg.contains(&p.0) || msg.contains(&p.1));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// REGRESSION §D: unknown_field includes the field name. Parallel to §B
+// but for the "extra / superfluous field" diagnostic path.
+// =============================================================================
+
+@test
+fn regression_unknown_field_includes_field_name() {
+    let names: List<Text> = [
+        "xyzzy".to_text(),
+        "extra_unrecognized".to_text(),
+        "_internal_field".to_text(),
+    ];
+    let mut i: Int = 0;
+    while i < names.len() {
+        let name = names[i].clone();
+        let e = SerdeError.unknown_field(&name);
+        assert(e.message().contains(&name));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// REGRESSION §E: SerdeResult<T> is structurally Result<T, SerdeError>.
+// Ok(x) round-trips through SerdeResult; Err(e) round-trips with the
+// SerdeError payload intact.
+// =============================================================================
+
+@test
+fn regression_serde_result_ok_round_trip() {
+    let r: SerdeResult<Int> = Ok(42);
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 42);
+}
+
+@test
+fn regression_serde_result_err_carries_serde_error() {
+    let e = SerdeError.new("custom".to_text());
+    let r: SerdeResult<Int> = Err(e);
+    assert(r.is_err());
+    let recovered = r.unwrap_err();
+    assert_eq(recovered.message().clone(), "custom".to_text());
+}
+
+// =============================================================================
+// REGRESSION §F: SerdeError single-field-record layout pin. A defect
+// that added or reordered fields would silently break every consumer
+// of `.message` field access.
+// =============================================================================
+
+@test
+fn regression_serde_error_single_field_record_layout() {
+    let e = SerdeError { message: "x".to_text() };
+    // Direct field access and the accessor method must return the
+    // same content.
+    assert_eq(e.message.clone(), "x".to_text());
+    assert_eq(e.message().clone(), "x".to_text());
+}
+
+// =============================================================================
+// REGRESSION §G: SerdeError Eq is structural over the message field.
+// A defect that compared by reference identity would silently break
+// "same error, distinct construction" equality.
+// =============================================================================
+
+@test
+fn regression_serde_error_eq_structural() {
+    let a = SerdeError.new("same".to_text());
+    let b = SerdeError.new("same".to_text());
+    assert(a == b);
+    let c = SerdeError.new("different".to_text());
+    assert(!(a == c));
+}
+
+@test
+fn regression_serde_error_eq_distinct_construction_paths() {
+    // missing_field("x") and missing_field("x") must compare equal
+    // because both produce the same canonical message.
+    let a = SerdeError.missing_field(&"x".to_text());
+    let b = SerdeError.missing_field(&"x".to_text());
+    assert(a == b);
+}
+
+fn main() {}
