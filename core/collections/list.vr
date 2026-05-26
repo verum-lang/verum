@@ -436,13 +436,18 @@ implement<T> List<T> {
     // mutates `self` in that case (the buffer pointer / len / cap
     // are untouched if try_grow returns Err).
     public fn try_push(&mut self, value: T) -> Result<Unit, AllocError> {
+        // Safe-operation try_push: ensure capacity first, then delegate to
+        // the runtime-intercepted `push` (which honors canonical
+        // [len@0, cap@1, backing_ptr@2] layout). Historical raw
+        // `ptr_write(self.ptr.offset(self.len), value)` wrote into the
+        // backing heap object's ObjectHeader bytes because codegen
+        // resolves `self.ptr` to header-start (not past
+        // `OBJECT_HEADER_SIZE`). Same defect class as get_mut /
+        // pop_front / split_off / binary_search migrations.
         if self.len == self.cap {
             try { self.try_grow()? };
         }
-        unsafe {
-            ptr_write(self.ptr.offset(self.len), value);
-        }
-        self.len = self.len + 1;
+        self.push(value);
         Ok(())
     }
 
