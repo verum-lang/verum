@@ -100,8 +100,7 @@ fn regression_repeat_byte_read_dispatches_correctly() {
 // but `c.read(...)` still mis-dispatches via opcode 0x62 (GetF) to
 // `BTreeSetDrain.next`, indicating the generic-instantiation path
 // for slice-borrowed BufferCursor receivers misroutes through the
-// shared LIST runtime kind.  Deeper VBC codegen issue beyond the
-// scope of the io.* conformance closes — separate task.
+// shared LIST runtime kind.  Pinned `@ignore` — separate task.
 @ignore
 @test
 fn regression_cursor_slice_read_dispatches_correctly() {
