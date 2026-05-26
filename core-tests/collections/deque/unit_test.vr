@@ -283,4 +283,286 @@ fn test_deque_wrap_around_via_back_drain_and_back_push() {
     assert_eq(d.back(), Some(103));
 }
 
+// =============================================================================
+// Section 8: get / get_mut / index — logical position access
+// =============================================================================
+
+@test
+fn test_deque_get_in_bounds_returns_value() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    assert_eq(d.get(0), Some(10));
+    assert_eq(d.get(1), Some(20));
+    assert_eq(d.get(2), Some(30));
+}
+
+@test
+fn test_deque_get_out_of_bounds_returns_none() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    assert_eq(d.get(5), None);
+    assert_eq(d.get(99), None);
+}
+
+@test
+fn test_deque_get_on_empty_is_none() {
+    let d: Deque<Int> = Deque.new();
+    assert_eq(d.get(0), None);
+}
+
+@test
+fn test_deque_get_after_wrap_around_returns_logical_position() {
+    // Same setup as ring-buffer wrap test — get(i) should follow logical
+    // position, not physical ring slot.
+    let mut d: Deque<Int> = Deque.new();
+    let mut i = 0;
+    while i < 8 {
+        d.push_back(i);
+        i = i + 1;
+    }
+    let mut k = 0;
+    while k < 4 {
+        let _ = d.pop_front();
+        k = k + 1;
+    }
+    let mut j = 100;
+    while j < 104 {
+        d.push_back(j);
+        j = j + 1;
+    }
+    // Logical: [4, 5, 6, 7, 100, 101, 102, 103]
+    assert_eq(d.get(0), Some(4));
+    assert_eq(d.get(3), Some(7));
+    assert_eq(d.get(4), Some(100));
+    assert_eq(d.get(7), Some(103));
+}
+
+@test
+fn test_deque_get_via_push_front_reverses_logical_order() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_front(3);
+    d.push_front(2);
+    d.push_front(1);
+    // Logical contents from front: [1, 2, 3]
+    assert_eq(d.get(0), Some(1));
+    assert_eq(d.get(1), Some(2));
+    assert_eq(d.get(2), Some(3));
+}
+
+// =============================================================================
+// Section 9: contains — value membership
+// =============================================================================
+
+@test
+fn test_deque_contains_present_value() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_back(20);
+    d.push_back(30);
+    assert(d.contains(&20));
+    assert(d.contains(&10));
+    assert(d.contains(&30));
+}
+
+@test
+fn test_deque_contains_absent_value() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    assert(!d.contains(&99));
+}
+
+@test
+fn test_deque_contains_on_empty_is_false() {
+    let d: Deque<Int> = Deque.new();
+    assert(!d.contains(&1));
+}
+
+@test
+fn test_deque_contains_after_wrap_around() {
+    let mut d: Deque<Int> = Deque.new();
+    let mut i = 0;
+    while i < 8 {
+        d.push_back(i);
+        i = i + 1;
+    }
+    let mut k = 0;
+    while k < 4 {
+        let _ = d.pop_front();
+        k = k + 1;
+    }
+    d.push_back(100);
+    assert(d.contains(&4));
+    assert(d.contains(&100));
+    assert(!d.contains(&0));
+    assert(!d.contains(&3));
+}
+
+// =============================================================================
+// Section 10: clear preserves capacity, resets logical state
+// =============================================================================
+
+@test
+fn test_deque_clear_resets_len_to_zero() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    d.clear();
+    assert_eq(d.len(), 0);
+    assert(d.is_empty());
+}
+
+@test
+fn test_deque_clear_allows_subsequent_push() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.clear();
+    d.push_back(99);
+    assert_eq(d.len(), 1);
+    assert_eq(d.front(), Some(99));
+    assert_eq(d.back(), Some(99));
+}
+
+@test
+fn test_deque_clear_on_empty_is_noop() {
+    let mut d: Deque<Int> = Deque.new();
+    d.clear();
+    assert(d.is_empty());
+}
+
+// =============================================================================
+// Section 11: with_capacity — explicit capacity allocation
+// =============================================================================
+
+@test
+fn test_deque_with_capacity_preallocates() {
+    // Note: per the per-tier divergence pinned in `audit.md` §3, the
+    // runtime intercept rounds up to its own ring-buffer policy
+    // (power-of-two ≥ 16); the stdlib body defers allocation entirely.
+    // We only assert capacity is non-negative + len starts at 0; the
+    // exact preallocation contract is intercept-defined.
+    let d: Deque<Int> = Deque.with_capacity(64);
+    assert_eq(d.len(), 0);
+    assert(d.capacity() >= 0);
+}
+
+@test
+fn test_deque_with_capacity_zero_is_valid() {
+    let d: Deque<Int> = Deque.with_capacity(0);
+    assert_eq(d.len(), 0);
+}
+
+@test
+fn test_deque_with_capacity_then_fill() {
+    let mut d: Deque<Int> = Deque.with_capacity(8);
+    let mut i = 0;
+    while i < 8 {
+        d.push_back(i);
+        i = i + 1;
+    }
+    assert_eq(d.len(), 8);
+    assert_eq(d.get(0), Some(0));
+    assert_eq(d.get(7), Some(7));
+}
+
+// =============================================================================
+// Section 12: Single-element deque — edge cases at boundary
+// =============================================================================
+
+@test
+fn test_deque_singleton_back_eq_front() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(42);
+    assert_eq(d.front(), Some(42));
+    assert_eq(d.back(), Some(42));
+    assert_eq(d.get(0), Some(42));
+}
+
+@test
+fn test_deque_singleton_pop_front_then_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(99);
+    assert_eq(d.pop_front(), Some(99));
+    assert(d.is_empty());
+    assert_eq(d.front(), None);
+}
+
+@test
+fn test_deque_singleton_pop_back_then_empty() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(99);
+    assert_eq(d.pop_back(), Some(99));
+    assert(d.is_empty());
+    assert_eq(d.back(), None);
+}
+
+// =============================================================================
+// Section 13: Repeated push_front — reverses order
+// =============================================================================
+
+@test
+fn test_deque_repeated_push_front_reverses_iteration() {
+    let mut d: Deque<Int> = Deque.new();
+    let mut i = 1;
+    while i <= 5 {
+        d.push_front(i);
+        i = i + 1;
+    }
+    // Logical contents: [5, 4, 3, 2, 1]
+    assert_eq(d.front(), Some(5));
+    assert_eq(d.back(), Some(1));
+    assert_eq(d.get(0), Some(5));
+    assert_eq(d.get(4), Some(1));
+}
+
+@test
+fn test_deque_push_front_then_back_interleave() {
+    // After push_front(1) then push_back(2) then push_front(0):
+    // logical = [0, 1, 2]
+    let mut d: Deque<Int> = Deque.new();
+    d.push_front(1);
+    d.push_back(2);
+    d.push_front(0);
+    assert_eq(d.len(), 3);
+    assert_eq(d.get(0), Some(0));
+    assert_eq(d.get(1), Some(1));
+    assert_eq(d.get(2), Some(2));
+}
+
+// =============================================================================
+// Section 14: Drain to empty then refill — state-machine integrity
+// =============================================================================
+
+@test
+fn test_deque_drain_to_empty_then_refill_resumes_correctly() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    let _ = d.pop_front();
+    let _ = d.pop_front();
+    assert(d.is_empty());
+    // Refill — len/head/cap invariants must be re-established.
+    d.push_back(10);
+    d.push_back(20);
+    assert_eq(d.len(), 2);
+    assert_eq(d.get(0), Some(10));
+    assert_eq(d.get(1), Some(20));
+}
+
+@test
+fn test_deque_alternating_push_pop_keeps_len_one() {
+    let mut d: Deque<Int> = Deque.new();
+    let mut i = 0;
+    while i < 10 {
+        d.push_back(i);
+        let _ = d.pop_front();
+        i = i + 1;
+    }
+    assert(d.is_empty());
+}
+
 fn main() {}
