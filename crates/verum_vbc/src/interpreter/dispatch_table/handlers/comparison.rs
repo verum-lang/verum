@@ -22,6 +22,12 @@ pub(in super::super) fn handle_eqi(
     let b = read_reg(state)?;
     let va = state.get_reg(a);
     let vb = state.get_reg(b);
+    if std::env::var("VERUM_TRACE_EQ_RUNTIME").is_ok() {
+        eprintln!(
+            "[eqi-entry] va.is_ptr={} vb.is_ptr={} va.bits=0x{:x} vb.bits=0x{:x}",
+            va.is_ptr(), vb.is_ptr(), va.to_bits(), vb.to_bits(),
+        );
+    }
     let result = deep_value_eq(&va, &vb, state);
     state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
@@ -176,6 +182,13 @@ pub(in super::super) fn handle_eqg(
     let va = state.get_reg(a);
     let vb = state.get_reg(b);
 
+    if std::env::var("VERUM_TRACE_EQ_RUNTIME").is_ok() {
+        eprintln!(
+            "[eqg-entry] protocol_id={} va.is_ptr={} vb.is_ptr={} va.bits=0x{:x} vb.bits=0x{:x}",
+            protocol_id, va.is_ptr(), vb.is_ptr(), va.to_bits(), vb.to_bits(),
+        );
+    }
+
     // **Eq dispatch chain** (most-specific → most-general):
     //
     // (1) **protocol_id != 0** — codegen knew the static type at the
@@ -289,6 +302,16 @@ fn runtime_type_name_for_eq(v: &Value, state: &InterpreterState) -> Option<Strin
     // lookup naturally falls through to `None`.
     let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
     let raw_id = header.type_id.0;
+    if std::env::var("VERUM_TRACE_EQ_RUNTIME").is_ok() {
+        eprintln!(
+            "[eq-runtime] raw_id={} (0x{:x}) is_synthetic={} is_maybe={} is_result={}",
+            raw_id,
+            raw_id,
+            verum_common::layout::is_synthetic_variant_type_id(raw_id),
+            raw_id == crate::types::TypeId::MAYBE.0,
+            raw_id == crate::types::TypeId::RESULT.0,
+        );
+    }
     if raw_id == 0 {
         return None;
     }
