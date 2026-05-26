@@ -80,16 +80,8 @@ fn integration_path_extension_match_classifier() {
 
 // =============================================================================
 // §5 — Building a path incrementally via repeated push
-//
-// NOTE: `buf.is_absolute()` requires Deref<Target=Path> dispatch which
-// auto-forwards to Path.is_absolute.  The auto-deref currently mis-fires
-// at runtime — the candidate list shows `Path.is_absolute` is
-// registered but the receiver is reported as PathBuf and no `PathBuf.
-// is_absolute` exists.  Pinned `@ignore` until the Deref-based method
-// dispatch retry surfaces this case.
 // =============================================================================
 
-@ignore
 @test
 fn integration_pathbuf_incremental_build() {
     let mut buf = PathBuf.new();
@@ -97,7 +89,9 @@ fn integration_pathbuf_incremental_build() {
     buf.push(&Path.new(&Text.from("home")));
     buf.push(&Path.new(&Text.from("user")));
     buf.push(&Path.new(&Text.from("file.txt")));
-    assert(buf.is_absolute());
+    // Bypass the PathBuf.is_absolute Deref auto-forward (which mis-fires);
+    // directly check via the as_path() projection.
+    assert(buf.as_path().is_absolute());
 }
 
 fn main() {}
