@@ -1748,8 +1748,8 @@ implement<I: Iterator> Iterator for SkipIter<I> {
         let n = self.remaining;
         let new_lower = if lower > n { lower - n } else { 0 };
         let new_upper = match upper {
-            Some(u) => if u > n { Some(u - n) } else { Some(0) },
-            None => None,
+            Maybe.Some(u) => if u > n { Maybe.Some(u - n) } else { Maybe.Some(0) },
+            Maybe.None => Maybe.None,
         };
         (new_lower, new_upper)
     }
@@ -1763,7 +1763,7 @@ implement<I: DoubleEndedIterator + ExactSizeIterator> DoubleEndedIterator for Sk
             self.iter.next_back()
         } else {
             // Not enough elements to skip and yield from back
-            None
+            Maybe.None
         }
     }
 }
