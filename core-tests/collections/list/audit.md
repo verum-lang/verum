@@ -122,3 +122,41 @@ non-`@ignore`d regression to guard against re-regression.
 
 3. **Re-enable the property + integration tests in `regression_test.vr`
    §B** once item 1 lands.
+
+4. **Close the for/range iterator-closure dispatch class for non-
+   intercepted methods** (§E new). The stdlib bodies of `find_by`,
+   `position_by`, `starts_with`, `ends_with`, `windows`, `chunks`,
+   `partition_by`, `chunk_by`, `dedup_by` all use
+   `for i in range(0, self.len)` which depends on iterator-internal
+   closures being registered in the user-side function table. From
+   stdlib-internal call sites the closures are present; from user-side
+   bytecode they aren't and the call lowers to
+   `TypeMismatch { expected: "closure", got: "non-pointer" }`. Two fix
+   paths: (a) migrate each method body to the `while + self.get(i)`
+   pattern that `index_of` uses (already validated to work everywhere);
+   (b) close the iterator-closure cross-module remap. Path (a) is the
+   minimum-invasive fundamental fix and is symmetric with the
+   already-validated `index_of`/`position`/`rposition` pattern in
+   commit chain `c14e4ca87` lineage. Pinned @ignore in
+   `unit_test.vr` Sections 17 / 18 / 20 / 27 / 28.
+
+### §E — Bi-modal `position` intercept fixed (CLOSED 2026-05-26)
+
+The runtime `position` intercept at
+`crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs:9243`
+previously took `arg[0]` as a closure unconditionally — the
+iterator-protocol shape. This routed every value-form
+`xs.position(&value)` call (sister of `contains`) into
+`call_closure_sync(value, _)` which panics with
+`TypeMismatch { expected: "closure", got: "non-pointer" }`.
+
+Fundamental fix: the intercept now branches on `arg0.is_func_ref()`.
+Func-ref → predicate-form (original semantics); non-func-ref →
+value-form mirroring the `contains` intercept (auto-deref CBGR ref
+needle, bitwise compare against each element).
+
+Same defect class as task #17/#39 (mount-scope-aware lookup): a single
+name-only dispatch arm trying to serve two semantic sister types
+without arg-shape discrimination. The bi-modal-by-arg-shape pattern
+documented here is the load-bearing template for closing similar
+defects in `find`, `find_by`, `position_by`, etc.
