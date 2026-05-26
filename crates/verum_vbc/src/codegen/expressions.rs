@@ -18491,12 +18491,33 @@ impl VbcCodegen {
                         {
                             return Some(inner_type);
                         }
-                        // Look up the qualified static method to get its return type
+                        // Look up the qualified static method to get its return type.
+                        //
+                        // **Self → concrete substitution at static-call READ-site**
+                        // (defence-in-depth alongside the WRITE-site
+                        // substitution in `register_impl_function` at
+                        // codegen/mod.rs:8225).  When the static method's
+                        // declared signature is `fn new(...) -> Self`, the
+                        // function table normally stores `return_type_name
+                        // = Some("<concrete>")` because register_impl_function
+                        // already calls `substitute_self_in_type_name` at
+                        // registration time.  But registration-path drift
+                        // (forward declarations, protocol default-method
+                        // monomorphisations registered via alternate paths,
+                        // cross-module aliasing) can leave the literal
+                        // `"Self"` in the table.  Applying the substitution
+                        // here too means the receiver-type tracking never
+                        // sees `"Self"` polluting downstream consumers —
+                        // even when the WRITE-site path missed.  Mirrors
+                        // the same discipline in the instance-method arm
+                        // below at line ~18555.
                         let qualified_method = format!("{}.{}", name, method.name);
                         if let Some(func_info) = self.ctx.lookup_function(&qualified_method)
                             && let Some(ref ret_type_name) = func_info.return_type_name
                         {
-                            return Some(ret_type_name.clone());
+                            let resolved =
+                                VbcCodegen::substitute_self_in_type_name(ret_type_name, name);
+                            return Some(resolved);
                         }
                         // Check if this is a known static method that returns Maybe<T>
                         const MAYBE_RETURNING_STATIC_METHODS: &[&str] = &[
@@ -18939,7 +18960,7 @@ impl VbcCodegen {
                     // Handle qualified paths like module.function()
                     if path.segments.len() > 1 {
                         // Build qualified name from path segments
-                        let qualified_name: String = path
+                        let segment_names: Vec<String> = path
                             .segments
                             .iter()
                             .filter_map(|seg| {
@@ -18949,13 +18970,46 @@ impl VbcCodegen {
                                     None
                                 }
                             })
-                            .collect::<Vec<_>>()
-                            .join(".");
+                            .collect();
+                        let qualified_name: String = segment_names.join(".");
 
                         if let Some(func_info) = self.ctx.lookup_function(&qualified_name)
                             && let Some(ref ret_type) = func_info.return_type_name
                         {
-                            return Some(ret_type.clone());
+                            // **Self → concrete substitution at qualified-Call
+                            // READ-site** (defence-in-depth for the
+                            // qualified-path shape).
+                            //
+                            // When a fully-qualified path call like
+                            // `module.Type.method(...)` reaches this arm and
+                            // the registered `return_type_name` is the
+                            // literal `"Self"` (registration-path drift —
+                            // see WRITE-site substitution at
+                            // codegen/mod.rs:8225), substitute Self with
+                            // the receiver type (the segment BEFORE the
+                            // method-name segment) so downstream consumers
+                            // never see the literal `"Self"` token.
+                            //
+                            // For an N-segment qualified path the type-
+                            // identifier is the second-to-last segment
+                            // (the receiver of the static method). Mirrors
+                            // the same Self-substitution discipline added
+                            // to the single-segment MethodCall arm above
+                            // and already present in the instance-method arms.
+                            let receiver_type_name = if segment_names.len() >= 2 {
+                                &segment_names[segment_names.len() - 2]
+                            } else {
+                                // Defensive: shouldn't happen given the
+                                // outer `segments.len() > 1` guard, but
+                                // fall through with the bare ret_type
+                                // rather than panic if invariants drift.
+                                ret_type
+                            };
+                            let resolved = VbcCodegen::substitute_self_in_type_name(
+                                ret_type,
+                                receiver_type_name,
+                            );
+                            return Some(resolved);
                         }
                     }
                 }
@@ -19457,7 +19511,34 @@ impl VbcCodegen {
                         if info.param_count == args.len()
                             && let Some(rt) = &info.return_type_name
                         {
-                            return Some(rt.clone());
+                            // **Self → concrete substitution at qualified
+                            // Call READ-site** (defence-in-depth — mirror
+                            // of the same fix in `extract_expr_type_name`'s
+                            // sibling arm and alongside the WRITE-site
+                            // substitution in `register_impl_function` at
+                            // codegen/mod.rs:8225).
+                            //
+                            // When `func_name = "Type.method"` and the
+                            // registered `return_type_name` is the literal
+                            // `"Self"` (registration-path drift), substitute
+                            // with the receiver type name (the segment
+                            // BEFORE the trailing method-name segment) so
+                            // downstream consumers never see `"Self"`
+                            // polluting variable_type_names tracking. For
+                            // unqualified bare-name calls there is no
+                            // receiver, so the substitution is a no-op
+                            // (Self can only meaningfully appear on a
+                            // type's own static / instance method).
+                            let resolved = if let Some(dot_pos) = func_name.rfind('.') {
+                                let receiver = &func_name[..dot_pos];
+                                VbcCodegen::substitute_self_in_type_name(rt, receiver)
+                            } else if let Some(cc_pos) = func_name.rfind("::") {
+                                let receiver = &func_name[..cc_pos];
+                                VbcCodegen::substitute_self_in_type_name(rt, receiver)
+                            } else {
+                                rt.clone()
+                            };
+                            return Some(resolved);
                         }
                     }
                     // (2) Disambiguating fallback for variants: when the
