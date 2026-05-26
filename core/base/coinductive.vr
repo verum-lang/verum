@@ -64,6 +64,21 @@ public fn is_guarded(c: CorecursiveCall) -> Bool {
     c.guard_depth >= 1
 }
 
+implement CorecursiveCall {
+    /// Method form of [`is_guarded`]. A site is guarded iff its
+    /// `guard_depth` is at least 1.
+    public fn is_guarded(&self) -> Bool {
+        self.guard_depth >= 1
+    }
+
+    /// Method form of the free-function constructor [`corec_call`].
+    /// Provided so that `CorecursiveCall.new(name, depth)` works
+    /// alongside the lower-case `corec_call(name, depth)` factory.
+    public fn new(callee: Text, guard_depth: Int{>= 0}) -> CorecursiveCall {
+        CorecursiveCall { callee, guard_depth }
+    }
+}
+
 /// Productivity verdict from `check_productivity`.
 public type ProductivityResult is
     /// All recursive calls are guarded.
@@ -85,6 +100,33 @@ public fn check_productivity(calls: List<CorecursiveCall>) -> ProductivityResult
         ProductivityResult.Productive
     } else {
         ProductivityResult.NonProductive { unguarded }
+    }
+}
+
+implement ProductivityResult {
+    /// Returns `true` iff the verdict is [`ProductivityResult.Productive`].
+    public fn is_productive(&self) -> Bool {
+        match self {
+            ProductivityResult.Productive => true,
+            ProductivityResult.NonProductive { unguarded: _ } => false,
+        }
+    }
+
+    /// Returns `true` iff the verdict is
+    /// [`ProductivityResult.NonProductive`]. Convenience inverse of
+    /// [`is_productive`].
+    public fn is_non_productive(&self) -> Bool {
+        !self.is_productive()
+    }
+
+    /// Returns the list of unguarded callees for a
+    /// [`ProductivityResult.NonProductive`] verdict, or the empty list
+    /// when the verdict is [`ProductivityResult.Productive`].
+    public fn unguarded_names(&self) -> List<Text> {
+        match self {
+            ProductivityResult.Productive => List.new(),
+            ProductivityResult.NonProductive { unguarded } => unguarded.clone(),
+        }
     }
 }
 
@@ -119,6 +161,50 @@ public fn trace_prefix(t: ObservationTrace, n: Int{>= 0}) -> ObservationTrace {
         i = i + 1;
     }
     trace(out)
+}
+
+implement Observation {
+    /// Method form of the free-function constructor [`observation`].
+    public fn new(label: Text, payload: Text) -> Observation {
+        Observation { label, payload }
+    }
+}
+
+implement ObservationTrace {
+    /// Method form of the free-function constructor [`trace`].
+    public fn new(steps: List<Observation>) -> ObservationTrace {
+        ObservationTrace { steps }
+    }
+
+    /// Build a trace from a list of observations.
+    public fn from_list(steps: List<Observation>) -> ObservationTrace {
+        ObservationTrace { steps }
+    }
+
+    /// Number of observations in this trace.
+    public fn len(&self) -> Int {
+        self.steps.len()
+    }
+
+    /// `true` iff the trace has no observations.
+    public fn is_empty(&self) -> Bool {
+        self.steps.len() == 0
+    }
+
+    /// Returns the observation at index `i`, or [`None`] if `i` is out
+    /// of range.
+    public fn get(&self, i: Int) -> Maybe<Observation> {
+        if i >= 0 && i < self.steps.len() {
+            Some(self.steps[i])
+        } else {
+            None
+        }
+    }
+
+    /// Method form of [`trace_prefix`].
+    public fn prefix(&self, n: Int{>= 0}) -> ObservationTrace {
+        trace_prefix(ObservationTrace { steps: self.steps.clone() }, n)
+    }
 }
 
 // =============================================================================

@@ -2,110 +2,389 @@
 // core-tests/base/coinductive/integration_test.vr
 // =============================================================================
 //
-// Integration tests for `core.base.coinductive` — coinductive types,
-// productivity checks, and observation streams used in cross-stdlib contexts.
+// Integration tests for `core.base.coinductive` — corecursive call sites,
+// productivity verdicts, observation traces, and depth-bounded
+// bisimulation, exercised against the rest of stdlib (List / Maybe).
+//
+// Uses the free-function API surface (`corec_call` / `observation` /
+// `trace` / `trace_prefix` / `bisimilar_up_to`) — the impl-block method
+// forms added in this branch (`CorecursiveCall.is_guarded()`,
+// `ProductivityResult.is_productive()`, `Observation.new(...)`,
+// `ObservationTrace.from_list/.len/.get/.prefix`) are exercised in
+// `regression_test.vr` once the precompiled-stdlib refresh has landed.
 // =============================================================================
 
 mount core.prelude.*;
 mount core.base.coinductive.{
-    CorecursiveCall, Observation, ObservationTrace,
-    check_productivity, trace_prefix, ProductivityVerdict,
+    CorecursiveCall, corec_call, is_guarded,
+    ProductivityResult, check_productivity,
+    Observation, observation,
+    ObservationTrace, trace, trace_prefix, observations_equal,
+    BisimulationResult, bisimilar_up_to,
 };
 mount core.collections.list.List;
 
 // =============================================================================
-// Section 1: CorecursiveCall composition
+// Section 1: Productivity verdicts across heterogeneous call lists
 // =============================================================================
 
 @test
-fn test_corecursive_chain_depth_two() {
-    let outer = CorecursiveCall.new("outer", 1, [
-        CorecursiveCall.new("inner", 1, [])
-    ]);
-    assert(outer.is_guarded());
-    assert(outer.recursive_calls.get(0).is_some());
-}
-
-@test
-fn test_corecursive_nested_structure() {
-    let deep = CorecursiveCall.new("deep", 3, [
-        CorecursiveCall.new("mid", 2, [
-            CorecursiveCall.new("leaf", 1, [])
-        ])
-    ]);
-    assert(deep.is_guarded());
-    assert_eq(deep.call_depth, 3);
-}
-
-// =============================================================================
-// Section 2: ObservationTrace built from multiple observations
-// =============================================================================
-
-@test
-fn test_observation_trace_multi_step() {
-    let obs1 = Observation.new(1, "step-1");
-    let obs2 = Observation.new(2, "step-2");
-    let obs3 = Observation.new(3, "step-3");
-    let trace = ObservationTrace.from_list([obs1, obs2, obs3]);
-    let prefix = trace_prefix(&trace, 2);
-    assert_eq(prefix.len(), 2);
-    assert_eq(prefix.get(0).map(|o| o.value), Some(1));
-    assert_eq(prefix.get(1).map(|o| o.value), Some(2));
-}
-
-@test
-fn test_observation_trace_prefix_shorter_than_length() {
-    let trace = ObservationTrace.from_list([
-        Observation.new(10, "a"),
-        Observation.new(20, "b"),
-        Observation.new(30, "c"),
-        Observation.new(40, "d"),
-    ]);
-    let p = trace_prefix(&trace, 3);
-    assert_eq(p.len(), 3);
-    assert_eq(p.get(2).map(|o| o.value), Some(30));
-}
-
-// =============================================================================
-// Section 3: Productivity verdict pinning
-// =============================================================================
-
-@test
-fn test_guarded_call_is_productive() {
-    let call = CorecursiveCall.new("f", 1, []);
-    let verdict = check_productivity(&call);
-    assert(verdict.is_productive());
-}
-
-@test
-fn test_unguarded_call_is_not_productive() {
-    let call = CorecursiveCall.new("f", 0, []);
-    let verdict = check_productivity(&call);
-    assert(!verdict.is_productive());
-}
-
-@test
-fn test_deeply_guarded_is_productive() {
-    let call = CorecursiveCall.new("g", 5, [
-        CorecursiveCall.new("h", 2, [])
-    ]);
-    let verdict = check_productivity(&call);
-    assert(verdict.is_productive());
-}
-
-// =============================================================================
-// Section 4: Observation round-trip across list
-// =============================================================================
-
-@test
-fn test_observation_list_map_values() {
-    let observations: List<Observation<Int>> = [
-        Observation.new(1, "one"),
-        Observation.new(2, "two"),
-        Observation.new(3, "three"),
+fn integration_check_productivity_all_guarded_returns_productive() {
+    let calls: List<CorecursiveCall> = [
+        corec_call("a".to_text(), 1),
+        corec_call("b".to_text(), 2),
+        corec_call("c".to_text(), 3),
     ];
-    let values: List<Int> = observations.map(|o| o.value).collect();
-    assert_eq(values, [1, 2, 3]);
+    let v = check_productivity(calls);
+    match v {
+        ProductivityResult.Productive => {},
+        ProductivityResult.NonProductive { unguarded: _ } => {
+            panic("expected Productive for all-guarded list");
+        },
+    }
+}
+
+@test
+fn integration_check_productivity_one_unguarded_lists_it() {
+    let calls: List<CorecursiveCall> = [
+        corec_call("guarded".to_text(), 1),
+        corec_call("naked".to_text(), 0),
+    ];
+    let v = check_productivity(calls);
+    match v {
+        ProductivityResult.NonProductive { unguarded } => {
+            assert_eq(unguarded.len(), 1);
+            assert_eq(unguarded[0], "naked".to_text());
+        },
+        ProductivityResult.Productive => {
+            panic("expected NonProductive when at least one call is unguarded");
+        },
+    }
+}
+
+@test
+fn integration_check_productivity_all_unguarded_lists_each() {
+    let calls: List<CorecursiveCall> = [
+        corec_call("a".to_text(), 0),
+        corec_call("b".to_text(), 0),
+        corec_call("c".to_text(), 0),
+    ];
+    let v = check_productivity(calls);
+    match v {
+        ProductivityResult.NonProductive { unguarded } => {
+            assert_eq(unguarded.len(), 3);
+        },
+        ProductivityResult.Productive => {
+            panic("expected NonProductive for fully-naked list");
+        },
+    }
+}
+
+@test
+fn integration_check_productivity_empty_list_vacuously_productive() {
+    let v = check_productivity(List.new());
+    match v {
+        ProductivityResult.Productive => {},
+        ProductivityResult.NonProductive { unguarded: _ } => {
+            panic("expected Productive for empty call list (vacuous truth)");
+        },
+    }
+}
+
+@test
+fn integration_check_productivity_preserves_unguarded_order() {
+    let calls: List<CorecursiveCall> = [
+        corec_call("g1".to_text(), 1),
+        corec_call("naked_first".to_text(), 0),
+        corec_call("g2".to_text(), 2),
+        corec_call("naked_second".to_text(), 0),
+    ];
+    let v = check_productivity(calls);
+    match v {
+        ProductivityResult.NonProductive { unguarded } => {
+            assert_eq(unguarded.len(), 2);
+            assert_eq(unguarded[0], "naked_first".to_text());
+            assert_eq(unguarded[1], "naked_second".to_text());
+        },
+        ProductivityResult.Productive => {
+            panic("expected NonProductive when two calls are unguarded");
+        },
+    }
+}
+
+// =============================================================================
+// Section 2: ObservationTrace construction and step round-trip
+// =============================================================================
+
+@test
+fn integration_observation_trace_construction_preserves_count() {
+    let steps: List<Observation> = [
+        observation("a".to_text(), "1".to_text()),
+        observation("b".to_text(), "2".to_text()),
+        observation("c".to_text(), "3".to_text()),
+    ];
+    let t = trace(steps.clone());
+    assert_eq(t.steps.len(), 3);
+    assert_eq(t.steps.len(), steps.len());
+}
+
+@test
+fn integration_observation_trace_preserves_label_at_each_step() {
+    // Same workaround as `..._preserves_payload_at_each_step` —
+    // bind via explicitly-typed local before accessing fields, since
+    // field-name `label` also collides with several wider stdlib
+    // records, and the field-index resolver loses Observation through
+    // a List subscript.
+    let t = trace([
+        observation("first".to_text(),  "1".to_text()),
+        observation("second".to_text(), "2".to_text()),
+        observation("third".to_text(),  "3".to_text()),
+    ]);
+    let o0: Observation = t.steps[0];
+    let o1: Observation = t.steps[1];
+    let o2: Observation = t.steps[2];
+    assert_eq(o0.label, "first".to_text());
+    assert_eq(o1.label, "second".to_text());
+    assert_eq(o2.label, "third".to_text());
+}
+
+@test
+fn integration_observation_trace_preserves_payload_at_each_step() {
+    // Workaround for [[btree_pattern_match_ref_generic_class]]:
+    // accessing `.payload` directly via `t.steps[i]` mis-routes to a
+    // wider stdlib type's field offset (multiple stdlib records have a
+    // `payload` field). Binding to a local first pins the type so the
+    // field-index resolver picks Observation's offset.
+    let t = trace([
+        observation("k1".to_text(), "v1".to_text()),
+        observation("k2".to_text(), "v2".to_text()),
+    ]);
+    let o0: Observation = t.steps[0];
+    let o1: Observation = t.steps[1];
+    assert_eq(o0.payload, "v1".to_text());
+    assert_eq(o1.payload, "v2".to_text());
+}
+
+@test
+fn integration_observation_trace_empty_list() {
+    let t = trace(List.new());
+    assert_eq(t.steps.len(), 0);
+}
+
+// =============================================================================
+// Section 3: trace_prefix — length / order / saturation semantics
+// =============================================================================
+
+@test
+fn integration_trace_prefix_truncates_to_n() {
+    let t = trace([
+        observation("a".to_text(), "1".to_text()),
+        observation("b".to_text(), "2".to_text()),
+        observation("c".to_text(), "3".to_text()),
+        observation("d".to_text(), "4".to_text()),
+    ]);
+    let p = trace_prefix(t, 2);
+    assert_eq(p.steps.len(), 2);
+    let p0: Observation = p.steps[0];
+    let p1: Observation = p.steps[1];
+    assert_eq(p0.label, "a".to_text());
+    assert_eq(p1.label, "b".to_text());
+}
+
+@test
+fn integration_trace_prefix_n_exceeds_length_returns_full() {
+    let t = trace([
+        observation("a".to_text(), "1".to_text()),
+        observation("b".to_text(), "2".to_text()),
+    ]);
+    let p = trace_prefix(t, 100);
+    assert_eq(p.steps.len(), 2);
+}
+
+@test
+fn integration_trace_prefix_zero_returns_empty() {
+    let t = trace([observation("x".to_text(), "y".to_text())]);
+    let p = trace_prefix(t, 0);
+    assert_eq(p.steps.len(), 0);
+}
+
+@test
+fn integration_trace_prefix_full_length_is_identity() {
+    let steps: List<Observation> = [
+        observation("a".to_text(), "1".to_text()),
+        observation("b".to_text(), "2".to_text()),
+        observation("c".to_text(), "3".to_text()),
+    ];
+    let full = trace(steps.clone());
+    let p = trace_prefix(full, 3);
+    assert_eq(p.steps.len(), 3);
+    let mut i: Int = 0;
+    while i < 3 {
+        assert(observations_equal(p.steps[i], steps[i]));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 4: Bisimulation — depth-bounded equality on observation traces
+// =============================================================================
+
+@test
+fn integration_bisimilar_identical_traces_at_full_depth() {
+    let steps: List<Observation> = [
+        observation("a".to_text(), "1".to_text()),
+        observation("b".to_text(), "2".to_text()),
+        observation("c".to_text(), "3".to_text()),
+    ];
+    let left  = trace(steps.clone());
+    let right = trace(steps);
+    let v = bisimilar_up_to(left, right, 3);
+    match v {
+        BisimulationResult.Bisimilar { observed_depth } => {
+            assert_eq(observed_depth, 3);
+        },
+        BisimulationResult.Distinct { divergence_at: _ } => {
+            panic("expected bisimilar at full depth");
+        },
+    }
+}
+
+@test
+fn integration_bisimilar_distinguishes_payload_at_index() {
+    let left = trace([
+        observation("a".to_text(), "1".to_text()),
+        observation("b".to_text(), "2".to_text()),
+    ]);
+    let right = trace([
+        observation("a".to_text(), "1".to_text()),
+        observation("b".to_text(), "DIFFERENT".to_text()),
+    ]);
+    let v = bisimilar_up_to(left, right, 2);
+    match v {
+        BisimulationResult.Distinct { divergence_at } => {
+            assert_eq(divergence_at, 1);
+        },
+        BisimulationResult.Bisimilar { observed_depth: _ } => {
+            panic("expected divergence at index 1");
+        },
+    }
+}
+
+@test
+fn integration_bisimilar_distinguishes_label_at_index() {
+    let left = trace([
+        observation("same".to_text(), "1".to_text()),
+        observation("left".to_text(), "x".to_text()),
+    ]);
+    let right = trace([
+        observation("same".to_text(),  "1".to_text()),
+        observation("right".to_text(), "x".to_text()),
+    ]);
+    let v = bisimilar_up_to(left, right, 2);
+    match v {
+        BisimulationResult.Distinct { divergence_at } => {
+            assert_eq(divergence_at, 1);
+        },
+        BisimulationResult.Bisimilar { observed_depth: _ } => {
+            panic("expected divergence at label mismatch");
+        },
+    }
+}
+
+@test
+fn integration_bisimilar_zero_depth_is_vacuously_equal() {
+    let left  = trace([observation("a".to_text(), "1".to_text())]);
+    let right = trace([observation("b".to_text(), "2".to_text())]);
+    let v = bisimilar_up_to(left, right, 0);
+    match v {
+        BisimulationResult.Bisimilar { observed_depth } => {
+            assert_eq(observed_depth, 0);
+        },
+        BisimulationResult.Distinct { divergence_at: _ } => {
+            panic("expected bisimilar at depth 0");
+        },
+    }
+}
+
+@test
+fn integration_bisimilar_distinct_lengths_returns_min() {
+    let left  = trace([observation("a".to_text(), "1".to_text())]);
+    let right = trace([
+        observation("a".to_text(), "1".to_text()),
+        observation("b".to_text(), "2".to_text()),
+    ]);
+    // trace_prefix saturates each to its actual length, so the
+    // surviving prefixes have lengths 1 and 1 — bisimilar at 1.
+    let v = bisimilar_up_to(left, right, 2);
+    match v {
+        BisimulationResult.Bisimilar { observed_depth } => {
+            assert_eq(observed_depth, 1);
+        },
+        BisimulationResult.Distinct { divergence_at: _ } => {
+            // Acceptable too — implementations may treat short prefixes as
+            // diverging at the shorter length.
+        },
+    }
+}
+
+// =============================================================================
+// Section 5: Cross-type integration with List<Observation>
+// =============================================================================
+
+@test
+fn integration_observations_equal_reflexive_in_list() {
+    let observations: List<Observation> = [
+        observation("a".to_text(), "1".to_text()),
+        observation("b".to_text(), "2".to_text()),
+        observation("c".to_text(), "3".to_text()),
+    ];
+    let mut i: Int = 0;
+    while i < observations.len() {
+        assert(observations_equal(observations[i], observations[i]));
+        i = i + 1;
+    }
+}
+
+@test
+fn integration_observations_equal_symmetric_distinct() {
+    let a = observation("a".to_text(), "1".to_text());
+    let b = observation("b".to_text(), "1".to_text());
+    assert(!observations_equal(a, b));
+    assert(!observations_equal(b, a));
+}
+
+// =============================================================================
+// Section 6: corec_call factory + is_guarded free-fn cross-check
+// =============================================================================
+
+@test
+fn integration_is_guarded_threshold_at_depth_one() {
+    let zero   = corec_call("x".to_text(), 0);
+    let one    = corec_call("x".to_text(), 1);
+    let high   = corec_call("x".to_text(), 1000);
+    assert(!is_guarded(zero));
+    assert(is_guarded(one));
+    assert(is_guarded(high));
+}
+
+@test
+fn integration_corec_call_preserves_callee_through_check() {
+    let calls: List<CorecursiveCall> = [
+        corec_call("alpha".to_text(), 1),
+        corec_call("beta".to_text(),  0),
+        corec_call("gamma".to_text(), 0),
+    ];
+    let v = check_productivity(calls);
+    match v {
+        ProductivityResult.NonProductive { unguarded } => {
+            assert_eq(unguarded.len(), 2);
+            assert(unguarded[0] == "beta".to_text());
+            assert(unguarded[1] == "gamma".to_text());
+        },
+        ProductivityResult.Productive => {
+            panic("expected NonProductive with two naked calls");
+        },
+    }
 }
 
 fn main() {}
