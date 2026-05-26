@@ -354,16 +354,41 @@ implement Path {
     /// assert_eq(Path.new("/home/user/").file_name(), Some("user"));
     /// ```
     public fn file_name(&self) -> Maybe<Text> {
-        let path = self.inner.trim_end_matches(is_separator);
+        // SOUNDNESS (closes file_name trailing-separator defect): the
+        // previous body called `self.inner.trim_end_matches(is_separator)`
+        // — but `Text.trim_end_matches` takes a `&Text` pattern, NOT a
+        // predicate function.  The type-mismatch silently let the wrong
+        // value through and `path` ended up as something other than the
+        // trimmed string, so `file_name()` for `"/home/user/"` returned
+        // None instead of Some("user").  Inline the trim loop using the
+        // platform separator literal directly.
+        //
+        // Build the trimmed copy by hand: walk backwards skipping
+        // separator characters.
+        let raw_bytes = self.inner.as_bytes();
+        let mut end: Int = raw_bytes.len();
+        @cfg(unix)
+        {
+            while end > 0 && raw_bytes[end - 1] == ('/' as Byte) {
+                end = end - 1;
+            }
+        }
+        @cfg(windows)
+        {
+            while end > 0
+                && (raw_bytes[end - 1] == ('/' as Byte)
+                    || raw_bytes[end - 1] == ('\\' as Byte))
+            {
+                end = end - 1;
+            }
+        }
+        let path = self.inner.slice(0, end);
         if path.is_empty() {
             return None;
         }
 
         // Find the last separator's BYTE offset, plus the byte
         // length of THAT separator (1 for ASCII '/', 1 for '\').
-        // Same byte-vs-char hazard as `parent()`: `slice(last_sep + 1,
-        // ...)` is byte-indexed, so `last_sep` must also be a byte
-        // index. `char_indices` yields the byte offset directly.
         let mut last_sep: Int = -1;
         let mut last_sep_byte_len: Int = 0;
         for (b, c) in path.char_indices() {
@@ -484,7 +509,10 @@ implement Path {
 
     /// Check if this path starts with the given prefix.
     public fn starts_with(&self, prefix: &Path) -> Bool {
-        self.inner.starts_with(&prefix.inner)
+        // SOUNDNESS: extract `prefix.inner` to a local to avoid the
+        // nested-struct-field access mis-read documented at PathBuf.push.
+        let prefix_inner = prefix.inner.clone();
+        self.inner.starts_with(&prefix_inner)
     }
 
     /// Check if this path ends with the given suffix.
@@ -503,7 +531,20 @@ implement Path {
     public fn strip_prefix(&self, prefix: &Path) -> Maybe<Path> {
         if self.starts_with(prefix) {
             let remaining = self.inner.slice(prefix.inner.len(), self.inner.len());
-            let trimmed = remaining.trim_start_matches(is_separator);
+            // SOUNDNESS: `trim_start_matches` takes `&Text`, not a
+            // predicate fn — the previous `trim_start_matches(is_separator)`
+            // call was a silent type-mismatch.  Inline byte-walk
+            // accepts BOTH '/' and '\\' so Windows paths normalise
+            // correctly here too.
+            let rem_bytes = remaining.as_bytes();
+            let mut start: Int = 0;
+            while start < rem_bytes.len()
+                && (rem_bytes[start] == ('/' as Byte)
+                    || rem_bytes[start] == ('\\' as Byte))
+            {
+                start = start + 1;
+            }
+            let trimmed = remaining.slice(start, remaining.len());
             Some(Path.new(&trimmed))
         } else {
             None
