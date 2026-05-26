@@ -142,7 +142,41 @@ pub(in super::super) fn handle_get_field(
         return Ok(DispatchResult::Continue);
     }
 
-    if !obj_val.is_ptr() || obj_val.is_nil() {
+    // **Transparent-newtype fast-path** (closes the
+    // `closure |f| (*f).0` class for `Foo(Int)` newtypes where
+    // codegen lost the static `Foo` type from `infer_expr_type_name`).
+    //
+    // For transparent newtypes (e.g. `type MemoryFlags is (UInt32)`),
+    // the runtime representation IS the inner value — `MemoryFlags(1)`
+    // is just the `UInt32 1`.  The codegen-side `compile_tuple_index`
+    // Mov fast-path elides the `.0` access when it can statically
+    // resolve the receiver type to a registered newtype name.  But
+    // when type inference returns None (closure parameters without
+    // AST annotation are the canonical case — iterator-element types
+    // don't propagate to closure params), the fast-path is skipped
+    // and `GetF { field_idx: 0 }` is emitted.  Without this runtime
+    // arm, `GetF` on a primitive non-pointer Value null-derefs at
+    // the `is_ptr` check below.
+    //
+    // The semantic is "field 0 of a transparent wrapper IS the
+    // wrapped value" — for any primitive Value, returning it as
+    // field 0 is the structurally-correct answer.  Higher field
+    // indices on primitives still null-deref (no other valid
+    // interpretation).
+    //
+    // Architectural rule: every GetF receiver MUST either be a
+    // heap pointer (regular record access path below) OR a
+    // primitive Value treated as a transparent-newtype self
+    // (field_idx 0 only).  This mirrors the codegen-side
+    // `is_transparent_wrapper` fast-path.
+    if !obj_val.is_ptr() {
+        if field_idx == 0 {
+            state.set_reg(dst, obj_val);
+            return Ok(DispatchResult::Continue);
+        }
+        return Err(InterpreterError::NullPointer);
+    }
+    if obj_val.is_nil() {
         return Err(InterpreterError::NullPointer);
     }
 
