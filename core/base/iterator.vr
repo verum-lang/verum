@@ -1662,13 +1662,13 @@ implement<I: Iterator, U: Iterator, F: fn(I.Item) -> U> Iterator for FlatMapIter
     fn next(&mut self) -> Maybe<U.Item> {
         loop {
             if let Some(ref mut inner) = self.current {
-                if let Some(x) = inner.next() {
-                    return Some(x);
+                if let Maybe.Some(x) = inner.next() {
+                    return Maybe.Some(x);
                 }
             }
             match self.iter.next() {
-                Some(item) => self.current = Some((self.f)(item)),
-                None => return None,
+                Maybe.Some(item) => self.current = Maybe.Some((self.f)(item)),
+                Maybe.None => return Maybe.None,
             }
         }
     }
@@ -1678,13 +1678,13 @@ implement<I: Iterator, U: Iterator, F: fn(I.Item) -> U> Iterator for FlatMapIter
         // what current inner has
         let (_, outer_upper) = self.iter.size_hint();
         match self.current {
-            Some(ref inner) => {
+            Maybe.Some(ref inner) => {
                 let (inner_lower, _) = inner.size_hint();
-                (inner_lower, None)
+                (inner_lower, Maybe.None)
             },
-            None => (0, match outer_upper {
-                Some(0) => Some(0),
-                _ => None,
+            Maybe.None => (0, match outer_upper {
+                Maybe.Some(0) => Maybe.Some(0),
+                _ => Maybe.None,
             }),
         }
     }
