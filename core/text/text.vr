@@ -2244,8 +2244,8 @@ implement Text {
     /// Returns (before, after) or None if separator not found.
     public fn split_once(&self, sep: &Text) -> Maybe<(Text, Text)> {
         match self.find(sep) {
-            Some(idx) => Some((self.slice(0, idx), self.slice(idx + sep.len(), self.len()))),
-            None => None,
+            Maybe.Some(idx) => Maybe.Some((self.slice(0, idx), self.slice(idx + sep.len(), self.len()))),
+            Maybe.None => Maybe.None,
         }
     }
 
@@ -2253,8 +2253,8 @@ implement Text {
     /// Returns (before, after) or None if separator not found.
     public fn rsplit_once(&self, sep: &Text) -> Maybe<(Text, Text)> {
         match self.rfind(sep) {
-            Some(idx) => Some((self.slice(0, idx), self.slice(idx + sep.len(), self.len()))),
-            None => None,
+            Maybe.Some(idx) => Maybe.Some((self.slice(0, idx), self.slice(idx + sep.len(), self.len()))),
+            Maybe.None => Maybe.None,
         }
     }
 
