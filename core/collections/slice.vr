@@ -62,19 +62,19 @@ implement<T> [T] {
 
     /// Length of the slice.
     @inline(always)
-    fn len(&self) -> Int {
+    public fn len(&self) -> Int {
         slice_len(self) as Int
     }
 
     /// Check if slice is empty.
     @inline(always)
-    fn is_empty(&self) -> Bool {
+    public fn is_empty(&self) -> Bool {
         self.len() == 0
     }
 
     /// Get raw pointer to first element.
     @inline(always)
-    fn as_ptr(&self) -> &unsafe T {
+    public fn as_ptr(&self) -> &unsafe T {
         slice_as_ptr(self)
     }
 
@@ -84,7 +84,7 @@ implement<T> [T] {
 
     /// Get element by index.
     @inline(always)
-    fn get(&self, idx: Int) -> Maybe<&T> {
+    public fn get(&self, idx: Int) -> Maybe<&T> {
         if idx >= 0 && idx < self.len() {
             Some(&self[idx])
         } else {
@@ -102,13 +102,13 @@ implement<T> [T] {
 
     /// Get first element.
     @inline(always)
-    fn first(&self) -> Maybe<&T> {
+    public fn first(&self) -> Maybe<&T> {
         if self.is_empty() { None } else { Some(&self[0]) }
     }
 
     /// Get last element.
     @inline(always)
-    fn last(&self) -> Maybe<&T> {
+    public fn last(&self) -> Maybe<&T> {
         if self.is_empty() { None } else { Some(&self[self.len() - 1]) }
     }
 
@@ -117,24 +117,24 @@ implement<T> [T] {
     // =========================================================================
 
     /// Get a subslice from start to end.
-    fn slice(&self, start: Int, end: Int) -> &[T] {
+    public fn slice(&self, start: Int, end: Int) -> &[T] {
         assert(start >= 0 && start <= end && end <= self.len(),
                "slice bounds out of range");
         slice_subslice(self, start as USize, end as USize)
     }
 
     /// Get subslice from start to end of slice.
-    fn slice_from(&self, start: Int) -> &[T] {
+    public fn slice_from(&self, start: Int) -> &[T] {
         self.slice(start, self.len())
     }
 
     /// Get subslice from beginning to end index.
-    fn slice_to(&self, end: Int) -> &[T] {
+    public fn slice_to(&self, end: Int) -> &[T] {
         self.slice(0, end)
     }
 
     /// Split at index, returning two slices.
-    fn split_at(&self, mid: Int) -> (&[T], &[T]) {
+    public fn split_at(&self, mid: Int) -> (&[T], &[T]) {
         assert(mid >= 0 && mid <= self.len(), "split_at out of bounds");
         (self.slice_to(mid), self.slice_from(mid))
     }
@@ -147,12 +147,12 @@ implement<T> [T] {
     ///
 
     /// Returns a double-ended iterator that supports both forward and reverse iteration.
-    fn iter(&self) -> SliceIter<T> {
+    public fn iter(&self) -> SliceIter<T> {
         SliceIter.new(self)
     }
 
     /// Iterate over elements with indices.
-    fn iter_enumerate(&self) -> SliceEnumerate<T> {
+    public fn iter_enumerate(&self) -> SliceEnumerate<T> {
         SliceEnumerate {
             slice: self,
             pos: 0,
@@ -160,7 +160,7 @@ implement<T> [T] {
     }
 
     /// Iterate over chunks of size n.
-    fn chunks(&self, chunk_size: Int) -> Chunks<T> {
+    public fn chunks(&self, chunk_size: Int) -> Chunks<T> {
         assert(chunk_size > 0, "chunk size must be positive");
         Chunks {
             slice: self,
@@ -170,7 +170,7 @@ implement<T> [T] {
     }
 
     /// Iterate over exact chunks (panics if !evenly divisible).
-    fn chunks_exact(&self, chunk_size: Int) -> ChunksExact<T> {
+    public fn chunks_exact(&self, chunk_size: Int) -> ChunksExact<T> {
         assert(chunk_size > 0, "chunk size must be positive");
         ChunksExact {
             slice: self.slice_to(self.len() - (self.len() % chunk_size)),
@@ -181,7 +181,7 @@ implement<T> [T] {
     }
 
     /// Iterate over sliding windows.
-    fn windows(&self, size: Int) -> Windows<T> {
+    public fn windows(&self, size: Int) -> Windows<T> {
         assert(size > 0, "window size must be positive");
         Windows {
             slice: self,
@@ -195,7 +195,7 @@ implement<T> [T] {
     // =========================================================================
 
     /// Check if slice contains element.
-    fn contains(&self, value: &T) -> Bool
+    public fn contains(&self, value: &T) -> Bool
     where T: Eq
     {
         for i in range(0, self.len()) {
@@ -251,7 +251,7 @@ implement<T> [T] {
     }
 
     /// Find first element matching predicate.
-    fn find(&self, predicate: fn(&T) -> Bool) -> Maybe<&T> {
+    public fn find(&self, predicate: fn(&T) -> Bool) -> Maybe<&T> {
         for i in range(0, self.len()) {
             let item: &T = &self[i];
             if predicate(item) {
@@ -262,7 +262,7 @@ implement<T> [T] {
     }
 
     /// Find position of first element matching predicate.
-    fn find_position(&self, predicate: fn(&T) -> Bool) -> Maybe<Int> {
+    public fn find_position(&self, predicate: fn(&T) -> Bool) -> Maybe<Int> {
         for i in range(0, self.len()) {
             let item: &T = &self[i];
             if predicate(item) {
@@ -281,7 +281,7 @@ implement<T> [T] {
     /// pointer addresses when self and prefix arrive with different
     /// runtime ref shapes.  Pinned in
     /// `core-tests/collections/slice/regression_test.vr` §B.2.
-    fn starts_with(&self, prefix: &[T]) -> Bool
+    public fn starts_with(&self, prefix: &[T]) -> Bool
     where T: Eq
     {
         if prefix.len() > self.len() {
@@ -302,7 +302,7 @@ implement<T> [T] {
     ///
 
     /// Same `.get(i)` routing as `starts_with` — see §B.2 pin.
-    fn ends_with(&self, suffix: &[T]) -> Bool
+    public fn ends_with(&self, suffix: &[T]) -> Bool
     where T: Eq
     {
         if suffix.len() > self.len() {
@@ -336,7 +336,7 @@ implement<T> [T] {
     /// `binary_search_by` path routes through a closure which
     /// avoids the generic-constrained deref-then-compare pattern.
     /// Pinned in `core-tests/collections/slice/regression_test.vr` §E.
-    fn binary_search(&self, target: &T) -> Result<Int, Int>
+    public fn binary_search(&self, target: &T) -> Result<Int, Int>
     where T: Ord
     {
         self.binary_search_by(|elem| {
@@ -352,7 +352,7 @@ implement<T> [T] {
     }
 
     /// Binary search with custom comparator.
-    fn binary_search_by(&self, f: fn(&T) -> Ordering) -> Result<Int, Int> {
+    public fn binary_search_by(&self, f: fn(&T) -> Ordering) -> Result<Int, Int> {
         let mut left = 0;
         let mut right = self.len();
 
@@ -369,7 +369,7 @@ implement<T> [T] {
     }
 
     /// Binary search by key.
-    fn binary_search_by_key<K: Ord>(&self, key: &K, f: fn(&T) -> K) -> Result<Int, Int> {
+    public fn binary_search_by_key<K: Ord>(&self, key: &K, f: fn(&T) -> K) -> Result<Int, Int> {
         self.binary_search_by(|item| {
             let k: K = f(item);
             if k < *key { Ordering.Less }
@@ -383,7 +383,7 @@ implement<T> [T] {
     // =========================================================================
 
     /// Count elements matching predicate.
-    fn count(&self, predicate: fn(&T) -> Bool) -> Int {
+    public fn count(&self, predicate: fn(&T) -> Bool) -> Int {
         let mut n = 0;
         for i in range(0, self.len()) {
             let item: &T = &self[i];
@@ -395,7 +395,7 @@ implement<T> [T] {
     }
 
     /// Check if all elements match predicate.
-    fn all(&self, predicate: fn(&T) -> Bool) -> Bool {
+    public fn all(&self, predicate: fn(&T) -> Bool) -> Bool {
         for i in range(0, self.len()) {
             let item: &T = &self[i];
             if !predicate(item) {
@@ -406,7 +406,7 @@ implement<T> [T] {
     }
 
     /// Check if any element matches predicate.
-    fn any(&self, predicate: fn(&T) -> Bool) -> Bool {
+    public fn any(&self, predicate: fn(&T) -> Bool) -> Bool {
         for i in range(0, self.len()) {
             let item: &T = &self[i];
             if predicate(item) {
@@ -417,7 +417,7 @@ implement<T> [T] {
     }
 
     /// Get minimum element.
-    fn min(&self) -> Maybe<&T>
+    public fn min(&self) -> Maybe<&T>
     where T: Ord
     {
         if self.is_empty() {
@@ -434,7 +434,7 @@ implement<T> [T] {
     }
 
     /// Get maximum element.
-    fn max(&self) -> Maybe<&T>
+    public fn max(&self) -> Maybe<&T>
     where T: Ord
     {
         if self.is_empty() {
@@ -459,7 +459,7 @@ implement<T> [T] {
 
     /// Routes through `.get(i)` — same defensive pattern as
     /// `starts_with`/`ends_with`.
-    fn eq_slice(&self, other: &[T]) -> Bool
+    public fn eq_slice(&self, other: &[T]) -> Bool
     where T: Eq
     {
         if self.len() != other.len() {
@@ -481,7 +481,7 @@ implement<T> [T] {
 
     /// Routes through `.get(i)` — same defensive pattern as
     /// `starts_with`/`ends_with`.
-    fn cmp_slice(&self, other: &[T]) -> Ordering
+    public fn cmp_slice(&self, other: &[T]) -> Ordering
     where T: Ord
     {
         let min_len = self.len().min(other.len());
@@ -519,7 +519,7 @@ implement<T> [T] {
     /// reference shape that the value-comparison operators do not
     /// auto-deref through.  Pinned in
     /// `core-tests/collections/slice/regression_test.vr` §B.1.
-    fn is_sorted(&self) -> Bool
+    public fn is_sorted(&self) -> Bool
     where T: Ord
     {
         if self.len() <= 1 {
@@ -536,7 +536,7 @@ implement<T> [T] {
     }
 
     /// Check if slice is sorted according to a comparator.
-    fn is_sorted_by(&self, compare: fn(&T, &T) -> Ordering) -> Bool {
+    public fn is_sorted_by(&self, compare: fn(&T, &T) -> Ordering) -> Bool {
         if self.len() <= 1 {
             return true;
         }
@@ -551,7 +551,7 @@ implement<T> [T] {
     }
 
     /// Check if slice is sorted by a key extraction function.
-    fn is_sorted_by_key<K: Ord>(&self, key: fn(&T) -> K) -> Bool {
+    public fn is_sorted_by_key<K: Ord>(&self, key: fn(&T) -> K) -> Bool {
         if self.len() <= 1 {
             return true;
         }
@@ -573,7 +573,7 @@ implement<T> [T] {
 
     /// Split off the first element, returning it and the rest.
     /// Returns None if the slice is empty.
-    fn split_first(&self) -> Maybe<(&T, &[T])> {
+    public fn split_first(&self) -> Maybe<(&T, &[T])> {
         if self.is_empty() {
             None
         } else {
@@ -583,7 +583,7 @@ implement<T> [T] {
 
     /// Split off the last element, returning it and the rest.
     /// Returns None if the slice is empty.
-    fn split_last(&self) -> Maybe<(&T, &[T])> {
+    public fn split_last(&self) -> Maybe<(&T, &[T])> {
         if self.is_empty() {
             None
         } else {
@@ -605,7 +605,7 @@ implement<T> [T] {
 
     /// Returns the index of the first element for which the predicate returns false,
     /// or the length of the slice if the predicate returns true for all elements.
-    fn partition_point(&self, predicate: fn(&T) -> Bool) -> Int {
+    public fn partition_point(&self, predicate: fn(&T) -> Bool) -> Int {
         let mut left = 0;
         let mut right = self.len();
 
@@ -630,7 +630,7 @@ implement<T> [T] {
     // =========================================================================
 
     /// Find last element matching predicate.
-    fn rfind(&self, predicate: fn(&T) -> Bool) -> Maybe<&T> {
+    public fn rfind(&self, predicate: fn(&T) -> Bool) -> Maybe<&T> {
         let mut i = self.len();
         while i > 0 {
             i = i - 1;
@@ -643,7 +643,7 @@ implement<T> [T] {
     }
 
     /// Find position of last element matching predicate.
-    fn rfind_position(&self, predicate: fn(&T) -> Bool) -> Maybe<Int> {
+    public fn rfind_position(&self, predicate: fn(&T) -> Bool) -> Maybe<Int> {
         let mut i = self.len();
         while i > 0 {
             i = i - 1;
@@ -660,7 +660,7 @@ implement<T> [T] {
     // =========================================================================
 
     /// Convert slice to an owned List.
-    fn to_list(&self) -> List<T>
+    public fn to_list(&self) -> List<T>
     where T: Clone
     {
         let mut result: List<T> = List.with_capacity(self.len());
@@ -677,7 +677,7 @@ implement<T> [T] {
 
 implement<T> [T] {
     /// Get mutable reference by index.
-    fn get_mut(&mut self, idx: Int) -> Maybe<&mut T> {
+    public fn get_mut(&mut self, idx: Int) -> Maybe<&mut T> {
         if idx >= 0 && idx < self.len() {
             Some(&mut self[idx])
         } else {
@@ -686,18 +686,18 @@ implement<T> [T] {
     }
 
     /// Get mutable first element.
-    fn first_mut(&mut self) -> Maybe<&mut T> {
+    public fn first_mut(&mut self) -> Maybe<&mut T> {
         if self.is_empty() { None } else { Some(&mut self[0]) }
     }
 
     /// Get mutable last element.
-    fn last_mut(&mut self) -> Maybe<&mut T> {
+    public fn last_mut(&mut self) -> Maybe<&mut T> {
         let len = self.len();
         if len == 0 { None } else { Some(&mut self[len - 1]) }
     }
 
     /// Mutable subslice.
-    fn slice_mut(&mut self, start: Int, end: Int) -> &mut [T] {
+    public fn slice_mut(&mut self, start: Int, end: Int) -> &mut [T] {
         assert(start >= 0 && start <= end && end <= self.len(),
                "slice bounds out of range");
         slice_subslice_mut(self, start as USize, end as USize)
@@ -707,18 +707,18 @@ implement<T> [T] {
     ///
 
     /// Returns a double-ended iterator that supports both forward and reverse iteration.
-    fn iter_mut(&mut self) -> SliceIterMut<T> {
+    public fn iter_mut(&mut self) -> SliceIterMut<T> {
         SliceIterMut.new(self)
     }
 
     /// Split at index returning mutable slices.
-    fn split_at_mut(&mut self, mid: Int) -> (&mut [T], &mut [T]) {
+    public fn split_at_mut(&mut self, mid: Int) -> (&mut [T], &mut [T]) {
         assert(mid >= 0 && mid <= self.len(), "split_at_mut out of bounds");
         slice_split_at_mut(self, mid as USize)
     }
 
     /// Swap two elements.
-    fn swap(&mut self, a: Int, b: Int) {
+    public fn swap(&mut self, a: Int, b: Int) {
         assert(a >= 0 && a < self.len() && b >= 0 && b < self.len(),
                "swap indices out of bounds");
         if a != b {
@@ -729,7 +729,7 @@ implement<T> [T] {
     }
 
     /// Reverse slice in place.
-    fn reverse(&mut self) {
+    public fn reverse(&mut self) {
         let len = self.len();
         for i in range(0, len / 2) {
             self.swap(i, len - 1 - i);
@@ -737,7 +737,7 @@ implement<T> [T] {
     }
 
     /// Fill slice with value.
-    fn fill(&mut self, value: T)
+    public fn fill(&mut self, value: T)
     where T: Clone
     {
         for i in range(0, self.len()) {
@@ -747,7 +747,7 @@ implement<T> [T] {
 
     /// Fill with default value.
     /// Task #17 workaround — literal `0` substitution.
-    fn fill_default(&mut self)
+    public fn fill_default(&mut self)
     where T: Default
     {
         for i in range(0, self.len()) {
@@ -756,14 +756,14 @@ implement<T> [T] {
     }
 
     /// Fill with values generated by a closure.
-    fn fill_with<F: fn() -> T>(&mut self, f: F) {
+    public fn fill_with<F: fn() -> T>(&mut self, f: F) {
         for i in range(0, self.len()) {
             self[i] = f();
         }
     }
 
     /// Swap contents of two non-overlapping slices of equal length.
-    fn swap_with_slice(&mut self, other: &mut [T]) {
+    public fn swap_with_slice(&mut self, other: &mut [T]) {
         assert(self.len() == other.len(), "slice lengths must match");
         for i in range(0, self.len()) {
             let tmp = self[i];
@@ -773,7 +773,7 @@ implement<T> [T] {
     }
 
     /// Copy from another slice.
-    fn copy_from_slice(&mut self, src: &[T])
+    public fn copy_from_slice(&mut self, src: &[T])
     where T: Copy
     {
         assert(self.len() == src.len(), "slice lengths must match");
@@ -785,14 +785,14 @@ implement<T> [T] {
     /// Alias for `copy_from_slice` — matches the short spelling that
     /// code generic over "copyable container" tends to use. Both are
     /// provided so call sites can pick the more readable one.
-    fn copy_from(&mut self, src: &[T])
+    public fn copy_from(&mut self, src: &[T])
     where T: Copy
     {
         self.copy_from_slice(src);
     }
 
     /// Clone from another slice.
-    fn clone_from_slice(&mut self, src: &[T])
+    public fn clone_from_slice(&mut self, src: &[T])
     where T: Clone
     {
         assert(self.len() == src.len(), "slice lengths must match");
@@ -802,7 +802,7 @@ implement<T> [T] {
     }
 
     /// Copy within slice (handles overlap).
-    fn copy_within(&mut self, src_start: Int, src_end: Int, dest: Int)
+    public fn copy_within(&mut self, src_start: Int, src_end: Int, dest: Int)
     where T: Copy
     {
         let count = src_end - src_start;
@@ -831,7 +831,7 @@ implement<T> [T] {
 
     /// Stability means equal elements maintain their relative order.
     /// Uses merge sort for O(n log n) guaranteed performance.
-    fn sort(&mut self)
+    public fn sort(&mut self)
     where T: Ord
     {
         self.sort_by(|a, b| a.cmp(b));
@@ -842,7 +842,7 @@ implement<T> [T] {
 
     /// Guarantees O(n log n) worst-case and preserves the relative
     /// order of equal elements.
-    fn sort_by(&mut self, compare: fn(&T, &T) -> Ordering) {
+    public fn sort_by(&mut self, compare: fn(&T, &T) -> Ordering) {
         let len = self.len();
         if len <= 1 {
             return;
@@ -859,7 +859,7 @@ implement<T> [T] {
     }
 
     /// Sort by key (stable).
-    fn sort_by_key<K: Ord>(&mut self, key: fn(&T) -> K) {
+    public fn sort_by_key<K: Ord>(&mut self, key: fn(&T) -> K) {
         self.sort_by(|a, b| {
             let ka: K = key(a);
             let kb: K = key(b);
@@ -870,7 +870,7 @@ implement<T> [T] {
     }
 
     /// Insertion sort for small slices (stable, O(n^2)).
-    fn insertion_sort_by(&mut self, compare: fn(&T, &T) -> Ordering) {
+    public fn insertion_sort_by(&mut self, compare: fn(&T, &T) -> Ordering) {
         for i in range(1, self.len()) {
             let mut j = i;
             while j > 0 && compare(&self[j], &self[j - 1]) is Ordering.Less {
@@ -881,7 +881,7 @@ implement<T> [T] {
     }
 
     /// Bottom-up merge sort (stable, O(n log n)).
-    fn merge_sort_by(&mut self, compare: fn(&T, &T) -> Ordering)
+    public fn merge_sort_by(&mut self, compare: fn(&T, &T) -> Ordering)
     where T: Clone
     {
         let len = self.len();
@@ -921,7 +921,7 @@ implement<T> [T] {
     }
 
     /// Merge two adjacent sorted runs [left_start..mid) and [mid..right_end).
-    fn merge_by(&mut self, left_start: Int, mid: Int, right_end: Int, compare: fn(&T, &T) -> Ordering)
+    public fn merge_by(&mut self, left_start: Int, mid: Int, right_end: Int, compare: fn(&T, &T) -> Ordering)
     where T: Clone
     {
         // Copy left run to temporary buffer
@@ -969,14 +969,14 @@ implement<T> [T] {
 
     /// May be faster than stable sort but does not preserve relative order
     /// of equal elements. Uses quicksort.
-    fn sort_unstable(&mut self)
+    public fn sort_unstable(&mut self)
     where T: Ord
     {
         self.sort_unstable_by(|a, b| a.cmp(b));
     }
 
     /// Sort with custom comparator (unstable, quicksort).
-    fn sort_unstable_by(&mut self, compare: fn(&T, &T) -> Ordering) {
+    public fn sort_unstable_by(&mut self, compare: fn(&T, &T) -> Ordering) {
         if self.len() <= 1 {
             return;
         }
@@ -990,7 +990,7 @@ implement<T> [T] {
     }
 
     /// Sort by key (unstable).
-    fn sort_unstable_by_key<K: Ord>(&mut self, key: fn(&T) -> K) {
+    public fn sort_unstable_by_key<K: Ord>(&mut self, key: fn(&T) -> K) {
         self.sort_unstable_by(|a, b| {
             let ka: K = key(a);
             let kb: K = key(b);
@@ -1001,7 +1001,7 @@ implement<T> [T] {
     }
 
     /// Quicksort implementation.
-    fn quicksort_by(&mut self, low: Int, high: Int, compare: fn(&T, &T) -> Ordering) {
+    public fn quicksort_by(&mut self, low: Int, high: Int, compare: fn(&T, &T) -> Ordering) {
         if low < high {
             let pivot = self.qs_partition_by(low, high, compare);
             if pivot > 0 {
@@ -1012,7 +1012,7 @@ implement<T> [T] {
     }
 
     /// Partition for quicksort.
-    fn qs_partition_by(&mut self, low: Int, high: Int, compare: fn(&T, &T) -> Ordering) -> Int {
+    public fn qs_partition_by(&mut self, low: Int, high: Int, compare: fn(&T, &T) -> Ordering) -> Int {
         let pivot_idx = low + (high - low) / 2;
         self.swap(pivot_idx, high);
 
@@ -1037,20 +1037,20 @@ implement<T> [T] {
     /// All elements before `index` will be <= element at `index`.
     /// All elements after `index` will be >= element at `index`.
     /// Uses quickselect algorithm, O(n) average.
-    fn select_nth_unstable(&mut self, index: Int)
+    public fn select_nth_unstable(&mut self, index: Int)
     where T: Ord
     {
         self.select_nth_unstable_by(index, |a, b| a.cmp(b));
     }
 
     /// Quickselect with custom comparator.
-    fn select_nth_unstable_by(&mut self, index: Int, compare: fn(&T, &T) -> Ordering) {
+    public fn select_nth_unstable_by(&mut self, index: Int, compare: fn(&T, &T) -> Ordering) {
         assert(index >= 0 && index < self.len(), "select_nth_unstable: index out of bounds");
         self.quickselect_by(0, self.len() - 1, index, compare);
     }
 
     /// Quickselect implementation.
-    fn quickselect_by(&mut self, mut low: Int, mut high: Int, index: Int, compare: fn(&T, &T) -> Ordering) {
+    public fn quickselect_by(&mut self, mut low: Int, mut high: Int, index: Int, compare: fn(&T, &T) -> Ordering) {
         while low < high {
             let pivot = self.qs_partition_by(low, high, compare);
             if pivot == index {
@@ -1072,7 +1072,7 @@ implement<T> [T] {
 
     /// Returns the new logical length of the deduplicated prefix.
     /// Elements beyond the returned length are unspecified.
-    fn dedup(&mut self) -> Int
+    public fn dedup(&mut self) -> Int
     where T: Eq
     {
         self.dedup_by(|a, b| *a == *b)
@@ -1082,7 +1082,7 @@ implement<T> [T] {
     ///
 
     /// Returns the new logical length of the deduplicated prefix.
-    fn dedup_by(&mut self, same: fn(&T, &T) -> Bool) -> Int {
+    public fn dedup_by(&mut self, same: fn(&T, &T) -> Bool) -> Int {
         let len = self.len();
         if len <= 1 {
             return len;
@@ -1101,7 +1101,7 @@ implement<T> [T] {
     }
 
     /// Rotate left by n positions.
-    fn rotate_left(&mut self, n: Int) {
+    public fn rotate_left(&mut self, n: Int) {
         if self.is_empty() {
             return;
         }
@@ -1117,7 +1117,7 @@ implement<T> [T] {
     }
 
     /// Rotate right by n positions.
-    fn rotate_right(&mut self, n: Int) {
+    public fn rotate_right(&mut self, n: Int) {
         if self.is_empty() {
             return;
         }
@@ -1134,7 +1134,7 @@ implement<T> [T] {
 
     /// The matching elements are not included in the yielded subslices.
     /// Adjacent matches yield empty slices between them.
-    fn split<P: fn(&T) -> Bool>(&self, predicate: P) -> Split<T, P> {
+    public fn split<P: fn(&T) -> Bool>(&self, predicate: P) -> Split<T, P> {
         Split {
             slice: self,
             predicate: predicate,
@@ -1147,7 +1147,7 @@ implement<T> [T] {
     ///
 
     /// The last subslice will contain any remaining elements even if they don't end with a match.
-    fn split_inclusive<P: fn(&T) -> Bool>(&self, predicate: P) -> SplitInclusive<T, P> {
+    public fn split_inclusive<P: fn(&T) -> Bool>(&self, predicate: P) -> SplitInclusive<T, P> {
         SplitInclusive {
             slice: self,
             predicate: predicate,
@@ -1161,7 +1161,7 @@ implement<T> [T] {
 
     /// At most `n` subslices are returned. The last subslice contains
     /// the remainder of the slice after `n-1` splits.
-    fn splitn<P: fn(&T) -> Bool>(&self, n: Int, predicate: P) -> SplitN<T, P> {
+    public fn splitn<P: fn(&T) -> Bool>(&self, n: Int, predicate: P) -> SplitN<T, P> {
         SplitN {
             slice: self,
             predicate: predicate,
@@ -1175,7 +1175,7 @@ implement<T> [T] {
     ///
 
     /// Like `split`, but yields subslices from the end.
-    fn rsplit<P: fn(&T) -> Bool>(&self, predicate: P) -> RSplit<T, P> {
+    public fn rsplit<P: fn(&T) -> Bool>(&self, predicate: P) -> RSplit<T, P> {
         RSplit {
             slice: self,
             predicate: predicate,
@@ -1188,7 +1188,7 @@ implement<T> [T] {
     ///
 
     /// Like `splitn`, but splits from the right.
-    fn rsplitn<P: fn(&T) -> Bool>(&self, n: Int, predicate: P) -> RSplitN<T, P> {
+    public fn rsplitn<P: fn(&T) -> Bool>(&self, n: Int, predicate: P) -> RSplitN<T, P> {
         RSplitN {
             slice: self,
             predicate: predicate,
@@ -1218,7 +1218,7 @@ public type SliceIter<T> is {
 
 implement<T> SliceIter<T> {
     /// Create a new slice iterator.
-    fn new(slice: &[T]) -> SliceIter<T> {
+    public fn new(slice: &[T]) -> SliceIter<T> {
         SliceIter {
             slice: slice,
             front: 0,
@@ -1230,7 +1230,7 @@ implement<T> SliceIter<T> {
 implement<T> Iterator for SliceIter<T> {
     type Item = &T;
 
-    fn next(&mut self) -> Maybe<&T> {
+    public fn next(&mut self) -> Maybe<&T> {
         if self.front >= self.back {
             return None;
         }
@@ -1239,25 +1239,25 @@ implement<T> Iterator for SliceIter<T> {
         Some(item)
     }
 
-    fn size_hint(&self) -> (Int, Maybe<Int>) {
+    public fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.back - self.front;
         (remaining, Some(remaining))
     }
 
-    fn count(&mut self) -> Int {
+    public fn count(&mut self) -> Int {
         let remaining = self.back - self.front;
         self.front = self.back;
         remaining
     }
 
-    fn nth(&mut self, n: Int) -> Maybe<&T> {
+    public fn nth(&mut self, n: Int) -> Maybe<&T> {
         self.front = self.front + n;
         self.next()
     }
 }
 
 implement<T> DoubleEndedIterator for SliceIter<T> {
-    fn next_back(&mut self) -> Maybe<&T> {
+    public fn next_back(&mut self) -> Maybe<&T> {
         if self.front >= self.back {
             return None;
         }
@@ -1265,7 +1265,7 @@ implement<T> DoubleEndedIterator for SliceIter<T> {
         Some(&self.slice[self.back])
     }
 
-    fn nth_back(&mut self, n: Int) -> Maybe<&T> {
+    public fn nth_back(&mut self, n: Int) -> Maybe<&T> {
         if n >= self.back - self.front {
             self.front = self.back;
             return None;
@@ -1281,7 +1281,7 @@ implement<T> IntoIterator for SliceIter<T> {
     type Item = &T;
     type IntoIter = SliceIter<T>;
 
-    fn into_iter(self) -> SliceIter<T> {
+    public fn into_iter(self) -> SliceIter<T> {
         self
     }
 }
@@ -1295,7 +1295,7 @@ public type SliceEnumerate<T> is {
 implement<T> Iterator for SliceEnumerate<T> {
     type Item = (Int, &T);
 
-    fn next(&mut self) -> Maybe<(Int, &T)> {
+    public fn next(&mut self) -> Maybe<(Int, &T)> {
         if self.pos >= self.slice.len() {
             return None;
         }
@@ -1305,7 +1305,7 @@ implement<T> Iterator for SliceEnumerate<T> {
         Some((idx, item))
     }
 
-    fn size_hint(&self) -> (Int, Maybe<Int>) {
+    public fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.slice.len() - self.pos;
         (remaining, Some(remaining))
     }
@@ -1315,7 +1315,7 @@ implement<T> IntoIterator for SliceEnumerate<T> {
     type Item = (Int, &T);
     type IntoIter = SliceEnumerate<T>;
 
-    fn into_iter(self) -> SliceEnumerate<T> {
+    public fn into_iter(self) -> SliceEnumerate<T> {
         self
     }
 }
@@ -1334,7 +1334,7 @@ public type SliceIterMut<T> is {
 
 implement<T> SliceIterMut<T> {
     /// Create a new mutable slice iterator.
-    fn new(slice: &mut [T]) -> SliceIterMut<T> {
+    public fn new(slice: &mut [T]) -> SliceIterMut<T> {
         let len = slice.len();
         SliceIterMut {
             slice: slice,
@@ -1347,7 +1347,7 @@ implement<T> SliceIterMut<T> {
 implement<T> Iterator for SliceIterMut<T> {
     type Item = &mut T;
 
-    fn next(&mut self) -> Maybe<&mut T> {
+    public fn next(&mut self) -> Maybe<&mut T> {
         if self.front >= self.back {
             return None;
         }
@@ -1356,14 +1356,14 @@ implement<T> Iterator for SliceIterMut<T> {
         Some(item)
     }
 
-    fn size_hint(&self) -> (Int, Maybe<Int>) {
+    public fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.back - self.front;
         (remaining, Some(remaining))
     }
 }
 
 implement<T> DoubleEndedIterator for SliceIterMut<T> {
-    fn next_back(&mut self) -> Maybe<&mut T> {
+    public fn next_back(&mut self) -> Maybe<&mut T> {
         if self.front >= self.back {
             return None;
         }
@@ -1378,7 +1378,7 @@ implement<T> IntoIterator for SliceIterMut<T> {
     type Item = &mut T;
     type IntoIter = SliceIterMut<T>;
 
-    fn into_iter(self) -> SliceIterMut<T> {
+    public fn into_iter(self) -> SliceIterMut<T> {
         self
     }
 }
@@ -1400,7 +1400,7 @@ public type Chunks<T> is {
 implement<T> Iterator for Chunks<T> {
     type Item = &[T];
 
-    fn next(&mut self) -> Maybe<&[T]> {
+    public fn next(&mut self) -> Maybe<&[T]> {
         if self.pos >= self.slice.len() {
             return None;
         }
@@ -1410,7 +1410,7 @@ implement<T> Iterator for Chunks<T> {
         Some(chunk)
     }
 
-    fn size_hint(&self) -> (Int, Maybe<Int>) {
+    public fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.slice.len() - self.pos;
         let count = (remaining + self.size - 1) / self.size;
         (count, Some(count))
@@ -1421,7 +1421,7 @@ implement<T> IntoIterator for Chunks<T> {
     type Item = &[T];
     type IntoIter = Chunks<T>;
 
-    fn into_iter(self) -> Chunks<T> {
+    public fn into_iter(self) -> Chunks<T> {
         self
     }
 }
@@ -1437,7 +1437,7 @@ public type ChunksExact<T> is {
 implement<T> Iterator for ChunksExact<T> {
     type Item = &[T];
 
-    fn next(&mut self) -> Maybe<&[T]> {
+    public fn next(&mut self) -> Maybe<&[T]> {
         if self.pos >= self.slice.len() {
             return None;
         }
@@ -1446,7 +1446,7 @@ implement<T> Iterator for ChunksExact<T> {
         Some(chunk)
     }
 
-    fn size_hint(&self) -> (Int, Maybe<Int>) {
+    public fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = (self.slice.len() - self.pos) / self.size;
         (remaining, Some(remaining))
     }
@@ -1454,7 +1454,7 @@ implement<T> Iterator for ChunksExact<T> {
 
 implement<T> ChunksExact<T> {
     /// Get the remainder (elements that don't fit in a complete chunk).
-    fn remainder(&self) -> &[T] {
+    public fn remainder(&self) -> &[T] {
         self.remainder
     }
 }
@@ -1463,7 +1463,7 @@ implement<T> IntoIterator for ChunksExact<T> {
     type Item = &[T];
     type IntoIter = ChunksExact<T>;
 
-    fn into_iter(self) -> ChunksExact<T> {
+    public fn into_iter(self) -> ChunksExact<T> {
         self
     }
 }
@@ -1478,7 +1478,7 @@ public type Windows<T> is {
 implement<T> Iterator for Windows<T> {
     type Item = &[T];
 
-    fn next(&mut self) -> Maybe<&[T]> {
+    public fn next(&mut self) -> Maybe<&[T]> {
         if self.pos + self.size > self.slice.len() {
             return None;
         }
@@ -1487,7 +1487,7 @@ implement<T> Iterator for Windows<T> {
         Some(window)
     }
 
-    fn size_hint(&self) -> (Int, Maybe<Int>) {
+    public fn size_hint(&self) -> (Int, Maybe<Int>) {
         if self.slice.len() < self.size {
             return (0, Some(0));
         }
@@ -1500,7 +1500,7 @@ implement<T> IntoIterator for Windows<T> {
     type Item = &[T];
     type IntoIter = Windows<T>;
 
-    fn into_iter(self) -> Windows<T> {
+    public fn into_iter(self) -> Windows<T> {
         self
     }
 }
@@ -1523,7 +1523,7 @@ public type Split<T, P> is {
 implement<T, P: fn(&T) -> Bool> Iterator for Split<T, P> {
     type Item = &[T];
 
-    fn next(&mut self) -> Maybe<&[T]> {
+    public fn next(&mut self) -> Maybe<&[T]> {
         if self.finished {
             return None;
         }
@@ -1548,7 +1548,7 @@ implement<T, P: fn(&T) -> Bool> Iterator for Split<T, P> {
         Some(self.slice.slice(start, len))
     }
 
-    fn size_hint(&self) -> (Int, Maybe<Int>) {
+    public fn size_hint(&self) -> (Int, Maybe<Int>) {
         if self.finished {
             (0, Some(0))
         } else {
@@ -1561,7 +1561,7 @@ implement<T, P: fn(&T) -> Bool> IntoIterator for Split<T, P> {
     type Item = &[T];
     type IntoIter = Split<T, P>;
 
-    fn into_iter(self) -> Split<T, P> {
+    public fn into_iter(self) -> Split<T, P> {
         self
     }
 }
@@ -1580,7 +1580,7 @@ public type SplitInclusive<T, P> is {
 implement<T, P: fn(&T) -> Bool> Iterator for SplitInclusive<T, P> {
     type Item = &[T];
 
-    fn next(&mut self) -> Maybe<&[T]> {
+    public fn next(&mut self) -> Maybe<&[T]> {
         if self.finished {
             return None;
         }
@@ -1610,7 +1610,7 @@ implement<T, P: fn(&T) -> Bool> Iterator for SplitInclusive<T, P> {
         Some(self.slice.slice(start, len))
     }
 
-    fn size_hint(&self) -> (Int, Maybe<Int>) {
+    public fn size_hint(&self) -> (Int, Maybe<Int>) {
         if self.finished {
             (0, Some(0))
         } else {
@@ -1623,7 +1623,7 @@ implement<T, P: fn(&T) -> Bool> IntoIterator for SplitInclusive<T, P> {
     type Item = &[T];
     type IntoIter = SplitInclusive<T, P>;
 
-    fn into_iter(self) -> SplitInclusive<T, P> {
+    public fn into_iter(self) -> SplitInclusive<T, P> {
         self
     }
 }
@@ -1643,7 +1643,7 @@ public type SplitN<T, P> is {
 implement<T, P: fn(&T) -> Bool> Iterator for SplitN<T, P> {
     type Item = &[T];
 
-    fn next(&mut self) -> Maybe<&[T]> {
+    public fn next(&mut self) -> Maybe<&[T]> {
         if self.finished || self.remaining == 0 {
             return None;
         }
@@ -1677,7 +1677,7 @@ implement<T, P: fn(&T) -> Bool> Iterator for SplitN<T, P> {
         Some(self.slice.slice(start, len))
     }
 
-    fn size_hint(&self) -> (Int, Maybe<Int>) {
+    public fn size_hint(&self) -> (Int, Maybe<Int>) {
         if self.finished || self.remaining == 0 {
             (0, Some(0))
         } else {
@@ -1690,7 +1690,7 @@ implement<T, P: fn(&T) -> Bool> IntoIterator for SplitN<T, P> {
     type Item = &[T];
     type IntoIter = SplitN<T, P>;
 
-    fn into_iter(self) -> SplitN<T, P> {
+    public fn into_iter(self) -> SplitN<T, P> {
         self
     }
 }
@@ -1709,7 +1709,7 @@ public type RSplit<T, P> is {
 implement<T, P: fn(&T) -> Bool> Iterator for RSplit<T, P> {
     type Item = &[T];
 
-    fn next(&mut self) -> Maybe<&[T]> {
+    public fn next(&mut self) -> Maybe<&[T]> {
         if self.finished {
             return None;
         }
@@ -1733,7 +1733,7 @@ implement<T, P: fn(&T) -> Bool> Iterator for RSplit<T, P> {
         Some(self.slice.slice(0, end))
     }
 
-    fn size_hint(&self) -> (Int, Maybe<Int>) {
+    public fn size_hint(&self) -> (Int, Maybe<Int>) {
         if self.finished {
             (0, Some(0))
         } else {
@@ -1746,7 +1746,7 @@ implement<T, P: fn(&T) -> Bool> IntoIterator for RSplit<T, P> {
     type Item = &[T];
     type IntoIter = RSplit<T, P>;
 
-    fn into_iter(self) -> RSplit<T, P> {
+    public fn into_iter(self) -> RSplit<T, P> {
         self
     }
 }
@@ -1766,7 +1766,7 @@ public type RSplitN<T, P> is {
 implement<T, P: fn(&T) -> Bool> Iterator for RSplitN<T, P> {
     type Item = &[T];
 
-    fn next(&mut self) -> Maybe<&[T]> {
+    public fn next(&mut self) -> Maybe<&[T]> {
         if self.finished || self.remaining == 0 {
             return None;
         }
@@ -1799,7 +1799,7 @@ implement<T, P: fn(&T) -> Bool> Iterator for RSplitN<T, P> {
         Some(self.slice.slice(0, end))
     }
 
-    fn size_hint(&self) -> (Int, Maybe<Int>) {
+    public fn size_hint(&self) -> (Int, Maybe<Int>) {
         if self.finished || self.remaining == 0 {
             (0, Some(0))
         } else {
@@ -1812,7 +1812,7 @@ implement<T, P: fn(&T) -> Bool> IntoIterator for RSplitN<T, P> {
     type Item = &[T];
     type IntoIter = RSplitN<T, P>;
 
-    fn into_iter(self) -> RSplitN<T, P> {
+    public fn into_iter(self) -> RSplitN<T, P> {
         self
     }
 }
@@ -1822,20 +1822,20 @@ implement<T, P: fn(&T) -> Bool> IntoIterator for RSplitN<T, P> {
 // =============================================================================
 
 implement<T> ExactSizeIterator for Chunks<T> {
-    fn len(&self) -> Int {
+    public fn len(&self) -> Int {
         let remaining = self.slice.len() - self.pos;
         (remaining + self.size - 1) / self.size
     }
 }
 
 implement<T> ExactSizeIterator for ChunksExact<T> {
-    fn len(&self) -> Int {
+    public fn len(&self) -> Int {
         (self.slice.len() - self.pos) / self.size
     }
 }
 
 implement<T> ExactSizeIterator for Windows<T> {
-    fn len(&self) -> Int {
+    public fn len(&self) -> Int {
         if self.slice.len() < self.size {
             0
         } else {
@@ -1863,7 +1863,7 @@ implement<T, P: fn(&T) -> Bool> FusedIterator for RSplitN<T, P> {}
 
 implement [Byte] {
     /// Compare byte slices using memcmp.
-    fn eq_bytes(&self, other: &[Byte]) -> Bool {
+    public fn eq_bytes(&self, other: &[Byte]) -> Bool {
         if self.len() != other.len() {
             return false;
         }
@@ -1876,19 +1876,19 @@ implement [Byte] {
     }
 
     /// Fill with byte value.
-    fn fill_byte(&mut self, value: Byte) {
+    public fn fill_byte(&mut self, value: Byte) {
         for i in range(0, self.len()) {
             self[i] = value;
         }
     }
 
     /// Zero out bytes.
-    fn zero(&mut self) {
+    public fn zero(&mut self) {
         self.fill_byte(0);
     }
 
     /// Copy from byte slice.
-    fn copy_from_bytes(&mut self, src: &[Byte]) {
+    public fn copy_from_bytes(&mut self, src: &[Byte]) {
         assert(self.len() == src.len(), "slice lengths must match");
         for i in range(0, self.len()) {
             self[i] = src[i];
@@ -1920,7 +1920,7 @@ public unsafe fn make_slice_mut<T>(ptr: &unsafe T, len: Int) -> &mut [T] {
 
 implement<T> Length for [T] {
     @inline(always)
-    fn len(&self) -> Int {
+    public fn len(&self) -> Int {
         slice_len(self) as Int
     }
 }
