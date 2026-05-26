@@ -193,7 +193,6 @@ fn regression_text_starts_with_char_empty_text() {
 // §C — `file_name()` on path ending with trailing separator
 // =============================================================================
 
-@ignore
 @test
 fn regression_path_file_name_with_trailing_separator() {
     let p = Path.new(&Text.from("/home/user/"));

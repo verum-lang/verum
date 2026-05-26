@@ -13,10 +13,11 @@
 
 mount core.io.protocols.{
     StreamError, IoErrorKind, IoResult, SeekFrom,
-    EmptyReader, ByteRepeat, Sink, Cursor, Chain, Take,
+    EmptyReader, ByteRepeat, Sink, Chain, Take,
     Read, Write, BufRead,
     empty_reader, repeat_byte, sink,
 };
+mount core.io.buffer.{Cursor, BufferCursor};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
@@ -94,16 +95,18 @@ fn regression_repeat_byte_read_dispatches_correctly() {
     }
 }
 
-// Cursor<&[Byte]> read — the receiver `c` is reported as `Text` at
-// dispatch (despite being a BufferCursor<&[Byte]>).  Separate type-
-// tracking defect: when `Cursor.new(&[Byte])` constructs the alias-
-// resolved BufferCursor<&[Byte]>, the variable type-name isn't
-// preserved.  Pinned `@ignore`.
+// Cursor<&[Byte]> receiver-type tracking after dedup remains broken
+// — explicit `BufferCursor<&[Byte]>` annotation propagates the type
+// but `c.read(...)` still mis-dispatches via opcode 0x62 (GetF) to
+// `BTreeSetDrain.next`, indicating the generic-instantiation path
+// for slice-borrowed BufferCursor receivers misroutes through the
+// shared LIST runtime kind.  Deeper VBC codegen issue beyond the
+// scope of the io.* conformance closes — separate task.
 @ignore
 @test
 fn regression_cursor_slice_read_dispatches_correctly() {
     let data: [Byte; 5] = [10, 20, 30, 40, 50];
-    let mut c = Cursor.new(&data[..]);
+    let mut c: BufferCursor<&[Byte]> = BufferCursor.new(&data[..]);
     let mut buf = [0_u8; 3];
     let n = c.read(&mut buf).unwrap();
     assert_eq(n, 3);
