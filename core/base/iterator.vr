@@ -1425,8 +1425,8 @@ implement<I: ExactSizeIterator> ExactSizeIterator for EnumerateIter<I> {
 implement<I: ExactSizeIterator> ExactSizeIterator for FuseIter<I> {
     fn len(&self) -> Int {
         match self.iter {
-            Some(ref inner) => inner.len(),
-            None => 0,
+            Maybe.Some(ref inner) => inner.len(),
+            Maybe.None => 0,
         }
     }
 }
@@ -1466,8 +1466,8 @@ implement<I: ExactSizeIterator> ExactSizeIterator for SkipIter<I> {
 implement<T, A: ExactSizeIterator<Item>, B: ExactSizeIterator<Item>> ExactSizeIterator for ChainIter<A, B> {
     fn len(&self) -> Int {
         let a_len = match self.first {
-            Some(ref a) => a.len(),
-            None => 0,
+            Maybe.Some(ref a) => a.len(),
+            Maybe.None => 0,
         };
         a_len + self.second.len()
     }
