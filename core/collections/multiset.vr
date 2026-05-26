@@ -274,8 +274,8 @@ implement<T: Hash + Eq> Multiset<T> {
     /// was evicted (0 if absent).
     public fn remove_all(&mut self, value: &T) -> Int {
         match self.inner.remove(value) {
-            None    => 0,
-            Some(k) => {
+            Maybe.None    => 0,
+            Maybe.Some(k) => {
                 self.cardinality = self.cardinality - k;
                 k
             }
@@ -463,17 +463,17 @@ implement<T: Hash + Eq> Multiset<T> {
     /// Return the element with the largest multiplicity, ties broken
     /// arbitrarily. None when the multiset is empty.
     public fn mode(&self) -> Maybe<&T> {
-        let mut best: Maybe<(&T, Int)> = None;
+        let mut best: Maybe<(&T, Int)> = Maybe.None;
         let mut iter = self.iter();
-        while let Some((k, v)) = iter.next() {
+        while let Maybe.Some((k, v)) = iter.next() {
             best = match best {
-                None        => Some((k, v)),
-                Some((_, b)) => if v > b { Some((k, v)) } else { best },
+                Maybe.None        => Maybe.Some((k, v)),
+                Maybe.Some((_, b)) => if v > b { Maybe.Some((k, v)) } else { best },
             };
         }
         match best {
-            None         => None,
-            Some((k, _)) => Some(k),
+            Maybe.None         => Maybe.None,
+            Maybe.Some((k, _)) => Maybe.Some(k),
         }
     }
 }
@@ -492,8 +492,8 @@ implement<T: Hash + Eq> Iterator for MultisetIter<T> {
 
     fn next(&mut self) -> Maybe<Self.Item> {
         match self.inner.next() {
-            None    => None,
-            Some(p) => Some((p.0, *p.1)),
+            Maybe.None    => Maybe.None,
+            Maybe.Some(p) => Maybe.Some((p.0, *p.1)),
         }
     }
 }
