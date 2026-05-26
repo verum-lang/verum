@@ -1315,29 +1315,29 @@ implement Iterator for WalkDir {
     fn next(&mut self) -> Maybe<IoResult<DirEntry>> {
         loop {
             if self.stack.is_empty() {
-                return None;
+                return Maybe.None;
             }
 
             let current = self.stack.last_mut()?;
 
             match current.next() {
-                Some(Ok(entry)) => {
+                Maybe.Some(Result.Ok(entry)) => {
                     // If it's a directory, push a new ReadDir
                     if entry.file_type().is_dir() {
-                        if let Ok(sub_dir) = read_dir(&entry.path()) {
+                        if let Result.Ok(sub_dir) = read_dir(&entry.path()) {
                             self.stack.push(sub_dir);
                         }
                     }
-                    return Some(Ok(entry));
+                    return Maybe.Some(Result.Ok(entry));
                 }
-                Some(Err(e)) => {
-                    return Some(Err(e));
+                Maybe.Some(Result.Err(e)) => {
+                    return Maybe.Some(Result.Err(e));
                 }
-                None => {
+                Maybe.None => {
                     // This iterator is exhausted, pop it
                     self.stack.pop();
                 }
-                Some(_) => unreachable(),
+                Maybe.Some(_) => unreachable(),
             }
         }
     }
