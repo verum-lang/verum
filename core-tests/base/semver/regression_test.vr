@@ -1,0 +1,157 @@
+// =============================================================================
+// core-tests/base/semver/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.semver`. Each entry ties a previously-
+// observed defect or canonical-shape contract to a single @test so
+// re-regressions surface as named test failures.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.semver.{SemVer, SemVerError, parse, cmp, format};
+mount core.collections.list.List;
+
+// =============================================================================
+// REGRESSION §A (@ignore'd): `parse` bare-name dispatch defect —
+// `core.base.semver.parse` collides with another module's bare `parse`
+// (returning `ParsedType` somewhere in stdlib). The static-method
+// dispatcher's first-suffix-wins rule (task #17/#39) picks the wrong
+// sibling; `parse(&"1.2.3".to_text()).unwrap()` panics with:
+//   method 'ParsedType.unwrap' not found on receiver of runtime kind
+//   `ParsedType` ... 5 candidate(s) end with `.unwrap`
+//   (Maybe / Result / CheckedResult / Poll / ReduceResult)
+//
+// Workaround in unit_test: construct SemVer records directly via the
+// record-literal `mk_semver` helper instead of going through `parse`.
+// Live parse + unwrap pinned at §A — flips green when the dispatcher
+// becomes mount-scope-aware (multi-day VBC codegen fix).
+// =============================================================================
+
+@ignore("task #17/#39 — parse bare-name dispatch collision. Multi-day VBC codegen fix.")
+@test
+fn regression_pin_parse_bare_dispatch_returns_wrong_type() {
+    let r = parse(&"1.2.3".to_text());
+    assert(r.is_ok());
+}
+
+// =============================================================================
+// REGRESSION §B (@ignore'd): `format` lenient-stubbed because
+// `Text.from_utf8_unchecked` was private in the precompiled stdlib
+// (text.vr:455). Fix staged in the `core-tests/base/ulid` work; flips
+// green on next stdlib refresh.
+// =============================================================================
+
+@ignore("Text.from_utf8_unchecked private — fix staged, awaits stdlib refresh.")
+@test
+fn regression_pin_format_panics_on_stub() {
+    let v = SemVer {
+        major: 1_u64,
+        minor: 2_u64,
+        patch: 3_u64,
+        pre_release: List.new(),
+        build_meta:  List.new(),
+    };
+    let _ = format(&v);
+}
+
+// =============================================================================
+// REGRESSION §C: SemVer is a 5-field record (major, minor, patch,
+// pre_release, build_meta). A defect that reordered or renamed any
+// field would break every consumer of cmp() / format() / parse().
+// =============================================================================
+
+@test
+fn regression_semver_five_field_record_layout() {
+    let v = SemVer {
+        major: 7_u64,
+        minor: 11_u64,
+        patch: 13_u64,
+        pre_release: ["pre".to_text()],
+        build_meta:  ["build".to_text()],
+    };
+    assert_eq(v.major, 7_u64);
+    assert_eq(v.minor, 11_u64);
+    assert_eq(v.patch, 13_u64);
+    assert_eq(v.pre_release.len(), 1);
+    assert_eq(v.build_meta.len(), 1);
+}
+
+// =============================================================================
+// REGRESSION §D: cmp respects SemVer §11 ordering — major dominates
+// minor dominates patch. A defect that reordered the precedence
+// would silently break dependency resolution.
+// =============================================================================
+
+@test
+fn regression_cmp_major_dominates_minor() {
+    let a = SemVer {
+        major: 1_u64, minor: 99_u64, patch: 99_u64,
+        pre_release: List.new(), build_meta: List.new(),
+    };
+    let b = SemVer {
+        major: 2_u64, minor: 0_u64, patch: 0_u64,
+        pre_release: List.new(), build_meta: List.new(),
+    };
+    match cmp(&a, &b) {
+        Ordering.Less => {},
+        _ => panic("expected 1.99.99 < 2.0.0 — major dominates"),
+    }
+}
+
+@test
+fn regression_cmp_minor_dominates_patch() {
+    let a = SemVer {
+        major: 1_u64, minor: 0_u64, patch: 99_u64,
+        pre_release: List.new(), build_meta: List.new(),
+    };
+    let b = SemVer {
+        major: 1_u64, minor: 1_u64, patch: 0_u64,
+        pre_release: List.new(), build_meta: List.new(),
+    };
+    match cmp(&a, &b) {
+        Ordering.Less => {},
+        _ => panic("expected 1.0.99 < 1.1.0 — minor dominates patch"),
+    }
+}
+
+// =============================================================================
+// REGRESSION §E: prerelease < release per SemVer §11.3. A defect
+// that inverted this would silently install prerelease packages as
+// "newer" than stable releases.
+// =============================================================================
+
+@test
+fn regression_cmp_prerelease_strictly_less_than_release() {
+    let pre = SemVer {
+        major: 1_u64, minor: 0_u64, patch: 0_u64,
+        pre_release: ["alpha".to_text()],
+        build_meta:  List.new(),
+    };
+    let rel = SemVer {
+        major: 1_u64, minor: 0_u64, patch: 0_u64,
+        pre_release: List.new(),
+        build_meta:  List.new(),
+    };
+    match cmp(&pre, &rel) {
+        Ordering.Less => {},
+        _ => panic("expected 1.0.0-alpha < 1.0.0 (SemVer §11.3)"),
+    }
+}
+
+// =============================================================================
+// REGRESSION §F: SemVerError variants disjoint under Eq.
+// =============================================================================
+
+@test
+fn regression_semver_error_variants_disjoint() {
+    let a = SemVerError.Malformed("x".to_text());
+    let b = SemVerError.LeadingZero("x".to_text());
+    let c = SemVerError.InvalidIdentifier("x".to_text());
+    let d = SemVerError.Overflow("x".to_text());
+    assert(!(a == b));
+    assert(!(b == c));
+    assert(!(c == d));
+    assert(!(a == d));
+}
+
+fn main() {}
