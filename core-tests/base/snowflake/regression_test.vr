@@ -1,0 +1,155 @@
+// =============================================================================
+// core-tests/base/snowflake/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.snowflake`. Every entry ties a
+// previously-observed defect or canonical-shape contract to a single
+// executable @test so re-regressions surface as named test failures.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.snowflake.{
+    Snowflake, SnowflakeError, SnowflakeParts, parse,
+    MAX_WORKER, MAX_SEQUENCE, DEFAULT_EPOCH_MS,
+    WORKER_SHIFT, TIMESTAMP_SHIFT,
+};
+
+// =============================================================================
+// REGRESSION §A: layout-constant pin — bit packing assumptions are
+// load-bearing on every downstream consumer. The 41-bit timestamp +
+// 10-bit worker + 12-bit sequence layout must be stable across
+// stdlib edits. Any change to WORKER_SHIFT / TIMESTAMP_SHIFT would
+// silently break sortability of every previously-emitted Snowflake.
+// =============================================================================
+
+@test
+fn regression_layout_constants_stable() {
+    assert_eq(WORKER_SHIFT,    12_u64);
+    assert_eq(TIMESTAMP_SHIFT, 22_u64);
+    assert_eq(MAX_WORKER,      1023_u64);   // 10 bits == 0..=1023
+    assert_eq(MAX_SEQUENCE,    4095_u64);   // 12 bits == 0..=4095
+}
+
+// =============================================================================
+// REGRESSION §B: WorkerIdOutOfRange must fire at exactly MAX_WORKER+1,
+// not at MAX_WORKER (off-by-one defect). 1023 is legal; 1024 is not.
+// =============================================================================
+
+@test
+fn regression_worker_id_boundary_at_max_worker() {
+    // MAX_WORKER itself is legal.
+    let ok_at_max = Snowflake.new(0_u64, MAX_WORKER);
+    assert(ok_at_max.is_ok());
+    // MAX_WORKER + 1 must be rejected with WorkerIdOutOfRange.
+    let bad = Snowflake.new(0_u64, MAX_WORKER + 1_u64);
+    assert(bad.is_err());
+    match bad {
+        Err(e) => match e {
+            SnowflakeError.WorkerIdOutOfRange(id) => assert_eq(id, MAX_WORKER + 1_u64),
+            _ => panic("expected WorkerIdOutOfRange"),
+        },
+        Ok(_) => panic("expected Err at MAX_WORKER + 1"),
+    }
+}
+
+// =============================================================================
+// REGRESSION §C: parse round-trip — packing then unpacking via the
+// canonical shifts must recover the exact same fields. Off-by-one
+// shift constants or wrong mask values would surface here.
+// =============================================================================
+
+@test
+fn regression_parse_pack_unpack_round_trip() {
+    let ts_offset: UInt64 = 9_999_u64;
+    let worker:    UInt64 = 511_u64;
+    let sequence:  UInt64 = 2_048_u64;
+    let id: UInt64 = (ts_offset << TIMESTAMP_SHIFT)
+                   | (worker    << WORKER_SHIFT)
+                   | sequence;
+    let parts: SnowflakeParts = parse(id, DEFAULT_EPOCH_MS);
+    assert_eq(parts.timestamp_ms, DEFAULT_EPOCH_MS + ts_offset);
+    assert_eq(parts.worker_id, worker);
+    assert_eq(parts.sequence, sequence);
+}
+
+// =============================================================================
+// REGRESSION §D (@ignore'd): `SystemTime.now()` static-method dispatch
+// mis-routes to `SysTimeOpsInstant.now()` (a different sibling type
+// with a different field layout) via the same bare-name first-suffix-
+// wins root as task #17/#39. The static-method dispatcher does not
+// honour the qualified receiver type `SystemTime` and picks the first
+// registered `now` function in the bare-suffix scan, which happens to
+// be `SysTimeOpsInstant.now`. Every `Snowflake.next_id()` call goes
+// through `current_unix_ms()` → `SystemTime.now().timestamp_millis()`,
+// so all three live-clock tests panic with:
+//   field access out of bounds: field index 1 (offset 8+8 = 16)
+//   exceeds object data size 8 type_id=... type='SysTimeOpsInstant'
+// (SystemTime has 2 fields / 16 bytes; SysTimeOpsInstant has 1 / 8.)
+//
+// Workaround: gated. Live next_id tests pinned as @ignore'd until the
+// dispatcher becomes mount-scope-aware (multi-day VBC codegen fix
+// shared with other static-method dispatch defects across stdlib).
+// =============================================================================
+
+@ignore("task #17/#39 — SystemTime.now() static-method dispatch mis-routes to SysTimeOpsInstant.now(). Multi-day VBC codegen fix in static-method dispatcher.")
+@test
+fn regression_pin_systemtime_now_static_dispatch() {
+    let mut sf = Snowflake.using_default_epoch(1_u64).unwrap();
+    // next_id internally calls current_unix_ms() ->
+    // SystemTime.now().timestamp_millis() — currently panics here.
+    let r = sf.next_id();
+    assert(r.is_ok());
+}
+
+@ignore("task #17/#39 — same SystemTime.now() dispatch defect as §D. next_id panics.")
+@test
+fn regression_pin_next_id_monotonic_within_same_ms() {
+    let mut sf = Snowflake.using_default_epoch(1_u64).unwrap();
+    let id1 = sf.next_id().unwrap();
+    let id2 = sf.next_id().unwrap();
+    let id3 = sf.next_id().unwrap();
+    assert(id1 < id2);
+    assert(id2 < id3);
+}
+
+@ignore("task #17/#39 — same SystemTime.now() dispatch defect as §D. parse round-trip from live ID gated until next_id works.")
+@test
+fn regression_pin_live_id_round_trip_through_parts() {
+    let mut sf = Snowflake.using_default_epoch(7_u64).unwrap();
+    let id = sf.next_id().unwrap();
+    let parts: SnowflakeParts = parse(id, sf.epoch_ms());
+    assert_eq(parts.worker_id, 7_u64);
+}
+
+// =============================================================================
+// REGRESSION §E: default-epoch helper must carry the canonical Twitter
+// 2010-11-04 epoch constant. A defect that hard-coded a different
+// value here would silently shift every default-epoch timestamp by
+// the difference, breaking cross-system Snowflake interop.
+// =============================================================================
+
+@test
+fn regression_using_default_epoch_carries_twitter_2010() {
+    let sf = Snowflake.using_default_epoch(0_u64).unwrap();
+    assert_eq(sf.epoch_ms(), DEFAULT_EPOCH_MS);
+    assert_eq(DEFAULT_EPOCH_MS, 1_288_834_974_657_u64);
+}
+
+// =============================================================================
+// REGRESSION §F: SnowflakeError variants are pairwise distinct under
+// Eq. A defect that collapsed WorkerIdOutOfRange and ClockRegressed
+// at the Eq dispatch site would silently corrupt error-classification
+// downstream.
+// =============================================================================
+
+@test
+fn regression_snowflake_error_variants_pairwise_distinct() {
+    let a = SnowflakeError.WorkerIdOutOfRange(1_u64);
+    let b = SnowflakeError.ClockRegressed(1_u64);
+    let c = SnowflakeError.ClockBeforeEpoch(1_u64);
+    assert(!(a == b));
+    assert(!(b == c));
+    assert(!(a == c));
+}
+
+fn main() {}
