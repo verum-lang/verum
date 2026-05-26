@@ -577,11 +577,11 @@ public type Iterator is protocol {
     {
         let first = self.next();
         match first {
-            None => None,
-            Some(val) => {
+            Maybe.None => Maybe.None,
+            Maybe.Some(val) => {
                 let mut current_min = val.clone();
                 let mut current_max = val;
-                while let Some(item) = self.next() {
+                while let Maybe.Some(item) = self.next() {
                     if item < current_min {
                         current_min = item.clone();
                     }
@@ -590,7 +590,7 @@ public type Iterator is protocol {
                     }
                     // Note: if item == current_min or between, neither branch triggers update
                 }
-                Some((current_min, current_max))
+                Maybe.Some((current_min, current_max))
             }
         }
     }
