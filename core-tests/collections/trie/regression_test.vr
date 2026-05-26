@@ -33,7 +33,7 @@ fn regression_trie_remove_present_returns_value() {
     assert_eq(r, Some(100));
 }
 
-@ignore
+// CLOSED 2026-05-26 (Map.get_mut added in commit 997f53352)
 @test
 fn regression_trie_remove_absent_returns_none_via_map_get_mut() {
     let mut t: Trie<Int> = Trie.new();
