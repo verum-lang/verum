@@ -682,21 +682,21 @@ fn spawn_child_with_output(cmd: &Command) -> Result<Output, Text> {
 
     // Read output from pipes before waiting (avoids deadlock if child fills buffer)
     let stdout_bytes = match child.stdout_fd {
-        Some(fd) => {
+        Maybe.Some(fd) => {
             let bytes = read_all_from_fd(fd);
             close_fd(fd);
             bytes
         }
-        None => [],
+        Maybe.None => [],
     };
 
     let stderr_bytes = match child.stderr_fd {
-        Some(fd) => {
+        Maybe.Some(fd) => {
             let bytes = read_all_from_fd(fd);
             close_fd(fd);
             bytes
         }
-        None => [],
+        Maybe.None => [],
     };
 
     let exit_status = wait_for_child(child.pid)?;
