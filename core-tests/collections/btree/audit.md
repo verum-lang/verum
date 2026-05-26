@@ -152,6 +152,26 @@ account for the through-reference + through-Heap chain, AND the
 destructured binding's type must carry the inner `T` for downstream
 field resolution.  Multi-day VBC codegen investigation.
 
+### Source-side workaround attempts 2026-05-25 / 2026-05-26 (all insufficient)
+
+| Attempt | Outcome |
+|---|---|
+| Inline `search_node` body into `get` | search_node still called at runtime (pc=176) |
+| Reorder BTreeNode fields (is_leaf first) | Field-3 OOB persists (now at children field) |
+| Make BTreeNode `public` | No effect |
+| Make Heap.new stamp TypeId::HEAP | Different defect surfaces (user-side TypeId collision) |
+| `&`-rebinding stabilisation discipline | Codegen still emits search_node call somehow |
+| Replace `node.is_leaf` with `node.children.len() == 0` proxy | Same backtrace pc=176 |
+| `match self.root.clone()` value-match instead of ref-match | Closes some defects but creates write-side data-loss |
+| `if let Some(ref h) = self.root` destructure | Identical OOB pattern |
+
+The receiver at `search_node@pc=176` is consistently reported as
+`type_id=512 type='List'` (24B) instead of `BTreeNode` (32B).
+Diagnostic added in commit `c2f74b263` (handle_get_field panic
+now includes type_id + 8-frame backtrace).  Multi-day VBC codegen
+investigation is the next viable scope — source-side refactoring
+has been exhausted across 8 distinct shapes.
+
 Working surface today: only the empty-state surface (new, get on
 absent key, contains_key absent, remove absent, get_or_default on
 absent, is_empty/len coherence) — 6 unit + 5 property + 2
