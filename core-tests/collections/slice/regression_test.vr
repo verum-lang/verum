@@ -62,6 +62,8 @@ fn regression_slice_cmp_slice_dispatch_panic() {
 //
 // Cross-reference: same shape as the closed `List.is_sorted` defect in
 // `core-tests/collections/list/regression_test.vr` §D.
+// is_sorted public-resolved 2026-05-26 (batch slice public commit) but
+// underlying `*prev > *cur` deref-compare defect remains — kept @ignore.
 @ignore
 @test
 fn regression_slice_is_sorted_false_on_sorted_input() {
