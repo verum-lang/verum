@@ -135,7 +135,7 @@ public fn generate_with_length(n: Int) -> Text {
 
 public fn generate_with_alphabet(alphabet: &[Byte], n: Int) -> Text {
     let alpha_size = alphabet.len();
-    if alpha_size == 0 || n <= 0 { return Text.from(""); }
+    if alpha_size == 0 || n <= 0 { return Text.new(); }
 
     // Pick smallest mask that covers alpha_size — power-of-two
     // boundary for rejection sampling.
