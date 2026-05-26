@@ -1372,13 +1372,22 @@ implement<T> List<T> {
 
     /// Append all elements from another list, leaving the other list empty.
     public fn append(&mut self, other: &mut List<T>) {
-        self.reserve(other.len());
-        for i in range(0, other.len) {
-            unsafe {
-                self.push(ptr_read(other.ptr.offset(i)));
+        // Safe-operation append — same rationale as get_mut /
+        // pop_front / split_off / try_push: raw `ptr_read(other.ptr
+        // .offset(i))` returned bytes from the backing heap object's
+        // ObjectHeader because codegen resolves `other.ptr` to the
+        // heap-object start (not past `OBJECT_HEADER_SIZE`). Read via
+        // the runtime-intercepted `other.get(i)` and push.
+        let n = other.len();
+        let mut i: Int = 0;
+        while i < n {
+            match other.get(i) {
+                Some(item) => self.push(item),
+                None => break,
             }
+            i = i + 1;
         }
-        other.len = 0;
+        other.clear();
     }
 
     // =========================================================================

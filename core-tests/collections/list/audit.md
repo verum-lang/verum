@@ -7,22 +7,50 @@ gaps; defect inventory.
 
 ## Status
 
-**partial** — Unit / property / integration coverage now spans both the
-runtime-intercepted API surface (allocation, push/pop, get/first/last,
-contains, set, get_or, swap, insert, remove, swap_remove, clear,
-truncate, reverse, sort, capacity management) AND the stdlib-body path
-that was previously gated by the memory-layout drift (retain, resize,
-rotate_left, dedup — see unit_test.vr §10 + regression_test.vr §B).
+**partial** — Unit / property / integration coverage spans the
+runtime-intercepted API surface (allocation, push / pop / get / first /
+last / contains / set / get_or / swap / insert / remove / swap_remove /
+clear / truncate / reverse / sort / capacity management), the
+layout-correct stdlib-body path (retain / resize / rotate_left / dedup
+— see unit_test.vr §10 + regression_test.vr §B), AND the broad expansion
+landed 2026-05-26/27 covering position / rposition / index_of / pop_front
+/ extend_from_slice / append / split_off / rotate_right / any / all /
+binary_search / partition_point / get_mut / first_mut / last_mut / iter
+/ try_push / as_slice (unit_test.vr §11–§28).
 
-**Architectural fix landed in this branch**: the stdlib `type List<T>`
-field decl was reordered from `{ ptr, len, cap }` to `{ len, cap, ptr }`
-so codegen field-index agrees with the VBC runtime intercept's slot
-allocation `[len@0, cap@1, backing_ptr@2]`. Eliminates the entire
-class of "unintercepted method reads wrong slot" defects.
+Test count: **136 @test (107 active + 29 @ignore)**, up from 61 baseline.
 
-Residual defects are now in adjacent layers (Clone-dispatch for
-`value.clone()` inside `fill`; ref-deref-as-value comparison inside
-`is_sorted` / `sort_by`) — pinned in regression_test.vr §D.
+**Architectural fixes landed in this branch**:
+* The stdlib `type List<T>` field decl was reordered from
+  `{ ptr, len, cap }` to `{ len, cap, ptr }` so codegen field-index
+  agrees with the VBC runtime intercept's slot allocation
+  `[len@0, cap@1, backing_ptr@2]`. Eliminates the entire class of
+  "unintercepted method reads wrong slot" defects.
+* `position` runtime intercept is now bi-modal by `arg0.is_func_ref()`
+  — closure form keeps Iterator-protocol semantics; non-closure form
+  mirrors `contains` (resolve_arg_value + value_eq). See §E below.
+* Migrated `get_mut`, `pop_front`, `split_off`, `binary_search`,
+  `binary_search_by`, `partition_point`, `try_push`, `append` from
+  raw `*self.ptr.offset(i)` to the runtime-intercepted `self.get(i)`
+  / `self.remove(i)` / `self.truncate(at)` surface. `position` and
+  `rposition` migrated from `for i in range(...)` to `while +
+  self.get(i)`. Each migration restores user-side callability without
+  requiring the cross-module closure-id remap (task #28/#47) to close.
+
+Residual defects pinned @ignore:
+* `find_by`, `position_by`, `starts_with`, `ends_with`, `windows`,
+  `chunks`, `partition_by`, `chunk_by`, `dedup_by` — stdlib body uses
+  `for i in range(0, self.len)`; iterator-internal closures aren't in
+  user-side function table (audit.md §E).
+* `reserve` / `reserve_exact` / `shrink_to_fit` / `shrink_to` —
+  resize_buffer calls `realloc(self.ptr, ...)` which SIGABRTs (header-
+  pointer mismatch in allocator).
+* `try_with_capacity` — static constructor dispatches to
+  `AdjacencyList.add_vertex` via cross-module bare-name table (task
+  #28/#47 class).
+* `sort_unstable` populated input + `sorted` — introsort body trips
+  closure dispatch (same root as §E).
+* `fill` / `is_sorted` / `sort_by` — pinned in regression_test.vr §D.
 
 ## 1. Cross-stdlib usage
 
