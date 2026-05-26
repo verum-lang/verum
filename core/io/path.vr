@@ -361,11 +361,14 @@ implement Path {
         // (added to `core/text/text.vr`) which accepts a Char pattern
         // — type-correct.  On Windows both '/' and '\' are separators;
         // strip them in two passes.
-        let trimmed_once = self.inner.trim_end_matches_char('/');
-        @cfg(unix)
-        let path = trimmed_once;
-        @cfg(windows)
-        let path = trimmed_once.trim_end_matches_char('\\');
+        // Two passes: strip '/' then '\\' so cross-platform paths
+        // normalise correctly here (Unix '\\' is just a regular char in
+        // a filename and won't be present in typical paths; Windows
+        // both are separators).  Safe on Unix because '\\' isn't a
+        // separator there.
+        let path = self.inner
+            .trim_end_matches_char('/')
+            .trim_end_matches_char('\\');
         if path.is_empty() {
             return None;
         }
@@ -970,13 +973,13 @@ implement Iterator for Components {
         let start = self.pos;
         while self.pos < self.path.len() {
             match self.path.char_at(self.pos) {
-                Some(c) => {
+                Maybe.Some(c) => {
                     if is_separator(c) {
                         break;
                     }
                     self.pos = self.pos + 1;
                 }
-                None => break,
+                Maybe.None => break,
             }
         }
 
