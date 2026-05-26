@@ -6,7 +6,7 @@
 // suite.
 // =============================================================================
 
-mount core.io.path.{Path, PathBuf, Component, normalize};
+mount core.io.path.{Path, PathBuf, Component, MAIN_SEPARATOR, normalize};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.collections.list.List;
 
@@ -85,6 +85,41 @@ fn regression_main_separator_equals_slash() {
 fn regression_main_separator_load_diagnostic() {
     let m_byte: Byte = MAIN_SEPARATOR as Byte;
     assert_eq(m_byte, '/' as Byte);
+}
+
+// MAIN_SEPARATOR's mount-imported archive load path doesn't pick up
+// the `__const_val_47` LoadI fast-path.  Tracked for separate
+// investigation in archive_ctx_loader.rs / compile_simple_path
+// scope-lookup interaction.
+@ignore
+@test
+fn regression_main_separator_local_bind_probe() {
+    let m: Char = MAIN_SEPARATOR;
+    assert_eq(m, '/');
+}
+
+@ignore
+@test
+fn regression_main_separator_vs_test_local_const() {
+    let m: Char = MAIN_SEPARATOR;
+    let t: Char = TEST_LOCAL_SLASH;
+    assert_eq(m, t);
+}
+
+// Test-local Char const to compare against MAIN_SEPARATOR.
+// If this works but MAIN_SEPARATOR doesn't, the bug is specifically
+// in the mount-imported / stdlib-precompiled const path.
+const TEST_LOCAL_SLASH: Char = '/';
+
+@test
+fn regression_test_local_char_const_equals_literal() {
+    assert_eq(TEST_LOCAL_SLASH, '/');
+}
+
+@test
+fn regression_test_local_char_const_as_byte() {
+    let b: Byte = TEST_LOCAL_SLASH as Byte;
+    assert_eq(b, '/' as Byte);
 }
 
 @test
