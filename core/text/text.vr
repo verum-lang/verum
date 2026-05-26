@@ -1261,6 +1261,47 @@ implement Text {
         res
     }
 
+    /// Split by a single character separator.
+    ///
+    /// Convenience overload for the common case where the separator is a
+    /// single character literal — `s.split_char(',')` instead of
+    /// `s.split(",")`.  Avoids the allocation of a 1-char Text
+    /// intermediary AND is type-correct: pre-existing stdlib callers
+    /// (`core/security/kdf/argon2.vr:278`, `core/shell/permissions.vr:578`)
+    /// passed a Char literal to `split(&Text)` — silent type-mismatch
+    /// that let the wrong value through.  Architectural rule pinned:
+    /// when the separator is a Char, route through this overload.
+    public fn split_char(&self, sep: Char) -> List<Text> {
+        let mut buf = [0_u8; 4];
+        let n = sep.encode_utf8(&mut buf);
+        let mut res = List.new();
+        let bytes = self.as_bytes();
+        let blen = bytes.len();
+
+        if n == 0 {
+            res.push(self.clone());
+            return res;
+        }
+
+        let mut start = 0;
+        let mut i = 0;
+        while i + n <= blen {
+            let mut j = 0;
+            while j < n && bytes[i + j] == buf[j] {
+                j = j + 1;
+            }
+            if j == n {
+                res.push(self.slice(start, i));
+                start = i + n;
+                i = start;
+            } else {
+                i = i + 1;
+            }
+        }
+        res.push(self.slice(start, blen));
+        res
+    }
+
     /// Split by whitespace.
     public fn split_whitespace(&self) -> List<Text> {
         let mut res = List.new();

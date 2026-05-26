@@ -275,7 +275,7 @@ fn encode_phc(params: &Argon2idParams, salt: &[Byte], tag: &[Byte]) -> Text {
 }
 
 fn parse_phc(phc: &Text) -> Result<ParsedPhc, PasswordHashError> {
-    let parts: List<Text> = phc.split('$').filter(|s| !s.is_empty()).collect();
+    let parts: List<Text> = phc.split_char('$').filter(|s| !s.is_empty()).collect();
     if parts.len() != 5 { return Err(PasswordHashError.MalformedHash); }
     if parts[0].as_str() != "argon2id" {
         return Err(PasswordHashError.UnsupportedBackend(parts[0].clone()));
@@ -291,7 +291,7 @@ fn parse_phc(phc: &Text) -> Result<ParsedPhc, PasswordHashError> {
     let mut memory_kib: Int = 0;
     let mut iterations: Int = 0;
     let mut parallelism: Int = 0;
-    for kv in parts[2].split(',') {
+    for kv in parts[2].split_char(',') {
         let kv_bytes = kv.as_bytes();
         if kv_bytes.len() < 3 || kv_bytes[1] != b'=' {
             return Err(PasswordHashError.MalformedHash);

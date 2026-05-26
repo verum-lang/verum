@@ -575,7 +575,7 @@ fn parse_string_list(text: &Text) -> List<Text> {
     let trimmed: Text = text.trim().into();
     if !trimmed.starts_with("[") || !trimmed.ends_with("]") { return out; }
     let inner: Text = trimmed.slice(1, trimmed.len() - 1).into();
-    for token in inner.split(',') {
+    for token in inner.split_char(',') {
         let t: Text = token.trim().trim_matches_char('"').into();
         if !t.is_empty() { out.push(t); }
     }
