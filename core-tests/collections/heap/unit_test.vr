@@ -173,4 +173,178 @@ fn test_heap_into_sorted_list_ascending() {
     assert_eq(sorted.get(7), Some(9));
 }
 
+// =============================================================================
+// Section 6: with_capacity — explicit preallocation
+// =============================================================================
+
+@test
+fn test_heap_with_capacity_starts_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.with_capacity(64);
+    assert_eq(h.len(), 0);
+    assert(h.is_empty());
+}
+
+@test
+fn test_heap_with_capacity_then_fill_preserves_max_invariant() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.with_capacity(8);
+    h.push(5);
+    h.push(1);
+    h.push(9);
+    h.push(3);
+    // Max-heap → peek returns greatest.
+    assert_eq(h.peek(), Some(9));
+}
+
+// =============================================================================
+// Section 7: push_pop — atomic push-then-pop convenience
+//
+//   `push_pop(v)` is equivalent to push then pop. When v ≥ current max, it
+//   returns v (heap unchanged); otherwise it pops the current max and the
+//   new v sits inside.
+// =============================================================================
+
+@test
+fn test_heap_push_pop_returns_value_when_value_is_largest() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+    // Pushing 100 → it's the new max → pop returns it; heap stays {1,2,3}.
+    let out = h.push_pop(100);
+    assert_eq(out, 100);
+    assert_eq(h.peek(), Some(3));
+    assert_eq(h.len(), 3);
+}
+
+@test
+fn test_heap_push_pop_returns_current_max_when_value_is_smaller() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    h.push(30);
+    // Pushing 5 → current max 30 is popped; heap becomes {10, 20, 5}.
+    let out = h.push_pop(5);
+    assert_eq(out, 30);
+    assert_eq(h.len(), 3);
+    assert_eq(h.peek(), Some(20));
+}
+
+@test
+fn test_heap_push_pop_on_empty_returns_value() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let out = h.push_pop(42);
+    // Empty heap → pushed value is itself the max → popped.
+    assert_eq(out, 42);
+    assert(h.is_empty());
+}
+
+// =============================================================================
+// Section 8: replace — pop-then-push compound
+//
+//   `replace(v)` pops the current max (returns it as Maybe) and pushes v.
+//   On an empty heap returns None and v is still pushed.
+// =============================================================================
+
+@test
+fn test_heap_replace_returns_previous_max() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(10);
+    h.push(20);
+    let old: Maybe<Int> = h.replace(99);
+    assert_eq(old, Some(20));
+    // New max is 99.
+    assert_eq(h.peek(), Some(99));
+    assert_eq(h.len(), 2);
+}
+
+@test
+fn test_heap_replace_on_empty_returns_none() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let old: Maybe<Int> = h.replace(7);
+    assert_eq(old, None);
+    assert_eq(h.peek(), Some(7));
+    assert_eq(h.len(), 1);
+}
+
+// =============================================================================
+// Section 9: try_push — fallible push
+// =============================================================================
+
+@test
+fn test_heap_try_push_succeeds() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let r = h.try_push(42);
+    assert(r.is_ok());
+    assert_eq(h.peek(), Some(42));
+}
+
+// =============================================================================
+// Section 10: Singleton heap — edge cases
+// =============================================================================
+
+@test
+fn test_heap_singleton_pop_then_empty() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(99);
+    assert_eq(h.pop(), Some(99));
+    assert(h.is_empty());
+    assert_eq(h.pop(), None);
+}
+
+@test
+fn test_heap_singleton_peek_returns_value() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(42);
+    assert_eq(h.peek(), Some(42));
+}
+
+// =============================================================================
+// Section 11: Reverse / in-order insert both yield descending drain
+// =============================================================================
+
+@test
+fn test_heap_inserted_in_increasing_order_drains_descending() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let mut i = 1;
+    while i <= 5 {
+        h.push(i);
+        i = i + 1;
+    }
+    // Drain — should be 5, 4, 3, 2, 1.
+    assert_eq(h.pop(), Some(5));
+    assert_eq(h.pop(), Some(4));
+    assert_eq(h.pop(), Some(3));
+    assert_eq(h.pop(), Some(2));
+    assert_eq(h.pop(), Some(1));
+    assert_eq(h.pop(), None);
+}
+
+@test
+fn test_heap_inserted_in_decreasing_order_drains_descending() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let mut i = 5;
+    while i >= 1 {
+        h.push(i);
+        i = i - 1;
+    }
+    assert_eq(h.pop(), Some(5));
+    assert_eq(h.pop(), Some(4));
+    assert_eq(h.pop(), Some(3));
+    assert_eq(h.pop(), Some(2));
+    assert_eq(h.pop(), Some(1));
+}
+
+@test
+fn test_heap_duplicates_preserved_in_drain() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(3);
+    h.push(3);
+    h.push(3);
+    assert_eq(h.len(), 3);
+    assert_eq(h.pop(), Some(3));
+    assert_eq(h.pop(), Some(3));
+    assert_eq(h.pop(), Some(3));
+    assert(h.is_empty());
+}
+
 fn main() {}
