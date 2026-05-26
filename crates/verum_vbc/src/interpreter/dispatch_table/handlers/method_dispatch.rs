@@ -61,6 +61,14 @@ pub(in super::super) fn handle_call_method(
 
     let receiver = state.get_reg(receiver_reg);
 
+    if std::env::var("VERUM_TRACE_CALLM_EQ").is_ok() {
+        let mname = state.module.strings.get(StringId(method_id)).unwrap_or("?");
+        eprintln!(
+            "[callm] method='{}' receiver.is_ptr={} receiver.bits=0x{:x}",
+            mname, receiver.is_ptr(), receiver.to_bits(),
+        );
+    }
+
     // Resolve method name from string table.
     //
 
