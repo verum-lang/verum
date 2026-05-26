@@ -1,0 +1,161 @@
+// =============================================================================
+// core-tests/base/semver_constraint/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.semver_constraint`. Each entry ties a
+// previously-observed defect or canonical-shape contract to a single
+// @test so re-regressions surface as named test failures.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.semver.{SemVer};
+mount core.base.semver_constraint.{
+    SemVerConstraint, SemVerConstraintError, MatchOptions,
+    matches_default, matches,
+    match_options_default, match_options_allow_prerelease,
+    exact, caret, tilde, tilde_major, tilde_minor,
+    and, or, parse, format_constraint,
+};
+mount core.collections.list.List;
+
+fn mk_semver(major: UInt64, minor: UInt64, patch: UInt64) -> SemVer {
+    SemVer {
+        major: major,
+        minor: minor,
+        patch: patch,
+        pre_release: List.new(),
+        build_meta:  List.new(),
+    }
+}
+
+// =============================================================================
+// REGRESSION §A (@ignore'd): `parse` bare-name dispatch defect — same
+// root as `base/semver/regression_test.vr §A`. `parse_ver(s).unwrap()`
+// and `parse_constraint(s).unwrap()` both mis-route via the
+// MatchAst-returning sibling. Downstream `matches_impl` panics:
+//   field access out of bounds: field index 2 (offset 16+8 = 24)
+//   exceeds object data size 16 type_id=... type='MatchAst'
+//
+// Workaround: direct mk_semver record literal + sum-variant
+// `SemVerConstraint.Eq(v)` / convenience-ctor `exact` / `caret` /
+// `tilde`. Pinned here.
+// =============================================================================
+
+@ignore("task #17/#39 — parse bare-name dispatch collision returns MatchAst. Multi-day VBC codegen fix.")
+@test
+fn regression_pin_parse_bare_dispatch_returns_wrong_type() {
+    let r = parse(&"^1.2.3".to_text());
+    assert(r.is_ok());
+}
+
+@ignore("Same parse dispatch defect — format_constraint round-trip gated until §A closes.")
+@test
+fn regression_pin_format_round_trip_via_parse() {
+    let r = parse(&"^1.2.3".to_text());
+    assert(r.is_ok());
+    let c = r.unwrap();
+    let formatted = format_constraint(&c);
+    let reparsed = parse(&formatted);
+    assert(reparsed.is_ok());
+}
+
+// =============================================================================
+// REGRESSION §B: caret semantics — major-stable for X >= 1, the upper
+// bound is `<(X+1).0.0`. A defect that wrapped the upper bound at
+// X.Y+1.0 would silently break Cargo-style major-stable releases.
+// =============================================================================
+
+@test
+fn regression_caret_upper_bound_is_next_major() {
+    let v = mk_semver(1_u64, 5_u64, 0_u64);
+    let c = caret(v);
+    // 1.99.99 must match (same major).
+    assert(matches_default(&c, &mk_semver(1_u64, 99_u64, 99_u64)));
+    // 2.0.0 must NOT match (next major).
+    assert(!matches_default(&c, &mk_semver(2_u64, 0_u64, 0_u64)));
+}
+
+// =============================================================================
+// REGRESSION §C: tilde semantics — minor-stable. Upper bound is
+// `<X.(Y+1).0`. A defect that used `<X.(Y+1).(Z+1)` would let one
+// patch of the next minor leak in.
+// =============================================================================
+
+@test
+fn regression_tilde_upper_bound_is_next_minor() {
+    let v = mk_semver(1_u64, 2_u64, 3_u64);
+    let c = tilde(v);
+    // 1.2.99 must match (same minor).
+    assert(matches_default(&c, &mk_semver(1_u64, 2_u64, 99_u64)));
+    // 1.3.0 must NOT match (next minor).
+    assert(!matches_default(&c, &mk_semver(1_u64, 3_u64, 0_u64)));
+}
+
+// =============================================================================
+// REGRESSION §D: `Empty` constraint must reject EVERY version. A
+// defect that conflated Empty with Any would silently let
+// invalid manifests resolve successfully.
+// =============================================================================
+
+@test
+fn regression_empty_matches_no_release_version() {
+    let c = SemVerConstraint.Empty;
+    let cases: List<SemVer> = [
+        mk_semver(0_u64, 0_u64, 0_u64),
+        mk_semver(1_u64, 2_u64, 3_u64),
+        mk_semver(99_u64, 99_u64, 99_u64),
+    ];
+    let mut i: Int = 0;
+    while i < cases.len() {
+        assert(!matches_default(&c, &cases[i]));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// REGRESSION §E: `Any` constraint must match EVERY release version. A
+// defect would silently break wildcard `*` manifest entries.
+// =============================================================================
+
+@test
+fn regression_any_matches_every_release_version() {
+    let c = SemVerConstraint.Any;
+    let cases: List<SemVer> = [
+        mk_semver(0_u64, 0_u64, 0_u64),
+        mk_semver(1_u64, 2_u64, 3_u64),
+        mk_semver(99_u64, 99_u64, 99_u64),
+    ];
+    let mut i: Int = 0;
+    while i < cases.len() {
+        assert(matches_default(&c, &cases[i]));
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// REGRESSION §F: and(Any, x) and and(x, Any) both collapse to x.
+// Source line 236-243 implements this absorption.
+// =============================================================================
+
+@test
+fn regression_and_with_any_absorbs() {
+    let target = mk_semver(1_u64, 0_u64, 0_u64);
+    let c_x = exact(target.clone());
+    let r1 = and(SemVerConstraint.Any, c_x.clone());
+    let r2 = and(c_x, SemVerConstraint.Any);
+    assert(matches_default(&r1, &target));
+    assert(matches_default(&r2, &target));
+}
+
+// =============================================================================
+// REGRESSION §G: SemVerConstraintError variants disjoint under Eq.
+// =============================================================================
+
+@test
+fn regression_semver_constraint_error_disjoint() {
+    let a = SemVerConstraintError.InvalidConstraint("x".to_text());
+    let b = SemVerConstraintError.InvalidConstraint("y".to_text());
+    assert(!(a == b));
+}
+
+fn main() {}
