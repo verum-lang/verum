@@ -1,0 +1,157 @@
+// =============================================================================
+// core-tests/base/coinductive/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.coinductive`. Every entry here ties a
+// previously-observed defect to a single executable @test so that future
+// edits to the module surface a re-regression as a named test failure
+// rather than a generic green-suite drop.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.base.coinductive.{
+    CorecursiveCall, corec_call, is_guarded,
+    ProductivityResult, check_productivity,
+    Observation, observation,
+    ObservationTrace, trace, trace_prefix,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// REGRESSION §A: integration_test.vr originally referenced a hallucinated
+// API surface — `CorecursiveCall.new("x", 1, [nested_calls])` with a third
+// nested-calls argument, `outer.recursive_calls`, `deep.call_depth`,
+// `Observation<Int>` with a `value` field, `ObservationTrace.from_list`,
+// `prefix.len()` returning a List length, and `ProductivityVerdict` (vs
+// the actual `ProductivityResult`). The integration_test was rewritten
+// against the actual surface in this branch; these pins guarantee the
+// canonical API stays stable.
+// =============================================================================
+
+@test
+fn regression_corec_call_two_field_record_layout() {
+    // CorecursiveCall has exactly two public fields: callee, guard_depth.
+    // Any third field (e.g. a hallucinated `recursive_calls`) would surface
+    // here as a record-literal type error at compile time or a runtime
+    // field-OOB. Tested twice — at the canonical (1) and at zero.
+    let one  = CorecursiveCall { callee: "f".to_text(), guard_depth: 1 };
+    let zero = CorecursiveCall { callee: "g".to_text(), guard_depth: 0 };
+    assert_eq(one.callee, "f".to_text());
+    assert_eq(one.guard_depth, 1);
+    assert_eq(zero.guard_depth, 0);
+}
+
+@test
+fn regression_observation_two_field_record_layout() {
+    // Observation has exactly two public fields: label, payload (both Text).
+    // The hallucinated generic `Observation<T> { value: T, label: Text }`
+    // shape would surface as a field-name lookup error. This pin keeps
+    // the canonical two-Text-field layout stable.
+    let o = Observation { label: "step".to_text(), payload: "value".to_text() };
+    assert_eq(o.label, "step".to_text());
+    assert_eq(o.payload, "value".to_text());
+}
+
+// =============================================================================
+// REGRESSION §B: `check_productivity` takes a *list* of calls (the
+// flat-graph model), never a single call with a nested children list.
+// Pre-fix the integration_test author tried `check_productivity(&single_call)`
+// against a single-call argument with embedded children — that signature
+// does not exist and would not type-check.
+// =============================================================================
+
+@test
+fn regression_check_productivity_takes_list_of_calls() {
+    // Empty list: vacuously productive.
+    let empty = check_productivity(List.new());
+    match empty {
+        ProductivityResult.Productive => {},
+        ProductivityResult.NonProductive { unguarded: _ } => {
+            panic("empty call list must be vacuously productive");
+        },
+    }
+    // Singleton list: productive when guarded.
+    let one_guarded: List<CorecursiveCall> = [corec_call("f".to_text(), 1)];
+    let v = check_productivity(one_guarded);
+    match v {
+        ProductivityResult.Productive => {},
+        ProductivityResult.NonProductive { unguarded: _ } => {
+            panic("singleton-guarded list must be productive");
+        },
+    }
+}
+
+// =============================================================================
+// REGRESSION §C: `is_guarded` threshold at guard_depth == 1, not == 0.
+// A defect here would silently classify naked recursion (depth 0) as
+// productive, defeating the productivity check's safety contract.
+// =============================================================================
+
+@test
+fn regression_is_guarded_threshold_at_one() {
+    let naked = corec_call("naked".to_text(), 0);
+    let guard = corec_call("guard".to_text(), 1);
+    assert(!is_guarded(naked));
+    assert(is_guarded(guard));
+}
+
+// =============================================================================
+// REGRESSION §D: `trace_prefix` saturates at `t.steps.len()` when n
+// exceeds the trace length — must NOT panic on out-of-range slice, must
+// NOT loop forever, and must return a trace whose length equals
+// `min(n, t.steps.len())`.
+// =============================================================================
+
+@test
+fn regression_trace_prefix_saturates_at_length() {
+    let t = trace([
+        observation("a".to_text(), "1".to_text()),
+        observation("b".to_text(), "2".to_text()),
+    ]);
+    let p = trace_prefix(t, 1000);
+    assert_eq(p.steps.len(), 2);
+}
+
+@test
+fn regression_trace_prefix_zero_returns_empty_not_full() {
+    // A defect that ignored n==0 and returned the full trace would
+    // surface here as a length mismatch.
+    let t = trace([
+        observation("a".to_text(), "1".to_text()),
+        observation("b".to_text(), "2".to_text()),
+        observation("c".to_text(), "3".to_text()),
+    ]);
+    let p = trace_prefix(t, 0);
+    assert_eq(p.steps.len(), 0);
+}
+
+// =============================================================================
+// REGRESSION §E: Same defect class as [[btree_pattern_match_ref_generic_class]]
+// applied to Observation `.payload` accessed via `List<Observation>[i]`
+// subscript. Pre-workaround the field-index resolver lost the
+// Observation type at `t.steps[i].payload` and routed to a wider
+// stdlib type's `payload` offset (panic: "field index 5 (offset 40+8 = 48)
+// exceeds object data size 16 type_id=454 type='Observation'"). Workaround
+// is to bind the element to an explicitly-typed local first.
+//
+// The workaround pin lives in integration_test.vr at
+// `integration_observation_trace_preserves_payload_at_each_step`. This
+// @ignore'd entry pins the underlying defect — flip it when the
+// VBC codegen / runtime fixes field-index propagation through List
+// subscript on stdlib records.
+// =============================================================================
+
+@ignore("[[btree_pattern_match_ref_generic_class]] — field-index resolver loses Observation type through List<Observation>[i] subscript; \"payload\" field name collides with wider stdlib records (~5 sites). Workaround: typed-local binding.")
+@test
+fn regression_pin_payload_field_access_through_list_subscript() {
+    let t = trace([
+        observation("k1".to_text(), "v1".to_text()),
+        observation("k2".to_text(), "v2".to_text()),
+    ]);
+    // Direct field access on a subscript-returned record value of a
+    // stdlib type: this is the exact shape that panics today.
+    assert_eq(t.steps[0].payload, "v1".to_text());
+    assert_eq(t.steps[1].payload, "v2".to_text());
+}
+
+fn main() {}
