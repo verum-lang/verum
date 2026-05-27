@@ -1,0 +1,150 @@
+// =============================================================================
+// core-tests/sync/rwlock/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for the testable surface of RwLock<T>:
+//
+//   §A  Fresh-rwlock invariant: every RwLock<T>.new(v) is unpoisoned.
+//   §B  Poison flag state-machine laws (binary, idempotent, involutive)
+//       — identical to Mutex (and intentionally so).
+//   §C  RwLock instances are independent — poisoning one does not bleed
+//       into a sibling RwLock.
+//   §D  Re-exported error types from sync.mutex round-trip cleanly.
+// =============================================================================
+
+mount core.sync.rwlock.{RwLock, PoisonError, TryLockError};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Fresh-rwlock invariant
+// =============================================================================
+
+@test
+fn law_fresh_rwlock_int_unpoisoned() {
+    let cases: List<Int> = [0, 1, -1, 42, 1_000_000, -1_000_000];
+    for &n in cases.iter() {
+        let l = RwLock.new(n);
+        assert(!l.is_poisoned());
+    }
+}
+
+@test
+fn law_fresh_rwlock_bool_unpoisoned() {
+    let lt = RwLock.new(true);
+    let lf = RwLock.new(false);
+    assert(!lt.is_poisoned());
+    assert(!lf.is_poisoned());
+}
+
+// =============================================================================
+// §B  Poison-flag state-machine laws
+// =============================================================================
+
+@test
+fn law_rwlock_double_poison_absorbs() {
+    let l = RwLock.new(0);
+    l.poison();
+    let s1 = l.is_poisoned();
+    l.poison();
+    let s2 = l.is_poisoned();
+    assert_eq(s1, s2);
+    assert(s2);
+}
+
+@test
+fn law_rwlock_double_clear_absorbs() {
+    let l = RwLock.new(0);
+    l.poison();
+    l.clear_poison();
+    let s1 = l.is_poisoned();
+    l.clear_poison();
+    let s2 = l.is_poisoned();
+    assert_eq(s1, s2);
+    assert(!s2);
+}
+
+@test
+fn law_rwlock_poison_then_clear_returns_to_unpoisoned() {
+    let l = RwLock.new(0);
+    l.poison();
+    l.clear_poison();
+    assert(!l.is_poisoned());
+}
+
+@test
+fn law_rwlock_clear_then_poison_returns_to_poisoned() {
+    let l = RwLock.new(0);
+    l.clear_poison();
+    l.poison();
+    assert(l.is_poisoned());
+}
+
+@test
+fn law_rwlock_poison_cycle_oscillates_terminal_state() {
+    let l = RwLock.new(0);
+    let mut expected: Bool = false;
+    for i in 0..6 {
+        if (i % 2) == 0 {
+            l.poison();
+            expected = true;
+        } else {
+            l.clear_poison();
+            expected = false;
+        }
+        assert_eq(l.is_poisoned(), expected);
+    }
+}
+
+// =============================================================================
+// §C  Multi-instance independence
+// =============================================================================
+
+@test
+fn law_rwlock_independence_three_way() {
+    let a = RwLock.new(0);
+    let b = RwLock.new(0);
+    let c = RwLock.new(0);
+
+    // Poison b only — a and c stay clean.
+    b.poison();
+    assert(!a.is_poisoned());
+    assert(b.is_poisoned());
+    assert(!c.is_poisoned());
+
+    // Clear b — back to all-clean.
+    b.clear_poison();
+    assert(!a.is_poisoned());
+    assert(!b.is_poisoned());
+    assert(!c.is_poisoned());
+
+    // Poison a and c — b stays clean.
+    a.poison();
+    c.poison();
+    assert(a.is_poisoned());
+    assert(!b.is_poisoned());
+    assert(c.is_poisoned());
+}
+
+// =============================================================================
+// §D  Re-exported error types round-trip
+// =============================================================================
+
+@test
+fn law_rwlock_poison_error_payload_round_trip() {
+    let cases: List<Int> = [0, 1, -1, 100, 999];
+    for &n in cases.iter() {
+        let pe: PoisonError<Int> = PoisonError { guard: n };
+        assert_eq(pe.into_inner(), n);
+    }
+}
+
+@test
+fn law_rwlock_try_lock_error_disjointness_under_any_payload() {
+    let cases: List<Int> = [0, 1, -1, 42];
+    for &n in cases.iter() {
+        let pe: PoisonError<Int> = PoisonError { guard: n };
+        let po: TryLockError<Int> = TryLockError.Poisoned(pe);
+        assert(po is TryLockError.Poisoned);
+        assert(!(po is TryLockError.WouldBlock));
+    }
+}

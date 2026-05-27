@@ -1,0 +1,154 @@
+// =============================================================================
+// core-tests/sync/rwlock/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sync.rwlock` — RwLock<T> + RwLockReadGuard<T> +
+// RwLockWriteGuard<T>.
+//
+// Static + single-threaded uncontended surface only.  Live read/write
+// blocking + writer-preference fairness exercised at the L2-spec level.
+// =============================================================================
+
+mount core.sync.rwlock.{
+    RwLock,
+    LockResult, TryLockResult, PoisonError, TryLockError,
+};
+
+// =============================================================================
+// Section 1: RwLock.new construction (uncontended)
+// =============================================================================
+
+@test
+fn test_rwlock_new_int_constructs() {
+    let l = RwLock.new(42);
+    assert(!l.is_poisoned());
+}
+
+@test
+fn test_rwlock_new_bool_constructs() {
+    let l = RwLock.new(true);
+    assert(!l.is_poisoned());
+}
+
+@test
+fn test_rwlock_new_default_poison_false() {
+    let l = RwLock.new(0);
+    assert_eq(l.is_poisoned(), false);
+}
+
+// =============================================================================
+// Section 2: RwLock poison / clear_poison / is_poisoned round-trip
+// =============================================================================
+//
+// Same advisory protocol as Mutex<T>: see core-tests/sync/mutex/audit.md §3.2.
+
+@test
+fn test_rwlock_poison_sets_flag() {
+    let l = RwLock.new(0);
+    assert(!l.is_poisoned());
+    l.poison();
+    assert(l.is_poisoned());
+}
+
+@test
+fn test_rwlock_clear_poison_resets_flag() {
+    let l = RwLock.new(0);
+    l.poison();
+    assert(l.is_poisoned());
+    l.clear_poison();
+    assert(!l.is_poisoned());
+}
+
+@test
+fn test_rwlock_poison_idempotent() {
+    let l = RwLock.new(0);
+    l.poison();
+    l.poison();
+    l.poison();
+    assert(l.is_poisoned());
+}
+
+@test
+fn test_rwlock_clear_poison_on_unpoisoned_noop() {
+    let l = RwLock.new(0);
+    assert(!l.is_poisoned());
+    l.clear_poison();
+    assert(!l.is_poisoned());
+}
+
+@test
+fn test_rwlock_poison_clear_cycle_preserves_terminal_state() {
+    let l = RwLock.new(0);
+    l.poison();
+    l.clear_poison();
+    l.poison();
+    l.clear_poison();
+    l.poison();
+    assert(l.is_poisoned());
+}
+
+// =============================================================================
+// Section 3: Re-exported error types resolve via rwlock import path
+// =============================================================================
+//
+// rwlock.vr:338-341 re-exports LockResult / TryLockResult / PoisonError /
+// TryLockError from sync.mutex.  Drift between the two views surfaces as
+// type-confusion at construction time.
+
+@test
+fn test_rwlock_lock_result_ok_constructs() {
+    let r: LockResult<Int> = Result.Ok(42);
+    assert(r is Result.Ok);
+}
+
+@test
+fn test_rwlock_lock_result_err_constructs() {
+    let pe: PoisonError<Int> = PoisonError { guard: 99 };
+    let r: LockResult<Int> = Result.Err(pe);
+    assert(r is Result.Err);
+}
+
+@test
+fn test_rwlock_try_lock_error_would_block_constructs() {
+    let e: TryLockError<Int> = TryLockError.WouldBlock;
+    assert(e is TryLockError.WouldBlock);
+}
+
+@test
+fn test_rwlock_try_lock_error_poisoned_constructs() {
+    let pe: PoisonError<Int> = PoisonError { guard: 0 };
+    let e: TryLockError<Int> = TryLockError.Poisoned(pe);
+    assert(e is TryLockError.Poisoned);
+}
+
+@test
+fn test_rwlock_try_lock_error_variants_disjoint() {
+    let pe: PoisonError<Int> = PoisonError { guard: 0 };
+    let wb: TryLockError<Int> = TryLockError.WouldBlock;
+    let po: TryLockError<Int> = TryLockError.Poisoned(pe);
+
+    assert(wb is TryLockError.WouldBlock);
+    assert(po is TryLockError.Poisoned);
+
+    assert(!(wb is TryLockError.Poisoned));
+    assert(!(po is TryLockError.WouldBlock));
+}
+
+// =============================================================================
+// Section 4: Multiple RwLock instances are independent
+// =============================================================================
+
+@test
+fn test_two_rwlocks_independent_poison_state() {
+    let a = RwLock.new(0);
+    let b = RwLock.new(0);
+    a.poison();
+    assert(a.is_poisoned());
+    assert(!b.is_poisoned());
+    b.poison();
+    assert(a.is_poisoned());
+    assert(b.is_poisoned());
+    a.clear_poison();
+    assert(!a.is_poisoned());
+    assert(b.is_poisoned());
+}
