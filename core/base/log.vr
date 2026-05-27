@@ -365,74 +365,106 @@ implement LogRecordBuilder {
 
     /// Override the severity level.
     public fn level(self, lvl: LogLevel) -> LogRecordBuilder {
+        // Typed-local extraction prevents chained-self-field resolver
+        // drift — the same pattern applied in `build()`.
+        let msg: Text = self.rec_message;
+        let flds: List<(Text, Text)> = self.rec_fields;
+        let mod_path: Maybe<Text> = self.rec_module_path;
+        let f: Maybe<Text> = self.rec_file;
+        let ln: Maybe<Int> = self.rec_line;
         LogRecordBuilder {
             rec_level: lvl,
-            rec_message: self.rec_message,
-            rec_fields: self.rec_fields,
-            rec_module_path: self.rec_module_path,
-            rec_file: self.rec_file,
-            rec_line: self.rec_line,
+            rec_message: msg,
+            rec_fields: flds,
+            rec_module_path: mod_path,
+            rec_file: f,
+            rec_line: ln,
         }
     }
 
     /// Override the message.
     public fn message(self, msg: Text) -> LogRecordBuilder {
+        let lvl: LogLevel = self.rec_level;
+        let flds: List<(Text, Text)> = self.rec_fields;
+        let mod_path: Maybe<Text> = self.rec_module_path;
+        let f: Maybe<Text> = self.rec_file;
+        let ln: Maybe<Int> = self.rec_line;
         LogRecordBuilder {
-            rec_level: self.rec_level,
+            rec_level: lvl,
             rec_message: msg,
-            rec_fields: self.rec_fields,
-            rec_module_path: self.rec_module_path,
-            rec_file: self.rec_file,
-            rec_line: self.rec_line,
+            rec_fields: flds,
+            rec_module_path: mod_path,
+            rec_file: f,
+            rec_line: ln,
         }
     }
 
     /// Append a structured field.
     public fn field(self, key: Text, value: Text) -> LogRecordBuilder {
-        let mut fields = self.rec_fields;
-        fields.push((key, value));
+        let lvl: LogLevel = self.rec_level;
+        let msg: Text = self.rec_message;
+        let mut flds: List<(Text, Text)> = self.rec_fields;
+        let mod_path: Maybe<Text> = self.rec_module_path;
+        let f: Maybe<Text> = self.rec_file;
+        let ln: Maybe<Int> = self.rec_line;
+        flds.push((key, value));
         LogRecordBuilder {
-            rec_level: self.rec_level,
-            rec_message: self.rec_message,
-            rec_fields: fields,
-            rec_module_path: self.rec_module_path,
-            rec_file: self.rec_file,
-            rec_line: self.rec_line,
+            rec_level: lvl,
+            rec_message: msg,
+            rec_fields: flds,
+            rec_module_path: mod_path,
+            rec_file: f,
+            rec_line: ln,
         }
     }
 
     /// Set the module path.
     public fn module_path(self, path: Text) -> LogRecordBuilder {
+        let lvl: LogLevel = self.rec_level;
+        let msg: Text = self.rec_message;
+        let flds: List<(Text, Text)> = self.rec_fields;
+        let f: Maybe<Text> = self.rec_file;
+        let ln: Maybe<Int> = self.rec_line;
         LogRecordBuilder {
-            rec_level: self.rec_level,
-            rec_message: self.rec_message,
-            rec_fields: self.rec_fields,
+            rec_level: lvl,
+            rec_message: msg,
+            rec_fields: flds,
             rec_module_path: Some(path),
-            rec_file: self.rec_file,
-            rec_line: self.rec_line,
+            rec_file: f,
+            rec_line: ln,
         }
     }
 
     /// Set the source file.
     public fn file(self, file: Text) -> LogRecordBuilder {
+        let lvl: LogLevel = self.rec_level;
+        let msg: Text = self.rec_message;
+        let flds: List<(Text, Text)> = self.rec_fields;
+        let mod_path: Maybe<Text> = self.rec_module_path;
+        let ln: Maybe<Int> = self.rec_line;
         LogRecordBuilder {
-            rec_level: self.rec_level,
-            rec_message: self.rec_message,
-            rec_fields: self.rec_fields,
-            rec_module_path: self.rec_module_path,
+            rec_level: lvl,
+            rec_message: msg,
+            rec_fields: flds,
+            rec_module_path: mod_path,
             rec_file: Some(file),
-            rec_line: self.rec_line,
+            rec_line: ln,
         }
     }
 
     /// Set the source line.
     public fn line(self, line: Int) -> LogRecordBuilder {
+        let lvl: LogLevel = self.rec_level;
+        let msg: Text = self.rec_message;
+        let flds: List<(Text, Text)> = self.rec_fields;
+        let mod_path: Maybe<Text> = self.rec_module_path;
+        let f: Maybe<Text> = self.rec_file;
         LogRecordBuilder {
-            rec_level: self.rec_level,
-            rec_message: self.rec_message,
-            rec_fields: self.rec_fields,
-            rec_module_path: self.rec_module_path,
-            rec_file: self.rec_file,
+            rec_level: lvl,
+            rec_message: msg,
+            rec_fields: flds,
+            rec_module_path: mod_path,
+            rec_file: f,
             rec_line: Some(line),
         }
     }
