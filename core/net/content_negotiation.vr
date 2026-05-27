@@ -353,8 +353,14 @@ fn trim_ws(src: &[Byte]) -> List<Byte> {
     while l < src.len() && is_ws(src[l]) { l = l + 1; }
     let mut r: Int = src.len();
     while r > l && is_ws(src[r - 1]) { r = r - 1; }
+    // Byte-by-byte push instead of extend_from_slice — CONNEG-1 fix
+    // family (cidr / uri_template / http_range / http_cache shared).
     let mut out: List<Byte> = List.with_capacity(r - l);
-    out.extend_from_slice(&src[l..r]);
+    let mut k = l;
+    while k < r {
+        out.push(src[k]);
+        k = k + 1;
+    }
     out
 }
 
