@@ -552,7 +552,7 @@ implement Iterator for ReadDir {
                     }
                     Result.Err(e) => {
                         self.finished = true;
-                        return Maybe.Some(Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }));
+                        return Maybe.Some(Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }));
                     }
                 }
             }
@@ -689,7 +689,7 @@ public fn metadata(path: &Path) -> IoResult<Metadata> {
             let raw = FsMetadataRaw.from_stat(&stat_buf, true);
             Result.Ok(Metadata { raw: raw })
         }
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
+        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -704,7 +704,7 @@ public fn symlink_metadata(path: &Path) -> IoResult<Metadata> {
             let raw = FsMetadataRaw.from_stat(&stat_buf, false);
             Result.Ok(Metadata { raw: raw })
         }
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
+        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -763,7 +763,7 @@ public fn create_dir(path: &Path) -> IoResult<()> {
 
     match sys_mkdir(path_bytes, mode) {
         Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
+        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -781,7 +781,7 @@ public fn create_dir_all(path: &Path) -> IoResult<()> {
     }
 
     // Try to create parent first
-    if let Some(parent) = path.parent() {
+    if let Maybe.Some(parent) = path.parent() {
         if !parent.as_str().is_empty() && !is_dir(&parent) {
             create_dir_all(&parent)?;
         }
@@ -811,7 +811,7 @@ public fn remove_dir(path: &Path) -> IoResult<()> {
 
     match sys_rmdir(path_bytes) {
         Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
+        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -876,7 +876,7 @@ public fn read_dir(path: &Path) -> IoResult<ReadDir> {
                 finished: false,
             })
         }
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
+        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -894,7 +894,7 @@ public fn read_dir(path: &Path) -> IoResult<ReadDir> {
     let dir_handle = unsafe { sys.darwin.libsystem.opendir(path_buf.as_ptr() as &Byte) };
     if dir_handle.is_null() {
         let err = sys.darwin.libsystem.errno();
-        return Result.Err(StreamError { kind: io_error_kind_from_os_code(err), message: Some(f"OS error {err}") });
+        return Result.Err(StreamError { kind: io_error_kind_from_os_code(err), message: Maybe.Some(f"OS error {err}") });
     }
 
     Result.Ok(ReadDir {
@@ -921,7 +921,7 @@ public fn remove_file(path: &Path) -> IoResult<()> {
 
     match sys_unlink(path_bytes) {
         Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
+        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -940,7 +940,7 @@ public fn rename(from: &Path, to: &Path) -> IoResult<()> {
 
     match sys_rename(from_bytes, to_bytes) {
         Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
+        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -976,7 +976,7 @@ public fn copy(from: &Path, to: &Path) -> IoResult<Int> {
         while written < n {
             let w = dst.write(&buf[written..n])?;
             if w == 0 {
-                return Result.Err(StreamError { kind: IoErrorKind.WriteZero, message: Some("write returned 0") });
+                return Result.Err(StreamError { kind: IoErrorKind.WriteZero, message: Maybe.Some("write returned 0") });
             }
             written = written + w;
         }
@@ -1001,7 +1001,7 @@ public fn hard_link(src: &Path, dst: &Path) -> IoResult<()> {
 
     match sys_link(src_bytes, dst_bytes) {
         Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
+        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -1021,7 +1021,7 @@ public fn symlink(src: &Path, dst: &Path) -> IoResult<()> {
 
     match sys_symlink(src_bytes, dst_bytes) {
         Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
+        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -1043,7 +1043,7 @@ public fn read_link(path: &Path) -> IoResult<PathBuf> {
             let target = Text.from_utf8_lossy(&buf[..n]);
             Result.Ok(PathBuf.from(&target))
         }
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
+        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -1136,7 +1136,7 @@ public fn set_permissions(path: &Path, perm: Permissions) -> IoResult<()> {
 
     match sys_chmod(path_bytes, perm.mode) {
         Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
+        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -1205,7 +1205,7 @@ public fn current_dir() -> IoResult<PathBuf> {
             let path = Text.from_utf8_lossy(&buf[..len]);
             Result.Ok(PathBuf.from(&path))
         }
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
+        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -1216,7 +1216,7 @@ public fn set_current_dir(path: &Path) -> IoResult<()> {
 
     match sys_chdir(path_bytes) {
         Result.Ok(()) => Ok(()),
-        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
+        Result.Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Maybe.Some(f"OS error {e.code}") }),
     }
 }
 
@@ -1265,7 +1265,7 @@ public fn write(path: &Path, contents: &[Byte]) -> IoResult<()> {
     while written < contents.len() {
         let n = file.write(&contents[written..])?;
         if n == 0 {
-            return Result.Err(StreamError { kind: IoErrorKind.WriteZero, message: Some("write returned 0") });
+            return Result.Err(StreamError { kind: IoErrorKind.WriteZero, message: Maybe.Some("write returned 0") });
         }
         written = written + n;
     }
