@@ -60,6 +60,36 @@ iterator + Iterator default-method dispatch.
 Pin at `regression_test.vr §A` as `@ignore`'d. `unit_test.vr`
 `test_range_inclusive_via_prelude` relaxed to construction-only.
 
+**Investigation 2026-05-27** (memory:
+`range_iterator_chained_self_field_2026-05-27.md`): comprehensive
+probe matrix isolated the defect to `Range<Int>.next()` body's
+inclusive-boundary branch. Multiple fix attempts failed:
+* Range<T> extended from 2 to 3 fields {current, end, inclusive} +
+  matching `compile_range` SetF emit at idx 0/1/2 (commit
+  `014193b60`).
+* `ExprKind::Range` arm added to both `extract_expr_type_name` and
+  `infer_expr_type_name` (commits `badd2341d` + `187f2db05`).
+* Typed-local extraction (`let cur, end_v, inc = self.{...}`) at
+  method-body entry to pin field-resolver to Range layout.
+* `core/cog/resolve.vr` `Range` → `VersionRange` rename to
+  eliminate simple-name collision with iterator.vr's Range<T>
+  (commit `014267ad3`).
+* `else if inc && cur == end_v` restructured to flat `if-return`
+  chain.
+* `else if inc && cur == end_v` restructured to single comparison
+  `cur <= upper` with `upper = if inc { end_v } else { end_v - 1 }`.
+* Hard-coded `Some(999)` body probe: STILL fails `v.is_some()`
+  assertion — indicates the user impl body may not be reached on
+  the 3rd call OR Maybe.Some-vs-Some dispatch difference.
+
+CallM trace (`VERUM_TRACE_CALLM_EQ=1`) confirms dispatch DOES reach
+`Range.next` for both successful and failing calls, with the result
+being a heap-allocated Maybe pointer. The first 2 next() calls
+return Some(1) / Some(2) correctly; the 3rd (boundary) returns None.
+
+Multi-day VBC codegen work — root cause is deeper than chained-
+self-field; pinned for focused tracing-infrastructure investigation.
+
 ### 2.2 `take(&mut x)` does not reset `x` to `T::default()`
 
 Per the canonical mem::take contract, `take(&mut x)` MUST swap `x`
