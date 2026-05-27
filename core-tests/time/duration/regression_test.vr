@@ -1,0 +1,101 @@
+// =============================================================================
+// core-tests/time/duration/regression_test.vr
+// =============================================================================
+//
+// Regression pins for surfaced defects in `core.time.duration`.
+//
+// Every regression name here links to an entry in `audit.md`.  Defects pinned
+// to a current behaviour are LOCK-INs: the test passes under the current
+// (defective) shape; the contract is "do not silently change this without
+// also closing the audit entry."  The companion of every LOCK-IN is a
+// proposed-resolution note in `audit.md`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// §A  CONSTRUCTOR-CLAMPING INCONSISTENCY — audit.md §A
+// =============================================================================
+//
+// `Duration.nanos(n)` runs the Verum body `Duration { nanos: n.max(0) }`
+// (clamps negatives to zero).  `Duration.from_nanos(n)` is intercepted by the
+// runtime intrinsic `time_duration_from_nanos` (identity — preserves negative).
+//
+// The same split exists for the four scale-tier constructor pairs:
+//   - (nanos / from_nanos), (micros / from_micros),
+//     (millis / from_millis), (secs / from_secs)
+//
+// Resolution path (the cheap-and-correct one): align everything on identity
+// semantics by dropping `.max(0)` from the Verum body.  Duration becomes a
+// signed nanosecond span — matches `Go time.Duration` / `Java java.time.Duration`
+// / `C++ std::chrono::duration` / the existing duration_parse "-15m" surface.
+//
+// These pins LOCK the current inconsistent behaviour so a future signed-
+// refactor doesn't slip through unnoticed.
+
+@test
+fn regression_nanos_short_form_clamps_via_verum_body() {
+    // Short-form constructor goes through Verum body `n.max(0)`.
+    assert_eq(Duration.nanos(-1).as_nanos(), 0,
+        "Duration.nanos(-1) clamps via Verum body's `n.max(0)`");
+}
+
+@test
+fn regression_from_nanos_long_form_preserves_via_intrinsic() {
+    // Long-form constructor is intercepted by the
+    // `time_duration_from_nanos` intrinsic — pure identity, no clamp.
+    assert_eq(Duration.from_nanos(-1).as_nanos(), -1,
+        "Duration.from_nanos(-1) preserves via intrinsic identity (no clamp)");
+}
+
+@test
+fn regression_constructor_surface_inconsistent() {
+    // The two surfaces produce semantically different Duration values
+    // for the SAME input.  Pinning this divergence makes future
+    // alignment a visible diff in this file rather than a silent
+    // behavioural change in stdlib.
+    assert(Duration.nanos(-1).as_nanos() != Duration.from_nanos(-1).as_nanos(),
+        "constructor surface is inconsistent — see audit.md §A");
+}
+
+@test
+fn regression_from_secs_large_negative_preserves() {
+    // Confirms the inconsistency scales beyond Int32 range.  `from_secs(-15 * 60)`
+    // == -900_000_000_000 ns, larger than Int32::MAX in magnitude.  The
+    // intrinsic preserves it; the Verum-body short-form would clamp.
+    let d = Duration.from_secs(-15 * 60);
+    assert_eq(d.as_nanos(), -900_000_000_000,
+        "Duration.from_secs preserves large negative via intrinsic identity");
+}
+
+@test
+fn regression_short_form_secs_large_negative_clamps() {
+    // Mirror: the short-form goes through the Verum body — clamps to 0.
+    let d = Duration.secs(-15 * 60);
+    assert_eq(d.as_nanos(), 0,
+        "Duration.secs(-large) clamps to 0 via Verum body");
+}
+
+// =============================================================================
+// §B  duration_parse NEGATIVE-INPUT relies on the from_nanos identity
+// =============================================================================
+//
+// `core/time/duration_parse.vr::parse_compact` builds a positive total_ns,
+// negates it, and constructs `Ok(Duration.from_nanos(total_ns))`.  Because
+// `from_nanos` is the intrinsic-identity surface (§A above), the resulting
+// Duration carries the negative sign verbatim.  If the §A resolution lands as
+// "make everything clamp", duration_parse's negative-input contract MUST
+// be re-engineered to either reject negatives with an error or carry a
+// separate sign bit.
+
+@test
+fn regression_parse_negative_relies_on_intrinsic_identity() {
+    let r = core.time.duration_parse.parse(&"-15m".to_text());
+    assert(r.is_ok(), "parse('-15m') accepts negative");
+    let d = r.unwrap();
+    assert(d.as_nanos() < 0,
+        "negative parse preserves sign via Duration.from_nanos intrinsic");
+}
+
+fn main() {}
