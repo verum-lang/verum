@@ -343,7 +343,7 @@ public type Iterator is protocol {
     /// Panics if `size <= 0`. Same precondition as `step_by` —
     /// a non-positive chunk size has no sensible semantic and
     /// the underlying ChunksIter::next would either silently
-    /// return None forever (size <= 0 → empty chunk → None) or
+    /// return Maybe.None forever (size <= 0 → empty chunk → None) or
     /// (for size_hint) divide by zero in `(inner + step - 1) / step`.
     /// Audit #12 fix.
     fn chunks(self, size: Int) -> ChunksIter<Self> {
@@ -1113,7 +1113,7 @@ implement<I: DoubleEndedIterator> IntoIterator for Rev<I> {
 ///
 
 /// Implementors must ensure that `len()` returns the exact number of
-/// remaining elements and that `size_hint()` returns `(len, Some(len))`.
+/// remaining elements and that `size_hint()` returns `(len, Maybe.Some(len))`.
 public type ExactSizeIterator is protocol extends Iterator {
     /// Returns the exact number of remaining elements.
     fn len(&self) -> Int;
@@ -1223,7 +1223,7 @@ implement<A: FusedIterator, B: FusedIterator> FusedIterator for InterleaveIter<A
 /// IntersperseWithIter is fused if inner iterator is fused.
 implement<I: FusedIterator, G: fn() -> I.Item> FusedIterator for IntersperseWithIter<I, G> {}
 
-/// CycleIter is always fused (empty cycles return None forever, non-empty never return None).
+/// CycleIter is always fused (empty cycles return Maybe.None forever, non-empty never return Maybe.None).
 implement<I: Clone + Iterator> FusedIterator for CycleIter<I> {}
 
 /// ChunksIter is fused (finite iterator).
@@ -2698,13 +2698,13 @@ implement Iterator for Range<Int> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else if inc && cur == end_v {
             // Inclusive ranges yield the upper bound exactly once.
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -2717,7 +2717,7 @@ implement Iterator for Range<Int> {
         } else {
             (end_v - cur).max(0)
         };
-        (len, Some(len))
+        (len, Maybe.Some(len))
     }
 }
 
@@ -2728,14 +2728,14 @@ implement DoubleEndedIterator for Range<Int> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.end = end_v - 1;
-            Some(end_v - 1)
+            Maybe.Some(end_v - 1)
         } else if inc && cur == end_v {
             // Flip to exclusive after yielding the boundary so the
             // next call sees `current == end` non-inclusive → None.
             self.inclusive = false;
-            Some(end_v)
+            Maybe.Some(end_v)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -2763,12 +2763,12 @@ implement Iterator for Range<UInt64> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else if inc && cur == end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -2781,7 +2781,7 @@ implement Iterator for Range<UInt64> {
         } else {
             (end_v - cur) as Int
         };
-        (len.max(0), Some(len.max(0)))
+        (len.max(0), Maybe.Some(len.max(0)))
     }
 }
 
@@ -2795,12 +2795,12 @@ implement Iterator for Range<Int8> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else if inc && cur == end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -2813,7 +2813,7 @@ implement Iterator for Range<Int8> {
         } else {
             ((end_v as Int) - (cur as Int)).max(0)
         };
-        (len, Some(len))
+        (len, Maybe.Some(len))
     }
 }
 
@@ -2824,12 +2824,12 @@ implement DoubleEndedIterator for Range<Int8> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.end = end_v - 1;
-            Some(end_v - 1)
+            Maybe.Some(end_v - 1)
         } else if inc && cur == end_v {
             self.inclusive = false;
-            Some(end_v)
+            Maybe.Some(end_v)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -2857,12 +2857,12 @@ implement Iterator for Range<Int16> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else if inc && cur == end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -2875,7 +2875,7 @@ implement Iterator for Range<Int16> {
         } else {
             ((end_v as Int) - (cur as Int)).max(0)
         };
-        (len, Some(len))
+        (len, Maybe.Some(len))
     }
 }
 
@@ -2886,12 +2886,12 @@ implement DoubleEndedIterator for Range<Int16> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.end = end_v - 1;
-            Some(end_v - 1)
+            Maybe.Some(end_v - 1)
         } else if inc && cur == end_v {
             self.inclusive = false;
-            Some(end_v)
+            Maybe.Some(end_v)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -2919,12 +2919,12 @@ implement Iterator for Range<Int32> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else if inc && cur == end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -2937,7 +2937,7 @@ implement Iterator for Range<Int32> {
         } else {
             ((end_v as Int) - (cur as Int)).max(0)
         };
-        (len, Some(len))
+        (len, Maybe.Some(len))
     }
 }
 
@@ -2948,12 +2948,12 @@ implement DoubleEndedIterator for Range<Int32> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.end = end_v - 1;
-            Some(end_v - 1)
+            Maybe.Some(end_v - 1)
         } else if inc && cur == end_v {
             self.inclusive = false;
-            Some(end_v)
+            Maybe.Some(end_v)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -2981,12 +2981,12 @@ implement Iterator for Range<Int64> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else if inc && cur == end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -2999,7 +2999,7 @@ implement Iterator for Range<Int64> {
         } else {
             ((end_v as Int) - (cur as Int)).max(0)
         };
-        (len, Some(len))
+        (len, Maybe.Some(len))
     }
 }
 
@@ -3010,12 +3010,12 @@ implement DoubleEndedIterator for Range<Int64> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.end = end_v - 1;
-            Some(end_v - 1)
+            Maybe.Some(end_v - 1)
         } else if inc && cur == end_v {
             self.inclusive = false;
-            Some(end_v)
+            Maybe.Some(end_v)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -3043,12 +3043,12 @@ implement Iterator for Range<UInt8> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else if inc && cur == end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -3061,7 +3061,7 @@ implement Iterator for Range<UInt8> {
         } else {
             ((end_v as Int) - (cur as Int)).max(0)
         };
-        (len, Some(len))
+        (len, Maybe.Some(len))
     }
 }
 
@@ -3075,12 +3075,12 @@ implement Iterator for Range<UInt16> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else if inc && cur == end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -3093,7 +3093,7 @@ implement Iterator for Range<UInt16> {
         } else {
             ((end_v as Int) - (cur as Int)).max(0)
         };
-        (len, Some(len))
+        (len, Maybe.Some(len))
     }
 }
 
@@ -3107,12 +3107,12 @@ implement Iterator for Range<UInt32> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else if inc && cur == end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -3125,7 +3125,7 @@ implement Iterator for Range<UInt32> {
         } else {
             ((end_v as Int) - (cur as Int)).max(0)
         };
-        (len, Some(len))
+        (len, Maybe.Some(len))
     }
 }
 
@@ -3139,12 +3139,12 @@ implement Iterator for Range<ISize> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else if inc && cur == end_v {
             self.current = cur + 1;
-            Some(cur)
+            Maybe.Some(cur)
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -3157,7 +3157,7 @@ implement Iterator for Range<ISize> {
         } else {
             ((end_v as Int) - (cur as Int)).max(0)
         };
-        (len, Some(len))
+        (len, Maybe.Some(len))
     }
 }
 
@@ -3168,12 +3168,12 @@ implement DoubleEndedIterator for Range<ISize> {
         let inc: Bool = self.inclusive;
         if cur < end_v {
             self.end = end_v - 1;
-            Some(end_v - 1)
+            Maybe.Some(end_v - 1)
         } else if inc && cur == end_v {
             self.inclusive = false;
-            Some(end_v)
+            Maybe.Some(end_v)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -3199,15 +3199,15 @@ implement Iterator for Range<USize> {
         if self.current < self.end {
             let val = self.current;
             self.current = self.current + 1;
-            Some(val)
+            Maybe.Some(val)
         } else {
-            None
+            Maybe.None
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let len = ((self.end as Int) - (self.current as Int)).max(0);
-        (len, Some(len))
+        (len, Maybe.Some(len))
     }
 }
 
@@ -3216,17 +3216,17 @@ implement Iterator for RangeInclusive<Int> {
 
     fn next(&mut self) -> Maybe<Int> {
         if self.done {
-            return None;
+            return Maybe.None;
         }
         if self.current < self.end {
             let val = self.current;
             self.current = self.current + 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.current)
+            Maybe.Some(self.current)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -3234,17 +3234,17 @@ implement Iterator for RangeInclusive<Int> {
 implement DoubleEndedIterator for RangeInclusive<Int> {
     fn next_back(&mut self) -> Maybe<Int> {
         if self.done {
-            return None;
+            return Maybe.None;
         }
         if self.current < self.end {
             let val = self.end;
             self.end = self.end - 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.end)
+            Maybe.Some(self.end)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -3264,32 +3264,32 @@ implement Iterator for RangeInclusive<Int8> {
     type Item = Int8;
 
     fn next(&mut self) -> Maybe<Int8> {
-        if self.done { return None; }
+        if self.done { return Maybe.None; }
         if self.current < self.end {
             let val = self.current;
             self.current = self.current + 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.current)
+            Maybe.Some(self.current)
         } else {
-            None
+            Maybe.None
         }
     }
 }
 
 implement DoubleEndedIterator for RangeInclusive<Int8> {
     fn next_back(&mut self) -> Maybe<Int8> {
-        if self.done { return None; }
+        if self.done { return Maybe.None; }
         if self.current < self.end {
             let val = self.end;
             self.end = self.end - 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.end)
+            Maybe.Some(self.end)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -3309,32 +3309,32 @@ implement Iterator for RangeInclusive<Int16> {
     type Item = Int16;
 
     fn next(&mut self) -> Maybe<Int16> {
-        if self.done { return None; }
+        if self.done { return Maybe.None; }
         if self.current < self.end {
             let val = self.current;
             self.current = self.current + 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.current)
+            Maybe.Some(self.current)
         } else {
-            None
+            Maybe.None
         }
     }
 }
 
 implement DoubleEndedIterator for RangeInclusive<Int16> {
     fn next_back(&mut self) -> Maybe<Int16> {
-        if self.done { return None; }
+        if self.done { return Maybe.None; }
         if self.current < self.end {
             let val = self.end;
             self.end = self.end - 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.end)
+            Maybe.Some(self.end)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -3354,32 +3354,32 @@ implement Iterator for RangeInclusive<Int32> {
     type Item = Int32;
 
     fn next(&mut self) -> Maybe<Int32> {
-        if self.done { return None; }
+        if self.done { return Maybe.None; }
         if self.current < self.end {
             let val = self.current;
             self.current = self.current + 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.current)
+            Maybe.Some(self.current)
         } else {
-            None
+            Maybe.None
         }
     }
 }
 
 implement DoubleEndedIterator for RangeInclusive<Int32> {
     fn next_back(&mut self) -> Maybe<Int32> {
-        if self.done { return None; }
+        if self.done { return Maybe.None; }
         if self.current < self.end {
             let val = self.end;
             self.end = self.end - 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.end)
+            Maybe.Some(self.end)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -3399,32 +3399,32 @@ implement Iterator for RangeInclusive<Int64> {
     type Item = Int64;
 
     fn next(&mut self) -> Maybe<Int64> {
-        if self.done { return None; }
+        if self.done { return Maybe.None; }
         if self.current < self.end {
             let val = self.current;
             self.current = self.current + 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.current)
+            Maybe.Some(self.current)
         } else {
-            None
+            Maybe.None
         }
     }
 }
 
 implement DoubleEndedIterator for RangeInclusive<Int64> {
     fn next_back(&mut self) -> Maybe<Int64> {
-        if self.done { return None; }
+        if self.done { return Maybe.None; }
         if self.current < self.end {
             let val = self.end;
             self.end = self.end - 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.end)
+            Maybe.Some(self.end)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -3444,16 +3444,16 @@ implement Iterator for RangeInclusive<UInt8> {
     type Item = UInt8;
 
     fn next(&mut self) -> Maybe<UInt8> {
-        if self.done { return None; }
+        if self.done { return Maybe.None; }
         if self.current < self.end {
             let val = self.current;
             self.current = self.current + 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.current)
+            Maybe.Some(self.current)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -3463,16 +3463,16 @@ implement Iterator for RangeInclusive<UInt16> {
     type Item = UInt16;
 
     fn next(&mut self) -> Maybe<UInt16> {
-        if self.done { return None; }
+        if self.done { return Maybe.None; }
         if self.current < self.end {
             let val = self.current;
             self.current = self.current + 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.current)
+            Maybe.Some(self.current)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -3482,16 +3482,16 @@ implement Iterator for RangeInclusive<UInt32> {
     type Item = UInt32;
 
     fn next(&mut self) -> Maybe<UInt32> {
-        if self.done { return None; }
+        if self.done { return Maybe.None; }
         if self.current < self.end {
             let val = self.current;
             self.current = self.current + 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.current)
+            Maybe.Some(self.current)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -3501,16 +3501,16 @@ implement Iterator for RangeInclusive<UInt64> {
     type Item = UInt64;
 
     fn next(&mut self) -> Maybe<UInt64> {
-        if self.done { return None; }
+        if self.done { return Maybe.None; }
         if self.current < self.end {
             let val = self.current;
             self.current = self.current + 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.current)
+            Maybe.Some(self.current)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -3520,32 +3520,32 @@ implement Iterator for RangeInclusive<ISize> {
     type Item = ISize;
 
     fn next(&mut self) -> Maybe<ISize> {
-        if self.done { return None; }
+        if self.done { return Maybe.None; }
         if self.current < self.end {
             let val = self.current;
             self.current = self.current + 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.current)
+            Maybe.Some(self.current)
         } else {
-            None
+            Maybe.None
         }
     }
 }
 
 implement DoubleEndedIterator for RangeInclusive<ISize> {
     fn next_back(&mut self) -> Maybe<ISize> {
-        if self.done { return None; }
+        if self.done { return Maybe.None; }
         if self.current < self.end {
             let val = self.end;
             self.end = self.end - 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.end)
+            Maybe.Some(self.end)
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -3565,16 +3565,16 @@ implement Iterator for RangeInclusive<USize> {
     type Item = USize;
 
     fn next(&mut self) -> Maybe<USize> {
-        if self.done { return None; }
+        if self.done { return Maybe.None; }
         if self.current < self.end {
             let val = self.current;
             self.current = self.current + 1;
-            Some(val)
+            Maybe.Some(val)
         } else if self.current == self.end {
             self.done = true;
-            Some(self.current)
+            Maybe.Some(self.current)
         } else {
-            None
+            Maybe.None
         }
     }
 }

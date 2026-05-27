@@ -493,8 +493,8 @@ public fn catch_unwind<T, F: fn() -> T>(f: F) -> Result<T, PanicInfo> {
 /// sub-program's failure point becomes harder to bisect.
 public fn resume_unwind(panic_info: PanicInfo) -> ! {
     match panic_info.location {
-        Some(loc) => panic_at(panic_info.message, loc.file, loc.line, loc.column),
-        None => panic(panic_info.message),
+        Maybe.Some(loc) => panic_at(panic_info.message, loc.file, loc.line, loc.column),
+        Maybe.None => panic(panic_info.message),
     }
 }
 

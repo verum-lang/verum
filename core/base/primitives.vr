@@ -4409,13 +4409,13 @@ implement Eq for Float32 {
 implement PartialOrd for Float32 {
     public fn partial_cmp(&self, other: &Float32) -> Maybe<Ordering> {
         if self.is_nan() || other.is_nan() {
-            None
+            Maybe.None
         } else if *self < *other {
-            Some(Less)
+            Maybe.Some(Less)
         } else if *self > *other {
-            Some(Greater)
+            Maybe.Some(Greater)
         } else {
-            Some(Equal)
+            Maybe.Some(Equal)
         }
     }
 }
@@ -4466,13 +4466,13 @@ implement Eq for Float64 {
 implement PartialOrd for Float64 {
     public fn partial_cmp(&self, other: &Float64) -> Maybe<Ordering> {
         if self.is_nan() || other.is_nan() {
-            None
+            Maybe.None
         } else if *self < *other {
-            Some(Less)
+            Maybe.Some(Less)
         } else if *self > *other {
-            Some(Greater)
+            Maybe.Some(Greater)
         } else {
-            Some(Equal)
+            Maybe.Some(Equal)
         }
     }
 }
@@ -6552,10 +6552,10 @@ implement Int8 {
     /// Parse a string in the given radix (2..36) into an Int8.
     public fn from_str_radix(text: &Text, radix: Int) -> Maybe<Int8> {
         match Int.from_str_radix(text, radix) {
-            None => None,
-            Some(v) => {
-                if v >= -128 && v <= 127 { Some(v as Int8) }
-                else { None }
+            Maybe.None => None,
+            Maybe.Some(v) => {
+                if v >= -128 && v <= 127 { Maybe.Some(v as Int8) }
+                else { Maybe.None }
             }
         }
     }
@@ -6564,10 +6564,10 @@ implement Int8 {
 implement Int16 {
     public fn from_str_radix(text: &Text, radix: Int) -> Maybe<Int16> {
         match Int.from_str_radix(text, radix) {
-            None => None,
-            Some(v) => {
-                if v >= -32768 && v <= 32767 { Some(v as Int16) }
-                else { None }
+            Maybe.None => None,
+            Maybe.Some(v) => {
+                if v >= -32768 && v <= 32767 { Maybe.Some(v as Int16) }
+                else { Maybe.None }
             }
         }
     }
@@ -6576,10 +6576,10 @@ implement Int16 {
 implement Int32 {
     public fn from_str_radix(text: &Text, radix: Int) -> Maybe<Int32> {
         match Int.from_str_radix(text, radix) {
-            None => None,
-            Some(v) => {
-                if v >= -2147483648 && v <= 2147483647 { Some(v as Int32) }
-                else { None }
+            Maybe.None => None,
+            Maybe.Some(v) => {
+                if v >= -2147483648 && v <= 2147483647 { Maybe.Some(v as Int32) }
+                else { Maybe.None }
             }
         }
     }
@@ -6588,8 +6588,8 @@ implement Int32 {
 implement Int64 {
     public fn from_str_radix(text: &Text, radix: Int) -> Maybe<Int64> {
         match Int.from_str_radix(text, radix) {
-            None => None,
-            Some(v) => Some(v as Int64),
+            Maybe.None => None,
+            Maybe.Some(v) => Some(v as Int64),
         }
     }
 }
@@ -6597,8 +6597,8 @@ implement Int64 {
 implement Int128 {
     public fn from_str_radix(text: &Text, radix: Int) -> Maybe<Int128> {
         match Int.from_str_radix(text, radix) {
-            None => None,
-            Some(v) => Some(v as Int128),
+            Maybe.None => None,
+            Maybe.Some(v) => Some(v as Int128),
         }
     }
 }
@@ -6606,8 +6606,8 @@ implement Int128 {
 implement ISize {
     public fn from_str_radix(text: &Text, radix: Int) -> Maybe<ISize> {
         match Int.from_str_radix(text, radix) {
-            None => None,
-            Some(v) => Some(v as ISize),
+            Maybe.None => None,
+            Maybe.Some(v) => Some(v as ISize),
         }
     }
 }
@@ -6615,10 +6615,10 @@ implement ISize {
 implement UInt8 {
     public fn from_str_radix(text: &Text, radix: Int) -> Maybe<UInt8> {
         match Int.from_str_radix(text, radix) {
-            None => None,
-            Some(v) => {
-                if v >= 0 && v <= 255 { Some(v as UInt8) }
-                else { None }
+            Maybe.None => None,
+            Maybe.Some(v) => {
+                if v >= 0 && v <= 255 { Maybe.Some(v as UInt8) }
+                else { Maybe.None }
             }
         }
     }
@@ -6627,10 +6627,10 @@ implement UInt8 {
 implement UInt16 {
     public fn from_str_radix(text: &Text, radix: Int) -> Maybe<UInt16> {
         match Int.from_str_radix(text, radix) {
-            None => None,
-            Some(v) => {
-                if v >= 0 && v <= 65535 { Some(v as UInt16) }
-                else { None }
+            Maybe.None => None,
+            Maybe.Some(v) => {
+                if v >= 0 && v <= 65535 { Maybe.Some(v as UInt16) }
+                else { Maybe.None }
             }
         }
     }
@@ -6639,10 +6639,10 @@ implement UInt16 {
 implement UInt32 {
     public fn from_str_radix(text: &Text, radix: Int) -> Maybe<UInt32> {
         match Int.from_str_radix(text, radix) {
-            None => None,
-            Some(v) => {
-                if v >= 0 && v <= 4294967295 { Some(v as UInt32) }
-                else { None }
+            Maybe.None => None,
+            Maybe.Some(v) => {
+                if v >= 0 && v <= 4294967295 { Maybe.Some(v as UInt32) }
+                else { Maybe.None }
             }
         }
     }
@@ -6651,10 +6651,10 @@ implement UInt32 {
 implement UInt64 {
     public fn from_str_radix(text: &Text, radix: Int) -> Maybe<UInt64> {
         match Int.from_str_radix(text, radix) {
-            None => None,
-            Some(v) => {
-                if v >= 0 { Some(v as UInt64) }
-                else { None }
+            Maybe.None => None,
+            Maybe.Some(v) => {
+                if v >= 0 { Maybe.Some(v as UInt64) }
+                else { Maybe.None }
             }
         }
     }
@@ -6663,10 +6663,10 @@ implement UInt64 {
 implement UInt128 {
     public fn from_str_radix(text: &Text, radix: Int) -> Maybe<UInt128> {
         match Int.from_str_radix(text, radix) {
-            None => None,
-            Some(v) => {
-                if v >= 0 { Some(v as UInt128) }
-                else { None }
+            Maybe.None => None,
+            Maybe.Some(v) => {
+                if v >= 0 { Maybe.Some(v as UInt128) }
+                else { Maybe.None }
             }
         }
     }
@@ -6675,10 +6675,10 @@ implement UInt128 {
 implement USize {
     public fn from_str_radix(text: &Text, radix: Int) -> Maybe<USize> {
         match Int.from_str_radix(text, radix) {
-            None => None,
-            Some(v) => {
-                if v >= 0 { Some(v as USize) }
-                else { None }
+            Maybe.None => None,
+            Maybe.Some(v) => {
+                if v >= 0 { Maybe.Some(v as USize) }
+                else { Maybe.None }
             }
         }
     }

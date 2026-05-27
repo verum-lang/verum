@@ -230,11 +230,11 @@ implement CidrSet {
         let mut i: Int = 0;
         while i < self.blocks.len() {
             if self.blocks[i].contains(ip) {
-                return Some(clone_cidr(&self.blocks[i]));
+                return Maybe.Some(clone_cidr(&self.blocks[i]));
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     public fn len(&self) -> Int { self.blocks.len() }
@@ -296,23 +296,23 @@ fn slice_text(src: &[Byte], start: Int, end: Int) -> Text {
 }
 
 fn parse_int(src: &[Byte]) -> Maybe<Int> {
-    if src.len() == 0 { return None; }
+    if src.len() == 0 { return Maybe.None; }
     // Hard cap on digit count: 4 digits is enough to express every
     // legal prefix length (max 128). A long-digit input is either a
     // typo or an attempt to wrap `v = v * 10 + d` past Int.MAX into
     // a small positive value that slips past the prefix-range check.
-    if src.len() > 4 { return None; }
+    if src.len() > 4 { return Maybe.None; }
     let mut v: Int = 0;
     let mut i: Int = 0;
     while i < src.len() {
         let c = src[i];
-        if c < ('0' as Byte) || c > ('9' as Byte) { return None; }
+        if c < ('0' as Byte) || c > ('9' as Byte) { return Maybe.None; }
         // 4-digit cap above bounds v at 9999 — well below Int.MAX, so
         // the multiply-add cannot overflow. Belt-and-braces on a per-
         // step ceiling keeps the invariant local.
-        if v > 9999 { return None; }
+        if v > 9999 { return Maybe.None; }
         v = v * 10 + ((c - ('0' as Byte)) as Int);
         i = i + 1;
     }
-    Some(v)
+    Maybe.Some(v)
 }

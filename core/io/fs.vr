@@ -535,7 +535,7 @@ implement Iterator for ReadDir {
 
     fn next(&mut self) -> Maybe<IoResult<DirEntry>> {
         if self.finished {
-            return None;
+            return Maybe.None;
         }
 
         loop {
@@ -545,14 +545,14 @@ implement Iterator for ReadDir {
                     Ok(n) => {
                         if n == 0 {
                             self.finished = true;
-                            return None;
+                            return Maybe.None;
                         }
                         self.buffer_len = n;
                         self.buffer_pos = 0;
                     }
                     Err(e) => {
                         self.finished = true;
-                        return Some(Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }));
+                        return Maybe.Some(Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }));
                     }
                 }
             }
@@ -590,7 +590,7 @@ implement Iterator for ReadDir {
             let mut full_path = self.base_path.clone();
             full_path.push_str(&name);
 
-            return Some(Ok(DirEntry {
+            return Maybe.Some(Ok(DirEntry {
                 path: full_path,
                 file_name: name,
                 file_type: file_type,
@@ -613,14 +613,14 @@ implement Iterator for ReadDir {
 
     fn next(&mut self) -> Maybe<IoResult<DirEntry>> {
         if self.finished {
-            return None;
+            return Maybe.None;
         }
 
         loop {
             let entry = unsafe { sys_readdir(self.dir_handle) };
             if entry.is_null() {
                 self.finished = true;
-                return None;
+                return Maybe.None;
             }
 
             // Extract name from dirent
@@ -645,7 +645,7 @@ implement Iterator for ReadDir {
             let mut full_path = self.base_path.clone();
             full_path.push_str(&name);
 
-            return Some(Ok(DirEntry {
+            return Maybe.Some(Ok(DirEntry {
                 path: full_path,
                 file_name: name,
                 file_type: file_type,

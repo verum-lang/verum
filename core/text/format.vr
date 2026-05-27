@@ -1374,18 +1374,34 @@ public fn int_to_text_radix(n: Int, radix: Int) -> Text {
 // =============================================================================
 
 /// Format a value as lowercase hexadecimal string.
+///
+/// The `let v: Int = *value` local-binding deref is load-bearing
+/// (NOT just `(*value).to_hex()` which the Tier-0 codegen folds
+/// back into the bare-receiver dispatch path): the
+/// value-receiver method `Int.to_hex(self)` dispatched against
+/// the `&Int` receiver lands at the raw-pointer bits (not the
+/// pointee value).  Materialising the deref into a fresh local
+/// `Int` register makes the dispatch unambiguous.  See
+/// `core-tests/text/format/regression_test.vr` §H for the pin.
+/// The sibling `format_lower_exp` / `format_upper_exp` already
+/// carry the explicit-deref discipline via `float_to_exp(*value, …)`.
 public fn format_hex(value: &Int) -> Text {
-    value.to_hex()
+    let v: Int = *value;
+    v.to_hex()
 }
 
-/// Format a value as binary string.
+/// Format a value as binary string. (See `format_hex` for the
+/// local-binding-deref discipline rationale.)
 public fn format_binary(value: &Int) -> Text {
-    value.to_binary()
+    let v: Int = *value;
+    v.to_binary()
 }
 
-/// Format a value as octal string.
+/// Format a value as octal string. (See `format_hex` for the
+/// local-binding-deref discipline rationale.)
 public fn format_octal(value: &Int) -> Text {
-    value.to_octal()
+    let v: Int = *value;
+    v.to_octal()
 }
 
 /// Format a float in lowercase exponential notation.
