@@ -2367,8 +2367,8 @@ implement<I: Iterator, B, F: fn(I.Item) -> Maybe<B>> Iterator for MapWhileIter<I
 
     fn next(&mut self) -> Maybe<B> {
         match self.iter.next() {
-            Some(item) => (self.f)(item),
-            None => None,
+            Maybe.Some(item) => (self.f)(item),
+            Maybe.None => Maybe.None,
         }
     }
 
@@ -2385,15 +2385,15 @@ implement<I: Iterator, G: fn() -> I.Item> Iterator for IntersperseWithIter<I, G>
     fn next(&mut self) -> Maybe<I.Item> {
         if self.started && self.next_sep {
             self.next_sep = false;
-            Some((self.separator_fn)())
+            Maybe.Some((self.separator_fn)())
         } else {
             match self.iter.next() {
-                Some(v) => {
+                Maybe.Some(v) => {
                     self.started = true;
                     self.next_sep = true;
-                    Some(v)
+                    Maybe.Some(v)
                 },
-                None => None,
+                Maybe.None => Maybe.None,
             }
         }
     }
@@ -2403,12 +2403,12 @@ implement<I: Iterator, G: fn() -> I.Item> Iterator for IntersperseWithIter<I, G>
         let pending = if self.started && self.next_sep { 1 } else { 0 };
         let intersperse_lower = if lower == 0 { 0 } else { lower * 2 - 1 };
         let intersperse_upper = match upper {
-            Some(u) => if u == 0 { Some(0) } else { Some(u * 2 - 1) },
-            None => None,
+            Maybe.Some(u) => if u == 0 { Maybe.Some(0) } else { Maybe.Some(u * 2 - 1) },
+            Maybe.None => Maybe.None,
         };
         (intersperse_lower + pending, match intersperse_upper {
-            Some(u) => Some(u + pending),
-            None => None,
+            Maybe.Some(u) => Maybe.Some(u + pending),
+            Maybe.None => Maybe.None,
         })
     }
 }
