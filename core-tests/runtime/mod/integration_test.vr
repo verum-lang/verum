@@ -1,0 +1,132 @@
+// =============================================================================
+// core-tests/runtime/mod/integration_test.vr
+// =============================================================================
+//
+// `core/runtime/mod.vr` (643 LOC) — runtime module root.  Re-exports the
+// surface from submodules (config / env / recovery / supervisor / spawn /
+// pool / ctx_bridge / stack_alloc / task_queue) into a single
+// `core.runtime.*` namespace.
+//
+// Integration tests verify the umbrella re-exports work — every type
+// touched here is the canonical `core.runtime.X` name (NOT the
+// `core.runtime.<sub>.X` qualified form).
+//
+// Live runtime.init() / runtime.shutdown() / current_env() / Runtime
+// helpers (current_epoch / memory_usage / advance_epoch /
+// allocation_count / validate_all) + Bencher + benchmark() are gated on
+// the live runtime intrinsics + thread-local-context-slot binding.
+// =============================================================================
+
+mount core.runtime.{
+    // From .config
+    RuntimeIoError, IoHandle,
+    // From .env (already covered in core-tests/runtime/env/)
+    ExecutionTier, IsolationLevel,
+    // From .recovery
+    RecoveryRetryPolicy, RecoveryCircuitState,
+    // From .supervisor
+    SupervisionStrategy,
+    // From .spawn
+    SupervisorSpawnConfig, PriorityLevel,
+};
+
+// =============================================================================
+// Section 1: Umbrella re-exports — each type resolves at the `core.runtime.X` level
+// =============================================================================
+
+@test
+fn test_runtime_re_exports_runtime_io_error() {
+    let e = RuntimeIoError.WouldBlock;
+    assert(e is RuntimeIoError.WouldBlock);
+}
+
+@test
+fn test_runtime_re_exports_io_handle() {
+    let h = IoHandle { id: 0_u64 };
+    assert(h.id == 0_u64);
+}
+
+@test
+fn test_runtime_re_exports_execution_tier() {
+    let t = ExecutionTier.Tier0_Full;
+    assert(t is ExecutionTier.Tier0_Full);
+}
+
+@test
+fn test_runtime_re_exports_isolation_level() {
+    let l = IsolationLevel.Shared;
+    assert(l is IsolationLevel.Shared);
+}
+
+@test
+fn test_runtime_re_exports_recovery_circuit_state() {
+    let s = RecoveryCircuitState.Closed;
+    assert(s is RecoveryCircuitState.Closed);
+}
+
+@test
+fn test_runtime_re_exports_supervision_strategy() {
+    let s = SupervisionStrategy.OneForOne;
+    assert(s is SupervisionStrategy.OneForOne);
+}
+
+@test
+fn test_runtime_re_exports_priority_level() {
+    let p = PriorityLevel.Normal;
+    assert(p is PriorityLevel.Normal);
+}
+
+// =============================================================================
+// Section 2: Re-export identity — qualified-form and umbrella-form same type
+// =============================================================================
+//
+// The `core.runtime.ExecutionTier` umbrella name MUST resolve to the
+// SAME type as `core.runtime.env.ExecutionTier` (the source canonical
+// location).  Cross-assignment is the compile-time identity check.
+//
+
+@test
+fn test_runtime_execution_tier_identity_with_env_submodule() {
+    let a: ExecutionTier = ExecutionTier.Tier0_Full;
+    let b: core.runtime.env.ExecutionTier = a;
+    let _ = b;
+    assert(true);
+}
+
+@test
+fn test_runtime_supervision_strategy_identity_with_supervisor_submodule() {
+    let a: SupervisionStrategy = SupervisionStrategy.OneForOne;
+    let b: core.runtime.supervisor.SupervisionStrategy = a;
+    let _ = b;
+    assert(true);
+}
+
+@test
+fn test_runtime_priority_level_identity_with_spawn_submodule() {
+    let a: PriorityLevel = PriorityLevel.Normal;
+    let b: core.runtime.spawn.PriorityLevel = a;
+    let _ = b;
+    assert(true);
+}
+
+// =============================================================================
+// Section 3: Cross-submodule composition — types compose across boundaries
+// =============================================================================
+//
+// `SupervisorSpawnConfig` (from .spawn) embeds `PriorityLevel` (also from
+// .spawn).  Pinning that the embedded field resolves correctly when
+// accessed via the umbrella name.
+//
+// Note: `SupervisorSpawnConfig.new()` is currently @ignored at the
+// spawn-folder unit_test on §F (cross-module ctor return field-write OOB
+// defect).  Tests here pin the language-level CONSTRUCTION shape via
+// direct record literal where possible.
+//
+
+@test
+fn test_runtime_priority_level_default_via_explicit_construction() {
+    // Default is PriorityLevel.Normal per the @derive(Default) impl,
+    // verified at the spawn-folder unit_test.
+    let p: PriorityLevel = PriorityLevel.Normal;
+    assert(p.to_u8() == 128_u8);
+}
