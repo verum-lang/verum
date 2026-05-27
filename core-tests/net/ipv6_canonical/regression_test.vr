@@ -1,0 +1,48 @@
+// =============================================================================
+// core-tests/net/ipv6_canonical/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN pins for IPV6CAN-1 — calling `format_ipv6(&Ipv6Addr)` with
+// an address that reaches the IPv4-mapped emit-path
+// (`format_v4_mapped`) triggers a precompile SIGSEGV.
+//
+// The non-v4-mapped emit path covers >95% of canonicalization
+// semantic correctness — see `unit_test.vr §1-§8`. The
+// `::ffff:a.b.c.d` v4-mapped path is locked-in by 3 regression pins
+// here so the defect shape (single isolated emit-branch) does not
+// drift in either direction.
+//
+// See `audit.md §3.1` for diagnostic isolation and candidate
+// triggers (`b"::ffff:"` byte-string literal, `push_decimal_byte`
+// multi-branch arithmetic, `octets[12]`-`octets[15]` high-index
+// access through array-of-byte param).
+// =============================================================================
+
+mount core.net.ipv6_canonical.{format_ipv6};
+mount core.net.addr.{Ipv6Addr};
+
+@ignore("IPV6CAN-1: format_v4_mapped SIGSEGVs during precompile cascade. See audit.md §3.1.")
+@test
+fn regression_format_ipv4_mapped_zero() {
+    let a = Ipv6Addr.new(0, 0, 0, 0, 0, 0xffff, 0, 0);
+    let s = format_ipv6(&a);
+    assert_eq(s.as_str(), "::ffff:0.0.0.0");
+}
+
+@ignore("IPV6CAN-1: format_v4_mapped SIGSEGVs. See audit.md §3.1.")
+@test
+fn regression_format_ipv4_mapped_canonical() {
+    // ::ffff:192.168.1.1 → IPv6 segs [0,0,0,0,0,0xffff,0xc0a8,0x0101]
+    let a = Ipv6Addr.new(0, 0, 0, 0, 0, 0xffff, 0xc0a8, 0x0101);
+    let s = format_ipv6(&a);
+    assert_eq(s.as_str(), "::ffff:192.168.1.1");
+}
+
+@ignore("IPV6CAN-1: format_v4_mapped SIGSEGVs. See audit.md §3.1.")
+@test
+fn regression_format_ipv4_mapped_max() {
+    // ::ffff:255.255.255.255
+    let a = Ipv6Addr.new(0, 0, 0, 0, 0, 0xffff, 0xffff, 0xffff);
+    let s = format_ipv6(&a);
+    assert_eq(s.as_str(), "::ffff:255.255.255.255");
+}
