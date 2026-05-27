@@ -160,11 +160,17 @@ implement UriTemplate {
                 parts.push(expr);
                 i = close + 1;
             } else {
-                // Gather literal up to next '{'.
+                // Gather literal up to next '{'. Byte-by-byte push to
+                // avoid extend_from_slice intrinsic chain (CIDR-1 fix
+                // family — same trigger profile).
                 let start = i;
                 while i < b.len() && b[i] != ('{' as Byte) { i = i + 1; }
                 let mut buf: List<Byte> = List.with_capacity(i - start);
-                buf.extend_from_slice(&b[start..i]);
+                let mut j = start;
+                while j < i {
+                    buf.push(b[j]);
+                    j = j + 1;
+                }
                 parts.push(TemplatePart.Literal(Text.from_utf8_unchecked(buf.as_slice())));
             }
         }
