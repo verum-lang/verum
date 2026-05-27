@@ -19765,6 +19765,15 @@ impl VbcCodegen {
                 }
                 _ => None,
             },
+            // Range expression `a..b` / `a..=b` lowers to a 3-field
+            // `TypeId::RANGE` (517) record. Mirrors the corresponding
+            // arm in `extract_expr_type_name` so the two inferrers
+            // agree on Range surface — without this, sites that
+            // consult `infer_expr_type_name(range_expr)` for direct
+            // `(1..=10).<field>` access without an intermediate
+            // let-binding mis-resolved field offsets via the global
+            // field-name interner.
+            ExprKind::Range { .. } => Some("Range".to_string()),
             _ => None,
         }
     }
