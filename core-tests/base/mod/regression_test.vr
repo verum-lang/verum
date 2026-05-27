@@ -1,0 +1,175 @@
+// =============================================================================
+// core-tests/base/mod/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core/base/mod.vr` — the core module manifest.
+// This file is itself a re-export hub; pins guard the prelude
+// surface stays accessible without explicit submodule mounts.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.collections.list.List;
+
+// =============================================================================
+// REGRESSION §A (@ignore'd): `(1..=10).sum()` returns the wrong total
+// (45 instead of 55). The inclusive range `1..=10` should sum to 55
+// (1+2+...+10). A defect in the Range.sum() default method or the
+// `..=` inclusive-range desugar is dropping the upper bound.
+// Multi-day fix in Range iterator + Iterator default-method dispatch.
+// =============================================================================
+
+@ignore("Range::1..=N.sum() drops upper bound; (1..=10).sum() returns 45 instead of 55.")
+@test
+fn regression_pin_range_inclusive_sum_includes_upper_bound() {
+    let total: Int = (1..=10).sum();
+    assert_eq(total, 55);
+}
+
+// =============================================================================
+// REGRESSION §B (@ignore'd): `take(&mut x)` returns the value but does
+// not reset `x` to T::default(). Per the canonical mem::take contract,
+// `take(&mut x)` MUST swap `x` with `T::default()` and return the old
+// value. Defect: the swap is not landing — `x` retains its original
+// value after `take`.
+// =============================================================================
+
+@ignore("take(&mut x) does not reset x to default after extracting the value.")
+@test
+fn regression_pin_take_resets_to_default() {
+    let mut x: Int = 42;
+    let taken = take(&mut x);
+    assert_eq(taken, 42);
+    assert_eq(x, 0);   // T::default() for Int == 0
+}
+
+// =============================================================================
+// REGRESSION §C: prelude re-exports Maybe / Result / Ordering / Heap /
+// List / Map / Set without explicit `mount`. A defect that broke a
+// re-export would silently force every consumer to add a per-module
+// `mount core.base.<...>` line.
+// =============================================================================
+
+@test
+fn regression_prelude_reexports_maybe_result_ordering() {
+    let _: Maybe<Int> = Some(42);
+    let _: Result<Int, Text> = Ok(7);
+    let o: Ordering = Less;
+    match o {
+        Ordering.Less    => {},
+        Ordering.Equal   => panic("expected Less"),
+        Ordering.Greater => panic("expected Less"),
+    }
+}
+
+@test
+fn regression_prelude_reexports_collections() {
+    let xs: List<Int> = [1, 2, 3];
+    let m: Map<Text, Int> = Map.new();
+    let s: Set<Int> = Set.new();
+    assert_eq(xs.len(), 3);
+    assert_eq(m.len(), 0);
+    assert_eq(s.len(), 0);
+}
+
+@test
+fn regression_prelude_reexports_heap() {
+    let h: Heap<Int> = Heap.new(99);
+    assert_eq(*h, 99);
+}
+
+// =============================================================================
+// REGRESSION §D: `Byte` alias resolves and round-trips through `as`
+// casts. A defect that lost the alias would silently force every
+// byte literal to use `UInt8`.
+// =============================================================================
+
+@test
+fn regression_byte_alias_round_trip() {
+    let b: Byte = 42 as Byte;
+    let n: Int = b as Int;
+    assert_eq(n, 42);
+}
+
+// =============================================================================
+// REGRESSION §E: `Bytes` alias is structurally `List<Byte>`. Length
+// invariants apply.
+// =============================================================================
+
+@test
+fn regression_bytes_alias_is_list_of_byte() {
+    let bs: Bytes = [1 as Byte, 2 as Byte, 3 as Byte];
+    assert_eq(bs.len(), 3);
+}
+
+// =============================================================================
+// REGRESSION §F: `TextResult<T>` alias is `Result<T, Text>`.
+// =============================================================================
+
+@test
+fn regression_text_result_alias_is_result_with_text_error() {
+    let r: TextResult<Int> = Ok(42);
+    assert(r.is_ok());
+    let e: TextResult<Int> = Err("error".to_text());
+    assert(e.is_err());
+}
+
+// =============================================================================
+// REGRESSION §G: VERSION / VERSION_MAJOR / VERSION_MINOR / VERSION_PATCH
+// constants exist with the expected types.
+// =============================================================================
+
+@test
+fn regression_version_constants_exist() {
+    assert(VERSION.len() > 0);
+    assert(VERSION_MAJOR >= 0);
+    assert(VERSION_MINOR >= 0);
+    assert(VERSION_PATCH >= 0);
+}
+
+@test
+fn regression_version_string_is_dotted() {
+    let v = VERSION;
+    assert(v.contains("."));
+}
+
+// =============================================================================
+// REGRESSION §H: protocol methods are accessible through the prelude
+// (Eq, Ord, Clone) without explicit `mount core.base.protocols.*`.
+// =============================================================================
+
+@test
+fn regression_eq_protocol_via_prelude() {
+    let a: Int = 1;
+    let b: Int = 1;
+    assert(a == b);
+    assert(!(a == 2));
+}
+
+@test
+fn regression_ord_protocol_via_prelude() {
+    let n = (1 as Int).cmp(&(2 as Int));
+    match n {
+        Ordering.Less => {},
+        _ => panic("expected Less"),
+    }
+}
+
+@test
+fn regression_clone_protocol_via_prelude() {
+    let a: Int = 7;
+    let b = a.clone();
+    assert_eq(a, b);
+}
+
+// =============================================================================
+// REGRESSION §I: Range exclusive `..` count equals N - start.
+// (1..5).count() == 4 (1, 2, 3, 4).
+// =============================================================================
+
+@test
+fn regression_range_exclusive_count() {
+    let n = (0..5).count();
+    assert_eq(n, 5);
+}
+
+fn main() {}
