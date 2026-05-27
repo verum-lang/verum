@@ -715,6 +715,19 @@ implement Text {
 
     /// Get a substring by byte range.
     /// Panics if range doesn't align with UTF-8 character boundaries.
+    ///
+    /// SOUNDNESS: Eager-copies the byte range into a fresh Text via
+    /// `with_capacity + push_byte` rather than the prior
+    /// `from_utf8_unchecked(slice_from_raw_parts(...))` path, which
+    /// produced a Text record whose `len` field was correct but whose
+    /// `as_bytes()` returned an empty buffer for slice-derived Texts
+    /// returned across cross-module boundaries (URL-1 / URL-7 defect
+    /// class). The eager-copy path goes through the same codegen
+    /// pipeline as `to_lowercase` / `clone` which works correctly.
+    /// Performance impact: O(N) copy cost vs O(1) alias; the alias
+    /// path was unsound for cross-module returns (the slice's
+    /// pointer-into-source lifecycle isn't tracked through the VBC
+    /// record-return pathway).
     public fn slice(&self, start: Int, end: Int) -> Text {
         let bytes = self.as_bytes();
         let len = bytes.len();
@@ -732,13 +745,18 @@ implement Text {
             "slice end not on UTF-8 boundary"
         );
 
+        // Eager-copy path — same pattern as to_lowercase. Walks the
+        // byte range via push_byte so each byte goes through the
+        // canonical Text-builder codegen, not the
+        // slice_from_raw_parts intrinsic path.
         let slice_len = end - start;
-        unsafe {
-            Text.from_utf8_unchecked(slice_from_raw_parts(
-                ptr_offset(self.as_ptr(), start),
-                slice_len
-            ))
+        let mut out = Text.with_capacity(slice_len);
+        let mut i = start;
+        while i < end {
+            out.push_byte(bytes[i]);
+            i = i + 1;
         }
+        out
     }
 
     /// Get substring from start to end.
