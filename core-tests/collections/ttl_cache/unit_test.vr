@@ -94,3 +94,83 @@ fn test_ttl_purge_on_empty_returns_zero() {
     let r = c.purge_expired();
     assert_eq(r, 0);
 }
+
+// =============================================================================
+// Section 5: clear on empty + repeated calls
+// =============================================================================
+
+@test
+fn test_ttl_clear_on_empty_is_noop() {
+    let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    c.clear();
+    assert(c.is_empty());
+    assert_eq(c.len(), 0);
+}
+
+@test
+fn test_ttl_repeated_clear_is_idempotent() {
+    let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    c.clear();
+    c.clear();
+    c.clear();
+    assert(c.is_empty());
+}
+
+// =============================================================================
+// Section 6: stats observability — misses accumulate on repeated lookups
+// =============================================================================
+
+@test
+fn test_ttl_stats_misses_accumulate() {
+    let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    let mut i = 0;
+    while i < 5 {
+        let _ = c.get(&i);
+        i = i + 1;
+    }
+    let s = c.stats();
+    assert_eq(s.misses, 5_u64);
+    assert_eq(s.hits, 0_u64);
+}
+
+@test
+fn test_ttl_stats_remains_zero_size_after_get_misses() {
+    let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
+    let _ = c.get(&100);
+    let _ = c.get(&200);
+    let s = c.stats();
+    assert_eq(s.size, 0);
+}
+
+// =============================================================================
+// Section 7: TtlCacheConfig — distinct config values yield distinct caches
+// =============================================================================
+
+@test
+fn test_ttl_distinct_capacities_produce_distinct_caches() {
+    let cfg_small = TtlCacheConfig {
+        capacity: 4,
+        default_ttl: Duration.from_secs(60),
+    };
+    let cfg_large = TtlCacheConfig {
+        capacity: 1024,
+        default_ttl: Duration.from_secs(60),
+    };
+    let c_small: TtlCache<Int, Int> = TtlCache.new(cfg_small);
+    let c_large: TtlCache<Int, Int> = TtlCache.new(cfg_large);
+    // Both empty, independent.
+    assert(c_small.is_empty());
+    assert(c_large.is_empty());
+    assert_eq(c_small.len(), 0);
+    assert_eq(c_large.len(), 0);
+}
+
+@test
+fn test_ttl_zero_default_ttl_config_valid() {
+    let cfg = TtlCacheConfig {
+        capacity: 8,
+        default_ttl: Duration.from_secs(0),
+    };
+    let c: TtlCache<Int, Int> = TtlCache.new(cfg);
+    assert(c.is_empty());
+}
