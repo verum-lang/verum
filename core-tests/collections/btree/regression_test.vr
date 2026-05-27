@@ -39,7 +39,9 @@ fn regression_btreemap_insert_returns_prior_on_replacement() {
     assert_eq(prev, Some(100));
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp post round-13b /
+// round-14b interpreter fixes (Duration ptr-arith narrowing +
+// related codegen consolidation).
 @test
 fn regression_btreemap_get_present_returns_some() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
@@ -47,7 +49,7 @@ fn regression_btreemap_get_present_returns_some() {
     assert_eq(m.get(&1), Some(100));
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn regression_btreemap_contains_key_present_returns_true() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
@@ -139,7 +141,7 @@ fn regression_btreemap_len_tracks_insertions() {
     assert_eq(m.len(), 3);
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn regression_btreemap_get_or_default_present() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
@@ -160,7 +162,8 @@ fn regression_btreemap_get_or_default_present() {
 // Likely cascades from §A.
 // =============================================================================
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp post round-14b
+// interpreter fixes.
 @test
 fn regression_btreemap_pop_first_on_empty_returns_none() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
@@ -168,7 +171,7 @@ fn regression_btreemap_pop_first_on_empty_returns_none() {
     assert(r is None);
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn regression_btreemap_first_last_none_on_empty() {
     let m: BTreeMap<Int, Int> = BTreeMap.new();
