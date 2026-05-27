@@ -1,0 +1,154 @@
+// =============================================================================
+// core-tests/net/content_negotiation/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/content_negotiation.vr` — RFC 9110 §12 content negotiation
+// parsers + selectors for the Accept family.
+//
+// Full functional surface (`parse_accept`, `parse_accept_encoding`,
+// `parse_accept_language`, `select_best_media`, `select_best_coding`)
+// is locked-in behind CONNEG-1 in `regression_test.vr` — same
+// precompile-cascade SIGSEGV defect class as CIDR-1 / URITPL-1 /
+// HTTPRNG-1.
+//
+// Data-surface tests (this file):
+//
+//   * MediaRangeSpec record (type_main / subtype / q) construction.
+//   * CodedPreference record (value / q) construction.
+//   * MAX_NEGOTIATION_ENTRIES constant pin (256 — CVE-2011-3192 class
+//     hardening).
+// =============================================================================
+
+mount core.net.content_negotiation.{
+    MediaRangeSpec, CodedPreference, MAX_NEGOTIATION_ENTRIES
+};
+
+// =============================================================================
+// Section 1: MediaRangeSpec — construction + field preservation
+// =============================================================================
+
+@test
+fn test_media_range_spec_construction() {
+    let m = MediaRangeSpec {
+        type_main: "text".clone(),
+        subtype: "html".clone(),
+        q: 0.9,
+    };
+    assert_eq(m.q, 0.9);
+}
+
+@test
+fn test_media_range_spec_full_wildcard() {
+    let m = MediaRangeSpec {
+        type_main: "*".clone(),
+        subtype: "*".clone(),
+        q: 0.1,
+    };
+    assert_eq(m.q, 0.1);
+}
+
+@test
+fn test_media_range_spec_q_one_default() {
+    // RFC 9110 §12.4.1: missing q defaults to 1.0 (callers set explicitly)
+    let m = MediaRangeSpec {
+        type_main: "application".clone(),
+        subtype: "json".clone(),
+        q: 1.0,
+    };
+    assert_eq(m.q, 1.0);
+}
+
+@test
+fn test_media_range_spec_q_zero() {
+    // q=0 means explicitly rejected per RFC 9110 §12.4.2
+    let m = MediaRangeSpec {
+        type_main: "text".clone(),
+        subtype: "plain".clone(),
+        q: 0.0,
+    };
+    assert_eq(m.q, 0.0);
+}
+
+@test
+fn test_media_range_spec_subtype_wildcard() {
+    // "text/*" — wildcard subtype
+    let m = MediaRangeSpec {
+        type_main: "text".clone(),
+        subtype: "*".clone(),
+        q: 0.5,
+    };
+    assert_eq(m.q, 0.5);
+}
+
+// =============================================================================
+// Section 2: CodedPreference — construction + field preservation
+// =============================================================================
+
+@test
+fn test_coded_preference_gzip() {
+    let p = CodedPreference {
+        value: "gzip".clone(),
+        q: 1.0,
+    };
+    assert_eq(p.q, 1.0);
+}
+
+@test
+fn test_coded_preference_identity() {
+    // identity coding (no compression) — implicit per RFC 9110 §12.5.3
+    let p = CodedPreference {
+        value: "identity".clone(),
+        q: 1.0,
+    };
+    assert_eq(p.q, 1.0);
+}
+
+@test
+fn test_coded_preference_wildcard() {
+    let p = CodedPreference {
+        value: "*".clone(),
+        q: 0.5,
+    };
+    assert_eq(p.q, 0.5);
+}
+
+@test
+fn test_coded_preference_q_zero_rejection() {
+    // explicit rejection of br compression
+    let p = CodedPreference {
+        value: "br".clone(),
+        q: 0.0,
+    };
+    assert_eq(p.q, 0.0);
+}
+
+@test
+fn test_coded_preference_language_tag() {
+    // RFC 5646 language tag
+    let p = CodedPreference {
+        value: "en-US".clone(),
+        q: 0.8,
+    };
+    assert_eq(p.q, 0.8);
+}
+
+// =============================================================================
+// Section 3: MAX_NEGOTIATION_ENTRIES — DoS hardening
+// =============================================================================
+
+@test
+fn test_max_negotiation_entries_value() {
+    // 256 — generous middle ground vs nginx ~100 default
+    assert_eq(MAX_NEGOTIATION_ENTRIES, 256);
+}
+
+@test
+fn test_max_negotiation_entries_positive() {
+    assert(MAX_NEGOTIATION_ENTRIES > 0);
+}
+
+@test
+fn test_max_negotiation_entries_exceeds_nginx() {
+    // Should comfortably exceed nginx's ~100 default
+    assert(MAX_NEGOTIATION_ENTRIES > 100);
+}

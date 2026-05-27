@@ -1,0 +1,591 @@
+// =============================================================================
+// core-tests/net/url/unit_test.vr
+// =============================================================================
+//
+// `core/net/url.vr` — URL parsing + serialization (RFC 3986) +
+// percent-encoding helpers (RFC 3986 §2.1/§2.3).
+//
+//   * Url.parse(&Text) -> Result<Url, UrlError>
+//   * url.to_text() -> Text  (canonical round-trip)
+//   * percent_encode(&Text) -> Text
+//   * percent_decode(&Text) -> Result<Text, UrlError>
+//   * UrlErrorKind 6-variant: MissingScheme / InvalidScheme /
+//     InvalidAuthority / InvalidPort / InvalidPercentEscape /
+//     UrlTooLong
+//   * MAX_URL_LENGTH_BYTES = 64 * 1024 — DoS guard
+//
+// IMPORTANT: tests use `assert(field == "literal".clone())` rather
+// than `assert_eq(field.as_str(), "literal")` to sidestep URL-1 — a
+// stdlib codegen defect where `Text` derived via `Text.slice` has
+// its byte payload length-tracked but pointer-corrupted, so
+// `as_str()` reads from the wrong buffer. See `audit.md §3.1`.
+// Field-equality through the canonical `Text == Text` path takes a
+// different codegen branch that compares structurally and works
+// correctly.
+// =============================================================================
+
+mount core.net.url.{Url, UrlError, UrlErrorKind, percent_encode, percent_decode, MAX_URL_LENGTH_BYTES};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Url.parse — scheme + has-authority structural shape
+// =============================================================================
+
+@test
+fn test_parse_https_isok() {
+    let s = "https://example.com/".clone();
+    assert(Url.parse(&s).is_ok());
+}
+
+@test
+fn test_parse_scheme_eq_http() {
+    let s = "http://example.com/".clone();
+    let want = "http".clone();
+    match Url.parse(&s) {
+        Ok(u) => assert(u.scheme == want),
+        Err(_) => panic("should parse"),
+    }
+}
+
+@test
+fn test_parse_scheme_eq_https() {
+    let s = "https://example.com/".clone();
+    let want = "https".clone();
+    match Url.parse(&s) {
+        Ok(u) => assert(u.scheme == want),
+        Err(_) => panic("should parse"),
+    }
+}
+
+@test
+fn test_parse_scheme_eq_ftp() {
+    let s = "ftp://example.com/".clone();
+    let want = "ftp".clone();
+    match Url.parse(&s) {
+        Ok(u) => assert(u.scheme == want),
+        Err(_) => panic("should parse"),
+    }
+}
+
+@test
+fn test_parse_scheme_lowercased() {
+    // RFC 3986 §3.1: canonical scheme is lowercase
+    let s = "HTTPS://example.com/".clone();
+    let want = "https".clone();
+    match Url.parse(&s) {
+        Ok(u) => assert(u.scheme == want),
+        Err(_) => panic("uppercase scheme should parse"),
+    }
+}
+
+@test
+fn test_parse_scheme_with_plus() {
+    let s = "svn+ssh://server/repo".clone();
+    let want = "svn+ssh".clone();
+    match Url.parse(&s) {
+        Ok(u) => assert(u.scheme == want),
+        Err(_) => panic("svn+ssh should parse"),
+    }
+}
+
+@test
+fn test_parse_scheme_with_dash() {
+    let s = "view-source://example.com/".clone();
+    let want = "view-source".clone();
+    match Url.parse(&s) {
+        Ok(u) => assert(u.scheme == want),
+        Err(_) => panic("view-source should parse"),
+    }
+}
+
+@test
+fn test_parse_scheme_len_http() {
+    let s = "http://example.com/".clone();
+    match Url.parse(&s) {
+        Ok(u) => assert_eq(u.scheme.len(), 4),
+        Err(_) => panic("should parse"),
+    }
+}
+
+// =============================================================================
+// Section 2: Url.parse — port handling
+// =============================================================================
+
+@test
+fn test_parse_port_443() {
+    let s = "https://example.com:443/".clone();
+    match Url.parse(&s) {
+        Ok(u) => match u.port {
+            Some(p) => assert_eq(p, 443),
+            None => panic("port should be Some(443)"),
+        },
+        Err(_) => panic("should parse"),
+    }
+}
+
+@test
+fn test_parse_port_zero() {
+    let s = "http://example.com:0/".clone();
+    match Url.parse(&s) {
+        Ok(u) => match u.port {
+            Some(p) => assert_eq(p, 0),
+            None => panic("port should be Some(0)"),
+        },
+        Err(_) => panic("should parse"),
+    }
+}
+
+@test
+fn test_parse_port_max() {
+    let s = "http://example.com:65535/".clone();
+    match Url.parse(&s) {
+        Ok(u) => match u.port {
+            Some(p) => assert_eq(p, 65535),
+            None => panic("port should be Some(65535)"),
+        },
+        Err(_) => panic("should parse"),
+    }
+}
+
+@test
+fn test_parse_no_port_is_none() {
+    let s = "http://example.com/".clone();
+    match Url.parse(&s) {
+        Ok(u) => match u.port {
+            Some(_) => panic("expected no port"),
+            None => assert(true),
+        },
+        Err(_) => panic("should parse"),
+    }
+}
+
+// =============================================================================
+// Section 3: Url.parse — userinfo
+// =============================================================================
+
+@test
+fn test_parse_userinfo_present() {
+    let s = "https://alice:secret@example.com/".clone();
+    match Url.parse(&s) {
+        Ok(u) => match u.userinfo {
+            Some(_) => assert(true),
+            None => panic("expected userinfo"),
+        },
+        Err(_) => panic("should parse"),
+    }
+}
+
+@test
+fn test_parse_no_userinfo_is_none() {
+    let s = "https://example.com/".clone();
+    match Url.parse(&s) {
+        Ok(u) => match u.userinfo {
+            Some(_) => panic("expected no userinfo"),
+            None => assert(true),
+        },
+        Err(_) => panic("should parse"),
+    }
+}
+
+@test
+fn test_parse_userinfo_no_password_present() {
+    let s = "https://alice@example.com/".clone();
+    match Url.parse(&s) {
+        Ok(u) => match u.userinfo {
+            Some(_) => assert(true),
+            None => panic("expected userinfo"),
+        },
+        Err(_) => panic("should parse"),
+    }
+}
+
+// =============================================================================
+// Section 4: Url.parse — path length
+// =============================================================================
+
+@test
+fn test_parse_path_len_simple() {
+    let s = "https://example.com/foo/bar".clone();
+    match Url.parse(&s) {
+        Ok(u) => assert_eq(u.path.len(), 8),  // "/foo/bar"
+        Err(_) => panic("should parse"),
+    }
+}
+
+@test
+fn test_parse_path_empty_after_authority() {
+    let s = "https://example.com".clone();
+    match Url.parse(&s) {
+        Ok(u) => assert_eq(u.path.len(), 0),
+        Err(_) => panic("should parse"),
+    }
+}
+
+@test
+fn test_parse_root_path_len() {
+    let s = "https://example.com/".clone();
+    match Url.parse(&s) {
+        Ok(u) => assert_eq(u.path.len(), 1),
+        Err(_) => panic("should parse"),
+    }
+}
+
+// =============================================================================
+// Section 5: Url.parse — query Some/None
+// =============================================================================
+
+@test
+fn test_parse_query_present() {
+    let s = "https://example.com/?q=x".clone();
+    match Url.parse(&s) {
+        Ok(u) => match u.query {
+            Some(_) => assert(true),
+            None => panic("expected query"),
+        },
+        Err(_) => panic("should parse"),
+    }
+}
+
+@test
+fn test_parse_query_empty_after_question_is_some() {
+    let s = "https://example.com/?".clone();
+    match Url.parse(&s) {
+        Ok(u) => match u.query {
+            Some(_) => assert(true),
+            None => panic("expected empty query Some"),
+        },
+        Err(_) => panic("should parse"),
+    }
+}
+
+@test
+fn test_parse_no_query_is_none() {
+    let s = "https://example.com/".clone();
+    match Url.parse(&s) {
+        Ok(u) => match u.query {
+            Some(_) => panic("expected no query"),
+            None => assert(true),
+        },
+        Err(_) => panic("should parse"),
+    }
+}
+
+// =============================================================================
+// Section 6: Url.parse — fragment Some/None
+// =============================================================================
+
+@test
+fn test_parse_fragment_present() {
+    let s = "https://example.com/#top".clone();
+    match Url.parse(&s) {
+        Ok(u) => match u.fragment {
+            Some(_) => assert(true),
+            None => panic("expected fragment"),
+        },
+        Err(_) => panic("should parse"),
+    }
+}
+
+@test
+fn test_parse_query_and_fragment_both_present() {
+    let s = "https://example.com/?q=x#section".clone();
+    match Url.parse(&s) {
+        Ok(u) => {
+            match u.query {
+                Some(_) => assert(true),
+                None => panic("expected query"),
+            }
+            match u.fragment {
+                Some(_) => assert(true),
+                None => panic("expected fragment"),
+            }
+        }
+        Err(_) => panic("should parse"),
+    }
+}
+
+@test
+fn test_parse_fragment_empty_is_some() {
+    let s = "https://example.com/#".clone();
+    match Url.parse(&s) {
+        Ok(u) => match u.fragment {
+            Some(_) => assert(true),
+            None => panic("expected empty fragment Some"),
+        },
+        Err(_) => panic("should parse"),
+    }
+}
+
+// =============================================================================
+// Section 7: Url.parse — IPv6 literal
+// =============================================================================
+
+@test
+fn test_parse_ipv6_literal_no_port_isok() {
+    let s = "https://[::1]/".clone();
+    match Url.parse(&s) {
+        Ok(u) => match u.host {
+            Some(_) => assert(true),
+            None => panic("expected ipv6 host"),
+        },
+        Err(_) => panic("should parse"),
+    }
+}
+
+@test
+fn test_parse_ipv6_literal_with_port() {
+    let s = "https://[::1]:8443/".clone();
+    match Url.parse(&s) {
+        Ok(u) => match u.port {
+            Some(p) => assert_eq(p, 8443),
+            None => panic("expected port"),
+        },
+        Err(_) => panic("should parse"),
+    }
+}
+
+// =============================================================================
+// Section 8: Url.parse — error paths
+// =============================================================================
+
+@test
+fn test_parse_empty_rejects() {
+    let s = "".clone();
+    match Url.parse(&s) {
+        Ok(_) => panic("empty must reject"),
+        Err(e) => assert(e.kind == UrlErrorKind.MissingScheme),
+    }
+}
+
+@test
+fn test_parse_no_scheme_rejects() {
+    let s = "example.com/path".clone();
+    match Url.parse(&s) {
+        Ok(_) => panic("no scheme must reject"),
+        Err(e) => assert(e.kind == UrlErrorKind.MissingScheme),
+    }
+}
+
+@test
+fn test_parse_scheme_starts_with_digit_rejects() {
+    let s = "1http://example.com/".clone();
+    match Url.parse(&s) {
+        Ok(_) => panic("scheme cannot start with digit"),
+        Err(e) => assert(e.kind == UrlErrorKind.MissingScheme),
+    }
+}
+
+@test
+fn test_parse_port_overflow_rejects() {
+    let s = "http://example.com:99999/".clone();
+    match Url.parse(&s) {
+        Ok(_) => panic("port > 65535 must reject"),
+        Err(e) => assert(e.kind == UrlErrorKind.InvalidPort),
+    }
+}
+
+@test
+fn test_parse_port_non_digit_rejects() {
+    let s = "http://example.com:abc/".clone();
+    match Url.parse(&s) {
+        Ok(_) => panic("non-digit port must reject"),
+        Err(e) => assert(e.kind == UrlErrorKind.InvalidPort),
+    }
+}
+
+@test
+fn test_parse_unterminated_ipv6_literal_rejects() {
+    let s = "http://[::1/".clone();
+    match Url.parse(&s) {
+        Ok(_) => panic("unterminated ipv6 must reject"),
+        Err(e) => assert(e.kind == UrlErrorKind.InvalidAuthority),
+    }
+}
+
+// =============================================================================
+// Section 9: MAX_URL_LENGTH_BYTES — DoS guard
+// =============================================================================
+
+@test
+fn test_max_url_length_bytes_constant() {
+    assert_eq(MAX_URL_LENGTH_BYTES, 65536);
+}
+
+// =============================================================================
+// Section 10: percent_encode — unreserved set passthrough
+// =============================================================================
+
+@test
+fn test_percent_encode_alpha_passthrough() {
+    let s = "abc".clone();
+    let want = "abc".clone();
+    assert(percent_encode(&s) == want);
+}
+
+@test
+fn test_percent_encode_digit_passthrough() {
+    let s = "123".clone();
+    let want = "123".clone();
+    assert(percent_encode(&s) == want);
+}
+
+@test
+fn test_percent_encode_unreserved_special_passthrough() {
+    // RFC 3986 §2.3 unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
+    let s = "a-b.c_d~e".clone();
+    let want = "a-b.c_d~e".clone();
+    assert(percent_encode(&s) == want);
+}
+
+@test
+fn test_percent_encode_space() {
+    let s = "a b".clone();
+    let want = "a%20b".clone();
+    assert(percent_encode(&s) == want);
+}
+
+@test
+fn test_percent_encode_slash() {
+    let s = "/path".clone();
+    let want = "%2Fpath".clone();
+    assert(percent_encode(&s) == want);
+}
+
+@test
+fn test_percent_encode_percent_itself() {
+    let s = "a%b".clone();
+    let want = "a%25b".clone();
+    assert(percent_encode(&s) == want);
+}
+
+@test
+fn test_percent_encode_uppercase_hex() {
+    // RFC 3986 §2.1: encoder SHOULD use uppercase hex
+    let s = " ".clone();
+    let want = "%20".clone();
+    assert(percent_encode(&s) == want);
+}
+
+// =============================================================================
+// Section 11: percent_decode — happy paths
+// =============================================================================
+
+@test
+fn test_percent_decode_alpha_passthrough() {
+    let s = "abc".clone();
+    let want = "abc".clone();
+    match percent_decode(&s) {
+        Ok(d) => assert(d == want),
+        Err(_) => panic("plain alpha should pass"),
+    }
+}
+
+@test
+fn test_percent_decode_space() {
+    let s = "a%20b".clone();
+    let want = "a b".clone();
+    match percent_decode(&s) {
+        Ok(d) => assert(d == want),
+        Err(_) => panic("%20 → space"),
+    }
+}
+
+@test
+fn test_percent_decode_uppercase_hex() {
+    let s = "%2F".clone();
+    let want = "/".clone();
+    match percent_decode(&s) {
+        Ok(d) => assert(d == want),
+        Err(_) => panic("uppercase hex should decode"),
+    }
+}
+
+@test
+fn test_percent_decode_lowercase_hex() {
+    let s = "%2f".clone();
+    let want = "/".clone();
+    match percent_decode(&s) {
+        Ok(d) => assert(d == want),
+        Err(_) => panic("lowercase hex should decode"),
+    }
+}
+
+// =============================================================================
+// Section 12: percent_decode — error paths
+// =============================================================================
+
+@test
+fn test_percent_decode_truncated_rejects() {
+    let s = "a%2".clone();
+    match percent_decode(&s) {
+        Ok(_) => panic("truncated %% must reject"),
+        Err(e) => assert(e.kind == UrlErrorKind.InvalidPercentEscape),
+    }
+}
+
+@test
+fn test_percent_decode_non_hex_rejects() {
+    let s = "%XY".clone();
+    match percent_decode(&s) {
+        Ok(_) => panic("non-hex digits must reject"),
+        Err(e) => assert(e.kind == UrlErrorKind.InvalidPercentEscape),
+    }
+}
+
+// =============================================================================
+// Section 13: Round-trip percent_decode(percent_encode(x)) == x
+// =============================================================================
+
+@test
+fn test_percent_round_trip_alpha() {
+    let s = "abc".clone();
+    let e = percent_encode(&s);
+    let d = percent_decode(&e).unwrap();
+    assert(d == s);
+}
+
+@test
+fn test_percent_round_trip_special() {
+    let s = "hello world!".clone();
+    let e = percent_encode(&s);
+    let d = percent_decode(&e).unwrap();
+    assert(d == s);
+}
+
+@test
+fn test_percent_round_trip_all_reserved() {
+    let s = "/?#@:".clone();
+    let e = percent_encode(&s);
+    let d = percent_decode(&e).unwrap();
+    assert(d == s);
+}
+
+// =============================================================================
+// Section 14: UrlErrorKind — variant pairwise disjointness
+// =============================================================================
+
+@test
+fn test_url_error_kind_missing_scheme_eq() {
+    assert(UrlErrorKind.MissingScheme == UrlErrorKind.MissingScheme);
+}
+
+@test
+fn test_url_error_kind_invalid_port_eq() {
+    assert(UrlErrorKind.InvalidPort == UrlErrorKind.InvalidPort);
+}
+
+@test
+fn test_url_error_kind_disjoint_missing_vs_port() {
+    assert(!(UrlErrorKind.MissingScheme == UrlErrorKind.InvalidPort));
+}
+
+@test
+fn test_url_error_kind_disjoint_authority_vs_percent_escape() {
+    assert(!(UrlErrorKind.InvalidAuthority == UrlErrorKind.InvalidPercentEscape));
+}
+
+@test
+fn test_url_error_kind_disjoint_invalid_scheme_vs_url_too_long() {
+    assert(!(UrlErrorKind.InvalidScheme == UrlErrorKind.UrlTooLong));
+}

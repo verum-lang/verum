@@ -1,0 +1,105 @@
+// =============================================================================
+// core-tests/net/uri_template/unit_test.vr — data-surface coverage only
+// =============================================================================
+//
+// `core/net/uri_template.vr` — RFC 6570 URI Template expansion.
+// Full functional surface (`UriTemplate.parse` / `UriTemplate.expand`)
+// is locked-in behind URITPL-1 in `regression_test.vr` — calling
+// either entry point from a user test module SIGSEGVs the compiler
+// during precompile cascade.
+//
+// Data-surface tests (this file) cover the algebraic shape:
+//
+//   * TemplateValue 2-variant construction (Str / List_)
+//   * UriTemplateError 2-variant + Eq + variant disjointness
+// =============================================================================
+
+mount core.net.uri_template.{UriTemplateError, TemplateValue};
+mount core.collections.List;
+
+// =============================================================================
+// Section 1: TemplateValue construction
+// =============================================================================
+
+@test
+fn test_template_value_str_construction() {
+    let v = "hello".clone();
+    let tv = TemplateValue.Str(v);
+    assert(tv is TemplateValue.Str);
+}
+
+@test
+fn test_template_value_str_empty() {
+    let v = "".clone();
+    let tv = TemplateValue.Str(v);
+    assert(tv is TemplateValue.Str);
+}
+
+@test
+fn test_template_value_list_empty() {
+    let l: List<Text> = [];
+    let tv = TemplateValue.List_(l);
+    assert(tv is TemplateValue.List_);
+}
+
+@test
+fn test_template_value_list_one() {
+    let mut l: List<Text> = [];
+    l.push("a".clone());
+    let tv = TemplateValue.List_(l);
+    assert(tv is TemplateValue.List_);
+}
+
+@test
+fn test_template_value_list_multiple() {
+    let mut l: List<Text> = [];
+    l.push("a".clone());
+    l.push("b".clone());
+    l.push("c".clone());
+    let tv = TemplateValue.List_(l);
+    assert(tv is TemplateValue.List_);
+}
+
+@test
+fn test_template_value_disjoint_str_vs_list() {
+    let s = TemplateValue.Str("x".clone());
+    let l: List<Text> = [];
+    let lv = TemplateValue.List_(l);
+    assert(s is TemplateValue.Str);
+    assert(lv is TemplateValue.List_);
+}
+
+// =============================================================================
+// Section 2: UriTemplateError — variant Eq lattice
+// =============================================================================
+
+@test
+fn test_uri_template_error_unbalanced_eq() {
+    assert(UriTemplateError.UnbalancedBraces == UriTemplateError.UnbalancedBraces);
+}
+
+@test
+fn test_uri_template_error_malformed_eq_same_payload() {
+    let m1 = "test".clone();
+    let m2 = "test".clone();
+    let a = UriTemplateError.Malformed(m1);
+    let b = UriTemplateError.Malformed(m2);
+    assert(a == b);
+}
+
+@test
+fn test_uri_template_error_malformed_disjoint_payloads() {
+    let m1 = "x".clone();
+    let m2 = "y".clone();
+    let a = UriTemplateError.Malformed(m1);
+    let b = UriTemplateError.Malformed(m2);
+    assert(!(a == b));
+}
+
+@test
+fn test_uri_template_error_disjoint_variants() {
+    let m = "x".clone();
+    let a = UriTemplateError.Malformed(m);
+    let b = UriTemplateError.UnbalancedBraces;
+    assert(!(a == b));
+}

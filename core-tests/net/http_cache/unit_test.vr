@@ -1,0 +1,272 @@
+// =============================================================================
+// core-tests/net/http_cache/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/http_cache.vr` — RFC 9111 §5.2 Cache-Control + §4.2 age +
+// freshness + decision pipeline.
+//
+// Full functional surface (`parse`, `current_age`,
+// `freshness_lifetime_sec`, `decide`) is locked-in behind HTTPCACHE-1
+// in `regression_test.vr` — same precompile-cascade SIGSEGV defect
+// class as CIDR-1 / URITPL-1 / HTTPRNG-1 / CONNEG-1 / LINKHDR-1.
+//
+// Data-surface tests (this file):
+//
+//   * CacheControl record — 16-field directive container (every
+//     RFC 9111 §5.2 directive that the parser recognises).
+//   * CacheControlError 1-variant (Malformed) Eq + Display.
+//   * MAX_CACHE_CONTROL_DIRECTIVES constant pin (64 — CVE-2011-3192).
+//   * AgeInputs record — 5-field §4.2.3 age-formula input.
+//   * DecisionInputs record — 5-field cache decision input.
+//   * CacheDecision 4-variant: Fresh / StaleServable / MustRevalidate
+//     / MustNotCache + variant disjointness.
+// =============================================================================
+
+mount core.net.http_cache.{
+    CacheControl, CacheControlError, MAX_CACHE_CONTROL_DIRECTIVES,
+    AgeInputs, DecisionInputs, CacheDecision
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: CacheControl — 16-field record construction
+// =============================================================================
+
+fn fresh_cc() -> CacheControl {
+    CacheControl {
+        no_cache: false, no_store: false, no_transform: false,
+        public_: false, private_: false, immutable: false,
+        must_revalidate: false, proxy_revalidate: false, must_understand: false,
+        max_age: None, s_maxage: None,
+        stale_while_revalidate: None, stale_if_error: None,
+        max_stale: None, min_fresh: None, only_if_cached: false,
+    }
+}
+
+@test
+fn test_cache_control_all_defaults_false_none() {
+    let cc = fresh_cc();
+    assert(!cc.no_cache);
+    assert(!cc.no_store);
+    assert(!cc.public_);
+    assert(!cc.private_);
+    assert(!cc.immutable);
+    assert(cc.max_age is None);
+    assert(cc.s_maxage is None);
+}
+
+@test
+fn test_cache_control_set_no_store() {
+    let mut cc = fresh_cc();
+    cc.no_store = true;
+    assert(cc.no_store);
+    assert(!cc.no_cache);
+}
+
+@test
+fn test_cache_control_set_max_age() {
+    let mut cc = fresh_cc();
+    cc.max_age = Some(3600_u64);
+    match cc.max_age {
+        Some(v) => assert_eq(v, 3600_u64),
+        None => panic("max_age should be Some"),
+    }
+}
+
+@test
+fn test_cache_control_set_s_maxage_overrides_for_shared() {
+    let mut cc = fresh_cc();
+    cc.max_age = Some(3600_u64);
+    cc.s_maxage = Some(7200_u64);
+    match cc.s_maxage {
+        Some(v) => assert_eq(v, 7200_u64),
+        None => panic("s_maxage should be Some"),
+    }
+}
+
+@test
+fn test_cache_control_immutable_flag() {
+    let mut cc = fresh_cc();
+    cc.immutable = true;
+    cc.max_age = Some(31536000_u64); // 1 year
+    assert(cc.immutable);
+}
+
+@test
+fn test_cache_control_no_cache_distinct_from_no_store() {
+    // RFC 9111 §5.2.2.4 vs §5.2.2.5 — semantically distinct
+    let mut a = fresh_cc();
+    let mut b = fresh_cc();
+    a.no_cache = true;
+    b.no_store = true;
+    assert(a.no_cache && !a.no_store);
+    assert(b.no_store && !b.no_cache);
+}
+
+@test
+fn test_cache_control_must_revalidate_flag() {
+    let mut cc = fresh_cc();
+    cc.must_revalidate = true;
+    assert(cc.must_revalidate);
+}
+
+@test
+fn test_cache_control_only_if_cached_request_directive() {
+    // Request-only directive
+    let mut cc = fresh_cc();
+    cc.only_if_cached = true;
+    assert(cc.only_if_cached);
+}
+
+@test
+fn test_cache_control_stale_directives() {
+    let mut cc = fresh_cc();
+    cc.stale_while_revalidate = Some(60_u64);
+    cc.stale_if_error = Some(300_u64);
+    match cc.stale_while_revalidate {
+        Some(v) => assert_eq(v, 60_u64),
+        None => panic("stale_while_revalidate should be Some"),
+    }
+    match cc.stale_if_error {
+        Some(v) => assert_eq(v, 300_u64),
+        None => panic("stale_if_error should be Some"),
+    }
+}
+
+// =============================================================================
+// Section 2: CacheControlError — Eq lattice
+// =============================================================================
+
+@test
+fn test_cache_control_error_malformed_eq() {
+    let a = CacheControlError.Malformed("test".clone());
+    let b = CacheControlError.Malformed("test".clone());
+    assert(a == b);
+}
+
+@test
+fn test_cache_control_error_malformed_disjoint_payloads() {
+    let a = CacheControlError.Malformed("x".clone());
+    let b = CacheControlError.Malformed("y".clone());
+    assert(!(a == b));
+}
+
+// =============================================================================
+// Section 3: MAX_CACHE_CONTROL_DIRECTIVES — DoS hardening
+// =============================================================================
+
+@test
+fn test_max_cache_control_directives_value() {
+    assert_eq(MAX_CACHE_CONTROL_DIRECTIVES, 64);
+}
+
+@test
+fn test_max_cache_control_directives_positive() {
+    assert(MAX_CACHE_CONTROL_DIRECTIVES > 0);
+}
+
+@test
+fn test_max_cache_control_directives_exceeds_typical() {
+    // Real-world Cache-Control carries ≤ 5 directives.
+    assert(MAX_CACHE_CONTROL_DIRECTIVES > 16);
+}
+
+// =============================================================================
+// Section 4: AgeInputs — §4.2.3 record fields
+// =============================================================================
+
+@test
+fn test_age_inputs_construction() {
+    let ai = AgeInputs {
+        now_unix:                1_700_000_100_u64,
+        date_header_unix:        1_700_000_000_u64,
+        response_received_unix:  1_700_000_050_u64,
+        request_unix:            1_700_000_100_u64,
+        age_header_sec:          0_u64,
+    };
+    assert_eq(ai.age_header_sec, 0_u64);
+}
+
+@test
+fn test_age_inputs_with_upstream_age_header() {
+    let ai = AgeInputs {
+        now_unix:                1_700_000_100_u64,
+        date_header_unix:        1_700_000_000_u64,
+        response_received_unix:  1_700_000_010_u64,
+        request_unix:            1_700_000_100_u64,
+        age_header_sec:          120_u64, // upstream reports 2-min cached
+    };
+    assert_eq(ai.age_header_sec, 120_u64);
+}
+
+// =============================================================================
+// Section 5: DecisionInputs — record construction
+// =============================================================================
+
+@test
+fn test_decision_inputs_construction() {
+    let ai = AgeInputs {
+        now_unix: 1_700_000_100_u64,
+        date_header_unix: 1_700_000_000_u64,
+        response_received_unix: 1_700_000_050_u64,
+        request_unix: 1_700_000_100_u64,
+        age_header_sec: 0_u64,
+    };
+    let di = DecisionInputs {
+        resp_cc: fresh_cc(),
+        age: ai,
+        expires_unix: None,
+        shared_cache: true,
+        upstream_error: false,
+    };
+    assert(di.shared_cache);
+    assert(!di.upstream_error);
+}
+
+// =============================================================================
+// Section 6: CacheDecision — 4-variant lattice
+// =============================================================================
+
+@test
+fn test_cache_decision_fresh_construction() {
+    let d = CacheDecision.Fresh(3600_u64);
+    assert(d is CacheDecision.Fresh);
+}
+
+@test
+fn test_cache_decision_stale_servable_construction() {
+    let d = CacheDecision.StaleServable(60_u64);
+    assert(d is CacheDecision.StaleServable);
+}
+
+@test
+fn test_cache_decision_must_revalidate_construction() {
+    let d = CacheDecision.MustRevalidate;
+    assert(d is CacheDecision.MustRevalidate);
+}
+
+@test
+fn test_cache_decision_must_not_cache_construction() {
+    let d = CacheDecision.MustNotCache;
+    assert(d is CacheDecision.MustNotCache);
+}
+
+@test
+fn test_cache_decision_disjoint_fresh_vs_stale_servable() {
+    let f = CacheDecision.Fresh(100_u64);
+    let s = CacheDecision.StaleServable(100_u64);
+    assert(f is CacheDecision.Fresh);
+    assert(s is CacheDecision.StaleServable);
+    assert(!(f is CacheDecision.StaleServable));
+    assert(!(s is CacheDecision.Fresh));
+}
+
+@test
+fn test_cache_decision_disjoint_must_revalidate_vs_must_not_cache() {
+    let r = CacheDecision.MustRevalidate;
+    let n = CacheDecision.MustNotCache;
+    assert(r is CacheDecision.MustRevalidate);
+    assert(n is CacheDecision.MustNotCache);
+    assert(!(r is CacheDecision.MustNotCache));
+    assert(!(n is CacheDecision.MustRevalidate));
+}

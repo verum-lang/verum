@@ -1,0 +1,111 @@
+// =============================================================================
+// core-tests/net/http_range/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN pins for HTTPRNG-1 — calling any of
+// `parse_range_header(&Text)`, `resolve_and_merge(&RangeSet, UInt64)`,
+// `encode_content_range(&ResolvedRange, UInt64)`, or
+// `encode_unsatisfiable(UInt64)` from a USER test module triggers
+// the precompile SIGSEGV class shared with CIDR-1 / URITPL-1.
+//
+// See `audit.md §3.1`.
+// =============================================================================
+
+mount core.net.http_range.{
+    parse_range_header, resolve_and_merge, encode_content_range,
+    encode_unsatisfiable, RangeSpec, RangeSet, ResolvedRange, RangeError
+};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// HTTPRNG-1 — parse_range_header SIGSEGV during precompile cascade
+// =============================================================================
+
+@ignore("HTTPRNG-1: parse_range_header SIGSEGV. See audit.md §3.1.")
+@test
+fn regression_parse_single_closed_range() {
+    let s = "bytes=0-499".clone();
+    assert(parse_range_header(&s).is_ok());
+}
+
+@ignore("HTTPRNG-1: parse_range_header SIGSEGV.")
+@test
+fn regression_parse_multi_range() {
+    let s = "bytes=0-499,600-899,1000-".clone();
+    assert(parse_range_header(&s).is_ok());
+}
+
+@ignore("HTTPRNG-1: parse_range_header SIGSEGV.")
+@test
+fn regression_parse_suffix_range() {
+    let s = "bytes=-500".clone();
+    assert(parse_range_header(&s).is_ok());
+}
+
+@ignore("HTTPRNG-1: parse_range_header SIGSEGV — wrong unit.")
+@test
+fn regression_parse_wrong_unit_rejects() {
+    let s = "items=0-1".clone();
+    match parse_range_header(&s) {
+        Ok(_) => panic("wrong unit must reject"),
+        Err(_) => assert(true),
+    }
+}
+
+@ignore("HTTPRNG-1: resolve_and_merge SIGSEGV.")
+@test
+fn regression_resolve_closed_in_range() {
+    let s = "bytes=0-499".clone();
+    let rs = parse_range_header(&s).unwrap();
+    match resolve_and_merge(&rs, 1234_u64) {
+        Ok(merged) => {
+            assert_eq(merged.len(), 1);
+            assert_eq(merged[0].start, 0_u64);
+            assert_eq(merged[0].end, 499_u64);
+        }
+        Err(_) => panic("expected resolved range"),
+    }
+}
+
+@ignore("HTTPRNG-1: resolve_and_merge SIGSEGV — overlapping merge.")
+@test
+fn regression_resolve_merge_overlapping() {
+    let s = "bytes=0-499,400-899".clone();
+    let rs = parse_range_header(&s).unwrap();
+    match resolve_and_merge(&rs, 1000_u64) {
+        Ok(merged) => {
+            assert_eq(merged.len(), 1);
+            assert_eq(merged[0].start, 0_u64);
+            assert_eq(merged[0].end, 899_u64);
+        }
+        Err(_) => panic("expected merged"),
+    }
+}
+
+@ignore("HTTPRNG-1: resolve_and_merge SIGSEGV — unsatisfiable.")
+@test
+fn regression_resolve_all_invalid_returns_unsatisfiable() {
+    let s = "bytes=2000-3000".clone();
+    let rs = parse_range_header(&s).unwrap();
+    match resolve_and_merge(&rs, 100_u64) {
+        Ok(_) => panic("all-invalid must surface UnsatisfiableRange"),
+        Err(e) => assert(e == RangeError.UnsatisfiableRange),
+    }
+}
+
+@ignore("HTTPRNG-1: encode_content_range SIGSEGV.")
+@test
+fn regression_encode_content_range_simple() {
+    let r = ResolvedRange { start: 0_u64, end: 499_u64 };
+    let h = encode_content_range(&r, 1234_u64);
+    let want = "bytes 0-499/1234".clone();
+    assert(h == want);
+}
+
+@ignore("HTTPRNG-1: encode_unsatisfiable SIGSEGV.")
+@test
+fn regression_encode_unsatisfiable_simple() {
+    let h = encode_unsatisfiable(1234_u64);
+    let want = "bytes */1234".clone();
+    assert(h == want);
+}

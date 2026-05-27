@@ -1,0 +1,80 @@
+// =============================================================================
+// core-tests/net/uri_template/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN pins for URITPL-1 — calling `UriTemplate.parse(&Text)` or
+// `UriTemplate.expand(&self, &Map<Text, TemplateValue>)` from a USER
+// test module triggers an LLVM-level SIGSEGV inside
+// `llvm::SmallVectorBase<unsigned long long>::grow_pod` during the
+// precompile cascade for `uri_template.vr`. Same crash signature
+// family as CIDR-1.
+//
+// See `audit.md §3.1` for diagnostic isolation. The data-surface
+// suite in `unit_test.vr` covers TemplateValue + UriTemplateError;
+// every `UriTemplate.*` functional pin in this file is @ignore'd
+// until URITPL-1 closes.
+// =============================================================================
+
+mount core.net.uri_template.{UriTemplate, UriTemplateError, TemplateValue};
+mount core.collections.map.{Map};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// URITPL-1 — UriTemplate.parse / expand SIGSEGV during precompile cascade
+// =============================================================================
+
+@ignore("URITPL-1: UriTemplate.parse SIGSEGVs in LLVM SmallVector. See audit.md §3.1.")
+@test
+fn regression_parse_literal_only() {
+    let s = "/users".clone();
+    assert(UriTemplate.parse(&s).is_ok());
+}
+
+@ignore("URITPL-1: UriTemplate.parse SIGSEGV. See audit.md §3.1.")
+@test
+fn regression_parse_simple_var() {
+    let s = "/users/{user}".clone();
+    assert(UriTemplate.parse(&s).is_ok());
+}
+
+@ignore("URITPL-1: UriTemplate.expand SIGSEGV through parse cascade. See audit.md §3.1.")
+@test
+fn regression_expand_simple_var() {
+    let s = "/users/{user}".clone();
+    let tpl = UriTemplate.parse(&s).unwrap();
+    let mut vars: Map<Text, TemplateValue> = Map.new();
+    vars.insert("user".clone(), TemplateValue.Str("alice".clone()));
+    let want = "/users/alice".clone();
+    assert(tpl.expand(&vars) == want);
+}
+
+@ignore("URITPL-1: parse SIGSEGV on form-query operator. See audit.md §3.1.")
+@test
+fn regression_parse_form_query_op() {
+    let s = "/users{?type,sort}".clone();
+    assert(UriTemplate.parse(&s).is_ok());
+}
+
+@ignore("URITPL-1: parse SIGSEGV on path-segment operator. See audit.md §3.1.")
+@test
+fn regression_parse_path_seg_op() {
+    let s = "/users{/id}".clone();
+    assert(UriTemplate.parse(&s).is_ok());
+}
+
+@ignore("URITPL-1: parse SIGSEGV on prefix modifier. See audit.md §3.1.")
+@test
+fn regression_parse_prefix_modifier() {
+    let s = "/users/{id:8}".clone();
+    assert(UriTemplate.parse(&s).is_ok());
+}
+
+@ignore("URITPL-1: parse SIGSEGV on error path. See audit.md §3.1.")
+@test
+fn regression_parse_unbalanced_open_brace_rejects() {
+    let s = "/users/{user".clone();
+    match UriTemplate.parse(&s) {
+        Ok(_) => panic("unbalanced { must reject"),
+        Err(e) => assert(e == UriTemplateError.UnbalancedBraces),
+    }
+}
