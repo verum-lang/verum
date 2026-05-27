@@ -482,7 +482,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// ```
     public fn get(&self, key: K) -> Maybe<V> {
         if self.cap == 0 {
-            return None;
+            return Maybe.None;
         }
 
         let hash = self.make_hash_val(key);
@@ -494,15 +494,15 @@ implement<K: Hash + Eq, V> Map<K, V> {
             let entry = unsafe { &*self.entries.offset(idx) };
 
             if entry.hash == 0 {
-                return None;
+                return Maybe.None;
             }
 
             if entry.hash > 0 && entry.hash == hash && entry.key == key {
-                return Some(entry.value);
+                return Maybe.Some(entry.value);
             }
 
             if entry.hash > 0 && psl > entry.psl {
-                return None;
+                return Maybe.None;
             }
 
             idx = (idx + 1) & mask;
@@ -523,7 +523,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     where K: Clone
     {
         if self.cap == 0 {
-            return None;
+            return Maybe.None;
         }
 
         let key_owned = (*key).clone();
@@ -539,15 +539,15 @@ implement<K: Hash + Eq, V> Map<K, V> {
             let entry = unsafe { &mut *self.entries.offset(idx) };
 
             if entry.hash == 0 {
-                return None;
+                return Maybe.None;
             }
 
             if entry.hash > 0 && entry.hash == hash && entry.key == *key {
-                return Some(unsafe { &mut (*self.entries.offset(idx)).value });
+                return Maybe.Some(unsafe { &mut (*self.entries.offset(idx)).value });
             }
 
             if entry.hash > 0 && psl > entry.psl {
-                return None;
+                return Maybe.None;
             }
 
             idx = (idx + 1) & mask;
@@ -574,8 +574,8 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// the fallback path is exactly the same as the Maybe-based API.
     public fn get_or(&self, key: K, default: V) -> V {
         match self.get(key) {
-            Some(value) => value,
-            None => default,
+            Maybe.Some(value) => value,
+            Maybe.None => default,
         }
     }
 
@@ -596,7 +596,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// ```
     public fn get_key_value(&self, key: &K) -> Maybe<(&K, &V)> {
         if self.cap == 0 {
-            return None;
+            return Maybe.None;
         }
 
         let hash = self.make_hash_val(*key);
@@ -608,22 +608,22 @@ implement<K: Hash + Eq, V> Map<K, V> {
             let entry = unsafe { &*self.entries.offset(idx) };
 
             if entry.hash == 0 {
-                return None;
+                return Maybe.None;
             }
 
             if entry.hash > 0 && entry.hash == hash && entry.key == *key {
-                return Some((&entry.key, &entry.value));
+                return Maybe.Some((&entry.key, &entry.value));
             }
 
             if entry.hash > 0 && psl > entry.psl {
-                return None;
+                return Maybe.None;
             }
 
             psl = psl + 1;
             idx = (idx + 1) & mask;
 
             if psl > self.cap {
-                return None;
+                return Maybe.None;
             }
         }
     }
