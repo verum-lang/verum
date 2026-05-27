@@ -737,7 +737,7 @@ implement<T: Ord> Iterator for HeapDrain<T> {
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (self.heap.len(), Some(self.heap.len()))
+        (self.heap.len(), Maybe.Some(self.heap.len()))
     }
 }
 
@@ -764,7 +764,7 @@ implement<T: Ord> Iterator for HeapDrainSorted<T> {
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (self.heap.len(), Some(self.heap.len()))
+        (self.heap.len(), Maybe.Some(self.heap.len()))
     }
 }
 
@@ -791,7 +791,7 @@ implement<T: Ord> Iterator for HeapIntoIter<T> {
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (self.data.len(), Some(self.data.len()))
+        (self.data.len(), Maybe.Some(self.data.len()))
     }
 }
 
@@ -1039,7 +1039,7 @@ where T: Clone
 public fn list_heap_sort<T: Ord>(list: &mut List<T>) {
     let mut heap = BinaryHeap.from_list(list.clone());
     list.clear();
-    while let Some(v) = heap.pop() {
+    while let Maybe.Some(v) = heap.pop() {
         list.push(v);
     }
     list.reverse();
