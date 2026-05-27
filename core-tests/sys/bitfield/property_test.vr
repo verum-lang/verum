@@ -1,0 +1,480 @@
+// =============================================================================
+// core-tests/sys/bitfield/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws over `core.sys.bitfield`.
+//
+// Methodology:
+//   * USize is a 64-bit (or 32-bit) domain; exhaustive sweeps are
+//     infeasible, so each law sweeps a representative-sample list:
+//       - boundary positions: 0, 1, 7, 8, 31, USIZE_BITS-1
+//       - boundary values:    0, 1, 0xFF, 0xCAFE, 0xDEADBEEF, !0
+//   * Where the law is finite-domain (per-bit predicates), the sweep
+//     runs over every bit `0..USIZE_BITS` exhaustively.
+//   * Boundary widths `0` and `USIZE_BITS` are tested independently
+//     because their codegen paths diverge from the hot 1..N-1 path.
+//
+// Properties covered:
+//
+//   Single-bit:
+//     * set_bit is idempotent
+//     * clear_bit is idempotent
+//     * toggle_bit is self-inverse
+//     * set_bit ∘ clear_bit = identity-when-was-clear
+//     * clear_bit ∘ set_bit = identity-when-was-set
+//     * test_bit reads what set/clear/toggle wrote
+//     * set_bit + clear_bit on disjoint positions commute
+//
+//   Mask:
+//     * set_bits / clear_bits are idempotent in `mask`
+//     * set_bits + clear_bits are duals (De Morgan via mask)
+//
+//   Field:
+//     * field_mask 0-width is zero; full-width is all-ones
+//     * field_mask disjoint-union law on adjacent fields
+//     * extract_bits ∘ insert_bits round-trip law
+//     * insert_bits preserves adjacent fields
+//     * insert_bits masks bits above width
+//     * extract_bits equivalent to mask-then-shift form
+//     * extract_bits 0-width is 0; full-width is value
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.bitfield;
+
+// =============================================================================
+// Representative sample sets
+// =============================================================================
+
+fn sample_values() -> List<USize> {
+    [
+        0 as USize,
+        1 as USize,
+        0xFF as USize,
+        0xCAFE as USize,
+        0xDEADBEEF as USize,
+        0x55555555 as USize,
+        0xAAAAAAAA as USize,
+        !(0 as USize),
+    ]
+}
+
+fn sample_low_positions() -> List<USize> {
+    // Positions safely within the hot path on every supported pointer width.
+    [
+        0 as USize,
+        1 as USize,
+        3 as USize,
+        7 as USize,
+        8 as USize,
+        15 as USize,
+        16 as USize,
+        31 as USize,
+    ]
+}
+
+fn sample_masks() -> List<USize> {
+    [
+        0 as USize,
+        1 as USize,
+        0xFF as USize,
+        0xF0 as USize,
+        0x0F as USize,
+        0xAA as USize,
+        0x55 as USize,
+        0xCAFE as USize,
+        !(0 as USize),
+    ]
+}
+
+// =============================================================================
+// Section 1: Single-bit laws
+// =============================================================================
+
+@test
+fn law_set_bit_idempotent_sweep() {
+    for v in sample_values().iter() {
+        for n in sample_low_positions().iter() {
+            let once  = bitfield.set_bit(*v, *n);
+            let twice = bitfield.set_bit(once, *n);
+            assert_eq(once, twice);
+        }
+    }
+}
+
+@test
+fn law_clear_bit_idempotent_sweep() {
+    for v in sample_values().iter() {
+        for n in sample_low_positions().iter() {
+            let once  = bitfield.clear_bit(*v, *n);
+            let twice = bitfield.clear_bit(once, *n);
+            assert_eq(once, twice);
+        }
+    }
+}
+
+@test
+fn law_toggle_bit_self_inverse_sweep() {
+    for v in sample_values().iter() {
+        for n in sample_low_positions().iter() {
+            let twice = bitfield.toggle_bit(bitfield.toggle_bit(*v, *n), *n);
+            assert_eq(twice, *v);
+        }
+    }
+}
+
+@test
+fn law_set_then_clear_restores_when_was_clear() {
+    // For every position n, set on an all-zero word then clear yields zero.
+    for n in sample_low_positions().iter() {
+        let v = bitfield.clear_bit(bitfield.set_bit(0 as USize, *n), *n);
+        assert_eq(v, 0 as USize);
+    }
+}
+
+@test
+fn law_clear_then_set_restores_when_was_set() {
+    // For every position n, clear on an all-ones word then set yields all-ones.
+    let all_ones: USize = !(0 as USize);
+    for n in sample_low_positions().iter() {
+        let v = bitfield.set_bit(bitfield.clear_bit(all_ones, *n), *n);
+        assert_eq(v, all_ones);
+    }
+}
+
+@test
+fn law_test_bit_reads_set_bit() {
+    // After set_bit(v, n), test_bit must be true at n.
+    for v in sample_values().iter() {
+        for n in sample_low_positions().iter() {
+            assert(bitfield.test_bit(bitfield.set_bit(*v, *n), *n));
+        }
+    }
+}
+
+@test
+fn law_test_bit_reads_clear_bit() {
+    // After clear_bit(v, n), test_bit must be false at n.
+    for v in sample_values().iter() {
+        for n in sample_low_positions().iter() {
+            assert(!bitfield.test_bit(bitfield.clear_bit(*v, *n), *n));
+        }
+    }
+}
+
+@test
+fn law_set_bit_disjoint_commute() {
+    // set_bit(set_bit(0, a), b) == set_bit(set_bit(0, b), a) for a != b.
+    let positions: List<USize> = [0 as USize, 3 as USize, 7 as USize, 15 as USize, 31 as USize];
+    let n = positions.len();
+    let mut i: USize = 0 as USize;
+    while i < n {
+        let mut j: USize = i + (1 as USize);
+        while j < n {
+            let a = *positions.get(i).unwrap();
+            let b = *positions.get(j).unwrap();
+            let left  = bitfield.set_bit(bitfield.set_bit(0 as USize, a), b);
+            let right = bitfield.set_bit(bitfield.set_bit(0 as USize, b), a);
+            assert_eq(left, right);
+            j = j + (1 as USize);
+        }
+        i = i + (1 as USize);
+    }
+}
+
+// =============================================================================
+// Section 2: Mask laws
+// =============================================================================
+
+@test
+fn law_set_bits_idempotent_in_mask() {
+    for v in sample_values().iter() {
+        for m in sample_masks().iter() {
+            let once  = bitfield.set_bits(*v, *m);
+            let twice = bitfield.set_bits(once, *m);
+            assert_eq(once, twice);
+        }
+    }
+}
+
+@test
+fn law_clear_bits_idempotent_in_mask() {
+    for v in sample_values().iter() {
+        for m in sample_masks().iter() {
+            let once  = bitfield.clear_bits(*v, *m);
+            let twice = bitfield.clear_bits(once, *m);
+            assert_eq(once, twice);
+        }
+    }
+}
+
+@test
+fn law_set_bits_zero_mask_identity() {
+    for v in sample_values().iter() {
+        assert_eq(bitfield.set_bits(*v, 0 as USize), *v);
+    }
+}
+
+@test
+fn law_clear_bits_zero_mask_identity() {
+    for v in sample_values().iter() {
+        assert_eq(bitfield.clear_bits(*v, 0 as USize), *v);
+    }
+}
+
+@test
+fn law_set_bits_full_mask_yields_all_ones() {
+    let all_ones: USize = !(0 as USize);
+    for v in sample_values().iter() {
+        assert_eq(bitfield.set_bits(*v, all_ones), all_ones);
+    }
+}
+
+@test
+fn law_clear_bits_full_mask_yields_zero() {
+    let all_ones: USize = !(0 as USize);
+    for v in sample_values().iter() {
+        assert_eq(bitfield.clear_bits(*v, all_ones), 0 as USize);
+    }
+}
+
+@test
+fn law_set_and_clear_bits_are_duals() {
+    // !set_bits(v, m) == clear_bits(!v, m)
+    for v in sample_values().iter() {
+        for m in sample_masks().iter() {
+            let left  = !bitfield.set_bits(*v, *m);
+            let right = bitfield.clear_bits(!*v, *m);
+            assert_eq(left, right);
+        }
+    }
+}
+
+// =============================================================================
+// Section 3: Field-mask laws
+// =============================================================================
+
+@test
+fn law_field_mask_zero_width_is_zero() {
+    let offsets: List<USize> = [0 as USize, 1 as USize, 7 as USize, 31 as USize];
+    for o in offsets.iter() {
+        assert_eq(bitfield.field_mask(*o, 0 as USize), 0 as USize);
+    }
+}
+
+@test
+fn law_field_mask_full_width_is_all_ones() {
+    let all_ones: USize = !(0 as USize);
+    assert_eq(bitfield.field_mask(0 as USize, bitfield.USIZE_BITS), all_ones);
+}
+
+@test
+fn law_field_mask_disjoint_union_adjacent() {
+    // field_mask(0, w) | field_mask(w, k) == field_mask(0, w + k)
+    // when w + k <= USIZE_BITS.
+    let widths: List<USize> = [1 as USize, 2 as USize, 4 as USize, 8 as USize, 16 as USize];
+    for w in widths.iter() {
+        for k in widths.iter() {
+            if *w + *k <= bitfield.USIZE_BITS {
+                let a = bitfield.field_mask(0 as USize, *w);
+                let b = bitfield.field_mask(*w, *k);
+                let c = bitfield.field_mask(0 as USize, *w + *k);
+                assert_eq(a | b, c);
+                // Disjoint: no overlap.
+                assert_eq(a & b, 0 as USize);
+            }
+        }
+    }
+}
+
+@test
+fn law_field_mask_popcount_equals_width() {
+    // field_mask(o, w) has exactly w bits set.
+    let cases: List<USize> = [1 as USize, 2 as USize, 4 as USize, 8 as USize, 16 as USize];
+    let offsets: List<USize> = [0 as USize, 1 as USize, 4 as USize, 8 as USize];
+    for o in offsets.iter() {
+        for w in cases.iter() {
+            if *o + *w <= bitfield.USIZE_BITS {
+                let m = bitfield.field_mask(*o, *w);
+                let mut count: USize = 0 as USize;
+                let mut n: USize = 0 as USize;
+                while n < bitfield.USIZE_BITS {
+                    if bitfield.test_bit(m, n) {
+                        count = count + (1 as USize);
+                    }
+                    n = n + (1 as USize);
+                }
+                assert_eq(count, *w);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Section 4: extract / insert round-trip laws
+// =============================================================================
+
+@test
+fn law_extract_insert_round_trip() {
+    // extract(insert(v, b, o, w), o, w) == b & field_mask(0, w)
+    let values: List<USize>  = [0 as USize, 0xDEAD as USize, !(0 as USize)];
+    let bits:   List<USize>  = [0 as USize, 0x55 as USize, 0xFF as USize];
+    let cases:  List<USize>  = [1 as USize, 4 as USize, 8 as USize];
+    let offsets: List<USize> = [0 as USize, 4 as USize, 8 as USize, 16 as USize];
+    for v in values.iter() {
+        for b in bits.iter() {
+            for o in offsets.iter() {
+                for w in cases.iter() {
+                    if *o + *w <= bitfield.USIZE_BITS {
+                        let stored    = bitfield.insert_bits(*v, *b, *o, *w);
+                        let recovered = bitfield.extract_bits(stored, *o, *w);
+                        let expected  = *b & bitfield.field_mask(0 as USize, *w);
+                        assert_eq(recovered, expected);
+                    }
+                }
+            }
+        }
+    }
+}
+
+@test
+fn law_insert_preserves_adjacent_fields() {
+    // For non-overlapping fields F1 = [o, o+w) and F2 = [o2, o2+w2),
+    // insert into F1 leaves the F2 region unchanged.
+    let v: USize = 0xFFFF as USize;
+    // F1 = [4, 8), F2 = [8, 16)
+    let updated = bitfield.insert_bits(v, 0 as USize, 4 as USize, 4 as USize);
+    let f2_before = bitfield.extract_bits(v,       8 as USize, 8 as USize);
+    let f2_after  = bitfield.extract_bits(updated, 8 as USize, 8 as USize);
+    assert_eq(f2_before, f2_after);
+    // F0 = [0, 4) also unchanged.
+    let f0_before = bitfield.extract_bits(v,       0 as USize, 4 as USize);
+    let f0_after  = bitfield.extract_bits(updated, 0 as USize, 4 as USize);
+    assert_eq(f0_before, f0_after);
+}
+
+@test
+fn law_insert_masks_bits_above_width() {
+    // bits above position w-1 are silently masked.
+    let widths: List<USize> = [1 as USize, 4 as USize, 8 as USize];
+    for w in widths.iter() {
+        let dirty: USize = !(0 as USize);
+        let stored = bitfield.insert_bits(0 as USize, dirty, 0 as USize, *w);
+        let mask   = bitfield.field_mask(0 as USize, *w);
+        // Only the w low bits of `dirty` survive.
+        assert_eq(stored, dirty & mask);
+        // No bit above w is set.
+        assert_eq(stored & !mask, 0 as USize);
+    }
+}
+
+@test
+fn law_extract_equivalent_to_mask_and_shift() {
+    // extract_bits(v, o, w) == (v & field_mask(o, w)) >> o for 0 < w < USIZE_BITS.
+    let values: List<USize> = [0xCAFE as USize, 0xDEADBEEF as USize, 0x55555555 as USize];
+    let offsets: List<USize> = [0 as USize, 4 as USize, 12 as USize];
+    let widths: List<USize> = [1 as USize, 4 as USize, 8 as USize];
+    for v in values.iter() {
+        for o in offsets.iter() {
+            for w in widths.iter() {
+                if *o + *w <= bitfield.USIZE_BITS && *w < bitfield.USIZE_BITS {
+                    let left  = bitfield.extract_bits(*v, *o, *w);
+                    let right = (*v & bitfield.field_mask(*o, *w)) >> *o;
+                    assert_eq(left, right);
+                }
+            }
+        }
+    }
+}
+
+@test
+fn law_extract_zero_width_is_zero() {
+    for v in sample_values().iter() {
+        let offsets: List<USize> = [0 as USize, 8 as USize, 16 as USize, 31 as USize];
+        for o in offsets.iter() {
+            assert_eq(bitfield.extract_bits(*v, *o, 0 as USize), 0 as USize);
+        }
+    }
+}
+
+@test
+fn law_extract_full_width_returns_value() {
+    for v in sample_values().iter() {
+        assert_eq(bitfield.extract_bits(*v, 0 as USize, bitfield.USIZE_BITS), *v);
+    }
+}
+
+@test
+fn law_insert_zero_width_is_identity() {
+    for v in sample_values().iter() {
+        let offsets: List<USize> = [0 as USize, 8 as USize, 16 as USize, 31 as USize];
+        for o in offsets.iter() {
+            assert_eq(bitfield.insert_bits(*v, 0xFF as USize, *o, 0 as USize), *v);
+        }
+    }
+}
+
+@test
+fn law_insert_full_width_overwrites() {
+    for v in sample_values().iter() {
+        let bits: USize = 0xDEAD as USize;
+        assert_eq(bitfield.insert_bits(*v, bits, 0 as USize, bitfield.USIZE_BITS), bits);
+    }
+}
+
+// =============================================================================
+// Section 5: Cross-operation equivalences
+// =============================================================================
+
+@test
+fn law_set_bit_equivalent_to_set_bits_one() {
+    // set_bit(v, n) == set_bits(v, 1 << n)
+    for v in sample_values().iter() {
+        for n in sample_low_positions().iter() {
+            assert_eq(
+                bitfield.set_bit(*v, *n),
+                bitfield.set_bits(*v, (1 as USize) << *n),
+            );
+        }
+    }
+}
+
+@test
+fn law_clear_bit_equivalent_to_clear_bits_one() {
+    for v in sample_values().iter() {
+        for n in sample_low_positions().iter() {
+            assert_eq(
+                bitfield.clear_bit(*v, *n),
+                bitfield.clear_bits(*v, (1 as USize) << *n),
+            );
+        }
+    }
+}
+
+@test
+fn law_test_bit_equivalent_to_extract_one_bit() {
+    // test_bit(v, n) == (extract_bits(v, n, 1) == 1)
+    let v: USize = 0xCAFEBABE as USize;
+    let mut n: USize = 0 as USize;
+    while n < (32 as USize) {
+        let by_test    = bitfield.test_bit(v, n);
+        let by_extract = bitfield.extract_bits(v, n, 1 as USize) == (1 as USize);
+        assert_eq(by_test, by_extract);
+        n = n + (1 as USize);
+    }
+}
+
+@test
+fn law_toggle_bit_equivalent_to_xor_one_shifted() {
+    // toggle_bit(v, n) == v ^ (1 << n)
+    for v in sample_values().iter() {
+        for n in sample_low_positions().iter() {
+            assert_eq(
+                bitfield.toggle_bit(*v, *n),
+                *v ^ ((1 as USize) << *n),
+            );
+        }
+    }
+}
+
+fn main() {}

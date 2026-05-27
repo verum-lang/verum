@@ -140,6 +140,25 @@ No other Rust-side hardcodes for the new free functions surfaced.
 
 ## Action items
 
+### Landed in 2026-05-27 conformance refresh
+
+* **`property_test.vr` shipped (31 algebraic laws across 5 sections)**:
+  single-bit idempotence / self-inverse / disjoint commutation; mask
+  idempotence / dual-via-complement laws; field-mask zero-width / full-
+  width / disjoint-union / popcount-equals-width; extract ∘ insert
+  round-trip with adjacent-field independence and above-width masking;
+  cross-operation equivalences (set_bit ↔ set_bits-1, toggle ↔ xor-1,
+  test ↔ extract-1). Sweeps run over representative-sample USize and
+  position lists.
+* **`integration_test.vr` shipped (22 cross-stdlib scenarios across 9
+  sections)**: `BitfieldElement` round-trips for Bool / UInt8 / UInt16
+  / UInt32 / UInt64; `BIT_WIDTH` protocol-constant pinning; free-
+  function primitives composed with `List<(USize, USize, USize)>`
+  field-packing; `test_bit` via List-iter `filter`/`map`/`collect`
+  combinator chain; popcount loop pinned against analytic byte
+  patterns; `Endianness` variant trio exhaustively pattern-matched
+  through `Maybe<Endianness>`; USIZE_BITS ↔ type-property drift pin.
+
 ### Landed in this branch
 
 * **Bit-manipulation primitives canonicalised in `core.sys.bitfield`**:
