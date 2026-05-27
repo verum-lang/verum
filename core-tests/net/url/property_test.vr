@@ -1,0 +1,387 @@
+// =============================================================================
+// core-tests/net/url/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core/net/url.vr`:
+//
+//   * percent_decode(percent_encode(x)) == x over alphanumerics,
+//     reserved RFC 3986 §2.2 characters, and multibyte UTF-8.
+//   * percent_decode of a safe-encoded value reproduces the original.
+//   * UrlErrorKind 6-variant Eq reflexivity + pairwise disjointness
+//     (MissingScheme / InvalidScheme / InvalidAuthority / InvalidPort
+//     / InvalidPercentEscape / UrlTooLong).
+//   * Url.parse accepts http / https / ftp / file schemes.
+//   * Url.parse canonicalises scheme to lowercase (RFC 3986 §3.1).
+//   * Url.parse on "" returns Err with MissingScheme.
+//   * Url.parse on input > MAX_URL_LENGTH_BYTES returns Err with
+//     UrlTooLong.
+//   * MAX_URL_LENGTH_BYTES == 65536.
+//
+// IMPORTANT: tests use `assert(field == "literal".clone())` rather
+// than `assert_eq(field.as_str(), "literal")` — URL-1 is a stdlib
+// codegen defect where `Text` derived via `Text.slice` is length-
+// tracked but pointer-corrupted. See `audit.md §3.1`.
+// =============================================================================
+
+mount core.net.url.{Url, UrlError, UrlErrorKind, percent_encode, percent_decode, MAX_URL_LENGTH_BYTES};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: percent_encode ∘ percent_decode = identity — alphanumerics
+// =============================================================================
+
+@test
+fn prop_percent_round_trip_lowercase_alpha() {
+    let s = "abcdefghijklmnopqrstuvwxyz".clone();
+    let e = percent_encode(&s);
+    let d = percent_decode(&e).unwrap();
+    assert(d == s);
+}
+
+@test
+fn prop_percent_round_trip_uppercase_alpha() {
+    let s = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".clone();
+    let e = percent_encode(&s);
+    let d = percent_decode(&e).unwrap();
+    assert(d == s);
+}
+
+@test
+fn prop_percent_round_trip_digits() {
+    let s = "0123456789".clone();
+    let e = percent_encode(&s);
+    let d = percent_decode(&e).unwrap();
+    assert(d == s);
+}
+
+// =============================================================================
+// Section 2: percent_encode ∘ percent_decode = identity — reserved set
+// =============================================================================
+
+@test
+fn prop_percent_round_trip_reserved_gendelims() {
+    // RFC 3986 §2.2 gen-delims = ":" / "/" / "?" / "#" / "[" / "]" / "@"
+    let s = ":/?#[]@".clone();
+    let e = percent_encode(&s);
+    let d = percent_decode(&e).unwrap();
+    assert(d == s);
+}
+
+@test
+fn prop_percent_round_trip_reserved_subdelims() {
+    // RFC 3986 §2.2 sub-delims = "!" / "$" / "&" / "'" / "(" / ")"
+    //                            / "*" / "+" / "," / ";" / "="
+    let s = "!$&'()*+,;=".clone();
+    let e = percent_encode(&s);
+    let d = percent_decode(&e).unwrap();
+    assert(d == s);
+}
+
+@test
+fn prop_percent_round_trip_full_reserved_corpus() {
+    // The full corpus from the task description.
+    let s = "aA0-9!*'();:@&=+$,/?#[]".clone();
+    let e = percent_encode(&s);
+    let d = percent_decode(&e).unwrap();
+    assert(d == s);
+}
+
+// =============================================================================
+// Section 3: percent_encode ∘ percent_decode = identity — UTF-8 multibyte
+// =============================================================================
+
+@test
+fn prop_percent_round_trip_utf8_latin1_supplement() {
+    // "héllo" — 'é' is U+00E9, two-byte UTF-8 sequence 0xC3 0xA9
+    let s = "héllo".clone();
+    let e = percent_encode(&s);
+    let d = percent_decode(&e).unwrap();
+    assert(d == s);
+}
+
+@test
+fn prop_percent_round_trip_utf8_cjk() {
+    // CJK Unified Ideographs — three-byte UTF-8 sequences
+    let s = "日本".clone();
+    let e = percent_encode(&s);
+    let d = percent_decode(&e).unwrap();
+    assert(d == s);
+}
+
+@test
+fn prop_percent_round_trip_utf8_emoji() {
+    // Emoji — four-byte UTF-8 sequence U+1F600 → 0xF0 0x9F 0x98 0x80
+    let s = "smile-😀".clone();
+    let e = percent_encode(&s);
+    let d = percent_decode(&e).unwrap();
+    assert(d == s);
+}
+
+// =============================================================================
+// Section 4: percent_decode of safe-encoded matches original
+// =============================================================================
+
+@test
+fn prop_percent_decode_safe_space() {
+    // "%20" decodes to " " (RFC 3986 §2.1)
+    let s = "%20".clone();
+    let want = " ".clone();
+    match percent_decode(&s) {
+        Ok(d) => assert(d == want),
+        Err(_) => panic("%20 must decode to space"),
+    }
+}
+
+@test
+fn prop_percent_decode_safe_slash() {
+    let s = "%2F".clone();
+    let want = "/".clone();
+    match percent_decode(&s) {
+        Ok(d) => assert(d == want),
+        Err(_) => panic("%2F must decode to /"),
+    }
+}
+
+@test
+fn prop_percent_decode_safe_percent_itself() {
+    let s = "%25".clone();
+    let want = "%".clone();
+    match percent_decode(&s) {
+        Ok(d) => assert(d == want),
+        Err(_) => panic("%25 must decode to %"),
+    }
+}
+
+// =============================================================================
+// Section 5: UrlErrorKind 6-variant Eq reflexivity
+// =============================================================================
+
+@test
+fn prop_url_error_kind_eq_missing_scheme_reflexive() {
+    assert(UrlErrorKind.MissingScheme == UrlErrorKind.MissingScheme);
+}
+
+@test
+fn prop_url_error_kind_eq_invalid_scheme_reflexive() {
+    assert(UrlErrorKind.InvalidScheme == UrlErrorKind.InvalidScheme);
+}
+
+@test
+fn prop_url_error_kind_eq_invalid_authority_reflexive() {
+    assert(UrlErrorKind.InvalidAuthority == UrlErrorKind.InvalidAuthority);
+}
+
+@test
+fn prop_url_error_kind_eq_invalid_port_reflexive() {
+    assert(UrlErrorKind.InvalidPort == UrlErrorKind.InvalidPort);
+}
+
+@test
+fn prop_url_error_kind_eq_invalid_percent_escape_reflexive() {
+    assert(UrlErrorKind.InvalidPercentEscape == UrlErrorKind.InvalidPercentEscape);
+}
+
+@test
+fn prop_url_error_kind_eq_url_too_long_reflexive() {
+    assert(UrlErrorKind.UrlTooLong == UrlErrorKind.UrlTooLong);
+}
+
+// =============================================================================
+// Section 6: UrlErrorKind pairwise disjointness — 15 pairs across 6 variants
+// =============================================================================
+
+@test
+fn prop_url_error_kind_disjoint_missing_vs_invalid_scheme() {
+    assert(!(UrlErrorKind.MissingScheme == UrlErrorKind.InvalidScheme));
+}
+
+@test
+fn prop_url_error_kind_disjoint_missing_vs_invalid_authority() {
+    assert(!(UrlErrorKind.MissingScheme == UrlErrorKind.InvalidAuthority));
+}
+
+@test
+fn prop_url_error_kind_disjoint_missing_vs_invalid_port() {
+    assert(!(UrlErrorKind.MissingScheme == UrlErrorKind.InvalidPort));
+}
+
+@test
+fn prop_url_error_kind_disjoint_missing_vs_percent_escape() {
+    assert(!(UrlErrorKind.MissingScheme == UrlErrorKind.InvalidPercentEscape));
+}
+
+@test
+fn prop_url_error_kind_disjoint_missing_vs_url_too_long() {
+    assert(!(UrlErrorKind.MissingScheme == UrlErrorKind.UrlTooLong));
+}
+
+@test
+fn prop_url_error_kind_disjoint_invalid_scheme_vs_authority() {
+    assert(!(UrlErrorKind.InvalidScheme == UrlErrorKind.InvalidAuthority));
+}
+
+@test
+fn prop_url_error_kind_disjoint_invalid_scheme_vs_port() {
+    assert(!(UrlErrorKind.InvalidScheme == UrlErrorKind.InvalidPort));
+}
+
+@test
+fn prop_url_error_kind_disjoint_invalid_scheme_vs_percent_escape() {
+    assert(!(UrlErrorKind.InvalidScheme == UrlErrorKind.InvalidPercentEscape));
+}
+
+@test
+fn prop_url_error_kind_disjoint_invalid_scheme_vs_url_too_long() {
+    assert(!(UrlErrorKind.InvalidScheme == UrlErrorKind.UrlTooLong));
+}
+
+@test
+fn prop_url_error_kind_disjoint_authority_vs_port() {
+    assert(!(UrlErrorKind.InvalidAuthority == UrlErrorKind.InvalidPort));
+}
+
+@test
+fn prop_url_error_kind_disjoint_authority_vs_percent_escape() {
+    assert(!(UrlErrorKind.InvalidAuthority == UrlErrorKind.InvalidPercentEscape));
+}
+
+@test
+fn prop_url_error_kind_disjoint_authority_vs_url_too_long() {
+    assert(!(UrlErrorKind.InvalidAuthority == UrlErrorKind.UrlTooLong));
+}
+
+@test
+fn prop_url_error_kind_disjoint_port_vs_percent_escape() {
+    assert(!(UrlErrorKind.InvalidPort == UrlErrorKind.InvalidPercentEscape));
+}
+
+@test
+fn prop_url_error_kind_disjoint_port_vs_url_too_long() {
+    assert(!(UrlErrorKind.InvalidPort == UrlErrorKind.UrlTooLong));
+}
+
+@test
+fn prop_url_error_kind_disjoint_percent_escape_vs_url_too_long() {
+    assert(!(UrlErrorKind.InvalidPercentEscape == UrlErrorKind.UrlTooLong));
+}
+
+// =============================================================================
+// Section 7: Url.parse accepts common schemes — http / https / ftp / file
+// =============================================================================
+
+@test
+fn prop_url_parse_http_scheme_isok() {
+    let s = "http://example.com/".clone();
+    assert(Url.parse(&s).is_ok());
+}
+
+@test
+fn prop_url_parse_https_scheme_isok() {
+    let s = "https://example.com/".clone();
+    assert(Url.parse(&s).is_ok());
+}
+
+@test
+fn prop_url_parse_ftp_scheme_isok() {
+    let s = "ftp://example.com/".clone();
+    assert(Url.parse(&s).is_ok());
+}
+
+@test
+fn prop_url_parse_file_scheme_isok() {
+    // file:///path — empty host with rootless path
+    let s = "file:///etc/hosts".clone();
+    assert(Url.parse(&s).is_ok());
+}
+
+// =============================================================================
+// Section 8: Url.parse normalises scheme to lowercase (RFC 3986 §3.1)
+// =============================================================================
+
+@test
+fn prop_url_parse_scheme_lowercased_https() {
+    let s = "HTTPS://example.com/".clone();
+    let want = "https".clone();
+    match Url.parse(&s) {
+        Ok(u) => assert(u.scheme == want),
+        Err(_) => panic("HTTPS:// should parse"),
+    }
+}
+
+@test
+fn prop_url_parse_scheme_lowercased_http_mixed() {
+    let s = "HtTp://example.com/".clone();
+    let want = "http".clone();
+    match Url.parse(&s) {
+        Ok(u) => assert(u.scheme == want),
+        Err(_) => panic("HtTp:// should parse"),
+    }
+}
+
+@test
+fn prop_url_parse_scheme_lowercased_ftp_caps() {
+    let s = "FTP://server/".clone();
+    let want = "ftp".clone();
+    match Url.parse(&s) {
+        Ok(u) => assert(u.scheme == want),
+        Err(_) => panic("FTP:// should parse"),
+    }
+}
+
+// =============================================================================
+// Section 9: Url.parse rejects empty input with MissingScheme
+// =============================================================================
+
+@test
+fn prop_url_parse_empty_returns_err() {
+    let s = "".clone();
+    assert(Url.parse(&s).is_err());
+}
+
+@test
+fn prop_url_parse_empty_error_kind_missing_scheme() {
+    let s = "".clone();
+    match Url.parse(&s) {
+        Ok(_) => panic("empty input must reject"),
+        Err(e) => assert(e.kind == UrlErrorKind.MissingScheme),
+    }
+}
+
+// =============================================================================
+// Section 10: Url.parse rejects > MAX_URL_LENGTH_BYTES with UrlTooLong
+// =============================================================================
+
+@test
+fn prop_url_parse_max_length_constant_is_65536() {
+    assert_eq(MAX_URL_LENGTH_BYTES, 65536);
+}
+
+@test
+fn prop_url_parse_oversized_input_rejects() {
+    // Build "http://" + 65530 'a' bytes + "/" — total > MAX_URL_LENGTH_BYTES.
+    // "a".repeat(65530) is a 65530-byte ASCII run; concat with "http://" and
+    // a trailing slash pushes total length comfortably past 64 KiB.
+    let prefix = "http://".clone();
+    let filler = "a".clone().repeat(65530);
+    let suffix = "/".clone();
+    let mut big = prefix;
+    big.push_str(&filler);
+    big.push_str(&suffix);
+    assert(big.len() > MAX_URL_LENGTH_BYTES);
+    assert(Url.parse(&big).is_err());
+}
+
+@test
+fn prop_url_parse_oversized_input_kind_url_too_long() {
+    let prefix = "http://".clone();
+    let filler = "a".clone().repeat(65530);
+    let suffix = "/".clone();
+    let mut big = prefix;
+    big.push_str(&filler);
+    big.push_str(&suffix);
+    match Url.parse(&big) {
+        Ok(_) => panic("URL > MAX_URL_LENGTH_BYTES must reject"),
+        Err(e) => assert(e.kind == UrlErrorKind.UrlTooLong),
+    }
+}

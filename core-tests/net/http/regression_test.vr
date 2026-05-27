@@ -1,0 +1,187 @@
+// =============================================================================
+// core-tests/net/http/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for `core/net/http.vr`.
+//
+// Active pins anchor RFC 7230 / 7231 stable behaviour:
+//
+//   * HTTP-1 Method 9-variant exhaustiveness (Get / Head / Post / Put
+//     / Delete / Connect / Options / Trace / Patch — RFC 7231 + RFC
+//     5789).
+//   * HTTP-2 StatusCode.new round-trip for canonical wire codes
+//     {100, 200, 301, 401, 404, 500}.
+//   * HTTP-3 Version.Http11 as_str is wire-stable "HTTP/1.1".
+//   * HTTP-4 Method.Post.has_body() == true, Method.Get.has_body() ==
+//     false (RFC 7230 §3.3).
+//
+// @ignore'd pins gated on the live transport / serializer harnesses:
+//
+//   * HTTP-5 HttpClient.get(&url) — needs TCP/TLS harness.
+//   * HTTP-6 HttpServer.bind — needs TcpListener harness.
+//   * HTTP-7 Request/Response wire-format round-trip serialize.
+// =============================================================================
+
+mount core.net.http.{Method, StatusCode, Version, Headers, Request, Response};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// HTTP-1 — Method 9-variant exhaustiveness (RFC 7231 + RFC 5789)
+// =============================================================================
+// Every IANA-registered HTTP method MUST be constructible. If a
+// variant disappears under a refactor this test fails to compile,
+// not to run — that's the intended regression coverage.
+
+@test
+fn regression_http_method_9_variant_exhaustive() {
+    let methods: List<Method> = [
+        Method.Get, Method.Head, Method.Post, Method.Put,
+        Method.Delete, Method.Connect, Method.Options,
+        Method.Trace, Method.Patch
+    ];
+    assert_eq(methods.len(), 9);
+}
+
+@test
+fn regression_http_method_get_is_get() {
+    let m = Method.Get;
+    assert(m is Method.Get);
+}
+
+@test
+fn regression_http_method_patch_is_patch() {
+    // RFC 5789 PATCH added later than the original RFC 2616 set.
+    let m = Method.Patch;
+    assert(m is Method.Patch);
+}
+
+@test
+fn regression_http_method_connect_is_connect() {
+    // CONNECT is the proxy tunnelling method.
+    let m = Method.Connect;
+    assert(m is Method.Connect);
+}
+
+// =============================================================================
+// HTTP-2 — StatusCode.new round-trip for canonical wire codes
+// =============================================================================
+// 100 / 200 / 301 / 401 / 404 / 500 are stable RFC 7231 wire values.
+
+@test
+fn regression_http_status_code_100_round_trip() {
+    let s = StatusCode.new(100);
+    assert_eq(s.code(), 100);
+}
+
+@test
+fn regression_http_status_code_200_round_trip() {
+    let s = StatusCode.new(200);
+    assert_eq(s.code(), 200);
+}
+
+@test
+fn regression_http_status_code_301_round_trip() {
+    let s = StatusCode.new(301);
+    assert_eq(s.code(), 301);
+}
+
+@test
+fn regression_http_status_code_401_round_trip() {
+    let s = StatusCode.new(401);
+    assert_eq(s.code(), 401);
+}
+
+@test
+fn regression_http_status_code_404_round_trip() {
+    let s = StatusCode.new(404);
+    assert_eq(s.code(), 404);
+}
+
+@test
+fn regression_http_status_code_500_round_trip() {
+    let s = StatusCode.new(500);
+    assert_eq(s.code(), 500);
+}
+
+// =============================================================================
+// HTTP-3 — Version.Http11.as_str() is wire-stable "HTTP/1.1"
+// =============================================================================
+// RFC 7230 §2.6 wire format. Drift would silently break every HTTP/1.1
+// peer that compares Version strings.
+
+@test
+fn regression_http_version_http11_as_str() {
+    assert_eq(Version.Http11.as_str(), "HTTP/1.1");
+}
+
+@test
+fn regression_http_version_http10_as_str() {
+    assert_eq(Version.Http10.as_str(), "HTTP/1.0");
+}
+
+@test
+fn regression_http_version_http2_as_str() {
+    assert_eq(Version.Http2.as_str(), "HTTP/2");
+}
+
+@test
+fn regression_http_version_http3_as_str() {
+    assert_eq(Version.Http3.as_str(), "HTTP/3");
+}
+
+// =============================================================================
+// HTTP-4 — Method.has_body() truth-table pinning (RFC 7230 §3.3)
+// =============================================================================
+
+@test
+fn regression_http_method_post_has_body_true() {
+    assert(Method.Post.has_body());
+}
+
+@test
+fn regression_http_method_get_has_body_false() {
+    assert(!Method.Get.has_body());
+}
+
+// =============================================================================
+// HTTP-5 — HttpClient.get(&url) live request (gated on harness)
+// =============================================================================
+
+@ignore("HTTP-5: HttpClient.get(&url) needs a TCP/TLS transport harness. See audit.md §5.")
+@test
+fn regression_http_client_get_dispatches() {
+    // Placeholder. Once the transport harness lands:
+    //   let client = HttpClient.new();
+    //   let url = "http://127.0.0.1:0/health".clone();
+    //   let resp = client.get(&url).await.unwrap();
+    //   assert(resp.is_success());
+    assert(true);
+}
+
+// =============================================================================
+// HTTP-6 — HttpServer.bind (gated on TcpListener harness)
+// =============================================================================
+
+@ignore("HTTP-6: HttpServer.bind needs a TcpListener harness. See audit.md §5.")
+@test
+fn regression_http_server_bind_localhost_ephemeral() {
+    // Placeholder. Once the listener harness lands:
+    //   let server = HttpServer.bind("127.0.0.1:0".clone()).unwrap();
+    //   assert(server.is_listening());
+    assert(true);
+}
+
+// =============================================================================
+// HTTP-7 — Request / Response wire-format round-trip
+// =============================================================================
+
+@ignore("HTTP-7: Request / Response wire-format round-trip deferred. See audit.md §5.")
+@test
+fn regression_http_request_response_wire_round_trip() {
+    // Placeholder for the eventual:
+    //   let req = Request.new(Method.Get, "/index".clone());
+    //   let wire = serialize_request(&req);
+    //   let parsed = parse_request(&wire).unwrap();
+    //   assert(parsed.method == req.method && parsed.url == req.url);
+    assert(true);
+}

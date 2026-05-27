@@ -1,0 +1,140 @@
+// =============================================================================
+// core-tests/net/weft/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/weft/*` (~25 files) — Verum's typed HTTP framework. The
+// largest sub-tree under `core/net/`: handlers + extractors +
+// middleware + routing + arena-pooled buffer / connection management
+// + HTTP/1.1 + HTTP/2 + HTTP/3 + observability hooks.
+//
+// Tests cover the algebraic data-surface visible from a USER test
+// module:
+//
+//   * WeftErrorCategory 5-variant + default_status + is_retryable +
+//     Eq + variant disjointness (the retry / circuit-breaker
+//     classification axis).
+// =============================================================================
+
+mount core.net.weft.error.{WeftErrorCategory};
+mount core.net.http.{StatusCode};
+
+// =============================================================================
+// Section 1: WeftErrorCategory — 5-variant construction
+// =============================================================================
+
+@test
+fn test_weft_error_category_transient_construction() {
+    let c: WeftErrorCategory = WeftErrorCategory.ErrTransient;
+    assert(c is WeftErrorCategory.ErrTransient);
+}
+
+@test
+fn test_weft_error_category_permanent_construction() {
+    let c: WeftErrorCategory = WeftErrorCategory.ErrPermanent;
+    assert(c is WeftErrorCategory.ErrPermanent);
+}
+
+@test
+fn test_weft_error_category_security_construction() {
+    let c: WeftErrorCategory = WeftErrorCategory.ErrSecurity;
+    assert(c is WeftErrorCategory.ErrSecurity);
+}
+
+@test
+fn test_weft_error_category_client_construction() {
+    let c: WeftErrorCategory = WeftErrorCategory.ErrClient;
+    assert(c is WeftErrorCategory.ErrClient);
+}
+
+@test
+fn test_weft_error_category_upstream_construction() {
+    let c: WeftErrorCategory = WeftErrorCategory.ErrUpstream;
+    assert(c is WeftErrorCategory.ErrUpstream);
+}
+
+// =============================================================================
+// Section 2: WeftErrorCategory.default_status — StatusCode mapping
+// =============================================================================
+
+@test
+fn test_weft_transient_maps_to_503() {
+    assert_eq(WeftErrorCategory.ErrTransient.default_status().code(), 503);
+}
+
+@test
+fn test_weft_permanent_maps_to_500() {
+    assert_eq(WeftErrorCategory.ErrPermanent.default_status().code(), 500);
+}
+
+@test
+fn test_weft_security_maps_to_403() {
+    assert_eq(WeftErrorCategory.ErrSecurity.default_status().code(), 403);
+}
+
+@test
+fn test_weft_client_maps_to_400() {
+    assert_eq(WeftErrorCategory.ErrClient.default_status().code(), 400);
+}
+
+@test
+fn test_weft_upstream_maps_to_502() {
+    assert_eq(WeftErrorCategory.ErrUpstream.default_status().code(), 502);
+}
+
+// =============================================================================
+// Section 3: WeftErrorCategory.is_retryable — retry policy
+// =============================================================================
+
+@test
+fn test_weft_transient_is_retryable() {
+    assert(WeftErrorCategory.ErrTransient.is_retryable());
+}
+
+@test
+fn test_weft_upstream_is_retryable() {
+    assert(WeftErrorCategory.ErrUpstream.is_retryable());
+}
+
+@test
+fn test_weft_permanent_is_not_retryable() {
+    assert(!WeftErrorCategory.ErrPermanent.is_retryable());
+}
+
+@test
+fn test_weft_security_is_not_retryable() {
+    assert(!WeftErrorCategory.ErrSecurity.is_retryable());
+}
+
+@test
+fn test_weft_client_is_not_retryable() {
+    assert(!WeftErrorCategory.ErrClient.is_retryable());
+}
+
+// =============================================================================
+// Section 4: WeftErrorCategory — Eq lattice
+// =============================================================================
+
+@test
+fn test_weft_category_eq_transient() {
+    assert(WeftErrorCategory.ErrTransient == WeftErrorCategory.ErrTransient);
+}
+
+@test
+fn test_weft_category_eq_permanent() {
+    assert(WeftErrorCategory.ErrPermanent == WeftErrorCategory.ErrPermanent);
+}
+
+@test
+fn test_weft_category_disjoint_transient_vs_permanent() {
+    assert(!(WeftErrorCategory.ErrTransient == WeftErrorCategory.ErrPermanent));
+}
+
+@test
+fn test_weft_category_disjoint_security_vs_client() {
+    assert(!(WeftErrorCategory.ErrSecurity == WeftErrorCategory.ErrClient));
+}
+
+@test
+fn test_weft_category_disjoint_upstream_vs_permanent() {
+    assert(!(WeftErrorCategory.ErrUpstream == WeftErrorCategory.ErrPermanent));
+}
