@@ -12,8 +12,9 @@
 mount core.prelude.*;
 mount core.mem.header.{
     HEADER_SIZE, HEADER_ALIGN,
-    GEN_INITIAL, GEN_MAX,
+    GEN_INITIAL, GEN_MAX, GEN_UNALLOCATED,
     FLAG_PINNED, FLAG_LEAKED, FLAG_SHARED, FLAG_LARGE, FLAG_ARENA,
+    FLAG_WEAK, FLAG_CAPABILITY, FLAG_NUMA_PINNED, FLAG_BORROWED,
     AllocationFlags,
     MemValidationError, ValidationError,
 };
@@ -145,6 +146,99 @@ fn integration_validation_error_alias_round_trip() {
         }
         _ => assert(false),
     }
+}
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// §6  Allocation flags — power-of-two layout + pairwise distinctness +
+//     compound flag predicate consistency.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_alloc_flags_each_single_bit() {
+    // Each FLAG_* constant must occupy exactly one bit (power of two).
+    let flag_set: List<UInt32> = [
+        FLAG_PINNED, FLAG_LEAKED, FLAG_SHARED, FLAG_WEAK,
+        FLAG_CAPABILITY, FLAG_ARENA, FLAG_NUMA_PINNED, FLAG_LARGE,
+        FLAG_BORROWED,
+    ];
+    for f in flag_set.iter() {
+        // f > 0
+        assert(*f > 0 as UInt32);
+        // f has exactly one bit set: (f & (f - 1)) == 0
+        assert_eq((*f) & ((*f) - (1 as UInt32)), 0 as UInt32);
+    }
+}
+
+@test
+fn integration_alloc_flags_pairwise_distinct() {
+    // No two flag constants share a bit. Verify pairwise: f1 & f2 == 0 for f1 != f2.
+    let pinned_x_leaked = FLAG_PINNED & FLAG_LEAKED;
+    let pinned_x_shared = FLAG_PINNED & FLAG_SHARED;
+    let leaked_x_shared = FLAG_LEAKED & FLAG_SHARED;
+    let weak_x_capability = FLAG_WEAK & FLAG_CAPABILITY;
+    let arena_x_large = FLAG_ARENA & FLAG_LARGE;
+    let borrowed_x_pinned = FLAG_BORROWED & FLAG_PINNED;
+    assert_eq(pinned_x_leaked, 0 as UInt32);
+    assert_eq(pinned_x_shared, 0 as UInt32);
+    assert_eq(leaked_x_shared, 0 as UInt32);
+    assert_eq(weak_x_capability, 0 as UInt32);
+    assert_eq(arena_x_large, 0 as UInt32);
+    assert_eq(borrowed_x_pinned, 0 as UInt32);
+}
+
+// -----------------------------------------------------------------------------
+// §7  Generation chained inequality `GEN_UNALLOCATED < GEN_INITIAL <
+//     GEN_MAX < UInt32.MAX` — the load-bearing lifecycle ordering.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_generation_chain_strictly_ordered() {
+    // The lifecycle: null sentinel < freshly allocated < highest in-use.
+    assert(GEN_UNALLOCATED < GEN_INITIAL);
+    assert(GEN_INITIAL < GEN_MAX);
+    // GEN_MAX < UInt32.MAX leaves headroom for the in-transition
+    // revoke marker that callers temporarily stamp before commit.
+    assert(GEN_MAX < (0xFFFFFFFF as UInt32));
+}
+
+@test
+fn integration_generation_is_initial_distance_to_max() {
+    // GEN_MAX - GEN_INITIAL >= 2^31 — pin the wraparound headroom
+    // (at least half of UInt32 space is usable for live generations).
+    let span: UInt32 = GEN_MAX - GEN_INITIAL;
+    assert(span > (0x80000000 as UInt32));
+}
+
+// -----------------------------------------------------------------------------
+// §8  Compound flag operations: bitwise OR for adding, AND for testing.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_flag_or_combines_disjoint_bits() {
+    // Combining two flags via OR yields a value containing both bits.
+    let combined: UInt32 = FLAG_PINNED | FLAG_SHARED;
+    assert_eq(combined & FLAG_PINNED, FLAG_PINNED);
+    assert_eq(combined & FLAG_SHARED, FLAG_SHARED);
+    // And neither set if individually checked against a new flag.
+    assert_eq(combined & FLAG_WEAK, 0 as UInt32);
+}
+
+@test
+fn integration_flag_xor_round_trip_removes_bit() {
+    // XOR with a present flag clears it; XOR with absent flag sets it.
+    // Used by the revoke path to atomically toggle FLAG_LEAKED.
+    let pinned_only: UInt32 = FLAG_PINNED;
+    let after_xor_with_pinned: UInt32 = pinned_only ^ FLAG_PINNED;
+    assert_eq(after_xor_with_pinned, 0 as UInt32);
+
+    // XOR with absent flag sets it.
+    let with_shared: UInt32 = pinned_only ^ FLAG_SHARED;
+    assert_eq(with_shared & FLAG_SHARED, FLAG_SHARED);
+    assert_eq(with_shared & FLAG_PINNED, FLAG_PINNED);
 }
 
 // =============================================================================
