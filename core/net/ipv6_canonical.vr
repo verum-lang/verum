@@ -130,9 +130,15 @@ public fn format_ipv6(addr: &Ipv6Addr) -> Text {
 }
 
 /// Parse `text` into an Ipv6Addr. Shorthand alias over
-/// `Ipv6Addr.parse`.
+/// `Ipv6Addr.parse`. Closure-free dispatch (`match` instead of
+/// `.map_err(|...|...)`) — see CIDR-1 / URL-1 / URITPL-1 defect
+/// class: closure-desugaring through stdlib Result chains triggers
+/// the precompile-cascade SIGSEGV.
 public fn parse(text: &Text) -> Result<Ipv6Addr, Ipv6CanonicalError> {
-    Ipv6Addr.parse(text).map_err(|e| Ipv6CanonicalError.ParseFailed(e))
+    match Ipv6Addr.parse(text) {
+        Ok(addr) => Ok(addr),
+        Err(e)   => Err(Ipv6CanonicalError.ParseFailed(e)),
+    }
 }
 
 /// Parse + re-emit — the "normalise this text" one-call form.

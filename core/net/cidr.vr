@@ -120,9 +120,15 @@ public fn parse(text: &Text) -> Result<Cidr, CidrError> {
     let addr_text = slice_text(b, 0, slash);
     let len_text = slice_text(b, slash + 1, b.len());
 
-    // Parse prefix length.
-    let prefix_len = parse_int(len_text.as_bytes())
-        .ok_or_else(|| CidrError.Malformed(Text.from("bad prefix len")))?;
+    // Parse prefix length — closure-free dispatch. The previous
+    // `.ok_or_else(|| ...)?` chain triggered the CIDR-1 precompile-
+    // cascade SIGSEGV class (LLVM SmallVector::grow_pod during
+    // closure-desugaring through-Result `?` operator). Inline the
+    // match for closure-free codegen.
+    let prefix_len: Int = match parse_int(len_text.as_bytes()) {
+        Maybe.Some(v) => v,
+        Maybe.None    => return Err(CidrError.Malformed(Text.from("bad prefix len"))),
+    };
 
     // Try IPv4, then IPv6.
     match Ipv4Addr.parse(&addr_text) {
