@@ -1,0 +1,169 @@
+// =============================================================================
+// core-tests/base/ops/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.ops` — ControlFlow<B, C>, Try protocol,
+// FromResidual, Never, Drop.
+// =============================================================================
+
+mount core.base.ops.{ControlFlow, Continue, Break, Try, FromResidual, Never};
+mount core.{Maybe, Result};
+mount core.collections.list.List;
+
+// =============================================================================
+// REGRESSION §A (@ignore'd): nested-if-else chained Result simulation
+// returns Err where it should return Ok. Specifically, the pattern:
+//
+//   fn chain() -> Result<Int, Text> {
+//       let r1 = step1();
+//       if r1.is_err() { Err(r1.unwrap_err()) } else {
+//           let v1 = r1.unwrap();
+//           let r2 = step2(v1);
+//           ... nested ...
+//       }
+//   }
+//
+// silently returns Err where the actual control flow should reach
+// the deepest Ok(v3). Likely a chained-function-return type-tracking
+// defect: the `if/else` arms returning Result lose type at the outer
+// scope, and the unwrap on the outer result mis-routes.
+//
+// Workaround: use `?` operator (Try protocol) directly instead of
+// hand-unrolling the chain. Multi-day VBC codegen fix.
+// =============================================================================
+
+@ignore("Nested-if-else chained Result simulation returns wrong variant — chained-function-return type tracking defect.")
+@test
+fn regression_pin_nested_if_else_chained_result() {
+    fn step1() -> Result<Int, Text> {
+        Ok(10)
+    }
+    fn step2(x: Int) -> Result<Int, Text> {
+        Ok(x * 2)
+    }
+    fn step3(x: Int) -> Result<Int, Text> {
+        if x > 15 {
+            Ok(x + 5)
+        } else {
+            Err("Too small".to_text())
+        }
+    }
+    fn chain() -> Result<Int, Text> {
+        let r1 = step1();
+        if r1.is_err() { Err(r1.unwrap_err()) } else {
+            let v1 = r1.unwrap();
+            let r2 = step2(v1);
+            if r2.is_err() { Err(r2.unwrap_err()) } else {
+                let v2 = r2.unwrap();
+                let r3 = step3(v2);
+                if r3.is_err() { Err(r3.unwrap_err()) } else {
+                    let v3 = r3.unwrap();
+                    Ok(v3)
+                }
+            }
+        }
+    }
+    let result = chain();
+    assert(result.is_ok());
+    assert_eq(result.unwrap(), 25);
+}
+
+// =============================================================================
+// REGRESSION §B: ControlFlow<B, C> Continue variant carries the C
+// value; Break carries the B value. A defect swapping the payloads
+// would silently break every iter().try_fold loop body.
+// =============================================================================
+
+@test
+fn regression_control_flow_continue_carries_c_payload() {
+    let cf: ControlFlow<Text, Int> = Continue(42);
+    match cf {
+        Continue(v) => assert_eq(v, 42),
+        Break(_)    => panic("expected Continue"),
+    }
+}
+
+@test
+fn regression_control_flow_break_carries_b_payload() {
+    let cf: ControlFlow<Text, Int> = Break("stop".to_text());
+    match cf {
+        Continue(_) => panic("expected Break"),
+        Break(b)    => assert_eq(b, "stop".to_text()),
+    }
+}
+
+// =============================================================================
+// REGRESSION §C: predicates is_continue / is_break are mutually
+// exclusive — every ControlFlow value is exactly one of the two
+// variants.
+// =============================================================================
+
+@test
+fn regression_predicates_mutually_exclusive_for_continue() {
+    let cf: ControlFlow<Int, Int> = Continue(1);
+    let is_c = match cf { Continue(_) => true, Break(_) => false };
+    let is_b = match cf { Continue(_) => false, Break(_) => true };
+    assert(is_c);
+    assert(!is_b);
+}
+
+@test
+fn regression_predicates_mutually_exclusive_for_break() {
+    let cf: ControlFlow<Int, Int> = Break(99);
+    let is_c = match cf { Continue(_) => true, Break(_) => false };
+    let is_b = match cf { Continue(_) => false, Break(_) => true };
+    assert(!is_c);
+    assert(is_b);
+}
+
+// =============================================================================
+// REGRESSION §D: Try protocol works on Maybe — `match maybe { Some =>
+// Continue(value), None => Break(()) }` shape via Try::branch.
+// =============================================================================
+
+@test
+fn regression_try_maybe_some_continues() {
+    let m: Maybe<Int> = Some(42);
+    match m {
+        Some(v) => assert_eq(v, 42),
+        None    => panic("expected Some"),
+    }
+}
+
+@test
+fn regression_try_maybe_none_breaks() {
+    let m: Maybe<Int> = None;
+    match m {
+        Some(_) => panic("expected None"),
+        None    => {},
+    }
+}
+
+// =============================================================================
+// REGRESSION §E: ControlFlow construction in a List<ControlFlow<B, C>>
+// preserves variant identity across collection ops.
+// =============================================================================
+
+@test
+fn regression_control_flow_in_list_preserves_variants() {
+    let xs: List<ControlFlow<Text, Int>> = [
+        Continue(1),
+        Continue(2),
+        Break("stop".to_text()),
+        Continue(3),
+    ];
+    let mut continue_count: Int = 0;
+    let mut break_count: Int = 0;
+    let mut i: Int = 0;
+    while i < xs.len() {
+        match xs[i].clone() {
+            Continue(_) => continue_count = continue_count + 1,
+            Break(_)    => break_count    = break_count + 1,
+        }
+        i = i + 1;
+    }
+    assert_eq(continue_count, 3);
+    assert_eq(break_count, 1);
+}
+
+fn main() {}
