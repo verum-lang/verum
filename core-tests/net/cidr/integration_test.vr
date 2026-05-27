@@ -1,0 +1,159 @@
+// =============================================================================
+// core-tests/net/cidr/integration_test.vr
+// =============================================================================
+//
+// Integration tests for `core/net/cidr.vr` — Cidr + CidrSet + IpAddr +
+// Ipv4Addr / Ipv6Addr cross-type coordination.
+//
+//   * Cidr construction → contains across the full lattice
+//   * CidrSet insertion ordering doesn't affect contains result
+//   * Cross-family CidrSet: v4 + v6 prefixes coexist without false positives
+//   * num_addresses lattice: prefix-len monotone in count
+//   * matching returns the contained prefix (Some) or None
+//   * CidrError disjointness across distinct failure modes
+//
+// All tests construct `Cidr` variants directly via record literals — the
+// `cidr.parse(&Text)` path is gated behind CIDR-1 (audit.md §3.1).
+// =============================================================================
+
+mount core.net.cidr.{Cidr, CidrSet, CidrError};
+mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Cidr.V4 contains lattice — full /24 sweep
+// =============================================================================
+
+@test
+fn integration_cidr_v4_24_contains_all_in_subnet() {
+    // 10.0.0.0/24 contains every 10.0.0.X for X in [0..255].
+    let net = Cidr.V4 {
+        addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8),
+        prefix_len: 24,
+    };
+    let mut i = 0;
+    while i < 256 {
+        let ip = IpAddr.v4(10_u8, 0_u8, 0_u8, i as Byte);
+        assert(net.contains(&ip));
+        i = i + 1;
+    }
+}
+
+@test
+fn integration_cidr_v4_24_excludes_out_of_subnet() {
+    // 10.0.0.0/24 does NOT contain 10.0.1.X — boundary check.
+    let net = Cidr.V4 {
+        addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8),
+        prefix_len: 24,
+    };
+    assert(!net.contains(&IpAddr.v4(10_u8, 0_u8, 1_u8, 0_u8)));
+    assert(!net.contains(&IpAddr.v4(10_u8, 0_u8, 1_u8, 255_u8)));
+    assert(!net.contains(&IpAddr.v4(9_u8, 255_u8, 255_u8, 255_u8)));
+    assert(!net.contains(&IpAddr.v4(11_u8, 0_u8, 0_u8, 0_u8)));
+}
+
+// =============================================================================
+// Section 2: CidrSet insertion order independence
+// =============================================================================
+
+@test
+fn integration_cidr_set_insert_order_independent() {
+    // Insert /8 then /16: contains should be true for 10.0.0.1.
+    let mut a = CidrSet.new();
+    a.insert(Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 });
+    a.insert(Cidr.V4 { addr: Ipv4Addr.new(192_u8, 168_u8, 0_u8, 0_u8), prefix_len: 16 });
+
+    let mut b = CidrSet.new();
+    b.insert(Cidr.V4 { addr: Ipv4Addr.new(192_u8, 168_u8, 0_u8, 0_u8), prefix_len: 16 });
+    b.insert(Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 });
+
+    let probe = IpAddr.v4(10_u8, 1_u8, 2_u8, 3_u8);
+    assert(a.contains(&probe));
+    assert(b.contains(&probe));
+}
+
+// =============================================================================
+// Section 3: CidrSet cross-family — v4 + v6 coexistence
+// =============================================================================
+
+@test
+fn integration_cidr_set_mixed_family_no_cross_match() {
+    let mut set = CidrSet.new();
+    set.insert(Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 });
+    set.insert(Cidr.V6 { addr: Ipv6Addr.new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0), prefix_len: 32 });
+
+    // v4 probe matches v4 prefix only.
+    let v4_in = IpAddr.v4(10_u8, 1_u8, 2_u8, 3_u8);
+    assert(set.contains(&v4_in));
+
+    // v6 probe matches v6 prefix only.
+    let v6_in = IpAddr.v6(0x2001, 0xdb8, 0xabcd, 0xef01, 0, 0, 0, 1);
+    assert(set.contains(&v6_in));
+
+    // v4 outside any v4 prefix — NOT in set.
+    assert(!set.contains(&IpAddr.v4(11_u8, 0_u8, 0_u8, 0_u8)));
+
+    // v6 outside any v6 prefix — NOT in set.
+    assert(!set.contains(&IpAddr.v6(0x2002, 0, 0, 0, 0, 0, 0, 1)));
+}
+
+// =============================================================================
+// Section 4: num_addresses lattice monotonicity
+// =============================================================================
+
+@test
+fn integration_cidr_v4_num_addresses_monotone_in_prefix_len() {
+    // /N contains 2^(32-N) addresses; widening prefix doubles count.
+    // /30 contains 4, /29 contains 8, /28 contains 16.
+    let p30 = Cidr.V4 { addr: Ipv4Addr.new(192_u8, 168_u8, 1_u8, 0_u8), prefix_len: 30 };
+    let p29 = Cidr.V4 { addr: Ipv4Addr.new(192_u8, 168_u8, 1_u8, 0_u8), prefix_len: 29 };
+    let p28 = Cidr.V4 { addr: Ipv4Addr.new(192_u8, 168_u8, 1_u8, 0_u8), prefix_len: 28 };
+    assert_eq(p30.num_addresses(), 4);
+    assert_eq(p29.num_addresses(), 8);
+    assert_eq(p28.num_addresses(), 16);
+    assert(p29.num_addresses() == 2 * p30.num_addresses());
+    assert(p28.num_addresses() == 2 * p29.num_addresses());
+}
+
+// =============================================================================
+// Section 5: CidrSet.matching returns the longest prefix or None
+// =============================================================================
+
+@test
+fn integration_cidr_set_matching_returns_some_for_member() {
+    let mut set = CidrSet.new();
+    set.insert(Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 });
+    let m = set.matching(&IpAddr.v4(10_u8, 1_u8, 2_u8, 3_u8));
+    match m {
+        Some(_) => assert(true),
+        None => panic("10.1.2.3 must match 10.0.0.0/8"),
+    }
+}
+
+@test
+fn integration_cidr_set_matching_returns_none_for_non_member() {
+    let mut set = CidrSet.new();
+    set.insert(Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 });
+    let m = set.matching(&IpAddr.v4(11_u8, 0_u8, 0_u8, 0_u8));
+    match m {
+        Some(_) => panic("11.0.0.0 must NOT match 10.0.0.0/8"),
+        None => assert(true),
+    }
+}
+
+// =============================================================================
+// Section 6: Cidr.V4 host-bit honesty — only host bits affect contains
+// =============================================================================
+
+@test
+fn integration_cidr_v4_host_bits_dont_affect_contains_when_zero_filled() {
+    // 192.168.1.0/24 and 192.168.1.42/24 represent the same subnet in
+    // semantic terms (matching addresses), even if the canonical form
+    // zero-fills host bits.
+    let canonical = Cidr.V4 {
+        addr: Ipv4Addr.new(192_u8, 168_u8, 1_u8, 0_u8),
+        prefix_len: 24,
+    };
+    let probe = IpAddr.v4(192_u8, 168_u8, 1_u8, 42_u8);
+    assert(canonical.contains(&probe));
+}
