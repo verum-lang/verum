@@ -377,7 +377,7 @@ public type Iterator is protocol {
     /// Fold all elements with an accumulator.
     fn fold<B, F: fn(B, Self.Item) -> B>(mut self, init: B, f: F) -> B {
         let mut acc = init;
-        while let Some(x) = self.next() {
+        while let Maybe.Some(x) = self.next() {
             acc = f(acc, x);
         }
         acc
@@ -386,16 +386,16 @@ public type Iterator is protocol {
     /// Reduce without initial value.
     fn reduce<F: fn(Self.Item, Self.Item) -> Self.Item>(mut self, f: F) -> Maybe<Self.Item> {
         let first = self.next()?;
-        Some(self.fold(first, f))
+        Maybe.Some(self.fold(first, f))
     }
 
     /// Try to fold, short-circuiting on error.
     fn try_fold<B, E, F: fn(B, Self.Item) -> Result<B, E>>(mut self, init: B, f: F) -> Result<B, E> {
         let mut acc = init;
-        while let Some(x) = self.next() {
+        while let Maybe.Some(x) = self.next() {
             acc = f(acc, x)?;
         }
-        Ok(acc)
+        Result.Ok(acc)
     }
 
     /// Scan with state && function.
@@ -527,7 +527,7 @@ public type Iterator is protocol {
     /// Find maximum by key function.
     fn max_by_key<B: Ord, F: fn(&Self.Item) -> B>(mut self, f: F) -> Maybe<Self.Item> {
         let first = self.next()?;
-        Some(self.fold(first, |max_item, item| {
+        Maybe.Some(self.fold(first, |max_item, item| {
             if f(&item) > f(&max_item) { item } else { max_item }
         }))
     }
@@ -535,7 +535,7 @@ public type Iterator is protocol {
     /// Find minimum by key function.
     fn min_by_key<B: Ord, F: fn(&Self.Item) -> B>(mut self, f: F) -> Maybe<Self.Item> {
         let first = self.next()?;
-        Some(self.fold(first, |min_item, item| {
+        Maybe.Some(self.fold(first, |min_item, item| {
             if f(&item) < f(&min_item) { item } else { min_item }
         }))
     }
@@ -632,10 +632,10 @@ public type Iterator is protocol {
     where Self.Item: Ord {
         loop {
             match (self.next(), other.next()) {
-                (None, None) => return Equal,
-                (None, Some(_)) => return Less,
-                (Some(_), None) => return Greater,
-                (Some(a), Some(b)) => {
+                (Maybe.None, Maybe.None) => return Ordering.Equal,
+                (Maybe.None, Maybe.Some(_)) => return Ordering.Less,
+                (Maybe.Some(_), Maybe.None) => return Ordering.Greater,
+                (Maybe.Some(a), Maybe.Some(b)) => {
                     let ord = a.cmp(&b);
                     if !(ord is Equal) {
                         return ord;
@@ -650,8 +650,8 @@ public type Iterator is protocol {
     where Self.Item: Eq {
         loop {
             match (self.next(), other.next()) {
-                (None, None) => return true,
-                (Some(a), Some(b)) if a == b => continue,
+                (Maybe.None, Maybe.None) => return true,
+                (Maybe.Some(a), Maybe.Some(b)) if a == b => continue,
                 _ => return false,
             }
         }
