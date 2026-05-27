@@ -1513,24 +1513,34 @@ implement<T> List<T> {
 
     // Remove consecutive duplicates using custom equality.
     public fn dedup_by(&mut self, same: fn(&T, &T) -> Bool) {
-        if self.len <= 1 {
+        // Safe-op migration — see audit.md §E. Element access via
+        // `self.get(i)` / `self.set(i, v)` (both runtime-intercepted).
+        let n = self.len();
+        if n <= 1 {
             return;
         }
-        let mut write = 1;
-        for read in range(1, self.len) {
-            let prev: &T = unsafe { &*self.ptr.offset(write - 1) };
-            let curr: &T = unsafe { &*self.ptr.offset(read) };
-            if !same(prev, curr) {
-                if write != read {
-                    unsafe {
-                        let val = ptr_read(self.ptr.offset(read));
-                        ptr_write(self.ptr.offset(write), val);
-                    }
-                }
-                write = write + 1;
+        let mut write: Int = 1;
+        let mut read: Int = 1;
+        while read < n {
+            let prev_opt = self.get(write - 1);
+            let curr_opt = self.get(read);
+            match prev_opt {
+                Some(prev) => match curr_opt {
+                    Some(curr) => {
+                        if !same(&prev, &curr) {
+                            if write != read {
+                                self.set(write, curr);
+                            }
+                            write = write + 1;
+                        }
+                    },
+                    None => break,
+                },
+                None => break,
             }
+            read = read + 1;
         }
-        self.len = write;
+        self.truncate(write);
     }
 
     // =========================================================================
@@ -1541,16 +1551,26 @@ implement<T> List<T> {
     public fn split_at(&self, mid: Int) -> (List<T>, List<T>)
     where T: Clone
     {
-        assert(mid >= 0 && mid <= self.len, "split_at index out of bounds");
-        let mut left = List.with_capacity(mid);
-        let mut right = List.with_capacity(self.len - mid);
-        for i in range(0, mid) {
-            let item: &T = unsafe { &*self.ptr.offset(i) };
-            left.push(item.clone());
+        // Safe-op migration — see audit.md §E.
+        let n = self.len();
+        assert(mid >= 0 && mid <= n, "split_at index out of bounds");
+        let mut left: List<T> = List.with_capacity(mid);
+        let mut right: List<T> = List.with_capacity(n - mid);
+        let mut i: Int = 0;
+        while i < mid {
+            match self.get(i) {
+                Some(item) => left.push(item.clone()),
+                None => break,
+            }
+            i = i + 1;
         }
-        for i in range(mid, self.len) {
-            let item: &T = unsafe { &*self.ptr.offset(i) };
-            right.push(item.clone());
+        let mut j: Int = mid;
+        while j < n {
+            match self.get(j) {
+                Some(item) => right.push(item.clone()),
+                None => break,
+            }
+            j = j + 1;
         }
         (left, right)
     }
@@ -1601,16 +1621,30 @@ implement<T> List<T> {
     public fn windows(&self, size: Int) -> List<List<T>>
     where T: Clone
     {
+        // Safe-operation migration — see audit.md §E. Raw
+        // `&*self.ptr.offset(j)` reads from the backing heap object's
+        // ObjectHeader bytes because codegen resolves `self.ptr` to
+        // header-start. Route through `self.get(j)` which honors the
+        // canonical [len@0, cap@1, backing_ptr@2] layout.
         assert(size > 0, "window size must be positive");
         let mut result: List<List<T>> = [];
-        if size <= self.len {
-            for i in range(0, self.len - size + 1) {
+        let n = self.len();
+        if size <= n {
+            let limit = n - size + 1;
+            let mut i: Int = 0;
+            while i < limit {
                 let mut window: List<T> = List.with_capacity(size);
-                for j in range(i, i + size) {
-                    let item: &T = unsafe { &*self.ptr.offset(j) };
-                    window.push(item.clone());
+                let mut j: Int = i;
+                let end = i + size;
+                while j < end {
+                    match self.get(j) {
+                        Some(item) => window.push(item.clone()),
+                        None => {},
+                    }
+                    j = j + 1;
                 }
                 result.push(window);
+                i = i + 1;
             }
         }
         result
@@ -1620,15 +1654,21 @@ implement<T> List<T> {
     public fn chunks(&self, size: Int) -> List<List<T>>
     where T: Clone
     {
+        // Safe-operation migration — same rationale as `windows` above.
         assert(size > 0, "chunk size must be positive");
         let mut result: List<List<T>> = [];
-        let mut i = 0;
-        while i < self.len {
-            let chunk_end = if i + size > self.len { self.len } else { i + size };
+        let n = self.len();
+        let mut i: Int = 0;
+        while i < n {
+            let chunk_end = if i + size > n { n } else { i + size };
             let mut chunk: List<T> = List.with_capacity(chunk_end - i);
-            for j in range(i, chunk_end) {
-                let item: &T = unsafe { &*self.ptr.offset(j) };
-                chunk.push(item.clone());
+            let mut j: Int = i;
+            while j < chunk_end {
+                match self.get(j) {
+                    Some(item) => chunk.push(item.clone()),
+                    None => {},
+                }
+                j = j + 1;
             }
             result.push(chunk);
             i = i + size;
@@ -1641,23 +1681,44 @@ implement<T> List<T> {
     // =========================================================================
 
     /// Find the first element matching a predicate.
-    public fn find_by(&self, predicate: fn(&T) -> Bool) -> Maybe<&T> {
-        for i in range(0, self.len) {
-            let item: &T = unsafe { &*self.ptr.offset(i) };
-            if predicate(item) {
-                return Some(item);
+    ///
+    /// Safe-operation migration — see audit.md §E. Raw
+    /// `&*self.ptr.offset(i)` returns header bytes under user-side
+    /// dispatch; routes through `self.get(i)` instead. Note the return
+    /// shape: `Maybe<T>` not `Maybe<&T>`, because `self.get(i)`
+    /// produces an owned value. Callers that need a reference can take
+    /// `&` on the returned binding.
+    public fn find_by(&self, predicate: fn(&T) -> Bool) -> Maybe<T> {
+        let n = self.len();
+        let mut i: Int = 0;
+        while i < n {
+            match self.get(i) {
+                Some(item) => {
+                    if predicate(&item) {
+                        return Some(item);
+                    }
+                },
+                None => return None,
             }
+            i = i + 1;
         }
         None
     }
 
     /// Find the index of the first element matching a predicate.
     public fn position_by(&self, predicate: fn(&T) -> Bool) -> Maybe<Int> {
-        for i in range(0, self.len) {
-            let item: &T = unsafe { &*self.ptr.offset(i) };
-            if predicate(item) {
-                return Some(i);
+        let n = self.len();
+        let mut i: Int = 0;
+        while i < n {
+            match self.get(i) {
+                Some(item) => {
+                    if predicate(&item) {
+                        return Some(i);
+                    }
+                },
+                None => return None,
             }
+            i = i + 1;
         }
         None
     }
@@ -1687,22 +1748,38 @@ implement<T> List<T> {
 
     /// Check if any element matches a predicate.
     public fn any(&self, predicate: fn(&T) -> Bool) -> Bool {
-        for i in range(0, self.len) {
-            let item: &T = unsafe { &*self.ptr.offset(i) };
-            if predicate(item) {
-                return true;
+        // any() is intercepted at method_dispatch.rs but also routes
+        // here for non-intercepted dispatch paths. Safe-op migration.
+        let n = self.len();
+        let mut i: Int = 0;
+        while i < n {
+            match self.get(i) {
+                Some(item) => {
+                    if predicate(&item) {
+                        return true;
+                    }
+                },
+                None => return false,
             }
+            i = i + 1;
         }
         false
     }
 
     /// Check if all elements match a predicate.
     public fn all(&self, predicate: fn(&T) -> Bool) -> Bool {
-        for i in range(0, self.len) {
-            let item: &T = unsafe { &*self.ptr.offset(i) };
-            if !predicate(item) {
-                return false;
+        let n = self.len();
+        let mut i: Int = 0;
+        while i < n {
+            match self.get(i) {
+                Some(item) => {
+                    if !predicate(&item) {
+                        return false;
+                    }
+                },
+                None => return true,
             }
+            i = i + 1;
         }
         true
     }
@@ -1711,15 +1788,23 @@ implement<T> List<T> {
     public fn starts_with(&self, prefix: &List<T>) -> Bool
     where T: Eq
     {
-        if prefix.len > self.len {
+        let pn = prefix.len();
+        let n = self.len();
+        if pn > n {
             return false;
         }
-        for i in range(0, prefix.len) {
-            let a: &T = unsafe { &*self.ptr.offset(i) };
-            let b: &T = unsafe { &*prefix.ptr.offset(i) };
-            if !(*a == *b) {
-                return false;
+        let mut i: Int = 0;
+        while i < pn {
+            match self.get(i) {
+                Some(a) => match prefix.get(i) {
+                    Some(b) => {
+                        if !(a == b) { return false; }
+                    },
+                    None => return false,
+                },
+                None => return false,
             }
+            i = i + 1;
         }
         true
     }
@@ -1728,16 +1813,24 @@ implement<T> List<T> {
     public fn ends_with(&self, suffix: &List<T>) -> Bool
     where T: Eq
     {
-        if suffix.len > self.len {
+        let sn = suffix.len();
+        let n = self.len();
+        if sn > n {
             return false;
         }
-        let offset = self.len - suffix.len;
-        for i in range(0, suffix.len) {
-            let a: &T = unsafe { &*self.ptr.offset(offset + i) };
-            let b: &T = unsafe { &*suffix.ptr.offset(i) };
-            if !(*a == *b) {
-                return false;
+        let offset = n - sn;
+        let mut i: Int = 0;
+        while i < sn {
+            match self.get(offset + i) {
+                Some(a) => match suffix.get(i) {
+                    Some(b) => {
+                        if !(a == b) { return false; }
+                    },
+                    None => return false,
+                },
+                None => return false,
             }
+            i = i + 1;
         }
         true
     }
@@ -1796,15 +1889,23 @@ implement<T> List<T> {
     public fn partition_by(&self, predicate: fn(&T) -> Bool) -> (List<T>, List<T>)
     where T: Clone
     {
+        // Safe-op migration — see audit.md §E.
         let mut matching: List<T> = List.new();
         let mut non_matching: List<T> = List.new();
-        for i in range(0, self.len) {
-            let item: &T = unsafe { &*self.ptr.offset(i) };
-            if predicate(item) {
-                matching.push(item.clone());
-            } else {
-                non_matching.push(item.clone());
+        let n = self.len();
+        let mut i: Int = 0;
+        while i < n {
+            match self.get(i) {
+                Some(item) => {
+                    if predicate(&item) {
+                        matching.push(item.clone());
+                    } else {
+                        non_matching.push(item.clone());
+                    }
+                },
+                None => break,
             }
+            i = i + 1;
         }
         (matching, non_matching)
     }
@@ -1825,22 +1926,35 @@ implement<T> List<T> {
     public fn chunk_by(&self, predicate: fn(&T, &T) -> Bool) -> List<List<T>>
     where T: Clone
     {
+        // Safe-op migration — see audit.md §E.
         let mut result: List<List<T>> = [];
-        if self.len > 0 {
+        let n = self.len();
+        if n > 0 {
             let mut current: List<T> = List.new();
-            let first: &T = unsafe { &*self.ptr.offset(0) };
-            current.push(first.clone());
-
-            for i in range(1, self.len) {
-                let prev: &T = unsafe { &*self.ptr.offset(i - 1) };
-                let curr: &T = unsafe { &*self.ptr.offset(i) };
-                if predicate(prev, curr) {
-                    current.push(curr.clone());
-                } else {
-                    result.push(current);
-                    current = List.new();
-                    current.push(curr.clone());
+            match self.get(0) {
+                Some(first) => current.push(first.clone()),
+                None => return result,
+            }
+            let mut i: Int = 1;
+            while i < n {
+                let prev_opt = self.get(i - 1);
+                let curr_opt = self.get(i);
+                match prev_opt {
+                    Some(prev) => match curr_opt {
+                        Some(curr) => {
+                            if predicate(&prev, &curr) {
+                                current.push(curr.clone());
+                            } else {
+                                result.push(current);
+                                current = List.new();
+                                current.push(curr.clone());
+                            }
+                        },
+                        None => break,
+                    },
+                    None => break,
                 }
+                i = i + 1;
             }
             result.push(current);
         }
