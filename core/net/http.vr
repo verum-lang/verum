@@ -126,6 +126,21 @@ implement Method {
             _ => false,
         }
     }
+
+    /// Check if responses to this method are cacheable by default
+    /// (RFC 7234 §3 / RFC 9111 §3). `GET` and `HEAD` are cacheable
+    /// by default; `POST` is conditionally cacheable when the
+    /// response includes explicit freshness information (caller's
+    /// concern); other methods are not cacheable. The default-
+    /// cacheability flag is the one consulted by cache layers when
+    /// no `Cache-Control` directive is present, so reflecting the
+    /// RFC default exactly here is load-bearing.
+    public fn is_cacheable(&self) -> Bool {
+        match self {
+            Method.Get | Method.Head => true,
+            _ => false,
+        }
+    }
 }
 
 implement Eq for Method {
@@ -269,6 +284,15 @@ implement Ord for StatusCode {
     }
 }
 
+implement Hash for StatusCode {
+    /// Hash via the underlying Int code so `Map<StatusCode,
+    /// ResponseTemplate>` lookups (handler tables, retry-policy
+    /// dispatch tables) are O(1) amortised.
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        self.code.hash(h);
+    }
+}
+
 implement Clone for StatusCode {
     fn clone(&self) -> StatusCode { StatusCode { code: self.code } }
 }
@@ -313,6 +337,14 @@ implement Version {
 implement Eq for Version {
     fn eq(&self, other: &Version) -> Bool {
         self.as_str() == other.as_str()
+    }
+}
+
+implement Hash for Version {
+    /// Hash via the as_str canonical wire-form. Stable across calls
+    /// so `Map<Version, ProtocolStats>` lookups are O(1) amortised.
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        self.as_str().hash(h);
     }
 }
 

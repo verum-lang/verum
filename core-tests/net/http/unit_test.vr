@@ -240,3 +240,62 @@ fn test_no_body_options() { assert(!Method.Options.has_body()); }
 
 @test
 fn test_no_body_trace() { assert(!Method.Trace.has_body()); }
+
+// =============================================================================
+// Section 7: Method.is_cacheable — RFC 7234 §3 / RFC 9111 §3
+// =============================================================================
+//
+// Default-cacheability per RFC: GET + HEAD cacheable by default;
+// POST conditionally cacheable when explicit freshness present
+// (caller's responsibility); others not cacheable by default.
+
+@test
+fn test_is_cacheable_get() { assert(Method.Get.is_cacheable()); }
+
+@test
+fn test_is_cacheable_head() { assert(Method.Head.is_cacheable()); }
+
+@test
+fn test_is_not_cacheable_post() {
+    // POST is conditionally cacheable per RFC 7234 §3 — but the
+    // default-cacheability flag (no Cache-Control directive) is
+    // false.
+    assert(!Method.Post.is_cacheable());
+}
+
+@test
+fn test_is_not_cacheable_put() { assert(!Method.Put.is_cacheable()); }
+
+@test
+fn test_is_not_cacheable_delete() { assert(!Method.Delete.is_cacheable()); }
+
+@test
+fn test_is_not_cacheable_patch() { assert(!Method.Patch.is_cacheable()); }
+
+@test
+fn test_is_not_cacheable_options() {
+    // OPTIONS is safe + idempotent but NOT cacheable (no
+    // representation to cache).
+    assert(!Method.Options.is_cacheable());
+}
+
+@test
+fn test_is_not_cacheable_trace() { assert(!Method.Trace.is_cacheable()); }
+
+@test
+fn test_is_not_cacheable_connect() { assert(!Method.Connect.is_cacheable()); }
+
+@test
+fn test_is_cacheable_implies_is_safe() {
+    // Algebraic invariant: every cacheable method is also safe.
+    // (RFC 7234 §3 + RFC 7231 §4.2.1.) Cacheable ⊆ Safe.
+    assert(!Method.Get.is_cacheable() || Method.Get.is_safe());
+    assert(!Method.Head.is_cacheable() || Method.Head.is_safe());
+    assert(!Method.Post.is_cacheable() || Method.Post.is_safe());
+    assert(!Method.Put.is_cacheable() || Method.Put.is_safe());
+    assert(!Method.Delete.is_cacheable() || Method.Delete.is_safe());
+    assert(!Method.Connect.is_cacheable() || Method.Connect.is_safe());
+    assert(!Method.Options.is_cacheable() || Method.Options.is_safe());
+    assert(!Method.Trace.is_cacheable() || Method.Trace.is_safe());
+    assert(!Method.Patch.is_cacheable() || Method.Patch.is_safe());
+}
