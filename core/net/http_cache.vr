@@ -379,7 +379,11 @@ fn is_ws(b: Byte) -> Bool {
 
 fn slice_vec(src: &[Byte], start: Int, end: Int) -> List<Byte> {
     let mut out: List<Byte> = List.with_capacity(end - start);
-    out.extend_from_slice(&src[start..end]);
+    let mut __i = start;
+        while __i < end {
+            out.push(src[__i]);
+            __i = __i + 1;
+        }
     out
 }
 
