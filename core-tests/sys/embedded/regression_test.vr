@@ -1,0 +1,89 @@
+// =============================================================================
+// core-tests/sys/embedded/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.sys.embedded`. Each defect we have ever
+// seen on this surface gets a one-test-per-bug entry.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.embedded.{StackAllocator, RingBuffer};
+
+// =============================================================================
+// REGRESSION 1: Bump-allocator overflow path must NOT advance `offset`
+//
+// Pre-fix bug class (if `new_offset > capacity` check were placed AFTER
+// the `self.offset = new_offset` write): a failed alloc would silently
+// commit the overflowing offset, causing subsequent allocs to never
+// recover. The current implementation correctly checks BEFORE writing.
+// This test pins that ordering.
+// =============================================================================
+
+@test
+fn regression_stack_allocator_oom_does_not_advance_offset() {
+    let mut a = StackAllocator.new(0x1000, 256);
+    let _ = a.alloc(200, 8);
+    let used_before_oom = a.used();
+    let p = a.alloc(100, 8);   // 200 + 100 = 300 > 256 → OOM
+    assert_eq(p, 0);
+    // Used MUST still be `used_before_oom` — the failed alloc did NOT
+    // advance the bump pointer.
+    assert_eq(a.used(), used_before_oom);
+    // Remaining must still allow a smaller alloc.
+    let p2 = a.alloc(50, 8);
+    assert(p2 != 0);
+}
+
+// =============================================================================
+// REGRESSION 2: Alignment-rounding must honour the buffer base address
+//
+// Pre-fix bug class (if `alloc` rounded `self.offset` without considering
+// the alignment of `buffer_ptr`): the returned pointer could be aligned
+// to A within the buffer's frame but absolutely misaligned. The current
+// implementation returns `buffer_ptr + aligned_offset` — alignment is
+// only guaranteed when the caller ensures buffer_ptr itself is A-aligned.
+// This test pins the documented contract (caller-aligned buffer ⇒
+// caller-observed alignment).
+// =============================================================================
+
+@test
+fn regression_stack_allocator_alignment_relative_to_buffer() {
+    // 0x1000 is 4096-aligned, which subsumes all alignments ≤ 4096.
+    let mut a = StackAllocator.new(0x1000, 1024);
+    let p8  = a.alloc(8, 8);
+    let p16 = a.alloc(16, 16);
+    let p32 = a.alloc(32, 32);
+    assert_eq(p8  % 8,  0);
+    assert_eq(p16 % 16, 0);
+    assert_eq(p32 % 32, 0);
+}
+
+// =============================================================================
+// REGRESSION 3: RingBuffer.reset must restore the EMPTY state, not the
+// FULL state — pre-fix the reset path could be misimplemented as
+// `count = capacity` instead of `count = 0`.
+// =============================================================================
+
+@test
+fn regression_ring_buffer_reset_yields_empty_not_full() {
+    let mut r = RingBuffer.new(0x1000, 16);
+    r.reset();
+    assert(r.is_empty());
+    assert(!r.is_full());
+    assert_eq(r.len(), 0);
+}
+
+// =============================================================================
+// REGRESSION 4: Zero-capacity RingBuffer must construct cleanly — the
+// degenerate "always full, always empty" mode.
+// =============================================================================
+
+@test
+fn regression_ring_buffer_zero_capacity_construction() {
+    let r = RingBuffer.new(0x1000, 0);
+    assert(r.is_empty());
+    assert(r.is_full());
+    assert_eq(r.len(), 0);
+}
+
+fn main() {}

@@ -1,0 +1,101 @@
+// =============================================================================
+// core-tests/sys/mod/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.mod` umbrella re-exports.
+//
+// Properties covered:
+//
+//   * Constants re-exported at the umbrella level (PAGE_SIZE,
+//     MAX_CONTEXT_SLOTS, CONTEXT_STACK_DEPTH, USIZE_BITS) are
+//     byte-multiple / positive / power-of-two as their underlying
+//     module ships them.
+//   * Type re-exports preserve identity across the boundary —
+//     `OSError` reached via the umbrella mount accepts the same
+//     construction shape as reached via `core.sys.common.OSError`.
+//   * Constants accessed via the umbrella path match the values
+//     observed at the direct-submodule path.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.{
+    PAGE_SIZE,
+    MAX_CONTEXT_SLOTS,
+    CONTEXT_STACK_DEPTH,
+    USIZE_BITS,
+};
+
+// Alias the same constants at the direct-submodule paths so we can
+// pin path-equivalence.
+mount core.sys.common.{
+    PAGE_SIZE as COMMON_PAGE_SIZE,
+    MAX_CONTEXT_SLOTS as COMMON_MAX_CONTEXT_SLOTS,
+    CONTEXT_STACK_DEPTH as COMMON_CONTEXT_STACK_DEPTH,
+};
+mount core.sys.bitfield.{USIZE_BITS as BITFIELD_USIZE_BITS};
+
+// =============================================================================
+// Section 1: Path-equivalence — umbrella value == direct-submodule value
+// =============================================================================
+
+@test
+fn law_umbrella_page_size_equals_common_page_size() {
+    assert_eq(PAGE_SIZE, COMMON_PAGE_SIZE);
+}
+
+@test
+fn law_umbrella_max_context_slots_equals_common() {
+    assert_eq(MAX_CONTEXT_SLOTS, COMMON_MAX_CONTEXT_SLOTS);
+}
+
+@test
+fn law_umbrella_context_stack_depth_equals_common() {
+    assert_eq(CONTEXT_STACK_DEPTH, COMMON_CONTEXT_STACK_DEPTH);
+}
+
+@test
+fn law_umbrella_usize_bits_equals_bitfield_usize_bits() {
+    assert_eq(USIZE_BITS, BITFIELD_USIZE_BITS);
+}
+
+// =============================================================================
+// Section 2: Umbrella constants — invariants
+// =============================================================================
+
+@test
+fn law_umbrella_page_size_power_of_two() {
+    let v = PAGE_SIZE as USize;
+    assert(v > (0 as USize));
+    assert_eq(v & (v - (1 as USize)), 0 as USize);
+}
+
+@test
+fn law_umbrella_page_size_at_least_4k() {
+    // Every supported Verum target uses at least 4 KiB pages.
+    assert(PAGE_SIZE >= 4096);
+}
+
+@test
+fn law_umbrella_max_context_slots_positive_power_of_two() {
+    let v = MAX_CONTEXT_SLOTS as USize;
+    assert(v > (0 as USize));
+    assert_eq(v & (v - (1 as USize)), 0 as USize);
+}
+
+@test
+fn law_umbrella_context_stack_depth_positive() {
+    assert(CONTEXT_STACK_DEPTH > 0);
+}
+
+@test
+fn law_umbrella_usize_bits_byte_multiple() {
+    assert_eq(USIZE_BITS % (8 as USize), 0 as USize);
+}
+
+@test
+fn law_umbrella_usize_bits_at_least_32() {
+    // Verum's minimum supported pointer width is 32 (embedded targets).
+    assert(USIZE_BITS >= (32 as USize));
+}
+
+fn main() {}

@@ -1,0 +1,165 @@
+// =============================================================================
+// core-tests/sys/no_runtime/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.no_runtime`. Exercises
+// the async-to-sync stubs in combination with the rest of the standard
+// library (List, Maybe, pattern matching, accumulation loops).
+//
+// What this file pins:
+//
+//   * SyncChannel composed into a producer/consumer pattern over a
+//     List<Int> — mirrors the canonical embedded single-task pipeline.
+//   * block_on / spawn_sync funneled through Maybe (Some on success).
+//   * NoOpMutex<T> composition with custom payloads (IntPair record).
+//   * SyncChannel one-shot retransmit pattern (send → recv → send →
+//     recv N times, accumulator increments correctly).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.no_runtime.{
+    SyncChannel,
+    NoOpMutex,
+    block_on,
+    spawn_sync,
+};
+
+// =============================================================================
+// Section 1: SyncChannel producer/consumer over a List<Int>
+// =============================================================================
+
+@test
+fn integration_sync_channel_drain_list_into_accumulator() {
+    // Producer side: send each entry of `values` through the channel,
+    // consume immediately on the consumer side, accumulate into `total`.
+    let values: List<Int> = [10, 20, 30, 40, 50];
+    let mut c: SyncChannel<Int> = SyncChannel.new();
+    let mut total: Int = 0;
+    for v in values.iter() {
+        let _ = c.send(*v);
+        match c.recv() {
+            Some(received) => total = total + received,
+            None           => assert(false),
+        };
+    }
+    assert_eq(total, 150);
+    assert(c.is_empty());
+}
+
+@test
+fn integration_sync_channel_collect_received_into_list() {
+    // Drain a sequence of values via channel into a recipient list;
+    // the recipient list must mirror the input.
+    let values: List<Int> = [1, 2, 3, 4, 5];
+    let mut c: SyncChannel<Int> = SyncChannel.new();
+    let mut received: List<Int> = [];
+    for v in values.iter() {
+        let _ = c.send(*v);
+        match c.recv() {
+            Some(r) => received.push(r),
+            None    => assert(false),
+        };
+    }
+    assert_eq(received.len(), values.len());
+    let mut i: USize = 0 as USize;
+    while i < values.len() {
+        let a = *values.get(i).unwrap();
+        let b = *received.get(i).unwrap();
+        assert_eq(a, b);
+        i = i + (1 as USize);
+    }
+}
+
+// =============================================================================
+// Section 2: block_on funneled through Maybe
+// =============================================================================
+
+@test
+fn integration_block_on_via_maybe_some_branch() {
+    // The canonical "have we got a sync result?" pattern.
+    let opt: Maybe<Int> = Some(block_on(42));
+    match opt {
+        Some(v) => assert_eq(v, 42),
+        None    => assert(false),
+    };
+}
+
+@test
+fn integration_block_on_via_result_ok_branch() {
+    // Result<T, E> wrapping for error-path consistency.
+    let r: Result<Int, Text> = Ok(block_on(7));
+    match r {
+        Ok(v)  => assert_eq(v, 7),
+        Err(_) => assert(false),
+    };
+}
+
+// =============================================================================
+// Section 3: spawn_sync × List — execute fleet of closures
+// =============================================================================
+
+fn produce_one()   -> Int { 1 }
+fn produce_two()   -> Int { 2 }
+fn produce_three() -> Int { 3 }
+fn produce_four()  -> Int { 4 }
+
+@test
+fn integration_spawn_sync_fleet_accumulator() {
+    // The canonical "spawn N tasks, sum their results" pattern.
+    let mut total: Int = 0;
+    total = total + spawn_sync(produce_one);
+    total = total + spawn_sync(produce_two);
+    total = total + spawn_sync(produce_three);
+    total = total + spawn_sync(produce_four);
+    assert_eq(total, 10);
+}
+
+// =============================================================================
+// Section 4: NoOpMutex × custom-record payload
+// =============================================================================
+
+type IntPair is { a: Int, b: Int };
+
+@test
+fn integration_no_op_mutex_with_record_payload() {
+    let mut m: NoOpMutex<IntPair> = NoOpMutex.new(IntPair { a: 3, b: 4 });
+    let r = m.lock();
+    assert_eq(r.a, 3);
+    assert_eq(r.b, 4);
+}
+
+@test
+fn integration_no_op_mutex_round_trip_value_preserved() {
+    let mut m: NoOpMutex<Int> = NoOpMutex.new(100);
+    let v_before = *m.lock();
+    m.unlock();
+    let v_after  = *m.lock();
+    assert_eq(v_before, v_after);
+}
+
+// =============================================================================
+// Section 5: SyncChannel retransmit pattern (N cycles)
+// =============================================================================
+
+@test
+fn integration_sync_channel_retransmit_n_times() {
+    // Send + recv N times; the count after must equal N.
+    let mut c: SyncChannel<Int> = SyncChannel.new();
+    let mut sent: Int = 0;
+    let mut recvd: Int = 0;
+    let mut i: Int = 0;
+    while i < 8 {
+        let ok = c.send(i);
+        if ok { sent = sent + 1; }
+        match c.recv() {
+            Some(_) => recvd = recvd + 1,
+            None    => assert(false),
+        };
+        i = i + 1;
+    }
+    assert_eq(sent, 8);
+    assert_eq(recvd, 8);
+    assert(c.is_empty());
+}
+
+fn main() {}

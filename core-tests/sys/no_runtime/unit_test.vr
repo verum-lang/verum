@@ -1,0 +1,186 @@
+// =============================================================================
+// core-tests/sys/no_runtime/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.no_runtime` — async-to-sync stubs for
+// bare-metal / no-runtime Verum builds. Activated at the umbrella
+// level by `@cfg(runtime = "none")` or `@cfg(runtime = "embedded")`
+// (see `core/sys/mod.vr`). The types themselves are NOT @cfg-gated,
+// so this in-process conformance suite exercises them directly.
+//
+// API surface tested here:
+//
+//   block_on<T>(future: T) -> T          — identity transformation
+//   spawn_sync<T>(task: fn() -> T) -> T  — inline execution
+//   SyncChannel<T>                       — Empty | Full(T)
+//     .new() / .send(value) / .recv() / .is_empty()
+//   NoOpMutex<T>                         — { value: T }
+//     .new(value) / .lock() / .unlock()
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.no_runtime.{
+    SyncChannel,
+    NoOpMutex,
+    block_on,
+    spawn_sync,
+};
+
+// =============================================================================
+// Section 1: block_on — identity transformation
+// =============================================================================
+
+@test
+fn test_block_on_int_identity() {
+    // In no-runtime mode, block_on is just `id`. Pin the identity.
+    let r = block_on(42);
+    assert_eq(r, 42);
+}
+
+@test
+fn test_block_on_text_identity() {
+    let r = block_on("hello".clone());
+    assert_eq(r, "hello".clone());
+}
+
+@test
+fn test_block_on_bool_identity() {
+    assert_eq(block_on(true),  true);
+    assert_eq(block_on(false), false);
+}
+
+@test
+fn test_block_on_negative_int_identity() {
+    let r = block_on(-100);
+    assert_eq(r, -100);
+}
+
+// =============================================================================
+// Section 2: spawn_sync — inline execution
+// =============================================================================
+
+@test
+fn test_spawn_sync_returns_function_result() {
+    fn produce_42() -> Int { 42 }
+    let r = spawn_sync(produce_42);
+    assert_eq(r, 42);
+}
+
+@test
+fn test_spawn_sync_returns_text() {
+    fn produce_text() -> Text { "spawned".clone() }
+    let r = spawn_sync(produce_text);
+    assert_eq(r, "spawned".clone());
+}
+
+@test
+fn test_spawn_sync_returns_bool() {
+    fn always_true() -> Bool { true }
+    let r = spawn_sync(always_true);
+    assert(r);
+}
+
+// =============================================================================
+// Section 3: SyncChannel — Empty / Full(T) variant lifecycle
+// =============================================================================
+
+@test
+fn test_sync_channel_new_is_empty() {
+    let c: SyncChannel<Int> = SyncChannel.new();
+    assert(c.is_empty());
+}
+
+@test
+fn test_sync_channel_send_then_full() {
+    let mut c: SyncChannel<Int> = SyncChannel.new();
+    let ok = c.send(42);
+    assert(ok);
+    assert(!c.is_empty());
+}
+
+@test
+fn test_sync_channel_send_when_full_returns_false() {
+    let mut c: SyncChannel<Int> = SyncChannel.new();
+    let _ = c.send(1);
+    let second = c.send(2);
+    // Single-element buffer rejects the second send.
+    assert(!second);
+}
+
+@test
+fn test_sync_channel_recv_empty_yields_none() {
+    let mut c: SyncChannel<Int> = SyncChannel.new();
+    match c.recv() {
+        Some(_) => assert(false),
+        None    => assert(true),
+    };
+}
+
+@test
+fn test_sync_channel_send_recv_round_trip_int() {
+    let mut c: SyncChannel<Int> = SyncChannel.new();
+    let _ = c.send(7);
+    match c.recv() {
+        Some(v) => assert_eq(v, 7),
+        None    => assert(false),
+    };
+    // After recv, channel is empty again.
+    assert(c.is_empty());
+}
+
+@test
+fn test_sync_channel_send_recv_round_trip_text() {
+    let mut c: SyncChannel<Text> = SyncChannel.new();
+    let _ = c.send("payload".clone());
+    match c.recv() {
+        Some(v) => assert_eq(v, "payload".clone()),
+        None    => assert(false),
+    };
+}
+
+@test
+fn test_sync_channel_send_recv_send_recv_cycle() {
+    let mut c: SyncChannel<Int> = SyncChannel.new();
+    let _ = c.send(1);
+    let _ = c.recv();
+    let _ = c.send(2);
+    match c.recv() {
+        Some(v) => assert_eq(v, 2),
+        None    => assert(false),
+    };
+}
+
+// =============================================================================
+// Section 4: NoOpMutex — single-threaded "lock"
+// =============================================================================
+
+@test
+fn test_no_op_mutex_new_construction_int() {
+    let _m: NoOpMutex<Int> = NoOpMutex.new(42);
+}
+
+@test
+fn test_no_op_mutex_new_construction_text() {
+    let _m: NoOpMutex<Text> = NoOpMutex.new("guard".clone());
+}
+
+@test
+fn test_no_op_mutex_lock_returns_mut_ref() {
+    let mut m: NoOpMutex<Int> = NoOpMutex.new(100);
+    let r = m.lock();
+    assert_eq(*r, 100);
+}
+
+@test
+fn test_no_op_mutex_lock_unlock_cycle() {
+    let mut m: NoOpMutex<Int> = NoOpMutex.new(0);
+    {
+        let _ = m.lock();
+    }
+    m.unlock();
+    // After unlock + relock, the value still reads as 0.
+    let r = m.lock();
+    assert_eq(*r, 0);
+}
+
+fn main() {}

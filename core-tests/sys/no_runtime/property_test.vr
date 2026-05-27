@@ -1,0 +1,172 @@
+// =============================================================================
+// core-tests/sys/no_runtime/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.no_runtime`.
+//
+// Properties covered:
+//
+//   block_on:
+//     * Identity law: block_on(x) == x for every concrete x.
+//
+//   spawn_sync:
+//     * Identity law: spawn_sync(|| x) == x.
+//
+//   SyncChannel:
+//     * After .new(), .is_empty() ≡ true.
+//     * .send on empty ⇒ returns true, transitions to Full.
+//     * .send on Full ⇒ returns false, state preserved.
+//     * .recv on Empty ⇒ None, state preserved.
+//     * .recv on Full(v) ⇒ Some(v), transitions to Empty.
+//     * Round-trip identity: send(v) then recv yields Some(v).
+//     * Two-step state machine: Empty ⇄ Full(_).
+//
+//   NoOpMutex:
+//     * Lock-then-unlock is a no-op on the inner value.
+//     * Construction stores the payload byte-identical.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.no_runtime.{
+    SyncChannel,
+    NoOpMutex,
+    block_on,
+    spawn_sync,
+};
+
+// =============================================================================
+// Section 1: block_on — identity law
+// =============================================================================
+
+@test
+fn law_block_on_int_identity_sweep() {
+    let samples: List<Int> = [-1_000_000, -1, 0, 1, 42, 1_000_000];
+    for x in samples.iter() {
+        assert_eq(block_on(*x), *x);
+    }
+}
+
+@test
+fn law_block_on_bool_identity() {
+    assert_eq(block_on(true),  true);
+    assert_eq(block_on(false), false);
+}
+
+@test
+fn law_block_on_int_extreme_identity() {
+    assert_eq(block_on(Int.max), Int.max);
+    assert_eq(block_on(Int.min), Int.min);
+}
+
+// =============================================================================
+// Section 2: spawn_sync — identity law on closure return value
+// =============================================================================
+
+fn return_constant_seven() -> Int { 7 }
+fn return_constant_eleven() -> Int { 11 }
+
+@test
+fn law_spawn_sync_returns_inner_value() {
+    assert_eq(spawn_sync(return_constant_seven),   7);
+    assert_eq(spawn_sync(return_constant_eleven), 11);
+}
+
+// =============================================================================
+// Section 3: SyncChannel state-machine laws
+// =============================================================================
+
+@test
+fn law_sync_channel_new_is_empty() {
+    let c: SyncChannel<Int> = SyncChannel.new();
+    assert(c.is_empty());
+}
+
+@test
+fn law_sync_channel_send_on_empty_succeeds_int() {
+    let samples: List<Int> = [-1, 0, 1, 42, 1024];
+    for v in samples.iter() {
+        let mut c: SyncChannel<Int> = SyncChannel.new();
+        let ok = c.send(*v);
+        assert(ok);
+        assert(!c.is_empty());
+    }
+}
+
+@test
+fn law_sync_channel_send_on_full_fails() {
+    let mut c: SyncChannel<Int> = SyncChannel.new();
+    let _ = c.send(1);
+    // Second send must return false.
+    let second = c.send(2);
+    assert(!second);
+}
+
+@test
+fn law_sync_channel_recv_empty_is_none() {
+    let mut c: SyncChannel<Int> = SyncChannel.new();
+    match c.recv() {
+        Some(_) => assert(false),
+        None    => assert(true),
+    };
+}
+
+@test
+fn law_sync_channel_round_trip_identity_int() {
+    let samples: List<Int> = [-1, 0, 1, 42, 999_999];
+    for v in samples.iter() {
+        let mut c: SyncChannel<Int> = SyncChannel.new();
+        let _ = c.send(*v);
+        match c.recv() {
+            Some(r) => assert_eq(r, *v),
+            None    => assert(false),
+        };
+    }
+}
+
+@test
+fn law_sync_channel_recv_after_full_returns_empty() {
+    let mut c: SyncChannel<Int> = SyncChannel.new();
+    let _ = c.send(10);
+    let _ = c.recv();
+    assert(c.is_empty());
+}
+
+@test
+fn law_sync_channel_send_recv_alternation_n_cycles() {
+    // After N send/recv cycles, the channel returns to Empty.
+    let mut c: SyncChannel<Int> = SyncChannel.new();
+    let mut i: Int = 0;
+    while i < 5 {
+        let _ = c.send(i);
+        let _ = c.recv();
+        i = i + 1;
+    }
+    assert(c.is_empty());
+}
+
+// =============================================================================
+// Section 4: NoOpMutex — payload identity laws
+// =============================================================================
+
+@test
+fn law_no_op_mutex_construction_stores_int() {
+    let samples: List<Int> = [-1, 0, 1, 42, Int.max, Int.min];
+    for v in samples.iter() {
+        let mut m: NoOpMutex<Int> = NoOpMutex.new(*v);
+        let r = m.lock();
+        assert_eq(*r, *v);
+    }
+}
+
+@test
+fn law_no_op_mutex_lock_unlock_preserves_value() {
+    let mut m: NoOpMutex<Int> = NoOpMutex.new(42);
+    {
+        let _ = m.lock();
+    }
+    m.unlock();
+    let r = m.lock();
+    assert_eq(*r, 42);
+}
+
+fn main() {}

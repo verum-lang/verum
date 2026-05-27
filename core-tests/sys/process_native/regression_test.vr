@@ -1,0 +1,60 @@
+// =============================================================================
+// core-tests/sys/process_native/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.sys.process_native`. Each defect we have
+// ever seen on this surface gets a one-test-per-bug entry that survives
+// the underlying fix as a re-regression guardrail.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.process_native.{SpawnResult};
+
+// =============================================================================
+// REGRESSION 1: SpawnResult.stdin_fd / stdout_fd / stderr_fd must be
+// Int-typed (signed), NOT UInt32 or USize — because the -1 sentinel for
+// "not piped" is a critical value across the API.
+// =============================================================================
+
+@test
+fn regression_spawn_result_minus_one_sentinel_constructs_cleanly() {
+    // Pre-fix shape (if ever reverted to unsigned fd type): construction
+    // with -1 would either compile-error or silently wrap to UInt32.max.
+    // The post-fix Int typing accepts -1 verbatim.
+    let r = SpawnResult {
+        pid: 1234,
+        stdin_fd: -1,
+        stdout_fd: -1,
+        stderr_fd: -1,
+    };
+    assert_eq(r.stdin_fd,  -1);
+    assert_eq(r.stdout_fd, -1);
+    assert_eq(r.stderr_fd, -1);
+    // The sentinel is observable as < 0 — pinning the signed contract.
+    assert(r.stdin_fd  < 0);
+    assert(r.stdout_fd < 0);
+    assert(r.stderr_fd < 0);
+}
+
+// =============================================================================
+// REGRESSION 2: SpawnResult.pid must be Int — fork(2) on 64-bit Linux
+// returns Int values in the full pid_t range; macOS pid_t is signed
+// 32-bit. The negative-pid path (fork() failed; the higher-level wrapper
+// funnels through Result<SpawnResult, Text>) must construct cleanly.
+// =============================================================================
+
+@test
+fn regression_spawn_result_pid_carries_negative() {
+    // Pre-fix shape (if the pid field were USize): the -1 error path would
+    // wrap silently to USize.max, masking the error.
+    let r = SpawnResult {
+        pid: -1,
+        stdin_fd: -1,
+        stdout_fd: -1,
+        stderr_fd: -1,
+    };
+    assert(r.pid < 0);
+}
+
+fn main() {}

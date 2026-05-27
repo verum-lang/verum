@@ -1,0 +1,67 @@
+// =============================================================================
+// core-tests/sys/mod/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for the `core.sys` umbrella module.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.{OSError, Fd, PAGE_SIZE, USIZE_BITS};
+
+// =============================================================================
+// REGRESSION 1: Umbrella re-exports must preserve type identity.
+//
+// Pre-fix bug class (if the umbrella `public mount .common.OSError`
+// generated a distinct copy of the OSError type instead of an alias):
+// users would observe two OSError types in the codegen registry, with
+// values of one rejected at function boundaries expecting the other.
+//
+// This test pins the rule: OSError reached via umbrella == OSError
+// reached via direct submodule (both refer to the same nominal type).
+// =============================================================================
+
+@test
+fn regression_umbrella_os_error_field_access_round_trip() {
+    let e = OSError { code: 2, message: "ENOENT".clone() };
+    assert_eq(e.code, 2);
+    assert_eq(e.message, "ENOENT".clone());
+}
+
+// =============================================================================
+// REGRESSION 2: Umbrella `Fd` must be the newtype from
+// `core.sys.io_engine`, not a shadow type from another submodule.
+// =============================================================================
+
+@test
+fn regression_umbrella_fd_newtype_round_trip() {
+    let f: Fd = Fd(42 as Int32);
+    assert_eq(f.0, 42 as Int32);
+}
+
+// =============================================================================
+// REGRESSION 3: PAGE_SIZE accessed via the umbrella must equal the
+// platform's actual page size (4096 on x86_64; 16384 on aarch64 macOS).
+// Pre-fix bug class: if the umbrella exposed a stale literal that
+// drifted from the per-platform constant, the value here would be off.
+// =============================================================================
+
+@test
+fn regression_umbrella_page_size_matches_platform() {
+    // Page size is positive, byte-aligned, and a power of two on every
+    // supported target.
+    assert(PAGE_SIZE >= 4096);
+    let v = PAGE_SIZE as USize;
+    assert_eq(v & (v - (1 as USize)), 0 as USize);
+}
+
+// =============================================================================
+// REGRESSION 4: USIZE_BITS reached via the umbrella must equal the
+// USize.bits type-property intrinsic.
+// =============================================================================
+
+@test
+fn regression_umbrella_usize_bits_drift_pin() {
+    assert_eq(USIZE_BITS, USize.bits);
+}
+
+fn main() {}

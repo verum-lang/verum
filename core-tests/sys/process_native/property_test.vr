@@ -1,0 +1,124 @@
+// =============================================================================
+// core-tests/sys/process_native/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.process_native`.
+//
+// Properties covered:
+//   * SpawnResult field-projection identity.
+//   * Spawn-result invariants for the 4 standard capture configurations
+//     (no_capture / stdin_only / stdout_only / stderr_only / all).
+//   * The -1 fd sentinel disjointness from valid fds (n >= 0).
+//   * The 0-pid is reserved for the child path (canonical fork(2) contract).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.process_native.{SpawnResult};
+
+// =============================================================================
+// Section 1: SpawnResult — field-projection identity
+// =============================================================================
+
+@test
+fn property_spawn_result_field_projection_identity_pid() {
+    let pids: List<Int> = [-1, 0, 1, 42, 1000, 1_000_000];
+    for p in pids.iter() {
+        let r = SpawnResult { pid: *p, stdin_fd: -1, stdout_fd: -1, stderr_fd: -1 };
+        assert_eq(r.pid, *p);
+    }
+}
+
+@test
+fn property_spawn_result_field_projection_identity_stdin() {
+    let fds: List<Int> = [-1, 0, 1, 7, 1023];
+    for fd in fds.iter() {
+        let r = SpawnResult { pid: 1, stdin_fd: *fd, stdout_fd: -1, stderr_fd: -1 };
+        assert_eq(r.stdin_fd, *fd);
+    }
+}
+
+@test
+fn property_spawn_result_field_projection_identity_stdout() {
+    let fds: List<Int> = [-1, 0, 1, 7, 1023];
+    for fd in fds.iter() {
+        let r = SpawnResult { pid: 1, stdin_fd: -1, stdout_fd: *fd, stderr_fd: -1 };
+        assert_eq(r.stdout_fd, *fd);
+    }
+}
+
+@test
+fn property_spawn_result_field_projection_identity_stderr() {
+    let fds: List<Int> = [-1, 0, 1, 7, 1023];
+    for fd in fds.iter() {
+        let r = SpawnResult { pid: 1, stdin_fd: -1, stdout_fd: -1, stderr_fd: *fd };
+        assert_eq(r.stderr_fd, *fd);
+    }
+}
+
+// =============================================================================
+// Section 2: Standard capture configurations — exhaustive 2^3 = 8 cases
+// =============================================================================
+
+@test
+fn property_spawn_result_eight_capture_configurations() {
+    // Sweep every (stdin?, stdout?, stderr?) Bool triple — 8 cases.
+    let triples: List<(Bool, Bool, Bool)> = [
+        (false, false, false),
+        (false, false, true),
+        (false, true,  false),
+        (false, true,  true),
+        (true,  false, false),
+        (true,  false, true),
+        (true,  true,  false),
+        (true,  true,  true),
+    ];
+    let mut n_constructed: Int = 0;
+    for t in triples.iter() {
+        let (i, o, e) = *t;
+        let r = SpawnResult {
+            pid: 1234,
+            stdin_fd:  if i { 10 } else { -1 },
+            stdout_fd: if o { 11 } else { -1 },
+            stderr_fd: if e { 12 } else { -1 },
+        };
+        // The 8-case sweep just confirms each construction is reachable.
+        assert_eq(r.pid, 1234);
+        n_constructed = n_constructed + 1;
+    }
+    assert_eq(n_constructed, 8);
+}
+
+// =============================================================================
+// Section 3: Sentinel disjointness — -1 never equals any valid fd
+// =============================================================================
+
+@test
+fn property_spawn_result_minus_one_sentinel_disjoint_from_valid() {
+    // For any valid fd (n >= 0), -1 != n.
+    let valid_fds: List<Int> = [0, 1, 2, 3, 7, 100, 4096];
+    for v in valid_fds.iter() {
+        assert(*v != -1);
+        assert(*v >= 0);
+    }
+}
+
+// =============================================================================
+// Section 4: fork(2) pid contract — 0 = child, > 0 = parent, < 0 = error
+// =============================================================================
+
+@test
+fn property_spawn_result_pid_trichotomy() {
+    fn classify(r: &SpawnResult) -> Int {
+        if r.pid < 0 { -1 }
+        else if r.pid == 0 { 0 }
+        else { 1 }
+    }
+    let error_r  = SpawnResult { pid: -1,   stdin_fd: -1, stdout_fd: -1, stderr_fd: -1 };
+    let child_r  = SpawnResult { pid: 0,    stdin_fd: -1, stdout_fd: -1, stderr_fd: -1 };
+    let parent_r = SpawnResult { pid: 4242, stdin_fd: -1, stdout_fd: -1, stderr_fd: -1 };
+    assert_eq(classify(&error_r),  -1);
+    assert_eq(classify(&child_r),   0);
+    assert_eq(classify(&parent_r),  1);
+}
+
+fn main() {}
