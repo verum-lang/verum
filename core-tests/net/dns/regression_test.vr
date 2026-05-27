@@ -1,0 +1,219 @@
+// =============================================================================
+// core-tests/net/dns/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN pins for `core/net/dns.vr`:
+//
+//   * Live network paths (`lookup_host` / `lookup_host_v4` /
+//     `lookup_host_v6` / `lookup_addr` / `Resolver.query` / `resolve`)
+//     require either a mock-resolver harness OR a `@network` marker
+//     against non-hermetic CI. Neither exists in `core-tests/` —
+//     see `audit.md §3.1`. Tests below are `@ignore`'d with a stable
+//     defect tag so re-enablement is mechanical once harness lands.
+//
+//   * Active regressions pin wire-format constants and variant payload
+//     identity — these protect against silent drift of values that
+//     `crates/verum_runtime/src/net/dns/...` reads at the FFI boundary
+//     and that downstream RFC-compliance depends on.
+//
+// =============================================================================
+
+mount core.net.dns.{
+    DnsError, DnsRecord, DnsRecordEntry, DnsRecordType, Resolver,
+    DNS_TYPE_A, DNS_TYPE_NS, DNS_TYPE_CNAME, DNS_TYPE_SOA,
+    DNS_TYPE_PTR, DNS_TYPE_MX, DNS_TYPE_TXT, DNS_TYPE_AAAA,
+    DNS_TYPE_SRV, DNS_TYPE_ANY,
+    lookup_host, lookup_host_v4, lookup_host_v6, lookup_addr, resolve
+};
+mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: @ignore'd live-network paths (DNS-1 — see audit.md §3.1)
+// =============================================================================
+
+@ignore("DNS-1: lookup_host requires mock-resolver harness or @network marker. See audit.md §3.1.")
+@test
+fn regression_lookup_host_real_hostname() {
+    let host = "example.com".clone();
+    match lookup_host(&host) {
+        Ok(addrs) => assert(addrs.len() > 0),
+        Err(_) => panic("expected at least one address"),
+    }
+}
+
+@ignore("DNS-2: lookup_host_v4 requires mock-resolver harness. See audit.md §3.1.")
+@test
+fn regression_lookup_host_v4_real_hostname() {
+    let host = "example.com".clone();
+    match lookup_host_v4(&host) {
+        Ok(addrs) => assert(addrs.len() > 0),
+        Err(_) => panic("expected at least one v4 address"),
+    }
+}
+
+@ignore("DNS-3: lookup_host_v6 requires mock-resolver harness. See audit.md §3.1.")
+@test
+fn regression_lookup_host_v6_real_hostname() {
+    let host = "example.com".clone();
+    match lookup_host_v6(&host) {
+        Ok(addrs) => assert(addrs.len() > 0),
+        Err(_) => panic("expected at least one v6 address"),
+    }
+}
+
+@ignore("DNS-4: lookup_addr reverse PTR requires mock-resolver harness. See audit.md §3.1.")
+@test
+fn regression_lookup_addr_reverse_ptr() {
+    // 8.8.8.8 PTR → dns.google. (a stable Google-DNS reverse).
+    let ip = IpAddr.v4(8_u8, 8_u8, 8_u8, 8_u8);
+    match lookup_addr(&ip) {
+        Ok(name) => assert(name.len() > 0),
+        Err(_) => panic("expected a PTR record"),
+    }
+}
+
+@ignore("DNS-5: Resolver.new + Resolver.query require mock-resolver harness or live UDP. See audit.md §3.1.")
+@test
+fn regression_resolver_new_and_query() {
+    let _r = Resolver.new();
+    // Even constructing the Resolver requires the underlying UDP socket
+    // FFI to be reachable — gated until harness lands.
+    assert(true);
+}
+
+@ignore("DNS-6: resolve(&Text) SocketAddr resolution requires mock-resolver harness. See audit.md §3.1.")
+@test
+fn regression_resolve_socket_addrs() {
+    let host = "example.com".clone();
+    match resolve(&host, 80) {
+        Ok(addrs) => assert(addrs.len() > 0),
+        Err(_) => panic("expected at least one SocketAddr"),
+    }
+}
+
+// =============================================================================
+// Section 2: Active LOCK-IN pins — wire-format constants
+// =============================================================================
+//
+// `crates/verum_runtime/src/net/dns/...` reads these UInt16 values
+// directly when serialising the DNS question section. Drift here
+// would silently produce malformed queries that hit every resolver
+// in the world. These pins are RFC-cited; do NOT relax without RFC.
+// =============================================================================
+
+@test
+fn regression_dns_type_a_wire_is_1() {
+    // RFC 1035 §3.2.2: A=1 — every IPv4 forward-DNS query depends on
+    // this wire value. Single-byte change here breaks the world.
+    assert_eq(DNS_TYPE_A, 1_u16);
+}
+
+@test
+fn regression_dns_type_aaaa_wire_is_28() {
+    // RFC 3596 §2.1: AAAA=28 — every IPv6 forward-DNS query depends
+    // on this wire value. RFC 1886 → RFC 3596 kept the value stable.
+    assert_eq(DNS_TYPE_AAAA, 28_u16);
+}
+
+@test
+fn regression_dns_type_srv_wire_is_33() {
+    // RFC 2782: SRV=33 — service-locator records. Every SIP/XMPP/
+    // Kerberos discovery depends on this wire value.
+    assert_eq(DNS_TYPE_SRV, 33_u16);
+}
+
+@test
+fn regression_dns_type_ptr_wire_is_12() {
+    // RFC 1035 §3.2.2: PTR=12 — every reverse-DNS lookup depends on
+    // this wire value. Drift here breaks rDNS in monitoring + logging.
+    assert_eq(DNS_TYPE_PTR, 12_u16);
+}
+
+@test
+fn regression_dns_type_any_wire_is_255() {
+    // RFC 1035 §3.2.3: ANY=255 — QTYPE-only marker for the
+    // catch-all query. Routing of zone walks and debugging tools
+    // depends on this being the high byte sentinel.
+    assert_eq(DNS_TYPE_ANY, 255_u16);
+}
+
+// =============================================================================
+// Section 3: Active LOCK-IN pins — DnsError identity post-clone
+// =============================================================================
+
+@test
+fn regression_dns_error_13_variant_identity() {
+    // All 13 DnsError variants must compare equal to themselves after
+    // independent construction — the Eq implementation at
+    // dns.vr:270-289 covers every match arm including payload variants
+    // (NetworkError + Other) over Text equality.
+    assert(DnsError.NotFound == DnsError.NotFound);
+    assert(DnsError.HostNotFound == DnsError.HostNotFound);
+    assert(DnsError.TryAgain == DnsError.TryAgain);
+    assert(DnsError.NoRecovery == DnsError.NoRecovery);
+    assert(DnsError.NoData == DnsError.NoData);
+    assert(DnsError.Timeout == DnsError.Timeout);
+    assert(DnsError.ServerError == DnsError.ServerError);
+    assert(DnsError.InvalidName == DnsError.InvalidName);
+    assert(DnsError.InvalidResponse == DnsError.InvalidResponse);
+    let na = DnsError.NetworkError("transport".clone());
+    let nb = DnsError.NetworkError("transport".clone());
+    assert(na == nb);
+    assert(DnsError.Truncated == DnsError.Truncated);
+    assert(DnsError.Refused == DnsError.Refused);
+    let oa = DnsError.Other("custom".clone());
+    let ob = DnsError.Other("custom".clone());
+    assert(oa == ob);
+}
+
+// =============================================================================
+// Section 4: Active LOCK-IN pins — DnsRecord variant payload preservation
+// =============================================================================
+
+@test
+fn regression_dns_record_a_payload_preserved_post_let_bind() {
+    // A-record payload (Ipv4Addr) must survive a let-bind without
+    // identity drift. RFC 1035 §3.4.1.
+    let ip = Ipv4Addr.new(8_u8, 8_u8, 4_u8, 4_u8);
+    let r = DnsRecord.A(ip);
+    let same = r;
+    match same {
+        DnsRecord.A(out) => assert(out == ip),
+        _ => panic("expected A variant post-let-bind"),
+    }
+}
+
+@test
+fn regression_dns_record_srv_payload_preserved_post_let_bind() {
+    // SRV-record payload (priority/weight/port/target) must survive
+    // a let-bind. RFC 2782.
+    let r = DnsRecord.SRV {
+        priority: 10, weight: 60, port: 5269,
+        target: "xmpp.example.com".clone(),
+    };
+    let same = r;
+    match same {
+        DnsRecord.SRV { priority, weight, port, target: _ } => {
+            assert_eq(priority, 10);
+            assert_eq(weight, 60);
+            assert_eq(port, 5269);
+        },
+        _ => panic("expected SRV variant post-let-bind"),
+    }
+}
+
+@test
+fn regression_dns_record_entry_record_plus_ttl_preserved() {
+    // DnsRecordEntry { record, ttl } must store both fields losslessly.
+    // RFC 1035 §3.2.1 — TTL is part of every RR.
+    let e = DnsRecordEntry {
+        record: DnsRecord.A(Ipv4Addr.new(1_u8, 1_u8, 1_u8, 1_u8)),
+        ttl: 300,
+    };
+    assert_eq(e.ttl, 300);
+    match e.record {
+        DnsRecord.A(ip) => assert(ip == Ipv4Addr.new(1_u8, 1_u8, 1_u8, 1_u8)),
+        _ => panic("expected A variant on entry.record"),
+    }
+}

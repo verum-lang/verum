@@ -1,0 +1,305 @@
+// =============================================================================
+// core-tests/net/unix/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core/net/unix.vr` covering:
+//
+//   * UnixError 7-variant Eq reflexivity (IoError, PathTooLong,
+//     InvalidPath, PermissionDenied, PathInUse, NotFound, PeerClosed).
+//     `implement Eq for UnixError` exists at unix.vr:232, so `==`
+//     is the canonical equality operator here.
+//   * UnixError pairwise disjointness — 7 × 7 ≈ 49 cells reduced to
+//     ~12 representative non-reflexive pairs.
+//   * UnixError.PathTooLong field-independence on {limit, actual}.
+//   * ShutdownKind 3-variant disjointness via `is` (no Eq impl).
+//   * PeerCred field-independence on {pid, uid, gid} 3-axis lattice.
+//   * FdPassingError.NotImplemented identity (stub marker).
+// =============================================================================
+
+mount core.net.unix.{UnixError, ShutdownKind, PeerCred, FdPassingError};
+
+// =============================================================================
+// Section 1: UnixError — 7-variant Eq reflexivity
+// =============================================================================
+
+@test
+fn prop_unix_error_io_error_eq_reflexive() {
+    let a = UnixError.IoError("io".clone());
+    let b = UnixError.IoError("io".clone());
+    assert(a == b);
+}
+
+@test
+fn prop_unix_error_path_too_long_eq_reflexive() {
+    let a = UnixError.PathTooLong { limit: 108, actual: 200 };
+    let b = UnixError.PathTooLong { limit: 108, actual: 200 };
+    assert(a == b);
+}
+
+@test
+fn prop_unix_error_invalid_path_eq_reflexive() {
+    let a = UnixError.InvalidPath("/dev/null".clone());
+    let b = UnixError.InvalidPath("/dev/null".clone());
+    assert(a == b);
+}
+
+@test
+fn prop_unix_error_permission_denied_eq_reflexive() {
+    let a = UnixError.PermissionDenied;
+    let b = UnixError.PermissionDenied;
+    assert(a == b);
+}
+
+@test
+fn prop_unix_error_path_in_use_eq_reflexive() {
+    let a = UnixError.PathInUse("/tmp/x".clone());
+    let b = UnixError.PathInUse("/tmp/x".clone());
+    assert(a == b);
+}
+
+@test
+fn prop_unix_error_not_found_eq_reflexive() {
+    let a = UnixError.NotFound("/tmp/missing".clone());
+    let b = UnixError.NotFound("/tmp/missing".clone());
+    assert(a == b);
+}
+
+@test
+fn prop_unix_error_peer_closed_eq_reflexive() {
+    let a = UnixError.PeerClosed;
+    let b = UnixError.PeerClosed;
+    assert(a == b);
+}
+
+// =============================================================================
+// Section 2: UnixError — pairwise disjointness (representative pairs)
+// =============================================================================
+//
+// 7 × 7 = 49 cells. After collapsing reflexivity (7) and symmetric
+// duplicates, the non-trivial cardinality is 21 unordered pairs.
+// Sampling ~12 representative pairs that cross every variant at
+// least once.
+
+@test
+fn prop_unix_error_disjoint_io_vs_invalid_path() {
+    let a = UnixError.IoError("x".clone());
+    let b = UnixError.InvalidPath("x".clone());
+    assert(!(a == b));
+}
+
+@test
+fn prop_unix_error_disjoint_io_vs_path_too_long() {
+    let a = UnixError.IoError("x".clone());
+    let b = UnixError.PathTooLong { limit: 108, actual: 200 };
+    assert(!(a == b));
+}
+
+@test
+fn prop_unix_error_disjoint_io_vs_permission_denied() {
+    let a = UnixError.IoError("x".clone());
+    let b = UnixError.PermissionDenied;
+    assert(!(a == b));
+}
+
+@test
+fn prop_unix_error_disjoint_path_too_long_vs_invalid_path() {
+    let a = UnixError.PathTooLong { limit: 108, actual: 200 };
+    let b = UnixError.InvalidPath("x".clone());
+    assert(!(a == b));
+}
+
+@test
+fn prop_unix_error_disjoint_path_too_long_vs_not_found() {
+    let a = UnixError.PathTooLong { limit: 108, actual: 200 };
+    let b = UnixError.NotFound("x".clone());
+    assert(!(a == b));
+}
+
+@test
+fn prop_unix_error_disjoint_invalid_path_vs_path_in_use() {
+    let a = UnixError.InvalidPath("/tmp/x".clone());
+    let b = UnixError.PathInUse("/tmp/x".clone());
+    assert(!(a == b));
+}
+
+@test
+fn prop_unix_error_disjoint_permission_denied_vs_not_found() {
+    let a = UnixError.PermissionDenied;
+    let b = UnixError.NotFound("x".clone());
+    assert(!(a == b));
+}
+
+@test
+fn prop_unix_error_disjoint_permission_denied_vs_peer_closed() {
+    let a = UnixError.PermissionDenied;
+    let b = UnixError.PeerClosed;
+    assert(!(a == b));
+}
+
+@test
+fn prop_unix_error_disjoint_path_in_use_vs_not_found() {
+    let a = UnixError.PathInUse("/tmp/x".clone());
+    let b = UnixError.NotFound("/tmp/x".clone());
+    assert(!(a == b));
+}
+
+@test
+fn prop_unix_error_disjoint_path_in_use_vs_peer_closed() {
+    let a = UnixError.PathInUse("/tmp/x".clone());
+    let b = UnixError.PeerClosed;
+    assert(!(a == b));
+}
+
+@test
+fn prop_unix_error_disjoint_not_found_vs_peer_closed() {
+    let a = UnixError.NotFound("x".clone());
+    let b = UnixError.PeerClosed;
+    assert(!(a == b));
+}
+
+@test
+fn prop_unix_error_disjoint_io_vs_peer_closed() {
+    let a = UnixError.IoError("x".clone());
+    let b = UnixError.PeerClosed;
+    assert(!(a == b));
+}
+
+// =============================================================================
+// Section 3: UnixError.PathTooLong — field independence
+// =============================================================================
+
+@test
+fn prop_unix_error_path_too_long_actual_field_independence() {
+    // {limit:108, actual:200} != {limit:108, actual:250} — `actual`
+    // is independently observable in the Eq lattice.
+    let a = UnixError.PathTooLong { limit: 108, actual: 200 };
+    let b = UnixError.PathTooLong { limit: 108, actual: 250 };
+    assert(!(a == b));
+}
+
+@test
+fn prop_unix_error_path_too_long_limit_field_independence() {
+    // {limit:108, actual:200} != {limit:104, actual:200} — `limit`
+    // is independently observable.
+    let a = UnixError.PathTooLong { limit: 108, actual: 200 };
+    let b = UnixError.PathTooLong { limit: 104, actual: 200 };
+    assert(!(a == b));
+}
+
+@test
+fn prop_unix_error_path_too_long_both_fields_change() {
+    // Belt-and-braces: changing both fields stays disjoint.
+    let a = UnixError.PathTooLong { limit: 108, actual: 200 };
+    let b = UnixError.PathTooLong { limit: 104, actual: 250 };
+    assert(!(a == b));
+}
+
+// =============================================================================
+// Section 4: ShutdownKind — 3-variant disjointness via `is`
+// =============================================================================
+//
+// `ShutdownKind` has no `implement Eq for ShutdownKind` block in
+// unix.vr — use the `is` pattern operator (mirrors the convention
+// in `core-tests/net/tcp/property_test.vr`).
+
+@test
+fn prop_shutdown_kind_reflexive_read() {
+    let s: ShutdownKind = ShutdownKind.Read;
+    assert(s is ShutdownKind.Read);
+}
+
+@test
+fn prop_shutdown_kind_reflexive_write() {
+    let s: ShutdownKind = ShutdownKind.Write;
+    assert(s is ShutdownKind.Write);
+}
+
+@test
+fn prop_shutdown_kind_reflexive_both() {
+    let s: ShutdownKind = ShutdownKind.Both;
+    assert(s is ShutdownKind.Both);
+}
+
+@test
+fn prop_shutdown_kind_disjoint_read_vs_write() {
+    let r: ShutdownKind = ShutdownKind.Read;
+    let w: ShutdownKind = ShutdownKind.Write;
+    assert(!(r is ShutdownKind.Write));
+    assert(!(w is ShutdownKind.Read));
+}
+
+@test
+fn prop_shutdown_kind_disjoint_read_vs_both() {
+    let r: ShutdownKind = ShutdownKind.Read;
+    let b: ShutdownKind = ShutdownKind.Both;
+    assert(!(r is ShutdownKind.Both));
+    assert(!(b is ShutdownKind.Read));
+}
+
+@test
+fn prop_shutdown_kind_disjoint_write_vs_both() {
+    let w: ShutdownKind = ShutdownKind.Write;
+    let b: ShutdownKind = ShutdownKind.Both;
+    assert(!(w is ShutdownKind.Both));
+    assert(!(b is ShutdownKind.Write));
+}
+
+// =============================================================================
+// Section 5: PeerCred — 3-axis field independence
+// =============================================================================
+
+@test
+fn prop_peer_cred_pid_field_independence() {
+    let a = PeerCred { pid: 1234_i32, uid: 1000_u32, gid: 1000_u32 };
+    let b = PeerCred { pid: 5678_i32, uid: 1000_u32, gid: 1000_u32 };
+    // Different pid → fields observably different along that axis.
+    assert_eq(a.pid, 1234_i32);
+    assert_eq(b.pid, 5678_i32);
+    assert(a.pid != b.pid);
+    assert(a.uid == b.uid);
+    assert(a.gid == b.gid);
+}
+
+@test
+fn prop_peer_cred_uid_field_independence() {
+    let a = PeerCred { pid: 1234_i32, uid: 1000_u32, gid: 1000_u32 };
+    let b = PeerCred { pid: 1234_i32, uid: 0_u32,    gid: 1000_u32 };
+    assert(a.pid == b.pid);
+    assert(a.uid != b.uid);
+    assert(a.gid == b.gid);
+}
+
+@test
+fn prop_peer_cred_gid_field_independence() {
+    let a = PeerCred { pid: 1234_i32, uid: 1000_u32, gid: 1000_u32 };
+    let b = PeerCred { pid: 1234_i32, uid: 1000_u32, gid: 0_u32    };
+    assert(a.pid == b.pid);
+    assert(a.uid == b.uid);
+    assert(a.gid != b.gid);
+}
+
+@test
+fn prop_peer_cred_all_three_axes_change() {
+    // Belt-and-braces: full 3-axis swing.
+    let a = PeerCred { pid: 1_i32,    uid: 0_u32,    gid: 0_u32    };
+    let b = PeerCred { pid: 9999_i32, uid: 1000_u32, gid: 1000_u32 };
+    assert(a.pid != b.pid);
+    assert(a.uid != b.uid);
+    assert(a.gid != b.gid);
+}
+
+// =============================================================================
+// Section 6: FdPassingError.NotImplemented — identity
+// =============================================================================
+//
+// `FdPassingError.NotImplemented(Text)` is the stub marker at every
+// backend until SCM_RIGHTS lands (see audit.md §3.3). The `is`
+// pattern operator on the tag is intentionally agnostic of the
+// payload — pin that identity here so removing the variant requires
+// an audit edit.
+
+@test
+fn prop_fd_passing_error_not_implemented_identity() {
+    let e: FdPassingError = FdPassingError.NotImplemented("stub".clone());
+    assert(e is FdPassingError.NotImplemented);
+}

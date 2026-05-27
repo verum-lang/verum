@@ -1,0 +1,445 @@
+// =============================================================================
+// core-tests/net/dns/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core/net/dns.vr` data surface:
+//
+//   * DNS_TYPE_* wire-constant pairwise disjointness (RFC 1035 §3.2.2,
+//     RFC 3596, RFC 2782 for AAAA + SRV).
+//   * DnsRecordType 10-variant pairwise disjointness via `is` pattern.
+//   * DnsRecord.A ⊥ DnsRecord.AAAA (separate payload types).
+//   * DnsRecord.MX preserves priority across construction.
+//   * DnsRecord.SRV preserves priority/weight/port/target.
+//   * DnsRecord.SOA preserves all 7 fields.
+//   * DnsError 13-variant reflexivity + sampled disjointness.
+//   * DnsRecordEntry TTL boundary preservation (0, 1, 3600, 86400, Int.MAX).
+//
+// Live network paths (`lookup_host`, `Resolver.query`, …) require a
+// mock-resolver harness and are gated in `regression_test.vr`. See
+// `audit.md §3.1`.
+// =============================================================================
+
+mount core.net.dns.{
+    DnsError, DnsRecord, DnsRecordEntry, DnsRecordType,
+    DNS_TYPE_A, DNS_TYPE_NS, DNS_TYPE_CNAME, DNS_TYPE_SOA,
+    DNS_TYPE_PTR, DNS_TYPE_MX, DNS_TYPE_TXT, DNS_TYPE_AAAA,
+    DNS_TYPE_SRV, DNS_TYPE_ANY
+};
+mount core.net.addr.{Ipv4Addr, Ipv6Addr};
+
+// =============================================================================
+// Section 1: DNS_TYPE_* pairwise disjointness — sampled significant pairs
+// =============================================================================
+
+@test
+fn prop_dns_type_a_vs_aaaa_disjoint() {
+    // RFC 1035 §3.2.2 A=1 vs RFC 3596 AAAA=28 — must never collide.
+    assert(!(DNS_TYPE_A == DNS_TYPE_AAAA));
+}
+
+@test
+fn prop_dns_type_a_vs_cname_disjoint() {
+    assert(!(DNS_TYPE_A == DNS_TYPE_CNAME));
+}
+
+@test
+fn prop_dns_type_ns_vs_soa_disjoint() {
+    // NS=2 vs SOA=6 — both authority-zone identifiers, must stay distinct.
+    assert(!(DNS_TYPE_NS == DNS_TYPE_SOA));
+}
+
+@test
+fn prop_dns_type_ptr_vs_a_disjoint() {
+    // PTR=12 vs A=1 — reverse-DNS vs forward-DNS must stay distinct.
+    assert(!(DNS_TYPE_PTR == DNS_TYPE_A));
+}
+
+@test
+fn prop_dns_type_mx_vs_srv_disjoint() {
+    // MX=15 vs SRV=33 — both service-locator records.
+    assert(!(DNS_TYPE_MX == DNS_TYPE_SRV));
+}
+
+@test
+fn prop_dns_type_txt_vs_srv_disjoint() {
+    // TXT=16 vs SRV=33 — small numerical gap, easy to typo.
+    assert(!(DNS_TYPE_TXT == DNS_TYPE_SRV));
+}
+
+@test
+fn prop_dns_type_aaaa_vs_srv_disjoint() {
+    // AAAA=28 vs SRV=33 — both in the 28-33 cluster.
+    assert(!(DNS_TYPE_AAAA == DNS_TYPE_SRV));
+}
+
+@test
+fn prop_dns_type_any_disjoint_from_all() {
+    // ANY=255 — the meta-query type, must not collide with any concrete.
+    assert(!(DNS_TYPE_ANY == DNS_TYPE_A));
+    assert(!(DNS_TYPE_ANY == DNS_TYPE_AAAA));
+    assert(!(DNS_TYPE_ANY == DNS_TYPE_CNAME));
+    assert(!(DNS_TYPE_ANY == DNS_TYPE_SOA));
+    assert(!(DNS_TYPE_ANY == DNS_TYPE_PTR));
+    assert(!(DNS_TYPE_ANY == DNS_TYPE_MX));
+    assert(!(DNS_TYPE_ANY == DNS_TYPE_TXT));
+    assert(!(DNS_TYPE_ANY == DNS_TYPE_NS));
+    assert(!(DNS_TYPE_ANY == DNS_TYPE_SRV));
+}
+
+// =============================================================================
+// Section 2: DnsRecordType — pairwise disjointness via `is` pattern
+// =============================================================================
+
+@test
+fn prop_dns_record_type_a_vs_aaaa_disjoint() {
+    let a = DnsRecordType.A;
+    let q = DnsRecordType.AAAA;
+    assert(a is DnsRecordType.A && !(a is DnsRecordType.AAAA));
+    assert(q is DnsRecordType.AAAA && !(q is DnsRecordType.A));
+}
+
+@test
+fn prop_dns_record_type_cname_disjoint_from_ns() {
+    let c = DnsRecordType.CNAME;
+    let n = DnsRecordType.NS;
+    assert(c is DnsRecordType.CNAME && !(c is DnsRecordType.NS));
+    assert(n is DnsRecordType.NS && !(n is DnsRecordType.CNAME));
+}
+
+@test
+fn prop_dns_record_type_mx_disjoint_from_srv() {
+    let m = DnsRecordType.MX;
+    let s = DnsRecordType.SRV;
+    assert(m is DnsRecordType.MX && !(m is DnsRecordType.SRV));
+    assert(s is DnsRecordType.SRV && !(s is DnsRecordType.MX));
+}
+
+@test
+fn prop_dns_record_type_ptr_disjoint_from_txt() {
+    let p = DnsRecordType.PTR;
+    let t = DnsRecordType.TXT;
+    assert(p is DnsRecordType.PTR && !(p is DnsRecordType.TXT));
+    assert(t is DnsRecordType.TXT && !(t is DnsRecordType.PTR));
+}
+
+@test
+fn prop_dns_record_type_soa_disjoint_from_any() {
+    let s = DnsRecordType.SOA;
+    let a = DnsRecordType.ANY;
+    assert(s is DnsRecordType.SOA && !(s is DnsRecordType.ANY));
+    assert(a is DnsRecordType.ANY && !(a is DnsRecordType.SOA));
+}
+
+@test
+fn prop_dns_record_type_full_chain_disjoint() {
+    // A specimen of every variant — each must satisfy its own tag and
+    // exactly one other tag (its sibling pair in this test) must NOT.
+    let v_a    = DnsRecordType.A;
+    let v_aaaa = DnsRecordType.AAAA;
+    let v_cn   = DnsRecordType.CNAME;
+    let v_mx   = DnsRecordType.MX;
+    let v_txt  = DnsRecordType.TXT;
+    let v_ns   = DnsRecordType.NS;
+    let v_ptr  = DnsRecordType.PTR;
+    let v_srv  = DnsRecordType.SRV;
+    let v_soa  = DnsRecordType.SOA;
+    let v_any  = DnsRecordType.ANY;
+    assert(v_a is DnsRecordType.A);
+    assert(v_aaaa is DnsRecordType.AAAA);
+    assert(v_cn is DnsRecordType.CNAME);
+    assert(v_mx is DnsRecordType.MX);
+    assert(v_txt is DnsRecordType.TXT);
+    assert(v_ns is DnsRecordType.NS);
+    assert(v_ptr is DnsRecordType.PTR);
+    assert(v_srv is DnsRecordType.SRV);
+    assert(v_soa is DnsRecordType.SOA);
+    assert(v_any is DnsRecordType.ANY);
+    // Cross-checks: each variant must NOT match a different tag.
+    assert(!(v_a is DnsRecordType.AAAA));
+    assert(!(v_cn is DnsRecordType.PTR));
+    assert(!(v_mx is DnsRecordType.SOA));
+    assert(!(v_srv is DnsRecordType.ANY));
+}
+
+// =============================================================================
+// Section 3: DnsRecord — A vs AAAA disjointness
+// =============================================================================
+
+@test
+fn prop_dns_record_a_disjoint_from_aaaa() {
+    let r_a = DnsRecord.A(Ipv4Addr.new(1_u8, 1_u8, 1_u8, 1_u8));
+    let r_q = DnsRecord.AAAA(Ipv6Addr.localhost());
+    assert(r_a is DnsRecord.A);
+    assert(r_q is DnsRecord.AAAA);
+    assert(!(r_a is DnsRecord.AAAA));
+    assert(!(r_q is DnsRecord.A));
+}
+
+@test
+fn prop_dns_record_a_payload_preserved() {
+    // A-record payload is Ipv4Addr — must round-trip through construction.
+    let ip = Ipv4Addr.new(8_u8, 8_u8, 4_u8, 4_u8);
+    let r = DnsRecord.A(ip);
+    match r {
+        DnsRecord.A(out) => assert(out == ip),
+        _ => panic("expected A variant"),
+    }
+}
+
+@test
+fn prop_dns_record_aaaa_payload_preserved() {
+    let ip = Ipv6Addr.new(0x2001, 0x4860, 0x4860, 0, 0, 0, 0, 0x8888);
+    let r = DnsRecord.AAAA(ip);
+    match r {
+        DnsRecord.AAAA(out) => assert(out == ip),
+        _ => panic("expected AAAA variant"),
+    }
+}
+
+// =============================================================================
+// Section 4: DnsRecord — MX / SRV / SOA field preservation
+// =============================================================================
+
+@test
+fn prop_dns_record_mx_priority_preserved() {
+    let r = DnsRecord.MX { priority: 10, exchange: "mail.example.com".clone() };
+    match r {
+        DnsRecord.MX { priority, exchange: _ } => assert_eq(priority, 10),
+        _ => panic("expected MX variant"),
+    }
+}
+
+@test
+fn prop_dns_record_mx_priority_distinct_lattice() {
+    // Two MX records with different priorities must remain distinct.
+    let lo = DnsRecord.MX { priority: 5, exchange: "primary.example.com".clone() };
+    let hi = DnsRecord.MX { priority: 50, exchange: "backup.example.com".clone() };
+    match lo {
+        DnsRecord.MX { priority, exchange: _ } => assert_eq(priority, 5),
+        _ => panic("expected MX"),
+    }
+    match hi {
+        DnsRecord.MX { priority, exchange: _ } => assert_eq(priority, 50),
+        _ => panic("expected MX"),
+    }
+}
+
+@test
+fn prop_dns_record_srv_all_fields_preserved() {
+    // RFC 2782: SRV = priority + weight + port + target.
+    let r = DnsRecord.SRV {
+        priority: 10, weight: 60, port: 5269,
+        target: "xmpp.example.com".clone(),
+    };
+    match r {
+        DnsRecord.SRV { priority, weight, port, target: _ } => {
+            assert_eq(priority, 10);
+            assert_eq(weight, 60);
+            assert_eq(port, 5269);
+        },
+        _ => panic("expected SRV variant"),
+    }
+}
+
+@test
+fn prop_dns_record_srv_port_distinct_lattice() {
+    let r1 = DnsRecord.SRV { priority: 0, weight: 0, port: 443, target: "h.example.com".clone() };
+    let r2 = DnsRecord.SRV { priority: 0, weight: 0, port: 80,  target: "h.example.com".clone() };
+    match r1 {
+        DnsRecord.SRV { priority: _, weight: _, port, target: _ } => assert_eq(port, 443),
+        _ => panic("expected SRV"),
+    }
+    match r2 {
+        DnsRecord.SRV { priority: _, weight: _, port, target: _ } => assert_eq(port, 80),
+        _ => panic("expected SRV"),
+    }
+}
+
+@test
+fn prop_dns_record_soa_all_seven_fields_preserved() {
+    // RFC 1035 §3.3.13: SOA = mname + rname + serial + refresh + retry + expire + minimum.
+    let r = DnsRecord.SOA {
+        mname: "ns1.example.com".clone(),
+        rname: "admin.example.com".clone(),
+        serial: 2026052700,
+        refresh: 86400,
+        retry: 7200,
+        expire: 604800,
+        minimum: 300,
+    };
+    match r {
+        DnsRecord.SOA { mname: _, rname: _, serial, refresh, retry, expire, minimum } => {
+            assert_eq(serial, 2026052700);
+            assert_eq(refresh, 86400);
+            assert_eq(retry, 7200);
+            assert_eq(expire, 604800);
+            assert_eq(minimum, 300);
+        },
+        _ => panic("expected SOA variant"),
+    }
+}
+
+// =============================================================================
+// Section 5: DnsError — 13-variant reflexivity
+// =============================================================================
+
+@test
+fn prop_dns_error_not_found_reflexive() {
+    assert(DnsError.NotFound == DnsError.NotFound);
+}
+
+@test
+fn prop_dns_error_host_not_found_reflexive() {
+    assert(DnsError.HostNotFound == DnsError.HostNotFound);
+}
+
+@test
+fn prop_dns_error_try_again_reflexive() {
+    assert(DnsError.TryAgain == DnsError.TryAgain);
+}
+
+@test
+fn prop_dns_error_no_recovery_reflexive() {
+    assert(DnsError.NoRecovery == DnsError.NoRecovery);
+}
+
+@test
+fn prop_dns_error_no_data_reflexive() {
+    assert(DnsError.NoData == DnsError.NoData);
+}
+
+@test
+fn prop_dns_error_timeout_reflexive() {
+    assert(DnsError.Timeout == DnsError.Timeout);
+}
+
+@test
+fn prop_dns_error_server_error_reflexive() {
+    assert(DnsError.ServerError == DnsError.ServerError);
+}
+
+@test
+fn prop_dns_error_invalid_name_reflexive() {
+    assert(DnsError.InvalidName == DnsError.InvalidName);
+}
+
+@test
+fn prop_dns_error_invalid_response_reflexive() {
+    assert(DnsError.InvalidResponse == DnsError.InvalidResponse);
+}
+
+@test
+fn prop_dns_error_truncated_reflexive() {
+    assert(DnsError.Truncated == DnsError.Truncated);
+}
+
+@test
+fn prop_dns_error_refused_reflexive() {
+    assert(DnsError.Refused == DnsError.Refused);
+}
+
+@test
+fn prop_dns_error_network_error_reflexive() {
+    let a = DnsError.NetworkError("connection reset".clone());
+    let b = DnsError.NetworkError("connection reset".clone());
+    assert(a == b);
+}
+
+@test
+fn prop_dns_error_other_reflexive() {
+    let a = DnsError.Other("custom failure".clone());
+    let b = DnsError.Other("custom failure".clone());
+    assert(a == b);
+}
+
+// =============================================================================
+// Section 6: DnsError — sampled pairwise disjointness
+// =============================================================================
+
+@test
+fn prop_dns_error_not_found_vs_timeout_disjoint() {
+    // RFC 1035: NXDOMAIN vs query-timeout — distinct failure modes.
+    assert(!(DnsError.NotFound == DnsError.Timeout));
+}
+
+@test
+fn prop_dns_error_truncated_vs_refused_disjoint() {
+    // RFC 1035: TC=1 (truncated) vs RCODE=5 (refused).
+    assert(!(DnsError.Truncated == DnsError.Refused));
+}
+
+@test
+fn prop_dns_error_host_not_found_vs_no_data_disjoint() {
+    // NXDOMAIN-via-stub vs NOERROR-with-empty-answer.
+    assert(!(DnsError.HostNotFound == DnsError.NoData));
+}
+
+@test
+fn prop_dns_error_network_error_vs_other_same_payload_disjoint() {
+    // Same Text payload but different variants — must NOT compare equal.
+    let n = DnsError.NetworkError("a".clone());
+    let o = DnsError.Other("a".clone());
+    assert(!(n == o));
+}
+
+@test
+fn prop_dns_error_network_error_differing_payloads() {
+    // Same variant, different payload → must NOT compare equal.
+    let a = DnsError.NetworkError("alpha".clone());
+    let b = DnsError.NetworkError("beta".clone());
+    assert(!(a == b));
+}
+
+// =============================================================================
+// Section 7: DnsRecordEntry — TTL boundary preservation
+// =============================================================================
+
+@test
+fn prop_dns_record_entry_ttl_zero_preserved() {
+    let e = DnsRecordEntry {
+        record: DnsRecord.A(Ipv4Addr.localhost()),
+        ttl: 0,
+    };
+    assert_eq(e.ttl, 0);
+}
+
+@test
+fn prop_dns_record_entry_ttl_one_preserved() {
+    let e = DnsRecordEntry {
+        record: DnsRecord.A(Ipv4Addr.localhost()),
+        ttl: 1,
+    };
+    assert_eq(e.ttl, 1);
+}
+
+@test
+fn prop_dns_record_entry_ttl_3600_preserved() {
+    // RFC-1035 §3.2.1 typical short-lived TTL.
+    let e = DnsRecordEntry {
+        record: DnsRecord.A(Ipv4Addr.new(8_u8, 8_u8, 8_u8, 8_u8)),
+        ttl: 3600,
+    };
+    assert_eq(e.ttl, 3600);
+}
+
+@test
+fn prop_dns_record_entry_ttl_86400_preserved() {
+    // 1-day TTL — common for stable A/AAAA records.
+    let e = DnsRecordEntry {
+        record: DnsRecord.AAAA(Ipv6Addr.localhost()),
+        ttl: 86400,
+    };
+    assert_eq(e.ttl, 86400);
+}
+
+@test
+fn prop_dns_record_entry_ttl_int_max_preserved() {
+    // RFC 2181 §8: TTL is a 32-bit unsigned in DNS wire format; the
+    // stdlib stores it as Int (i64). At Int.max it must not be silently
+    // truncated.
+    let e = DnsRecordEntry {
+        record: DnsRecord.A(Ipv4Addr.localhost()),
+        ttl: 2147483647, // Int32.max — RFC 2181 ceiling
+    };
+    assert_eq(e.ttl, 2147483647);
+}

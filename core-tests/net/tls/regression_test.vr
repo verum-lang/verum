@@ -1,0 +1,144 @@
+// =============================================================================
+// core-tests/net/tls/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core/net/tls.vr`. Live TLS operations
+// (`TlsConnector.connect` / `TlsAcceptor.accept` / PEM parsing /
+// ALPN negotiation) require a real TLS backend (rustls-ktls /
+// openssl-fips / hacl-star / SChannel / SecureTransport) which is
+// not yet wired up — see `audit.md §3.1`. The @ignore'd pins below
+// register the harness-side coverage points.
+//
+// Active LOCK-IN pins cover RFC-stable wire constants:
+//
+//   * TLS-6  TlsVersion.Tls10.wire_version == (3, 1)  — RFC 2246 §6.2.1
+//   * TLS-7  TlsVersion.Tls11.wire_version == (3, 2)  — RFC 4346 §6.2.1
+//   * TLS-8  TlsVersion.Tls12.wire_version == (3, 3)  — RFC 5246 §6.2.1
+//   * TLS-9  TlsVersion.Tls13.wire_version == (3, 4)  — RFC 8446 §5.1
+//              (NOTE: legacy_record_version is still (3, 3) per audit §3.2)
+//   * TLS-10 CertVerifyMode.None — pinned because audit §3.3 flags
+//              it as DANGEROUS (skips certificate verification).
+//
+// Pattern reference: `core-tests/net/cidr/regression_test.vr`.
+// =============================================================================
+
+mount core.net.tls.{TlsVersion, CertVerifyMode};
+
+// =============================================================================
+// TLS-1 — TlsConnector.connect over TcpStream
+// =============================================================================
+
+@ignore("TLS-1: TlsConnector.connect needs a live TLS backend — currently not wired up per audit.md §3.1.")
+@test
+fn regression_tls_connector_connect_over_tcp() {
+    assert(true);
+}
+
+// =============================================================================
+// TLS-2 — TlsAcceptor.accept on TcpListener
+// =============================================================================
+
+@ignore("TLS-2: TlsAcceptor.accept needs a live TLS backend — see audit.md §3.1.")
+@test
+fn regression_tls_acceptor_accept_on_tcp_listener() {
+    assert(true);
+}
+
+// =============================================================================
+// TLS-3 — Certificate.from_pem with sample fixture
+// =============================================================================
+
+@ignore("TLS-3: Certificate.from_pem needs a sample PEM fixture model. See audit.md §3.1.")
+@test
+fn regression_certificate_from_pem_sample() {
+    assert(true);
+}
+
+// =============================================================================
+// TLS-4 — PrivateKey.from_pem with sample fixture
+// =============================================================================
+
+@ignore("TLS-4: PrivateKey.from_pem needs a sample PEM fixture model. See audit.md §3.1.")
+@test
+fn regression_private_key_from_pem_sample() {
+    assert(true);
+}
+
+// =============================================================================
+// TLS-5 — ALPN negotiation h2 / http/1.1
+// =============================================================================
+
+@ignore("TLS-5: ALPN negotiation needs a live TLS backend with ALPN extension wiring. See audit.md §3.1.")
+@test
+fn regression_tls_alpn_negotiation_h2_http11() {
+    assert(true);
+}
+
+// =============================================================================
+// TLS-6 — TlsVersion.Tls10.wire_version == (3, 1) per RFC 2246 §6.2.1
+// =============================================================================
+
+@test
+fn regression_tls_version_tls10_wire_constant_rfc2246() {
+    let (maj, min) = TlsVersion.Tls10.wire_version();
+    assert_eq(maj, 3);
+    assert_eq(min, 1);
+}
+
+// =============================================================================
+// TLS-7 — TlsVersion.Tls11.wire_version == (3, 2) per RFC 4346 §6.2.1
+// =============================================================================
+
+@test
+fn regression_tls_version_tls11_wire_constant_rfc4346() {
+    let (maj, min) = TlsVersion.Tls11.wire_version();
+    assert_eq(maj, 3);
+    assert_eq(min, 2);
+}
+
+// =============================================================================
+// TLS-8 — TlsVersion.Tls12.wire_version == (3, 3) per RFC 5246 §6.2.1
+// =============================================================================
+
+@test
+fn regression_tls_version_tls12_wire_constant_rfc5246() {
+    let (maj, min) = TlsVersion.Tls12.wire_version();
+    assert_eq(maj, 3);
+    assert_eq(min, 3);
+}
+
+// =============================================================================
+// TLS-9 — TlsVersion.Tls13.wire_version == (3, 4) per RFC 8446 §5.1
+// =============================================================================
+//
+// NOTE: RFC 8446 §5.1 specifies that TLS 1.3 reports
+// legacy_record_version = (3, 3) on the ClientHello/ServerHello
+// record header for middlebox-compat (see audit §3.2). The version
+// itself, however, is (3, 4) — the supported_versions extension
+// carries the (3, 4) tuple and the real handshake version. This
+// regression pins the `(3, 4)` identity of `wire_version()` —
+// the API surface returns the actual TLS 1.3 version, not the
+// legacy compat value.
+
+@test
+fn regression_tls_version_tls13_wire_constant_rfc8446() {
+    let (maj, min) = TlsVersion.Tls13.wire_version();
+    assert_eq(maj, 3);
+    assert_eq(min, 4);
+}
+
+// =============================================================================
+// TLS-10 — CertVerifyMode.None marker pinned (audit §3.3 DANGEROUS)
+// =============================================================================
+//
+// `CertVerifyMode.None` is the cert-skip mode. Per `tls.vr:305`
+// inline doc: "Skip certificate verification (DANGEROUS - for
+// testing only)". audit §3.3 flags removal of this variant as a
+// breaking change requiring explicit review — pin its existence
+// here so any silent removal trips the regression suite.
+
+@test
+fn regression_cert_verify_mode_none_marker_pinned() {
+    let m: CertVerifyMode = CertVerifyMode.None;
+    assert(m is CertVerifyMode.None);
+}

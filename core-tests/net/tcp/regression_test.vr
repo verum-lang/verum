@@ -1,0 +1,104 @@
+// =============================================================================
+// core-tests/net/tcp/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core/net/tcp.vr`. Most functional surface
+// (connect / bind / accept / read / write / socket options) requires
+// a loopback or socketpair harness and is `@ignore`'d here — see
+// `audit.md §3.1` for the harness gate and `vcs/specs/L2-standard/net/tcp/`
+// for the live coverage.
+//
+// LOCK-IN pins (active) cover the `Shutdown` 3-variant algebraic
+// surface — these are wire-stable wrt SHUT_RD / SHUT_WR / SHUT_RDWR
+// per POSIX, but the integer constants are private inside `tcp.vr`
+// (audit.md §3.3) so the algebraic identity (variant disjointness
+// + reflexive matching via `is`) is pinned instead.
+//
+// Pattern reference: `core-tests/net/cidr/regression_test.vr` for
+// the @ignore'd functional surface + active LOCK-IN section split.
+// =============================================================================
+
+mount core.net.tcp.{Shutdown};
+
+// =============================================================================
+// TCP-1 — TcpStream.connect against loopback fixture
+// =============================================================================
+
+@ignore("TCP-1: TcpStream.connect needs loopback fixture harness. See audit.md §3.1.")
+@test
+fn regression_tcp_stream_connect_loopback() {
+    // Live connect target on 127.0.0.1:<port> — gated on harness.
+    // Placeholder body keeps the registration point reachable so
+    // un-ignoring once the harness lands is a one-line flip.
+    assert(true);
+}
+
+// =============================================================================
+// TCP-2 — TcpListener.bind + accept
+// =============================================================================
+
+@ignore("TCP-2: TcpListener.bind + accept needs harness. See audit.md §3.1.")
+@test
+fn regression_tcp_listener_bind_accept() {
+    assert(true);
+}
+
+// =============================================================================
+// TCP-3 — AsyncRead / AsyncWrite round-trip
+// =============================================================================
+
+@ignore("TCP-3: AsyncRead/AsyncWrite round-trip needs harness. See audit.md §3.1.")
+@test
+fn regression_tcp_stream_async_read_write_round_trip() {
+    assert(true);
+}
+
+// =============================================================================
+// TCP-4 — socket options: set_nodelay / set_keepalive / set_linger
+// =============================================================================
+
+@ignore("TCP-4: socket-option setters need bound TcpStream from harness. See audit.md §3.1.")
+@test
+fn regression_tcp_stream_socket_options() {
+    assert(true);
+}
+
+// =============================================================================
+// TCP-5..7 — Shutdown wire-constant LOCK-IN (variant disjointness)
+// =============================================================================
+//
+// SHUT_RD / SHUT_WR / SHUT_RDWR are POSIX-stable integers but the
+// kernel constants live inside `tcp.vr` (audit.md §3.3) and are not
+// re-exported. We pin the variant disjointness identity here so
+// downstream code that branches on `Shutdown` cannot silently
+// re-order the tag wire layout under us.
+
+@test
+fn regression_shutdown_read_serializes_distinctly() {
+    // TCP-5: Shutdown.Read must remain a distinct variant tag from
+    // Shutdown.Write / Shutdown.Both so the syscall-side mapping
+    // table in `tcp.vr` does not collapse onto a single SHUT_*
+    // value.
+    let s: Shutdown = Shutdown.Read;
+    assert(s is Shutdown.Read);
+    assert(!(s is Shutdown.Write));
+    assert(!(s is Shutdown.Both));
+}
+
+@test
+fn regression_shutdown_write_serializes_distinctly() {
+    // TCP-6: Shutdown.Write — same distinctness invariant.
+    let s: Shutdown = Shutdown.Write;
+    assert(s is Shutdown.Write);
+    assert(!(s is Shutdown.Read));
+    assert(!(s is Shutdown.Both));
+}
+
+@test
+fn regression_shutdown_both_serializes_distinctly() {
+    // TCP-7: Shutdown.Both — same distinctness invariant.
+    let s: Shutdown = Shutdown.Both;
+    assert(s is Shutdown.Both);
+    assert(!(s is Shutdown.Read));
+    assert(!(s is Shutdown.Write));
+}
