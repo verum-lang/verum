@@ -1,0 +1,157 @@
+// =============================================================================
+// core-tests/net/websocket/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for `core/net/websocket.vr` — RFC 6455.
+//
+// Active pins anchor the wire-format constants — drift here breaks
+// every WebSocket peer:
+//
+//   * WS-1 WsOpcode wire constants — Continuation 0x0, Textual 0x1,
+//     Binary 0x2, Close 0x8, Ping 0x9, Pong 0xA (RFC 6455 §5.2).
+//   * WS-2 CloseCode variants pairwise disjoint via UInt16 code.
+//
+// @ignore'd pins gated on the precompile-cascade SIGSEGV class
+// (CIDR-1 family) or live transport harnesses:
+//
+//   * WS-3 WebSocket Upgrade handshake over HTTP/1.1.
+//   * WS-4 Permessage-deflate negotiation (RFC 7692).
+//   * WS-5 Fragmented message reassembly across Continuation frames.
+// =============================================================================
+
+mount core.net.websocket.{WsOpcode, CloseCode, WsFrame};
+mount core.collections.List;
+
+// =============================================================================
+// WS-1 — WsOpcode wire-byte constants (RFC 6455 §5.2)
+// =============================================================================
+
+@test
+fn regression_ws_opcode_continuation_is_0x0() {
+    assert_eq(WsOpcode.Continuation.to_byte(), 0x0_u8);
+}
+
+@test
+fn regression_ws_opcode_textual_is_0x1() {
+    assert_eq(WsOpcode.Textual.to_byte(), 0x1_u8);
+}
+
+@test
+fn regression_ws_opcode_binary_is_0x2() {
+    assert_eq(WsOpcode.Binary.to_byte(), 0x2_u8);
+}
+
+@test
+fn regression_ws_opcode_close_is_0x8() {
+    assert_eq(WsOpcode.Close.to_byte(), 0x8_u8);
+}
+
+@test
+fn regression_ws_opcode_ping_is_0x9() {
+    assert_eq(WsOpcode.Ping.to_byte(), 0x9_u8);
+}
+
+@test
+fn regression_ws_opcode_pong_is_0xA() {
+    assert_eq(WsOpcode.Pong.to_byte(), 0xA_u8);
+}
+
+// =============================================================================
+// WS-2 — CloseCode variants pairwise disjoint via UInt16 code
+// =============================================================================
+// RFC 6455 §7.4 IANA-registered close codes. Pairwise disjointness
+// across the well-known set is what router-side handlers rely on for
+// switch-case correctness.
+
+@test
+fn regression_ws_close_code_normal_distinct_from_going_away() {
+    assert(!(CloseCode.NORMAL == CloseCode.GOING_AWAY));
+}
+
+@test
+fn regression_ws_close_code_protocol_error_distinct_from_unsupported() {
+    assert(!(CloseCode.PROTOCOL_ERROR == CloseCode.UNSUPPORTED_DATA));
+}
+
+@test
+fn regression_ws_close_code_invalid_frame_payload_distinct_from_policy() {
+    assert(!(CloseCode.INVALID_FRAME_PAYLOAD == CloseCode.POLICY_VIOLATION));
+}
+
+@test
+fn regression_ws_close_code_message_too_big_distinct_from_internal() {
+    assert(!(CloseCode.MESSAGE_TOO_BIG == CloseCode.INTERNAL_ERROR));
+}
+
+@test
+fn regression_ws_close_code_normal_eq_normal() {
+    assert(CloseCode.NORMAL == CloseCode.NORMAL);
+}
+
+@test
+fn regression_ws_close_code_new_preserves_code() {
+    let c = CloseCode.new(4001_u16);
+    assert_eq(c.code(), 4001_u16);
+}
+
+// =============================================================================
+// WS-3 — WebSocket Upgrade handshake (gated on transport harness)
+// =============================================================================
+
+@ignore("WS-3: WebSocket Upgrade handshake needs an HTTP/1.1 transport harness. See audit.md §3.1.")
+@test
+fn regression_ws_handshake_over_http_upgrade() {
+    // Placeholder for the eventual end-to-end:
+    //   let req = HttpRequest.builder()
+    //       .method(Method.Get)
+    //       .header("Upgrade", "websocket")
+    //       .header("Connection", "Upgrade")
+    //       .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+    //       .header("Sec-WebSocket-Version", "13")
+    //       .build();
+    //   let resp = ws_handshake(req).unwrap();
+    //   assert_eq(resp.status, StatusCode.switching_protocols());
+    assert(true);
+}
+
+@ignore("WS-3b: accept_key RFC 6455 §1.3 test vector — gated on SIGSEGV class. See audit.md §3.1.")
+@test
+fn regression_ws_accept_key_rfc6455_test_vector() {
+    // accept_key("dGhlIHNhbXBsZSBub25jZQ==") must yield
+    // "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" per RFC 6455 §1.3.
+    assert(true);
+}
+
+// =============================================================================
+// WS-4 — Permessage-deflate negotiation (RFC 7692)
+// =============================================================================
+
+@ignore("WS-4: permessage-deflate (RFC 7692) not implemented — RSV1 currently fails ReservedBitsSet. See audit.md §3.2.")
+@test
+fn regression_ws_permessage_deflate_extension_negotiation() {
+    // Placeholder. Once RFC 7692 lands:
+    //   * Sec-WebSocket-Extensions: permessage-deflate request → server
+    //     echoes negotiated parameters.
+    //   * Frames with RSV1=1 carry deflate-compressed payloads.
+    //   * client_max_window_bits / server_max_window_bits parameter
+    //     defaults are 15.
+    //   * client_no_context_takeover / server_no_context_takeover.
+    assert(true);
+}
+
+// =============================================================================
+// WS-5 — Fragmented message reassembly across Continuation frames
+// =============================================================================
+
+@ignore("WS-5: fragmented Continuation-frame reassembly needs a decoder-state harness. See audit.md §3.1.")
+@test
+fn regression_ws_fragmented_message_reassembly() {
+    // Placeholder. Once the harness lands:
+    //   * frame1 = Textual, FIN=0, payload="Hel"
+    //   * frame2 = Continuation, FIN=0, payload="lo, "
+    //   * frame3 = Continuation, FIN=1, payload="world"
+    //   * reassemble(frame1, frame2, frame3) yields "Hello, world".
+    //   * Interleaved control frames (Ping/Pong) MUST NOT close
+    //     the reassembly window.
+    assert(true);
+}

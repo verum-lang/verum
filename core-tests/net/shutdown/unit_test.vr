@@ -1,0 +1,88 @@
+// =============================================================================
+// core-tests/net/shutdown/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/shutdown.vr` (~323 LOC) — Graceful-shutdown primitives
+// for any accept-loop service. Combines a CancellationToken (for
+// prompt accept-loop / handler stop) with an atomic in-flight
+// request counter + wait-for-zero drain mechanism.
+//
+// Tests cover the algebraic data-surface:
+//
+//   * ShutdownError 1-variant (DrainTimeout { remaining }) + Eq.
+//   * ListenFdsError 3-variant (NoSocketActivation / WrongPid /
+//     ParseError) + Eq + disjointness.
+//   * GracefulShutdown.new — controller construction smoke test.
+// =============================================================================
+
+mount core.net.shutdown.{
+    ShutdownError, ListenFdsError, GracefulShutdown
+};
+
+// =============================================================================
+// Section 1: ShutdownError — DrainTimeout
+// =============================================================================
+
+@test
+fn test_shutdown_error_drain_timeout_eq() {
+    let a = ShutdownError.DrainTimeout { remaining: 5 };
+    let b = ShutdownError.DrainTimeout { remaining: 5 };
+    assert(a == b);
+}
+
+@test
+fn test_shutdown_error_drain_timeout_disjoint() {
+    let a = ShutdownError.DrainTimeout { remaining: 5 };
+    let b = ShutdownError.DrainTimeout { remaining: 10 };
+    assert(!(a == b));
+}
+
+@test
+fn test_shutdown_error_drain_timeout_zero_eq() {
+    let a = ShutdownError.DrainTimeout { remaining: 0 };
+    let b = ShutdownError.DrainTimeout { remaining: 0 };
+    assert(a == b);
+}
+
+// =============================================================================
+// Section 2: ListenFdsError — 3-variant + Eq
+// =============================================================================
+
+@test
+fn test_listen_fds_error_no_socket_activation_construction() {
+    let e: ListenFdsError = ListenFdsError.NoSocketActivation;
+    assert(e is ListenFdsError.NoSocketActivation);
+}
+
+@test
+fn test_listen_fds_error_wrong_pid_construction() {
+    let e = ListenFdsError.WrongPid { expected: 1234, actual: 5678 };
+    assert(e is ListenFdsError.WrongPid);
+}
+
+@test
+fn test_listen_fds_error_parse_error_construction() {
+    let e = ListenFdsError.ParseError("garbage".clone());
+    assert(e is ListenFdsError.ParseError);
+}
+
+@test
+fn test_listen_fds_error_disjoint_no_socket_vs_wrong_pid() {
+    let a: ListenFdsError = ListenFdsError.NoSocketActivation;
+    let b = ListenFdsError.WrongPid { expected: 1, actual: 2 };
+    assert(!(a is ListenFdsError.WrongPid));
+    assert(!(b is ListenFdsError.NoSocketActivation));
+}
+
+// =============================================================================
+// Section 3: GracefulShutdown.new — controller smoke test
+// =============================================================================
+
+@test
+fn test_graceful_shutdown_new_returns_controller() {
+    let _sd = GracefulShutdown.new();
+    // Confirms the construction path works without triggering the
+    // precompile-cascade SIGSEGV class. Live initiate / wait_drained
+    // require multi-threaded harness; tested at L2 specs.
+    assert(true);
+}

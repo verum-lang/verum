@@ -1,0 +1,147 @@
+// =============================================================================
+// core-tests/net/url/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for `core/net/url.vr`.
+//
+//   * URL-1 (@ignore'd) — `Text.slice` pointer-but-not-length
+//     corruption surfaces through `Url.scheme.as_str()` and
+//     `text.as_bytes()[i]` even when `text.len()` is correct.
+//     See `audit.md §3.1`. Workaround discipline: use the
+//     canonical `Text == Text` structural comparison
+//     (`assert(field == "literal".clone())`).
+//   * URL-2 (@ignore'd) — full-Unicode percent-encode coverage
+//     gated on UTF-32-aware corpus selection.
+//
+// Active pins anchor RFC 3986 §2.1 / §2.3 stable behaviour:
+//
+//   * URL-3 percent_encode(" ") == "%20" (§2.1 reserved-set hex).
+//   * URL-4 percent_encode("/") == "%2F" (slash NOT unreserved).
+//   * URL-5 percent_decode("%2F") == "/".
+//   * URL-6 percent_decode("%20") == " ".
+//   * URL-7 Url.parse keeps trailing slash: path.len() == 1 for
+//     "http://example.com/".
+// =============================================================================
+
+mount core.net.url.{Url, UrlError, UrlErrorKind, percent_encode, percent_decode};
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// URL-1 — Text.slice pointer-corruption via as_str() / as_bytes()[i]
+// =============================================================================
+//
+// Audit §3.1. Workaround is the `Text == Text` structural-compare path.
+// Test below would call `as_str()` directly to exercise the defect;
+// keep @ignore'd until VBC codegen of `Text.slice` is fixed (eager
+// payload copy or alias-through-record-clone).
+
+@ignore("URL-1: Text.slice produces pointer-corrupted view — use `==` literal comparison instead. See audit.md §3.1.")
+@test
+fn regression_url_scheme_as_str_byte_access_corrupted() {
+    let s = "http://example.com/".clone();
+    let u = Url.parse(&s).unwrap();
+    // Pre-fix: `u.path.as_bytes()[0]` panics with "Slice index out of
+    // bounds: index 0 but length is 0" even though `u.path.len() == 1`.
+    assert_eq(u.path.len(), 1);
+    let bytes = u.path.as_bytes();
+    assert_eq(bytes[0], 0x2F_u8);
+}
+
+// =============================================================================
+// URL-2 — full UTF-32 percent-encode coverage
+// =============================================================================
+//
+// Gated on a deterministic full-Unicode corpus selection. The current
+// round-trip property tests at `property_test.vr` cover the BMP,
+// supplementary plane (emoji), CJK, and Latin-1 supplement; this pin
+// reserves a slot for the full code-point sweep.
+
+@ignore("URL-2: full UTF-32 range needs a deterministic corpus generator.")
+@test
+fn regression_url_percent_encode_full_utf32() {
+    // Placeholder for the full-Unicode sweep. Cover U+0000..U+10FFFF
+    // excluding surrogate range U+D800..U+DFFF.
+    assert(true);
+}
+
+// =============================================================================
+// URL-3 — percent_encode(" ") == "%20"
+// =============================================================================
+// RFC 3986 §2.1: percent-encoded byte is "%" HEXDIG HEXDIG, hex
+// uppercase per §2.1 encoder MAY. Space (0x20) is not in the
+// unreserved set so encoder MUST percent-encode it.
+
+@test
+fn regression_url_percent_encode_space_yields_pct20() {
+    let s = " ".clone();
+    let want = "%20".clone();
+    assert(percent_encode(&s) == want);
+}
+
+// =============================================================================
+// URL-4 — percent_encode("/") == "%2F"
+// =============================================================================
+// The current `percent_encode` (url.vr:410-426) treats only the
+// unreserved set (ALPHA/DIGIT/-._~) as passthrough — '/' (0x2F) is
+// NOT unreserved per RFC 3986 §2.3 so it must be percent-encoded.
+
+@test
+fn regression_url_percent_encode_slash_yields_pct2F() {
+    let s = "/".clone();
+    let want = "%2F".clone();
+    assert(percent_encode(&s) == want);
+}
+
+// =============================================================================
+// URL-5 — percent_decode("%2F") == "/"
+// =============================================================================
+
+@test
+fn regression_url_percent_decode_pct2F_yields_slash() {
+    let s = "%2F".clone();
+    let want = "/".clone();
+    match percent_decode(&s) {
+        Ok(d) => assert(d == want),
+        Err(_) => panic("%2F must decode to /"),
+    }
+}
+
+// =============================================================================
+// URL-6 — percent_decode("%20") == " "
+// =============================================================================
+
+@test
+fn regression_url_percent_decode_pct20_yields_space() {
+    let s = "%20".clone();
+    let want = " ".clone();
+    match percent_decode(&s) {
+        Ok(d) => assert(d == want),
+        Err(_) => panic("%20 must decode to space"),
+    }
+}
+
+// =============================================================================
+// URL-7 — Url.parse keeps trailing slash: "http://example.com/" → path "/"
+// =============================================================================
+// Uses structural `Text == Text` comparison rather than as_str() to
+// sidestep URL-1.
+
+@test
+fn regression_url_parse_trailing_slash_path_len_1() {
+    let s = "http://example.com/".clone();
+    match Url.parse(&s) {
+        Ok(u) => assert_eq(u.path.len(), 1),
+        Err(_) => panic("trailing-slash URL should parse"),
+    }
+}
+
+@test
+fn regression_url_parse_trailing_slash_path_eq_slash() {
+    let s = "http://example.com/".clone();
+    let want = "/".clone();
+    match Url.parse(&s) {
+        Ok(u) => assert(u.path == want),
+        Err(_) => panic("trailing-slash URL should parse"),
+    }
+}

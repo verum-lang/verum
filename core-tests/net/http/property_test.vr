@@ -1,0 +1,391 @@
+// =============================================================================
+// core-tests/net/http/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core/net/http.vr`:
+//
+//   * Method.from_str(M.as_str()) == M — round-trip identity over the
+//     9-variant Method (RFC 7231 + RFC 5789).
+//   * Method.from_str case-insensitive: lower/upper/mixed all parse.
+//   * Method.is_safe — exactly {Get, Head, Options, Trace} per RFC
+//     7231 §4.2.1; others are NOT safe.
+//   * Method.is_idempotent — exactly {Get, Head, Put, Delete, Options,
+//     Trace} per RFC 7231 §4.2.2; {Post, Patch, Connect} are NOT.
+//   * Method.has_body — exactly {Post, Put, Patch} per RFC 7230 §3.3.
+//   * StatusCode classification — 1xx Informational / 2xx Success /
+//     3xx Redirection / 4xx ClientError / 5xx ServerError boundaries.
+//   * Common codes — 200 OK / 301 MovedPermanently / 404 NotFound /
+//     500 InternalServerError reason-phrase pinning.
+//   * Version — Http10 / Http11 / Http2 / Http3 pairwise disjoint via
+//     Eq.
+// =============================================================================
+
+mount core.net.http.{Method, StatusCode, Version};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Method round-trip — from_str(as_str()) == M
+// =============================================================================
+
+@test
+fn prop_method_round_trip_get() {
+    let s = Method.Get.as_str();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Get),
+        None => panic("from_str(Get.as_str()) must succeed"),
+    }
+}
+
+@test
+fn prop_method_round_trip_head() {
+    let s = Method.Head.as_str();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Head),
+        None => panic("from_str(Head.as_str()) must succeed"),
+    }
+}
+
+@test
+fn prop_method_round_trip_post() {
+    let s = Method.Post.as_str();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Post),
+        None => panic("from_str(Post.as_str()) must succeed"),
+    }
+}
+
+@test
+fn prop_method_round_trip_put() {
+    let s = Method.Put.as_str();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Put),
+        None => panic("from_str(Put.as_str()) must succeed"),
+    }
+}
+
+@test
+fn prop_method_round_trip_delete() {
+    let s = Method.Delete.as_str();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Delete),
+        None => panic("from_str(Delete.as_str()) must succeed"),
+    }
+}
+
+@test
+fn prop_method_round_trip_connect() {
+    let s = Method.Connect.as_str();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Connect),
+        None => panic("from_str(Connect.as_str()) must succeed"),
+    }
+}
+
+@test
+fn prop_method_round_trip_options() {
+    let s = Method.Options.as_str();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Options),
+        None => panic("from_str(Options.as_str()) must succeed"),
+    }
+}
+
+@test
+fn prop_method_round_trip_trace() {
+    let s = Method.Trace.as_str();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Trace),
+        None => panic("from_str(Trace.as_str()) must succeed"),
+    }
+}
+
+@test
+fn prop_method_round_trip_patch() {
+    let s = Method.Patch.as_str();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Patch),
+        None => panic("from_str(Patch.as_str()) must succeed"),
+    }
+}
+
+// =============================================================================
+// Section 2: Method.from_str case-insensitive
+// =============================================================================
+
+@test
+fn prop_method_from_str_lowercase_get() {
+    let s = "get".clone();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Get),
+        None => panic("'get' lowercase should parse to Get"),
+    }
+}
+
+@test
+fn prop_method_from_str_uppercase_get() {
+    let s = "GET".clone();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Get),
+        None => panic("'GET' uppercase should parse to Get"),
+    }
+}
+
+@test
+fn prop_method_from_str_mixed_case_get() {
+    let s = "GeT".clone();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Get),
+        None => panic("'GeT' mixed case should parse to Get"),
+    }
+}
+
+@test
+fn prop_method_from_str_lowercase_delete() {
+    let s = "delete".clone();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Delete),
+        None => panic("'delete' lowercase should parse to Delete"),
+    }
+}
+
+@test
+fn prop_method_from_str_mixed_case_options() {
+    let s = "OpTiOnS".clone();
+    match Method.from_str(&s) {
+        Some(m) => assert(m is Method.Options),
+        None => panic("'OpTiOnS' mixed case should parse to Options"),
+    }
+}
+
+// =============================================================================
+// Section 3: Method.is_safe — RFC 7231 §4.2.1 — exactly {Get, Head, Options, Trace}
+// =============================================================================
+
+@test
+fn prop_method_is_safe_includes_get() { assert(Method.Get.is_safe()); }
+
+@test
+fn prop_method_is_safe_includes_head() { assert(Method.Head.is_safe()); }
+
+@test
+fn prop_method_is_safe_includes_options() { assert(Method.Options.is_safe()); }
+
+@test
+fn prop_method_is_safe_includes_trace() { assert(Method.Trace.is_safe()); }
+
+@test
+fn prop_method_is_safe_excludes_post() { assert(!Method.Post.is_safe()); }
+
+@test
+fn prop_method_is_safe_excludes_put() { assert(!Method.Put.is_safe()); }
+
+@test
+fn prop_method_is_safe_excludes_delete() { assert(!Method.Delete.is_safe()); }
+
+@test
+fn prop_method_is_safe_excludes_patch() { assert(!Method.Patch.is_safe()); }
+
+@test
+fn prop_method_is_safe_excludes_connect() { assert(!Method.Connect.is_safe()); }
+
+// =============================================================================
+// Section 4: Method.is_idempotent — RFC 7231 §4.2.2
+// =============================================================================
+
+@test
+fn prop_method_is_idempotent_includes_get() { assert(Method.Get.is_idempotent()); }
+
+@test
+fn prop_method_is_idempotent_includes_head() { assert(Method.Head.is_idempotent()); }
+
+@test
+fn prop_method_is_idempotent_includes_put() { assert(Method.Put.is_idempotent()); }
+
+@test
+fn prop_method_is_idempotent_includes_delete() { assert(Method.Delete.is_idempotent()); }
+
+@test
+fn prop_method_is_idempotent_includes_options() { assert(Method.Options.is_idempotent()); }
+
+@test
+fn prop_method_is_idempotent_includes_trace() { assert(Method.Trace.is_idempotent()); }
+
+@test
+fn prop_method_is_idempotent_excludes_post() { assert(!Method.Post.is_idempotent()); }
+
+@test
+fn prop_method_is_idempotent_excludes_patch() { assert(!Method.Patch.is_idempotent()); }
+
+@test
+fn prop_method_is_idempotent_excludes_connect() { assert(!Method.Connect.is_idempotent()); }
+
+// =============================================================================
+// Section 5: Method.has_body — RFC 7230 §3.3 — exactly {Post, Put, Patch}
+// =============================================================================
+
+@test
+fn prop_method_has_body_includes_post() { assert(Method.Post.has_body()); }
+
+@test
+fn prop_method_has_body_includes_put() { assert(Method.Put.has_body()); }
+
+@test
+fn prop_method_has_body_includes_patch() { assert(Method.Patch.has_body()); }
+
+@test
+fn prop_method_has_body_excludes_get() { assert(!Method.Get.has_body()); }
+
+@test
+fn prop_method_has_body_excludes_head() { assert(!Method.Head.has_body()); }
+
+@test
+fn prop_method_has_body_excludes_delete() { assert(!Method.Delete.has_body()); }
+
+@test
+fn prop_method_has_body_excludes_options() { assert(!Method.Options.has_body()); }
+
+@test
+fn prop_method_has_body_excludes_trace() { assert(!Method.Trace.has_body()); }
+
+@test
+fn prop_method_has_body_excludes_connect() { assert(!Method.Connect.has_body()); }
+
+// =============================================================================
+// Section 6: StatusCode classification — 1xx / 2xx / 3xx / 4xx / 5xx
+// =============================================================================
+
+@test
+fn prop_status_code_1xx_is_informational() {
+    let s = StatusCode.new(100);
+    assert(s.is_informational());
+    assert(!s.is_success());
+    assert(!s.is_redirection());
+    assert(!s.is_client_error());
+    assert(!s.is_server_error());
+}
+
+@test
+fn prop_status_code_2xx_is_success() {
+    let s = StatusCode.new(200);
+    assert(s.is_success());
+    assert(!s.is_informational());
+    assert(!s.is_redirection());
+    assert(!s.is_client_error());
+    assert(!s.is_server_error());
+}
+
+@test
+fn prop_status_code_3xx_is_redirection() {
+    let s = StatusCode.new(301);
+    assert(s.is_redirection());
+    assert(!s.is_informational());
+    assert(!s.is_success());
+    assert(!s.is_client_error());
+    assert(!s.is_server_error());
+}
+
+@test
+fn prop_status_code_4xx_is_client_error() {
+    let s = StatusCode.new(404);
+    assert(s.is_client_error());
+    assert(!s.is_informational());
+    assert(!s.is_success());
+    assert(!s.is_redirection());
+    assert(!s.is_server_error());
+}
+
+@test
+fn prop_status_code_5xx_is_server_error() {
+    let s = StatusCode.new(500);
+    assert(s.is_server_error());
+    assert(!s.is_informational());
+    assert(!s.is_success());
+    assert(!s.is_redirection());
+    assert(!s.is_client_error());
+}
+
+// =============================================================================
+// Section 7: StatusCode common codes — reason-phrase pinning
+// =============================================================================
+
+@test
+fn prop_status_code_200_reason_ok() {
+    let s = StatusCode.ok();
+    assert_eq(s.code(), 200);
+    assert_eq(s.reason_phrase(), "OK");
+}
+
+@test
+fn prop_status_code_301_reason_moved_permanently() {
+    let s = StatusCode.new(301);
+    assert_eq(s.code(), 301);
+    assert_eq(s.reason_phrase(), "Moved Permanently");
+}
+
+@test
+fn prop_status_code_404_reason_not_found() {
+    let s = StatusCode.not_found();
+    assert_eq(s.code(), 404);
+    assert_eq(s.reason_phrase(), "Not Found");
+}
+
+@test
+fn prop_status_code_500_reason_internal_server_error() {
+    let s = StatusCode.internal_server_error();
+    assert_eq(s.code(), 500);
+    assert_eq(s.reason_phrase(), "Internal Server Error");
+}
+
+// =============================================================================
+// Section 8: Version — Http10 / Http11 / Http2 / Http3 pairwise disjoint
+// =============================================================================
+
+@test
+fn prop_version_eq_http10_reflexive() {
+    assert(Version.Http10 == Version.Http10);
+}
+
+@test
+fn prop_version_eq_http11_reflexive() {
+    assert(Version.Http11 == Version.Http11);
+}
+
+@test
+fn prop_version_eq_http2_reflexive() {
+    assert(Version.Http2 == Version.Http2);
+}
+
+@test
+fn prop_version_eq_http3_reflexive() {
+    assert(Version.Http3 == Version.Http3);
+}
+
+@test
+fn prop_version_disjoint_http10_http11() {
+    assert(!(Version.Http10 == Version.Http11));
+}
+
+@test
+fn prop_version_disjoint_http10_http2() {
+    assert(!(Version.Http10 == Version.Http2));
+}
+
+@test
+fn prop_version_disjoint_http10_http3() {
+    assert(!(Version.Http10 == Version.Http3));
+}
+
+@test
+fn prop_version_disjoint_http11_http2() {
+    assert(!(Version.Http11 == Version.Http2));
+}
+
+@test
+fn prop_version_disjoint_http11_http3() {
+    assert(!(Version.Http11 == Version.Http3));
+}
+
+@test
+fn prop_version_disjoint_http2_http3() {
+    assert(!(Version.Http2 == Version.Http3));
+}
