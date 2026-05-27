@@ -67,21 +67,30 @@ public type UrlErrorKind is
     | UrlTooLong;
 
 fn url_error_kind_name(k: &UrlErrorKind) -> Text {
+    // Qualified arms (task #17/#39 / URL-8 close-out) — bare-name
+    // variants collide first-wins with sibling-module variants
+    // through the VBC variant-dispatch table. `MissingScheme`
+    // unqualified specifically shadowed against an unrelated
+    // tag-0 dispatch site so empty-Text parse produced an Err
+    // whose `.kind` compared NOT-equal to UrlErrorKind.MissingScheme.
     match k {
-        MissingScheme         => "MissingScheme".clone(),
-        InvalidScheme         => "InvalidScheme".clone(),
-        InvalidAuthority      => "InvalidAuthority".clone(),
-        InvalidPort           => "InvalidPort".clone(),
-        InvalidPercentEscape  => "InvalidPercentEscape".clone(),
-        UrlTooLong            => "UrlTooLong".clone(),
+        UrlErrorKind.MissingScheme         => "MissingScheme".clone(),
+        UrlErrorKind.InvalidScheme         => "InvalidScheme".clone(),
+        UrlErrorKind.InvalidAuthority      => "InvalidAuthority".clone(),
+        UrlErrorKind.InvalidPort           => "InvalidPort".clone(),
+        UrlErrorKind.InvalidPercentEscape  => "InvalidPercentEscape".clone(),
+        UrlErrorKind.UrlTooLong            => "UrlTooLong".clone(),
     }
 }
 
 fn url_error_kind_tag(k: &UrlErrorKind) -> Int {
     match k {
-        MissingScheme         => 0,  InvalidScheme        => 1,
-        InvalidAuthority      => 2,  InvalidPort          => 3,
-        InvalidPercentEscape  => 4,  UrlTooLong           => 5,
+        UrlErrorKind.MissingScheme         => 0,
+        UrlErrorKind.InvalidScheme         => 1,
+        UrlErrorKind.InvalidAuthority      => 2,
+        UrlErrorKind.InvalidPort           => 3,
+        UrlErrorKind.InvalidPercentEscape  => 4,
+        UrlErrorKind.UrlTooLong            => 5,
     }
 }
 
@@ -149,14 +158,14 @@ implement Url {
         let n = bytes.len();
         if n == 0 {
             return Err(UrlError {
-                kind: MissingScheme,
+                kind: UrlErrorKind.MissingScheme,
                 position: 0,
                 message: "empty URL",
             });
         }
         if n > MAX_URL_LENGTH_BYTES {
             return Err(UrlError {
-                kind: UrlTooLong,
+                kind: UrlErrorKind.UrlTooLong,
                 position: MAX_URL_LENGTH_BYTES,
                 message: "URL exceeds MAX_URL_LENGTH_BYTES (64 KiB)",
             });
@@ -179,7 +188,7 @@ implement Url {
         }
         if !found || colon == 0 {
             return Err(UrlError {
-                kind: MissingScheme,
+                kind: UrlErrorKind.MissingScheme,
                 position: 0,
                 message: "URL does not start with a valid scheme",
             });
@@ -331,7 +340,7 @@ fn parse_host_port(
         }
         match close {
             None => return Err(UrlError {
-                kind: InvalidAuthority,
+                kind: UrlErrorKind.InvalidAuthority,
                 position: base_pos,
                 message: "unterminated IPv6 literal",
             }),
@@ -342,7 +351,7 @@ fn parse_host_port(
                 }
                 if bytes[c + 1] != 0x3A_u8 {
                     return Err(UrlError {
-                        kind: InvalidAuthority,
+                        kind: UrlErrorKind.InvalidAuthority,
                         position: base_pos + c + 1,
                         message: "expected ':' after IPv6 literal",
                     });
@@ -382,7 +391,7 @@ fn parse_port(port_text: &Text, base_pos: Int) -> Result<Maybe<Int>, UrlError> {
         let b = bytes[i];
         if b < 0x30_u8 || b > 0x39_u8 {
             return Err(UrlError {
-                kind: InvalidPort,
+                kind: UrlErrorKind.InvalidPort,
                 position: base_pos + i,
                 message: "non-digit in port",
             });
@@ -390,7 +399,7 @@ fn parse_port(port_text: &Text, base_pos: Int) -> Result<Maybe<Int>, UrlError> {
         v = v * 10 + ((b - 0x30_u8) as Int);
         if v > 65535 {
             return Err(UrlError {
-                kind: InvalidPort,
+                kind: UrlErrorKind.InvalidPort,
                 position: base_pos,
                 message: "port exceeds 65535",
             });
@@ -435,7 +444,7 @@ public fn percent_decode(input: &Text) -> Result<Text, UrlError> {
         if b == 0x25_u8 {                // '%'
             if i + 2 >= bytes.len() {
                 return Err(UrlError {
-                    kind: InvalidPercentEscape,
+                    kind: UrlErrorKind.InvalidPercentEscape,
                     position: i,
                     message: "truncated percent-escape",
                 });
@@ -475,7 +484,7 @@ fn decode_hex(b: Byte, pos: Int) -> Result<Int, UrlError> {
         Ok((b - 0x61_u8 + 10) as Int)
     } else {
         Err(UrlError {
-            kind: InvalidPercentEscape,
+            kind: UrlErrorKind.InvalidPercentEscape,
             position: pos,
             message: "non-hex digit in percent-escape",
         })
