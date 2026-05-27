@@ -92,16 +92,21 @@ suspicion):
    `core.net.url`) DO compile under user tests, so this is
    the *least* likely candidate.
 
-**Fix path**: multi-day VBC + codegen work. The closure
-desugaring in #1 should be probed first by replacing
-`ok_or_else(|| ...)` with a plain `match` — if the crash
-disappears, the closure path is the surface. Source-side
-workaround is straightforward (the closure here is a
-single-argument constant constructor) but does not close the
-underlying defect class.
+**Source-side closure-free fix landed 2026-05-27** (commit
+`f649312c6`): `parse_int(len_text.as_bytes()).ok_or_else(|| ...)`
+chain replaced with explicit `match Maybe.Some / Maybe.None`
+dispatch. Activates on next verum binary rebuild. Pinned by the
+5 @ignore'd regression tests in `regression_test.vr` — once the
+binary rebuilds the regression pins should remove their @ignore.
+
+If the source-side closure-free refactor doesn't close CIDR-1,
+remaining root-cause candidates #2 (Text.as_bytes layout
+propagation) and #3 (@arch_module precompile cascade) become
+the next investigation targets.
 
 **Effort**: 1 day to diagnose root cause + 2-3 days fix VBC
-codegen + retest.
+codegen + retest IF the source-side closure-free refactor
+doesn't close the defect.
 
 ### §3.2 `Cidr.contains` slice-deref pattern
 
