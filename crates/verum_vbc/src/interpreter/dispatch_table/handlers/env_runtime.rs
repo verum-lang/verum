@@ -365,6 +365,19 @@ fn intercept_arg(
         idx_val.as_i64()
     };
     let argv: Vec<String> = std::env::args().collect();
+    // `arg(idx) -> Maybe<Text>` per `core/base/env.vr:156` — out-of-bounds
+    // returns `Maybe.None`, in-bounds returns `Maybe.Some(text)`.  Pre-fix
+    // the interceptor returned a bare Text Value (empty string for OOB)
+    // which is structurally incompatible with `Maybe<Text>`.  Attempted
+    // fix via `make_none_value` / `make_some_value` broke previously-
+    // passing tests (`regression_arg_negative_index_is_none` /
+    // `regression_arg_large_index_is_none`) — those tests called
+    // `arg(-1).is_none()` and PASSED pre-fix, meaning the bare-Text
+    // return was being implicitly coerced or routed through the
+    // Verum body path that DOES return Maybe.  The full fix needs
+    // investigation of how the intercept's return value gets typed
+    // at the call site.  Keeping the pre-fix behaviour for now;
+    // re-pinned as audit § A regression for base/env.
     if idx < 0 || (idx as usize) >= argv.len() {
         return Ok(Some(alloc_string_value(state, "")?));
     }
