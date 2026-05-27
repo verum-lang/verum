@@ -53,3 +53,69 @@ fn test_ring_nodes_for_key_empty_returns_empty_list() {
 fn test_ring_default_virtual_nodes_positive() {
     assert(DEFAULT_VIRTUAL_NODES > 0);
 }
+
+// =============================================================================
+// Section 4: with_virtual_nodes(N) — accepts N range; empty state preserved
+// =============================================================================
+
+@test
+fn test_ring_with_virtual_nodes_one() {
+    let r = ConsistentHashRing.with_virtual_nodes(1);
+    assert_eq(r.node_count(), 0);
+}
+
+@test
+fn test_ring_with_virtual_nodes_large() {
+    let r = ConsistentHashRing.with_virtual_nodes(1024);
+    assert_eq(r.node_count(), 0);
+}
+
+@test
+fn test_ring_with_virtual_nodes_default_constant() {
+    let r = ConsistentHashRing.with_virtual_nodes(DEFAULT_VIRTUAL_NODES);
+    assert_eq(r.node_count(), 0);
+}
+
+// =============================================================================
+// Section 5: node_for_key / nodes_for_key invariants on empty ring
+// =============================================================================
+
+@test
+fn test_ring_node_for_key_short_key_empty_is_none() {
+    let r = ConsistentHashRing.new();
+    let k1: [Byte; 1] = [0];
+    let n: Maybe<Text> = r.node_for_key(&k1);
+    assert(n is None);
+}
+
+@test
+fn test_ring_node_for_key_long_key_empty_is_none() {
+    let r = ConsistentHashRing.new();
+    let k: [Byte; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let n: Maybe<Text> = r.node_for_key(&k);
+    assert(n is None);
+}
+
+@test
+fn test_ring_nodes_for_key_empty_with_n_zero() {
+    let r = ConsistentHashRing.new();
+    let k: [Byte; 4] = [1, 2, 3, 4];
+    let n = r.nodes_for_key(&k, 0);
+    assert_eq(n.len(), 0);
+}
+
+@test
+fn test_ring_nodes_for_key_empty_with_large_n() {
+    let r = ConsistentHashRing.new();
+    let k: [Byte; 4] = [1, 2, 3, 4];
+    let n = r.nodes_for_key(&k, 100);
+    assert_eq(n.len(), 0);
+}
+
+@test
+fn test_ring_default_virtual_nodes_reasonable_magnitude() {
+    // Industry convention: 100–200 vnodes/physical node yields acceptable
+    // distribution skew. Pin a reasonable order-of-magnitude.
+    assert(DEFAULT_VIRTUAL_NODES >= 16);
+    assert(DEFAULT_VIRTUAL_NODES <= 4096);
+}

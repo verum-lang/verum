@@ -43,3 +43,42 @@ fn test_trie_contains_absent_returns_false() {
     let key: [Byte; 3] = [1, 2, 3];
     assert(!t.contains(&key));
 }
+
+// =============================================================================
+// Section 3: empty-state invariants — multiple distinct queries
+// =============================================================================
+
+@test
+fn test_trie_empty_len_invariant() {
+    let t: Trie<Int> = Trie.new();
+    assert_eq(t.len(), 0);
+    assert(t.is_empty());
+}
+
+@test
+fn test_trie_empty_does_not_contain_arbitrary_keys() {
+    let t: Trie<Int> = Trie.new();
+    let k1: [Byte; 1] = [0];
+    let k2: [Byte; 2] = [1, 2];
+    let k3: [Byte; 5] = [10, 20, 30, 40, 50];
+    assert(!t.contains(&k1));
+    assert(!t.contains(&k2));
+    assert(!t.contains(&k3));
+}
+
+@test
+fn test_trie_empty_get_arbitrary_keys_is_none() {
+    let t: Trie<Int> = Trie.new();
+    let k1: [Byte; 1] = [0];
+    let k4: [Byte; 4] = [1, 2, 3, 4];
+    assert(t.get(&k1) is None);
+    assert(t.get(&k4) is None);
+}
+
+@test
+fn test_trie_empty_zero_byte_key_is_absent() {
+    // Zero-byte key (empty key) — well-defined empty-trie miss.
+    let t: Trie<Int> = Trie.new();
+    let empty_key: [Byte; 0] = [];
+    assert(!t.contains(&empty_key));
+}
