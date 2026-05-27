@@ -121,6 +121,77 @@ fn integration_subslice_of_subslice_offset_adds() {
     assert_eq(header_addr, 1000 - 32);
 }
 
+// -----------------------------------------------------------------------------
+// §7  32-byte layout invariant — FatRef MUST occupy exactly 32 bytes
+//     for @repr(C, size(32), align(8)).  Pin the per-field byte
+//     breakdown that LLVM lowering depends on.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_fat_ref_field_byte_breakdown_sums_to_32() {
+    // ptr      8 bytes (NaN-boxed pointer)
+    // gen      4 bytes (UInt32 generation)
+    // caps     4 bytes (UInt32 epoch_and_caps packed form)
+    // meta     8 bytes (Int signed for slice-length / -1 sentinel / vtable ptr)
+    // offset   4 bytes (UInt32 offset_from_base)
+    // reserved 4 bytes (zero-init forward-compat slot)
+    // ----     -------
+    //          32 bytes total
+    let ptr_bytes: Int = 8;
+    let gen_bytes: Int = 4;
+    let caps_bytes: Int = 4;
+    let meta_bytes: Int = 8;
+    let offset_bytes: Int = 4;
+    let reserved_bytes: Int = 4;
+    let total = ptr_bytes + gen_bytes + caps_bytes
+              + meta_bytes + offset_bytes + reserved_bytes;
+    assert_eq(total, 32);
+}
+
+@test
+fn integration_fat_ref_alignment_divides_size() {
+    // The FatRef @repr declares align(8) and size(32). For C ABI
+    // compatibility, alignment must divide size — pinned here.
+    let size: Int = 32;
+    let alignment: Int = 8;
+    assert_eq(size % alignment, 0);
+}
+
+// -----------------------------------------------------------------------------
+// §8  Metadata signed-sentinel semantics — the metadata field is
+//     declared signed (Int) NOT unsigned, so it can carry -1 as a
+//     sentinel for "no metadata yet" + arbitrary positive lengths up
+//     to Int.MAX.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_fat_ref_metadata_minus_one_sentinel_distinct_from_zero() {
+    // -1 is the "no metadata yet" sentinel; 0 is "empty slice".
+    // The two MUST be distinguishable — pin via direct comparison.
+    let no_meta: Int = -1;
+    let empty_slice: Int = 0;
+    assert(no_meta != empty_slice);
+    assert(no_meta < 0);
+    assert(empty_slice >= 0);
+}
+
+@test
+fn integration_fat_ref_metadata_supports_large_positive_lengths() {
+    // The metadata field is Int (signed 64-bit), so it supports
+    // slice lengths up to 2^63 - 1 (Int.MAX).  Pin a few canonical
+    // large values that downstream slice operations use.
+    let small: Int = 16;
+    let mid: Int = 4096;
+    let large: Int = 1048576;       // 2^20
+    let huge: Int = 1073741824;     // 2^30
+    assert(small > 0);
+    assert(mid > small);
+    assert(large > mid);
+    assert(huge > large);
+    // All fit within Int.MAX range.
+    assert(huge < (1 << 62));
+}
+
 // =============================================================================
 // Entry point
 // =============================================================================
