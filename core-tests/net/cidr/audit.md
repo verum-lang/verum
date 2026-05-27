@@ -95,18 +95,38 @@ suspicion):
 **Source-side closure-free fix landed 2026-05-27** (commit
 `f649312c6`): `parse_int(len_text.as_bytes()).ok_or_else(|| ...)`
 chain replaced with explicit `match Maybe.Some / Maybe.None`
-dispatch. Activates on next verum binary rebuild. Pinned by the
-5 @ignore'd regression tests in `regression_test.vr` — once the
-binary rebuilds the regression pins should remove their @ignore.
+dispatch.
 
-If the source-side closure-free refactor doesn't close CIDR-1,
-remaining root-cause candidates #2 (Text.as_bytes layout
-propagation) and #3 (@arch_module precompile cascade) become
-the next investigation targets.
+**Post-rebuild verification 2026-05-27** (after `cargo build --release
+-p verum_cli` regenerated the verum binary with the new runtime.vbca):
+**CIDR-1 STILL SIGSEGVs.** The closure was NOT the root cause.
+Same `llvm::SmallVectorBase<unsigned long long>::grow_pod` backtrace.
 
-**Effort**: 1 day to diagnose root cause + 2-3 days fix VBC
-codegen + retest IF the source-side closure-free refactor
-doesn't close the defect.
+Compare: `core.net.ipv6_canonical.canonicalize` (which transitively
+calls `Ipv6Addr.parse` via `parse`) now compiles + runs correctly
+post-rebuild — the closure-free fix DID close the equivalent
+IPV6CAN-1 defect for ipv6_canonical. So whatever cidr.parse triggers
+is specific to cidr.
+
+**Remaining root-cause candidates** (newly weighted post-2026-05-27):
+
+1. **Dual cross-module parse attempt + Err-wrapping cascade** —
+   `match Ipv6Addr.parse(...) { Err(e) => Err(CidrError.AddrParseFailed(e)) }`
+   wraps an `AddrParseError` in a `CidrError` variant. The
+   `AddrParseFailed(AddrParseError)` construction at user-side codegen
+   may trigger the SmallVector grow defect. Same defect-class family
+   as URL-8 (cross-module record-field corruption).
+
+2. **`slice_text` helper using `as_bytes` + `extend_from_slice`** —
+   the internal `slice_text(b, 0, slash)` at `cidr.vr:120` packages
+   a byte-range into a fresh Text via `Text.from_utf8_unchecked`.
+   Same defect class as
+   [[btree_pattern_match_ref_generic_class]] applied to Text-payload
+   construction.
+
+**Effort**: 2-3 days VBC codegen + retest. Investigation should
+isolate which of the two new candidates is the trigger by removing
+the Ipv6Addr branch first, then the slice_text helper.
 
 ### §3.2 `Cidr.contains` slice-deref pattern
 
