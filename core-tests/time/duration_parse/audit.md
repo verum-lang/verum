@@ -126,11 +126,11 @@ InputTooLong { .. } => ok, _ => fail }` pattern.
 
 | # | Defect | Estimate | Track |
 |---|---|---|---|
-| §A | Coordinate with [duration/audit.md §A](../duration/audit.md) resolution | gated | gated on duration/§A |
+| §A | Coordinate with [duration/audit.md §A](../duration/audit.md) resolution | gated | **CLOSED 2026-05-27 via Option B (signed Duration)** — negative-parse contract preserved; no parser changes needed. |
 | §B | ISO 8601 leading-sign support | 20 min | open |
-| §C | UTF-8 µ microseconds-suffix test pin | 5 min | open |
-| §D | Overflow positive-pin test | 5 min | open |
-| §E | InputTooLong variant-tight test | 5 min | open |
+| §C | UTF-8 µ microseconds-suffix test pin | 5 min | **CLOSED 2026-05-27** — `test_parse_microseconds_unicode_mu` |
+| §D | Overflow positive-pin test | 5 min | **CLOSED 2026-05-27** — `test_parse_overflow_returns_overflow_error` |
+| §E | InputTooLong variant-tight test | 5 min | **CLOSED 2026-05-27** — `test_parse_too_long_returns_input_too_long_variant` |
 
 ## 6. Status
 

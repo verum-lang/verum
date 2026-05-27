@@ -91,7 +91,7 @@ emitting the canonical 5-field text + 10 round-trip property tests.
 |---|---|---|---|
 | §A | Vixie-cron extensions (`@hourly`/`W`/`L`/`#n`) | ~3h | open |
 | §B | Tighter pattern-match-on-error diagnostics | trivial | open (gated on `Debug for CronError`) |
-| §C | Leap-year edge-case next_after pin | 10 min | open |
+| §C | Leap-year edge-case next_after pin | 10 min | **CLOSED 2026-05-27** — `test_next_after_leap_year_feb_29_to_mar_1` + `test_next_after_non_leap_year_feb_28_to_mar_1` |
 | §D | `Display for CronExpr` + format-direction round-trip suite | ~1h | open |
 | — | Cross-tier (`--aot` vs `--interp`) divergence sweep | ~10 min wall-clock | open |
 

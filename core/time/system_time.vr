@@ -124,8 +124,19 @@ implement SystemTime {
     /// Get the duration since another system time.
     ///
 
-    /// Returns Err if `earlier` is actually later than `self`.
+    /// Returns:
+    ///   - `Ok(d)` when `self` is later than `earlier` (or equal).
+    ///   - `Err(WentBackwards(gap))` when `earlier` is later than `self`.
+    ///   - `Err(Overflow)` when either secs value puts the nanosecond
+    ///     product outside `Int64` range (year ≈ 2262 boundary).
     public fn duration_since(&self, earlier: &SystemTime) -> Result<Duration, SystemTimeError> {
+        // Year-2262 overflow guard: `secs * NANOS_PER_SEC` must fit in Int64.
+        // Int64.MAX / NANOS_PER_SEC ≈ 9_223_372_036.
+        let max_safe_secs: Int = 9_223_372_036;
+        if self.secs > max_safe_secs || self.secs < -max_safe_secs
+            || earlier.secs > max_safe_secs || earlier.secs < -max_safe_secs {
+            return Err(SystemTimeError.Overflow);
+        }
         let self_nanos = self.secs * NANOS_PER_SEC + self.nanos;
         let earlier_nanos = earlier.secs * NANOS_PER_SEC + earlier.nanos;
 
@@ -214,14 +225,27 @@ implement SystemTime {
 // =============================================================================
 
 /// Error returned when computing duration between system times.
+///
+
+/// `WentBackwards(d)` — `self` is earlier than the comparison instant by
+/// magnitude `d` (sign reversed).  Carries the gap as a `Duration`.
+///
+
+/// `Overflow` — `secs * NANOS_PER_SEC + nanos` exceeds `Int64` range.
+/// For practical wall-clock timestamps this happens only at `secs >=
+/// 9_223_372_036` (year ≈ 2262); guards against corrupted-mtime / hostile
+/// timestamp inputs that would otherwise wrap silently.  See
+/// `audit.md §A`.
 public type SystemTimeError is
-    | WentBackwards(Duration);
+    | WentBackwards(Duration)
+    | Overflow;
 
 implement SystemTimeError {
-    /// Get the duration by which time went backwards.
+    /// Get the duration by which time went backwards.  Zero for `Overflow`.
     public fn duration(&self) -> Duration {
         match self {
             WentBackwards(d) => *d,
+            Overflow => Duration.zero(),
         }
     }
 }
@@ -230,6 +254,7 @@ implement Debug for SystemTimeError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             WentBackwards(d) => f.write_str(f"SystemTimeError.WentBackwards({d})"),
+            Overflow => f.write_str("SystemTimeError.Overflow"),
         }
     }
 }
@@ -238,13 +263,18 @@ implement Display for SystemTimeError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             WentBackwards(d) => f.write_str(f"system time went backwards by {d}"),
+            Overflow => f.write_str("system time overflow (secs out of Int64 nanosecond range)"),
         }
     }
 }
 
 implement Eq for SystemTimeError {
     fn eq(&self, other: &SystemTimeError) -> Bool {
-        self.duration() == other.duration()
+        match (self, other) {
+            (SystemTimeError.WentBackwards(a), SystemTimeError.WentBackwards(b)) => a == b,
+            (SystemTimeError.Overflow, SystemTimeError.Overflow) => true,
+            _ => false,
+        }
     }
 }
 
@@ -331,8 +361,19 @@ implement Display for SystemTime {
 // =============================================================================
 
 /// Wall-clock timestamp in nanoseconds since the Unix epoch.
+///
+
 /// Convenience for `SystemTime.now().duration_since_epoch().as_nanos()`
 /// without bringing the unit-marker `SystemTime` into scope.
+///
+
+/// **Range note**: returns a signed `Int` (Int64).  `secs * NANOS_PER_SEC`
+/// overflows when `secs >= Int64.MAX / 1_000_000_000 ≈ 9.2e9` — corresponds
+/// to year ≈ 2262.  Practical wall-clock timestamps are safely far below
+/// this bound; only adversarial / corrupted mtime values would exercise
+/// the overflow.  For overflow-safe arithmetic use
+/// `SystemTime.duration_since(...)` which surfaces `SystemTimeError.Overflow`
+/// on the boundary.
 public fn now_unix_ns() -> Int {
     let st = SystemTime.now();
     st.secs * NANOS_PER_SEC + st.nanos

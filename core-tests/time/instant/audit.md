@@ -96,8 +96,8 @@ text. Add `test_display_formats_as_seconds_dot_millis` pin.
 
 | # | Defect | Estimate | Track |
 |---|---|---|---|
-| §A | `elapsed_after_sleep_is_positive` directional pin | 10 min | open |
-| §B | Display rendering text assertion | 5 min | open |
+| §A | `elapsed_after_sleep_is_positive` directional pin | 10 min | **CLOSED 2026-05-27** — `test_elapsed_after_sleep_is_positive` |
+| §B | Display rendering text assertion | 5 min | **CLOSED 2026-05-27** — `test_display_formats_as_seconds_dot_millis` + `test_display_zero_padded_millis` |
 | §C | Cross-tier (`--aot` vs `--interp`) divergence sweep | ~10 min wall-clock | open |
 
 ## 6. Status

@@ -101,10 +101,10 @@ Pinned for parallel landing with `system_time` integration.
 
 | # | Defect | Estimate | Track |
 |---|---|---|---|
-| §A | empty-fraction edge-case test | 5 min | open |
-| §B | 10+ fractional digit truncation pin | 5 min | open |
-| §C | Out-of-range offset boundary + tests | 10 min | open |
-| §D | format_rfc3339 convenience round-trip | 5 min | open |
+| §A | empty-fraction edge-case test | 5 min | **CLOSED 2026-05-27** — `test_parse_empty_fraction_is_malformed` |
+| §B | 10+ fractional digit truncation pin | 5 min | **CLOSED 2026-05-27** — `test_parse_10_digit_fraction_truncates_to_9` |
+| §C | Out-of-range offset boundary + tests | 10 min | **CLOSED 2026-05-27** — stdlib `core/time/rfc3339.vr::parse` extended with off_h > 23 / off_m > 59 boundary check + 3 tests (`test_parse_positive_offset_out_of_range_is_error`, `test_parse_negative_offset_out_of_range_is_error`, `test_parse_offset_minute_out_of_range_is_error`) |
+| §D | format_rfc3339 convenience round-trip | 5 min | **CLOSED 2026-05-27** — `test_format_rfc3339_round_trips_with_offset` + `test_format_rfc3339_round_trips_with_nanos` |
 | §E | now_utc() integration test | 10 min | open |
 | — | Cross-tier (`--aot` vs `--interp`) divergence sweep | ~10 min wall-clock | open |
 

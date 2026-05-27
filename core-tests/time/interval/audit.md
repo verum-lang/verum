@@ -99,7 +99,7 @@ load). Gated on §A's live-blocking harness.
 |---|---|---|---|
 | §A | Blocking-tick live test harness | 30 min | open (gated on `@slow` test marker) |
 | §B | AsyncInterval live-poll test | 20 min | open (gated on executor harness — track at `vcs/specs/L2-standard/async/`) |
-| §C | `interval()` / `interval_ms()` factory pins | 5 min | open |
+| §C | `interval()` / `interval_ms()` factory pins | 5 min | **VERIFIED COVERED 2026-05-27** — already present in `unit_test.vr` §5 (`test_interval_factory_stores_period_ns`, `test_interval_ms_factory_100ms`, `test_interval_ms_factory_1000ms`, `test_interval_ms_factory_zero`) |
 | §D | Reset-after-N-ticks pin | 15 min | gated on §A |
 | §E | Drift-compensation correctness pin | 30 min | gated on §A |
 | — | Cross-tier (`--aot` vs `--interp`) divergence sweep | ~10 min wall-clock | open |

@@ -48,7 +48,7 @@ through every one of these.
 
 ## 3. Language-implementation gaps
 
-### §A — Constructor-clamping inconsistency (LOCK-IN this session)
+### §A — Constructor-clamping inconsistency — CLOSED 2026-05-27 via Option B
 
 **Surface:** `Duration.nanos(-1).as_nanos()` returns `0` (Verum body
 clamps via `n.max(0)`), but `Duration.from_nanos(-1).as_nanos()`
@@ -90,8 +90,27 @@ maximal-expressive-power, matches industry semantics, removes a
 branch.  The signed-Duration refactor is the right architectural
 move and is the surgical-minimal closure of this audit entry.
 
-**Pinned by:** `regression_test.vr` §A — 5 lock-in tests that pass
-under the current inconsistent shape.
+**RESOLUTION LANDED 2026-05-27 via Option B**:
+
+- `core/time/duration.vr`: dropped `.max(0)` from constructors
+  (`nanos` / `micros` / `millis` / `secs` / `mins` / `hours` /
+  `new` / `from_days` / `from_weeks`); dropped early-return in
+  `from_secs_f64`; dropped `.max(0)` from `Sub for Duration` /
+  `Mul<Int> for Duration` impls; updated `checked_add` / `checked_sub` /
+  `checked_mul` to proper signed-overflow detection (sign-flip rule for
+  add/sub; re-derivation rule `res / rhs != self.nanos` for mul);
+  updated `saturating_add` / `saturating_mul` to clamp at `Int.max_value`
+  / `Int.min_value` based on operand sign.  `saturating_sub` retains
+  the "floor at zero" timer-friendly convention by design.
+- Updated top-of-module + record-field docstring to reflect signed
+  semantics + cross-reference to Go/Java/C++ Duration semantics.
+- 9 affected tests updated in `unit_test.vr` + 2 properties in
+  `property_test.vr` + entire `regression_test.vr` flipped from
+  LOCK-IN-current-defect to LOCK-IN-Option-B-resolution (now §A/§B/§C
+  sections — 10 post-close pins).
+
+**Pinned by:** `regression_test.vr` §A (5 post-close pins) + §B
+(parser dependency preserved) + §C (signed-arithmetic operator pins).
 
 ### §B — duration_parse negative-input relies on §A intrinsic identity
 
@@ -163,10 +182,10 @@ unit tests for each branch.
 
 | # | Defect | Estimate | Track |
 |---|---|---|---|
-| §A | Signed-Duration refactor (Option B — drop `.max(0)` from Verum body + Sub/Mul impls + from_secs_f64 early return; update 6 affected tests) | ~2h + cross-tier validation | open — see §A above for rationale |
-| §C | Int.max_value() boundary pins in checked / saturating | 15 min | open |
-| §D | from_secs_f64 early-return re-evaluation at §A resolution | 5 min | gated on §A |
-| §E | Display / Debug rendering exhaustive coverage (6 branches) | 30 min | open |
+| §A | Signed-Duration refactor (Option B — drop `.max(0)` from Verum body + Sub/Mul impls + from_secs_f64 early return; update affected tests) | ~2h + cross-tier validation | **CLOSED 2026-05-27** — Option B landed; see §A header above for full diff summary. |
+| §C | Int.max_value() boundary pins in checked / saturating | 15 min | **CLOSED 2026-05-27** — 6 tests in Section 11: `test_checked_add_at_max_value_returns_none`, `test_saturating_add_clamps_to_max_value`, `test_saturating_add_negative_clamps_to_min_value`, `test_checked_mul_overflow_returns_none`, `test_saturating_mul_overflow_clamps_to_max`, `test_saturating_mul_negative_overflow_clamps_to_min` |
+| §D | from_secs_f64 early-return re-evaluation at §A resolution | 5 min | **CLOSED 2026-05-27** — closed inline as part of §A Option B (early-return dropped) |
+| §E | Display / Debug rendering exhaustive coverage (6 branches) | 30 min | **CLOSED 2026-05-27** — 7 tests in Section 12: zero / sub-µs / sub-ms / sub-second / whole-secs / secs-with-subsec / Display==Debug |
 | — | Cross-tier (`--aot` vs `--interp`) divergence sweep | ~10 min wall-clock | open |
 
 ## 6. Status

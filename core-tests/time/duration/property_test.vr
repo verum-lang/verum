@@ -132,15 +132,18 @@ fn law_saturating_sub_self_is_zero() {
 
 @property
 fn prop_nanos_round_trip(n: Int) {
-    // Duration.nanos clamps negatives to 0; only test non-negative
-    let input = if n < 0 { -n } else { n };
-    assert_eq(Duration.nanos(input).as_nanos(), input);
+    // Duration.nanos is signed-identity (post Option-B refactor) — full
+    // Int range round-trips, including negatives.
+    assert_eq(Duration.nanos(n).as_nanos(), n);
 }
 
 @property
 fn prop_millis_round_trip(n: Int) {
-    let input = if n < 0 { -n } else { n };
-    assert_eq(Duration.millis(input).as_millis(), input);
+    // Constrain to avoid Int overflow under the multiply-by-NANOS_PER_MILLI:
+    // valid range is approximately ±9.2e15 (Int.max / 1_000_000).  Use a
+    // safe subset for the property.
+    let safe = n % 1_000_000_000;
+    assert_eq(Duration.millis(safe).as_millis(), safe);
 }
 
 // =============================================================================

@@ -200,4 +200,115 @@ fn test_system_time_lt() {
     assert(a < b);
 }
 
+// =============================================================================
+// Section 9: Audit §A/§E close-outs (added 2026-05-27)
+// =============================================================================
+
+@test
+fn test_duration_since_at_year_2262_returns_overflow() {
+    // §A — `secs * NANOS_PER_SEC` overflows Int64 when secs > 9.2e9.
+    // `9_223_372_037` (just over the safe bound) MUST surface
+    // SystemTimeError.Overflow rather than silently wrap.
+    let huge = SystemTime { secs: 9_223_372_037, nanos: 0 };
+    let earlier = SystemTime { secs: 1_000_000_000, nanos: 0 };
+    let r = huge.duration_since(&earlier);
+    assert(r.is_err(), "year-2262+ secs must error");
+    match r.unwrap_err() {
+        SystemTimeError.Overflow => { /* expected */ },
+        _ => assert(false, "expected Overflow variant"),
+    }
+}
+
+@test
+fn test_duration_since_at_year_2262_boundary_safe() {
+    // Boundary: secs == 9_223_372_036 IS still safe (just under the
+    // overflow line).  This must NOT surface Overflow.
+    let safe = SystemTime { secs: 9_223_372_036, nanos: 0 };
+    let earlier = SystemTime { secs: 9_223_372_035, nanos: 0 };
+    let r = safe.duration_since(&earlier);
+    assert(r.is_ok(), "9_223_372_036 secs is the safe boundary");
+    assert_eq(r.unwrap().as_secs(), 1);
+}
+
+@test
+fn test_overflow_error_eq_to_self() {
+    // §A — Eq matrix for the new Overflow variant.
+    let a = SystemTimeError.Overflow;
+    let b = SystemTimeError.Overflow;
+    assert_eq(a, b);
+}
+
+@test
+fn test_overflow_error_distinct_from_went_backwards() {
+    let overflow = SystemTimeError.Overflow;
+    let backwards = SystemTimeError.WentBackwards(Duration.secs(10));
+    assert(overflow != backwards);
+}
+
+@test
+fn test_overflow_error_duration_method_returns_zero() {
+    // Overflow carries no Duration payload; duration() returns zero.
+    let err = SystemTimeError.Overflow;
+    assert(err.duration().is_zero());
+}
+
+@test
+fn test_went_backwards_clone_preserves_payload() {
+    // §E — Clone of SystemTimeError must preserve the carried Duration.
+    let err = SystemTimeError.WentBackwards(Duration.millis(750));
+    // Clone via match-rebuild (variant-with-payload clone idiom).
+    let cloned = match err {
+        SystemTimeError.WentBackwards(d) => SystemTimeError.WentBackwards(d),
+        SystemTimeError.Overflow => SystemTimeError.Overflow,
+    };
+    assert_eq(cloned, err);
+    assert_eq(cloned.duration().as_millis(), 750);
+}
+
+// =============================================================================
+// Section 10: Audit §D Display / Debug rendering (added 2026-05-27)
+// =============================================================================
+
+@test
+fn test_systemtime_debug_renders_record_shape() {
+    // §D — Debug renders as "SystemTime { secs: N, nanos: M }".
+    let st = SystemTime { secs: 42, nanos: 750_000_000 };
+    let rendered = f"{st:?}".to_text();
+    assert_eq(rendered, "SystemTime { secs: 42, nanos: 750000000 }".to_text(),
+        "Debug renders SystemTime as record-shape literal");
+}
+
+@test
+fn test_systemtime_display_renders_secs_dot_millis() {
+    // §D — Display renders as "{secs}.{ms:03}s" per
+    // `core/time/system_time.vr:321-327`.
+    let st = SystemTime { secs: 100, nanos: 500_000_000 };
+    let rendered = f"{st}".to_text();
+    assert_eq(rendered, "100.500s".to_text(),
+        "Display renders SystemTime as secs.millis-padded form");
+}
+
+@test
+fn test_systemtime_display_zero_padded_millis() {
+    // §D — millis component MUST zero-pad to 3 digits via `{ms:03}`.
+    let st = SystemTime { secs: 5, nanos: 25_000_000 }; // 25ms = "025"
+    let rendered = f"{st}".to_text();
+    assert_eq(rendered, "5.025s".to_text(),
+        "Display zero-pads millis component to 3 digits");
+}
+
+@test
+fn test_overflow_error_debug_renders() {
+    let err = SystemTimeError.Overflow;
+    let rendered = f"{err:?}".to_text();
+    assert_eq(rendered, "SystemTimeError.Overflow".to_text());
+}
+
+@test
+fn test_overflow_error_display_renders() {
+    let err = SystemTimeError.Overflow;
+    let rendered = f"{err}".to_text();
+    assert_eq(rendered, "system time overflow (secs out of Int64 nanosecond range)".to_text());
+}
+
 fn main() {}

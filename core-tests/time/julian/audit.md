@@ -91,9 +91,9 @@ note for future record-vs-tuple-API discussion.
 
 | # | Defect | Estimate | Track |
 |---|---|---|---|
-| §A | Float64 precision cliff regression pin | 10 min | open |
-| §B | Half-away-from-zero rounding pin | 5 min | open |
-| §C | Carry-rollover guard pin | 5 min | open |
+| §A | Float64 precision cliff regression pin | 10 min | **CLOSED 2026-05-27** — `test_julian_from_unix_ms_monotonic_near_cliff` |
+| §B | Half-away-from-zero rounding pin | 5 min | **CLOSED 2026-05-27** — `test_unix_ms_from_julian_rounds_half_away_from_zero_positive` + `_negative` |
+| §C | Carry-rollover guard pin | 5 min | **CLOSED 2026-05-27** — `test_hms_from_julian_carry_rollover_guard` |
 | §D | 7-tuple → record API consideration | discussion | open |
 | — | Cross-tier (`--aot` vs `--interp`) divergence sweep | ~10 min wall-clock | open |
 

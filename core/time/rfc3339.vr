@@ -183,6 +183,12 @@ public fn parse(s: &Text) -> Result<Rfc3339Time, Rfc3339Error> {
         let sign = if b[i] == ('+' as Byte) { 1 } else { -1 };
         let off_h = take_digits(b, i + 1, 2)?;
         let off_m = take_digits(b, i + 4, 2)?;
+        // RFC 3339 §5.6: time-numoffset = ("+" / "-") time-hour ":" time-minute
+        // time-hour = 2DIGIT (00..23), time-minute = 2DIGIT (00..59).
+        // Reject out-of-range offsets per the grammar.
+        if off_h > 23 || off_m > 59 {
+            return Err(Rfc3339Error.OutOfRange(Text.from("offset")));
+        }
         i = i + 6;
         sign * (off_h * 60 + off_m)
     } else {

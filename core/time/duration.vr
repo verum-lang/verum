@@ -6,8 +6,17 @@
 // =============================================================================
 //
 
-// Duration represents a span of time stored as nanoseconds.
+// Duration represents a signed span of time stored as nanoseconds (Int64).
 // It provides constructors for common time units and methods for conversion.
+//
+// Duration values can be negative — `Duration.secs(-1)` represents "one
+// second backwards" relative to a reference instant.  This matches
+// `Go time.Duration`, `Java java.time.Duration`, and `C++ chrono::duration`
+// semantics, and aligns with the runtime intrinsic identity surface used
+// by `time_duration_from_nanos` and friends.
+//
+// To clamp at zero use `Duration.saturating_sub` (returns zero on
+// underflow), or the idiom `if d.as_nanos() < 0 { Duration.zero() } else { d }`.
 //
 
 // # Example
@@ -62,11 +71,18 @@ public const MICROS_PER_SEC: Int = 1_000_000;
 // Duration
 // =============================================================================
 
-/// A duration of time, stored as nanoseconds.
+/// A signed time span in nanoseconds (Int64).
 ///
 
-/// Duration is always non-negative. Attempting to create a negative
-/// duration will result in zero.
+/// Negative durations represent past-relative spans (e.g.
+/// `Duration.secs(-3600)` is "one hour before").  This matches
+/// `Go time.Duration` / `Java Duration` / `C++ chrono::duration`
+/// semantics and aligns with the runtime intrinsic identity surface
+/// (`time_duration_from_nanos` etc. are pure identity / scale-multiply).
+///
+
+/// To clamp at zero use `saturating_sub` (returns zero on underflow), or
+/// the idiom `if d.as_nanos() < 0 { Duration.zero() } else { d }`.
 ///
 
 /// # Example
@@ -78,9 +94,13 @@ public const MICROS_PER_SEC: Int = 1_000_000;
 
 /// assert(total.as_millis() == 5500);
 /// assert(total.as_secs() == 5); // truncated
+///
+
+/// let backwards = Duration.secs(1) - Duration.secs(5);
+/// assert(backwards.as_secs() == -4);  // signed subtraction
 /// ```
 public type Duration is {
-    /// Total nanoseconds (always non-negative)
+    /// Signed nanoseconds (Int64).
     nanos: Int,
 };
 
@@ -101,10 +121,10 @@ implement Duration {
         Duration { nanos: 0 }
     }
 
-    /// Create a duration from nanoseconds.
+    /// Create a duration from nanoseconds (signed; negatives preserved).
     @inline(always)
     public fn nanos(n: Int) -> Duration {
-        Duration { nanos: n.max(0) }
+        Duration { nanos: n }
     }
 
     /// Create a duration from nanoseconds (alias).
@@ -113,10 +133,10 @@ implement Duration {
         Duration.nanos(n)
     }
 
-    /// Create a duration from microseconds.
+    /// Create a duration from microseconds (signed).
     @inline(always)
     public fn micros(n: Int) -> Duration {
-        Duration { nanos: n.max(0) * NANOS_PER_MICRO }
+        Duration { nanos: n * NANOS_PER_MICRO }
     }
 
     /// Create a duration from microseconds (alias).
@@ -125,10 +145,10 @@ implement Duration {
         Duration.micros(n)
     }
 
-    /// Create a duration from milliseconds.
+    /// Create a duration from milliseconds (signed).
     @inline(always)
     public fn millis(n: Int) -> Duration {
-        Duration { nanos: n.max(0) * NANOS_PER_MILLI }
+        Duration { nanos: n * NANOS_PER_MILLI }
     }
 
     /// Create a duration from milliseconds (alias).
@@ -137,10 +157,10 @@ implement Duration {
         Duration.millis(n)
     }
 
-    /// Create a duration from seconds.
+    /// Create a duration from seconds (signed).
     @inline(always)
     public fn secs(n: Int) -> Duration {
-        Duration { nanos: n.max(0) * NANOS_PER_SEC }
+        Duration { nanos: n * NANOS_PER_SEC }
     }
 
     /// Create a duration from seconds (alias).
@@ -149,38 +169,34 @@ implement Duration {
         Duration.secs(n)
     }
 
-    /// Create a duration from a floating-point number of seconds.
+    /// Create a duration from a floating-point number of seconds (signed).
     ///
 
-    /// Converts fractional seconds to nanosecond precision.
-    /// Negative values are clamped to zero.
+    /// Converts fractional seconds to nanosecond precision.  Negative
+    /// inputs preserved; underlying `as Int` truncates toward zero.
     public fn from_secs_f64(secs: Float) -> Duration {
-        if secs <= 0.0 {
-            Duration.zero()
-        } else {
-            let whole_secs: Int = secs as Int;
-            let frac: Float = secs - (whole_secs as Float);
-            let nanos: Int = (frac * (NANOS_PER_SEC as Float)) as Int;
-            Duration { nanos: whole_secs * NANOS_PER_SEC + nanos }
-        }
+        let whole_secs: Int = secs as Int;
+        let frac: Float = secs - (whole_secs as Float);
+        let nanos: Int = (frac * (NANOS_PER_SEC as Float)) as Int;
+        Duration { nanos: whole_secs * NANOS_PER_SEC + nanos }
     }
 
-    /// Create a duration from seconds && nanoseconds.
+    /// Create a duration from seconds && nanoseconds (signed).
     @inline(always)
     public fn new(secs: Int, nanos: Int) -> Duration {
-        Duration { nanos: secs.max(0) * NANOS_PER_SEC + nanos.max(0) }
+        Duration { nanos: secs * NANOS_PER_SEC + nanos }
     }
 
-    /// Create a duration from minutes.
+    /// Create a duration from minutes (signed).
     @inline(always)
     public fn mins(n: Int) -> Duration {
-        Duration { nanos: n.max(0) * NANOS_PER_MIN }
+        Duration { nanos: n * NANOS_PER_MIN }
     }
 
-    /// Create a duration from hours.
+    /// Create a duration from hours (signed).
     @inline(always)
     public fn hours(n: Int) -> Duration {
-        Duration { nanos: n.max(0) * NANOS_PER_HOUR }
+        Duration { nanos: n * NANOS_PER_HOUR }
     }
 
     /// Create a duration from minutes (alias for `Duration.mins`).
@@ -195,16 +211,16 @@ implement Duration {
         Duration.hours(n)
     }
 
-    /// Create a duration from days.
+    /// Create a duration from days (signed).
     @inline(always)
     public fn from_days(n: Int) -> Duration {
-        Duration { nanos: n.max(0) * NANOS_PER_HOUR * 24 }
+        Duration { nanos: n * NANOS_PER_HOUR * 24 }
     }
 
-    /// Create a duration from weeks.
+    /// Create a duration from weeks (signed).
     @inline(always)
     public fn from_weeks(n: Int) -> Duration {
-        Duration { nanos: n.max(0) * NANOS_PER_HOUR * 24 * 7 }
+        Duration { nanos: n * NANOS_PER_HOUR * 24 * 7 }
     }
 
     // =========================================================================
@@ -277,57 +293,116 @@ implement Duration {
     // Arithmetic
     // =========================================================================
 
-    /// Checked addition. Returns None on overflow.
+    /// Checked addition.  Returns None on Int64 overflow.
+    ///
+
+    /// Detects signed-overflow via sign-flip: if both operands have the
+    /// same sign and the result has the opposite sign, overflow has
+    /// occurred.  Returns the wrapped sum otherwise.
     public fn checked_add(&self, other: Duration) -> Maybe<Duration> {
         let res = self.nanos + other.nanos;
-        if res < self.nanos {
-            // Overflow
+        // Signed overflow detection: same-sign inputs producing wrong-sign result.
+        let same_sign = (self.nanos < 0) == (other.nanos < 0);
+        let sign_flipped = (res < 0) != (self.nanos < 0);
+        if same_sign && sign_flipped {
             None
         } else {
             Some(Duration { nanos: res })
         }
     }
 
-    /// Saturating addition.
+    /// Saturating addition.  Clamps to `Int.max_value()` / `Int.min_value()`
+    /// on overflow / underflow rather than wrapping.
     public fn saturating_add(&self, other: Duration) -> Duration {
-        self.checked_add(other).unwrap_or(Duration { nanos: Int.max_value() })
+        match self.checked_add(other) {
+            Some(d) => d,
+            None => {
+                // Saturate at MAX if operands were both positive, MIN otherwise.
+                if self.nanos >= 0 {
+                    Duration { nanos: Int.max_value() }
+                } else {
+                    Duration { nanos: Int.min_value() }
+                }
+            },
+        }
     }
 
-    /// Checked subtraction. Returns None if res would be negative.
+    /// Checked subtraction.  Returns None on Int64 underflow.
+    ///
+
+    /// Detects signed-underflow via sign-flip rule for `a - b == a + (-b)`.
+    /// Preserves negative results (Duration is signed; see top of module).
     public fn checked_sub(&self, other: Duration) -> Maybe<Duration> {
-        if other.nanos > self.nanos {
+        let res = self.nanos - other.nanos;
+        // Signed subtraction overflow: opposite-sign inputs producing wrong-sign result.
+        let opposite_sign = (self.nanos < 0) != (other.nanos < 0);
+        let sign_flipped = (res < 0) != (self.nanos < 0);
+        if opposite_sign && sign_flipped {
             None
         } else {
-            Some(Duration { nanos: self.nanos - other.nanos })
+            Some(Duration { nanos: res })
         }
     }
 
-    /// Saturating subtraction.
+    /// Saturating subtraction.  Clamps at `Duration.zero()` when the
+    /// result would be negative — preserves the legacy "floor at zero"
+    /// behaviour from the non-negative-Duration era, useful for timers
+    /// counting down toward a deadline that cannot represent "elapsed
+    /// past the deadline" as a negative span.
+    ///
+
+    /// Use plain `-` for signed subtraction; use this for clamp-to-zero
+    /// timer semantics.
     public fn saturating_sub(&self, other: Duration) -> Duration {
-        self.checked_sub(other).unwrap_or(Duration.zero())
+        match self.checked_sub(other) {
+            Some(d) => {
+                if d.nanos < 0 { Duration.zero() } else { d }
+            },
+            None => {
+                // Underflow at Int.min_value boundary → saturate at zero
+                // for consistency with the "timer floor" semantic.
+                Duration.zero()
+            },
+        }
     }
 
-    /// Checked multiplication. Returns None on overflow.
+    /// Checked multiplication.  Returns None on Int64 overflow.
+    ///
+
+    /// Allows negative scalar (Duration is signed); detects overflow
+    /// by re-deriving the divisor.
     public fn checked_mul(&self, rhs: Int) -> Maybe<Duration> {
-        if rhs < 0 {
-            return None;
+        if rhs == 0 || self.nanos == 0 {
+            return Some(Duration.zero());
         }
-        // Simple overflow check
-        if rhs > 0 && self.nanos > Int.max_value() / rhs {
+        let res = self.nanos * rhs;
+        // Overflow check: if res / rhs != self.nanos, overflow occurred.
+        if res / rhs != self.nanos {
             None
         } else {
-            Some(Duration { nanos: self.nanos * rhs })
+            Some(Duration { nanos: res })
         }
     }
 
     /// Saturating multiplication.
     public fn saturating_mul(&self, rhs: Int) -> Duration {
-        self.checked_mul(rhs).unwrap_or(Duration { nanos: Int.max_value() })
+        match self.checked_mul(rhs) {
+            Some(d) => d,
+            None => {
+                // Saturate at MAX or MIN depending on product sign.
+                let sign_negative = (self.nanos < 0) != (rhs < 0);
+                if sign_negative {
+                    Duration { nanos: Int.min_value() }
+                } else {
+                    Duration { nanos: Int.max_value() }
+                }
+            },
+        }
     }
 
-    /// Checked division. Returns None if rhs is zero.
+    /// Checked division.  Returns None if rhs is zero.
     public fn checked_div(&self, rhs: Int) -> Maybe<Duration> {
-        if rhs <= 0 {
+        if rhs == 0 {
             None
         } else {
             Some(Duration { nanos: self.nanos / rhs })
@@ -351,7 +426,9 @@ implement Sub for Duration {
     type Output = Duration;
 
     fn sub(self, other: Duration) -> Duration {
-        Duration { nanos: (self.nanos - other.nanos).max(0) }
+        // Signed subtraction — preserves negative results.  Use
+        // `saturating_sub` if you need clamp-to-zero semantics.
+        Duration { nanos: self.nanos - other.nanos }
     }
 }
 
@@ -359,7 +436,9 @@ implement Mul<Int> for Duration {
     type Output = Duration;
 
     fn mul(self, rhs: Int) -> Duration {
-        Duration { nanos: self.nanos * rhs.max(0) }
+        // Signed multiplication — negative scalar produces a signed
+        // (past-relative) Duration.
+        Duration { nanos: self.nanos * rhs }
     }
 }
 
@@ -367,7 +446,9 @@ implement Div<Int> for Duration {
     type Output = Duration;
 
     fn div(self, rhs: Int) -> Duration {
-        assert(rhs > 0, "Duration division by zero || negative");
+        // Signed division — rhs must be non-zero.  Negative divisors
+        // produce sign-flipped Duration results.
+        assert(rhs != 0, "Duration division by zero");
         Duration { nanos: self.nanos / rhs }
     }
 }
