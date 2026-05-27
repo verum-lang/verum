@@ -10,6 +10,13 @@
 // Defect classes:
 //   §A  format_display<T: Display> / format_debug<T: Debug> trigger
 //       "TypeMismatch: expected closure, got non-pointer"
+//   §H  `(&Int).to_hex()` (value-self method via reference receiver)
+//       passes raw pointer-bits as `self` instead of dereferencing.
+//       Surfaced 2026-05-27 via the format_hex / format_binary /
+//       format_octal module-level wrappers (which took `value: &Int`
+//       and called `value.to_hex()`).  Workaround applied: explicit
+//       `*value` deref in the wrappers (see format.vr).  Pinning the
+//       underlying defect class here so re-introduction surfaces.
 // =============================================================================
 
 mount core.text.{Text};
@@ -17,6 +24,7 @@ mount core.text.format.{
     WriteError, WriteErrorKind,
     TextAlignment, Sign, FormatSpec,
     format_debug, format_display,
+    format_hex, format_binary, format_octal,
 };
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
@@ -106,6 +114,59 @@ fn guard_format_string_text_display() {
 fn guard_format_string_bool_display() {
     assert_eq(f"{true}", "true");
     assert_eq(f"{false}", "false");
+}
+
+// =============================================================================
+// §H — PASS-GUARDs for the format_hex / format_binary / format_octal
+// wrappers.  The fix in core/text/format.vr uses an explicit `*value`
+// dereference; if a reviewer reverts that to the bare `value.to_hex()`
+// form, these three guards regress immediately.
+// =============================================================================
+
+@test
+fn guard_format_hex_dereferences_input() {
+    let v: Int = 255;
+    assert_eq(format_hex(&v), "ff");
+}
+
+@test
+fn guard_format_binary_dereferences_input() {
+    let v: Int = 10;
+    assert_eq(format_binary(&v), "1010");
+}
+
+@test
+fn guard_format_octal_dereferences_input() {
+    let v: Int = 64;
+    assert_eq(format_octal(&v), "100");
+}
+
+@test
+fn guard_format_hex_zero_is_zero_digit() {
+    let v: Int = 0;
+    assert_eq(format_hex(&v), "0");
+}
+
+// =============================================================================
+// Underlying defect probe — `(&Int).to_hex()` (reference receiver, value-
+// self method on a primitive) should auto-dereference to the pointee
+// value.  The current Tier-0 codegen does NOT do this — it passes the
+// CBGR pointer bits as the `self: Int` arg, so `format_radix_signed`
+// formats the pointer instead.  Pinned `@ignore` because the fix lives
+// in `crates/verum_vbc/src/codegen/expressions.rs::compile_method_call`'s
+// receiver-handling for primitive value-self methods through `&Primitive`
+// references.  When the fix lands, removing `@ignore` flips this green.
+// =============================================================================
+
+@ignore
+@test
+fn regression_h_ref_int_to_hex_auto_deref_pinned() {
+    let v: Int = 255;
+    let r: &Int = &v;
+    // Currently returns the hex of the CBGR pointer bits (e.g.
+    // "-6c00000002") because the dispatcher feeds the pointer to
+    // `Int.to_hex(self: Int)` without dereferencing.
+    assert_eq(r.to_hex(), "ff");
 }
 
 // =============================================================================
