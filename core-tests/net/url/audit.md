@@ -100,6 +100,41 @@ attacker URLs before any per-byte scanning. Pinned by
 `test_max_url_length_bytes_constant` so the constant doesn't
 drift under refactoring.
 
+### §3.4 URL-8 — empty-Text `"".clone()` parse routes through non-MissingScheme error kind
+
+**Stable trigger**: `Url.parse(&"".clone())` returns `Err(_)` (correct
+behavior — `.is_err()` pin GREEN at `prop_url_parse_empty_returns_err`)
+but the returned `e.kind` value compares NOT-equal to
+`UrlErrorKind.MissingScheme` under `--interp`. Source-side at
+`url.vr:150-156` clearly returns `MissingScheme` for the `n == 0` arm.
+
+**Pin**: `prop_url_parse_empty_error_kind_missing_scheme` @ignore'd
+under URL-8. Other UrlErrorKind comparison sites (e.g.
+`prop_url_parse_oversized_input_rejects` for UrlTooLong) work
+correctly, so the defect is empty-input-specific.
+
+**Likely root cause** (ordered by suspicion):
+
+1. **Empty-Text Eq via discriminant comparison**: `UrlErrorKind` Eq
+   impl at `url.vr:100-103` reads `url_error_kind_tag(self) ==
+   url_error_kind_tag(other)`. The body uses `match self { ... }`
+   which routes through variant-tag dispatch. For
+   `MissingScheme` (tag=0) the call may collide with an unrelated
+   tag-0 dispatch site (same defect class as `[[task17_static_method_dispatch_defect_2026-05-24]]`).
+2. **`"".clone()` representation drift**: empty-Text codegen may
+   produce a non-canonical representation (different from the
+   compile-time-empty `""`) that the `as_bytes().len() == 0`
+   check misses, routing parsing into a non-empty branch and
+   returning a different error kind (e.g. `InvalidScheme`).
+3. **`e.kind` field access**: post-Err(record) construction, the
+   field read may shift indices (sister of
+   `[[use_after_free_error_field_shift_2026-05-27]]`).
+
+**Fix path**: trace via `VERUM_TRACE_VARIANT_EQ=1
+VERUM_TRACE_FIELD_READ=1` against the failing test. Expected:
+~2-4 hours diagnosis + medium fix once root narrowed (variant-eq
+likely Tier-0 dispatch; field-access shift requires codegen).
+
 ### §3.3 RFC 3986 §6.2 normalization not implemented
 
 The parser does NOT apply RFC 3986 §6.2.2 syntax-based
