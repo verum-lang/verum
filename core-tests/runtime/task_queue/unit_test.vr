@@ -1,0 +1,116 @@
+// =============================================================================
+// core-tests/runtime/task_queue/unit_test.vr
+// =============================================================================
+//
+// `core/runtime/task_queue.vr` (1051 LOC) — Chase-Lev work-stealing
+// deque + WorkStealingPool + BoundedQueue + StealResult.
+//
+// Module-gated: `@cfg(any(runtime = "full", runtime = "single_thread"))`
+// so `mount core.runtime.task_queue` only works under those profiles.
+//
+// Tests pin the DATA-only subset of `StealResult<T>` — the live ring-
+// buffer + atomic operations require os_alloc / atomic_cas_u64 / etc.
+// intrinsics under --interp.
+//
+// Live work-stealing tests (push/pop/steal/grow/balance) deferred to
+// vcs/specs/L2-standard/runtime/task_queue/.
+// =============================================================================
+
+mount core.runtime.task_queue.{StealResult};
+
+// =============================================================================
+// Section 1: StealResult<T> 3-variant
+// =============================================================================
+
+@test
+fn test_steal_result_success_with_int_payload() {
+    let r: StealResult<Int> = StealResult.Success(42);
+    assert(r is StealResult.Success);
+}
+
+@test
+fn test_steal_result_empty() {
+    let r: StealResult<Int> = StealResult.Empty;
+    assert(r is StealResult.Empty);
+}
+
+@test
+fn test_steal_result_retry() {
+    let r: StealResult<Int> = StealResult.Retry;
+    assert(r is StealResult.Retry);
+}
+
+@test
+fn test_steal_result_pairwise_disjoint() {
+    let a: StealResult<Int> = StealResult.Success(1);
+    let b: StealResult<Int> = StealResult.Empty;
+    let c: StealResult<Int> = StealResult.Retry;
+    assert(a is StealResult.Success && !(a is StealResult.Empty));
+    assert(b is StealResult.Empty && !(b is StealResult.Retry));
+    assert(c is StealResult.Retry && !(c is StealResult.Success));
+}
+
+// =============================================================================
+// Section 2: StealResult helper predicates — .is_success / .is_empty
+// =============================================================================
+
+@test
+fn test_steal_result_is_success_true_on_success() {
+    let r: StealResult<Int> = StealResult.Success(7);
+    assert(r.is_success());
+}
+
+@test
+fn test_steal_result_is_success_false_on_empty() {
+    let r: StealResult<Int> = StealResult.Empty;
+    assert(!r.is_success());
+}
+
+@test
+fn test_steal_result_is_success_false_on_retry() {
+    let r: StealResult<Int> = StealResult.Retry;
+    assert(!r.is_success());
+}
+
+@test
+fn test_steal_result_is_empty_true_on_empty() {
+    let r: StealResult<Int> = StealResult.Empty;
+    assert(r.is_empty());
+}
+
+@test
+fn test_steal_result_is_empty_false_on_success() {
+    let r: StealResult<Int> = StealResult.Success(0);
+    assert(!r.is_empty());
+}
+
+@test
+fn test_steal_result_is_empty_false_on_retry() {
+    let r: StealResult<Int> = StealResult.Retry;
+    assert(!r.is_empty());
+}
+
+// =============================================================================
+// Section 3: StealResult.into_option — Some on Success, None on Empty / Retry
+// =============================================================================
+
+@test
+fn test_steal_result_into_option_success_returns_some() {
+    let r: StealResult<Int> = StealResult.Success(99);
+    let m: Maybe<Int> = r.into_option();
+    assert(m is Maybe.Some);
+}
+
+@test
+fn test_steal_result_into_option_empty_returns_none() {
+    let r: StealResult<Int> = StealResult.Empty;
+    let m: Maybe<Int> = r.into_option();
+    assert(m is Maybe.None);
+}
+
+@test
+fn test_steal_result_into_option_retry_returns_none() {
+    let r: StealResult<Int> = StealResult.Retry;
+    let m: Maybe<Int> = r.into_option();
+    assert(m is Maybe.None);
+}

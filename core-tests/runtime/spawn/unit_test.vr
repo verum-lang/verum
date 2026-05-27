@@ -1,0 +1,282 @@
+// =============================================================================
+// core-tests/runtime/spawn/unit_test.vr
+// =============================================================================
+//
+// `core/runtime/spawn.vr` (1086 LOC) — SupervisorSpawnConfig +
+// SpawnConfigBuilder + PriorityLevel + InlineContextStorage + several
+// `public fn spawn_*` helpers.
+//
+// Tests pin the DATA-only subset:
+//   * PriorityLevel 5-variant + .to_u8 / .from_u8 round-trip + Default
+//   * InlineContextStorage record + .new/.len/.is_empty
+//   * SupervisorSpawnConfig.new() default values + SpawnConfig alias
+//
+// SpawnConfigBuilder + spawn_with(_*) live helpers require a working
+// async executor and ExecutionEnv intrinsics under --interp — deferred
+// to vcs/specs/L2-standard/runtime/spawn/.
+// =============================================================================
+
+mount core.runtime.spawn.{
+    PriorityLevel, InlineContextStorage,
+    SupervisorSpawnConfig, SpawnConfig,
+};
+
+// =============================================================================
+// Section 1: PriorityLevel 5-variant
+// =============================================================================
+
+@test
+fn test_priority_level_background_variant() {
+    let p = PriorityLevel.Background;
+    assert(p is PriorityLevel.Background);
+}
+
+@test
+fn test_priority_level_low_variant() {
+    let p = PriorityLevel.Low;
+    assert(p is PriorityLevel.Low);
+}
+
+@test
+fn test_priority_level_normal_variant() {
+    let p = PriorityLevel.Normal;
+    assert(p is PriorityLevel.Normal);
+}
+
+@test
+fn test_priority_level_high_variant() {
+    let p = PriorityLevel.High;
+    assert(p is PriorityLevel.High);
+}
+
+@test
+fn test_priority_level_critical_variant() {
+    let p = PriorityLevel.Critical;
+    assert(p is PriorityLevel.Critical);
+}
+
+@test
+fn test_priority_level_pairwise_disjoint() {
+    let a: PriorityLevel = PriorityLevel.Background;
+    let b: PriorityLevel = PriorityLevel.Low;
+    let c: PriorityLevel = PriorityLevel.Normal;
+    let d: PriorityLevel = PriorityLevel.High;
+    let e: PriorityLevel = PriorityLevel.Critical;
+    assert(a is PriorityLevel.Background && !(a is PriorityLevel.Low));
+    assert(b is PriorityLevel.Low && !(b is PriorityLevel.Normal));
+    assert(c is PriorityLevel.Normal && !(c is PriorityLevel.High));
+    assert(d is PriorityLevel.High && !(d is PriorityLevel.Critical));
+    assert(e is PriorityLevel.Critical && !(e is PriorityLevel.Background));
+}
+
+// =============================================================================
+// Section 2: PriorityLevel.to_u8 — fixed numeric mapping
+// =============================================================================
+//
+// Source contract:
+//   Background = 32, Low = 64, Normal = 128, High = 192, Critical = 255
+//
+
+@test
+fn test_priority_level_to_u8_background_32() {
+    assert(PriorityLevel.Background.to_u8() == 32_u8);
+}
+
+@test
+fn test_priority_level_to_u8_low_64() {
+    assert(PriorityLevel.Low.to_u8() == 64_u8);
+}
+
+@test
+fn test_priority_level_to_u8_normal_128() {
+    assert(PriorityLevel.Normal.to_u8() == 128_u8);
+}
+
+@test
+fn test_priority_level_to_u8_high_192() {
+    assert(PriorityLevel.High.to_u8() == 192_u8);
+}
+
+@test
+fn test_priority_level_to_u8_critical_255() {
+    assert(PriorityLevel.Critical.to_u8() == 255_u8);
+}
+
+@test
+fn test_priority_level_to_u8_monotone_increasing() {
+    // Spec: Background < Low < Normal < High < Critical
+    let bg = PriorityLevel.Background.to_u8();
+    let lo = PriorityLevel.Low.to_u8();
+    let no = PriorityLevel.Normal.to_u8();
+    let hi = PriorityLevel.High.to_u8();
+    let cr = PriorityLevel.Critical.to_u8();
+    assert(bg < lo);
+    assert(lo < no);
+    assert(no < hi);
+    assert(hi < cr);
+}
+
+// =============================================================================
+// Section 3: PriorityLevel.from_u8 — range-based decoding
+// =============================================================================
+//
+// Source contract (spawn.vr:146-152):
+//   0..48 → Background
+//   48..96 → Low
+//   96..160 → Normal
+//   160..224 → High
+//   224..256 → Critical (catch-all _)
+//
+
+@test
+fn test_priority_level_from_u8_background_lower_bound() {
+    let p = PriorityLevel.from_u8(0_u8);
+    assert(p is PriorityLevel.Background);
+}
+
+@test
+fn test_priority_level_from_u8_background_canonical() {
+    let p = PriorityLevel.from_u8(32_u8);
+    assert(p is PriorityLevel.Background);
+}
+
+@test
+fn test_priority_level_from_u8_background_upper_47() {
+    let p = PriorityLevel.from_u8(47_u8);
+    assert(p is PriorityLevel.Background);
+}
+
+@test
+fn test_priority_level_from_u8_low_boundary_48() {
+    let p = PriorityLevel.from_u8(48_u8);
+    assert(p is PriorityLevel.Low);
+}
+
+@test
+fn test_priority_level_from_u8_normal_canonical_128() {
+    let p = PriorityLevel.from_u8(128_u8);
+    assert(p is PriorityLevel.Normal);
+}
+
+@test
+fn test_priority_level_from_u8_high_canonical_192() {
+    let p = PriorityLevel.from_u8(192_u8);
+    assert(p is PriorityLevel.High);
+}
+
+@test
+fn test_priority_level_from_u8_critical_canonical_255() {
+    let p = PriorityLevel.from_u8(255_u8);
+    assert(p is PriorityLevel.Critical);
+}
+
+@test
+fn test_priority_level_round_trip_canonical_values() {
+    // The 5 canonical values round-trip through to_u8 → from_u8.
+    assert(PriorityLevel.from_u8(PriorityLevel.Background.to_u8()) is PriorityLevel.Background);
+    assert(PriorityLevel.from_u8(PriorityLevel.Low.to_u8()) is PriorityLevel.Low);
+    assert(PriorityLevel.from_u8(PriorityLevel.Normal.to_u8()) is PriorityLevel.Normal);
+    assert(PriorityLevel.from_u8(PriorityLevel.High.to_u8()) is PriorityLevel.High);
+    assert(PriorityLevel.from_u8(PriorityLevel.Critical.to_u8()) is PriorityLevel.Critical);
+}
+
+// =============================================================================
+// Section 4: InlineContextStorage record + helpers
+// =============================================================================
+//
+// §F — DEFECT SURFACED 2026-05-27: `InlineContextStorage.new()` panics
+// with `field write out of bounds: field index 9 (offset 72+8 = 80)
+// exceeds object data size 24`.  Same defect class as
+// [[btree_pattern_match_ref_generic_class]] /
+// [[enactment_field_access_oob_2026-05-24]] / runtime/spawn cascade:
+// cross-module ctor returns lose record layout in the codegen, the
+// caller writes past the truncated 24-byte data section.  The record
+// has 3 logical fields (entries[4] + count + _padding[7]) but the
+// `[InlineContextEntry; 4]` array field expands to 4 × 24 = 96 bytes
+// of inline storage; the codegen mis-sizes it to 24 bytes (one entry).
+// Tests pinned `@ignore` until the cross-module ctor return-layout
+// fix lands.
+//
+
+@ignore  // §F
+@test
+fn test_inline_context_storage_new_is_empty() {
+    let s = InlineContextStorage.new();
+    assert(s.is_empty());
+    assert(s.len() == 0);
+}
+
+@ignore  // §F
+@test
+fn test_inline_context_storage_new_count_is_zero() {
+    let s = InlineContextStorage.new();
+    assert(s.count == 0_u8);
+}
+
+// =============================================================================
+// Section 5: SupervisorSpawnConfig.new() default values
+// =============================================================================
+
+@ignore  // §F — SupervisorSpawnConfig.new() field-write-OOB on InlineContextStorage.new sub-ctor
+@test
+fn test_spawn_config_new_default_name_is_none() {
+    let c = SupervisorSpawnConfig.new();
+    assert(c.name is Maybe.None);
+}
+
+@ignore  // §F
+@test
+fn test_spawn_config_new_default_recovery_is_none() {
+    let c = SupervisorSpawnConfig.new();
+    assert(c.recovery is Maybe.None);
+}
+
+@ignore  // §F
+@test
+fn test_spawn_config_new_default_restart_is_none() {
+    let c = SupervisorSpawnConfig.new();
+    assert(c.restart is Maybe.None);
+}
+
+@ignore  // §F
+@test
+fn test_spawn_config_new_default_isolation_is_none() {
+    let c = SupervisorSpawnConfig.new();
+    assert(c.isolation is Maybe.None);
+}
+
+@ignore  // §F
+@test
+fn test_spawn_config_new_default_priority_is_normal() {
+    let c = SupervisorSpawnConfig.new();
+    assert(c.priority is PriorityLevel.Normal);
+}
+
+@ignore  // §F
+@test
+fn test_spawn_config_new_default_stack_size_is_zero() {
+    // 0 means "use platform default" per source contract.
+    let c = SupervisorSpawnConfig.new();
+    assert(c.stack_size == 0);
+}
+
+@ignore  // §F
+@test
+fn test_spawn_config_new_default_deadline_ns_is_zero() {
+    // 0 means "no deadline" per source contract.
+    let c = SupervisorSpawnConfig.new();
+    assert(c.deadline_ns == 0_u64);
+}
+
+// =============================================================================
+// Section 6: SpawnConfig public alias
+// =============================================================================
+
+@ignore  // §F
+@test
+fn test_spawn_config_alias_resolves_to_supervisor_spawn_config() {
+    let a = SupervisorSpawnConfig.new();
+    let b: SpawnConfig = a;
+    let _ = b;
+    assert(true);
+}
