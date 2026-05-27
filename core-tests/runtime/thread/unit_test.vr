@@ -1,0 +1,224 @@
+// =============================================================================
+// core-tests/runtime/thread/unit_test.vr
+// =============================================================================
+//
+// `core/runtime/thread.vr` (600 LOC) — thread spawn / join / handle /
+// stack-trace surface.
+//
+// Public surface:
+//   * ThreadId record + .current() + Eq/Hash/Debug/Display/Clone/Copy
+//   * ThreadJoinHandle<T> record + .join/.name/.id/.is_finished
+//   * ThreadBuilder record + .new/.name/.stack_size/.spawn
+//   * Thread namespace + .spawn/.builder/.current_id/.yield_now/
+//     .sleep/.sleep_ms/.available_parallelism/.park/.unpark
+//   * ThreadError 4-variant (SpawnFailed/JoinFailed/Panicked/InvalidName)
+//     + Display/Debug/Eq/Describable
+//   * ThreadStackFrame record + .from_ip + Debug/Display
+//   * StackTrace record + .capture/.empty/.frames/.len/.is_empty +
+//     Debug/Display
+//
+// Tests pin the DATA-only subset.  Live spawn/join require the platform
+// thread intrinsic to be bound under --interp — covered at
+// vcs/specs/L2-standard/runtime/thread/.
+// =============================================================================
+
+mount core.runtime.thread.{
+    ThreadId, ThreadError, ThreadStackFrame, StackTrace,
+    ThreadBuilder,
+};
+
+// =============================================================================
+// Section 1: ThreadId — record + Eq + Hash
+// =============================================================================
+
+@test
+fn test_thread_id_construction() {
+    let t = ThreadId { id: 42_u64 };
+    assert(t.id == 42_u64);
+}
+
+@test
+fn test_thread_id_zero() {
+    let t = ThreadId { id: 0_u64 };
+    assert(t.id == 0_u64);
+}
+
+@test
+fn test_thread_id_eq_reflexive() {
+    let t = ThreadId { id: 100_u64 };
+    assert(t == t);
+}
+
+@test
+fn test_thread_id_eq_same_id() {
+    let a = ThreadId { id: 1234_u64 };
+    let b = ThreadId { id: 1234_u64 };
+    assert(a == b);
+}
+
+@test
+fn test_thread_id_eq_different_id() {
+    let a = ThreadId { id: 1_u64 };
+    let b = ThreadId { id: 2_u64 };
+    assert(!(a == b));
+}
+
+// =============================================================================
+// Section 2: ThreadError — 4-variant ADT
+// =============================================================================
+
+@test
+fn test_thread_error_spawn_failed_variant() {
+    let e = ThreadError.SpawnFailed;
+    assert(e is ThreadError.SpawnFailed);
+}
+
+@test
+fn test_thread_error_join_failed_variant() {
+    let e = ThreadError.JoinFailed;
+    assert(e is ThreadError.JoinFailed);
+}
+
+@test
+fn test_thread_error_panicked_variant() {
+    let e = ThreadError.Panicked;
+    assert(e is ThreadError.Panicked);
+}
+
+@test
+fn test_thread_error_invalid_name_variant() {
+    let e = ThreadError.InvalidName;
+    assert(e is ThreadError.InvalidName);
+}
+
+@test
+fn test_thread_error_pairwise_disjoint() {
+    let a: ThreadError = ThreadError.SpawnFailed;
+    let b: ThreadError = ThreadError.JoinFailed;
+    let c: ThreadError = ThreadError.Panicked;
+    let d: ThreadError = ThreadError.InvalidName;
+    assert(a is ThreadError.SpawnFailed && !(a is ThreadError.JoinFailed));
+    assert(b is ThreadError.JoinFailed && !(b is ThreadError.Panicked));
+    assert(c is ThreadError.Panicked && !(c is ThreadError.InvalidName));
+    assert(d is ThreadError.InvalidName && !(d is ThreadError.SpawnFailed));
+}
+
+@test
+fn test_thread_error_eq_reflexive_all_variants() {
+    assert(ThreadError.SpawnFailed == ThreadError.SpawnFailed);
+    assert(ThreadError.JoinFailed == ThreadError.JoinFailed);
+    assert(ThreadError.Panicked == ThreadError.Panicked);
+    assert(ThreadError.InvalidName == ThreadError.InvalidName);
+}
+
+@test
+fn test_thread_error_eq_distinguishes_variants() {
+    assert(!(ThreadError.SpawnFailed == ThreadError.JoinFailed));
+    assert(!(ThreadError.JoinFailed == ThreadError.Panicked));
+    assert(!(ThreadError.Panicked == ThreadError.InvalidName));
+    assert(!(ThreadError.SpawnFailed == ThreadError.InvalidName));
+}
+
+// =============================================================================
+// Section 3: ThreadStackFrame — record + .from_ip
+// =============================================================================
+
+@test
+fn test_thread_stack_frame_from_ip_no_symbol() {
+    let frame = ThreadStackFrame.from_ip(0x1000_u64);
+    assert(frame.ip == 0x1000_u64);
+    assert(frame.symbol is Maybe.None);
+    assert(frame.file is Maybe.None);
+    assert(frame.line is Maybe.None);
+    assert(frame.column is Maybe.None);
+}
+
+@test
+fn test_thread_stack_frame_full_construction() {
+    let frame = ThreadStackFrame {
+        ip: 0xDEAD_BEEF_u64,
+        symbol: Maybe.Some("main"),
+        file: Maybe.Some("/tmp/main.vr"),
+        line: Maybe.Some(42),
+        column: Maybe.Some(7),
+    };
+    assert(frame.ip == 0xDEAD_BEEF_u64);
+    assert(frame.symbol is Maybe.Some);
+    assert(frame.file is Maybe.Some);
+    assert(frame.line is Maybe.Some);
+    assert(frame.column is Maybe.Some);
+}
+
+@test
+fn test_thread_stack_frame_zero_ip() {
+    let frame = ThreadStackFrame.from_ip(0_u64);
+    assert(frame.ip == 0_u64);
+}
+
+// =============================================================================
+// Section 4: StackTrace — record + .empty/.len/.is_empty/.frames
+// =============================================================================
+
+@test
+fn test_stack_trace_empty() {
+    let st = StackTrace.empty();
+    assert(st.len() == 0);
+    assert(st.is_empty());
+}
+
+@test
+fn test_stack_trace_empty_frames_list_is_empty() {
+    let st = StackTrace.empty();
+    let frames = st.frames();
+    assert(frames.is_empty());
+}
+
+// =============================================================================
+// Section 5: ThreadBuilder — record + builder pattern
+// =============================================================================
+
+@test
+fn test_thread_builder_new_defaults() {
+    let b = ThreadBuilder.new();
+    assert(b.name is Maybe.None);
+    assert(b.stack_size is Maybe.None);
+}
+
+@test
+fn test_thread_builder_with_name() {
+    let b = ThreadBuilder.new().name("worker-1");
+    assert(b.name is Maybe.Some);
+    assert(b.stack_size is Maybe.None);
+}
+
+@test
+fn test_thread_builder_with_stack_size() {
+    let b = ThreadBuilder.new().stack_size(2 * 1024 * 1024);
+    assert(b.name is Maybe.None);
+    assert(b.stack_size is Maybe.Some);
+}
+
+@test
+fn test_thread_builder_with_both() {
+    let b = ThreadBuilder.new()
+        .name("worker-2")
+        .stack_size(4 * 1024 * 1024);
+    assert(b.name is Maybe.Some);
+    assert(b.stack_size is Maybe.Some);
+}
+
+@test
+fn test_thread_builder_name_overrides() {
+    let b = ThreadBuilder.new()
+        .name("first")
+        .name("second");
+    assert(b.name is Maybe.Some);
+}
+
+@test
+fn test_thread_builder_stack_size_overrides() {
+    let b = ThreadBuilder.new()
+        .stack_size(1024)
+        .stack_size(2048);
+    assert(b.stack_size is Maybe.Some);
+}
