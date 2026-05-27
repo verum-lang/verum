@@ -1,0 +1,360 @@
+// =============================================================================
+// core-tests/sys/bitfield/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.bitfield`. Exercises:
+//
+//   * The `BitfieldElement` protocol implementations for `Bool`, `UInt8`,
+//     `UInt16`, `UInt32`, `UInt64` — the canonical bit-storage round-trip
+//     for every concrete instance ships in `core/sys/bitfield.vr`.
+//   * Free-function bit primitives in combination with `List<USize>`
+//     accumulation, `Maybe<USize>` selectors, and pattern matching.
+//   * The `Endianness` variant trio — used by the `EndianBitfield`
+//     protocol — round-tripped through `Maybe<Endianness>` to confirm
+//     pattern matching reaches every arm.
+//
+// Notes:
+//   * All free-function call sites use the `bitfield.<name>(...)`
+//     qualified form — that is the working dispatch shape closed by
+//     task #121 (see audit.md §3.2).
+//   * Constants are accessed through the fully-qualified path
+//     (`bitfield.USIZE_BITS`) — the bare-mount selective-const form
+//     remains gated on task #15.
+//   * The integration suite intentionally avoids hardware
+//     `Bitfield`-protocol round-trips: `Bitfield::SIZE_BYTES` and
+//     `Bitfield::as_bytes` are produced by the `@bitfield` codegen pass,
+//     which is hardware-target-specific. That surface is locked down by
+//     `vcs/specs/L3-extended/` integration suites.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.bitfield.{Endianness, BitfieldElement};
+mount core.sys.bitfield;
+
+// =============================================================================
+// Section 1: BitfieldElement<Bool> round-trip
+// =============================================================================
+
+@test
+fn integration_bool_bitfield_element_round_trip_true() {
+    let bits = (true as Bool).to_bits();
+    let back = Bool.from_bits(bits);
+    assert_eq(back, true);
+}
+
+@test
+fn integration_bool_bitfield_element_round_trip_false() {
+    let bits = (false as Bool).to_bits();
+    let back = Bool.from_bits(bits);
+    assert_eq(back, false);
+}
+
+@test
+fn integration_bool_bitfield_element_to_bits_is_unit_domain() {
+    // Bool.to_bits maps exactly { false → 0, true → 1 }.
+    assert_eq(false.to_bits(), 0 as USize);
+    assert_eq(true.to_bits(),  1 as USize);
+}
+
+@test
+fn integration_bool_bitfield_element_from_bits_truthiness() {
+    // Every non-zero USize converts to true.
+    assert_eq(Bool.from_bits(0 as USize),    false);
+    assert_eq(Bool.from_bits(1 as USize),    true);
+    assert_eq(Bool.from_bits(0xFF as USize), true);
+    assert_eq(Bool.from_bits(!(0 as USize)), true);
+}
+
+// =============================================================================
+// Section 2: BitfieldElement<UInt8> round-trip
+// =============================================================================
+
+@test
+fn integration_uint8_bitfield_element_round_trip_zero() {
+    let bits = (0 as UInt8).to_bits();
+    let back = UInt8.from_bits(bits);
+    assert_eq(back, 0 as UInt8);
+}
+
+@test
+fn integration_uint8_bitfield_element_round_trip_max() {
+    let bits = (0xFF as UInt8).to_bits();
+    let back = UInt8.from_bits(bits);
+    assert_eq(back, 0xFF as UInt8);
+}
+
+@test
+fn integration_uint8_bitfield_element_round_trip_pattern() {
+    let v: UInt8 = 0xA5 as UInt8;
+    let back = UInt8.from_bits(v.to_bits());
+    assert_eq(back, v);
+}
+
+// =============================================================================
+// Section 3: BitfieldElement<UInt16> round-trip
+// =============================================================================
+
+@test
+fn integration_uint16_bitfield_element_round_trip_zero() {
+    let bits = (0 as UInt16).to_bits();
+    let back = UInt16.from_bits(bits);
+    assert_eq(back, 0 as UInt16);
+}
+
+@test
+fn integration_uint16_bitfield_element_round_trip_max() {
+    let bits = (0xFFFF as UInt16).to_bits();
+    let back = UInt16.from_bits(bits);
+    assert_eq(back, 0xFFFF as UInt16);
+}
+
+@test
+fn integration_uint16_bitfield_element_round_trip_pattern() {
+    let v: UInt16 = 0xCAFE as UInt16;
+    let back = UInt16.from_bits(v.to_bits());
+    assert_eq(back, v);
+}
+
+// =============================================================================
+// Section 4: BitfieldElement<UInt32> round-trip
+// =============================================================================
+
+@test
+fn integration_uint32_bitfield_element_round_trip_zero() {
+    let bits = (0 as UInt32).to_bits();
+    let back = UInt32.from_bits(bits);
+    assert_eq(back, 0 as UInt32);
+}
+
+@test
+fn integration_uint32_bitfield_element_round_trip_max() {
+    let bits = (0xFFFFFFFF as UInt32).to_bits();
+    let back = UInt32.from_bits(bits);
+    assert_eq(back, 0xFFFFFFFF as UInt32);
+}
+
+@test
+fn integration_uint32_bitfield_element_round_trip_pattern() {
+    let v: UInt32 = 0xDEADBEEF as UInt32;
+    let back = UInt32.from_bits(v.to_bits());
+    assert_eq(back, v);
+}
+
+// =============================================================================
+// Section 5: BitfieldElement<UInt64> round-trip
+// =============================================================================
+
+@test
+fn integration_uint64_bitfield_element_round_trip_zero() {
+    let bits = (0 as UInt64).to_bits();
+    let back = UInt64.from_bits(bits);
+    assert_eq(back, 0 as UInt64);
+}
+
+@test
+fn integration_uint64_bitfield_element_round_trip_pattern() {
+    // Stay within the USize representational envelope to keep this
+    // platform-portable: on 64-bit Verum targets USize is 64 bits;
+    // on 32-bit embedded targets BitfieldElement<UInt64> would
+    // truncate, so the conformance suite restricts itself to the low
+    // 32 bits — the rest is locked down by L3-extended specs.
+    let v: UInt64 = 0xDEADBEEF as UInt64;
+    let back = UInt64.from_bits(v.to_bits());
+    assert_eq(back, v);
+}
+
+// =============================================================================
+// Section 6: BIT_WIDTH protocol constant pinning
+// =============================================================================
+
+@test
+fn integration_bool_bit_width_is_one() {
+    // Pinned in the protocol; one bit per Bool.
+    assert_eq(Bool.BIT_WIDTH, 1 as USize);
+}
+
+@test
+fn integration_uint8_bit_width_is_eight() {
+    assert_eq(UInt8.BIT_WIDTH, 8 as USize);
+}
+
+@test
+fn integration_uint16_bit_width_is_sixteen() {
+    assert_eq(UInt16.BIT_WIDTH, 16 as USize);
+}
+
+@test
+fn integration_uint32_bit_width_is_thirtytwo() {
+    assert_eq(UInt32.BIT_WIDTH, 32 as USize);
+}
+
+@test
+fn integration_uint64_bit_width_is_sixtyfour() {
+    assert_eq(UInt64.BIT_WIDTH, 64 as USize);
+}
+
+// =============================================================================
+// Section 7: Free-function primitives × stdlib collections
+// =============================================================================
+
+@test
+fn integration_bitfield_packing_via_list_accumulation() {
+    // Pack a list of (offset, width, payload) triples into a single USize.
+    // Each triple inserts into a disjoint field; extracting them again
+    // through the same triples reconstructs the original payload list.
+    let triples: List<(USize, USize, USize)> = [
+        (0  as USize, 4 as USize, 0xA as USize),
+        (4  as USize, 4 as USize, 0x5 as USize),
+        (8  as USize, 8 as USize, 0xCD as USize),
+        (16 as USize, 8 as USize, 0xAB as USize),
+    ];
+    let mut packed: USize = 0 as USize;
+    for t in triples.iter() {
+        let (o, w, b) = *t;
+        packed = bitfield.insert_bits(packed, b, o, w);
+    }
+    // Recover each field; assert it matches the original payload.
+    for t in triples.iter() {
+        let (o, w, expected) = *t;
+        let recovered = bitfield.extract_bits(packed, o, w);
+        assert_eq(recovered, expected);
+    }
+    // Sanity: low 32 bits of `packed` carry the four fields concatenated.
+    // 0xA at [0..4] | 0x5 at [4..8] | 0xCD at [8..16] | 0xAB at [16..24]
+    //   = 0x00ABCD5A
+    assert_eq(packed & (0xFFFFFFFF as USize), 0xABCD5A as USize);
+}
+
+@test
+fn integration_bitfield_test_bit_filter_collect() {
+    // Filter the bit positions set in 0xA5 (= 1010_0101) using test_bit.
+    let v: USize = 0xA5 as USize;
+    let positions: List<USize> = [
+        0 as USize, 1 as USize, 2 as USize, 3 as USize,
+        4 as USize, 5 as USize, 6 as USize, 7 as USize,
+    ];
+    let set_positions: List<USize> = positions.iter()
+        .filter(|n| bitfield.test_bit(v, **n))
+        .map(|n| *n)
+        .collect();
+    // 0xA5 has bits 0, 2, 5, 7 set.
+    assert_eq(set_positions.len(), 4);
+    assert(set_positions.contains(&(0 as USize)));
+    assert(set_positions.contains(&(2 as USize)));
+    assert(set_positions.contains(&(5 as USize)));
+    assert(set_positions.contains(&(7 as USize)));
+}
+
+@test
+fn integration_bitfield_popcount_via_test_bit_loop() {
+    // Compute popcount by sweeping every bit position. Pinned against the
+    // analytic answer for a handful of byte patterns.
+    let cases: List<(USize, USize)> = [
+        (0x00 as USize, 0 as USize),
+        (0x01 as USize, 1 as USize),
+        (0x03 as USize, 2 as USize),
+        (0x07 as USize, 3 as USize),
+        (0x0F as USize, 4 as USize),
+        (0xA5 as USize, 4 as USize),
+        (0xFF as USize, 8 as USize),
+        (0xAA as USize, 4 as USize),
+        (0x55 as USize, 4 as USize),
+    ];
+    for c in cases.iter() {
+        let (value, expected) = *c;
+        let mut count: USize = 0 as USize;
+        let mut n: USize = 0 as USize;
+        while n < (8 as USize) {
+            if bitfield.test_bit(value, n) {
+                count = count + (1 as USize);
+            }
+            n = n + (1 as USize);
+        }
+        assert_eq(count, expected);
+    }
+}
+
+// =============================================================================
+// Section 8: Endianness variant exhaustion
+// =============================================================================
+
+@test
+fn integration_endianness_pattern_match_exhaustive() {
+    let variants: List<Endianness> = [
+        Endianness.Little,
+        Endianness.Big,
+        Endianness.Native,
+    ];
+    let mut little: Int = 0;
+    let mut big:    Int = 0;
+    let mut native: Int = 0;
+    for e in variants.iter() {
+        match *e {
+            Endianness.Little => little = little + 1,
+            Endianness.Big    => big    = big    + 1,
+            Endianness.Native => native = native + 1,
+        };
+    }
+    assert_eq(little, 1);
+    assert_eq(big,    1);
+    assert_eq(native, 1);
+}
+
+@test
+fn integration_endianness_via_maybe_pattern() {
+    // Route Endianness through Maybe; confirm the Some / None arms reach
+    // pattern-match for every variant.
+    let maybes: List<Maybe<Endianness>> = [
+        Some(Endianness.Little),
+        Some(Endianness.Big),
+        Some(Endianness.Native),
+        None,
+    ];
+    let mut some_count: Int = 0;
+    let mut none_count: Int = 0;
+    for m in maybes.iter() {
+        match m {
+            Some(_) => some_count = some_count + 1,
+            None    => none_count = none_count + 1,
+        };
+    }
+    assert_eq(some_count, 3);
+    assert_eq(none_count, 1);
+}
+
+// =============================================================================
+// Section 9: Bitfield primitives × USIZE_BITS boundary discipline
+// =============================================================================
+
+@test
+fn integration_usize_bits_matches_type_property() {
+    // Tying the docs-exposed constant to the type-info intrinsic. If a
+    // future codegen change forgets to update one or the other, this
+    // test catches the drift.
+    assert_eq(bitfield.USIZE_BITS, USize.bits);
+}
+
+@test
+fn integration_field_mask_packs_full_usize_window() {
+    // A USIZE_BITS-wide field is the all-ones mask, regardless of offset.
+    let all_ones: USize = !(0 as USize);
+    assert_eq(bitfield.field_mask(0 as USize, bitfield.USIZE_BITS), all_ones);
+}
+
+@test
+fn integration_extract_through_full_width_is_identity() {
+    let values: List<USize> = [
+        0 as USize,
+        0xCAFE as USize,
+        0xDEADBEEF as USize,
+        !(0 as USize),
+    ];
+    for v in values.iter() {
+        assert_eq(
+            bitfield.extract_bits(*v, 0 as USize, bitfield.USIZE_BITS),
+            *v,
+        );
+    }
+}
+
+fn main() {}

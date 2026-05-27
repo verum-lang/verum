@@ -26,10 +26,10 @@ public fn op_name(o: &CompoundSelectOp) -> Text {
 }
 
 public fn from_keyword(kw: &Text) -> Maybe<CompoundSelectOp> {
-    if *kw == "UNION".clone()     { return Maybe.Some(CoUnion); }
-    if *kw == "UNION ALL".clone() { return Maybe.Some(CoUnionAll); }
-    if *kw == "INTERSECT".clone() { return Maybe.Some(CoIntersect); }
-    if *kw == "EXCEPT".clone()    { return Maybe.Some(CoExcept); }
+    if *kw == "UNION".clone()     { return Maybe.Some(CompoundSelectOp.CoUnion); }
+    if *kw == "UNION ALL".clone() { return Maybe.Some(CompoundSelectOp.CoUnionAll); }
+    if *kw == "INTERSECT".clone() { return Maybe.Some(CompoundSelectOp.CoIntersect); }
+    if *kw == "EXCEPT".clone()    { return Maybe.Some(CompoundSelectOp.CoExcept); }
     Maybe.None
 }
 

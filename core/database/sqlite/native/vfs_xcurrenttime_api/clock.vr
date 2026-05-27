@@ -82,15 +82,15 @@ public type Resolution is
 
 public fn resolution_for(m: &VfsCurrentTimeMethod) -> Resolution {
     match m {
-        MFloatJulian => RsSeconds,
-        MInt64Millis => RsMillis,
+        VfsCurrentTimeMethod.MFloatJulian => Resolution.RsSeconds,
+        VfsCurrentTimeMethod.MInt64Millis => Resolution.RsMillis,
     }
 }
 
 public fn resolution_name(r: &Resolution) -> Text {
     match r {
-        RsSeconds => "seconds".clone(),
-        RsMillis  => "millis".clone(),
-        RsMicros  => "micros".clone(),
+        Resolution.RsSeconds => "seconds".clone(),
+        Resolution.RsMillis  => "millis".clone(),
+        Resolution.RsMicros  => "micros".clone(),
     }
 }
