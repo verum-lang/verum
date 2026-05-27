@@ -439,13 +439,26 @@ implement LogRecordBuilder {
 
     /// Materialise the record.
     public fn build(self) -> LogRecord {
+        // Typed-local extraction prevents the chained-self-field
+        // dispatch defect (same root family as Range<T>.next elseif —
+        // see fix(core/base/iterator) commit). Pulling each field into
+        // a typed local pins the type for the record-literal
+        // construction and prevents downstream consumers' field
+        // accesses on the returned LogRecord from mis-resolving the
+        // level / message / fields offsets.
+        let lvl: LogLevel = self.rec_level;
+        let msg: Text = self.rec_message;
+        let flds: List<(Text, Text)> = self.rec_fields;
+        let mod_path: Maybe<Text> = self.rec_module_path;
+        let f: Maybe<Text> = self.rec_file;
+        let ln: Maybe<Int> = self.rec_line;
         LogRecord {
-            level: self.rec_level,
-            message: self.rec_message,
-            fields: self.rec_fields,
-            module_path: self.rec_module_path,
-            file: self.rec_file,
-            line: self.rec_line,
+            level: lvl,
+            message: msg,
+            fields: flds,
+            module_path: mod_path,
+            file: f,
+            line: ln,
         }
     }
 }
