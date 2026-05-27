@@ -71,6 +71,7 @@ mod registers;
 mod stack;
 mod state;
 pub mod tensor;
+pub mod waitgroup;
 pub mod worker_pool;
 
 pub use registers::RegisterFile;

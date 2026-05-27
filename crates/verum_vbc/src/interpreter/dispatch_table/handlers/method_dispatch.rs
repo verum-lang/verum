@@ -4056,10 +4056,19 @@ pub(super) fn dispatch_primitive_method(
             "as_micros" => Value::from_i64(v / 1_000),
             "as_nanos" => Value::from_i64(v),
             "subsec_nanos" => Value::from_i64(v % 1_000_000_000),
-            "add" => {
-                let other = state.get_reg(Reg(args.start.0)).as_i64();
-                Value::from_i64(v + other)
-            }
+            // NB: `"add"` intercept REMOVED 2026-05-27.  It fired for
+            // any Int-receiver method called `add` and mis-routed
+            // every single-field-record-unboxed receiver's `.add()`
+            // call to a bare `Int + Int` sum.  In particular,
+            // `WaitGroup { handle: Int }.add(delta)` was hitting this
+            // arm and computing `handle + delta` — silently dropping
+            // the call into `__waitgroup_add_raw` and leaving the
+            // backing counter untouched.  Same defect surface as
+            // [[duration_single_field_record_unboxing_2026-05-27]].
+            // Duration's `Add::add` body is dispatched through the
+            // Verum source body + the `time_duration_add` intrinsic;
+            // this intercept was a redundant shortcut whose blast
+            // radius was every WaitGroup-shaped record.
 
             // Instant methods (Instant stored as nanoseconds since epoch in Int)
             "duration_since" => {

@@ -1,0 +1,113 @@
+// =============================================================================
+// core-tests/sync/waitgroup/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sync.waitgroup.WaitGroup`.
+//
+// Static + single-threaded "counter-at-zero" surface only.  Live wait()
+// blocking is exercised at the L2-spec level.
+// =============================================================================
+
+mount core.sync.waitgroup.{WaitGroup};
+
+// =============================================================================
+// Section 1: Construction
+// =============================================================================
+
+@test
+fn test_waitgroup_new_constructs() {
+    let wg = WaitGroup.new();
+    // Fresh WaitGroup has counter == 0; try_wait must report ready.
+    assert(wg.try_wait());
+}
+
+@test
+fn test_waitgroup_new_then_immediate_wait_ok() {
+    let wg = WaitGroup.new();
+    // wait() on a zero-counter must return immediately (does NOT block).
+    wg.wait();
+}
+
+// =============================================================================
+// Section 2: try_wait Bool encoding (audit §3.3)
+// =============================================================================
+
+@test
+fn test_waitgroup_try_wait_true_when_zero() {
+    let wg = WaitGroup.new();
+    assert_eq(wg.try_wait(), true);
+}
+
+@test
+fn test_waitgroup_try_wait_false_when_nonzero() {
+    let wg = WaitGroup.new();
+    wg.add(1);
+    assert_eq(wg.try_wait(), false);
+    wg.done();   // drain so destroy is clean
+}
+
+// =============================================================================
+// Section 3: add + done round-trip (single-threaded)
+// =============================================================================
+
+@test
+fn test_waitgroup_add_one_done_one() {
+    let wg = WaitGroup.new();
+    wg.add(1);
+    assert(!wg.try_wait());
+    wg.done();
+    assert(wg.try_wait());
+}
+
+@test
+fn test_waitgroup_add_three_done_three() {
+    let wg = WaitGroup.new();
+    wg.add(3);
+    assert(!wg.try_wait());
+    wg.done();
+    assert(!wg.try_wait());
+    wg.done();
+    assert(!wg.try_wait());
+    wg.done();
+    assert(wg.try_wait());
+}
+
+@test
+fn test_waitgroup_add_then_wait_after_drain_is_immediate() {
+    let wg = WaitGroup.new();
+    wg.add(2);
+    wg.done();
+    wg.done();
+    wg.wait();   // counter back to 0 — must return immediately
+    assert(wg.try_wait());
+}
+
+// =============================================================================
+// Section 4: add(0) is a no-op (audit §3.4)
+// =============================================================================
+
+@test
+fn test_waitgroup_add_zero_noop() {
+    let wg = WaitGroup.new();
+    wg.add(0);
+    assert(wg.try_wait());
+    wg.add(0);
+    wg.add(0);
+    assert(wg.try_wait());
+}
+
+// =============================================================================
+// Section 5: Multiple independent WaitGroups
+// =============================================================================
+
+@test
+fn test_two_waitgroups_independent() {
+    let a = WaitGroup.new();
+    let b = WaitGroup.new();
+    a.add(1);
+    assert(!a.try_wait());
+    assert(b.try_wait());
+    a.done();
+    assert(a.try_wait());
+    assert(b.try_wait());
+}
