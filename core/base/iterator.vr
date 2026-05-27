@@ -3565,15 +3565,15 @@ implement<R> ReduceResult<R> {
     /// Unwrap the result value regardless of termination state.
     fn unwrap(self) -> R {
         match self {
-            Continue(r) => r,
-            Reduced(r) => r,
+            ReduceResult.Continue(r) => r,
+            ReduceResult.Reduced(r) => r,
         }
     }
 
     /// Check if this is an early termination.
     fn is_reduced(&self) -> Bool {
         match self {
-            Reduced(_) => true,
+            ReduceResult.Reduced(_) => true,
             _ => false,
         }
     }
@@ -3581,8 +3581,8 @@ implement<R> ReduceResult<R> {
     /// Map the inner value.
     fn map<S>(self, f: fn(R) -> S) -> ReduceResult<S> {
         match self {
-            Continue(r) => Continue(f(r)),
-            Reduced(r) => Reduced(f(r)),
+            ReduceResult.Continue(r) => ReduceResult.Continue(f(r)),
+            ReduceResult.Reduced(r) => ReduceResult.Reduced(f(r)),
         }
     }
 }
@@ -3664,7 +3664,7 @@ public module Transducer {
                     if pred(&x) {
                         downstream(acc, x)
                     } else {
-                        Continue(acc)
+                        ReduceResult.Continue(acc)
                     }
                 }
             }
@@ -3686,8 +3686,8 @@ public module Transducer {
             transform: |downstream| {
                 |acc, x| {
                     match f(x) {
-                        Some(y) => downstream(acc, y),
-                        None => Continue(acc),
+                        Maybe.Some(y) => downstream(acc, y),
+                        Maybe.None => ReduceResult.Continue(acc),
                     }
                 }
             }
@@ -3713,12 +3713,12 @@ public module Transducer {
                         *remaining = *remaining - 1;
                         let result = downstream(acc, x);
                         if *remaining == 0 {
-                            Reduced(result.unwrap())
+                            ReduceResult.Reduced(result.unwrap())
                         } else {
                             result
                         }
                     } else {
-                        Reduced(acc)
+                        ReduceResult.Reduced(acc)
                     }
                 }
             }
@@ -3742,7 +3742,7 @@ public module Transducer {
                 |acc, x| {
                     if *remaining > 0 {
                         *remaining = *remaining - 1;
-                        Continue(acc)
+                        ReduceResult.Continue(acc)
                     } else {
                         downstream(acc, x)
                     }
@@ -3768,7 +3768,7 @@ public module Transducer {
                     if pred(&x) {
                         downstream(acc, x)
                     } else {
-                        Reduced(acc)
+                        ReduceResult.Reduced(acc)
                     }
                 }
             }
@@ -3785,7 +3785,7 @@ public module Transducer {
             transform: |downstream, dropping| {
                 |acc, x| {
                     if *dropping && pred(&x) {
-                        Continue(acc)  // Keep dropping
+                        ReduceResult.Continue(acc)  // Keep dropping
                     } else {
                         *dropping = false;
                         downstream(acc, x)
@@ -3801,17 +3801,17 @@ public module Transducer {
     /// Removes consecutive duplicates.
     public fn dedupe<A: Eq + Clone>() -> StatefulTransducer<A, A, Maybe<A>> {
         StatefulTransducer {
-            initial_state: None,
+            initial_state: Maybe.None,
             transform: |downstream, last| {
                 |acc, x| {
                     let dominated = match last {
-                        Some(ref prev) => *prev == x,
-                        None => false,
+                        Maybe.Some(ref prev) => *prev == x,
+                        Maybe.None => false,
                     };
                     if dominated {
-                        Continue(acc)
+                        ReduceResult.Continue(acc)
                     } else {
-                        *last = Some(x.clone());
+                        *last = Maybe.Some(x.clone());
                         downstream(acc, x)
                     }
                 }
