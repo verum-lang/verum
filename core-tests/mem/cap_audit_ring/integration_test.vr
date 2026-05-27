@@ -11,6 +11,7 @@ mount core.mem.cap_audit_ring.{
     enable, disable, is_enabled, reset_for_tests,
     count, recent,
     record_revoke, record_attenuate, record_gen_bump,
+    CAP_AUDIT_RING_CAPACITY,
 };
 mount core.mem.cap_audit.{CapEventKind, CapEvent};
 mount core.mem.capability.{CAP_OWNED, CAP_READ_ONLY};
@@ -115,6 +116,46 @@ fn integration_disabled_window_records_not_observable() {
         }
     }
     assert(!found_disabled_event);
+}
+
+// -----------------------------------------------------------------------------
+// §6  CAP_AUDIT_RING_CAPACITY drift surface — load-bearing constants.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_capacity_is_positive() {
+    // Capacity must be > 0 (otherwise no events ever recorded).
+    assert(CAP_AUDIT_RING_CAPACITY > 0);
+}
+
+@test
+fn integration_capacity_is_power_of_two() {
+    // The ring buffer's modular indexing relies on power-of-two
+    // capacity for efficient (i & (capacity - 1)) masking.  Pin via
+    // canonical (n & (n-1)) == 0 test.
+    let cap = CAP_AUDIT_RING_CAPACITY;
+    assert_eq(cap & (cap - 1), 0);
+}
+
+@test
+fn integration_capacity_is_canonical_256() {
+    // Currently pinned to 256 — large enough for typical-burst
+    // CBGR audit traffic, small enough to stay in L2 cache.
+    assert_eq(CAP_AUDIT_RING_CAPACITY, 256);
+}
+
+@test
+fn integration_recent_request_bounded_by_capacity() {
+    // recent(N) is bounded by min(N, count, capacity).
+    // For an empty ring (after reset), recent(any) is empty regardless
+    // of N — pin the upper bound.
+    reset_for_tests();
+    disable();
+    let r = recent(1000);
+    assert_eq(r.len(), 0);
+    // Asking for 2× capacity is still bounded
+    let r2 = recent(CAP_AUDIT_RING_CAPACITY * 2);
+    assert_eq(r2.len(), 0);
 }
 
 // =============================================================================
