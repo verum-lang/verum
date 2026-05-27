@@ -189,14 +189,14 @@ public type Iterator is protocol {
     /// documents the contract.
     fn advance_by(&mut self, n: Int) -> Result<(), Int> {
         if n <= 0 {
-            return Ok(());
+            return Result.Ok(());
         }
         for i in range(0, n) {
             if self.next().is_none() {
-                return Err(i);
+                return Result.Err(i);
             }
         }
-        Ok(())
+        Result.Ok(())
     }
 
     // =========================================================================
@@ -2610,7 +2610,7 @@ public fn repeat_n<T: Clone>(value: T, n: Int) -> RepeatN<T> {
 
 /// Create an iterator that yields one element.
 public fn once<T>(value: T) -> OnceIter<T> {
-    OnceIter { value: Some(value) }
+    OnceIter { value: Maybe.Some(value) }
 }
 
 /// Create an empty iterator.
@@ -2621,13 +2621,13 @@ public fn empty<T>() -> Empty<T> {
 /// Create an iterator that yields values by calling a function repeatedly.
 /// Unlike `repeat`, the value is computed lazily on each call.
 public fn repeat_with<T, F: fn() -> T>(f: F) -> RepeatWith<T, F> {
-    RepeatWith { f: f, _phantom: None }
+    RepeatWith { f: f, _phantom: Maybe.None }
 }
 
 /// Create an iterator that yields one element, computed lazily.
 /// Unlike `once`, the value is not computed until the iterator is polled.
 public fn once_with<T, F: fn() -> T>(f: F) -> OnceWith<T, F> {
-    OnceWith { f: Some(f), _phantom: None }
+    OnceWith { f: Maybe.Some(f), _phantom: Maybe.None }
 }
 
 /// Create an iterator from a function.
