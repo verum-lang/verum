@@ -1,0 +1,94 @@
+// =============================================================================
+// core-tests/sync/barrier/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for `core.sync.barrier`.
+// =============================================================================
+
+mount core.sync.barrier.{
+    Phaser, CountDownLatch, BarrierWaitResult,
+};
+
+// =============================================================================
+// §3.2 — Phaser.terminate preserves party-count (TERMINATED_BIT moved to bit 62)
+// =============================================================================
+//
+// `barrier.vr:262-288` documents the arithmetic-right-shift hazard
+// (task #32) — moving TERMINATED_BIT off the sign bit so phase
+// decoding via `state >> PHASE_SHIFT` doesn't silently corrupt the
+// terminated state.  This pin LOCKs the invariant that after
+// terminate(), the party count survives the bit-layout decode.
+
+@test
+fn regression_phaser_terminate_preserves_party_count_one() {
+    let p = Phaser.new(1);
+    assert_eq(p.get_registered_parties(), 1);
+    p.terminate();
+    assert(p.is_terminated());
+    assert_eq(p.get_registered_parties(), 1);
+}
+
+@test
+fn regression_phaser_terminate_preserves_party_count_many() {
+    let p = Phaser.new(7);
+    p.terminate();
+    assert(p.is_terminated());
+    assert_eq(p.get_registered_parties(), 7);
+}
+
+@test
+fn regression_phaser_terminate_preserves_arrived_zero() {
+    let p = Phaser.new(3);
+    assert_eq(p.get_arrived_parties(), 0);
+    p.terminate();
+    assert_eq(p.get_arrived_parties(), 0);
+}
+
+@test
+fn regression_phaser_terminate_preserves_phase_zero() {
+    let p = Phaser.new(3);
+    assert_eq(p.get_phase(), 0);
+    p.terminate();
+    assert_eq(p.get_phase(), 0);
+}
+
+// =============================================================================
+// §3.6 — CountDownLatch.wait_for_zero_timeout on a drained latch is immediate
+// =============================================================================
+//
+// `barrier.vr:561-564` short-circuits zero-counter / non-positive
+// timeout cases.  Regression LOCKs the early-return paths.
+
+@test
+fn regression_count_down_latch_zero_counter_drained_immediate() {
+    let l = CountDownLatch.new(0);
+    assert(l.wait_for_zero_timeout(0));
+    assert(l.wait_for_zero_timeout(1_000_000));   // 1 ms budget on drained
+}
+
+@test
+fn regression_count_down_latch_drained_after_count_down_immediate() {
+    let l = CountDownLatch.new(1);
+    l.count_down();
+    // Drained — timeout variant immediately returns true.
+    assert(l.wait_for_zero_timeout(0));
+}
+
+@test
+fn regression_count_down_latch_nonpositive_timeout_observes_state() {
+    let l = CountDownLatch.new(2);
+    // Counter > 0, timeout <= 0 — per the source-side branch at
+    // barrier.vr:565-567, returns false (count was not zero).
+    assert(!l.wait_for_zero_timeout(0));
+    assert(!l.wait_for_zero_timeout(-1));
+}
+
+// =============================================================================
+// §3.5 — BarrierWaitResult.Default is is_leader: false
+// =============================================================================
+
+@test
+fn regression_barrier_wait_result_default_not_leader() {
+    let r: BarrierWaitResult = BarrierWaitResult.default();
+    assert_eq(r.is_leader(), false);
+}

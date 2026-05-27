@@ -1,0 +1,146 @@
+// =============================================================================
+// core-tests/sync/condvar/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sync.condvar` — Condvar + WaitTimeoutResult +
+// CondvarNotifyGuard + producer_consumer_pair.
+//
+// Static + single-threaded surface only.  Live wait / notify race
+// scenarios exercised at the L2-spec level.
+// =============================================================================
+
+mount core.sync.condvar.{
+    Condvar, WaitTimeoutResult, CondvarNotifyGuard,
+    producer_consumer_pair,
+};
+mount core.sync.mutex.{Mutex};
+
+// =============================================================================
+// Section 1: Condvar.new construction
+// =============================================================================
+
+@test
+fn test_condvar_new_constructs() {
+    let cv = Condvar.new();
+    // Fresh condvar has no waiters.
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_default_equivalent_to_new() {
+    let cv: Condvar = Condvar.default();
+    assert_eq(cv.waiter_count(), 0);
+}
+
+// =============================================================================
+// Section 2: waiter_count on quiescent condvar
+// =============================================================================
+
+@test
+fn test_condvar_quiescent_waiter_count_zero() {
+    let cv = Condvar.new();
+    // Multiple observations of the same quiescent condvar all see 0.
+    assert_eq(cv.waiter_count(), 0);
+    assert_eq(cv.waiter_count(), 0);
+    assert_eq(cv.waiter_count(), 0);
+}
+
+// =============================================================================
+// Section 3: notify_one / notify_all on a no-waiter condvar (audit §3.2)
+// =============================================================================
+//
+// The notify path is unconditional — it always bumps the sequence
+// counter and issues futex_wake.  We can verify it doesn't panic on
+// a fresh condvar even though there are no waiters; the syscall
+// returns immediately in that case.
+
+@test
+fn test_condvar_notify_one_no_waiters_safe() {
+    let cv = Condvar.new();
+    cv.notify_one();   // must not panic / abort
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_notify_all_no_waiters_safe() {
+    let cv = Condvar.new();
+    cv.notify_all();   // must not panic / abort
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_condvar_repeated_notifications_safe() {
+    let cv = Condvar.new();
+    cv.notify_one();
+    cv.notify_all();
+    cv.notify_one();
+    cv.notify_all();
+    cv.notify_one();
+    assert_eq(cv.waiter_count(), 0);
+}
+
+// =============================================================================
+// Section 4: WaitTimeoutResult data record
+// =============================================================================
+
+@test
+fn test_wait_timeout_result_true_constructs() {
+    let r: WaitTimeoutResult = WaitTimeoutResult { timed_out: true };
+    assert_eq(r.timed_out(), true);
+}
+
+@test
+fn test_wait_timeout_result_false_constructs() {
+    let r: WaitTimeoutResult = WaitTimeoutResult { timed_out: false };
+    assert_eq(r.timed_out(), false);
+}
+
+@test
+fn test_wait_timeout_result_disjoint_values() {
+    let yes: WaitTimeoutResult = WaitTimeoutResult { timed_out: true };
+    let no: WaitTimeoutResult = WaitTimeoutResult { timed_out: false };
+    assert(yes.timed_out());
+    assert(!no.timed_out());
+}
+
+// =============================================================================
+// Section 5: producer_consumer_pair factory
+// =============================================================================
+
+@test
+fn test_producer_consumer_pair_returns_mutex_and_condvar() {
+    let (m, cv) = producer_consumer_pair(0);
+    // Mutex side: fresh, unpoisoned.
+    assert(!m.is_poisoned());
+    // Condvar side: fresh, no waiters.
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn test_producer_consumer_pair_independent_pairs() {
+    let (m1, cv1) = producer_consumer_pair(0);
+    let (m2, cv2) = producer_consumer_pair(0);
+    // Poisoning one pair's mutex doesn't bleed to the other.
+    m1.poison();
+    assert(m1.is_poisoned());
+    assert(!m2.is_poisoned());
+    // Notification on one condvar doesn't affect the other.
+    cv1.notify_all();
+    assert_eq(cv2.waiter_count(), 0);
+}
+
+// =============================================================================
+// Section 6: Multiple independent Condvars
+// =============================================================================
+
+@test
+fn test_two_condvars_independent() {
+    let a = Condvar.new();
+    let b = Condvar.new();
+    assert_eq(a.waiter_count(), 0);
+    assert_eq(b.waiter_count(), 0);
+    a.notify_one();
+    b.notify_all();
+    assert_eq(a.waiter_count(), 0);
+    assert_eq(b.waiter_count(), 0);
+}

@@ -1,0 +1,224 @@
+// =============================================================================
+// core-tests/sync/barrier/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sync.barrier` — Barrier + BarrierWaitResult +
+// Phaser + CountDownLatch.
+//
+// Static + single-threaded surface only.  Live multi-thread rendezvous
+// + phase transitions exercised at the L2-spec level.
+// =============================================================================
+
+mount core.sync.barrier.{
+    Barrier, BarrierWaitResult,
+    Phaser, CountDownLatch,
+};
+
+// =============================================================================
+// Section 1: Barrier.new construction + accessors
+// =============================================================================
+
+@test
+fn test_barrier_new_one_thread_constructs() {
+    let b = Barrier.new(1);
+    assert_eq(b.num_threads(), 1);
+    assert_eq(b.waiting_count(), 0);
+    assert_eq(b.generation(), 0);
+}
+
+@test
+fn test_barrier_new_many_threads_constructs() {
+    let b = Barrier.new(5);
+    assert_eq(b.num_threads(), 5);
+    assert_eq(b.waiting_count(), 0);
+    assert_eq(b.generation(), 0);
+}
+
+@test
+fn test_barrier_num_threads_independent_of_waiting_count() {
+    let b = Barrier.new(8);
+    assert_eq(b.num_threads(), 8);
+    // No one is waiting yet.
+    assert_eq(b.waiting_count(), 0);
+}
+
+// =============================================================================
+// Section 2: BarrierWaitResult data record
+// =============================================================================
+
+@test
+fn test_barrier_wait_result_leader_true_constructs() {
+    let r: BarrierWaitResult = BarrierWaitResult { is_leader: true };
+    assert(r.is_leader());
+}
+
+@test
+fn test_barrier_wait_result_leader_false_constructs() {
+    let r: BarrierWaitResult = BarrierWaitResult { is_leader: false };
+    assert(!r.is_leader());
+}
+
+@test
+fn test_barrier_wait_result_default_is_not_leader() {
+    let r: BarrierWaitResult = BarrierWaitResult.default();
+    assert_eq(r.is_leader(), false);
+}
+
+// =============================================================================
+// Section 3: Barrier.new(1) — single-thread barrier
+// =============================================================================
+//
+// A 1-thread barrier rendezvous-es immediately: the first arriver IS
+// the leader, no waiting required.  Live wait() invocation needs the
+// underlying mutex/condvar wiring to work; we cannot reliably exercise
+// this from a single-threaded interpreter test (the wait() call may
+// reasonably block waiting for "the rest"); instead we pin the static
+// shape that `Barrier.new(1)` constructs cleanly with the documented
+// invariants.
+
+@test
+fn test_barrier_one_thread_initial_state_consistent() {
+    let b = Barrier.new(1);
+    // Construction-time invariants only — wait() is exercised at L2.
+    assert_eq(b.num_threads(), 1);
+    assert_eq(b.waiting_count(), 0);
+    assert_eq(b.generation(), 0);
+}
+
+// =============================================================================
+// Section 4: Phaser.new construction + accessors
+// =============================================================================
+
+@test
+fn test_phaser_new_zero_parties_constructs() {
+    let p = Phaser.new(0);
+    assert_eq(p.get_registered_parties(), 0);
+    assert_eq(p.get_arrived_parties(), 0);
+    assert_eq(p.get_phase(), 0);
+    assert(!p.is_terminated());
+}
+
+@test
+fn test_phaser_new_some_parties_constructs() {
+    let p = Phaser.new(3);
+    assert_eq(p.get_registered_parties(), 3);
+    assert_eq(p.get_arrived_parties(), 0);
+    assert_eq(p.get_phase(), 0);
+    assert(!p.is_terminated());
+}
+
+// =============================================================================
+// Section 5: Phaser.register + terminate
+// =============================================================================
+
+@test
+fn test_phaser_register_increments_parties() {
+    let p = Phaser.new(0);
+    assert_eq(p.get_registered_parties(), 0);
+    let _phase_before = p.register();
+    assert_eq(p.get_registered_parties(), 1);
+    let _phase_before2 = p.register();
+    assert_eq(p.get_registered_parties(), 2);
+}
+
+@test
+fn test_phaser_register_returns_current_phase() {
+    let p = Phaser.new(0);
+    // Phase starts at 0; register() returns the phase BEFORE registration.
+    let phase = p.register();
+    assert_eq(phase, 0);
+}
+
+@test
+fn test_phaser_terminate_flips_is_terminated() {
+    let p = Phaser.new(2);
+    assert(!p.is_terminated());
+    p.terminate();
+    assert(p.is_terminated());
+}
+
+@test
+fn test_phaser_terminate_preserves_party_count() {
+    let p = Phaser.new(2);
+    assert_eq(p.get_registered_parties(), 2);
+    p.terminate();
+    // The terminate-bit preservation contract: party-count survives
+    // (audit §3.2 + barrier.vr:262-288 doc-comment).
+    assert_eq(p.get_registered_parties(), 2);
+}
+
+// =============================================================================
+// Section 6: CountDownLatch.new + count_down + wait_for_zero (drained)
+// =============================================================================
+
+@test
+fn test_count_down_latch_new_zero_immediately_drained() {
+    let l = CountDownLatch.new(0);
+    assert_eq(l.get_count(), 0);
+    // Drained on construction.
+    l.wait_for_zero();   // must return immediately
+}
+
+@test
+fn test_count_down_latch_new_n_observable_count() {
+    let l = CountDownLatch.new(3);
+    assert_eq(l.get_count(), 3);
+}
+
+@test
+fn test_count_down_latch_count_down_decrements() {
+    let l = CountDownLatch.new(3);
+    l.count_down();
+    assert_eq(l.get_count(), 2);
+    l.count_down();
+    assert_eq(l.get_count(), 1);
+    l.count_down();
+    assert_eq(l.get_count(), 0);
+}
+
+@test
+fn test_count_down_latch_drain_then_wait_for_zero_immediate() {
+    let l = CountDownLatch.new(2);
+    l.count_down();
+    l.count_down();
+    assert_eq(l.get_count(), 0);
+    l.wait_for_zero();   // must return immediately
+}
+
+@test
+fn test_count_down_latch_wait_for_zero_timeout_drained_returns_true() {
+    let l = CountDownLatch.new(0);
+    // 0-budget timeout on a drained latch: per the source-side check
+    // at barrier.vr:561-564, returns true (count is already 0).
+    assert(l.wait_for_zero_timeout(0));
+}
+
+// =============================================================================
+// Section 7: Multiple independent Barriers / Phasers / Latches
+// =============================================================================
+
+@test
+fn test_two_barriers_independent() {
+    let a = Barrier.new(3);
+    let b = Barrier.new(5);
+    assert_eq(a.num_threads(), 3);
+    assert_eq(b.num_threads(), 5);
+}
+
+@test
+fn test_two_phasers_independent() {
+    let p1 = Phaser.new(2);
+    let p2 = Phaser.new(3);
+    p1.terminate();
+    assert(p1.is_terminated());
+    assert(!p2.is_terminated());
+}
+
+@test
+fn test_two_count_down_latches_independent() {
+    let a = CountDownLatch.new(2);
+    let b = CountDownLatch.new(3);
+    a.count_down();
+    assert_eq(a.get_count(), 1);
+    assert_eq(b.get_count(), 3);
+}

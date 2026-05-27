@@ -1,0 +1,89 @@
+// =============================================================================
+// core-tests/sync/condvar/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for the testable surface of Condvar:
+//
+//   §A  Fresh-condvar invariant: every newly-constructed Condvar has
+//       waiter_count == 0.
+//   §B  Notify-quiescence law: notify_one / notify_all on a quiescent
+//       condvar do not change waiter_count.
+//   §C  WaitTimeoutResult value round-trip: the timed_out Bool survives
+//       the data-record boxing.
+// =============================================================================
+
+mount core.sync.condvar.{Condvar, WaitTimeoutResult};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Fresh-condvar invariant
+// =============================================================================
+
+@test
+fn law_condvar_fresh_no_waiters() {
+    for _ in 0..5 {
+        let cv = Condvar.new();
+        assert_eq(cv.waiter_count(), 0);
+    }
+}
+
+@test
+fn law_condvar_default_no_waiters() {
+    let cv: Condvar = Condvar.default();
+    assert_eq(cv.waiter_count(), 0);
+}
+
+// =============================================================================
+// §B  Notify-quiescence law
+// =============================================================================
+
+@test
+fn law_condvar_notify_one_preserves_no_waiter_state() {
+    let cv = Condvar.new();
+    for _ in 0..10 {
+        cv.notify_one();
+        assert_eq(cv.waiter_count(), 0);
+    }
+}
+
+@test
+fn law_condvar_notify_all_preserves_no_waiter_state() {
+    let cv = Condvar.new();
+    for _ in 0..10 {
+        cv.notify_all();
+        assert_eq(cv.waiter_count(), 0);
+    }
+}
+
+@test
+fn law_condvar_mixed_notify_one_and_all_preserves_no_waiter_state() {
+    let cv = Condvar.new();
+    for i in 0..6 {
+        if (i % 2) == 0 {
+            cv.notify_one();
+        } else {
+            cv.notify_all();
+        }
+        assert_eq(cv.waiter_count(), 0);
+    }
+}
+
+// =============================================================================
+// §C  WaitTimeoutResult round-trip
+// =============================================================================
+
+@test
+fn law_wait_timeout_result_bool_round_trip() {
+    let bs: List<Bool> = [true, false, true, false, true];
+    for &b in bs.iter() {
+        let r: WaitTimeoutResult = WaitTimeoutResult { timed_out: b };
+        assert_eq(r.timed_out(), b);
+    }
+}
+
+@test
+fn law_wait_timeout_result_distinct_values_disjoint() {
+    let yes: WaitTimeoutResult = WaitTimeoutResult { timed_out: true };
+    let no: WaitTimeoutResult = WaitTimeoutResult { timed_out: false };
+    assert(yes.timed_out() != no.timed_out());
+}
