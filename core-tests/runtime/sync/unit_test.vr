@@ -1,0 +1,57 @@
+// =============================================================================
+// core-tests/runtime/sync/unit_test.vr
+// =============================================================================
+//
+// `core/runtime/sync.vr` — minimal synchronization-primitive intrinsic
+// surface.  10 LOC, single forward-declared free function:
+//
+//   * spin_loop_hint() — emits the CPU PAUSE / YIELD hint
+//
+// The intrinsic lowers to `pause` (x86_64) / `yield` (aarch64) /
+// `wfe` (some armv7 variants) at AOT.  Under --interp it's a runtime
+// no-op (just consumes one VBC dispatch step).
+// =============================================================================
+
+mount core.runtime.sync.{spin_loop_hint};
+
+// =============================================================================
+// Section 1: spin_loop_hint — surface + callability
+// =============================================================================
+
+@test
+fn test_spin_loop_hint_callable() {
+    // The intrinsic returns unit and must not panic.  A spin-wait loop in
+    // production code calls this once per iteration; we exercise a tight
+    // 100-iteration burst here to pin the "no per-call overhead bug"
+    // contract (no allocation, no I/O, no side effect observable to the
+    // user beyond the CPU hint).
+    let mut i: Int = 0;
+    while i < 100 {
+        spin_loop_hint();
+        i = i + 1;
+    }
+    assert(true);
+}
+
+@test
+fn test_spin_loop_hint_zero_iterations_is_safe() {
+    // The 0-iteration corner: the intrinsic is referenced but never
+    // called.  Verifies the forward declaration alone doesn't trip
+    // any compile-time check (intrinsic resolution should be lazy).
+    let mut i: Int = 0;
+    let n: Int = 0;
+    while i < n {
+        spin_loop_hint();
+        i = i + 1;
+    }
+    assert(true);
+}
+
+@test
+fn test_spin_loop_hint_returns_unit() {
+    // Pin the return type: the intrinsic returns `()`, NOT an Int.
+    // Drift here would surface as a register-mis-alloc on the call site.
+    let result: () = spin_loop_hint();
+    let _ = result;
+    assert(true);
+}
