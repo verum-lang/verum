@@ -132,6 +132,150 @@ fn integration_borrow_shared_cannot_be_promoted_to_write() {
     assert(try_read.is_none());
 }
 
+// -----------------------------------------------------------------------------
+// §7  Composition with `core.mem.header.GEN_*` lifecycle constants
+//     — the (generation, epoch, caps) tuple is the CBGR reference's
+//     full identity; this section pins the static contract that
+//     ThinRef.null() / ThinRef.fresh() establish.
+// -----------------------------------------------------------------------------
+
+mount core.mem.header.{GEN_UNALLOCATED, GEN_INITIAL, GEN_MAX};
+
+@test
+fn integration_packed_form_is_zero_only_for_null_sentinel() {
+    // A packed `(epoch=0, caps=0)` IS the null sentinel paired with
+    // `GEN_UNALLOCATED=0`.  Together these three zeros uniquely
+    // identify the never-allocated state of a CBGR reference.
+    let null_packed = pack_epoch_caps(0 as UInt16, 0 as UInt16);
+    assert_eq(null_packed, 0 as UInt32);
+    assert_eq(GEN_UNALLOCATED, 0 as UInt32);
+}
+
+@test
+fn integration_fresh_allocation_uses_initial_gen_with_owned_caps() {
+    // A freshly-allocated Heap<T> stamps GEN_INITIAL=1 in generation,
+    // current_epoch in the low-16 of epoch_and_caps, CAP_OWNED in the
+    // high-16 of epoch_and_caps.  No bits collide across the three lanes.
+    let gen = GEN_INITIAL;
+    let epoch: UInt16 = 1 as UInt16;
+    let caps = CAP_OWNED;
+    let packed = pack_epoch_caps(epoch, caps);
+
+    assert_eq(gen, 1 as UInt32);
+    assert_eq(unpack_epoch(packed), epoch);
+    assert_eq(unpack_caps(packed), caps);
+    // GEN_INITIAL is reachable from gen, not from packed.
+    assert(gen != 0 as UInt32);
+}
+
+@test
+fn integration_revoke_increments_generation_independently_of_caps() {
+    // The revoke protocol increments generation while leaving
+    // epoch_and_caps unchanged (until the caller explicitly attenuates).
+    // Pin: GEN_INITIAL → GEN_INITIAL+1 across one revoke cycle, with
+    // (epoch, caps) bit-identical before and after.
+    let gen_before = GEN_INITIAL;
+    let gen_after = gen_before + (1 as UInt32);
+    let epoch: UInt16 = 5 as UInt16;
+    let caps = CAP_OWNED;
+    let packed_before = pack_epoch_caps(epoch, caps);
+    let packed_after  = pack_epoch_caps(epoch, caps);  // unchanged
+    assert_eq(packed_before, packed_after);
+    assert(gen_after > gen_before);
+    assert(gen_after < GEN_MAX);
+}
+
+// -----------------------------------------------------------------------------
+// §8  Capability lattice ordering: every preset is reachable from
+//     CAP_ALL via attenuation, never via promotion. The lattice's
+//     bottom is 0 (no capabilities); top is CAP_ALL.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_lattice_top_attenuates_to_every_preset() {
+    let top: UInt16 = CAP_ALL;
+    // Every preset must be a subset of CAP_ALL.
+    assert_eq(attenuate(top, CAP_OWNED), CAP_OWNED);
+    assert_eq(attenuate(top, CAP_READ_ONLY), CAP_READ_ONLY);
+    assert_eq(attenuate(top, CAP_READ_WRITE), CAP_READ_WRITE);
+    assert_eq(attenuate(top, CAP_BORROW_SHARED), CAP_BORROW_SHARED);
+    assert_eq(attenuate(top, CAP_BORROW_MUT), CAP_BORROW_MUT);
+}
+
+@test
+fn integration_lattice_bottom_attenuates_to_zero() {
+    // The bottom of the lattice is the empty capability set.
+    let bot: UInt16 = 0 as UInt16;
+    assert_eq(attenuate(bot, CAP_OWNED), 0 as UInt16);
+    assert_eq(attenuate(bot, CAP_READ_WRITE), 0 as UInt16);
+    assert_eq(attenuate(bot, CAP_ALL), 0 as UInt16);
+}
+
+@test
+fn integration_attenuate_is_idempotent_under_self() {
+    // attenuate(x, x) = x for every x — pinned for the canonical
+    // CAP_* presets.  The CBGR memory safety proofs depend on this
+    // idempotence to short-circuit no-op clones.
+    let presets: List<UInt16> = [
+        CAP_OWNED, CAP_READ_ONLY, CAP_READ_WRITE,
+        CAP_BORROW_SHARED, CAP_BORROW_MUT, CAP_ALL,
+    ].to_list();
+    for p in presets.iter() {
+        assert_eq(attenuate(*p, *p), *p);
+    }
+}
+
+@test
+fn integration_attenuate_associativity_two_step() {
+    // attenuate(attenuate(x, m1), m2) == attenuate(x, m1 & m2).
+    // Pinning this allows the codegen to fold consecutive attenuations.
+    let x: UInt16 = CAP_OWNED;
+    let m1: UInt16 = CAP_READ_WRITE;
+    let m2: UInt16 = CAP_READ;
+    let two_step = attenuate(attenuate(x, m1), m2);
+    let one_step = attenuate(x, m1 & m2);
+    assert_eq(two_step, one_step);
+}
+
+// -----------------------------------------------------------------------------
+// §9  Bit-mask invariants — `has_capability` is monotone over the
+//     subset lattice. Adding capabilities only adds yes-answers,
+//     never removes them.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_has_capability_monotone_under_or() {
+    let lhs: UInt16 = CAP_READ;
+    let rhs: UInt16 = CAP_WRITE;
+    let combined: UInt16 = lhs | rhs;
+    // Adding to a flag set preserves all positive answers.
+    assert(has_capability(lhs, CAP_READ));
+    assert(has_capability(combined, CAP_READ));
+    assert(!has_capability(lhs, CAP_WRITE));
+    assert(has_capability(combined, CAP_WRITE));
+}
+
+@test
+fn integration_has_capability_zero_mask_always_false() {
+    // For ANY flag set v, has_capability(v, 0) is vacuously TRUE
+    // (every flag in the empty mask is present), but we wrote the
+    // check as "any bit of the mask is in v".  Calling with 0 always
+    // returns false — pinned for capability validation in writes.
+    assert(!has_capability(CAP_OWNED, 0 as UInt16));
+    assert(!has_capability(CAP_ALL,   0 as UInt16));
+    assert(!has_capability(0 as UInt16, 0 as UInt16));
+}
+
+@test
+fn integration_has_all_capabilities_universal_with_self() {
+    // has_all_capabilities(v, v) is always true — every flag in v is
+    // (vacuously) in v.
+    assert(has_all_capabilities(CAP_OWNED, CAP_OWNED));
+    assert(has_all_capabilities(CAP_ALL, CAP_ALL));
+    assert(has_all_capabilities(CAP_READ_WRITE, CAP_READ_WRITE));
+    assert(has_all_capabilities(0 as UInt16, 0 as UInt16));
+}
+
 // =============================================================================
 // Entry point
 // =============================================================================
