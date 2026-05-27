@@ -997,10 +997,16 @@ implement Eq for AddrParseError {
 
 implement Debug for AddrParseError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        // Qualified arms (task #17/#39 close-out) — bare `InvalidPort`
+        // collides first-wins with `UrlErrorKind.InvalidPort` and
+        // `AddrParseError.InvalidPort` across the variant-dispatch
+        // table, producing wrong Debug strings when sibling modules
+        // share variant names. Qualified form forces resolver dispatch
+        // through the canonical type.
         match *self {
-            InvalidFormat => f.write_str("InvalidFormat"),
-            InvalidOctet => f.write_str("InvalidOctet"),
-            InvalidPort => f.write_str("InvalidPort"),
+            AddrParseError.InvalidFormat => f.write_str("InvalidFormat"),
+            AddrParseError.InvalidOctet  => f.write_str("InvalidOctet"),
+            AddrParseError.InvalidPort   => f.write_str("InvalidPort"),
         }
     }
 }
@@ -1008,9 +1014,9 @@ implement Debug for AddrParseError {
 implement Display for AddrParseError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match *self {
-            InvalidFormat => f.write_str("invalid address format"),
-            InvalidOctet => f.write_str("invalid octet value"),
-            InvalidPort => f.write_str("invalid port number"),
+            AddrParseError.InvalidFormat => f.write_str("invalid address format"),
+            AddrParseError.InvalidOctet  => f.write_str("invalid octet value"),
+            AddrParseError.InvalidPort   => f.write_str("invalid port number"),
         }
     }
 }

@@ -61,8 +61,9 @@ public type Ipv6CanonicalError is
 
 implement Display for Ipv6CanonicalError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        // Qualified arms (task #17/#39 close-out).
         match self {
-            ParseFailed(e) => f.write_str(f"IPv6 canonical: {e}".as_str()),
+            Ipv6CanonicalError.ParseFailed(e) => f.write_str(f"IPv6 canonical: {e}".as_str()),
         }
     }
 }
@@ -70,7 +71,7 @@ implement Display for Ipv6CanonicalError {
 implement Debug for Ipv6CanonicalError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            ParseFailed(e) => f.write_str(f"ParseFailed({e})".as_str()),
+            Ipv6CanonicalError.ParseFailed(e) => f.write_str(f"ParseFailed({e})".as_str()),
         }
     }
 }
@@ -78,7 +79,7 @@ implement Debug for Ipv6CanonicalError {
 implement Eq for Ipv6CanonicalError {
     fn eq(&self, other: &Ipv6CanonicalError) -> Bool {
         match (self, other) {
-            (ParseFailed(a), ParseFailed(b)) => a == b,
+            (Ipv6CanonicalError.ParseFailed(a), Ipv6CanonicalError.ParseFailed(b)) => a == b,
         }
     }
 }
