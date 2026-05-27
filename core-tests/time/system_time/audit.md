@@ -102,11 +102,11 @@ correct for the documented use case.
 
 | # | Defect | Estimate | Track |
 |---|---|---|---|
-| §A | Year-2262 overflow guard + Overflow error variant | 30 min | open |
-| §B | now_unix_ns docstring note re. year-2262 trap | 5 min | open |
+| §A | Year-2262 overflow guard + Overflow error variant | 30 min | **CLOSED 2026-05-27** — stdlib `core/time/system_time.vr` extended with `SystemTimeError.Overflow` variant + Display/Debug/Eq arms + `duration_since` boundary guard at 9_223_372_036 secs; 4 tests (`test_duration_since_at_year_2262_returns_overflow`, `test_duration_since_at_year_2262_boundary_safe`, `test_overflow_error_eq_to_self`, `test_overflow_error_distinct_from_went_backwards`, `test_overflow_error_duration_method_returns_zero`) |
+| §B | now_unix_ns docstring note re. year-2262 trap | 5 min | **CLOSED 2026-05-27** — docstring note added at `core/time/system_time.vr::now_unix_ns` |
 | §C | Cross-tier (`--aot` vs `--interp`) divergence sweep | ~10 min wall-clock | open |
-| §D | `Display` / `Debug` rendering text assertions | 15 min | open |
-| §E | `WentBackwards.duration()` method round-trip test (currently covered by `test_went_backwards_duration_method`) — extend to assert payload identity after Clone | 5 min | open |
+| §D | `Display` / `Debug` rendering text assertions | 15 min | **CLOSED 2026-05-27** — 5 tests in Section 10: Debug record-shape, Display secs.millis, zero-pad millis, Overflow Debug, Overflow Display |
+| §E | `WentBackwards.duration()` method round-trip test (currently covered by `test_went_backwards_duration_method`) — extend to assert payload identity after Clone | 5 min | **CLOSED 2026-05-27** — `test_went_backwards_clone_preserves_payload` |
 
 ## 6. Status
 

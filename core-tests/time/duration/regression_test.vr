@@ -4,98 +4,121 @@
 //
 // Regression pins for surfaced defects in `core.time.duration`.
 //
-// Every regression name here links to an entry in `audit.md`.  Defects pinned
-// to a current behaviour are LOCK-INs: the test passes under the current
-// (defective) shape; the contract is "do not silently change this without
-// also closing the audit entry."  The companion of every LOCK-IN is a
-// proposed-resolution note in `audit.md`.
+// Every regression name here links to an entry in `audit.md`.
 // =============================================================================
 
 mount core.prelude.*;
 mount core.time.duration.{Duration};
 
 // =============================================================================
-// §A  CONSTRUCTOR-CLAMPING INCONSISTENCY — audit.md §A
+// §A  CONSTRUCTOR-CLAMPING INCONSISTENCY — CLOSED 2026-05-27 via Option B
 // =============================================================================
 //
-// `Duration.nanos(n)` runs the Verum body `Duration { nanos: n.max(0) }`
-// (clamps negatives to zero).  `Duration.from_nanos(n)` is intercepted by the
-// runtime intrinsic `time_duration_from_nanos` (identity — preserves negative).
+// PRE-CLOSE STATE (round 13 surface): `Duration.nanos(n)` ran the Verum body
+// `Duration { nanos: n.max(0) }` (clamped negatives to zero) while
+// `Duration.from_nanos(n)` was intercepted by the runtime intrinsic
+// `time_duration_from_nanos` (pure identity — preserved negative).  Same
+// split existed for (micros / from_micros), (millis / from_millis),
+// (secs / from_secs).
 //
-// The same split exists for the four scale-tier constructor pairs:
-//   - (nanos / from_nanos), (micros / from_micros),
-//     (millis / from_millis), (secs / from_secs)
+// CLOSED via Option B (signed Duration refactor) — drop `.max(0)` from
+// every Verum-body constructor + Sub/Mul operator impls + from_secs_f64
+// early-return.  Duration is now signed (matches `Go time.Duration` /
+// `Java Duration` / `C++ chrono::duration` semantics; aligns with the
+// runtime intrinsic identity surface; preserves the duration_parse
+// "-15m" negative-input contract).  See [duration/audit.md §A].
 //
-// Resolution path (the cheap-and-correct one): align everything on identity
-// semantics by dropping `.max(0)` from the Verum body.  Duration becomes a
-// signed nanosecond span — matches `Go time.Duration` / `Java java.time.Duration`
-// / `C++ std::chrono::duration` / the existing duration_parse "-15m" surface.
-//
-// These pins LOCK the current inconsistent behaviour so a future signed-
-// refactor doesn't slip through unnoticed.
+// These pins now LOCK the POST-CLOSE behaviour: short-form and long-form
+// constructors AGREE on signed semantics.  Resurrected divergence would
+// re-open §A.
 
 @test
-fn regression_nanos_short_form_clamps_via_verum_body() {
-    // Short-form constructor goes through Verum body `n.max(0)`.
-    assert_eq(Duration.nanos(-1).as_nanos(), 0,
-        "Duration.nanos(-1) clamps via Verum body's `n.max(0)`");
+fn regression_a_nanos_short_form_preserves_via_signed_body() {
+    // Post-fix: short-form constructor IS now signed (matches intrinsic).
+    assert_eq(Duration.nanos(-1).as_nanos(), -1,
+        "Duration.nanos(-1) preserves sign post Option B");
 }
 
 @test
-fn regression_from_nanos_long_form_preserves_via_intrinsic() {
-    // Long-form constructor is intercepted by the
-    // `time_duration_from_nanos` intrinsic — pure identity, no clamp.
+fn regression_a_from_nanos_long_form_preserves_via_intrinsic() {
+    // Long-form constructor remains intrinsic-identity (unchanged).
     assert_eq(Duration.from_nanos(-1).as_nanos(), -1,
-        "Duration.from_nanos(-1) preserves via intrinsic identity (no clamp)");
+        "Duration.from_nanos(-1) preserves via intrinsic identity");
 }
 
 @test
-fn regression_constructor_surface_inconsistent() {
-    // The two surfaces produce semantically different Duration values
-    // for the SAME input.  Pinning this divergence makes future
-    // alignment a visible diff in this file rather than a silent
-    // behavioural change in stdlib.
-    assert(Duration.nanos(-1).as_nanos() != Duration.from_nanos(-1).as_nanos(),
-        "constructor surface is inconsistent — see audit.md §A");
+fn regression_a_constructor_surface_consistent() {
+    // The two surfaces produce IDENTICAL Duration values for the
+    // SAME input — §A is closed.
+    assert_eq(Duration.nanos(-1), Duration.from_nanos(-1),
+        "constructor surface is consistent — §A closed via Option B");
+    assert_eq(Duration.millis(-100), Duration.from_millis(-100));
+    assert_eq(Duration.secs(-5), Duration.from_secs(-5));
 }
 
 @test
-fn regression_from_secs_large_negative_preserves() {
-    // Confirms the inconsistency scales beyond Int32 range.  `from_secs(-15 * 60)`
-    // == -900_000_000_000 ns, larger than Int32::MAX in magnitude.  The
-    // intrinsic preserves it; the Verum-body short-form would clamp.
+fn regression_a_from_secs_large_negative_preserves() {
+    // Confirms large-negative arithmetic round-trips correctly.
     let d = Duration.from_secs(-15 * 60);
     assert_eq(d.as_nanos(), -900_000_000_000,
-        "Duration.from_secs preserves large negative via intrinsic identity");
+        "Duration.from_secs preserves large negative");
 }
 
 @test
-fn regression_short_form_secs_large_negative_clamps() {
-    // Mirror: the short-form goes through the Verum body — clamps to 0.
+fn regression_a_short_form_secs_large_negative_preserves() {
+    // Post-fix: short-form preserves negatives the same way long-form does.
     let d = Duration.secs(-15 * 60);
-    assert_eq(d.as_nanos(), 0,
-        "Duration.secs(-large) clamps to 0 via Verum body");
+    assert_eq(d.as_nanos(), -900_000_000_000,
+        "Duration.secs preserves large negative post Option B");
 }
 
 // =============================================================================
-// §B  duration_parse NEGATIVE-INPUT relies on the from_nanos identity
+// §B  duration_parse NEGATIVE-INPUT contract — preserved under §A close
 // =============================================================================
 //
-// `core/time/duration_parse.vr::parse_compact` builds a positive total_ns,
-// negates it, and constructs `Ok(Duration.from_nanos(total_ns))`.  Because
-// `from_nanos` is the intrinsic-identity surface (§A above), the resulting
-// Duration carries the negative sign verbatim.  If the §A resolution lands as
-// "make everything clamp", duration_parse's negative-input contract MUST
-// be re-engineered to either reject negatives with an error or carry a
-// separate sign bit.
+// The parser's negative-input contract (`parse("-15m")` → negative
+// Duration) continues to hold after §A close because Option B
+// preserves the intrinsic-identity surface that the parser depends on.
 
 @test
-fn regression_parse_negative_relies_on_intrinsic_identity() {
+fn regression_b_parse_negative_carries_through_signed_constructor() {
     let r = core.time.duration_parse.parse(&"-15m".to_text());
     assert(r.is_ok(), "parse('-15m') accepts negative");
     let d = r.unwrap();
     assert(d.as_nanos() < 0,
-        "negative parse preserves sign via Duration.from_nanos intrinsic");
+        "negative parse preserves sign via signed Duration.from_nanos");
+    assert_eq(d.as_secs(), -900,  // -15 * 60 seconds
+        "negative parse magnitude exact");
+}
+
+// =============================================================================
+// §C  Signed-arithmetic operators (Sub / Mul) — Option B post-close pins
+// =============================================================================
+//
+// Pre-fix: `Duration - Duration` had `.max(0)` clamp; `Duration * Int`
+// clamped `rhs.max(0)`.  Post-fix: both are signed.
+
+@test
+fn regression_c_sub_operator_returns_signed_result() {
+    let diff = Duration.secs(1) - Duration.secs(3);
+    assert_eq(diff.as_secs(), -2,
+        "signed subtraction preserves negative result");
+}
+
+@test
+fn regression_c_mul_operator_negative_scalar_flips_sign() {
+    let d = Duration.secs(5) * (-2);
+    assert_eq(d.as_secs(), -10,
+        "signed multiplication: negative scalar produces past-relative span");
+}
+
+@test
+fn regression_c_saturating_sub_still_floors_at_zero() {
+    // saturating_sub retains the timer-friendly floor-at-zero
+    // convention even under signed Duration.
+    let diff = Duration.secs(1).saturating_sub(Duration.secs(5));
+    assert(diff.is_zero(),
+        "saturating_sub floors at zero (timer-friendly convention)");
 }
 
 fn main() {}

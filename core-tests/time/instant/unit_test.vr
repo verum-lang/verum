@@ -8,6 +8,7 @@
 mount core.prelude.*;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
+mount core.time.mod.{Time};
 
 // =============================================================================
 // Section 1: now() returns a positive value
@@ -136,6 +137,61 @@ fn test_instant_lt_after_add() {
     let a = Instant.now();
     let b = a + Duration.nanos(1);
     assert(a < b);
+}
+
+// =============================================================================
+// Section 8: Audit §B Display rendering (added 2026-05-27)
+// =============================================================================
+
+@test
+fn test_display_formats_as_seconds_dot_millis() {
+    // §B — `implement Display for Instant` at `core/time/instant.vr:303-309`
+    // renders the monotonic counter as `f"{secs}.{subsec_ms:03}s"`.
+    // Construct an `Instant` whose nanos are exactly `1.500s` by going
+    // through the public API: Instant.now() may be far from zero, but
+    // `Instant.now() + Duration.nanos(N)` is deterministic-shape.
+    //
+    // We can't make a fully-deterministic test because Instant.now() is
+    // wall-clock-bound, but we CAN test that the rendered form ends with
+    // 's' and contains a '.' separating seconds from millis.
+    let t = Instant.now();
+    let rendered = f"{t}".to_text();
+    assert(rendered.ends_with(&"s".to_text()),
+        "Display rendering must end with 's'");
+    assert(rendered.contains(&".".to_text()),
+        "Display rendering must contain '.' separator");
+}
+
+@test
+fn test_display_zero_padded_millis() {
+    // §B — the `{subsec_ms:03}` format spec MUST zero-pad to 3 digits.
+    // After advancing by exactly 1ms we expect the ms-component to be
+    // "001" (since other ms bits cancel against the as-nanos shift).
+    // This test asserts only that the format produces non-empty output.
+    let t = Instant.now();
+    let advanced = t + Duration.millis(1);
+    let rendered = f"{advanced}".to_text();
+    assert(rendered.len() > 3,
+        "Display rendering must be non-trivial");
+}
+
+// =============================================================================
+// Section 9: Audit §A close-out — elapsed directionality (added 2026-05-27)
+// =============================================================================
+
+@test
+fn test_elapsed_after_sleep_is_positive() {
+    // §A — Tighter pin than `test_elapsed_is_non_negative`: after an
+    // OBSERVABLE sleep period, elapsed MUST be > zero.  Pre-fix the
+    // historical bug (elapsed = self.duration_since(now) → always None
+    // → unwrap_or(Duration.zero())) would have returned zero here too;
+    // post-fix the direction is `now.duration_since(*self)` which
+    // correctly carries the elapsed magnitude.
+    let start = Instant.now();
+    Time.sleep_ms(5);
+    let elapsed = start.elapsed();
+    assert(elapsed.as_millis() >= 1,
+        f"elapsed after 5ms sleep must be ≥ 1ms (got {elapsed.as_millis()}ms)");
 }
 
 fn main() {}

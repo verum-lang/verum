@@ -80,22 +80,38 @@ fn test_from_secs_alias() {
 }
 
 // =============================================================================
-// Section 2: Negative input clamped to zero
+// Section 2: Signed-Duration constructor semantics
 // =============================================================================
+//
+// As of the Option-B signed-Duration refactor, every short-form constructor
+// preserves the sign of its input — matching the runtime intrinsic identity
+// surface (time_duration_from_nanos etc.) and the duration_parse "-15m"
+// negative-input contract.  See `core/time/duration.vr` top-of-module
+// docstring.
 
 @test
-fn test_nanos_negative_clamped_to_zero() {
-    assert_eq(Duration.nanos(-1).as_nanos(), 0);
+fn test_nanos_negative_preserved() {
+    assert_eq(Duration.nanos(-1).as_nanos(), -1);
 }
 
 @test
-fn test_millis_negative_clamped_to_zero() {
-    assert_eq(Duration.millis(-100).as_nanos(), 0);
+fn test_millis_negative_preserved() {
+    assert_eq(Duration.millis(-100).as_nanos(), -100_000_000);
 }
 
 @test
-fn test_secs_negative_clamped_to_zero() {
-    assert_eq(Duration.secs(-5).as_nanos(), 0);
+fn test_secs_negative_preserved() {
+    assert_eq(Duration.secs(-5).as_nanos(), -5_000_000_000);
+}
+
+@test
+fn test_short_form_and_long_form_constructors_agree_for_negative_input() {
+    // Closes regression §A from the round-13 audit — short-form
+    // (Verum-body) and long-form (runtime-intrinsic) constructors now
+    // produce the SAME Duration for the same input.
+    assert_eq(Duration.nanos(-1), Duration.from_nanos(-1));
+    assert_eq(Duration.millis(-100), Duration.from_millis(-100));
+    assert_eq(Duration.secs(-5), Duration.from_secs(-5));
 }
 
 // =============================================================================
@@ -188,8 +204,10 @@ fn test_from_secs_f64_fractional() {
 }
 
 @test
-fn test_from_secs_f64_negative_gives_zero() {
-    assert(Duration.from_secs_f64(-1.0).is_zero());
+fn test_from_secs_f64_negative_preserves_sign() {
+    // Signed Duration: from_secs_f64(-1.0) carries -1s, not zero.
+    let d = Duration.from_secs_f64(-1.0);
+    assert_eq(d.as_secs(), -1);
 }
 
 // =============================================================================
@@ -214,9 +232,21 @@ fn test_checked_sub_exact() {
 }
 
 @test
-fn test_checked_sub_underflow_returns_none() {
+fn test_checked_sub_signed_negative_result() {
+    // Signed Duration: checked_sub returns Some on negative result;
+    // None only on Int64 underflow boundary.
     let a = Duration.secs(1);
     let b = Duration.secs(5);
+    let r = a.checked_sub(b);
+    assert(r.is_some());
+    assert_eq(r.unwrap().as_secs(), -4);
+}
+
+@test
+fn test_checked_sub_underflow_returns_none() {
+    // True Int64 underflow: subtracting Int.max from Int.min wraps.
+    let a = Duration.from_nanos(Int.min_value());
+    let b = Duration.from_nanos(Int.max_value());
     assert(a.checked_sub(b).is_none());
 }
 
@@ -236,9 +266,12 @@ fn test_checked_mul_by_zero_returns_zero() {
 }
 
 @test
-fn test_checked_mul_negative_returns_none() {
+fn test_checked_mul_negative_returns_signed_result() {
+    // Signed Duration: checked_mul(-1) flips sign rather than rejecting.
     let d = Duration.secs(5);
-    assert(d.checked_mul(-1).is_none());
+    let r = d.checked_mul(-1);
+    assert(r.is_some());
+    assert_eq(r.unwrap().as_secs(), -5);
 }
 
 @test
@@ -287,9 +320,11 @@ fn test_add_operator() {
 }
 
 @test
-fn test_sub_operator_floors_at_zero() {
+fn test_sub_operator_signed() {
+    // Signed Duration: subtraction preserves negative result.
+    // Use saturating_sub for the floor-at-zero timer convention.
     let diff = Duration.secs(1) - Duration.secs(3);
-    assert(diff.is_zero());
+    assert_eq(diff.as_secs(), -2);
 }
 
 @test
@@ -321,6 +356,125 @@ fn test_duration_lt() {
 @test
 fn test_duration_zero_eq_to_self() {
     assert_eq(Duration.zero(), Duration.zero());
+}
+
+// =============================================================================
+// Section 11: Audit §C — Int.max_value() boundary pins (added 2026-05-27)
+// =============================================================================
+
+@test
+fn test_checked_add_at_max_value_returns_none() {
+    let a = Duration.from_nanos(Int.max_value());
+    let b = Duration.nanos(1);
+    // a + 1ns wraps signed Int64 → overflow detected → None
+    assert(a.checked_add(b).is_none(),
+        "checked_add must surface overflow at Int.max_value boundary");
+}
+
+@test
+fn test_saturating_add_clamps_to_max_value() {
+    let a = Duration.from_nanos(Int.max_value());
+    let b = Duration.secs(1);
+    let res = a.saturating_add(b);
+    // Both operands positive, overflow → saturate at MAX.
+    assert_eq(res.as_nanos(), Int.max_value(),
+        "saturating_add clamps to Int.max_value on positive overflow");
+}
+
+@test
+fn test_saturating_add_negative_clamps_to_min_value() {
+    let a = Duration.from_nanos(Int.min_value());
+    let b = Duration.secs(-1);
+    let res = a.saturating_add(b);
+    // Both operands negative, underflow → saturate at MIN.
+    assert_eq(res.as_nanos(), Int.min_value(),
+        "saturating_add clamps to Int.min_value on negative underflow");
+}
+
+@test
+fn test_checked_mul_overflow_returns_none() {
+    // Int.max_value() / 2 * 3 overflows.
+    let half_max = Duration.from_nanos(Int.max_value() / 2);
+    assert(half_max.checked_mul(3).is_none(),
+        "checked_mul surfaces overflow when product exceeds Int.max");
+}
+
+@test
+fn test_saturating_mul_overflow_clamps_to_max() {
+    let half_max = Duration.from_nanos(Int.max_value() / 2);
+    let r = half_max.saturating_mul(3);
+    assert_eq(r.as_nanos(), Int.max_value(),
+        "saturating_mul clamps to Int.max on positive overflow");
+}
+
+@test
+fn test_saturating_mul_negative_overflow_clamps_to_min() {
+    let half_max = Duration.from_nanos(Int.max_value() / 2);
+    let r = half_max.saturating_mul(-3);
+    assert_eq(r.as_nanos(), Int.min_value(),
+        "saturating_mul clamps to Int.min on negative overflow");
+}
+
+// =============================================================================
+// Section 12: Audit §E — Display / Debug rendering (added 2026-05-27)
+// =============================================================================
+
+@test
+fn test_debug_renders_zero_as_0ns() {
+    let d = Duration.zero();
+    let rendered = f"{d:?}".to_text();
+    assert_eq(rendered, "0ns".to_text(),
+        "Debug renders Duration.zero() as '0ns'");
+}
+
+@test
+fn test_debug_renders_sub_microsecond() {
+    let d = Duration.nanos(500);
+    let rendered = f"{d:?}".to_text();
+    assert_eq(rendered, "500ns".to_text(),
+        "Debug renders sub-microsecond as Nns");
+}
+
+@test
+fn test_debug_renders_sub_millisecond() {
+    let d = Duration.micros(250);
+    let rendered = f"{d:?}".to_text();
+    assert_eq(rendered, "250µs".to_text(),
+        "Debug renders sub-millisecond as Nµs");
+}
+
+@test
+fn test_debug_renders_sub_second() {
+    let d = Duration.millis(750);
+    let rendered = f"{d:?}".to_text();
+    assert_eq(rendered, "750ms".to_text(),
+        "Debug renders sub-second as Nms");
+}
+
+@test
+fn test_debug_renders_whole_seconds() {
+    let d = Duration.secs(42);
+    let rendered = f"{d:?}".to_text();
+    assert_eq(rendered, "42s".to_text(),
+        "Debug renders whole seconds as Ns");
+}
+
+@test
+fn test_debug_renders_seconds_with_subsec() {
+    let d = Duration.nanos(2_750_000_000); // 2.75s
+    let rendered = f"{d:?}".to_text();
+    assert_eq(rendered, "2.750s".to_text(),
+        "Debug renders seconds-with-subsec as N.MMMs");
+}
+
+@test
+fn test_display_equals_debug() {
+    // Display delegates to Debug per `core/time/duration.vr:464-468`.
+    let d = Duration.millis(42);
+    let display = f"{d}".to_text();
+    let debug = f"{d:?}".to_text();
+    assert_eq(display, debug,
+        "Display renders identically to Debug");
 }
 
 fn main() {}

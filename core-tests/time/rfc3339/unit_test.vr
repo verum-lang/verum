@@ -6,7 +6,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.time.rfc3339.{Rfc3339Time, Rfc3339Error, parse, format_utc, format_utc_with_nanos, format_with_offset, add_seconds, diff_seconds};
+mount core.time.rfc3339.{Rfc3339Time, Rfc3339Error, parse, format_utc, format_utc_with_nanos, format_with_offset, format_rfc3339, add_seconds, diff_seconds};
 
 // =============================================================================
 // Section 1: Parse UTC Z-suffixed timestamps
@@ -210,6 +210,79 @@ fn test_add_seconds_preserves_nanos_and_offset() {
     let t2 = add_seconds(&t, 100);
     assert_eq(t2.nanos, 500_000_000);
     assert_eq(t2.offset_minutes, 60);
+}
+
+// =============================================================================
+// Section 9: Audit §A/§B/§C/§D close-outs (added 2026-05-27)
+// =============================================================================
+
+@test
+fn test_parse_empty_fraction_is_malformed() {
+    // §A — RFC 3339 §5.6 mandates `.` MUST be followed by ≥ 1 digit.
+    // `2026-01-01T00:00:00.Z` has a `.` then immediately `Z` — invalid.
+    let r = parse(&"2026-01-01T00:00:00.Z".to_text());
+    assert(r.is_err(), "empty fraction must be rejected");
+}
+
+@test
+fn test_parse_10_digit_fraction_truncates_to_9() {
+    // §B — Inputs with 10+ fractional digits silently truncate to 9
+    // (nanosecond precision).  Pinned to harden against future
+    // "round-to-nearest"-style behaviour changes.
+    let t = parse(&"2026-01-01T00:00:00.123456789012Z".to_text()).unwrap();
+    assert_eq(t.nanos, 123_456_789,
+        "10+ fractional digits truncate to 9 (nanosecond precision)");
+}
+
+@test
+fn test_parse_positive_offset_out_of_range_is_error() {
+    // §C — Per RFC 3339 §5.6, offset hour MUST be in 00..23.
+    // `+24:00` is out of range and must surface as Rfc3339Error.OutOfRange("offset").
+    let r = parse(&"2026-01-01T00:00:00+24:00".to_text());
+    assert(r.is_err(), "+24:00 offset must be rejected");
+    match r.unwrap_err() {
+        Rfc3339Error.OutOfRange(field) => {
+            assert_eq(field, "offset".to_text(),
+                "expected OutOfRange(\"offset\")");
+        },
+        _ => assert(false, "expected OutOfRange variant"),
+    }
+}
+
+@test
+fn test_parse_negative_offset_out_of_range_is_error() {
+    // §C mirror — negative offset also bounded at 23.
+    let r = parse(&"2026-01-01T00:00:00-25:00".to_text());
+    assert(r.is_err(), "-25:00 offset must be rejected");
+}
+
+@test
+fn test_parse_offset_minute_out_of_range_is_error() {
+    // §C extension — offset minute bounded at 59.
+    let r = parse(&"2026-01-01T00:00:00+05:60".to_text());
+    assert(r.is_err(), "+05:60 offset must be rejected (minute > 59)");
+}
+
+@test
+fn test_format_rfc3339_round_trips_with_offset() {
+    // §D — `format_rfc3339(t)` convenience round-trip.
+    let original = Rfc3339Time { unix_seconds: 1_000_000_000, nanos: 0, offset_minutes: 60 };
+    let formatted = format_rfc3339(&original);
+    let recovered = parse(&formatted).unwrap();
+    assert_eq(recovered.unix_seconds, original.unix_seconds);
+    assert_eq(recovered.nanos, original.nanos);
+    assert_eq(recovered.offset_minutes, original.offset_minutes);
+}
+
+@test
+fn test_format_rfc3339_round_trips_with_nanos() {
+    // §D extension — non-zero sub-second preserved across round-trip.
+    let original = Rfc3339Time { unix_seconds: 42, nanos: 123_456_789, offset_minutes: 0 };
+    let formatted = format_rfc3339(&original);
+    let recovered = parse(&formatted).unwrap();
+    assert_eq(recovered.unix_seconds, original.unix_seconds);
+    assert_eq(recovered.nanos, original.nanos);
+    assert_eq(recovered.offset_minutes, original.offset_minutes);
 }
 
 fn main() {}

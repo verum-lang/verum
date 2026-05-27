@@ -155,6 +155,105 @@ fn integration_huge_size_routes_to_huge_bin() {
     assert(bin >= BIN_HUGE - 1);   // tolerate 72 (top regular) or 73 (huge)
 }
 
+// -----------------------------------------------------------------------------
+// §9  Aligned-size monotonicity — `aligned_size(s, a) >= s` for every
+//     (s, a) where a is a power of 2. The aligned size is the smallest
+//     multiple of a that is >= s.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_aligned_size_passthrough_for_standard_alignment() {
+    // For alignments <= MAX_ALIGN_SIZE (16, the standard 16-byte
+    // boundary), aligned_size returns size unchanged because the
+    // size class itself already satisfies alignment.  Pins the
+    // mimalloc-style invariant that small-alignment allocations
+    // never pay an alignment-overhead cost.
+    let pairs: List<(Int, Int)> = [
+        (8, 1), (8, 2), (8, 4), (8, 8), (8, 16),
+        (9, 8), (15, 8), (16, 8), (17, 8), (24, 8),
+        (32, 16), (64, 16), (256, 16),
+    ];
+    for pair in pairs.iter() {
+        let s: Int = pair.0;
+        let a: Int = pair.1;
+        let aligned = aligned_size(s, a);
+        // For align <= MAX_ALIGN_SIZE=16, returns size unchanged.
+        assert_eq(aligned, s);
+    }
+}
+
+@test
+fn integration_aligned_size_overhead_for_oversized_alignment() {
+    // For alignments > MAX_ALIGN_SIZE=16, aligned_size adds (align - 1)
+    // bytes of slack — pin the "size + align - 1" upper bound that
+    // the allocator uses to over-reserve and then align the returned
+    // pointer.
+    let pairs: List<(Int, Int)> = [
+        (8, 32), (16, 32), (64, 32),
+        (8, 64), (16, 64), (256, 64),
+        (8, 256), (256, 256), (4096, 256),
+    ];
+    for pair in pairs.iter() {
+        let s: Int = pair.0;
+        let a: Int = pair.1;
+        let aligned = aligned_size(s, a);
+        assert_eq(aligned, s + a - 1);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §10  Round-trip law: size_to_bin · bin_to_size is monotonic and
+//      idempotent on bin domain.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_round_trip_idempotent_on_canonical_bin_sizes() {
+    // Every canonical bin's size, when re-mapped to a bin, must yield
+    // the same bin id. This pins the bin-to-size table's lossless
+    // round-trip on its canonical entries.
+    let probe_sizes: List<Int> = [8, 16, 32, 64, 128, 256, 512, 1024, 2048];
+    for s in probe_sizes.iter() {
+        let bin = size_to_bin(*s);
+        let bin_size = bin_to_size(bin);
+        let bin2 = size_to_bin(bin_size);
+        // bin2 == bin: the round-trip lands at the same bin id.
+        assert_eq(bin2, bin);
+    }
+}
+
+@test
+fn integration_size_to_bin_monotonic_over_doubling() {
+    // For increasing sizes 1, 2, 4, 8, ..., 1024, size_to_bin must be
+    // non-decreasing. This is a consequence of the bin table's
+    // monotonic structure (~12.5% spacing).
+    let doublings: List<Int> = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024];
+    let mut prev_bin: Int = -1;
+    for s in doublings.iter() {
+        let bin = size_to_bin(*s);
+        assert(bin >= prev_bin);
+        prev_bin = bin;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// §11  Page-layout consistency: blocks_per_page is at least 1 for
+//      small bins (every page must hold at least one block of the
+//      bin's size class). This is the load-bearing minimum invariant
+//      for the free-list allocator.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_blocks_per_page_at_least_one_for_small_bins() {
+    // For the first 30 bins (covering small-size class — bins 0..30
+    // are all sub-1024-byte blocks), every page must hold at least one
+    // block of the bin's size class.
+    let probe_bins: List<Int> = [0, 1, 2, 5, 10, 15, 20, 25, 30];
+    for b in probe_bins.iter() {
+        let blocks = blocks_per_page(*b);
+        assert(blocks >= 1);
+    }
+}
+
 // =============================================================================
 // Entry point
 // =============================================================================

@@ -257,4 +257,57 @@ fn test_julian_from_mjd_round_trip() {
     assert((recovered - jd).abs() < eps);
 }
 
+// =============================================================================
+// Section 9: Audit §B/§C close-outs (added 2026-05-27)
+// =============================================================================
+
+@test
+fn test_unix_ms_from_julian_rounds_half_away_from_zero_positive() {
+    // §B — Module uses `(ms + 0.5) as Int64` for positive halves —
+    // "round half away from zero" convention (NOT IEEE-754 banker's rounding).
+    // 0.5 ms above the unix epoch → JD = JD_UNIX_EPOCH + 0.5 / 86400000.
+    let half_ms_above = JD_UNIX_EPOCH + 0.5 / MILLIS_PER_DAY_F;
+    let recovered = unix_ms_from_julian(half_ms_above);
+    // 0.5 → 1 under half-away-from-zero.
+    assert_eq(recovered, 1,
+        "positive half-ms rounds away from zero (→ 1, not 0)");
+}
+
+@test
+fn test_unix_ms_from_julian_rounds_half_away_from_zero_negative() {
+    // §B mirror — `(ms - 0.5) as Int64` for negative halves.
+    let half_ms_below = JD_UNIX_EPOCH - 0.5 / MILLIS_PER_DAY_F;
+    let recovered = unix_ms_from_julian(half_ms_below);
+    // -0.5 → -1 under half-away-from-zero.
+    assert_eq(recovered, -1,
+        "negative half-ms rounds away from zero (→ -1, not 0)");
+}
+
+@test
+fn test_julian_from_unix_ms_monotonic_near_cliff() {
+    // §A — Float64 has 53-bit mantissa.  Millisecond resolution holds
+    // up to ~9e15 ms (~2.85e5 years).  Adjacent inputs near the cliff
+    // boundary must remain monotonically non-decreasing.
+    let near_cliff: Int64 = 9_000_000_000_000_000; // ~285k years; safely within F64 mantissa
+    let jd1 = julian_from_unix_ms(near_cliff);
+    let jd2 = julian_from_unix_ms(near_cliff + 1);
+    assert(jd2 >= jd1,
+        "julian_from_unix_ms remains monotonic near (but below) the Float64 cliff");
+}
+
+@test
+fn test_hms_from_julian_carry_rollover_guard() {
+    // §C — Module clamps `total_ms` at MILLIS_PER_DAY - 1 if rounding pushes
+    // total_ms over the day boundary.  Construct a JD just below the next
+    // day's midnight boundary by adding a tiny epsilon.  Without the
+    // guard, the result would roll over to (24, 0, 0, 0) which is invalid.
+    // 23:59:59.999 plus a sub-ms epsilon = JD_UNIX_EPOCH + (1.0 - tiny)
+    let jd = JD_UNIX_EPOCH + 1.0 - (0.4 / MILLIS_PER_DAY_F);
+    let (h, m, s, ms) = hms_from_julian(jd);
+    assert(h < 24, f"hour {h} must NOT roll over to 24");
+    assert(m < 60, f"minute {m} must NOT roll over to 60");
+    assert(s < 60, f"second {s} must NOT roll over to 60");
+    assert(ms < 1000, f"millis {ms} must NOT roll over to 1000");
+}
+
 fn main() {}

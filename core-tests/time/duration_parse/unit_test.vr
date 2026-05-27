@@ -235,4 +235,48 @@ fn test_max_bytes_constant_is_256() {
     assert_eq(MAX_DURATION_INPUT_BYTES, 256);
 }
 
+// =============================================================================
+// Section 9: Audit §C/§D/§E close-outs (added 2026-05-27)
+// =============================================================================
+
+@test
+fn test_parse_microseconds_unicode_mu() {
+    // §C — UTF-8 µ (U+00B5) as microseconds suffix, per module docstring.
+    let d = parse(&"250µs".to_text()).unwrap();
+    assert_eq(d.as_nanos(), 250_000);
+}
+
+@test
+fn test_parse_overflow_returns_overflow_error() {
+    // §D — Inputs whose unit-scaled value exceeds Int.max_value() must
+    // surface as DurationParseError.Overflow rather than silently
+    // wrapping.  `99999999999999999s` × NANOS_PER_SEC overflows Int64.
+    let r = parse(&"99999999999999999s".to_text());
+    assert(r.is_err(), "overflow input must error");
+    match r.unwrap_err() {
+        DurationParseError.Overflow => { /* expected */ },
+        _ => assert(false, "expected Overflow variant"),
+    }
+}
+
+@test
+fn test_parse_too_long_returns_input_too_long_variant() {
+    // §E — Tight pattern-match on InputTooLong variant.  Previously the
+    // `test_parse_too_long_is_error` test asserted only `r.is_err()`,
+    // allowing a future Malformed-leak to silently pass.
+    let mut long: Text = "".to_text();
+    let mut i = 0;
+    while i < 257 { long = f"{long}1"; i = i + 1; }
+    let long_input = f"{long}s";
+    let r = parse(&long_input);
+    assert(r.is_err(), "256+ byte input must be rejected");
+    match r.unwrap_err() {
+        DurationParseError.InputTooLong { limit_bytes } => {
+            assert_eq(limit_bytes, MAX_DURATION_INPUT_BYTES,
+                "limit_bytes payload must equal the documented constant");
+        },
+        _ => assert(false, "expected InputTooLong variant"),
+    }
+}
+
 fn main() {}
