@@ -236,13 +236,13 @@ implement Char {
             // 'a'-'z' -> 10-35
             code - 87
         } else {
-            return None;
+            return Maybe.None;
         };
 
         if digit < radix {
-            Some(digit)
+            Maybe.Some(digit)
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -257,13 +257,13 @@ implement Char {
         assert(radix >= 2 && radix <= 36, "radix must be 2..=36");
 
         if digit < 0 || digit >= radix {
-            return None;
+            return Maybe.None;
         }
 
         if digit < 10 {
-            Some(('0' as Int + digit) as Char)
+            Maybe.Some(('0' as Int + digit) as Char)
         } else {
-            Some(('a' as Int + digit - 10) as Char)
+            Maybe.Some(('a' as Int + digit - 10) as Char)
         }
     }
 
