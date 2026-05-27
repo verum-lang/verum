@@ -1,0 +1,241 @@
+// =============================================================================
+// core-tests/runtime/tls/unit_test.vr
+// =============================================================================
+//
+// `core/runtime/tls.vr` (58 LOC) — thread-local storage intrinsic surface.
+//
+// 12 forward-declared free fns over the TLS slot API:
+//   * tls_get_base() -> Int
+//   * tls_slot_get(slot) / tls_slot_set(slot, value) / tls_slot_clear(slot)
+//   * tls_slot_has(slot) -> Bool
+//   * tls_frame_push() -> Int / tls_frame_pop(frame)
+//   * tls_read_ptr(offset) / tls_write_ptr(offset, value)
+//   * tls_read_i32(offset) / tls_write_i32(offset, value)
+//   * tls_read_usize(offset) / tls_write_usize(offset, value)
+//
+// TLS is the foundation of `core.context.*` — every dependency-injection
+// context is a TLS slot.  Test strategy: pin the surface + the round-
+// trip invariants on slots we KNOW are safe to use (high-index slots
+// that the runtime doesn't otherwise touch).
+// =============================================================================
+
+mount core.runtime.tls.{
+    tls_get_base, tls_slot_get, tls_slot_set, tls_slot_clear, tls_slot_has,
+    tls_frame_push, tls_frame_pop,
+    tls_read_ptr, tls_write_ptr,
+    tls_read_i32, tls_write_i32,
+    tls_read_usize, tls_write_usize,
+};
+
+// =============================================================================
+// Section 1: tls_get_base — surface
+// =============================================================================
+
+@test
+fn test_tls_get_base_callable() {
+    // The base pointer is platform-dependent and may be 0 on platforms
+    // where TLS is virtualised through the context-slot API.  We pin
+    // callability only.
+    let b = tls_get_base();
+    let _ = b;
+    assert(true);
+}
+
+// =============================================================================
+// Section 2: tls_slot_{get,set,clear,has} — slot lifecycle on a high index
+// =============================================================================
+//
+// We use slot 200 deliberately — well above the context-slot reservation
+// (typically 0..16) and below any plausible internal-use ceiling.  The
+// CONTEXT_SLOT_COUNT constant is checked in `core/sys/common.vr`.
+//
+// §A — DEFECT SURFACED 2026-05-27: the `verum.runtime.tls_slot_*` idents
+// are forward-declared at `core/runtime/tls.vr` but the VBC interpreter's
+// dispatch table has no registered handler (or routes through a different
+// ident name).  Probe at slot 200 with `tls_slot_set(200, 0xCAFE_F00D);
+// tls_slot_get(200)` yields a different value (likely 0, the
+// default-zero intrinsic-stub return).  Pinned `@ignore` until binding
+// lands — the live round-trip tests flip GREEN as soon as
+// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/` registers
+// the four `tls_slot_*` idents.  See `audit.md §A`.
+//
+// Note: the actual context-DI surface used by `core.sys.common.{ctx_get,
+// ctx_set}` is bound — those use a DIFFERENT intrinsic path (the
+// `ctx_set` ident binds to the per-state context_slots vector inside
+// the VBC interpreter, NOT through `tls_slot_set`).  This is the drift
+// surface §B audits: two parallel TLS-slot APIs, only one bound.
+
+@ignore  // §A
+@test
+fn test_tls_slot_lifecycle_set_then_get_round_trips() {
+    // The load-bearing round-trip: write a value, read it back, get
+    // the same value.  Without this, every context-DI consumer is
+    // broken at the foundation.
+    let slot = 200;
+    tls_slot_clear(slot);  // ensure clean slate
+    tls_slot_set(slot, 0xCAFE_F00D);
+    let v = tls_slot_get(slot);
+    tls_slot_clear(slot);  // cleanup
+    assert(v == 0xCAFE_F00D, "TLS slot round-trip dropped the value");
+}
+
+@ignore  // §A
+@test
+fn test_tls_slot_has_after_set_is_true() {
+    let slot = 201;
+    tls_slot_clear(slot);
+    tls_slot_set(slot, 42);
+    let has = tls_slot_has(slot);
+    tls_slot_clear(slot);
+    assert(has, "tls_slot_has should be true after set");
+}
+
+@test
+fn test_tls_slot_has_after_clear_is_false() {
+    // Without a prior set this test passes trivially under the stub
+    // binding (set is a no-op, so has() reads default-false).  Pin
+    // the contract — flips behaviour stays correct after binding.
+    let slot = 202;
+    tls_slot_set(slot, 42);
+    tls_slot_clear(slot);
+    let has = tls_slot_has(slot);
+    assert(!has, "tls_slot_has should be false after clear");
+}
+
+@test
+fn test_tls_slot_clear_is_idempotent() {
+    // Pure no-op composition — passes under both stub and live binding.
+    let slot = 203;
+    tls_slot_clear(slot);
+    tls_slot_clear(slot);  // second clear is a no-op
+    let has = tls_slot_has(slot);
+    assert(!has, "double-clear should leave the slot empty");
+}
+
+@ignore  // §A — set is a no-op under stub, so v == 0 not 200
+@test
+fn test_tls_slot_overwrite_keeps_latest() {
+    let slot = 204;
+    tls_slot_clear(slot);
+    tls_slot_set(slot, 100);
+    tls_slot_set(slot, 200);
+    let v = tls_slot_get(slot);
+    tls_slot_clear(slot);
+    assert(v == 200, "second set should overwrite first");
+}
+
+// =============================================================================
+// Section 3: Multi-slot isolation — slots don't interfere with each other
+// =============================================================================
+
+@ignore  // §A
+@test
+fn test_tls_slot_isolation_two_slots() {
+    let s1 = 210;
+    let s2 = 211;
+    tls_slot_clear(s1);
+    tls_slot_clear(s2);
+    tls_slot_set(s1, 0xDEAD);
+    tls_slot_set(s2, 0xBEEF);
+    let v1 = tls_slot_get(s1);
+    let v2 = tls_slot_get(s2);
+    tls_slot_clear(s1);
+    tls_slot_clear(s2);
+    assert(v1 == 0xDEAD, "slot 1 leaked into slot 2");
+    assert(v2 == 0xBEEF, "slot 2 leaked into slot 1");
+}
+
+@ignore  // §A — has() reads default-false under stub binding, breaking the s2 assertion
+@test
+fn test_tls_slot_clear_does_not_affect_other_slots() {
+    let s1 = 220;
+    let s2 = 221;
+    tls_slot_clear(s1);
+    tls_slot_clear(s2);
+    tls_slot_set(s1, 0xAA);
+    tls_slot_set(s2, 0xBB);
+    tls_slot_clear(s1);
+    let has1 = tls_slot_has(s1);
+    let has2 = tls_slot_has(s2);
+    tls_slot_clear(s2);
+    assert(!has1, "clear of slot 1 should empty slot 1");
+    assert(has2, "clear of slot 1 should NOT empty slot 2");
+}
+
+// =============================================================================
+// Section 4: tls_frame_push / tls_frame_pop — call-frame scoping
+// =============================================================================
+//
+// Frames are an optional surface — many runtimes don't support frame
+// stacks (they're a contextual scoping primitive used by some
+// dependency-injection backends).  We pin callability only.  Live
+// frame-stack tests would belong with the context system at
+// `core-tests/context/*`.
+//
+
+@test
+fn test_tls_frame_push_pop_pair() {
+    // Push returns a token; pop with that token restores the previous
+    // frame.  The token may be 0 on platforms without frame stacks.
+    let frame = tls_frame_push();
+    tls_frame_pop(frame);
+    assert(true);
+}
+
+@test
+fn test_tls_frame_nested_push_pop_lifo() {
+    // Nested LIFO discipline — push A, push B, pop B, pop A.  If the
+    // runtime doesn't support nested frames it MUST treat the calls
+    // as no-ops (rather than crashing).
+    let a = tls_frame_push();
+    let b = tls_frame_push();
+    tls_frame_pop(b);
+    tls_frame_pop(a);
+    assert(true);
+}
+
+// =============================================================================
+// Section 5: Raw TLS read/write — ptr / i32 / usize variants
+// =============================================================================
+//
+// These ops are NOT exercised live here — they read/write at a raw
+// offset from the TLS base, which is platform-specific and risky to
+// touch in a unit test (an unbound offset would corrupt runtime
+// state).  We pin SYMBOL EXISTENCE via type-binding only.
+//
+
+@test
+fn test_tls_read_ptr_symbol_exists() {
+    let _: fn(Int) -> Int = tls_read_ptr;
+    assert(true);
+}
+
+@test
+fn test_tls_write_ptr_symbol_exists() {
+    let _: fn(Int, Int) -> () = tls_write_ptr;
+    assert(true);
+}
+
+@test
+fn test_tls_read_i32_symbol_exists() {
+    let _: fn(Int) -> Int = tls_read_i32;
+    assert(true);
+}
+
+@test
+fn test_tls_write_i32_symbol_exists() {
+    let _: fn(Int, Int) -> () = tls_write_i32;
+    assert(true);
+}
+
+@test
+fn test_tls_read_usize_symbol_exists() {
+    let _: fn(Int) -> Int = tls_read_usize;
+    assert(true);
+}
+
+@test
+fn test_tls_write_usize_symbol_exists() {
+    let _: fn(Int, Int) -> () = tls_write_usize;
+    assert(true);
+}

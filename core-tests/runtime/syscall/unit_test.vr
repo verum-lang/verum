@@ -1,0 +1,56 @@
+// =============================================================================
+// core-tests/runtime/syscall/unit_test.vr
+// =============================================================================
+//
+// `core/runtime/syscall.vr` (10 LOC) — raw 6-argument syscall intrinsic.
+// This is the bottom of the no-libc stack: every higher-level OS surface
+// in `core/sys/{linux,darwin,freebsd}/` ultimately emits a syscall6 call.
+//
+// `fn syscall6(nr, a1, a2, a3, a4, a5, a6) -> Int`
+//
+// **DANGER**: an actual `syscall6(...)` invocation with a real syscall
+// number performs a kernel transition.  Tests here MUST NOT invoke
+// kernel transitions — instead we pin the surface (type signature,
+// arity) without making any kernel-visible call.
+//
+// The "platform invariant" hardcodes (syscall number tables per arch)
+// are validated at `crates/verum_vbc/src/sys/` and the AOT inline
+// asm sequences live at `crates/verum_codegen/src/llvm/syscalls.rs`.
+// =============================================================================
+
+mount core.runtime.syscall.{syscall6};
+
+// =============================================================================
+// Section 1: syscall6 — surface only (no kernel invocation)
+// =============================================================================
+//
+// The strategy: take the function as a value (`let f = syscall6;`) so that
+// the symbol resolution + signature happen at compile time, but no actual
+// call is made.  This validates the language-level surface (mount works,
+// type-checks, available in scope) without touching the kernel.
+//
+// Two test shapes:
+//   1. Symbol-existence — the function is mountable and the type
+//      `fn(Int, Int, Int, Int, Int, Int, Int) -> Int` resolves.
+//   2. Arity pin — the symbol takes exactly 7 Ints and returns Int.
+//
+
+@test
+fn test_syscall6_symbol_exists() {
+    // Reference the symbol; cast to fn-pointer.  Failure here = the
+    // language-level forward-declaration is broken (compile error).
+    let _: fn(Int, Int, Int, Int, Int, Int, Int) -> Int = syscall6;
+    assert(true);
+}
+
+@test
+fn test_syscall6_arity_seven() {
+    // Pin arity at the type level — the first arg is the syscall number,
+    // followed by 6 arguments.  Drift here would break every sys.* call
+    // site silently.  Note: this is a TYPE-level check via let-binding;
+    // calling syscall6 with arbitrary numbers is forbidden (kernel
+    // transition).
+    let f: fn(Int, Int, Int, Int, Int, Int, Int) -> Int = syscall6;
+    let _ = f;  // silence unused warning
+    assert(true);
+}
