@@ -3360,11 +3360,11 @@ implement Iterator for CountFrom {
     fn next(&mut self) -> Maybe<Int> {
         let val = self.current;
         self.current = self.current + 1;
-        Some(val)
+        Maybe.Some(val)
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (Int.max_value(), None)
+        (Int.max_value(), Maybe.None)
     }
 }
 
@@ -3375,11 +3375,11 @@ implement<T: Clone> Iterator for Repeat<T> {
     type Item = T;
 
     fn next(&mut self) -> Maybe<T> {
-        Some(self.value.clone())
+        Maybe.Some(self.value.clone())
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (Int.max_value(), None)
+        (Int.max_value(), Maybe.None)
     }
 }
 
@@ -3392,14 +3392,14 @@ implement<T: Clone> Iterator for RepeatN<T> {
     fn next(&mut self) -> Maybe<T> {
         if self.remaining > 0 {
             self.remaining = self.remaining - 1;
-            Some(self.value.clone())
+            Maybe.Some(self.value.clone())
         } else {
-            None
+            Maybe.None
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (self.remaining, Some(self.remaining))
+        (self.remaining, Maybe.Some(self.remaining))
     }
 }
 
@@ -3421,7 +3421,7 @@ implement<T> Iterator for OnceIter<T> {
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let n = if self.value.is_some() { 1 } else { 0 };
-        (n, Some(n))
+        (n, Maybe.Some(n))
     }
 }
 
@@ -3438,11 +3438,11 @@ implement<T> Iterator for Empty<T> {
     type Item = T;
 
     fn next(&mut self) -> Maybe<T> {
-        None
+        Maybe.None
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (0, Some(0))
+        (0, Maybe.Some(0))
     }
 }
 
@@ -3459,11 +3459,11 @@ implement<T, F: fn() -> T> Iterator for RepeatWith<T, F> {
     type Item = T;
 
     fn next(&mut self) -> Maybe<T> {
-        Some((self.f)())
+        Maybe.Some((self.f)())
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (Int.max_value(), None)
+        (Int.max_value(), Maybe.None)
     }
 }
 
@@ -3475,12 +3475,12 @@ implement<T, F: fn() -> T> Iterator for OnceWith<T, F> {
 
     fn next(&mut self) -> Maybe<T> {
         let f = self.f.take()?;
-        Some(f())
+        Maybe.Some(f())
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let n = if self.f.is_some() { 1 } else { 0 };
-        (n, Some(n))
+        (n, Maybe.Some(n))
     }
 }
 
@@ -3521,7 +3521,7 @@ implement<T: Clone, F: fn(&T) -> Maybe<T>> Iterator for Successors<T, F> {
     fn next(&mut self) -> Maybe<T> {
         let current = self.next.take()?;
         self.next = (self.f)(&current);
-        Some(current)
+        Maybe.Some(current)
     }
 }
 
