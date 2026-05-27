@@ -20,8 +20,11 @@
 mount core.text.{Text};
 mount core.text.format.{
     WriteError, WriteErrorKind,
-    TextAlignment, Sign, FormatSpec,
+    TextAlignment, Sign, FormatSpec, TextFormatter,
     format_debug, format_display,
+    format_hex, format_binary, format_octal,
+    format_lower_exp, format_upper_exp,
+    int_to_text, int_to_text_radix,
 };
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
@@ -322,6 +325,546 @@ fn test_format_debug_int_function() {
     let n: Int = 5;
     let s = format_debug(&n);
     assert_eq(s, "5");
+}
+
+// =============================================================================
+// Section 10: FormatSpec — advanced builder methods
+// =============================================================================
+
+@test
+fn test_format_spec_alternate_form_sets_flag() {
+    let s = FormatSpec.default().alternate_form();
+    assert(s.alternate);
+}
+
+@test
+fn test_format_spec_alternate_default_false() {
+    let s = FormatSpec.default();
+    assert(!s.alternate);
+}
+
+@test
+fn test_format_spec_zero_padded_sets_fill_and_align() {
+    let s = FormatSpec.default().zero_padded();
+    assert_eq(s.fill, '0');
+    assert(s.align is TextAlignment.Right);
+}
+
+@test
+fn test_format_spec_is_zero_padded_after_builder() {
+    let s = FormatSpec.default().zero_padded();
+    assert(s.is_zero_padded());
+}
+
+@test
+fn test_format_spec_is_zero_padded_default_false() {
+    let s = FormatSpec.default();
+    assert(!s.is_zero_padded());
+}
+
+@test
+fn test_format_spec_with_type_x() {
+    let s = FormatSpec.default().with_type('x');
+    match s.format_type {
+        Some(t) => assert_eq(t, 'x'),
+        None => panic("format_type should be Some('x')"),
+    }
+}
+
+@test
+fn test_format_spec_builder_chain() {
+    let s = FormatSpec.default()
+        .with_width(10)
+        .with_precision(3)
+        .with_fill('*')
+        .with_align(TextAlignment.Center);
+    match s.width { Some(w) => assert_eq(w, 10), None => panic("width") }
+    match s.precision { Some(p) => assert_eq(p, 3), None => panic("precision") }
+    assert_eq(s.fill, '*');
+    assert(s.align is TextAlignment.Center);
+}
+
+@test
+fn test_format_spec_new_equiv_default() {
+    let a = FormatSpec.new();
+    let b = FormatSpec.default();
+    assert_eq(a.fill, b.fill);
+    assert(a.align is TextAlignment.Left);
+    assert(b.align is TextAlignment.Left);
+}
+
+// =============================================================================
+// Section 11: int_to_text + int_to_text_radix (canonical entry points)
+// =============================================================================
+
+@test
+fn test_int_to_text_zero() {
+    assert_eq(int_to_text(0), "0");
+}
+
+@test
+fn test_int_to_text_positive() {
+    assert_eq(int_to_text(42), "42");
+}
+
+@test
+fn test_int_to_text_negative() {
+    assert_eq(int_to_text(-7), "-7");
+}
+
+@test
+fn test_int_to_text_large_positive() {
+    assert_eq(int_to_text(1234567890), "1234567890");
+}
+
+@test
+fn test_int_to_text_large_negative() {
+    assert_eq(int_to_text(-1234567890), "-1234567890");
+}
+
+// `Int.MIN` round-trip is the canonical safety pin — int_to_text's
+// `UInt64`-magnitude path is the ONLY correct way to format Int.MIN
+// in two's complement. A direct `-n` would overflow back to Int.MIN
+// and emit "-" with no digits.
+@test
+fn test_int_to_text_int_min_canonical() {
+    // -9223372036854775808 — exact two's-complement boundary.
+    let n: Int = -9223372036854775808;
+    assert_eq(int_to_text(n), "-9223372036854775808");
+}
+
+@test
+fn test_int_to_text_int_max() {
+    let n: Int = 9223372036854775807;
+    assert_eq(int_to_text(n), "9223372036854775807");
+}
+
+@test
+fn test_int_to_text_radix_2_eight() {
+    assert_eq(int_to_text_radix(8, 2), "1000");
+}
+
+@test
+fn test_int_to_text_radix_16_lowercase() {
+    assert_eq(int_to_text_radix(255, 16), "ff");
+}
+
+@test
+fn test_int_to_text_radix_8_octal() {
+    assert_eq(int_to_text_radix(64, 8), "100");
+}
+
+@test
+fn test_int_to_text_radix_10_matches_decimal() {
+    assert_eq(int_to_text_radix(12345, 10), "12345");
+}
+
+@test
+fn test_int_to_text_radix_zero_special() {
+    assert_eq(int_to_text_radix(0, 2), "0");
+    assert_eq(int_to_text_radix(0, 16), "0");
+    assert_eq(int_to_text_radix(0, 10), "0");
+}
+
+@test
+fn test_int_to_text_radix_negative_prefixed_minus() {
+    assert_eq(int_to_text_radix(-255, 16), "-ff");
+    assert_eq(int_to_text_radix(-8, 2), "-1000");
+}
+
+@test
+fn test_int_to_text_radix_invalid_returns_empty() {
+    // Radix outside 2..=36 returns empty per documented contract.
+    assert_eq(int_to_text_radix(42, 1), "");
+    assert_eq(int_to_text_radix(42, 37), "");
+    assert_eq(int_to_text_radix(42, 0), "");
+}
+
+@test
+fn test_int_to_text_radix_36_base() {
+    // 35 in base 36 is the single digit 'z' (lowercase).
+    assert_eq(int_to_text_radix(35, 36), "z");
+    assert_eq(int_to_text_radix(36, 36), "10");
+}
+
+@test
+fn test_int_to_text_radix_int_min_safety() {
+    // Two's-complement boundary in non-decimal radix — same `UInt64`
+    // magnitude path as int_to_text. Without it the previous `-n`
+    // overflow would emit "-" + empty.
+    let n: Int = -9223372036854775808;
+    // |Int.MIN| = 2^63 = 0x8000000000000000 in hex (lowercase).
+    assert_eq(int_to_text_radix(n, 16), "-8000000000000000");
+}
+
+// =============================================================================
+// Section 12: format_hex / format_binary / format_octal
+// =============================================================================
+
+@test
+fn test_format_hex_zero() {
+    let v: Int = 0;
+    assert_eq(format_hex(&v), "0");
+}
+
+@test
+fn test_format_hex_basic() {
+    let v: Int = 255;
+    assert_eq(format_hex(&v), "ff");
+}
+
+@test
+fn test_format_hex_large() {
+    let v: Int = 0xdeadbeef;
+    assert_eq(format_hex(&v), "deadbeef");
+}
+
+@test
+fn test_format_binary_zero() {
+    let v: Int = 0;
+    assert_eq(format_binary(&v), "0");
+}
+
+@test
+fn test_format_binary_basic() {
+    let v: Int = 10;
+    assert_eq(format_binary(&v), "1010");
+}
+
+@test
+fn test_format_binary_byte_full() {
+    let v: Int = 255;
+    assert_eq(format_binary(&v), "11111111");
+}
+
+@test
+fn test_format_octal_zero() {
+    let v: Int = 0;
+    assert_eq(format_octal(&v), "0");
+}
+
+@test
+fn test_format_octal_basic() {
+    let v: Int = 64;
+    assert_eq(format_octal(&v), "100");
+}
+
+@test
+fn test_format_octal_unix_perm() {
+    // 0o755 in decimal is 493 — a familiar Unix perm bits sanity check.
+    let v: Int = 493;
+    assert_eq(format_octal(&v), "755");
+}
+
+// =============================================================================
+// Section 13: format_lower_exp / format_upper_exp
+// =============================================================================
+
+@test
+fn test_format_lower_exp_zero() {
+    let v: Float = 0.0;
+    let s = format_lower_exp(&v);
+    // 0.0 → "0.000000e0" per float_to_exp special-case (precision=6).
+    assert_eq(s, "0.000000e0");
+}
+
+@test
+fn test_format_upper_exp_zero() {
+    let v: Float = 0.0;
+    let s = format_upper_exp(&v);
+    assert_eq(s, "0.000000E0");
+}
+
+@test
+fn test_format_lower_exp_uses_lowercase_e() {
+    let v: Float = 100.0;
+    let s = format_lower_exp(&v);
+    assert(s.contains(&"e"));
+    assert(!s.contains(&"E"));
+}
+
+@test
+fn test_format_upper_exp_uses_uppercase_e() {
+    let v: Float = 100.0;
+    let s = format_upper_exp(&v);
+    assert(s.contains(&"E"));
+    assert(!s.contains(&"e"));
+}
+
+@test
+fn test_format_lower_exp_nan_text() {
+    let v: Float = 0.0 / 0.0;
+    let s = format_lower_exp(&v);
+    assert_eq(s, "NaN");
+}
+
+@test
+fn test_format_upper_exp_nan_text() {
+    let v: Float = 0.0 / 0.0;
+    let s = format_upper_exp(&v);
+    assert_eq(s, "NAN");
+}
+
+@test
+fn test_format_lower_exp_positive_infinity() {
+    let v: Float = 1.0 / 0.0;
+    let s = format_lower_exp(&v);
+    assert_eq(s, "inf");
+}
+
+@test
+fn test_format_upper_exp_negative_infinity() {
+    let v: Float = -1.0 / 0.0;
+    let s = format_upper_exp(&v);
+    assert_eq(s, "-INF");
+}
+
+// =============================================================================
+// Section 14: TextFormatter direct API
+// =============================================================================
+
+@test
+fn test_text_formatter_write_str_appends() {
+    let mut buf = Text.new();
+    let mut f = TextFormatter.new(&mut buf);
+    let _ = f.write_str(&"hello");
+    assert_eq(buf, "hello");
+}
+
+@test
+fn test_text_formatter_write_str_appends_multiple() {
+    let mut buf = Text.new();
+    let mut f = TextFormatter.new(&mut buf);
+    let _ = f.write_str(&"foo");
+    let _ = f.write_str(&"bar");
+    assert_eq(buf, "foobar");
+}
+
+@test
+fn test_text_formatter_write_char() {
+    let mut buf = Text.new();
+    let mut f = TextFormatter.new(&mut buf);
+    let _ = f.write_char('x');
+    let _ = f.write_char('y');
+    assert_eq(buf, "xy");
+}
+
+@test
+fn test_text_formatter_write_int_default_decimal() {
+    let mut buf = Text.new();
+    let mut f = TextFormatter.new(&mut buf);
+    let _ = f.write_int(123);
+    assert_eq(buf, "123");
+}
+
+@test
+fn test_text_formatter_write_int_negative() {
+    let mut buf = Text.new();
+    let mut f = TextFormatter.new(&mut buf);
+    let _ = f.write_int(-42);
+    assert_eq(buf, "-42");
+}
+
+@test
+fn test_text_formatter_accessors_default() {
+    let mut buf = Text.new();
+    let f = TextFormatter.new(&mut buf);
+    assert(f.width() is None);
+    assert(f.precision() is None);
+    assert(f.align() is TextAlignment.Left);
+    assert_eq(f.fill(), ' ');
+    assert(!f.alternate());
+}
+
+@test
+fn test_text_formatter_with_spec_carries_spec() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_width(5).with_fill('*');
+    let f = TextFormatter.with_spec(&mut buf, spec);
+    match f.width() {
+        Some(w) => assert_eq(w, 5),
+        None => panic("width should be Some(5)"),
+    }
+    assert_eq(f.fill(), '*');
+}
+
+@test
+fn test_text_formatter_write_str_pads_right_align() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_width(8).with_align(TextAlignment.Right);
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_str(&"hi");
+    assert_eq(buf, "      hi");
+}
+
+@test
+fn test_text_formatter_write_str_pads_left_align() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_width(6).with_align(TextAlignment.Left);
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_str(&"hi");
+    assert_eq(buf, "hi    ");
+}
+
+@test
+fn test_text_formatter_write_str_pads_center_even() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_width(6).with_align(TextAlignment.Center);
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_str(&"hi");
+    // padding=4 ⇒ left=2, right=2.
+    assert_eq(buf, "  hi  ");
+}
+
+@test
+fn test_text_formatter_write_str_pads_center_odd_extra_right() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_width(5).with_align(TextAlignment.Center);
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_str(&"hi");
+    // padding=3 ⇒ left=1, right=2 (per impl: right = padding - left).
+    assert_eq(buf, " hi  ");
+}
+
+@test
+fn test_text_formatter_write_str_custom_fill() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_width(5).with_fill('*').with_align(TextAlignment.Right);
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_str(&"hi");
+    assert_eq(buf, "***hi");
+}
+
+@test
+fn test_text_formatter_write_str_precision_truncates() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_precision(3);
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_str(&"hello");
+    assert_eq(buf, "hel");
+}
+
+@test
+fn test_text_formatter_write_str_precision_no_op_when_shorter() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_precision(10);
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_str(&"hi");
+    assert_eq(buf, "hi");
+}
+
+@test
+fn test_text_formatter_write_int_hex_via_spec() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_type('x');
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_int(255);
+    assert_eq(buf, "ff");
+}
+
+@test
+fn test_text_formatter_write_int_binary_via_spec() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_type('b');
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_int(5);
+    assert_eq(buf, "101");
+}
+
+@test
+fn test_text_formatter_write_int_octal_via_spec() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_type('o');
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_int(8);
+    assert_eq(buf, "10");
+}
+
+@test
+fn test_text_formatter_write_int_uppercase_hex_via_spec() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_type('X');
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_int(255);
+    assert_eq(buf, "FF");
+}
+
+@test
+fn test_text_formatter_write_int_alternate_hex_prefix() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_type('x').alternate_form();
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_int(255);
+    assert_eq(buf, "0xff");
+}
+
+@test
+fn test_text_formatter_write_int_alternate_uppercase_hex_prefix() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_type('X').alternate_form();
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_int(255);
+    assert_eq(buf, "0XFF");
+}
+
+@test
+fn test_text_formatter_write_int_alternate_binary_prefix() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_type('b').alternate_form();
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_int(5);
+    assert_eq(buf, "0b101");
+}
+
+@test
+fn test_text_formatter_write_int_alternate_octal_prefix() {
+    let mut buf = Text.new();
+    let spec = FormatSpec.default().with_type('o').alternate_form();
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_int(8);
+    assert_eq(buf, "0o10");
+}
+
+// =============================================================================
+// Section 15: TextFormatter — sign handling
+// =============================================================================
+
+@test
+fn test_text_formatter_write_int_sign_plus_for_positive() {
+    let mut buf = Text.new();
+    let mut spec = FormatSpec.default();
+    spec.sign = Sign.Plus;
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_int(42);
+    assert_eq(buf, "+42");
+}
+
+@test
+fn test_text_formatter_write_int_sign_space_for_positive() {
+    let mut buf = Text.new();
+    let mut spec = FormatSpec.default();
+    spec.sign = Sign.Space;
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_int(42);
+    assert_eq(buf, " 42");
+}
+
+@test
+fn test_text_formatter_write_int_sign_minus_default_for_positive() {
+    let mut buf = Text.new();
+    let mut f = TextFormatter.new(&mut buf);
+    let _ = f.write_int(42);
+    assert_eq(buf, "42");  // no leading sign under Minus mode
+}
+
+@test
+fn test_text_formatter_write_int_negative_keeps_minus_with_plus_sign() {
+    let mut buf = Text.new();
+    let mut spec = FormatSpec.default();
+    spec.sign = Sign.Plus;
+    let mut f = TextFormatter.with_spec(&mut buf, spec);
+    let _ = f.write_int(-7);
+    assert_eq(buf, "-7");  // sign Plus does not flip negatives
 }
 
 // =============================================================================
