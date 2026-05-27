@@ -2562,9 +2562,15 @@ implement<A: Iterator, B: Iterator> IntoIterator for ZipLongestIter<A, B> {
 // Iterator Construction Functions
 // =============================================================================
 
-/// Range iterator [start, end).
-/// Generic over element type T which must support ordering and increment.
-public type Range<T> is { current: T, end: T };
+/// Range iterator over `[start, end)` (exclusive) or `[start, end]`
+/// (inclusive). The third field `inclusive` discriminates the two
+/// forms, matching the runtime's `TypeId::RANGE` (517) layout
+/// `[current, end, inclusive]` that codegen emits for both `..` and
+/// `..=` syntax. Keeping both shapes under one type lets the runtime
+/// IterNew/IterNext fast-path and the user-side Iterator impl share
+/// a single layout — no monomorphic split is required at the runtime
+/// boundary.
+public type Range<T> is { current: T, end: T, inclusive: Bool };
 
 // Range/RangeInclusive — IntCoercible (slice notation `a[i..j]` produces
 // Int-bearing handles), Indexable (`range[i]` enumeration), RangeLike
@@ -2574,19 +2580,25 @@ implement<T> IntCoercible for Range<T> {}
 implement<T> Indexable for Range<T> {}
 implement<T> RangeLike for Range<T> {}
 
-/// Inclusive range iterator [start, end].
+/// Inclusive range iterator `[start, end]`. Distinct from `Range<T>`
+/// only at the free-function `range_inclusive(start, end)` construction
+/// site — the `(start..=end)` syntactic form lowers to `Range<T>` with
+/// `inclusive: true` (handled by codegen `compile_range` and the
+/// runtime's `TypeId::RANGE` (517) fast-path) and is the canonical
+/// form for inclusive iteration. `RangeInclusive` is retained for
+/// imports that name it explicitly.
 public type RangeInclusive<T> is { current: T, end: T, done: Bool };
 
 implement<T> IntCoercible for RangeInclusive<T> {}
 implement<T> RangeLike for RangeInclusive<T> {}
 
-/// Create a range iterator [start, end).
+/// Create a range iterator `[start, end)`.
 @inline(always)
 public fn range(start: Int, end: Int) -> Range<Int> {
-    Range { current: start, end: end }
+    Range { current: start, end: end, inclusive: false }
 }
 
-/// Create an inclusive range iterator [start, end].
+/// Create an inclusive range iterator `[start, end]`.
 @inline(always)
 public fn range_inclusive(start: Int, end: Int) -> RangeInclusive<Int> {
     RangeInclusive { current: start, end: end, done: false }
@@ -2670,13 +2682,24 @@ implement Iterator for Range<Int> {
             let val = self.current;
             self.current = self.current + 1;
             Some(val)
+        } else if self.inclusive && self.current == self.end {
+            // Inclusive ranges yield the upper bound exactly once.
+            // Advancing past `end` ensures the next call sees
+            // `current > end`, falling through to None.
+            let val = self.current;
+            self.current = self.current + 1;
+            Some(val)
         } else {
             None
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        let len = (self.end - self.current).max(0);
+        let len = if self.inclusive {
+            (self.end - self.current + 1).max(0)
+        } else {
+            (self.end - self.current).max(0)
+        };
         (len, Some(len))
     }
 }
@@ -2686,6 +2709,12 @@ implement DoubleEndedIterator for Range<Int> {
         if self.current < self.end {
             self.end = self.end - 1;
             Some(self.end)
+        } else if self.inclusive && self.current == self.end {
+            let val = self.end;
+            // Flip to exclusive after yielding the boundary so the
+            // next call sees `current == end` non-inclusive → None.
+            self.inclusive = false;
+            Some(val)
         } else {
             None
         }
@@ -2694,7 +2723,11 @@ implement DoubleEndedIterator for Range<Int> {
 
 implement ExactSizeIterator for Range<Int> {
     fn len(&self) -> Int {
-        (self.end - self.current).max(0)
+        if self.inclusive {
+            (self.end - self.current + 1).max(0)
+        } else {
+            (self.end - self.current).max(0)
+        }
     }
 }
 
@@ -2707,13 +2740,21 @@ implement Iterator for Range<UInt64> {
             let val = self.current;
             self.current = self.current + 1;
             Some(val)
+        } else if self.inclusive && self.current == self.end {
+            let val = self.current;
+            self.current = self.current + 1;
+            Some(val)
         } else {
             None
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        let len = (self.end - self.current) as Int;
+        let len = if self.inclusive {
+            ((self.end - self.current) as Int) + 1
+        } else {
+            (self.end - self.current) as Int
+        };
         (len.max(0), Some(len.max(0)))
     }
 }
@@ -2727,13 +2768,21 @@ implement Iterator for Range<Int8> {
             let val = self.current;
             self.current = self.current + 1;
             Some(val)
+        } else if self.inclusive && self.current == self.end {
+            let val = self.current;
+            self.current = self.current + 1;
+            Some(val)
         } else {
             None
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        let len = ((self.end as Int) - (self.current as Int)).max(0);
+        let len = if self.inclusive {
+            ((self.end as Int) - (self.current as Int) + 1).max(0)
+        } else {
+            ((self.end as Int) - (self.current as Int)).max(0)
+        };
         (len, Some(len))
     }
 }
@@ -2743,6 +2792,10 @@ implement DoubleEndedIterator for Range<Int8> {
         if self.current < self.end {
             self.end = self.end - 1;
             Some(self.end)
+        } else if self.inclusive && self.current == self.end {
+            let val = self.end;
+            self.inclusive = false;
+            Some(val)
         } else {
             None
         }
@@ -2751,7 +2804,11 @@ implement DoubleEndedIterator for Range<Int8> {
 
 implement ExactSizeIterator for Range<Int8> {
     fn len(&self) -> Int {
-        ((self.end as Int) - (self.current as Int)).max(0)
+        if self.inclusive {
+            ((self.end as Int) - (self.current as Int) + 1).max(0)
+        } else {
+            ((self.end as Int) - (self.current as Int)).max(0)
+        }
     }
 }
 
@@ -2764,13 +2821,21 @@ implement Iterator for Range<Int16> {
             let val = self.current;
             self.current = self.current + 1;
             Some(val)
+        } else if self.inclusive && self.current == self.end {
+            let val = self.current;
+            self.current = self.current + 1;
+            Some(val)
         } else {
             None
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        let len = ((self.end as Int) - (self.current as Int)).max(0);
+        let len = if self.inclusive {
+            ((self.end as Int) - (self.current as Int) + 1).max(0)
+        } else {
+            ((self.end as Int) - (self.current as Int)).max(0)
+        };
         (len, Some(len))
     }
 }
@@ -2780,6 +2845,10 @@ implement DoubleEndedIterator for Range<Int16> {
         if self.current < self.end {
             self.end = self.end - 1;
             Some(self.end)
+        } else if self.inclusive && self.current == self.end {
+            let val = self.end;
+            self.inclusive = false;
+            Some(val)
         } else {
             None
         }
@@ -2788,7 +2857,11 @@ implement DoubleEndedIterator for Range<Int16> {
 
 implement ExactSizeIterator for Range<Int16> {
     fn len(&self) -> Int {
-        ((self.end as Int) - (self.current as Int)).max(0)
+        if self.inclusive {
+            ((self.end as Int) - (self.current as Int) + 1).max(0)
+        } else {
+            ((self.end as Int) - (self.current as Int)).max(0)
+        }
     }
 }
 
@@ -2801,13 +2874,21 @@ implement Iterator for Range<Int32> {
             let val = self.current;
             self.current = self.current + 1;
             Some(val)
+        } else if self.inclusive && self.current == self.end {
+            let val = self.current;
+            self.current = self.current + 1;
+            Some(val)
         } else {
             None
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        let len = ((self.end as Int) - (self.current as Int)).max(0);
+        let len = if self.inclusive {
+            ((self.end as Int) - (self.current as Int) + 1).max(0)
+        } else {
+            ((self.end as Int) - (self.current as Int)).max(0)
+        };
         (len, Some(len))
     }
 }
@@ -2817,6 +2898,10 @@ implement DoubleEndedIterator for Range<Int32> {
         if self.current < self.end {
             self.end = self.end - 1;
             Some(self.end)
+        } else if self.inclusive && self.current == self.end {
+            let val = self.end;
+            self.inclusive = false;
+            Some(val)
         } else {
             None
         }
@@ -2825,7 +2910,11 @@ implement DoubleEndedIterator for Range<Int32> {
 
 implement ExactSizeIterator for Range<Int32> {
     fn len(&self) -> Int {
-        ((self.end as Int) - (self.current as Int)).max(0)
+        if self.inclusive {
+            ((self.end as Int) - (self.current as Int) + 1).max(0)
+        } else {
+            ((self.end as Int) - (self.current as Int)).max(0)
+        }
     }
 }
 
@@ -2838,13 +2927,21 @@ implement Iterator for Range<Int64> {
             let val = self.current;
             self.current = self.current + 1;
             Some(val)
+        } else if self.inclusive && self.current == self.end {
+            let val = self.current;
+            self.current = self.current + 1;
+            Some(val)
         } else {
             None
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        let len = ((self.end as Int) - (self.current as Int)).max(0);
+        let len = if self.inclusive {
+            ((self.end as Int) - (self.current as Int) + 1).max(0)
+        } else {
+            ((self.end as Int) - (self.current as Int)).max(0)
+        };
         (len, Some(len))
     }
 }
@@ -2854,6 +2951,10 @@ implement DoubleEndedIterator for Range<Int64> {
         if self.current < self.end {
             self.end = self.end - 1;
             Some(self.end)
+        } else if self.inclusive && self.current == self.end {
+            let val = self.end;
+            self.inclusive = false;
+            Some(val)
         } else {
             None
         }
@@ -2862,7 +2963,11 @@ implement DoubleEndedIterator for Range<Int64> {
 
 implement ExactSizeIterator for Range<Int64> {
     fn len(&self) -> Int {
-        ((self.end as Int) - (self.current as Int)).max(0)
+        if self.inclusive {
+            ((self.end as Int) - (self.current as Int) + 1).max(0)
+        } else {
+            ((self.end as Int) - (self.current as Int)).max(0)
+        }
     }
 }
 
@@ -2875,13 +2980,21 @@ implement Iterator for Range<UInt8> {
             let val = self.current;
             self.current = self.current + 1;
             Some(val)
+        } else if self.inclusive && self.current == self.end {
+            let val = self.current;
+            self.current = self.current + 1;
+            Some(val)
         } else {
             None
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        let len = ((self.end as Int) - (self.current as Int)).max(0);
+        let len = if self.inclusive {
+            ((self.end as Int) - (self.current as Int) + 1).max(0)
+        } else {
+            ((self.end as Int) - (self.current as Int)).max(0)
+        };
         (len, Some(len))
     }
 }
@@ -2895,13 +3008,21 @@ implement Iterator for Range<UInt16> {
             let val = self.current;
             self.current = self.current + 1;
             Some(val)
+        } else if self.inclusive && self.current == self.end {
+            let val = self.current;
+            self.current = self.current + 1;
+            Some(val)
         } else {
             None
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        let len = ((self.end as Int) - (self.current as Int)).max(0);
+        let len = if self.inclusive {
+            ((self.end as Int) - (self.current as Int) + 1).max(0)
+        } else {
+            ((self.end as Int) - (self.current as Int)).max(0)
+        };
         (len, Some(len))
     }
 }
@@ -2915,13 +3036,21 @@ implement Iterator for Range<UInt32> {
             let val = self.current;
             self.current = self.current + 1;
             Some(val)
+        } else if self.inclusive && self.current == self.end {
+            let val = self.current;
+            self.current = self.current + 1;
+            Some(val)
         } else {
             None
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        let len = ((self.end as Int) - (self.current as Int)).max(0);
+        let len = if self.inclusive {
+            ((self.end as Int) - (self.current as Int) + 1).max(0)
+        } else {
+            ((self.end as Int) - (self.current as Int)).max(0)
+        };
         (len, Some(len))
     }
 }
@@ -2935,13 +3064,21 @@ implement Iterator for Range<ISize> {
             let val = self.current;
             self.current = self.current + 1;
             Some(val)
+        } else if self.inclusive && self.current == self.end {
+            let val = self.current;
+            self.current = self.current + 1;
+            Some(val)
         } else {
             None
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        let len = ((self.end as Int) - (self.current as Int)).max(0);
+        let len = if self.inclusive {
+            ((self.end as Int) - (self.current as Int) + 1).max(0)
+        } else {
+            ((self.end as Int) - (self.current as Int)).max(0)
+        };
         (len, Some(len))
     }
 }
@@ -2951,6 +3088,10 @@ implement DoubleEndedIterator for Range<ISize> {
         if self.current < self.end {
             self.end = self.end - 1;
             Some(self.end)
+        } else if self.inclusive && self.current == self.end {
+            let val = self.end;
+            self.inclusive = false;
+            Some(val)
         } else {
             None
         }
@@ -2959,7 +3100,11 @@ implement DoubleEndedIterator for Range<ISize> {
 
 implement ExactSizeIterator for Range<ISize> {
     fn len(&self) -> Int {
-        ((self.end as Int) - (self.current as Int)).max(0)
+        if self.inclusive {
+            ((self.end as Int) - (self.current as Int) + 1).max(0)
+        } else {
+            ((self.end as Int) - (self.current as Int)).max(0)
+        }
     }
 }
 
