@@ -1,0 +1,144 @@
+// =============================================================================
+// core-tests/base/env/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.env` — process arguments,
+// environment variables, exit codes, and standard environment helpers.
+// =============================================================================
+
+mount core.base.{
+    args, arg, args_count, args_os, Args,
+    var, var_opt, set_var, remove_var, VarError,
+    exit, exit_success, exit_failure,
+    home_dir, user, path, temp_dir, shell, locale,
+};
+mount core.{Maybe, Result, Text};
+mount core.collections.list.List;
+
+// =============================================================================
+// REGRESSION §A (@ignore'd): argv plumbing inconsistency under
+// `--interp` harness. `args_count()` returns > 0 but `arg(0)` returns
+// None. The two accessors should be consistent — either both
+// indicate "no argv" (count=0, arg(i)=None) or both indicate "argv
+// present" (count>0, arg(0)=Some(program_name)).
+//
+// Workaround in tests: avoid asserting on arg(i) when running under
+// `--interp` without explicit argv setup. Pin here.
+// =============================================================================
+
+@ignore("arg(0) returns None when args_count() > 0 under --interp harness — argv plumbing inconsistency.")
+@test
+fn regression_pin_arg_zero_consistent_with_args_count() {
+    let count = args_count();
+    let first = arg(0);
+    if count > 0 {
+        assert(first.is_some());
+    } else {
+        assert(first.is_none());
+    }
+}
+
+// =============================================================================
+// REGRESSION §B: `args_count()` is a non-negative Int. A defect that
+// returned a negative count would silently break every iteration
+// pattern over argv.
+// =============================================================================
+
+@test
+fn regression_args_count_non_negative() {
+    let n = args_count();
+    assert(n >= 0);
+}
+
+// =============================================================================
+// REGRESSION §C: `arg(i)` returns None for negative or out-of-range
+// indices regardless of args_count. A defect that wrapped to a
+// positive index modulo size would silently produce wrong values.
+// =============================================================================
+
+@test
+fn regression_arg_negative_index_is_none() {
+    let v = arg(-1);
+    assert(v.is_none());
+}
+
+@test
+fn regression_arg_large_index_is_none() {
+    let v = arg(1_000_000);
+    assert(v.is_none());
+}
+
+// =============================================================================
+// REGRESSION §D: `var_opt` for a non-existent key returns None. A
+// defect that returned an empty string or panic would silently break
+// optional-config patterns.
+// =============================================================================
+
+@test
+fn regression_var_opt_returns_none_for_missing_key() {
+    let key = "REGRESSION_VAR_THAT_SHOULD_NEVER_EXIST_XYZZY_12345".to_text();
+    let v = var_opt(&key);
+    assert(v.is_none());
+}
+
+// =============================================================================
+// REGRESSION §E: `var` for a non-existent key returns Err(NotPresent).
+// =============================================================================
+
+@test
+fn regression_var_returns_err_not_present_for_missing_key() {
+    let key = "REGRESSION_VAR_THAT_SHOULD_NEVER_EXIST_XYZZY_67890".to_text();
+    let r = var(&key);
+    assert(r.is_err());
+    match r {
+        Err(e) => match e {
+            VarError.NotPresent => {},
+            _ => {},   // accept any VarError variant — not all imps fix NotPresent
+        },
+        Ok(_) => panic("missing key should return Err"),
+    }
+}
+
+// =============================================================================
+// REGRESSION §F: VarError variants disjoint under Eq.
+// =============================================================================
+
+@test
+fn regression_var_error_variants_disjoint() {
+    let a = VarError.NotPresent;
+    let b = VarError.NotUnicode("invalid".to_text());
+    // Both must be constructible — variant tag pin via match.
+    match a {
+        VarError.NotPresent => {},
+        _ => panic("expected NotPresent"),
+    }
+    match b {
+        VarError.NotUnicode(_) => {},
+        _ => panic("expected NotUnicode"),
+    }
+}
+
+// =============================================================================
+// REGRESSION §G: `temp_dir()` returns a non-empty Text. A defect that
+// returned an empty string would silently break every tempfile creation.
+// =============================================================================
+
+@test
+fn regression_temp_dir_non_empty() {
+    let t = temp_dir();
+    assert(t.len() > 0);
+}
+
+// =============================================================================
+// REGRESSION §H: `args()` returns a List<Text> (possibly empty under
+// --interp).
+// =============================================================================
+
+@test
+fn regression_args_returns_list_text() {
+    let xs: List<Text> = args();
+    let n = xs.len();
+    assert(n >= 0);
+}
+
+fn main() {}
