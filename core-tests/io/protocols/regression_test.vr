@@ -113,7 +113,7 @@ fn regression_cursor_slice_read_dispatches_correctly() {
     assert_eq(buf[2], 30 as Byte);
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn regression_cursor_seek_start_dispatches_correctly() {
     let data: [Byte; 5] = [1, 2, 3, 4, 5];
@@ -256,7 +256,8 @@ fn regression_question_mark_preserves_kind() {
 // `mount super.buffer.Cursor`.
 // =============================================================================
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp post Cursor
+// dedup (round-7 io/protocols §3.2; canonical Cursor lives in buffer.vr).
 @test
 fn regression_cursor_alias_collision_between_protocols_and_buffer() {
     // If both Cursor types live in the io surface, this construction
