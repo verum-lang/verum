@@ -289,8 +289,14 @@ fn resolve_one(spec: &RangeSpec, total: UInt64) -> Maybe<ResolvedRange> {
 /// Build a `Content-Range:` header value for a resolved sub-range.
 /// Emits `bytes <start>-<end>/<total>`.
 public fn encode_content_range(r: &ResolvedRange, total: UInt64) -> Text {
+    // Inline "bytes " prefix byte-by-byte — see encode_unsatisfiable.
     let mut out: List<Byte> = [];
-    push_bytes(&mut out, b"bytes ");
+    out.push('b' as Byte);
+    out.push('y' as Byte);
+    out.push('t' as Byte);
+    out.push('e' as Byte);
+    out.push('s' as Byte);
+    out.push(' ' as Byte);
     push_u64(&mut out, r.start);
     out.push('-' as Byte);
     push_u64(&mut out, r.end);
@@ -301,8 +307,18 @@ public fn encode_content_range(r: &ResolvedRange, total: UInt64) -> Text {
 
 /// Emit the 416-response form: `bytes */<total>`.
 public fn encode_unsatisfiable(total: UInt64) -> Text {
+    // Inline the "bytes */" prefix byte-by-byte rather than via
+    // push_bytes(b"bytes */") — same SIGSEGV-trigger discipline as
+    // ipv6_canonical.format_v4_mapped fix.
     let mut out: List<Byte> = [];
-    push_bytes(&mut out, b"bytes */");
+    out.push('b' as Byte);
+    out.push('y' as Byte);
+    out.push('t' as Byte);
+    out.push('e' as Byte);
+    out.push('s' as Byte);
+    out.push(' ' as Byte);
+    out.push('*' as Byte);
+    out.push('/' as Byte);
     push_u64(&mut out, total);
     Text.from_utf8_unchecked(out.as_slice())
 }

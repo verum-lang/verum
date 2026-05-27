@@ -21,28 +21,24 @@ mount core.base.result.{Result, Ok, Err};
 // HTTPRNG-1 — parse_range_header SIGSEGV during precompile cascade
 // =============================================================================
 
-@ignore("HTTPRNG-1: parse_range_header SIGSEGV. See audit.md §3.1.")
 @test
 fn regression_parse_single_closed_range() {
     let s = "bytes=0-499".clone();
     assert(parse_range_header(&s).is_ok());
 }
 
-@ignore("HTTPRNG-1: parse_range_header SIGSEGV.")
 @test
 fn regression_parse_multi_range() {
     let s = "bytes=0-499,600-899,1000-".clone();
     assert(parse_range_header(&s).is_ok());
 }
 
-@ignore("HTTPRNG-1: parse_range_header SIGSEGV.")
 @test
 fn regression_parse_suffix_range() {
     let s = "bytes=-500".clone();
     assert(parse_range_header(&s).is_ok());
 }
 
-@ignore("HTTPRNG-1: parse_range_header SIGSEGV — wrong unit.")
 @test
 fn regression_parse_wrong_unit_rejects() {
     let s = "items=0-1".clone();
@@ -52,7 +48,6 @@ fn regression_parse_wrong_unit_rejects() {
     }
 }
 
-@ignore("HTTPRNG-1: resolve_and_merge SIGSEGV.")
 @test
 fn regression_resolve_closed_in_range() {
     let s = "bytes=0-499".clone();
@@ -67,7 +62,6 @@ fn regression_resolve_closed_in_range() {
     }
 }
 
-@ignore("HTTPRNG-1: resolve_and_merge SIGSEGV — overlapping merge.")
 @test
 fn regression_resolve_merge_overlapping() {
     let s = "bytes=0-499,400-899".clone();
@@ -82,7 +76,6 @@ fn regression_resolve_merge_overlapping() {
     }
 }
 
-@ignore("HTTPRNG-1: resolve_and_merge SIGSEGV — unsatisfiable.")
 @test
 fn regression_resolve_all_invalid_returns_unsatisfiable() {
     let s = "bytes=2000-3000".clone();
@@ -93,7 +86,6 @@ fn regression_resolve_all_invalid_returns_unsatisfiable() {
     }
 }
 
-@ignore("HTTPRNG-1: encode_content_range SIGSEGV.")
 @test
 fn regression_encode_content_range_simple() {
     let r = ResolvedRange { start: 0_u64, end: 499_u64 };
@@ -102,7 +94,6 @@ fn regression_encode_content_range_simple() {
     assert(h == want);
 }
 
-@ignore("HTTPRNG-1: encode_unsatisfiable SIGSEGV.")
 @test
 fn regression_encode_unsatisfiable_simple() {
     let h = encode_unsatisfiable(1234_u64);

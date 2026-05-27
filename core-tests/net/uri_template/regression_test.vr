@@ -23,21 +23,18 @@ mount core.base.result.{Result, Ok, Err};
 // URITPL-1 — UriTemplate.parse / expand SIGSEGV during precompile cascade
 // =============================================================================
 
-@ignore("URITPL-1: UriTemplate.parse SIGSEGVs in LLVM SmallVector. See audit.md §3.1.")
 @test
 fn regression_parse_literal_only() {
     let s = "/users".clone();
     assert(UriTemplate.parse(&s).is_ok());
 }
 
-@ignore("URITPL-1: UriTemplate.parse SIGSEGV. See audit.md §3.1.")
 @test
 fn regression_parse_simple_var() {
     let s = "/users/{user}".clone();
     assert(UriTemplate.parse(&s).is_ok());
 }
 
-@ignore("URITPL-1: UriTemplate.expand SIGSEGV through parse cascade. See audit.md §3.1.")
 @test
 fn regression_expand_simple_var() {
     let s = "/users/{user}".clone();
@@ -48,28 +45,24 @@ fn regression_expand_simple_var() {
     assert(tpl.expand(&vars) == want);
 }
 
-@ignore("URITPL-1: parse SIGSEGV on form-query operator. See audit.md §3.1.")
 @test
 fn regression_parse_form_query_op() {
     let s = "/users{?type,sort}".clone();
     assert(UriTemplate.parse(&s).is_ok());
 }
 
-@ignore("URITPL-1: parse SIGSEGV on path-segment operator. See audit.md §3.1.")
 @test
 fn regression_parse_path_seg_op() {
     let s = "/users{/id}".clone();
     assert(UriTemplate.parse(&s).is_ok());
 }
 
-@ignore("URITPL-1: parse SIGSEGV on prefix modifier. See audit.md §3.1.")
 @test
 fn regression_parse_prefix_modifier() {
     let s = "/users/{id:8}".clone();
     assert(UriTemplate.parse(&s).is_ok());
 }
 
-@ignore("URITPL-1: parse SIGSEGV on error path. See audit.md §3.1.")
 @test
 fn regression_parse_unbalanced_open_brace_rejects() {
     let s = "/users/{user".clone();
