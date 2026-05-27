@@ -143,6 +143,12 @@ public fn parse(text: &Text) -> Result<Cidr, CidrError> {
         },
         Err(_) => {},
     }
+    // Discard the Ipv6Addr Err payload — wrapping it as
+    // `CidrError.AddrParseFailed(AddrParseError)` triggers the CIDR-1
+    // cross-type Err-payload codegen path. Use `CidrError.Malformed`
+    // with a fixed-string message instead. Callers needing the
+    // typed inner error can re-invoke Ipv6Addr.parse on the same
+    // input.
     match Ipv6Addr.parse(&addr_text) {
         Ok(v6) => {
             if prefix_len < 0 || prefix_len > 128 {
@@ -150,7 +156,7 @@ public fn parse(text: &Text) -> Result<Cidr, CidrError> {
             }
             return Ok(Cidr.V6 { addr: v6, prefix_len: prefix_len });
         },
-        Err(e) => Err(CidrError.AddrParseFailed(e)),
+        Err(_) => Err(CidrError.Malformed(Text.from("not a valid IPv4 or IPv6 address"))),
     }
 }
 
