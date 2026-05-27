@@ -36,7 +36,8 @@ mount core.collections.list.List;
 // Multi-day VBC codegen fix; tracked alongside task #17/#39 class.
 // =============================================================================
 
-@ignore("Closure mutable-state defect — counter increment in retry body trips .next-on-Int dispatch.")
+// Un-@ignore'd 2026-05-28 — passes under --interp; closure mutable-state
+// + retry body dispatch consolidated by recent interpreter fixes.
 @test
 fn regression_pin_retry_succeeds_after_failures() {
     let mut counter: Int = 0;
@@ -53,7 +54,7 @@ fn regression_pin_retry_succeeds_after_failures() {
     assert_eq(counter, 3);
 }
 
-@ignore("Same closure mutable-state defect — exhaust-attempts path.")
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn regression_pin_retry_exhausts_returns_last_err() {
     let mut counter: Int = 0;
@@ -65,7 +66,7 @@ fn regression_pin_retry_exhausts_returns_last_err() {
     assert_eq(counter, 3);
 }
 
-@ignore("Same closure mutable-state defect — abort-on-permanent path.")
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn regression_pin_retry_aborts_on_permanent_error() {
     let mut counter: Int = 0;
