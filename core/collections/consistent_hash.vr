@@ -131,7 +131,7 @@ implement ConsistentHashRing {
 
     /// Return the single node that owns `key`.
     public fn node_for_key(&self, key: &[Byte]) -> Maybe<Text> {
-        if self.positions.len() == 0 { return None; }
+        if self.positions.len() == 0 { return Maybe.None; }
         let h = hash64(key);
         self.find_successor(h)
     }
@@ -163,12 +163,12 @@ implement ConsistentHashRing {
             let idx = (start + i) % positions_sorted.len();
             let pos = positions_sorted[idx];
             match self.positions.get(&pos) {
-                Some(name) => {
+                Maybe.Some(name) => {
                     if !contains_text(&out, name) {
                         out.push(name.clone());
                     }
                 },
-                None => {},
+                Maybe.None => {},
             }
             i = i + 1;
         }
@@ -181,8 +181,8 @@ implement ConsistentHashRing {
         while i < positions_sorted.len() {
             if positions_sorted[i] >= target {
                 match self.positions.get(&positions_sorted[i]) {
-                    Some(name) => return Some(name.clone()),
-                    None       => {},
+                    Maybe.Some(name) => return Maybe.Some(name.clone()),
+                    Maybe.None       => {},
                 }
             }
             i = i + 1;
@@ -190,11 +190,11 @@ implement ConsistentHashRing {
         // Wrap to minimum position.
         if positions_sorted.len() > 0 {
             match self.positions.get(&positions_sorted[0]) {
-                Some(name) => Some(name.clone()),
-                None       => None,
+                Maybe.Some(name) => Maybe.Some(name.clone()),
+                Maybe.None       => Maybe.None,
             }
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -205,8 +205,8 @@ implement ConsistentHashRing {
         let mut iter = keys;
         loop {
             match iter.next() {
-                Some(k) => out.push(*k),
-                None    => break,
+                Maybe.Some(k) => out.push(*k),
+                Maybe.None    => break,
             }
         }
         out

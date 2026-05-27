@@ -112,8 +112,8 @@ implement<K: Hash + Eq, V> TtlCache<K, V> {
         // `Instant.now()` (current instant — entries inserted at that
         // boundary expire immediately, which is the safest fail-mode).
         let exp = match now.checked_add(ttl) {
-            Some(t) => t,
-            None    => Instant.now(),
+            Maybe.Some(t) => t,
+            Maybe.None    => Instant.now(),
         };
 
         // Evict LRU if full (unless overwriting an existing key).
@@ -131,19 +131,19 @@ implement<K: Hash + Eq, V> TtlCache<K, V> {
     public fn get(&mut self, key: &K) -> Maybe<&V> {
         let now = Instant.now();
         let hit_and_live = match self.store.get(key) {
-            Some(entry) => now < entry.expires_at.clone(),
-            None        => return { self.misses = self.misses + 1_u64; None },
+            Maybe.Some(entry) => now < entry.expires_at.clone(),
+            Maybe.None        => return { self.misses = self.misses + 1_u64; Maybe.None },
         };
         if !hit_and_live {
             self.remove(key);
             self.expired = self.expired + 1_u64;
-            return None;
+            return Maybe.None;
         }
         self.hits = self.hits + 1_u64;
         self.touch(key);
         match self.store.get(key) {
-            Some(entry) => Some(&entry.value),
-            None        => None,
+            Maybe.Some(entry) => Maybe.Some(&entry.value),
+            Maybe.None        => Maybe.None,
         }
     }
 
@@ -163,8 +163,8 @@ implement<K: Hash + Eq, V> TtlCache<K, V> {
         while i < self.order.len() {
             let key = self.order[i].clone();
             let expired = match self.store.get(key.clone()) {
-                Some(entry) => now >= entry.expires_at.clone(),
-                None        => true,
+                Maybe.Some(entry) => now >= entry.expires_at.clone(),
+                Maybe.None        => true,
             };
             if expired {
                 let _ = self.store.remove(key.clone());
