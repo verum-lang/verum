@@ -15,7 +15,7 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.mem.heap.{DIRECT_LOOKUP_SIZE, PAGE_HEADER_SIZE};
+mount core.mem.heap.{DIRECT_LOOKUP_SIZE, PAGE_HEADER_SIZE, HeapStats, HeapError};
 mount core.mem.size_class.{SMALL_SIZE_MAX, WORD_SIZE};
 
 // -----------------------------------------------------------------------------
@@ -95,6 +95,85 @@ fn integration_multiple_concurrent_heap_allocations() {
     assert_eq(*f, 6);
     assert_eq(*g, 7);
     assert_eq(*h, 8);
+}
+
+// -----------------------------------------------------------------------------
+// §4  HeapStats record algebra — zero-init shape + non-negative-counters
+//     pin.  The HeapStats record carries the per-thread observability
+//     surface; downstream tools (verum profile, debugger) read these
+//     8 fields and depend on the zero-init contract.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_heap_stats_new_yields_zero_state() {
+    // HeapStats.new() must produce an all-zero record — pin the
+    // baseline state that every per-thread heap reports BEFORE the
+    // first allocation.
+    let s: HeapStats = HeapStats.new();
+    assert_eq(s.allocated, 0);
+    assert_eq(s.deallocated, 0);
+    assert_eq(s.bytes_allocated, 0);
+    assert_eq(s.bytes_deallocated, 0);
+    assert_eq(s.peak_bytes, 0);
+    assert_eq(s.pages_allocated, 0);
+    assert_eq(s.pages_freed, 0);
+    assert_eq(s.cache_hits, 0);
+}
+
+@test
+fn integration_heap_stats_zero_state_live_count_zero() {
+    // At zero state, the live-allocation count is zero. This is the
+    // load-bearing invariant for any per-thread heap observer: when
+    // there have been no allocations, there are no live allocations.
+    let s: HeapStats = HeapStats.new();
+    assert_eq(s.allocated - s.deallocated, 0);
+}
+
+@test
+fn integration_heap_stats_zero_state_bytes_outstanding_zero() {
+    // At zero state, outstanding bytes (bytes_allocated -
+    // bytes_deallocated) is zero. Pinned for parity with the
+    // live-count zero invariant.
+    let s: HeapStats = HeapStats.new();
+    assert_eq(s.bytes_allocated - s.bytes_deallocated, 0);
+    assert_eq(s.peak_bytes, 0);
+}
+
+@test
+fn integration_heap_stats_zero_state_no_pages_or_cache_activity() {
+    // At zero state, no pages have been allocated or freed, no cache
+    // hits accrued. Pins the full 8-field zero baseline (4 of the 8
+    // fields exercised here; the other 4 are in the _zero_state test).
+    let s: HeapStats = HeapStats.new();
+    assert_eq(s.pages_allocated, 0);
+    assert_eq(s.pages_freed, 0);
+    assert_eq(s.cache_hits, 0);
+}
+
+// -----------------------------------------------------------------------------
+// §5  Constants drift surface — DIRECT_LOOKUP_SIZE and PAGE_HEADER_SIZE
+//     are load-bearing primitives; pin them against unintended drift.
+// -----------------------------------------------------------------------------
+
+@test
+fn integration_direct_lookup_size_positive_and_bounded() {
+    // DIRECT_LOOKUP_SIZE must be in a sane range: > 0 (otherwise no
+    // fast-path table) and <= 256 (otherwise the table consumes too
+    // much L1 cache for the small-alloc hot path).
+    assert(DIRECT_LOOKUP_SIZE > 0);
+    assert(DIRECT_LOOKUP_SIZE <= 256);
+    // Current pinned value is 129.
+    assert_eq(DIRECT_LOOKUP_SIZE, 129);
+}
+
+@test
+fn integration_page_header_size_aligned_to_cache_line() {
+    // PAGE_HEADER_SIZE must be a multiple of 64 bytes (typical L1 cache
+    // line size on modern CPUs) so the page payload starts on a
+    // cache-aligned boundary.  Current pinned value is 128 (= 2 cache lines).
+    assert(PAGE_HEADER_SIZE > 0);
+    assert(PAGE_HEADER_SIZE % 64 == 0);
+    assert_eq(PAGE_HEADER_SIZE, 128);
 }
 
 fn main() {
