@@ -280,14 +280,20 @@ public fn format_link_header(entries: &List<LinkEntry>) -> Text {
     let mut out: List<Byte> = [];
     let mut i: Int = 0;
     while i < entries.len() {
-        if i > 0 { push_bytes(&mut out, b", "); }
+        // Inline ", " / "; " separator pushes — avoid b"..." byte-string
+        // literal codegen path that triggers LINKHDR-1 family SIGSEGV.
+        if i > 0 {
+            out.push(',' as Byte);
+            out.push(' ' as Byte);
+        }
         out.push('<' as Byte);
         push_bytes(&mut out, entries[i].uri.as_bytes());
         out.push('>' as Byte);
         let mut j: Int = 0;
         while j < entries[i].params.len() {
             let (name, value) = &entries[i].params[j];
-            push_bytes(&mut out, b"; ");
+            out.push(';' as Byte);
+            out.push(' ' as Byte);
             push_bytes(&mut out, name.as_bytes());
             if value.as_bytes().len() > 0 {
                 out.push('=' as Byte);

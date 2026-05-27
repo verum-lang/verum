@@ -19,7 +19,6 @@ mount core.base.maybe.{Maybe, Some, None};
 // LINKHDR-1 — parse / find_rel / format SIGSEGV during precompile cascade
 // =============================================================================
 
-@ignore("LINKHDR-1: link_header.parse SIGSEGV. See audit.md §3.1.")
 @test
 fn regression_parse_single_entry_no_params() {
     let s = "</next>".clone();
@@ -29,7 +28,6 @@ fn regression_parse_single_entry_no_params() {
     }
 }
 
-@ignore("LINKHDR-1: parse SIGSEGV.")
 @test
 fn regression_parse_with_rel() {
     let s = "</page/2>; rel=\"next\"".clone();
@@ -42,7 +40,6 @@ fn regression_parse_with_rel() {
     }
 }
 
-@ignore("LINKHDR-1: parse SIGSEGV — multi-entry.")
 @test
 fn regression_parse_pagination_pair() {
     let s = "</page/1>; rel=\"prev\", </page/3>; rel=\"next\"".clone();
@@ -52,7 +49,6 @@ fn regression_parse_pagination_pair() {
     }
 }
 
-@ignore("LINKHDR-1: find_rel SIGSEGV.")
 @test
 fn regression_find_rel_matches() {
     let s = "</page/2>; rel=\"next\"".clone();
@@ -63,7 +59,6 @@ fn regression_find_rel_matches() {
     }
 }
 
-@ignore("LINKHDR-1: find_rel SIGSEGV — case-insensitive.")
 @test
 fn regression_find_rel_case_insensitive() {
     let s = "</page/2>; rel=\"NEXT\"".clone();
@@ -74,7 +69,6 @@ fn regression_find_rel_case_insensitive() {
     }
 }
 
-@ignore("LINKHDR-1: find_rel SIGSEGV — no match.")
 @test
 fn regression_find_rel_no_match() {
     let s = "</page/2>; rel=\"next\"".clone();
@@ -85,7 +79,6 @@ fn regression_find_rel_no_match() {
     }
 }
 
-@ignore("LINKHDR-1: format_link_header SIGSEGV.")
 @test
 fn regression_format_round_trip() {
     let s = "</page/2>; rel=\"next\"".clone();
@@ -94,7 +87,6 @@ fn regression_format_round_trip() {
     assert(entries.len() == 1);
 }
 
-@ignore("LINKHDR-1: parse SIGSEGV — malformed.")
 @test
 fn regression_parse_missing_close_angle() {
     let s = "</foo; rel=\"x\"".clone();

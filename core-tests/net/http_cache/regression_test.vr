@@ -21,7 +21,6 @@ mount core.base.maybe.{Maybe, Some, None};
 // HTTPCACHE-1 — parse / current_age / freshness / decide SIGSEGV
 // =============================================================================
 
-@ignore("HTTPCACHE-1: cc_parse SIGSEGV. See audit.md §3.1.")
 @test
 fn regression_parse_no_store() {
     let s = "no-store".clone();
@@ -29,7 +28,6 @@ fn regression_parse_no_store() {
     assert(cc.no_store);
 }
 
-@ignore("HTTPCACHE-1: cc_parse SIGSEGV.")
 @test
 fn regression_parse_max_age() {
     let s = "max-age=3600".clone();
@@ -40,7 +38,6 @@ fn regression_parse_max_age() {
     }
 }
 
-@ignore("HTTPCACHE-1: cc_parse SIGSEGV — multi-directive.")
 @test
 fn regression_parse_compound_directives() {
     let s = "public, max-age=3600, must-revalidate".clone();
@@ -49,7 +46,6 @@ fn regression_parse_compound_directives() {
     assert(cc.must_revalidate);
 }
 
-@ignore("HTTPCACHE-1: current_age SIGSEGV.")
 @test
 fn regression_current_age_no_age_header() {
     let ai = AgeInputs {
@@ -64,7 +60,6 @@ fn regression_current_age_no_age_header() {
     assert_eq(current_age(&ai), 100_u64);
 }
 
-@ignore("HTTPCACHE-1: freshness_lifetime_sec SIGSEGV.")
 @test
 fn regression_freshness_max_age_wins_for_browser() {
     let s = "max-age=600".clone();
@@ -76,7 +71,6 @@ fn regression_freshness_max_age_wins_for_browser() {
     }
 }
 
-@ignore("HTTPCACHE-1: decide SIGSEGV.")
 @test
 fn regression_decide_no_store_must_not_cache() {
     let s = "no-store".clone();
