@@ -100,7 +100,7 @@ implement<T> Deque<T> {
     // (e.g. daemons / services that should degrade rather than crash).
     public fn try_with_capacity(capacity: Int) -> Maybe<Deque<T>> {
         if capacity == 0 {
-            return Some(Deque.new());
+            return Maybe.Some(Deque.new());
         }
 
         let cap = capacity.next_power_of_two();
@@ -109,10 +109,10 @@ implement<T> Deque<T> {
         } as &unsafe T;
 
         if data.is_null() {
-            return None;
+            return Maybe.None;
         }
 
-        Some(Deque {
+        Maybe.Some(Deque {
             data: data,
             head: 0,
             len: 0,
@@ -216,24 +216,24 @@ implement<T> Deque<T> {
     // Pop element from back.
     public fn pop_back(&mut self) -> Maybe<T> {
         if self.len == 0 {
-            return None;
+            return Maybe.None;
         }
 
         self.len = self.len - 1;
         let tail = self.physical_index(self.len);
-        Some(unsafe { ptr_read(self.data.offset(tail)) })
+        Maybe.Some(unsafe { ptr_read(self.data.offset(tail)) })
     }
 
     // Pop element from front.
     public fn pop_front(&mut self) -> Maybe<T> {
         if self.len == 0 {
-            return None;
+            return Maybe.None;
         }
 
         let value = unsafe { ptr_read(self.data.offset(self.head)) };
         self.head = self.wrap_index(self.head + 1);
         self.len = self.len - 1;
-        Some(value)
+        Maybe.Some(value)
     }
 
     // Get front element by value copy.
@@ -241,9 +241,9 @@ implement<T> Deque<T> {
     @inline(always)
     public fn front(&self) -> Maybe<T> {
         if self.len == 0 {
-            None
+            Maybe.None
         } else {
-            Some(unsafe { *self.data.offset(self.head) })
+            Maybe.Some(unsafe { *self.data.offset(self.head) })
         }
     }
 
@@ -251,9 +251,9 @@ implement<T> Deque<T> {
     @inline(always)
     public fn front_mut(&mut self) -> Maybe<&mut T> {
         if self.len == 0 {
-            None
+            Maybe.None
         } else {
-            Some(unsafe { &mut *self.data.offset(self.head) })
+            Maybe.Some(unsafe { &mut *self.data.offset(self.head) })
         }
     }
 
@@ -262,10 +262,10 @@ implement<T> Deque<T> {
     @inline(always)
     public fn back(&self) -> Maybe<T> {
         if self.len == 0 {
-            None
+            Maybe.None
         } else {
             let tail = self.physical_index(self.len - 1);
-            Some(unsafe { *self.data.offset(tail) })
+            Maybe.Some(unsafe { *self.data.offset(tail) })
         }
     }
 
@@ -273,10 +273,10 @@ implement<T> Deque<T> {
     @inline(always)
     public fn back_mut(&mut self) -> Maybe<&mut T> {
         if self.len == 0 {
-            None
+            Maybe.None
         } else {
             let tail = self.physical_index(self.len - 1);
-            Some(unsafe { &mut *self.data.offset(tail) })
+            Maybe.Some(unsafe { &mut *self.data.offset(tail) })
         }
     }
 
@@ -285,10 +285,10 @@ implement<T> Deque<T> {
     @inline(always)
     public fn get(&self, idx: Int) -> Maybe<T> {
         if idx < 0 || idx >= self.len {
-            None
+            Maybe.None
         } else {
             let phys = self.physical_index(idx);
-            Some(unsafe { *self.data.offset(phys) })
+            Maybe.Some(unsafe { *self.data.offset(phys) })
         }
     }
 
@@ -296,10 +296,10 @@ implement<T> Deque<T> {
     @inline(always)
     public fn get_mut(&mut self, idx: Int) -> Maybe<&mut T> {
         if idx < 0 || idx >= self.len {
-            None
+            Maybe.None
         } else {
             let phys = self.physical_index(idx);
-            Some(unsafe { &mut *self.data.offset(phys) })
+            Maybe.Some(unsafe { &mut *self.data.offset(phys) })
         }
     }
 
@@ -492,10 +492,10 @@ implement<T> Deque<T> {
         for i in range(0, self.len) {
             let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             if predicate(item) {
-                return Some(item);
+                return Maybe.Some(item);
             }
         }
-        None
+        Maybe.None
     }
 
     /// Find position of first element matching predicate.
@@ -503,10 +503,10 @@ implement<T> Deque<T> {
         for i in range(0, self.len) {
             let item = self.get(i).expect("Deque: i in range(0, self.len) — get is_some");
             if predicate(item) {
-                return Some(i);
+                return Maybe.Some(i);
             }
         }
-        None
+        Maybe.None
     }
 
     /// Check if any element satisfies the predicate.
@@ -541,7 +541,7 @@ implement<T> Deque<T> {
     where T: Ord
     {
         if self.is_empty() {
-            return None;
+            return Maybe.None;
         }
         let mut min_val = self.get(0).expect("Deque: non-empty branch (early-empty-return above) — get(0) is_some");
         for i in range(1, self.len) {
@@ -550,7 +550,7 @@ implement<T> Deque<T> {
                 min_val = item;
             }
         }
-        Some(min_val)
+        Maybe.Some(min_val)
     }
 
     /// Get maximum element.
@@ -559,7 +559,7 @@ implement<T> Deque<T> {
     where T: Ord
     {
         if self.is_empty() {
-            return None;
+            return Maybe.None;
         }
         let mut max_val = self.get(0).expect("Deque: non-empty branch (early-empty-return above) — get(0) is_some");
         for i in range(1, self.len) {
@@ -568,7 +568,7 @@ implement<T> Deque<T> {
                 max_val = item;
             }
         }
-        Some(max_val)
+        Maybe.Some(max_val)
     }
 
     // =========================================================================
@@ -590,7 +590,7 @@ implement<T> Deque<T> {
     public fn into_list(self) -> List<T> {
         let mut result: List<T> = List.with_capacity(self.len);
         let mut d = self;
-        while let Some(val) = d.pop_front() {
+        while let Maybe.Some(val) = d.pop_front() {
             result.push(val);
         }
         result
@@ -764,7 +764,7 @@ implement<T> Deque<T> {
     // Remove element at position. Returns removed element.
     public fn remove(&mut self, idx: Int) -> Maybe<T> {
         if idx < 0 || idx >= self.len {
-            return None;
+            return Maybe.None;
         }
 
         let phys = self.physical_index(idx);
@@ -783,7 +783,7 @@ implement<T> Deque<T> {
         }
 
         self.len = self.len - 1;
-        Some(value)
+        Maybe.Some(value)
     }
 
     /// Creates a draining iterator that removes and yields all elements.
