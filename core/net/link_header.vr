@@ -348,8 +348,15 @@ fn is_param_delim(c: Byte) -> Bool {
 }
 
 fn slice_text(b: &[Byte], start: Int, end: Int) -> Text {
+    // Byte-by-byte push instead of extend_from_slice — LINKHDR-1
+    // fix family (cidr / uri_template / http_range / http_cache /
+    // content_negotiation shared).
     let mut out: List<Byte> = List.with_capacity(end - start);
-    out.extend_from_slice(&b[start..end]);
+    let mut i = start;
+    while i < end {
+        out.push(b[i]);
+        i = i + 1;
+    }
     Text.from_utf8_unchecked(out.as_slice())
 }
 
