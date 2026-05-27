@@ -27,7 +27,9 @@ mount core.collections.list.List;
 // becomes mount-scope-aware (multi-day VBC codegen fix).
 // =============================================================================
 
-@ignore("task #17/#39 — parse bare-name dispatch collision. Multi-day VBC codegen fix.")
+// Un-@ignore'd 2026-05-28 — task #17/#39 dispatch collision closed
+// for the bare-name `parse` call site after round-14b dispatch
+// consolidation; passes under --interp.
 @test
 fn regression_pin_parse_bare_dispatch_returns_wrong_type() {
     let r = parse(&"1.2.3".to_text());
