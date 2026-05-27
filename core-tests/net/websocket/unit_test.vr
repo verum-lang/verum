@@ -1,0 +1,279 @@
+// =============================================================================
+// core-tests/net/websocket/unit_test.vr — RFC 6455 surface
+// =============================================================================
+//
+// `core/net/websocket.vr` (~510 LOC) — RFC 6455 WebSocket protocol:
+// opening-handshake helpers, frame codec with masking, close codes,
+// control frames (Ping/Pong/Close), fragmentation support.
+//
+// Tests cover the algebraic data-surface:
+//
+//   * WsOpcode 7-variant + to_byte / from_byte round-trip + is_control
+//     + is_data predicates.
+//   * CloseCode RFC 6455 §7.4 well-known constants (NORMAL 1000,
+//     GOING_AWAY 1001, PROTOCOL_ERROR 1002, ...).
+//   * WsFrame factory ctors (text / binary / ping / pong / close)
+//     header field preservation.
+//   * WebSocketDecodeError + WebSocketDecodeResult shape.
+//
+// `encode(&WsFrame, ..., &mut out)` / `decode(buf, ...)` / `accept_key`
+// /  `validate_server_handshake` functional paths are gated behind
+// WS-1 — calling them from a user test module is subject to the same
+// precompile-cascade SIGSEGV class as CIDR-1 family.
+// =============================================================================
+
+mount core.net.websocket.{
+    WsOpcode, CloseCode, WsFrame
+};
+mount core.collections.List;
+
+// =============================================================================
+// Section 1: WsOpcode — 7-variant construction
+// =============================================================================
+
+@test
+fn test_ws_opcode_continuation() {
+    let o: WsOpcode = WsOpcode.Continuation;
+    assert(o is WsOpcode.Continuation);
+}
+
+@test
+fn test_ws_opcode_textual() {
+    let o: WsOpcode = WsOpcode.Textual;
+    assert(o is WsOpcode.Textual);
+}
+
+@test
+fn test_ws_opcode_binary() {
+    let o: WsOpcode = WsOpcode.Binary;
+    assert(o is WsOpcode.Binary);
+}
+
+@test
+fn test_ws_opcode_close() {
+    let o: WsOpcode = WsOpcode.Close;
+    assert(o is WsOpcode.Close);
+}
+
+@test
+fn test_ws_opcode_ping() {
+    let o: WsOpcode = WsOpcode.Ping;
+    assert(o is WsOpcode.Ping);
+}
+
+@test
+fn test_ws_opcode_pong() {
+    let o: WsOpcode = WsOpcode.Pong;
+    assert(o is WsOpcode.Pong);
+}
+
+@test
+fn test_ws_opcode_reserved() {
+    let o = WsOpcode.Reserved(0xC_u8);
+    assert(o is WsOpcode.Reserved);
+}
+
+// =============================================================================
+// Section 2: WsOpcode.to_byte — RFC 6455 §5.2 wire format
+// =============================================================================
+
+@test
+fn test_ws_opcode_to_byte_continuation_0() {
+    assert_eq(WsOpcode.Continuation.to_byte(), 0x0_u8);
+}
+
+@test
+fn test_ws_opcode_to_byte_textual_1() {
+    assert_eq(WsOpcode.Textual.to_byte(), 0x1_u8);
+}
+
+@test
+fn test_ws_opcode_to_byte_binary_2() {
+    assert_eq(WsOpcode.Binary.to_byte(), 0x2_u8);
+}
+
+@test
+fn test_ws_opcode_to_byte_close_8() {
+    assert_eq(WsOpcode.Close.to_byte(), 0x8_u8);
+}
+
+@test
+fn test_ws_opcode_to_byte_ping_9() {
+    assert_eq(WsOpcode.Ping.to_byte(), 0x9_u8);
+}
+
+@test
+fn test_ws_opcode_to_byte_pong_a() {
+    assert_eq(WsOpcode.Pong.to_byte(), 0xA_u8);
+}
+
+@test
+fn test_ws_opcode_to_byte_reserved_preserves() {
+    assert_eq(WsOpcode.Reserved(0xC_u8).to_byte(), 0xC_u8);
+}
+
+// =============================================================================
+// Section 3: WsOpcode.from_byte — round-trip
+// =============================================================================
+
+@test
+fn test_ws_opcode_from_byte_0_continuation() {
+    let o = WsOpcode.from_byte(0x0_u8);
+    assert(o is WsOpcode.Continuation);
+}
+
+@test
+fn test_ws_opcode_from_byte_1_textual() {
+    let o = WsOpcode.from_byte(0x1_u8);
+    assert(o is WsOpcode.Textual);
+}
+
+@test
+fn test_ws_opcode_from_byte_8_close() {
+    let o = WsOpcode.from_byte(0x8_u8);
+    assert(o is WsOpcode.Close);
+}
+
+@test
+fn test_ws_opcode_from_byte_unknown_is_reserved() {
+    let o = WsOpcode.from_byte(0xC_u8);
+    assert(o is WsOpcode.Reserved);
+}
+
+// =============================================================================
+// Section 4: WsOpcode.is_control / is_data classification
+// =============================================================================
+
+@test
+fn test_ws_opcode_close_is_control() {
+    assert(WsOpcode.Close.is_control());
+    assert(!WsOpcode.Close.is_data());
+}
+
+@test
+fn test_ws_opcode_ping_is_control() {
+    assert(WsOpcode.Ping.is_control());
+    assert(!WsOpcode.Ping.is_data());
+}
+
+@test
+fn test_ws_opcode_pong_is_control() {
+    assert(WsOpcode.Pong.is_control());
+    assert(!WsOpcode.Pong.is_data());
+}
+
+@test
+fn test_ws_opcode_textual_is_data() {
+    assert(WsOpcode.Textual.is_data());
+    assert(!WsOpcode.Textual.is_control());
+}
+
+@test
+fn test_ws_opcode_binary_is_data() {
+    assert(WsOpcode.Binary.is_data());
+    assert(!WsOpcode.Binary.is_control());
+}
+
+@test
+fn test_ws_opcode_continuation_is_data() {
+    assert(WsOpcode.Continuation.is_data());
+    assert(!WsOpcode.Continuation.is_control());
+}
+
+@test
+fn test_ws_opcode_reserved_is_neither() {
+    let o = WsOpcode.Reserved(0xC_u8);
+    assert(!o.is_control());
+    assert(!o.is_data());
+}
+
+// =============================================================================
+// Section 5: CloseCode — RFC 6455 §7.4 well-known constants
+// =============================================================================
+
+@test
+fn test_close_code_normal_1000() {
+    assert_eq(CloseCode.NORMAL, 1000_u16);
+}
+
+@test
+fn test_close_code_going_away_1001() {
+    assert_eq(CloseCode.GOING_AWAY, 1001_u16);
+}
+
+@test
+fn test_close_code_protocol_error_1002() {
+    assert_eq(CloseCode.PROTOCOL_ERROR, 1002_u16);
+}
+
+@test
+fn test_close_code_unsupported_data_1003() {
+    assert_eq(CloseCode.UNSUPPORTED_DATA, 1003_u16);
+}
+
+@test
+fn test_close_code_invalid_frame_payload_1007() {
+    assert_eq(CloseCode.INVALID_FRAME_PAYLOAD, 1007_u16);
+}
+
+@test
+fn test_close_code_policy_violation_1008() {
+    assert_eq(CloseCode.POLICY_VIOLATION, 1008_u16);
+}
+
+@test
+fn test_close_code_message_too_big_1009() {
+    assert_eq(CloseCode.MESSAGE_TOO_BIG, 1009_u16);
+}
+
+@test
+fn test_close_code_internal_error_1011() {
+    assert_eq(CloseCode.INTERNAL_ERROR, 1011_u16);
+}
+
+// =============================================================================
+// Section 6: CloseCode — factory + code accessor
+// =============================================================================
+
+@test
+fn test_close_code_new_normal() {
+    let c = CloseCode.new(1000_u16);
+    assert_eq(c.code(), 1000_u16);
+}
+
+@test
+fn test_close_code_new_custom() {
+    let c = CloseCode.new(4000_u16);
+    assert_eq(c.code(), 4000_u16);
+}
+
+@test
+fn test_close_code_new_max() {
+    let c = CloseCode.new(0xFFFF_u16);
+    assert_eq(c.code(), 0xFFFF_u16);
+}
+
+// =============================================================================
+// Section 7: WsFrame — factory ctors
+// =============================================================================
+
+@test
+fn test_ws_frame_text_factory() {
+    let payload: List<Byte> = [];
+    let f = WsFrame.text(payload);
+    assert(f.fin);
+    assert(!f.rsv1);
+    assert(!f.rsv2);
+    assert(!f.rsv3);
+    assert(f.opcode is WsOpcode.Textual);
+}
+
+@test
+fn test_ws_frame_binary_factory() {
+    let mut payload: List<Byte> = [];
+    payload.push(0xDE_u8);
+    payload.push(0xAD_u8);
+    let f = WsFrame.binary(payload);
+    assert(f.fin);
+    assert(f.opcode is WsOpcode.Binary);
+}

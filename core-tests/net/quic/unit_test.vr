@@ -1,0 +1,210 @@
+// =============================================================================
+// core-tests/net/quic/unit_test.vr — RFC 9000 surface
+// =============================================================================
+//
+// `core/net/quic/*` — RFC 9000 QUIC transport protocol.
+//
+// Tests cover the wire-format constants + error-code matrix:
+//
+//   * QUIC version IDs (VERSION_1 = 0x00000001, VERSION_2 = 0x6B3343CF,
+//     VERSION_NEGOTIATION = 0x00000000) per RFC 9000 + RFC 9369.
+//   * TransportErrorCode RFC 9000 §20.1 (17 codes).
+//   * ApplicationErrorCode + QuicError variants.
+//   * is_supported + is_greased version predicates (RFC 9000 §15).
+// =============================================================================
+
+mount core.net.quic.version.{VERSION_NEGOTIATION, VERSION_1, VERSION_2, is_supported, is_greased};
+mount core.net.quic.error.{TransportErrorCode, ApplicationErrorCode, QuicError};
+
+// =============================================================================
+// Section 1: QUIC version constants
+// =============================================================================
+
+@test
+fn test_quic_version_negotiation_is_zero() {
+    assert_eq(VERSION_NEGOTIATION, 0x00000000_u32);
+}
+
+@test
+fn test_quic_version_1() {
+    // RFC 9000 §15: QUIC v1 = 0x00000001
+    assert_eq(VERSION_1, 0x00000001_u32);
+}
+
+@test
+fn test_quic_version_2() {
+    // RFC 9369: QUIC v2 = 0x6B3343CF
+    assert_eq(VERSION_2, 0x6B3343CF_u32);
+}
+
+// =============================================================================
+// Section 2: TransportErrorCode — RFC 9000 §20.1
+// =============================================================================
+
+@test
+fn test_transport_error_code_no_error() {
+    assert_eq(TransportErrorCode.NO_ERROR, 0x00_u64);
+}
+
+@test
+fn test_transport_error_code_internal_error() {
+    assert_eq(TransportErrorCode.INTERNAL_ERROR, 0x01_u64);
+}
+
+@test
+fn test_transport_error_code_connection_refused() {
+    assert_eq(TransportErrorCode.CONNECTION_REFUSED, 0x02_u64);
+}
+
+@test
+fn test_transport_error_code_flow_control_error() {
+    assert_eq(TransportErrorCode.FLOW_CONTROL_ERROR, 0x03_u64);
+}
+
+@test
+fn test_transport_error_code_stream_limit_error() {
+    assert_eq(TransportErrorCode.STREAM_LIMIT_ERROR, 0x04_u64);
+}
+
+@test
+fn test_transport_error_code_stream_state_error() {
+    assert_eq(TransportErrorCode.STREAM_STATE_ERROR, 0x05_u64);
+}
+
+@test
+fn test_transport_error_code_final_size_error() {
+    assert_eq(TransportErrorCode.FINAL_SIZE_ERROR, 0x06_u64);
+}
+
+@test
+fn test_transport_error_code_frame_encoding_error() {
+    assert_eq(TransportErrorCode.FRAME_ENCODING_ERROR, 0x07_u64);
+}
+
+@test
+fn test_transport_error_code_transport_parameter_error() {
+    assert_eq(TransportErrorCode.TRANSPORT_PARAMETER_ERROR, 0x08_u64);
+}
+
+@test
+fn test_transport_error_code_connection_id_limit_error() {
+    assert_eq(TransportErrorCode.CONNECTION_ID_LIMIT_ERROR, 0x09_u64);
+}
+
+@test
+fn test_transport_error_code_protocol_violation() {
+    assert_eq(TransportErrorCode.PROTOCOL_VIOLATION, 0x0A_u64);
+}
+
+@test
+fn test_transport_error_code_invalid_token() {
+    assert_eq(TransportErrorCode.INVALID_TOKEN, 0x0B_u64);
+}
+
+@test
+fn test_transport_error_code_application_error() {
+    assert_eq(TransportErrorCode.APPLICATION_ERROR, 0x0C_u64);
+}
+
+@test
+fn test_transport_error_code_crypto_buffer_exceeded() {
+    assert_eq(TransportErrorCode.CRYPTO_BUFFER_EXCEEDED, 0x0D_u64);
+}
+
+@test
+fn test_transport_error_code_key_update_error() {
+    assert_eq(TransportErrorCode.KEY_UPDATE_ERROR, 0x0E_u64);
+}
+
+@test
+fn test_transport_error_code_aead_limit_reached() {
+    assert_eq(TransportErrorCode.AEAD_LIMIT_REACHED, 0x0F_u64);
+}
+
+@test
+fn test_transport_error_code_no_viable_path() {
+    assert_eq(TransportErrorCode.NO_VIABLE_PATH, 0x10_u64);
+}
+
+@test
+fn test_transport_error_code_crypto_error_base() {
+    // CRYPTO_ERROR base — actual code = base + TLS alert (§20.1)
+    assert_eq(TransportErrorCode.CRYPTO_ERROR_BASE, 0x0100_u64);
+}
+
+// =============================================================================
+// Section 3: TransportErrorCode — Eq lattice
+// =============================================================================
+
+@test
+fn test_transport_error_code_eq() {
+    let a = TransportErrorCode.new(0x05);
+    let b = TransportErrorCode.new(0x05);
+    assert(a == b);
+}
+
+@test
+fn test_transport_error_code_neq() {
+    let a = TransportErrorCode.new(0x05);
+    let b = TransportErrorCode.new(0x06);
+    assert(!(a == b));
+}
+
+@test
+fn test_transport_error_code_value_accessor() {
+    let c = TransportErrorCode.new(0x0A);
+    assert_eq(c.value(), 0x0A_u64);
+}
+
+// =============================================================================
+// Section 4: ApplicationErrorCode — opaque per-protocol numbering
+// =============================================================================
+
+@test
+fn test_application_error_code_construction() {
+    let c = ApplicationErrorCode.new(0x100);
+    assert_eq(c.value(), 0x100_u64);
+}
+
+@test
+fn test_application_error_code_eq() {
+    let a = ApplicationErrorCode.new(0x100);
+    let b = ApplicationErrorCode.new(0x100);
+    assert(a == b);
+}
+
+// =============================================================================
+// Section 5: QuicError — variant disjointness
+// =============================================================================
+
+@test
+fn test_quic_error_idle_timeout_construction() {
+    let e: QuicError = QuicError.IdleTimeout;
+    assert(e is QuicError.IdleTimeout);
+}
+
+@test
+fn test_quic_error_stateless_reset_construction() {
+    let e: QuicError = QuicError.StatelessReset;
+    assert(e is QuicError.StatelessReset);
+}
+
+@test
+fn test_quic_error_version_mismatch_construction() {
+    let e: QuicError = QuicError.VersionMismatch;
+    assert(e is QuicError.VersionMismatch);
+}
+
+@test
+fn test_quic_error_closed_construction() {
+    let e: QuicError = QuicError.Closed;
+    assert(e is QuicError.Closed);
+}
+
+@test
+fn test_quic_error_disjoint_idle_vs_reset() {
+    let a: QuicError = QuicError.IdleTimeout;
+    let b: QuicError = QuicError.StatelessReset;
+    assert(!(a is QuicError.StatelessReset));
+    assert(!(b is QuicError.IdleTimeout));
+}
