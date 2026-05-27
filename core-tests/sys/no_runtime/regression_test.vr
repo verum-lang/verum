@@ -1,0 +1,81 @@
+// =============================================================================
+// core-tests/sys/no_runtime/regression_test.vr
+// =============================================================================
+//
+// Pinned regressions for `core.sys.no_runtime`. Each defect we have ever
+// seen on this surface gets a one-test-per-bug entry.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.no_runtime.{SyncChannel, NoOpMutex, block_on};
+
+// =============================================================================
+// REGRESSION 1: SyncChannel.send on Full must NOT clobber the existing
+// value — pre-fix shape where `send` always wrote `*self = Full(value)`
+// regardless of state would silently lose the previously-stored value.
+// The current implementation correctly checks for Empty before writing.
+// =============================================================================
+
+@test
+fn regression_sync_channel_send_full_preserves_existing() {
+    let mut c: SyncChannel<Int> = SyncChannel.new();
+    let _ = c.send(1);
+    // Second send should fail AND leave the original `1` in place.
+    let second = c.send(99);
+    assert(!second);
+    // Recv must return the FIRST value (1), not the rejected `99`.
+    match c.recv() {
+        Some(v) => assert_eq(v, 1),
+        None    => assert(false),
+    };
+}
+
+// =============================================================================
+// REGRESSION 2: SyncChannel.recv on Full must transition the channel back
+// to Empty — pre-fix shape where `recv` returned `Some(v)` without
+// clearing the state would yield a second-recv of the same value.
+// =============================================================================
+
+@test
+fn regression_sync_channel_recv_clears_state() {
+    let mut c: SyncChannel<Int> = SyncChannel.new();
+    let _ = c.send(7);
+    let _ = c.recv();
+    // After one recv, channel must be Empty.
+    assert(c.is_empty());
+    // Second recv must yield None.
+    match c.recv() {
+        Some(_) => assert(false),
+        None    => assert(true),
+    };
+}
+
+// =============================================================================
+// REGRESSION 3: block_on must be the identity transformation, not a
+// no-op-returning-Unit. Pre-fix shape where block_on dropped its argument
+// would compile cleanly but return `()` at runtime.
+// =============================================================================
+
+@test
+fn regression_block_on_returns_argument_not_unit() {
+    let r: Int = block_on(42);
+    assert_eq(r, 42);
+    let s: Text = block_on("ok".clone());
+    assert_eq(s, "ok".clone());
+}
+
+// =============================================================================
+// REGRESSION 4: NoOpMutex.new must capture its payload by value and
+// store it in the .value field — pre-fix shape where `value: value`
+// confusingly named field-vs-arg could surface as field-init typecheck
+// confusion.
+// =============================================================================
+
+@test
+fn regression_no_op_mutex_construction_captures_payload() {
+    let mut m: NoOpMutex<Int> = NoOpMutex.new(42);
+    let r = m.lock();
+    assert_eq(*r, 42);
+}
+
+fn main() {}

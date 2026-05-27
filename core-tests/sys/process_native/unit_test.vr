@@ -1,0 +1,155 @@
+// =============================================================================
+// core-tests/sys/process_native/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.process_native` — direct-syscall pipe + fork
+// + dup2 + execve flow (no C runtime).
+//
+// API surface tested here:
+//
+//   SpawnResult                          — { pid, stdin_fd, stdout_fd, stderr_fd }
+//   native_spawn                         — pipe + fork + execve
+//   native_kill                          — kill(2) wrapper
+//   native_fd_write_all                  — retry-on-EINTR write
+//   native_fd_read_chunk                 — bounded read
+//
+// What we DO test here (in-process conformance surface):
+//   * `SpawnResult` record construction + field access — every public
+//     field reads back the value we wrote at construction time.
+//   * Spawn-result field-shape pin: pid is Int; stdin/stdout/stderr_fd
+//     are Int; -1 sentinel for "not piped".
+//
+// What we do NOT test:
+//   * Live `native_spawn` — requires a CI-portable fixture binary +
+//     deterministic /bin/echo or similar. Tracked in
+//     `core-tests/integration/process_native/` against a synthetic
+//     test-binary built ahead-of-time.
+//   * `native_kill` — requires a live child PID to signal.
+//   * `native_fd_write_all` / `native_fd_read_chunk` — require live
+//     pipe fds (which only `native_spawn` can produce).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.process_native.{SpawnResult};
+
+// =============================================================================
+// Section 1: SpawnResult — record construction + field access
+// =============================================================================
+
+@test
+fn test_spawn_result_full_pipe_construction() {
+    // All three streams captured — every fd is a positive integer.
+    let r = SpawnResult {
+        pid: 12345,
+        stdin_fd: 7,
+        stdout_fd: 8,
+        stderr_fd: 9,
+    };
+    assert_eq(r.pid, 12345);
+    assert_eq(r.stdin_fd, 7);
+    assert_eq(r.stdout_fd, 8);
+    assert_eq(r.stderr_fd, 9);
+}
+
+@test
+fn test_spawn_result_no_pipe_sentinel_minus_one() {
+    // No streams captured — each fd is the -1 sentinel.
+    let r = SpawnResult {
+        pid: 999,
+        stdin_fd: -1,
+        stdout_fd: -1,
+        stderr_fd: -1,
+    };
+    assert_eq(r.pid, 999);
+    assert_eq(r.stdin_fd, -1);
+    assert_eq(r.stdout_fd, -1);
+    assert_eq(r.stderr_fd, -1);
+}
+
+@test
+fn test_spawn_result_partial_capture_stdout_only() {
+    // Only stdout captured (the canonical "capture command output" pattern).
+    let r = SpawnResult {
+        pid: 4242,
+        stdin_fd: -1,
+        stdout_fd: 5,
+        stderr_fd: -1,
+    };
+    assert_eq(r.pid, 4242);
+    assert_eq(r.stdin_fd, -1);
+    assert_eq(r.stdout_fd, 5);
+    assert_eq(r.stderr_fd, -1);
+}
+
+@test
+fn test_spawn_result_partial_capture_stderr_only() {
+    let r = SpawnResult {
+        pid: 4243,
+        stdin_fd: -1,
+        stdout_fd: -1,
+        stderr_fd: 5,
+    };
+    assert_eq(r.pid, 4243);
+    assert_eq(r.stderr_fd, 5);
+}
+
+@test
+fn test_spawn_result_partial_capture_stdin_only() {
+    let r = SpawnResult {
+        pid: 4244,
+        stdin_fd: 5,
+        stdout_fd: -1,
+        stderr_fd: -1,
+    };
+    assert_eq(r.stdin_fd, 5);
+    assert_eq(r.stdout_fd, -1);
+    assert_eq(r.stderr_fd, -1);
+}
+
+@test
+fn test_spawn_result_pid_zero_child_path() {
+    // pid == 0 is the canonical "child process" indicator returned by
+    // fork() in the child. SpawnResult should be able to carry it.
+    let r = SpawnResult {
+        pid: 0,
+        stdin_fd: -1,
+        stdout_fd: -1,
+        stderr_fd: -1,
+    };
+    assert_eq(r.pid, 0);
+}
+
+@test
+fn test_spawn_result_pid_negative_error_path() {
+    // pid < 0 indicates a fork() failure. SpawnResult itself doesn't
+    // restrict the sign; the higher-level wrapper funnels the negative
+    // pid through Result<SpawnResult, Text>.
+    let r = SpawnResult {
+        pid: -1,
+        stdin_fd: -1,
+        stdout_fd: -1,
+        stderr_fd: -1,
+    };
+    assert(r.pid < 0);
+}
+
+// =============================================================================
+// Section 2: SpawnResult — fd-validity classification
+// =============================================================================
+
+@test
+fn test_spawn_result_classify_streams_helper() {
+    // The canonical "any stream captured?" classifier — true iff at
+    // least one of {stdin, stdout, stderr} is non-negative.
+    fn any_captured(r: &SpawnResult) -> Bool {
+        r.stdin_fd >= 0 || r.stdout_fd >= 0 || r.stderr_fd >= 0
+    }
+    let none = SpawnResult { pid: 1, stdin_fd: -1, stdout_fd: -1, stderr_fd: -1 };
+    let some = SpawnResult { pid: 1, stdin_fd: -1, stdout_fd:  5, stderr_fd: -1 };
+    let all  = SpawnResult { pid: 1, stdin_fd:  3, stdout_fd:  5, stderr_fd:  7 };
+    assert(!any_captured(&none));
+    assert(any_captured(&some));
+    assert(any_captured(&all));
+}
+
+fn main() {}

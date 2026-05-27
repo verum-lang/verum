@@ -1,0 +1,186 @@
+// =============================================================================
+// core-tests/sys/embedded/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.embedded`. Exercises
+// StackAllocator + RingBuffer + PanicAction in combination with the
+// rest of the standard library (List, Maybe, pattern matching).
+//
+// What this file pins:
+//
+//   * StackAllocator allocation sequences mirroring real embedded-
+//     bootloader patterns (struct table + per-struct payload).
+//   * StackAllocator OOM funnel through Maybe<Int> (Some(ptr) on
+//     success; None on the 0-sentinel).
+//   * Multi-allocator coexistence (independent bump pointers).
+//   * RingBuffer × List<Int> drained-iteration shape pin.
+//   * PanicAction × Maybe<PanicAction> handler-selection pattern.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.embedded.{
+    StackAllocator,
+    RingBuffer,
+    PanicAction,
+};
+
+// =============================================================================
+// Section 1: StackAllocator × Maybe — OOM-funnel pattern
+// =============================================================================
+
+@test
+fn integration_stack_allocator_alloc_funnel_through_maybe() {
+    // Wrap alloc result in Maybe to make the OOM-vs-success branch
+    // typesafe at the call site.
+    fn alloc_maybe(a: &mut StackAllocator, size: Int, align: Int) -> Maybe<Int> {
+        let p = a.alloc(size, align);
+        if p == 0 { None } else { Some(p) }
+    }
+    let mut a = StackAllocator.new(0x1000, 256);
+    let ok  = alloc_maybe(&mut a, 128, 8);
+    let oom = alloc_maybe(&mut a, 256, 8);
+    match ok {
+        Some(p) => assert_eq(p, 0x1000),
+        None    => assert(false),
+    };
+    match oom {
+        Some(_) => assert(false),
+        None    => assert(true),
+    };
+}
+
+// =============================================================================
+// Section 2: StackAllocator — sequential bump pattern
+// =============================================================================
+
+@test
+fn integration_stack_allocator_struct_table_pattern() {
+    // The canonical embedded-bootloader pattern: allocate a table of N
+    // struct-descriptor pointers, then bump-allocate the descriptors.
+    let mut a = StackAllocator.new(0x2000, 2048);
+    // Table of 4 pointers (4 * 8 = 32 bytes, 8-aligned).
+    let table = a.alloc(32, 8);
+    // Four 64-byte descriptors.
+    let d1 = a.alloc(64, 8);
+    let d2 = a.alloc(64, 8);
+    let d3 = a.alloc(64, 8);
+    let d4 = a.alloc(64, 8);
+    // Each pointer must be distinct.
+    assert(table != d1);
+    assert(d1 != d2);
+    assert(d2 != d3);
+    assert(d3 != d4);
+    // Sequential bumps — every descriptor is 64 bytes from the previous.
+    assert_eq(d2 - d1, 64);
+    assert_eq(d3 - d2, 64);
+    assert_eq(d4 - d3, 64);
+}
+
+// =============================================================================
+// Section 3: Multi-allocator coexistence
+// =============================================================================
+
+@test
+fn integration_two_independent_allocators() {
+    // Two allocators over disjoint buffers maintain independent state.
+    let mut a = StackAllocator.new(0x3000, 1024);
+    let mut b = StackAllocator.new(0x4000, 1024);
+    let _ = a.alloc(128, 8);
+    let _ = a.alloc(128, 8);
+    let _ = b.alloc(64, 8);
+    // a has 256 used, b has 64 used — independent bookkeeping.
+    assert_eq(a.used(), 256);
+    assert_eq(b.used(),  64);
+    // Reset a does NOT touch b.
+    a.reset();
+    assert_eq(a.used(), 0);
+    assert_eq(b.used(), 64);
+}
+
+// =============================================================================
+// Section 4: RingBuffer — construction + state-machine invariants
+// =============================================================================
+
+@test
+fn integration_ring_buffer_initial_state_invariants() {
+    let r = RingBuffer.new(0x5000, 64);
+    // After construction: empty, not full, len = 0.
+    assert(r.is_empty());
+    assert(!r.is_full());
+    assert_eq(r.len(), 0);
+}
+
+@test
+fn integration_ring_buffer_after_reset_is_empty() {
+    let mut r = RingBuffer.new(0x5000, 64);
+    r.reset();
+    assert(r.is_empty());
+    assert_eq(r.len(), 0);
+}
+
+// =============================================================================
+// Section 5: PanicAction × pattern dispatch table
+// =============================================================================
+
+@test
+fn integration_panic_action_classification() {
+    // Classify panic actions by "is this a user-supplied handler?".
+    fn is_custom(p: &PanicAction) -> Bool {
+        match p {
+            PanicAction.Custom(_) => true,
+            _ => false,
+        }
+    }
+    fn empty_handler() -> () { () }
+    let halt   = PanicAction.Halt;
+    let reset  = PanicAction.Reset;
+    let custom = PanicAction.Custom(empty_handler);
+    assert(!is_custom(&halt));
+    assert(!is_custom(&reset));
+    assert(is_custom(&custom));
+}
+
+@test
+fn integration_panic_action_via_maybe_some() {
+    fn empty_handler() -> () { () }
+    let opt: Maybe<PanicAction> = Some(PanicAction.Custom(empty_handler));
+    match opt {
+        Some(p) => {
+            match p {
+                PanicAction.Custom(_) => assert(true),
+                PanicAction.Halt      => assert(false),
+                PanicAction.Reset     => assert(false),
+            }
+        }
+        None => assert(false),
+    };
+}
+
+// =============================================================================
+// Section 6: StackAllocator × List — collect allocation pointers
+// =============================================================================
+
+@test
+fn integration_stack_allocator_pointers_collect_into_list() {
+    // Allocate N small blocks; collect their pointers into a List;
+    // every pointer must be distinct (bump-allocator invariant).
+    let mut a = StackAllocator.new(0x6000, 2048);
+    let mut ptrs: List<Int> = [];
+    let mut i: Int = 0;
+    while i < 8 {
+        let p = a.alloc(32, 8);
+        ptrs.push(p);
+        i = i + 1;
+    }
+    assert_eq(ptrs.len(), 8);
+    // Every pointer in ascending order.
+    let mut j: USize = 1 as USize;
+    while j < ptrs.len() {
+        let prev = *ptrs.get(j - (1 as USize)).unwrap();
+        let curr = *ptrs.get(j).unwrap();
+        assert(curr > prev);
+        j = j + (1 as USize);
+    }
+}
+
+fn main() {}

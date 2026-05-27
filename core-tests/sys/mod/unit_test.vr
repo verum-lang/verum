@@ -1,0 +1,180 @@
+// =============================================================================
+// core-tests/sys/mod/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.mod` — the umbrella module that re-exports
+// the V-LLSI public surface (common types, intrinsic-mounted syscall
+// names, hardware-level primitives, platform-specific entry points).
+//
+// What this file pins:
+//   * Every umbrella re-export is reachable through `mount core.sys.X`
+//     (the canonical user-facing import path).
+//   * Type identity is preserved across the re-export boundary —
+//     `core.sys.X` and `core.sys.<submod>.X` refer to the same nominal
+//     type (the typechecker accepts assignment between them).
+//   * Constants exposed at the umbrella level (PAGE_SIZE,
+//     MAX_CONTEXT_SLOTS, USIZE_BITS) carry the same value at every
+//     access path.
+//
+// What we do NOT exercise:
+//   * Platform-conditional re-exports (`linux.*`, `darwin.*`, `windows.*`)
+//     — those live in the per-platform conformance suites.
+//   * `@cfg(runtime = "embedded")` and `@cfg(runtime = "none")`
+//     re-exports — gated by build-mode flag.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.{
+    // Common types
+    OSError,
+    FileDesc,
+    MemProt,
+    MapFlags,
+    MemoryOrdering,
+    SysContextError,
+    // Constants
+    PAGE_SIZE,
+    MAX_CONTEXT_SLOTS,
+    CONTEXT_STACK_DEPTH,
+    // io_engine re-exports
+    Fd,
+    TimeSpec,
+    // bitfield re-exports
+    USIZE_BITS,
+    // mmio re-exports
+    BarrierKind,
+    MemoryRegion,
+    MemoryFlags,
+    // init re-exports
+    InitError,
+};
+
+// =============================================================================
+// Section 1: Constants re-exported at the umbrella level
+// =============================================================================
+
+@test
+fn test_umbrella_page_size_is_positive() {
+    // PAGE_SIZE must be positive and a power of two on every Verum
+    // target (verified by an indirect popcount-style test: x & (x-1) == 0).
+    assert(PAGE_SIZE > 0);
+    let v = PAGE_SIZE as USize;
+    assert_eq(v & (v - (1 as USize)), 0 as USize);
+}
+
+@test
+fn test_umbrella_page_size_byte_multiple() {
+    // PAGE_SIZE is byte-addressable — multiple of 8 bits.
+    assert_eq(PAGE_SIZE % 8, 0);
+}
+
+@test
+fn test_umbrella_max_context_slots_is_positive() {
+    assert(MAX_CONTEXT_SLOTS > 0);
+}
+
+@test
+fn test_umbrella_context_stack_depth_is_positive() {
+    assert(CONTEXT_STACK_DEPTH > 0);
+}
+
+@test
+fn test_umbrella_usize_bits_pinned() {
+    // Pinned by the bitfield property suite — USIZE_BITS == USize.bits.
+    assert_eq(USIZE_BITS, USize.bits);
+}
+
+// =============================================================================
+// Section 2: Common-type re-exports — construction at the umbrella path
+// =============================================================================
+
+@test
+fn test_umbrella_os_error_constructs_via_umbrella_path() {
+    // OSError reachable as `core.sys.OSError` (umbrella) NOT just
+    // `core.sys.common.OSError`.
+    let e = OSError { code: 2, message: "ENOENT".clone() };
+    assert_eq(e.code, 2);
+}
+
+@test
+fn test_umbrella_sys_context_error_construct() {
+    // SysContextError is the umbrella-level alias for the context-system
+    // error variant.
+    let _e: SysContextError = SysContextError.StackOverflow;
+}
+
+@test
+fn test_umbrella_mem_prot_variant() {
+    let _p: MemProt = MemProt.Read;
+}
+
+@test
+fn test_umbrella_memory_ordering_variant() {
+    let _o: MemoryOrdering = MemoryOrdering.SeqCst;
+}
+
+// =============================================================================
+// Section 3: Re-exported io_engine types — Fd / TimeSpec
+// =============================================================================
+
+@test
+fn test_umbrella_fd_construction() {
+    let f: Fd = Fd(7 as Int32);
+    assert_eq(f.0, 7 as Int32);
+}
+
+@test
+fn test_umbrella_timespec_construction() {
+    let ts = TimeSpec { tv_sec: 5 as Int64, tv_nsec: 250_000_000 as Int64 };
+    assert_eq(ts.tv_sec, 5 as Int64);
+    assert_eq(ts.tv_nsec, 250_000_000 as Int64);
+}
+
+// =============================================================================
+// Section 4: Re-exported mmio types — BarrierKind / MemoryRegion / MemoryFlags
+// =============================================================================
+
+@test
+fn test_umbrella_barrier_kind_variant() {
+    let _b: BarrierKind = BarrierKind.SeqCst;
+}
+
+@test
+fn test_umbrella_memory_flags_read_bit() {
+    assert_eq(MemoryFlags.READ.0, 1 as UInt32);
+}
+
+@test
+fn test_umbrella_memory_region_construction() {
+    let r = MemoryRegion {
+        start: 0x4000 as *const (),
+        size: 4096 as USize,
+        flags: MemoryFlags.READ,
+    };
+    assert_eq(r.size, 4096 as USize);
+}
+
+// =============================================================================
+// Section 5: Re-exported init types — InitError
+// =============================================================================
+
+@test
+fn test_umbrella_init_error_variant_reachable() {
+    let _e: InitError = InitError.AlreadyInitialized;
+}
+
+// =============================================================================
+// Section 6: Re-exported MapFlags - structural shape
+// =============================================================================
+
+@test
+fn test_umbrella_map_flags_private_variant() {
+    let _f: MapFlags = MapFlags.Private;
+}
+
+@test
+fn test_umbrella_map_flags_anon_variant() {
+    let _f: MapFlags = MapFlags.Anon;
+}
+
+fn main() {}

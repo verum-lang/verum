@@ -1,0 +1,162 @@
+// =============================================================================
+// core-tests/sys/process_native/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.process_native`. Exercises
+// SpawnResult in combination with the rest of the standard library (List,
+// Maybe, Result, custom ADTs).
+//
+// What this file pins:
+//
+//   * SpawnResult composed into List<SpawnResult> — fleet-style
+//     process-group tracking.
+//   * SpawnResult × Result<SpawnResult, Text> — error funnel that
+//     mirrors the real native_spawn return shape.
+//   * Capture-mode dispatch table over a custom ADT (NoCapture /
+//     StdoutOnly / StderrOnly / All) to SpawnResult constructions.
+//
+// What we do NOT exercise:
+//   * Live spawn — require a CI-portable test binary.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.process_native.{SpawnResult};
+
+// =============================================================================
+// Section 1: SpawnResult × List — fleet of processes
+// =============================================================================
+
+@test
+fn integration_spawn_result_list_pid_distinct() {
+    // A fleet of 4 spawned children, each with its own pid.
+    let children: List<SpawnResult> = [
+        SpawnResult { pid: 1001, stdin_fd: -1, stdout_fd: -1, stderr_fd: -1 },
+        SpawnResult { pid: 1002, stdin_fd: -1, stdout_fd: -1, stderr_fd: -1 },
+        SpawnResult { pid: 1003, stdin_fd: -1, stdout_fd: -1, stderr_fd: -1 },
+        SpawnResult { pid: 1004, stdin_fd: -1, stdout_fd: -1, stderr_fd: -1 },
+    ];
+    assert_eq(children.len(), 4);
+    let mut total: Int = 0;
+    for c in children.iter() {
+        total = total + c.pid;
+    }
+    // 1001 + 1002 + 1003 + 1004 = 4010.
+    assert_eq(total, 4010);
+}
+
+@test
+fn integration_spawn_result_collect_open_stdout_fds() {
+    // The canonical "iterate the fleet, collect every captured stdout"
+    // pattern — used by core.shell to aggregate stdout from multiple
+    // pipelined commands.
+    let fleet: List<SpawnResult> = [
+        SpawnResult { pid: 1001, stdin_fd: -1, stdout_fd:  5, stderr_fd: -1 },
+        SpawnResult { pid: 1002, stdin_fd: -1, stdout_fd: -1, stderr_fd: -1 },
+        SpawnResult { pid: 1003, stdin_fd: -1, stdout_fd:  6, stderr_fd: -1 },
+        SpawnResult { pid: 1004, stdin_fd: -1, stdout_fd:  7, stderr_fd: -1 },
+    ];
+    let mut open_fds: List<Int> = [];
+    for c in fleet.iter() {
+        if c.stdout_fd >= 0 {
+            open_fds.push(c.stdout_fd);
+        }
+    }
+    // 3 of 4 children captured stdout.
+    assert_eq(open_fds.len(), 3);
+}
+
+// =============================================================================
+// Section 2: SpawnResult × Result — error-funnel pattern
+// =============================================================================
+
+@test
+fn integration_spawn_result_ok_branch_propagates_pid() {
+    // Mimic native_spawn's Result<SpawnResult, Text> shape.
+    let ok: Result<SpawnResult, Text> = Ok(SpawnResult {
+        pid: 9999,
+        stdin_fd: -1,
+        stdout_fd: -1,
+        stderr_fd: -1,
+    });
+    match ok {
+        Ok(r) => {
+            assert_eq(r.pid, 9999);
+        }
+        Err(_) => assert(false),
+    };
+}
+
+@test
+fn integration_spawn_result_err_branch_carries_text() {
+    let err: Result<SpawnResult, Text> = Err("fork() failed: EAGAIN".clone());
+    match err {
+        Ok(_)    => assert(false),
+        Err(msg) => assert_eq(msg, "fork() failed: EAGAIN".clone()),
+    };
+}
+
+// =============================================================================
+// Section 3: Capture-mode dispatch table — custom ADT → SpawnResult
+// =============================================================================
+
+type CaptureMode is
+    | NoCapture
+    | StdoutOnly
+    | StderrOnly
+    | All;
+
+@test
+fn integration_capture_mode_dispatch_table() {
+    fn build_result(mode: &CaptureMode, base_pid: Int) -> SpawnResult {
+        match mode {
+            CaptureMode.NoCapture  => SpawnResult { pid: base_pid, stdin_fd: -1, stdout_fd: -1, stderr_fd: -1 },
+            CaptureMode.StdoutOnly => SpawnResult { pid: base_pid, stdin_fd: -1, stdout_fd:  5, stderr_fd: -1 },
+            CaptureMode.StderrOnly => SpawnResult { pid: base_pid, stdin_fd: -1, stdout_fd: -1, stderr_fd:  5 },
+            CaptureMode.All        => SpawnResult { pid: base_pid, stdin_fd:  3, stdout_fd:  5, stderr_fd:  7 },
+        }
+    }
+    let modes: List<CaptureMode> = [
+        CaptureMode.NoCapture,
+        CaptureMode.StdoutOnly,
+        CaptureMode.StderrOnly,
+        CaptureMode.All,
+    ];
+    let mut n_with_stdout: Int = 0;
+    let mut n_with_stderr: Int = 0;
+    let mut n_with_stdin: Int = 0;
+    for m in modes.iter() {
+        let r = build_result(m, 7777);
+        if r.stdin_fd  >= 0 { n_with_stdin  = n_with_stdin  + 1; }
+        if r.stdout_fd >= 0 { n_with_stdout = n_with_stdout + 1; }
+        if r.stderr_fd >= 0 { n_with_stderr = n_with_stderr + 1; }
+    }
+    // StdoutOnly + All have stdout; StderrOnly + All have stderr;
+    // only All has stdin.
+    assert_eq(n_with_stdout, 2);
+    assert_eq(n_with_stderr, 2);
+    assert_eq(n_with_stdin,  1);
+}
+
+// =============================================================================
+// Section 4: SpawnResult × Maybe — selective access pattern
+// =============================================================================
+
+@test
+fn integration_spawn_result_via_maybe_some_branch() {
+    // Wrap SpawnResult in Maybe; pattern-match through both arms.
+    let opt: Maybe<SpawnResult> = Some(SpawnResult {
+        pid: 1234,
+        stdin_fd: -1,
+        stdout_fd: 7,
+        stderr_fd: -1,
+    });
+    match opt {
+        Some(r) => {
+            assert_eq(r.pid, 1234);
+            assert_eq(r.stdout_fd, 7);
+        }
+        None => assert(false),
+    };
+}
+
+fn main() {}

@@ -1,0 +1,221 @@
+// =============================================================================
+// core-tests/sys/embedded/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.embedded` — minimal runtime for embedded
+// / bare-metal targets (activated by `@cfg(runtime = "embedded")`).
+//
+// API surface tested here:
+//
+//   StackAllocator       — bump allocator over a fixed buffer
+//     .new(buffer, size) / .alloc(size, align) / .reset()
+//     .remaining() / .capacity() / .used()
+//   RingBuffer           — fixed-size circular buffer
+//     .new(buffer, capacity) / .push / .pop / .is_empty / .is_full
+//     .len / .reset
+//   PanicAction          — Halt | Reset | Custom(fn() -> ())
+//
+// What we DO test here:
+//   * StackAllocator construction + capacity/used/remaining invariants
+//     against a synthetic buffer address (no actual writes).
+//   * StackAllocator.alloc bump arithmetic + alignment rounding.
+//   * StackAllocator.reset returns to initial state.
+//   * Out-of-memory boundary returns 0 sentinel.
+//   * RingBuffer construction + is_empty/is_full/len/reset invariants
+//     against a synthetic buffer address (no actual writes; push/pop
+//     hit volatile_load/store on the synthetic pointer which would
+//     UB in a real target — those live in vcs/specs/L0-critical/).
+//   * PanicAction variant construction.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.embedded.{
+    StackAllocator,
+    RingBuffer,
+    PanicAction,
+};
+
+// =============================================================================
+// Section 1: StackAllocator — construction
+// =============================================================================
+
+@test
+fn test_stack_allocator_new_zero_used() {
+    let a = StackAllocator.new(0x1000, 8192);
+    assert_eq(a.used(), 0);
+}
+
+@test
+fn test_stack_allocator_new_full_capacity_remaining() {
+    let a = StackAllocator.new(0x1000, 8192);
+    assert_eq(a.remaining(), 8192);
+}
+
+@test
+fn test_stack_allocator_new_capacity_accessor() {
+    let a = StackAllocator.new(0x4000_0000, 65_536);
+    assert_eq(a.capacity(), 65_536);
+}
+
+@test
+fn test_stack_allocator_new_zero_size() {
+    // A zero-capacity allocator is legal — it just immediately reports
+    // remaining == 0 and every alloc returns the OOM sentinel.
+    let a = StackAllocator.new(0x1000, 0);
+    assert_eq(a.capacity(), 0);
+    assert_eq(a.used(), 0);
+    assert_eq(a.remaining(), 0);
+}
+
+// =============================================================================
+// Section 2: StackAllocator — alloc bump arithmetic
+// =============================================================================
+
+@test
+fn test_stack_allocator_alloc_aligned_at_zero_offset() {
+    // First alloc at offset 0 — aligned_offset == 0, returns base ptr.
+    let mut a = StackAllocator.new(0x1000, 1024);
+    let p = a.alloc(64, 8);
+    assert_eq(p, 0x1000);
+    assert_eq(a.used(), 64);
+}
+
+@test
+fn test_stack_allocator_alloc_advances_used() {
+    let mut a = StackAllocator.new(0x2000, 4096);
+    let _ = a.alloc(128, 8);
+    let _ = a.alloc(256, 16);
+    // used = max-aligned(128, 16) + 256 = 128 + 256 = 384 (since 128 already aligned).
+    // Aligned offset after first alloc is 128 (already aligned to 16);
+    // new_offset = 128 + 256 = 384.
+    assert_eq(a.used(), 384);
+}
+
+@test
+fn test_stack_allocator_alloc_alignment_rounding() {
+    // After a 5-byte alloc, the next aligned-to-8 alloc must round
+    // offset up from 5 to 8 before reserving.
+    let mut a = StackAllocator.new(0x3000, 256);
+    let _ = a.alloc(5, 1);   // offset = 5
+    let _ = a.alloc(8, 8);   // aligned_offset = 8, new_offset = 16
+    assert_eq(a.used(), 16);
+}
+
+@test
+fn test_stack_allocator_alloc_returns_oom_sentinel() {
+    // Asking for more than capacity returns 0 (the OOM sentinel).
+    let mut a = StackAllocator.new(0x4000, 128);
+    let p = a.alloc(256, 8);   // wants 256, has 128 → OOM
+    assert_eq(p, 0);
+}
+
+@test
+fn test_stack_allocator_alloc_exactly_capacity_succeeds() {
+    let mut a = StackAllocator.new(0x5000, 1024);
+    let p = a.alloc(1024, 8);
+    assert(p != 0);
+    assert_eq(a.used(), 1024);
+    assert_eq(a.remaining(), 0);
+}
+
+@test
+fn test_stack_allocator_alloc_after_full_returns_oom() {
+    let mut a = StackAllocator.new(0x6000, 1024);
+    let _ = a.alloc(1024, 8);
+    let p = a.alloc(1, 1);
+    assert_eq(p, 0);
+}
+
+// =============================================================================
+// Section 3: StackAllocator — reset
+// =============================================================================
+
+@test
+fn test_stack_allocator_reset_clears_used() {
+    let mut a = StackAllocator.new(0x7000, 1024);
+    let _ = a.alloc(64, 8);
+    let _ = a.alloc(128, 16);
+    assert(a.used() > 0);
+    a.reset();
+    assert_eq(a.used(), 0);
+    assert_eq(a.remaining(), 1024);
+}
+
+@test
+fn test_stack_allocator_reset_preserves_capacity() {
+    let mut a = StackAllocator.new(0x8000, 2048);
+    let _ = a.alloc(512, 8);
+    a.reset();
+    assert_eq(a.capacity(), 2048);
+}
+
+@test
+fn test_stack_allocator_alloc_after_reset_succeeds() {
+    let mut a = StackAllocator.new(0x9000, 256);
+    let _ = a.alloc(256, 8);
+    assert_eq(a.remaining(), 0);
+    a.reset();
+    let p = a.alloc(128, 8);
+    assert(p != 0);
+}
+
+// =============================================================================
+// Section 4: RingBuffer — construction
+// =============================================================================
+
+@test
+fn test_ring_buffer_new_is_empty() {
+    let r = RingBuffer.new(0x1000, 256);
+    assert(r.is_empty());
+    assert_eq(r.len(), 0);
+}
+
+@test
+fn test_ring_buffer_new_is_not_full() {
+    let r = RingBuffer.new(0x1000, 256);
+    assert(!r.is_full());
+}
+
+@test
+fn test_ring_buffer_reset_clears_state() {
+    let mut r = RingBuffer.new(0x1000, 256);
+    // We can't safely push (no real buffer at 0x1000), but reset always
+    // returns to zero count.
+    r.reset();
+    assert(r.is_empty());
+    assert_eq(r.len(), 0);
+}
+
+@test
+fn test_ring_buffer_zero_capacity_is_full() {
+    // A zero-capacity ring buffer reports full immediately (0 >= 0).
+    let r = RingBuffer.new(0x1000, 0);
+    assert(r.is_empty());
+    assert(r.is_full());
+}
+
+// =============================================================================
+// Section 5: PanicAction — variant construction
+// =============================================================================
+
+@test
+fn test_panic_action_halt_construction() {
+    let p = PanicAction.Halt;
+    match p {
+        PanicAction.Halt        => assert(true),
+        PanicAction.Reset       => assert(false),
+        PanicAction.Custom(_)   => assert(false),
+    };
+}
+
+@test
+fn test_panic_action_reset_construction() {
+    let p = PanicAction.Reset;
+    match p {
+        PanicAction.Halt        => assert(false),
+        PanicAction.Reset       => assert(true),
+        PanicAction.Custom(_)   => assert(false),
+    };
+}
+
+fn main() {}

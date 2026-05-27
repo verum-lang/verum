@@ -1,0 +1,183 @@
+// =============================================================================
+// core-tests/sys/embedded/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.embedded`.
+//
+// Properties covered:
+//
+//   StackAllocator:
+//     * used() + remaining() == capacity() invariant.
+//     * Sequential alloc N times reduces remaining monotonically.
+//     * reset() restores remaining() to capacity().
+//     * Alignment law: alloc(_, A) returns an A-aligned pointer when
+//       the underlying buffer is itself A-aligned (verified
+//       indirectly by checking `(ptr - base) % A == 0`).
+//     * OOM-sentinel zero: alloc returns 0 iff requested size exceeds
+//       remaining().
+//
+//   RingBuffer:
+//     * is_empty XOR is_full (mostly; both true iff capacity == 0).
+//     * len() == 0 iff is_empty.
+//     * len() <= capacity always.
+//     * reset() ⇒ is_empty.
+//
+//   PanicAction:
+//     * Variant set is exactly {Halt, Reset, Custom(_)}; pairwise
+//       pattern dispatch reaches each arm exactly once over a 3-element
+//       sweep.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.embedded.{
+    StackAllocator,
+    RingBuffer,
+    PanicAction,
+};
+
+// =============================================================================
+// Section 1: StackAllocator — used / remaining / capacity invariants
+// =============================================================================
+
+@test
+fn law_stack_allocator_used_plus_remaining_eq_capacity() {
+    let mut a = StackAllocator.new(0x1000, 1024);
+    // Invariant holds at every observable state.
+    assert_eq(a.used() + a.remaining(), a.capacity());
+    let _ = a.alloc(64, 8);
+    assert_eq(a.used() + a.remaining(), a.capacity());
+    let _ = a.alloc(256, 16);
+    assert_eq(a.used() + a.remaining(), a.capacity());
+}
+
+@test
+fn law_stack_allocator_remaining_monotone_decreasing() {
+    let mut a = StackAllocator.new(0x2000, 4096);
+    let before = a.remaining();
+    let _ = a.alloc(128, 8);
+    let after = a.remaining();
+    // After a successful alloc, remaining MUST have decreased.
+    assert(after < before);
+}
+
+@test
+fn law_stack_allocator_reset_restores_remaining_to_capacity() {
+    let mut a = StackAllocator.new(0x3000, 2048);
+    let _ = a.alloc(512, 8);
+    let _ = a.alloc(256, 16);
+    a.reset();
+    assert_eq(a.remaining(), a.capacity());
+}
+
+@test
+fn law_stack_allocator_alloc_returns_aligned_pointer() {
+    // The contract: alloc(size, A) returns a pointer p with
+    // (p - base_ptr) % A == 0, when base_ptr is itself A-aligned.
+    // We pick base = 0x1000 (which is 4096-aligned, so all power-of-2
+    // up to 4096 are fine).
+    let mut a = StackAllocator.new(0x1000, 4096);
+    // First alloc — small bump to make next offset non-aligned.
+    let _ = a.alloc(7, 1);
+    // Now ask for 8-aligned alloc — must round up.
+    let p = a.alloc(8, 8);
+    assert((p - (0x1000 as Int)) % 8 == 0);
+    // 16-aligned next.
+    let q = a.alloc(16, 16);
+    assert((q - (0x1000 as Int)) % 16 == 0);
+}
+
+@test
+fn law_stack_allocator_oom_sentinel_iff_overflow() {
+    let mut a = StackAllocator.new(0x4000, 256);
+    // Allocate 200 — succeeds.
+    let p1 = a.alloc(200, 8);
+    assert(p1 != 0);
+    // Try to allocate 100 more — total 300, > 256 → OOM.
+    let p2 = a.alloc(100, 8);
+    assert_eq(p2, 0);
+    // After OOM, used() must NOT have advanced.
+    assert_eq(a.used(), 200);
+}
+
+@test
+fn law_stack_allocator_sequential_allocs_sum_to_used() {
+    // For aligned-aligned-aligned sequential allocs that don't require
+    // extra alignment padding, used() == sum of sizes.
+    let mut a = StackAllocator.new(0x5000, 1024);
+    let _ = a.alloc(8,  8);
+    let _ = a.alloc(16, 8);
+    let _ = a.alloc(32, 8);
+    let _ = a.alloc(64, 8);
+    // 8 + 16 + 32 + 64 = 120.
+    assert_eq(a.used(), 120);
+}
+
+// =============================================================================
+// Section 2: RingBuffer — empty / full / len / capacity invariants
+// =============================================================================
+
+@test
+fn law_ring_buffer_fresh_is_empty_not_full_when_capacity_positive() {
+    let r = RingBuffer.new(0x1000, 8);
+    assert(r.is_empty());
+    assert(!r.is_full());
+}
+
+@test
+fn law_ring_buffer_zero_capacity_is_both_empty_and_full() {
+    // Degenerate but well-defined: 0 >= 0 AND count == 0 ⇒ both true.
+    let r = RingBuffer.new(0x1000, 0);
+    assert(r.is_empty());
+    assert(r.is_full());
+}
+
+@test
+fn law_ring_buffer_fresh_len_is_zero() {
+    let r = RingBuffer.new(0x1000, 16);
+    assert_eq(r.len(), 0);
+}
+
+@test
+fn law_ring_buffer_reset_makes_empty() {
+    let mut r = RingBuffer.new(0x1000, 32);
+    r.reset();
+    assert(r.is_empty());
+    assert_eq(r.len(), 0);
+}
+
+@test
+fn law_ring_buffer_len_zero_iff_is_empty() {
+    let r = RingBuffer.new(0x1000, 16);
+    assert_eq(r.len() == 0, r.is_empty());
+}
+
+// =============================================================================
+// Section 3: PanicAction — 3-variant exhaustive dispatch
+// =============================================================================
+
+@test
+fn law_panic_action_dispatch_three_variants() {
+    fn empty_handler() -> () {
+        ()
+    }
+    let actions: List<PanicAction> = [
+        PanicAction.Halt,
+        PanicAction.Reset,
+        PanicAction.Custom(empty_handler),
+    ];
+    let mut halt_n: Int = 0;
+    let mut reset_n: Int = 0;
+    let mut custom_n: Int = 0;
+    for a in actions.iter() {
+        match a {
+            PanicAction.Halt      => halt_n   = halt_n   + 1,
+            PanicAction.Reset     => reset_n  = reset_n  + 1,
+            PanicAction.Custom(_) => custom_n = custom_n + 1,
+        };
+    }
+    assert_eq(halt_n,   1);
+    assert_eq(reset_n,  1);
+    assert_eq(custom_n, 1);
+}
+
+fn main() {}
