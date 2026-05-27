@@ -1,0 +1,155 @@
+// =============================================================================
+// core-tests/sync/mutex/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for the testable surface of Mutex<T>:
+//
+//   §A  Fresh-mutex invariant: every newly-constructed mutex is
+//       unpoisoned + unlocked.
+//   §B  Poison-flag is a binary, idempotent, involutive state-machine:
+//          poison() . poison() ≡ poison()
+//          clear()  . clear()  ≡ clear()
+//          poison() . clear()  ≡ clear()
+//          clear()  . poison() ≡ poison()
+//   §C  TryLockError variant tags are distinct — WouldBlock and
+//       Poisoned(_) cannot collide under any in-bounds payload.
+//   §D  PoisonError<T> payload round-trips through accessor and
+//       into_inner.
+// =============================================================================
+
+mount core.sync.mutex.{Mutex, PoisonError, TryLockError};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Fresh-mutex invariant
+// =============================================================================
+
+@test
+fn law_fresh_mutex_int_unpoisoned() {
+    let cases: List<Int> = [0, 1, -1, 42, 1_000_000, -1_000_000];
+    for &n in cases.iter() {
+        let m = Mutex.new(n);
+        assert(!m.is_poisoned());
+    }
+}
+
+@test
+fn law_fresh_mutex_int_unlocked() {
+    let cases: List<Int> = [0, 7, -3];
+    for &n in cases.iter() {
+        let m = Mutex.new(n);
+        assert(!m.is_locked());
+    }
+}
+
+@test
+fn law_fresh_mutex_bool_unpoisoned() {
+    let m_true = Mutex.new(true);
+    let m_false = Mutex.new(false);
+    assert(!m_true.is_poisoned());
+    assert(!m_false.is_poisoned());
+}
+
+// =============================================================================
+// §B  Poison-flag state-machine laws
+// =============================================================================
+
+@test
+fn law_double_poison_absorbs() {
+    let m = Mutex.new(0);
+    m.poison();
+    let s1 = m.is_poisoned();
+    m.poison();
+    let s2 = m.is_poisoned();
+    assert_eq(s1, s2);
+    assert(s2);
+}
+
+@test
+fn law_double_clear_absorbs() {
+    let m = Mutex.new(0);
+    m.poison();
+    m.clear_poison();
+    let s1 = m.is_poisoned();
+    m.clear_poison();
+    let s2 = m.is_poisoned();
+    assert_eq(s1, s2);
+    assert(!s2);
+}
+
+@test
+fn law_poison_then_clear_returns_to_unpoisoned() {
+    let m = Mutex.new(0);
+    m.poison();
+    m.clear_poison();
+    assert(!m.is_poisoned());
+}
+
+@test
+fn law_clear_then_poison_returns_to_poisoned() {
+    let m = Mutex.new(0);
+    m.clear_poison();
+    m.poison();
+    assert(m.is_poisoned());
+}
+
+@test
+fn law_poison_cycle_oscillates_terminal_state() {
+    let m = Mutex.new(0);
+    let mut expected_poison: Bool = false;
+    for i in 0..8 {
+        if (i % 2) == 0 {
+            m.poison();
+            expected_poison = true;
+        } else {
+            m.clear_poison();
+            expected_poison = false;
+        }
+        assert_eq(m.is_poisoned(), expected_poison);
+    }
+}
+
+// =============================================================================
+// §C  TryLockError variant disjointness
+// =============================================================================
+
+@test
+fn law_try_lock_error_would_block_never_matches_poisoned() {
+    let wb: TryLockError<Int> = TryLockError.WouldBlock;
+    assert(!(wb is TryLockError.Poisoned));
+}
+
+@test
+fn law_try_lock_error_poisoned_with_any_payload_disjoint_from_would_block() {
+    let cases: List<Int> = [0, 1, -1, 42];
+    for &n in cases.iter() {
+        let pe: PoisonError<Int> = PoisonError { guard: n };
+        let po: TryLockError<Int> = TryLockError.Poisoned(pe);
+        assert(po is TryLockError.Poisoned);
+        assert(!(po is TryLockError.WouldBlock));
+    }
+}
+
+// =============================================================================
+// §D  PoisonError<T> payload round-trip
+// =============================================================================
+
+@test
+fn law_poison_error_payload_round_trip_int() {
+    let cases: List<Int> = [0, 1, -1, 100, -100, 999_999];
+    for &n in cases.iter() {
+        let pe: PoisonError<Int> = PoisonError { guard: n };
+        assert_eq(pe.into_inner(), n);
+    }
+}
+
+@test
+fn law_poison_error_get_ref_matches_into_inner() {
+    let cases: List<Int> = [0, 1, -1, 100];
+    for &n in cases.iter() {
+        let pe: PoisonError<Int> = PoisonError { guard: n };
+        let r = *pe.get_ref();
+        let inner = pe.into_inner();
+        assert_eq(r, inner);
+    }
+}

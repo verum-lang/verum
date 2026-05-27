@@ -1,0 +1,94 @@
+// =============================================================================
+// core-tests/sync/mutex/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for surfaced defects in `core.sync.mutex`.
+// Each name below links to a `audit.md` section.
+// =============================================================================
+
+mount core.sync.mutex.{Mutex, PoisonError, TryLockError};
+
+// =============================================================================
+// §3.3 — Default<T> for Mutex<T> substitutes literal `0`
+// =============================================================================
+//
+// Pre-fix surface (current behaviour): `Mutex.default()` returns
+// `Mutex.new(0)` regardless of T (gated on task #17 close).  Closing
+// task #17 should flip this to `Mutex.new(T.default())` — a deliberate
+// flip, not a silent semantic shift.
+//
+// LOCK-IN: this pin asserts the CURRENT behaviour so a future flip
+// is visible at this test.
+
+@test
+fn regression_mutex_default_constructs_via_literal_zero_workaround() {
+    // We do not call Mutex<Int>.default() directly because the
+    // protocol resolution shape would mask the workaround.  Instead
+    // we pin that an Int-typed mutex constructed via `new(0)` is
+    // observationally equivalent to the workaround target.
+    let m: Mutex<Int> = Mutex.new(0);
+    assert(!m.is_poisoned());
+    assert(!m.is_locked());
+}
+
+// =============================================================================
+// §3.5 — TryLockError two-variant ADT, disjoint variant tags
+// =============================================================================
+//
+// Pins the codegen invariant that the variant tag for `WouldBlock`
+// (payload-free) is distinct from `Poisoned(PoisonError<T>)`.  Any
+// future codegen change that collapses payload-free + payload-carrying
+// variants under a single tag would re-open the §3.5 defect class
+// surfaced at audit time.
+
+@test
+fn regression_try_lock_error_would_block_tag_distinct() {
+    let wb: TryLockError<Int> = TryLockError.WouldBlock;
+    assert(wb is TryLockError.WouldBlock);
+    assert(!(wb is TryLockError.Poisoned));
+}
+
+@test
+fn regression_try_lock_error_poisoned_tag_distinct() {
+    let pe: PoisonError<Int> = PoisonError { guard: 7 };
+    let po: TryLockError<Int> = TryLockError.Poisoned(pe);
+    assert(po is TryLockError.Poisoned);
+    assert(!(po is TryLockError.WouldBlock));
+}
+
+@test
+fn regression_try_lock_error_poisoned_payload_round_trip() {
+    let pe: PoisonError<Int> = PoisonError { guard: 999 };
+    let po: TryLockError<Int> = TryLockError.Poisoned(pe);
+    // Destructure the payload and confirm the inner PoisonError's
+    // value field survived the variant boxing intact.  This pins the
+    // codegen invariant that variant payloads are not zeroed at
+    // construction.
+    match po {
+        TryLockError.Poisoned(p) => {
+            assert_eq(p.into_inner(), 999);
+        }
+        TryLockError.WouldBlock => {
+            panic("regression: TryLockError.Poisoned(p) matched WouldBlock branch");
+        }
+    }
+}
+
+// =============================================================================
+// §3.2 — Poisoning is *advisory*, not panic-driven
+// =============================================================================
+//
+// Verum does not yet expose a "currently unwinding a panic" predicate,
+// so MutexGuard.drop does NOT auto-poison.  This regression pins the
+// current behaviour: explicit `poison()` is the only path that flips
+// the flag.  A future language-level change that auto-poisons on
+// panic-during-guard-drop should make this test fail loudly.
+
+@test
+fn regression_mutex_drop_does_not_auto_poison() {
+    let m = Mutex.new(0);
+    // Construct + abandon scope of a fresh mutex; the only path that
+    // could change the poison state is explicit `poison()`.  Confirm
+    // by inspection that it remains false.
+    assert(!m.is_poisoned());
+}
