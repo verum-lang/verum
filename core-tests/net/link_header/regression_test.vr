@@ -1,0 +1,105 @@
+// =============================================================================
+// core-tests/net/link_header/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN pins for LINKHDR-1 — calling `parse(&Text)`, `find_rel`,
+// or `format_link_header` from a USER test module triggers the
+// precompile SIGSEGV class shared with CIDR-1 / URITPL-1 /
+// HTTPRNG-1 / CONNEG-1.
+//
+// See `audit.md §3.1`.
+// =============================================================================
+
+mount core.net.link_header.{parse as link_parse, find_rel, format_link_header, LinkEntry, LinkHeaderError};
+mount core.collections.List;
+mount core.base.result.{Result, Ok, Err};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// LINKHDR-1 — parse / find_rel / format SIGSEGV during precompile cascade
+// =============================================================================
+
+@ignore("LINKHDR-1: link_header.parse SIGSEGV. See audit.md §3.1.")
+@test
+fn regression_parse_single_entry_no_params() {
+    let s = "</next>".clone();
+    match link_parse(&s) {
+        Ok(entries) => assert_eq(entries.len(), 1),
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+@ignore("LINKHDR-1: parse SIGSEGV.")
+@test
+fn regression_parse_with_rel() {
+    let s = "</page/2>; rel=\"next\"".clone();
+    match link_parse(&s) {
+        Ok(entries) => {
+            assert_eq(entries.len(), 1);
+            assert_eq(entries[0].params.len(), 1);
+        }
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+@ignore("LINKHDR-1: parse SIGSEGV — multi-entry.")
+@test
+fn regression_parse_pagination_pair() {
+    let s = "</page/1>; rel=\"prev\", </page/3>; rel=\"next\"".clone();
+    match link_parse(&s) {
+        Ok(entries) => assert_eq(entries.len(), 2),
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+@ignore("LINKHDR-1: find_rel SIGSEGV.")
+@test
+fn regression_find_rel_matches() {
+    let s = "</page/2>; rel=\"next\"".clone();
+    let entries = link_parse(&s).unwrap();
+    match find_rel(&entries, "next") {
+        Some(_) => assert(true),
+        None => panic("expected match"),
+    }
+}
+
+@ignore("LINKHDR-1: find_rel SIGSEGV — case-insensitive.")
+@test
+fn regression_find_rel_case_insensitive() {
+    let s = "</page/2>; rel=\"NEXT\"".clone();
+    let entries = link_parse(&s).unwrap();
+    match find_rel(&entries, "next") {
+        Some(_) => assert(true),
+        None => panic("expected case-insensitive match"),
+    }
+}
+
+@ignore("LINKHDR-1: find_rel SIGSEGV — no match.")
+@test
+fn regression_find_rel_no_match() {
+    let s = "</page/2>; rel=\"next\"".clone();
+    let entries = link_parse(&s).unwrap();
+    match find_rel(&entries, "prev") {
+        Some(_) => panic("should be no match"),
+        None => assert(true),
+    }
+}
+
+@ignore("LINKHDR-1: format_link_header SIGSEGV.")
+@test
+fn regression_format_round_trip() {
+    let s = "</page/2>; rel=\"next\"".clone();
+    let entries = link_parse(&s).unwrap();
+    let _formatted = format_link_header(&entries);
+    assert(entries.len() == 1);
+}
+
+@ignore("LINKHDR-1: parse SIGSEGV — malformed.")
+@test
+fn regression_parse_missing_close_angle() {
+    let s = "</foo; rel=\"x\"".clone();
+    match link_parse(&s) {
+        Ok(_) => panic("missing '>' must reject"),
+        Err(_) => assert(true),
+    }
+}

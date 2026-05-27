@@ -1,0 +1,112 @@
+// =============================================================================
+// core-tests/net/content_negotiation/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN pins for CONNEG-1 — calling any of `parse_accept(&Text)`,
+// `parse_accept_encoding(&Text)`, `parse_accept_language(&Text)`,
+// `select_best_media`, or `select_best_coding` from a USER test
+// module triggers the precompile SIGSEGV class shared with
+// CIDR-1 / URITPL-1 / HTTPRNG-1.
+//
+// See `audit.md §3.1`.
+// =============================================================================
+
+mount core.net.content_negotiation.{
+    parse_accept, parse_accept_encoding, parse_accept_language,
+    select_best_media, select_best_coding, MediaRangeSpec,
+    CodedPreference
+};
+mount core.collections.List;
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// CONNEG-1 — parse_* / select_* SIGSEGV during precompile cascade
+// =============================================================================
+
+@ignore("CONNEG-1: parse_accept SIGSEGV in LLVM SmallVector. See audit.md §3.1.")
+@test
+fn regression_parse_accept_simple() {
+    let s = "text/html".clone();
+    let prefs = parse_accept(&s);
+    assert_eq(prefs.len(), 1);
+}
+
+@ignore("CONNEG-1: parse_accept SIGSEGV.")
+@test
+fn regression_parse_accept_with_q() {
+    let s = "text/html;q=0.9, application/json".clone();
+    let prefs = parse_accept(&s);
+    assert_eq(prefs.len(), 2);
+}
+
+@ignore("CONNEG-1: parse_accept SIGSEGV — wildcard.")
+@test
+fn regression_parse_accept_wildcard() {
+    let s = "*/*;q=0.1".clone();
+    let prefs = parse_accept(&s);
+    assert_eq(prefs.len(), 1);
+}
+
+@ignore("CONNEG-1: parse_accept_encoding SIGSEGV.")
+@test
+fn regression_parse_accept_encoding_gzip() {
+    let s = "gzip, deflate, br".clone();
+    let prefs = parse_accept_encoding(&s);
+    assert_eq(prefs.len(), 3);
+}
+
+@ignore("CONNEG-1: parse_accept_language SIGSEGV.")
+@test
+fn regression_parse_accept_language_en_us() {
+    let s = "en-US,en;q=0.5".clone();
+    let prefs = parse_accept_language(&s);
+    assert_eq(prefs.len(), 2);
+}
+
+@ignore("CONNEG-1: select_best_media SIGSEGV.")
+@test
+fn regression_select_best_media_exact_match() {
+    let header = "application/json".clone();
+    let prefs = parse_accept(&header);
+    let mut offers: List<Text> = [];
+    offers.push("application/json".clone());
+    offers.push("text/html".clone());
+    match select_best_media(&prefs, &offers) {
+        Some(pick) => {
+            let want = "application/json".clone();
+            assert(pick == want);
+        }
+        None => panic("expected match"),
+    }
+}
+
+@ignore("CONNEG-1: select_best_coding SIGSEGV.")
+@test
+fn regression_select_best_coding_q_zero_rejects() {
+    // "gzip;q=0,br" — gzip explicitly rejected, br accepted
+    let header = "gzip;q=0, br".clone();
+    let prefs = parse_accept_encoding(&header);
+    let mut offers: List<Text> = [];
+    offers.push("gzip".clone());
+    offers.push("br".clone());
+    match select_best_coding(&prefs, &offers) {
+        Some(pick) => {
+            let want = "br".clone();
+            assert(pick == want);
+        }
+        None => panic("br should be selected"),
+    }
+}
+
+@ignore("CONNEG-1: select_best_media SIGSEGV — no match returns None.")
+@test
+fn regression_select_best_media_no_match_none() {
+    let header = "application/xml".clone();
+    let prefs = parse_accept(&header);
+    let mut offers: List<Text> = [];
+    offers.push("application/json".clone());
+    match select_best_media(&prefs, &offers) {
+        Some(_) => panic("no acceptable offer"),
+        None => assert(true),
+    }
+}

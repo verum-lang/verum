@@ -1,0 +1,183 @@
+// =============================================================================
+// core-tests/net/http_range/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/http_range.vr` — HTTP Range + Content-Range (RFC 9110
+// §14). Full functional surface (`parse_range_header`,
+// `resolve_and_merge`, `encode_content_range`, `encode_unsatisfiable`)
+// is locked-in behind HTTPRNG-1 in `regression_test.vr` — calling
+// any of these from a user test module triggers the precompile
+// SIGSEGV class shared with CIDR-1 / URITPL-1.
+//
+// Data-surface tests (this file) cover the algebraic shape:
+//
+//   * RangeSpec 3-variant (Closed / Prefix / Suffix) construction.
+//   * RangeSet single-field record construction.
+//   * ResolvedRange record construction + field preservation.
+//   * RangeError 3-variant disjointness + Eq.
+//   * MAX_RANGE_SPECS constant pin (Apache CVE-2011-3192 hardening).
+// =============================================================================
+
+mount core.net.http_range.{
+    RangeSpec, RangeSet, ResolvedRange, RangeError, MAX_RANGE_SPECS
+};
+mount core.collections.List;
+
+// =============================================================================
+// Section 1: RangeSpec 3-variant construction
+// =============================================================================
+
+@test
+fn test_range_spec_closed_construction() {
+    let r = RangeSpec.Closed { start: 0_u64, end: 499_u64 };
+    assert(r is RangeSpec.Closed);
+}
+
+@test
+fn test_range_spec_prefix_construction() {
+    let r = RangeSpec.Prefix { start: 1000_u64 };
+    assert(r is RangeSpec.Prefix);
+}
+
+@test
+fn test_range_spec_suffix_construction() {
+    let r = RangeSpec.Suffix { length: 500_u64 };
+    assert(r is RangeSpec.Suffix);
+}
+
+@test
+fn test_range_spec_disjoint_closed_vs_prefix() {
+    let a = RangeSpec.Closed { start: 0_u64, end: 100_u64 };
+    let b = RangeSpec.Prefix { start: 0_u64 };
+    assert(a is RangeSpec.Closed);
+    assert(b is RangeSpec.Prefix);
+    assert(!(a is RangeSpec.Prefix));
+    assert(!(b is RangeSpec.Closed));
+}
+
+@test
+fn test_range_spec_disjoint_prefix_vs_suffix() {
+    let a = RangeSpec.Prefix { start: 100_u64 };
+    let b = RangeSpec.Suffix { length: 100_u64 };
+    assert(a is RangeSpec.Prefix);
+    assert(b is RangeSpec.Suffix);
+    assert(!(a is RangeSpec.Suffix));
+    assert(!(b is RangeSpec.Prefix));
+}
+
+// =============================================================================
+// Section 2: RangeSet single-field record
+// =============================================================================
+
+@test
+fn test_range_set_empty_specs() {
+    let specs: List<RangeSpec> = [];
+    let rs = RangeSet { specs: specs };
+    assert_eq(rs.specs.len(), 0);
+}
+
+@test
+fn test_range_set_one_closed_spec() {
+    let mut specs: List<RangeSpec> = [];
+    specs.push(RangeSpec.Closed { start: 0_u64, end: 99_u64 });
+    let rs = RangeSet { specs: specs };
+    assert_eq(rs.specs.len(), 1);
+}
+
+@test
+fn test_range_set_mixed_specs() {
+    let mut specs: List<RangeSpec> = [];
+    specs.push(RangeSpec.Closed { start: 0_u64, end: 99_u64 });
+    specs.push(RangeSpec.Prefix { start: 200_u64 });
+    specs.push(RangeSpec.Suffix { length: 50_u64 });
+    let rs = RangeSet { specs: specs };
+    assert_eq(rs.specs.len(), 3);
+}
+
+// =============================================================================
+// Section 3: ResolvedRange record construction + field preservation
+// =============================================================================
+
+@test
+fn test_resolved_range_construction() {
+    let r = ResolvedRange { start: 0_u64, end: 499_u64 };
+    assert_eq(r.start, 0_u64);
+    assert_eq(r.end, 499_u64);
+}
+
+@test
+fn test_resolved_range_zero_zero() {
+    let r = ResolvedRange { start: 0_u64, end: 0_u64 };
+    assert_eq(r.start, 0_u64);
+    assert_eq(r.end, 0_u64);
+}
+
+@test
+fn test_resolved_range_large_values() {
+    let r = ResolvedRange { start: 0xFFFFFFFF_u64, end: 0xFFFFFFFFFFFFFFFF_u64 };
+    assert_eq(r.start, 0xFFFFFFFF_u64);
+    assert_eq(r.end, 0xFFFFFFFFFFFFFFFF_u64);
+}
+
+// =============================================================================
+// Section 4: MAX_RANGE_SPECS — DoS hardening constant
+// =============================================================================
+
+@test
+fn test_max_range_specs_value() {
+    // Apache CVE-2011-3192 ("killapache") hardening — 256 is generous
+    // middle ground between nginx (1000) and Apache (200).
+    assert_eq(MAX_RANGE_SPECS, 256);
+}
+
+@test
+fn test_max_range_specs_positive() {
+    assert(MAX_RANGE_SPECS > 0);
+}
+
+// =============================================================================
+// Section 5: RangeError — 3-variant Eq lattice
+// =============================================================================
+
+@test
+fn test_range_error_unsatisfiable_eq() {
+    assert(RangeError.UnsatisfiableRange == RangeError.UnsatisfiableRange);
+}
+
+@test
+fn test_range_error_too_many_ranges_eq() {
+    let a = RangeError.TooManyRanges { declared: 300, limit: 256 };
+    let b = RangeError.TooManyRanges { declared: 300, limit: 256 };
+    assert(a == b);
+}
+
+@test
+fn test_range_error_too_many_ranges_declared_disjoint() {
+    let a = RangeError.TooManyRanges { declared: 300, limit: 256 };
+    let b = RangeError.TooManyRanges { declared: 400, limit: 256 };
+    assert(!(a == b));
+}
+
+@test
+fn test_range_error_malformed_eq_same_payload() {
+    let m1 = "test".clone();
+    let m2 = "test".clone();
+    let a = RangeError.Malformed(m1);
+    let b = RangeError.Malformed(m2);
+    assert(a == b);
+}
+
+@test
+fn test_range_error_disjoint_unsatisfiable_vs_malformed() {
+    let m = "x".clone();
+    let a = RangeError.UnsatisfiableRange;
+    let b = RangeError.Malformed(m);
+    assert(!(a == b));
+}
+
+@test
+fn test_range_error_disjoint_too_many_vs_unsatisfiable() {
+    let a = RangeError.TooManyRanges { declared: 300, limit: 256 };
+    let b = RangeError.UnsatisfiableRange;
+    assert(!(a == b));
+}

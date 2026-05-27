@@ -1,0 +1,132 @@
+// =============================================================================
+// core-tests/net/link_header/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/link_header.vr` — RFC 8288 Link header parser + builder.
+//
+// Full functional surface (`parse`, `find_rel`, `format_link_header`)
+// is locked-in behind LINKHDR-1 in `regression_test.vr` — same
+// precompile-cascade SIGSEGV defect class as CIDR-1 / URITPL-1 /
+// HTTPRNG-1 / CONNEG-1.
+//
+// Data-surface tests (this file):
+//
+//   * LinkEntry record (uri / params) construction.
+//   * LinkHeaderError 2-variant: Malformed(Text) / TooManyEntries.
+//   * MAX_LINK_ENTRIES constant pin (256 — CVE-2011-3192 hardening).
+// =============================================================================
+
+mount core.net.link_header.{LinkEntry, LinkHeaderError, MAX_LINK_ENTRIES};
+mount core.collections.List;
+
+// =============================================================================
+// Section 1: LinkEntry — construction + accessors
+// =============================================================================
+
+@test
+fn test_link_entry_minimal() {
+    let params: List<(Text, Text)> = [];
+    let e = LinkEntry {
+        uri: "/next".clone(),
+        params: params,
+    };
+    assert_eq(e.params.len(), 0);
+}
+
+@test
+fn test_link_entry_with_rel() {
+    let mut params: List<(Text, Text)> = [];
+    params.push(("rel".clone(), "next".clone()));
+    let e = LinkEntry {
+        uri: "/page/2".clone(),
+        params: params,
+    };
+    assert_eq(e.params.len(), 1);
+}
+
+@test
+fn test_link_entry_multiple_params() {
+    let mut params: List<(Text, Text)> = [];
+    params.push(("rel".clone(), "next".clone()));
+    params.push(("title".clone(), "Page 2".clone()));
+    params.push(("hreflang".clone(), "en".clone()));
+    let e = LinkEntry {
+        uri: "/page/2".clone(),
+        params: params,
+    };
+    assert_eq(e.params.len(), 3);
+}
+
+@test
+fn test_link_entry_absolute_uri() {
+    let params: List<(Text, Text)> = [];
+    let e = LinkEntry {
+        uri: "https://example.com/feed".clone(),
+        params: params,
+    };
+    let want_uri = "https://example.com/feed".clone();
+    assert(e.uri == want_uri);
+}
+
+// =============================================================================
+// Section 2: LinkHeaderError — 2-variant Eq lattice
+// =============================================================================
+
+@test
+fn test_link_header_error_too_many_entries_eq() {
+    let a = LinkHeaderError.TooManyEntries { declared: 300, limit: 256 };
+    let b = LinkHeaderError.TooManyEntries { declared: 300, limit: 256 };
+    assert(a == b);
+}
+
+@test
+fn test_link_header_error_too_many_entries_declared_disjoint() {
+    let a = LinkHeaderError.TooManyEntries { declared: 300, limit: 256 };
+    let b = LinkHeaderError.TooManyEntries { declared: 400, limit: 256 };
+    assert(!(a == b));
+}
+
+@test
+fn test_link_header_error_too_many_entries_limit_disjoint() {
+    let a = LinkHeaderError.TooManyEntries { declared: 300, limit: 256 };
+    let b = LinkHeaderError.TooManyEntries { declared: 300, limit: 512 };
+    assert(!(a == b));
+}
+
+@test
+fn test_link_header_error_malformed_eq_same_payload() {
+    let m1 = "x".clone();
+    let m2 = "x".clone();
+    let a = LinkHeaderError.Malformed(m1);
+    let b = LinkHeaderError.Malformed(m2);
+    assert(a == b);
+}
+
+@test
+fn test_link_header_error_disjoint_variants() {
+    let m = "x".clone();
+    let a = LinkHeaderError.Malformed(m);
+    let b = LinkHeaderError.TooManyEntries { declared: 300, limit: 256 };
+    assert(!(a == b));
+}
+
+// =============================================================================
+// Section 3: MAX_LINK_ENTRIES — DoS hardening
+// =============================================================================
+
+@test
+fn test_max_link_entries_value() {
+    assert_eq(MAX_LINK_ENTRIES, 256);
+}
+
+@test
+fn test_max_link_entries_positive() {
+    assert(MAX_LINK_ENTRIES > 0);
+}
+
+@test
+fn test_max_link_entries_exceeds_typical_usage() {
+    // Real-world headers carry 2-5 entries (next/prev/canonical/preload).
+    // 256 is generous bound.
+    assert(MAX_LINK_ENTRIES > 100);
+}

@@ -1,0 +1,100 @@
+// =============================================================================
+// core-tests/net/http_cache/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN pins for HTTPCACHE-1 — calling `parse(&Text)`,
+// `current_age(&AgeInputs)`, `freshness_lifetime_sec(...)`,
+// or `decide(&DecisionInputs)` from a USER test module triggers
+// the precompile SIGSEGV class shared with CIDR-1 / URITPL-1 /
+// HTTPRNG-1 / CONNEG-1 / LINKHDR-1.
+//
+// See `audit.md §3.1`.
+// =============================================================================
+
+mount core.net.http_cache.{
+    parse as cc_parse, current_age, freshness_lifetime_sec, decide,
+    CacheControl, CacheControlError, AgeInputs, DecisionInputs, CacheDecision
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// HTTPCACHE-1 — parse / current_age / freshness / decide SIGSEGV
+// =============================================================================
+
+@ignore("HTTPCACHE-1: cc_parse SIGSEGV. See audit.md §3.1.")
+@test
+fn regression_parse_no_store() {
+    let s = "no-store".clone();
+    let cc = cc_parse(&s);
+    assert(cc.no_store);
+}
+
+@ignore("HTTPCACHE-1: cc_parse SIGSEGV.")
+@test
+fn regression_parse_max_age() {
+    let s = "max-age=3600".clone();
+    let cc = cc_parse(&s);
+    match cc.max_age {
+        Some(v) => assert_eq(v, 3600_u64),
+        None => panic("expected max_age"),
+    }
+}
+
+@ignore("HTTPCACHE-1: cc_parse SIGSEGV — multi-directive.")
+@test
+fn regression_parse_compound_directives() {
+    let s = "public, max-age=3600, must-revalidate".clone();
+    let cc = cc_parse(&s);
+    assert(cc.public_);
+    assert(cc.must_revalidate);
+}
+
+@ignore("HTTPCACHE-1: current_age SIGSEGV.")
+@test
+fn regression_current_age_no_age_header() {
+    let ai = AgeInputs {
+        now_unix: 1_700_000_100_u64,
+        date_header_unix: 1_700_000_000_u64,
+        response_received_unix: 1_700_000_050_u64,
+        request_unix: 1_700_000_100_u64,
+        age_header_sec: 0_u64,
+    };
+    // apparent_age = 50, corrected = max(50, 0) = 50, resident = 50
+    // current_age = 100
+    assert_eq(current_age(&ai), 100_u64);
+}
+
+@ignore("HTTPCACHE-1: freshness_lifetime_sec SIGSEGV.")
+@test
+fn regression_freshness_max_age_wins_for_browser() {
+    let s = "max-age=600".clone();
+    let cc = cc_parse(&s);
+    // browser cache (shared=false) — max-age wins
+    match freshness_lifetime_sec(&cc, None, 1_700_000_000_u64, false) {
+        Some(v) => assert_eq(v, 600_u64),
+        None => panic("expected freshness"),
+    }
+}
+
+@ignore("HTTPCACHE-1: decide SIGSEGV.")
+@test
+fn regression_decide_no_store_must_not_cache() {
+    let s = "no-store".clone();
+    let cc = cc_parse(&s);
+    let ai = AgeInputs {
+        now_unix: 1_700_000_100_u64,
+        date_header_unix: 1_700_000_000_u64,
+        response_received_unix: 1_700_000_050_u64,
+        request_unix: 1_700_000_100_u64,
+        age_header_sec: 0_u64,
+    };
+    let di = DecisionInputs {
+        resp_cc: cc,
+        age: ai,
+        expires_unix: None,
+        shared_cache: false,
+        upstream_error: false,
+    };
+    let d = decide(&di);
+    assert(d is CacheDecision.MustNotCache);
+}
