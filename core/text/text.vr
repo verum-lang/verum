@@ -644,15 +644,15 @@ implement Text {
     public fn char_at(&self, byte_idx: Int) -> Maybe<Char> {
         let bytes = self.as_bytes();
         if byte_idx < 0 || byte_idx >= bytes.len() {
-            return None;
+            return Maybe.None;
         }
         // Reject continuation bytes (10xxxxxx). A leading byte of a
         // multi-byte sequence (110x..., 1110..., 11110...) or an
         // ASCII byte (0xxx...) IS a valid char boundary.
         if !is_utf8_char_boundary(bytes[byte_idx]) {
-            return None;
+            return Maybe.None;
         }
-        Some(intrinsic_utf8_decode_char(bytes, byte_idx))
+        Maybe.Some(intrinsic_utf8_decode_char(bytes, byte_idx))
     }
 
     /// Get byte at index.
@@ -660,9 +660,9 @@ implement Text {
     public fn byte_at(&self, idx: Int) -> Maybe<Byte> {
         let bytes = self.as_bytes();
         if idx >= 0 && idx < bytes.len() {
-            Some(bytes[idx])
+            Maybe.Some(bytes[idx])
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -882,17 +882,17 @@ implement Text {
         let needle_bytes = needle.as_bytes();
         let nlen = needle_bytes.len();
         if nlen == 0 {
-            return Some(0);
+            return Maybe.Some(0);
         }
         if nlen > self_bytes.len() {
-            return None;
+            return Maybe.None;
         }
         let table = kmp_failure_table(needle_bytes);
         let idx = kmp_find(self_bytes, needle_bytes, &table, 0);
         if idx < 0 {
-            None
+            Maybe.None
         } else {
-            Some(idx)
+            Maybe.Some(idx)
         }
     }
 
@@ -909,14 +909,14 @@ implement Text {
         let hlen = self_bytes.len();
 
         if nlen == 0 {
-            return Some(hlen);
+            return Maybe.Some(hlen);
         }
         if nlen > hlen {
-            return None;
+            return Maybe.None;
         }
 
         let table = kmp_failure_table(needle_bytes);
-        let mut last: Maybe<Int> = None;
+        let mut last: Maybe<Int> = Maybe.None;
         let mut i = 0;
         let mut j = 0;
         while i < hlen {
@@ -924,7 +924,7 @@ implement Text {
                 i = i + 1;
                 j = j + 1;
                 if j == nlen {
-                    last = Some(i - j);
+                    last = Maybe.Some(i - j);
                     // Fall back via failure table to allow
                     // overlapping matches — preserves the legacy
                     // "rightmost start of any match" semantics.
@@ -943,10 +943,10 @@ implement Text {
     public fn find_char(&self, ch: Char) -> Maybe<Int> {
         for (idx, c) in self.char_indices() {
             if c == ch {
-                return Some(idx);
+                return Maybe.Some(idx);
             }
         }
-        None
+        Maybe.None
     }
 
     /// True iff this text contains the given character.
@@ -1187,13 +1187,13 @@ implement Text {
             }
             // Now i is at a character boundary - decode the character
             match self.char_at(i) {
-                Some(ch) => {
+                Maybe.Some(ch) => {
                     if !ch.is_whitespace() {
                         end = i + ch.len_utf8();
                         break;
                     }
                 }
-                None => {
+                Maybe.None => {
                     break;
                 }
             }
@@ -1510,7 +1510,7 @@ implement Text {
         let mut i = 0;
         while i < bytes.len() {
             if char_idx == n {
-                return Some(i);
+                return Maybe.Some(i);
             }
             let char_len = unsafe { utf8_char_len(bytes[i]) };
             i = i + char_len;
@@ -1518,9 +1518,9 @@ implement Text {
         }
         if char_idx == n {
             // n == char_count(), return byte length (past the end)
-            return Some(i);
+            return Maybe.Some(i);
         }
-        None
+        Maybe.None
     }
 
     /// Pad on the left to reach target width.
@@ -1576,11 +1576,11 @@ implement Text {
 
         while start <= bytes.len() && res.len() < n - 1 {
             match self.slice(start, bytes.len()).find(sep) {
-                Some(offset) => {
+                Maybe.Some(offset) => {
                     res.push(self.slice(start, start + offset));
                     start = start + offset + sep.len();
                 }
-                None => {
+                Maybe.None => {
                     res.push(self.slice(start, bytes.len()));
                     return res;
                 }
@@ -1601,11 +1601,11 @@ implement Text {
 
         while end > 0 {
             match self.slice(0, end).rfind(sep) {
-                Some(offset) => {
+                Maybe.Some(offset) => {
                     res.push(self.slice(offset + sep.len(), end));
                     end = offset;
                 }
-                None => {
+                Maybe.None => {
                     res.push(self.slice(0, end));
                     end = 0;
                 }
@@ -1627,11 +1627,11 @@ implement Text {
 
         while end > 0 && res.len() < n - 1 {
             match self.slice(0, end).rfind(sep) {
-                Some(offset) => {
+                Maybe.Some(offset) => {
                     res.push(self.slice(offset + sep.len(), end));
                     end = offset;
                 }
-                None => {
+                Maybe.None => {
                     res.push(self.slice(0, end));
                     return res;
                 }
@@ -2222,18 +2222,18 @@ implement Text {
     /// Remove prefix and return remainder, or None if prefix doesn't match.
     public fn strip_prefix(&self, prefix: &Text) -> Maybe<Text> {
         if self.starts_with(prefix) {
-            Some(self.slice(prefix.len(), self.len()))
+            Maybe.Some(self.slice(prefix.len(), self.len()))
         } else {
-            None
+            Maybe.None
         }
     }
 
     /// Remove suffix and return remainder, or None if suffix doesn't match.
     public fn strip_suffix(&self, suffix: &Text) -> Maybe<Text> {
         if self.ends_with(suffix) {
-            Some(self.slice(0, self.len() - suffix.len()))
+            Maybe.Some(self.slice(0, self.len() - suffix.len()))
         } else {
-            None
+            Maybe.None
         }
     }
 
