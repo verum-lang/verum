@@ -201,15 +201,46 @@ fn test_use_after_free_error_record_construction() {
     assert_eq(e.type_name,      "Heap<Int>");
 }
 
-// REGRESSION: `UseAfterFreeError.new(...)`, `.null_pointer(...)`, and
-// `.message()` dispatch through the same first-suffix-wins
-// `lookup_function` defect class as the diagnostics/heap collisions
-// (task #17/#39 mount-scope-aware lookup).  `UseAfterFreeError.new(...)`
-// collides with `Heap.new` / `Shared.new` / `HazardStats.new` / etc.;
-// `.null_pointer(...)` with the `RevocationError.null_pointer` static;
-// `.message()` is universal across stdlib error types.  Construction
-// via record literal works (above).  The constructor + `.message()`
-// surface is pinned via @ignore until #17/#39 closes.
+// REGRESSION (superseded 2026-05-27): the earlier hypothesis that
+// `UseAfterFreeError.new(...)` / `.null_pointer(...)` / `.message()`
+// failed via a first-suffix-wins `lookup_function` collision against
+// `Heap.new` / `Shared.new` / `HazardStats.new` / `RevocationError.null_pointer`
+// was disproved by a diagnostic probe matrix (see `audit.md §6`).
+//
+// **Actual defect class**: cross-module record-return field-access OOB
+// (same root as `[[btree_pattern_match_ref_generic_class]]` and
+// `[[enactment_field_access_oob_2026-05-24]]`).  The constructor body
+// writes fields at the correct offsets — verified by the
+// `_record_construction` literal-path test above which passes GREEN.
+// At the test site, the value returned from `UseAfterFreeError.new(...)`
+// has no propagated type information through the cross-module fn-return
+// path; `compile_field_access` falls through `resolve_field_index`'s
+// type-aware lookups and lands on the global `intern_field_name(field_name)`
+// fallback at `crates/verum_vbc/src/codegen/mod.rs:13687`.  For
+// `expected_gen` this returns global StringId 2, producing a uniform
+// +2 field-index shift: read `e.expected_gen` returns slot 2's value,
+// read `e.actual_gen` returns slot 3, etc.  Uninitialised slots 5/6
+// render as NaN-boxed `0.0`.
+//
+// 1-arg `.null_pointer(t)` pins the shift sharply: constructor writes
+// `(0, 0, 0, 0, "NullT")`, reader reports
+// `(0, 0, "NullT", 0.0, 0.0)` — exact match for +2 shift.
+//
+// Workaround pinned in §5 (direct record literal).  Three working
+// tests cover the Eq/disjointness surface via that pattern.
+// Fundamental fix surface (multi-day VBC codegen work) mapped at:
+//   * `compile_static_method_call` (expressions.rs:10798) — propagate
+//     `func_info.return_type_name` to `variable_type_names[__temp_r{dst}]`.
+//   * `compile_let` (statements.rs:285) — verify annotation-driven
+//     `variable_type_names[var]` is consulted by downstream
+//     `compile_field_access` for `resolve_field_index(Some(tn), ...)`.
+//   * `populate_types_from_archive` (mod.rs:4320) — verify the
+//     archive's TypeDescriptor `simple_name` is the bare type name
+//     and `type_field_layouts` is keyed accordingly.
+//
+// Pinned via @ignore until the fundamental fix lands.  See
+// `audit.md §6` + memory `use_after_free_error_field_shift_2026-05-27.md`
+// for the full diagnostic trace.
 
 @test
 @ignore

@@ -86,3 +86,122 @@ allocator suite lands.
 | §B | `core-tests/mem/allocator/` integration suite — must cover `cbgr_alloc` + `deref_thin` + a Drop cycle. | ~2 hours | open |
 | §C | Cross-tier divergence sweep: all four files under `--aot` + `--interp` for exit-code parity. | 1 hour wall-clock | open |
 | §D | `ThinRef.new` should have a refinement-typed safer wrapper that takes a `&AllocationHeader` directly, removing precondition (2) from the caller's obligation. | ~2 hours | open |
+
+## 6. Investigation 2026-05-27 — UseAfterFreeError.new (+2 field-index shift)
+
+Earlier audits attributed the 3 `@ignore`'d tests in
+`unit_test.vr` §6 (`test_use_after_free_error_new_constructor_round_trip_pinned_by_collision`,
+`test_use_after_free_error_null_pointer_uses_gen_unallocated_sentinel_pinned`,
+and an analogous `.message()` pin) to a **dispatch-side name
+collision** (task #17/#39 manifested as bare-suffix `.new` competing
+with sibling `Heap.new` / `Shared.new` / `HazardStats.new`). A precise
+diagnostic sweep on this branch (probe matrix in
+`core-tests/mem/thin_ref/probe_test.vr` — removed after isolation)
+shows the defect is NOT in the dispatch:
+
+```text
+DIRECT  UseAfterFreeError.new(100,99,7,6,"ProbeT")
+        →  expected_gen=7  actual_gen=6  expected_epoch="ProbeT"
+           actual_epoch=0.0  type_name=0.0
+
+HELPER  build_uaf(...) wraps the same call inside a user-side helper
+        →  IDENTICAL output to DIRECT
+
+LITERAL UseAfterFreeError { expected_gen: 100, ... }
+        →  CORRECT (100, 99, 7, 6, "LitT")
+
+USERUAF UserUaf.new(...) — a user-space type with the IDENTICAL
+        signature + body declared inside the test file
+        →  CORRECT (100, 99, 7, 6, "UserT")
+
+CALLFRAME CallFrame.new(...) — a stdlib type with 5-arg arity but
+        all "normal" field types (Text, Text, Int, Int, UInt64)
+        →  CORRECT
+```
+
+The constructor body of `UseAfterFreeError.new` writes fields **at the
+correct offsets** (verified by the LITERAL probe reading slots
+0..4 correctly off a directly-constructed record). The defect is at
+**field READ time** on the test side, where reads of `e.<field>`
+shift by **+2 indices** for every field — the read at index 0 returns
+slot 2's value, index 1 returns slot 3, index 2 returns slot 4, and
+indices 3/4 return uninitialised slots (rendered as NaN-boxed `0.0`).
+
+The 1-arg `UseAfterFreeError.null_pointer("NullT")` probe pins this
+sharply:
+
+```text
+constructor body writes:  f0=0, f1=0, f2=0, f3=0, f4="NullT"
+read e.expected_gen (f0)  →  expected 0,   got 0        ✓ (slot 2 = 0)
+read e.actual_gen   (f1)  →  expected 0,   got 0        ✓ (slot 3 = 0)
+read e.expected_epoch(f2) →  expected 0,   got "NullT"  ❌ (slot 4)
+read e.actual_epoch (f3)  →  expected 0,   got 0.0      ❌ (slot 5 uninit)
+read e.type_name    (f4)  →  expected "NullT", got 0.0  ❌ (slot 6 uninit)
+```
+
+The match is exact: reads shift by +2 because the value-of-`e`
+returned from `UseAfterFreeError.new` carries no type information
+through the cross-module fn-return path. `compile_field_access` at
+the test site does NOT resolve `e`'s type to `UseAfterFreeError`,
+falls through `resolve_field_index`'s type-aware lookups, and lands
+on the global `intern_field_name(field_name)` fallback at
+`crates/verum_vbc/src/codegen/mod.rs:13687` — which returns the
+sequential global StringId allocated when the field name was first
+seen across the entire stdlib. For `expected_gen` that global ID
+happens to be 2 in the current intern order.
+
+**This is the same defect class as `[[btree_pattern_match_ref_generic_class]]`
+and `[[enactment_field_access_oob_2026-05-24]]`** — the
+"cross-module record-return field-access OOB" surface. The dispatch
+itself works correctly; the `func_info.return_type_name` for
+`UseAfterFreeError.new` IS recorded at `register_impl_function`
+(mod.rs:8225 via `extract_type_name` + `substitute_self_in_type_name`),
+but is not propagated through the static-call result register to
+`variable_type_names[<dst>]` at the call site, so the test's let-
+binding annotation `let e: UseAfterFreeError = ...` doesn't help
+when the typechecker downstream re-derives the type for
+field-access.
+
+**Workaround pinned in `unit_test.vr` §5**: construct via direct
+record literal at the test site. `test_use_after_free_error_record_construction`
++ `_eq_reflexive_via_record_literal` + `_eq_distinct_field_diff`
+exercise the full surface and all pass GREEN — the `@ignore`'d
+trio that pin the `.new(...)` / `.null_pointer(...)` constructor
+calls remains gated on the fundamental fix.
+
+**Fundamental fix surface** (multi-day VBC codegen work, not closed
+in this branch):
+
+1. At `compile_static_method_call` (expressions.rs:10798) — when the
+   resolved `func_info.return_type_name` is `Some(name)`, propagate
+   it to `self.ctx.variable_type_names[__temp_r{dst}]` so the
+   downstream let-binding's `variable_type_names[var]` annotation
+   isn't the only source.
+
+2. At `compile_let` (statements.rs:285) — when the binding has an
+   explicit type annotation AND the RHS is a cross-module fn return,
+   the annotation is already inserted into `variable_type_names`,
+   but the downstream `compile_field_access` apparently isn't
+   consulting it for `resolve_field_index(Some(type_name), ...)` —
+   the lookup chain at `resolve_field_index` (mod.rs:13433) needs
+   verification that the archive-loaded `UseAfterFreeError` is in
+   `type_field_layouts` keyed by the simple name "UseAfterFreeError".
+   If `populate_types_from_archive` (mod.rs:4320) registers it
+   under a different key (e.g., `core.mem.UseAfterFreeError`),
+   the user-side simple-name lookup misses.
+
+3. At `populate_types_from_archive` — verify that the simple name
+   stored is exactly the bare type name without module prefix
+   (the simple-name extraction at mod.rs:4338 uses
+   `module.strings.get(ty.name)` which SHOULD be the bare name,
+   but the archive's TypeDescriptor.name might already be a
+   qualified-name StringId for stdlib types — needs verification).
+
+This investigation supersedes the earlier dispatch-collision
+hypothesis pinned in the `@ignore` comments at `unit_test.vr:204-212`.
+The comments are kept for historical reference but the actual
+fundamental-fix target is the cross-module type-layout propagation,
+not the dispatch resolution. Pin updated in `audit.md` (this
+section). See memory entry
+`use_after_free_error_field_shift_2026-05-27.md` for the full
+diagnostic trace.
