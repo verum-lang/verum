@@ -34,99 +34,44 @@ None. `core/net/cidr.vr` is pure Verum with no `@intrinsic` bridge.
 
 ## 3. Language-implementation gaps
 
-### §3.1 CIDR-1 — `cidr.parse(&Text)` SIGSEGV in LLVM SmallVector
+### §3.1 CIDR-1 — `cidr.parse(&Text)` SIGSEGV (CLOSED 2026-05-28)
 
-**Stable trigger**: any reachable callsite of `cidr.parse(&Text)`
-from a USER test module — including transitive paths through
-`CidrSet.add_text(&Text)` — produces a fatal SIGSEGV inside
-`llvm::SmallVectorBase<unsigned long long>::grow_pod` during the
-precompile cascade for `cidr.vr`. The crash happens during
-compilation (before any test body runs).
+**Pre-fix stable trigger**: any reachable callsite of `cidr.parse(&Text)`
+from a USER test module produced a fatal SIGSEGV inside
+`llvm::SmallVectorBase<unsigned long long>::grow_pod`.
 
-**Crash signature** (`/Users/taaliman/.verum/crashes/...`):
-```
-Kind: fatal signal SIGSEGV (11)
-Backtrace:
-   ...
-  11: __ZN4llvm15SmallVectorBaseIyE8grow_podEPvmm
-  12: __mh_execute_header
-```
+**Closed by source-side discipline across 3 commits** — the
+defect was triggered by a combination of three independent codegen
+surfaces, all in cidr.parse:
 
-**Reproduction** (matches `regression_test.vr` pins):
+1. **Closure desugaring** (commit `f649312c6`): `parse_int().ok_or_else(|| ...)?`
+   chain replaced with `match Maybe.Some / Maybe.None` explicit
+   dispatch. Eliminated closure-codegen through `?`-operator.
 
-```verum
-mount core.net.cidr.{parse as cidr_parse};
-@test
-fn probe() {
-    let s = "10.0.0.0/8".clone();
-    let _ = cidr_parse(&s);     // ← SIGSEGV here at codegen time
-}
-```
+2. **`extend_from_slice` intrinsic chain** (commit `be64f4e1e`):
+   `slice_text` helper's `out.extend_from_slice(&src[start..end])`
+   replaced with `while i < end { out.push(src[i]); i = i + 1 }`
+   byte-by-byte loop. Eliminated List-payload intrinsic dispatch
+   chain.
 
-Compare: direct variant construction
-`Cidr.V4 { addr: Ipv4Addr.new(10,0,0,0), prefix_len: 8 }`
-compiles + executes correctly (see all of `unit_test.vr §1-§9`).
+3. **Cross-type variant-payload construction** (commit `8ed55522c`):
+   `Err(e) => Err(CidrError.AddrParseFailed(e))` replaced with
+   `Err(_) => Err(CidrError.Malformed(fixed_text))`. The
+   `CidrError.AddrParseFailed(AddrParseError)` construction with
+   cross-type payload was the final SIGSEGV trigger.
 
-**Likely root cause** (candidates ordered by source-side
-suspicion):
+**Post-rebuild validation 2026-05-28** — 4 of 5 regression tests
+transition from @ignore'd-SIGSEGV to GREEN under `--interp`:
+- `regression_parse_v4_8` ✅
+- `regression_parse_v6_32` ✅
+- `regression_parse_invalid_prefix_len` ✅
+- `regression_parse_no_slash` ✅
 
-1. **Closure in `?`-chain inside `parse`** —
-   `parse_int(len_text.as_bytes()).ok_or_else(|| CidrError.Malformed(...))?`
-   at `cidr.vr:124-125`. Closure codegen interacting with the
-   `?` desugaring for `Maybe → Result` conversion is the most
-   likely codegen surface that crashes the LLVM SmallVector.
-
-2. **`text.as_bytes()` from `&Text`** — multiple callsites use
-   `text.as_bytes()` to obtain `&[Byte]`. The `&[Byte]` view
-   into a `Text` payload may be the trigger if `Text`-layout
-   types-by-name propagation through the archive loader hits
-   a stale entry. Same defect class as
-   [[use_after_free_error_field_shift_2026-05-27]] +
-   [[btree_pattern_match_ref_generic_class]].
-
-3. **`@arch_module` annotation interaction with module-import
-   precompile cascade** — `cidr.vr` ships under `@arch_module(
-   foundation: Foundation.ZfcTwoInacc, stratum:
-   MsfsStratum.LFnd, lifecycle: Lifecycle.Theorem("v0.1"))`.
-   Other modules with this annotation (e.g. `core.net.addr`,
-   `core.net.url`) DO compile under user tests, so this is
-   the *least* likely candidate.
-
-**Source-side closure-free fix landed 2026-05-27** (commit
-`f649312c6`): `parse_int(len_text.as_bytes()).ok_or_else(|| ...)`
-chain replaced with explicit `match Maybe.Some / Maybe.None`
-dispatch.
-
-**Post-rebuild verification 2026-05-27** (after `cargo build --release
--p verum_cli` regenerated the verum binary with the new runtime.vbca):
-**CIDR-1 STILL SIGSEGVs.** The closure was NOT the root cause.
-Same `llvm::SmallVectorBase<unsigned long long>::grow_pod` backtrace.
-
-Compare: `core.net.ipv6_canonical.canonicalize` (which transitively
-calls `Ipv6Addr.parse` via `parse`) now compiles + runs correctly
-post-rebuild — the closure-free fix DID close the equivalent
-IPV6CAN-1 defect for ipv6_canonical. So whatever cidr.parse triggers
-is specific to cidr.
-
-**Remaining root-cause candidates** (newly weighted post-2026-05-27):
-
-1. **Dual cross-module parse attempt + Err-wrapping cascade** —
-   `match Ipv6Addr.parse(...) { Err(e) => Err(CidrError.AddrParseFailed(e)) }`
-   wraps an `AddrParseError` in a `CidrError` variant. The
-   `AddrParseFailed(AddrParseError)` construction at user-side codegen
-   may trigger the SmallVector grow defect. Same defect-class family
-   as URL-8 (cross-module record-field corruption).
-
-2. **`slice_text` helper using `as_bytes` + `extend_from_slice`** —
-   the internal `slice_text(b, 0, slash)` at `cidr.vr:120` packages
-   a byte-range into a fresh Text via `Text.from_utf8_unchecked`.
-   Same defect class as
-   [[btree_pattern_match_ref_generic_class]] applied to Text-payload
-   construction.
-
-**Effort**: 2-3 days VBC codegen + retest. Investigation should
-isolate which of the two new candidates is the trigger by removing
-the Ipv6Addr branch first, then the slice_text helper.
+**Residual**: `regression_set_add_text_v4` still fails AT
+runtime (NOT SIGSEGV; AssertionFailed at `set.contains`). This
+is a different defect — CIDR-2, cross-module record-field
+corruption on CidrSet.blocks. Sister of URL-1 / URL-7 / URL-8.
+Pinned by `@ignore("CIDR-2: ...")` in regression_test.vr.
 
 ### §3.2 `Cidr.contains` slice-deref pattern
 

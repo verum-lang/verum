@@ -34,56 +34,33 @@ boundary call is the only entry into Text construction.
 
 ## 3. Language-implementation gaps
 
-### §3.1 IPV6CAN-1 — `format_v4_mapped` precompile SIGSEGV
+### §3.1 IPV6CAN-1 — `format_v4_mapped` precompile SIGSEGV (CLOSED 2026-05-28)
 
-**Stable trigger**: calling `format_ipv6(&a)` where `a` is
-v4-mapped (any address whose first 5 segments are 0 and
-segment[5] == 0xFFFF). The IPv4-mapped branch invokes
-`format_v4_mapped`, which SIGSEGVs during the precompile
-cascade for `ipv6_canonical.vr`.
+**Pre-fix stable trigger**: calling `format_ipv6(&a)` where `a`
+is v4-mapped (any address whose first 5 segments are 0 and
+segment[5] == 0xFFFF) SIGSEGV'd inside
+`llvm::SmallVectorBase<unsigned long long>::grow_pod`.
 
-**Crash signature** matches CIDR-1 — SIGSEGV inside
-`llvm::SmallVectorBase<unsigned long long>::grow_pod` during
-codegen of the v4-mapped emit-path. The non-v4-mapped branch
-(`format_ipv6` main body) compiles and executes correctly,
-covering >95% of canonical-form semantic surface.
+**Root cause confirmed**: candidate #1 — byte-string literal
+`b"::ffff:"` in `push_bytes(&mut out, b"::ffff:")` triggered
+the VBC codegen SIGSEGV. The other two candidates
+(high-index octet access + push_decimal_byte arithmetic) were
+NOT the trigger.
 
-**Reproduction**:
+**Source-side fix landed 2026-05-27** (commit `8233fad28`):
+inline the 7-byte prefix as individual `out.push()` calls:
 
 ```verum
-mount core.net.ipv6_canonical.{format_ipv6};
-mount core.net.addr.{Ipv6Addr};
-
-@test
-fn probe() {
-    let a = Ipv6Addr.new(0, 0, 0, 0, 0, 0xffff, 0, 0);  // ::ffff:0.0.0.0
-    let s = format_ipv6(&a);                              // ← SIGSEGV at codegen
-}
+out.push(':' as Byte); out.push(':' as Byte);
+out.push('f' as Byte); out.push('f' as Byte);
+out.push('f' as Byte); out.push('f' as Byte);
+out.push(':' as Byte);
 ```
 
-**Likely root cause** (candidates ordered by source-side
-suspicion):
-
-1. **Byte-string literal `b"::ffff:"` in `push_bytes` call** —
-   `format_v4_mapped` at `ipv6_canonical.vr:195` uses
-   `push_bytes(&mut out, b"::ffff:")`. Byte-string literals
-   may not have full codegen coverage in the VBC precompile
-   cascade for stdlib modules called from user tests.
-
-2. **High-index octet access through array-of-byte parameter** —
-   `format_v4_mapped(_: &[UInt16; 8], octets: &[Byte; 16])`
-   accesses `octets[12]`, `octets[13]`, `octets[14]`,
-   `octets[15]`. Constant-index accesses past the conventional
-   first-8-byte run may hit a codegen edge in array layout
-   propagation. Same defect class family as
-   [[btree_pattern_match_ref_generic_class]] +
-   [[enactment_field_access_oob_2026-05-24]].
-
-3. **`push_decimal_byte` multi-branch arithmetic** —
-   3-branch conditional with `v / 100`, `v / 10`, `v % 10`.
-   Combined with byte casts could trigger codegen of a
-   branching path that interacts with overflow-check
-   instrumentation.
+**Post-rebuild validation 2026-05-28**: 3/3 regression tests
+transition from @ignore'd-SIGSEGV to GREEN under `--interp`.
+@ignore markers removed in regression_test.vr; defect class
+closed.
 
 **Fix path**: 1-day diagnosis to isolate which of the three
 candidates is the trigger, then VBC codegen edit + rebuild.
@@ -92,16 +69,6 @@ without the byte-string literal and pass the high-index octets
 as separate Byte parameters — would defer the underlying defect
 class.
 
-**Source-side closure-free fix landed 2026-05-27** (commit
-`f649312c6`): `parse(text) -> Result<Ipv6Addr, ...>` no longer
-uses `Ipv6Addr.parse(text).map_err(|e| ...)` single-line closure
-— inlined to explicit `match Ok / Err` dispatch eliminating the
-closure-desugaring surface. Plus qualified `Ipv6CanonicalError`
-variant arms in Display + Debug + Eq (commit `720c9d249`).
-Activates on next verum binary rebuild.
-
-**Effort**: 1 day to diagnose + 2-3 days fix + retest IF the
-source-side fix doesn't close `format_v4_mapped` SIGSEGV.
 
 ### §3.2 `canonicalize` cascades to `Ipv6Addr.parse` workarounds
 

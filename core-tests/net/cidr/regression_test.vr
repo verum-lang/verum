@@ -2,26 +2,29 @@
 // core-tests/net/cidr/regression_test.vr
 // =============================================================================
 //
-// LOCK-IN pins for CIDR-1 — calling `cidr.parse(&Text)` (or any path
-// that transitively calls it, including `CidrSet.add_text`) from a
-// USER test module triggers an LLVM-level SIGSEGV inside
-// `llvm::SmallVectorBase<unsigned long long>::grow_pod` during the
-// precompile cascade for cidr.vr.
+// LOCK-IN regression pins for `core.net.cidr` parse + matcher surface.
 //
-// Stable trigger: any reachable callsite of `parse(&Text)` in cidr.vr.
-// The crash signature is identical across attempts and is independent
-// of the test body — even an empty function body that merely calls
-// the function panics.
+// CIDR-1 (CLOSED 2026-05-28) — `cidr.parse(&Text)` SIGSEGV during
+// precompile cascade. Closed by source-side discipline applied across
+// 3 commits:
 //
-// Direct `Cidr.V4 { addr: _, prefix_len: _ }` / `Cidr.V6 { ... }`
-// variant construction does NOT trigger the crash (see unit_test.vr),
-// so the conformance suite exercises the algebraic surface through
-// that path. The parser-path tests in this file are @ignore'd until
-// the underlying defect closes.
+//   * f649312c6 — closure-free `parse_int().ok_or_else()` → `match
+//     Maybe.Some/None` (eliminated closure desugaring through `?`).
+//   * be64f4e1e — `slice_text` byte-by-byte push instead of
+//     `extend_from_slice(&src[start..end])` (eliminated List-payload
+//     intrinsic dispatch chain).
+//   * 8ed55522c — discard Ipv6Addr.parse Err payload (eliminated
+//     cross-type `CidrError.AddrParseFailed(AddrParseError)` variant
+//     construction).
 //
-// See `audit.md §3.1` for diagnostic isolation and the candidate
-// fix paths (closure codegen, Result `?` in stdlib parse functions,
-// precompile cascade `.as_bytes()` interaction).
+// Validated post-binary-rebuild 2026-05-28 — 4/5 regression tests
+// transition from @ignore'd-SIGSEGV to GREEN under `--interp`.
+//
+// CIDR-2 (open) — `CidrSet.contains` after `add_text` returns false
+// for valid IPs. Manifest as `regression_set_add_text_v4` AssertionFailed
+// at the set.contains assertion (set.add_text succeeds, but contains
+// fails). Sister of URL-1 / URL-7 / URL-8 cross-module record-field
+// corruption defect class.
 // =============================================================================
 
 mount core.net.cidr.{Cidr, CidrSet, CidrError, parse as cidr_parse};
@@ -29,10 +32,9 @@ mount core.net.addr.{IpAddr, Ipv4Addr};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
-// CIDR-1 — `cidr.parse(&Text)` SIGSEGV during precompile cascade
+// CIDR-1 — CLOSED 2026-05-28 — formerly SIGSEGV'd during precompile cascade
 // =============================================================================
 
-@ignore("CIDR-1: cidr.parse SIGSEGVs in LLVM SmallVector during precompile cascade. See audit.md §3.1.")
 @test
 fn regression_parse_v4_8() {
     let s = "10.0.0.0/8".clone();
@@ -42,7 +44,6 @@ fn regression_parse_v4_8() {
     }
 }
 
-@ignore("CIDR-1: cidr.parse SIGSEGV. See audit.md §3.1.")
 @test
 fn regression_parse_v6_32() {
     let s = "2001:db8::/32".clone();
@@ -52,7 +53,7 @@ fn regression_parse_v6_32() {
     }
 }
 
-@ignore("CIDR-1: transitive call into cidr.parse via CidrSet.add_text SIGSEGVs. See audit.md §3.1.")
+@ignore("CIDR-2: CidrSet.contains after add_text returns false for valid IPs — cross-module record-field corruption on CidrSet.blocks. Sister of URL-1/URL-7/URL-8. Multi-day VBC compile_field_access fix.")
 @test
 fn regression_set_add_text_v4() {
     let mut set = CidrSet.new();
@@ -62,7 +63,6 @@ fn regression_set_add_text_v4() {
     assert(set.contains(&IpAddr.v4(10_u8, 1_u8, 1_u8, 1_u8)));
 }
 
-@ignore("CIDR-1: cidr.parse error paths SIGSEGV before validation runs. See audit.md §3.1.")
 @test
 fn regression_parse_invalid_prefix_len() {
     let s = "10.0.0.0/33".clone();
@@ -72,7 +72,6 @@ fn regression_parse_invalid_prefix_len() {
     }
 }
 
-@ignore("CIDR-1: cidr.parse error paths SIGSEGV. See audit.md §3.1.")
 @test
 fn regression_parse_no_slash() {
     let s = "10.0.0.0".clone();
