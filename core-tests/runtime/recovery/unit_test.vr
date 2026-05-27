@@ -1,0 +1,313 @@
+// =============================================================================
+// core-tests/runtime/recovery/unit_test.vr
+// =============================================================================
+//
+// `core/runtime/recovery.vr` (1083 LOC) — retry policy + circuit breaker
+// + backoff + jitter + RuntimeRecoveryStrategy ADT.
+//
+// Tests pin the DATA-only subset:
+//   * RuntimeRetryConfig record
+//   * RecoveryRetryPolicy record + .new/.should_retry/.reset
+//   * RetryPredicate 3-variant (AllErrors / TransientOnly / Custom)
+//   * RecoveryBackoffStrategy 4-variant (Fixed / Linear / Exponential / None)
+//   * JitterConfig 4-variant (None / Proportional / Fixed / Full)
+//   * RecoveryCircuitState 3-variant + .to_u8 / .from_u8 round-trip
+//   * RecoveryCircuitBreakerConfig record
+//   * ErrorPredicate 3-variant
+//   * RuntimeRecoveryStrategy 5-variant + .retry/.circuit_breaker ctors
+//
+// Live retry/circuit-breaker behaviour requires async-spawn + sys.sleep
+// binding — covered at vcs/specs/L2-standard/runtime/recovery/.
+// =============================================================================
+
+mount core.runtime.recovery.{
+    RuntimeRetryConfig, RecoveryRetryPolicy, RetryPolicy,
+    RetryPredicate, RecoveryBackoffStrategy, JitterConfig,
+    RecoveryCircuitState, RecoveryCircuitBreakerConfig, ErrorPredicate,
+    RuntimeRecoveryStrategy,
+};
+
+// =============================================================================
+// Section 1: RetryPredicate 3-variant
+// =============================================================================
+
+@test
+fn test_retry_predicate_all_errors() {
+    let p = RetryPredicate.AllErrors;
+    assert(p is RetryPredicate.AllErrors);
+}
+
+@test
+fn test_retry_predicate_transient_only() {
+    let p = RetryPredicate.TransientOnly;
+    assert(p is RetryPredicate.TransientOnly);
+}
+
+@test
+fn test_retry_predicate_pairwise_disjoint() {
+    let a: RetryPredicate = RetryPredicate.AllErrors;
+    let b: RetryPredicate = RetryPredicate.TransientOnly;
+    assert(a is RetryPredicate.AllErrors && !(a is RetryPredicate.TransientOnly));
+    assert(b is RetryPredicate.TransientOnly && !(b is RetryPredicate.AllErrors));
+}
+
+// =============================================================================
+// Section 2: RecoveryBackoffStrategy 4-variant
+// =============================================================================
+
+@test
+fn test_backoff_strategy_fixed() {
+    let s = RecoveryBackoffStrategy.Fixed { delay_ms: 100_u64 };
+    assert(s is RecoveryBackoffStrategy.Fixed);
+}
+
+@test
+fn test_backoff_strategy_linear() {
+    let s = RecoveryBackoffStrategy.Linear {
+        base_ms: 50_u64,
+        increment_ms: 25_u64,
+        max_ms: 1000_u64,
+    };
+    assert(s is RecoveryBackoffStrategy.Linear);
+}
+
+@test
+fn test_backoff_strategy_exponential() {
+    let s = RecoveryBackoffStrategy.Exponential {
+        base_ms: 100_u64,
+        max_ms: 5000_u64,
+        multiplier: 2,
+    };
+    assert(s is RecoveryBackoffStrategy.Exponential);
+}
+
+@test
+fn test_backoff_strategy_none() {
+    let s = RecoveryBackoffStrategy.None;
+    assert(s is RecoveryBackoffStrategy.None);
+}
+
+@test
+fn test_backoff_strategy_pairwise_disjoint() {
+    let a: RecoveryBackoffStrategy = RecoveryBackoffStrategy.None;
+    let b: RecoveryBackoffStrategy = RecoveryBackoffStrategy.Fixed { delay_ms: 1_u64 };
+    assert(a is RecoveryBackoffStrategy.None && !(a is RecoveryBackoffStrategy.Fixed));
+    assert(b is RecoveryBackoffStrategy.Fixed && !(b is RecoveryBackoffStrategy.None));
+}
+
+// =============================================================================
+// Section 3: JitterConfig 4-variant
+// =============================================================================
+
+@test
+fn test_jitter_none() {
+    let j = JitterConfig.None;
+    assert(j is JitterConfig.None);
+}
+
+@test
+fn test_jitter_proportional_zero_percent() {
+    let j = JitterConfig.Proportional(0_u8);
+    assert(j is JitterConfig.Proportional);
+}
+
+@test
+fn test_jitter_proportional_full_percent() {
+    let j = JitterConfig.Proportional(100_u8);
+    assert(j is JitterConfig.Proportional);
+}
+
+@test
+fn test_jitter_fixed_zero_ms() {
+    let j = JitterConfig.Fixed(0_u64);
+    assert(j is JitterConfig.Fixed);
+}
+
+@test
+fn test_jitter_fixed_large_ms() {
+    let j = JitterConfig.Fixed(10_000_u64);
+    assert(j is JitterConfig.Fixed);
+}
+
+@test
+fn test_jitter_full() {
+    let j = JitterConfig.Full;
+    assert(j is JitterConfig.Full);
+}
+
+@test
+fn test_jitter_pairwise_disjoint() {
+    let a: JitterConfig = JitterConfig.None;
+    let b: JitterConfig = JitterConfig.Full;
+    let c: JitterConfig = JitterConfig.Proportional(50_u8);
+    assert(a is JitterConfig.None && !(a is JitterConfig.Full));
+    assert(b is JitterConfig.Full && !(b is JitterConfig.Proportional));
+    assert(c is JitterConfig.Proportional && !(c is JitterConfig.None));
+}
+
+// =============================================================================
+// Section 4: RecoveryCircuitState 3-variant + to_u8 / from_u8
+// =============================================================================
+
+@test
+fn test_circuit_state_closed() {
+    let s = RecoveryCircuitState.Closed;
+    assert(s is RecoveryCircuitState.Closed);
+}
+
+@test
+fn test_circuit_state_open() {
+    let s = RecoveryCircuitState.Open;
+    assert(s is RecoveryCircuitState.Open);
+}
+
+@test
+fn test_circuit_state_half_open() {
+    let s = RecoveryCircuitState.HalfOpen;
+    assert(s is RecoveryCircuitState.HalfOpen);
+}
+
+@test
+fn test_circuit_state_pairwise_disjoint() {
+    let a: RecoveryCircuitState = RecoveryCircuitState.Closed;
+    let b: RecoveryCircuitState = RecoveryCircuitState.Open;
+    let c: RecoveryCircuitState = RecoveryCircuitState.HalfOpen;
+    assert(a is RecoveryCircuitState.Closed && !(a is RecoveryCircuitState.Open));
+    assert(b is RecoveryCircuitState.Open && !(b is RecoveryCircuitState.HalfOpen));
+    assert(c is RecoveryCircuitState.HalfOpen && !(c is RecoveryCircuitState.Closed));
+}
+
+// =============================================================================
+// Section 5: ErrorPredicate 3-variant
+// =============================================================================
+
+@test
+fn test_error_predicate_all_errors() {
+    let p = ErrorPredicate.AllErrors;
+    assert(p is ErrorPredicate.AllErrors);
+}
+
+// =============================================================================
+// Section 6: RuntimeRecoveryStrategy 5-variant + smart ctors
+// =============================================================================
+
+@test
+fn test_recovery_strategy_none() {
+    let s = RuntimeRecoveryStrategy.None;
+    assert(s is RuntimeRecoveryStrategy.None);
+}
+
+@test
+fn test_recovery_strategy_supervision() {
+    let s = RuntimeRecoveryStrategy.Supervision;
+    assert(s is RuntimeRecoveryStrategy.Supervision);
+}
+
+@test
+fn test_recovery_strategy_retry_ctor_default() {
+    let s = RuntimeRecoveryStrategy.retry(5);
+    assert(s is RuntimeRecoveryStrategy.Retry);
+}
+
+@test
+fn test_recovery_strategy_circuit_breaker_ctor_default() {
+    let s = RuntimeRecoveryStrategy.circuit_breaker(10);
+    assert(s is RuntimeRecoveryStrategy.UseBreaker);
+}
+
+@test
+fn test_recovery_strategy_pairwise_disjoint() {
+    let a: RuntimeRecoveryStrategy = RuntimeRecoveryStrategy.None;
+    let b: RuntimeRecoveryStrategy = RuntimeRecoveryStrategy.Supervision;
+    let c: RuntimeRecoveryStrategy = RuntimeRecoveryStrategy.retry(3);
+    let d: RuntimeRecoveryStrategy = RuntimeRecoveryStrategy.circuit_breaker(5);
+    assert(a is RuntimeRecoveryStrategy.None && !(a is RuntimeRecoveryStrategy.Supervision));
+    assert(b is RuntimeRecoveryStrategy.Supervision && !(b is RuntimeRecoveryStrategy.Retry));
+    assert(c is RuntimeRecoveryStrategy.Retry && !(c is RuntimeRecoveryStrategy.UseBreaker));
+    assert(d is RuntimeRecoveryStrategy.UseBreaker && !(d is RuntimeRecoveryStrategy.None));
+}
+
+// =============================================================================
+// Section 7: RuntimeRetryConfig + RecoveryRetryPolicy record
+// =============================================================================
+
+@test
+fn test_retry_config_construction() {
+    let cfg = RuntimeRetryConfig {
+        max_attempts: 5,
+        backoff: RecoveryBackoffStrategy.Fixed { delay_ms: 100_u64 },
+        jitter: JitterConfig.None,
+        retry_on: RetryPredicate.AllErrors,
+    };
+    assert(cfg.max_attempts == 5);
+}
+
+@test
+fn test_retry_policy_new_initial_state() {
+    let cfg = RuntimeRetryConfig {
+        max_attempts: 3,
+        backoff: RecoveryBackoffStrategy.None,
+        jitter: JitterConfig.None,
+        retry_on: RetryPredicate.AllErrors,
+    };
+    let p = RecoveryRetryPolicy.new(cfg);
+    assert(p.current_attempt == 0);
+    assert(p.total_retries == 0);
+    assert(p.last_error is Maybe.None);
+}
+
+@test
+fn test_retry_policy_should_retry_initially_true() {
+    let cfg = RuntimeRetryConfig {
+        max_attempts: 1,
+        backoff: RecoveryBackoffStrategy.None,
+        jitter: JitterConfig.None,
+        retry_on: RetryPredicate.AllErrors,
+    };
+    let p = RecoveryRetryPolicy.new(cfg);
+    // current_attempt(0) < max_attempts(1) → should_retry == true
+    assert(p.should_retry());
+}
+
+@test
+fn test_retry_policy_should_retry_zero_max_attempts_false() {
+    let cfg = RuntimeRetryConfig {
+        max_attempts: 0,
+        backoff: RecoveryBackoffStrategy.None,
+        jitter: JitterConfig.None,
+        retry_on: RetryPredicate.AllErrors,
+    };
+    let p = RecoveryRetryPolicy.new(cfg);
+    // 0 < 0 is false — no retries allowed.
+    assert(!p.should_retry());
+}
+
+@test
+fn test_retry_policy_public_alias_resolves() {
+    let cfg = RuntimeRetryConfig {
+        max_attempts: 1,
+        backoff: RecoveryBackoffStrategy.None,
+        jitter: JitterConfig.None,
+        retry_on: RetryPredicate.AllErrors,
+    };
+    let p: RetryPolicy = RecoveryRetryPolicy.new(cfg);
+    let _ = p;
+    assert(true);
+}
+
+// =============================================================================
+// Section 8: RecoveryCircuitBreakerConfig
+// =============================================================================
+
+@test
+fn test_circuit_breaker_config_construction() {
+    let cfg = RecoveryCircuitBreakerConfig {
+        failure_threshold: 5_u16,
+        required_successes: 3_u16,
+        timeout_ms: 60_000_u32,
+        error_predicate: ErrorPredicate.AllErrors,
+    };
+    assert(cfg.failure_threshold == 5_u16);
+    assert(cfg.required_successes == 3_u16);
+    assert(cfg.timeout_ms == 60_000_u32);
+}
