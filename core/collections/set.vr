@@ -139,8 +139,8 @@ implement<T: Hash + Eq> Set<T> {
     // Take value from set (removes && returns if present).
     public fn take(&mut self, value: T) -> Maybe<T> {
         match self.inner.remove_entry(value) {
-            None => None,
-            Some(pair) => Some(pair.0),
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => Maybe.Some(pair.0),
         }
     }
 
@@ -191,8 +191,8 @@ implement<T: Hash + Eq> Set<T> {
     public fn get(&self, value: &T) -> Maybe<&T> {
         // Use Map's O(1) get_key_value to return the key reference
         match self.inner.get_key_value(value) {
-            None => None,
-            Some(pair) => Some(pair.0),
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => Maybe.Some(pair.0),
         }
     }
 
@@ -230,7 +230,7 @@ implement<T: Hash + Eq> Set<T> {
     {
         let mut result: List<T> = List.with_capacity(self.len());
         let mut iter = self.iter();
-        while let Some(item) = iter.next() {
+        while let Maybe.Some(item) = iter.next() {
             result.push(item.clone());
         }
         result
@@ -248,7 +248,7 @@ implement<T: Hash + Eq> Set<T> {
     public fn into_list(self) -> List<T> {
         let mut result: List<T> = List.with_capacity(self.len());
         let mut drain = self.inner.drain();
-        while let Some(pair) = drain.next() {
+        while let Maybe.Some(pair) = drain.next() {
             result.push(pair.0);
         }
         result
@@ -343,8 +343,8 @@ implement<T: Hash + Eq> Set<T> {
         let mut iter1 = self.iter();
         loop {
             match iter1.next() {
-                None => break,
-                Some(val) => {
+                Maybe.None => break,
+                Maybe.Some(val) => {
                     if !other.contains(val) {
                         res.insert(val);
                     }
@@ -354,8 +354,8 @@ implement<T: Hash + Eq> Set<T> {
         let mut iter2 = other.iter();
         loop {
             match iter2.next() {
-                None => break,
-                Some(val) => {
+                Maybe.None => break,
+                Maybe.Some(val) => {
                     if !self.contains(val) {
                         res.insert(val);
                     }
@@ -446,8 +446,8 @@ implement<T: Hash + Eq> Set<T> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(v) => {
+                Maybe.None => break,
+                Maybe.Some(v) => {
                     if f(v) {
                         return true;
                     }
@@ -463,8 +463,8 @@ implement<T: Hash + Eq> Set<T> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(v) => {
+                Maybe.None => break,
+                Maybe.Some(v) => {
                     if !f(v) {
                         return false;
                     }
@@ -480,15 +480,15 @@ implement<T: Hash + Eq> Set<T> {
         let mut iter = self.iter();
         loop {
             match iter.next() {
-                None => break,
-                Some(v) => {
+                Maybe.None => break,
+                Maybe.Some(v) => {
                     if f(v) {
-                        return Some(v);
+                        return Maybe.Some(v);
                     }
                 }
             }
         }
-        None
+        Maybe.None
     }
 
     /// Returns `true` if `self` is a strict (proper) subset of `other`.
@@ -525,11 +525,11 @@ implement<T: Hash + Eq> Set<T> {
     public fn pop(&mut self) -> Maybe<T> {
         let entry = self.inner.pop_entry();
         match entry {
-            Some(pair) => {
+            Maybe.Some(pair) => {
                 let k = pair.0;
-                Some(k)
+                Maybe.Some(k)
             },
-            None => None,
+            Maybe.None => Maybe.None,
         }
     }
 
@@ -598,7 +598,7 @@ implement<T: Hash + Eq> Set<T> {
     public fn filter_map<U: Hash + Eq, F: fn(&T) -> Maybe<U>>(&self, f: F) -> Set<U> {
         let mut result = Set.new();
         for v in self.iter() {
-            if let Some(u) = f(v) {
+            if let Maybe.Some(u) = f(v) {
                 result.insert(u);
             }
         }
@@ -663,8 +663,8 @@ implement<T: Hash + Eq> Iterator for SetDrain<T> {
 
     fn next(&mut self) -> Maybe<T> {
         match self.inner.next() {
-            None => None,
-            Some(pair) => Some(pair.0),  // Extract key from (K, V) tuple
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => Maybe.Some(pair.0),  // Extract key from (K, V) tuple
         }
     }
 }
@@ -679,8 +679,8 @@ implement<T: Hash + Eq> Iterator for SetIntoIter<T> {
 
     fn next(&mut self) -> Maybe<T> {
         match self.inner.next() {
-            None => None,
-            Some(pair) => Some(pair.0),
+            Maybe.None => Maybe.None,
+            Maybe.Some(pair) => Maybe.Some(pair.0),
         }
     }
 

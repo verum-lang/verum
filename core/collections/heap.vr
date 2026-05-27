@@ -118,9 +118,9 @@ implement<T: Ord> BinaryHeap<T> {
     /// ```
     public fn peek_mut(&mut self) -> Maybe<PeekMut<T>> {
         if self.data.is_empty() {
-            None
+            Maybe.None
         } else {
-            Some(PeekMut { heap: self })
+            Maybe.Some(PeekMut { heap: self })
         }
     }
 
@@ -148,7 +148,7 @@ implement<T: Ord> BinaryHeap<T> {
     // Pop && return maximum element.
     public fn pop(&mut self) -> Maybe<T> {
         if self.data.is_empty() {
-            return None;
+            return Maybe.None;
         }
 
         let len = self.data.len();
@@ -174,8 +174,8 @@ implement<T: Ord> BinaryHeap<T> {
         // List bodies (see core-tests/collections/list/audit.md §E).
         // Compare via Maybe<T> shape from get().
         match self.data.get(0) {
-            None => return value,
-            Some(top) => {
+            Maybe.None => return value,
+            Maybe.Some(top) => {
                 if value >= top {
                     return value;
                 }
@@ -191,14 +191,14 @@ implement<T: Ord> BinaryHeap<T> {
     public fn replace(&mut self, value: T) -> Maybe<T> {
         // Safe-operation replace: see push_pop migration note.
         match self.data.get(0) {
-            None => {
+            Maybe.None => {
                 self.data.push(value);
-                None
+                Maybe.None
             },
-            Some(old) => {
+            Maybe.Some(old) => {
                 self.data.set(0, value);
                 self.sift_down(0);
-                Some(old)
+                Maybe.Some(old)
             }
         }
     }
@@ -235,7 +235,7 @@ implement<T: Ord> BinaryHeap<T> {
     // Convert to sorted list (consumes heap).
     public fn into_sorted_list(mut self) -> List<T> {
         let mut res = List.with_capacity(self.len());
-        while let Some(v) = self.pop() {
+        while let Maybe.Some(v) = self.pop() {
             res.push(v);
         }
         // Result is in descending order, reverse for ascending
@@ -354,17 +354,17 @@ implement<T: Ord> BinaryHeap<T> {
         // Find the index of the value via direct indexing (the loop
         // bound is the live `len`, so each access is in-range by
         // construction).
-        let mut idx: Maybe<Int> = None;
+        let mut idx: Maybe<Int> = Maybe.None;
         for i in range(0, self.data.len()) {
             if self.data[i] == *value {
-                idx = Some(i);
+                idx = Maybe.Some(i);
                 break;
             }
         }
 
         match idx {
-            None => false,
-            Some(i) => {
+            Maybe.None => false,
+            Maybe.Some(i) => {
                 self.remove_at(i);
                 true
             }
@@ -677,10 +677,10 @@ implement<T: Ord> PeekMut<T> {
     /// without an `unwrap`.
     public fn pop(self) -> T {
         match self.heap.pop() {
-            Some(v) => v,
+            Maybe.Some(v) => v,
             // Unreachable by construction: PeekMut is only created when
             // the heap is non-empty and pop() drains exactly one element.
-            None => panic("PeekMut.pop on heap that became empty"),
+            Maybe.None => panic("PeekMut.pop on heap that became empty"),
         }
     }
 }
