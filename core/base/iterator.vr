@@ -768,10 +768,10 @@ public type Iterator is protocol {
     /// all elements that don't satisfy the predicate.
     fn is_partitioned<P: fn(&Self.Item) -> Bool>(mut self, predicate: P) -> Bool {
         // First phase: all true elements
-        while let Some(x) = self.next() {
+        while let Maybe.Some(x) = self.next() {
             if !predicate(&x) {
                 // Transition point: now all remaining must be false
-                while let Some(y) = self.next() {
+                while let Maybe.Some(y) = self.next() {
                     if predicate(&y) {
                         return false;
                     }
@@ -795,7 +795,7 @@ public type Iterator is protocol {
     /// on any Iterator by linear scan (O(n)).
     fn partition_point<P: fn(&Self.Item) -> Bool>(mut self, predicate: P) -> Int {
         let mut count = 0;
-        while let Some(x) = self.next() {
+        while let Maybe.Some(x) = self.next() {
             if !predicate(&x) {
                 break;
             }
@@ -810,7 +810,7 @@ public type Iterator is protocol {
 
     /// Execute function for each element.
     fn for_each<F: fn(Self.Item)>(mut self, f: F) {
-        while let Some(x) = self.next() {
+        while let Maybe.Some(x) = self.next() {
             f(x);
         }
     }
@@ -957,7 +957,7 @@ public type Iterator is protocol {
     where Self.Item = (A, B) {
         let mut left = CA.default();
         let mut right = CB.default();
-        while let Some((a, b)) = self.next() {
+        while let Maybe.Some((a, b)) = self.next() {
             left.extend_one(a);
             right.extend_one(b);
         }
