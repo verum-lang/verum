@@ -1,0 +1,35 @@
+// =============================================================================
+// core-tests/net/udp/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/udp.vr` (~1060 LOC) — UDP datagram sockets via V-LLSI
+// syscalls. Used for DNS (RFC 1035 §4.2.1), QUIC, multicast.
+//
+// Live operations require socket bind + send_to/recv_from which is
+// gated on `vcs/specs/L2-standard/net/udp/` harness.
+//
+// Data-surface from `udp.vr`: `UdpSocket` record is the only public
+// type (record fields are internal: fd, local_addr, peer_addr).
+//
+// This file is intentionally minimal until a UDP-loopback harness
+// lands. UdpSocket bind/connect/send_to/recv_from coverage is at
+// L2 specs.
+// =============================================================================
+
+mount core.net.udp.{UdpSocket};
+
+// =============================================================================
+// Section 1: UdpSocket — import-only smoke test
+// =============================================================================
+//
+// The `UdpSocket` constructor and method surface require runtime
+// socket binding — see audit.md §3.1. This smoke test confirms the
+// type symbol resolves through the import path.
+
+@test
+fn test_udp_socket_type_imports() {
+    // Type resolves through `mount core.net.udp.{UdpSocket}` —
+    // confirms module imports + sysmlib precompile cascade reach
+    // this submodule without precompile-cascade SIGSEGV.
+    assert(true);
+}

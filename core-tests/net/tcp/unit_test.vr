@@ -1,0 +1,73 @@
+// =============================================================================
+// core-tests/net/tcp/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/tcp.vr` (~1637 LOC) — TCP streams + listeners + accept
+// loop + AsyncRead/AsyncWrite. Built directly on V-LLSI syscalls
+// (no libc).
+//
+// Live socket operations require:
+//   * A bind-port (port collision risk in CI),
+//   * Or a UNIX-socketpair fixture, or
+//   * Loopback connect to a port served by the same test process.
+//
+// Pre-fix infrastructure: none in core-tests. Data-surface
+// coverage here pins the algebraic shape. Live tests live at
+// `vcs/specs/L2-standard/net/tcp/`.
+//
+//   * Shutdown 3-variant: Read / Write / Both + variant disjointness.
+// =============================================================================
+
+mount core.net.tcp.{Shutdown};
+
+// =============================================================================
+// Section 1: Shutdown 3-variant — SHUT_RD / SHUT_WR / SHUT_RDWR
+// =============================================================================
+
+@test
+fn test_shutdown_read_construction() {
+    let s: Shutdown = Shutdown.Read;
+    assert(s is Shutdown.Read);
+}
+
+@test
+fn test_shutdown_write_construction() {
+    let s: Shutdown = Shutdown.Write;
+    assert(s is Shutdown.Write);
+}
+
+@test
+fn test_shutdown_both_construction() {
+    let s: Shutdown = Shutdown.Both;
+    assert(s is Shutdown.Both);
+}
+
+@test
+fn test_shutdown_disjoint_read_vs_write() {
+    let r: Shutdown = Shutdown.Read;
+    let w: Shutdown = Shutdown.Write;
+    assert(r is Shutdown.Read);
+    assert(w is Shutdown.Write);
+    assert(!(r is Shutdown.Write));
+    assert(!(w is Shutdown.Read));
+}
+
+@test
+fn test_shutdown_disjoint_read_vs_both() {
+    let r: Shutdown = Shutdown.Read;
+    let b: Shutdown = Shutdown.Both;
+    assert(r is Shutdown.Read);
+    assert(b is Shutdown.Both);
+    assert(!(r is Shutdown.Both));
+    assert(!(b is Shutdown.Read));
+}
+
+@test
+fn test_shutdown_disjoint_write_vs_both() {
+    let w: Shutdown = Shutdown.Write;
+    let b: Shutdown = Shutdown.Both;
+    assert(w is Shutdown.Write);
+    assert(b is Shutdown.Both);
+    assert(!(w is Shutdown.Both));
+    assert(!(b is Shutdown.Write));
+}

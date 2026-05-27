@@ -1,0 +1,283 @@
+// =============================================================================
+// core-tests/net/tls13/unit_test.vr — RFC 8446 type catalogues
+// =============================================================================
+//
+// `core/net/tls13/*` — pure-Verum TLS 1.3 (RFC 8446) implementation.
+// Replaces the intrinsic-backed `core.net.tls` surface over multiple
+// phases.
+//
+// Tests cover the algebraic data-surface — wire-encoding round-trips
+// for IANA-registered identifiers (RFC 8446 §B.4 cipher suites,
+// §B.3 named groups + signature schemes), the legacy/downgrade
+// sentinels (§4.1.3), and the AEAD parameter table.
+// =============================================================================
+
+mount core.net.tls13.{
+    ProtocolVersion, TLS_1_3, LEGACY_VERSION_TLS_1_2,
+    CipherSuite, HashKind, AeadKind,
+    NamedGroup
+};
+
+// =============================================================================
+// Section 1: ProtocolVersion — TLS_1_3 + LEGACY_VERSION_TLS_1_2
+// =============================================================================
+
+@test
+fn test_protocol_version_tls13_major() {
+    assert_eq(TLS_1_3.major, 0x03_u8);
+}
+
+@test
+fn test_protocol_version_tls13_minor() {
+    assert_eq(TLS_1_3.minor, 0x04_u8);
+}
+
+@test
+fn test_legacy_version_tls12_major() {
+    assert_eq(LEGACY_VERSION_TLS_1_2.major, 0x03_u8);
+}
+
+@test
+fn test_legacy_version_tls12_minor() {
+    // RFC 8446 §4.1.2: legacy_version field MUST be 0x0303 (TLS 1.2)
+    assert_eq(LEGACY_VERSION_TLS_1_2.minor, 0x03_u8);
+}
+
+@test
+fn test_protocol_version_construction() {
+    let v = ProtocolVersion { major: 0x03_u8, minor: 0x03_u8 };
+    assert_eq(v.major, 0x03_u8);
+    assert_eq(v.minor, 0x03_u8);
+}
+
+// =============================================================================
+// Section 2: CipherSuite — RFC 8446 §B.4 IANA wire IDs
+// =============================================================================
+
+@test
+fn test_cipher_suite_aes128_gcm_sha256_to_u16() {
+    assert_eq(CipherSuite.TlsAes128GcmSha256.to_u16(), 0x1301_u16);
+}
+
+@test
+fn test_cipher_suite_aes256_gcm_sha384_to_u16() {
+    assert_eq(CipherSuite.TlsAes256GcmSha384.to_u16(), 0x1302_u16);
+}
+
+@test
+fn test_cipher_suite_chacha20_poly1305_sha256_to_u16() {
+    assert_eq(CipherSuite.TlsChaCha20Poly1305Sha256.to_u16(), 0x1303_u16);
+}
+
+@test
+fn test_cipher_suite_aes128_ccm_sha256_to_u16() {
+    assert_eq(CipherSuite.TlsAes128CcmSha256.to_u16(), 0x1304_u16);
+}
+
+@test
+fn test_cipher_suite_aes128_ccm8_sha256_to_u16() {
+    assert_eq(CipherSuite.TlsAes128Ccm8Sha256.to_u16(), 0x1305_u16);
+}
+
+// =============================================================================
+// Section 3: CipherSuite — to_u16 / from_u16 round-trip
+// =============================================================================
+
+@test
+fn test_cipher_suite_round_trip_aes128_gcm() {
+    let s = CipherSuite.from_u16(0x1301_u16);
+    assert(s is CipherSuite.TlsAes128GcmSha256);
+}
+
+@test
+fn test_cipher_suite_round_trip_aes256_gcm() {
+    let s = CipherSuite.from_u16(0x1302_u16);
+    assert(s is CipherSuite.TlsAes256GcmSha384);
+}
+
+@test
+fn test_cipher_suite_unknown_fallthrough() {
+    let s = CipherSuite.from_u16(0xFFFF_u16);
+    assert(s is CipherSuite.Unknown);
+}
+
+// =============================================================================
+// Section 4: CipherSuite.is_supported — RFC 8446 §9.1 mandatory list
+// =============================================================================
+
+@test
+fn test_cipher_suite_aes128_gcm_is_supported() {
+    // RFC 8446 §9.1: TLS_AES_128_GCM_SHA256 is mandatory-to-implement
+    assert(CipherSuite.TlsAes128GcmSha256.is_supported());
+}
+
+@test
+fn test_cipher_suite_chacha20_is_supported() {
+    // RFC 8446 §9.1: TLS_CHACHA20_POLY1305_SHA256 is mandatory-to-implement
+    assert(CipherSuite.TlsChaCha20Poly1305Sha256.is_supported());
+}
+
+@test
+fn test_cipher_suite_aes256_gcm_is_supported() {
+    // RFC 8446 §9.1: TLS_AES_256_GCM_SHA384 is RECOMMENDED
+    assert(CipherSuite.TlsAes256GcmSha384.is_supported());
+}
+
+@test
+fn test_cipher_suite_ccm_is_not_supported() {
+    // CCM suites parse but never negotiate per stdlib design
+    assert(!CipherSuite.TlsAes128CcmSha256.is_supported());
+    assert(!CipherSuite.TlsAes128Ccm8Sha256.is_supported());
+}
+
+// =============================================================================
+// Section 5: CipherSuite.hash_kind — Sha384 only for AES-256-GCM
+// =============================================================================
+
+@test
+fn test_cipher_suite_hash_kind_aes128_gcm_is_sha256() {
+    let h = CipherSuite.TlsAes128GcmSha256.hash_kind();
+    assert(h is HashKind.Sha256);
+}
+
+@test
+fn test_cipher_suite_hash_kind_aes256_gcm_is_sha384() {
+    let h = CipherSuite.TlsAes256GcmSha384.hash_kind();
+    assert(h is HashKind.Sha384);
+}
+
+@test
+fn test_cipher_suite_hash_kind_chacha20_is_sha256() {
+    let h = CipherSuite.TlsChaCha20Poly1305Sha256.hash_kind();
+    assert(h is HashKind.Sha256);
+}
+
+// =============================================================================
+// Section 6: HashKind.output_len — RFC-stable lengths
+// =============================================================================
+
+@test
+fn test_hash_kind_sha256_output_len() {
+    assert_eq(HashKind.Sha256.output_len(), 32);
+}
+
+@test
+fn test_hash_kind_sha384_output_len() {
+    assert_eq(HashKind.Sha384.output_len(), 48);
+}
+
+// =============================================================================
+// Section 7: AeadKind — key/IV/tag lengths
+// =============================================================================
+
+@test
+fn test_aead_kind_aes128_gcm_key_len_16() {
+    assert_eq(AeadKind.Aes128Gcm.key_len(), 16);
+}
+
+@test
+fn test_aead_kind_aes256_gcm_key_len_32() {
+    assert_eq(AeadKind.Aes256Gcm.key_len(), 32);
+}
+
+@test
+fn test_aead_kind_chacha20_key_len_32() {
+    assert_eq(AeadKind.ChaCha20Poly1305.key_len(), 32);
+}
+
+@test
+fn test_aead_kind_iv_len_always_12() {
+    // RFC 8446: AEAD IV is always 12 bytes for TLS 1.3
+    assert_eq(AeadKind.Aes128Gcm.iv_len(), 12);
+    assert_eq(AeadKind.Aes256Gcm.iv_len(), 12);
+    assert_eq(AeadKind.ChaCha20Poly1305.iv_len(), 12);
+    assert_eq(AeadKind.Aes128Ccm.iv_len(), 12);
+    assert_eq(AeadKind.Aes128Ccm8.iv_len(), 12);
+}
+
+@test
+fn test_aead_kind_tag_len_default_16() {
+    assert_eq(AeadKind.Aes128Gcm.tag_len(), 16);
+    assert_eq(AeadKind.Aes256Gcm.tag_len(), 16);
+    assert_eq(AeadKind.ChaCha20Poly1305.tag_len(), 16);
+    assert_eq(AeadKind.Aes128Ccm.tag_len(), 16);
+}
+
+@test
+fn test_aead_kind_ccm8_tag_len_is_8() {
+    // CCM-8 truncates the tag to 8 bytes
+    assert_eq(AeadKind.Aes128Ccm8.tag_len(), 8);
+}
+
+// =============================================================================
+// Section 8: NamedGroup — IANA wire IDs
+// =============================================================================
+
+@test
+fn test_named_group_x25519_to_u16() {
+    assert_eq(NamedGroup.X25519.to_u16(), 0x001D_u16);
+}
+
+@test
+fn test_named_group_secp256r1_to_u16() {
+    assert_eq(NamedGroup.Secp256r1.to_u16(), 0x0017_u16);
+}
+
+@test
+fn test_named_group_secp384r1_to_u16() {
+    assert_eq(NamedGroup.Secp384r1.to_u16(), 0x0018_u16);
+}
+
+@test
+fn test_named_group_secp521r1_to_u16() {
+    assert_eq(NamedGroup.Secp521r1.to_u16(), 0x0019_u16);
+}
+
+@test
+fn test_named_group_x448_to_u16() {
+    assert_eq(NamedGroup.X448.to_u16(), 0x001E_u16);
+}
+
+@test
+fn test_named_group_ffdhe2048_to_u16() {
+    assert_eq(NamedGroup.Ffdhe2048.to_u16(), 0x0100_u16);
+}
+
+// =============================================================================
+// Section 9: NamedGroup.is_supported — v1 production groups
+// =============================================================================
+
+@test
+fn test_named_group_x25519_is_supported() {
+    assert(NamedGroup.X25519.is_supported());
+}
+
+@test
+fn test_named_group_secp256r1_is_supported() {
+    assert(NamedGroup.Secp256r1.is_supported());
+}
+
+@test
+fn test_named_group_secp384r1_is_supported() {
+    assert(NamedGroup.Secp384r1.is_supported());
+}
+
+@test
+fn test_named_group_x448_is_not_supported_v1() {
+    // X448 parses but is not in v1 supported list
+    assert(!NamedGroup.X448.is_supported());
+}
+
+// =============================================================================
+// Section 10: NamedGroup.public_key_len — wire-format invariants
+// =============================================================================
+
+@test
+fn test_named_group_x25519_pubkey_len_32() {
+    assert_eq(NamedGroup.X25519.public_key_len(), 32);
+}
+
+@test
+fn test_named_group_x448_pubkey_len_56() {
+    assert_eq(NamedGroup.X448.public_key_len(), 56);
+}
