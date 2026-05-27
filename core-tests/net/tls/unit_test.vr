@@ -1,0 +1,268 @@
+// =============================================================================
+// core-tests/net/tls/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/tls.vr` (~1114 LOC) — TLS 1.0-1.3 streams + connector +
+// acceptor with pluggable backend (rustls-ktls / openssl-fips /
+// hacl-star / SChannel / SecureTransport).
+//
+// Tests cover the algebraic data-surface:
+//
+//   * TlsVersion 4-variant + as_str + wire_version + is_secure
+//     (Tls12/Tls13 only).
+//   * KeyType 3-variant + as_str (Rsa / Ec / Ed25519).
+//   * CertVerifyMode 3-variant (Full / None / Custom).
+//   * Certificate record (der_data: List<Byte>).
+//   * PrivateKey record (der_data + key_type).
+// =============================================================================
+
+mount core.net.tls.{
+    TlsVersion, KeyType, CertVerifyMode, Certificate, PrivateKey
+};
+mount core.collections.List;
+
+// =============================================================================
+// Section 1: TlsVersion — 4-variant + as_str
+// =============================================================================
+
+@test
+fn test_tls_version_tls10_construction() {
+    let v: TlsVersion = TlsVersion.Tls10;
+    assert(v is TlsVersion.Tls10);
+}
+
+@test
+fn test_tls_version_tls11_construction() {
+    let v: TlsVersion = TlsVersion.Tls11;
+    assert(v is TlsVersion.Tls11);
+}
+
+@test
+fn test_tls_version_tls12_construction() {
+    let v: TlsVersion = TlsVersion.Tls12;
+    assert(v is TlsVersion.Tls12);
+}
+
+@test
+fn test_tls_version_tls13_construction() {
+    let v: TlsVersion = TlsVersion.Tls13;
+    assert(v is TlsVersion.Tls13);
+}
+
+@test
+fn test_tls_version_as_str_tls10() {
+    assert_eq(TlsVersion.Tls10.as_str(), "TLS 1.0");
+}
+
+@test
+fn test_tls_version_as_str_tls11() {
+    assert_eq(TlsVersion.Tls11.as_str(), "TLS 1.1");
+}
+
+@test
+fn test_tls_version_as_str_tls12() {
+    assert_eq(TlsVersion.Tls12.as_str(), "TLS 1.2");
+}
+
+@test
+fn test_tls_version_as_str_tls13() {
+    assert_eq(TlsVersion.Tls13.as_str(), "TLS 1.3");
+}
+
+// =============================================================================
+// Section 2: TlsVersion.wire_version — RFC-stable (major, minor) tuples
+// =============================================================================
+
+@test
+fn test_tls_version_wire_tls10() {
+    let (maj, min) = TlsVersion.Tls10.wire_version();
+    assert_eq(maj, 3);
+    assert_eq(min, 1);
+}
+
+@test
+fn test_tls_version_wire_tls11() {
+    let (maj, min) = TlsVersion.Tls11.wire_version();
+    assert_eq(maj, 3);
+    assert_eq(min, 2);
+}
+
+@test
+fn test_tls_version_wire_tls12() {
+    let (maj, min) = TlsVersion.Tls12.wire_version();
+    assert_eq(maj, 3);
+    assert_eq(min, 3);
+}
+
+@test
+fn test_tls_version_wire_tls13() {
+    // RFC 8446: TLS 1.3 reports (3, 3) on the wire for backward compat,
+    // signaled via supported_versions extension — but the version
+    // record itself encodes (3, 4).
+    let (maj, min) = TlsVersion.Tls13.wire_version();
+    assert_eq(maj, 3);
+    assert_eq(min, 4);
+}
+
+// =============================================================================
+// Section 3: TlsVersion.is_secure — Tls12/Tls13 only
+// =============================================================================
+
+@test
+fn test_tls_version_is_secure_tls12() {
+    assert(TlsVersion.Tls12.is_secure());
+}
+
+@test
+fn test_tls_version_is_secure_tls13() {
+    assert(TlsVersion.Tls13.is_secure());
+}
+
+@test
+fn test_tls_version_is_not_secure_tls10() {
+    assert(!TlsVersion.Tls10.is_secure());
+}
+
+@test
+fn test_tls_version_is_not_secure_tls11() {
+    assert(!TlsVersion.Tls11.is_secure());
+}
+
+// =============================================================================
+// Section 4: TlsVersion — Eq + disjointness
+// =============================================================================
+
+@test
+fn test_tls_version_eq_tls12() {
+    assert(TlsVersion.Tls12 == TlsVersion.Tls12);
+}
+
+@test
+fn test_tls_version_disjoint_tls12_vs_tls13() {
+    assert(!(TlsVersion.Tls12 == TlsVersion.Tls13));
+}
+
+@test
+fn test_tls_version_disjoint_tls10_vs_tls13() {
+    assert(!(TlsVersion.Tls10 == TlsVersion.Tls13));
+}
+
+// =============================================================================
+// Section 5: KeyType — 3-variant + as_str
+// =============================================================================
+
+@test
+fn test_key_type_rsa_construction() {
+    let k: KeyType = KeyType.Rsa;
+    assert(k is KeyType.Rsa);
+}
+
+@test
+fn test_key_type_ec_construction() {
+    let k: KeyType = KeyType.Ec;
+    assert(k is KeyType.Ec);
+}
+
+@test
+fn test_key_type_ed25519_construction() {
+    let k: KeyType = KeyType.Ed25519;
+    assert(k is KeyType.Ed25519);
+}
+
+@test
+fn test_key_type_as_str_rsa() {
+    assert_eq(KeyType.Rsa.as_str(), "RSA");
+}
+
+@test
+fn test_key_type_as_str_ec() {
+    assert_eq(KeyType.Ec.as_str(), "EC");
+}
+
+@test
+fn test_key_type_as_str_ed25519() {
+    assert_eq(KeyType.Ed25519.as_str(), "Ed25519");
+}
+
+@test
+fn test_key_type_disjoint_rsa_vs_ec() {
+    assert(!(KeyType.Rsa == KeyType.Ec));
+}
+
+@test
+fn test_key_type_disjoint_ec_vs_ed25519() {
+    assert(!(KeyType.Ec == KeyType.Ed25519));
+}
+
+// =============================================================================
+// Section 6: CertVerifyMode — 3-variant
+// =============================================================================
+
+@test
+fn test_cert_verify_mode_full_construction() {
+    let m: CertVerifyMode = CertVerifyMode.Full;
+    assert(m is CertVerifyMode.Full);
+}
+
+@test
+fn test_cert_verify_mode_none_construction() {
+    let m: CertVerifyMode = CertVerifyMode.None;
+    assert(m is CertVerifyMode.None);
+}
+
+@test
+fn test_cert_verify_mode_custom_construction() {
+    let m: CertVerifyMode = CertVerifyMode.Custom;
+    assert(m is CertVerifyMode.Custom);
+}
+
+@test
+fn test_cert_verify_mode_disjoint_full_vs_none() {
+    let f: CertVerifyMode = CertVerifyMode.Full;
+    let n: CertVerifyMode = CertVerifyMode.None;
+    assert(!(f is CertVerifyMode.None));
+    assert(!(n is CertVerifyMode.Full));
+}
+
+// =============================================================================
+// Section 7: Certificate / PrivateKey — record construction
+// =============================================================================
+
+@test
+fn test_certificate_from_der_empty() {
+    let data: List<Byte> = [];
+    let c = Certificate.from_der(data);
+    assert_eq(c.der_data.len(), 0);
+}
+
+@test
+fn test_certificate_from_der_dummy() {
+    let mut data: List<Byte> = [];
+    data.push(0x30_u8);  // ASN.1 SEQUENCE tag
+    data.push(0x82_u8);
+    data.push(0x00_u8);
+    data.push(0x10_u8);
+    let c = Certificate.from_der(data);
+    assert_eq(c.der_data.len(), 4);
+}
+
+@test
+fn test_private_key_from_der_rsa() {
+    let data: List<Byte> = [];
+    let k = PrivateKey.from_der(data, KeyType.Rsa);
+    assert(k.key_type == KeyType.Rsa);
+}
+
+@test
+fn test_private_key_from_der_ed25519() {
+    let data: List<Byte> = [];
+    let k = PrivateKey.from_der(data, KeyType.Ed25519);
+    assert(k.key_type == KeyType.Ed25519);
+}
+
+@test
+fn test_private_key_key_type_accessor() {
+    let data: List<Byte> = [];
+    let k = PrivateKey.from_der(data, KeyType.Ec);
+    assert(k.key_type() == KeyType.Ec);
+}

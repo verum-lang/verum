@@ -1,0 +1,302 @@
+// =============================================================================
+// core-tests/net/dns/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/dns.vr` (~1928 LOC) — pure-Verum DNS resolver per RFC 1035
+// (UDP + TCP fallback).
+//
+// Tests cover the algebraic data-surface:
+//
+//   * DNS_TYPE_* wire-type constants (RFC 1035 §3.2.2).
+//   * DnsRecordType 10-variant + disjointness.
+//   * DnsError 13-variant disjointness + Eq.
+//   * DnsRecord 9-variant payload preservation.
+//   * DnsRecordEntry record (record + ttl).
+//
+// Live `lookup_host` / `resolve` / `Resolver.query` are network-bound
+// (live DNS queries) and are tested at language level
+// (vcs/specs/L2-standard/net/dns/) against a mock resolver fixture.
+// =============================================================================
+
+mount core.net.dns.{
+    DnsError, DnsRecord, DnsRecordEntry, DnsRecordType,
+    DNS_TYPE_A, DNS_TYPE_NS, DNS_TYPE_CNAME, DNS_TYPE_SOA,
+    DNS_TYPE_PTR, DNS_TYPE_MX, DNS_TYPE_TXT, DNS_TYPE_AAAA,
+    DNS_TYPE_SRV, DNS_TYPE_ANY
+};
+mount core.net.addr.{Ipv4Addr, Ipv6Addr};
+
+// =============================================================================
+// Section 1: DNS_TYPE_* wire constants (RFC 1035 §3.2.2)
+// =============================================================================
+
+@test
+fn test_dns_type_a_is_1() { assert_eq(DNS_TYPE_A, 1_u16); }
+
+@test
+fn test_dns_type_ns_is_2() { assert_eq(DNS_TYPE_NS, 2_u16); }
+
+@test
+fn test_dns_type_cname_is_5() { assert_eq(DNS_TYPE_CNAME, 5_u16); }
+
+@test
+fn test_dns_type_soa_is_6() { assert_eq(DNS_TYPE_SOA, 6_u16); }
+
+@test
+fn test_dns_type_ptr_is_12() { assert_eq(DNS_TYPE_PTR, 12_u16); }
+
+@test
+fn test_dns_type_mx_is_15() { assert_eq(DNS_TYPE_MX, 15_u16); }
+
+@test
+fn test_dns_type_txt_is_16() { assert_eq(DNS_TYPE_TXT, 16_u16); }
+
+@test
+fn test_dns_type_aaaa_is_28() { assert_eq(DNS_TYPE_AAAA, 28_u16); }
+
+@test
+fn test_dns_type_srv_is_33() { assert_eq(DNS_TYPE_SRV, 33_u16); }
+
+@test
+fn test_dns_type_any_is_255() { assert_eq(DNS_TYPE_ANY, 255_u16); }
+
+// =============================================================================
+// Section 2: DnsRecordType — 10-variant disjointness
+// =============================================================================
+
+@test
+fn test_dns_record_type_a_construction() {
+    let r: DnsRecordType = DnsRecordType.A;
+    assert(r is DnsRecordType.A);
+}
+
+@test
+fn test_dns_record_type_aaaa_construction() {
+    let r: DnsRecordType = DnsRecordType.AAAA;
+    assert(r is DnsRecordType.AAAA);
+}
+
+@test
+fn test_dns_record_type_cname_construction() {
+    let r: DnsRecordType = DnsRecordType.CNAME;
+    assert(r is DnsRecordType.CNAME);
+}
+
+@test
+fn test_dns_record_type_mx_construction() {
+    let r: DnsRecordType = DnsRecordType.MX;
+    assert(r is DnsRecordType.MX);
+}
+
+@test
+fn test_dns_record_type_txt_construction() {
+    let r: DnsRecordType = DnsRecordType.TXT;
+    assert(r is DnsRecordType.TXT);
+}
+
+@test
+fn test_dns_record_type_ns_construction() {
+    let r: DnsRecordType = DnsRecordType.NS;
+    assert(r is DnsRecordType.NS);
+}
+
+@test
+fn test_dns_record_type_ptr_construction() {
+    let r: DnsRecordType = DnsRecordType.PTR;
+    assert(r is DnsRecordType.PTR);
+}
+
+@test
+fn test_dns_record_type_srv_construction() {
+    let r: DnsRecordType = DnsRecordType.SRV;
+    assert(r is DnsRecordType.SRV);
+}
+
+@test
+fn test_dns_record_type_soa_construction() {
+    let r: DnsRecordType = DnsRecordType.SOA;
+    assert(r is DnsRecordType.SOA);
+}
+
+@test
+fn test_dns_record_type_any_construction() {
+    let r: DnsRecordType = DnsRecordType.ANY;
+    assert(r is DnsRecordType.ANY);
+}
+
+@test
+fn test_dns_record_type_a_vs_aaaa_disjoint() {
+    let a: DnsRecordType = DnsRecordType.A;
+    let q: DnsRecordType = DnsRecordType.AAAA;
+    assert(a is DnsRecordType.A);
+    assert(q is DnsRecordType.AAAA);
+    assert(!(a is DnsRecordType.AAAA));
+    assert(!(q is DnsRecordType.A));
+}
+
+// =============================================================================
+// Section 3: DnsError — variant Eq + disjointness
+// =============================================================================
+
+@test
+fn test_dns_error_not_found_eq() {
+    assert(DnsError.NotFound == DnsError.NotFound);
+}
+
+@test
+fn test_dns_error_timeout_eq() {
+    assert(DnsError.Timeout == DnsError.Timeout);
+}
+
+@test
+fn test_dns_error_invalid_response_eq() {
+    assert(DnsError.InvalidResponse == DnsError.InvalidResponse);
+}
+
+@test
+fn test_dns_error_truncated_eq() {
+    assert(DnsError.Truncated == DnsError.Truncated);
+}
+
+@test
+fn test_dns_error_refused_eq() {
+    assert(DnsError.Refused == DnsError.Refused);
+}
+
+@test
+fn test_dns_error_no_data_eq() {
+    assert(DnsError.NoData == DnsError.NoData);
+}
+
+@test
+fn test_dns_error_network_error_eq_same_payload() {
+    let a = DnsError.NetworkError("connection reset".clone());
+    let b = DnsError.NetworkError("connection reset".clone());
+    assert(a == b);
+}
+
+@test
+fn test_dns_error_network_error_disjoint_payloads() {
+    let a = DnsError.NetworkError("a".clone());
+    let b = DnsError.NetworkError("b".clone());
+    assert(!(a == b));
+}
+
+@test
+fn test_dns_error_other_eq() {
+    let a = DnsError.Other("custom".clone());
+    let b = DnsError.Other("custom".clone());
+    assert(a == b);
+}
+
+@test
+fn test_dns_error_disjoint_not_found_vs_timeout() {
+    assert(!(DnsError.NotFound == DnsError.Timeout));
+}
+
+@test
+fn test_dns_error_disjoint_truncated_vs_refused() {
+    assert(!(DnsError.Truncated == DnsError.Refused));
+}
+
+@test
+fn test_dns_error_disjoint_host_not_found_vs_no_data() {
+    // RFC 1035 §4.1.1: NXDOMAIN vs NOERROR with empty answer
+    assert(!(DnsError.HostNotFound == DnsError.NoData));
+}
+
+// =============================================================================
+// Section 4: DnsRecord — 9-variant payload preservation
+// =============================================================================
+
+@test
+fn test_dns_record_a_construction() {
+    let r = DnsRecord.A(Ipv4Addr.new(1_u8, 1_u8, 1_u8, 1_u8));
+    assert(r is DnsRecord.A);
+}
+
+@test
+fn test_dns_record_aaaa_construction() {
+    let r = DnsRecord.AAAA(Ipv6Addr.localhost());
+    assert(r is DnsRecord.AAAA);
+}
+
+@test
+fn test_dns_record_cname_construction() {
+    let r = DnsRecord.CNAME("alias.example.com".clone());
+    assert(r is DnsRecord.CNAME);
+}
+
+@test
+fn test_dns_record_mx_construction() {
+    let r = DnsRecord.MX { priority: 10, exchange: "mail.example.com".clone() };
+    assert(r is DnsRecord.MX);
+}
+
+@test
+fn test_dns_record_txt_construction() {
+    let r = DnsRecord.TXT("v=spf1 -all".clone());
+    assert(r is DnsRecord.TXT);
+}
+
+@test
+fn test_dns_record_ns_construction() {
+    let r = DnsRecord.NS("ns1.example.com".clone());
+    assert(r is DnsRecord.NS);
+}
+
+@test
+fn test_dns_record_ptr_construction() {
+    let r = DnsRecord.PTR("host.example.com".clone());
+    assert(r is DnsRecord.PTR);
+}
+
+@test
+fn test_dns_record_srv_construction() {
+    let r = DnsRecord.SRV {
+        priority: 10, weight: 60, port: 5269, target: "xmpp.example.com".clone(),
+    };
+    assert(r is DnsRecord.SRV);
+}
+
+@test
+fn test_dns_record_soa_construction() {
+    let r = DnsRecord.SOA {
+        mname: "ns1.example.com".clone(),
+        rname: "admin.example.com".clone(),
+        serial: 2026052700, refresh: 86400, retry: 7200,
+        expire: 604800, minimum: 300,
+    };
+    assert(r is DnsRecord.SOA);
+}
+
+// =============================================================================
+// Section 5: DnsRecordEntry — record + TTL pair
+// =============================================================================
+
+@test
+fn test_dns_record_entry_a_with_ttl() {
+    let e = DnsRecordEntry {
+        record: DnsRecord.A(Ipv4Addr.new(8_u8, 8_u8, 8_u8, 8_u8)),
+        ttl: 300,
+    };
+    assert_eq(e.ttl, 300);
+}
+
+@test
+fn test_dns_record_entry_ttl_zero() {
+    let e = DnsRecordEntry {
+        record: DnsRecord.A(Ipv4Addr.localhost()),
+        ttl: 0,
+    };
+    assert_eq(e.ttl, 0);
+}
+
+@test
+fn test_dns_record_entry_ttl_max() {
+    let e = DnsRecordEntry {
+        record: DnsRecord.A(Ipv4Addr.localhost()),
+        ttl: 2147483647, // Int.max
+    };
+    assert_eq(e.ttl, 2147483647);
+}

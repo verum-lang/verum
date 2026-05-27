@@ -1,0 +1,197 @@
+// =============================================================================
+// core-tests/net/unix/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/unix.vr` (~1051 LOC) — AF_UNIX stream sockets for local
+// IPC. Per-process credentials via SO_PEERCRED (Linux) /
+// LOCAL_PEERCRED (macOS). FD-passing via SCM_RIGHTS (gated).
+//
+// Tests cover the algebraic data-surface visible from a USER test
+// module:
+//
+//   * UnixError 7-variant + Eq + variant disjointness.
+//   * ShutdownKind 3-variant + variant disjointness.
+//   * PeerCred record (pid / uid / gid).
+//   * FdPassingError variant (currently NotImplemented stub).
+// =============================================================================
+
+mount core.net.unix.{UnixError, ShutdownKind, PeerCred, FdPassingError};
+
+// =============================================================================
+// Section 1: UnixError — 7-variant Eq + disjointness
+// =============================================================================
+
+@test
+fn test_unix_error_io_error_eq() {
+    let a = UnixError.IoError("connection reset".clone());
+    let b = UnixError.IoError("connection reset".clone());
+    assert(a == b);
+}
+
+@test
+fn test_unix_error_io_error_disjoint_payloads() {
+    let a = UnixError.IoError("a".clone());
+    let b = UnixError.IoError("b".clone());
+    assert(!(a == b));
+}
+
+@test
+fn test_unix_error_path_too_long_eq() {
+    let a = UnixError.PathTooLong { limit: 108, actual: 200 };
+    let b = UnixError.PathTooLong { limit: 108, actual: 200 };
+    assert(a == b);
+}
+
+@test
+fn test_unix_error_path_too_long_limit_disjoint() {
+    let a = UnixError.PathTooLong { limit: 108, actual: 200 };
+    let b = UnixError.PathTooLong { limit: 104, actual: 200 };
+    assert(!(a == b));
+}
+
+@test
+fn test_unix_error_path_too_long_actual_disjoint() {
+    let a = UnixError.PathTooLong { limit: 108, actual: 200 };
+    let b = UnixError.PathTooLong { limit: 108, actual: 250 };
+    assert(!(a == b));
+}
+
+@test
+fn test_unix_error_invalid_path_eq() {
+    let a = UnixError.InvalidPath("/dev/null".clone());
+    let b = UnixError.InvalidPath("/dev/null".clone());
+    assert(a == b);
+}
+
+@test
+fn test_unix_error_permission_denied_eq() {
+    assert(UnixError.PermissionDenied == UnixError.PermissionDenied);
+}
+
+@test
+fn test_unix_error_path_in_use_eq() {
+    let a = UnixError.PathInUse("/tmp/app.sock".clone());
+    let b = UnixError.PathInUse("/tmp/app.sock".clone());
+    assert(a == b);
+}
+
+@test
+fn test_unix_error_not_found_eq() {
+    let a = UnixError.NotFound("/tmp/missing".clone());
+    let b = UnixError.NotFound("/tmp/missing".clone());
+    assert(a == b);
+}
+
+@test
+fn test_unix_error_peer_closed_eq() {
+    assert(UnixError.PeerClosed == UnixError.PeerClosed);
+}
+
+@test
+fn test_unix_error_disjoint_perm_vs_not_found() {
+    let a = UnixError.PermissionDenied;
+    let b = UnixError.NotFound("x".clone());
+    assert(!(a == b));
+}
+
+@test
+fn test_unix_error_disjoint_peer_closed_vs_path_in_use() {
+    let a = UnixError.PeerClosed;
+    let b = UnixError.PathInUse("x".clone());
+    assert(!(a == b));
+}
+
+@test
+fn test_unix_error_disjoint_io_vs_invalid_path() {
+    let a = UnixError.IoError("x".clone());
+    let b = UnixError.InvalidPath("x".clone());
+    assert(!(a == b));
+}
+
+// =============================================================================
+// Section 2: ShutdownKind — 3-variant disjointness
+// =============================================================================
+
+@test
+fn test_shutdown_kind_read_construction() {
+    let s: ShutdownKind = ShutdownKind.Read;
+    assert(s is ShutdownKind.Read);
+}
+
+@test
+fn test_shutdown_kind_write_construction() {
+    let s: ShutdownKind = ShutdownKind.Write;
+    assert(s is ShutdownKind.Write);
+}
+
+@test
+fn test_shutdown_kind_both_construction() {
+    let s: ShutdownKind = ShutdownKind.Both;
+    assert(s is ShutdownKind.Both);
+}
+
+@test
+fn test_shutdown_kind_disjoint_read_vs_write() {
+    let r: ShutdownKind = ShutdownKind.Read;
+    let w: ShutdownKind = ShutdownKind.Write;
+    assert(r is ShutdownKind.Read);
+    assert(w is ShutdownKind.Write);
+    assert(!(r is ShutdownKind.Write));
+    assert(!(w is ShutdownKind.Read));
+}
+
+@test
+fn test_shutdown_kind_disjoint_read_vs_both() {
+    let r: ShutdownKind = ShutdownKind.Read;
+    let b: ShutdownKind = ShutdownKind.Both;
+    assert(!(r is ShutdownKind.Both));
+    assert(!(b is ShutdownKind.Read));
+}
+
+// =============================================================================
+// Section 3: PeerCred — record fields
+// =============================================================================
+
+@test
+fn test_peer_cred_construction() {
+    let p = PeerCred {
+        pid: 12345_i32,
+        uid: 1000_u32,
+        gid: 1000_u32,
+    };
+    assert_eq(p.pid, 12345_i32);
+    assert_eq(p.uid, 1000_u32);
+    assert_eq(p.gid, 1000_u32);
+}
+
+@test
+fn test_peer_cred_root() {
+    // Root process — useful for admin-API authorization
+    let p = PeerCred {
+        pid: 1_i32,
+        uid: 0_u32,
+        gid: 0_u32,
+    };
+    assert_eq(p.uid, 0_u32);
+}
+
+@test
+fn test_peer_cred_negative_pid_sentinel() {
+    // Some kernels return -1 for unknown pid
+    let p = PeerCred {
+        pid: -1_i32,
+        uid: 0_u32,
+        gid: 0_u32,
+    };
+    assert_eq(p.pid, -1_i32);
+}
+
+// =============================================================================
+// Section 4: FdPassingError — currently NotImplemented stub
+// =============================================================================
+
+@test
+fn test_fd_passing_error_not_implemented_construction() {
+    let e: FdPassingError = FdPassingError.NotImplemented;
+    assert(e is FdPassingError.NotImplemented);
+}
