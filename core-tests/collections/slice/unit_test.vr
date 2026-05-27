@@ -311,3 +311,171 @@ fn test_slice_iter_count_elements() {
     }
     assert_eq(count, 5);
 }
+
+// =============================================================================
+// Section 7: index_of / rindex_of — value search (CLOSED 2026-05-24, commit
+// d05ffd479; missing `public` qualifier prevented user-side dispatch)
+// =============================================================================
+
+@test
+fn test_slice_index_of_first_match() {
+    let xs: List<Int> = [10, 20, 30, 20, 10];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.index_of(&20), Some(1));
+    assert_eq(s.index_of(&10), Some(0));
+    assert_eq(s.index_of(&30), Some(2));
+}
+
+@test
+fn test_slice_index_of_absent_is_none() {
+    let xs: List<Int> = [1, 2, 3];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.index_of(&99), None);
+}
+
+@test
+fn test_slice_index_of_on_empty_is_none() {
+    let xs: List<Int> = [];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.index_of(&1), None);
+}
+
+@test
+fn test_slice_rindex_of_last_match() {
+    let xs: List<Int> = [10, 20, 30, 20, 10];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.rindex_of(&20), Some(3));
+    assert_eq(s.rindex_of(&10), Some(4));
+    assert_eq(s.rindex_of(&30), Some(2));
+}
+
+@test
+fn test_slice_rindex_of_absent_is_none() {
+    let xs: List<Int> = [1, 2, 3];
+    let s: &[Int] = xs.as_slice();
+    assert_eq(s.rindex_of(&7), None);
+}
+
+// =============================================================================
+// Section 8: contains via different construction paths
+// =============================================================================
+
+@test
+fn test_slice_contains_via_full_slice() {
+    let xs: List<Int> = [10, 20, 30];
+    let s: &[Int] = xs.as_slice();
+    assert(s.contains(&20));
+    assert(s.contains(&10));
+    assert(s.contains(&30));
+}
+
+@test
+fn test_slice_contains_via_subrange_slice() {
+    let xs: List<Int> = [10, 20, 30, 40, 50];
+    let s: &[Int] = xs.as_slice();
+    let sub = s.slice(1, 4);
+    // Subrange [20, 30, 40]
+    assert(sub.contains(&20));
+    assert(sub.contains(&30));
+    assert(sub.contains(&40));
+    assert(!sub.contains(&10));
+    assert(!sub.contains(&50));
+}
+
+// =============================================================================
+// Section 9: get coherence with first / last across subrange chains
+// =============================================================================
+
+@test
+fn test_slice_get_zero_eq_first() {
+    let xs: List<Int> = [100, 200, 300];
+    let s: &[Int] = xs.as_slice();
+    let f = s.first();
+    let g0 = s.get(0);
+    // first() returns Maybe<&T>; get(0) returns Maybe<T>; the values
+    // (via *) should match. Direct equality on the Maybe-of-ref vs
+    // Maybe-of-value differs by shape, so we destructure and compare.
+    match f {
+        Some(fv) => match g0 {
+            Some(gv) => assert_eq(*fv, gv),
+            None => panic("get(0) must be Some on non-empty"),
+        },
+        None => panic("first() must be Some on non-empty"),
+    }
+}
+
+@test
+fn test_slice_get_last_idx_eq_last() {
+    let xs: List<Int> = [100, 200, 300];
+    let s: &[Int] = xs.as_slice();
+    let l = s.last();
+    let g = s.get(s.len() - 1);
+    match l {
+        Some(lv) => match g {
+            Some(gv) => assert_eq(*lv, gv),
+            None => panic("get(last) must be Some on non-empty"),
+        },
+        None => panic("last() must be Some on non-empty"),
+    }
+}
+
+// =============================================================================
+// Section 10: Subrange chain — slice-of-slice independence
+// =============================================================================
+
+@test
+fn test_slice_of_slice_preserves_len() {
+    let xs: List<Int> = [1, 2, 3, 4, 5, 6];
+    let s: &[Int] = xs.as_slice();
+    let sub1 = s.slice(1, 5);
+    let sub2 = sub1.slice(1, 3);
+    assert_eq(sub1.len(), 4);
+    assert_eq(sub2.len(), 2);
+}
+
+@test
+fn test_slice_full_full_eq_original() {
+    let xs: List<Int> = [10, 20, 30];
+    let s: &[Int] = xs.as_slice();
+    let full = s.slice(0, s.len());
+    assert_eq(full.len(), s.len());
+}
+
+// =============================================================================
+// Section 11: split_at coherence — lengths reconstruct original
+// =============================================================================
+
+@test
+fn test_slice_split_at_concat_len_equals_original() {
+    let xs: List<Int> = [1, 2, 3, 4, 5];
+    let s: &[Int] = xs.as_slice();
+    let (left, right) = s.split_at(2);
+    assert_eq(left.len() + right.len(), s.len());
+}
+
+@test
+fn test_slice_split_at_one_yields_singleton_left() {
+    let xs: List<Int> = [42, 99];
+    let s: &[Int] = xs.as_slice();
+    let (left, right) = s.split_at(1);
+    assert_eq(left.len(), 1);
+    assert_eq(right.len(), 1);
+}
+
+@test
+fn test_slice_split_at_zero_yields_empty_left() {
+    let xs: List<Int> = [1, 2, 3];
+    let s: &[Int] = xs.as_slice();
+    let (left, right) = s.split_at(0);
+    assert_eq(left.len(), 0);
+    assert_eq(right.len(), 3);
+}
+
+@test
+fn test_slice_split_at_full_yields_empty_right() {
+    let xs: List<Int> = [1, 2, 3];
+    let s: &[Int] = xs.as_slice();
+    let (left, right) = s.split_at(3);
+    assert_eq(left.len(), 3);
+    assert_eq(right.len(), 0);
+}

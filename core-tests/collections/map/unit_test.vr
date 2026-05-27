@@ -405,4 +405,123 @@ fn test_map_many_keys_then_remove_half_preserves_remainder() {
     assert_eq(m.get(&14), None);
 }
 
+// =============================================================================
+// Section 15: keys_list / values_list — iteration into owned List
+// =============================================================================
+
+@test
+fn test_map_keys_list_on_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let ks = m.keys_list();
+    assert_eq(ks.len(), 0);
+}
+
+@test
+fn test_map_values_list_on_empty() {
+    let m: Map<Int, Int> = Map.new();
+    let vs = m.values_list();
+    assert_eq(vs.len(), 0);
+}
+
+@test
+fn test_map_keys_list_count_matches_len() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    let _ = m.insert(2, 20);
+    let _ = m.insert(3, 30);
+    let ks = m.keys_list();
+    assert_eq(ks.len(), 3);
+}
+
+@test
+fn test_map_values_list_count_matches_len() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    let _ = m.insert(2, 20);
+    let _ = m.insert(3, 30);
+    let vs = m.values_list();
+    assert_eq(vs.len(), 3);
+}
+
+@test
+fn test_map_keys_list_contains_each_inserted_key() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(10, 100);
+    let _ = m.insert(20, 200);
+    let _ = m.insert(30, 300);
+    let ks = m.keys_list();
+    assert(ks.contains(&10));
+    assert(ks.contains(&20));
+    assert(ks.contains(&30));
+}
+
+@test
+fn test_map_values_list_contains_each_inserted_value() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 100);
+    let _ = m.insert(2, 200);
+    let _ = m.insert(3, 300);
+    let vs = m.values_list();
+    assert(vs.contains(&100));
+    assert(vs.contains(&200));
+    assert(vs.contains(&300));
+}
+
+@test
+fn test_map_keys_list_after_remove_drops_key() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    let _ = m.insert(2, 20);
+    let _ = m.remove(1);
+    let ks = m.keys_list();
+    assert_eq(ks.len(), 1);
+    assert(!ks.contains(&1));
+    assert(ks.contains(&2));
+}
+
+// =============================================================================
+// Section 16: is_empty / capacity invariants
+// =============================================================================
+
+@test
+fn test_map_is_empty_true_after_new() {
+    let m: Map<Int, Int> = Map.new();
+    assert(m.is_empty());
+}
+
+@test
+fn test_map_is_empty_false_after_insert() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    assert(!m.is_empty());
+}
+
+@test
+fn test_map_is_empty_after_clear() {
+    let mut m: Map<Int, Int> = Map.new();
+    let _ = m.insert(1, 10);
+    let _ = m.insert(2, 20);
+    m.clear();
+    assert(m.is_empty());
+    assert_eq(m.len(), 0);
+}
+
+@test
+fn test_map_capacity_non_negative() {
+    let m: Map<Int, Int> = Map.new();
+    assert(m.capacity() >= 0);
+}
+
+@test
+fn test_map_capacity_grows_with_inserts() {
+    let mut m: Map<Int, Int> = Map.new();
+    let mut i = 0;
+    while i < 64 {
+        let _ = m.insert(i, i);
+        i = i + 1;
+    }
+    // 64 inserts must have allocated capacity ≥ 64.
+    assert(m.capacity() >= 64);
+}
+
 fn main() {}

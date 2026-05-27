@@ -356,4 +356,98 @@ fn test_heap_duplicates_preserved_in_drain() {
     assert(h.is_empty());
 }
 
+// =============================================================================
+// Section 12: to_list / into_list — backing-store accessors
+// =============================================================================
+
+@test
+fn test_heap_to_list_on_empty_returns_empty_list() {
+    let h: BinaryHeap<Int> = BinaryHeap.new();
+    let lst = h.to_list();
+    assert_eq(lst.len(), 0);
+}
+
+@test
+fn test_heap_to_list_returns_clone_of_data() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(5);
+    h.push(10);
+    h.push(3);
+    let lst = h.to_list();
+    assert_eq(lst.len(), 3);
+    // List contains all heap elements (in heap order, not sorted).
+    assert(lst.contains(&5));
+    assert(lst.contains(&10));
+    assert(lst.contains(&3));
+}
+
+@test
+fn test_heap_to_list_does_not_consume_heap() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(5);
+    h.push(10);
+    let _ = h.to_list();
+    // Heap is unchanged: peek still returns max.
+    assert_eq(h.peek(), Some(10));
+    assert_eq(h.len(), 2);
+}
+
+@test
+fn test_heap_into_list_consumes_heap() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(7);
+    h.push(14);
+    h.push(2);
+    let lst = h.into_list();
+    assert_eq(lst.len(), 3);
+    assert(lst.contains(&7));
+    assert(lst.contains(&14));
+    assert(lst.contains(&2));
+}
+
+// =============================================================================
+// Section 13: clear — preserves capacity, resets to empty
+// =============================================================================
+
+@test
+fn test_heap_clear_resets_len() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.push(3);
+    h.clear();
+    assert_eq(h.len(), 0);
+    assert(h.is_empty());
+}
+
+@test
+fn test_heap_clear_allows_subsequent_push() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(1);
+    h.push(2);
+    h.clear();
+    h.push(99);
+    assert_eq(h.peek(), Some(99));
+}
+
+// =============================================================================
+// Section 14: Larger heap — drain in correct descending order under growth
+// =============================================================================
+
+@test
+fn test_heap_16_elements_drain_descending() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    let mut i = 1;
+    while i <= 16 {
+        h.push(i);
+        i = i + 1;
+    }
+    let mut expected = 16;
+    while expected >= 1 {
+        assert_eq(h.pop(), Some(expected));
+        expected = expected - 1;
+    }
+    assert(h.is_empty());
+}
+
 fn main() {}
