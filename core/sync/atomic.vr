@@ -102,6 +102,48 @@ public type MemoryOrdering is
     | AcqRel       // Both Acquire && Release
     | SeqCst;      // Sequential consistency (strongest)
 
+implement MemoryOrdering {
+    /// Canonical short-form name.  Mirrors the LLVM ordering token used
+    /// in the underlying atomic intrinsics and the Rust `std::sync::atomic::Ordering`
+    /// variants.  Useful for state-machine assertion messages
+    /// (e.g. `assert_eq(o.name(), "Acquire")`).
+    public fn name(&self) -> Text {
+        match self {
+            MemoryOrdering.Relaxed => "Relaxed".clone(),
+            MemoryOrdering.Acquire => "Acquire".clone(),
+            MemoryOrdering.Release => "Release".clone(),
+            MemoryOrdering.AcqRel  => "AcqRel".clone(),
+            MemoryOrdering.SeqCst  => "SeqCst".clone(),
+        }
+    }
+}
+
+implement Display for MemoryOrdering {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.name().as_str())
+    }
+}
+
+implement Debug for MemoryOrdering {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.name().as_str())
+    }
+}
+
+implement Eq for MemoryOrdering {
+    /// Tag-only equality — variants are unit.
+    fn eq(&self, other: &MemoryOrdering) -> Bool {
+        match (self, other) {
+            (MemoryOrdering.Relaxed, MemoryOrdering.Relaxed) => true,
+            (MemoryOrdering.Acquire, MemoryOrdering.Acquire) => true,
+            (MemoryOrdering.Release, MemoryOrdering.Release) => true,
+            (MemoryOrdering.AcqRel,  MemoryOrdering.AcqRel)  => true,
+            (MemoryOrdering.SeqCst,  MemoryOrdering.SeqCst)  => true,
+            _ => false,
+        }
+    }
+}
+
 // AtomicOrdering alias for convenience in atomic contexts.
 // For comparison ordering (Less|Equal|Greater), use core.base.ordering.Ordering.
 // NOTE: Do NOT alias plain "Ordering" here — it conflicts with core.base.ordering.Ordering

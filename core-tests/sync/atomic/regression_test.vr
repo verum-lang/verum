@@ -1,0 +1,104 @@
+// =============================================================================
+// core-tests/sync/atomic/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for `core.sync.atomic`.
+// =============================================================================
+
+mount core.sync.atomic.{MemoryOrdering, AtomicOrdering, AtomicInt, AtomicBool};
+
+// =============================================================================
+// §3.2 (audit.md closed by this branch) — MemoryOrdering name / Display /
+//   Debug / Eq impls
+// =============================================================================
+//
+// Pre-fix MemoryOrdering had only the data-shape (5-variant ADT).
+// Adding `.name()` + `Display` + `Debug` + `Eq` (this branch) closes
+// the deferred §3.2 of the audit.  LOCK-IN that each impl is wired
+// and produces the canonical token expected by the LLVM atomic
+// codegen / Rust-side ORDERING_* constants.
+
+@test
+fn regression_memory_ordering_name_canonical_token_relaxed() {
+    assert_eq(MemoryOrdering.Relaxed.name(), "Relaxed");
+}
+
+@test
+fn regression_memory_ordering_name_canonical_token_seq_cst() {
+    assert_eq(MemoryOrdering.SeqCst.name(), "SeqCst");
+}
+
+@test
+fn regression_memory_ordering_eq_via_name_for_all_variants() {
+    // Cross-check: variants are equal iff their names match.
+    let r1 = MemoryOrdering.Relaxed;
+    let r2 = MemoryOrdering.Relaxed;
+    let a = MemoryOrdering.Acquire;
+    assert_eq(r1, r2);
+    assert_eq(r1.name(), r2.name());
+    assert(r1 != a);
+    assert(r1.name() != a.name());
+}
+
+// =============================================================================
+// Live atomic ops — AtomicInt single-threaded load / store / fetch_add
+// =============================================================================
+//
+// The interpreter routes atomic_{load,store,cas,fetch_*}_u64 to the
+// typed atomic intrinsics.  Single-threaded under no contention these
+// degrade to plain ops + the LLVM atomic fences.  Pin the contract
+// that the value round-trips through Acquire/Release pair.
+
+@test
+fn regression_atomic_int_load_after_new_returns_initial() {
+    let a = AtomicInt.new(42);
+    assert_eq(a.load(MemoryOrdering.Acquire), 42);
+}
+
+@test
+fn regression_atomic_int_store_then_load_round_trip() {
+    let a = AtomicInt.new(0);
+    a.store(99, MemoryOrdering.Release);
+    assert_eq(a.load(MemoryOrdering.Acquire), 99);
+}
+
+@test
+fn regression_atomic_int_fetch_add_returns_previous() {
+    let a = AtomicInt.new(10);
+    let prev = a.fetch_add(5, MemoryOrdering.AcqRel);
+    assert_eq(prev, 10);
+    assert_eq(a.load(MemoryOrdering.Acquire), 15);
+}
+
+@test
+fn regression_atomic_int_fetch_sub_returns_previous() {
+    let a = AtomicInt.new(10);
+    let prev = a.fetch_sub(3, MemoryOrdering.AcqRel);
+    assert_eq(prev, 10);
+    assert_eq(a.load(MemoryOrdering.Acquire), 7);
+}
+
+// =============================================================================
+// AtomicBool — single-threaded load / store
+// =============================================================================
+
+@test
+fn regression_atomic_bool_load_after_new_false() {
+    let a = AtomicBool.new(false);
+    assert_eq(a.load(MemoryOrdering.Acquire), false);
+}
+
+@test
+fn regression_atomic_bool_load_after_new_true() {
+    let a = AtomicBool.new(true);
+    assert_eq(a.load(MemoryOrdering.Acquire), true);
+}
+
+@test
+fn regression_atomic_bool_store_then_load_round_trip() {
+    let a = AtomicBool.new(false);
+    a.store(true, MemoryOrdering.Release);
+    assert_eq(a.load(MemoryOrdering.Acquire), true);
+    a.store(false, MemoryOrdering.Release);
+    assert_eq(a.load(MemoryOrdering.Acquire), false);
+}

@@ -1,0 +1,118 @@
+// =============================================================================
+// core-tests/sync/once/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for `core.sync.once.OnceState`:
+//
+//   §A  Variant pairwise disjointness — exhaustive 4×3 = 12 negative
+//       checks across the New / InProgress / Done / Poisoned matrix.
+//   §B  OnceState.name() injectivity — each variant has a unique
+//       canonical name.
+//   §C  OnceState Eq reflexivity + cross-variant inequality.
+// =============================================================================
+
+mount core.sync.once.{OnceState};
+
+// =============================================================================
+// §A  Pairwise disjointness — exhaustive matrix
+// =============================================================================
+
+@test
+fn law_once_state_pairwise_disjoint_new() {
+    let s = OnceState.New;
+    assert(s is OnceState.New);
+    assert(!(s is OnceState.InProgress));
+    assert(!(s is OnceState.Done));
+    assert(!(s is OnceState.Poisoned));
+}
+
+@test
+fn law_once_state_pairwise_disjoint_in_progress() {
+    let s = OnceState.InProgress;
+    assert(s is OnceState.InProgress);
+    assert(!(s is OnceState.New));
+    assert(!(s is OnceState.Done));
+    assert(!(s is OnceState.Poisoned));
+}
+
+@test
+fn law_once_state_pairwise_disjoint_done() {
+    let s = OnceState.Done;
+    assert(s is OnceState.Done);
+    assert(!(s is OnceState.New));
+    assert(!(s is OnceState.InProgress));
+    assert(!(s is OnceState.Poisoned));
+}
+
+@test
+fn law_once_state_pairwise_disjoint_poisoned() {
+    let s = OnceState.Poisoned;
+    assert(s is OnceState.Poisoned);
+    assert(!(s is OnceState.New));
+    assert(!(s is OnceState.InProgress));
+    assert(!(s is OnceState.Done));
+}
+
+// =============================================================================
+// §B  name() canonical-token injectivity
+// =============================================================================
+
+@test
+fn law_once_state_name_new() {
+    assert_eq(OnceState.New.name(), "New");
+}
+
+@test
+fn law_once_state_name_in_progress() {
+    assert_eq(OnceState.InProgress.name(), "InProgress");
+}
+
+@test
+fn law_once_state_name_done() {
+    assert_eq(OnceState.Done.name(), "Done");
+}
+
+@test
+fn law_once_state_name_poisoned() {
+    assert_eq(OnceState.Poisoned.name(), "Poisoned");
+}
+
+@test
+fn law_once_state_names_all_distinct() {
+    let names: List<Text> = [
+        OnceState.New.name(),
+        OnceState.InProgress.name(),
+        OnceState.Done.name(),
+        OnceState.Poisoned.name(),
+    ];
+    // Pairwise inequality across the 4 names.
+    for i in 0..4 {
+        for j in 0..4 {
+            if i != j {
+                assert(names[i] != names[j]);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// §C  Eq reflexivity + cross-variant inequality
+// =============================================================================
+
+@test
+fn law_once_state_eq_reflexive() {
+    assert_eq(OnceState.New, OnceState.New);
+    assert_eq(OnceState.InProgress, OnceState.InProgress);
+    assert_eq(OnceState.Done, OnceState.Done);
+    assert_eq(OnceState.Poisoned, OnceState.Poisoned);
+}
+
+@test
+fn law_once_state_eq_distinguishes_variants() {
+    assert(OnceState.New != OnceState.InProgress);
+    assert(OnceState.New != OnceState.Done);
+    assert(OnceState.New != OnceState.Poisoned);
+    assert(OnceState.InProgress != OnceState.Done);
+    assert(OnceState.InProgress != OnceState.Poisoned);
+    assert(OnceState.Done != OnceState.Poisoned);
+}

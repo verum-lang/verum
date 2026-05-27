@@ -75,8 +75,8 @@ public async fn select_either<A, B, FA: Future<Output>, FB: Future<Output>>(
     fut_b: FB,
 ) -> Either<A, B> {
     SelectPair {
-        fut_a: Some(fut_a),
-        fut_b: Some(fut_b),
+        fut_a: Maybe.Some(fut_a),
+        fut_b: Maybe.Some(fut_b),
     }.await
 }
 
@@ -91,10 +91,10 @@ implement<A, B, FA: Future<Output>, FB: Future<Output>> Future for SelectPair<A,
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Either<A, B>> {
         // Poll first future
-        if let Some(ref mut a) = self.fut_a {
+        if let Maybe.Some(ref mut a) = self.fut_a {
             match a.poll(cx) {
                 Poll.Ready(val) => {
-                    self.fut_a = None;
+                    self.fut_a = Maybe.None;
                     return Poll.Ready(Either.Left(val));
                 }
                 Poll.Pending => {}
@@ -102,10 +102,10 @@ implement<A, B, FA: Future<Output>, FB: Future<Output>> Future for SelectPair<A,
         }
 
         // Poll second future
-        if let Some(ref mut b) = self.fut_b {
+        if let Maybe.Some(ref mut b) = self.fut_b {
             match b.poll(cx) {
                 Poll.Ready(val) => {
-                    self.fut_b = None;
+                    self.fut_b = Maybe.None;
                     return Poll.Ready(Either.Right(val));
                 }
                 Poll.Pending => {}
@@ -281,10 +281,10 @@ public async fn join<A, B, FA: Future<Output>, FB: Future<Output>>(
     fut_b: FB,
 ) -> (A, B) {
     JoinPair {
-        fut_a: Some(fut_a),
-        fut_b: Some(fut_b),
-        result_a: None,
-        result_b: None,
+        fut_a: Maybe.Some(fut_a),
+        fut_b: Maybe.Some(fut_b),
+        result_a: Maybe.None,
+        result_b: Maybe.None,
     }.await
 }
 
@@ -301,11 +301,11 @@ implement<A, B, FA: Future<Output>, FB: Future<Output>> Future for JoinPair<A, B
     fn poll(&mut self, cx: &mut Context) -> Poll<(A, B)> {
         // Poll first future if !done
         if self.result_a.is_none() {
-            if let Some(ref mut a) = self.fut_a {
+            if let Maybe.Some(ref mut a) = self.fut_a {
                 match a.poll(cx) {
                     Poll.Ready(val) => {
-                        self.result_a = Some(val);
-                        self.fut_a = None;
+                        self.result_a = Maybe.Some(val);
+                        self.fut_a = Maybe.None;
                     }
                     Poll.Pending => {}
                 }
@@ -314,11 +314,11 @@ implement<A, B, FA: Future<Output>, FB: Future<Output>> Future for JoinPair<A, B
 
         // Poll second future if !done
         if self.result_b.is_none() {
-            if let Some(ref mut b) = self.fut_b {
+            if let Maybe.Some(ref mut b) = self.fut_b {
                 match b.poll(cx) {
                     Poll.Ready(val) => {
-                        self.result_b = Some(val);
-                        self.fut_b = None;
+                        self.result_b = Maybe.Some(val);
+                        self.fut_b = Maybe.None;
                     }
                     Poll.Pending => {}
                 }

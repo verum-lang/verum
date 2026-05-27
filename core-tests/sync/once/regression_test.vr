@@ -1,0 +1,84 @@
+// =============================================================================
+// core-tests/sync/once/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for `core.sync.once`.
+// =============================================================================
+
+mount core.sync.once.{OnceState};
+
+// =============================================================================
+// §3.3 (audit.md closed by this branch) — OnceState.name / Display / Debug / Eq
+// =============================================================================
+//
+// LOCK-IN that each impl is wired and produces canonical tokens.
+
+@test
+fn regression_once_state_name_canonical_token_new() {
+    assert_eq(OnceState.New.name(), "New");
+}
+
+@test
+fn regression_once_state_name_canonical_token_in_progress() {
+    assert_eq(OnceState.InProgress.name(), "InProgress");
+}
+
+@test
+fn regression_once_state_name_canonical_token_done() {
+    assert_eq(OnceState.Done.name(), "Done");
+}
+
+@test
+fn regression_once_state_name_canonical_token_poisoned() {
+    assert_eq(OnceState.Poisoned.name(), "Poisoned");
+}
+
+@test
+fn regression_once_state_eq_via_name_for_all_variants() {
+    let n1 = OnceState.New;
+    let n2 = OnceState.New;
+    let ip = OnceState.InProgress;
+    assert_eq(n1, n2);
+    assert_eq(n1.name(), n2.name());
+    assert(n1 != ip);
+    assert(n1.name() != ip.name());
+}
+
+// =============================================================================
+// §3.1 — Four-variant ADT shape pin
+// =============================================================================
+//
+// OnceState carries exactly four variants in this fixed order: New,
+// InProgress, Done, Poisoned.  The internal CAS state machine in
+// once.vr (INCOMPLETE = 0 / RUNNING = 1 / COMPLETE = 2 / POISONED = 3)
+// pairs with these variants; any future addition or reordering would
+// break the Rust-side state-constant mapping documented in
+// once.vr:30-34.
+
+@test
+fn regression_once_state_all_four_variants_distinct() {
+    let states: [OnceState; 4] = [
+        OnceState.New,
+        OnceState.InProgress,
+        OnceState.Done,
+        OnceState.Poisoned,
+    ];
+    assert(states[0] is OnceState.New);
+    assert(states[1] is OnceState.InProgress);
+    assert(states[2] is OnceState.Done);
+    assert(states[3] is OnceState.Poisoned);
+
+    // Cross-disjoint: every variant differs from every other.
+    assert(!(states[0] is OnceState.InProgress));
+    assert(!(states[0] is OnceState.Done));
+    assert(!(states[0] is OnceState.Poisoned));
+    assert(!(states[1] is OnceState.New));
+    assert(!(states[1] is OnceState.Done));
+    assert(!(states[1] is OnceState.Poisoned));
+    assert(!(states[2] is OnceState.New));
+    assert(!(states[2] is OnceState.InProgress));
+    assert(!(states[2] is OnceState.Poisoned));
+    assert(!(states[3] is OnceState.New));
+    assert(!(states[3] is OnceState.InProgress));
+    assert(!(states[3] is OnceState.Done));
+}

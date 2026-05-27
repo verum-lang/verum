@@ -1,0 +1,160 @@
+// =============================================================================
+// core-tests/sync/atomic/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for the testable surface of
+// `core.sync.atomic`:
+//
+//   §A  MemoryOrdering 5-variant pairwise disjointness — exhaustive matrix.
+//   §B  MemoryOrdering.name() injectivity — each variant has a unique
+//       canonical name.
+//   §C  MemoryOrdering Eq reflexivity + symmetry.
+//   §D  AtomicOrdering alias preserves variant identity — every
+//       MemoryOrdering variant satisfies its is-check through the
+//       AtomicOrdering type alias.
+// =============================================================================
+
+mount core.sync.atomic.{MemoryOrdering, AtomicOrdering};
+
+// =============================================================================
+// §A  Pairwise disjointness — exhaustive 5×4 = 20 negative checks
+// =============================================================================
+
+@test
+fn law_memory_ordering_pairwise_disjoint_relaxed() {
+    let o = MemoryOrdering.Relaxed;
+    assert(o is MemoryOrdering.Relaxed);
+    assert(!(o is MemoryOrdering.Acquire));
+    assert(!(o is MemoryOrdering.Release));
+    assert(!(o is MemoryOrdering.AcqRel));
+    assert(!(o is MemoryOrdering.SeqCst));
+}
+
+@test
+fn law_memory_ordering_pairwise_disjoint_acquire() {
+    let o = MemoryOrdering.Acquire;
+    assert(o is MemoryOrdering.Acquire);
+    assert(!(o is MemoryOrdering.Relaxed));
+    assert(!(o is MemoryOrdering.Release));
+    assert(!(o is MemoryOrdering.AcqRel));
+    assert(!(o is MemoryOrdering.SeqCst));
+}
+
+@test
+fn law_memory_ordering_pairwise_disjoint_release() {
+    let o = MemoryOrdering.Release;
+    assert(o is MemoryOrdering.Release);
+    assert(!(o is MemoryOrdering.Relaxed));
+    assert(!(o is MemoryOrdering.Acquire));
+    assert(!(o is MemoryOrdering.AcqRel));
+    assert(!(o is MemoryOrdering.SeqCst));
+}
+
+@test
+fn law_memory_ordering_pairwise_disjoint_acq_rel() {
+    let o = MemoryOrdering.AcqRel;
+    assert(o is MemoryOrdering.AcqRel);
+    assert(!(o is MemoryOrdering.Relaxed));
+    assert(!(o is MemoryOrdering.Acquire));
+    assert(!(o is MemoryOrdering.Release));
+    assert(!(o is MemoryOrdering.SeqCst));
+}
+
+@test
+fn law_memory_ordering_pairwise_disjoint_seq_cst() {
+    let o = MemoryOrdering.SeqCst;
+    assert(o is MemoryOrdering.SeqCst);
+    assert(!(o is MemoryOrdering.Relaxed));
+    assert(!(o is MemoryOrdering.Acquire));
+    assert(!(o is MemoryOrdering.Release));
+    assert(!(o is MemoryOrdering.AcqRel));
+}
+
+// =============================================================================
+// §B  name() injectivity — each variant's canonical name is unique
+// =============================================================================
+
+@test
+fn law_memory_ordering_name_relaxed() {
+    assert_eq(MemoryOrdering.Relaxed.name(), "Relaxed");
+}
+
+@test
+fn law_memory_ordering_name_acquire() {
+    assert_eq(MemoryOrdering.Acquire.name(), "Acquire");
+}
+
+@test
+fn law_memory_ordering_name_release() {
+    assert_eq(MemoryOrdering.Release.name(), "Release");
+}
+
+@test
+fn law_memory_ordering_name_acq_rel() {
+    assert_eq(MemoryOrdering.AcqRel.name(), "AcqRel");
+}
+
+@test
+fn law_memory_ordering_name_seq_cst() {
+    assert_eq(MemoryOrdering.SeqCst.name(), "SeqCst");
+}
+
+@test
+fn law_memory_ordering_names_all_distinct() {
+    let names: List<Text> = [
+        MemoryOrdering.Relaxed.name(),
+        MemoryOrdering.Acquire.name(),
+        MemoryOrdering.Release.name(),
+        MemoryOrdering.AcqRel.name(),
+        MemoryOrdering.SeqCst.name(),
+    ];
+    // Pairwise inequality across the 5 names.
+    for i in 0..5 {
+        for j in 0..5 {
+            if i != j {
+                assert(names[i] != names[j]);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// §C  MemoryOrdering Eq reflexivity + symmetry
+// =============================================================================
+
+@test
+fn law_memory_ordering_eq_reflexive() {
+    assert_eq(MemoryOrdering.Relaxed, MemoryOrdering.Relaxed);
+    assert_eq(MemoryOrdering.Acquire, MemoryOrdering.Acquire);
+    assert_eq(MemoryOrdering.Release, MemoryOrdering.Release);
+    assert_eq(MemoryOrdering.AcqRel, MemoryOrdering.AcqRel);
+    assert_eq(MemoryOrdering.SeqCst, MemoryOrdering.SeqCst);
+}
+
+@test
+fn law_memory_ordering_eq_distinguishes_variants() {
+    assert(MemoryOrdering.Relaxed != MemoryOrdering.Acquire);
+    assert(MemoryOrdering.Acquire != MemoryOrdering.Release);
+    assert(MemoryOrdering.Release != MemoryOrdering.AcqRel);
+    assert(MemoryOrdering.AcqRel != MemoryOrdering.SeqCst);
+    assert(MemoryOrdering.SeqCst != MemoryOrdering.Relaxed);
+}
+
+// =============================================================================
+// §D  AtomicOrdering alias — type-level identity with MemoryOrdering
+// =============================================================================
+
+@test
+fn law_atomic_ordering_alias_carries_all_variants() {
+    let r: AtomicOrdering = MemoryOrdering.Relaxed;
+    let a: AtomicOrdering = MemoryOrdering.Acquire;
+    let rel: AtomicOrdering = MemoryOrdering.Release;
+    let ar: AtomicOrdering = MemoryOrdering.AcqRel;
+    let s: AtomicOrdering = MemoryOrdering.SeqCst;
+
+    assert(r is MemoryOrdering.Relaxed);
+    assert(a is MemoryOrdering.Acquire);
+    assert(rel is MemoryOrdering.Release);
+    assert(ar is MemoryOrdering.AcqRel);
+    assert(s is MemoryOrdering.SeqCst);
+}
