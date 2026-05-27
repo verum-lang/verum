@@ -198,8 +198,19 @@ fn is_ipv4_mapped(groups: &[UInt16; 8]) -> Bool {
 }
 
 fn format_v4_mapped(_: &[UInt16; 8], octets: &[Byte; 16]) -> Text {
+    // Inline the literal "::ffff:" prefix byte-by-byte rather than
+    // via `push_bytes(&mut out, b"::ffff:")`. The byte-string-literal
+    // codegen path triggered IPV6CAN-1 SIGSEGV in LLVM SmallVector
+    // when format_v4_mapped was reached. The 7-byte prefix is small
+    // enough that inlining is cheaper than the dispatch cost anyway.
     let mut out: List<Byte> = [];
-    push_bytes(&mut out, b"::ffff:");
+    out.push(':' as Byte);
+    out.push(':' as Byte);
+    out.push('f' as Byte);
+    out.push('f' as Byte);
+    out.push('f' as Byte);
+    out.push('f' as Byte);
+    out.push(':' as Byte);
     push_decimal_byte(&mut out, octets[12]);
     out.push('.' as Byte);
     push_decimal_byte(&mut out, octets[13]);
