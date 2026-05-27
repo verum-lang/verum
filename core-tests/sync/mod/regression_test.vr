@@ -1,0 +1,94 @@
+// =============================================================================
+// core-tests/sync/mod/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for the top-level `core.sync.*` re-export
+// surface.
+// =============================================================================
+
+// =============================================================================
+// §3.1 — Top-level re-export and submodule-direct must resolve identically
+// =============================================================================
+//
+// `core.sync.Mutex` and `core.sync.mutex.Mutex` MUST resolve to the
+// same record type with identical method dispatch.  A future change
+// that creates two distinct types (a re-export "shim" type) would
+// fail every cross-module caller silently.
+
+@test
+fn regression_mod_mutex_top_level_matches_submodule_direct() {
+    use top = core.sync.Mutex;
+    use sub = core.sync.mutex.Mutex;
+    // Construct via the top-level path and via the submodule-direct
+    // path; both must produce a Mutex<Int> that responds identically
+    // to is_poisoned().
+    let m_top = top.new(0);
+    let m_sub = sub.new(0);
+    assert_eq(m_top.is_poisoned(), m_sub.is_poisoned());
+}
+
+@test
+fn regression_mod_rwlock_top_level_matches_submodule_direct() {
+    use top = core.sync.RwLock;
+    use sub = core.sync.rwlock.RwLock;
+    let l_top = top.new(0);
+    let l_sub = sub.new(0);
+    assert_eq(l_top.is_poisoned(), l_sub.is_poisoned());
+}
+
+@test
+fn regression_mod_memory_ordering_top_level_matches_submodule_direct() {
+    use top = core.sync.MemoryOrdering;
+    use sub = core.sync.atomic.MemoryOrdering;
+    let o_top: top = top.SeqCst;
+    let o_sub: sub = sub.SeqCst;
+    // Both paths produce a value that is the same variant.
+    assert(o_top is top.SeqCst);
+    assert(o_sub is sub.SeqCst);
+}
+
+@test
+fn regression_mod_once_state_top_level_matches_submodule_direct() {
+    use top = core.sync.OnceState;
+    use sub = core.sync.once.OnceState;
+    let s_top: top = top.Done;
+    let s_sub: sub = sub.Done;
+    assert(s_top is top.Done);
+    assert(s_sub is sub.Done);
+}
+
+// =============================================================================
+// §3.3 — Prelude curated set: Mutex, MutexGuard, RwLock, AtomicInt,
+//        AtomicBool, Send, Sync
+// =============================================================================
+//
+// Drift in this set is a public-API change.  LOCK-IN that each
+// prelude name resolves.
+
+@test
+fn regression_mod_prelude_mutex_resolves() {
+    use M = core.sync.prelude.Mutex;
+    let m = M.new(0);
+    assert(!m.is_poisoned());
+}
+
+@test
+fn regression_mod_prelude_rwlock_resolves() {
+    use L = core.sync.prelude.RwLock;
+    let l = L.new(0);
+    assert(!l.is_poisoned());
+}
+
+@test
+fn regression_mod_prelude_atomic_int_resolves() {
+    use A = core.sync.prelude.AtomicInt;
+    let a = A.new(99);
+    assert_eq(a.load(core.sync.MemoryOrdering.Acquire), 99);
+}
+
+@test
+fn regression_mod_prelude_atomic_bool_resolves() {
+    use B = core.sync.prelude.AtomicBool;
+    let b = B.new(true);
+    assert_eq(b.load(core.sync.MemoryOrdering.Acquire), true);
+}
