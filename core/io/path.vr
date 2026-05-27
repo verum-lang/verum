@@ -116,9 +116,9 @@ implement Component {
     @inline(always)
     public fn as_text(&self) -> Maybe<&Text> {
         match self {
-            Normal(s) => Some(s),
-            Prefix(s) => Some(s),
-            _ => None,
+            Normal(s) => Maybe.Some(s),
+            Prefix(s) => Maybe.Some(s),
+            _ => Maybe.None,
         }
     }
 
@@ -299,7 +299,7 @@ implement Path {
     /// ```
     public fn parent(&self) -> Maybe<Path> {
         if self.inner.is_empty() {
-            return None;
+            return Maybe.None;
         }
 
         // Find the last separator's BYTE offset. Earlier impl used
@@ -320,18 +320,18 @@ implement Path {
 
         if last_sep < 0 {
             // No separator - no parent (relative path with just file name)
-            return None;
+            return Maybe.None;
         }
 
         if last_sep == 0 {
             // Root is parent
             if self.inner.len() == 1 {
-                return None; // Path is just "/"
+                return Maybe.None; // Path is just "/"
             }
-            return Some(Path.new(&Text.from(MAIN_SEPARATOR)));
+            return Maybe.Some(Path.new(&Text.from(MAIN_SEPARATOR)));
         }
 
-        Some(Path.new(&self.inner.slice(0, last_sep)))
+        Maybe.Some(Path.new(&self.inner.slice(0, last_sep)))
     }
 
     /// Get the ancestors of this path.
@@ -339,7 +339,7 @@ implement Path {
 
     /// Returns an iterator over the path && all its parents.
     public fn ancestors(&self) -> Ancestors {
-        Ancestors { path: Some(self.clone()) }
+        Ancestors { path: Maybe.Some(self.clone()) }
     }
 
     /// Get the final component of the path (file || directory name).
@@ -370,7 +370,7 @@ implement Path {
             .trim_end_matches_char('/')
             .trim_end_matches_char('\\');
         if path.is_empty() {
-            return None;
+            return Maybe.None;
         }
 
         // Find the last separator's BYTE offset, plus the byte
@@ -391,9 +391,9 @@ implement Path {
         };
 
         if name == ".." || name == "." || name.is_empty() {
-            None
+            Maybe.None
         } else {
-            Some(name)
+            Maybe.Some(name)
         }
     }
 
@@ -421,9 +421,9 @@ implement Path {
         }
 
         if last_dot < 0 {
-            Some(name)
+            Maybe.Some(name)
         } else {
-            Some(name.slice(0, last_dot))
+            Maybe.Some(name.slice(0, last_dot))
         }
     }
 
@@ -452,9 +452,9 @@ implement Path {
         }
 
         if last_dot < 0 {
-            None
+            Maybe.None
         } else {
-            Some(name.slice(last_dot + 1, name.len()))
+            Maybe.Some(name.slice(last_dot + 1, name.len()))
         }
     }
 
@@ -508,7 +508,7 @@ implement Path {
         let suffix_name = suffix.file_name();
 
         match (self_name, suffix_name) {
-            (Some(a), Some(b)) => a == b,
+            (Maybe.Some(a), Maybe.Some(b)) => a == b,
             _ => false,
         }
     }
@@ -524,9 +524,9 @@ implement Path {
             let trimmed = remaining
                 .trim_start_matches_char('/')
                 .trim_start_matches_char('\\');
-            Some(Path.new(&trimmed))
+            Maybe.Some(Path.new(&trimmed))
         } else {
-            None
+            Maybe.None
         }
     }
 
