@@ -2419,14 +2419,14 @@ where I.Item: IntoIterator<IntoIter = U> {
 
     fn next(&mut self) -> Maybe<U.Item> {
         loop {
-            if let Some(ref mut inner) = self.inner {
-                if let Some(x) = inner.next() {
-                    return Some(x);
+            if let Maybe.Some(ref mut inner) = self.inner {
+                if let Maybe.Some(x) = inner.next() {
+                    return Maybe.Some(x);
                 }
             }
             match self.outer.next() {
-                Some(item) => self.inner = Some(item.into_iter()),
-                None => return None,
+                Maybe.Some(item) => self.inner = Maybe.Some(item.into_iter()),
+                Maybe.None => return Maybe.None,
             }
         }
     }
@@ -2434,13 +2434,13 @@ where I.Item: IntoIterator<IntoIter = U> {
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let (_, outer_upper) = self.outer.size_hint();
         match self.inner {
-            Some(ref inner) => {
+            Maybe.Some(ref inner) => {
                 let (inner_lower, _) = inner.size_hint();
-                (inner_lower, None)
+                (inner_lower, Maybe.None)
             },
-            None => (0, match outer_upper {
-                Some(0) => Some(0),
-                _ => None,
+            Maybe.None => (0, match outer_upper {
+                Maybe.Some(0) => Maybe.Some(0),
+                _ => Maybe.None,
             }),
         }
     }
@@ -2463,20 +2463,20 @@ where I.Item: Clone {
 
     fn next(&mut self) -> Maybe<(I.Item, I.Item)> {
         if self.prev is None {
-            None
+            Maybe.None
         } else {
             match self.iter.next() {
-                None => {
-                    self.prev = None;
-                    None
+                Maybe.None => {
+                    self.prev = Maybe.None;
+                    Maybe.None
                 },
-                Some(next_val) => {
+                Maybe.Some(next_val) => {
                     // Take old prev, set new prev
                     let old_prev = self.prev;
-                    self.prev = Some(next_val.clone());
+                    self.prev = Maybe.Some(next_val.clone());
                     match old_prev {
-                        Some(p) => Some((p, next_val)),
-                        None => None,
+                        Maybe.Some(p) => Maybe.Some((p, next_val)),
+                        Maybe.None => Maybe.None,
                     }
                 },
             }
@@ -2486,7 +2486,7 @@ where I.Item: Clone {
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let (lower, upper) = self.iter.size_hint();
         if self.prev is None {
-            (0, Some(0))
+            (0, Maybe.Some(0))
         } else {
             // Each next() call produces one pair from (prev, next_element)
             (lower, upper)
