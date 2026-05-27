@@ -145,7 +145,7 @@ public type PartialOrd is protocol extends PartialEq {
 /// `Maybe::None` on NaN.
 implement<T: Ord> PartialOrd for T {
     fn partial_cmp(&self, other: &T) -> Maybe<Ordering> {
-        Some(self.cmp(other))
+        Maybe.Some(self.cmp(other))
     }
 }
 
@@ -922,7 +922,7 @@ public type Describable is protocol {
 public type ErrorSource is protocol extends Describable {
     /// Get the underlying cause of this error, if any.
     fn source(&self) -> Maybe<&dyn ErrorSource> {
-        None
+        Maybe.None
     }
 };
 

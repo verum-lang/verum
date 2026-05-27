@@ -29,7 +29,7 @@ mount core.base.protocols.{
     Describable, ErrorSource, Debug, Display, Clone, Eq, Hash, Hasher,
     Formatter, FormatError, Default, PartialEq,
 };
-mount core.maybe.{Maybe, Some, None};
+mount core.maybe.{Maybe, Some, Maybe.None};
 mount core.result.{Result, Ok, Err};
 mount core.ordering.{Ordering, Less, Equal, Greater};
 
@@ -283,7 +283,7 @@ public type ErrorProtocol is protocol extends ErrorSource {
 
     /// Get the backtrace associated with this error, if available.
     fn backtrace(&self) -> Maybe<Backtrace> {
-        None
+        Maybe.None
     }
 };
 
@@ -314,7 +314,7 @@ implement ErrorChain {
     /// Create a new error chain iterator starting from the given error.
     public fn new(error: &dyn ErrorSource) -> ErrorChain {
         ErrorChain {
-            current: Some(error),
+            current: Maybe.Some(error),
         }
     }
 }
@@ -324,11 +324,11 @@ implement Iterator for ErrorChain {
 
     fn next(&mut self) -> Maybe<Text> {
         match self.current {
-            None => None,
-            Some(s) => {
+            Maybe.None => None,
+            Maybe.Some(s) => {
                 let desc = s.description();
                 self.current = s.source();
-                Some(desc)
+                Maybe.Some(desc)
             }
         }
     }

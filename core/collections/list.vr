@@ -341,9 +341,9 @@ implement<T> List<T> {
     @inline(always)
     public fn get(&self, idx: Int) -> Maybe<T> {
         if idx >= 0 && idx < self.len {
-            unsafe { Some(*self.ptr.offset(idx)) }
+            unsafe { Maybe.Some(*self.ptr.offset(idx)) }
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -395,7 +395,7 @@ implement<T> List<T> {
         if self.len > 0 {
             self.get(self.len - 1)
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -411,7 +411,7 @@ implement<T> List<T> {
         if self.len > 0 {
             self.get_mut(self.len - 1)
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -454,11 +454,11 @@ implement<T> List<T> {
     // Pop element from end.
     public fn pop(&mut self) -> Maybe<T> {
         if self.len == 0 {
-            return None;
+            return Maybe.None;
         }
         self.len = self.len - 1;
         unsafe {
-            Some(ptr_read(self.ptr.offset(self.len)))
+            Maybe.Some(ptr_read(self.ptr.offset(self.len)))
         }
     }
 
@@ -476,14 +476,14 @@ implement<T> List<T> {
         // as `index_of` / `position` (cross-module direct-ptr drift);
         // see audit.md §E.
         if self.len == 0 {
-            return None;
+            return Maybe.None;
         }
         match self.get(0) {
-            Some(value) => {
+            Maybe.Some(value) => {
                 self.remove(0);
-                Some(value)
+                Maybe.Some(value)
             },
-            None => None,
+            Maybe.None => Maybe.None,
         }
     }
 
@@ -713,8 +713,8 @@ implement<T> List<T> {
         let max = list_max_len(T.size);
         // checked_mul instead of `*` so the doubling can't wrap.
         match self.cap.checked_mul(2) {
-            Some(doubled) => if doubled > max { max } else { doubled },
-            None          => max,
+            Maybe.Some(doubled) => if doubled > max { max } else { doubled },
+            Maybe.None          => max,
         }
     }
 
@@ -886,14 +886,14 @@ implement<T> List<T> {
         let mut i: Int = 0;
         while i < n {
             match self.get(i) {
-                Some(item) => {
-                    if *item == *value { return Some(i); }
+                Maybe.Some(item) => {
+                    if *item == *value { return Maybe.Some(i); }
                 },
-                None => return None,
+                Maybe.None => return Maybe.None,
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     // Find index of element matching `value` (by value-equality).
@@ -922,14 +922,14 @@ implement<T> List<T> {
         let mut i: Int = 0;
         while i < n {
             match self.get(i) {
-                Some(item) => {
-                    if *item == *value { return Some(i); }
+                Maybe.Some(item) => {
+                    if *item == *value { return Maybe.Some(i); }
                 },
-                None => return None,
+                Maybe.None => return Maybe.None,
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     // =========================================================================
@@ -1382,8 +1382,8 @@ implement<T> List<T> {
         let mut i: Int = 0;
         while i < n {
             match other.get(i) {
-                Some(item) => self.push(item),
-                None => break,
+                Maybe.Some(item) => self.push(item),
+                Maybe.None => break,
             }
             i = i + 1;
         }
@@ -1423,14 +1423,14 @@ implement<T> List<T> {
         while low < high {
             let mid = low + (high - low) / 2;
             match self.get(mid) {
-                Some(item) => {
+                Maybe.Some(item) => {
                     match item.cmp(value) {
                         Ordering.Less => { low = mid + 1; },
                         Ordering.Greater => { high = mid; },
                         Ordering.Equal => { return Ok(mid); },
                     }
                 },
-                None => return Err(low),
+                Maybe.None => return Err(low),
             }
         }
         Err(low)
@@ -1443,14 +1443,14 @@ implement<T> List<T> {
         while low < high {
             let mid = low + (high - low) / 2;
             match self.get(mid) {
-                Some(item) => {
+                Maybe.Some(item) => {
                     match f(&item) {
                         Ordering.Less => { low = mid + 1; },
                         Ordering.Greater => { high = mid; },
                         Ordering.Equal => { return Ok(mid); },
                     }
                 },
-                None => return Err(low),
+                Maybe.None => return Err(low),
             }
         }
         Err(low)
@@ -1470,14 +1470,14 @@ implement<T> List<T> {
         while low < high {
             let mid = low + (high - low) / 2;
             match self.get(mid) {
-                Some(item) => {
+                Maybe.Some(item) => {
                     if predicate(&item) {
                         high = mid;
                     } else {
                         low = mid + 1;
                     }
                 },
-                None => return low,
+                Maybe.None => return low,
             }
         }
         low
@@ -1525,8 +1525,8 @@ implement<T> List<T> {
             let prev_opt = self.get(write - 1);
             let curr_opt = self.get(read);
             match prev_opt {
-                Some(prev) => match curr_opt {
-                    Some(curr) => {
+                Maybe.Some(prev) => match curr_opt {
+                    Maybe.Some(curr) => {
                         if !same(&prev, &curr) {
                             if write != read {
                                 self.set(write, curr);
@@ -1534,9 +1534,9 @@ implement<T> List<T> {
                             write = write + 1;
                         }
                     },
-                    None => break,
+                    Maybe.None => break,
                 },
-                None => break,
+                Maybe.None => break,
             }
             read = read + 1;
         }
@@ -1559,16 +1559,16 @@ implement<T> List<T> {
         let mut i: Int = 0;
         while i < mid {
             match self.get(i) {
-                Some(item) => left.push(item.clone()),
-                None => break,
+                Maybe.Some(item) => left.push(item.clone()),
+                Maybe.None => break,
             }
             i = i + 1;
         }
         let mut j: Int = mid;
         while j < n {
             match self.get(j) {
-                Some(item) => right.push(item.clone()),
-                None => break,
+                Maybe.Some(item) => right.push(item.clone()),
+                Maybe.None => break,
             }
             j = j + 1;
         }
@@ -1638,8 +1638,8 @@ implement<T> List<T> {
                 let end = i + size;
                 while j < end {
                     match self.get(j) {
-                        Some(item) => window.push(item.clone()),
-                        None => {},
+                        Maybe.Some(item) => window.push(item.clone()),
+                        Maybe.None => {},
                     }
                     j = j + 1;
                 }
@@ -1665,8 +1665,8 @@ implement<T> List<T> {
             let mut j: Int = i;
             while j < chunk_end {
                 match self.get(j) {
-                    Some(item) => chunk.push(item.clone()),
-                    None => {},
+                    Maybe.Some(item) => chunk.push(item.clone()),
+                    Maybe.None => {},
                 }
                 j = j + 1;
             }
@@ -1693,16 +1693,16 @@ implement<T> List<T> {
         let mut i: Int = 0;
         while i < n {
             match self.get(i) {
-                Some(item) => {
+                Maybe.Some(item) => {
                     if predicate(&item) {
-                        return Some(item);
+                        return Maybe.Some(item);
                     }
                 },
-                None => return None,
+                Maybe.None => return Maybe.None,
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Find the index of the first element matching a predicate.
@@ -1711,16 +1711,16 @@ implement<T> List<T> {
         let mut i: Int = 0;
         while i < n {
             match self.get(i) {
-                Some(item) => {
+                Maybe.Some(item) => {
                     if predicate(&item) {
-                        return Some(i);
+                        return Maybe.Some(i);
                     }
                 },
-                None => return None,
+                Maybe.None => return Maybe.None,
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     /// Find the index of the last occurrence of a value.
@@ -1736,14 +1736,14 @@ implement<T> List<T> {
         let mut i: Int = n - 1;
         while i >= 0 {
             match self.get(i) {
-                Some(item) => {
-                    if *item == *value { return Some(i); }
+                Maybe.Some(item) => {
+                    if *item == *value { return Maybe.Some(i); }
                 },
-                None => return None,
+                Maybe.None => return Maybe.None,
             }
             i = i - 1;
         }
-        None
+        Maybe.None
     }
 
     /// Check if any element matches a predicate.
@@ -1754,12 +1754,12 @@ implement<T> List<T> {
         let mut i: Int = 0;
         while i < n {
             match self.get(i) {
-                Some(item) => {
+                Maybe.Some(item) => {
                     if predicate(&item) {
                         return true;
                     }
                 },
-                None => return false,
+                Maybe.None => return false,
             }
             i = i + 1;
         }
@@ -1772,12 +1772,12 @@ implement<T> List<T> {
         let mut i: Int = 0;
         while i < n {
             match self.get(i) {
-                Some(item) => {
+                Maybe.Some(item) => {
                     if !predicate(&item) {
                         return false;
                     }
                 },
-                None => return true,
+                Maybe.None => return true,
             }
             i = i + 1;
         }
@@ -1796,13 +1796,13 @@ implement<T> List<T> {
         let mut i: Int = 0;
         while i < pn {
             match self.get(i) {
-                Some(a) => match prefix.get(i) {
-                    Some(b) => {
+                Maybe.Some(a) => match prefix.get(i) {
+                    Maybe.Some(b) => {
                         if !(a == b) { return false; }
                     },
-                    None => return false,
+                    Maybe.None => return false,
                 },
-                None => return false,
+                Maybe.None => return false,
             }
             i = i + 1;
         }
@@ -1822,13 +1822,13 @@ implement<T> List<T> {
         let mut i: Int = 0;
         while i < sn {
             match self.get(offset + i) {
-                Some(a) => match suffix.get(i) {
-                    Some(b) => {
+                Maybe.Some(a) => match suffix.get(i) {
+                    Maybe.Some(b) => {
                         if !(a == b) { return false; }
                     },
-                    None => return false,
+                    Maybe.None => return false,
                 },
-                None => return false,
+                Maybe.None => return false,
             }
             i = i + 1;
         }
@@ -1876,8 +1876,8 @@ implement<T> List<T> {
         let mut i: Int = at;
         while i < n {
             match self.get(i) {
-                Some(item) => tail.push(item),
-                None => return tail,
+                Maybe.Some(item) => tail.push(item),
+                Maybe.None => return tail,
             }
             i = i + 1;
         }
@@ -1896,14 +1896,14 @@ implement<T> List<T> {
         let mut i: Int = 0;
         while i < n {
             match self.get(i) {
-                Some(item) => {
+                Maybe.Some(item) => {
                     if predicate(&item) {
                         matching.push(item.clone());
                     } else {
                         non_matching.push(item.clone());
                     }
                 },
-                None => break,
+                Maybe.None => break,
             }
             i = i + 1;
         }
@@ -1932,16 +1932,16 @@ implement<T> List<T> {
         if n > 0 {
             let mut current: List<T> = List.new();
             match self.get(0) {
-                Some(first) => current.push(first.clone()),
-                None => return result,
+                Maybe.Some(first) => current.push(first.clone()),
+                Maybe.None => return result,
             }
             let mut i: Int = 1;
             while i < n {
                 let prev_opt = self.get(i - 1);
                 let curr_opt = self.get(i);
                 match prev_opt {
-                    Some(prev) => match curr_opt {
-                        Some(curr) => {
+                    Maybe.Some(prev) => match curr_opt {
+                        Maybe.Some(curr) => {
                             if predicate(&prev, &curr) {
                                 current.push(curr.clone());
                             } else {
@@ -1950,9 +1950,9 @@ implement<T> List<T> {
                                 current.push(curr.clone());
                             }
                         },
-                        None => break,
+                        Maybe.None => break,
                     },
-                    None => break,
+                    Maybe.None => break,
                 }
                 i = i + 1;
             }
@@ -2050,7 +2050,7 @@ implement<T> List<T> {
     /// # Example
     /// ```verum
     /// let nums = list([1, 2, 3, 4, 5]);
-    /// let evens_doubled = nums.filter_map(|x| if *x % 2 == 0 { Some(*x * 2) } else { None });
+    /// let evens_doubled = nums.filter_map(|x| if *x % 2 == 0 { Maybe.Some(*x * 2) } else { Maybe.None });
     /// assert_eq(evens_doubled, list([4, 8]));
     /// ```
     public fn filter_map<U, F: fn(&T) -> Maybe<U>>(&self, f: F) -> List<U> {
@@ -2077,7 +2077,7 @@ implement<T> List<T> {
 
     /// # Example
     /// ```verum
-    /// let maybes: List<Maybe<Int>> = list([Some(1), None, Some(3)]);
+    /// let maybes: List<Maybe<Int>> = list([Some(1), Maybe.None, Maybe.Some(3)]);
     /// let collected = maybes.collect_some();
     /// assert_eq(collected, list([1, 3]));
     /// ```
@@ -2086,8 +2086,8 @@ implement<T> List<T> {
         for i in range(0, self.len) {
             let item = unsafe { ptr_read(self.ptr.offset(i)) };
             match item {
-                Some(val) => result.push(val),
-                None => {},
+                Maybe.Some(val) => result.push(val),
+                Maybe.None => {},
                 _ => result.push(item),
             }
         }
@@ -2101,7 +2101,7 @@ implement<T> List<T> {
     /// ```verum
     /// let nums = list([1, 2, 3, 4]);
     /// let first_even = nums.find(|x| *x % 2 == 0);
-    /// assert_eq(first_even, Some(2));
+    /// assert_eq(first_even, Maybe.Some(2));
     /// ```
     public fn find(&self, predicate: fn(&T) -> Bool) -> Maybe<T>
     where T: Clone
@@ -2109,10 +2109,10 @@ implement<T> List<T> {
         for i in range(0, self.len) {
             let item: &T = unsafe { &*self.ptr.offset(i) };
             if predicate(item) {
-                return Some(item.clone());
+                return Maybe.Some(item.clone());
             }
         }
-        None
+        Maybe.None
     }
 
     /// Find the index of the first element matching a predicate.
@@ -2122,16 +2122,16 @@ implement<T> List<T> {
     /// ```verum
     /// let nums = list([10, 20, 30, 40]);
     /// let idx = nums.find_index(|x| *x > 25);
-    /// assert_eq(idx, Some(2));
+    /// assert_eq(idx, Maybe.Some(2));
     /// ```
     public fn find_index(&self, predicate: fn(&T) -> Bool) -> Maybe<Int> {
         for i in range(0, self.len) {
             let item: &T = unsafe { &*self.ptr.offset(i) };
             if predicate(item) {
-                return Some(i);
+                return Maybe.Some(i);
             }
         }
-        None
+        Maybe.None
     }
 
     /// Take the first n elements.
@@ -2217,10 +2217,10 @@ implement<T> List<T> {
             let item: &T = unsafe { &*self.ptr.offset(i) };
             let key = key_fn(item);
             match result.get_mut(&key) {
-                Some(group) => {
+                Maybe.Some(group) => {
                     group.push(item.clone());
                 },
-                None => {
+                Maybe.None => {
                     let mut group: List<T> = List.new();
                     group.push(item.clone());
                     result.insert(key, group);
@@ -2282,7 +2282,7 @@ implement<T> List<T> {
     where T: Clone
     {
         if self.len == 0 {
-            return None;
+            return Maybe.None;
         }
         let first: &T = unsafe { &*self.ptr.offset(0) };
         let mut acc: T = first.clone();
@@ -2290,7 +2290,7 @@ implement<T> List<T> {
             let item: &T = unsafe { &*self.ptr.offset(i) };
             acc = f(acc, item);
         }
-        Some(acc)
+        Maybe.Some(acc)
     }
 
     /// Find the minimum element.
@@ -2298,7 +2298,7 @@ implement<T> List<T> {
     where T: Ord
     {
         if self.len == 0 {
-            return None;
+            return Maybe.None;
         }
         let mut min_ref: &T = unsafe { &*self.ptr.offset(0) };
         for i in range(1, self.len) {
@@ -2307,7 +2307,7 @@ implement<T> List<T> {
                 min_ref = item;
             }
         }
-        Some(min_ref)
+        Maybe.Some(min_ref)
     }
 
     /// Find the maximum element.
@@ -2315,7 +2315,7 @@ implement<T> List<T> {
     where T: Ord
     {
         if self.len == 0 {
-            return None;
+            return Maybe.None;
         }
         let mut max_ref: &T = unsafe { &*self.ptr.offset(0) };
         for i in range(1, self.len) {
@@ -2324,7 +2324,7 @@ implement<T> List<T> {
                 max_ref = item;
             }
         }
-        Some(max_ref)
+        Maybe.Some(max_ref)
     }
 
     /// Returns the first element and the rest of the list as a slice,
@@ -2342,13 +2342,13 @@ implement<T> List<T> {
     /// ```
     public fn split_first(&self) -> Maybe<(&T, &[T])> {
         if self.len == 0 {
-            return None;
+            return Maybe.None;
         }
         let first_ref: &T = unsafe { &*self.ptr.offset(0) };
         let rest = unsafe {
             slice_from_raw_parts(self.ptr.offset(1) as &T, self.len - 1)
         };
-        Some((first_ref, rest))
+        Maybe.Some((first_ref, rest))
     }
 
     /// Returns the last element and the rest of the list as a slice,
@@ -2366,13 +2366,13 @@ implement<T> List<T> {
     /// ```
     public fn split_last(&self) -> Maybe<(&T, &[T])> {
         if self.len == 0 {
-            return None;
+            return Maybe.None;
         }
         let last_ref: &T = unsafe { &*self.ptr.offset(self.len - 1) };
         let init = unsafe {
             slice_from_raw_parts(self.ptr as &T, self.len - 1)
         };
-        Some((last_ref, init))
+        Maybe.Some((last_ref, init))
     }
 
     /// Returns `true` if the list is sorted in ascending order.
@@ -3158,29 +3158,29 @@ implement<T> Iterator for ListIter<T> {
 
     fn next(&mut self) -> Maybe<&T> {
         if self.ptr == self.end {
-            return None;
+            return Maybe.None;
         }
         unsafe {
             let item = &*self.ptr;
             self.ptr = self.ptr.offset(1);
-            Some(item)
+            Maybe.Some(item)
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = (self.end as Int - self.ptr as Int) / T.size;
-        (remaining, Some(remaining))
+        (remaining, Maybe.Some(remaining))
     }
 }
 
 implement<T> DoubleEndedIterator for ListIter<T> {
     fn next_back(&mut self) -> Maybe<&T> {
         if self.ptr == self.end {
-            return None;
+            return Maybe.None;
         }
         unsafe {
             self.end = self.end.offset(-1);
-            Some(&*self.end)
+            Maybe.Some(&*self.end)
         }
     }
 }
@@ -3212,29 +3212,29 @@ implement<T> Iterator for ListIterMut<T> {
 
     fn next(&mut self) -> Maybe<&mut T> {
         if self.ptr == self.end {
-            return None;
+            return Maybe.None;
         }
         unsafe {
             let item = &mut *self.ptr;
             self.ptr = self.ptr.offset(1);
-            Some(item)
+            Maybe.Some(item)
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = (self.end as Int - self.ptr as Int) / T.size;
-        (remaining, Some(remaining))
+        (remaining, Maybe.Some(remaining))
     }
 }
 
 implement<T> DoubleEndedIterator for ListIterMut<T> {
     fn next_back(&mut self) -> Maybe<&mut T> {
         if self.ptr == self.end {
-            return None;
+            return Maybe.None;
         }
         unsafe {
             self.end = self.end.offset(-1);
-            Some(&mut *self.end)
+            Maybe.Some(&mut *self.end)
         }
     }
 }
@@ -3267,29 +3267,29 @@ implement<T> Iterator for IntoList<T> {
 
     fn next(&mut self) -> Maybe<T> {
         if self.idx >= self.back {
-            return None;
+            return Maybe.None;
         }
         unsafe {
             let item = ptr_read(self.list.ptr.offset(self.idx));
             self.idx = self.idx + 1;
-            Some(item)
+            Maybe.Some(item)
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.back - self.idx;
-        (remaining, Some(remaining))
+        (remaining, Maybe.Some(remaining))
     }
 }
 
 implement<T> DoubleEndedIterator for IntoList<T> {
     fn next_back(&mut self) -> Maybe<T> {
         if self.idx >= self.back {
-            return None;
+            return Maybe.None;
         }
         self.back = self.back - 1;
         unsafe {
-            Some(ptr_read(self.list.ptr.offset(self.back)))
+            Maybe.Some(ptr_read(self.list.ptr.offset(self.back)))
         }
     }
 }
@@ -3332,29 +3332,29 @@ implement<T> Iterator for Drain<T> {
 
     fn next(&mut self) -> Maybe<T> {
         if self.current >= self.end {
-            return None;
+            return Maybe.None;
         }
         unsafe {
             let item = ptr_read(self.list.ptr.offset(self.current));
             self.current = self.current + 1;
-            Some(item)
+            Maybe.Some(item)
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let remaining = self.end - self.current;
-        (remaining, Some(remaining))
+        (remaining, Maybe.Some(remaining))
     }
 }
 
 implement<T> DoubleEndedIterator for Drain<T> {
     fn next_back(&mut self) -> Maybe<T> {
         if self.current >= self.end {
-            return None;
+            return Maybe.None;
         }
         self.end = self.end - 1;
         unsafe {
-            Some(ptr_read(self.list.ptr.offset(self.end)))
+            Maybe.Some(ptr_read(self.list.ptr.offset(self.end)))
         }
     }
 }

@@ -86,9 +86,9 @@ implement<T> [T] {
     @inline(always)
     public fn get(&self, idx: Int) -> Maybe<&T> {
         if idx >= 0 && idx < self.len() {
-            Some(&self[idx])
+            Maybe.Some(&self[idx])
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -103,13 +103,13 @@ implement<T> [T] {
     /// Get first element.
     @inline(always)
     public fn first(&self) -> Maybe<&T> {
-        if self.is_empty() { None } else { Some(&self[0]) }
+        if self.is_empty() { Maybe.None } else { Maybe.Some(&self[0]) }
     }
 
     /// Get last element.
     @inline(always)
     public fn last(&self) -> Maybe<&T> {
-        if self.is_empty() { None } else { Some(&self[self.len() - 1]) }
+        if self.is_empty() { Maybe.None } else { Maybe.Some(&self[self.len() - 1]) }
     }
 
     // =========================================================================
@@ -255,10 +255,10 @@ implement<T> [T] {
         for i in range(0, self.len()) {
             let item: &T = &self[i];
             if predicate(item) {
-                return Some(item);
+                return Maybe.Some(item);
             }
         }
-        None
+        Maybe.None
     }
 
     /// Find position of first element matching predicate.
@@ -266,10 +266,10 @@ implement<T> [T] {
         for i in range(0, self.len()) {
             let item: &T = &self[i];
             if predicate(item) {
-                return Some(i);
+                return Maybe.Some(i);
             }
         }
-        None
+        Maybe.None
     }
 
     /// Check if starts with given slice.
@@ -289,7 +289,7 @@ implement<T> [T] {
         }
         for i in range(0, prefix.len()) {
             match (self.get(i), prefix.get(i)) {
-                (Some(a), Some(b)) => {
+                (Maybe.Some(a), Maybe.Some(b)) => {
                     if !(*a == *b) { return false; }
                 },
                 _ => return false,
@@ -311,7 +311,7 @@ implement<T> [T] {
         let offset = self.len() - suffix.len();
         for i in range(0, suffix.len()) {
             match (self.get(offset + i), suffix.get(i)) {
-                (Some(a), Some(b)) => {
+                (Maybe.Some(a), Maybe.Some(b)) => {
                     if !(*a == *b) { return false; }
                 },
                 _ => return false,
@@ -421,7 +421,7 @@ implement<T> [T] {
     where T: Ord
     {
         if self.is_empty() {
-            return None;
+            return Maybe.None;
         }
         let mut min = &self[0];
         for i in range(1, self.len()) {
@@ -430,7 +430,7 @@ implement<T> [T] {
                 min = elem;
             }
         }
-        Some(min)
+        Maybe.Some(min)
     }
 
     /// Get maximum element.
@@ -438,7 +438,7 @@ implement<T> [T] {
     where T: Ord
     {
         if self.is_empty() {
-            return None;
+            return Maybe.None;
         }
         let mut max = &self[0];
         for i in range(1, self.len()) {
@@ -447,7 +447,7 @@ implement<T> [T] {
                 max = elem;
             }
         }
-        Some(max)
+        Maybe.Some(max)
     }
 
     // =========================================================================
@@ -467,7 +467,7 @@ implement<T> [T] {
         }
         for i in range(0, self.len()) {
             match (self.get(i), other.get(i)) {
-                (Some(a), Some(b)) => {
+                (Maybe.Some(a), Maybe.Some(b)) => {
                     if !(*a == *b) { return false; }
                 },
                 _ => return false,
@@ -487,7 +487,7 @@ implement<T> [T] {
         let min_len = self.len().min(other.len());
         for i in range(0, min_len) {
             match (self.get(i), other.get(i)) {
-                (Some(a), Some(b)) => {
+                (Maybe.Some(a), Maybe.Some(b)) => {
                     if *a < *b {
                         return Ordering.Less;
                     } else if *a > *b {
@@ -575,9 +575,9 @@ implement<T> [T] {
     /// Returns None if the slice is empty.
     public fn split_first(&self) -> Maybe<(&T, &[T])> {
         if self.is_empty() {
-            None
+            Maybe.None
         } else {
-            Some((&self[0], self.slice_from(1)))
+            Maybe.Some((&self[0], self.slice_from(1)))
         }
     }
 
@@ -585,10 +585,10 @@ implement<T> [T] {
     /// Returns None if the slice is empty.
     public fn split_last(&self) -> Maybe<(&T, &[T])> {
         if self.is_empty() {
-            None
+            Maybe.None
         } else {
             let last_idx = self.len() - 1;
-            Some((&self[last_idx], self.slice_to(last_idx)))
+            Maybe.Some((&self[last_idx], self.slice_to(last_idx)))
         }
     }
 
@@ -636,10 +636,10 @@ implement<T> [T] {
             i = i - 1;
             let item: &T = &self[i];
             if predicate(item) {
-                return Some(item);
+                return Maybe.Some(item);
             }
         }
-        None
+        Maybe.None
     }
 
     /// Find position of last element matching predicate.
@@ -649,10 +649,10 @@ implement<T> [T] {
             i = i - 1;
             let item: &T = &self[i];
             if predicate(item) {
-                return Some(i);
+                return Maybe.Some(i);
             }
         }
-        None
+        Maybe.None
     }
 
     // =========================================================================
@@ -679,21 +679,21 @@ implement<T> [T] {
     /// Get mutable reference by index.
     public fn get_mut(&mut self, idx: Int) -> Maybe<&mut T> {
         if idx >= 0 && idx < self.len() {
-            Some(&mut self[idx])
+            Maybe.Some(&mut self[idx])
         } else {
-            None
+            Maybe.None
         }
     }
 
     /// Get mutable first element.
     public fn first_mut(&mut self) -> Maybe<&mut T> {
-        if self.is_empty() { None } else { Some(&mut self[0]) }
+        if self.is_empty() { Maybe.None } else { Maybe.Some(&mut self[0]) }
     }
 
     /// Get mutable last element.
     public fn last_mut(&mut self) -> Maybe<&mut T> {
         let len = self.len();
-        if len == 0 { None } else { Some(&mut self[len - 1]) }
+        if len == 0 { Maybe.None } else { Maybe.Some(&mut self[len - 1]) }
     }
 
     /// Mutable subslice.
