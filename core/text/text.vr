@@ -334,13 +334,13 @@ implement Text {
     /// propagate as typed variants.
     public fn try_with_capacity(cap: Int) -> Result<Text, AllocError> {
         if cap <= 0 {
-            return Ok(Text.new());
+            return Result.Ok(Text.new());
         }
         let raw = try_alloc(cap + 1, 1)?;
         if is_null(raw) {
-            return Err(AllocError.OutOfMemory { requested: cap + 1 });
+            return Result.Err(AllocError.OutOfMemory { requested: cap + 1 });
         }
-        Ok(Text {
+        Result.Ok(Text {
             ptr: raw,
             len: 0,
             cap: cap,
@@ -351,10 +351,10 @@ implement Text {
     public fn from_utf8(bytes: &[Byte]) -> Result<Text, Utf8Error> {
         // Validate UTF-8
         if !utf8_validate(bytes) {
-            return Err(Utf8Error.new(0));
+            return Result.Err(Utf8Error.new(0));
         }
 
-        Ok(Text.from_utf8_unchecked(bytes))
+        Result.Ok(Text.from_utf8_unchecked(bytes))
     }
 
     /// Compatibility alias for `from_utf8` — the canonical
@@ -1852,10 +1852,10 @@ implement Text {
     /// ```
     public fn parse_int_radix(&self, radix: Int) -> Result<Int, ParseError> {
         if radix < 2 || radix > 36 {
-            return Err(ParseError.new("radix must be between 2 and 36"));
+            return Result.Err(ParseError.new("radix must be between 2 and 36"));
         }
         if self.is_empty() {
-            return Err(ParseError.new("empty string"));
+            return Result.Err(ParseError.new("empty string"));
         }
 
         let mut negative = false;
@@ -1871,7 +1871,7 @@ implement Text {
         }
 
         if start >= the_bytes.len() {
-            return Err(ParseError.new("no digits"));
+            return Result.Err(ParseError.new("no digits"));
         }
 
         // Accumulate magnitude in UInt64. The historical signed-Int
@@ -1896,11 +1896,11 @@ implement Text {
                 // 'a'-'z'
                 b - 97 + 10
             } else {
-                return Err(ParseError.new("invalid character"));
+                return Result.Err(ParseError.new("invalid character"));
             };
 
             if digit >= radix {
-                return Err(ParseError.new("digit out of range for radix"));
+                return Result.Err(ParseError.new("digit out of range for radix"));
             }
 
             // Per-step overflow guard against UInt64.MAX.
@@ -1913,11 +1913,11 @@ implement Text {
             // the previous signed-i64 division.
             let max_div: UInt64 = 18_446_744_073_709_551_615_u64 / radix_u;
             if mag > max_div {
-                return Err(ParseError.new("integer overflow"));
+                return Result.Err(ParseError.new("integer overflow"));
             }
             let next = mag * radix_u + (digit as UInt64);
             if next < mag {
-                return Err(ParseError.new("integer overflow"));
+                return Result.Err(ParseError.new("integer overflow"));
             }
             mag = next;
         }
@@ -1926,21 +1926,21 @@ implement Text {
         if negative {
             // Int.MIN's magnitude is 2^63 = 9223372036854775808.
             if mag > 9_223_372_036_854_775_808_u64 {
-                return Err(ParseError.new("integer underflow"));
+                return Result.Err(ParseError.new("integer underflow"));
             }
             // Special-case Int.MIN: its magnitude doesn't fit in
             // positive Int range. Reconstruct via two's complement.
             if mag == 9_223_372_036_854_775_808_u64 {
-                Ok(-9_223_372_036_854_775_808)
+                Result.Ok(-9_223_372_036_854_775_808)
             } else {
-                Ok(0 - (mag as Int))
+                Result.Ok(0 - (mag as Int))
             }
         } else {
             // Int.MAX = 2^63 - 1 = 9223372036854775807.
             if mag > 9_223_372_036_854_775_807_u64 {
-                return Err(ParseError.new("integer overflow"));
+                return Result.Err(ParseError.new("integer overflow"));
             }
-            Ok(mag as Int)
+            Result.Ok(mag as Int)
         }
     }
 
@@ -1954,7 +1954,7 @@ implement Text {
     public fn parse_float(&self) -> Result<Float, ParseError> {
         let bytes = self.as_bytes();
         if bytes.len() == 0 {
-            return Err(ParseError.new("empty string"));
+            return Result.Err(ParseError.new("empty string"));
         }
         // Validate that at least one digit appears so that silent
         // zeros don't mask junk input like "abc" or "".
@@ -1983,26 +1983,26 @@ implement Text {
                 i = i + 1;
             }
             if !exp_digits {
-                return Err(ParseError.new("missing exponent digits"));
+                return Result.Err(ParseError.new("missing exponent digits"));
             }
         }
         if !seen_digit {
-            return Err(ParseError.new("no digits"));
+            return Result.Err(ParseError.new("no digits"));
         }
         if i < n {
-            return Err(ParseError.new("trailing characters"));
+            return Result.Err(ParseError.new("trailing characters"));
         }
-        Ok(self.to_float())
+        Result.Ok(self.to_float())
     }
 
     /// Parse to Bool.
     public fn parse_bool(&self) -> Result<Bool, ParseError> {
         if *self == "true" {
-            Ok(true)
+            Result.Ok(true)
         } else if *self == "false" {
-            Ok(false)
+            Result.Ok(false)
         } else {
-            Err(ParseError.new("invalid boolean"))
+            Result.Err(ParseError.new("invalid boolean"))
         }
     }
 
@@ -3014,25 +3014,25 @@ implement Text {
             if code >= 0xD800 && code <= 0xDBFF {
                 // High surrogate — must be followed by low surrogate
                 if i + 1 >= len {
-                    return Err(Utf16Error { index: i });
+                    return Result.Err(Utf16Error { index: i });
                 }
                 let low = units[i + 1];
                 if low < 0xDC00 || low > 0xDFFF {
-                    return Err(Utf16Error { index: i });
+                    return Result.Err(Utf16Error { index: i });
                 }
                 let codepoint = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
                 result.push(codepoint as Char);
                 i = i + 2;
             } else if code >= 0xDC00 && code <= 0xDFFF {
                 // Lone low surrogate — invalid
-                return Err(Utf16Error { index: i });
+                return Result.Err(Utf16Error { index: i });
             } else {
                 // BMP character
                 result.push(code as Char);
                 i = i + 1;
             }
         }
-        Ok(result)
+        Result.Ok(result)
     }
 
     /// Decode a UTF-16 encoded slice into a Text, replacing invalid
@@ -3755,7 +3755,7 @@ implement FromStr for Text {
     type ParseError = ParseError;
 
     fn from_str(s: &Text) -> Result<Text, ParseError> {
-        Ok(s.clone())
+        Result.Ok(s.clone())
     }
 }
 
@@ -3771,12 +3771,12 @@ implement FromStr for Int8 {
     fn from_str(s: &Text) -> Result<Int8, ParseError> {
         let n = s.parse_int();
         match n {
-            Err(e) => Err(e),
-            Ok(val) => {
+            Result.Err(e) => Err(e),
+            Result.Ok(val) => {
                 let converted = Int8.try_from(val);
                 match converted {
-                    Ok(v) => Ok(v),
-                    Err(_) => Err(ParseError.new(&"value out of range for Int8")),
+                    Result.Ok(v) => Ok(v),
+                    Result.Err(_) => Err(ParseError.new(&"value out of range for Int8")),
                 }
             },
         }
@@ -3789,12 +3789,12 @@ implement FromStr for Int16 {
     fn from_str(s: &Text) -> Result<Int16, ParseError> {
         let n = s.parse_int();
         match n {
-            Err(e) => Err(e),
-            Ok(val) => {
+            Result.Err(e) => Err(e),
+            Result.Ok(val) => {
                 let converted = Int16.try_from(val);
                 match converted {
-                    Ok(v) => Ok(v),
-                    Err(_) => Err(ParseError.new(&"value out of range for Int16")),
+                    Result.Ok(v) => Ok(v),
+                    Result.Err(_) => Err(ParseError.new(&"value out of range for Int16")),
                 }
             },
         }
@@ -3807,12 +3807,12 @@ implement FromStr for Int32 {
     fn from_str(s: &Text) -> Result<Int32, ParseError> {
         let n = s.parse_int();
         match n {
-            Err(e) => Err(e),
-            Ok(val) => {
+            Result.Err(e) => Err(e),
+            Result.Ok(val) => {
                 let converted = Int32.try_from(val);
                 match converted {
-                    Ok(v) => Ok(v),
-                    Err(_) => Err(ParseError.new(&"value out of range for Int32")),
+                    Result.Ok(v) => Ok(v),
+                    Result.Err(_) => Err(ParseError.new(&"value out of range for Int32")),
                 }
             },
         }
@@ -3825,12 +3825,12 @@ implement FromStr for UInt8 {
     fn from_str(s: &Text) -> Result<UInt8, ParseError> {
         let n = s.parse_int();
         match n {
-            Err(e) => Err(e),
-            Ok(val) => {
+            Result.Err(e) => Err(e),
+            Result.Ok(val) => {
                 let converted = UInt8.try_from(val);
                 match converted {
-                    Ok(v) => Ok(v),
-                    Err(_) => Err(ParseError.new(&"value out of range for UInt8")),
+                    Result.Ok(v) => Ok(v),
+                    Result.Err(_) => Err(ParseError.new(&"value out of range for UInt8")),
                 }
             },
         }
@@ -3843,12 +3843,12 @@ implement FromStr for UInt16 {
     fn from_str(s: &Text) -> Result<UInt16, ParseError> {
         let n = s.parse_int();
         match n {
-            Err(e) => Err(e),
-            Ok(val) => {
+            Result.Err(e) => Err(e),
+            Result.Ok(val) => {
                 let converted = UInt16.try_from(val);
                 match converted {
-                    Ok(v) => Ok(v),
-                    Err(_) => Err(ParseError.new(&"value out of range for UInt16")),
+                    Result.Ok(v) => Ok(v),
+                    Result.Err(_) => Err(ParseError.new(&"value out of range for UInt16")),
                 }
             },
         }
@@ -3861,12 +3861,12 @@ implement FromStr for UInt32 {
     fn from_str(s: &Text) -> Result<UInt32, ParseError> {
         let n = s.parse_int();
         match n {
-            Err(e) => Err(e),
-            Ok(val) => {
+            Result.Err(e) => Err(e),
+            Result.Ok(val) => {
                 let converted = UInt32.try_from(val);
                 match converted {
-                    Ok(v) => Ok(v),
-                    Err(_) => Err(ParseError.new(&"value out of range for UInt32")),
+                    Result.Ok(v) => Ok(v),
+                    Result.Err(_) => Err(ParseError.new(&"value out of range for UInt32")),
                 }
             },
         }
@@ -3879,12 +3879,12 @@ implement FromStr for UInt64 {
     fn from_str(s: &Text) -> Result<UInt64, ParseError> {
         let n = s.parse_int();
         match n {
-            Err(e) => Err(e),
-            Ok(val) => {
+            Result.Err(e) => Err(e),
+            Result.Ok(val) => {
                 let converted = UInt64.try_from(val);
                 match converted {
-                    Ok(v) => Ok(v),
-                    Err(_) => Err(ParseError.new(&"value out of range for UInt64")),
+                    Result.Ok(v) => Ok(v),
+                    Result.Err(_) => Err(ParseError.new(&"value out of range for UInt64")),
                 }
             },
         }
@@ -3897,8 +3897,8 @@ implement FromStr for Int64 {
     fn from_str(s: &Text) -> Result<Int64, ParseError> {
         let n = s.parse_int();
         match n {
-            Err(e) => Err(e),
-            Ok(val) => Ok(val as Int64),
+            Result.Err(e) => Err(e),
+            Result.Ok(val) => Ok(val as Int64),
         }
     }
 }
@@ -3909,8 +3909,8 @@ implement FromStr for Int128 {
     fn from_str(s: &Text) -> Result<Int128, ParseError> {
         let n = s.parse_int();
         match n {
-            Err(e) => Err(e),
-            Ok(val) => Ok(val as Int128),
+            Result.Err(e) => Err(e),
+            Result.Ok(val) => Ok(val as Int128),
         }
     }
 }
@@ -3921,12 +3921,12 @@ implement FromStr for UInt128 {
     fn from_str(s: &Text) -> Result<UInt128, ParseError> {
         let n = s.parse_int();
         match n {
-            Err(e) => Err(e),
-            Ok(val) => {
+            Result.Err(e) => Err(e),
+            Result.Ok(val) => {
                 if val < 0 {
-                    Err(ParseError.new(&"value out of range for UInt128"))
+                    Result.Err(ParseError.new(&"value out of range for UInt128"))
                 } else {
-                    Ok(val as UInt128)
+                    Result.Ok(val as UInt128)
                 }
             },
         }
@@ -3939,8 +3939,8 @@ implement FromStr for ISize {
     fn from_str(s: &Text) -> Result<ISize, ParseError> {
         let n = s.parse_int();
         match n {
-            Err(e) => Err(e),
-            Ok(val) => Ok(val as ISize),
+            Result.Err(e) => Err(e),
+            Result.Ok(val) => Ok(val as ISize),
         }
     }
 }
@@ -3951,12 +3951,12 @@ implement FromStr for USize {
     fn from_str(s: &Text) -> Result<USize, ParseError> {
         let n = s.parse_int();
         match n {
-            Err(e) => Err(e),
-            Ok(val) => {
+            Result.Err(e) => Err(e),
+            Result.Ok(val) => {
                 if val < 0 {
-                    Err(ParseError.new(&"value out of range for USize"))
+                    Result.Err(ParseError.new(&"value out of range for USize"))
                 } else {
-                    Ok(val as USize)
+                    Result.Ok(val as USize)
                 }
             },
         }
@@ -3969,8 +3969,8 @@ implement FromStr for Float32 {
     fn from_str(s: &Text) -> Result<Float32, ParseError> {
         let f = s.parse_float();
         match f {
-            Err(e) => Err(e),
-            Ok(val) => Ok(val as Float32),
+            Result.Err(e) => Err(e),
+            Result.Ok(val) => Ok(val as Float32),
         }
     }
 }
@@ -3981,8 +3981,8 @@ implement FromStr for Float64 {
     fn from_str(s: &Text) -> Result<Float64, ParseError> {
         let f = s.parse_float();
         match f {
-            Err(e) => Err(e),
-            Ok(val) => Ok(val as Float64),
+            Result.Err(e) => Err(e),
+            Result.Ok(val) => Ok(val as Float64),
         }
     }
 }
