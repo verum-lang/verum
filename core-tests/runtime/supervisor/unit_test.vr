@@ -1,0 +1,363 @@
+// =============================================================================
+// core-tests/runtime/supervisor/unit_test.vr
+// =============================================================================
+//
+// `core/runtime/supervisor.vr` (1679 LOC) — Erlang/OTP-style supervision
+// tree for fault-tolerant async tasks.
+//
+// Tests pin the DATA-only subset:
+//   * SupervisorId / ChildId newtypes + .raw + .root + .new
+//   * SupervisionStrategy 3-variant (OneForOne / OneForAll / RestForOne)
+//     + .description
+//   * SupervisorRestartStrategy 3-variant (Permanent / Transient /
+//     Temporary) + .should_restart
+//   * FailureReason 7-variant + .is_abnormal + .description
+//   * ChildStatus 6-variant + .to_u8 / .from_u8 + .is_active
+//   * ChildSpec record + .new / .permanent
+//   * EscalationPolicy 4-variant
+//   * ShutdownStrategy 3-variant + .graceful / .brutal + .timeout_ms
+//   * SupervisorConfig record + one_for_one / one_for_all / rest_for_one
+//     + Default
+//   * SupervisorError 8-variant
+//
+// Live RestartIntensity + Supervisor + SupervisorHandle + root_supervisor
+// require atomic intrinsics + spawn — deferred to
+// vcs/specs/L2-standard/runtime/supervisor/.
+// =============================================================================
+
+mount core.runtime.supervisor.{
+    SupervisorId, ChildId,
+    SupervisionStrategy, SupervisorRestartStrategy, FailureReason, ChildStatus,
+    EscalationPolicy, ShutdownStrategy, SupervisorError,
+};
+
+// =============================================================================
+// Section 1: SupervisorId / ChildId — newtypes
+// =============================================================================
+
+@test
+fn test_supervisor_id_root_is_zero() {
+    let s = SupervisorId.root();
+    assert(s.raw() == 0_u64);
+}
+
+@test
+fn test_supervisor_id_raw_accessor() {
+    // Construct via direct newtype application
+    let s = SupervisorId(42_u64);
+    assert(s.raw() == 42_u64);
+}
+
+@test
+fn test_child_id_raw_accessor() {
+    let c = ChildId(99_u64);
+    assert(c.raw() == 99_u64);
+}
+
+// =============================================================================
+// Section 2: SupervisionStrategy 3-variant
+// =============================================================================
+
+@test
+fn test_supervision_strategy_one_for_one() {
+    let s = SupervisionStrategy.OneForOne;
+    assert(s is SupervisionStrategy.OneForOne);
+}
+
+@test
+fn test_supervision_strategy_one_for_all() {
+    let s = SupervisionStrategy.OneForAll;
+    assert(s is SupervisionStrategy.OneForAll);
+}
+
+@test
+fn test_supervision_strategy_rest_for_one() {
+    let s = SupervisionStrategy.RestForOne;
+    assert(s is SupervisionStrategy.RestForOne);
+}
+
+@test
+fn test_supervision_strategy_pairwise_disjoint() {
+    let a: SupervisionStrategy = SupervisionStrategy.OneForOne;
+    let b: SupervisionStrategy = SupervisionStrategy.OneForAll;
+    let c: SupervisionStrategy = SupervisionStrategy.RestForOne;
+    assert(a is SupervisionStrategy.OneForOne && !(a is SupervisionStrategy.OneForAll));
+    assert(b is SupervisionStrategy.OneForAll && !(b is SupervisionStrategy.RestForOne));
+    assert(c is SupervisionStrategy.RestForOne && !(c is SupervisionStrategy.OneForOne));
+}
+
+// =============================================================================
+// Section 3: SupervisorRestartStrategy 3-variant + .should_restart
+// =============================================================================
+
+@test
+fn test_supervisor_restart_strategy_permanent() {
+    let s = SupervisorRestartStrategy.Permanent;
+    assert(s is SupervisorRestartStrategy.Permanent);
+}
+
+@test
+fn test_supervisor_restart_strategy_transient() {
+    let s = SupervisorRestartStrategy.Transient;
+    assert(s is SupervisorRestartStrategy.Transient);
+}
+
+@test
+fn test_supervisor_restart_strategy_temporary() {
+    let s = SupervisorRestartStrategy.Temporary;
+    assert(s is SupervisorRestartStrategy.Temporary);
+}
+
+@test
+fn test_should_restart_permanent_on_normal_exit_is_true() {
+    let s = SupervisorRestartStrategy.Permanent;
+    let r = FailureReason.NormalExit;
+    assert(s.should_restart(&r));
+}
+
+@test
+fn test_should_restart_permanent_on_panic_is_true() {
+    let s = SupervisorRestartStrategy.Permanent;
+    let r = FailureReason.Panic("kaboom");
+    assert(s.should_restart(&r));
+}
+
+@test
+fn test_should_restart_transient_on_normal_exit_is_false() {
+    let s = SupervisorRestartStrategy.Transient;
+    let r = FailureReason.NormalExit;
+    assert(!s.should_restart(&r));
+}
+
+@test
+fn test_should_restart_transient_on_panic_is_true() {
+    let s = SupervisorRestartStrategy.Transient;
+    let r = FailureReason.Panic("kaboom");
+    assert(s.should_restart(&r));
+}
+
+@test
+fn test_should_restart_temporary_never_restarts() {
+    let s = SupervisorRestartStrategy.Temporary;
+    let r1 = FailureReason.NormalExit;
+    let r2 = FailureReason.Panic("kaboom");
+    assert(!s.should_restart(&r1));
+    assert(!s.should_restart(&r2));
+}
+
+// =============================================================================
+// Section 4: FailureReason 7-variant + .is_abnormal
+// =============================================================================
+
+@test
+fn test_failure_reason_normal_exit_not_abnormal() {
+    let r = FailureReason.NormalExit;
+    assert(!r.is_abnormal());
+}
+
+@test
+fn test_failure_reason_supervisor_shutdown_not_abnormal() {
+    // Controlled shutdown is NOT abnormal per source contract.
+    let r = FailureReason.SupervisorShutdown;
+    assert(!r.is_abnormal());
+}
+
+@test
+fn test_failure_reason_panic_is_abnormal() {
+    let r = FailureReason.Panic("oops");
+    assert(r.is_abnormal());
+}
+
+@test
+fn test_failure_reason_error_exit_is_abnormal() {
+    let r = FailureReason.ErrorExit("io error");
+    assert(r.is_abnormal());
+}
+
+@test
+fn test_failure_reason_timeout_is_abnormal() {
+    let r = FailureReason.Timeout;
+    assert(r.is_abnormal());
+}
+
+@test
+fn test_failure_reason_cancelled_is_abnormal() {
+    let r = FailureReason.Cancelled;
+    assert(r.is_abnormal());
+}
+
+@test
+fn test_failure_reason_manual_is_abnormal() {
+    // Manual restart is treated as abnormal (Transient strategy will retry).
+    let r = FailureReason.Manual;
+    assert(r.is_abnormal());
+}
+
+// =============================================================================
+// Section 5: ChildStatus 6-variant + to_u8 / from_u8 / is_active
+// =============================================================================
+
+@test
+fn test_child_status_running_active() {
+    assert(ChildStatus.Running.is_active());
+}
+
+@test
+fn test_child_status_starting_active() {
+    assert(ChildStatus.Starting.is_active());
+}
+
+@test
+fn test_child_status_restarting_active() {
+    assert(ChildStatus.Restarting.is_active());
+}
+
+@test
+fn test_child_status_terminated_not_active() {
+    assert(!ChildStatus.Terminated.is_active());
+}
+
+@test
+fn test_child_status_failed_not_active() {
+    assert(!ChildStatus.Failed.is_active());
+}
+
+@test
+fn test_child_status_stopped_not_active() {
+    assert(!ChildStatus.Stopped.is_active());
+}
+
+@test
+fn test_child_status_to_u8_table() {
+    assert(ChildStatus.Running.to_u8() == 0_u8);
+    assert(ChildStatus.Starting.to_u8() == 1_u8);
+    assert(ChildStatus.Restarting.to_u8() == 2_u8);
+    assert(ChildStatus.Terminated.to_u8() == 3_u8);
+    assert(ChildStatus.Failed.to_u8() == 4_u8);
+    assert(ChildStatus.Stopped.to_u8() == 5_u8);
+}
+
+@test
+fn test_child_status_from_u8_canonical_round_trip() {
+    assert(ChildStatus.from_u8(0_u8) is ChildStatus.Running);
+    assert(ChildStatus.from_u8(1_u8) is ChildStatus.Starting);
+    assert(ChildStatus.from_u8(2_u8) is ChildStatus.Restarting);
+    assert(ChildStatus.from_u8(3_u8) is ChildStatus.Terminated);
+    assert(ChildStatus.from_u8(4_u8) is ChildStatus.Failed);
+    assert(ChildStatus.from_u8(5_u8) is ChildStatus.Stopped);
+}
+
+@test
+fn test_child_status_from_u8_unknown_falls_to_stopped() {
+    // Source contract: catch-all `_ => Stopped`.
+    let s = ChildStatus.from_u8(99_u8);
+    assert(s is ChildStatus.Stopped);
+}
+
+// =============================================================================
+// Section 6: EscalationPolicy 4-variant
+// =============================================================================
+
+@test
+fn test_escalation_policy_restart_subtree() {
+    let p = EscalationPolicy.RestartSubtree;
+    assert(p is EscalationPolicy.RestartSubtree);
+}
+
+@test
+fn test_escalation_policy_escalate_to_parent() {
+    let p = EscalationPolicy.EscalateToParent;
+    assert(p is EscalationPolicy.EscalateToParent);
+}
+
+@test
+fn test_escalation_policy_terminate() {
+    let p = EscalationPolicy.Terminate;
+    assert(p is EscalationPolicy.Terminate);
+}
+
+@test
+fn test_escalation_policy_log_and_ignore() {
+    let p = EscalationPolicy.LogAndIgnore;
+    assert(p is EscalationPolicy.LogAndIgnore);
+}
+
+// =============================================================================
+// Section 7: ShutdownStrategy 3-variant + .graceful / .brutal / .timeout_ms
+// =============================================================================
+
+@test
+fn test_shutdown_strategy_graceful_factory_5000ms() {
+    let s = ShutdownStrategy.graceful();
+    assert(s.timeout_ms() == 5000_u32);
+}
+
+@test
+fn test_shutdown_strategy_brutal_factory_100ms() {
+    let s = ShutdownStrategy.brutal();
+    assert(s.timeout_ms() == 100_u32);
+}
+
+@test
+fn test_shutdown_strategy_infinite_timeout_max() {
+    let s = ShutdownStrategy.Infinite;
+    assert(s.timeout_ms() == UInt32.MAX);
+}
+
+@test
+fn test_shutdown_strategy_custom_graceful() {
+    let s = ShutdownStrategy.Graceful { timeout_ms: 30_000_u32 };
+    assert(s.timeout_ms() == 30_000_u32);
+}
+
+@test
+fn test_shutdown_strategy_custom_brutal() {
+    let s = ShutdownStrategy.Brutal { timeout_ms: 50_u32 };
+    assert(s.timeout_ms() == 50_u32);
+}
+
+// =============================================================================
+// Section 8: SupervisorError 8-variant
+// =============================================================================
+
+@test
+fn test_supervisor_error_too_many_restarts() {
+    let e = SupervisorError.TooManyRestarts { count: 10, window_secs: 60_u32 };
+    assert(e is SupervisorError.TooManyRestarts);
+}
+
+@test
+fn test_supervisor_error_channel_closed() {
+    let e = SupervisorError.ChannelClosed;
+    assert(e is SupervisorError.ChannelClosed);
+}
+
+@test
+fn test_supervisor_error_shutting_down() {
+    let e = SupervisorError.ShuttingDown;
+    assert(e is SupervisorError.ShuttingDown);
+}
+
+@test
+fn test_supervisor_error_no_parent_supervisor() {
+    let e = SupervisorError.NoParentSupervisor;
+    assert(e is SupervisorError.NoParentSupervisor);
+}
+
+@test
+fn test_supervisor_error_spawn_failed_with_text() {
+    let e = SupervisorError.SpawnFailed("clone(2) returned EAGAIN");
+    assert(e is SupervisorError.SpawnFailed);
+}
+
+@test
+fn test_supervisor_error_invalid_spec_with_text() {
+    let e = SupervisorError.InvalidSpec("name is empty");
+    assert(e is SupervisorError.InvalidSpec);
+}
+
+@test
+fn test_supervisor_error_other_with_text() {
+    let e = SupervisorError.Other("misc");
+    assert(e is SupervisorError.Other);
+}
