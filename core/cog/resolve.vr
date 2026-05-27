@@ -25,9 +25,9 @@
 //                                       derive incompatibilities from
 //                                       its dependencies
 //
-// **Term algebra.** A `Term` is a (Package, Range, polarity) triple.
+// **Term algebra.** A `Term` is a (Package, VersionRange, polarity) triple.
 // Polarity is `Positive` (the package version must satisfy R) or
-// `Negative` (must NOT satisfy R). Set operations on `Range`:
+// `Negative` (must NOT satisfy R). Set operations on `VersionRange`:
 // intersect, union, complement, contains, is_empty, is_full. Pubgrub
 // runs entirely in the term algebra; it never touches concrete
 // versions until the very end, when it converts the partial solution
@@ -93,7 +93,7 @@ implement Display for PackageName {
 }
 
 // =============================================================================
-// Range — a set of semver versions
+// VersionRange — a set of semver versions
 // =============================================================================
 //
 // Ranges are represented as a sorted list of disjoint intervals.
@@ -103,8 +103,8 @@ implement Display for PackageName {
 // Invariants:
 //   - intervals are sorted by lower bound
 //   - intervals are disjoint and non-adjacent (canonical form)
-//   - empty Range = empty intervals list
-//   - full Range = single interval (-∞, +∞)
+//   - empty VersionRange = empty intervals list
+//   - full VersionRange = single interval (-∞, +∞)
 //
 // All set ops (intersect, union, complement, contains) preserve
 // canonical form.
@@ -122,65 +122,65 @@ public type Interval is {
 };
 
 @derive(Eq, Clone, Debug)
-public type Range is {
+public type VersionRange is {
     intervals: List<Interval>,
 };
 
-// ----- Range constructors -----
+// ----- VersionRange constructors -----
 
-public fn range_empty() -> Range {
-    Range { intervals: List.new() }
+public fn range_empty() -> VersionRange {
+    VersionRange { intervals: List.new() }
 }
 
-public fn range_full() -> Range {
+public fn range_full() -> VersionRange {
     let mut iv: List<Interval> = List.new();
     iv.push(Interval { lo: Bound.Unbounded, hi: Bound.Unbounded });
-    Range { intervals: iv }
+    VersionRange { intervals: iv }
 }
 
-public fn range_exact(v: SemVer) -> Range {
+public fn range_exact(v: SemVer) -> VersionRange {
     let mut iv: List<Interval> = List.new();
     iv.push(Interval { lo: Bound.Included(v.clone()), hi: Bound.Included(v) });
-    Range { intervals: iv }
+    VersionRange { intervals: iv }
 }
 
-public fn range_higher_than(v: SemVer) -> Range {
+public fn range_higher_than(v: SemVer) -> VersionRange {
     let mut iv: List<Interval> = List.new();
     iv.push(Interval { lo: Bound.Included(v), hi: Bound.Unbounded });
-    Range { intervals: iv }
+    VersionRange { intervals: iv }
 }
 
-public fn range_strictly_higher(v: SemVer) -> Range {
+public fn range_strictly_higher(v: SemVer) -> VersionRange {
     let mut iv: List<Interval> = List.new();
     iv.push(Interval { lo: Bound.Excluded(v), hi: Bound.Unbounded });
-    Range { intervals: iv }
+    VersionRange { intervals: iv }
 }
 
-public fn range_lower_than(v: SemVer) -> Range {
+public fn range_lower_than(v: SemVer) -> VersionRange {
     let mut iv: List<Interval> = List.new();
     iv.push(Interval { lo: Bound.Unbounded, hi: Bound.Excluded(v) });
-    Range { intervals: iv }
+    VersionRange { intervals: iv }
 }
 
-public fn range_at_most(v: SemVer) -> Range {
+public fn range_at_most(v: SemVer) -> VersionRange {
     let mut iv: List<Interval> = List.new();
     iv.push(Interval { lo: Bound.Unbounded, hi: Bound.Included(v) });
-    Range { intervals: iv }
+    VersionRange { intervals: iv }
 }
 
-public fn range_between(lo: SemVer, hi: SemVer) -> Range {
+public fn range_between(lo: SemVer, hi: SemVer) -> VersionRange {
     let mut iv: List<Interval> = List.new();
     iv.push(Interval { lo: Bound.Included(lo), hi: Bound.Excluded(hi) });
-    Range { intervals: iv }
+    VersionRange { intervals: iv }
 }
 
-/// Build a `Range` from an existing `SemVerConstraint`. Supports the
+/// Build a `VersionRange` from an existing `SemVerConstraint`. Supports the
 /// full Cargo+npm constraint algebra (caret, tilde, exact, AND, OR).
-public fn range_from_constraint(c: &SemVerConstraint) -> Range {
+public fn range_from_constraint(c: &SemVerConstraint) -> VersionRange {
     constraint_to_range(c)
 }
 
-// ----- Range predicates -----
+// ----- VersionRange predicates -----
 
 fn bound_to_text(b: &Bound) -> Text {
     match b {
@@ -190,7 +190,7 @@ fn bound_to_text(b: &Bound) -> Text {
     }
 }
 
-public fn range_to_text(r: &Range) -> Text {
+public fn range_to_text(r: &VersionRange) -> Text {
     let mut out: Text = "".to_text();
     let mut i: Int = 0;
     while i < r.intervals.len() {
@@ -202,15 +202,15 @@ public fn range_to_text(r: &Range) -> Text {
     out
 }
 
-public fn range_is_empty(r: &Range) -> Bool { r.intervals.len() == 0 }
+public fn range_is_empty(r: &VersionRange) -> Bool { r.intervals.len() == 0 }
 
-public fn range_is_full(r: &Range) -> Bool {
+public fn range_is_full(r: &VersionRange) -> Bool {
     if r.intervals.len() != 1 { return false; }
     let iv = &r.intervals[0];
     iv.lo is Bound.Unbounded && iv.hi is Bound.Unbounded
 }
 
-public fn range_contains(r: &Range, v: &SemVer) -> Bool {
+public fn range_contains(r: &VersionRange, v: &SemVer) -> Bool {
     let mut i: Int = 0;
     while i < r.intervals.len() {
         if interval_contains(&r.intervals[i], v) { return true; }
@@ -245,9 +245,9 @@ fn interval_contains(iv: &Interval, v: &SemVer) -> Bool {
     lo_ok && hi_ok
 }
 
-// ----- Range set operations -----
+// ----- VersionRange set operations -----
 
-public fn range_intersect(a: &Range, b: &Range) -> Range {
+public fn range_intersect(a: &VersionRange, b: &VersionRange) -> VersionRange {
     let mut out: List<Interval> = List.new();
     let mut i: Int = 0;
     while i < a.intervals.len() {
@@ -261,19 +261,19 @@ public fn range_intersect(a: &Range, b: &Range) -> Range {
         }
         i = i + 1;
     }
-    Range { intervals: canonicalise(out) }
+    VersionRange { intervals: canonicalise(out) }
 }
 
-public fn range_union(a: &Range, b: &Range) -> Range {
+public fn range_union(a: &VersionRange, b: &VersionRange) -> VersionRange {
     let mut all: List<Interval> = List.new();
     let mut i: Int = 0;
     while i < a.intervals.len() { all.push(a.intervals[i].clone()); i = i + 1; }
     let mut j: Int = 0;
     while j < b.intervals.len() { all.push(b.intervals[j].clone()); j = j + 1; }
-    Range { intervals: canonicalise(all) }
+    VersionRange { intervals: canonicalise(all) }
 }
 
-public fn range_complement(r: &Range) -> Range {
+public fn range_complement(r: &VersionRange) -> VersionRange {
     if range_is_empty(r) { return range_full(); }
     let mut out: List<Interval> = List.new();
     let mut prev_hi: Bound = Bound.Unbounded;
@@ -298,14 +298,14 @@ public fn range_complement(r: &Range) -> Range {
         Bound.Unbounded => {} // nothing left
         _ => out.push(Interval { lo: prev_hi, hi: Bound.Unbounded }),
     }
-    Range { intervals: canonicalise(out) }
+    VersionRange { intervals: canonicalise(out) }
 }
 
-public fn range_subtract(a: &Range, b: &Range) -> Range {
+public fn range_subtract(a: &VersionRange, b: &VersionRange) -> VersionRange {
     range_intersect(a, &range_complement(b))
 }
 
-// ----- Range helpers -----
+// ----- VersionRange helpers -----
 
 fn interval_intersect(a: &Interval, b: &Interval) -> Maybe<Interval> {
     let lo = bound_lo_max(&a.lo, &b.lo);
@@ -496,12 +496,12 @@ fn bound_hi_max(a: &Bound, b: &Bound) -> Bound {
     }
 }
 
-fn constraint_to_range(c: &SemVerConstraint) -> Range {
+fn constraint_to_range(c: &SemVerConstraint) -> VersionRange {
     // SemVerConstraint is a generic constraint AST.  We convert by
     // sampling its semantics: anything that `matches` accepts is in
     // the range. For known tags we lower directly; for AND/OR we
     // recurse. Since the parser produces a stable AST per
-    // semver_constraint.vr, callers can also build Range directly via
+    // semver_constraint.vr, callers can also build VersionRange directly via
     // the constructors above.
     match c.classify() {
         ConstraintShape.Exact(v)            => range_exact(v),
@@ -511,14 +511,14 @@ fn constraint_to_range(c: &SemVerConstraint) -> Range {
         ConstraintShape.AtLeast(v)          => range_higher_than(v),
         ConstraintShape.LessThan(v)         => range_lower_than(v),
         ConstraintShape.AtMost(v)           => range_at_most(v),
-        ConstraintShape.Range(lo, hi)       => range_between(lo, hi),
+        ConstraintShape.VersionRange(lo, hi)       => range_between(lo, hi),
         ConstraintShape.And(a, b)           => range_intersect(&constraint_to_range(&a), &constraint_to_range(&b)),
         ConstraintShape.Or(a, b)            => range_union(&constraint_to_range(&a), &constraint_to_range(&b)),
         ConstraintShape.Wildcard            => range_full(),
     }
 }
 
-fn caret_range(v: SemVer) -> Range {
+fn caret_range(v: SemVer) -> VersionRange {
     // ^1.2.3 = >=1.2.3 <2.0.0  (compatibility within major)
     // ^0.2.3 = >=0.2.3 <0.3.0
     // ^0.0.3 = >=0.0.3 <0.0.4
@@ -532,7 +532,7 @@ fn caret_range(v: SemVer) -> Range {
     range_between(v, upper)
 }
 
-fn tilde_range(v: SemVer) -> Range {
+fn tilde_range(v: SemVer) -> VersionRange {
     // ~1.2.3 = >=1.2.3 <1.3.0
     let upper = SemVer {
         major: v.major,
@@ -554,17 +554,17 @@ fn tilde_range(v: SemVer) -> Range {
 @derive(Eq, Clone, Debug)
 public type Term is {
     package:  PackageName,
-    range:    Range,
+    range:    VersionRange,
     /// `Positive`: the selected version must be IN range.
     /// `Negative`: the selected version must be OUT OF range.
     positive: Bool,
 };
 
-public fn term_positive(pkg: PackageName, r: Range) -> Term {
+public fn term_positive(pkg: PackageName, r: VersionRange) -> Term {
     Term { package: pkg, range: r, positive: true }
 }
 
-public fn term_negative(pkg: PackageName, r: Range) -> Term {
+public fn term_negative(pkg: PackageName, r: VersionRange) -> Term {
     Term { package: pkg, range: r, positive: false }
 }
 
@@ -584,7 +584,7 @@ pub fn term_satisfies(a: &Term, b: &Term) -> Bool {
     range_is_subset(&a_set, &b_set)
 }
 
-fn range_is_subset(a: &Range, b: &Range) -> Bool {
+fn range_is_subset(a: &VersionRange, b: &VersionRange) -> Bool {
     range_is_empty(&range_subtract(a, b))
 }
 
@@ -598,7 +598,7 @@ pub fn term_intersect(a: &Term, b: &Term) -> Maybe<Term> {
 }
 
 /// Convert the term to a "covered set" view (the set of allowed versions).
-pub fn term_allowed(t: &Term) -> Range {
+pub fn term_allowed(t: &Term) -> VersionRange {
     if t.positive { t.range.clone() } else { range_complement(&t.range) }
 }
 
@@ -769,7 +769,7 @@ public fn partial_solution_has_decision(sol: &PartialSolution, pkg: &PackageName
 
 public type Dependency is {
     package:    PackageName,
-    constraint: Range,
+    constraint: VersionRange,
 };
 
 public type Dependencies is
@@ -816,7 +816,7 @@ public type DependencyProvider is protocol {
     /// Optional package preference: which package should the resolver
     /// try to satisfy first when multiple are eligible?  Default:
     /// fewer versions ⇒ higher priority (smaller search subtree).
-    fn priority(&self, package: &PackageName, range: &Range) -> Int { 0 }
+    fn priority(&self, package: &PackageName, range: &VersionRange) -> Int { 0 }
 
     /// Optional version preference: given a sorted (descending) list
     /// of allowed versions, pick one to try. Default: highest.
