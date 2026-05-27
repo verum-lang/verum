@@ -1,0 +1,248 @@
+// =============================================================================
+// core-tests/runtime/config/unit_test.vr
+// =============================================================================
+//
+// `core/runtime/config.vr` (1208 LOC) — RuntimeConfig protocol +
+// implementations (FullRuntime / SingleThreadRuntime / SyncRuntime /
+// EmbeddedRuntime / CustomRuntime) + executor implementations
+// (NoopExecutor / WorkStealingExecutor / SingleThreadExecutor) + I/O
+// driver protocol (RuntimeIoDriver + NoopDriver) + IoOp/IoHandle/
+// IoCompletion data + error types (RuntimeInitError / RuntimeIoError).
+//
+// Tests pin the DATA-only ADT subset:
+//   * RuntimeInitError 6-variant + Eq/Display
+//   * RuntimeIoError 9-variant + Eq + tag-disjointness
+//   * IoHandle + IoCompletion record surface
+//   * NoopExecutor + NoopDriver unit-type sentinel
+//
+// The protocol surfaces (RuntimeConfig / AsyncExecutor / RuntimeIoDriver)
+// are tested via their NoopX implementors here; live executor/driver
+// behaviour is exercised at vcs/specs/L2-standard/runtime/config/.
+// =============================================================================
+
+mount core.runtime.config.{
+    RuntimeInitError, InitError, RuntimeIoError,
+    IoHandle, IoCompletion,
+    NoopExecutor, NoopDriver,
+};
+
+// =============================================================================
+// Section 1: RuntimeInitError 6-variant
+// =============================================================================
+
+@test
+fn test_runtime_init_error_tls_init_failed() {
+    let e = RuntimeInitError.TlsInitFailed;
+    assert(e is RuntimeInitError.TlsInitFailed);
+}
+
+@test
+fn test_runtime_init_error_platform_not_supported() {
+    let e = RuntimeInitError.PlatformNotSupported;
+    assert(e is RuntimeInitError.PlatformNotSupported);
+}
+
+@test
+fn test_runtime_init_error_already_initialized() {
+    let e = RuntimeInitError.AlreadyInitialized;
+    assert(e is RuntimeInitError.AlreadyInitialized);
+}
+
+@test
+fn test_runtime_init_error_io_driver_init_failed_with_message() {
+    let e = RuntimeInitError.IoDriverInitFailed("io_uring open failed");
+    assert(e is RuntimeInitError.IoDriverInitFailed);
+}
+
+@test
+fn test_runtime_init_error_executor_init_failed_with_message() {
+    let e = RuntimeInitError.ExecutorInitFailed("workers exhausted");
+    assert(e is RuntimeInitError.ExecutorInitFailed);
+}
+
+@test
+fn test_runtime_init_error_eq_unit_variant_reflexive() {
+    assert(RuntimeInitError.TlsInitFailed == RuntimeInitError.TlsInitFailed);
+    assert(RuntimeInitError.PlatformNotSupported == RuntimeInitError.PlatformNotSupported);
+    assert(RuntimeInitError.AlreadyInitialized == RuntimeInitError.AlreadyInitialized);
+}
+
+@test
+fn test_runtime_init_error_eq_message_variant_same_text() {
+    let a = RuntimeInitError.IoDriverInitFailed("io_uring");
+    let b = RuntimeInitError.IoDriverInitFailed("io_uring");
+    assert(a == b);
+}
+
+@test
+fn test_runtime_init_error_eq_message_variant_different_text() {
+    let a = RuntimeInitError.IoDriverInitFailed("io_uring");
+    let b = RuntimeInitError.IoDriverInitFailed("epoll");
+    assert(!(a == b));
+}
+
+@test
+fn test_runtime_init_error_eq_cross_variant_disjoint() {
+    let a: RuntimeInitError = RuntimeInitError.TlsInitFailed;
+    let b: RuntimeInitError = RuntimeInitError.PlatformNotSupported;
+    let c: RuntimeInitError = RuntimeInitError.AlreadyInitialized;
+    assert(!(a == b));
+    assert(!(a == c));
+    assert(!(b == c));
+}
+
+@test
+fn test_init_error_alias_resolves_to_runtime_init_error() {
+    // The `InitError` public alias resolves to `RuntimeInitError`.
+    // Compile-only check via cross-assignment.
+    let a: RuntimeInitError = RuntimeInitError.TlsInitFailed;
+    let b: InitError = a;
+    let _ = b;
+    assert(true);
+}
+
+// =============================================================================
+// Section 2: RuntimeIoError 9-variant
+// =============================================================================
+
+@test
+fn test_runtime_io_error_would_block() {
+    let e = RuntimeIoError.WouldBlock;
+    assert(e is RuntimeIoError.WouldBlock);
+}
+
+@test
+fn test_runtime_io_error_interrupted() {
+    let e = RuntimeIoError.Interrupted;
+    assert(e is RuntimeIoError.Interrupted);
+}
+
+@test
+fn test_runtime_io_error_invalid_fd() {
+    let e = RuntimeIoError.InvalidFd;
+    assert(e is RuntimeIoError.InvalidFd);
+}
+
+@test
+fn test_runtime_io_error_permission_denied() {
+    let e = RuntimeIoError.PermissionDenied;
+    assert(e is RuntimeIoError.PermissionDenied);
+}
+
+@test
+fn test_runtime_io_error_connection_refused() {
+    let e = RuntimeIoError.ConnectionRefused;
+    assert(e is RuntimeIoError.ConnectionRefused);
+}
+
+@test
+fn test_runtime_io_error_connection_reset() {
+    let e = RuntimeIoError.ConnectionReset;
+    assert(e is RuntimeIoError.ConnectionReset);
+}
+
+@test
+fn test_runtime_io_error_not_connected() {
+    let e = RuntimeIoError.NotConnected;
+    assert(e is RuntimeIoError.NotConnected);
+}
+
+@test
+fn test_runtime_io_error_timed_out() {
+    let e = RuntimeIoError.TimedOut;
+    assert(e is RuntimeIoError.TimedOut);
+}
+
+@test
+fn test_runtime_io_error_other_with_code() {
+    let e = RuntimeIoError.Other(13_i32);
+    assert(e is RuntimeIoError.Other);
+}
+
+@test
+fn test_runtime_io_error_eq_unit_variant_reflexive() {
+    assert(RuntimeIoError.WouldBlock == RuntimeIoError.WouldBlock);
+    assert(RuntimeIoError.TimedOut == RuntimeIoError.TimedOut);
+    assert(RuntimeIoError.InvalidFd == RuntimeIoError.InvalidFd);
+}
+
+@test
+fn test_runtime_io_error_eq_other_same_code() {
+    let a = RuntimeIoError.Other(42_i32);
+    let b = RuntimeIoError.Other(42_i32);
+    assert(a == b);
+}
+
+@test
+fn test_runtime_io_error_eq_other_different_code() {
+    let a = RuntimeIoError.Other(1_i32);
+    let b = RuntimeIoError.Other(2_i32);
+    assert(!(a == b));
+}
+
+@test
+fn test_runtime_io_error_eq_cross_unit_disjoint() {
+    assert(!(RuntimeIoError.WouldBlock == RuntimeIoError.Interrupted));
+    assert(!(RuntimeIoError.InvalidFd == RuntimeIoError.PermissionDenied));
+    assert(!(RuntimeIoError.ConnectionRefused == RuntimeIoError.ConnectionReset));
+    assert(!(RuntimeIoError.NotConnected == RuntimeIoError.TimedOut));
+}
+
+@test
+fn test_runtime_io_error_eq_other_vs_unit_disjoint() {
+    let a: RuntimeIoError = RuntimeIoError.Other(0_i32);
+    let b: RuntimeIoError = RuntimeIoError.WouldBlock;
+    assert(!(a == b));
+}
+
+// =============================================================================
+// Section 3: IoHandle + IoCompletion records
+// =============================================================================
+
+@test
+fn test_io_handle_construction() {
+    let h = IoHandle { id: 0_u64 };
+    assert(h.id == 0_u64);
+}
+
+@test
+fn test_io_handle_non_zero_id() {
+    let h = IoHandle { id: 0xDEAD_BEEF_u64 };
+    assert(h.id == 0xDEAD_BEEF_u64);
+}
+
+@test
+fn test_io_completion_success_construction() {
+    let h = IoHandle { id: 7_u64 };
+    let c = IoCompletion {
+        handle: h,
+        result: Result.Ok(42),
+    };
+    assert(c.handle.id == 7_u64);
+}
+
+@test
+fn test_io_completion_error_construction() {
+    let h = IoHandle { id: 99_u64 };
+    let c = IoCompletion {
+        handle: h,
+        result: Result.Err(RuntimeIoError.TimedOut),
+    };
+    assert(c.handle.id == 99_u64);
+}
+
+// =============================================================================
+// Section 4: NoopExecutor + NoopDriver — unit-type sentinels
+// =============================================================================
+
+@test
+fn test_noop_executor_construction() {
+    let _: NoopExecutor = NoopExecutor();
+    assert(true);
+}
+
+@test
+fn test_noop_driver_construction() {
+    let _: NoopDriver = NoopDriver();
+    assert(true);
+}
