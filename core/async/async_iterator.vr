@@ -105,7 +105,7 @@ public type AsyncIterator is protocol {
     /// `(lower_bound, optional_upper_bound)`. Implementors MAY override
     /// for better pre-allocation; default returns `(0, None)`.
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (0, None)
+        (0, Maybe.None)
     }
 }
 

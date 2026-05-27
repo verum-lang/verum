@@ -187,9 +187,9 @@ fn empty_cache_control() -> CacheControl {
         no_cache: false, no_store: false, no_transform: false,
         public_: false, private_: false, immutable: false,
         must_revalidate: false, proxy_revalidate: false, must_understand: false,
-        max_age: None, s_maxage: None,
-        stale_while_revalidate: None, stale_if_error: None,
-        max_stale: None, min_fresh: None, only_if_cached: false,
+        max_age: Maybe.None, s_maxage: Maybe.None,
+        stale_while_revalidate: Maybe.None, stale_if_error: Maybe.None,
+        max_stale: Maybe.None, min_fresh: Maybe.None, only_if_cached: false,
     }
 }
 
@@ -250,17 +250,17 @@ public fn freshness_lifetime_sec(
     shared_cache:  Bool,
 ) -> Maybe<UInt64> {
     if shared_cache {
-        match &resp_cc.s_maxage { Some(n) => return Some(*n), None => {} }
+        match &resp_cc.s_maxage { Maybe.Some(n) => return Maybe.Some(*n), Maybe.None => {} }
     }
-    match &resp_cc.max_age { Some(n) => return Some(*n), None => {} }
+    match &resp_cc.max_age { Maybe.Some(n) => return Maybe.Some(*n), Maybe.None => {} }
     match expires_unix {
-        Some(exp) => {
-            if exp > date_unix { return Some(exp - date_unix); }
-            return Some(0_u64);
+        Maybe.Some(exp) => {
+            if exp > date_unix { return Maybe.Some(exp - date_unix); }
+            return Maybe.Some(0_u64);
         },
-        None => {},
+        Maybe.None => {},
     }
-    None
+    Maybe.None
 }
 
 // =============================================================================
@@ -293,8 +293,8 @@ public fn decide(di: &DecisionInputs) -> CacheDecision {
     // immutable never-revalidate optimisation (RFC 8246).
     if di.resp_cc.immutable {
         match &di.resp_cc.max_age {
-            Some(n) => return CacheDecision.Fresh(*n),
-            None    => {},
+            Maybe.Some(n) => return CacheDecision.Fresh(*n),
+            Maybe.None    => {},
         }
     }
 
@@ -302,7 +302,7 @@ public fn decide(di: &DecisionInputs) -> CacheDecision {
         &di.resp_cc, di.expires_unix, di.age.date_header_unix, di.shared_cache,
     );
     match lifetime {
-        Some(limit) => {
+        Maybe.Some(limit) => {
             let age = current_age(&di.age);
             if age < limit {
                 return CacheDecision.Fresh(limit - age);
@@ -310,21 +310,21 @@ public fn decide(di: &DecisionInputs) -> CacheDecision {
             // Stale — consider grace-period directives.
             if di.upstream_error {
                 match &di.resp_cc.stale_if_error {
-                    Some(grace) => {
+                    Maybe.Some(grace) => {
                         if age < limit + *grace {
                             return CacheDecision.StaleServable(limit + *grace - age);
                         }
                     },
-                    None => {},
+                    Maybe.None => {},
                 }
             }
             match &di.resp_cc.stale_while_revalidate {
-                Some(grace) => {
+                Maybe.Some(grace) => {
                     if age < limit + *grace {
                         return CacheDecision.StaleServable(limit + *grace - age);
                     }
                 },
-                None => {},
+                Maybe.None => {},
             }
             if di.resp_cc.must_revalidate
                 || (di.shared_cache && di.resp_cc.proxy_revalidate)
@@ -333,7 +333,7 @@ public fn decide(di: &DecisionInputs) -> CacheDecision {
             }
             CacheDecision.MustRevalidate
         },
-        None => {
+        Maybe.None => {
             // No explicit lifetime — caller applies heuristic freshness
             // (§4.2.2) externally; we conservatively say revalidate.
             CacheDecision.MustRevalidate
@@ -414,20 +414,20 @@ fn trim_quotes(src: List<Byte>) -> List<Byte> {
 }
 
 fn parse_u64_opt(src: &List<Byte>) -> Maybe<UInt64> {
-    if src.len() == 0 { return None; }
+    if src.len() == 0 { return Maybe.None; }
     // Cache-Control directive values arrive over the wire — apply
     // 3-layer overflow defense (UInt64.MAX is 20 decimal digits).
-    if src.len() > 20 { return None; }
+    if src.len() > 20 { return Maybe.None; }
     let mut v: UInt64 = 0_u64;
     let mut i: Int = 0;
     while i < src.len() {
         let c = src[i];
-        if c < ('0' as Byte) || c > ('9' as Byte) { return None; }
-        if v > 1_844_674_407_370_955_161_u64 { return None; }    // UInt64.MAX / 10
+        if c < ('0' as Byte) || c > ('9' as Byte) { return Maybe.None; }
+        if v > 1_844_674_407_370_955_161_u64 { return Maybe.None; }    // UInt64.MAX / 10
         let next = v * 10_u64 + ((c - ('0' as Byte)) as UInt64);
-        if next < v { return None; }
+        if next < v { return Maybe.None; }
         v = next;
         i = i + 1;
     }
-    Some(v)
+    Maybe.Some(v)
 }

@@ -295,12 +295,12 @@ implement HttpParser {
             state: State.StartLine,
             pos: 0,
             headers: List.with_capacity(16),
-            method: None,
+            method: Maybe.None,
             path_start: 0, path_len: 0,
             version: Version.Http11,
-            status: None,
+            status: Maybe.None,
             reason_start: 0, reason_len: 0,
-            content_length: None,
+            content_length: Maybe.None,
             chunked: false,
             headers_bytes_total: 0,
         }
@@ -313,12 +313,12 @@ implement HttpParser {
             state: State.StartLine,
             pos: 0,
             headers: List.with_capacity(16),
-            method: None,
+            method: Maybe.None,
             path_start: 0, path_len: 0,
             version: Version.Http11,
-            status: None,
+            status: Maybe.None,
             reason_start: 0, reason_len: 0,
-            content_length: None,
+            content_length: Maybe.None,
             chunked: false,
             headers_bytes_total: 0,
         }
@@ -416,8 +416,8 @@ implement HttpParser {
         // Locate CRLF — bounded by MAX_REQUEST_LINE.
         let scan_end = if buf.len() < MAX_REQUEST_LINE { buf.len() } else { MAX_REQUEST_LINE };
         let lf_pos = match find_byte(&buf[..scan_end], LF) {
-            Some(i) => i,
-            None => {
+            Maybe.Some(i) => i,
+            Maybe.None => {
                 if buf.len() >= MAX_REQUEST_LINE {
                     return Err(HttpParseError.RequestLineTooLong { limit: MAX_REQUEST_LINE });
                 }
@@ -447,7 +447,7 @@ implement HttpParser {
         let path_slice = &rest[..sp2];
         let version_slice = &rest[sp2 + 1..];
 
-        self.method = Some(parse_method(method_slice)?);
+        self.method = Maybe.Some(parse_method(method_slice)?);
         // Path is a view relative to the overall input buffer — caller
         // passes `buf` starting at offset 0. self.path_start/len are
         // offsets in the buffer where the parser was fed.
@@ -469,7 +469,7 @@ implement HttpParser {
 
         self.version = parse_version(version_slice)?;
         let code = parse_status_code(code_slice)?;
-        self.status = Some(code);
+        self.status = Maybe.Some(code);
         let reason_off_in_line = sp1 + 1 + sp2 + 1;
         self.reason_start = self.pos + reason_off_in_line;
         self.reason_len = reason_slice.len();
@@ -502,8 +502,8 @@ implement HttpParser {
         // Locate CRLF bounded by MAX_HEADER_LINE.
         let scan_end = if buf.len() < MAX_HEADER_LINE { buf.len() } else { MAX_HEADER_LINE };
         let lf_pos = match find_byte(&buf[..scan_end], LF) {
-            Some(i) => i,
-            None => {
+            Maybe.Some(i) => i,
+            Maybe.None => {
                 if buf.len() >= MAX_HEADER_LINE {
                     return Err(HttpParseError.HeaderTooLong { limit: MAX_HEADER_LINE });
                 }
@@ -562,7 +562,7 @@ implement HttpParser {
     /// both → protocol error.
     fn resolve_body_framing(&mut self, buf: &[Byte]) -> Result<(), HttpParseError> {
         let mut saw_te_chunked = false;
-        let mut content_length: Maybe<Int> = None;
+        let mut content_length: Maybe<Int> = Maybe.None;
 
         for hv in self.headers.iter() {
             let key = hv.key(buf);
@@ -591,8 +591,8 @@ implement HttpParser {
                     });
                 }
                 match content_length {
-                    Some(prev) if prev != n_int => return Err(HttpParseError.ConflictingContentLength),
-                    _ => content_length = Some(n_int),
+                    Maybe.Some(prev) if prev != n_int => return Err(HttpParseError.ConflictingContentLength),
+                    _ => content_length = Maybe.Some(n_int),
                 }
             }
         }
@@ -601,7 +601,7 @@ implement HttpParser {
         // (RFC 7230 §3.3.3 rule 3).
         if saw_te_chunked {
             self.chunked = true;
-            self.content_length = None;
+            self.content_length = Maybe.None;
         } else {
             self.content_length = content_length;
         }
@@ -711,20 +711,20 @@ fn parse_status_code(bytes: &[Byte]) -> Result<StatusCode, HttpParseError> {
 
 @inline
 fn parse_decimal_u32(bytes: &[Byte]) -> Maybe<UInt32> {
-    if bytes.is_empty() { return None; }
+    if bytes.is_empty() { return Maybe.None; }
     let mut n: UInt32 = 0;
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
-        if b < 0x30 || b > 0x39 { return None; }
+        if b < 0x30 || b > 0x39 { return Maybe.None; }
         // Overflow check against UInt32 max.
         let digit = (b - 0x30) as UInt32;
         let max_div10: UInt32 = 429496729;    // (u32.MAX - 9) / 10
-        if n > max_div10 { return None; }
+        if n > max_div10 { return Maybe.None; }
         n = n * 10 + digit;
         i = i + 1;
     }
-    Some(n)
+    Maybe.Some(n)
 }
 
 /// ASCII case-insensitive equality. HTTP header names are
