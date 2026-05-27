@@ -184,32 +184,32 @@ public fn assert_ne<T: Eq + Debug>(left: T, right: T, msg: Text = "assertion fai
 /// Assert that a value is Some.
 public fn assert_some<T>(value: Maybe<T>, msg: Text = "assertion failed: expected Some") -> T {
     match value {
-        Some(v) => v,
-        None => panic(msg),
+        Maybe.Some(v) => v,
+        Maybe.None => panic(msg),
     }
 }
 
 /// Assert that a value is None.
 public fn assert_none<T>(value: Maybe<T>, msg: Text = "assertion failed: expected None") {
     match value {
-        Some(_) => panic(msg),
-        None => {},
+        Maybe.Some(_) => panic(msg),
+        Maybe.None => {},
     }
 }
 
 /// Assert that a Result is Ok.
 public fn assert_ok<T, E: Debug>(result: Result<T, E>, msg: Text = "assertion failed: expected Ok") -> T {
     match result {
-        Ok(v) => v,
-        Err(_) => panic(msg),
+        Result.Ok(v) => v,
+        Result.Err(_) => panic(msg),
     }
 }
 
 /// Assert that a Result is Err.
 public fn assert_err<T: Debug, E>(result: Result<T, E>, msg: Text = "assertion failed: expected Err") -> E {
     match result {
-        Ok(_) => panic(msg),
-        Err(e) => e,
+        Result.Ok(_) => panic(msg),
+        Result.Err(e) => e,
     }
 }
 
@@ -275,8 +275,8 @@ public fn assert_contains<T: Eq>(list: &List<T>, needle: &T, msg: Text = "assert
 /// `f` are captured; normal returns fail the assertion.
 public fn assert_panics(f: fn() -> Unit, msg: Text = "assertion failed: expected panic, function returned normally") {
     match catch_unwind(f) {
-        Ok(_) => panic(msg),
-        Err(_) => {},
+        Result.Ok(_) => panic(msg),
+        Result.Err(_) => {},
     }
 }
 
@@ -434,7 +434,7 @@ implement Debug for PanicInfo {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str("PanicInfo { message: ")?;
         f.write_str(&self.message)?;
-        if let Some(loc) = self.location.as_ref() {
+        if let Maybe.Some(loc) = self.location.as_ref() {
             f.write_str(", at ")?;
             loc.fmt_debug(f)?;
         }
@@ -454,7 +454,7 @@ public fn default_panic_hook(info: &PanicInfo) {
     debug_print(&"panic: ");
     debug_print(&info.message);
     match info.location() {
-        Some(loc) => {
+        Maybe.Some(loc) => {
             debug_print(&" at ");
             debug_print(&loc.file);
             debug_print(&":");
@@ -464,7 +464,7 @@ public fn default_panic_hook(info: &PanicInfo) {
             let column_str = f"{loc.column}";
             debug_print(&column_str);
         }
-        None => {}
+        Maybe.None => {}
     }
     debug_print(&"\n");
 }

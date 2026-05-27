@@ -240,65 +240,65 @@ implement Data {
     /// Extract boolean value, returns None if not a Bool
     fn as_bool(&self) -> Maybe<Bool> {
         match self {
-            Data.Bool(b) => Some(*b),
-            _ => None,
+            Data.Bool(b) => Maybe.Some(*b),
+            _ => Maybe.None,
         }
     }
 
     /// Extract integer value, returns None if not an Int
     fn as_int(&self) -> Maybe<Int> {
         match self {
-            Data.Int(i) => Some(*i),
-            _ => None,
+            Data.Int(i) => Maybe.Some(*i),
+            _ => Maybe.None,
         }
     }
 
     /// Extract float value, returns None if not a Float
     fn as_float(&self) -> Maybe<Float> {
         match self {
-            Data.Float(f) => Some(*f),
-            Data.Int(i) => Some(*i as Float),  // Int coerces to Float
-            _ => None,
+            Data.Float(f) => Maybe.Some(*f),
+            Data.Int(i) => Maybe.Some(*i as Float),  // Int coerces to Float
+            _ => Maybe.None,
         }
     }
 
     /// Extract text value, returns None if not Text
     fn as_text(&self) -> Maybe<Text> {
         match self {
-            Data.Text(ref s) => Some(s.clone()),
-            _ => None,
+            Data.Text(ref s) => Maybe.Some(s.clone()),
+            _ => Maybe.None,
         }
     }
 
     /// Extract array reference, returns None if not Array
     fn as_array(&self) -> Maybe<&List<Data>> {
         match self {
-            Data.Array(ref arr) => Some(arr),
-            _ => None,
+            Data.Array(ref arr) => Maybe.Some(arr),
+            _ => Maybe.None,
         }
     }
 
     /// Extract mutable array reference
     fn as_array_mut(&mut self) -> Maybe<&mut List<Data>> {
         match self {
-            Data.Array(ref mut arr) => Some(arr),
-            _ => None,
+            Data.Array(ref mut arr) => Maybe.Some(arr),
+            _ => Maybe.None,
         }
     }
 
     /// Extract object reference, returns None if not Object
     fn as_object(&self) -> Maybe<&Map<Text, Data>> {
         match self {
-            Data.Object(ref obj) => Some(obj),
-            _ => None,
+            Data.Object(ref obj) => Maybe.Some(obj),
+            _ => Maybe.None,
         }
     }
 
     /// Extract mutable object reference
     fn as_object_mut(&mut self) -> Maybe<&mut Map<Text, Data>> {
         match self {
-            Data.Object(ref mut obj) => Some(obj),
-            _ => None,
+            Data.Object(ref mut obj) => Maybe.Some(obj),
+            _ => Maybe.None,
         }
     }
 
@@ -310,7 +310,7 @@ implement Data {
     fn get(&self, key: Text) -> Maybe<&Data> {
         match self {
             Data.Object(ref obj) => obj.get(&key),
-            _ => None,
+            _ => Maybe.None,
         }
     }
 
@@ -318,7 +318,7 @@ implement Data {
     fn get_mut(&mut self, key: Text) -> Maybe<&mut Data> {
         match self {
             Data.Object(ref mut obj) => obj.get_mut(&key),
-            _ => None,
+            _ => Maybe.None,
         }
     }
 
@@ -335,9 +335,9 @@ implement Data {
         match self {
             Data.Object(ref mut obj) => {
                 obj.insert(key, value);
-                Ok(())
+                Result.Ok(())
             }
-            _ => Err(DataError.TypeMismatch {
+            _ => Result.Err(DataError.TypeMismatch {
                 expected: "Object".to_text(),
                 actual: self.type_name(),
             }),
@@ -348,7 +348,7 @@ implement Data {
     fn remove(&mut self, key: Text) -> Maybe<Data> {
         match self {
             Data.Object(ref mut obj) => obj.remove(&key),
-            _ => None,
+            _ => Maybe.None,
         }
     }
 
@@ -361,12 +361,12 @@ implement Data {
         match self {
             Data.Array(ref arr) => {
                 if index >= 0 && (index as USize) < arr.len() {
-                    Some(&arr[index as USize])
+                    Maybe.Some(&arr[index as USize])
                 } else {
-                    None
+                    Maybe.None
                 }
             }
-            _ => None,
+            _ => Maybe.None,
         }
     }
 
@@ -375,12 +375,12 @@ implement Data {
         match self {
             Data.Array(ref mut arr) => {
                 if index >= 0 && (index as USize) < arr.len() {
-                    Some(&mut arr[index as USize])
+                    Maybe.Some(&mut arr[index as USize])
                 } else {
-                    None
+                    Maybe.None
                 }
             }
-            _ => None,
+            _ => Maybe.None,
         }
     }
 
@@ -389,9 +389,9 @@ implement Data {
         match self {
             Data.Array(ref mut arr) => {
                 arr.push(value);
-                Ok(())
+                Result.Ok(())
             }
-            _ => Err(DataError.TypeMismatch {
+            _ => Result.Err(DataError.TypeMismatch {
                 expected: "Array".to_text(),
                 actual: self.type_name(),
             }),
@@ -402,7 +402,7 @@ implement Data {
     fn pop(&mut self) -> Maybe<Data> {
         match self {
             Data.Array(ref mut arr) => arr.pop(),
-            _ => None,
+            _ => Maybe.None,
         }
     }
 
@@ -450,23 +450,23 @@ implement Data {
 
         for part in parts {
             match current.get(part) {
-                Some(next) => current = next,
-                None => {
+                Maybe.Some(next) => current = next,
+                Maybe.None => {
                     // Try array index
                     match part.parse_int() {
-                        Some(idx) => {
+                        Maybe.Some(idx) => {
                             match current.at(idx) {
-                                Some(next) => current = next,
-                                None => return None,
+                                Maybe.Some(next) => current = next,
+                                Maybe.None => return Maybe.None,
                             }
                         }
-                        None => return None,
+                        Maybe.None => return Maybe.None,
                     }
                 }
             }
         }
 
-        Some(current)
+        Maybe.Some(current)
     }
 
     // =========================================================================
@@ -537,10 +537,10 @@ implement Data {
     /// Try to convert to a specific numeric type
     fn to_number(&self) -> Maybe<Float> {
         match self {
-            Data.Int(i) => Some(*i as Float),
-            Data.Float(f) => Some(*f),
+            Data.Int(i) => Maybe.Some(*i as Float),
+            Data.Float(f) => Maybe.Some(*f),
             Data.Text(ref s) => s.parse_float().ok(),
-            _ => None,
+            _ => Maybe.None,
         }
     }
 

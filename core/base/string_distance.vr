@@ -106,9 +106,9 @@ public fn levenshtein(a: &[Byte], b: &[Byte]) -> Int {
 public fn levenshtein_bounded(a: &[Byte], b: &[Byte], max: Int) -> Maybe<Int> {
     let m = a.len();
     let n = b.len();
-    if abs_diff(m, n) > max { return None; }
-    if m == 0 { return if n <= max { Some(n) } else { None }; }
-    if n == 0 { return if m <= max { Some(m) } else { None }; }
+    if abs_diff(m, n) > max { return Maybe.None; }
+    if m == 0 { return if n <= max { Maybe.Some(n) } else { Maybe.None }; }
+    if n == 0 { return if m <= max { Maybe.Some(m) } else { Maybe.None }; }
 
     let (short, long_) = if m < n { (a, b) } else { (b, a) };
     let sl = short.len();
@@ -134,12 +134,12 @@ public fn levenshtein_bounded(a: &[Byte], b: &[Byte], max: Int) -> Maybe<Int> {
             if v < min_in_row { min_in_row = v; }
             c = c + 1;
         }
-        if min_in_row > max { return None; }
+        if min_in_row > max { return Maybe.None; }
         let mut k: Int = 0;
         while k <= sl { prev[k] = curr[k]; k = k + 1; }
         r = r + 1;
     }
-    if prev[sl] <= max { Some(prev[sl]) } else { None }
+    if prev[sl] <= max { Maybe.Some(prev[sl]) } else { Maybe.None }
 }
 
 // =============================================================================
@@ -240,12 +240,12 @@ public fn closest<'a>(
     let mut i: Int = 0;
     while i < candidates.len() {
         match levenshtein_bounded(query, candidates[i], max_distance) {
-            Some(d) => if d < best_d { best_idx = i; best_d = d; },
-            None    => {},
+            Maybe.Some(d) => if d < best_d { best_idx = i; best_d = d; },
+            Maybe.None    => {},
         }
         i = i + 1;
     }
-    if best_idx < 0 { None } else { Some((best_idx, best_d)) }
+    if best_idx < 0 { Maybe.None } else { Maybe.Some((best_idx, best_d)) }
 }
 
 // =============================================================================
@@ -291,20 +291,20 @@ public fn closest_text(query: &Text, candidates: &List<Text>, max_distance: Int 
     while i < candidates.len() {
         let cand_bytes = candidates[i].as_bytes();
         match levenshtein_bounded(q_bytes, cand_bytes, max_distance) {
-            Some(d) => {
+            Maybe.Some(d) => {
                 if d < best_d {
                     best_d = d;
                     best_idx = i;
                 }
             }
-            None => {}
+            Maybe.None => {}
         }
         i = i + 1;
     }
     if best_idx >= 0 {
-        Some(candidates[best_idx].clone())
+        Maybe.Some(candidates[best_idx].clone())
     } else {
-        None
+        Maybe.None
     }
 }
 
