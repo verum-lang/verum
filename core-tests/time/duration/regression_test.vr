@@ -121,4 +121,57 @@ fn regression_c_saturating_sub_still_floors_at_zero() {
         "saturating_sub floors at zero (timer-friendly convention)");
 }
 
+// =============================================================================
+// §D  Operator-method-dispatch shadow — CLOSED 2026-05-27 via VBC runtime fix
+// =============================================================================
+//
+// SURFACE (pre-fix): the runtime intercept for pointer-arithmetic methods
+// (`sub` / `byte_sub` / `add` / `byte_add` / `offset` in
+// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs:7252`)
+// fired indiscriminately on `receiver.is_ptr() && !is_nil()` — catching
+// heap-allocated records like Duration whose user-defined `Sub.sub` body
+// was silently bypassed.  The result was a garbage pointer value
+// masquerading as a Duration; `.nanos` reads of that value returned
+// NaN-boxed Float pattern.
+//
+// The pre-fix test `test_sub_operator_floors_at_zero` happened to pass
+// only because `.max(0)` clamped the garbage value to zero by accident
+// (the runtime path for `max(NaN, 0)` returns 0).  Removing the
+// `.max(0)` clamp under Option B exposed the underlying defect, which
+// surfaced as NaN-rendered output for `Duration - Duration`.
+//
+// RESOLUTION 2026-05-27 — `method_dispatch.rs` line 7249 extended with
+// a `is_cbgr_heap_object` guard: pointer arithmetic methods now skip
+// CBGR-allocated heap objects (Duration / Instant / SystemTime / any
+// user-defined record), letting the protocol dispatch resolve to the
+// user-defined `Sub.sub` / `Add.add` / `Offset.offset` body instead.
+//
+// Closes the operator-method-dispatch shadow defect class for ALL
+// heap-allocated records that define `sub` / `add` / `offset` methods
+// via Sub / Add / Offset protocol impls.
+
+@test
+fn regression_d_op_minus_dispatches_to_user_sub_not_ptr_arith() {
+    // The `-` operator on two Duration values MUST dispatch to the
+    // user-defined `Sub.sub` body, NOT the runtime's pointer-arithmetic
+    // intercept.  Pre-fix this returned a garbage pointer Value; post-fix
+    // it returns the signed Int difference.
+    let a = Duration.secs(1);
+    let b = Duration.secs(3);
+    let diff = a - b;
+    let n: Int = diff.nanos;
+    assert_eq(n, -2_000_000_000,
+        "Duration - Duration dispatches to user Sub.sub (not ptr arith)");
+}
+
+@test
+fn regression_d_dot_sub_dispatches_to_user_method() {
+    // Same defect class, exercised via explicit method call.
+    let a = Duration.secs(7);
+    let b = Duration.secs(2);
+    let diff = a.sub(b);
+    assert_eq(diff.as_secs(), 5,
+        "Duration.sub() method-call dispatches to user impl (not ptr arith)");
+}
+
 fn main() {}

@@ -104,13 +104,53 @@ move and is the surgical-minimal closure of this audit entry.
   the "floor at zero" timer-friendly convention by design.
 - Updated top-of-module + record-field docstring to reflect signed
   semantics + cross-reference to Go/Java/C++ Duration semantics.
+- Applied typed-local extraction pattern to `Add` / `Sub` / `Mul` / `Div`
+  operator impls (`let a_ns: Int = self.nanos; let res = a_ns OP b_ns`)
+  as defence-in-depth against codegen mis-routing through Float
+  arithmetic when Duration is treated as SizedNumeric.
 - 9 affected tests updated in `unit_test.vr` + 2 properties in
   `property_test.vr` + entire `regression_test.vr` flipped from
-  LOCK-IN-current-defect to LOCK-IN-Option-B-resolution (now §A/§B/§C
-  sections — 10 post-close pins).
+  LOCK-IN-current-defect to LOCK-IN-Option-B-resolution (now §A/§B/§C/§D
+  sections — 12 post-close pins).
 
 **Pinned by:** `regression_test.vr` §A (5 post-close pins) + §B
-(parser dependency preserved) + §C (signed-arithmetic operator pins).
+(parser dependency preserved) + §C (signed-arithmetic operator pins)
++ §D (operator-method-dispatch shadow regression pins).
+
+### §F — Operator-method-dispatch shadow surfaced 2026-05-27 — CLOSED via VBC runtime fix
+
+**Surface** (discovered during Option B refactor): `Duration - Duration`
+returned NaN-boxed garbage instead of signed Int.  Root cause:
+the runtime intercept for pointer-arithmetic methods (`sub` / `byte_sub`
+/ `add` / `byte_add` / `offset`) in
+`crates/verum_vbc/src/interpreter/dispatch_table/handlers/method_dispatch.rs:7252`
+fired indiscriminately on `receiver.is_ptr() && !is_nil()` — catching
+heap-allocated records like Duration before the protocol-method dispatch
+had a chance to resolve to the user's `Sub.sub` body.
+
+The pre-Option-B `.max(0)` clamp on the Sub impl body inadvertently
+masked the garbage Value as zero (because `max(NaN, 0) → 0` in the
+NaN-comparison semantics).  Removing the clamp exposed the latent
+shadow.
+
+**Resolution** — extended the pointer-arithmetic intercept with an
+`is_cbgr_heap_object` guard:
+
+```rust
+let header_addr = ptr_addr.wrapping_sub(32);
+let is_cbgr_heap_object = state.cbgr_allocations.contains(&header_addr);
+match method {
+    "sub" | "byte_sub" if !is_cbgr_heap_object => { /* ptr arith */ },
+    "add" | "byte_add" if !is_cbgr_heap_object => { /* ptr arith */ },
+    "offset"            if !is_cbgr_heap_object => { /* ptr arith */ },
+    ...
+}
+```
+
+Same root class applies to ANY heap-allocated record that defines a
+`sub` / `add` / `offset` method via Sub / Add / Offset protocols.
+
+**Pinned by:** `regression_test.vr` §D (2 dispatch-target pins).
 
 ### §B — duration_parse negative-input relies on §A intrinsic identity
 
