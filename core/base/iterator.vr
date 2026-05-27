@@ -3975,10 +3975,10 @@ implement<I: Iterator> I {
         f: F
     ) -> R {
         let mut acc = init;
-        while let Some(x) = self.next() {
+        while let Maybe.Some(x) = self.next() {
             match f(acc, x) {
-                Continue(new_acc) => acc = new_acc,
-                Reduced(final_acc) => return final_acc,
+                ReduceResult.Continue(new_acc) => acc = new_acc,
+                ReduceResult.Reduced(final_acc) => return final_acc,
             }
         }
         acc
@@ -4002,13 +4002,13 @@ implement<I: Iterator, B> Iterator for TransducedIter<I, B> {
     fn next(&mut self) -> Maybe<B> {
         // If we have buffered results, return from buffer
         if !self.buffer.is_empty() {
-            return Some(self.buffer.remove(0));
+            return Maybe.Some(self.buffer.remove(0));
         }
 
         // Create a reducer that collects to our buffer
         let collecting_reducer: Reducer<B, ()> = |(), x| {
             self.buffer.push(x);
-            Continue(())
+            ReduceResult.Continue(())
         };
 
         // Transform the reducer with our transducer
@@ -4017,20 +4017,20 @@ implement<I: Iterator, B> Iterator for TransducedIter<I, B> {
         // Pull from source until we have output or source exhausted
         while self.buffer.is_empty() {
             match self.source.next() {
-                Some(x) => {
+                Maybe.Some(x) => {
                     match transformed((), x) {
-                        Reduced(_) => break,  // Early termination
-                        Continue(_) => {}
+                        ReduceResult.Reduced(_) => break,  // Early termination
+                        ReduceResult.Continue(_) => {}
                     }
                 }
-                None => break,
+                Maybe.None => break,
             }
         }
 
         if !self.buffer.is_empty() {
-            Some(self.buffer.remove(0))
+            Maybe.Some(self.buffer.remove(0))
         } else {
-            None
+            Maybe.None
         }
     }
 }
@@ -4053,18 +4053,18 @@ implement<I: Iterator, B, S> Iterator for StatefulTransducedIter<I, B, S> {
 
     fn next(&mut self) -> Maybe<B> {
         if self.done {
-            return None;
+            return Maybe.None;
         }
 
         // If we have buffered results, return from buffer
         if !self.buffer.is_empty() {
-            return Some(self.buffer.remove(0));
+            return Maybe.Some(self.buffer.remove(0));
         }
 
         // Create a reducer that collects to our buffer
         let collecting_reducer: Reducer<B, ()> = |(), x| {
             self.buffer.push(x);
-            Continue(())
+            ReduceResult.Continue(())
         };
 
         // Transform with state
@@ -4073,16 +4073,16 @@ implement<I: Iterator, B, S> Iterator for StatefulTransducedIter<I, B, S> {
         // Pull from source until we have output or termination
         while self.buffer.is_empty() {
             match self.source.next() {
-                Some(x) => {
+                Maybe.Some(x) => {
                     match transformed((), x) {
-                        Reduced(_) => {
+                        ReduceResult.Reduced(_) => {
                             self.done = true;
                             break;
                         }
-                        Continue(_) => {}
+                        ReduceResult.Continue(_) => {}
                     }
                 }
-                None => {
+                Maybe.None => {
                     self.done = true;
                     break;
                 }
@@ -4090,9 +4090,9 @@ implement<I: Iterator, B, S> Iterator for StatefulTransducedIter<I, B, S> {
         }
 
         if !self.buffer.is_empty() {
-            Some(self.buffer.remove(0))
+            Maybe.Some(self.buffer.remove(0))
         } else {
-            None
+            Maybe.None
         }
     }
 }
