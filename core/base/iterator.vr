@@ -2683,8 +2683,16 @@ implement Iterator for Range<Int> {
         // can lose type-tracking on the method receiver, mis-resolving
         // field offsets for `inclusive` (field 2) when the codegen
         // doesn't propagate Range<Int> through `&mut self`. Loading
-        // them into typed locals first pins the type for the resolver
-        // and the elseif branch fires correctly.
+        // them into typed locals first pins the type for the resolver.
+        //
+        // KNOWN-DEFECT (pinned 2026-05-27, see
+        // [[range_iterator_chained_self_field_2026-05-27]]): the
+        // inclusive-boundary branch `cur == end_v && inc==true` never
+        // fires inside this method body even with the restructured
+        // `cur <= upper` single-comparison form. Multi-day VBC codegen
+        // defect — surface affected: `(1..=N).count()`, `(1..=N).sum()`,
+        // `(1..=N).collect()`, all yield N-1 instead of N for the
+        // inclusive form. Exclusive ranges (`0..N`) are unaffected.
         let cur: Int = self.current;
         let end_v: Int = self.end;
         let inc: Bool = self.inclusive;
@@ -2693,8 +2701,6 @@ implement Iterator for Range<Int> {
             Some(cur)
         } else if inc && cur == end_v {
             // Inclusive ranges yield the upper bound exactly once.
-            // Advancing past `end` ensures the next call sees
-            // `current > end`, falling through to None.
             self.current = cur + 1;
             Some(cur)
         } else {
