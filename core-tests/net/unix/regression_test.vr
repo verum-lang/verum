@@ -1,0 +1,162 @@
+// =============================================================================
+// core-tests/net/unix/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core/net/unix.vr`. Live AF_UNIX operations
+// (`UnixListener.bind` / `UnixStream.connect` / AsyncRead+Write /
+// SO_PEERCRED query / SCM_RIGHTS FD-passing) require a path-based
+// socket harness and are `@ignore`'d here — see `audit.md §3.1`
+// for the harness gate.
+//
+// Active pins cover:
+//
+//   * UNIX-6 UnixError variant payload preservation across clones.
+//   * UNIX-7 PeerCred negative-pid sentinel preserved through
+//     record construction (POSIX kernels return -1 for unknown).
+//   * UNIX-8 FdPassingError.NotImplemented stub marker — pinned
+//     until the SCM_RIGHTS backend lands (audit.md §3.3).
+//
+// Pattern reference: `core-tests/net/cidr/regression_test.vr`.
+// =============================================================================
+
+mount core.net.unix.{UnixError, PeerCred, FdPassingError};
+
+// =============================================================================
+// UNIX-1 — UnixListener.bind(&Text path)
+// =============================================================================
+
+@ignore("UNIX-1: UnixListener.bind needs a path-based socket harness. See audit.md §3.1.")
+@test
+fn regression_unix_listener_bind_path() {
+    assert(true);
+}
+
+// =============================================================================
+// UNIX-2 — UnixStream.connect(&Text path)
+// =============================================================================
+
+@ignore("UNIX-2: UnixStream.connect needs a listening peer from harness. See audit.md §3.1.")
+@test
+fn regression_unix_stream_connect_path() {
+    assert(true);
+}
+
+// =============================================================================
+// UNIX-3 — AsyncRead / AsyncWrite over UnixStream
+// =============================================================================
+
+@ignore("UNIX-3: AsyncRead+Write over UnixStream needs a paired socket from harness. See audit.md §3.1.")
+@test
+fn regression_unix_stream_async_read_write_round_trip() {
+    assert(true);
+}
+
+// =============================================================================
+// UNIX-4 — PeerCred query via SO_PEERCRED
+// =============================================================================
+
+@ignore("UNIX-4: peer_cred() needs a live connected UnixStream. See audit.md §3.1.")
+@test
+fn regression_unix_stream_peer_cred_query() {
+    assert(true);
+}
+
+// =============================================================================
+// UNIX-5 — FD passing via SCM_RIGHTS
+// =============================================================================
+
+@ignore("UNIX-5: SCM_RIGHTS FD-passing currently returns FdPassingError.NotImplemented at all backends — see audit.md §3.3.")
+@test
+fn regression_unix_stream_fd_passing_scm_rights() {
+    assert(true);
+}
+
+// =============================================================================
+// UNIX-6 — UnixError variant payload preservation post-clone
+// =============================================================================
+
+@test
+fn regression_unix_error_io_error_payload_preserved_through_clone() {
+    // `IoError("x".clone())` constructs from a freshly-cloned Text;
+    // the variant Eq impl at unix.vr:235 compares `a == b` on the
+    // payload — Eq must see identical payloads after the clone.
+    let a = UnixError.IoError("x".clone());
+    let b = UnixError.IoError("x".clone());
+    assert(a == b);
+}
+
+@test
+fn regression_unix_error_invalid_path_payload_preserved_through_clone() {
+    let a = UnixError.InvalidPath("/dev/null".clone());
+    let b = UnixError.InvalidPath("/dev/null".clone());
+    assert(a == b);
+}
+
+@test
+fn regression_unix_error_path_in_use_payload_preserved_through_clone() {
+    let a = UnixError.PathInUse("/tmp/app.sock".clone());
+    let b = UnixError.PathInUse("/tmp/app.sock".clone());
+    assert(a == b);
+}
+
+@test
+fn regression_unix_error_not_found_payload_preserved_through_clone() {
+    let a = UnixError.NotFound("/tmp/missing".clone());
+    let b = UnixError.NotFound("/tmp/missing".clone());
+    assert(a == b);
+}
+
+// =============================================================================
+// UNIX-7 — PeerCred negative-pid sentinel (-1) preserved through record
+// =============================================================================
+
+@test
+fn regression_peer_cred_negative_pid_sentinel_preserved() {
+    // Some kernels return -1 for unknown pid (e.g., when peer
+    // closed before peer_cred() resolved). Pin the round-trip
+    // through PeerCred record construction.
+    let p = PeerCred {
+        pid: -1_i32,
+        uid: 0_u32,
+        gid: 0_u32,
+    };
+    assert_eq(p.pid, -1_i32);
+    assert_eq(p.uid, 0_u32);
+    assert_eq(p.gid, 0_u32);
+}
+
+@test
+fn regression_peer_cred_negative_pid_with_nonroot_uid_preserved() {
+    // Mixed-axis edge: negative pid + non-root uid+gid.
+    let p = PeerCred {
+        pid: -1_i32,
+        uid: 1000_u32,
+        gid: 1000_u32,
+    };
+    assert_eq(p.pid, -1_i32);
+    assert_eq(p.uid, 1000_u32);
+    assert_eq(p.gid, 1000_u32);
+}
+
+// =============================================================================
+// UNIX-8 — FdPassingError.NotImplemented stub marker
+// =============================================================================
+
+@test
+fn regression_fd_passing_error_stub_marker_pinned() {
+    // SCM_RIGHTS FD-passing is intentionally unimplemented at every
+    // backend (audit.md §3.3). The stub returns
+    // `FdPassingError.NotImplemented(Text)` from every send-/recv-
+    // -fd helper — this regression pins the variant so removing it
+    // requires an audit edit + corresponding implementation review.
+    let e: FdPassingError = FdPassingError.NotImplemented("stub".clone());
+    assert(e is FdPassingError.NotImplemented);
+}
+
+@test
+fn regression_fd_passing_error_stub_payload_preserved_through_clone() {
+    // Eq impl at unix.vr:1014 compares payload via `a == b`.
+    let a = FdPassingError.NotImplemented("stub".clone());
+    let b = FdPassingError.NotImplemented("stub".clone());
+    assert(a == b);
+}

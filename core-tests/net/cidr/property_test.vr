@@ -1,0 +1,319 @@
+// =============================================================================
+// core-tests/net/cidr/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core/net/cidr.vr`:
+//
+//   * Contains-lattice monotonicity: if a prefix /n contains an IP,
+//     every wider prefix /m (m<n) over the same network bytes also
+//     contains it.
+//   * num_addresses (v4): /N == 2^(32-N) for N in {32,31,24,16,8,0}.
+//   * num_addresses (v6): /N == 2^(128-N) for N in {128,127,96}; for
+//     N ≤ 64 the count saturates to UInt64.MAX.
+//   * Cross-family rejection: a v4 Cidr never contains a v6 probe and
+//     vice versa.
+//   * CidrError 3-variant Eq reflexivity + pairwise disjointness.
+//   * CidrSet.contains lattice: insert N → contains every member;
+//     never matches anything outside any inserted prefix.
+//
+// All tests construct `Cidr` variants directly via record literals —
+// `cidr.parse(&Text)` is gated behind CIDR-1 (LLVM SmallVector
+// SIGSEGV during precompile cascade). See `audit.md §3.1`.
+// =============================================================================
+
+mount core.net.cidr.{Cidr, CidrSet, CidrError};
+mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr, AddrParseError};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: Contains-lattice monotonicity — IPv4
+// =============================================================================
+
+@test
+fn prop_cidr_v4_contains_self() {
+    // /32 must contain its own host address.
+    let net = Cidr.V4 { addr: Ipv4Addr.new(10_u8, 1_u8, 2_u8, 3_u8), prefix_len: 32 };
+    assert(net.contains(&IpAddr.v4(10_u8, 1_u8, 2_u8, 3_u8)));
+}
+
+@test
+fn prop_cidr_v4_monotone_widen_8_to_0() {
+    // If /8 contains an IP, /0 also contains it.
+    let ip = IpAddr.v4(10_u8, 1_u8, 2_u8, 3_u8);
+    let net8 = Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 };
+    let net0 = Cidr.V4 { addr: Ipv4Addr.unspecified(), prefix_len: 0 };
+    assert(net8.contains(&ip));
+    assert(net0.contains(&ip));
+}
+
+@test
+fn prop_cidr_v4_monotone_24_to_16_to_8() {
+    // Lattice walk: /24 ⊆ /16 ⊆ /8 over the same network bytes.
+    let ip = IpAddr.v4(192_u8, 168_u8, 1_u8, 42_u8);
+    let net24 = Cidr.V4 { addr: Ipv4Addr.new(192_u8, 168_u8, 1_u8, 0_u8), prefix_len: 24 };
+    let net16 = Cidr.V4 { addr: Ipv4Addr.new(192_u8, 168_u8, 0_u8, 0_u8), prefix_len: 16 };
+    let net8 = Cidr.V4 { addr: Ipv4Addr.new(192_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 };
+    assert(net24.contains(&ip));
+    assert(net16.contains(&ip));
+    assert(net8.contains(&ip));
+}
+
+@test
+fn prop_cidr_v4_monotone_full_chain() {
+    // /32 ⊆ /24 ⊆ /16 ⊆ /8 ⊆ /0 for the same canonical IP.
+    let ip = IpAddr.v4(127_u8, 0_u8, 0_u8, 1_u8);
+    let net32 = Cidr.V4 { addr: Ipv4Addr.new(127_u8, 0_u8, 0_u8, 1_u8), prefix_len: 32 };
+    let net24 = Cidr.V4 { addr: Ipv4Addr.new(127_u8, 0_u8, 0_u8, 0_u8), prefix_len: 24 };
+    let net16 = Cidr.V4 { addr: Ipv4Addr.new(127_u8, 0_u8, 0_u8, 0_u8), prefix_len: 16 };
+    let net8 = Cidr.V4 { addr: Ipv4Addr.new(127_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 };
+    let net0 = Cidr.V4 { addr: Ipv4Addr.unspecified(), prefix_len: 0 };
+    assert(net32.contains(&ip));
+    assert(net24.contains(&ip));
+    assert(net16.contains(&ip));
+    assert(net8.contains(&ip));
+    assert(net0.contains(&ip));
+}
+
+// =============================================================================
+// Section 2: Contains-lattice monotonicity — IPv6
+// =============================================================================
+
+@test
+fn prop_cidr_v6_monotone_128_to_0() {
+    // /128 (host) ⊆ /0 (any) for ::1 must both hold.
+    let ip = IpAddr.v6(0, 0, 0, 0, 0, 0, 0, 1);
+    let net128 = Cidr.V6 { addr: Ipv6Addr.localhost(), prefix_len: 128 };
+    let net0 = Cidr.V6 { addr: Ipv6Addr.unspecified(), prefix_len: 0 };
+    assert(net128.contains(&ip));
+    assert(net0.contains(&ip));
+}
+
+@test
+fn prop_cidr_v6_monotone_64_to_32_to_16() {
+    let ip = IpAddr.v6(0x2001, 0x0db8, 0xabcd, 0xef01, 0, 0, 0, 1);
+    let net64 = Cidr.V6 { addr: Ipv6Addr.new(0x2001, 0x0db8, 0xabcd, 0xef01, 0, 0, 0, 0), prefix_len: 64 };
+    let net32 = Cidr.V6 { addr: Ipv6Addr.new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0), prefix_len: 32 };
+    let net16 = Cidr.V6 { addr: Ipv6Addr.new(0x2001, 0, 0, 0, 0, 0, 0, 0), prefix_len: 16 };
+    assert(net64.contains(&ip));
+    assert(net32.contains(&ip));
+    assert(net16.contains(&ip));
+}
+
+// =============================================================================
+// Section 3: num_addresses — IPv4 block size 2^(32-N)
+// =============================================================================
+
+@test
+fn prop_num_addresses_v4_32_is_1() {
+    let net = Cidr.V4 { addr: Ipv4Addr.localhost(), prefix_len: 32 };
+    assert_eq(net.num_addresses(), 1_u64);
+}
+
+@test
+fn prop_num_addresses_v4_31_is_2() {
+    let net = Cidr.V4 { addr: Ipv4Addr.unspecified(), prefix_len: 31 };
+    assert_eq(net.num_addresses(), 2_u64);
+}
+
+@test
+fn prop_num_addresses_v4_24_is_256() {
+    let net = Cidr.V4 { addr: Ipv4Addr.unspecified(), prefix_len: 24 };
+    assert_eq(net.num_addresses(), 256_u64);
+}
+
+@test
+fn prop_num_addresses_v4_16_is_65536() {
+    let net = Cidr.V4 { addr: Ipv4Addr.unspecified(), prefix_len: 16 };
+    assert_eq(net.num_addresses(), 65536_u64);
+}
+
+@test
+fn prop_num_addresses_v4_8_is_2_to_24() {
+    let net = Cidr.V4 { addr: Ipv4Addr.unspecified(), prefix_len: 8 };
+    assert_eq(net.num_addresses(), 16777216_u64);
+}
+
+@test
+fn prop_num_addresses_v4_0_is_2_to_32() {
+    let net = Cidr.V4 { addr: Ipv4Addr.unspecified(), prefix_len: 0 };
+    assert_eq(net.num_addresses(), 4294967296_u64);
+}
+
+// =============================================================================
+// Section 4: num_addresses — IPv6 block size + saturation
+// =============================================================================
+
+@test
+fn prop_num_addresses_v6_128_is_1() {
+    let net = Cidr.V6 { addr: Ipv6Addr.localhost(), prefix_len: 128 };
+    assert_eq(net.num_addresses(), 1_u64);
+}
+
+@test
+fn prop_num_addresses_v6_127_is_2() {
+    let net = Cidr.V6 { addr: Ipv6Addr.unspecified(), prefix_len: 127 };
+    assert_eq(net.num_addresses(), 2_u64);
+}
+
+@test
+fn prop_num_addresses_v6_96_is_2_to_32() {
+    // /96 → 2^32 addresses (still fits in UInt64).
+    let net = Cidr.V6 { addr: Ipv6Addr.unspecified(), prefix_len: 96 };
+    assert_eq(net.num_addresses(), 4294967296_u64);
+}
+
+@test
+fn prop_num_addresses_v6_64_saturates() {
+    // /64 → 2^64 addresses — saturates to UInt64.MAX per dns.vr:184-190.
+    let net = Cidr.V6 { addr: Ipv6Addr.unspecified(), prefix_len: 64 };
+    assert_eq(net.num_addresses(), 0xFFFFFFFFFFFFFFFF_u64);
+}
+
+@test
+fn prop_num_addresses_v6_32_saturates() {
+    // /32 → 2^96 addresses — far exceeds UInt64; must saturate.
+    let net = Cidr.V6 { addr: Ipv6Addr.unspecified(), prefix_len: 32 };
+    assert_eq(net.num_addresses(), 0xFFFFFFFFFFFFFFFF_u64);
+}
+
+@test
+fn prop_num_addresses_v6_0_saturates() {
+    // /0 → 2^128 addresses — must saturate.
+    let net = Cidr.V6 { addr: Ipv6Addr.unspecified(), prefix_len: 0 };
+    assert_eq(net.num_addresses(), 0xFFFFFFFFFFFFFFFF_u64);
+}
+
+// =============================================================================
+// Section 5: Cross-family contains rejection
+// =============================================================================
+
+@test
+fn prop_cidr_v4_rejects_v6_probe_localhost() {
+    let net = Cidr.V4 { addr: Ipv4Addr.unspecified(), prefix_len: 0 };
+    let v6 = IpAddr.v6(0, 0, 0, 0, 0, 0, 0, 1);
+    assert(!net.contains(&v6));
+}
+
+@test
+fn prop_cidr_v4_rejects_v6_probe_doc_range() {
+    let net = Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 };
+    let v6 = IpAddr.v6(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
+    assert(!net.contains(&v6));
+}
+
+@test
+fn prop_cidr_v6_rejects_v4_probe_localhost() {
+    let net = Cidr.V6 { addr: Ipv6Addr.unspecified(), prefix_len: 0 };
+    let v4 = IpAddr.v4(127_u8, 0_u8, 0_u8, 1_u8);
+    assert(!net.contains(&v4));
+}
+
+@test
+fn prop_cidr_v6_rejects_v4_probe_private() {
+    let net = Cidr.V6 { addr: Ipv6Addr.new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0), prefix_len: 32 };
+    let v4 = IpAddr.v4(192_u8, 168_u8, 1_u8, 1_u8);
+    assert(!net.contains(&v4));
+}
+
+// =============================================================================
+// Section 6: CidrError — reflexivity + pairwise disjointness
+// =============================================================================
+
+@test
+fn prop_cidr_error_invalid_prefix_len_reflexive() {
+    let e = CidrError.InvalidPrefixLen(33);
+    assert(e == CidrError.InvalidPrefixLen(33));
+}
+
+@test
+fn prop_cidr_error_invalid_prefix_len_disjoint_payloads() {
+    // Same variant, different payload → not equal.
+    assert(!(CidrError.InvalidPrefixLen(33) == CidrError.InvalidPrefixLen(129)));
+    assert(!(CidrError.InvalidPrefixLen(0)  == CidrError.InvalidPrefixLen(1)));
+    assert(!(CidrError.InvalidPrefixLen(32) == CidrError.InvalidPrefixLen(128)));
+}
+
+@test
+fn prop_cidr_error_addr_parse_failed_reflexive() {
+    let a = CidrError.AddrParseFailed(AddrParseError.InvalidFormat);
+    let b = CidrError.AddrParseFailed(AddrParseError.InvalidFormat);
+    assert(a == b);
+}
+
+@test
+fn prop_cidr_error_addr_parse_failed_disjoint_payloads() {
+    let a = CidrError.AddrParseFailed(AddrParseError.InvalidFormat);
+    let b = CidrError.AddrParseFailed(AddrParseError.InvalidOctet);
+    let c = CidrError.AddrParseFailed(AddrParseError.InvalidPort);
+    assert(!(a == b));
+    assert(!(a == c));
+    assert(!(b == c));
+}
+
+@test
+fn prop_cidr_error_pairwise_disjoint_variants() {
+    // InvalidPrefixLen(N) vs AddrParseFailed(_) — distinct variants must
+    // never compare equal regardless of payload.
+    let m = CidrError.InvalidPrefixLen(33);
+    let p = CidrError.AddrParseFailed(AddrParseError.InvalidFormat);
+    assert(!(m == p));
+    assert(!(p == m));
+}
+
+// =============================================================================
+// Section 7: CidrSet.contains — insertion lattice
+// =============================================================================
+
+@test
+fn prop_cidr_set_contains_member_after_insert() {
+    let mut set = CidrSet.new();
+    set.add(Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 });
+    // Every IP inside 10.0.0.0/8 must be contained.
+    assert(set.contains(&IpAddr.v4(10_u8, 0_u8, 0_u8, 0_u8)));
+    assert(set.contains(&IpAddr.v4(10_u8, 1_u8, 2_u8, 3_u8)));
+    assert(set.contains(&IpAddr.v4(10_u8, 255_u8, 255_u8, 255_u8)));
+}
+
+@test
+fn prop_cidr_set_contains_each_member_of_multi_insert() {
+    let mut set = CidrSet.new();
+    set.add(Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 });
+    set.add(Cidr.V4 { addr: Ipv4Addr.new(172_u8, 16_u8, 0_u8, 0_u8), prefix_len: 12 });
+    set.add(Cidr.V4 { addr: Ipv4Addr.new(192_u8, 168_u8, 0_u8, 0_u8), prefix_len: 16 });
+    assert(set.contains(&IpAddr.v4(10_u8, 42_u8, 7_u8, 1_u8)));
+    assert(set.contains(&IpAddr.v4(172_u8, 16_u8, 1_u8, 1_u8)));
+    assert(set.contains(&IpAddr.v4(192_u8, 168_u8, 1_u8, 1_u8)));
+}
+
+@test
+fn prop_cidr_set_does_not_contain_outside_inserted_prefixes() {
+    let mut set = CidrSet.new();
+    set.add(Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 });
+    set.add(Cidr.V4 { addr: Ipv4Addr.new(192_u8, 168_u8, 0_u8, 0_u8), prefix_len: 16 });
+    // Outside the union: must NOT match.
+    assert(!set.contains(&IpAddr.v4(8_u8, 8_u8, 8_u8, 8_u8)));
+    assert(!set.contains(&IpAddr.v4(1_u8, 1_u8, 1_u8, 1_u8)));
+    assert(!set.contains(&IpAddr.v4(172_u8, 16_u8, 0_u8, 0_u8)));
+}
+
+@test
+fn prop_cidr_set_empty_contains_nothing() {
+    let set = CidrSet.new();
+    // No insertions → contains must reject every probe.
+    assert(!set.contains(&IpAddr.v4(0_u8, 0_u8, 0_u8, 0_u8)));
+    assert(!set.contains(&IpAddr.v4(127_u8, 0_u8, 0_u8, 1_u8)));
+    assert(!set.contains(&IpAddr.v4(255_u8, 255_u8, 255_u8, 255_u8)));
+}
+
+@test
+fn prop_cidr_set_mixed_family_membership() {
+    let mut set = CidrSet.new();
+    set.add(Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 });
+    set.add(Cidr.V6 { addr: Ipv6Addr.new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0), prefix_len: 32 });
+    // Each family's probe matches its own insertion.
+    assert(set.contains(&IpAddr.v4(10_u8, 1_u8, 1_u8, 1_u8)));
+    assert(set.contains(&IpAddr.v6(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1)));
+    // Outside-family probes must NOT match.
+    assert(!set.contains(&IpAddr.v4(192_u8, 168_u8, 1_u8, 1_u8)));
+    assert(!set.contains(&IpAddr.v6(0xfe80, 0, 0, 0, 0, 0, 0, 1)));
+}

@@ -1,0 +1,348 @@
+// =============================================================================
+// core-tests/net/tls/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core/net/tls.vr` covering:
+//
+//   * TlsVersion 4-variant: as_str ↔ wire_version coherence — each
+//     version maps to a unique (Text, (Int, Int)) pair.
+//   * TlsVersion.wire_version pairwise-disjoint over (3,1)/(3,2)/
+//     (3,3)/(3,4).
+//   * TlsVersion.is_secure XOR: ¬Tls10 ∧ ¬Tls11 ∧ Tls12 ∧ Tls13.
+//   * KeyType 3-variant: as_str unique ("RSA" / "EC" / "Ed25519"),
+//     Eq reflexivity + pairwise disjoint.
+//   * CertVerifyMode 3-variant disjointness via `is` (no Eq impl
+//     exists on CertVerifyMode in tls.vr).
+//   * Certificate.from_der + der_data length preservation (empty +
+//     short ASN.1 sample).
+//   * PrivateKey.from_der + key_type accessor coherence.
+// =============================================================================
+
+mount core.net.tls.{
+    TlsVersion, KeyType, CertVerifyMode, Certificate, PrivateKey
+};
+mount core.collections.List;
+
+// =============================================================================
+// Section 1: TlsVersion — as_str ↔ wire_version coherence
+// =============================================================================
+//
+// Each variant maps to a unique (as_str, wire_version) pair. Pinning
+// the bijection guards against accidental swap during refactors.
+
+@test
+fn prop_tls_version_tls10_pair_coherent() {
+    let v: TlsVersion = TlsVersion.Tls10;
+    assert_eq(v.as_str(), "TLS 1.0");
+    let (maj, min) = v.wire_version();
+    assert_eq(maj, 3);
+    assert_eq(min, 1);
+}
+
+@test
+fn prop_tls_version_tls11_pair_coherent() {
+    let v: TlsVersion = TlsVersion.Tls11;
+    assert_eq(v.as_str(), "TLS 1.1");
+    let (maj, min) = v.wire_version();
+    assert_eq(maj, 3);
+    assert_eq(min, 2);
+}
+
+@test
+fn prop_tls_version_tls12_pair_coherent() {
+    let v: TlsVersion = TlsVersion.Tls12;
+    assert_eq(v.as_str(), "TLS 1.2");
+    let (maj, min) = v.wire_version();
+    assert_eq(maj, 3);
+    assert_eq(min, 3);
+}
+
+@test
+fn prop_tls_version_tls13_pair_coherent() {
+    let v: TlsVersion = TlsVersion.Tls13;
+    assert_eq(v.as_str(), "TLS 1.3");
+    let (maj, min) = v.wire_version();
+    assert_eq(maj, 3);
+    assert_eq(min, 4);
+}
+
+// =============================================================================
+// Section 2: TlsVersion.wire_version — pairwise disjoint minor numbers
+// =============================================================================
+//
+// Major stays 3 across all 4 variants; minor is the discriminator
+// (1/2/3/4). Pinning pairwise disjointness on the minor axis.
+
+@test
+fn prop_tls_version_wire_minor_tls10_vs_tls11_disjoint() {
+    let (_, m10) = TlsVersion.Tls10.wire_version();
+    let (_, m11) = TlsVersion.Tls11.wire_version();
+    assert(m10 != m11);
+}
+
+@test
+fn prop_tls_version_wire_minor_tls10_vs_tls12_disjoint() {
+    let (_, m10) = TlsVersion.Tls10.wire_version();
+    let (_, m12) = TlsVersion.Tls12.wire_version();
+    assert(m10 != m12);
+}
+
+@test
+fn prop_tls_version_wire_minor_tls10_vs_tls13_disjoint() {
+    let (_, m10) = TlsVersion.Tls10.wire_version();
+    let (_, m13) = TlsVersion.Tls13.wire_version();
+    assert(m10 != m13);
+}
+
+@test
+fn prop_tls_version_wire_minor_tls11_vs_tls12_disjoint() {
+    let (_, m11) = TlsVersion.Tls11.wire_version();
+    let (_, m12) = TlsVersion.Tls12.wire_version();
+    assert(m11 != m12);
+}
+
+@test
+fn prop_tls_version_wire_minor_tls11_vs_tls13_disjoint() {
+    let (_, m11) = TlsVersion.Tls11.wire_version();
+    let (_, m13) = TlsVersion.Tls13.wire_version();
+    assert(m11 != m13);
+}
+
+@test
+fn prop_tls_version_wire_minor_tls12_vs_tls13_disjoint() {
+    let (_, m12) = TlsVersion.Tls12.wire_version();
+    let (_, m13) = TlsVersion.Tls13.wire_version();
+    assert(m12 != m13);
+}
+
+@test
+fn prop_tls_version_wire_major_uniform_three() {
+    // Major must stay 3 across the entire {Tls10, Tls11, Tls12, Tls13}
+    // ladder — pinned for RFC-stability.
+    let (m10, _) = TlsVersion.Tls10.wire_version();
+    let (m11, _) = TlsVersion.Tls11.wire_version();
+    let (m12, _) = TlsVersion.Tls12.wire_version();
+    let (m13, _) = TlsVersion.Tls13.wire_version();
+    assert_eq(m10, 3);
+    assert_eq(m11, 3);
+    assert_eq(m12, 3);
+    assert_eq(m13, 3);
+}
+
+// =============================================================================
+// Section 3: TlsVersion.is_secure — XOR pattern
+// =============================================================================
+//
+// Per `tls.vr:81-86`, is_secure() is true for {Tls12, Tls13} and false
+// for {Tls10, Tls11}. Pinning the partition.
+
+@test
+fn prop_tls_version_is_secure_tls10_false() {
+    assert(!TlsVersion.Tls10.is_secure());
+}
+
+@test
+fn prop_tls_version_is_secure_tls11_false() {
+    assert(!TlsVersion.Tls11.is_secure());
+}
+
+@test
+fn prop_tls_version_is_secure_tls12_true() {
+    assert(TlsVersion.Tls12.is_secure());
+}
+
+@test
+fn prop_tls_version_is_secure_tls13_true() {
+    assert(TlsVersion.Tls13.is_secure());
+}
+
+@test
+fn prop_tls_version_is_secure_partition_xor() {
+    // Belt-and-braces XOR: ¬Tls10 ∧ ¬Tls11 ∧ Tls12 ∧ Tls13.
+    let invariant =
+        !TlsVersion.Tls10.is_secure()
+        && !TlsVersion.Tls11.is_secure()
+        && TlsVersion.Tls12.is_secure()
+        && TlsVersion.Tls13.is_secure();
+    assert(invariant);
+}
+
+// =============================================================================
+// Section 4: KeyType — 3-variant as_str uniqueness
+// =============================================================================
+
+@test
+fn prop_key_type_as_str_rsa() {
+    assert_eq(KeyType.Rsa.as_str(), "RSA");
+}
+
+@test
+fn prop_key_type_as_str_ec() {
+    assert_eq(KeyType.Ec.as_str(), "EC");
+}
+
+@test
+fn prop_key_type_as_str_ed25519() {
+    assert_eq(KeyType.Ed25519.as_str(), "Ed25519");
+}
+
+@test
+fn prop_key_type_as_str_pairwise_unique() {
+    let a = KeyType.Rsa.as_str();
+    let b = KeyType.Ec.as_str();
+    let c = KeyType.Ed25519.as_str();
+    assert(a != b);
+    assert(a != c);
+    assert(b != c);
+}
+
+// =============================================================================
+// Section 5: KeyType — Eq reflexivity + pairwise disjoint
+// =============================================================================
+
+@test
+fn prop_key_type_eq_reflexive_rsa() {
+    assert(KeyType.Rsa == KeyType.Rsa);
+}
+
+@test
+fn prop_key_type_eq_reflexive_ec() {
+    assert(KeyType.Ec == KeyType.Ec);
+}
+
+@test
+fn prop_key_type_eq_reflexive_ed25519() {
+    assert(KeyType.Ed25519 == KeyType.Ed25519);
+}
+
+@test
+fn prop_key_type_disjoint_rsa_vs_ec() {
+    assert(!(KeyType.Rsa == KeyType.Ec));
+}
+
+@test
+fn prop_key_type_disjoint_rsa_vs_ed25519() {
+    assert(!(KeyType.Rsa == KeyType.Ed25519));
+}
+
+@test
+fn prop_key_type_disjoint_ec_vs_ed25519() {
+    assert(!(KeyType.Ec == KeyType.Ed25519));
+}
+
+// =============================================================================
+// Section 6: CertVerifyMode — 3-variant disjointness via `is`
+// =============================================================================
+//
+// `CertVerifyMode` has no `implement Eq for CertVerifyMode` in
+// tls.vr — use the `is` pattern operator (mirrors the Shutdown /
+// ShutdownKind convention).
+
+@test
+fn prop_cert_verify_mode_reflexive_full() {
+    let m: CertVerifyMode = CertVerifyMode.Full;
+    assert(m is CertVerifyMode.Full);
+}
+
+@test
+fn prop_cert_verify_mode_reflexive_none() {
+    let m: CertVerifyMode = CertVerifyMode.None;
+    assert(m is CertVerifyMode.None);
+}
+
+@test
+fn prop_cert_verify_mode_reflexive_custom() {
+    let m: CertVerifyMode = CertVerifyMode.Custom;
+    assert(m is CertVerifyMode.Custom);
+}
+
+@test
+fn prop_cert_verify_mode_disjoint_full_vs_none() {
+    let f: CertVerifyMode = CertVerifyMode.Full;
+    let n: CertVerifyMode = CertVerifyMode.None;
+    assert(!(f is CertVerifyMode.None));
+    assert(!(n is CertVerifyMode.Full));
+}
+
+@test
+fn prop_cert_verify_mode_disjoint_full_vs_custom() {
+    let f: CertVerifyMode = CertVerifyMode.Full;
+    let c: CertVerifyMode = CertVerifyMode.Custom;
+    assert(!(f is CertVerifyMode.Custom));
+    assert(!(c is CertVerifyMode.Full));
+}
+
+@test
+fn prop_cert_verify_mode_disjoint_none_vs_custom() {
+    let n: CertVerifyMode = CertVerifyMode.None;
+    let c: CertVerifyMode = CertVerifyMode.Custom;
+    assert(!(n is CertVerifyMode.Custom));
+    assert(!(c is CertVerifyMode.None));
+}
+
+// =============================================================================
+// Section 7: Certificate.from_der — length preservation
+// =============================================================================
+
+@test
+fn prop_certificate_from_der_length_preserved_empty() {
+    let data: List<Byte> = [];
+    let c = Certificate.from_der(data);
+    assert_eq(c.der_data.len(), 0);
+}
+
+@test
+fn prop_certificate_from_der_length_preserved_dummy_asn1() {
+    // Short ASN.1 prelude: SEQUENCE tag + 2-byte length + payload.
+    let mut data: List<Byte> = [];
+    data.push(0x30_u8);  // ASN.1 SEQUENCE
+    data.push(0x82_u8);  // length-of-length marker
+    data.push(0x00_u8);
+    data.push(0x10_u8);
+    data.push(0x02_u8);  // INTEGER tag
+    data.push(0x01_u8);  // length 1
+    data.push(0xff_u8);  // payload byte
+    let c = Certificate.from_der(data);
+    assert_eq(c.der_data.len(), 7);
+}
+
+// =============================================================================
+// Section 8: PrivateKey.from_der + key_type coherence
+// =============================================================================
+
+@test
+fn prop_private_key_from_der_key_type_round_trip_rsa() {
+    let data: List<Byte> = [];
+    let k = PrivateKey.from_der(data, KeyType.Rsa);
+    // `key_type` is both a field (tls.vr:209) and an accessor
+    // method (tls.vr:277). Pin coherence between the two surfaces.
+    assert(k.key_type == KeyType.Rsa);
+    assert(k.key_type() == KeyType.Rsa);
+}
+
+@test
+fn prop_private_key_from_der_key_type_round_trip_ec() {
+    let data: List<Byte> = [];
+    let k = PrivateKey.from_der(data, KeyType.Ec);
+    assert(k.key_type == KeyType.Ec);
+    assert(k.key_type() == KeyType.Ec);
+}
+
+@test
+fn prop_private_key_from_der_key_type_round_trip_ed25519() {
+    let data: List<Byte> = [];
+    let k = PrivateKey.from_der(data, KeyType.Ed25519);
+    assert(k.key_type == KeyType.Ed25519);
+    assert(k.key_type() == KeyType.Ed25519);
+}
+
+@test
+fn prop_private_key_from_der_der_data_length_preserved() {
+    let mut data: List<Byte> = [];
+    data.push(0x30_u8);
+    data.push(0x02_u8);
+    data.push(0x01_u8);
+    data.push(0x00_u8);
+    let k = PrivateKey.from_der(data, KeyType.Rsa);
+    assert_eq(k.der_data.len(), 4);
+}
