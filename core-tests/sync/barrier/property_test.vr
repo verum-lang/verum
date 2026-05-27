@@ -59,7 +59,12 @@ fn law_phaser_fresh_invariant() {
 // §C  Phaser.register() additivity
 // =============================================================================
 
+// Phaser.register() acquires Phaser.mutex (FutexLock), which routes
+// through an FFI symbol unbound at Tier-0.  Gated until the symbol
+// stub lands.  See audit §3.1.
+
 @test
+@ignore
 fn law_phaser_register_additive() {
     let p = Phaser.new(0);
     for i in 0..5 {
@@ -73,6 +78,7 @@ fn law_phaser_register_additive() {
 }
 
 @test
+@ignore
 fn law_phaser_register_does_not_change_phase() {
     let p = Phaser.new(0);
     assert_eq(p.get_phase(), 0);
@@ -85,8 +91,12 @@ fn law_phaser_register_does_not_change_phase() {
 // =============================================================================
 // §D  CountDownLatch drain law
 // =============================================================================
+//
+// `CountDownLatch.count_down()` triggers `condvar.notify_all()` when
+// the counter reaches zero — futex_wake FFI gap.  Gated.
 
 @test
+@ignore
 fn law_count_down_latch_drain_by_k_steps() {
     let ns: List<Int> = [1, 2, 3, 5, 8];
     for &n in ns.iter() {
@@ -102,6 +112,7 @@ fn law_count_down_latch_drain_by_k_steps() {
 }
 
 @test
+@ignore
 fn law_count_down_latch_drained_then_wait_immediate() {
     let l = CountDownLatch.new(4);
     for _ in 0..4 {

@@ -73,6 +73,26 @@ Pin in `unit_test.vr` §5.
 Data-record with single accessor `timed_out() -> Bool`.  Construction
 + accessor pinned in `unit_test.vr` §4.
 
+### §3.6 Tier-0 futex FFI symbol gap
+
+`Condvar.notify_one()` / `notify_all()` issue a `futex_wake` (Linux
+SYS_futex / macOS `__ulock_wake`) regardless of waiter count (per the
+missed-wakeup fix).  The Tier-0 interpreter currently does NOT
+register the `__ulock_wake` / SYS_futex FFI symbols in the per-module
+FFI table — calls trip "FFI symbol not found: FfiSymbolId(61)".
+
+This is a structural FFI-symbol-remap defect: the precompiled stdlib
+registers `__ulock_wake` at one index, but when a test compiles
+against the precompile, the resulting test module's FFI table doesn't
+get the same index propagated.
+
+Tests that exercise the live notify_* path are `@ignore`d here; the
+static-state contracts (Condvar.new, waiter_count == 0 on quiescent,
+WaitTimeoutResult / CondvarNotifyGuard / producer_consumer_pair
+ctors) stay live.  Promote to `@test` when the FFI-symbol
+propagation lands in `crates/verum_vbc/src/ffi/runtime.rs` +
+`crates/verum_vbc/src/linker.rs`.
+
 ### §3.5 `CondvarNotifyGuard` is RAII over notification
 
 Constructors `notify_one_guard(&Condvar)` / `notify_all_guard(&Condvar)`
