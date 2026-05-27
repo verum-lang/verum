@@ -170,7 +170,7 @@ fn new_inner<T>(capacity: Int, policy: LagPolicy) -> BroadcastInner<T> {
     let mut buf: List<Maybe<T>> = [];
     let mut i = 0;
     while i < capacity {
-        buf.push(None);
+        buf.push(Maybe.None);
         i = i + 1;
     }
     BroadcastInner {
@@ -199,7 +199,7 @@ fn wake_all_receivers<T>(inner: &BroadcastInner<T>) {
     for slot in snapshot {
         if slot.dropped.load(MemoryOrdering.Acquire) { continue; }
         let mut w = slot.waker.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(waker) = w.take() {
+        if let Maybe.Some(waker) = w.take() {
             waker.wake();
         }
     }
@@ -247,7 +247,7 @@ implement<T> BroadcastSender<T> {
         // Insert under buffer lock.
         {
             let mut buf = self.inner.buffer.lock().unwrap_or_else(|p| p.into_inner());
-            buf[idx] = Some(value);
+            buf[idx] = Maybe.Some(value);
         }
 
         // Publish write position (release — observers see the slot write).
@@ -274,7 +274,7 @@ implement<T> BroadcastSender<T> {
             read_pos: AtomicInt.new(
                 self.inner.write_pos.load(MemoryOrdering.Acquire)
             ),
-            waker: Mutex.new(None),
+            waker: Mutex.new(Maybe.None),
             dropped: AtomicBool.new(false),
         });
         {
@@ -354,7 +354,7 @@ implement<T> BroadcastReceiver<T> {
 
     /// Non-blocking receive attempt. Returns current status.
     public fn try_recv(&self) -> TryRecvResult<T> {
-        poll_recv_inner(&self.inner, &self.slot, None)
+        poll_recv_inner(&self.inner, &self.slot, Maybe.None)
     }
 
     /// Number of messages available to read (may be stale).
@@ -400,7 +400,7 @@ implement<T> Future for BroadcastReceiver<T> {
     type Output = Result<T, BroadcastRecvError>;
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, BroadcastRecvError>> {
-        match poll_recv_inner(&self.inner, &self.slot, Some(cx)) {
+        match poll_recv_inner(&self.inner, &self.slot, Maybe.Some(cx)) {
             TryRecvResult.Value(v) => Poll.Ready(Ok(v)),
             TryRecvResult.Lagged(n) => Poll.Ready(Err(BroadcastRecvError.Lagged(n))),
             TryRecvResult.Closed => Poll.Ready(Err(BroadcastRecvError.Closed)),
@@ -414,10 +414,10 @@ implement<T> Stream for BroadcastReceiver<T> {
     type Item = Result<T, BroadcastRecvError>;
 
     fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Result<T, BroadcastRecvError>>> {
-        match poll_recv_inner(&self.inner, &self.slot, Some(cx)) {
-            TryRecvResult.Value(v) => Poll.Ready(Some(Ok(v))),
-            TryRecvResult.Lagged(n) => Poll.Ready(Some(Err(BroadcastRecvError.Lagged(n)))),
-            TryRecvResult.Closed => Poll.Ready(None),
+        match poll_recv_inner(&self.inner, &self.slot, Maybe.Some(cx)) {
+            TryRecvResult.Value(v) => Poll.Ready(Maybe.Some(Ok(v))),
+            TryRecvResult.Lagged(n) => Poll.Ready(Maybe.Some(Err(BroadcastRecvError.Lagged(n)))),
+            TryRecvResult.Closed => Poll.Ready(Maybe.None),
             TryRecvResult.Empty => Poll.Pending,
         }
     }
@@ -447,7 +447,7 @@ implement<T> Future for BroadcastRecv<T> {
     type Output = Result<T, BroadcastRecvError>;
 
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, BroadcastRecvError>> {
-        match poll_recv_inner(&self.inner, &self.slot, Some(cx)) {
+        match poll_recv_inner(&self.inner, &self.slot, Maybe.Some(cx)) {
             TryRecvResult.Value(v) => Poll.Ready(Ok(v)),
             TryRecvResult.Lagged(n) => Poll.Ready(Err(BroadcastRecvError.Lagged(n))),
             TryRecvResult.Closed => Poll.Ready(Err(BroadcastRecvError.Closed)),
@@ -487,20 +487,20 @@ fn poll_recv_inner<T>(
             return TryRecvResult.Closed;
         }
         // Register waker if async context was provided.
-        if let Some(ctx) = cx {
+        if let Maybe.Some(ctx) = cx {
             let mut w = slot.waker.lock().unwrap_or_else(|p| p.into_inner());
-            *w = Some(ctx.waker().clone());
+            *w = Maybe.Some(ctx.waker().clone());
             // Re-check after register to close lost-wake race.
             let write_pos_2 = inner.write_pos.load(MemoryOrdering.Acquire);
             if read_pos < write_pos_2 {
                 // New value landed; clear waker and retry read below.
-                *w = None;
+                *w = Maybe.None;
                 drop(w);
                 // Fall through to value-read path by recursing once.
-                return poll_recv_inner(inner, slot, None);
+                return poll_recv_inner(inner, slot, Maybe.None);
             }
             if inner.closed.load(MemoryOrdering.Acquire) {
-                *w = None;
+                *w = Maybe.None;
                 return TryRecvResult.Closed;
             }
         }
@@ -517,8 +517,8 @@ fn poll_recv_inner<T>(
     slot.read_pos.store(read_pos + 1, MemoryOrdering.Release);
 
     match value_maybe {
-        Some(v) => TryRecvResult.Value(v),
-        None => {
+        Maybe.Some(v) => TryRecvResult.Value(v),
+        Maybe.None => {
             // Slot never written — only possible if write_pos was bumped
             // without a corresponding buf write (can't happen in current impl,
             // but defensive).
@@ -553,7 +553,7 @@ public fn broadcast_channel_with<T>(capacity: Int, policy: LagPolicy)
     let slot = Shared.new(RecvSlot {
         id: inner.next_slot_id.fetch_add(1, MemoryOrdering.Relaxed),
         read_pos: AtomicInt.new(0),
-        waker: Mutex.new(None),
+        waker: Mutex.new(Maybe.None),
         dropped: AtomicBool.new(false),
     });
     {
