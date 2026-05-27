@@ -64,10 +64,25 @@ condvar interactions are exercised at the L2-spec level.
 
 ## 3. Language-implementation gaps
 
-### §3.1 Live Barrier.wait / Phaser.arrive_and_await / CountDownLatch.wait require multi-threaded harness
+### §3.1 Live Barrier.wait / Phaser.arrive_and_await / CountDownLatch.wait require multi-threaded harness AND Tier-0 futex-FFI stub
 
-Cannot be tested at the data-shape level.  See
-`vcs/specs/L2-standard/sync/barrier/`.
+Two-layer gating:
+
+1. **Multi-threaded harness** — `Barrier.wait()` / `Phaser.arrive_and_await()` /
+   `CountDownLatch.wait_for_zero_timeout(>0)` block on a condvar that
+   only releases via cross-thread notification.  Cannot be tested at
+   the data-shape level.  See `vcs/specs/L2-standard/sync/barrier/`.
+
+2. **Tier-0 futex-FFI gap** — even single-threaded paths that touch
+   the futex (e.g. `Phaser.register()` acquires Phaser.mutex,
+   `Phaser.terminate()` issues `condvar.notify_all()`,
+   `CountDownLatch.count_down()` triggers `notify_all` when counter
+   reaches zero) trip a "FFI symbol not found: FfiSymbolId(61)" at the
+   Tier-0 interpreter — the underlying `futex_wake`/`futex_wait`
+   syscall isn't bound in the FFI symbol table.  Tests `@ignore`d
+   here pin the static-state contracts; promote to live `@test` when
+   the Tier-0 futex FFI lands at
+   `crates/verum_vbc/src/interpreter/dispatch_table/handlers/ffi_extended.rs`.
 
 ### §3.2 `Phaser.terminate` + termination-flag preservation
 
