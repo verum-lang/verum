@@ -100,40 +100,29 @@ attacker URLs before any per-byte scanning. Pinned by
 `test_max_url_length_bytes_constant` so the constant doesn't
 drift under refactoring.
 
-### §3.4 URL-8 — empty-Text `"".clone()` parse routes through non-MissingScheme error kind
+### §3.4 URL-8 — empty-Text parse routed through wrong UrlErrorKind (CLOSED 2026-05-27)
 
-**Stable trigger**: `Url.parse(&"".clone())` returns `Err(_)` (correct
-behavior — `.is_err()` pin GREEN at `prop_url_parse_empty_returns_err`)
-but the returned `e.kind` value compares NOT-equal to
-`UrlErrorKind.MissingScheme` under `--interp`. Source-side at
-`url.vr:150-156` clearly returns `MissingScheme` for the `n == 0` arm.
+**Original trigger**: `Url.parse(&"".clone())` returned `Err(_)` correctly
+but `e.kind != UrlErrorKind.MissingScheme`. Source-side at
+`url.vr:150-156` clearly returned `MissingScheme` for the `n == 0` arm.
 
-**Pin**: `prop_url_parse_empty_error_kind_missing_scheme` @ignore'd
-under URL-8. Other UrlErrorKind comparison sites (e.g.
-`prop_url_parse_oversized_input_rejects` for UrlTooLong) work
-correctly, so the defect is empty-input-specific.
+**Root cause confirmed**: candidate #1 in the audit hypothesis —
+`url_error_kind_tag` + `url_error_kind_name` Eq dispatch used bare-
+name match arms (`MissingScheme => 0`, `InvalidScheme => 1`, ...)
+which collide first-wins through the VBC variant-dispatch table with
+sibling-module variants. Bare `InvalidScheme` specifically collided
+against `AddrParseError`-class variant routing.
 
-**Likely root cause** (ordered by suspicion):
+**Source-side fix landed**: all 6 match arms in
+`url_error_kind_name` + `url_error_kind_tag` + 6 `Err(UrlError {
+kind: ... })` record-literal sites now use qualified
+`UrlErrorKind.<Variant>` form, eliminating the collision surface.
+Same close-out discipline applied to compress/archive/protobuf in
+prior sessions. Activates on next verum binary rebuild.
 
-1. **Empty-Text Eq via discriminant comparison**: `UrlErrorKind` Eq
-   impl at `url.vr:100-103` reads `url_error_kind_tag(self) ==
-   url_error_kind_tag(other)`. The body uses `match self { ... }`
-   which routes through variant-tag dispatch. For
-   `MissingScheme` (tag=0) the call may collide with an unrelated
-   tag-0 dispatch site (same defect class as `[[task17_static_method_dispatch_defect_2026-05-24]]`).
-2. **`"".clone()` representation drift**: empty-Text codegen may
-   produce a non-canonical representation (different from the
-   compile-time-empty `""`) that the `as_bytes().len() == 0`
-   check misses, routing parsing into a non-empty branch and
-   returning a different error kind (e.g. `InvalidScheme`).
-3. **`e.kind` field access**: post-Err(record) construction, the
-   field read may shift indices (sister of
-   `[[use_after_free_error_field_shift_2026-05-27]]`).
-
-**Fix path**: trace via `VERUM_TRACE_VARIANT_EQ=1
-VERUM_TRACE_FIELD_READ=1` against the failing test. Expected:
-~2-4 hours diagnosis + medium fix once root narrowed (variant-eq
-likely Tier-0 dispatch; field-access shift requires codegen).
+**Pinned by**: `prop_url_parse_empty_error_kind_missing_scheme`
+(@ignore'd pre-fix). Once the next binary rebuild runs, the pin
+should remove the @ignore.
 
 ### §3.3 RFC 3986 §6.2 normalization not implemented
 
@@ -163,6 +152,10 @@ deduplication should canonicalize externally.
   percent_decode error (2) — truncated + non-hex;
   round-trip (3) — alpha/special/reserved;
   UrlErrorKind disjointness (5).
+* `core/net/url.vr` — URL-8 close-out: qualify 6 match arms in
+  `url_error_kind_name` + 6 in `url_error_kind_tag` + 6 `Err(UrlError
+  { kind: ... })` record-literal sites with `UrlErrorKind.<Variant>`
+  form. Activates on next verum binary rebuild.
 * `core-tests/net/url/audit.md` — this file.
 
 ## 5. Action items deferred
