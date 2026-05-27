@@ -991,10 +991,10 @@ public type DoubleEndedIterator is protocol extends Iterator {
     fn advance_back_by(&mut self, n: Int) -> Result<(), Int> {
         for i in range(0, n) {
             if self.next_back().is_none() {
-                return Err(i);
+                return Result.Err(i);
             }
         }
-        Ok(())
+        Result.Ok(())
     }
 
     /// Get the nth element from the back (0-indexed).
@@ -1006,7 +1006,7 @@ public type DoubleEndedIterator is protocol extends Iterator {
     /// Fold from the back.
     fn rfold<B, F: fn(B, Self.Item) -> B>(mut self, init: B, f: F) -> B {
         let mut acc = init;
-        while let Some(x) = self.next_back() {
+        while let Maybe.Some(x) = self.next_back() {
             acc = f(acc, x);
         }
         acc
@@ -1014,12 +1014,12 @@ public type DoubleEndedIterator is protocol extends Iterator {
 
     /// Find from the back.
     fn rfind<P: fn(&Self.Item) -> Bool>(&mut self, predicate: P) -> Maybe<Self.Item> {
-        while let Some(x) = self.next_back() {
+        while let Maybe.Some(x) = self.next_back() {
             if predicate(&x) {
-                return Some(x);
+                return Maybe.Some(x);
             }
         }
-        None
+        Maybe.None
     }
 
     /// Find position of matching element from the back.
@@ -1029,22 +1029,22 @@ public type DoubleEndedIterator is protocol extends Iterator {
     fn rposition<P: fn(&Self.Item) -> Bool>(&mut self, predicate: P) -> Maybe<Int>
     where Self: ExactSizeIterator {
         let mut i = self.len();
-        while let Some(x) = self.next_back() {
+        while let Maybe.Some(x) = self.next_back() {
             i = i - 1;
             if predicate(&x) {
-                return Some(i);
+                return Maybe.Some(i);
             }
         }
-        None
+        Maybe.None
     }
 
     /// Try to fold from the back, short-circuiting on error.
     fn try_rfold<B, E, F: fn(B, Self.Item) -> Result<B, E>>(mut self, init: B, f: F) -> Result<B, E> {
         let mut acc = init;
-        while let Some(x) = self.next_back() {
+        while let Maybe.Some(x) = self.next_back() {
             acc = f(acc, x)?;
         }
-        Ok(acc)
+        Result.Ok(acc)
     }
 
     /// Reverse the iterator direction.
