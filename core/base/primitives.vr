@@ -192,8 +192,8 @@ implement Int {
     /// Checked division (returns None on division by zero).
     @inline(always)
     public fn checked_div(self, rhs: Int) -> Maybe<Int> {
-        if rhs == 0 { None }
-        else { Some(self / rhs) }
+        if rhs == 0 { Maybe.None }
+        else { Maybe.Some(self / rhs) }
     }
 
     /// Wrapping addition (wraps on overflow).
@@ -382,7 +382,7 @@ implement Int {
 
     /// Checked remainder (returns None on division by zero).
     public fn checked_rem(self, rhs: Int) -> Maybe<Int> {
-        if rhs == 0 { None } else { Some(self % rhs) }
+        if rhs == 0 { Maybe.None } else { Maybe.Some(self % rhs) }
     }
 
     /// Return the raw bit representation of this integer.
@@ -399,7 +399,7 @@ implement Int {
 
     /// Checked negation (returns None for MIN since -MIN overflows).
     public fn checked_neg(self) -> Maybe<Int> {
-        if self == -9223372036854775808 { None } else { Some(0 - self) }
+        if self == -9223372036854775808 { Maybe.None } else { Maybe.Some(0 - self) }
     }
 
     /// Absolute difference (always non-negative).
@@ -432,18 +432,18 @@ implement Int {
 
     /// Checked left shift. Returns None if shift >= 64.
     public fn checked_shl(self, shift: Int) -> Maybe<Int> {
-        if shift < 0 || shift >= 64 { None } else { Some(self << shift) }
+        if shift < 0 || shift >= 64 { Maybe.None } else { Maybe.Some(self << shift) }
     }
 
     /// Checked right shift. Returns None if shift >= 64.
     public fn checked_shr(self, shift: Int) -> Maybe<Int> {
-        if shift < 0 || shift >= 64 { None } else { Some(self >> shift) }
+        if shift < 0 || shift >= 64 { Maybe.None } else { Maybe.Some(self >> shift) }
     }
 
     /// Checked exponentiation. Returns None on overflow.
     public fn checked_pow(self, exp: Int) -> Maybe<Int> {
-        if exp < 0 { None }
-        else if exp == 0 { Some(1) }
+        if exp < 0 { Maybe.None }
+        else if exp == 0 { Maybe.Some(1) }
         else {
             let mut base = self;
             let mut e = exp;
@@ -452,19 +452,19 @@ implement Int {
             while e > 0 && !overflow {
                 if bitand(e, 1) == 1 {
                     match result.checked_mul(base) {
-                        Some(v) => { result = v; },
-                        None => { overflow = true; },
+                        Maybe.Some(v) => { result = v; },
+                        Maybe.None => { overflow = true; },
                     };
                 }
                 e = e >> 1;
                 if e > 0 && !overflow {
                     match base.checked_mul(base) {
-                        Some(v) => { base = v; },
-                        None => { overflow = true; },
+                        Maybe.Some(v) => { base = v; },
+                        Maybe.None => { overflow = true; },
                     };
                 }
             }
-            if overflow { None } else { Some(result) }
+            if overflow { Maybe.None } else { Maybe.Some(result) }
         }
     }
 
@@ -519,8 +519,8 @@ implement Int {
     /// Saturating exponentiation. Clamps to MIN/MAX on overflow.
     public fn saturating_pow(self, exp: Int) -> Int {
         match self.checked_pow(exp) {
-            Some(v) => v,
-            None => {
+            Maybe.Some(v) => v,
+            Maybe.None => {
                 if self < 0 && bitand(exp, 1) == 1 { -9223372036854775808 }
                 else { 9223372036854775807 }
             },
@@ -561,8 +561,8 @@ implement Int {
     /// `Int.MIN.to_string().from_str()` would round-trip back
     /// to `None` — a silent gap on the most-negative input.
     public fn from_str_radix(text: &Text, radix: Int) -> Maybe<Int> {
-        if radix < 2 || radix > 36 { return None; }
-        if text.len() == 0 { return None; }
+        if radix < 2 || radix > 36 { return Maybe.None; }
+        if text.len() == 0 { return Maybe.None; }
 
         let mut negative = false;
         let mut start = 0;
@@ -570,7 +570,7 @@ implement Int {
         if first == '-' { negative = true; start = 1; }
         else if first == '+' { start = 1; }
 
-        if start >= text.len() { return None; }
+        if start >= text.len() { return Maybe.None; }
 
         // Accumulate magnitude in unsigned 64-bit so the
         // pre-sign check fits Int.MIN's magnitude (2^63).
@@ -580,15 +580,15 @@ implement Int {
         while i < text.len() {
             let ch = text.char_at(i);
             let digit = char_to_digit(ch, radix);
-            if digit < 0 { return None; }
+            if digit < 0 { return Maybe.None; }
             // mag = mag * radix + digit, with overflow detection.
             // 64-bit unsigned mul check: mag > UInt64.MAX / radix
             // would overflow. We use a saturating-style check.
             let max_u: UInt64 = 18446744073709551615 as UInt64; // UInt64.MAX
-            if mag > max_u / radix_u { return None; }
+            if mag > max_u / radix_u { return Maybe.None; }
             mag = mag * radix_u;
             let digit_u = digit as UInt64;
-            if mag > max_u - digit_u { return None; }
+            if mag > max_u - digit_u { return Maybe.None; }
             mag = mag + digit_u;
             i = i + 1;
         }
@@ -598,17 +598,17 @@ implement Int {
         // in -Int.MIN's magnitude (= 9223372036854775808 = 2^63).
         if negative {
             let neg_min_mag: UInt64 = 9223372036854775808 as UInt64;
-            if mag > neg_min_mag { return None; }
+            if mag > neg_min_mag { return Maybe.None; }
             if mag == neg_min_mag {
                 // Exactly Int.MIN — can't represent its magnitude
                 // as a positive Int, so build directly.
-                return Some(-9223372036854775808);
+                return Maybe.Some(-9223372036854775808);
             }
-            return Some(0 - (mag as Int));
+            return Maybe.Some(0 - (mag as Int));
         } else {
             let max_mag: UInt64 = 9223372036854775807 as UInt64; // Int.MAX
-            if mag > max_mag { return None; }
-            return Some(mag as Int);
+            if mag > max_mag { return Maybe.None; }
+            return Maybe.Some(mag as Int);
         }
     }
 }
