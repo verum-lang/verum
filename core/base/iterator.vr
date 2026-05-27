@@ -1971,16 +1971,16 @@ where I.Item: Eq + Clone {
     type Item = I.Item;
 
     fn next(&mut self) -> Maybe<I.Item> {
-        while let Some(x) = self.iter.next() {
+        while let Maybe.Some(x) = self.iter.next() {
             match self.last {
-                Some(ref l) if l == &x => continue,
+                Maybe.Some(ref l) if l == &x => continue,
                 _ => {
-                    self.last = Some(x.clone());
-                    return Some(x);
+                    self.last = Maybe.Some(x.clone());
+                    return Maybe.Some(x);
                 }
             }
         }
-        None
+        Maybe.None
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
@@ -2074,7 +2074,7 @@ implement<I: DoubleEndedIterator, F: fn(&I.Item)> DoubleEndedIterator for Inspec
     fn next_back(&mut self) -> Maybe<I.Item> {
         let item = self.iter.next_back()?;
         (self.f)(&item);
-        Some(item)
+        Maybe.Some(item)
     }
 }
 
