@@ -19112,6 +19112,23 @@ impl VbcCodegen {
                 }
                 _ => None,
             },
+            // Range expression `a..b` / `a..=b` lowers to a 3-field
+            // `TypeId::RANGE` (517) record `[current, end, inclusive]`
+            // via `compile_range`. Without this arm, `let r = 1..=10;`
+            // didn't populate `variable_type_names["r"] = "Range"`, so
+            // downstream `r.current` / `r.end` / `r.inclusive` field
+            // accesses fell through to the global field-name interner
+            // which mis-resolved offsets to whichever other stdlib
+            // type defines `current` first — surfacing as
+            // `field access out of bounds: field index 3 (offset 24+8=32)
+            // exceeds object data size 24 type_id=517 type='Range'`.
+            //
+            // Returning the bare name `"Range"` matches the well-known
+            // type alias at `codegen/mod.rs:1302` (well_known_types
+            // map: "Range" → TypeId::RANGE) and lets
+            // `register_variable_type` / `resolve_field_index` look up
+            // the canonical 3-field map.
+            ExprKind::Range { .. } => Some("Range".to_string()),
             _ => None,
         }
     }
