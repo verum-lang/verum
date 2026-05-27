@@ -225,7 +225,7 @@ implement Command {
             program: program,
             args: [],
             env_vars: [],
-            working_dir: None,
+            working_dir: Maybe.None,
             stdin_cfg: Stdio.Inherit,
             stdout_cfg: Stdio.Inherit,
             stderr_cfg: Stdio.Inherit,
@@ -256,7 +256,7 @@ implement Command {
 
     /// Sets the working directory.
     public fn current_dir(&mut self, dir: Text) -> &mut Command {
-        self.working_dir = Some(dir);
+        self.working_dir = Maybe.Some(dir);
         self
     }
 
@@ -333,8 +333,8 @@ implement Child {
     /// Returns Err if stdin was not configured as Piped during spawn.
     public fn write_stdin(&self, data: &[Byte]) -> Result<Int, Text> {
         match self.stdin_fd {
-            Some(fd) => write_all_to_fd(fd, data),
-            None => Err("child was not spawned with piped stdin"),
+            Maybe.Some(fd) => write_all_to_fd(fd, data),
+            Maybe.None => Err("child was not spawned with piped stdin"),
         }
     }
 
@@ -342,11 +342,11 @@ implement Child {
     /// that read until EOF (cat, sort, jq, …).
     public fn close_stdin(&mut self) {
         match self.stdin_fd {
-            Some(fd) => {
+            Maybe.Some(fd) => {
                 close_fd(fd);
-                self.stdin_fd = None;
+                self.stdin_fd = Maybe.None;
             }
-            None => {}
+            Maybe.None => {}
         }
     }
 
@@ -382,19 +382,19 @@ implement Child {
         let mut err_bytes: List<Byte> = [];
 
         match self.stdout_fd {
-            Some(fd) => {
+            Maybe.Some(fd) => {
                 out_bytes = read_all_from_fd(fd);
                 close_fd(fd);
             }
-            None => {}
+            Maybe.None => {}
         }
 
         match self.stderr_fd {
-            Some(fd) => {
+            Maybe.Some(fd) => {
                 err_bytes = read_all_from_fd(fd);
                 close_fd(fd);
             }
-            None => {}
+            Maybe.None => {}
         }
 
         let exit_status = wait_for_child(self.pid)?;
@@ -458,9 +458,9 @@ fn spawn_child(cmd: &Command) -> Result<Child, Text> {
     let r = native_spawn(&cmd.program, &cmd.args, cap_stdin, cap_stdout, cap_stderr)?;
     Ok(Child {
         pid:       r.pid,
-        stdin_fd:  if r.stdin_fd  >= 0 { Some(r.stdin_fd)  } else { None },
-        stdout_fd: if r.stdout_fd >= 0 { Some(r.stdout_fd) } else { None },
-        stderr_fd: if r.stderr_fd >= 0 { Some(r.stderr_fd) } else { None },
+        stdin_fd:  if r.stdin_fd  >= 0 { Maybe.Some(r.stdin_fd)  } else { Maybe.None },
+        stdout_fd: if r.stdout_fd >= 0 { Maybe.Some(r.stdout_fd) } else { Maybe.None },
+        stderr_fd: if r.stderr_fd >= 0 { Maybe.Some(r.stderr_fd) } else { Maybe.None },
     })
 }
 
@@ -638,8 +638,8 @@ fn spawn_child(cmd: &Command) -> Result<Child, Text> {
         CREATE_NO_WINDOW,                      // Don't create console window
         0 as &unsafe Byte,                    // Inherit environment
         match &cmd.working_dir {               // Working directory
-            Some(dir) => dir.as_null_terminated_bytes().as_ptr() as &unsafe Byte,
-            None => 0 as &unsafe Byte,
+            Maybe.Some(dir) => dir.as_null_terminated_bytes().as_ptr() as &unsafe Byte,
+            Maybe.None => 0 as &unsafe Byte,
         },
         &si,
         &mut pi,
@@ -660,9 +660,9 @@ fn spawn_child(cmd: &Command) -> Result<Child, Text> {
 
     Ok(Child {
         pid: pi.process.as_raw() as Int,
-        stdout_fd: if capture_stdout { Some(stdout_read.as_raw() as Int) } else { None },
-        stderr_fd: if capture_stderr { Some(stderr_read.as_raw() as Int) } else { None },
-        stdin_fd: None,
+        stdout_fd: if capture_stdout { Maybe.Some(stdout_read.as_raw() as Int) } else { Maybe.None },
+        stderr_fd: if capture_stderr { Maybe.Some(stderr_read.as_raw() as Int) } else { Maybe.None },
+        stdin_fd: Maybe.None,
     })
 }
 
