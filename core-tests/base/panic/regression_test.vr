@@ -1,0 +1,152 @@
+// =============================================================================
+// core-tests/base/panic/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.panic` — panic/assert/control-flow,
+// Location + PanicInfo records, catch_unwind.
+// =============================================================================
+
+mount core.base.panic.{
+    Location, PanicInfo,
+    catch_unwind, CatchResult,
+};
+mount core.{Maybe, Result, Text};
+mount core.base.{Debug, Formatter, FormatError};
+mount core.collections.list.List;
+
+// =============================================================================
+// REGRESSION §A (@ignore'd): `Formatter.write_int` is lenient-stubbed
+// because the underlying integer→bytes path references
+// `Text.from_utf8_unchecked` which was declared private at
+// `core/text/text.vr:455`. Same root as
+// `core-tests/base/ulid/regression_test.vr §A` —
+// fix staged in this branch (text.vr:455 → `public unsafe fn`);
+// activates on next precompiled-stdlib refresh.
+//
+// Cascading consumers — every `.fmt_debug(&mut f)` / `.fmt(&mut f)`
+// impl that writes an integer or a Text via the bytes-unchecked path
+// hits this panic-stub.
+// =============================================================================
+
+@ignore("Text.from_utf8_unchecked was private; Formatter.write_int lenient-stub. Fix staged, awaits stdlib refresh.")
+@test
+fn regression_pin_location_debug_format_via_formatter() {
+    let loc = Location.new("test.vr".to_text(), 42, 10);
+    let mut buffer = Text.new();
+    {
+        let mut formatter = Formatter.new(&mut buffer);
+        let result = loc.fmt_debug(&mut formatter);
+        assert(result.is_ok());
+    }
+    assert(buffer.contains("test.vr"));
+    assert(buffer.contains("42"));
+    assert(buffer.contains("10"));
+}
+
+@ignore("Same Text.from_utf8_unchecked defect — Location.fmt() Display path.")
+@test
+fn regression_pin_location_display_format_via_formatter() {
+    let loc = Location.new("main.vr".to_text(), 1, 1);
+    let mut buffer = Text.new();
+    {
+        let mut formatter = Formatter.new(&mut buffer);
+        let result = loc.fmt(&mut formatter);
+        assert(result.is_ok());
+    }
+    assert(buffer.contains("main.vr"));
+}
+
+// =============================================================================
+// REGRESSION §B: Location is a 3-field record (file, line, column). A
+// defect that reordered or renamed any field would silently break
+// every consumer of panic-site capture and diagnostic formatting.
+// =============================================================================
+
+@test
+fn regression_location_three_field_record_layout() {
+    let loc = Location {
+        file: "module.vr".to_text(),
+        line: 55,
+        column: 3,
+    };
+    assert_eq(loc.file, "module.vr".to_text());
+    assert_eq(loc.line, 55);
+    assert_eq(loc.column, 3);
+}
+
+// =============================================================================
+// REGRESSION §C: Location.new constructor preserves all 3 fields in
+// declared order. A defect that swapped line / column would silently
+// flip column metadata across every panic site.
+// =============================================================================
+
+@test
+fn regression_location_new_preserves_field_order() {
+    let loc = Location.new("test.vr".to_text(), 42, 10);
+    assert_eq(loc.file, "test.vr".to_text());
+    assert_eq(loc.line, 42);
+    assert_eq(loc.column, 10);
+    // A second case to pin: column != line, swap-detect.
+    let loc2 = Location.new("alt.vr".to_text(), 7, 99);
+    assert_eq(loc2.line, 7);
+    assert_eq(loc2.column, 99);
+}
+
+// =============================================================================
+// REGRESSION §D: PanicInfo carries (message: Text, location: Maybe<Location>).
+// Both fields accessible via the canonical accessor methods
+// `.message() -> &Text` / `.location() -> &Maybe<Location>`.
+// =============================================================================
+
+@test
+fn regression_panic_info_with_location_round_trip() {
+    let loc = Location.new("error.vr".to_text(), 99, 5);
+    let info = PanicInfo {
+        message: "something went wrong".to_text(),
+        location: Some(loc),
+    };
+    assert_eq(info.message(), &"something went wrong".to_text());
+    assert(info.location().is_some());
+}
+
+@test
+fn regression_panic_info_without_location_round_trip() {
+    let info = PanicInfo {
+        message: "no location captured".to_text(),
+        location: None,
+    };
+    assert_eq(info.message(), &"no location captured".to_text());
+    assert(info.location().is_none());
+}
+
+// =============================================================================
+// REGRESSION §E: PanicInfo two-field record. Field-access order
+// stability pin.
+// =============================================================================
+
+@test
+fn regression_panic_info_two_field_record_layout() {
+    let info = PanicInfo {
+        message: "x".to_text(),
+        location: None,
+    };
+    // Direct field access.
+    assert_eq(info.message, "x".to_text());
+    let l: Maybe<Location> = info.location;
+    assert(l.is_none());
+}
+
+// =============================================================================
+// REGRESSION §F: Location.new with edge cases (empty file, zero
+// line/column) constructs cleanly without panic.
+// =============================================================================
+
+@test
+fn regression_location_new_with_empty_file_and_zero_positions() {
+    let loc = Location.new("".to_text(), 0, 0);
+    assert_eq(loc.file, "".to_text());
+    assert_eq(loc.line, 0);
+    assert_eq(loc.column, 0);
+}
+
+fn main() {}
