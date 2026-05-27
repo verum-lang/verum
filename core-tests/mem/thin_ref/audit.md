@@ -205,3 +205,47 @@ not the dispatch resolution. Pin updated in `audit.md` (this
 section). See memory entry
 `use_after_free_error_field_shift_2026-05-27.md` for the full
 diagnostic trace.
+
+## 7. Attempted fix 2026-05-27 — REVERTED (commit 585728904)
+
+Commit `ab8e707f4` added a defensive `self.types`-by-name fallback
+in `resolve_field_index` (codegen/mod.rs:13599-13663) that scanned
+`self.types` for descriptors by simple name and backfilled both
+`type_field_layouts` and `type_name_to_id`.  The intent was to close
+the cross-module record-return field-access OOB defect class.
+
+**Result**: the fix introduced a regression — the 3 previously-GREEN
+`test_use_after_free_error_*_via_record_literal` unit tests
+started failing with:
+
+```
+field write out of bounds: field index 5 (offset 40+8 = 48)
+exceeds object data size 40 type_id=0 type='?'
+backtrace=[...test_use_after_free_error_eq_reflexive_via_record_literal@pc=11]
+```
+
+The 5-field UseAfterFreeError record was allocated with 5 slots
+(40 bytes data), but a SetF emit tried field_idx=5 (OOB).
+
+Root cause hypothesis (incomplete — needs further investigation):
+the backfill into `type_name_to_id` interacts badly with
+`compile_record`'s alloc-slot computation at
+`expressions.rs:16906-16938`.  When the backfilled
+`type_name_to_id[UseAfterFreeError] = td.id` points at a descriptor
+whose field set doesn't strictly match the literal's field set
+(possibly due to a SECOND descriptor in `self.types` with the same
+simple name — a variant or sibling-type collision), the downstream
+`New { type_id, field_count: alloc_slots }` emit picks one
+descriptor's `fields.len()` while the SetF emits use the other
+descriptor's positional indices, producing OOB writes.
+
+**Reverted in commit `585728904`**.  Three `@ignore`'d tests remain
+pinned.  The correct fundamental fix must preserve the 4-way
+consistency invariant `(type_name_to_id, self.types,
+type_field_layouts, type_field_type_names)` simultaneously, not
+piecewise — likely requires touching the archive-load path
+(`import_archive_type_with_protocol_remap` in mod.rs:15771)
+directly rather than a downstream fallback.
+
+The defect class continues to be tracked in
+`use_after_free_error_field_shift_2026-05-27.md`.
