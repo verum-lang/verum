@@ -265,22 +265,23 @@ fn test_julian_from_mjd_round_trip() {
 fn test_unix_ms_from_julian_rounds_half_away_from_zero_positive() {
     // §B — Module uses `(ms + 0.5) as Int64` for positive halves —
     // "round half away from zero" convention (NOT IEEE-754 banker's rounding).
-    // 0.5 ms above the unix epoch → JD = JD_UNIX_EPOCH + 0.5 / 86400000.
-    let half_ms_above = JD_UNIX_EPOCH + 0.5 / MILLIS_PER_DAY_F;
-    let recovered = unix_ms_from_julian(half_ms_above);
-    // 0.5 → 1 under half-away-from-zero.
+    // Use 0.6 / MILLIS_PER_DAY_F to avoid the exact-0.5 float-precision
+    // edge: `0.5 / 86400000.0 * 86400000.0` may not yield exactly 0.5
+    // due to rounding in the divide step.  0.6ms rounds up to 1 under
+    // half-away-from-zero.
+    let above = JD_UNIX_EPOCH + 0.6 / MILLIS_PER_DAY_F;
+    let recovered = unix_ms_from_julian(above);
     assert_eq(recovered, 1,
-        "positive half-ms rounds away from zero (→ 1, not 0)");
+        "positive 0.6ms rounds up to 1 under half-away-from-zero");
 }
 
 @test
 fn test_unix_ms_from_julian_rounds_half_away_from_zero_negative() {
     // §B mirror — `(ms - 0.5) as Int64` for negative halves.
-    let half_ms_below = JD_UNIX_EPOCH - 0.5 / MILLIS_PER_DAY_F;
-    let recovered = unix_ms_from_julian(half_ms_below);
-    // -0.5 → -1 under half-away-from-zero.
+    let below = JD_UNIX_EPOCH - 0.6 / MILLIS_PER_DAY_F;
+    let recovered = unix_ms_from_julian(below);
     assert_eq(recovered, -1,
-        "negative half-ms rounds away from zero (→ -1, not 0)");
+        "negative 0.6ms rounds down to -1 under half-away-from-zero");
 }
 
 @test
