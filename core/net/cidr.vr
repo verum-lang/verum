@@ -299,8 +299,20 @@ fn mask_equal(a: &[Byte], b: &[Byte], prefix_len: Int) -> Bool {
 // =============================================================================
 
 fn slice_text(src: &[Byte], start: Int, end: Int) -> Text {
-    let mut out: List<Byte> = List.with_capacity(end - start);
-    out.extend_from_slice(&src[start..end]);
+    // Eager byte-by-byte push instead of extend_from_slice — CIDR-1
+    // root cause: extend_from_slice(&src[start..end]) followed by
+    // from_utf8_unchecked(out.as_slice()) chains through three
+    // List-payload intrinsic dispatch paths and triggers the LLVM
+    // SmallVector::grow_pod SIGSEGV in cidr.parse precompile cascade.
+    // The byte-by-byte push pattern uses the canonical push codegen
+    // that works for all other stdlib parsers.
+    let len = end - start;
+    let mut out: List<Byte> = List.with_capacity(len);
+    let mut i = start;
+    while i < end {
+        out.push(src[i]);
+        i = i + 1;
+    }
     Text.from_utf8_unchecked(out.as_slice())
 }
 
