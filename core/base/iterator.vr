@@ -135,7 +135,7 @@ public type Iterator is protocol {
     /// Returns (lower_bound, upper_bound) estimate of remaining elements.
     @inline(always)
     fn size_hint(&self) -> (Int, Maybe<Int>) {
-        (0, None)
+        (0, Maybe.None)
     }
 
     // =========================================================================
@@ -153,9 +153,9 @@ public type Iterator is protocol {
 
     /// Get the last element.
     fn last(mut self) -> Maybe<Self.Item> {
-        let mut last = None;
-        while let Some(x) = self.next() {
-            last = Some(x);
+        let mut last = Maybe.None;
+        while let Maybe.Some(x) = self.next() {
+            last = Maybe.Some(x);
         }
         last
     }
@@ -169,7 +169,7 @@ public type Iterator is protocol {
     /// returning the FIRST element. Audit #12 fix.
     fn nth(&mut self, n: Int) -> Maybe<Self.Item> {
         if n < 0 {
-            return None;
+            return Maybe.None;
         }
         for _ in range(0, n) {
             self.next()?;
@@ -227,7 +227,7 @@ public type Iterator is protocol {
         FlatMapIter {
             iter: self,
             f: f,
-            current: None,
+            current: Maybe.None,
         }
     }
 
@@ -235,7 +235,7 @@ public type Iterator is protocol {
     @inline(always)
     fn flatten<U: Iterator>(self) -> FlattenIter<Self, U>
     where Self.Item: IntoIterator<IntoIter = U> {
-        FlattenIter { outer: self, inner: None }
+        FlattenIter { outer: self, inner: Maybe.None }
     }
 
     /// Take first n elements.
@@ -265,7 +265,7 @@ public type Iterator is protocol {
     /// Chain with another iterator.
     @inline(always)
     fn chain<U: Iterator<Item = Self.Item>>(self, other: U) -> ChainIter<Self, U> {
-        ChainIter { first: Some(self), second: other }
+        ChainIter { first: Maybe.Some(self), second: other }
     }
 
     /// Zip with another iterator.
@@ -283,13 +283,13 @@ public type Iterator is protocol {
     /// Allow peeking at next element.
     @inline(always)
     fn peekable(self) -> PeekableIter<Self> {
-        PeekableIter { iter: self, peeked: None }
+        PeekableIter { iter: self, peeked: Maybe.None }
     }
 
     /// Skip consecutive duplicates.
     fn dedup(self) -> DedupIter<Self>
     where Self.Item: Eq {
-        DedupIter { iter: self, last: None }
+        DedupIter { iter: self, last: Maybe.None }
     }
 
     /// Interleave with another iterator.
@@ -312,7 +312,7 @@ public type Iterator is protocol {
     /// Fuse the iterator (returns None forever after first None).
     @inline(always)
     fn fuse(self) -> FuseIter<Self> {
-        FuseIter { iter: Some(self) }
+        FuseIter { iter: Maybe.Some(self) }
     }
 
     /// Cycle through elements infinitely.
@@ -2510,33 +2510,33 @@ implement<A: Iterator, B: Iterator> Iterator for ZipLongestIter<A, B> {
 
     fn next(&mut self) -> Maybe<(Maybe<A.Item>, Maybe<B.Item>)> {
         let left = if self.a_done {
-            None
+            Maybe.None
         } else {
             match self.a.next() {
-                Some(v) => Some(v),
-                None => {
+                Maybe.Some(v) => Maybe.Some(v),
+                Maybe.None => {
                     self.a_done = true;
-                    None
+                    Maybe.None
                 },
             }
         };
 
         let right = if self.b_done {
-            None
+            Maybe.None
         } else {
             match self.b.next() {
-                Some(v) => Some(v),
-                None => {
+                Maybe.Some(v) => Maybe.Some(v),
+                Maybe.None => {
                     self.b_done = true;
-                    None
+                    Maybe.None
                 },
             }
         };
 
         if left is None && right is None {
-            None
+            Maybe.None
         } else {
-            Some((left, right))
+            Maybe.Some((left, right))
         }
     }
 
@@ -2545,8 +2545,8 @@ implement<A: Iterator, B: Iterator> Iterator for ZipLongestIter<A, B> {
         let (b_lower, b_upper) = self.b.size_hint();
         let lower = if a_lower > b_lower { a_lower } else { b_lower };
         let upper = match (a_upper, b_upper) {
-            (Some(a), Some(b)) => if a > b { Some(a) } else { Some(b) },
-            _ => None,
+            (Maybe.Some(a), Maybe.Some(b)) => if a > b { Maybe.Some(a) } else { Maybe.Some(b) },
+            _ => Maybe.None,
         };
         (lower, upper)
     }
