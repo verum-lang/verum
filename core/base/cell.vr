@@ -440,13 +440,13 @@ implement<T> OnceCell<T> {
     /// Create a new empty OnceCell.
     @inline(always)
     public fn new() -> OnceCell<T> {
-        OnceCell { value: None }
+        OnceCell { value: Maybe.None }
     }
 
     /// Create a new OnceCell with an initial value.
     @inline(always)
     public fn new_with(value: T) -> OnceCell<T> {
-        OnceCell { value: Some(value) }
+        OnceCell { value: Maybe.Some(value) }
     }
 
     /// Returns true if the cell has been initialized.
@@ -471,10 +471,10 @@ implement<T> OnceCell<T> {
     /// back the rejected value.
     public fn set(&self, value: T) -> Result<(), T> {
         if self.value.is_some() {
-            Err(value)
+            Result.Err(value)
         } else {
             @vbc(ONCECELL_SET, self, value);
-            Ok(())
+            Result.Ok(())
         }
     }
 
@@ -501,7 +501,7 @@ implement<T> OnceCell<T> {
     /// After this call, the cell can be set again.
     public fn take(&self) -> Maybe<T> where T: Clone {
         if self.value.is_none() {
-            None
+            Maybe.None
         } else {
             let val = self.value.clone();
             @vbc(ONCECELL_TAKE, self);
@@ -617,8 +617,8 @@ implement<T> LazyCell<T> {
     @inline(always)
     public fn new(init: fn() -> T) -> LazyCell<T> {
         LazyCell {
-            value: None,
-            init: Some(init),
+            value: Maybe.None,
+            init: Maybe.Some(init),
         }
     }
 

@@ -75,8 +75,8 @@ implement<T, E> Result<T, E> {
     @inline(always)
     public fn ok(self) -> Maybe<T> {
         match self {
-            Ok(v) => Some(v),
-            Err(_) => None,
+            Ok(v) => Maybe.Some(v),
+            Err(_) => Maybe.None,
         }
     }
 
@@ -84,8 +84,8 @@ implement<T, E> Result<T, E> {
     @inline(always)
     public fn err(self) -> Maybe<E> {
         match self {
-            Ok(_) => None,
-            Err(e) => Some(e),
+            Ok(_) => Maybe.None,
+            Err(e) => Maybe.Some(e),
         }
     }
 
@@ -330,7 +330,7 @@ implement<T> Iterator for ResultIter<T> {
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let n = if self.inner.is_some() { 1 } else { 0 };
-        (n, Some(n))
+        (n, Maybe.Some(n))
     }
 }
 
@@ -379,8 +379,8 @@ implement<T: Ord, E: Ord> Ord for Result<T, E> {
         match (self, other) {
             (Ok(a), Ok(b)) => a.cmp(b),
             (Err(a), Err(b)) => a.cmp(b),
-            (Ok(_), Err(_)) => Greater,
-            (Err(_), Ok(_)) => Less,
+            (Ok(_), Err(_)) => Ordering.Greater,
+            (Err(_), Ok(_)) => Ordering.Less,
         }
     }
 }

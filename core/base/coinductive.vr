@@ -195,9 +195,9 @@ implement ObservationTrace {
     /// of range.
     public fn get(&self, i: Int) -> Maybe<Observation> {
         if i >= 0 && i < self.steps.len() {
-            Some(self.steps[i])
+            Maybe.Some(self.steps[i])
         } else {
-            None
+            Maybe.None
         }
     }
 

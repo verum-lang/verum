@@ -697,9 +697,9 @@ implement<T> Shared<T> {
     /// Try to get mutable reference (only if unique and no weak refs).
     public fn get_mut(&mut self) -> Maybe<&mut T> {
         if self.is_unique() && self.weak_count() == 0 {
-            Some(unsafe { &mut (*self.ptr).value })
+            Maybe.Some(unsafe { &mut (*self.ptr).value })
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -952,7 +952,7 @@ implement<T> Weak<T> {
 
                 if count == 0 {
                     // Value has been dropped
-                    return None;
+                    return Maybe.None;
                 }
 
                 // Try to increment
@@ -965,7 +965,7 @@ implement<T> Weak<T> {
                 );
 
                 if result.1 {
-                    return Some(Shared {
+                    return Maybe.Some(Shared {
                         ptr: self.ptr,
                         generation: self.generation,
                         epoch: self.epoch,
