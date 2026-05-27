@@ -23,7 +23,7 @@
 // =============================================================================
 
 mount core.net.websocket.{
-    WsOpcode, CloseCode, WsFrame
+    WsOpcode, CloseCode, WsFrame, accept_key, WEBSOCKET_MAGIC
 };
 mount core.collections.List;
 
@@ -277,3 +277,46 @@ fn test_ws_frame_binary_factory() {
     assert(f.fin);
     assert(f.opcode is WsOpcode.Binary);
 }
+
+// =============================================================================
+// Section 8: WEBSOCKET_MAGIC — RFC 6455 §1.3 GUID
+// =============================================================================
+//
+// The fixed 36-byte ASCII GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+// is the canonical handshake derivation salt. Wire-format drift here
+// would break every WebSocket peer.
+
+@test
+fn test_websocket_magic_length() {
+    // RFC 6455 §1.3: the GUID is exactly 36 ASCII characters
+    assert_eq(WEBSOCKET_MAGIC.len(), 36);
+}
+
+@test
+fn test_websocket_magic_first_byte() {
+    // '2' = 0x32
+    assert_eq(WEBSOCKET_MAGIC[0], 0x32_u8);
+}
+
+@test
+fn test_websocket_magic_last_byte() {
+    // '1' = 0x31
+    assert_eq(WEBSOCKET_MAGIC[35], 0x31_u8);
+}
+
+@test
+fn test_websocket_magic_dashes_at_canonical_positions() {
+    // GUID format: 8-4-4-4-12 with dashes at indices 8, 13, 18, 23
+    assert_eq(WEBSOCKET_MAGIC[8], 0x2D_u8);    // '-'
+    assert_eq(WEBSOCKET_MAGIC[13], 0x2D_u8);   // '-'
+    assert_eq(WEBSOCKET_MAGIC[18], 0x2D_u8);   // '-'
+    assert_eq(WEBSOCKET_MAGIC[23], 0x2D_u8);   // '-'
+}
+
+// =============================================================================
+// Section 9: accept_key — see regression_test.vr WS-6
+// =============================================================================
+//
+// `accept_key(&Text)` stack-overflows in Sha1/base64 cascade at depth
+// 16384 — even with empty key — under `--interp`. Tracked as WS-6 in
+// regression_test.vr; RFC 6455 §1.3 test vector pinned there.
