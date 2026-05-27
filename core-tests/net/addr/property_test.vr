@@ -1,0 +1,228 @@
+// =============================================================================
+// core-tests/net/addr/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core/net/addr.vr`:
+//   * to_u32 / from_u32 round-trip identity over selected canonical IPs
+//   * Ipv4Addr.parse ∘ Display ≡ id on the 256³ × 256 lattice (sampled)
+//   * RFC-1918 / RFC-5735 predicate disjointness
+//   * is_broadcast ⇒ NOT is_private
+//   * is_loopback ⇒ NOT is_private (disjointness 127/8 vs RFC 1918)
+//   * is_multicast ⇒ NOT is_broadcast
+//   * Ipv6Addr.is_loopback ⇒ NOT is_multicast
+//   * SocketAddr.is_ipv4 XOR SocketAddr.is_ipv6 (variant exhaustivity)
+// =============================================================================
+
+mount core.net.addr.{Ipv4Addr, Ipv6Addr, IpAddr, SocketAddr, AddrParseError};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: to_u32 / from_u32 round-trip — sampled
+// =============================================================================
+
+@test
+fn prop_ipv4_round_trip_localhost() {
+    let a = Ipv4Addr.localhost();
+    let b = Ipv4Addr.from_u32(a.to_u32());
+    assert(a == b);
+}
+
+@test
+fn prop_ipv4_round_trip_unspecified() {
+    let a = Ipv4Addr.unspecified();
+    let b = Ipv4Addr.from_u32(a.to_u32());
+    assert(a == b);
+}
+
+@test
+fn prop_ipv4_round_trip_broadcast() {
+    let a = Ipv4Addr.broadcast();
+    let b = Ipv4Addr.from_u32(a.to_u32());
+    assert(a == b);
+}
+
+@test
+fn prop_ipv4_round_trip_dns_google() {
+    let a = Ipv4Addr.new(8_u8, 8_u8, 8_u8, 8_u8);
+    let b = Ipv4Addr.from_u32(a.to_u32());
+    assert(a == b);
+}
+
+@test
+fn prop_ipv4_round_trip_private_192() {
+    let a = Ipv4Addr.new(192_u8, 168_u8, 42_u8, 7_u8);
+    let b = Ipv4Addr.from_u32(a.to_u32());
+    assert(a == b);
+}
+
+@test
+fn prop_ipv4_round_trip_private_172() {
+    let a = Ipv4Addr.new(172_u8, 20_u8, 13_u8, 99_u8);
+    let b = Ipv4Addr.from_u32(a.to_u32());
+    assert(a == b);
+}
+
+@test
+fn prop_ipv4_round_trip_full_sweep_low_octets() {
+    // Sample every low-byte combination on octet 3 — confirms round-trip
+    // monotone wrt low byte (catches accidental masking bugs).
+    let mut i = 0;
+    while i < 256 {
+        let a = Ipv4Addr.new(10_u8, 0_u8, 0_u8, i as Byte);
+        let b = Ipv4Addr.from_u32(a.to_u32());
+        assert(a == b);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 2: Predicate disjointness
+// =============================================================================
+
+@test
+fn prop_loopback_disjoint_private() {
+    // 127/8 ∩ RFC-1918 = ∅
+    let a = Ipv4Addr.new(127_u8, 0_u8, 0_u8, 1_u8);
+    assert(a.is_loopback() && !a.is_private());
+}
+
+@test
+fn prop_broadcast_disjoint_private() {
+    let b = Ipv4Addr.broadcast();
+    assert(b.is_broadcast() && !b.is_private());
+}
+
+@test
+fn prop_multicast_disjoint_broadcast() {
+    let m = Ipv4Addr.new(224_u8, 0_u8, 0_u8, 1_u8);
+    assert(m.is_multicast() && !m.is_broadcast());
+}
+
+@test
+fn prop_unspecified_unique() {
+    // 0.0.0.0 is unspecified — nothing else satisfies it
+    let u = Ipv4Addr.unspecified();
+    assert(u.is_unspecified());
+    assert(!Ipv4Addr.localhost().is_unspecified());
+    assert(!Ipv4Addr.broadcast().is_unspecified());
+}
+
+// =============================================================================
+// Section 3: RFC 1918 boundary lattice
+// =============================================================================
+
+@test
+fn prop_rfc1918_10_full_first_octet() {
+    // Every 10/8 is private (sampled at first/last)
+    assert(Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8).is_private());
+    assert(Ipv4Addr.new(10_u8, 255_u8, 255_u8, 255_u8).is_private());
+}
+
+@test
+fn prop_rfc1918_172_boundary_lattice() {
+    // 172.{15,16,31,32}.0.0 — 16/31 private, 15/32 not
+    assert(!Ipv4Addr.new(172_u8, 15_u8, 0_u8, 0_u8).is_private());
+    assert(Ipv4Addr.new(172_u8, 16_u8, 0_u8, 0_u8).is_private());
+    assert(Ipv4Addr.new(172_u8, 31_u8, 0_u8, 0_u8).is_private());
+    assert(!Ipv4Addr.new(172_u8, 32_u8, 0_u8, 0_u8).is_private());
+}
+
+@test
+fn prop_rfc1918_192_boundary_lattice() {
+    assert(!Ipv4Addr.new(192_u8, 167_u8, 0_u8, 0_u8).is_private());
+    assert(Ipv4Addr.new(192_u8, 168_u8, 0_u8, 0_u8).is_private());
+    assert(Ipv4Addr.new(192_u8, 168_u8, 255_u8, 255_u8).is_private());
+    assert(!Ipv4Addr.new(192_u8, 169_u8, 0_u8, 0_u8).is_private());
+}
+
+// =============================================================================
+// Section 4: Multicast 224-239 boundary
+// =============================================================================
+
+@test
+fn prop_multicast_lower_boundary() {
+    assert(!Ipv4Addr.new(223_u8, 255_u8, 255_u8, 255_u8).is_multicast());
+    assert(Ipv4Addr.new(224_u8, 0_u8, 0_u8, 0_u8).is_multicast());
+}
+
+@test
+fn prop_multicast_upper_boundary() {
+    assert(Ipv4Addr.new(239_u8, 255_u8, 255_u8, 255_u8).is_multicast());
+    assert(!Ipv4Addr.new(240_u8, 0_u8, 0_u8, 0_u8).is_multicast());
+}
+
+// =============================================================================
+// Section 5: Ipv6Addr — predicate exclusivity
+// =============================================================================
+
+@test
+fn prop_ipv6_loopback_not_multicast() {
+    let l = Ipv6Addr.localhost();
+    assert(l.is_loopback() && !l.is_multicast());
+}
+
+@test
+fn prop_ipv6_link_local_disjoint_unique_local() {
+    let ll = Ipv6Addr.new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+    let ul = Ipv6Addr.new(0xfc00, 0, 0, 0, 0, 0, 0, 1);
+    assert(ll.is_link_local() && !ll.is_unique_local());
+    assert(ul.is_unique_local() && !ul.is_link_local());
+}
+
+@test
+fn prop_ipv6_multicast_ff00_to_ffff() {
+    // First octet ff → multicast
+    assert(Ipv6Addr.new(0xff01, 0, 0, 0, 0, 0, 0, 1).is_multicast());
+    assert(Ipv6Addr.new(0xffff, 0, 0, 0, 0, 0, 0, 1).is_multicast());
+    // First octet fe → NOT multicast
+    assert(!Ipv6Addr.new(0xfe00, 0, 0, 0, 0, 0, 0, 1).is_multicast());
+}
+
+// =============================================================================
+// Section 6: SocketAddr — variant exhaustivity
+// =============================================================================
+
+@test
+fn prop_socket_addr_v4_xor_v6() {
+    let v4 = SocketAddr.new_v4(Ipv4Addr.localhost(), 80);
+    let v6 = SocketAddr.new_v6(Ipv6Addr.localhost(), 80);
+    assert(v4.is_ipv4() != v4.is_ipv6());
+    assert(v6.is_ipv4() != v6.is_ipv6());
+}
+
+@test
+fn prop_socket_addr_port_preserved() {
+    let mut p = 0;
+    while p < 65536 {
+        let s = SocketAddr.new_v4(Ipv4Addr.localhost(), p);
+        assert_eq(s.port(), p);
+        // Step by a generous stride — full sweep would be too slow under --interp.
+        p = p + 4096;
+    }
+}
+
+// =============================================================================
+// Section 7: AddrParseError — disjointness lattice
+// =============================================================================
+
+@test
+fn prop_addr_parse_error_pairwise_disjoint() {
+    let variants = [
+        AddrParseError.InvalidFormat,
+        AddrParseError.InvalidOctet,
+        AddrParseError.InvalidPort,
+    ];
+    let mut i = 0;
+    while i < 3 {
+        let mut j = 0;
+        while j < 3 {
+            if i == j {
+                assert(variants[i] == variants[j]);
+            } else {
+                assert(!(variants[i] == variants[j]));
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}

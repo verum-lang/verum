@@ -1,0 +1,225 @@
+// =============================================================================
+// core-tests/net/ipv6_canonical/unit_test.vr
+// =============================================================================
+//
+// `core/net/ipv6_canonical.vr` — RFC 5952 canonical IPv6 text
+// representation.
+//
+//   * format_ipv6(&Ipv6Addr) -> Text  — non-v4-mapped path only
+//   * canonicalize(&Text) -> Result<Text, Ipv6CanonicalError>
+//   * equal_addresses(&Text, &Text) -> Bool
+//
+// Canonical-form rules tested (§4):
+//   * §4.1 Leading zeros suppressed
+//   * §4.2.1 Longest run of zero groups compressed with `::`
+//   * §4.2.2 Single zero group NOT compressed
+//   * §4.2.3 Ties → leftmost run wins
+//   * §4.3 All hex digits lowercase
+//
+// §5 IPv4-mapped form `::ffff:a.b.c.d` is pinned in
+// `regression_test.vr` behind IPV6CAN-1 — calling
+// `format_ipv6(&v4_mapped)` triggers a precompile SIGSEGV through
+// the byte-string-literal + high-index octet-access path in
+// `format_v4_mapped`. See `audit.md §3.1`.
+// =============================================================================
+
+mount core.net.ipv6_canonical.{format_ipv6, canonicalize, equal_addresses};
+mount core.net.addr.{Ipv6Addr};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: format_ipv6 — canonical addresses
+// =============================================================================
+
+@test
+fn test_format_unspecified() {
+    let a = Ipv6Addr.unspecified();
+    let s = format_ipv6(&a);
+    assert_eq(s.as_str(), "::");
+}
+
+@test
+fn test_format_localhost() {
+    let a = Ipv6Addr.localhost();
+    let s = format_ipv6(&a);
+    assert_eq(s.as_str(), "::1");
+}
+
+// =============================================================================
+// Section 2: format_ipv6 — §4.1 leading-zero suppression
+// =============================================================================
+
+@test
+fn test_format_suppresses_leading_zeros() {
+    // 2001:0db8:0001:0002:0003:0004:0005:0006 → 2001:db8:1:2:3:4:5:6
+    let a = Ipv6Addr.new(0x2001, 0x0db8, 0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006);
+    let s = format_ipv6(&a);
+    assert_eq(s.as_str(), "2001:db8:1:2:3:4:5:6");
+}
+
+// =============================================================================
+// Section 3: format_ipv6 — §4.2.1 longest zero-run compression
+// =============================================================================
+
+@test
+fn test_format_compresses_trailing_zeros() {
+    // 2001:db8:0:0:0:0:0:0 → 2001:db8::
+    let a = Ipv6Addr.new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0);
+    let s = format_ipv6(&a);
+    assert_eq(s.as_str(), "2001:db8::");
+}
+
+@test
+fn test_format_compresses_leading_zeros() {
+    let a = Ipv6Addr.new(0, 0, 0, 0, 0, 0, 0, 1);
+    let s = format_ipv6(&a);
+    assert_eq(s.as_str(), "::1");
+}
+
+@test
+fn test_format_compresses_middle_zeros() {
+    let a = Ipv6Addr.new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+    let s = format_ipv6(&a);
+    assert_eq(s.as_str(), "2001:db8::1");
+}
+
+// =============================================================================
+// Section 4: format_ipv6 — §4.2.2 single-zero NOT compressed
+// =============================================================================
+
+@test
+fn test_format_does_not_compress_single_zero() {
+    let a = Ipv6Addr.new(0x2001, 0xdb8, 0, 1, 1, 1, 1, 1);
+    let s = format_ipv6(&a);
+    assert_eq(s.as_str(), "2001:db8:0:1:1:1:1:1");
+}
+
+// =============================================================================
+// Section 5: format_ipv6 — §4.2.3 leftmost-on-ties + longest-wins
+// =============================================================================
+
+@test
+fn test_format_leftmost_ties_win() {
+    let a = Ipv6Addr.new(0, 0, 1, 0, 0, 1, 0, 0);
+    let s = format_ipv6(&a);
+    assert_eq(s.as_str(), "::1:0:0:1:0:0");
+}
+
+@test
+fn test_format_longest_run_wins() {
+    let a = Ipv6Addr.new(0, 0, 1, 0, 0, 0, 1, 0);
+    let s = format_ipv6(&a);
+    assert_eq(s.as_str(), "0:0:1::1:0");
+}
+
+// =============================================================================
+// Section 6: format_ipv6 — §4.3 lowercase hex
+// =============================================================================
+
+@test
+fn test_format_emits_lowercase_hex() {
+    let a = Ipv6Addr.new(0xFE80, 0xABCD, 0xDEAD, 0xBEEF, 0xCAFE, 0xBABE, 0xF00D, 0xFADE);
+    let s = format_ipv6(&a);
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        assert(!(c >= 65_u8 && c <= 70_u8), "found uppercase A-F in canonical output");
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Section 7: canonicalize — parse + re-emit
+// =============================================================================
+
+@test
+fn test_canonicalize_localhost() {
+    let s = "::1".clone();
+    match canonicalize(&s) {
+        Ok(c) => assert_eq(c.as_str(), "::1"),
+        Err(_) => panic("::1 should canonicalize"),
+    }
+}
+
+@test
+fn test_canonicalize_full_to_compressed() {
+    let s = "2001:0db8:0000:0000:0000:0000:0000:0001".clone();
+    match canonicalize(&s) {
+        Ok(c) => assert_eq(c.as_str(), "2001:db8::1"),
+        Err(_) => panic("should canonicalize"),
+    }
+}
+
+@test
+fn test_canonicalize_uppercase_to_lowercase() {
+    let s = "2001:DB8::1".clone();
+    match canonicalize(&s) {
+        Ok(c) => assert_eq(c.as_str(), "2001:db8::1"),
+        Err(_) => panic("uppercase should canonicalize to lowercase"),
+    }
+}
+
+@test
+fn test_canonicalize_unspecified() {
+    let s = "0:0:0:0:0:0:0:0".clone();
+    match canonicalize(&s) {
+        Ok(c) => assert_eq(c.as_str(), "::"),
+        Err(_) => panic("0:0:.0 should canonicalize to ::"),
+    }
+}
+
+@test
+fn test_canonicalize_invalid_returns_err() {
+    let s = "not an ipv6".clone();
+    match canonicalize(&s) {
+        Ok(_) => panic("invalid input must reject"),
+        Err(_) => assert(true),
+    }
+}
+
+// =============================================================================
+// Section 8: equal_addresses — equivalence modulo spelling
+// =============================================================================
+
+@test
+fn test_equal_addresses_same_canonical() {
+    let a = "::1".clone();
+    let b = "::1".clone();
+    assert(equal_addresses(&a, &b));
+}
+
+@test
+fn test_equal_addresses_compressed_vs_full() {
+    let a = "::1".clone();
+    let b = "0:0:0:0:0:0:0:1".clone();
+    assert(equal_addresses(&a, &b));
+}
+
+@test
+fn test_equal_addresses_uppercase_vs_lowercase() {
+    let a = "2001:DB8::1".clone();
+    let b = "2001:db8::1".clone();
+    assert(equal_addresses(&a, &b));
+}
+
+@test
+fn test_equal_addresses_different() {
+    let a = "::1".clone();
+    let b = "::2".clone();
+    assert(!equal_addresses(&a, &b));
+}
+
+@test
+fn test_equal_addresses_one_invalid_returns_false() {
+    let a = "::1".clone();
+    let b = "garbage".clone();
+    assert(!equal_addresses(&a, &b));
+}
+
+@test
+fn test_equal_addresses_both_invalid_returns_false() {
+    let a = "junk1".clone();
+    let b = "junk2".clone();
+    assert(!equal_addresses(&a, &b));
+}

@@ -1,16 +1,19 @@
 # `net/addr` audit
 
-Module: `core/net/addr.vr` (~1000 LOC) — IP address types
-(Ipv4Addr / Ipv6Addr) + SocketAddr / SocketAddrV4 / SocketAddrV6 +
-parsing + RFC-conformant predicates.
+Module: `core/net/addr.vr` (~1016 LOC) — IP address types
+(Ipv4Addr / Ipv6Addr / IpAddr) + socket addresses
+(SocketAddrV4 / SocketAddrV6 / SocketAddr) + `ToSocketAddrs`
+protocol + parse + RFC-conformant predicates.
 
-Tests cover Ipv4Addr static surface: constructors, canonical
-addresses, classification predicates (is_loopback / is_unspecified /
-is_private / is_multicast / is_broadcast per RFC 1918 / 5735 /
-5771), to_u32 / from_u32 round-trip.
+Tests cover the full algebraic surface across construction,
+canonical addresses, classification predicates (RFC 1918 / 5735 /
+5771 / 4291), to_u32 / from_u32 round-trip, Ipv4 + Ipv6 parsing
+(happy + error paths), IpAddr discriminator, SocketAddr.parse,
+and `AddrParseError` variant lattice.
 
-Ipv6Addr + SocketAddr* tests deferred — larger surface, follow-up
-session.
+Sister tests for `ToSocketAddrs` (the protocol's `to_socket_addrs`
+method requires DNS resolution against a fixture) are deferred
+to `vcs/specs/L2-standard/net/` where DNS-mock harness lives.
 
 ## 1. Cross-stdlib usage
 
@@ -19,6 +22,7 @@ session.
 | `core.net.{http,http2,http3}` | server bind addresses, client targets. |
 | `core.net.dns` | A/AAAA record values. |
 | `core.net.cidr` | network masks built on IP types. |
+| `core.net.tcp` / `core.net.udp` / `core.net.unix` | every bind / connect uses an IP address. |
 | `core.mesh.xds` | Envoy listener filter-chain addresses. |
 | Application networking | every socket bind/connect call. |
 
@@ -27,51 +31,94 @@ session.
 `crates/verum_runtime/src/net/...` BSD-socket FFI consumes the
 4-byte big-endian wire form. Pinned by `test_to_u32_*` tests.
 
+The `SocketAddr.V4(...)` qualified-constructor form (instead of
+bare `V4(...)`) is documented as a VBC codegen workaround for
+nested-record-argument miscompilation (tracked as #76 in source).
+See `addr.vr:702-713`. The conformance suite calls only the
+qualified form via the `SocketAddr.new_v4` / `new_v6` factory
+methods, so the surface is durably tested through the canonical
+client path.
+
 ## 3. Language-implementation gaps
 
 ### §3.1 `Ipv4Addr.parse` workaround for codegen bug #78
 
 Source comment at `addr.vr:137-142` documents a codegen bug where
 `&parts[i]` panics with "Slice index out of bounds". Worked around
-via let-binding. This is task #17/#39 territory or its sibling
-slice-deref hazard. Test the workaround is durable.
+via let-binding. Same VBC codegen family as
+[[btree_pattern_match_ref_generic_class]]. Tested through the
+working-on-workaround path; the underlying defect is a multi-day
+VBC codegen fix.
 
-### §3.2 `Ipv4Addr.parse` doesn't unit-test in this folder
+### §3.2 `SocketAddr.parse` Char-vs-Text + Result.map_err
+workarounds for codegen bug #78 / #79
 
-The parse error paths + happy paths are not exercised in this
-suite — focus is on the algebraic surface. Add follow-up
-property_test.vr for ∀a. parse(a.display()) == Ok(a).
+Three workarounds documented in source at `addr.vr:760-808`:
+1. `rsplit_once(":")` Text literal instead of `':'` char literal
+   — char auto-promotion takes a different codegen branch.
+2. Explicit `match` instead of `.map_err(|_| ...)?` chain —
+   Result.map_err method-resolution fails when transitive
+   `core.base.result` import is missing.
+3. Explicit `&host` reference instead of relying on auto-borrow.
 
-**Effort:** small (~1h).
+Tested through the working canonical client path. Source-side
+workaround durability pinned by SocketAddr.parse error-path tests.
 
-### §3.3 No Eq / Display / Hash for Ipv4Addr
+### §3.3 SocketAddr-variant nested-record miscompile (#76)
 
-`Map<Ipv4Addr, BanState>` lookups need Hash. Display for
-`f"{addr}"` rendering. Add following the Method/Color pattern.
+Documented at `addr.vr:702-713` — bare `V4(...)` instead of
+`SocketAddr.V4(...)` miscompiles nested record argument as the
+inner record's first FIELD value (object size 8 instead of 16).
+This is the **same defect class** as
+[[btree_pattern_match_ref_generic_class]] +
+[[enactment_field_access_oob_2026-05-24]]: codegen loses record
+layout through cross-module / variant-payload pathways and
+defaults to 8-byte scalar.
 
-**Effort:** small (~30 min).
+The qualified form `SocketAddr.V4(...)` works because the
+resolver dispatches through the constructor symbol that user
+code uses. Source-side discipline is durable so long as
+contributors use the `SocketAddr.new_v4` / `new_v6` factories,
+which the conformance suite exclusively exercises.
 
-### §3.4 Sister coverage deferred — Ipv6Addr + SocketAddr*
+### §3.4 `ToSocketAddrs` protocol — type-Iter associated bound deferred
 
-Ipv6Addr is a 16-byte segments record; SocketAddrV4/V6 are
-(addr, port) tuples. Full RFC 5952 canonical Ipv6 form is
-covered separately in `core/net/ipv6_canonical.vr`.
+Source comment at `addr.vr:861-869` documents that the bound
+`Iterator<Item = SocketAddr>` would express "yields SocketAddrs"
+properly, but the typechecker doesn't yet enforce
+associated-type bindings on protocol-bounded generics (#75). The
+prior form `Iterator<Item>` was a no-op (Item unbound), so the
+bound is dropped entirely until #75 lands. **All three impls
+already use `Iter = List<SocketAddr>`** uniformly to sidestep
+the impl-method-dispatch codegen failure documented at
+`addr.vr:874-881`.
 
-## Action items landed in this branch
+Effort to add language-level fix: multi-day, gated on #75.
 
-* `core-tests/net/addr/unit_test.vr` — 28 unit tests covering
-  Ipv4Addr construction, canonical addresses (localhost/
-  unspecified/broadcast), classification predicates per RFC
-  1918/5735/5771, u32 round-trip.
+## 4. Action items landed in this branch
+
+* `core-tests/net/addr/unit_test.vr` — 95 unit tests covering
+  Ipv4Addr (28) + Ipv6Addr (16) + IpAddr (8) + SocketAddrV4 (4)
+  + SocketAddrV6 (2) + SocketAddr (19) + AddrParseError (6) +
+  parse-error paths (12) across the full public surface.
+* `core-tests/net/addr/property_test.vr` — 20 property tests:
+  to_u32/from_u32 round-trip identity over canonical addresses
+  + 256-element low-octet sweep; predicate disjointness
+  (loopback ⊥ private, broadcast ⊥ private, multicast ⊥
+  broadcast); RFC 1918 boundary lattices (10/8, 172.16-31/12,
+  192.168/16); multicast 224-239 boundary; Ipv6 predicate
+  exclusivity (loopback ⊥ multicast, link-local ⊥ unique-local);
+  SocketAddr V4 XOR V6 + port preservation sweep;
+  AddrParseError 3×3 disjointness matrix.
 * `core-tests/net/addr/audit.md` — this file.
 
-## Action items deferred
+## 5. Action items deferred
 
 | Item | Scope | Estimated effort |
 |---|---|---|
-| Add Ipv4Addr.parse unit tests (happy + error paths) | this folder | 1h |
-| Add Eq / Display / Hash for Ipv4Addr | `core/net/addr.vr` + tests | 30 min |
-| Add Ipv6Addr + SocketAddrV4/V6 + SocketAddr coverage | this folder | 1 day |
-| Add property_test.vr (parse∘display round-trip, RFC predicate disjointness) | this folder | 1h |
-| Sister tests for `core.net.{cidr,ipv6_canonical,dns,link_header}` | sister folders | 1 day total |
-EOF
+| `ToSocketAddrs` protocol coverage (host:port DNS path) | this folder | gated on DNS mock harness (vcs/specs/L2-standard/net/) |
+| Eq/Hash/Display for IpAddr / SocketAddrV4/V6 — currently
+  defined but conformance suite doesn't exercise `Map<IpAddr, _>`
+  lookup | this folder | 1h once Map dispatch class closes |
+| Display round-trip ∀a. parse(a.to_string()) == Ok(a) | this folder | 4h (relies on Display impl coverage in core/text/format/) |
+| Sister coverage for `core.net.{cidr,ipv6_canonical,dns,link_header}` | sister folders | tracked as separate INVENTORY rows |
