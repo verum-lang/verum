@@ -167,39 +167,40 @@ implement<T: Ord> BinaryHeap<T> {
 
     // Push && pop in single operation (more efficient than push then pop).
     public fn push_pop(&mut self, value: T) -> T {
-        // Direct indexing is bounds-checked by the is_empty guard; the
-        // top element is data[0] when non-empty.
-        if self.data.is_empty() || value >= self.data[0] {
-            return value;
+        // Safe-operation push_pop: route through `self.data.get(0)` /
+        // `self.data.set(0, value)` instead of raw ptr_read/ptr_write
+        // on `as_mut_slice().as_mut_ptr()`. The slice's mut pointer
+        // shares the same header-offset drift class as `self.ptr` in
+        // List bodies (see core-tests/collections/list/audit.md §E).
+        // Compare via Maybe<T> shape from get().
+        match self.data.get(0) {
+            None => return value,
+            Some(top) => {
+                if value >= top {
+                    return value;
+                }
+                // Replace root via set(); sift down to restore invariant.
+                self.data.set(0, value);
+                self.sift_down(0);
+                return top;
+            }
         }
-
-        // Replace root && sift down
-        let res = unsafe {
-            let ptr = self.data.as_mut_slice().as_mut_ptr();
-            let old = ptr_read(ptr);
-            ptr_write(ptr, value);
-            old
-        };
-        self.sift_down(0);
-        res
     }
 
     // Pop && push in single operation (more efficient than pop then push).
     public fn replace(&mut self, value: T) -> Maybe<T> {
-        if self.data.is_empty() {
-            self.data.push(value);
-            return None;
+        // Safe-operation replace: see push_pop migration note.
+        match self.data.get(0) {
+            None => {
+                self.data.push(value);
+                None
+            },
+            Some(old) => {
+                self.data.set(0, value);
+                self.sift_down(0);
+                Some(old)
+            }
         }
-
-        // Replace root && sift down
-        let res = unsafe {
-            let ptr = self.data.as_mut_slice().as_mut_ptr();
-            let old = ptr_read(ptr);
-            ptr_write(ptr, value);
-            old
-        };
-        self.sift_down(0);
-        Some(res)
     }
 
     // Clear all elements.

@@ -216,11 +216,9 @@ fn test_heap_push_pop_returns_value_when_value_is_largest() {
     assert_eq(h.len(), 3);
 }
 
-// push_pop with value < current max: stdlib body returns the wrong
-// value under --interp. Defect pending root-cause analysis (likely the
-// same self.ptr resolution drift class affecting List sort_unstable);
-// pinned @ignore.
-@ignore
+// push_pop with value < current max: migrated from raw ptr_read/write
+// on as_mut_slice().as_mut_ptr() to safe self.data.get(0) +
+// self.data.set(0, value). Test now active.
 @test
 fn test_heap_push_pop_returns_current_max_when_value_is_smaller() {
     let mut h: BinaryHeap<Int> = BinaryHeap.new();
@@ -250,13 +248,12 @@ fn test_heap_push_pop_on_empty_returns_value() {
 //   On an empty heap returns None and v is still pushed.
 // =============================================================================
 
-// `replace(v)` on populated heap: stdlib body dispatches `List.swap`
-// against a receiver mis-classified as `InterruptCell (Int)` instead of
-// the BinaryHeap's backing List<T>. This is a deep dispatch-table /
-// monomorphization defect — the receiver type is being lost before the
-// CallM site. Pinned @ignore until the dispatch table can resolve
-// `List.swap` against the actual List receiver.
-@ignore
+// replace(v): migrated from raw ptr_read/write on as_mut_slice() to
+// safe self.data.get(0) + self.data.set(0, value). The List.swap
+// dispatch failure surfaced because as_mut_slice + ptr_read was
+// returning an Int-shaped Value to a receiver that downstream
+// dispatched List.swap against — eliminated by the safe-op route.
+// Test now active.
 @test
 fn test_heap_replace_returns_previous_max() {
     let mut h: BinaryHeap<Int> = BinaryHeap.new();

@@ -791,13 +791,10 @@ fn test_list_all_on_empty_is_true() {
 // =============================================================================
 // Section 17: starts_with / ends_with
 //
-// NOTE: stdlib body uses `for i in range(0, prefix.len)` which routes
-// through the iterator-closure defect class for non-intercepted methods.
-// Marked @ignore until #17/#39 mount-scope-aware lookup closes OR stdlib
-// body is migrated to `while + self.get(i)` pattern.
+// stdlib body migrated from `for i in range(...)` to `while +
+// self.get(i)` pattern (commits this round); tests now active.
 // =============================================================================
 
-@ignore
 @test
 fn test_list_starts_with_proper_prefix() {
     let xs: List<Int> = [1, 2, 3, 4, 5];
@@ -805,7 +802,6 @@ fn test_list_starts_with_proper_prefix() {
     assert(xs.starts_with(&prefix));
 }
 
-@ignore
 @test
 fn test_list_starts_with_empty_is_true() {
     let xs: List<Int> = [1, 2, 3];
@@ -813,14 +809,12 @@ fn test_list_starts_with_empty_is_true() {
     assert(xs.starts_with(&empty));
 }
 
-@ignore
 @test
 fn test_list_starts_with_self_is_true() {
     let xs: List<Int> = [1, 2, 3];
     assert(xs.starts_with(&xs));
 }
 
-@ignore
 @test
 fn test_list_starts_with_longer_than_self_is_false() {
     let xs: List<Int> = [1, 2];
@@ -828,7 +822,6 @@ fn test_list_starts_with_longer_than_self_is_false() {
     assert(!xs.starts_with(&longer));
 }
 
-@ignore
 @test
 fn test_list_ends_with_proper_suffix() {
     let xs: List<Int> = [1, 2, 3, 4, 5];
@@ -836,7 +829,6 @@ fn test_list_ends_with_proper_suffix() {
     assert(xs.ends_with(&suffix));
 }
 
-@ignore
 @test
 fn test_list_ends_with_empty_is_true() {
     let xs: List<Int> = [1, 2, 3];
@@ -844,7 +836,6 @@ fn test_list_ends_with_empty_is_true() {
     assert(xs.ends_with(&empty));
 }
 
-@ignore
 @test
 fn test_list_ends_with_longer_than_self_is_false() {
     let xs: List<Int> = [4, 5];
@@ -855,29 +846,21 @@ fn test_list_ends_with_longer_than_self_is_false() {
 // =============================================================================
 // Section 18: find_by / position_by — predicate-driven search
 //
-// NOTE: position_by / find_by are NOT runtime-intercepted (`position` is, but
-// it targets the value-form sister method). The stdlib body uses
-// `for i in range(0, self.len)` which trips the iterator-closure
-// dispatch defect when called from user-side bytecode. Pinned in
-// regression_test.vr §E with `@ignore` until the stdlib body is migrated
-// to the safer `while + self.get(i)` pattern (sister of `index_of`).
+// position_by migrated to `while + self.get(i)`; tests now active.
 // =============================================================================
 
-@ignore
 @test
 fn test_list_position_by_returns_first_index() {
     let xs: List<Int> = [1, 2, 3, 4];
     assert_eq(xs.position_by(|x| *x >= 3), Some(2));
 }
 
-@ignore
 @test
 fn test_list_position_by_no_match_returns_none() {
     let xs: List<Int> = [1, 2, 3];
     assert_eq(xs.position_by(|x| *x > 100), None);
 }
 
-@ignore
 @test
 fn test_list_position_by_on_empty_is_none() {
     let xs: List<Int> = [];
@@ -950,24 +933,21 @@ fn test_list_partition_point_all_false_returns_len() {
 // =============================================================================
 // Section 20: dedup_by — generalised consecutive deduplication
 //
-// NOTE: dedup_by stdlib body uses `for read in range(1, self.len)`. Same
-// iterator-closure dispatch class — pinned @ignore until task #17/#39
-// closes or stdlib migrates pattern.
+// stdlib body migrated to `while + self.get(i) / self.set(write, v)`
+// pattern (this round); tests now active.
 // =============================================================================
 
-@ignore
 @test
 fn test_list_dedup_by_same_predicate_keeps_first() {
     let mut xs: List<Int> = [1, 11, 2, 22, 3];
-    // Treat values as "same" if they share div-10
+    // Treat values as "same" if they share div-10.
+    // dedup_by passes consecutive pairs — semantics depend on order;
+    // conservative property: result is shorter or equal in length.
     xs.dedup_by(|a, b| (*a / 10) == (*b / 10));
-    // Wait: dedup_by passes consecutive pairs; semantics depend on order.
-    // Conservative property: dedup_by leaves a list shorter or equal.
     assert(xs.len() <= 5);
     assert(xs.len() >= 1);
 }
 
-@ignore
 @test
 fn test_list_dedup_by_no_collapse_keeps_all() {
     let mut xs: List<Int> = [1, 2, 3, 4];
@@ -1221,13 +1201,10 @@ fn test_list_sorted_returns_new_sorted_list() {
 // =============================================================================
 // Section 27: windows / chunks — read-only slicing iterators
 //
-// NOTE: stdlib body uses `for i in range(0, self.len - size + 1)` plus
-// nested `for j in range(i, i + size)`. Both fall into the for/range
-// iterator-closure dispatch class — pinned @ignore until task #17/#39 or
-// stdlib body migration.
+// stdlib body migrated from `for i in range(...)` to `while +
+// self.get(j)` pattern; tests now active.
 // =============================================================================
 
-@ignore
 @test
 fn test_list_chunks_of_2_partitions_evenly() {
     let xs: List<Int> = [1, 2, 3, 4];
@@ -1237,7 +1214,6 @@ fn test_list_chunks_of_2_partitions_evenly() {
     assert_eq(cs.get(1).map(|c| c.len()), Some(2));
 }
 
-@ignore
 @test
 fn test_list_chunks_with_remainder() {
     let xs: List<Int> = [1, 2, 3, 4, 5];
@@ -1247,7 +1223,6 @@ fn test_list_chunks_with_remainder() {
     assert_eq(cs.get(2).map(|c| c.len()), Some(1));
 }
 
-@ignore
 @test
 fn test_list_chunks_size_larger_than_len_yields_one() {
     let xs: List<Int> = [1, 2];
@@ -1256,7 +1231,6 @@ fn test_list_chunks_size_larger_than_len_yields_one() {
     assert_eq(cs.get(0).map(|c| c.len()), Some(2));
 }
 
-@ignore
 @test
 fn test_list_windows_of_2_overlap_by_one() {
     let xs: List<Int> = [1, 2, 3, 4];
@@ -1264,7 +1238,6 @@ fn test_list_windows_of_2_overlap_by_one() {
     assert_eq(ws.len(), 3);
 }
 
-@ignore
 @test
 fn test_list_windows_size_equals_len_yields_one() {
     let xs: List<Int> = [1, 2, 3];
@@ -1283,11 +1256,10 @@ fn test_list_windows_size_larger_than_len_yields_zero() {
 // =============================================================================
 // Section 28: partition_by / chunk_by — predicate-driven splits
 //
-// NOTE: stdlib body uses `for i in range(0, self.len)`. Same
-// iterator-closure dispatch class — pinned @ignore until #17/#39 closes.
+// stdlib body migrated from `for i in range(...)` to `while +
+// self.get(i)` pattern; tests now active.
 // =============================================================================
 
-@ignore
 @test
 fn test_list_partition_by_separates_by_predicate() {
     let xs: List<Int> = [1, 2, 3, 4, 5, 6];
@@ -1298,7 +1270,6 @@ fn test_list_partition_by_separates_by_predicate() {
     assert_eq(odds.get(0), Some(1));
 }
 
-@ignore
 @test
 fn test_list_partition_by_all_true_left_full() {
     let xs: List<Int> = [2, 4, 6];
@@ -1307,7 +1278,6 @@ fn test_list_partition_by_all_true_left_full() {
     assert_eq(r.len(), 0);
 }
 
-@ignore
 @test
 fn test_list_partition_by_all_false_right_full() {
     let xs: List<Int> = [1, 3, 5];
