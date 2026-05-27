@@ -1,0 +1,161 @@
+// =============================================================================
+// core-tests/sync/semaphore/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sync.semaphore` — Semaphore + SemaphoreGuard.
+//
+// Static + single-threaded uncontended surface only.  Live blocking
+// acquire + futex wake-up exercised at the L2-spec level.
+// =============================================================================
+
+mount core.sync.semaphore.{Semaphore};
+
+// =============================================================================
+// Section 1: Semaphore.new + binary helper
+// =============================================================================
+
+@test
+fn test_semaphore_new_zero_permits() {
+    let s = Semaphore.new(0);
+    assert_eq(s.available_permits(), 0);
+    assert_eq(s.max_permits(), 0);
+}
+
+@test
+fn test_semaphore_new_one_permit() {
+    let s = Semaphore.new(1);
+    assert_eq(s.available_permits(), 1);
+    assert_eq(s.max_permits(), 1);
+}
+
+@test
+fn test_semaphore_new_many_permits() {
+    let s = Semaphore.new(42);
+    assert_eq(s.available_permits(), 42);
+    assert_eq(s.max_permits(), 42);
+}
+
+@test
+fn test_semaphore_binary_helper_is_new_one() {
+    let s = Semaphore.binary();
+    assert_eq(s.available_permits(), 1);
+    assert_eq(s.max_permits(), 1);
+}
+
+// =============================================================================
+// Section 2: try_acquire + release (single-threaded sequential)
+// =============================================================================
+
+@test
+fn test_semaphore_try_acquire_succeeds_on_available_permit() {
+    let s = Semaphore.new(1);
+    assert(s.try_acquire());
+    assert_eq(s.available_permits(), 0);
+}
+
+@test
+fn test_semaphore_try_acquire_fails_when_no_permits() {
+    let s = Semaphore.new(0);
+    assert(!s.try_acquire());
+    assert_eq(s.available_permits(), 0);
+}
+
+@test
+fn test_semaphore_release_restores_permit() {
+    let s = Semaphore.new(1);
+    assert(s.try_acquire());
+    assert_eq(s.available_permits(), 0);
+    s.release();
+    assert_eq(s.available_permits(), 1);
+}
+
+@test
+fn test_semaphore_try_acquire_release_round_trip_three_times() {
+    let s = Semaphore.new(2);
+    assert(s.try_acquire());          // 1 left
+    assert(s.try_acquire());          // 0 left
+    assert(!s.try_acquire());         // none
+    s.release();                       // 1 back
+    s.release();                       // 2 back
+    assert_eq(s.available_permits(), 2);
+}
+
+// =============================================================================
+// Section 3: try_acquire_many + release_many
+// =============================================================================
+
+@test
+fn test_semaphore_try_acquire_many_succeeds_when_enough() {
+    let s = Semaphore.new(5);
+    assert(s.try_acquire_many(3));
+    assert_eq(s.available_permits(), 2);
+}
+
+@test
+fn test_semaphore_try_acquire_many_fails_when_short() {
+    let s = Semaphore.new(2);
+    assert(!s.try_acquire_many(3));
+    assert_eq(s.available_permits(), 2);
+}
+
+@test
+fn test_semaphore_release_many_restores_permits() {
+    let s = Semaphore.new(5);
+    assert(s.try_acquire_many(3));
+    assert_eq(s.available_permits(), 2);
+    s.release_many(3);
+    assert_eq(s.available_permits(), 5);
+}
+
+// =============================================================================
+// Section 4: add_permits (capacity growth)
+// =============================================================================
+
+@test
+fn test_semaphore_add_permits_grows_capacity_and_availability() {
+    let s = Semaphore.new(2);
+    assert_eq(s.available_permits(), 2);
+    assert_eq(s.max_permits(), 2);
+    s.add_permits(3);
+    // Both capacity AND availability grow — audit §3.3 dual-bump.
+    assert_eq(s.available_permits(), 5);
+    assert_eq(s.max_permits(), 5);
+}
+
+@test
+fn test_semaphore_add_zero_permits_noop() {
+    let s = Semaphore.new(3);
+    s.add_permits(0);
+    assert_eq(s.available_permits(), 3);
+    assert_eq(s.max_permits(), 3);
+}
+
+// =============================================================================
+// Section 5: forget_permit (capacity shrink — asymmetric, see audit §3.4)
+// =============================================================================
+
+@test
+fn test_semaphore_forget_permit_after_acquire_shrinks_capacity_only() {
+    let s = Semaphore.new(3);
+    assert(s.try_acquire());          // permits=2, max=3
+    s.forget_permit();                 // permits=2, max=2 (the acquired permit is gone forever)
+    assert_eq(s.available_permits(), 2);
+    assert_eq(s.max_permits(), 2);
+}
+
+// =============================================================================
+// Section 6: Multiple Semaphore instances are independent
+// =============================================================================
+
+@test
+fn test_two_semaphores_independent() {
+    let a = Semaphore.new(2);
+    let b = Semaphore.new(5);
+    assert(a.try_acquire());
+    assert_eq(a.available_permits(), 1);
+    assert_eq(b.available_permits(), 5);
+    assert(b.try_acquire());
+    assert(b.try_acquire());
+    assert_eq(a.available_permits(), 1);
+    assert_eq(b.available_permits(), 3);
+}

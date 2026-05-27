@@ -1,0 +1,141 @@
+// =============================================================================
+// core-tests/sync/semaphore/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for the testable surface of Semaphore:
+//
+//   §A  Fresh-permits law: Semaphore.new(n).available_permits() == n,
+//       and .max_permits() == n.
+//   §B  available_permits() clamps to non-negative (audit §3.6) under
+//       observed values — the only way the clamp is exercised by the
+//       single-threaded surface is by acquiring all permits.
+//   §C  add_permits is additive on both availability AND capacity.
+//   §D  try_acquire is exact: succeeds iff available_permits >= 1
+//       under quiescent state.
+//   §E  release/release_many compose: K releases after K acquires
+//       restores the original availability.
+//   §F  binary() ≡ new(1).
+// =============================================================================
+
+mount core.sync.semaphore.{Semaphore};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Fresh-permits law
+// =============================================================================
+
+@test
+fn law_semaphore_fresh_permits_matches_constructor_arg() {
+    let cases: List<Int> = [0, 1, 2, 5, 10, 100, 1000];
+    for &n in cases.iter() {
+        let s = Semaphore.new(n);
+        assert_eq(s.available_permits(), n);
+        assert_eq(s.max_permits(), n);
+    }
+}
+
+// =============================================================================
+// §B  available_permits clamps to non-negative
+// =============================================================================
+//
+// Under the single-threaded surface, the only way to drive permits
+// to zero is to drain via try_acquire.  We never observe negative —
+// the clamp is a safety net.  Confirm the observation surface
+// stays in [0, max_permits] across a drain.
+
+@test
+fn law_semaphore_available_permits_in_range_during_drain() {
+    let s = Semaphore.new(4);
+    assert_eq(s.available_permits(), 4);
+    assert(s.try_acquire()); assert(s.available_permits() >= 0);
+    assert(s.try_acquire()); assert(s.available_permits() >= 0);
+    assert(s.try_acquire()); assert(s.available_permits() >= 0);
+    assert(s.try_acquire()); assert(s.available_permits() >= 0);
+    // Drained — every subsequent try_acquire fails.
+    assert(!s.try_acquire());
+    assert(s.available_permits() >= 0);
+    assert_eq(s.available_permits(), 0);
+}
+
+// =============================================================================
+// §C  add_permits is additive
+// =============================================================================
+
+@test
+fn law_semaphore_add_permits_additive() {
+    let s = Semaphore.new(2);
+    let initial_avail = s.available_permits();
+    let initial_max = s.max_permits();
+    s.add_permits(3);
+    assert_eq(s.available_permits(), initial_avail + 3);
+    assert_eq(s.max_permits(), initial_max + 3);
+}
+
+@test
+fn law_semaphore_add_permits_chain_sums() {
+    let s = Semaphore.new(0);
+    s.add_permits(1);
+    s.add_permits(2);
+    s.add_permits(3);
+    s.add_permits(4);
+    assert_eq(s.available_permits(), 10);
+    assert_eq(s.max_permits(), 10);
+}
+
+// =============================================================================
+// §D  try_acquire is exact (under quiescence)
+// =============================================================================
+
+@test
+fn law_semaphore_try_acquire_exact_under_quiescence() {
+    // For a semaphore at N permits, exactly N try_acquires succeed
+    // and the (N+1)-th fails.
+    let cases: List<Int> = [1, 2, 3, 5];
+    for &n in cases.iter() {
+        let s = Semaphore.new(n);
+        for _ in 0..n {
+            assert(s.try_acquire());
+        }
+        assert(!s.try_acquire());
+        assert_eq(s.available_permits(), 0);
+    }
+}
+
+// =============================================================================
+// §E  release/release_many compose
+// =============================================================================
+
+@test
+fn law_semaphore_acquire_release_round_trip() {
+    let s = Semaphore.new(3);
+    let initial = s.available_permits();
+    // K cycles of acquire-then-release each restore initial.
+    for _ in 0..5 {
+        assert(s.try_acquire());
+        s.release();
+        assert_eq(s.available_permits(), initial);
+    }
+}
+
+@test
+fn law_semaphore_release_many_inverts_acquire_many() {
+    let s = Semaphore.new(10);
+    let initial = s.available_permits();
+    assert(s.try_acquire_many(3));
+    assert(s.try_acquire_many(2));
+    assert_eq(s.available_permits(), initial - 5);
+    s.release_many(5);
+    assert_eq(s.available_permits(), initial);
+}
+
+// =============================================================================
+// §F  binary() ≡ new(1)
+// =============================================================================
+
+@test
+fn law_semaphore_binary_equiv_new_one() {
+    let b = Semaphore.binary();
+    let s1 = Semaphore.new(1);
+    assert_eq(b.available_permits(), s1.available_permits());
+    assert_eq(b.max_permits(), s1.max_permits());
+}
