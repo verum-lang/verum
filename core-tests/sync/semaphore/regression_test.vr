@@ -1,0 +1,92 @@
+// =============================================================================
+// core-tests/sync/semaphore/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for the testable surface of `core.sync.semaphore`.
+// =============================================================================
+
+mount core.sync.semaphore.{Semaphore};
+
+// =============================================================================
+// §3.3 — add_permits dual-bump invariant
+// =============================================================================
+//
+// Both `permits` AND `max_permits` are incremented by n.  A future
+// refactor that grows only capacity (without also growing availability)
+// would deadlock waiters expecting the new permits to be immediately
+// acquireable.  LOCK-IN pin.
+
+@test
+fn regression_semaphore_add_permits_grows_availability_alongside_capacity() {
+    let s = Semaphore.new(0);
+    let before_avail = s.available_permits();
+    let before_max = s.max_permits();
+    s.add_permits(7);
+    assert_eq(s.available_permits(), before_avail + 7);
+    assert_eq(s.max_permits(), before_max + 7);
+    // And the newly-added permits are immediately acquireable:
+    for _ in 0..7 {
+        assert(s.try_acquire());
+    }
+    assert_eq(s.available_permits(), 0);
+}
+
+// =============================================================================
+// §3.4 — forget_permit asymmetry
+// =============================================================================
+//
+// `forget_permit` decrements max_permits only.  It MUST be called
+// after a `try_acquire`/`acquire`/`acquire_many` so the permit count
+// stays consistent.  Pinning the asymmetric behaviour ensures a future
+// refactor doesn't silently bring availability and capacity into lock-
+// step at the forget site.
+
+@test
+fn regression_semaphore_forget_permit_decreases_max_only() {
+    let s = Semaphore.new(3);
+
+    assert(s.try_acquire());
+    let avail_after_acq = s.available_permits();
+    let max_after_acq = s.max_permits();
+    assert_eq(avail_after_acq, 2);
+    assert_eq(max_after_acq, 3);
+
+    s.forget_permit();
+    // max shrinks by 1; availability unchanged because the forgotten
+    // permit was already not in the available pool.
+    assert_eq(s.available_permits(), avail_after_acq);
+    assert_eq(s.max_permits(), max_after_acq - 1);
+}
+
+// =============================================================================
+// §3.5 — binary() helper is exactly Semaphore.new(1)
+// =============================================================================
+//
+// Semantic alias for mutex-like usage.  Drift from `new(1)` (e.g., to
+// `new(0)` or `new(2)`) silently breaks every binary-semaphore caller.
+
+@test
+fn regression_semaphore_binary_is_new_one_exact() {
+    let b = Semaphore.binary();
+    assert_eq(b.available_permits(), 1);
+    assert_eq(b.max_permits(), 1);
+    assert(b.try_acquire());
+    assert(!b.try_acquire());   // exactly one permit, not two
+}
+
+// =============================================================================
+// §3.1 — Zero-permits semaphore is constructible and rejects all acquires
+// =============================================================================
+//
+// `Semaphore.new(0)` is a degenerate semaphore (all acquires block /
+// fail).  Pin the construction surface and the immediate try_acquire
+// failure as the runtime contract.
+
+@test
+fn regression_semaphore_zero_permits_constructs_and_rejects_acquire() {
+    let s = Semaphore.new(0);
+    assert_eq(s.available_permits(), 0);
+    assert_eq(s.max_permits(), 0);
+    assert(!s.try_acquire());
+    assert(!s.try_acquire_many(1));
+}
