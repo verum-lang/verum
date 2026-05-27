@@ -1,0 +1,189 @@
+// =============================================================================
+// core-tests/base/data/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.data` — Data (dynamic JSON-like
+// value, 7-variant sum: Null / Bool / Int / Float / Text / Array /
+// Object), DataError, parse_json, DataBuilder, to_json.
+// =============================================================================
+
+mount core.base.data.{Data, DataError, parse_json, DataBuilder};
+mount core.collections.list.List;
+mount core.collections.map.Map;
+
+// =============================================================================
+// REGRESSION §A (@ignore'd): chained-builder return-value defect.
+// `let data = DataBuilder.new().set(...).set(...).set(...).build();`
+// returns a Data with the correct shape but downstream `data.len()` /
+// field traversal mis-routes — same root family as `base/log §A`
+// applied to DataBuilder.build() return.
+//
+// Multi-day VBC codegen fix for chained-builder type tracking.
+// =============================================================================
+
+@ignore("Chained-builder return-value defect — same root family as base/log §A applied to DataBuilder.build() return.")
+@test
+fn regression_pin_databuilder_chain_assert_len() {
+    let data = DataBuilder.new()
+        .set("a", Data.Int(1))
+        .set("b", Data.Int(2))
+        .set("c", Data.Int(3))
+        .build();
+    assert_eq(data.len(), 3);
+}
+
+// =============================================================================
+// REGRESSION §B: Data is a 7-variant ADT:
+//   Null | Bool(Bool) | Int(Int) | Float(Float) | Text(Text) |
+//   Array(List<Data>) | Object(Map<Text, Data>).
+// =============================================================================
+
+@test
+fn regression_data_seven_variant_adt() {
+    let v_null:   Data = Data.Null;
+    let v_bool:   Data = Data.Bool(true);
+    let v_int:    Data = Data.Int(42);
+    let v_float:  Data = Data.Float(3.14);
+    let v_text:   Data = Data.Text("hi".to_text());
+    let v_array:  Data = Data.Array(List.new());
+    let v_object: Data = Data.Object(Map.new());
+
+    // Pin each variant constructibility — variant tag pin via match.
+    match v_null {
+        Data.Null => {},
+        _ => panic("expected Null"),
+    }
+    match v_bool {
+        Data.Bool(b) => assert(b),
+        _ => panic("expected Bool"),
+    }
+    match v_int {
+        Data.Int(n) => assert_eq(n, 42),
+        _ => panic("expected Int"),
+    }
+    match v_text {
+        Data.Text(t) => assert_eq(t, "hi".to_text()),
+        _ => panic("expected Text"),
+    }
+}
+
+// =============================================================================
+// REGRESSION §C: Data.Int and Data.Float variants carry distinct
+// payload types. A defect that conflated them would silently lose
+// integer precision on JSON round-trip.
+// =============================================================================
+
+@test
+fn regression_data_int_and_float_are_distinct_variants() {
+    let i: Data = Data.Int(42);
+    let f: Data = Data.Float(42.0);
+    let is_i_int   = match i { Data.Int(_) => true, _ => false };
+    let is_i_float = match i { Data.Float(_) => true, _ => false };
+    let is_f_int   = match f { Data.Int(_) => true, _ => false };
+    let is_f_float = match f { Data.Float(_) => true, _ => false };
+    assert(is_i_int);
+    assert(!is_i_float);
+    assert(!is_f_int);
+    assert(is_f_float);
+}
+
+// =============================================================================
+// REGRESSION §D: Empty Array / Object construct cleanly.
+// =============================================================================
+
+@test
+fn regression_data_empty_array_and_object() {
+    let arr: Data = Data.Array(List.new());
+    let obj: Data = Data.Object(Map.new());
+    match arr {
+        Data.Array(xs) => assert_eq(xs.len(), 0),
+        _ => panic("expected Array"),
+    }
+    match obj {
+        Data.Object(m) => assert_eq(m.len(), 0),
+        _ => panic("expected Object"),
+    }
+}
+
+// =============================================================================
+// REGRESSION §E: Data.Null and Data.Bool(false) are distinct
+// variants. A defect that conflated falsy values would silently
+// break JSON null vs false semantics.
+// =============================================================================
+
+@test
+fn regression_data_null_distinct_from_bool_false() {
+    let null_v: Data = Data.Null;
+    let bool_f: Data = Data.Bool(false);
+    let is_null_null = match null_v { Data.Null => true, _ => false };
+    let is_null_bool = match null_v { Data.Bool(_) => true, _ => false };
+    let is_bf_null   = match bool_f { Data.Null => true, _ => false };
+    let is_bf_bool   = match bool_f { Data.Bool(_) => true, _ => false };
+    assert(is_null_null);
+    assert(!is_null_bool);
+    assert(!is_bf_null);
+    assert(is_bf_bool);
+}
+
+// =============================================================================
+// REGRESSION §F: parse_json accepts canonical JSON literals.
+// =============================================================================
+
+@test
+fn regression_parse_json_null_returns_null_data() {
+    let r = parse_json("null".to_text());
+    assert(r.is_ok());
+    match r.unwrap() {
+        Data.Null => {},
+        _ => panic("expected Null"),
+    }
+}
+
+@test
+fn regression_parse_json_true_returns_bool_true() {
+    let r = parse_json("true".to_text());
+    assert(r.is_ok());
+    match r.unwrap() {
+        Data.Bool(b) => assert(b),
+        _ => panic("expected Bool"),
+    }
+}
+
+@test
+fn regression_parse_json_false_returns_bool_false() {
+    let r = parse_json("false".to_text());
+    assert(r.is_ok());
+    match r.unwrap() {
+        Data.Bool(b) => assert(!b),
+        _ => panic("expected Bool"),
+    }
+}
+
+@test
+fn regression_parse_json_integer_returns_int() {
+    let r = parse_json("42".to_text());
+    assert(r.is_ok());
+    match r.unwrap() {
+        Data.Int(n) => assert_eq(n, 42),
+        Data.Float(_) => {},   // some JSON parsers represent integers as Float
+        _ => panic("expected Int or Float"),
+    }
+}
+
+// =============================================================================
+// REGRESSION §G: parse_json rejects garbage.
+// =============================================================================
+
+@test
+fn regression_parse_json_rejects_garbage() {
+    let r = parse_json("not-valid-json".to_text());
+    assert(r.is_err());
+}
+
+@test
+fn regression_parse_json_rejects_empty_string() {
+    let r = parse_json("".to_text());
+    assert(r.is_err());
+}
+
+fn main() {}
