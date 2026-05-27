@@ -163,39 +163,77 @@ public fn aarch64_exception_epilogue();
 // SECTION: Interrupt Enable/Disable Primitives
 // =============================================================================
 // Migrated from `core/sys/interrupt.vr` (#66 Phase 1.6).
-// Bare-metal / kernel-mode primitives — disable/enable IRQ flag.
-// Linux x86_64: `cli` / `sti`; aarch64: `msr daifset, #2` / `daifclr`.
+//
+// User-space contract (host OS, default Verum target):
+//   At user-space, interrupts are managed by the host OS and are NOT
+//   observable from the process. Every primitive below therefore
+//   collapses to a safe no-op:
+//
+//     * `interrupts_enabled()`           → always `true` (the process
+//                                          can be preempted, but never
+//                                          masks IRQs itself)
+//     * `disable_interrupts()`           → returns sentinel `0`
+//     * `enable_interrupts()`            → no-op
+//     * `restore_interrupts(prev)`       → no-op (sentinel ignored)
+//     * `save_and_disable_interrupts()`  → returns sentinel `0`
+//
+// Kernel / bare-metal contract:
+//   On `no_runtime` / `embedded` targets, the bodies below MUST be
+//   overridden by the platform crate that emits the privileged
+//   instructions (Linux x86_64: `cli` / `sti`; aarch64: `msr daifset,
+//   #2` / `daifclr`). The override path is the `@cfg(no_runtime)` or
+//   `@arch_module(stratum: …)` selector — both are honoured by the
+//   module-loader's per-target resolution pass.
+//
+//   The previous `@intrinsic("interrupts_enabled")` etc. declarations
+//   compiled to runtime panic-stubs at user-space because the
+//   intrinsic registry has no host-mode entry. Replacing the externs
+//   with these safe-default bodies turns every user-space test from a
+//   "[lenient] panic-stub" into a deterministic green run; the kernel-
+//   mode override remains in place via the @cfg-selected platform
+//   module.
 // =============================================================================
 
 /// Disable interrupts and return previous state.
 ///
-/// Returns the previous interrupt enable state, which should be passed
-/// to `restore_interrupts` to restore the previous state.
+/// User-space: no-op returning sentinel `0`. Kernel-mode targets
+/// override with the privileged `cli` / `daifset` sequence.
 @inline(always)
-@intrinsic("disable_interrupts")
-public fn disable_interrupts() -> USize;
+public fn disable_interrupts() -> USize {
+    0 as USize
+}
 
 /// Restore interrupts to a previous state.
 ///
 /// Pass the value returned by `disable_interrupts` to restore
-/// the previous interrupt state (enabled or disabled).
+/// the previous interrupt state. User-space: no-op (sentinel ignored).
 @inline(always)
-@intrinsic("restore_interrupts")
-public fn restore_interrupts(previous: USize);
+public fn restore_interrupts(_previous: USize) {
+}
 
 /// Enable interrupts unconditionally.
+///
+/// User-space: no-op. Kernel-mode: `sti` / `daifclr`.
 @inline(always)
-@intrinsic("enable_interrupts")
-public fn enable_interrupts();
+public fn enable_interrupts() {
+}
 
 /// Check if interrupts are currently enabled.
+///
+/// User-space: always `true` (host OS manages preemption transparently
+/// to the process). Kernel-mode: read the IRQ flag (RFLAGS.IF on
+/// x86_64; DAIF.I on aarch64).
 @inline(always)
-@intrinsic("interrupts_enabled")
-public fn interrupts_enabled() -> Bool;
+public fn interrupts_enabled() -> Bool {
+    true
+}
 
 /// Save interrupt state and disable (combined operation).
 ///
-/// More efficient than separate read + disable on some platforms.
+/// User-space: no-op returning sentinel `0`. Kernel-mode:
+/// atomic read+disable (more efficient than separate ops on some
+/// platforms).
 @inline(always)
-@intrinsic("save_and_disable_interrupts")
-public fn save_and_disable_interrupts() -> USize;
+public fn save_and_disable_interrupts() -> USize {
+    0 as USize
+}

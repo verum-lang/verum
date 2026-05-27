@@ -1,0 +1,251 @@
+// =============================================================================
+// core-tests/sys/mmio/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.mmio`.
+//
+// Properties covered:
+//   * BarrierKind variant set is exactly 5; pairwise distinct; the
+//     match-dispatch table maps each variant to a unique numeric tag
+//     in [0..5) — pinned for the Tier-0 atomic-fence intrinsic.
+//   * MemoryFlags single-bit invariants:
+//       READ / WRITE / EXEC / DMA are powers of two.
+//       Pairwise AND is zero (disjointness).
+//       OR-combination is the union of underlying values.
+//   * MemoryRegion.contains is monotone in [start, start + size).
+//   * MemoryRegion.end == start + size.
+//   * MemoryRegion.contains(addr) ⇔ start <= addr < end.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.mmio.{
+    BarrierKind,
+    MemoryFlags,
+    MemoryRegion,
+};
+
+// =============================================================================
+// Section 1: BarrierKind — 5-variant exhaustive sweep
+// =============================================================================
+
+fn all_barrier_kinds() -> List<BarrierKind> {
+    [
+        BarrierKind.Compiler,
+        BarrierKind.Acquire,
+        BarrierKind.Release,
+        BarrierKind.AcqRel,
+        BarrierKind.SeqCst,
+    ]
+}
+
+@test
+fn law_barrier_kind_variant_count_is_five() {
+    let kinds = all_barrier_kinds();
+    assert_eq(kinds.len(), 5);
+}
+
+@test
+fn law_barrier_kind_dispatch_tags_are_pairwise_distinct() {
+    fn tag_of(b: BarrierKind) -> Int {
+        match b {
+            BarrierKind.Compiler => 0,
+            BarrierKind.Acquire  => 1,
+            BarrierKind.Release  => 2,
+            BarrierKind.AcqRel   => 3,
+            BarrierKind.SeqCst   => 4,
+        }
+    }
+    let kinds = all_barrier_kinds();
+    let tags: List<Int> = kinds.iter().map(|k| tag_of(*k)).collect();
+    let mut i: USize = 0 as USize;
+    let n = tags.len();
+    while i < n {
+        let mut j: USize = i + (1 as USize);
+        while j < n {
+            let a = *tags.get(i).unwrap();
+            let b = *tags.get(j).unwrap();
+            assert(a != b);
+            j = j + (1 as USize);
+        }
+        i = i + (1 as USize);
+    }
+}
+
+@test
+fn law_barrier_kind_dispatch_tags_cover_zero_to_four() {
+    fn tag_of(b: BarrierKind) -> Int {
+        match b {
+            BarrierKind.Compiler => 0,
+            BarrierKind.Acquire  => 1,
+            BarrierKind.Release  => 2,
+            BarrierKind.AcqRel   => 3,
+            BarrierKind.SeqCst   => 4,
+        }
+    }
+    let kinds = all_barrier_kinds();
+    let mut seen0: Bool = false;
+    let mut seen1: Bool = false;
+    let mut seen2: Bool = false;
+    let mut seen3: Bool = false;
+    let mut seen4: Bool = false;
+    for k in kinds.iter() {
+        let t = tag_of(*k);
+        if t == 0 { seen0 = true; }
+        if t == 1 { seen1 = true; }
+        if t == 2 { seen2 = true; }
+        if t == 3 { seen3 = true; }
+        if t == 4 { seen4 = true; }
+    }
+    assert(seen0);
+    assert(seen1);
+    assert(seen2);
+    assert(seen3);
+    assert(seen4);
+}
+
+// =============================================================================
+// Section 2: MemoryFlags — single-bit invariants
+// =============================================================================
+
+fn all_memory_flags() -> List<UInt32> {
+    [
+        MemoryFlags.READ.0,
+        MemoryFlags.WRITE.0,
+        MemoryFlags.EXEC.0,
+        MemoryFlags.DMA.0,
+    ]
+}
+
+@test
+fn law_memory_flags_each_is_power_of_two() {
+    for f in all_memory_flags().iter() {
+        let v: UInt32 = *f;
+        // Non-zero, and `v & (v - 1) == 0`.
+        assert(v != (0 as UInt32));
+        assert_eq(v & (v - (1 as UInt32)), 0 as UInt32);
+    }
+}
+
+@test
+fn law_memory_flags_pairwise_disjoint() {
+    let flags = all_memory_flags();
+    let n = flags.len();
+    let mut i: USize = 0 as USize;
+    while i < n {
+        let mut j: USize = i + (1 as USize);
+        while j < n {
+            let a = *flags.get(i).unwrap();
+            let b = *flags.get(j).unwrap();
+            assert_eq(a & b, 0 as UInt32);
+            j = j + (1 as USize);
+        }
+        i = i + (1 as USize);
+    }
+}
+
+@test
+fn law_memory_flags_or_combines_to_union() {
+    // OR-ing N power-of-two values equals their arithmetic sum
+    // because the underlying bits are disjoint.
+    let flags = all_memory_flags();
+    let mut union_val: UInt32 = 0 as UInt32;
+    let mut sum: UInt32 = 0 as UInt32;
+    for f in flags.iter() {
+        union_val = union_val | *f;
+        sum = sum + *f;
+    }
+    assert_eq(union_val, sum);
+    // And 15 because READ=1, WRITE=2, EXEC=4, DMA=8.
+    assert_eq(union_val, 15 as UInt32);
+}
+
+@test
+fn law_memory_flags_self_or_idempotent() {
+    // For each single-bit flag, OR with itself is identity.
+    for f in all_memory_flags().iter() {
+        let v: UInt32 = *f;
+        assert_eq(v | v, v);
+    }
+}
+
+// =============================================================================
+// Section 3: MemoryRegion — contains + end invariants
+// =============================================================================
+
+fn make_region(base: USize, size: USize) -> MemoryRegion {
+    MemoryRegion {
+        start: base as *const (),
+        size: size,
+        flags: MemoryFlags.READ,
+    }
+}
+
+@test
+fn law_memory_region_end_is_start_plus_size() {
+    let cases: List<(USize, USize)> = [
+        (0x1000 as USize, 0x100 as USize),
+        (0x4000_0000 as USize, 0x2000 as USize),
+        (0 as USize, 0 as USize),
+        (0x8000_0000 as USize, 0x1 as USize),
+    ];
+    for c in cases.iter() {
+        let (base, size) = *c;
+        let region = make_region(base, size);
+        assert_eq(region.end(), base + size);
+    }
+}
+
+@test
+fn law_memory_region_contains_start_address() {
+    // start ∈ [start, start + size) iff size > 0.
+    let base: USize = 0x8000_0000 as USize;
+    let sizes: List<USize> = [
+        1 as USize,
+        4 as USize,
+        4096 as USize,
+        0x1_0000 as USize,
+    ];
+    for s in sizes.iter() {
+        let region = make_region(base, *s);
+        assert(region.contains(base));
+    }
+}
+
+@test
+fn law_memory_region_excludes_end_address_exactly() {
+    // The end address is EXCLUSIVE — `addr == start + size` ⇒ outside.
+    let cases: List<(USize, USize)> = [
+        (0x1000 as USize, 1 as USize),
+        (0x2000 as USize, 4 as USize),
+        (0x4000 as USize, 0x100 as USize),
+    ];
+    for c in cases.iter() {
+        let (base, size) = *c;
+        let region = make_region(base, size);
+        assert(!region.contains(base + size));
+    }
+}
+
+@test
+fn law_memory_region_excludes_below_start() {
+    let base: USize = 0x4000 as USize;
+    let region = make_region(base, 0x1000 as USize);
+    assert(!region.contains(base - (1 as USize)));
+    assert(!region.contains(0 as USize));
+}
+
+@test
+fn law_memory_region_contains_every_addr_in_range() {
+    // Sweep every address in a small region — each must report
+    // contained.
+    let base: USize = 0x10_0000 as USize;
+    let size: USize = 8 as USize;
+    let region = make_region(base, size);
+    let mut offset: USize = 0 as USize;
+    while offset < size {
+        assert(region.contains(base + offset));
+        offset = offset + (1 as USize);
+    }
+}
+
+fn main() {}

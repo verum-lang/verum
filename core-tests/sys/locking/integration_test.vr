@@ -1,0 +1,177 @@
+// =============================================================================
+// core-tests/sys/locking/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.locking`. Exercises
+// FileLockKind, LockRegion, and LockError in combination with the
+// rest of the standard library (List, Maybe, Result, tuple
+// destructuring).
+//
+// What this file pins:
+//
+//   * FileLockKind exhaustive pattern-match through Maybe<FileLockKind>.
+//   * LockRegion composition into List<LockRegion> with a `to-EOF`
+//     sentinel walk.
+//   * LockError.Conflict(Maybe<Int>) pattern-match dispatch table
+//     over a representative outcome list.
+//   * The byte-range-vs-EOF predicate: `length == -1 ⇒ "spans EOF"`
+//     vs `length >= 0 ⇒ "bounded"` — the canonical fcntl(2) F_GETLK
+//     decoder pattern.
+//
+// What we do NOT exercise:
+//   * Actual `try_lock` / `unlock` calls — these require kernel-side
+//     file descriptors and a parallel-holder fixture; tracked under
+//     `core-tests/integration/locking/`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.locking.{
+    FileLockKind,
+    LockRegion,
+    LockError,
+};
+
+// =============================================================================
+// Section 1: FileLockKind — exhaustive pattern match
+// =============================================================================
+
+@test
+fn integration_file_lock_kind_exhaustive_dispatch() {
+    let kinds: List<FileLockKind> = [
+        FileLockKind.Shared,
+        FileLockKind.Exclusive,
+    ];
+    let mut shared_count: Int = 0;
+    let mut exclusive_count: Int = 0;
+    for k in kinds.iter() {
+        match *k {
+            FileLockKind.Shared    => shared_count = shared_count + 1,
+            FileLockKind.Exclusive => exclusive_count = exclusive_count + 1,
+        };
+    }
+    assert_eq(shared_count, 1);
+    assert_eq(exclusive_count, 1);
+}
+
+@test
+fn integration_file_lock_kind_via_maybe_some_pattern() {
+    let opt: Maybe<FileLockKind> = Some(FileLockKind.Exclusive);
+    match opt {
+        Some(k) => {
+            match k {
+                FileLockKind.Exclusive => assert(true),
+                FileLockKind.Shared    => assert(false),
+            }
+        }
+        None => assert(false),
+    };
+}
+
+// =============================================================================
+// Section 2: LockRegion list walk — byte-range table
+// =============================================================================
+
+@test
+fn integration_lock_region_list_iteration() {
+    // A typical "lock the index and the data tail" pattern.
+    let regions: List<LockRegion> = [
+        LockRegion { start: 0, length: 4096 },          // index block
+        LockRegion { start: 4096, length: -1 },         // data → EOF
+    ];
+    assert_eq(regions.len(), 2);
+    let index = regions.get(0 as USize).unwrap();
+    assert_eq(index.start, 0);
+    assert_eq(index.length, 4096);
+    let data = regions.get(1 as USize).unwrap();
+    assert_eq(data.start, 4096);
+    assert_eq(data.length, -1);
+}
+
+@test
+fn integration_lock_region_to_eof_predicate() {
+    // The canonical fcntl(2) F_GETLK decoder predicate:
+    //   length == -1  ⇒ spans EOF
+    //   length >= 0   ⇒ bounded
+    fn spans_eof(r: &LockRegion) -> Bool {
+        r.length == -1
+    }
+    let bounded = LockRegion { start: 100, length: 1024 };
+    let eof     = LockRegion { start: 100, length: -1 };
+    let zero    = LockRegion { start: 100, length: 0 };
+    assert(!spans_eof(&bounded));
+    assert(spans_eof(&eof));
+    assert(!spans_eof(&zero));
+}
+
+// =============================================================================
+// Section 3: LockError dispatch table
+// =============================================================================
+
+type ErrorOutcome is
+    | ConflictWithPid(Int)
+    | ConflictUnknownOwner
+    | IoFailed;
+
+@test
+fn integration_lock_error_dispatch_table() {
+    fn classify(e: &LockError) -> ErrorOutcome {
+        match e {
+            LockError.Conflict(holder) => {
+                match holder {
+                    Some(p) => ErrorOutcome.ConflictWithPid(*p),
+                    None    => ErrorOutcome.ConflictUnknownOwner,
+                }
+            }
+            LockError.IoError(_) => ErrorOutcome.IoFailed,
+        }
+    }
+    let with_pid    = classify(&LockError.Conflict(Some(12345)));
+    let no_owner    = classify(&LockError.Conflict(None));
+    // We don't construct an IoError here — OSError construction is
+    // platform-side; the dispatch arm is type-checked.
+    let mut with_pid_pid: Int = 0;
+    match with_pid {
+        ErrorOutcome.ConflictWithPid(p)    => with_pid_pid = p,
+        ErrorOutcome.ConflictUnknownOwner  => assert(false),
+        ErrorOutcome.IoFailed              => assert(false),
+    };
+    assert_eq(with_pid_pid, 12345);
+    match no_owner {
+        ErrorOutcome.ConflictWithPid(_)    => assert(false),
+        ErrorOutcome.ConflictUnknownOwner  => assert(true),
+        ErrorOutcome.IoFailed              => assert(false),
+    };
+}
+
+// =============================================================================
+// Section 4: LockRegion span-overlap predicate composed with List
+// =============================================================================
+
+@test
+fn integration_lock_region_overlap_classification() {
+    // Predicate: does region A overlap region B?
+    // For bounded ranges, `(A.start, A.start + A.length)` overlaps
+    // `(B.start, B.start + B.length)` iff
+    // `A.start < B.start + B.length && B.start < A.start + A.length`.
+    // The EOF-sentinel case (length == -1) is treated as +∞.
+    fn end_or_inf(r: &LockRegion) -> Int {
+        if r.length == -1 {
+            Int.max
+        } else {
+            r.start + r.length
+        }
+    }
+    fn overlaps(a: &LockRegion, b: &LockRegion) -> Bool {
+        a.start < end_or_inf(b) && b.start < end_or_inf(a)
+    }
+    let r1 = LockRegion { start: 0,    length: 100 };  // [0, 100)
+    let r2 = LockRegion { start: 50,   length: 100 };  // [50, 150) — overlaps r1
+    let r3 = LockRegion { start: 200,  length: 100 };  // [200, 300) — disjoint
+    let r4 = LockRegion { start: 100,  length: -1  };  // [100, ∞)   — abuts r1
+    assert(overlaps(&r1, &r2));
+    assert(!overlaps(&r1, &r3));
+    assert(!overlaps(&r1, &r4));   // r1 ends at 100, r4 starts at 100 — exclusive
+    assert(overlaps(&r3, &r4));    // r3 [200, 300), r4 [100, ∞) — overlap
+}
+
+fn main() {}

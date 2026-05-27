@@ -1,0 +1,199 @@
+// =============================================================================
+// core-tests/sys/io_engine/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.io_engine`. Exercises
+// EngineDuration, TimeSpec, and Fd in combination with the rest of
+// the standard library (List, Maybe, pattern matching, accumulation
+// loops mirroring real I/O-engine integration paths).
+//
+// What this file pins:
+//
+//   * EngineDuration arithmetic composed across a List<EngineDuration>
+//     in the canonical "total wait time" reduction pattern.
+//   * EngineDuration.to_timespec funnel + tv_sec/tv_nsec read-back
+//     for the POSIX clock_nanosleep / pselect surface.
+//   * Fd / Fd.INVALID composed with Maybe<Fd>: "open(2) failed?"
+//     funnel using `is_valid`.
+//   * TimeSpec record construction + field-equality pattern matching
+//     against EngineDuration conversions.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.io_engine.{
+    EngineDuration,
+    TimeSpec,
+    Fd,
+};
+
+// =============================================================================
+// Section 1: EngineDuration accumulation across a List
+// =============================================================================
+
+@test
+fn integration_engine_duration_list_total_wait() {
+    // The canonical I/O-engine timeout-budget pattern: total wait
+    // time across N polls saturates to MAX rather than overflowing.
+    let waits: List<EngineDuration> = [
+        EngineDuration.from_millis(50 as UInt64),
+        EngineDuration.from_millis(100 as UInt64),
+        EngineDuration.from_millis(200 as UInt64),
+        EngineDuration.from_millis(400 as UInt64),
+    ];
+    let mut total = EngineDuration.ZERO;
+    for w in waits.iter() {
+        total = total.saturating_add(*w);
+    }
+    // 50 + 100 + 200 + 400 = 750 ms.
+    assert_eq(total.as_millis(), 750 as UInt64);
+}
+
+@test
+fn integration_engine_duration_saturating_add_at_max() {
+    // Sum a near-MAX value with a normal value — must clamp to MAX,
+    // not overflow.
+    let huge = EngineDuration.MAX;
+    let inc  = EngineDuration.from_millis(1 as UInt64);
+    let r = huge.saturating_add(inc);
+    assert_eq(r.as_nanos(), EngineDuration.MAX.as_nanos());
+}
+
+@test
+fn integration_engine_duration_saturating_sub_underflow_clamps_zero() {
+    let a = EngineDuration.from_millis(5 as UInt64);
+    let b = EngineDuration.from_millis(10 as UInt64);
+    let r = a.saturating_sub(b);
+    assert(r.is_zero());
+}
+
+// =============================================================================
+// Section 2: EngineDuration ↔ TimeSpec round-trip
+// =============================================================================
+
+@test
+fn integration_engine_duration_to_timespec_seconds_only() {
+    // 3 seconds → tv_sec = 3, tv_nsec = 0.
+    let d = EngineDuration.from_secs(3 as UInt64);
+    let ts: TimeSpec = d.to_timespec();
+    assert_eq(ts.tv_sec, 3 as Int64);
+    assert_eq(ts.tv_nsec, 0 as Int64);
+}
+
+@test
+fn integration_engine_duration_to_timespec_sub_second() {
+    // 500 ms → tv_sec = 0, tv_nsec = 500_000_000.
+    let d = EngineDuration.from_millis(500 as UInt64);
+    let ts: TimeSpec = d.to_timespec();
+    assert_eq(ts.tv_sec, 0 as Int64);
+    assert_eq(ts.tv_nsec, 500_000_000 as Int64);
+}
+
+@test
+fn integration_engine_duration_to_timespec_compound() {
+    // 1_500_500_000 ns = 1 second + 500_500_000 ns.
+    let d = EngineDuration.from_nanos(1_500_500_000 as UInt64);
+    let ts: TimeSpec = d.to_timespec();
+    assert_eq(ts.tv_sec, 1 as Int64);
+    assert_eq(ts.tv_nsec, 500_500_000 as Int64);
+}
+
+@test
+fn integration_engine_duration_zero_to_timespec_is_zero_zero() {
+    let ts: TimeSpec = EngineDuration.ZERO.to_timespec();
+    assert_eq(ts.tv_sec, 0 as Int64);
+    assert_eq(ts.tv_nsec, 0 as Int64);
+}
+
+// =============================================================================
+// Section 3: Fd × Maybe — open(2) failure funnel
+// =============================================================================
+
+@test
+fn integration_fd_open_failure_funnel_via_maybe() {
+    // Mimic open(2): negative => failure → None; non-negative ⇒
+    // Some(fd).
+    fn open_funnel(rv: Fd) -> Maybe<Fd> {
+        if rv.is_valid() { Some(rv) } else { None }
+    }
+    // Success: descriptor 7.
+    let ok = open_funnel(Fd(7 as Int32));
+    match ok {
+        Some(fd) => assert_eq(fd.0, 7 as Int32),
+        None     => assert(false),
+    };
+    // Failure: -1 sentinel.
+    let err = open_funnel(Fd.INVALID);
+    match err {
+        Some(_) => assert(false),
+        None    => assert(true),
+    };
+}
+
+@test
+fn integration_fd_invalid_is_negative() {
+    // The INVALID sentinel is the POSIX -1.
+    assert_eq(Fd.INVALID.0, -1 as Int32);
+    assert(!Fd.INVALID.is_valid());
+}
+
+@test
+fn integration_fd_is_valid_predicate_partition() {
+    // Sweep -2 .. 5 — only non-negative values report is_valid.
+    let mut valid_count: Int = 0;
+    let mut invalid_count: Int = 0;
+    let cases: List<Int32> = [
+        -2 as Int32, -1 as Int32, 0 as Int32, 1 as Int32, 5 as Int32,
+    ];
+    for v in cases.iter() {
+        let f = Fd(*v);
+        if f.is_valid() {
+            valid_count = valid_count + 1;
+        } else {
+            invalid_count = invalid_count + 1;
+        }
+    }
+    // 3 valid (0, 1, 5) + 2 invalid (-2, -1).
+    assert_eq(valid_count, 3);
+    assert_eq(invalid_count, 2);
+}
+
+// =============================================================================
+// Section 4: EngineDuration via List.iter().fold equivalent
+// =============================================================================
+
+@test
+fn integration_engine_duration_list_max_via_fold() {
+    // The "longest poll latency" pattern over a List<EngineDuration>.
+    let latencies: List<EngineDuration> = [
+        EngineDuration.from_micros(50 as UInt64),
+        EngineDuration.from_micros(120 as UInt64),
+        EngineDuration.from_micros(80 as UInt64),
+        EngineDuration.from_micros(200 as UInt64),
+        EngineDuration.from_micros(95 as UInt64),
+    ];
+    let mut max = EngineDuration.ZERO;
+    for l in latencies.iter() {
+        if (*l).as_nanos() > max.as_nanos() {
+            max = *l;
+        }
+    }
+    assert_eq(max.as_micros(), 200 as UInt64);
+}
+
+// =============================================================================
+// Section 5: TimeSpec record × pattern match × Maybe lift
+// =============================================================================
+
+@test
+fn integration_timespec_in_maybe_pattern_match() {
+    let maybe_ts: Maybe<TimeSpec> = Some(TimeSpec { tv_sec: 5 as Int64, tv_nsec: 250_000_000 as Int64 });
+    match maybe_ts {
+        Some(ts) => {
+            assert_eq(ts.tv_sec, 5 as Int64);
+            assert_eq(ts.tv_nsec, 250_000_000 as Int64);
+        }
+        None => assert(false),
+    };
+}
+
+fn main() {}

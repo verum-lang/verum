@@ -1,0 +1,200 @@
+// =============================================================================
+// core-tests/sys/fs_watch/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.fs_watch`. Exercises
+// FsEventKind and FsEvent in combination with the rest of the standard
+// library (List, Maybe, pattern matching).
+//
+// What this file pins:
+//
+//   * FsEventKind exhaustive 5-variant pattern dispatch.
+//   * FsEvent record construction × List composition × iteration.
+//   * FsEvent pattern matching through Maybe<FsEvent>.
+//   * Event-classifier dispatch table mirroring real-world watcher
+//     output: "did anything write?" predicate built from the variant
+//     stream.
+//
+// What we do NOT exercise:
+//   * `FsWatcher.new()` / `.watch()` — they allocate kernel resources
+//     (inotify fd / kqueue fd / Windows handle). Live-watcher tests
+//     belong in `core-tests/integration/fs_watch/` with a tmpdir
+//     fixture + a backgrounded writer process.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.fs_watch.{FsEventKind, FsEvent};
+
+// =============================================================================
+// Section 1: FsEventKind — exhaustive 5-variant dispatch
+// =============================================================================
+
+@test
+fn integration_fs_event_kind_exhaustive_dispatch() {
+    let kinds: List<FsEventKind> = [
+        FsEventKind.Created,
+        FsEventKind.Modified,
+        FsEventKind.Deleted,
+        FsEventKind.Renamed,
+        FsEventKind.AttribChanged,
+    ];
+    let mut created_n: Int = 0;
+    let mut modified_n: Int = 0;
+    let mut deleted_n: Int = 0;
+    let mut renamed_n: Int = 0;
+    let mut attrib_n: Int = 0;
+    for k in kinds.iter() {
+        match *k {
+            FsEventKind.Created       => created_n  = created_n  + 1,
+            FsEventKind.Modified      => modified_n = modified_n + 1,
+            FsEventKind.Deleted       => deleted_n  = deleted_n  + 1,
+            FsEventKind.Renamed       => renamed_n  = renamed_n  + 1,
+            FsEventKind.AttribChanged => attrib_n   = attrib_n   + 1,
+        };
+    }
+    assert_eq(created_n,  1);
+    assert_eq(modified_n, 1);
+    assert_eq(deleted_n,  1);
+    assert_eq(renamed_n,  1);
+    assert_eq(attrib_n,   1);
+}
+
+@test
+fn integration_fs_event_kind_via_maybe_some() {
+    let opt: Maybe<FsEventKind> = Some(FsEventKind.Deleted);
+    match opt {
+        Some(k) => {
+            match k {
+                FsEventKind.Deleted => assert(true),
+                _ => assert(false),
+            }
+        }
+        None => assert(false),
+    };
+}
+
+// =============================================================================
+// Section 2: FsEvent × List × iteration
+// =============================================================================
+
+@test
+fn integration_fs_event_list_iteration() {
+    let events: List<FsEvent> = [
+        FsEvent { path: "/tmp/a", kind: FsEventKind.Created },
+        FsEvent { path: "/tmp/b", kind: FsEventKind.Modified },
+        FsEvent { path: "/tmp/c", kind: FsEventKind.Deleted },
+    ];
+    assert_eq(events.len(), 3);
+    // First event reads back exactly the construction inputs.
+    let first = events.get(0 as USize).unwrap();
+    assert_eq(first.path, "/tmp/a");
+    match first.kind {
+        FsEventKind.Created => assert(true),
+        _                   => assert(false),
+    };
+}
+
+// =============================================================================
+// Section 3: Mutating-event classifier — real-world watcher pattern
+// =============================================================================
+
+@test
+fn integration_fs_event_mutating_predicate() {
+    // Predicate: did THIS event represent a content-changing mutation?
+    // Created / Modified / Deleted ⇒ true; Renamed / AttribChanged
+    // ⇒ false (rename moves the inode; chmod doesn't change content).
+    fn is_content_mutation(k: FsEventKind) -> Bool {
+        match k {
+            FsEventKind.Created       => true,
+            FsEventKind.Modified      => true,
+            FsEventKind.Deleted       => true,
+            FsEventKind.Renamed       => false,
+            FsEventKind.AttribChanged => false,
+        }
+    }
+    assert(is_content_mutation(FsEventKind.Created));
+    assert(is_content_mutation(FsEventKind.Modified));
+    assert(is_content_mutation(FsEventKind.Deleted));
+    assert(!is_content_mutation(FsEventKind.Renamed));
+    assert(!is_content_mutation(FsEventKind.AttribChanged));
+}
+
+@test
+fn integration_fs_event_filter_count_content_mutations() {
+    // Sweep a List<FsEvent>; count the ones that report content
+    // mutation. Equivalent to `events.iter().filter(is_content_mutation).count()`
+    // without needing iterator-adapter dispatch.
+    let events: List<FsEvent> = [
+        FsEvent { path: "/x", kind: FsEventKind.Created },
+        FsEvent { path: "/y", kind: FsEventKind.AttribChanged },
+        FsEvent { path: "/z", kind: FsEventKind.Modified },
+        FsEvent { path: "/w", kind: FsEventKind.Renamed },
+        FsEvent { path: "/v", kind: FsEventKind.Deleted },
+    ];
+    fn is_content_mutation(k: FsEventKind) -> Bool {
+        match k {
+            FsEventKind.Created       => true,
+            FsEventKind.Modified      => true,
+            FsEventKind.Deleted       => true,
+            FsEventKind.Renamed       => false,
+            FsEventKind.AttribChanged => false,
+        }
+    }
+    let mut content_count: Int = 0;
+    for e in events.iter() {
+        if is_content_mutation(e.kind) {
+            content_count = content_count + 1;
+        }
+    }
+    // Created + Modified + Deleted = 3 content mutations.
+    assert_eq(content_count, 3);
+}
+
+// =============================================================================
+// Section 4: FsEventKind.clone equivalent through pattern reconstruction
+// =============================================================================
+
+@test
+fn integration_fs_event_kind_pattern_round_trip() {
+    // Pattern-match a kind to a fresh constructor invocation; reading
+    // the round-tripped value through pattern-match again must reach
+    // the same arm.
+    fn round_trip(k: FsEventKind) -> FsEventKind {
+        match k {
+            FsEventKind.Created       => FsEventKind.Created,
+            FsEventKind.Modified      => FsEventKind.Modified,
+            FsEventKind.Deleted       => FsEventKind.Deleted,
+            FsEventKind.Renamed       => FsEventKind.Renamed,
+            FsEventKind.AttribChanged => FsEventKind.AttribChanged,
+        }
+    }
+    let kinds: List<FsEventKind> = [
+        FsEventKind.Created,
+        FsEventKind.Modified,
+        FsEventKind.Deleted,
+        FsEventKind.Renamed,
+        FsEventKind.AttribChanged,
+    ];
+    for k in kinds.iter() {
+        let r = round_trip(*k);
+        // Reach the same arm twice — once through the round-trip
+        // function, once directly.
+        let direct_tag = match *k {
+            FsEventKind.Created       => 1,
+            FsEventKind.Modified      => 2,
+            FsEventKind.Deleted       => 3,
+            FsEventKind.Renamed       => 4,
+            FsEventKind.AttribChanged => 5,
+        };
+        let trip_tag = match r {
+            FsEventKind.Created       => 1,
+            FsEventKind.Modified      => 2,
+            FsEventKind.Deleted       => 3,
+            FsEventKind.Renamed       => 4,
+            FsEventKind.AttribChanged => 5,
+        };
+        assert_eq(direct_tag, trip_tag);
+    }
+}
+
+fn main() {}
