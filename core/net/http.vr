@@ -89,16 +89,16 @@ implement Method {
     /// Parse a method from a string.
     public fn from_str(s: &Text) -> Maybe<Method> {
         match s.to_uppercase().as_str() {
-            "GET"     => Some(Method.Get),
-            "HEAD"    => Some(Method.Head),
-            "POST"    => Some(Method.Post),
-            "PUT"     => Some(Method.Put),
-            "DELETE"  => Some(Method.Delete),
-            "CONNECT" => Some(Method.Connect),
-            "OPTIONS" => Some(Method.Options),
-            "TRACE"   => Some(Method.Trace),
-            "PATCH"   => Some(Method.Patch),
-            _         => None,
+            "GET"     => Maybe.Some(Method.Get),
+            "HEAD"    => Maybe.Some(Method.Head),
+            "POST"    => Maybe.Some(Method.Post),
+            "PUT"     => Maybe.Some(Method.Put),
+            "DELETE"  => Maybe.Some(Method.Delete),
+            "CONNECT" => Maybe.Some(Method.Connect),
+            "OPTIONS" => Maybe.Some(Method.Options),
+            "TRACE"   => Maybe.Some(Method.Trace),
+            "PATCH"   => Maybe.Some(Method.Patch),
+            _         => Maybe.None,
         }
     }
 
@@ -382,10 +382,10 @@ implement Headers {
     public fn get(&self, name: &Text) -> Maybe<&Text> {
         for (k, v) in &self.entries {
             if k.eq_ignore_case(name) {
-                return Some(v);
+                return Maybe.Some(v);
             }
         }
-        None
+        Maybe.None
     }
 
     /// Get all values for a header name (case-insensitive).
@@ -499,7 +499,7 @@ implement Request {
             url: url,
             version: Version.Http11,
             headers: Headers.new(),
-            body: None,
+            body: Maybe.None,
         }
     }
 
@@ -532,13 +532,13 @@ implement Request {
 
     /// Set the request body as bytes.
     public fn body_bytes(self, data: List<Byte>) -> Request {
-        Request { body: Some(data), ..self }
+        Request { body: Maybe.Some(data), ..self }
     }
 
     /// Set the request body as text.
     public fn body_text(self, text: Text) -> Request {
         let bytes = text.into_bytes();
-        let mut req = Request { body: Some(bytes), ..self };
+        let mut req = Request { body: Maybe.Some(bytes), ..self };
         if !req.headers.contains(&"content-type") {
             req.headers.set(&"content-type", &"text/plain; charset=utf-8");
         }
@@ -548,7 +548,7 @@ implement Request {
     /// Set the request body as JSON text.
     public fn body_json(self, json: Text) -> Request {
         let bytes = json.into_bytes();
-        let mut req = Request { body: Some(bytes), ..self };
+        let mut req = Request { body: Maybe.Some(bytes), ..self };
         req.headers.set(&"content-type", &"application/json");
         req
     }
@@ -813,35 +813,35 @@ implement HttpUrl {
 
         // Split host from path
         let (authority, path_and_rest) = match rest.find("/") {
-            Some(idx) => (rest.slice(0, idx), rest.slice(idx, rest.len())),
-            None => (rest.clone(), "/"),
+            Maybe.Some(idx) => (rest.slice(0, idx), rest.slice(idx, rest.len())),
+            Maybe.None => (rest.clone(), "/"),
         };
 
         // Parse host:port
         let (host, port) = if authority.contains(":") {
             match authority.rsplit_once(':') {
-                Some((h, p)) => {
+                Maybe.Some((h, p)) => {
                     match p.parse_int() {
-                        Ok(port_num) => (h.clone(), Some(port_num)),
-                        Err(_) => (authority.clone(), None),
+                        Result.Ok(port_num) => (h.clone(), Maybe.Some(port_num)),
+                        Result.Err(_) => (authority.clone(), Maybe.None),
                     }
                 }
-                None => (authority.clone(), None),
+                Maybe.None => (authority.clone(), Maybe.None),
             }
         } else {
-            (authority.clone(), None)
+            (authority.clone(), Maybe.None)
         };
 
         // Split path from query and fragment
         let (path_str, query, fragment) = {
             let (p, frag) = match path_and_rest.find("#") {
-                Some(idx) => (path_and_rest.slice(0, idx), Some(path_and_rest.slice(idx + 1, path_and_rest.len()))),
-                None => (path_and_rest.clone(), None),
+                Maybe.Some(idx) => (path_and_rest.slice(0, idx), Maybe.Some(path_and_rest.slice(idx + 1, path_and_rest.len()))),
+                Maybe.None => (path_and_rest.clone(), Maybe.None),
             };
 
             match p.find("?") {
-                Some(idx) => (p.slice(0, idx), Some(p.slice(idx + 1, p.len())), frag),
-                None => (p, None, frag),
+                Maybe.Some(idx) => (p.slice(0, idx), Maybe.Some(p.slice(idx + 1, p.len())), frag),
+                Maybe.None => (p, Maybe.None, frag),
             }
         };
 
