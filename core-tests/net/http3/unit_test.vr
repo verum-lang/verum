@@ -1,0 +1,98 @@
+// =============================================================================
+// core-tests/net/http3/unit_test.vr — RFC 9114 surface
+// =============================================================================
+//
+// `core/net/http3/*` — RFC 9114 HTTP/3 protocol + RFC 9204 QPACK.
+//
+// Tests cover the wire-format constants:
+//
+//   * H3FrameType 7+Reserved variants + to_u64 wire IDs.
+//   * H3_SETTINGS_* RFC 9114 §7.2.4.1 settings parameter IDs.
+// =============================================================================
+
+mount core.net.http3.frame.{
+    H3FrameType,
+    H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY,
+    H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
+    H3_SETTINGS_QPACK_BLOCKED_STREAMS
+};
+
+// =============================================================================
+// Section 1: H3FrameType — wire IDs
+// =============================================================================
+
+@test
+fn test_h3_frame_type_data_to_u64_0() {
+    assert_eq(H3FrameType.Data.to_u64(), 0x0_u64);
+}
+
+@test
+fn test_h3_frame_type_headers_to_u64_1() {
+    assert_eq(H3FrameType.Headers.to_u64(), 0x1_u64);
+}
+
+@test
+fn test_h3_frame_type_cancel_push_to_u64_3() {
+    assert_eq(H3FrameType.CancelPush.to_u64(), 0x3_u64);
+}
+
+@test
+fn test_h3_frame_type_settings_to_u64_4() {
+    assert_eq(H3FrameType.Settings.to_u64(), 0x4_u64);
+}
+
+@test
+fn test_h3_frame_type_push_promise_to_u64_5() {
+    assert_eq(H3FrameType.PushPromise.to_u64(), 0x5_u64);
+}
+
+@test
+fn test_h3_frame_type_go_away_to_u64_7() {
+    assert_eq(H3FrameType.GoAway.to_u64(), 0x7_u64);
+}
+
+@test
+fn test_h3_frame_type_max_push_id_to_u64_d() {
+    assert_eq(H3FrameType.MaxPushId.to_u64(), 0xD_u64);
+}
+
+// =============================================================================
+// Section 2: H3FrameType — from_u64 round-trip
+// =============================================================================
+
+@test
+fn test_h3_frame_type_from_u64_0_data() {
+    let t = H3FrameType.from_u64(0x0_u64);
+    assert(t is H3FrameType.Data);
+}
+
+@test
+fn test_h3_frame_type_from_u64_1_headers() {
+    let t = H3FrameType.from_u64(0x1_u64);
+    assert(t is H3FrameType.Headers);
+}
+
+@test
+fn test_h3_frame_type_from_u64_unknown_reserved() {
+    let t = H3FrameType.from_u64(0xFF_u64);
+    assert(t is H3FrameType.Reserved);
+}
+
+// =============================================================================
+// Section 3: H3 settings parameter IDs (RFC 9114 §7.2.4.1)
+// =============================================================================
+
+@test
+fn test_h3_setting_qpack_max_table_capacity_0x01() {
+    assert_eq(H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY, 0x01_u64);
+}
+
+@test
+fn test_h3_setting_max_field_section_size_0x06() {
+    assert_eq(H3_SETTINGS_MAX_FIELD_SECTION_SIZE, 0x06_u64);
+}
+
+@test
+fn test_h3_setting_qpack_blocked_streams_0x07() {
+    assert_eq(H3_SETTINGS_QPACK_BLOCKED_STREAMS, 0x07_u64);
+}

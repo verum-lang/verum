@@ -1,0 +1,118 @@
+// =============================================================================
+// core-tests/net/h3/unit_test.vr — pure-Verum HTTP/3 + QPACK
+// =============================================================================
+//
+// `core/net/h3/` (~13 files) — pure-Verum HTTP/3 (RFC 9114) + QPACK
+// (RFC 9204) + WebTransport (W3C). The newer implementation that
+// will subsume `core/net/http3/`.
+//
+// Tests cover the wire-format constants:
+//
+//   * H3 frame type IDs (FT_DATA 0x00 ... FT_MAX_PUSH_ID 0x0D).
+//   * H3 SETTINGS parameter IDs (RFC 9114 §7.2.4.1 + RFC 9220 +
+//     RFC 9297 H3 Datagram).
+//   * Stream-type prefix bytes (RFC 9114 §6.2.2: Control 0x00,
+//     Push 0x01, QPACK Encoder 0x02, QPACK Decoder 0x03).
+// =============================================================================
+
+mount core.net.h3.frame.{
+    FT_DATA, FT_HEADERS, FT_CANCEL_PUSH, FT_SETTINGS, FT_PUSH_PROMISE,
+    FT_GOAWAY, FT_MAX_PUSH_ID,
+    SETTING_QPACK_MAX_TABLE_CAPACITY, SETTING_MAX_FIELD_SECTION_SIZE,
+    SETTING_QPACK_BLOCKED_STREAMS, SETTING_ENABLE_CONNECT_PROTOCOL,
+    SETTING_H3_DATAGRAM,
+    STREAM_TYPE_CONTROL, STREAM_TYPE_PUSH,
+    STREAM_TYPE_QPACK_ENCODER, STREAM_TYPE_QPACK_DECODER
+};
+
+// =============================================================================
+// Section 1: Frame type IDs (RFC 9114 §11.2.1)
+// =============================================================================
+
+@test
+fn test_ft_data_0x00() { assert_eq(FT_DATA, 0x00_u64); }
+
+@test
+fn test_ft_headers_0x01() { assert_eq(FT_HEADERS, 0x01_u64); }
+
+@test
+fn test_ft_cancel_push_0x03() { assert_eq(FT_CANCEL_PUSH, 0x03_u64); }
+
+@test
+fn test_ft_settings_0x04() { assert_eq(FT_SETTINGS, 0x04_u64); }
+
+@test
+fn test_ft_push_promise_0x05() { assert_eq(FT_PUSH_PROMISE, 0x05_u64); }
+
+@test
+fn test_ft_goaway_0x07() { assert_eq(FT_GOAWAY, 0x07_u64); }
+
+@test
+fn test_ft_max_push_id_0x0d() { assert_eq(FT_MAX_PUSH_ID, 0x0D_u64); }
+
+// =============================================================================
+// Section 2: SETTINGS parameter IDs
+// =============================================================================
+
+@test
+fn test_setting_qpack_max_table_capacity_0x01() {
+    assert_eq(SETTING_QPACK_MAX_TABLE_CAPACITY, 0x01_u64);
+}
+
+@test
+fn test_setting_max_field_section_size_0x06() {
+    assert_eq(SETTING_MAX_FIELD_SECTION_SIZE, 0x06_u64);
+}
+
+@test
+fn test_setting_qpack_blocked_streams_0x07() {
+    assert_eq(SETTING_QPACK_BLOCKED_STREAMS, 0x07_u64);
+}
+
+@test
+fn test_setting_enable_connect_protocol_0x08() {
+    // RFC 9220: Extended CONNECT for WebSockets-over-HTTP/3
+    assert_eq(SETTING_ENABLE_CONNECT_PROTOCOL, 0x08_u64);
+}
+
+@test
+fn test_setting_h3_datagram_0x33() {
+    // RFC 9297: HTTP/3 Datagram (for WebTransport)
+    assert_eq(SETTING_H3_DATAGRAM, 0x33_u64);
+}
+
+// =============================================================================
+// Section 3: Stream-type prefix bytes (RFC 9114 §6.2.2)
+// =============================================================================
+
+@test
+fn test_stream_type_control_0x00() {
+    assert_eq(STREAM_TYPE_CONTROL, 0x00_u64);
+}
+
+@test
+fn test_stream_type_push_0x01() {
+    assert_eq(STREAM_TYPE_PUSH, 0x01_u64);
+}
+
+@test
+fn test_stream_type_qpack_encoder_0x02() {
+    assert_eq(STREAM_TYPE_QPACK_ENCODER, 0x02_u64);
+}
+
+@test
+fn test_stream_type_qpack_decoder_0x03() {
+    assert_eq(STREAM_TYPE_QPACK_DECODER, 0x03_u64);
+}
+
+// =============================================================================
+// Section 4: Stream-type pairwise distinctness
+// =============================================================================
+
+@test
+fn test_stream_types_pairwise_distinct() {
+    assert(!(STREAM_TYPE_CONTROL == STREAM_TYPE_PUSH));
+    assert(!(STREAM_TYPE_PUSH == STREAM_TYPE_QPACK_ENCODER));
+    assert(!(STREAM_TYPE_QPACK_ENCODER == STREAM_TYPE_QPACK_DECODER));
+    assert(!(STREAM_TYPE_CONTROL == STREAM_TYPE_QPACK_DECODER));
+}

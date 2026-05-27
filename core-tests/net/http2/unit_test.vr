@@ -1,0 +1,386 @@
+// =============================================================================
+// core-tests/net/http2/unit_test.vr — RFC 7540 / RFC 7541 surface
+// =============================================================================
+//
+// `core/net/http2/*` — RFC 7540 HTTP/2 protocol + RFC 7541 HPACK.
+//
+// Tests cover the algebraic data-surface:
+//
+//   * FrameType 10+Unknown variants + to_u8 / from_u8 round-trip
+//     (RFC 7540 §4.1 wire IDs 0x0-0x9).
+//   * FrameFlags 5 well-known flag constants (END_STREAM, END_HEADERS,
+//     PADDED, PRIORITY, ACK).
+//   * SettingId 6 well-known parameter IDs (RFC 7540 §6.5.2 +
+//     RFC 9113 §6.5).
+//   * Settings defaults (per RFC 7540 §6.5.2 initial values).
+//   * ErrorCode 14 RFC 7540 §7 wire constants.
+//   * MAX/MIN settings bounds.
+//   * FRAME_HEADER_SIZE = 9 (§4.1 fixed-size prefix).
+//   * PREFACE 24-byte connection preface (§3.5).
+// =============================================================================
+
+mount core.net.http2.{
+    FrameType, FrameFlags, Settings, SettingId, ErrorCode,
+    FRAME_HEADER_SIZE, MAX_FRAME_SIZE_INITIAL, PREFACE
+};
+mount core.net.http2.settings.{
+    DEFAULT_HEADER_TABLE_SIZE, DEFAULT_ENABLE_PUSH,
+    DEFAULT_MAX_CONCURRENT_STREAMS, DEFAULT_INITIAL_WINDOW_SIZE,
+    DEFAULT_MAX_FRAME_SIZE, DEFAULT_MAX_HEADER_LIST_SIZE,
+    MAX_INITIAL_WINDOW_SIZE, MIN_MAX_FRAME_SIZE, MAX_MAX_FRAME_SIZE
+};
+mount core.net.http2.frame.{FRAME_LENGTH_LIMIT};
+
+// =============================================================================
+// Section 1: Wire-format constants
+// =============================================================================
+
+@test
+fn test_frame_header_size_is_9() {
+    // RFC 7540 §4.1: frame header is exactly 9 bytes
+    assert_eq(FRAME_HEADER_SIZE, 9);
+}
+
+@test
+fn test_max_frame_size_initial_is_16384() {
+    // RFC 7540 §6.5.2 SETTINGS_MAX_FRAME_SIZE initial value
+    assert_eq(MAX_FRAME_SIZE_INITIAL, 16384);
+}
+
+@test
+fn test_frame_length_limit_is_24_bit() {
+    // RFC 7540 §4.1: length field is 24-bit → 2^24-1 max
+    assert_eq(FRAME_LENGTH_LIMIT, 0xFFFFFF);
+}
+
+@test
+fn test_preface_length_is_24() {
+    // RFC 7540 §3.5: connection preface is exactly 24 bytes
+    assert_eq(PREFACE.len(), 24);
+}
+
+@test
+fn test_preface_starts_with_pri() {
+    // "PRI " in ASCII
+    assert_eq(PREFACE[0], 0x50_u8);  // 'P'
+    assert_eq(PREFACE[1], 0x52_u8);  // 'R'
+    assert_eq(PREFACE[2], 0x49_u8);  // 'I'
+    assert_eq(PREFACE[3], 0x20_u8);  // ' '
+}
+
+// =============================================================================
+// Section 2: FrameType — 10 variants + to_u8 wire IDs
+// =============================================================================
+
+@test
+fn test_frame_type_data_to_u8_0() {
+    assert_eq(FrameType.Data.to_u8(), 0x0_u8);
+}
+
+@test
+fn test_frame_type_headers_to_u8_1() {
+    assert_eq(FrameType.Headers.to_u8(), 0x1_u8);
+}
+
+@test
+fn test_frame_type_priority_to_u8_2() {
+    assert_eq(FrameType.Priority.to_u8(), 0x2_u8);
+}
+
+@test
+fn test_frame_type_rst_stream_to_u8_3() {
+    assert_eq(FrameType.RstStream.to_u8(), 0x3_u8);
+}
+
+@test
+fn test_frame_type_settings_to_u8_4() {
+    assert_eq(FrameType.SettingsType.to_u8(), 0x4_u8);
+}
+
+@test
+fn test_frame_type_push_promise_to_u8_5() {
+    assert_eq(FrameType.PushPromise.to_u8(), 0x5_u8);
+}
+
+@test
+fn test_frame_type_ping_to_u8_6() {
+    assert_eq(FrameType.Ping.to_u8(), 0x6_u8);
+}
+
+@test
+fn test_frame_type_go_away_to_u8_7() {
+    assert_eq(FrameType.GoAway.to_u8(), 0x7_u8);
+}
+
+@test
+fn test_frame_type_window_update_to_u8_8() {
+    assert_eq(FrameType.WindowUpdate.to_u8(), 0x8_u8);
+}
+
+@test
+fn test_frame_type_continuation_to_u8_9() {
+    assert_eq(FrameType.Continuation.to_u8(), 0x9_u8);
+}
+
+// =============================================================================
+// Section 3: FrameType.from_u8 round-trip
+// =============================================================================
+
+@test
+fn test_frame_type_from_u8_0_data() {
+    let t = FrameType.from_u8(0x0_u8);
+    assert(t is FrameType.Data);
+}
+
+@test
+fn test_frame_type_from_u8_1_headers() {
+    let t = FrameType.from_u8(0x1_u8);
+    assert(t is FrameType.Headers);
+}
+
+@test
+fn test_frame_type_from_u8_unknown_falls_through() {
+    let t = FrameType.from_u8(0xFF_u8);
+    assert(t is FrameType.Unknown);
+}
+
+// =============================================================================
+// Section 4: FrameFlags — well-known flag constants
+// =============================================================================
+
+@test
+fn test_frame_flags_end_stream_0x01() {
+    assert_eq(FrameFlags.END_STREAM, 0x01_u8);
+}
+
+@test
+fn test_frame_flags_end_headers_0x04() {
+    assert_eq(FrameFlags.END_HEADERS, 0x04_u8);
+}
+
+@test
+fn test_frame_flags_padded_0x08() {
+    assert_eq(FrameFlags.PADDED, 0x08_u8);
+}
+
+@test
+fn test_frame_flags_priority_0x20() {
+    // HEADERS-only flag
+    assert_eq(FrameFlags.PRIORITY, 0x20_u8);
+}
+
+@test
+fn test_frame_flags_ack_0x01() {
+    // SETTINGS, PING — bit 0
+    assert_eq(FrameFlags.ACK, 0x01_u8);
+}
+
+// =============================================================================
+// Section 5: FrameFlags — has / with / without bitmap operations
+// =============================================================================
+
+@test
+fn test_frame_flags_none_has_nothing() {
+    let f = FrameFlags.none();
+    assert(!f.has(FrameFlags.END_STREAM));
+    assert(!f.has(FrameFlags.END_HEADERS));
+}
+
+@test
+fn test_frame_flags_with_end_stream() {
+    let f = FrameFlags.none().with(FrameFlags.END_STREAM);
+    assert(f.has(FrameFlags.END_STREAM));
+}
+
+@test
+fn test_frame_flags_compound() {
+    let f = FrameFlags.none()
+        .with(FrameFlags.END_STREAM)
+        .with(FrameFlags.END_HEADERS);
+    assert(f.has(FrameFlags.END_STREAM));
+    assert(f.has(FrameFlags.END_HEADERS));
+}
+
+@test
+fn test_frame_flags_without_clears() {
+    let f = FrameFlags.none()
+        .with(FrameFlags.END_STREAM)
+        .with(FrameFlags.END_HEADERS)
+        .without(FrameFlags.END_STREAM);
+    assert(!f.has(FrameFlags.END_STREAM));
+    assert(f.has(FrameFlags.END_HEADERS));
+}
+
+// =============================================================================
+// Section 6: SettingId — RFC 7540 §6.5.2 parameter identifiers
+// =============================================================================
+
+@test
+fn test_setting_id_header_table_size_0x1() {
+    assert_eq(SettingId.HEADER_TABLE_SIZE, 0x1_u16);
+}
+
+@test
+fn test_setting_id_enable_push_0x2() {
+    assert_eq(SettingId.ENABLE_PUSH, 0x2_u16);
+}
+
+@test
+fn test_setting_id_max_concurrent_streams_0x3() {
+    assert_eq(SettingId.MAX_CONCURRENT_STREAMS, 0x3_u16);
+}
+
+@test
+fn test_setting_id_initial_window_size_0x4() {
+    assert_eq(SettingId.INITIAL_WINDOW_SIZE, 0x4_u16);
+}
+
+@test
+fn test_setting_id_max_frame_size_0x5() {
+    assert_eq(SettingId.MAX_FRAME_SIZE, 0x5_u16);
+}
+
+@test
+fn test_setting_id_max_header_list_size_0x6() {
+    assert_eq(SettingId.MAX_HEADER_LIST_SIZE, 0x6_u16);
+}
+
+// =============================================================================
+// Section 7: Settings — default constants per RFC 7540 §6.5.2
+// =============================================================================
+
+@test
+fn test_default_header_table_size_4096() {
+    assert_eq(DEFAULT_HEADER_TABLE_SIZE, 4096_u32);
+}
+
+@test
+fn test_default_enable_push_1() {
+    assert_eq(DEFAULT_ENABLE_PUSH, 1_u32);
+}
+
+@test
+fn test_default_max_concurrent_streams_unbounded() {
+    assert_eq(DEFAULT_MAX_CONCURRENT_STREAMS, 0xFFFFFFFF_u32);
+}
+
+@test
+fn test_default_initial_window_size_65535() {
+    assert_eq(DEFAULT_INITIAL_WINDOW_SIZE, 65535_u32);
+}
+
+@test
+fn test_default_max_frame_size_16384() {
+    assert_eq(DEFAULT_MAX_FRAME_SIZE, 16384_u32);
+}
+
+@test
+fn test_default_max_header_list_size_unbounded() {
+    assert_eq(DEFAULT_MAX_HEADER_LIST_SIZE, 0xFFFFFFFF_u32);
+}
+
+// =============================================================================
+// Section 8: Settings — value bounds
+// =============================================================================
+
+@test
+fn test_max_initial_window_size_is_2_to_31_minus_1() {
+    assert_eq(MAX_INITIAL_WINDOW_SIZE, 0x7FFFFFFF_u32);
+}
+
+@test
+fn test_min_max_frame_size_is_16384() {
+    assert_eq(MIN_MAX_FRAME_SIZE, 16384_u32);
+}
+
+@test
+fn test_max_max_frame_size_is_2_to_24_minus_1() {
+    assert_eq(MAX_MAX_FRAME_SIZE, 16777215_u32);
+}
+
+// =============================================================================
+// Section 9: Settings.defaults — record construction
+// =============================================================================
+
+@test
+fn test_settings_defaults_record_shape() {
+    let s = Settings.defaults();
+    assert_eq(s.header_table_size, 4096_u32);
+    assert(s.enable_push);
+    assert_eq(s.max_frame_size, 16384_u32);
+    assert_eq(s.initial_window_size, 65535_u32);
+}
+
+// =============================================================================
+// Section 10: ErrorCode — RFC 7540 §7 wire constants
+// =============================================================================
+
+@test
+fn test_error_code_no_error_0x00() {
+    assert_eq(ErrorCode.NO_ERROR, 0x00_u32);
+}
+
+@test
+fn test_error_code_protocol_error_0x01() {
+    assert_eq(ErrorCode.PROTOCOL_ERROR, 0x01_u32);
+}
+
+@test
+fn test_error_code_internal_error_0x02() {
+    assert_eq(ErrorCode.INTERNAL_ERROR, 0x02_u32);
+}
+
+@test
+fn test_error_code_flow_control_error_0x03() {
+    assert_eq(ErrorCode.FLOW_CONTROL_ERROR, 0x03_u32);
+}
+
+@test
+fn test_error_code_settings_timeout_0x04() {
+    assert_eq(ErrorCode.SETTINGS_TIMEOUT, 0x04_u32);
+}
+
+@test
+fn test_error_code_stream_closed_0x05() {
+    assert_eq(ErrorCode.STREAM_CLOSED, 0x05_u32);
+}
+
+@test
+fn test_error_code_frame_size_error_0x06() {
+    assert_eq(ErrorCode.FRAME_SIZE_ERROR, 0x06_u32);
+}
+
+@test
+fn test_error_code_refused_stream_0x07() {
+    assert_eq(ErrorCode.REFUSED_STREAM, 0x07_u32);
+}
+
+@test
+fn test_error_code_cancel_0x08() {
+    assert_eq(ErrorCode.CANCEL, 0x08_u32);
+}
+
+@test
+fn test_error_code_compression_error_0x09() {
+    assert_eq(ErrorCode.COMPRESSION_ERROR, 0x09_u32);
+}
+
+@test
+fn test_error_code_connect_error_0x0a() {
+    assert_eq(ErrorCode.CONNECT_ERROR, 0x0A_u32);
+}
+
+@test
+fn test_error_code_enhance_your_calm_0x0b() {
+    assert_eq(ErrorCode.ENHANCE_YOUR_CALM, 0x0B_u32);
+}
+
+@test
+fn test_error_code_inadequate_security_0x0c() {
+    assert_eq(ErrorCode.INADEQUATE_SECURITY, 0x0C_u32);
+}
+
+@test
+fn test_error_code_http_1_1_required_0x0d() {
+    assert_eq(ErrorCode.HTTP_1_1_REQUIRED, 0x0D_u32);
+}
