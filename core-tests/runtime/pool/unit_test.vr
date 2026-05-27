@@ -1,0 +1,78 @@
+// =============================================================================
+// core-tests/runtime/pool/unit_test.vr
+// =============================================================================
+//
+// `core/runtime/pool.vr` (153 LOC) — fixed-size thread pool with RAII Drop.
+//
+// Public surface:
+//   * ThreadPool record + new(num_workers) + submit(func, arg) + destroy +
+//     global_submit (static)
+//   * PoolTaskHandle record (handle + awaited Bool) + await(&mut self)
+//   * Drop for ThreadPool — calls `__pool_destroy_raw` on scope exit
+//   * Drop for PoolTaskHandle — drains unawaited handle on scope exit
+//
+// Backing intrinsics (`@intrinsic("pool_*")`):
+//   * pool_create / pool_submit / pool_await / pool_destroy /
+//     pool_global_submit
+//
+// Live thread-pool execution requires task #7 (AOT stdlib build) under
+// --aot.  Under --interp the pool intrinsics may or may not be bound —
+// tests pin DATA-ONLY surface (record construction, handle layout) and
+// flag the live path as deferred.
+// =============================================================================
+
+mount core.runtime.pool.{ThreadPool, PoolTaskHandle};
+
+// =============================================================================
+// Section 1: PoolTaskHandle — record construction + field surface
+// =============================================================================
+
+@test
+fn test_pool_task_handle_construction() {
+    let h = PoolTaskHandle { handle: 0, awaited: false };
+    assert(h.handle == 0);
+    assert(!h.awaited);
+}
+
+@test
+fn test_pool_task_handle_with_handle_id() {
+    let h = PoolTaskHandle { handle: 42, awaited: false };
+    assert(h.handle == 42);
+}
+
+@test
+fn test_pool_task_handle_awaited_true() {
+    let h = PoolTaskHandle { handle: 1, awaited: true };
+    assert(h.awaited);
+}
+
+@test
+fn test_pool_task_handle_layout_is_two_field() {
+    // Pin the layout via direct construction with positional-by-name —
+    // a third field would compile-error here.  Drift = compile failure.
+    let h = PoolTaskHandle { handle: 7, awaited: false };
+    let _ = h.handle;
+    let _ = h.awaited;
+    assert(true);
+}
+
+// =============================================================================
+// Section 2: ThreadPool — record surface
+// =============================================================================
+//
+// Direct record construction with `handle: Int` is the test surface;
+// the `new(num_workers)` ctor calls `__pool_create_raw` which is
+// gated on the live thread-pool binding (deferred).
+//
+
+@test
+fn test_thread_pool_record_construction() {
+    let p = ThreadPool { handle: 0 };
+    assert(p.handle == 0);
+}
+
+@test
+fn test_thread_pool_handle_field() {
+    let p = ThreadPool { handle: 0xDEAD };
+    assert(p.handle == 0xDEAD);
+}
