@@ -92,7 +92,16 @@ without the byte-string literal and pass the high-index octets
 as separate Byte parameters — would defer the underlying defect
 class.
 
-**Effort**: 1 day to diagnose + 2-3 days fix + retest.
+**Source-side closure-free fix landed 2026-05-27** (commit
+`f649312c6`): `parse(text) -> Result<Ipv6Addr, ...>` no longer
+uses `Ipv6Addr.parse(text).map_err(|e| ...)` single-line closure
+— inlined to explicit `match Ok / Err` dispatch eliminating the
+closure-desugaring surface. Plus qualified `Ipv6CanonicalError`
+variant arms in Display + Debug + Eq (commit `720c9d249`).
+Activates on next verum binary rebuild.
+
+**Effort**: 1 day to diagnose + 2-3 days fix + retest IF the
+source-side fix doesn't close `format_v4_mapped` SIGSEGV.
 
 ### §3.2 `canonicalize` cascades to `Ipv6Addr.parse` workarounds
 
