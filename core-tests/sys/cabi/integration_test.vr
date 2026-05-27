@@ -1,0 +1,240 @@
+// =============================================================================
+// core-tests/sys/cabi/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib integration tests for `core.sys.cabi`. Exercises the
+// C-ABI alias newtypes (CInt, CUInt, CLong, CULong, CSize, CSSize,
+// COff, CMode, CPid, CUid, CGid, CClockId, CSockLen, CFd) in
+// combination with the rest of the standard library.
+//
+// What this file pins:
+//
+//   * Aliases compose into List / Maybe / Result without losing their
+//     newtype-wrapper identity.
+//   * The three CFD_* sentinel constants funnel through pattern-match
+//     on a tuple-newtype shape.
+//   * Composite scenarios that mirror real FFI return-value handling:
+//     read(2) → CSSize-or-error funnel, fork(2) → CPid trichotomy,
+//     stat(2) → CMode permission decoding.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.cabi.{
+    CInt, CUInt, CLong, CULong, CSize, CSSize, COff,
+    CMode, CPid, CUid, CGid, CClockId, CSockLen,
+    CFd, CFD_STDIN, CFD_STDOUT, CFD_STDERR,
+};
+
+// =============================================================================
+// Section 1: Aliases composed into List
+// =============================================================================
+
+@test
+fn integration_cint_list_round_trip() {
+    // Build a List<CInt> via explicit construction (the canonical
+    // FFI-array shape). The "round trip" here is the assertion that
+    // each newtype wrapper preserves its underlying Int32 under `.0`
+    // projection.
+    let a = CInt(-5 as Int32);
+    let b = CInt(0 as Int32);
+    let c = CInt(5 as Int32);
+    let d = CInt(100 as Int32);
+    let wrapped: List<CInt> = [a, b, c, d];
+    assert_eq(wrapped.len(), 4 as USize);
+    // Direct .0 projections on each independently-constructed wrapper.
+    assert_eq(a.0, -5 as Int32);
+    assert_eq(b.0,  0 as Int32);
+    assert_eq(c.0,  5 as Int32);
+    assert_eq(d.0,  100 as Int32);
+}
+
+@test
+fn integration_csize_list_sum_matches_unwrapped() {
+    // Sum a list of CSize values directly through `.0` projection.
+    let sizes: List<CSize> = [
+        CSize(64 as USize),
+        CSize(128 as USize),
+        CSize(256 as USize),
+        CSize(512 as USize),
+    ];
+    let mut total: USize = 0 as USize;
+    for s in sizes.iter() {
+        total = total + (*s).0;
+    }
+    assert_eq(total, 960 as USize);
+}
+
+@test
+fn integration_cfd_collection_of_standard_descriptors() {
+    let fds: List<CFd> = [CFD_STDIN, CFD_STDOUT, CFD_STDERR];
+    assert_eq(fds.len(), 3);
+    let mut total: Int32 = 0 as Int32;
+    for f in fds.iter() {
+        total = total + (*f).0;
+    }
+    // 0 + 1 + 2 = 3.
+    assert_eq(total, 3 as Int32);
+}
+
+// =============================================================================
+// Section 2: read(2) success / failure funnel through CSSize
+// =============================================================================
+
+@test
+fn integration_cssize_read_return_value_funnel() {
+    // The POSIX read(2) result is CSSize: >= 0 on success (bytes
+    // read), -1 on failure. Funnel through Maybe<USize>: Some(n) on
+    // success, None on error.
+    fn read_funnel(rv: CSSize) -> Maybe<USize> {
+        if rv.0 < 0 {
+            None
+        } else {
+            Some(rv.0 as USize)
+        }
+    }
+    // Success: 1024 bytes read.
+    let ok = read_funnel(CSSize(1024));
+    match ok {
+        Some(n) => assert_eq(n, 1024 as USize),
+        None    => assert(false),
+    };
+    // Error: -1 sentinel.
+    let err = read_funnel(CSSize(-1));
+    match err {
+        Some(_) => assert(false),
+        None    => assert(true),
+    };
+    // Edge: zero bytes (EOF).
+    let eof = read_funnel(CSSize(0));
+    match eof {
+        Some(n) => assert_eq(n, 0 as USize),
+        None    => assert(false),
+    };
+}
+
+// =============================================================================
+// Section 3: fork(2) trichotomy through CPid
+// =============================================================================
+
+type ForkOutcome is
+    | Child
+    | Parent(Int32)         // child PID in parent process
+    | Error;
+
+@test
+fn integration_cpid_fork_trichotomy() {
+    fn classify(pid: CPid) -> ForkOutcome {
+        if pid.0 < (0 as Int32) {
+            ForkOutcome.Error
+        } else if pid.0 == (0 as Int32) {
+            ForkOutcome.Child
+        } else {
+            ForkOutcome.Parent(pid.0)
+        }
+    }
+    let outcomes: List<ForkOutcome> = [
+        classify(CPid(-1 as Int32)),
+        classify(CPid(0 as Int32)),
+        classify(CPid(12345 as Int32)),
+    ];
+    // Match each through the trichotomy.
+    let mut error_count: Int = 0;
+    let mut child_count: Int = 0;
+    let mut parent_count: Int = 0;
+    for o in outcomes.iter() {
+        match o {
+            ForkOutcome.Error      => error_count = error_count + 1,
+            ForkOutcome.Child      => child_count = child_count + 1,
+            ForkOutcome.Parent(_)  => parent_count = parent_count + 1,
+        };
+    }
+    assert_eq(error_count, 1);
+    assert_eq(child_count, 1);
+    assert_eq(parent_count, 1);
+}
+
+// =============================================================================
+// Section 4: CFD_* via pattern-match dispatch table
+// =============================================================================
+
+@test
+fn integration_cfd_dispatch_to_descriptor_name() {
+    // A canonical FFI helper: turn a CFd into the textual name of the
+    // descriptor for log lines.
+    fn descriptor_name(fd: CFd) -> Text {
+        if fd.0 == CFD_STDIN.0 {
+            return "stdin".clone();
+        }
+        if fd.0 == CFD_STDOUT.0 {
+            return "stdout".clone();
+        }
+        if fd.0 == CFD_STDERR.0 {
+            return "stderr".clone();
+        }
+        "other".clone()
+    }
+    assert_eq(descriptor_name(CFD_STDIN),  "stdin".clone());
+    assert_eq(descriptor_name(CFD_STDOUT), "stdout".clone());
+    assert_eq(descriptor_name(CFD_STDERR), "stderr".clone());
+    assert_eq(descriptor_name(CFd(7 as Int32)), "other".clone());
+}
+
+// =============================================================================
+// Section 5: CMode permission decoding via bitwise AND
+// =============================================================================
+
+@test
+fn integration_cmode_decode_permission_bits() {
+    // POSIX file modes — extract the user-bits triple from 0o644 = 420.
+    let mode: CMode = CMode(420 as UInt32);
+    // S_IRUSR = 0o400 = 256; S_IWUSR = 0o200 = 128.
+    let r_user: UInt32 = mode.0 & (256 as UInt32);
+    let w_user: UInt32 = mode.0 & (128 as UInt32);
+    let x_user: UInt32 = mode.0 & (64 as UInt32);
+    assert(r_user != (0 as UInt32));
+    assert(w_user != (0 as UInt32));
+    assert_eq(x_user, 0 as UInt32);
+}
+
+// =============================================================================
+// Section 6: Signed-vs-unsigned alias domain pin via collection
+// =============================================================================
+
+@test
+fn integration_signed_aliases_admit_negative_sample() {
+    // Construct a heterogeneous-looking list of signed-alias error
+    // sentinels by reading their `.0` raw projections — every entry
+    // is negative.
+    let entries: List<Int> = [
+        CInt(-1 as Int32).0 as Int,
+        CLong(-1).0,
+        CSSize(-1).0,
+        COff(-1).0,
+        CPid(-1 as Int32).0 as Int,
+        CClockId(-1 as Int32).0 as Int,
+        CFd(-1 as Int32).0 as Int,
+    ];
+    for e in entries.iter() {
+        assert(*e < 0);
+    }
+}
+
+@test
+fn integration_unsigned_aliases_admit_zero_floor() {
+    // Symmetric pin for the unsigned aliases — the underlying 0 is
+    // observable and equal across the family.
+    let entries: List<USize> = [
+        CUInt(0 as UInt32).0 as USize,
+        CULong(0 as UInt).0 as USize,
+        CSize(0 as USize).0,
+        CMode(0 as UInt32).0 as USize,
+        CUid(0 as UInt32).0 as USize,
+        CGid(0 as UInt32).0 as USize,
+        CSockLen(0 as UInt32).0 as USize,
+    ];
+    for e in entries.iter() {
+        assert_eq(*e, 0 as USize);
+    }
+}
+
+fn main() {}

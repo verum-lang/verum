@@ -1,0 +1,114 @@
+// =============================================================================
+// core-tests/sys/interrupt/property_test.vr
+// =============================================================================
+//
+// Property/algebraic-shape tests for `core.sys.interrupt`.
+//
+// Notes on scope:
+//   * Most of the interrupt surface — `enable_interrupts`,
+//     `disable_interrupts`, `with_interrupts_disabled`, the @interrupt
+//     attribute, exception-frame round-trips — is privileged (kernel-
+//     mode) and cannot be exercised from user-space. Those live in
+//     `vcs/specs/L0-critical/` against a no-runtime / embedded target.
+//   * `CriticalSection.is_active()` likewise depends on the kernel-
+//     intrinsic `interrupts_enabled()` which currently compiles to a
+//     lenient panic-stub at user-space (see audit.md "Action items
+//     deferred — kernel intrinsic registry gap"). It is exercised in
+//     `unit_test.vr` (currently @ignore'd) and will switch back to
+//     active once the user-space safe-default body lands in the
+//     binary's embedded stdlib.
+//   * What this file CAN pin from user-space:
+//       - `InterruptCell.new(v)` is parametrically polymorphic — every
+//         concrete `T` reaches the same constructor shape.
+//       - `InterruptCell.new(v)` does not observe `v` until accessed
+//         (constructor is pure — no side effects on the caller-side
+//         locals).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.interrupt.{
+    CriticalSection,
+    InterruptCell,
+};
+
+// =============================================================================
+// Section 0: CriticalSection.is_active() — user-space contract
+// =============================================================================
+//
+// At user-space, the kernel-intrinsic primitives
+// (`disable_interrupts`, `enable_interrupts`, `interrupts_enabled`,
+// `restore_interrupts`, `save_and_disable_interrupts`) are
+// declared in `core/intrinsics/lowlevel/kernel.vr` with safe-default
+// Verum bodies. The exact value of `CriticalSection.is_active()` at
+// user-space is determined by `!interrupts_enabled()` — host-OS
+// dependent and not pinned here; what we DO pin is:
+//
+//   * Determinism: back-to-back reads return the same Bool.
+//   * Shape: the return type is Bool, never panic / never Unit.
+//
+// Kernel-mode targets override these bodies through `@cfg(no_runtime)`
+// (see `audit.md §3.4`).
+
+@test
+fn property_critical_section_is_active_idempotent_reads() {
+    // Repeated reads must agree on the returned Bool.
+    let a = CriticalSection.is_active();
+    let b = CriticalSection.is_active();
+    let c = CriticalSection.is_active();
+    assert_eq(a, b);
+    assert_eq(b, c);
+}
+
+// =============================================================================
+// Section 1: InterruptCell.new — parametric polymorphism shape pin
+// =============================================================================
+
+@test
+fn property_interrupt_cell_new_parametric_int_shape() {
+    let _cell: InterruptCell<Int> = InterruptCell.new(0);
+}
+
+@test
+fn property_interrupt_cell_new_parametric_text_shape() {
+    let _cell: InterruptCell<Text> = InterruptCell.new("".clone());
+}
+
+@test
+fn property_interrupt_cell_new_parametric_bool_shape() {
+    let _cell: InterruptCell<Bool> = InterruptCell.new(false);
+}
+
+@test
+fn property_interrupt_cell_new_parametric_int_negative() {
+    // Construction with a negative Int — the constructor must not
+    // restrict to non-negative payloads.
+    let _cell: InterruptCell<Int> = InterruptCell.new(-1);
+}
+
+@test
+fn property_interrupt_cell_new_parametric_int_extreme() {
+    // Boundary payloads — Int.max / Int.min must construct cleanly.
+    let _cell_max: InterruptCell<Int> = InterruptCell.new(Int.max);
+    let _cell_min: InterruptCell<Int> = InterruptCell.new(Int.min);
+}
+
+// =============================================================================
+// Section 2: InterruptCell.new — payload does not leak via construction
+// =============================================================================
+//
+// The constructor is `@const` — calling it must not observably modify
+// the captured value. The only contract is "the value moves into the
+// cell". We pin that by accumulating side-effects in a parallel `mut`
+// witness and asserting it is unchanged by the construction.
+
+@test
+fn property_interrupt_cell_new_payload_no_side_effects() {
+    let mut witness: Int = 0;
+    let _cell: InterruptCell<Int> = InterruptCell.new(witness);
+    // The constructor took `witness` by value — the local is unchanged.
+    assert_eq(witness, 0);
+    witness = witness + 1;
+    assert_eq(witness, 1);
+}
+
+fn main() {}
