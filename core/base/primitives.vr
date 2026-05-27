@@ -1972,7 +1972,7 @@ implement UInt64 {
         result
     }
     public fn checked_div(self, rhs: UInt64) -> Maybe<UInt64> {
-        if rhs == 0_u64 { None } else { Some(self / rhs) }
+        if rhs == 0_u64 { Maybe.None } else { Maybe.Some(self / rhs) }
     }
     public fn in_range(self, start: UInt64, end: UInt64) -> Bool { self >= start && self < end }
     public fn to_float(self) -> Float { self.to_int().to_float() }
@@ -1985,7 +1985,7 @@ implement UInt64 {
     public fn to_hex(self) -> Text { self.to_int().to_hex() }
     public fn to_octal(self) -> Text { self.to_int().to_octal() }
     public fn checked_rem(self, rhs: UInt64) -> Maybe<UInt64> {
-        if rhs == 0_u64 { None } else { Some(rem(self, rhs)) }
+        if rhs == 0_u64 { Maybe.None } else { Maybe.Some(rem(self, rhs)) }
     }
     public fn wrapping_neg(self) -> UInt64 { wrapping_neg(self) }
     public fn abs_diff(self, other: UInt64) -> Int {
@@ -2019,14 +2019,14 @@ implement UInt64 {
         }
     }
     public fn checked_shl(self, shift: Int) -> Maybe<UInt64> {
-        if shift < 0 || shift >= 64 { None } else { Some(shl(self, shift as UInt32)) }
+        if shift < 0 || shift >= 64 { Maybe.None } else { Maybe.Some(shl(self, shift as UInt32)) }
     }
     public fn checked_shr(self, shift: Int) -> Maybe<UInt64> {
-        if shift < 0 || shift >= 64 { None } else { Some(shr(self, shift as UInt32)) }
+        if shift < 0 || shift >= 64 { Maybe.None } else { Maybe.Some(shr(self, shift as UInt32)) }
     }
     public fn checked_pow(self, exp: Int) -> Maybe<UInt64> {
-        if exp < 0 { None }
-        else if exp == 0 { Some(1_u64) }
+        if exp < 0 { Maybe.None }
+        else if exp == 0 { Maybe.Some(1_u64) }
         else {
             let mut base = self;
             let mut e = exp;
@@ -2035,19 +2035,19 @@ implement UInt64 {
             while e > 0 && !overflow {
                 if bitand(e, 1) == 1 {
                     match result.checked_mul(base) {
-                        Some(v) => { result = v; },
-                        None => { overflow = true; },
+                        Maybe.Some(v) => { result = v; },
+                        Maybe.None => { overflow = true; },
                     };
                 }
                 e = e >> 1;
                 if e > 0 && !overflow {
                     match base.checked_mul(base) {
-                        Some(v) => { base = v; },
-                        None => { overflow = true; },
+                        Maybe.Some(v) => { base = v; },
+                        Maybe.None => { overflow = true; },
                     };
                 }
             }
-            if overflow { None } else { Some(result) }
+            if overflow { Maybe.None } else { Maybe.Some(result) }
         }
     }
     public fn wrapping_shl(self, shift: Int) -> UInt64 { shl(self, (bitand(shift, 63)) as UInt32) }
@@ -2057,7 +2057,7 @@ implement UInt64 {
     public fn div_euclid(self, rhs: UInt64) -> UInt64 { div(self, rhs) }
     public fn rem_euclid(self, rhs: UInt64) -> UInt64 { rem(self, rhs) }
     public fn saturating_pow(self, exp: Int) -> UInt64 {
-        match self.checked_pow(exp) { Some(v) => v, None => 18446744073709551615 as UInt64 }
+        match self.checked_pow(exp) { Maybe.Some(v) => v, Maybe.None => 18446744073709551615 as UInt64 }
     }
     public fn overflowing_shl(self, shift: Int) -> (UInt64, Bool) {
         (shl(self, (bitand(shift, 63)) as UInt32), shift < 0 || shift >= 64)
