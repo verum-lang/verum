@@ -160,9 +160,9 @@ implement Instant {
     /// ```
     public fn duration_since(&self, earlier: Instant) -> Maybe<Duration> {
         if self.nanos >= earlier.nanos {
-            Some(Duration.from_nanos(self.nanos - earlier.nanos))
+            Maybe.Some(Duration.from_nanos(self.nanos - earlier.nanos))
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -180,9 +180,9 @@ implement Instant {
         let res = self.nanos + duration.as_nanos();
         if res < self.nanos {
             // Overflow
-            None
+            Maybe.None
         } else {
-            Some(Instant { nanos: res })
+            Maybe.Some(Instant { nanos: res })
         }
     }
 
@@ -208,9 +208,9 @@ implement Instant {
     public fn checked_sub(&self, duration: Duration) -> Maybe<Instant> {
         let dur_nanos = duration.as_nanos();
         if dur_nanos > self.nanos {
-            None
+            Maybe.None
         } else {
-            Some(Instant { nanos: self.nanos - dur_nanos })
+            Maybe.Some(Instant { nanos: self.nanos - dur_nanos })
         }
     }
 }
@@ -261,7 +261,7 @@ implement Ord for Instant {
 
 implement PartialOrd for Instant {
     fn partial_cmp(&self, other: &Instant) -> Maybe<Ordering> {
-        Some(self.cmp(other))
+        Maybe.Some(self.cmp(other))
     }
 }
 

@@ -305,9 +305,9 @@ implement Duration {
         let same_sign = (self.nanos < 0) == (other.nanos < 0);
         let sign_flipped = (res < 0) != (self.nanos < 0);
         if same_sign && sign_flipped {
-            None
+            Maybe.None
         } else {
-            Some(Duration { nanos: res })
+            Maybe.Some(Duration { nanos: res })
         }
     }
 
@@ -315,8 +315,8 @@ implement Duration {
     /// on overflow / underflow rather than wrapping.
     public fn saturating_add(&self, other: Duration) -> Duration {
         match self.checked_add(other) {
-            Some(d) => d,
-            None => {
+            Maybe.Some(d) => d,
+            Maybe.None => {
                 // Saturate at MAX if operands were both positive, MIN otherwise.
                 if self.nanos >= 0 {
                     Duration { nanos: Int.max_value() }
@@ -338,9 +338,9 @@ implement Duration {
         let opposite_sign = (self.nanos < 0) != (other.nanos < 0);
         let sign_flipped = (res < 0) != (self.nanos < 0);
         if opposite_sign && sign_flipped {
-            None
+            Maybe.None
         } else {
-            Some(Duration { nanos: res })
+            Maybe.Some(Duration { nanos: res })
         }
     }
 
@@ -355,10 +355,10 @@ implement Duration {
     /// timer semantics.
     public fn saturating_sub(&self, other: Duration) -> Duration {
         match self.checked_sub(other) {
-            Some(d) => {
+            Maybe.Some(d) => {
                 if d.nanos < 0 { Duration.zero() } else { d }
             },
-            None => {
+            Maybe.None => {
                 // Underflow at Int.min_value boundary → saturate at zero
                 // for consistency with the "timer floor" semantic.
                 Duration.zero()
@@ -373,22 +373,22 @@ implement Duration {
     /// by re-deriving the divisor.
     public fn checked_mul(&self, rhs: Int) -> Maybe<Duration> {
         if rhs == 0 || self.nanos == 0 {
-            return Some(Duration.zero());
+            return Maybe.Some(Duration.zero());
         }
         let res = self.nanos * rhs;
         // Overflow check: if res / rhs != self.nanos, overflow occurred.
         if res / rhs != self.nanos {
-            None
+            Maybe.None
         } else {
-            Some(Duration { nanos: res })
+            Maybe.Some(Duration { nanos: res })
         }
     }
 
     /// Saturating multiplication.
     public fn saturating_mul(&self, rhs: Int) -> Duration {
         match self.checked_mul(rhs) {
-            Some(d) => d,
-            None => {
+            Maybe.Some(d) => d,
+            Maybe.None => {
                 // Saturate at MAX or MIN depending on product sign.
                 let sign_negative = (self.nanos < 0) != (rhs < 0);
                 if sign_negative {
@@ -403,9 +403,9 @@ implement Duration {
     /// Checked division.  Returns None if rhs is zero.
     public fn checked_div(&self, rhs: Int) -> Maybe<Duration> {
         if rhs == 0 {
-            None
+            Maybe.None
         } else {
-            Some(Duration { nanos: self.nanos / rhs })
+            Maybe.Some(Duration { nanos: self.nanos / rhs })
         }
     }
 }
