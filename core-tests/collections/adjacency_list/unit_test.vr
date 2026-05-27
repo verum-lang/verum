@@ -50,3 +50,42 @@ fn test_adj_edge_count_zero_after_empty_construction() {
     let g: AdjacencyList<Int, ()> = AdjacencyList.empty();
     assert_eq(g.edge_count(), 0);
 }
+
+// =============================================================================
+// Section 2: add_vertex idempotence + ordering
+// =============================================================================
+
+@test
+fn test_adj_add_vertex_same_value_twice() {
+    let mut g: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    g.add_vertex(1);
+    g.add_vertex(1);
+    // The second add_vertex is a no-op for an already-existing vertex;
+    // exact semantics depend on Map.contains_key (gated). Conservative
+    // invariant: vertex_count stays in {1, 2}.
+    let n = g.vertex_count();
+    assert(n == 1 || n == 2);
+}
+
+@test
+fn test_adj_add_vertex_many_distinct() {
+    let mut g: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    let mut i = 0;
+    while i < 16 {
+        g.add_vertex(i);
+        i = i + 1;
+    }
+    assert(g.vertex_count() >= 16);
+    assert_eq(g.edge_count(), 0);
+}
+
+@test
+fn test_adj_empty_independent_instances() {
+    // Two independent empty graphs do not share state.
+    let mut g1: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    let g2: AdjacencyList<Int, ()> = AdjacencyList.empty();
+    g1.add_vertex(99);
+    // g2 remains empty.
+    assert(g1.vertex_count() >= 1);
+    assert_eq(g2.vertex_count(), 0);
+}

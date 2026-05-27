@@ -355,4 +355,90 @@ fn test_uf_generic_len_tracks_distinct_keys_int() {
     assert_eq(uf.len(), 3);
 }
 
+// =============================================================================
+// Section 15: UnionFindInt — algebraic laws (Round 12 follow-up)
+// =============================================================================
+
+@test
+fn test_uf_int_union_reflexive_returns_false_same_already() {
+    // union(x, x) on freshly-made x is a no-op — same representative.
+    let mut uf = UnionFindInt.new(4);
+    let merged = uf.union(2, 2);
+    // union returns true iff merge happened; same-set → false.
+    assert(!merged);
+    assert_eq(uf.component_count(), 4);
+}
+
+@test
+fn test_uf_int_union_symmetric() {
+    // union(a, b) and union(b, a) produce the same final partition.
+    let mut uf1 = UnionFindInt.new(5);
+    let _ = uf1.union(1, 3);
+    let mut uf2 = UnionFindInt.new(5);
+    let _ = uf2.union(3, 1);
+    // Both must have same_set(1, 3) and same_set(3, 1).
+    assert(uf1.same_set(1, 3));
+    assert(uf2.same_set(3, 1));
+    assert_eq(uf1.component_count(), uf2.component_count());
+}
+
+@test
+fn test_uf_int_union_transitive_via_chain() {
+    // union(0,1), union(1,2), union(2,3) → all four are in one component.
+    let mut uf = UnionFindInt.new(4);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(1, 2);
+    let _ = uf.union(2, 3);
+    assert(uf.same_set(0, 3));
+    assert(uf.same_set(0, 2));
+    assert(uf.same_set(1, 3));
+    assert_eq(uf.component_count(), 1);
+    assert_eq(uf.component_size(0), 4);
+}
+
+@test
+fn test_uf_int_component_size_consistency() {
+    // After 3 unions producing one 4-set component, size of any
+    // member equals 4.
+    let mut uf = UnionFindInt.new(6);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(2, 3);
+    let _ = uf.union(0, 2);
+    // {0, 1, 2, 3} + {4} + {5} = 3 components
+    assert_eq(uf.component_count(), 3);
+    assert_eq(uf.component_size(0), 4);
+    assert_eq(uf.component_size(1), 4);
+    assert_eq(uf.component_size(2), 4);
+    assert_eq(uf.component_size(3), 4);
+    assert_eq(uf.component_size(4), 1);
+    assert_eq(uf.component_size(5), 1);
+}
+
+@test
+fn test_uf_int_find_idempotence_after_compression() {
+    // find(x) repeated must return the same representative.
+    let mut uf = UnionFindInt.new(8);
+    let _ = uf.union(0, 1);
+    let _ = uf.union(1, 2);
+    let _ = uf.union(2, 3);
+    let r0 = uf.find(0);
+    let r1 = uf.find(0);
+    let r2 = uf.find(0);
+    assert_eq(r0, r1);
+    assert_eq(r1, r2);
+}
+
+@test
+fn test_uf_int_all_singleton_initially() {
+    let mut uf = UnionFindInt.new(10);
+    let mut i = 0;
+    while i < 10 {
+        // find(i) for an unmerged element returns itself.
+        assert_eq(uf.find(i), i);
+        assert_eq(uf.component_size(i), 1);
+        i = i + 1;
+    }
+    assert_eq(uf.component_count(), 10);
+}
+
 fn main() {}
