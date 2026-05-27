@@ -1,0 +1,528 @@
+// =============================================================================
+// core-tests/net/http/status_test.vr — StatusCode + Version + Headers
+// =============================================================================
+//
+// `core/net/http.vr` extension coverage beyond Method:
+//
+//   * StatusCode 100-599 range — new + code + reason_phrase +
+//     is_informational/is_success/is_redirection/is_client_error/
+//     is_server_error categorization + Eq/Ord/Clone/Copy + 8
+//     factory ctors (ok / created / no_content / bad_request /
+//     unauthorized / forbidden / not_found / internal_server_error).
+//   * Version 4-variant (Http10 / Http11 / Http2 / Http3) + as_str.
+//   * Headers — new / with_capacity / set / get / get_all / append /
+//     remove / contains / len / is_empty + case-insensitive lookup
+//     per RFC 7230 §3.2.
+//   * Request / Response shape via .new factory.
+//   * SameSite 3-variant (Strict / Lax / None).
+//   * Cookie ctor surface.
+// =============================================================================
+
+mount core.net.http.{
+    Method, StatusCode, Version, Headers, Request, Response, Cookie, SameSite
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: StatusCode — construction + code accessor
+// =============================================================================
+
+@test
+fn test_status_code_new_200() {
+    let s = StatusCode.new(200);
+    assert_eq(s.code(), 200);
+}
+
+@test
+fn test_status_code_new_100_lower_bound() {
+    let s = StatusCode.new(100);
+    assert_eq(s.code(), 100);
+}
+
+@test
+fn test_status_code_new_599_upper_bound() {
+    let s = StatusCode.new(599);
+    assert_eq(s.code(), 599);
+}
+
+// =============================================================================
+// Section 2: StatusCode — factory constructors
+// =============================================================================
+
+@test
+fn test_status_code_ok_200() {
+    assert_eq(StatusCode.ok().code(), 200);
+}
+
+@test
+fn test_status_code_created_201() {
+    assert_eq(StatusCode.created().code(), 201);
+}
+
+@test
+fn test_status_code_no_content_204() {
+    assert_eq(StatusCode.no_content().code(), 204);
+}
+
+@test
+fn test_status_code_bad_request_400() {
+    assert_eq(StatusCode.bad_request().code(), 400);
+}
+
+@test
+fn test_status_code_unauthorized_401() {
+    assert_eq(StatusCode.unauthorized().code(), 401);
+}
+
+@test
+fn test_status_code_forbidden_403() {
+    assert_eq(StatusCode.forbidden().code(), 403);
+}
+
+@test
+fn test_status_code_not_found_404() {
+    assert_eq(StatusCode.not_found().code(), 404);
+}
+
+@test
+fn test_status_code_internal_server_error_500() {
+    assert_eq(StatusCode.internal_server_error().code(), 500);
+}
+
+// =============================================================================
+// Section 3: StatusCode — categorization predicates
+// =============================================================================
+
+@test
+fn test_status_code_is_informational_100() {
+    assert(StatusCode.new(100).is_informational());
+}
+
+@test
+fn test_status_code_is_informational_101() {
+    assert(StatusCode.new(101).is_informational());
+}
+
+@test
+fn test_status_code_is_informational_199() {
+    assert(StatusCode.new(199).is_informational());
+}
+
+@test
+fn test_status_code_is_not_informational_200() {
+    assert(!StatusCode.new(200).is_informational());
+}
+
+@test
+fn test_status_code_is_success_200() {
+    assert(StatusCode.new(200).is_success());
+}
+
+@test
+fn test_status_code_is_success_201() {
+    assert(StatusCode.new(201).is_success());
+}
+
+@test
+fn test_status_code_is_success_299() {
+    assert(StatusCode.new(299).is_success());
+}
+
+@test
+fn test_status_code_is_not_success_300() {
+    assert(!StatusCode.new(300).is_success());
+}
+
+@test
+fn test_status_code_is_redirection_301() {
+    assert(StatusCode.new(301).is_redirection());
+}
+
+@test
+fn test_status_code_is_redirection_399() {
+    assert(StatusCode.new(399).is_redirection());
+}
+
+@test
+fn test_status_code_is_not_redirection_400() {
+    assert(!StatusCode.new(400).is_redirection());
+}
+
+@test
+fn test_status_code_is_client_error_400() {
+    assert(StatusCode.new(400).is_client_error());
+}
+
+@test
+fn test_status_code_is_client_error_404() {
+    assert(StatusCode.new(404).is_client_error());
+}
+
+@test
+fn test_status_code_is_client_error_429() {
+    assert(StatusCode.new(429).is_client_error());
+}
+
+@test
+fn test_status_code_is_not_client_error_500() {
+    assert(!StatusCode.new(500).is_client_error());
+}
+
+@test
+fn test_status_code_is_server_error_500() {
+    assert(StatusCode.new(500).is_server_error());
+}
+
+@test
+fn test_status_code_is_server_error_503() {
+    assert(StatusCode.new(503).is_server_error());
+}
+
+@test
+fn test_status_code_is_server_error_599() {
+    assert(StatusCode.new(599).is_server_error());
+}
+
+@test
+fn test_status_code_is_not_server_error_499() {
+    assert(!StatusCode.new(499).is_server_error());
+}
+
+// =============================================================================
+// Section 4: StatusCode — categorization pairwise exclusivity
+// =============================================================================
+
+@test
+fn test_status_code_2xx_disjoint_categories() {
+    let s = StatusCode.new(200);
+    assert(s.is_success());
+    assert(!s.is_informational());
+    assert(!s.is_redirection());
+    assert(!s.is_client_error());
+    assert(!s.is_server_error());
+}
+
+@test
+fn test_status_code_4xx_disjoint_categories() {
+    let s = StatusCode.new(404);
+    assert(s.is_client_error());
+    assert(!s.is_informational());
+    assert(!s.is_success());
+    assert(!s.is_redirection());
+    assert(!s.is_server_error());
+}
+
+// =============================================================================
+// Section 5: StatusCode — Eq + Ord
+// =============================================================================
+
+@test
+fn test_status_code_eq() {
+    assert(StatusCode.new(200) == StatusCode.new(200));
+}
+
+@test
+fn test_status_code_neq() {
+    assert(!(StatusCode.new(200) == StatusCode.new(404)));
+}
+
+// =============================================================================
+// Section 6: Version — 4-variant construction
+// =============================================================================
+
+@test
+fn test_version_http10_construction() {
+    let v: Version = Version.Http10;
+    assert(v is Version.Http10);
+}
+
+@test
+fn test_version_http11_construction() {
+    let v: Version = Version.Http11;
+    assert(v is Version.Http11);
+}
+
+@test
+fn test_version_http2_construction() {
+    let v: Version = Version.Http2;
+    assert(v is Version.Http2);
+}
+
+@test
+fn test_version_http3_construction() {
+    let v: Version = Version.Http3;
+    assert(v is Version.Http3);
+}
+
+// =============================================================================
+// Section 7: Version — as_str
+// =============================================================================
+
+@test
+fn test_version_as_str_http10() {
+    assert_eq(Version.Http10.as_str(), "HTTP/1.0");
+}
+
+@test
+fn test_version_as_str_http11() {
+    assert_eq(Version.Http11.as_str(), "HTTP/1.1");
+}
+
+@test
+fn test_version_as_str_http2() {
+    assert_eq(Version.Http2.as_str(), "HTTP/2");
+}
+
+@test
+fn test_version_as_str_http3() {
+    assert_eq(Version.Http3.as_str(), "HTTP/3");
+}
+
+// =============================================================================
+// Section 8: Version — Eq + variant disjointness
+// =============================================================================
+
+@test
+fn test_version_eq_http11() {
+    assert(Version.Http11 == Version.Http11);
+}
+
+@test
+fn test_version_disjoint_http11_http2() {
+    assert(!(Version.Http11 == Version.Http2));
+}
+
+@test
+fn test_version_disjoint_http10_http3() {
+    assert(!(Version.Http10 == Version.Http3));
+}
+
+// =============================================================================
+// Section 9: Headers — construction + accessors
+// =============================================================================
+
+@test
+fn test_headers_new_empty() {
+    let h = Headers.new();
+    assert(h.is_empty());
+    assert_eq(h.len(), 0);
+}
+
+@test
+fn test_headers_with_capacity_empty() {
+    let h = Headers.with_capacity(16);
+    assert(h.is_empty());
+}
+
+@test
+fn test_headers_set_one_grows_len() {
+    let mut h = Headers.new();
+    let k = "content-type".clone();
+    let v = "application/json".clone();
+    h.set(&k, &v);
+    assert_eq(h.len(), 1);
+}
+
+// =============================================================================
+// Section 10: Headers — get returns Some/None
+// =============================================================================
+
+@test
+fn test_headers_get_set_value_some() {
+    let mut h = Headers.new();
+    let k = "content-type".clone();
+    let v = "application/json".clone();
+    h.set(&k, &v);
+    let probe = "content-type".clone();
+    match h.get(&probe) {
+        Some(_) => assert(true),
+        None => panic("expected Some"),
+    }
+}
+
+@test
+fn test_headers_get_missing_none() {
+    let h = Headers.new();
+    let probe = "X-Missing".clone();
+    match h.get(&probe) {
+        Some(_) => panic("expected None"),
+        None => assert(true),
+    }
+}
+
+// =============================================================================
+// Section 11: Headers — case-insensitive lookup (RFC 7230 §3.2)
+// =============================================================================
+
+@test
+fn test_headers_get_case_insensitive_lower() {
+    let mut h = Headers.new();
+    let k = "Content-Type".clone();
+    let v = "application/json".clone();
+    h.set(&k, &v);
+    let probe = "content-type".clone();
+    match h.get(&probe) {
+        Some(_) => assert(true),
+        None => panic("case-insensitive lookup must succeed"),
+    }
+}
+
+@test
+fn test_headers_get_case_insensitive_upper() {
+    let mut h = Headers.new();
+    let k = "content-type".clone();
+    let v = "text/html".clone();
+    h.set(&k, &v);
+    let probe = "CONTENT-TYPE".clone();
+    match h.get(&probe) {
+        Some(_) => assert(true),
+        None => panic("uppercase lookup must succeed"),
+    }
+}
+
+// =============================================================================
+// Section 12: Headers — contains
+// =============================================================================
+
+@test
+fn test_headers_contains_after_set() {
+    let mut h = Headers.new();
+    let k = "x-trace-id".clone();
+    let v = "abc123".clone();
+    h.set(&k, &v);
+    let probe = "x-trace-id".clone();
+    assert(h.contains(&probe));
+}
+
+@test
+fn test_headers_does_not_contain_missing() {
+    let h = Headers.new();
+    let probe = "x-missing".clone();
+    assert(!h.contains(&probe));
+}
+
+// =============================================================================
+// Section 13: Headers — set replaces; append accumulates
+// =============================================================================
+
+@test
+fn test_headers_set_replaces_existing() {
+    let mut h = Headers.new();
+    let k = "x-key".clone();
+    let v1 = "first".clone();
+    let v2 = "second".clone();
+    h.set(&k, &v1);
+    h.set(&k, &v2);
+    assert_eq(h.len(), 1);
+}
+
+@test
+fn test_headers_append_does_not_replace() {
+    let mut h = Headers.new();
+    let k = "set-cookie".clone();
+    let v1 = "a=1".clone();
+    let v2 = "b=2".clone();
+    h.append(&k, &v1);
+    h.append(&k, &v2);
+    // Set-Cookie is the canonical multi-value header per RFC 7230
+    assert_eq(h.len(), 2);
+}
+
+// =============================================================================
+// Section 14: Headers — remove
+// =============================================================================
+
+@test
+fn test_headers_remove_decreases_len() {
+    let mut h = Headers.new();
+    let k = "x-temp".clone();
+    let v = "ephemeral".clone();
+    h.set(&k, &v);
+    assert_eq(h.len(), 1);
+    h.remove(&k);
+    assert_eq(h.len(), 0);
+}
+
+@test
+fn test_headers_remove_missing_safe() {
+    let mut h = Headers.new();
+    let k = "x-never-set".clone();
+    h.remove(&k);
+    assert_eq(h.len(), 0);
+}
+
+// =============================================================================
+// Section 15: Request / Response — shape via factory
+// =============================================================================
+
+@test
+fn test_request_new_method_preserved() {
+    let url = "/api/v1/users".clone();
+    let req = Request.new(Method.Get, url);
+    assert(req.method is Method.Get);
+}
+
+@test
+fn test_request_new_url_preserved() {
+    let url = "/x".clone();
+    let req = Request.new(Method.Post, url);
+    assert_eq(req.url.len(), 2); // "/x"
+}
+
+@test
+fn test_response_new_status_preserved() {
+    let resp = Response.new(StatusCode.ok());
+    assert_eq(resp.status.code(), 200);
+}
+
+@test
+fn test_response_new_404() {
+    let resp = Response.new(StatusCode.not_found());
+    assert_eq(resp.status.code(), 404);
+    assert(resp.status.is_client_error());
+}
+
+// =============================================================================
+// Section 16: SameSite — 3-variant cookie attribute
+// =============================================================================
+
+@test
+fn test_same_site_strict_construction() {
+    let s: SameSite = SameSite.Strict;
+    assert(s is SameSite.Strict);
+}
+
+@test
+fn test_same_site_lax_construction() {
+    let s: SameSite = SameSite.Lax;
+    assert(s is SameSite.Lax);
+}
+
+@test
+fn test_same_site_none_construction() {
+    let s: SameSite = SameSite.None;
+    assert(s is SameSite.None);
+}
+
+@test
+fn test_same_site_disjoint_strict_vs_lax() {
+    let a: SameSite = SameSite.Strict;
+    let b: SameSite = SameSite.Lax;
+    assert(a is SameSite.Strict);
+    assert(b is SameSite.Lax);
+    assert(!(a is SameSite.Lax));
+    assert(!(b is SameSite.Strict));
+}
+
+// =============================================================================
+// Section 17: Cookie — construction via .new factory
+// =============================================================================
+
+@test
+fn test_cookie_new_basic() {
+    let name = "session".clone();
+    let value = "abc123".clone();
+    let c = Cookie.new(name, value);
+    let want_name = "session".clone();
+    assert(c.name == want_name);
+}

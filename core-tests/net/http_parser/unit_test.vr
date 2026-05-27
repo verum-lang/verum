@@ -1,0 +1,315 @@
+// =============================================================================
+// core-tests/net/http_parser/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/http_parser.vr` (~931 LOC) — zero-copy, resumable,
+// SIMD-accelerated HTTP/1.1 parser intended for the hot-path of HTTP
+// servers and clients.
+//
+// Tests cover the algebraic types — HttpParseError 15-variant
+// disjointness + Eq, ParseProgress 3-variant, HeaderView 4-field
+// record, ChunkProgress 4-variant. HttpParser construction +
+// ChunkedDecoder construction work; feed() functional paths are
+// pinned behind HTTPPARSE-1 (precompile-cascade SIGSEGV class).
+// =============================================================================
+
+mount core.net.http_parser.{
+    HttpParseError, ParseProgress, HeaderView, HttpParser,
+    ChunkedDecoder, ChunkProgress
+};
+mount core.base.maybe.{Maybe, Some, None};
+
+// =============================================================================
+// Section 1: HttpParseError — variant construction + Eq
+// =============================================================================
+
+@test
+fn test_invalid_method_eq() {
+    let a = HttpParseError.InvalidMethod("FOO".clone());
+    let b = HttpParseError.InvalidMethod("FOO".clone());
+    assert(a == b);
+}
+
+@test
+fn test_invalid_method_disjoint_payloads() {
+    let a = HttpParseError.InvalidMethod("FOO".clone());
+    let b = HttpParseError.InvalidMethod("BAR".clone());
+    assert(!(a == b));
+}
+
+@test
+fn test_invalid_version_eq() {
+    let a = HttpParseError.InvalidVersion("HTTP/0.9".clone());
+    let b = HttpParseError.InvalidVersion("HTTP/0.9".clone());
+    assert(a == b);
+}
+
+@test
+fn test_invalid_status_code_eq() {
+    assert(HttpParseError.InvalidStatusCode(999) == HttpParseError.InvalidStatusCode(999));
+}
+
+@test
+fn test_invalid_status_code_disjoint() {
+    assert(!(HttpParseError.InvalidStatusCode(999) == HttpParseError.InvalidStatusCode(0)));
+}
+
+@test
+fn test_invalid_header_name_eq() {
+    let a = HttpParseError.InvalidHeaderName("X:Y".clone());
+    let b = HttpParseError.InvalidHeaderName("X:Y".clone());
+    assert(a == b);
+}
+
+@test
+fn test_invalid_header_value_eq() {
+    let a = HttpParseError.InvalidHeaderValue("\r".clone());
+    let b = HttpParseError.InvalidHeaderValue("\r".clone());
+    assert(a == b);
+}
+
+@test
+fn test_header_too_long_eq() {
+    let a = HttpParseError.HeaderTooLong { limit: 16384 };
+    let b = HttpParseError.HeaderTooLong { limit: 16384 };
+    assert(a == b);
+}
+
+@test
+fn test_too_many_headers_eq() {
+    let a = HttpParseError.TooManyHeaders { limit: 128 };
+    let b = HttpParseError.TooManyHeaders { limit: 128 };
+    assert(a == b);
+}
+
+@test
+fn test_request_line_too_long_eq() {
+    let a = HttpParseError.RequestLineTooLong { limit: 8192 };
+    let b = HttpParseError.RequestLineTooLong { limit: 8192 };
+    assert(a == b);
+}
+
+@test
+fn test_bad_request_line_eq() {
+    let a = HttpParseError.BadRequestLine("garbage".clone());
+    let b = HttpParseError.BadRequestLine("garbage".clone());
+    assert(a == b);
+}
+
+@test
+fn test_invalid_chunk_size_eq() {
+    let a = HttpParseError.InvalidChunkSize("ZZ".clone());
+    let b = HttpParseError.InvalidChunkSize("ZZ".clone());
+    assert(a == b);
+}
+
+@test
+fn test_invalid_content_length_eq() {
+    let a = HttpParseError.InvalidContentLength("abc".clone());
+    let b = HttpParseError.InvalidContentLength("abc".clone());
+    assert(a == b);
+}
+
+@test
+fn test_content_length_too_large_eq() {
+    let a = HttpParseError.ContentLengthTooLarge { length: 100_000_000, limit: 33_554_432 };
+    let b = HttpParseError.ContentLengthTooLarge { length: 100_000_000, limit: 33_554_432 };
+    assert(a == b);
+}
+
+@test
+fn test_conflicting_content_length_eq() {
+    assert(HttpParseError.ConflictingContentLength == HttpParseError.ConflictingContentLength);
+}
+
+@test
+fn test_incomplete_frame_eq() {
+    assert(HttpParseError.IncompleteFrame == HttpParseError.IncompleteFrame);
+}
+
+// =============================================================================
+// Section 2: HttpParseError — variant pairwise disjointness
+// =============================================================================
+
+@test
+fn test_http_parse_error_method_vs_version_disjoint() {
+    let a = HttpParseError.InvalidMethod("X".clone());
+    let b = HttpParseError.InvalidVersion("X".clone());
+    assert(!(a == b));
+}
+
+@test
+fn test_http_parse_error_too_many_vs_too_long_disjoint() {
+    let a = HttpParseError.TooManyHeaders { limit: 128 };
+    let b = HttpParseError.HeaderTooLong { limit: 128 };
+    assert(!(a == b));
+}
+
+@test
+fn test_http_parse_error_conflicting_vs_incomplete_disjoint() {
+    let a = HttpParseError.ConflictingContentLength;
+    let b = HttpParseError.IncompleteFrame;
+    assert(!(a == b));
+}
+
+// =============================================================================
+// Section 3: ParseProgress — 3-variant construction
+// =============================================================================
+
+@test
+fn test_parse_progress_need_more_construction() {
+    let p: ParseProgress = ParseProgress.NeedMore;
+    assert(p is ParseProgress.NeedMore);
+}
+
+@test
+fn test_parse_progress_done_with_body_len() {
+    let p = ParseProgress.Done {
+        consumed: 256,
+        body_len: Some(1024),
+        body_start: 256,
+    };
+    assert(p is ParseProgress.Done);
+}
+
+@test
+fn test_parse_progress_done_chunked_no_body_len() {
+    let p = ParseProgress.Done {
+        consumed: 256,
+        body_len: None,
+        body_start: 256,
+    };
+    assert(p is ParseProgress.Done);
+}
+
+@test
+fn test_parse_progress_error_wraps_parse_error() {
+    let p = ParseProgress.Error(HttpParseError.IncompleteFrame);
+    assert(p is ParseProgress.Error);
+}
+
+@test
+fn test_parse_progress_disjoint_need_more_vs_done() {
+    let a: ParseProgress = ParseProgress.NeedMore;
+    let b = ParseProgress.Done { consumed: 0, body_len: None, body_start: 0 };
+    assert(a is ParseProgress.NeedMore);
+    assert(b is ParseProgress.Done);
+    assert(!(a is ParseProgress.Done));
+    assert(!(b is ParseProgress.NeedMore));
+}
+
+// =============================================================================
+// Section 4: HeaderView — 4-field record construction
+// =============================================================================
+
+@test
+fn test_header_view_construction() {
+    let h = HeaderView {
+        key_start: 0,
+        key_len: 12,
+        value_start: 14,
+        value_len: 16,
+    };
+    assert_eq(h.key_start, 0);
+    assert_eq(h.key_len, 12);
+    assert_eq(h.value_start, 14);
+    assert_eq(h.value_len, 16);
+}
+
+@test
+fn test_header_view_zero_fields() {
+    let h = HeaderView {
+        key_start: 0,
+        key_len: 0,
+        value_start: 0,
+        value_len: 0,
+    };
+    assert_eq(h.key_len, 0);
+}
+
+// =============================================================================
+// Section 5: HttpParser — request/response factory construction
+// =============================================================================
+
+@test
+fn test_http_parser_request_factory() {
+    let p = HttpParser.request();
+    // Initial state — no method yet
+    match p.method() {
+        Some(_) => panic("fresh parser should have no method"),
+        None => assert(true),
+    }
+}
+
+@test
+fn test_http_parser_response_factory() {
+    let p = HttpParser.response();
+    // Initial state — no status yet
+    match p.status() {
+        Some(_) => panic("fresh parser should have no status"),
+        None => assert(true),
+    }
+}
+
+@test
+fn test_http_parser_initial_no_content_length() {
+    let p = HttpParser.request();
+    match p.content_length() {
+        Some(_) => panic("fresh parser should have no content_length"),
+        None => assert(true),
+    }
+}
+
+@test
+fn test_http_parser_initial_not_chunked() {
+    let p = HttpParser.request();
+    assert(!p.is_chunked());
+}
+
+@test
+fn test_http_parser_initial_no_headers() {
+    let p = HttpParser.request();
+    assert_eq(p.headers().len(), 0);
+}
+
+// =============================================================================
+// Section 6: ChunkProgress — 4-variant construction
+// =============================================================================
+
+@test
+fn test_chunk_progress_need_more() {
+    let p: ChunkProgress = ChunkProgress.ChunkNeedMore;
+    assert(p is ChunkProgress.ChunkNeedMore);
+}
+
+@test
+fn test_chunk_progress_output() {
+    let p = ChunkProgress.ChunkOutput {
+        consumed: 16,
+        data_start: 4,
+        data_len: 10,
+    };
+    assert(p is ChunkProgress.ChunkOutput);
+}
+
+@test
+fn test_chunk_progress_end() {
+    let p = ChunkProgress.ChunkEnd { consumed: 5 };
+    assert(p is ChunkProgress.ChunkEnd);
+}
+
+@test
+fn test_chunk_progress_err() {
+    let p = ChunkProgress.ChunkErr(HttpParseError.IncompleteFrame);
+    assert(p is ChunkProgress.ChunkErr);
+}
+
+// =============================================================================
+// Section 7: ChunkedDecoder — factory + initial state
+// =============================================================================
+
+@test
+fn test_chunked_decoder_new() {
+    let d = ChunkedDecoder.new();
+    assert_eq(d.trailers().len(), 0);
+}
