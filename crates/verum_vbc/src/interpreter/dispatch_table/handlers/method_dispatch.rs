@@ -7264,26 +7264,42 @@ pub(super) fn dispatch_primitive_method(
     // `add` / `offset` method via the Sub / Add protocols.
     if receiver.is_ptr() && !receiver.is_nil() {
         let ptr_addr = receiver.as_ptr::<u8>() as usize;
-        // Determine if this is a CBGR-allocated heap object: every
-        // CBGR allocation has an `AllocationHeader` at `ptr - 32` whose
-        // address is recorded in `state.cbgr_allocations`.  Heap-allocated
-        // records (user-defined types like Duration) MUST fall through
-        // to the protocol-method dispatch below — their `.sub` / `.add`
-        // / `.offset` calls are user-defined Sub / Add / Offset
-        // implementations, not pointer arithmetic.
-        let header_addr = ptr_addr.wrapping_sub(32);
-        let is_cbgr_heap_object = state.cbgr_allocations.contains(&header_addr);
+        // Pointer-arithmetic methods (`sub` / `byte_sub` / `add` / `byte_add`
+        // / `offset`) require an INTEGER offset as the first argument.  When
+        // the argument is itself a pointer (Duration / Instant / SystemTime /
+        // any heap-allocated record), the call is dispatching to a user-
+        // defined Sub / Add / Offset protocol impl — not pointer arithmetic.
+        //
+        // Gating on `args[0].is_int()` (which excludes BoxedInt-tagged
+        // pointers correctly) cleanly separates the two surfaces without
+        // needing receiver-side heap-object detection (which is fragile
+        // for non-CBGR-allocated records that nonetheless carry an
+        // ObjectHeader).
+        //
+        // **FUNDAMENTAL FIX 2026-05-27** — closes the operator-method-
+        // dispatch shadow surfaced by the Round-13 Option-B signed-Duration
+        // refactor.  Pre-fix the indiscriminate `is_ptr()` check caught
+        // every Duration `Sub.sub` body in pointer arithmetic, returning
+        // NaN-boxed garbage masked by the legacy `.max(0)` clamp.  Same
+        // root applies to ANY heap-allocated record that defines `sub` /
+        // `add` / `offset` via Sub / Add / Offset protocol impls.
+        let arg0 = if args.count > 0 {
+            Some(state.get_reg(Reg(args.start.0)))
+        } else {
+            None
+        };
+        let arg0_is_int = arg0.is_some_and(|v| v.is_int());
         match method {
-            "sub" | "byte_sub" if !is_cbgr_heap_object => {
-                let n = state.get_reg(Reg(args.start.0)).as_i64() as usize;
+            "sub" | "byte_sub" if arg0_is_int => {
+                let n = arg0.unwrap().as_i64() as usize;
                 return Ok(Some(Value::from_ptr(ptr_addr.wrapping_sub(n) as *mut u8)));
             }
-            "add" | "byte_add" if !is_cbgr_heap_object => {
-                let n = state.get_reg(Reg(args.start.0)).as_i64() as usize;
+            "add" | "byte_add" if arg0_is_int => {
+                let n = arg0.unwrap().as_i64() as usize;
                 return Ok(Some(Value::from_ptr(ptr_addr.wrapping_add(n) as *mut u8)));
             }
-            "offset" if !is_cbgr_heap_object => {
-                let n = state.get_reg(Reg(args.start.0)).as_i64();
+            "offset" if arg0_is_int => {
+                let n = arg0.unwrap().as_i64();
                 return Ok(Some(Value::from_ptr(
                     (ptr_addr as isize).wrapping_add(n as isize) as usize as *mut u8,
                 )));

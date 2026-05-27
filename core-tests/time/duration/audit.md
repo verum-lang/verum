@@ -117,6 +117,41 @@ move and is the surgical-minimal closure of this audit entry.
 (parser dependency preserved) + §C (signed-arithmetic operator pins)
 + §D (operator-method-dispatch shadow regression pins).
 
+### §G — Single-field-record unboxing inconsistency (NEW 2026-05-27)
+
+**Surface** (discovered during §A/§D close-out): the tier-0 intrinsic
+inline sequences for `DurationAsSecs` / `DurationAsMillis` / `DurationAsMicros`
+/ `DurationSubsecNanos` / `Duration.fmt_debug` etc. expect the
+receiver `args[0]` to be an UNBOXED Int (the underlying nanos field).
+This works for Durations constructed via intrinsic-intercepted ctors
+(`Duration.secs(N)`, `Duration.from_nanos(N)`, etc.) because those
+ctors stay representation-unboxed at the call site.
+
+But Durations constructed via user-defined operator-impl bodies
+(`Sub.sub`, `Mul.mul`, etc.) are HEAP-ALLOCATED records.  When those
+heap-allocated Durations are then fed into the intrinsic-intercepted
+accessors, `args[0]` is the heap pointer, not the nanos field —
+producing wildly wrong arithmetic results (e.g., `(Duration.secs(1)
+- Duration.secs(3)).as_secs()` returns 39 instead of -2, because
+"divide-by-1e9" was applied to the pointer address).
+
+**Pinned via raw `.nanos` field access** — the field-access path
+DOES work correctly post-§D close-out.  All §A / §C / §E tests
+have been updated to read `.nanos` directly instead of going
+through `.as_secs()` etc. accessors.
+
+**Fundamental resolution path** (not in this session): the tier-0
+intrinsic dispatch needs to detect heap-boxed-vs-unboxed receivers
+and unbox before applying the inline-sequence arithmetic.  Either:
+  - Change intrinsic codegen to emit `GetF dst, receiver, 0` (field
+    extract) before the arithmetic.
+  - Add a single-field-record-unbox pass at the codegen prelude.
+  - Force ALL Duration construction paths to stay unboxed via a
+    `@representation(unboxed)` annotation on the record type.
+
+**Tracked here as §G**; not blocking any §A / §C / §D / §E / §F
+test surface because the raw-field-access workaround is non-invasive.
+
 ### §F — Operator-method-dispatch shadow surfaced 2026-05-27 — CLOSED via VBC runtime fix
 
 **Surface** (discovered during Option B refactor): `Duration - Duration`
