@@ -1,0 +1,100 @@
+// =============================================================================
+// core-tests/sync/waitgroup/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for `core.sync.waitgroup`.  Each name links to
+// an `audit.md` section.
+// =============================================================================
+
+mount core.sync.waitgroup.{WaitGroup};
+
+// =============================================================================
+// §3.3 — try_wait Bool encoding (0 / non-zero from intrinsic)
+// =============================================================================
+//
+// Pre-fix the Tier-0 interpreter stubbed all WaitGroup intrinsics as
+// inert no-ops, AND `__waitgroup_try_wait_raw` was not even registered
+// (silent fallthrough to the catch-all).  Post-fix the interpreter
+// provides a real handle-table; this pin LOCKS the contract that
+// try_wait() returns true iff the counter is exactly zero.
+//
+// A future regression that flips the encoding (e.g., 1 = "would block")
+// fails this test loudly.
+
+@test
+fn regression_waitgroup_try_wait_true_iff_drained() {
+    let wg = WaitGroup.new();
+    // Drained (counter == 0): try_wait must be true.
+    assert(wg.try_wait());
+    // Pending: try_wait must be false.
+    wg.add(1);
+    assert(!wg.try_wait());
+    // Drained again: try_wait must be true.
+    wg.done();
+    assert(wg.try_wait());
+}
+
+// =============================================================================
+// §3.4 — add(0) is a no-op
+// =============================================================================
+
+@test
+fn regression_waitgroup_add_zero_does_not_block() {
+    let wg = WaitGroup.new();
+    wg.add(0);
+    wg.add(0);
+    wg.add(0);
+    assert(wg.try_wait());
+}
+
+// =============================================================================
+// §3.2 — RAII Drop calls __waitgroup_destroy_raw
+// =============================================================================
+//
+// We cannot directly observe destroy invocation, but we CAN verify that
+// constructing and dropping many WaitGroups in succession does not
+// exhaust the runtime-side handle table.  The pre-fix interpreter
+// always returned the same fixed handle `1` — meaning every WaitGroup
+// instance aliased the same backing state, a critical isolation defect.
+// The post-fix interpreter allocates fresh, monotonically-increasing
+// handles; isolation must hold across many short-lived constructions.
+
+@test
+fn regression_waitgroup_many_short_lived_instances_isolated() {
+    // Construct + observe + drop 12 WaitGroups in succession.  Each
+    // must observe the fresh-drained state independently of the others.
+    for _ in 0..12 {
+        let wg = WaitGroup.new();
+        assert(wg.try_wait());
+        wg.add(1);
+        assert(!wg.try_wait());
+        wg.done();
+        assert(wg.try_wait());
+    }
+}
+
+// =============================================================================
+// §3.1 — Sequential drain pattern: add(N) before any done()
+// =============================================================================
+//
+// Pin the canonical pattern documented in waitgroup.vr:15-25:
+//   wg.add(N);
+//   spawn { do_work(); wg.done(); } x N
+//   wg.wait();
+//
+// In the single-threaded interpreter the inner spawns are replaced by
+// inline done() calls.  Verify the drain converges as expected and
+// wait() on a drained WG is a no-op.
+
+@test
+fn regression_waitgroup_canonical_drain_pattern_three_workers() {
+    let wg = WaitGroup.new();
+    wg.add(3);
+    // Inline "workers": each just calls done().
+    wg.done();
+    wg.done();
+    wg.done();
+    // Drained.
+    assert(wg.try_wait());
+    wg.wait();   // no-op on drained — must return immediately
+}

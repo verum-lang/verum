@@ -1779,11 +1779,44 @@ fn try_dispatch_intrinsic_by_name(
         "__cond_new_raw" => Ok(Some(Value::from_i64(1))),
         "__cond_wait_raw" | "__cond_timedwait_raw" => Ok(Some(Value::from_i64(0))),
         "__cond_signal_raw" | "__cond_broadcast_raw" => Ok(Some(Value::from_i64(0))),
-        "__waitgroup_new_raw" => Ok(Some(Value::from_i64(1))),
-        "__waitgroup_add_raw"
-        | "__waitgroup_done_raw"
-        | "__waitgroup_wait_raw"
-        | "__waitgroup_destroy_raw" => Ok(Some(Value::from_i64(0))),
+        // Real handle-table WaitGroup — see crate::interpreter::waitgroup
+        // for the architectural rationale (pre-fix these were no-op
+        // stubs that made every conformance test silently pass against
+        // the wrong counter state).
+        "__waitgroup_new_raw" => Ok(Some(Value::from_i64(
+            crate::interpreter::waitgroup::wg_new()
+        ))),
+        "__waitgroup_add_raw" => {
+            let h = get_i64_arg(state, 0);
+            let delta = get_i64_arg(state, 1);
+            Ok(Some(Value::from_i64(
+                crate::interpreter::waitgroup::wg_add(h, delta)
+            )))
+        }
+        "__waitgroup_done_raw" => {
+            let h = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(
+                crate::interpreter::waitgroup::wg_done(h)
+            )))
+        }
+        "__waitgroup_wait_raw" => {
+            let h = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(
+                crate::interpreter::waitgroup::wg_wait(h)
+            )))
+        }
+        "__waitgroup_try_wait_raw" => {
+            let h = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(
+                crate::interpreter::waitgroup::wg_try_wait(h)
+            )))
+        }
+        "__waitgroup_destroy_raw" => {
+            let h = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(
+                crate::interpreter::waitgroup::wg_destroy(h)
+            )))
+        }
         "__gen_close_raw" => Ok(Some(Value::from_i64(0))),
 
         // --- IO Engine (VBC-IO-ENGINE-1: backed by per-session

@@ -1,0 +1,125 @@
+// =============================================================================
+// core-tests/sync/waitgroup/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for the testable surface of WaitGroup:
+//
+//   §A  Fresh-WG law: every WaitGroup.new() satisfies try_wait() == true.
+//   §B  Drain law: add(N) followed by done() x N converges to
+//       try_wait() == true.
+//   §C  Counter additivity: K calls to add(d_k) sum into the counter
+//       (drained iff sum of d_k done()'s have run).
+//   §D  Independence: two WaitGroups do not share counter state.
+// =============================================================================
+
+mount core.sync.waitgroup.{WaitGroup};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Fresh-WG law
+// =============================================================================
+
+@test
+fn law_waitgroup_fresh_is_drained() {
+    let wg = WaitGroup.new();
+    assert(wg.try_wait());
+}
+
+@test
+fn law_waitgroup_multiple_fresh_all_drained() {
+    let a = WaitGroup.new();
+    let b = WaitGroup.new();
+    let c = WaitGroup.new();
+    assert(a.try_wait());
+    assert(b.try_wait());
+    assert(c.try_wait());
+}
+
+// =============================================================================
+// §B  Drain law: add(N) + done() x N converges
+// =============================================================================
+
+@test
+fn law_waitgroup_drain_one() {
+    let wg = WaitGroup.new();
+    wg.add(1);
+    assert(!wg.try_wait());
+    wg.done();
+    assert(wg.try_wait());
+}
+
+@test
+fn law_waitgroup_drain_n_for_small_n() {
+    // For N = 1..5: add(N) + done() x N drains.
+    let ns: List<Int> = [1, 2, 3, 4, 5];
+    for &n in ns.iter() {
+        let wg = WaitGroup.new();
+        wg.add(n);
+        assert(!wg.try_wait());
+        for _ in 0..n {
+            wg.done();
+        }
+        assert(wg.try_wait());
+    }
+}
+
+// =============================================================================
+// §C  Counter additivity
+// =============================================================================
+
+@test
+fn law_waitgroup_add_then_add_sums() {
+    let wg = WaitGroup.new();
+    wg.add(2);
+    wg.add(3);
+    // Counter is now 5.
+    assert(!wg.try_wait());
+    for _ in 0..5 {
+        wg.done();
+    }
+    assert(wg.try_wait());
+}
+
+@test
+fn law_waitgroup_multiple_adds_each_drained_separately() {
+    let wg = WaitGroup.new();
+    wg.add(1);
+    wg.done();
+    assert(wg.try_wait());
+    wg.add(2);
+    wg.done();
+    wg.done();
+    assert(wg.try_wait());
+    wg.add(3);
+    wg.done();
+    wg.done();
+    wg.done();
+    assert(wg.try_wait());
+}
+
+// =============================================================================
+// §D  Independence
+// =============================================================================
+
+@test
+fn law_waitgroup_independent_counters() {
+    let a = WaitGroup.new();
+    let b = WaitGroup.new();
+    a.add(3);
+    b.add(2);
+    assert(!a.try_wait());
+    assert(!b.try_wait());
+
+    // Drain b first.
+    b.done();
+    b.done();
+    assert(!a.try_wait());
+    assert(b.try_wait());
+
+    // Drain a.
+    a.done();
+    a.done();
+    a.done();
+    assert(a.try_wait());
+    assert(b.try_wait());
+}
