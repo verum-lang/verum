@@ -2282,8 +2282,8 @@ implement<I: Iterator> Iterator for WindowsIter<I> {
                 // Buffer already filled, each remaining element yields one more window
                 let win_lower = lower + 1;
                 let win_upper = match upper {
-                    Some(u) => Some(u + 1),
-                    None => None,
+                    Maybe.Some(u) => Maybe.Some(u + 1),
+                    Maybe.None => Maybe.None,
                 };
                 (win_lower, win_upper)
             }
@@ -2299,15 +2299,15 @@ implement<I: Iterator> Iterator for ChunksIter<I> {
         let mut i = 0;
         while i < self.size {
             match self.iter.next() {
-                Some(v) => chunk.push(v),
-                None => { break; },
+                Maybe.Some(v) => chunk.push(v),
+                Maybe.None => { break; },
             }
             i = i + 1;
         }
         if chunk.is_empty() {
-            None
+            Maybe.None
         } else {
-            Some(chunk)
+            Maybe.Some(chunk)
         }
     }
 
@@ -2315,12 +2315,12 @@ implement<I: Iterator> Iterator for ChunksIter<I> {
         let (lower, upper) = self.iter.size_hint();
         let s = self.size;
         if s == 0 {
-            (0, Some(0))
+            (0, Maybe.Some(0))
         } else {
             let ceil_lower = (lower + s - 1) / s;
             let ceil_upper = match upper {
-                Some(u) => Some((u + s - 1) / s),
-                None => None,
+                Maybe.Some(u) => Maybe.Some((u + s - 1) / s),
+                Maybe.None => Maybe.None,
             };
             (ceil_lower, ceil_upper)
         }
@@ -2333,15 +2333,15 @@ implement<I: Iterator> Iterator for IntersperseIter<I> {
     fn next(&mut self) -> Maybe<I.Item> {
         if self.started && self.next_sep {
             self.next_sep = false;
-            Some(self.separator)
+            Maybe.Some(self.separator)
         } else {
             match self.iter.next() {
-                Some(v) => {
+                Maybe.Some(v) => {
                     self.started = true;
                     self.next_sep = true;
-                    Some(v)
+                    Maybe.Some(v)
                 },
-                None => None,
+                Maybe.None => Maybe.None,
             }
         }
     }
@@ -2352,12 +2352,12 @@ implement<I: Iterator> Iterator for IntersperseIter<I> {
         let pending = if self.started && self.next_sep { 1 } else { 0 };
         let intersperse_lower = if lower == 0 { 0 } else { lower * 2 - 1 };
         let intersperse_upper = match upper {
-            Some(u) => if u == 0 { Some(0) } else { Some(u * 2 - 1) },
-            None => None,
+            Maybe.Some(u) => if u == 0 { Maybe.Some(0) } else { Maybe.Some(u * 2 - 1) },
+            Maybe.None => Maybe.None,
         };
         (intersperse_lower + pending, match intersperse_upper {
-            Some(u) => Some(u + pending),
-            None => None,
+            Maybe.Some(u) => Maybe.Some(u + pending),
+            Maybe.None => Maybe.None,
         })
     }
 }
