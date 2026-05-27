@@ -19,7 +19,7 @@
 //   * WS-5 Fragmented message reassembly across Continuation frames.
 // =============================================================================
 
-mount core.net.websocket.{WsOpcode, CloseCode, WsFrame};
+mount core.net.websocket.{WsOpcode, CloseCode, WsFrame, accept_key};
 mount core.collections.List;
 
 // =============================================================================
@@ -154,4 +154,43 @@ fn regression_ws_fragmented_message_reassembly() {
     //   * Interleaved control frames (Ping/Pong) MUST NOT close
     //     the reassembly window.
     assert(true);
+}
+
+// =============================================================================
+// WS-6 — accept_key cascade stack-overflow in Sha1 / base64 dispatch
+// =============================================================================
+//
+// **Stable trigger**: calling `accept_key(&Text)` from a USER test
+// module triggers `StackOverflow { depth: 16384, max_depth: 16384 }`
+// under `--interp`. Empty-key probe also stack-overflows — so the
+// defect is in the Sha1 / base64 dispatch path, not size-dependent.
+//
+// **RFC 6455 §1.3 / §4.2.2 test vector** (locked-in here):
+//     Sec-WebSocket-Key:    "dGhlIHNhbXBsZSBub25jZQ=="
+//     Sec-WebSocket-Accept: "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+//
+// Derivation: base64(sha1(key || MAGIC)).
+//
+// **Likely root cause**: Sha1.new() / Sha1.update / Sha1.finalize
+// or base64.encode loops via a self-referential method dispatch
+// path. Same defect-class family as the precompile-cascade SIGSEGV
+// (CIDR-1 / URL-1 / URITPL-1) — through-stdlib `?` operator + Text
+// payload iteration triggers either codegen miscompile or VBC
+// dispatch loop.
+
+@ignore("WS-6: accept_key cascade stack-overflow in Sha1/base64 dispatch — depth 16384. RFC 6455 §1.3 test vector pinned here.")
+@test
+fn regression_ws_accept_key_rfc6455_canonical() {
+    let key = "dGhlIHNhbXBsZSBub25jZQ==".clone();
+    let expect = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=".clone();
+    assert(accept_key(&key) == expect);
+}
+
+@ignore("WS-6: accept_key stack-overflows even with empty key — defect is in Sha1/base64 dispatch path, not size-dependent.")
+@test
+fn regression_ws_accept_key_empty_succeeds() {
+    let key = "".clone();
+    let derived = accept_key(&key);
+    // SHA-1 output is 20 bytes → base64 with padding is 28 chars
+    assert_eq(derived.len(), 28);
 }
