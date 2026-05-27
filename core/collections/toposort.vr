@@ -214,7 +214,7 @@ implement<N: Hash + Eq> TopoGraph<N> {
             let mut m: Int = 0;
             while m < self.nodes.len() {
                 let n = &self.nodes[m];
-                let d = match in_deg_local.get(n.clone()) { Some(v) => v, None => 0 };
+                let d = match in_deg_local.get(n.clone()) { Maybe.Some(v) => v, Maybe.None => 0 };
                 if d > 0 {
                     // Render each node through its Debug textual form.
                     residual.push(node_label(n));

@@ -6311,9 +6311,9 @@ implement TryFrom<Int> for Int8 {
 
     public fn try_from(value: Int) -> Result<Int8, TryFromIntError> {
         if value >= -128 && value <= 127 {
-            Ok(value as Int8)
+            Result.Ok(value as Int8)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6323,9 +6323,9 @@ implement TryFrom<Int> for Int16 {
 
     public fn try_from(value: Int) -> Result<Int16, TryFromIntError> {
         if value >= -32768 && value <= 32767 {
-            Ok(value as Int16)
+            Result.Ok(value as Int16)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6335,9 +6335,9 @@ implement TryFrom<Int> for Int32 {
 
     public fn try_from(value: Int) -> Result<Int32, TryFromIntError> {
         if value >= -2147483648 && value <= 2147483647 {
-            Ok(value as Int32)
+            Result.Ok(value as Int32)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6349,9 +6349,9 @@ implement TryFrom<Int> for UInt8 {
 
     public fn try_from(value: Int) -> Result<UInt8, TryFromIntError> {
         if value >= 0 && value <= 255 {
-            Ok(value as UInt8)
+            Result.Ok(value as UInt8)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6361,9 +6361,9 @@ implement TryFrom<Int> for UInt16 {
 
     public fn try_from(value: Int) -> Result<UInt16, TryFromIntError> {
         if value >= 0 && value <= 65535 {
-            Ok(value as UInt16)
+            Result.Ok(value as UInt16)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6373,9 +6373,9 @@ implement TryFrom<Int> for UInt32 {
 
     public fn try_from(value: Int) -> Result<UInt32, TryFromIntError> {
         if value >= 0 && value <= 4294967295 {
-            Ok(value as UInt32)
+            Result.Ok(value as UInt32)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6385,9 +6385,9 @@ implement TryFrom<Int> for UInt64 {
 
     public fn try_from(value: Int) -> Result<UInt64, TryFromIntError> {
         if value >= 0 {
-            Ok(value as UInt64)
+            Result.Ok(value as UInt64)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6406,9 +6406,9 @@ implement TryFrom<Int32> for Int16 {
     public fn try_from(value: Int32) -> Result<Int16, TryFromIntError> {
         let v = value.to_int();
         if v >= -32768 && v <= 32767 {
-            Ok(v as Int16)
+            Result.Ok(v as Int16)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6419,9 +6419,9 @@ implement TryFrom<Int32> for Int8 {
     public fn try_from(value: Int32) -> Result<Int8, TryFromIntError> {
         let v = value.to_int();
         if v >= -128 && v <= 127 {
-            Ok(v as Int8)
+            Result.Ok(v as Int8)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6434,9 +6434,9 @@ implement TryFrom<Int16> for Int8 {
     public fn try_from(value: Int16) -> Result<Int8, TryFromIntError> {
         let v = value.to_int();
         if v >= -128 && v <= 127 {
-            Ok(v as Int8)
+            Result.Ok(v as Int8)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6449,9 +6449,9 @@ implement TryFrom<UInt64> for UInt32 {
     public fn try_from(value: UInt64) -> Result<UInt32, TryFromIntError> {
         let v = value.to_int();
         if v >= 0 && v <= 4294967295 {
-            Ok(v as UInt32)
+            Result.Ok(v as UInt32)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6464,9 +6464,9 @@ implement TryFrom<UInt32> for UInt16 {
     public fn try_from(value: UInt32) -> Result<UInt16, TryFromIntError> {
         let v = value.to_int();
         if v >= 0 && v <= 65535 {
-            Ok(v as UInt16)
+            Result.Ok(v as UInt16)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6477,9 +6477,9 @@ implement TryFrom<UInt32> for UInt8 {
     public fn try_from(value: UInt32) -> Result<UInt8, TryFromIntError> {
         let v = value.to_int();
         if v >= 0 && v <= 255 {
-            Ok(v as UInt8)
+            Result.Ok(v as UInt8)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6492,9 +6492,9 @@ implement TryFrom<UInt16> for UInt8 {
     public fn try_from(value: UInt16) -> Result<UInt8, TryFromIntError> {
         let v = value.to_int();
         if v >= 0 && v <= 255 {
-            Ok(v as UInt8)
+            Result.Ok(v as UInt8)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6509,9 +6509,9 @@ implement TryFrom<UInt64> for Int {
         // We convert to Int; if original value was > Int.MAX, the result will be negative
         let v = value as Int;
         if v >= 0 {
-            Ok(v)
+            Result.Ok(v)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6524,9 +6524,9 @@ implement TryFrom<UInt32> for Int16 {
     public fn try_from(value: UInt32) -> Result<Int16, TryFromIntError> {
         let v = value.to_int();
         if v >= 0 && v <= 32767 {
-            Ok(v as Int16)
+            Result.Ok(v as Int16)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }
@@ -6537,9 +6537,9 @@ implement TryFrom<UInt16> for Int8 {
     public fn try_from(value: UInt16) -> Result<Int8, TryFromIntError> {
         let v = value.to_int();
         if v >= 0 && v <= 127 {
-            Ok(v as Int8)
+            Result.Ok(v as Int8)
         } else {
-            Err(TryFromIntError.new())
+            Result.Err(TryFromIntError.new())
         }
     }
 }

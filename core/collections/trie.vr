@@ -83,7 +83,7 @@ type TrieNode<V> is {
 };
 
 fn empty_node<V>() -> TrieNode<V> {
-    TrieNode { value: None, children: Map.new() }
+    TrieNode { value: Maybe.None, children: Map.new() }
 }
 
 // =============================================================================
@@ -119,13 +119,13 @@ implement<V: Clone> Trie<V> {
             }
             // Descend — we need the &mut inside the Heap.
             match node.children.get_mut(&b) {
-                Some(child) => { node = &mut **child; },
-                None        => break,
+                Maybe.Some(child) => { node = &mut **child; },
+                Maybe.None        => break,
             }
             i = i + 1;
         }
         let prior = node.value.clone();
-        node.value = Some(value);
+        node.value = Maybe.Some(value);
         if prior.is_none() { self.size = self.size + 1; }
         prior
     }
@@ -133,15 +133,15 @@ implement<V: Clone> Trie<V> {
     /// Exact match.
     public fn get(&self, key: &[Byte]) -> Maybe<V> {
         match self.walk_to(key) {
-            Some(node) => node.value.clone(),
-            None       => None,
+            Maybe.Some(node) => node.value.clone(),
+            Maybe.None       => Maybe.None,
         }
     }
 
     public fn contains(&self, key: &[Byte]) -> Bool {
         match self.get(key) {
-            Some(_) => true,
-            None    => false,
+            Maybe.Some(_) => true,
+            Maybe.None    => false,
         }
     }
 
@@ -155,13 +155,13 @@ implement<V: Clone> Trie<V> {
         while i < key.len() {
             let b = key[i];
             match node.children.get_mut(&b) {
-                Some(child) => { node = &mut **child; },
-                None        => return None,
+                Maybe.Some(child) => { node = &mut **child; },
+                Maybe.None        => return Maybe.None,
             }
             i = i + 1;
         }
         let prior = node.value.clone();
-        node.value = None;
+        node.value = Maybe.None;
         if prior.is_some() { self.size = self.size - 1; }
         prior
     }
@@ -174,32 +174,32 @@ implement<V: Clone> Trie<V> {
     /// dispatch.
     public fn longest_prefix(&self, key: &[Byte]) -> Maybe<(List<Byte>, V)> {
         let mut node = &self.root;
-        let mut best: Maybe<(Int, V)> = None;
+        let mut best: Maybe<(Int, V)> = Maybe.None;
         if node.value.is_some() {
-            match &node.value { Some(v) => { best = Some((0, v.clone())); }, None => {} }
+            match &node.value { Maybe.Some(v) => { best = Maybe.Some((0, v.clone())); }, Maybe.None => {} }
         }
         let mut i: Int = 0;
         while i < key.len() {
             let b = key[i];
             match node.children.get(b.clone()) {
-                Some(child) => {
+                Maybe.Some(child) => {
                     node = &**child;
                     match &node.value {
-                        Some(v) => { best = Some((i + 1, v.clone())); },
-                        None    => {},
+                        Maybe.Some(v) => { best = Maybe.Some((i + 1, v.clone())); },
+                        Maybe.None    => {},
                     }
                 },
-                None => break,
+                Maybe.None => break,
             }
             i = i + 1;
         }
         match best {
-            Some((len, v)) => {
+            Maybe.Some((len, v)) => {
                 let mut prefix: List<Byte> = List.with_capacity(len);
                 prefix.extend_from_slice(&key[..len]);
-                Some((prefix, v))
+                Maybe.Some((prefix, v))
             },
-            None => None,
+            Maybe.None => Maybe.None,
         }
     }
 

@@ -151,8 +151,8 @@ implement<K: Hash + Eq, V> LruCache<K, V> {
     public fn remove(&mut self, key: &K) -> Maybe<V> {
         let v = self.store.remove(key.clone());
         match &v {
-            Some(_) => self.remove_from_order(key),
-            None    => {},
+            Maybe.Some(_) => self.remove_from_order(key),
+            Maybe.None    => {},
         }
         v
     }

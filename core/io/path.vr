@@ -552,16 +552,16 @@ implement Path {
     /// Check if this path is a file.
     public fn is_file(&self) -> Bool {
         match fs_metadata(self) {
-            Ok(meta) => meta.is_file(),
-            Err(_) => false,
+            Result.Ok(meta) => meta.is_file(),
+            Result.Err(_) => false,
         }
     }
 
     /// Check if this path is a directory.
     public fn is_dir(&self) -> Bool {
         match fs_metadata(self) {
-            Ok(meta) => meta.is_dir(),
-            Err(_) => false,
+            Result.Ok(meta) => meta.is_dir(),
+            Result.Err(_) => false,
         }
     }
 }

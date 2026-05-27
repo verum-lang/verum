@@ -334,7 +334,7 @@ implement<T: Hash + Eq> Multiset<T> {
     {
         let mut res = self.clone();
         let mut iter = other.iter();
-        while let Some((k, v)) = iter.next() {
+        while let Maybe.Some((k, v)) = iter.next() {
             let cur = res.count(k);
             if v > cur {
                 res.cardinality = res.cardinality + (v - cur);
@@ -355,7 +355,7 @@ implement<T: Hash + Eq> Multiset<T> {
 
         let mut res = Multiset.with_capacity(small.distinct_len());
         let mut iter = small.iter();
-        while let Some((k, v)) = iter.next() {
+        while let Maybe.Some((k, v)) = iter.next() {
             let other_v = large.count(k);
             if other_v == 0 { continue; }
             let m = if v <= other_v { v } else { other_v };
@@ -373,7 +373,7 @@ implement<T: Hash + Eq> Multiset<T> {
     {
         let mut res = self.clone();
         let mut iter = other.iter();
-        while let Some((k, v)) = iter.next() {
+        while let Maybe.Some((k, v)) = iter.next() {
             res.insert_n(k.clone(), v);
         }
         res
@@ -385,7 +385,7 @@ implement<T: Hash + Eq> Multiset<T> {
     {
         let mut res = Multiset.with_capacity(self.distinct_len());
         let mut iter = self.iter();
-        while let Some((k, v)) = iter.next() {
+        while let Maybe.Some((k, v)) = iter.next() {
             let sub = other.count(k);
             if v > sub {
                 let m = v - sub;
@@ -401,7 +401,7 @@ implement<T: Hash + Eq> Multiset<T> {
     public fn is_subset(&self, other: &Multiset<T>) -> Bool {
         if self.cardinality > other.cardinality { return false; }
         let mut iter = self.iter();
-        while let Some((k, v)) = iter.next() {
+        while let Maybe.Some((k, v)) = iter.next() {
             if other.count(k) < v { return false; }
         }
         true
@@ -419,7 +419,7 @@ implement<T: Hash + Eq> Multiset<T> {
             (self, other)
         } else { (other, self) };
         let mut iter = small.distinct_iter();
-        while let Some(k) = iter.next() {
+        while let Maybe.Some(k) = iter.next() {
             if large.contains(k) { return false; }
         }
         true
@@ -435,7 +435,7 @@ implement<T: Hash + Eq> Multiset<T> {
     {
         let mut out: List<T> = List.with_capacity(self.cardinality);
         let mut iter = self.iter();
-        while let Some((k, v)) = iter.next() {
+        while let Maybe.Some((k, v)) = iter.next() {
             let mut i: Int = 0;
             while i < v {
                 out.push(k.clone());
@@ -452,7 +452,7 @@ implement<T: Hash + Eq> Multiset<T> {
     {
         let mut out: List<(T, Int)> = List.with_capacity(self.distinct_len());
         let mut iter = self.iter();
-        while let Some((k, v)) = iter.next() {
+        while let Maybe.Some((k, v)) = iter.next() {
             out.push((k.clone(), v));
         }
         out
@@ -525,7 +525,7 @@ implement<T: Hash + Eq> Eq for Multiset<T> {
         if self.cardinality != other.cardinality { return false; }
         if self.distinct_len() != other.distinct_len() { return false; }
         let mut iter = self.iter();
-        while let Some((k, v)) = iter.next() {
+        while let Maybe.Some((k, v)) = iter.next() {
             if other.count(k) != v { return false; }
         }
         true
@@ -536,7 +536,7 @@ implement<T: Hash + Eq> Eq for Multiset<T> {
         if self.cardinality != other.cardinality { return true; }
         if self.distinct_len() != other.distinct_len() { return true; }
         let mut iter = self.iter();
-        while let Some((k, v)) = iter.next() {
+        while let Maybe.Some((k, v)) = iter.next() {
             if other.count(k) != v { return true; }
         }
         false
@@ -548,7 +548,7 @@ implement<T: Hash + Eq + Debug> Debug for Multiset<T> {
         f.write_str("Multiset {")?;
         let mut first = true;
         let mut iter = self.iter();
-        while let Some((k, v)) = iter.next() {
+        while let Maybe.Some((k, v)) = iter.next() {
             if !first { f.write_str(", ")?; }
             first = false;
             f.write_str(&f"{k}×{v}")?;

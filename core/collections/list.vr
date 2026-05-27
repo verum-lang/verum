@@ -195,14 +195,14 @@ implement<T> List<T> {
     // that need to degrade rather than crash.
     public fn try_with_capacity(capacity: Int) -> Result<List<T>, AllocError> {
         if capacity == 0 {
-            return Ok(List.new());
+            return Result.Ok(List.new());
         }
 
         // Capacity-overflow guard. Same role as in
         // `try_resize_buffer`, repeated here because direct callers
         // of `try_with_capacity` skip the resize path.
         if capacity < 0 || capacity > list_max_len(T.size) {
-            return Err(AllocError.CapacityOverflow { requested: capacity });
+            return Result.Err(AllocError.CapacityOverflow { requested: capacity });
         }
 
         // Route through try_alloc so allocator-side errors (OutOfMemory,
@@ -214,12 +214,12 @@ implement<T> List<T> {
         let ptr = raw as &unsafe T;
 
         if ptr.is_null() {
-            return Err(AllocError.OutOfMemory {
+            return Result.Err(AllocError.OutOfMemory {
                 requested: capacity * T.size,
             });
         }
 
-        Ok(List {
+        Result.Ok(List {
             ptr: ptr,
             len: 0,
             cap: capacity,
@@ -448,7 +448,7 @@ implement<T> List<T> {
             try { self.try_grow()? };
         }
         self.push(value);
-        Ok(())
+        Result.Ok(())
     }
 
     // Pop element from end.
@@ -637,7 +637,7 @@ implement<T> List<T> {
         if required > self.cap {
             try { self.try_resize_buffer(required)? };
         }
-        Ok(())
+        Result.Ok(())
     }
 
     // Reserve exact capacity. Panics on OOM.
@@ -654,7 +654,7 @@ implement<T> List<T> {
         if required > self.cap {
             try { self.try_resize_buffer(required)? };
         }
-        Ok(())
+        Result.Ok(())
     }
 
     // Shrink capacity to fit current length.
@@ -769,7 +769,7 @@ implement<T> List<T> {
         // monotonicity invariant — push/insert/reserve all funnel
         // through here on growth.
         if new_cap < 0 || new_cap > list_max_len(T.size) {
-            return Err(AllocError.CapacityOverflow { requested: new_cap });
+            return Result.Err(AllocError.CapacityOverflow { requested: new_cap });
         }
         let new_size = new_cap * T.size;
         let align = T.alignment;
@@ -791,12 +791,12 @@ implement<T> List<T> {
         let new_ptr = new_raw as &unsafe T;
 
         if new_ptr.is_null() {
-            return Err(AllocError.OutOfMemory { requested: new_size });
+            return Result.Err(AllocError.OutOfMemory { requested: new_size });
         }
 
         self.ptr = new_ptr;
         self.cap = new_cap;
-        Ok(())
+        Result.Ok(())
     }
 
     // Free internal buffer.
@@ -1427,13 +1427,13 @@ implement<T> List<T> {
                     match item.cmp(value) {
                         Ordering.Less => { low = mid + 1; },
                         Ordering.Greater => { high = mid; },
-                        Ordering.Equal => { return Ok(mid); },
+                        Ordering.Equal => { return Result.Ok(mid); },
                     }
                 },
-                Maybe.None => return Err(low),
+                Maybe.None => return Result.Err(low),
             }
         }
-        Err(low)
+        Result.Err(low)
     }
 
     // Binary search with comparator. Returns Ok(index) if found, or Err(insertion_point).
@@ -1447,13 +1447,13 @@ implement<T> List<T> {
                     match f(&item) {
                         Ordering.Less => { low = mid + 1; },
                         Ordering.Greater => { high = mid; },
-                        Ordering.Equal => { return Ok(mid); },
+                        Ordering.Equal => { return Result.Ok(mid); },
                     }
                 },
-                Maybe.None => return Err(low),
+                Maybe.None => return Result.Err(low),
             }
         }
-        Err(low)
+        Result.Err(low)
     }
 
     // Find the partition point in a sorted list.
