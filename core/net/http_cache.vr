@@ -85,8 +85,11 @@ public type CacheControlError is
 
 implement Display for CacheControlError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        // Qualified arms (task #17/#39 close-out) — bare `Malformed`
+        // collides with CidrError.Malformed / HttpParseError.Malformed
+        // across the variant-dispatch table.
         match self {
-            Malformed(reason) => f.write_str(f"Cache-Control malformed: {reason}".as_str()),
+            CacheControlError.Malformed(reason) => f.write_str(f"Cache-Control malformed: {reason}".as_str()),
         }
     }
 }
@@ -94,7 +97,7 @@ implement Display for CacheControlError {
 implement Debug for CacheControlError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            Malformed(reason) => f.write_str(f"Malformed({reason})".as_str()),
+            CacheControlError.Malformed(reason) => f.write_str(f"Malformed({reason})".as_str()),
         }
     }
 }
@@ -102,7 +105,7 @@ implement Debug for CacheControlError {
 implement Eq for CacheControlError {
     fn eq(&self, other: &CacheControlError) -> Bool {
         match (self, other) {
-            (Malformed(a), Malformed(b)) => a == b,
+            (CacheControlError.Malformed(a), CacheControlError.Malformed(b)) => a == b,
         }
     }
 }

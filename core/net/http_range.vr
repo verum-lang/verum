@@ -85,10 +85,11 @@ public type RangeError is
 
 implement Display for RangeError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        // Qualified arms (task #17/#39 close-out).
         match self {
-            Malformed(reason)         => f.write_str(f"HTTP Range malformed: {reason}".as_str()),
-            UnsatisfiableRange        => f.write_str("HTTP Range unsatisfiable (RFC 9110 §14.1.2)"),
-            TooManyRanges { declared, limit } =>
+            RangeError.Malformed(reason)         => f.write_str(f"HTTP Range malformed: {reason}".as_str()),
+            RangeError.UnsatisfiableRange        => f.write_str("HTTP Range unsatisfiable (RFC 9110 §14.1.2)"),
+            RangeError.TooManyRanges { declared, limit } =>
                 f.write_str(f"HTTP Range count {declared} exceeds limit {limit}".as_str()),
         }
     }
@@ -97,9 +98,9 @@ implement Display for RangeError {
 implement Debug for RangeError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
-            Malformed(reason)         => f.write_str(f"Malformed({reason})".as_str()),
-            UnsatisfiableRange        => f.write_str("UnsatisfiableRange"),
-            TooManyRanges { declared, limit } =>
+            RangeError.Malformed(reason)         => f.write_str(f"Malformed({reason})".as_str()),
+            RangeError.UnsatisfiableRange        => f.write_str("UnsatisfiableRange"),
+            RangeError.TooManyRanges { declared, limit } =>
                 f.write_str(f"TooManyRanges {{ declared: {declared}, limit: {limit} }}".as_str()),
         }
     }
@@ -108,10 +109,10 @@ implement Debug for RangeError {
 implement Eq for RangeError {
     fn eq(&self, other: &RangeError) -> Bool {
         match (self, other) {
-            (Malformed(a),         Malformed(b))         => a == b,
-            (UnsatisfiableRange,   UnsatisfiableRange)   => true,
-            (TooManyRanges { declared: da, limit: la },
-             TooManyRanges { declared: db, limit: lb }) => da == db && la == lb,
+            (RangeError.Malformed(a),       RangeError.Malformed(b))       => a == b,
+            (RangeError.UnsatisfiableRange, RangeError.UnsatisfiableRange) => true,
+            (RangeError.TooManyRanges { declared: da, limit: la },
+             RangeError.TooManyRanges { declared: db, limit: lb }) => da == db && la == lb,
             _ => false,
         }
     }
