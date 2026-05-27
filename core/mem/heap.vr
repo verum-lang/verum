@@ -321,7 +321,7 @@ implement HeapPageHeader {
             let next = unsafe { ptr_read(ptr as &UInt64) };
             self.free = next;
             self.used = self.used + 1;
-            return Some(ptr as &unsafe Byte);
+            return Maybe.Some(ptr as &unsafe Byte);
         }
 
         // Try local_free list
@@ -330,7 +330,7 @@ implement HeapPageHeader {
             let next = unsafe { ptr_read(ptr as &UInt64) };
             self.local_free = next;
             self.used = self.used + 1;
-            return Some(ptr as &unsafe Byte);
+            return Maybe.Some(ptr as &unsafe Byte);
         }
 
         // Try to collect xthread_free
@@ -342,10 +342,10 @@ implement HeapPageHeader {
             let next = unsafe { ptr_read(ptr as &UInt64) };
             self.free = next;
             self.used = self.used + 1;
-            return Some(ptr as &unsafe Byte);
+            return Maybe.Some(ptr as &unsafe Byte);
         }
 
-        None  // Page is full
+        Maybe.None  // Page is full
     }
 
     /// Free a block to the local free list (same thread)

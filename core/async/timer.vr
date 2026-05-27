@@ -69,7 +69,7 @@ implement Sleep {
     /// Create a new sleep future for the given duration.
     public fn new(duration: Duration) -> Sleep {
         Sleep {
-            deadline: None,
+            deadline: Maybe.None,
             duration: duration,
         }
     }
@@ -81,10 +81,10 @@ implement Future for Sleep {
     fn poll(&mut self, cx: &mut Context) -> Poll<()> {
         // Set deadline on first poll
         let deadline = match self.deadline {
-            Some(d) => d,
-            None => {
+            Maybe.Some(d) => d,
+            Maybe.None => {
                 let d = Instant.now() + self.duration;
-                self.deadline = Some(d);
+                self.deadline = Maybe.Some(d);
                 d
             }
         };
@@ -101,10 +101,10 @@ implement Future for Sleep {
             // existing call sites still progress (with the busy-spin
             // cost). Closes #243 for the canonical sleep primitive.
             match core.async.executor.current_runtime() {
-                Some(rt) => {
+                Maybe.Some(rt) => {
                     rt.register_timer(deadline.as_nanos() as UInt64, cx.waker().clone());
                 }
-                None => {
+                Maybe.None => {
                     cx.waker().wake_by_ref();
                 }
             }
@@ -164,13 +164,13 @@ implement Future for SleepUntil {
             // surface stays compatible. See Sleep::poll for the
             // rationale (closes #243).
             match core.async.executor.current_runtime() {
-                Some(rt) => {
+                Maybe.Some(rt) => {
                     rt.register_timer(self.deadline.as_nanos() as UInt64, cx.waker().clone());
                     // ^ SleepUntil takes the absolute Instant; cast
                     // to UInt64 nanoseconds for the timer queue's
                     // deadline-keyed insertion.
                 }
-                None => {
+                Maybe.None => {
                     cx.waker().wake_by_ref();
                 }
             }
@@ -221,7 +221,7 @@ implement TimerInterval {
     public fn new(period: Duration) -> TimerInterval {
         TimerInterval {
             period: period,
-            next_tick: None,
+            next_tick: Maybe.None,
         }
     }
 
@@ -229,7 +229,7 @@ implement TimerInterval {
     public fn immediate(period: Duration) -> TimerInterval {
         TimerInterval {
             period: period,
-            next_tick: Some(Instant.now()),
+            next_tick: Maybe.Some(Instant.now()),
         }
     }
 
@@ -239,10 +239,10 @@ implement TimerInterval {
     /// Returns the instant at which the tick occurred.
     public async fn tick(&mut self) -> Instant {
         let deadline = match self.next_tick {
-            Some(d) => d,
-            None => {
+            Maybe.Some(d) => d,
+            Maybe.None => {
                 let d = Instant.now() + self.period;
-                self.next_tick = Some(d);
+                self.next_tick = Maybe.Some(d);
                 d
             }
         };
@@ -252,14 +252,14 @@ implement TimerInterval {
 
         // Schedule next tick
         let tick_time = deadline;
-        self.next_tick = Some(deadline + self.period);
+        self.next_tick = Maybe.Some(deadline + self.period);
 
         tick_time
     }
 
     /// Reset the interval to start counting from now.
     public fn reset(&mut self) {
-        self.next_tick = Some(Instant.now() + self.period);
+        self.next_tick = Maybe.Some(Instant.now() + self.period);
     }
 
     /// Get the period of this interval.
