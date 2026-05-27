@@ -1,0 +1,229 @@
+// =============================================================================
+// core-tests/sync/mutex/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sync.mutex` — Mutex<T> + MutexGuard<T> +
+// PoisonError<T> + TryLockError<T> + LockResult<T> / TryLockResult<T>.
+//
+// Static + single-threaded uncontended surface only.  Live lock/unlock
+// blocking + contention are exercised at the L2-spec level.
+// =============================================================================
+
+mount core.sync.mutex.{
+    Mutex, MutexGuard, PoisonError, TryLockError,
+    LockResult, TryLockResult,
+};
+
+// =============================================================================
+// Section 1: Mutex.new construction (uncontended, single-threaded)
+// =============================================================================
+
+@test
+fn test_mutex_new_int_constructs() {
+    let m = Mutex.new(42);
+    // The data is owned by the mutex; construction does not contend.
+    assert(!m.is_poisoned());
+}
+
+@test
+fn test_mutex_new_bool_constructs() {
+    let m = Mutex.new(true);
+    assert(!m.is_poisoned());
+}
+
+@test
+fn test_mutex_new_default_poison_false() {
+    let m = Mutex.new(0);
+    // Freshly-constructed mutex MUST report not-poisoned.
+    assert_eq(m.is_poisoned(), false);
+}
+
+@test
+fn test_mutex_new_default_not_locked() {
+    let m = Mutex.new(0);
+    // Freshly-constructed mutex MUST report not-locked (futex zero).
+    assert_eq(m.is_locked(), false);
+}
+
+// =============================================================================
+// Section 2: Mutex.poison / clear_poison / is_poisoned round-trip
+// =============================================================================
+//
+// The poison flag is advisory and explicitly set/cleared.  See audit
+// §3.2 for why this is not auto-driven by panics.
+
+@test
+fn test_mutex_poison_sets_flag() {
+    let m = Mutex.new(0);
+    assert(!m.is_poisoned());
+    m.poison();
+    assert(m.is_poisoned());
+}
+
+@test
+fn test_mutex_clear_poison_resets_flag() {
+    let m = Mutex.new(0);
+    m.poison();
+    assert(m.is_poisoned());
+    m.clear_poison();
+    assert(!m.is_poisoned());
+}
+
+@test
+fn test_mutex_poison_idempotent() {
+    let m = Mutex.new(0);
+    m.poison();
+    m.poison();
+    m.poison();
+    // Multiple poisons converge to the same observable state.
+    assert(m.is_poisoned());
+}
+
+@test
+fn test_mutex_clear_poison_on_unpoisoned_noop() {
+    let m = Mutex.new(0);
+    assert(!m.is_poisoned());
+    m.clear_poison();
+    assert(!m.is_poisoned());
+}
+
+@test
+fn test_mutex_poison_clear_cycle_preserves_terminal_state() {
+    let m = Mutex.new(0);
+    m.poison();
+    m.clear_poison();
+    m.poison();
+    m.clear_poison();
+    m.poison();
+    assert(m.is_poisoned());
+    m.clear_poison();
+    assert(!m.is_poisoned());
+}
+
+// =============================================================================
+// Section 3: PoisonError<T> construction + accessors
+// =============================================================================
+//
+// PoisonError<T> is the error inside LockResult<T> / part of TryLockError.
+// It wraps the guard-or-data value so the recovering caller can still
+// reach the protected state.
+
+@test
+fn test_poison_error_constructs_with_int_payload() {
+    let e: PoisonError<Int> = PoisonError { guard: 99 };
+    // The payload is the public face — accessor returns a reference.
+    assert_eq(*e.get_ref(), 99);
+}
+
+@test
+fn test_poison_error_into_inner_returns_payload() {
+    let e: PoisonError<Int> = PoisonError { guard: 7 };
+    assert_eq(e.into_inner(), 7);
+}
+
+@test
+fn test_poison_error_get_ref_distinct_payloads() {
+    let a: PoisonError<Int> = PoisonError { guard: 1 };
+    let b: PoisonError<Int> = PoisonError { guard: 2 };
+    assert_eq(*a.get_ref(), 1);
+    assert_eq(*b.get_ref(), 2);
+}
+
+// =============================================================================
+// Section 4: TryLockError<T> two-variant ADT
+// =============================================================================
+//
+// Variant disjointness pins the codegen tag invariant (audit §3.5).
+
+@test
+fn test_try_lock_error_would_block_constructs() {
+    let e: TryLockError<Int> = TryLockError.WouldBlock;
+    assert(e is TryLockError.WouldBlock);
+}
+
+@test
+fn test_try_lock_error_poisoned_constructs() {
+    let pe: PoisonError<Int> = PoisonError { guard: 0 };
+    let e: TryLockError<Int> = TryLockError.Poisoned(pe);
+    assert(e is TryLockError.Poisoned);
+}
+
+@test
+fn test_try_lock_error_variants_disjoint() {
+    let pe: PoisonError<Int> = PoisonError { guard: 0 };
+    let wb: TryLockError<Int> = TryLockError.WouldBlock;
+    let po: TryLockError<Int> = TryLockError.Poisoned(pe);
+
+    assert(wb is TryLockError.WouldBlock);
+    assert(po is TryLockError.Poisoned);
+
+    assert(!(wb is TryLockError.Poisoned));
+    assert(!(po is TryLockError.WouldBlock));
+}
+
+// =============================================================================
+// Section 5: LockResult<T> + TryLockResult<T> as Result<...> aliases
+// =============================================================================
+//
+// LockResult<T>     = Result<T, PoisonError<T>>
+// TryLockResult<T>  = Result<T, TryLockError<T>>
+// These aliases are consumed at every Mutex.lock / try_lock call site.
+
+@test
+fn test_lock_result_ok_constructs() {
+    let r: LockResult<Int> = Result.Ok(42);
+    assert(r is Result.Ok);
+}
+
+@test
+fn test_lock_result_err_constructs() {
+    let pe: PoisonError<Int> = PoisonError { guard: 99 };
+    let r: LockResult<Int> = Result.Err(pe);
+    assert(r is Result.Err);
+}
+
+@test
+fn test_try_lock_result_ok_constructs() {
+    let r: TryLockResult<Int> = Result.Ok(7);
+    assert(r is Result.Ok);
+}
+
+@test
+fn test_try_lock_result_err_would_block_constructs() {
+    let r: TryLockResult<Int> = Result.Err(TryLockError.WouldBlock);
+    assert(r is Result.Err);
+}
+
+@test
+fn test_try_lock_result_err_poisoned_constructs() {
+    let pe: PoisonError<Int> = PoisonError { guard: 0 };
+    let r: TryLockResult<Int> = Result.Err(TryLockError.Poisoned(pe));
+    assert(r is Result.Err);
+}
+
+// =============================================================================
+// Section 6: Multiple Mutex instances are independent
+// =============================================================================
+
+@test
+fn test_two_mutexes_independent_poison_state() {
+    let m1 = Mutex.new(0);
+    let m2 = Mutex.new(0);
+    m1.poison();
+    assert(m1.is_poisoned());
+    assert(!m2.is_poisoned());
+    m2.poison();
+    assert(m1.is_poisoned());
+    assert(m2.is_poisoned());
+    m1.clear_poison();
+    assert(!m1.is_poisoned());
+    assert(m2.is_poisoned());
+}
+
+@test
+fn test_two_mutexes_independent_lock_state() {
+    let m1 = Mutex.new(0);
+    let m2 = Mutex.new(0);
+    assert(!m1.is_locked());
+    assert(!m2.is_locked());
+}
