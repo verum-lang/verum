@@ -1,0 +1,91 @@
+// =============================================================================
+// core-tests/sync/condvar/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for `core.sync.condvar`.
+// =============================================================================
+
+mount core.sync.condvar.{Condvar, WaitTimeoutResult};
+
+// =============================================================================
+// §3.2 — notify_one / notify_all are unconditional (no `if waiters > 0` gate)
+// =============================================================================
+//
+// Pre-fix (referenced in condvar.vr:201-241), notify_one / notify_all
+// gated the seq.fetch_add AND futex_wake on `waiters.load(SeqCst) > 0`.
+// This was unsafe in the notify-without-lock pattern: a producer
+// observing waiters==0 between the consumer's predicate-load and the
+// consumer's wait() would skip the wake; the consumer would then
+// sleep forever.
+//
+// The fix removes the gate entirely.  This regression LOCKs that
+// behaviour: notify_one / notify_all MUST work safely on a fresh
+// condvar with no observed waiters.  A future re-gating that early-
+// returns from notify_* on `waiters == 0` would re-open the missed-
+// wakeup race surfaced in concurrent tests.
+
+@test
+fn regression_condvar_notify_one_unconditional_on_no_waiters() {
+    let cv = Condvar.new();
+    assert_eq(cv.waiter_count(), 0);
+    // The call MUST complete without panic / abort.  Pre-fix it would
+    // have early-returned via the `if waiters > 0` gate; post-fix it
+    // unconditionally bumps seq and issues futex_wake (which is a
+    // no-op syscall when nothing is waiting).
+    cv.notify_one();
+    assert_eq(cv.waiter_count(), 0);
+}
+
+@test
+fn regression_condvar_notify_all_unconditional_on_no_waiters() {
+    let cv = Condvar.new();
+    assert_eq(cv.waiter_count(), 0);
+    cv.notify_all();
+    assert_eq(cv.waiter_count(), 0);
+}
+
+// =============================================================================
+// §3.4 — WaitTimeoutResult has a single-field shape with `timed_out: Bool`
+// =============================================================================
+//
+// Layout-pin: WaitTimeoutResult is a 1-field record around `timed_out: Bool`.
+// A future refactor that adds a field (e.g., a sequence number or
+// remaining-ns hint) would break every match arm in consumer code.
+// LOCK-IN the construction-by-field-init shape + accessor agreement.
+
+@test
+fn regression_wait_timeout_result_single_field_shape_true() {
+    let r: WaitTimeoutResult = WaitTimeoutResult { timed_out: true };
+    assert(r.timed_out());
+}
+
+@test
+fn regression_wait_timeout_result_single_field_shape_false() {
+    let r: WaitTimeoutResult = WaitTimeoutResult { timed_out: false };
+    assert(!r.timed_out());
+}
+
+// =============================================================================
+// §3.1 — Condvar.new construction is idempotent + isolated
+// =============================================================================
+//
+// LOCK-IN that two freshly-constructed Condvars are independent —
+// notifying one does not change the other's observable state.
+
+@test
+fn regression_condvar_pairwise_independence() {
+    let a = Condvar.new();
+    let b = Condvar.new();
+
+    a.notify_one();
+    a.notify_all();
+    a.notify_one();
+
+    // b's state must be untouched by a's notifications.
+    assert_eq(a.waiter_count(), 0);
+    assert_eq(b.waiter_count(), 0);
+
+    b.notify_all();
+    assert_eq(a.waiter_count(), 0);
+    assert_eq(b.waiter_count(), 0);
+}

@@ -1,0 +1,135 @@
+// =============================================================================
+// core-tests/sync/barrier/property_test.vr
+// =============================================================================
+//
+// Algebraic-law verification for Barrier / BarrierWaitResult / Phaser /
+// CountDownLatch testable surface.
+//
+//   §A  Fresh Barrier invariant: every Barrier.new(n) has
+//       num_threads == n, waiting_count == 0, generation == 0.
+//   §B  Fresh Phaser invariant: every Phaser.new(p) has
+//       registered_parties == p, arrived == 0, phase == 0,
+//       is_terminated == false.
+//   §C  Phaser.register() is additive on registered_parties and
+//       always returns the current (pre-register) phase 0.
+//   §D  CountDownLatch drain law: starting at N, K count_down()
+//       calls reduce get_count() by K (clamped at 0).
+//   §E  BarrierWaitResult is a 1-field Bool record with identity
+//       on its accessor.
+// =============================================================================
+
+mount core.sync.barrier.{
+    Barrier, BarrierWaitResult,
+    Phaser, CountDownLatch,
+};
+mount core.collections.list.List;
+
+// =============================================================================
+// §A  Fresh Barrier invariant
+// =============================================================================
+
+@test
+fn law_barrier_fresh_invariant() {
+    let ns: List<Int> = [1, 2, 3, 4, 8, 16];
+    for &n in ns.iter() {
+        let b = Barrier.new(n);
+        assert_eq(b.num_threads(), n);
+        assert_eq(b.waiting_count(), 0);
+        assert_eq(b.generation(), 0);
+    }
+}
+
+// =============================================================================
+// §B  Fresh Phaser invariant
+// =============================================================================
+
+@test
+fn law_phaser_fresh_invariant() {
+    let ps: List<Int> = [0, 1, 2, 4, 8];
+    for &p in ps.iter() {
+        let ph = Phaser.new(p);
+        assert_eq(ph.get_registered_parties(), p);
+        assert_eq(ph.get_arrived_parties(), 0);
+        assert_eq(ph.get_phase(), 0);
+        assert(!ph.is_terminated());
+    }
+}
+
+// =============================================================================
+// §C  Phaser.register() additivity
+// =============================================================================
+
+@test
+fn law_phaser_register_additive() {
+    let p = Phaser.new(0);
+    for i in 0..5 {
+        assert_eq(p.get_registered_parties(), i);
+        let phase = p.register();
+        // Phase is still 0 (no arrive has happened).
+        assert_eq(phase, 0);
+    }
+    assert_eq(p.get_registered_parties(), 5);
+    assert_eq(p.get_phase(), 0);
+}
+
+@test
+fn law_phaser_register_does_not_change_phase() {
+    let p = Phaser.new(0);
+    assert_eq(p.get_phase(), 0);
+    for _ in 0..10 {
+        p.register();
+        assert_eq(p.get_phase(), 0);
+    }
+}
+
+// =============================================================================
+// §D  CountDownLatch drain law
+// =============================================================================
+
+@test
+fn law_count_down_latch_drain_by_k_steps() {
+    let ns: List<Int> = [1, 2, 3, 5, 8];
+    for &n in ns.iter() {
+        let l = CountDownLatch.new(n);
+        assert_eq(l.get_count(), n);
+        for i in 0..n {
+            l.count_down();
+            // After i+1 count_downs, count == n - (i+1).
+            assert_eq(l.get_count(), n - (i + 1));
+        }
+        assert_eq(l.get_count(), 0);
+    }
+}
+
+@test
+fn law_count_down_latch_drained_then_wait_immediate() {
+    let l = CountDownLatch.new(4);
+    for _ in 0..4 {
+        l.count_down();
+    }
+    assert_eq(l.get_count(), 0);
+    // Drained — wait_for_zero must return immediately.
+    l.wait_for_zero();
+    // Also the timeout variant must immediately return true.
+    assert(l.wait_for_zero_timeout(0));
+}
+
+// =============================================================================
+// §E  BarrierWaitResult Bool round-trip
+// =============================================================================
+
+@test
+fn law_barrier_wait_result_bool_round_trip() {
+    let bs: List<Bool> = [true, false, true, false];
+    for &b in bs.iter() {
+        let r: BarrierWaitResult = BarrierWaitResult { is_leader: b };
+        assert_eq(r.is_leader(), b);
+    }
+}
+
+@test
+fn law_barrier_wait_result_distinct_values_disjoint() {
+    let leader: BarrierWaitResult = BarrierWaitResult { is_leader: true };
+    let follower: BarrierWaitResult = BarrierWaitResult { is_leader: false };
+    assert(leader.is_leader() != follower.is_leader());
+}
