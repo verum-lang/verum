@@ -7279,35 +7279,67 @@ pub(super) fn dispatch_primitive_method(
         // any heap-allocated record), the call is dispatching to a user-
         // defined Sub / Add / Offset protocol impl — not pointer arithmetic.
         //
-        // Gating on `args[0].is_int()` (which excludes BoxedInt-tagged
-        // pointers correctly) cleanly separates the two surfaces without
-        // needing receiver-side heap-object detection (which is fragile
-        // for non-CBGR-allocated records that nonetheless carry an
-        // ObjectHeader).
+        // **FUNDAMENTAL FIX 2026-05-27 (round 14b)** — extend the
+        // `arg0.is_int()` gate with a receiver-side `header.type_id != 0`
+        // check.  The arg0-side gate alone is insufficient: every
+        // single-field-record-unboxed record like
+        // `WaitGroup { handle: Int }` defines a method `add(delta: Int)`
+        // whose user-defined body MUST run (to dispatch
+        // `__waitgroup_add_raw(handle, delta)`) — but `delta: Int`
+        // satisfies `arg0.is_int()` and the receiver, being heap-allocated,
+        // satisfies `is_ptr()`, so pointer arithmetic mis-fires and
+        // returns `ptr.wrapping_add(delta)` instead of incrementing the
+        // backing counter.  Reading the `ObjectHeader` at the receiver
+        // pointer and rejecting type_id != 0 (i.e., a structured record
+        // with a known type) restricts the intercept to genuine raw
+        // pointers (`TypeId(0)` is the no-header sentinel returned by
+        // `ObjectHeader::ref_or_stub` for misaligned or unheadered ptrs).
         //
-        // **FUNDAMENTAL FIX 2026-05-27** — closes the operator-method-
-        // dispatch shadow surfaced by the Round-13 Option-B signed-Duration
-        // refactor.  Pre-fix the indiscriminate `is_ptr()` check caught
-        // every Duration `Sub.sub` body in pointer arithmetic, returning
-        // NaN-boxed garbage masked by the legacy `.max(0)` clamp.  Same
-        // root applies to ANY heap-allocated record that defines `sub` /
-        // `add` / `offset` via Sub / Add / Offset protocol impls.
+        // Closes the operator-method-dispatch shadow surfaced by the
+        // Round-13 Option-B signed-Duration refactor AND the WaitGroup
+        // `.add(delta)` mis-routing surfaced by the Round 14b sync
+        // conformance sweep.  Same root class applies to ANY user record
+        // that defines `sub` / `add` / `offset` via Sub / Add / Offset
+        // protocol impls.
         let arg0 = if args.count > 0 {
             Some(state.get_reg(Reg(args.start.0)))
         } else {
             None
         };
         let arg0_is_int = arg0.is_some_and(|v| v.is_int());
+        // Receiver-side narrowing for the pointer-arithmetic methods
+        // (`sub` / `byte_sub` / `add` / `byte_add` / `offset`): a
+        // structured record (type_id != 0 in its ObjectHeader) is NEVER
+        // a legitimate target for pointer arithmetic — its `.add(n)` /
+        // `.sub(n)` must dispatch to the user-defined Sub / Add / Offset
+        // protocol impl.  `ref_or_stub` returns the all-zero stub for
+        // misaligned / unheadered raw pointers (TypeId(0)), which IS
+        // the shape on which pointer arithmetic is semantically valid.
+        //
+        // Closes the WaitGroup `.add(delta)` mis-routing surfaced by
+        // the Round 14b sync conformance sweep — `WaitGroup { handle: Int }.add(1)`
+        // pre-fix dispatched to `ptr.wrapping_add(1)` instead of
+        // `__waitgroup_add_raw(handle, 1)` because the arg0.is_int()
+        // gate alone matched a single-field-record-unboxed receiver +
+        // Int-typed argument.  Same defect class as
+        // [[duration_single_field_record_unboxing_2026-05-27]].
+        let receiver_is_structured_record = {
+            let header = unsafe {
+                heap::ObjectHeader::ref_or_stub(receiver.as_ptr::<u8>())
+            };
+            header.type_id != crate::TypeId(0)
+        };
+        let allow_ptr_arith = arg0_is_int && !receiver_is_structured_record;
         match method {
-            "sub" | "byte_sub" if arg0_is_int => {
+            "sub" | "byte_sub" if allow_ptr_arith => {
                 let n = arg0.unwrap().as_i64() as usize;
                 return Ok(Some(Value::from_ptr(ptr_addr.wrapping_sub(n) as *mut u8)));
             }
-            "add" | "byte_add" if arg0_is_int => {
+            "add" | "byte_add" if allow_ptr_arith => {
                 let n = arg0.unwrap().as_i64() as usize;
                 return Ok(Some(Value::from_ptr(ptr_addr.wrapping_add(n) as *mut u8)));
             }
-            "offset" if arg0_is_int => {
+            "offset" if allow_ptr_arith => {
                 let n = arg0.unwrap().as_i64();
                 return Ok(Some(Value::from_ptr(
                     (ptr_addr as isize).wrapping_add(n as isize) as usize as *mut u8,
