@@ -616,8 +616,8 @@ implement Int {
 /// Helper: convert character to digit value for the given radix. Returns -1 on invalid.
 fn char_to_digit(ch: Char, radix: Int) -> Int {
     match ch.to_digit(radix) {
-        Some(d) => d,
-        None => -1,
+        Maybe.Some(d) => d,
+        Maybe.None => -1,
     }
 }
 
@@ -1300,13 +1300,13 @@ implement PartialOrd for Float {
     @inline(always)
     public fn partial_cmp(&self, other: &Float) -> Maybe<Ordering> {
         if self.is_nan() || other.is_nan() {
-            None
+            Maybe.None
         } else if *self < *other {
-            Some(Less)
+            Maybe.Some(Ordering.Less)
         } else if *self > *other {
-            Some(Greater)
+            Maybe.Some(Ordering.Greater)
         } else {
-            Some(Equal)
+            Maybe.Some(Ordering.Equal)
         }
     }
 }
@@ -1563,7 +1563,7 @@ implement Byte {
     /// Checked addition.
     public fn checked_add(self, rhs: Byte) -> Maybe<Byte> {
         let sum = (self as Int) + (rhs as Int);
-        if sum > 255 { None } else { Some(sum as Byte) }
+        if sum > 255 { Maybe.None } else { Maybe.Some(sum as Byte) }
     }
 
     /// Saturating addition.
@@ -1575,7 +1575,7 @@ implement Byte {
     /// Checked subtraction (returns None on underflow).
     public fn checked_sub(self, rhs: Byte) -> Maybe<Byte> {
         let diff = (self as Int) - (rhs as Int);
-        if diff < 0 { None } else { Some(diff as Byte) }
+        if diff < 0 { Maybe.None } else { Maybe.Some(diff as Byte) }
     }
 
     /// Saturating subtraction.
@@ -1715,7 +1715,7 @@ implement Char {
         } else {
             -1
         };
-        if digit >= 0 && digit < radix { Some(digit) } else { None }
+        if digit >= 0 && digit < radix { Maybe.Some(digit) } else { Maybe.None }
     }
 
     /// Create from digit value in given radix.
@@ -1741,11 +1741,11 @@ implement Char {
     public fn from_digit(digit: Int, radix: Int) -> Maybe<Char> {
         assert(radix >= 2 && radix <= 36, "radix must be 2..=36");
         if digit < 0 || digit >= radix {
-            None
+            Maybe.None
         } else if digit < 10 {
-            Some((48 + digit) as Char)  // '0'-'9'
+            Maybe.Some((48 + digit) as Char)  // '0'-'9'
         } else {
-            Some((87 + digit) as Char)  // 'a'-'z' — lowercase (87 = 'a' - 10)
+            Maybe.Some((87 + digit) as Char)  // 'a'-'z' — lowercase (87 = 'a' - 10)
         }
     }
 
