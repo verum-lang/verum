@@ -2188,7 +2188,7 @@ implement<I: Iterator + Clone> Iterator for CycleIter<I> {
 
     fn next(&mut self) -> Maybe<I.Item> {
         match self.iter.next() {
-            None => {
+            Maybe.None => {
                 self.iter = self.orig.clone();
                 self.iter.next()
             }
@@ -2201,10 +2201,10 @@ implement<I: Iterator + Clone> Iterator for CycleIter<I> {
         let (orig_lower, _) = self.orig.size_hint();
         if orig_lower > 0 {
             // Infinite iterator — no upper bound
-            (orig_lower, None)
+            (orig_lower, Maybe.None)
         } else {
             // Original might be empty
-            (0, None)
+            (0, Maybe.None)
         }
     }
 }
@@ -2229,33 +2229,33 @@ implement<I: Iterator> Iterator for WindowsIter<I> {
 
     fn next(&mut self) -> Maybe<List<I.Item>> {
         if self.done {
-            return None;
+            return Maybe.None;
         }
         if self.buffer.is_empty() {
             // Fill initial buffer
             let mut i = 0;
             while i < self.size {
                 match self.iter.next() {
-                    Some(v) => self.buffer.push(v),
-                    None => {
+                    Maybe.Some(v) => self.buffer.push(v),
+                    Maybe.None => {
                         self.done = true;
-                        return None;
+                        return Maybe.None;
                     },
                 }
                 i = i + 1;
             }
-            Some(self.buffer.clone())
+            Maybe.Some(self.buffer.clone())
         } else {
             // Slide window: remove first, add next
             match self.iter.next() {
-                Some(v) => {
+                Maybe.Some(v) => {
                     self.buffer.remove(0);
                     self.buffer.push(v);
-                    Some(self.buffer.clone())
+                    Maybe.Some(self.buffer.clone())
                 },
-                None => {
+                Maybe.None => {
                     self.done = true;
-                    None
+                    Maybe.None
                 },
             }
         }
@@ -2263,7 +2263,7 @@ implement<I: Iterator> Iterator for WindowsIter<I> {
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         if self.done {
-            (0, Some(0))
+            (0, Maybe.Some(0))
         } else {
             let (lower, upper) = self.iter.size_hint();
             let s = self.size;
@@ -2274,8 +2274,8 @@ implement<I: Iterator> Iterator for WindowsIter<I> {
                 // Need s elements for first window, then 1 per additional window
                 let win_lower = if lower >= s { lower - s + 1 } else { 0 };
                 let win_upper = match upper {
-                    Some(u) => if u >= s { Some(u - s + 1) } else { Some(0) },
-                    None => None,
+                    Maybe.Some(u) => if u >= s { Maybe.Some(u - s + 1) } else { Maybe.Some(0) },
+                    Maybe.None => Maybe.None,
                 };
                 (win_lower, win_upper)
             } else {
