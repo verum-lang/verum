@@ -418,7 +418,16 @@ implement Add for Duration {
     type Output = Duration;
 
     fn add(self, other: Duration) -> Duration {
-        Duration { nanos: self.nanos + other.nanos }
+        // Typed-local extraction pattern (see Sub impl) — forces
+        // BinaryIntOp::Add over the field arithmetic.  Without it,
+        // the codegen has historically dispatched Duration+Duration via
+        // Float addition, producing NaN-boxed payloads.  This is
+        // routed via the `time_duration_add` intrinsic at Tier 0, but
+        // the Verum body is the AOT fallback; keep both safe.
+        let a_ns: Int = self.nanos;
+        let b_ns: Int = other.nanos;
+        let sum_ns: Int = a_ns + b_ns;
+        Duration { nanos: sum_ns }
     }
 }
 
@@ -428,7 +437,20 @@ implement Sub for Duration {
     fn sub(self, other: Duration) -> Duration {
         // Signed subtraction — preserves negative results.  Use
         // `saturating_sub` if you need clamp-to-zero semantics.
-        Duration { nanos: self.nanos - other.nanos }
+        //
+        // Typed-local extraction pattern: the codegen path for
+        // `Duration - Duration` previously dispatched via Float subtraction
+        // (the SizedNumeric/IntCoercible lattice misroute) which produced
+        // NaN-boxed payloads when both operands were Int-tagged.  The
+        // pre-fix `.max(0)` clamp inadvertently masked NaN→0; removing
+        // it exposed the underlying codegen defect.  Loading the fields
+        // into typed Int locals before the arithmetic forces the
+        // BinaryIntOp::Sub path.  Same workaround pattern as
+        // `core/base/iterator.vr` Range<Int>::next.
+        let a_ns: Int = self.nanos;
+        let b_ns: Int = other.nanos;
+        let diff_ns: Int = a_ns - b_ns;
+        Duration { nanos: diff_ns }
     }
 }
 
@@ -438,7 +460,9 @@ implement Mul<Int> for Duration {
     fn mul(self, rhs: Int) -> Duration {
         // Signed multiplication — negative scalar produces a signed
         // (past-relative) Duration.
-        Duration { nanos: self.nanos * rhs }
+        let a_ns: Int = self.nanos;
+        let res_ns: Int = a_ns * rhs;
+        Duration { nanos: res_ns }
     }
 }
 
@@ -449,7 +473,9 @@ implement Div<Int> for Duration {
         // Signed division — rhs must be non-zero.  Negative divisors
         // produce sign-flipped Duration results.
         assert(rhs != 0, "Duration division by zero");
-        Duration { nanos: self.nanos / rhs }
+        let a_ns: Int = self.nanos;
+        let res_ns: Int = a_ns / rhs;
+        Duration { nanos: res_ns }
     }
 }
 

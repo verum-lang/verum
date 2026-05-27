@@ -7246,18 +7246,43 @@ pub(super) fn dispatch_primitive_method(
     }
 
     // Raw pointer methods (pointer arithmetic, CBGR generation)
+    //
+    // **FUNDAMENTAL FIX 2026-05-27** — Gate pointer-arithmetic methods
+    // (`sub` / `byte_sub` / `add` / `byte_add` / `offset`) on the
+    // receiver NOT being a CBGR-allocated heap object.  Pre-fix the
+    // generic `is_ptr()` check caught heap-allocated records like
+    // `Duration` whose user-defined `Sub.sub` body was then silently
+    // bypassed in favour of pointer arithmetic — producing NaN-boxed
+    // garbage pointers that masqueraded as Duration values.  The
+    // `is_zero()` test on the resulting value passed only because
+    // the garbage memory happened to read as zero.
+    //
+    // Closes the `Duration.sub` / `Duration.add` / `Duration.mul`
+    // operator-method-dispatch shadow surfaced by the Round-13 Option-B
+    // signed-Duration refactor (`core/time/duration.vr §A`).  Same root
+    // class applies to ANY heap-allocated record that defines a `sub` /
+    // `add` / `offset` method via the Sub / Add protocols.
     if receiver.is_ptr() && !receiver.is_nil() {
         let ptr_addr = receiver.as_ptr::<u8>() as usize;
+        // Determine if this is a CBGR-allocated heap object: every
+        // CBGR allocation has an `AllocationHeader` at `ptr - 32` whose
+        // address is recorded in `state.cbgr_allocations`.  Heap-allocated
+        // records (user-defined types like Duration) MUST fall through
+        // to the protocol-method dispatch below — their `.sub` / `.add`
+        // / `.offset` calls are user-defined Sub / Add / Offset
+        // implementations, not pointer arithmetic.
+        let header_addr = ptr_addr.wrapping_sub(32);
+        let is_cbgr_heap_object = state.cbgr_allocations.contains(&header_addr);
         match method {
-            "sub" | "byte_sub" => {
+            "sub" | "byte_sub" if !is_cbgr_heap_object => {
                 let n = state.get_reg(Reg(args.start.0)).as_i64() as usize;
                 return Ok(Some(Value::from_ptr(ptr_addr.wrapping_sub(n) as *mut u8)));
             }
-            "add" | "byte_add" => {
+            "add" | "byte_add" if !is_cbgr_heap_object => {
                 let n = state.get_reg(Reg(args.start.0)).as_i64() as usize;
                 return Ok(Some(Value::from_ptr(ptr_addr.wrapping_add(n) as *mut u8)));
             }
-            "offset" => {
+            "offset" if !is_cbgr_heap_object => {
                 let n = state.get_reg(Reg(args.start.0)).as_i64();
                 return Ok(Some(Value::from_ptr(
                     (ptr_addr as isize).wrapping_add(n as isize) as usize as *mut u8,
