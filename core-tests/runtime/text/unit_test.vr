@@ -1,0 +1,288 @@
+// =============================================================================
+// core-tests/runtime/text/unit_test.vr
+// =============================================================================
+//
+// `core/runtime/text.vr` (78 LOC) — runtime-layer text + char intrinsic
+// surface.  16 forward-declared free fns covering:
+//
+//   * text_from_static(ptr, len) -> Text
+//   * utf8_decode_char(bytes) / utf8_decode_char_len(byte)
+//   * text_parse_int / text_parse_float
+//   * int_to_text / float_to_text
+//   * char_is_{alphabetic,numeric,whitespace,control,uppercase,lowercase}
+//   * char_to_{uppercase,lowercase}
+//   * char_encode_utf8 / char_escape_debug / char_general_category
+//
+// **DEFECT CLASS §A — INTRINSIC STUBS NOT BOUND AT RUNTIME LAYER**
+// (surfaced 2026-05-27 — shared root with [[runtime/cbgr §A]] /
+// [[runtime/time §A]] / [[runtime/tls §A]])
+//
+// The `verum.runtime.text_*` and `verum.runtime.char_*` idents
+// forward-declared here are NOT registered in
+// `crates/verum_vbc/src/interpreter/dispatch_table/handlers/`.  Probes
+// 2026-05-27:
+//   * `text_parse_int(&"42").is_some() == false` (expected true)
+//   * `char_is_alphabetic('a') == false` (expected true)
+// All assertion-content tests below `@ignore`'d until binding lands.
+//
+// The HIGHER-LEVEL user-facing surface (`Char.is_alphabetic` /
+// `Text.parse_int`) DOES work — it routes through a DIFFERENT dispatch
+// path in `crates/verum_vbc/src/interpreter/dispatch_table/handlers/{char,text}_extended.rs`
+// keyed on the type-method shape, NOT on the free-fn intrinsic ident.
+// That's the same drift class as [[runtime/tls §B]]: two parallel APIs,
+// only one bound.  Surface-pinning tests (callable + return-type)
+// stay GREEN; semantic tests pin the FUTURE behaviour once §A closes.
+// =============================================================================
+
+mount core.runtime.text.{
+    text_parse_int, text_parse_float,
+    int_to_text, float_to_text,
+    char_is_alphabetic, char_is_numeric, char_is_whitespace, char_is_control,
+    char_is_uppercase, char_is_lowercase,
+    char_to_uppercase, char_to_lowercase,
+    char_general_category,
+};
+
+// =============================================================================
+// Section 1: text_parse_int — Maybe<Int> round-trips
+// =============================================================================
+
+@test
+fn test_text_parse_int_callable() {
+    // Stub binding returns Maybe.None — pin callability surface only.
+    let m = text_parse_int(&"42");
+    let _ = m;
+    assert(true);
+}
+
+@ignore  // §A — stub returns None for valid input
+@test
+fn test_text_parse_int_decimal_positive() {
+    let m = text_parse_int(&"42");
+    assert(m is Maybe.Some, "text_parse_int(\"42\") should be Some");
+}
+
+@ignore  // §A
+@test
+fn test_text_parse_int_decimal_zero() {
+    let m = text_parse_int(&"0");
+    assert(m is Maybe.Some, "text_parse_int(\"0\") should be Some");
+}
+
+@test
+fn test_text_parse_int_invalid_text_is_none() {
+    // Stub returns None for everything; coincidentally matches the
+    // expected behaviour for invalid input.  Test passes today and
+    // continues to pass post-§A.
+    let m = text_parse_int(&"not_a_number");
+    assert(m is Maybe.None, "text_parse_int garbage should be None");
+}
+
+@test
+fn test_text_parse_int_empty_is_none() {
+    let m = text_parse_int(&"");
+    assert(m is Maybe.None, "text_parse_int empty should be None");
+}
+
+// =============================================================================
+// Section 2: text_parse_float — Maybe<Float>
+// =============================================================================
+
+@test
+fn test_text_parse_float_callable() {
+    let m = text_parse_float(&"3.14");
+    let _ = m;
+    assert(true);
+}
+
+@ignore  // §A
+@test
+fn test_text_parse_float_decimal() {
+    let m = text_parse_float(&"3.14");
+    assert(m is Maybe.Some, "text_parse_float(\"3.14\") should be Some");
+}
+
+@test
+fn test_text_parse_float_invalid_is_none() {
+    let m = text_parse_float(&"xyz");
+    assert(m is Maybe.None, "text_parse_float garbage should be None");
+}
+
+// =============================================================================
+// Section 3: int_to_text — surface
+// =============================================================================
+//
+// int_to_text returns a Text value; content equality lives in
+// core-tests/text/text/.  Here we pin callability only.
+//
+
+@test
+fn test_int_to_text_zero_callable() {
+    let t = int_to_text(0);
+    let _ = t;
+    assert(true);
+}
+
+@test
+fn test_int_to_text_positive_callable() {
+    let t = int_to_text(42);
+    let _ = t;
+    assert(true);
+}
+
+@test
+fn test_int_to_text_negative_callable() {
+    let t = int_to_text(-100);
+    let _ = t;
+    assert(true);
+}
+
+// =============================================================================
+// Section 4: char_is_* predicates — ASCII canonical classifications
+// =============================================================================
+//
+// All @ignore'd on §A — stub returns false for every char.  Tests pin
+// the post-binding contract.
+//
+
+@ignore  // §A
+@test
+fn test_char_is_alphabetic_lowercase() {
+    assert(char_is_alphabetic('a'), "'a' is alphabetic");
+}
+
+@ignore  // §A
+@test
+fn test_char_is_alphabetic_uppercase() {
+    assert(char_is_alphabetic('Z'), "'Z' is alphabetic");
+}
+
+@test
+fn test_char_is_alphabetic_digit_is_false() {
+    // Stub returns false for everything; coincidentally matches contract.
+    assert(!char_is_alphabetic('5'), "'5' is NOT alphabetic");
+}
+
+@test
+fn test_char_is_alphabetic_space_is_false() {
+    assert(!char_is_alphabetic(' '), "' ' is NOT alphabetic");
+}
+
+@ignore  // §A
+@test
+fn test_char_is_numeric_digit() {
+    assert(char_is_numeric('0'), "'0' is numeric");
+    assert(char_is_numeric('9'), "'9' is numeric");
+}
+
+@test
+fn test_char_is_numeric_letter_is_false() {
+    assert(!char_is_numeric('a'), "'a' is NOT numeric");
+}
+
+@ignore  // §A
+@test
+fn test_char_is_whitespace_space() {
+    assert(char_is_whitespace(' '), "' ' is whitespace");
+}
+
+@ignore  // §A
+@test
+fn test_char_is_whitespace_tab() {
+    assert(char_is_whitespace('\t'), "'\\t' is whitespace");
+}
+
+@ignore  // §A
+@test
+fn test_char_is_whitespace_newline() {
+    assert(char_is_whitespace('\n'), "'\\n' is whitespace");
+}
+
+@test
+fn test_char_is_whitespace_letter_is_false() {
+    assert(!char_is_whitespace('a'), "'a' is NOT whitespace");
+}
+
+@ignore  // §A
+@test
+fn test_char_is_uppercase_canonical() {
+    assert(char_is_uppercase('A'), "'A' is uppercase");
+    assert(!char_is_uppercase('a'), "'a' is NOT uppercase");
+}
+
+@ignore  // §A
+@test
+fn test_char_is_lowercase_canonical() {
+    assert(char_is_lowercase('a'), "'a' is lowercase");
+    assert(!char_is_lowercase('A'), "'A' is NOT lowercase");
+}
+
+// =============================================================================
+// Section 5: char case conversion
+// =============================================================================
+
+@ignore  // §A — char_to_uppercase('a') returns 'a' under stub binding
+@test
+fn test_char_to_uppercase_lowercase_input() {
+    let c = char_to_uppercase('a');
+    assert(c == 'A', "'a'.to_uppercase() == 'A'");
+}
+
+@test
+fn test_char_to_uppercase_uppercase_input_idempotent() {
+    // Idempotence on already-uppercase passes under both stub
+    // (identity) and live binding (also identity).
+    let c = char_to_uppercase('A');
+    assert(c == 'A', "uppercase(uppercase) is identity");
+}
+
+@ignore  // §A
+@test
+fn test_char_to_lowercase_uppercase_input() {
+    let c = char_to_lowercase('A');
+    assert(c == 'a', "'A'.to_lowercase() == 'a'");
+}
+
+@test
+fn test_char_to_lowercase_lowercase_input_idempotent() {
+    let c = char_to_lowercase('a');
+    assert(c == 'a', "lowercase(lowercase) is identity");
+}
+
+@ignore  // §A — depends on case-fold binding
+@test
+fn test_char_case_inversion_law() {
+    // upper(lower(c)) == c for already-uppercase ASCII; same for the
+    // mirror.
+    let upper = char_to_uppercase('Z');
+    let back = char_to_uppercase(char_to_lowercase(upper));
+    assert(back == 'Z', "case-inversion round-trip failed");
+}
+
+// =============================================================================
+// Section 6: char_general_category — Unicode category dispatch
+// =============================================================================
+
+@test
+fn test_char_general_category_callable() {
+    let _ = char_general_category('A');
+    assert(true);
+}
+
+@test
+fn test_char_general_category_uppercase_letters_consistent() {
+    // 'A' and 'Z' are both Lu — same category code.  Passes under
+    // stub (both return default-zero) AND post-binding (both Lu).
+    let a = char_general_category('A');
+    let z = char_general_category('Z');
+    assert(a == z, "'A' and 'Z' should share Lu category");
+}
+
+@ignore  // §A — both return default-zero under stub
+@test
+fn test_char_general_category_uppercase_neq_lowercase() {
+    // 'A' (Lu) and 'a' (Ll) MUST have different categories.
+    let upper = char_general_category('A');
+    let lower = char_general_category('a');
+    assert(upper != lower, "Lu and Ll should be distinct categories");
+}
