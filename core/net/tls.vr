@@ -157,7 +157,7 @@ implement Certificate {
         let marker = "-----BEGIN CERTIFICATE-----";
         let mut search_start = 0;
 
-        while let Some(pos) = pem.slice(search_start, pem.len()).find(marker) {
+        while let Maybe.Some(pos) = pem.slice(search_start, pem.len()).find(marker) {
             let abs_pos = search_start + pos;
             let end_marker = "-----END CERTIFICATE-----";
             let end_pos = pem.slice(abs_pos, pem.len()).find(end_marker)
@@ -362,8 +362,8 @@ implement TlsConfig {
             min_version: TlsVersion.Tls12,
             max_version: TlsVersion.Tls13,
             root_certs: List.new(),
-            identity_cert: None,
-            identity_key: None,
+            identity_cert: Maybe.None,
+            identity_key: Maybe.None,
             verify_mode: CertVerifyMode.Full,
             alpn_protocols: List.new(),
             use_system_certs: true,
@@ -377,8 +377,8 @@ implement TlsConfig {
             min_version: TlsVersion.Tls12,
             max_version: TlsVersion.Tls13,
             root_certs: List.new(),
-            identity_cert: None,
-            identity_key: None,
+            identity_cert: Maybe.None,
+            identity_key: Maybe.None,
             verify_mode: CertVerifyMode.Full,
             alpn_protocols: List.new(),
             use_system_certs: false,
@@ -418,8 +418,8 @@ implement TlsConfig {
     /// Required for TLS servers. Optional for clients (mutual TLS).
     public fn with_identity(self, cert: Certificate, key: PrivateKey) -> TlsConfig {
         TlsConfig {
-            identity_cert: Some(cert),
-            identity_key: Some(key),
+            identity_cert: Maybe.Some(cert),
+            identity_key: Maybe.Some(key),
             ..self
         }
     }
@@ -827,10 +827,10 @@ implement<'a> Future for TlsWriteFut<'a> {
 implement Debug for TlsStream {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str("TlsStream { ")?;
-        if let Some(ver) = self.negotiated_version {
+        if let Maybe.Some(ver) = self.negotiated_version {
             f.write_str(f"version: {ver}, ")?;
         }
-        if let Some(alpn) = &self.alpn_protocol {
+        if let Maybe.Some(alpn) = &self.alpn_protocol {
             f.write_str(f"alpn: {alpn}, ")?;
         }
         f.write_str("}")
@@ -1093,8 +1093,8 @@ fn base64_decode(input: &Text) -> Result<List<Byte>, Text> {
                 sextet[j] = 0;
             } else {
                 match alphabet.find_char(c) {
-                    Some(idx) => sextet[j] = idx,
-                    None => return Err(f"invalid base64 character: {c}"),
+                    Maybe.Some(idx) => sextet[j] = idx,
+                    Maybe.None => return Err(f"invalid base64 character: {c}"),
                 }
             }
         }
