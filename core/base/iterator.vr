@@ -2083,21 +2083,21 @@ implement<I: Iterator> Iterator for FuseIter<I> {
 
     fn next(&mut self) -> Maybe<I.Item> {
         match self.iter {
-            Some(ref mut inner) => match inner.next() {
-                None => {
-                    self.iter = None;
-                    None
+            Maybe.Some(ref mut inner) => match inner.next() {
+                Maybe.None => {
+                    self.iter = Maybe.None;
+                    Maybe.None
                 }
                 x => x,
             },
-            None => None,
+            Maybe.None => Maybe.None,
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         match self.iter {
-            Some(ref inner) => inner.size_hint(),
-            None => (0, Some(0)),
+            Maybe.Some(ref inner) => inner.size_hint(),
+            Maybe.None => (0, Maybe.Some(0)),
         }
     }
 }
@@ -2105,14 +2105,14 @@ implement<I: Iterator> Iterator for FuseIter<I> {
 implement<I: DoubleEndedIterator> DoubleEndedIterator for FuseIter<I> {
     fn next_back(&mut self) -> Maybe<I.Item> {
         match self.iter {
-            Some(ref mut inner) => match inner.next_back() {
-                None => {
-                    self.iter = None;
-                    None
+            Maybe.Some(ref mut inner) => match inner.next_back() {
+                Maybe.None => {
+                    self.iter = Maybe.None;
+                    Maybe.None
                 }
                 x => x,
             },
-            None => None,
+            Maybe.None => Maybe.None,
         }
     }
 }
