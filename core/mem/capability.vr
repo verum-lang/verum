@@ -208,26 +208,26 @@ public fn can_execute(flags: UInt16) -> Bool {
 public fn delegate_capability(parent_caps: UInt16, requested: UInt16) -> Maybe<UInt16> {
     // Must have Delegate capability to create sub-references.
     if !can_delegate(parent_caps) {
-        return None;
+        return Maybe.None;
     }
 
     // Can only delegate capabilities that parent already has —
     // monotonic attenuation: sub-refs can only lose, never gain.
     if !has_all_capabilities(parent_caps, requested) {
-        return None;
+        return Maybe.None;
     }
 
-    Some(requested)
+    Maybe.Some(requested)
 }
 
 /// Revoke capabilities from a reference.
 /// Returns None if revocation is not allowed.
 public fn revoke_capability(caps: UInt16, to_revoke: UInt16) -> Maybe<UInt16> {
     if !can_revoke(caps) {
-        return None;
+        return Maybe.None;
     }
 
-    Some(caps & !to_revoke)
+    Maybe.Some(caps & !to_revoke)
 }
 
 /// Create capabilities for owned heap allocation.

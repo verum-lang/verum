@@ -139,17 +139,17 @@ implement Channel<T> {
                 self.head = (self.head + 1) % self.cap;
                 self.len.fetch_sub(1, MemoryOrdering.Release);
                 self.lock.unlock();
-                return Some(value);
+                return Maybe.Some(value);
             }
             self.lock.unlock();
 
             // Check if closed
             if self.closed.load(MemoryOrdering.Acquire) != 0 {
-                return None;
+                return Maybe.None;
             }
 
             // Block until sender wakes us
-            let _ = sys_futex_wait(&self.notify_seq.value, seq, None);
+            let _ = sys_futex_wait(&self.notify_seq.value, seq, Maybe.None);
         }
     }
 
@@ -163,10 +163,10 @@ implement Channel<T> {
             self.head = (self.head + 1) % self.cap;
             self.len.fetch_sub(1, MemoryOrdering.Release);
             self.lock.unlock();
-            return Some(value);
+            return Maybe.Some(value);
         }
         self.lock.unlock();
-        None
+        Maybe.None
     }
 
     public fn close(&mut self) {
@@ -242,14 +242,14 @@ implement<T> Sender<T> {
 
             let mut guard = self.inner.queue.lock().unwrap_or_else(|p| p.into_inner());
             // Bounded-capacity check under the same lock as the push — no TOCTOU.
-            if let Some(cap) = self.inner.capacity {
+            if let Maybe.Some(cap) = self.inner.capacity {
                 if guard.len() >= cap {
                     drop(guard);
                     if self.inner.closed.load(MemoryOrdering.Acquire) {
                         return Err(SendError(value));
                     }
                     // Wait until a receiver pops.
-                    let _ = sys_futex_wait(&self.inner.notify_seq.value, seq, None);
+                    let _ = sys_futex_wait(&self.inner.notify_seq.value, seq, Maybe.None);
                     continue;
                 }
             }
@@ -261,7 +261,7 @@ implement<T> Sender<T> {
             let _ = sys_futex_wake(&self.inner.notify_seq.value, 1);
 
             let waker_guard = self.inner.receiver_waker.lock().unwrap_or_else(|p| p.into_inner());
-            if let Some(waker) = waker_guard.as_ref() {
+            if let Maybe.Some(waker) = waker_guard.as_ref() {
                 waker.wake_by_ref();
             }
 
@@ -274,7 +274,7 @@ implement<T> Sender<T> {
     public fn send_async(&self, value: T) -> SendFut<T> {
         SendFut {
             inner: self.inner.clone(),
-            value: Some(value),
+            value: Maybe.Some(value),
             waker_registered: false,
         }
     }
@@ -347,7 +347,7 @@ implement<T> Sender<T> {
 
         let mut guard = self.inner.queue.lock().unwrap_or_else(|p| p.into_inner());
 
-        if let Some(cap) = self.inner.capacity {
+        if let Maybe.Some(cap) = self.inner.capacity {
             if guard.len() >= cap {
                 return Err(TrySendError.Full(value));
             }
@@ -360,7 +360,7 @@ implement<T> Sender<T> {
         let _ = sys_futex_wake(&self.inner.notify_seq.value, 1);
 
         let waker_guard = self.inner.receiver_waker.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(waker) = waker_guard.as_ref() {
+        if let Maybe.Some(waker) = waker_guard.as_ref() {
             waker.wake_by_ref();
         }
 
@@ -405,8 +405,8 @@ implement<T> Sender<T> {
     // and L2 rendezvous/bounded test scenarios that gate `send` on space.
     public fn is_full(&self) -> Bool {
         match self.inner.capacity {
-            Some(cap) => self.inner.queue.lock().unwrap_or_else(|p| p.into_inner()).len() >= cap,
-            None => false,
+            Maybe.Some(cap) => self.inner.queue.lock().unwrap_or_else(|p| p.into_inner()).len() >= cap,
+            Maybe.None => false,
         }
     }
 
@@ -457,7 +457,7 @@ implement<T> Drop for Sender<T> {
 
             // Also wake async receiver
             let waker_guard = self.inner.receiver_waker.lock().unwrap_or_else(|p| p.into_inner());
-            if let Some(waker) = waker_guard.as_ref() {
+            if let Maybe.Some(waker) = waker_guard.as_ref() {
                 waker.wake_by_ref();
             }
         }
@@ -481,25 +481,25 @@ implement<T> Receiver<T> {
             let seq = self.inner.notify_seq.load(MemoryOrdering.Acquire);
 
             let mut guard = self.inner.queue.lock().unwrap_or_else(|p| p.into_inner());
-            if let Some(value) = guard.pop_front() {
+            if let Maybe.Some(value) = guard.pop_front() {
                 // Wake a waiting sender
                 let mut wakers = self.inner.sender_wakers.lock().unwrap_or_else(|p| p.into_inner());
-                if let Some(waker) = wakers.pop() {
+                if let Maybe.Some(waker) = wakers.pop() {
                     waker.wake();
                 }
-                return Some(value);
+                return Maybe.Some(value);
             }
 
             // Check if closed
             if self.inner.closed.load(MemoryOrdering.Acquire) {
-                return None;
+                return Maybe.None;
             }
 
             // Release lock before blocking
             drop(guard);
 
             // Block until a sender increments notify_seq — real OS sleep
-            let _ = sys_futex_wait(&self.inner.notify_seq.value, seq, None);
+            let _ = sys_futex_wait(&self.inner.notify_seq.value, seq, Maybe.None);
         }
     }
 

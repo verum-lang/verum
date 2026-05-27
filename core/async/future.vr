@@ -67,8 +67,8 @@ implement<T> Future for ReadyFuture<T> {
 
     fn poll(&mut self, _cx: &mut Context) -> Poll<T> {
         match self.value.take() {
-            Some(v) => Poll.Ready(v),
-            None => panic("ReadyFuture polled after completion"),
+            Maybe.Some(v) => Poll.Ready(v),
+            Maybe.None => panic("ReadyFuture polled after completion"),
         }
     }
 }
@@ -76,7 +76,7 @@ implement<T> Future for ReadyFuture<T> {
 // Create a future that is immediately ready.
 @inline(always)
 public fn ready<T>(value: T) -> ReadyFuture<T> {
-    ReadyFuture { value: Some(value) }
+    ReadyFuture { value: Maybe.Some(value) }
 }
 
 // =============================================================================
@@ -115,8 +115,8 @@ implement<F: fn() -> T, T> Future for Lazy<F, T> {
 
     fn poll(&mut self, _cx: &mut Context) -> Poll<T> {
         match self.f.take() {
-            Some(f) => Poll.Ready(f()),
-            None => panic("Lazy future polled after completion"),
+            Maybe.Some(f) => Poll.Ready(f()),
+            Maybe.None => panic("Lazy future polled after completion"),
         }
     }
 }
@@ -124,7 +124,7 @@ implement<F: fn() -> T, T> Future for Lazy<F, T> {
 // Create a lazy future from a closure.
 @inline(always)
 public fn lazy<F: fn() -> T, T>(f: F) -> Lazy<F, T> {
-    Lazy { f: Some(f) }
+    Lazy { f: Maybe.Some(f) }
 }
 
 // =============================================================================
@@ -197,14 +197,14 @@ implement<Fut1: Future, F: fn(Fut1.Output) -> Fut2, Fut2: Future> Future for And
 public type FutureExt is protocol extends Future {
     // Map the output.
     fn map<T, F: fn(Self.Output) -> T>(self, f: F) -> MapFuture<Self, F> {
-        MapFuture { future: self, f: Some(f) }
+        MapFuture { future: self, f: Maybe.Some(f) }
     }
 
     // Chain with another future.
     fn and_then<Fut2: Future, F: fn(Self.Output) -> Fut2>(self, f: F) -> AndThenFuture<Self, F, Fut2> {
         AndThenFuture {
             state: First(self),
-            f: Some(f),
+            f: Maybe.Some(f),
         }
     }
 
@@ -280,20 +280,20 @@ implement<Fut1: Future, Fut2: Future> Future for Join2<Fut1, Fut2> {
     fn poll(&mut self, cx: &mut Context) -> Poll<(Fut1.Output, Fut2.Output)> {
         // Poll first future if !done
         if self.result1.is_none() {
-            if let Some(ref mut fut) = self.fut1 {
+            if let Maybe.Some(ref mut fut) = self.fut1 {
                 if let Poll.Ready(v) = fut.poll(cx) {
-                    self.result1 = Some(v);
-                    self.fut1 = None;
+                    self.result1 = Maybe.Some(v);
+                    self.fut1 = Maybe.None;
                 }
             }
         }
 
         // Poll second future if !done
         if self.result2.is_none() {
-            if let Some(ref mut fut) = self.fut2 {
+            if let Maybe.Some(ref mut fut) = self.fut2 {
                 if let Poll.Ready(v) = fut.poll(cx) {
-                    self.result2 = Some(v);
-                    self.fut2 = None;
+                    self.result2 = Maybe.Some(v);
+                    self.fut2 = Maybe.None;
                 }
             }
         }
@@ -315,10 +315,10 @@ implement<Fut1: Future, Fut2: Future> Future for Join2<Fut1, Fut2> {
 // Join two futures.
 public fn join<Fut1: Future, Fut2: Future>(fut1: Fut1, fut2: Fut2) -> Join2<Fut1, Fut2> {
     Join2 {
-        fut1: Some(fut1),
-        fut2: Some(fut2),
-        result1: None,
-        result2: None,
+        fut1: Maybe.Some(fut1),
+        fut2: Maybe.Some(fut2),
+        result1: Maybe.None,
+        result2: Maybe.None,
     }
 }
 
@@ -342,19 +342,19 @@ implement<Fut1: Future, Fut2: Future> Future for Select2<Fut1, Fut2> {
 
     fn poll(&mut self, cx: &mut Context) -> Poll<SelectResult<Fut1.Output, Fut2.Output>> {
         // Poll first future
-        if let Some(ref mut fut) = self.fut1 {
+        if let Maybe.Some(ref mut fut) = self.fut1 {
             if let Poll.Ready(v) = fut.poll(cx) {
-                self.fut1 = None;
-                self.fut2 = None;
+                self.fut1 = Maybe.None;
+                self.fut2 = Maybe.None;
                 return Poll.Ready(Left(v));
             }
         }
 
         // Poll second future
-        if let Some(ref mut fut) = self.fut2 {
+        if let Maybe.Some(ref mut fut) = self.fut2 {
             if let Poll.Ready(v) = fut.poll(cx) {
-                self.fut1 = None;
-                self.fut2 = None;
+                self.fut1 = Maybe.None;
+                self.fut2 = Maybe.None;
                 return Poll.Ready(Right(v));
             }
         }
@@ -366,8 +366,8 @@ implement<Fut1: Future, Fut2: Future> Future for Select2<Fut1, Fut2> {
 // Select between two futures.
 public fn select<Fut1: Future, Fut2: Future>(fut1: Fut1, fut2: Fut2) -> Select2<Fut1, Fut2> {
     Select2 {
-        fut1: Some(fut1),
-        fut2: Some(fut2),
+        fut1: Maybe.Some(fut1),
+        fut2: Maybe.Some(fut2),
     }
 }
 
