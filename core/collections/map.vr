@@ -767,7 +767,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// method's docstring for the by-reference-call-site idiom.
     public fn remove(&mut self, key: K) -> Maybe<V> {
         if self.cap == 0 {
-            return None;
+            return Maybe.None;
         }
 
         let hash = self.make_hash_val(key);
@@ -779,7 +779,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
             let entry = unsafe { &mut *self.entries.offset(idx) };
 
             if (entry.hash == 0) {
-                return None;
+                return Maybe.None;
             }
 
             if (entry.hash > 0) && entry.hash == hash && entry.key == key {
@@ -792,18 +792,18 @@ implement<K: Hash + Eq, V> Map<K, V> {
                     self.compact();
                 }
 
-                return Some(value);
+                return Maybe.Some(value);
             }
 
             if (entry.hash > 0) && psl > entry.psl {
-                return None;
+                return Maybe.None;
             }
 
             psl = psl + 1;
             idx = (idx + 1) & mask;
 
             if psl > self.cap {
-                return None;
+                return Maybe.None;
             }
         }
     }
@@ -812,7 +812,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     // Returns removed (key, value) pair if present.
     public fn remove_entry(&mut self, key: K) -> Maybe<(K, V)> {
         if self.cap == 0 {
-            return None;
+            return Maybe.None;
         }
 
         let hash = self.make_hash_val(key);
@@ -824,7 +824,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
             let entry = unsafe { &mut *self.entries.offset(idx) };
 
             if (entry.hash == 0) {
-                return None;
+                return Maybe.None;
             }
 
             if (entry.hash > 0) && entry.hash == hash && entry.key == key {
@@ -840,18 +840,18 @@ implement<K: Hash + Eq, V> Map<K, V> {
                     self.compact();
                 }
 
-                return Some((k, v));
+                return Maybe.Some((k, v));
             }
 
             if (entry.hash > 0) && psl > entry.psl {
-                return None;
+                return Maybe.None;
             }
 
             psl = psl + 1;
             idx = (idx + 1) & mask;
 
             if psl > self.cap {
-                return None;
+                return Maybe.None;
             }
         }
     }
@@ -1294,11 +1294,11 @@ implement<K: Hash + Eq, V> Map<K, V> {
     public fn merge<F: fn(V, V) -> V>(&mut self, mut other: Map<K, V>, resolve: F) {
         for (k, v) in other.drain() {
             match self.get_mut(&k) {
-                Some(existing) => {
+                Maybe.Some(existing) => {
                     let old = unsafe { ptr_read(existing as &unsafe V) };
                     unsafe { ptr_write(existing as &unsafe V, resolve(old, v)); }
                 }
-                None => {
+                Maybe.None => {
                     self.insert(k, v);
                 }
             }
@@ -1320,8 +1320,8 @@ implement<K: Hash + Eq, V> Map<K, V> {
     where K: Clone, V: Clone
     {
         match self.get(key.clone()) {
-            Some(v) => v,
-            None => default,
+            Maybe.Some(v) => v,
+            Maybe.None => default,
         }
     }
 
@@ -1436,10 +1436,10 @@ implement<K: Hash + Eq, V> Map<K, V> {
                 let key: &K = &entry.key;
                 let value: &V = &entry.value;
                 match f(key, value) {
-                    Some(new_val) => {
+                    Maybe.Some(new_val) => {
                         result.insert(key.clone(), new_val);
                     }
-                    None => {}
+                    Maybe.None => {}
                 }
             }
         }
@@ -1492,10 +1492,10 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// ```
     public fn pop_entry(&mut self) -> Maybe<(K, V)> {
         if self.len == 0 {
-            None
+            Maybe.None
         } else {
             // Find first occupied slot
-            let mut result: Maybe<(K, V)> = None;
+            let mut result: Maybe<(K, V)> = Maybe.None;
             let mut i = 0;
             while i < self.cap {
                 let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
@@ -1505,7 +1505,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
                     let slot: &mut Slot<K, V> = unsafe { &mut *self.entries.offset(i) };
                     slot.hash = -1;  // Mark as tombstone
                     self.len = self.len - 1;
-                    result = Some((key, value));
+                    result = Maybe.Some((key, value));
                     i = self.cap;  // break
                 } else {
                     i = i + 1;
@@ -1632,11 +1632,11 @@ implement<K: Hash + Eq, V> Map<K, V> {
             let entry: &Slot<K, V> = unsafe { &*self.entries.offset(i) };
             if (entry.hash > 0) {
                 if f(&entry.key, &entry.value) {
-                    return Some((&entry.key, &entry.value));
+                    return Maybe.Some((&entry.key, &entry.value));
                 }
             }
         }
-        None
+        Maybe.None
     }
 
     // =========================================================================
@@ -1759,7 +1759,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     public fn fold<U>(&self, init: U, f: fn(U, &K, &V) -> U) -> U {
         let mut acc = init;
         let mut iter = self.iter();
-        while let Some((k, v)) = iter.next() {
+        while let Maybe.Some((k, v)) = iter.next() {
             acc = f(acc, k, v);
         }
         acc
@@ -1768,7 +1768,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     /// Apply a function to each key-value pair for its side effects.
     public fn for_each<F: fn(&K, &V)>(&self, f: F) {
         let mut iter = self.iter();
-        while let Some((k, v)) = iter.next() {
+        while let Maybe.Some((k, v)) = iter.next() {
             f(k, v);
         }
     }
@@ -1792,7 +1792,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     {
         let mut result: List<(K, V)> = List.with_capacity(self.len);
         let mut iter = self.iter();
-        while let Some(pair) = iter.next() {
+        while let Maybe.Some(pair) = iter.next() {
             result.push((pair.0.clone(), pair.1.clone()));
         }
         result
@@ -1805,7 +1805,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     {
         let mut result: List<K> = List.with_capacity(self.len);
         let mut iter = self.keys();
-        while let Some(k) = iter.next() {
+        while let Maybe.Some(k) = iter.next() {
             result.push(k.clone());
         }
         result
@@ -1818,7 +1818,7 @@ implement<K: Hash + Eq, V> Map<K, V> {
     {
         let mut result: List<V> = List.with_capacity(self.len);
         let mut iter = self.values();
-        while let Some(v) = iter.next() {
+        while let Maybe.Some(v) = iter.next() {
             result.push(v.clone());
         }
         result
