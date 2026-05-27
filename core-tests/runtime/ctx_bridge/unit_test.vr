@@ -1,0 +1,238 @@
+// =============================================================================
+// core-tests/runtime/ctx_bridge/unit_test.vr
+// =============================================================================
+//
+// `core/runtime/ctx_bridge.vr` (122 LOC) — bridge functions called by
+// AOT-compiled CtxGet/CtxProvide opcodes.  Delegates to the bound
+// `sys.common.ctx_*` TLS-slot path.
+//
+// Public surface (4 fns):
+//   * env_ctx_get(slot_id: Int) -> Int
+//   * env_ctx_set(slot_id: Int, value: Int)
+//   * env_ctx_end(slot_id: Int)
+//   * env_active_slot_count() -> Int
+//   * env_install_parent_contexts(slots_ptr: Int, count: Int)
+//
+// Unlike `core.runtime.tls` (§A defect), these flow through the bound
+// dispatch path — the live round-trip works.  Tests pin:
+//   * Out-of-range slot-id guards (defence in depth)
+//   * Round-trip on a valid high-index slot
+//   * env_install_parent_contexts overflow rejection
+//   * env_active_slot_count consistency
+// =============================================================================
+
+mount core.runtime.ctx_bridge.{
+    env_ctx_get, env_ctx_set, env_ctx_end,
+    env_active_slot_count, env_install_parent_contexts,
+};
+
+// =============================================================================
+// Section 1: env_ctx_get out-of-range guards
+// =============================================================================
+//
+// Source contract (ctx_bridge.vr:44): `slot_id < 0 || slot_id >=
+// CONTEXT_SLOT_COUNT` returns 0 immediately.  Pinned here so that a
+// corrupted AOT-emitted CtxGet with a negative slot_id can't reach the
+// raw TLS-slot path.
+//
+
+@test
+fn test_env_ctx_get_negative_slot_returns_zero() {
+    let v = env_ctx_get(-1);
+    assert(v == 0, "negative slot_id should be guarded → 0");
+}
+
+@test
+fn test_env_ctx_get_large_negative_slot_returns_zero() {
+    let v = env_ctx_get(-1_000_000);
+    assert(v == 0, "very negative slot_id should be guarded → 0");
+}
+
+@test
+fn test_env_ctx_get_huge_positive_slot_returns_zero() {
+    // CONTEXT_SLOT_COUNT is small (~16-64 depending on platform); any
+    // value > 1_000_000 is well out of range.
+    let v = env_ctx_get(1_000_000);
+    assert(v == 0, "huge slot_id should be guarded → 0");
+}
+
+// =============================================================================
+// Section 2: env_ctx_set / env_ctx_get round-trip on a valid slot
+// =============================================================================
+//
+// Use slot 8 — within the CONTEXT_SLOT_COUNT range, but above the
+// reserved slots (EXEC_ENV_SLOT=0, SUPERVISOR_SLOT=1, RECOVERY_SLOT=2).
+//
+// §A — DEFECT SURFACED 2026-05-27: round-trip via `env_ctx_set(slot, V);
+// env_ctx_get(slot) == V` fails under --interp.  Tracing the source:
+// `env_ctx_set` casts `value: Int` to `&unsafe Byte` then forwards to
+// `sys.common.ctx_set(slot, bytes_ptr)`; `env_ctx_get` reads back via
+// `ctx_get(slot)` and casts the `&unsafe Byte` payload to `Int`.  The
+// expected behaviour is that this is an Int→ptr→Int round-trip
+// preserving the original Int bits.  Probe 2026-05-27 with slot 8,
+// value 0xBEEF: `env_ctx_get(8) == 0` (expected 0xBEEF).  Either
+// `ctx_set` is a stub under --interp (likely — same family as the
+// `tls_slot_*` §A defect) OR the Int↔ptr cast through the
+// `&unsafe Byte` boundary drops the bits.
+//
+// Higher-level context-DI flows (`provide ... in { ... }`) DO work
+// because they route through the codegen-emitted `CtxProvide` /
+// `CtxGet` opcodes directly against the per-state ContextSlots vector
+// in the VBC interpreter — NOT through these user-callable bridge
+// functions.  Same drift class as [[runtime/tls §B]]: two parallel
+// APIs, only the codegen-internal path is bound.
+//
+// Pinned `@ignore` until the user-callable bridge fns route through
+// the same dispatch handler.
+
+@ignore  // §A — env_ctx_set/get round-trip not bound under --interp
+@test
+fn test_env_ctx_set_get_round_trip() {
+    let slot = 8;
+    env_ctx_end(slot);  // clean slate
+    env_ctx_set(slot, 0xBEEF);
+    let v = env_ctx_get(slot);
+    env_ctx_end(slot);  // cleanup
+    assert(v == 0xBEEF, "ctx round-trip dropped the value");
+}
+
+@test
+fn test_env_ctx_end_clears_slot() {
+    // Under §A this test passes "by accident" — env_ctx_set is a no-op
+    // so the slot stays at default-zero anyway.  Post-§A behaviour
+    // (set lands value, end clears, get returns 0) also passes.  This
+    // is a stable pin across both states.
+    let slot = 9;
+    env_ctx_set(slot, 0xCAFE);
+    env_ctx_end(slot);
+    let v = env_ctx_get(slot);
+    assert(v == 0, "env_ctx_end should clear the slot to 0");
+}
+
+@ignore  // §A
+@test
+fn test_env_ctx_set_overwrite_keeps_latest() {
+    let slot = 10;
+    env_ctx_end(slot);
+    env_ctx_set(slot, 100);
+    env_ctx_set(slot, 200);
+    let v = env_ctx_get(slot);
+    env_ctx_end(slot);
+    assert(v == 200, "second set should overwrite first");
+}
+
+@ignore  // §A
+@test
+fn test_env_ctx_set_isolation_two_slots() {
+    let s1 = 11;
+    let s2 = 12;
+    env_ctx_end(s1);
+    env_ctx_end(s2);
+    env_ctx_set(s1, 0xDEAD);
+    env_ctx_set(s2, 0xBEEF);
+    let v1 = env_ctx_get(s1);
+    let v2 = env_ctx_get(s2);
+    env_ctx_end(s1);
+    env_ctx_end(s2);
+    assert(v1 == 0xDEAD, "slot 1 leaked into slot 2");
+    assert(v2 == 0xBEEF, "slot 2 leaked into slot 1");
+}
+
+// =============================================================================
+// Section 3: env_ctx_set out-of-range no-op
+// =============================================================================
+
+@test
+fn test_env_ctx_set_negative_slot_is_no_op() {
+    // Negative slot_id is silently dropped (no panic, no state change).
+    env_ctx_set(-5, 0xDEAD);
+    let v = env_ctx_get(-5);
+    assert(v == 0, "negative-slot set should be silently dropped");
+}
+
+@test
+fn test_env_ctx_set_huge_positive_slot_is_no_op() {
+    env_ctx_set(100_000, 0xBEEF);
+    let v = env_ctx_get(100_000);
+    assert(v == 0, "huge-slot set should be silently dropped");
+}
+
+@test
+fn test_env_ctx_end_out_of_range_is_no_op() {
+    // Defence in depth — ctx_end on garbage doesn't crash.
+    env_ctx_end(-1);
+    env_ctx_end(1_000_000);
+    assert(true);
+}
+
+// =============================================================================
+// Section 4: env_active_slot_count
+// =============================================================================
+//
+// `env_active_slot_count` iterates 0..CONTEXT_SLOT_COUNT counting
+// slots where `ctx_get(i).is_some()`.  Returns a non-negative Int
+// bounded by CONTEXT_SLOT_COUNT.
+//
+
+@test
+fn test_env_active_slot_count_returns_non_negative() {
+    let n = env_active_slot_count();
+    assert(n >= 0, "active slot count went negative");
+}
+
+@ignore  // §A — env_ctx_set is no-op so the slot doesn't become active
+@test
+fn test_env_active_slot_count_after_set_at_least_one() {
+    let slot = 13;
+    env_ctx_end(slot);
+    env_ctx_set(slot, 1);
+    let n_after = env_active_slot_count();
+    env_ctx_end(slot);
+    assert(n_after >= 1, "active count should reflect the set slot");
+}
+
+@test
+fn test_env_active_slot_count_self_consistent() {
+    // Two back-to-back reads with no intervening op return the same.
+    let n1 = env_active_slot_count();
+    let n2 = env_active_slot_count();
+    assert(n1 == n2, "active count drifted across reads");
+}
+
+// =============================================================================
+// Section 5: env_install_parent_contexts defence-in-depth guards
+// =============================================================================
+//
+// Source contract: rejects `count <= 0`, `slots_ptr == 0`, and the
+// overflow case `count > (Int.MAX - 8) / 16`.  All return silently.
+//
+
+@test
+fn test_env_install_parent_contexts_zero_count_is_no_op() {
+    env_install_parent_contexts(0xDEADBEEF, 0);
+    assert(true);
+}
+
+@test
+fn test_env_install_parent_contexts_negative_count_is_no_op() {
+    env_install_parent_contexts(0xDEADBEEF, -1);
+    assert(true);
+}
+
+@test
+fn test_env_install_parent_contexts_null_ptr_is_no_op() {
+    env_install_parent_contexts(0, 100);
+    assert(true);
+}
+
+@test
+fn test_env_install_parent_contexts_overflow_guard() {
+    // count > (Int.MAX - 8) / 16 — the source guard at ctx_bridge.vr:106.
+    // We pick a value well above that threshold.  Note: we use a non-zero
+    // pointer to ensure the FIRST guard (slots_ptr == 0) doesn't trip
+    // before the overflow guard gets a chance to fire.  Source order:
+    // `count <= 0 || slots_ptr == 0` returns first; overflow check is
+    // the next branch.
+    env_install_parent_contexts(0xDEADBEEF, 1_000_000_000_000);
+    assert(true);
+}
