@@ -64,15 +64,19 @@ fn test_eq_default_ne() {
 /// Test Eq reflexivity property
 @test
 fn test_eq_reflexivity() {
-    type Item is { id: Int };
+    // Use a unique type name to avoid collision with
+    // `core.meta.contexts.Item` (a unit type that the dispatcher's
+    // first-suffix-wins root may resolve before our local definition,
+    // task #17/#39 manifestation through type-name lookup).
+    type EqReflexItem is { id: Int };
 
-    implement Eq for Item {
-        fn eq(&self, other: &Item) -> Bool {
+    implement Eq for EqReflexItem {
+        fn eq(&self, other: &EqReflexItem) -> Bool {
             self.id == other.id
         }
     }
 
-    let item = Item { id: 100 };
+    let item = EqReflexItem { id: 100 };
     assert(item.eq(&item));  // x == x
 }
 

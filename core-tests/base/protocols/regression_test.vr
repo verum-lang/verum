@@ -1,0 +1,181 @@
+// =============================================================================
+// core-tests/base/protocols/regression_test.vr
+// =============================================================================
+//
+// Regression pins for `core.base.protocols` — the operator and
+// capability protocols (Eq / Ord / Hash / Clone / Copy / Default /
+// Debug / Display / From / Into / Add / Sub / ...).
+// =============================================================================
+
+mount core.base.protocols.*;
+mount core.base.ordering.{Ordering, Less, Equal, Greater};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+mount core.collections.list.List;
+
+// =============================================================================
+// REGRESSION §A: type-name collisions with stdlib. A user-defined
+// `type Item is { id: Int };` collides with `core.meta.contexts.Item`
+// (a unit type) — the dispatcher's first-suffix-wins root may
+// resolve the wrong shape, and `self.id` access then mis-routes via
+// task #17/#39. Workaround: use unique type names.
+//
+// This pin verifies a deliberately-unique type name resolves correctly.
+// =============================================================================
+
+@test
+fn regression_unique_typename_avoids_stdlib_collision() {
+    type RegressionUniqueRecord is { unique_payload: Int };
+    let r = RegressionUniqueRecord { unique_payload: 42 };
+    assert_eq(r.unique_payload, 42);
+}
+
+// =============================================================================
+// REGRESSION §B: Eq protocol reflexivity — `x.eq(&x)` must always
+// return true. A defect in self-reference handling would silently
+// break every collection-membership check.
+// =============================================================================
+
+@test
+fn regression_eq_reflexivity_on_user_record() {
+    type EqReflexA is { value: Int };
+    implement Eq for EqReflexA {
+        fn eq(&self, other: &EqReflexA) -> Bool {
+            self.value == other.value
+        }
+    }
+    let v = EqReflexA { value: 100 };
+    assert(v.eq(&v));
+}
+
+// =============================================================================
+// REGRESSION §C: Eq symmetry — a.eq(&b) ⇔ b.eq(&a). A defect that
+// asymmetrically inspected the receiver vs. the operand would break
+// commutative equality.
+// =============================================================================
+
+@test
+fn regression_eq_symmetric_on_user_record() {
+    type EqSymB is { value: Int };
+    implement Eq for EqSymB {
+        fn eq(&self, other: &EqSymB) -> Bool {
+            self.value == other.value
+        }
+    }
+    let a = EqSymB { value: 5 };
+    let b = EqSymB { value: 5 };
+    let c = EqSymB { value: 7 };
+    assert_eq(a.eq(&b), b.eq(&a));
+    assert_eq(a.eq(&c), c.eq(&a));
+}
+
+// =============================================================================
+// REGRESSION §D: Eq transitivity — a == b ∧ b == c ⇒ a == c. A
+// defect that hashed only the receiver's prefix would silently break
+// transitive equality.
+// =============================================================================
+
+@test
+fn regression_eq_transitive_on_user_record() {
+    type EqTransC is { value: Int };
+    implement Eq for EqTransC {
+        fn eq(&self, other: &EqTransC) -> Bool {
+            self.value == other.value
+        }
+    }
+    let a = EqTransC { value: 5 };
+    let b = EqTransC { value: 5 };
+    let c = EqTransC { value: 5 };
+    if a.eq(&b) && b.eq(&c) { assert(a.eq(&c)); }
+}
+
+// =============================================================================
+// REGRESSION §E: Clone independence — clone produces a separate copy
+// that's value-equal to the original.
+// =============================================================================
+
+@test
+fn regression_clone_independence_on_int() {
+    let a: Int = 42;
+    let b = a.clone();
+    assert_eq(a, b);
+}
+
+@test
+fn regression_clone_independence_on_text() {
+    let a: Text = "hello".to_text();
+    let b = a.clone();
+    assert_eq(a, b);
+}
+
+// =============================================================================
+// REGRESSION §F: Default protocol returns canonical zero / empty value.
+// Defects here silently change `T::default()` semantics across
+// stdlib consumers (e.g. mem::take).
+// =============================================================================
+
+@test
+fn regression_default_int_is_zero() {
+    let z: Int = Int.default();
+    assert_eq(z, 0);
+}
+
+@test
+fn regression_default_text_is_empty() {
+    let z: Text = Text.default();
+    assert_eq(z.len(), 0);
+}
+
+// =============================================================================
+// REGRESSION §G: Ord total-order protocol — cmp returns Less/Equal/Greater
+// consistently across the four boolean comparators (lt/le/gt/ge).
+// =============================================================================
+
+@test
+fn regression_ord_total_order_on_int() {
+    let a: Int = 5;
+    let b: Int = 10;
+    assert(a.lt(&b));
+    assert(a.le(&b));
+    assert(!a.gt(&b));
+    assert(!a.ge(&b));
+    assert(b.gt(&a));
+    assert(b.ge(&a));
+}
+
+@test
+fn regression_ord_total_order_equal_pair() {
+    let a: Int = 7;
+    let b: Int = 7;
+    assert(!a.lt(&b));
+    assert(a.le(&b));
+    assert(!a.gt(&b));
+    assert(a.ge(&b));
+}
+
+// =============================================================================
+// REGRESSION §H: Maybe.cmp via the Ord protocol — None < Some(x),
+// Some(a).cmp(Some(b)) follows inner Ord.
+// =============================================================================
+
+@test
+fn regression_maybe_cmp_none_less_than_some() {
+    let n: Maybe<Int> = None;
+    let s: Maybe<Int> = Some(5);
+    match n.cmp(&s) {
+        Ordering.Less => {},
+        _ => panic("expected None < Some"),
+    }
+}
+
+@test
+fn regression_maybe_cmp_inner_ord_for_some_pair() {
+    let a: Maybe<Int> = Some(3);
+    let b: Maybe<Int> = Some(7);
+    match a.cmp(&b) {
+        Ordering.Less => {},
+        _ => panic("expected Some(3) < Some(7)"),
+    }
+}
+
+fn main() {}
