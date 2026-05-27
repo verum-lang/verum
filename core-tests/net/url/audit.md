@@ -100,29 +100,57 @@ attacker URLs before any per-byte scanning. Pinned by
 `test_max_url_length_bytes_constant` so the constant doesn't
 drift under refactoring.
 
-### §3.4 URL-8 — empty-Text parse routed through wrong UrlErrorKind (CLOSED 2026-05-27)
+### §3.4 URL-8 — `e.kind` field-read corruption on cross-module record return
 
-**Original trigger**: `Url.parse(&"".clone())` returned `Err(_)` correctly
-but `e.kind != UrlErrorKind.MissingScheme`. Source-side at
-`url.vr:150-156` clearly returned `MissingScheme` for the `n == 0` arm.
+**Diagnosis 2026-05-27** (post binary rebuild + qualified-arm fix):
+URL-8 confirmed as candidate #3 in the original audit hypothesis —
+**field-read corruption** on cross-module record returns, NOT
+variant-tag dispatch collision.
 
-**Root cause confirmed**: candidate #1 in the audit hypothesis —
-`url_error_kind_tag` + `url_error_kind_name` Eq dispatch used bare-
-name match arms (`MissingScheme => 0`, `InvalidScheme => 1`, ...)
-which collide first-wins through the VBC variant-dispatch table with
-sibling-module variants. Bare `InvalidScheme` specifically collided
-against `AddrParseError`-class variant routing.
+**Stable trigger**: `Url.parse(&"".clone())` returns `Err(UrlError {
+... })`. The stdlib body at `url.vr:159-165` clearly constructs
+`UrlError { kind: UrlErrorKind.MissingScheme, ... }`. The user-side
+read of `e.kind` returns a value that:
 
-**Source-side fix landed**: all 6 match arms in
-`url_error_kind_name` + `url_error_kind_tag` + 6 `Err(UrlError {
-kind: ... })` record-literal sites now use qualified
-`UrlErrorKind.<Variant>` form, eliminating the collision surface.
-Same close-out discipline applied to compress/archive/protobuf in
-prior sessions. Activates on next verum binary rebuild.
+1. Does NOT compare equal to `UrlErrorKind.MissingScheme` (via Eq).
+2. Does NOT match ANY of the 6 UrlErrorKind variants via `is`
+   operator (`InvalidScheme` / `InvalidAuthority` / `InvalidPort` /
+   `InvalidPercentEscape` / `UrlTooLong` / `MissingScheme` all return
+   false).
 
-**Pinned by**: `prop_url_parse_empty_error_kind_missing_scheme`
-(@ignore'd pre-fix). Once the next binary rebuild runs, the pin
-should remove the @ignore.
+**Probe** (deleted after diagnosis):
+```verum
+Err(e) => {
+    if e.kind is UrlErrorKind.MissingScheme { panic(...); }
+    if e.kind is UrlErrorKind.InvalidScheme { panic(...); }
+    ...   // all 6 variants tested
+    panic("kind matched no variant — field-read corruption");
+}
+// → panic: "kind matched no variant — field-read corruption"
+```
+
+**Root cause**: same defect-class family as
+[[use_after_free_error_field_shift_2026-05-27]] +
+[[btree_pattern_match_ref_generic_class]] +
+[[enactment_field_access_oob_2026-05-24]]. Cross-module record-field
+access for `e.kind` lands on a byte offset that corresponds to neither
+the discriminant tag nor any valid variant payload.
+
+**Source-side workarounds NOT applicable**: qualified arms +
+closure-free Result chains landed in this session (commits
+`0b60920af` + `f649312c6`) eliminated other defect classes but do
+NOT close URL-8 — verified by probe post-rebuild.
+
+**Fix path**: VBC codegen of cross-module struct-field access for
+records carrying variant-typed fields. Multi-day work in
+`compile_field_access` (codegen/mod.rs) + `resolve_field_index`
+type-aware path. Same fix likely closes the 3 sister defects
+referenced above.
+
+**Pinned**: 1 @ignore'd regression test in
+`regression_test.vr` per URL-8.
+
+**Effort**: 2-3 days VBC codegen + retest.
 
 ### §3.3 RFC 3986 §6.2 normalization not implemented
 
