@@ -1499,7 +1499,7 @@ implement<I: ExactSizeIterator> ExactSizeIterator for StepByIter<I> {
 implement<I: ExactSizeIterator> ExactSizeIterator for PeekableIter<I> {
     fn len(&self) -> Int {
         let peek_len = match self.peeked {
-            Some(Some(_)) => 1,
+            Maybe.Some(Maybe.Some(_)) => 1,
             _ => 0,
         };
         self.iter.len() + peek_len
@@ -1602,12 +1602,12 @@ implement<I: Iterator, P: fn(&I.Item) -> Bool> Iterator for FilterIter<I, P> {
     type Item = I.Item;
 
     fn next(&mut self) -> Maybe<I.Item> {
-        while let Some(x) = self.iter.next() {
+        while let Maybe.Some(x) = self.iter.next() {
             if (self.predicate)(&x) {
-                return Some(x);
+                return Maybe.Some(x);
             }
         }
-        None
+        Maybe.None
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
@@ -1618,12 +1618,12 @@ implement<I: Iterator, P: fn(&I.Item) -> Bool> Iterator for FilterIter<I, P> {
 
 implement<I: DoubleEndedIterator, P: fn(&I.Item) -> Bool> DoubleEndedIterator for FilterIter<I, P> {
     fn next_back(&mut self) -> Maybe<I.Item> {
-        while let Some(x) = self.iter.next_back() {
+        while let Maybe.Some(x) = self.iter.next_back() {
             if (self.predicate)(&x) {
-                return Some(x);
+                return Maybe.Some(x);
             }
         }
-        None
+        Maybe.None
     }
 }
 
@@ -1631,12 +1631,12 @@ implement<I: Iterator, B, F: fn(I.Item) -> Maybe<B>> Iterator for FilterMapIter<
     type Item = B;
 
     fn next(&mut self) -> Maybe<B> {
-        while let Some(x) = self.iter.next() {
-            if let Some(b) = (self.f)(x) {
-                return Some(b);
+        while let Maybe.Some(x) = self.iter.next() {
+            if let Maybe.Some(b) = (self.f)(x) {
+                return Maybe.Some(b);
             }
         }
-        None
+        Maybe.None
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
@@ -1647,12 +1647,12 @@ implement<I: Iterator, B, F: fn(I.Item) -> Maybe<B>> Iterator for FilterMapIter<
 
 implement<I: DoubleEndedIterator, B, F: fn(I.Item) -> Maybe<B>> DoubleEndedIterator for FilterMapIter<I, F> {
     fn next_back(&mut self) -> Maybe<B> {
-        while let Some(x) = self.iter.next_back() {
-            if let Some(b) = (self.f)(x) {
-                return Some(b);
+        while let Maybe.Some(x) = self.iter.next_back() {
+            if let Maybe.Some(b) = (self.f)(x) {
+                return Maybe.Some(b);
             }
         }
-        None
+        Maybe.None
     }
 }
 
@@ -1661,7 +1661,7 @@ implement<I: Iterator, U: Iterator, F: fn(I.Item) -> U> Iterator for FlatMapIter
 
     fn next(&mut self) -> Maybe<U.Item> {
         loop {
-            if let Some(ref mut inner) = self.current {
+            if let Maybe.Some(ref mut inner) = self.current {
                 if let Maybe.Some(x) = inner.next() {
                     return Maybe.Some(x);
                 }
@@ -1699,7 +1699,7 @@ implement<I: Iterator> Iterator for TakeIter<I> {
             self.remaining = self.remaining - 1;
             self.iter.next()
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -1712,7 +1712,7 @@ implement<I: Iterator> Iterator for TakeIter<I> {
 implement<I: DoubleEndedIterator + ExactSizeIterator> DoubleEndedIterator for TakeIter<I> {
     fn next_back(&mut self) -> Maybe<I.Item> {
         if self.remaining == 0 {
-            None
+            Maybe.None
         } else {
             // Skip excess elements from back of inner
             let inner_len = self.iter.len();
@@ -1737,7 +1737,7 @@ implement<I: Iterator> Iterator for SkipIter<I> {
         while self.remaining > 0 {
             self.remaining = self.remaining - 1;
             if self.iter.next().is_none() {
-                return None;
+                return Maybe.None;
             }
         }
         self.iter.next()
@@ -1773,20 +1773,20 @@ implement<I: Iterator, P: fn(&I.Item) -> Bool> Iterator for TakeWhileIter<I, P> 
 
     fn next(&mut self) -> Maybe<I.Item> {
         if self.done {
-            return None;
+            return Maybe.None;
         }
         match self.iter.next() {
-            Some(x) if (self.predicate)(&x) => Some(x),
+            Maybe.Some(x) if (self.predicate)(&x) => Maybe.Some(x),
             _ => {
                 self.done = true;
-                None
+                Maybe.None
             }
         }
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         if self.done {
-            (0, Some(0))
+            (0, Maybe.Some(0))
         } else {
             let (_, upper) = self.iter.size_hint();
             (0, upper)
@@ -1801,13 +1801,13 @@ implement<I: Iterator, P: fn(&I.Item) -> Bool> Iterator for SkipWhileIter<I, P> 
         if self.done {
             return self.iter.next();
         }
-        while let Some(x) = self.iter.next() {
+        while let Maybe.Some(x) = self.iter.next() {
             if !(self.predicate)(&x) {
                 self.done = true;
-                return Some(x);
+                return Maybe.Some(x);
             }
         }
-        None
+        Maybe.None
     }
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
@@ -1826,11 +1826,11 @@ implement<T, A: Iterator<Item>, B: Iterator<Item>> Iterator for ChainIter<A, B> 
     type Item = T;
 
     fn next(&mut self) -> Maybe<T> {
-        if let Some(ref mut first) = self.first {
-            if let Some(x) = first.next() {
-                return Some(x);
+        if let Maybe.Some(ref mut first) = self.first {
+            if let Maybe.Some(x) = first.next() {
+                return Maybe.Some(x);
             }
-            self.first = None;
+            self.first = Maybe.None;
         }
         self.second.next()
     }
@@ -1838,7 +1838,7 @@ implement<T, A: Iterator<Item>, B: Iterator<Item>> Iterator for ChainIter<A, B> 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let (b_lower, b_upper) = self.second.size_hint();
         match self.first {
-            Some(ref a) => {
+            Maybe.Some(ref a) => {
                 let (a_lower, a_upper) = a.size_hint();
                 let lower = a_lower + b_lower;
                 let upper = match (a_upper, b_upper) {
@@ -1877,8 +1877,8 @@ implement<A: Iterator, B: Iterator> Iterator for ZipIter<A, B> {
         let (b_lower, b_upper) = self.b.size_hint();
         let lower = a_lower.min(b_lower);
         let upper = match (a_upper, b_upper) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            _ => None,
+            (Maybe.Some(a), Maybe.Some(b)) => Maybe.Some(a.min(b)),
+            _ => Maybe.None,
         };
         (lower, upper)
     }
@@ -1892,7 +1892,7 @@ implement<I: Iterator> Iterator for EnumerateIter<I> {
         let item = self.iter.next()?;
         let index = self.index;
         self.index = self.index + 1;
-        Some((index, item))
+        Maybe.Some((index, item))
     }
 
     @inline(always)
@@ -1905,7 +1905,7 @@ implement<I: DoubleEndedIterator + ExactSizeIterator> DoubleEndedIterator for En
     fn next_back(&mut self) -> Maybe<(Int, I.Item)> {
         let item = self.iter.next_back()?;
         let index = self.index + self.iter.len();
-        Some((index, item))
+        Maybe.Some((index, item))
     }
 }
 
@@ -1921,21 +1921,21 @@ implement<I: Iterator> IntoIterator for EnumerateIter<I> {
 implement<I: Iterator> PeekableIter<I> {
     fn peek(&mut self) -> Maybe<&I.Item> {
         if self.peeked.is_none() {
-            self.peeked = Some(self.iter.next());
+            self.peeked = Maybe.Some(self.iter.next());
         }
         match self.peeked {
-            Some(Some(ref x)) => Some(x),
-            _ => None,
+            Maybe.Some(Maybe.Some(ref x)) => Maybe.Some(x),
+            _ => Maybe.None,
         }
     }
 
     fn peek_mut(&mut self) -> Maybe<&mut I.Item> {
         if self.peeked.is_none() {
-            self.peeked = Some(self.iter.next());
+            self.peeked = Maybe.Some(self.iter.next());
         }
         match self.peeked {
-            Some(Some(ref mut x)) => Some(x),
-            _ => None,
+            Maybe.Some(Maybe.Some(ref mut x)) => Maybe.Some(x),
+            _ => Maybe.None,
         }
     }
 }
