@@ -217,7 +217,8 @@ fn test_max_cbor_map_entries_is_one_million() {
 // shadow on `encode`). Pinned @ignore for the compiler-crash bug class.
 //
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp post round-13b/14b
+// interpreter consolidation.
 @test
 fn test_cbor_round_trip_uint_zero() {
     let v: CborValue = CborValue.CborUint(0_u64);
@@ -226,7 +227,7 @@ fn test_cbor_round_trip_uint_zero() {
     assert(decoded is Result.Ok);
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn test_cbor_round_trip_uint_small() {
     let v: CborValue = CborValue.CborUint(23_u64);
@@ -237,7 +238,7 @@ fn test_cbor_round_trip_uint_small() {
     assert(decoded is Result.Ok);
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn test_cbor_round_trip_null() {
     let v: CborValue = CborValue.CborNull;
@@ -248,7 +249,7 @@ fn test_cbor_round_trip_null() {
     assert(decoded is Result.Ok);
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn test_cbor_round_trip_bool_true() {
     let v: CborValue = CborValue.CborBool(true);
@@ -258,7 +259,7 @@ fn test_cbor_round_trip_bool_true() {
     assert(decoded is Result.Ok);
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn test_cbor_round_trip_bool_false() {
     let v: CborValue = CborValue.CborBool(false);
@@ -286,7 +287,7 @@ fn test_cbor_round_trip_text_short() {
     assert(decoded is Result.Ok);
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn test_cbor_round_trip_array_empty() {
     let v: CborValue = CborValue.CborArray([]);
