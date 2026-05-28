@@ -8,12 +8,25 @@
 //       triggers after enough events to amortise the scan cost)
 //   §C  MAX_THREADS × HAZARD_POINTERS_PER_THREAD fits in 32 bits
 //       (global hazard table sizing)
+//   §D  HazardStats.needs_reclaim threshold-boundary algebra
+//   §E  HazardStats.estimated_retired_bytes is a pure product
+//   §F  HazardStats 3-field record-literal field-isolation
+//   §G  MAX_THREADS is a positive power of two (lock-free thread-index
+//       allocation invariant)
+//   §H  RETIRED_THRESHOLD is a positive power of two (efficient mod
+//       via `& (RETIRED_THRESHOLD - 1)`)
+//
 // =============================================================================
 
 mount core.prelude.*;
 mount core.mem.hazard.{
     HAZARD_POINTERS_PER_THREAD, RETIRED_THRESHOLD, MAX_THREADS,
+    HazardStats,
 };
+
+// =============================================================================
+// §A — HAZARD_POINTERS_PER_THREAD power-of-2
+// =============================================================================
 
 @test
 fn law_hazards_per_thread_power_of_two() {
@@ -21,16 +34,183 @@ fn law_hazards_per_thread_power_of_two() {
     assert((HAZARD_POINTERS_PER_THREAD & (HAZARD_POINTERS_PER_THREAD - 1)) == 0);
 }
 
+// =============================================================================
+// §B — RETIRED_THRESHOLD dominates HAZARD_POINTERS_PER_THREAD
+// =============================================================================
+
 @test
 fn law_retired_threshold_dominates_per_thread() {
     assert(RETIRED_THRESHOLD > HAZARD_POINTERS_PER_THREAD);
 }
+
+// =============================================================================
+// §C — global hazard table size fits in 32 bits
+// =============================================================================
 
 @test
 fn law_global_table_fits_in_32_bits() {
     let total = MAX_THREADS * HAZARD_POINTERS_PER_THREAD;
     assert(total > 0);
     assert(total < (1 << 32));
+}
+
+// =============================================================================
+// §D — HazardStats.needs_reclaim threshold-boundary algebra
+// =============================================================================
+//
+// Per `core/mem/hazard.vr` the predicate is `retired_count >=
+// RETIRED_THRESHOLD`.  Sweep ±1 around the boundary + 0 + far-above.
+
+@test
+fn law_needs_reclaim_below_threshold_is_false() {
+    let s = HazardStats { protected_count: 0, retired_count: RETIRED_THRESHOLD - 1, thread_count: 1 };
+    assert(!s.needs_reclaim());
+}
+
+@test
+fn law_needs_reclaim_at_threshold_is_true() {
+    let s = HazardStats { protected_count: 0, retired_count: RETIRED_THRESHOLD, thread_count: 1 };
+    assert(s.needs_reclaim());
+}
+
+@test
+fn law_needs_reclaim_above_threshold_is_true() {
+    let s = HazardStats { protected_count: 0, retired_count: RETIRED_THRESHOLD + 1, thread_count: 1 };
+    assert(s.needs_reclaim());
+}
+
+@test
+fn law_needs_reclaim_far_above_threshold_is_true() {
+    let s = HazardStats { protected_count: 0, retired_count: RETIRED_THRESHOLD * 100, thread_count: 1 };
+    assert(s.needs_reclaim());
+}
+
+@test
+fn law_needs_reclaim_zero_count_is_false() {
+    let s = HazardStats { protected_count: 0, retired_count: 0, thread_count: 0 };
+    assert(!s.needs_reclaim());
+}
+
+@test
+fn law_needs_reclaim_ignores_protected_and_thread_count() {
+    // Only retired_count drives the predicate — protected_count + thread_count are
+    // observability fields, not gating fields.
+    let s_high_others = HazardStats {
+        protected_count: 1000,
+        retired_count: RETIRED_THRESHOLD - 1,
+        thread_count: 200,
+    };
+    assert(!s_high_others.needs_reclaim());
+
+    let s_low_others_high_retired = HazardStats {
+        protected_count: 0,
+        retired_count: RETIRED_THRESHOLD,
+        thread_count: 0,
+    };
+    assert(s_low_others_high_retired.needs_reclaim());
+}
+
+// =============================================================================
+// §E — estimated_retired_bytes is a pure product (no overflow checks
+//      because retired_count * avg_size is bounded by Int range on
+//      every supported architecture)
+// =============================================================================
+
+@test
+fn law_estimated_retired_bytes_product_law() {
+    // Sweep a small Cartesian product of (retired_count, avg_size)
+    // pairs; assert the result is the multiplicative product.
+    let counts: List<Int> = [0, 1, 7, 64, 1024];
+    let sizes: List<Int> = [0, 1, 64, 128, 4096];
+    for c in counts.iter() {
+        for sz in sizes.iter() {
+            let s = HazardStats {
+                protected_count: 0,
+                retired_count: *c,
+                thread_count: 0,
+            };
+            assert_eq(s.estimated_retired_bytes(*sz), (*c) * (*sz));
+        }
+    }
+}
+
+@test
+fn law_estimated_retired_bytes_zero_count_is_zero() {
+    let s = HazardStats { protected_count: 0, retired_count: 0, thread_count: 0 };
+    let sizes: List<Int> = [0, 1, 128, 4096, 1_000_000];
+    for sz in sizes.iter() {
+        assert_eq(s.estimated_retired_bytes(*sz), 0);
+    }
+}
+
+@test
+fn law_estimated_retired_bytes_zero_size_is_zero() {
+    let counts: List<Int> = [0, 1, 7, 64, 1024];
+    for c in counts.iter() {
+        let s = HazardStats { protected_count: 0, retired_count: *c, thread_count: 0 };
+        assert_eq(s.estimated_retired_bytes(0), 0);
+    }
+}
+
+// =============================================================================
+// §F — HazardStats 3-field record-literal field-isolation
+//      (modifying one field doesn't bleed into the others)
+// =============================================================================
+
+@test
+fn law_hazard_stats_protected_isolated_from_others() {
+    let a = HazardStats { protected_count: 0, retired_count: 10, thread_count: 1 };
+    let b = HazardStats { protected_count: 5, retired_count: 10, thread_count: 1 };
+    assert(a.protected_count != b.protected_count);
+    assert_eq(a.retired_count, b.retired_count);
+    assert_eq(a.thread_count, b.thread_count);
+}
+
+@test
+fn law_hazard_stats_retired_isolated_from_others() {
+    let a = HazardStats { protected_count: 3, retired_count: 0, thread_count: 1 };
+    let b = HazardStats { protected_count: 3, retired_count: 100, thread_count: 1 };
+    assert_eq(a.protected_count, b.protected_count);
+    assert(a.retired_count != b.retired_count);
+    assert_eq(a.thread_count, b.thread_count);
+}
+
+@test
+fn law_hazard_stats_thread_count_isolated_from_others() {
+    let a = HazardStats { protected_count: 3, retired_count: 10, thread_count: 0 };
+    let b = HazardStats { protected_count: 3, retired_count: 10, thread_count: 64 };
+    assert_eq(a.protected_count, b.protected_count);
+    assert_eq(a.retired_count, b.retired_count);
+    assert(a.thread_count != b.thread_count);
+}
+
+// =============================================================================
+// §G — MAX_THREADS is a positive power of two
+// =============================================================================
+//
+// MAX_THREADS = 256 — required for the lock-free thread-index allocator
+// to use a single-mask op (`idx & (MAX_THREADS - 1)`) rather than a
+// division.  Pin the power-of-two invariant separately from the
+// canonical value pin in unit_test.
+
+@test
+fn law_max_threads_positive_power_of_two() {
+    assert(MAX_THREADS > 0);
+    assert((MAX_THREADS & (MAX_THREADS - 1)) == 0);
+}
+
+// =============================================================================
+// §H — RETIRED_THRESHOLD is a positive power of two
+// =============================================================================
+//
+// RETIRED_THRESHOLD = 64 — used by `needs_reclaim` as a >= predicate
+// AND by the runtime reclaim scan as a mod-mask trigger.  Pin POT
+// independently of the canonical-value test.
+
+@test
+fn law_retired_threshold_positive_power_of_two() {
+    assert(RETIRED_THRESHOLD > 0);
+    assert((RETIRED_THRESHOLD & (RETIRED_THRESHOLD - 1)) == 0);
 }
 
 fn main() {
