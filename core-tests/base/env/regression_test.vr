@@ -26,7 +26,6 @@ mount core.collections.list.List;
 // `--interp` without explicit argv setup. Pin here.
 // =============================================================================
 
-@ignore("arg(0) returns Maybe.None when args_count() > 0 under --interp harness — argv plumbing inconsistency.")
 @test
 fn regression_pin_arg_zero_consistent_with_args_count() {
     let count = args_count();
