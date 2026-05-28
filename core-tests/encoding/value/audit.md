@@ -55,7 +55,12 @@ MsgPackError.ArrayTooLarge.
 Conversion between Value ↔ CborValue / BsonValue / MsgPackValue is
 gated on the encode/decode round-trip of those codecs, which all
 trip the byte-array compile-time SIGSEGV or Text-builder
-lenient-stub cascade.
+lenient-stub cascade. The SIGSEGV class is the
+[EXTSLICE-1 / BSTRLIT-1](../../../internal/website/docs/stdlib/defect-class-catalogue.md)
+family applied to byte-array element-addr lowering — stdlib-side
+byte-push discipline already applied to cbor/jcs/msgpack/base58
+(commits `ab9ec931b` + `41882e63b`); the residual gate is the
+byte-array-on-stack defect (multi-day VBC codegen work).
 
 ### §D — Display / Debug / Eq impls
 Implementations exist; gated on stub-cascade family.
