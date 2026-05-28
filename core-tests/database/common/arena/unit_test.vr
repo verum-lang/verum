@@ -1,0 +1,120 @@
+// =============================================================================
+// core-tests/database/common/arena/unit_test.vr
+// =============================================================================
+//
+// `core/database/common/arena.vr` — Spindle per-pool/per-connection
+// arena allocator parameters.
+// =============================================================================
+
+mount core.database.common.arena.{
+    INITIAL_POOL_ARENA_BYTES, MAX_POOL_ARENA_BYTES,
+    INITIAL_CONNECTION_ARENA_BYTES, MAX_CONNECTION_ARENA_BYTES,
+    POOL_ARENA_GROWTH, CONNECTION_ARENA_GROWTH,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Arena size constants
+// =============================================================================
+
+@test
+fn test_initial_pool_arena_bytes_canonical_value() {
+    // 64 KiB initial pool arena.
+    assert_eq(INITIAL_POOL_ARENA_BYTES, 65536);
+}
+
+@test
+fn test_max_pool_arena_bytes_canonical_value() {
+    // 32 MiB pool arena cap.
+    assert_eq(MAX_POOL_ARENA_BYTES, 33_554_432);
+}
+
+@test
+fn test_initial_connection_arena_bytes_canonical_value() {
+    // 256 KiB initial connection arena.
+    assert_eq(INITIAL_CONNECTION_ARENA_BYTES, 262_144);
+}
+
+@test
+fn test_max_connection_arena_bytes_canonical_value() {
+    // 16 MiB connection arena cap.
+    assert_eq(MAX_CONNECTION_ARENA_BYTES, 16_777_216);
+}
+
+// =============================================================================
+// Section 2: Arena size ordering (initial < max for each tier)
+// =============================================================================
+
+@test
+fn test_pool_arena_initial_lt_max() {
+    assert(INITIAL_POOL_ARENA_BYTES < MAX_POOL_ARENA_BYTES);
+}
+
+@test
+fn test_connection_arena_initial_lt_max() {
+    assert(INITIAL_CONNECTION_ARENA_BYTES < MAX_CONNECTION_ARENA_BYTES);
+}
+
+// =============================================================================
+// Section 3: Arena power-of-two alignment
+//
+//   Each arena size is a power of two — guarantees alignment for the
+//   underlying mmap region.
+// =============================================================================
+
+@test
+fn test_initial_pool_arena_is_power_of_two() {
+    let n = INITIAL_POOL_ARENA_BYTES;
+    // (n & (n-1)) == 0 iff n is a power of 2 (and n > 0).
+    assert(n > 0);
+    assert_eq(n & (n - 1), 0);
+}
+
+@test
+fn test_max_pool_arena_is_power_of_two() {
+    let n = MAX_POOL_ARENA_BYTES;
+    assert(n > 0);
+    assert_eq(n & (n - 1), 0);
+}
+
+@test
+fn test_initial_connection_arena_is_power_of_two() {
+    let n = INITIAL_CONNECTION_ARENA_BYTES;
+    assert(n > 0);
+    assert_eq(n & (n - 1), 0);
+}
+
+@test
+fn test_max_connection_arena_is_power_of_two() {
+    let n = MAX_CONNECTION_ARENA_BYTES;
+    assert(n > 0);
+    assert_eq(n & (n - 1), 0);
+}
+
+// =============================================================================
+// Section 4: Growth multiplier
+//
+//   `*_ARENA_GROWTH` is expressed as a percentage (200 == 2.0× / double-
+//   per-grow). Both pool and connection arenas share the same growth
+//   strategy.
+// =============================================================================
+
+@test
+fn test_pool_arena_growth_is_200_percent() {
+    assert_eq(POOL_ARENA_GROWTH, 200);
+}
+
+@test
+fn test_connection_arena_growth_is_200_percent() {
+    assert_eq(CONNECTION_ARENA_GROWTH, 200);
+}
+
+@test
+fn test_arena_growth_factors_match() {
+    // Pool and connection arenas double together — uniform doubling
+    // simplifies operator mental model.
+    assert_eq(POOL_ARENA_GROWTH, CONNECTION_ARENA_GROWTH);
+}
+
+fn main() {}
