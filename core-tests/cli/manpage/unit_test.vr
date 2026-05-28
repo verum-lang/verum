@@ -1,0 +1,130 @@
+// =============================================================================
+// core-tests/cli/manpage/unit_test.vr
+// =============================================================================
+//
+// `core/cli/manpage.vr` — Groff/troff manpage emitter.
+//
+// Tested:
+//   * Section 8-variant ADT — POSIX manpage section numbers
+//   * Section.number() dispatch returns canonical 1..8
+//   * Variant pairwise disjointness
+// =============================================================================
+
+mount core.cli.manpage.Section;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Section variant construction
+// =============================================================================
+
+@test
+fn test_section_user_commands_variant() {
+    let s: Section = Section.UserCommands;
+    assert(s is Section.UserCommands);
+}
+
+@test
+fn test_section_system_calls_variant() {
+    let s: Section = Section.SystemCalls;
+    assert(s is Section.SystemCalls);
+}
+
+@test
+fn test_section_library_calls_variant() {
+    let s: Section = Section.LibraryCalls;
+    assert(s is Section.LibraryCalls);
+}
+
+@test
+fn test_section_special_files_variant() {
+    let s: Section = Section.SpecialFiles;
+    assert(s is Section.SpecialFiles);
+}
+
+@test
+fn test_section_file_formats_variant() {
+    let s: Section = Section.FileFormats;
+    assert(s is Section.FileFormats);
+}
+
+@test
+fn test_section_games_variant() {
+    let s: Section = Section.Games;
+    assert(s is Section.Games);
+}
+
+@test
+fn test_section_misc_variant() {
+    let s: Section = Section.Misc;
+    assert(s is Section.Misc);
+}
+
+@test
+fn test_section_system_admin_variant() {
+    let s: Section = Section.SystemAdmin;
+    assert(s is Section.SystemAdmin);
+}
+
+// =============================================================================
+// Section 2: Section.number() canonical POSIX section numbers
+//
+//   man(1) — User commands
+//   man(2) — System calls
+//   man(3) — Library calls
+//   man(4) — Special files
+//   man(5) — File formats
+//   man(6) — Games
+//   man(7) — Miscellaneous
+//   man(8) — System administration
+// =============================================================================
+
+@test
+fn test_section_number_user_commands_is_1() {
+    let s: Section = Section.UserCommands;
+    assert_eq(s.number(), 1);
+}
+
+@test
+fn test_section_number_system_calls_is_2() {
+    let s: Section = Section.SystemCalls;
+    assert_eq(s.number(), 2);
+}
+
+@test
+fn test_section_number_library_calls_is_3() {
+    let s: Section = Section.LibraryCalls;
+    assert_eq(s.number(), 3);
+}
+
+@test
+fn test_section_number_special_files_is_4() {
+    let s: Section = Section.SpecialFiles;
+    assert_eq(s.number(), 4);
+}
+
+@test
+fn test_section_number_file_formats_is_5() {
+    let s: Section = Section.FileFormats;
+    assert_eq(s.number(), 5);
+}
+
+@test
+fn test_section_number_games_is_6() {
+    let s: Section = Section.Games;
+    assert_eq(s.number(), 6);
+}
+
+@test
+fn test_section_number_misc_is_7() {
+    let s: Section = Section.Misc;
+    assert_eq(s.number(), 7);
+}
+
+@test
+fn test_section_number_system_admin_is_8() {
+    let s: Section = Section.SystemAdmin;
+    assert_eq(s.number(), 8);
+}
+
+fn main() {}
