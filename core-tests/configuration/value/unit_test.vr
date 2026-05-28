@@ -1,0 +1,153 @@
+// =============================================================================
+// core-tests/configuration/value/unit_test.vr
+// =============================================================================
+//
+// `core/configuration/value.vr` — universal ConfigValue type covering
+// all 14 supported configuration-format value kinds (TOML/YAML/JSON/
+// JSONC/JSON5/INI/etc.).
+// =============================================================================
+
+mount core.configuration.value.{ConfigValue, is_null, is_bool};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Scalar variant construction
+// =============================================================================
+
+@test
+fn test_config_value_null_variant() {
+    let v: ConfigValue = ConfigValue.ConfigNull;
+    assert(v is ConfigValue.ConfigNull);
+}
+
+@test
+fn test_config_value_bool_true_variant() {
+    let v: ConfigValue = ConfigValue.ConfigBool(true);
+    assert(v is ConfigValue.ConfigBool);
+}
+
+@test
+fn test_config_value_bool_false_variant() {
+    let v: ConfigValue = ConfigValue.ConfigBool(false);
+    assert(v is ConfigValue.ConfigBool);
+}
+
+@test
+fn test_config_value_int_variant() {
+    let v: ConfigValue = ConfigValue.ConfigInt(42);
+    assert(v is ConfigValue.ConfigInt);
+}
+
+@test
+fn test_config_value_float_variant() {
+    let v: ConfigValue = ConfigValue.ConfigFloat(3.14);
+    assert(v is ConfigValue.ConfigFloat);
+}
+
+@test
+fn test_config_value_string_variant() {
+    let v: ConfigValue = ConfigValue.ConfigString("hello".to_text());
+    assert(v is ConfigValue.ConfigString);
+}
+
+// =============================================================================
+// Section 2: Variant pairwise disjointness — scalars
+// =============================================================================
+
+@test
+fn test_config_value_null_disjoint() {
+    let v: ConfigValue = ConfigValue.ConfigNull;
+    assert(!(v is ConfigValue.ConfigBool));
+    assert(!(v is ConfigValue.ConfigInt));
+    assert(!(v is ConfigValue.ConfigFloat));
+    assert(!(v is ConfigValue.ConfigString));
+}
+
+@test
+fn test_config_value_bool_disjoint() {
+    let v: ConfigValue = ConfigValue.ConfigBool(true);
+    assert(!(v is ConfigValue.ConfigNull));
+    assert(!(v is ConfigValue.ConfigInt));
+    assert(!(v is ConfigValue.ConfigFloat));
+    assert(!(v is ConfigValue.ConfigString));
+}
+
+@test
+fn test_config_value_int_disjoint() {
+    let v: ConfigValue = ConfigValue.ConfigInt(0);
+    assert(!(v is ConfigValue.ConfigNull));
+    assert(!(v is ConfigValue.ConfigBool));
+    assert(!(v is ConfigValue.ConfigFloat));
+    assert(!(v is ConfigValue.ConfigString));
+}
+
+@test
+fn test_config_value_float_disjoint() {
+    let v: ConfigValue = ConfigValue.ConfigFloat(0.0);
+    assert(!(v is ConfigValue.ConfigNull));
+    assert(!(v is ConfigValue.ConfigBool));
+    assert(!(v is ConfigValue.ConfigInt));
+    assert(!(v is ConfigValue.ConfigString));
+}
+
+// =============================================================================
+// Section 3: Scalar payload preservation
+// =============================================================================
+
+@test
+fn test_config_value_int_payload_round_trip() {
+    let v: ConfigValue = ConfigValue.ConfigInt(-12345);
+    match v {
+        ConfigValue.ConfigInt(n) => assert_eq(n, -12345),
+        _ => panic("expected ConfigInt"),
+    }
+}
+
+@test
+fn test_config_value_bool_true_payload_round_trip() {
+    let v: ConfigValue = ConfigValue.ConfigBool(true);
+    match v {
+        ConfigValue.ConfigBool(b) => assert_eq(b, true),
+        _ => panic("expected ConfigBool"),
+    }
+}
+
+@test
+fn test_config_value_string_payload_round_trip() {
+    let v: ConfigValue = ConfigValue.ConfigString("verum".to_text());
+    match v {
+        ConfigValue.ConfigString(s) => assert_eq(s, "verum"),
+        _ => panic("expected ConfigString"),
+    }
+}
+
+// =============================================================================
+// Section 4: is_null and is_bool type-predicate functions
+// =============================================================================
+
+@test
+fn test_is_null_true_for_null() {
+    let v: ConfigValue = ConfigValue.ConfigNull;
+    assert_eq(is_null(&v), true);
+}
+
+@test
+fn test_is_null_false_for_other() {
+    let v: ConfigValue = ConfigValue.ConfigInt(0);
+    assert_eq(is_null(&v), false);
+}
+
+@test
+fn test_is_bool_true_for_bool() {
+    let v: ConfigValue = ConfigValue.ConfigBool(false);
+    assert_eq(is_bool(&v), true);
+}
+
+@test
+fn test_is_bool_false_for_other() {
+    let v: ConfigValue = ConfigValue.ConfigInt(0);
+    assert_eq(is_bool(&v), false);
+}
+
+fn main() {}
