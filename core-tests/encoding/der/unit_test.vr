@@ -1,0 +1,243 @@
+// =============================================================================
+// core-tests/encoding/der/unit_test.vr
+// =============================================================================
+//
+// `core/encoding/der.vr` — ASN.1 DER (Distinguished Encoding Rules)
+// codec for X.509 / PKIX surfaces.
+//
+// Pure-data surface tested here:
+//   * TagClass 4-variant ADT (Universal / Application / ContextSpecific / Private)
+//   * Tag 3-field record (class_ / constructed / number)
+//   * DerErrorKind 10-variant ADT
+//   * Canonical universal-class tag numbers (BOOLEAN / INTEGER / OID etc.)
+//
+// Read/write entry points are deferred behind the byte-array
+// codegen class.
+// =============================================================================
+
+mount core.encoding.der.{TagClass, Tag, DerErrorKind};
+mount core.encoding.der.{TAG_BOOLEAN, TAG_INTEGER, TAG_BIT_STRING, TAG_OCTET_STRING};
+mount core.encoding.der.{TAG_NULL, TAG_OID, TAG_UTF8_STRING, TAG_SEQUENCE, TAG_SET};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: TagClass 4-variant construction
+// =============================================================================
+
+@test
+fn test_tag_class_universal_variant() {
+    let c: TagClass = TagClass.Universal;
+    assert(c is TagClass.Universal);
+}
+
+@test
+fn test_tag_class_application_variant() {
+    let c: TagClass = TagClass.Application;
+    assert(c is TagClass.Application);
+}
+
+@test
+fn test_tag_class_context_specific_variant() {
+    let c: TagClass = TagClass.ContextSpecific;
+    assert(c is TagClass.ContextSpecific);
+}
+
+@test
+fn test_tag_class_private_variant() {
+    let c: TagClass = TagClass.Private;
+    assert(c is TagClass.Private);
+}
+
+// =============================================================================
+// Section 2: TagClass pairwise disjointness
+// =============================================================================
+
+@test
+fn test_tag_class_universal_disjoint() {
+    let c: TagClass = TagClass.Universal;
+    assert(!(c is TagClass.Application));
+    assert(!(c is TagClass.ContextSpecific));
+    assert(!(c is TagClass.Private));
+}
+
+@test
+fn test_tag_class_application_disjoint() {
+    let c: TagClass = TagClass.Application;
+    assert(!(c is TagClass.Universal));
+    assert(!(c is TagClass.ContextSpecific));
+    assert(!(c is TagClass.Private));
+}
+
+@test
+fn test_tag_class_context_specific_disjoint() {
+    let c: TagClass = TagClass.ContextSpecific;
+    assert(!(c is TagClass.Universal));
+    assert(!(c is TagClass.Application));
+    assert(!(c is TagClass.Private));
+}
+
+@test
+fn test_tag_class_private_disjoint() {
+    let c: TagClass = TagClass.Private;
+    assert(!(c is TagClass.Universal));
+    assert(!(c is TagClass.Application));
+    assert(!(c is TagClass.ContextSpecific));
+}
+
+// =============================================================================
+// Section 3: Tag record construction
+// =============================================================================
+
+@test
+fn test_tag_construction_universal_sequence() {
+    let t: Tag = Tag {
+        class_: TagClass.Universal,
+        constructed: true,
+        number: TAG_SEQUENCE,
+    };
+    assert(t.class_ is TagClass.Universal);
+    assert_eq(t.constructed, true);
+    assert_eq(t.number, 0x10_u32);
+}
+
+@test
+fn test_tag_construction_universal_integer() {
+    let t: Tag = Tag {
+        class_: TagClass.Universal,
+        constructed: false,
+        number: TAG_INTEGER,
+    };
+    assert(t.class_ is TagClass.Universal);
+    assert_eq(t.constructed, false);
+    assert_eq(t.number, 0x02_u32);
+}
+
+@test
+fn test_tag_construction_context_specific_explicit() {
+    let t: Tag = Tag {
+        class_: TagClass.ContextSpecific,
+        constructed: true,
+        number: 0_u32,
+    };
+    assert(t.class_ is TagClass.ContextSpecific);
+    assert_eq(t.constructed, true);
+    assert_eq(t.number, 0_u32);
+}
+
+// =============================================================================
+// Section 4: Canonical UNIVERSAL-class tag numbers
+//
+//   Pins the ASN.1 universal tag-number table for X.509 / PKIX.
+// =============================================================================
+
+@test
+fn test_tag_boolean_canonical_value() {
+    assert_eq(TAG_BOOLEAN, 0x01_u32);
+}
+
+@test
+fn test_tag_integer_canonical_value() {
+    assert_eq(TAG_INTEGER, 0x02_u32);
+}
+
+@test
+fn test_tag_bit_string_canonical_value() {
+    assert_eq(TAG_BIT_STRING, 0x03_u32);
+}
+
+@test
+fn test_tag_octet_string_canonical_value() {
+    assert_eq(TAG_OCTET_STRING, 0x04_u32);
+}
+
+@test
+fn test_tag_null_canonical_value() {
+    assert_eq(TAG_NULL, 0x05_u32);
+}
+
+@test
+fn test_tag_oid_canonical_value() {
+    assert_eq(TAG_OID, 0x06_u32);
+}
+
+@test
+fn test_tag_utf8_string_canonical_value() {
+    assert_eq(TAG_UTF8_STRING, 0x0C_u32);
+}
+
+@test
+fn test_tag_sequence_canonical_value() {
+    assert_eq(TAG_SEQUENCE, 0x10_u32);
+}
+
+@test
+fn test_tag_set_canonical_value() {
+    assert_eq(TAG_SET, 0x11_u32);
+}
+
+// =============================================================================
+// Section 5: DerErrorKind 10-variant construction
+// =============================================================================
+
+@test
+fn test_der_error_kind_unexpected_end_of_input() {
+    let k: DerErrorKind = DerErrorKind.UnexpectedEndOfInput;
+    assert(k is DerErrorKind.UnexpectedEndOfInput);
+}
+
+@test
+fn test_der_error_kind_malformed_der() {
+    let k: DerErrorKind = DerErrorKind.MalformedDer;
+    assert(k is DerErrorKind.MalformedDer);
+}
+
+@test
+fn test_der_error_kind_unexpected_tag() {
+    let k: DerErrorKind = DerErrorKind.UnexpectedTag;
+    assert(k is DerErrorKind.UnexpectedTag);
+}
+
+@test
+fn test_der_error_kind_length_overflow() {
+    let k: DerErrorKind = DerErrorKind.LengthOverflow;
+    assert(k is DerErrorKind.LengthOverflow);
+}
+
+@test
+fn test_der_error_kind_trailing_bytes() {
+    let k: DerErrorKind = DerErrorKind.TrailingBytes;
+    assert(k is DerErrorKind.TrailingBytes);
+}
+
+@test
+fn test_der_error_kind_invalid_oid() {
+    let k: DerErrorKind = DerErrorKind.InvalidOid;
+    assert(k is DerErrorKind.InvalidOid);
+}
+
+@test
+fn test_der_error_kind_invalid_boolean() {
+    let k: DerErrorKind = DerErrorKind.InvalidBoolean;
+    assert(k is DerErrorKind.InvalidBoolean);
+}
+
+@test
+fn test_der_error_kind_invalid_integer() {
+    let k: DerErrorKind = DerErrorKind.InvalidInteger;
+    assert(k is DerErrorKind.InvalidInteger);
+}
+
+@test
+fn test_der_error_kind_invalid_bit_string() {
+    let k: DerErrorKind = DerErrorKind.InvalidBitString;
+    assert(k is DerErrorKind.InvalidBitString);
+}
+
+@test
+fn test_der_error_kind_invalid_time() {
+    let k: DerErrorKind = DerErrorKind.InvalidTime;
+    assert(k is DerErrorKind.InvalidTime);
+}
+
+fn main() {}
