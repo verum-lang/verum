@@ -216,8 +216,8 @@ implement ParseError {
     public fn bare(kind: ParseErrorKind, message: Text) -> ParseError {
         ParseError {
             kind: kind,
-            field: None,
-            value: None,
+            field: Maybe.None,
+            value: Maybe.None,
             message: message,
             diagnostics: List.new(),
         }
@@ -227,8 +227,8 @@ implement ParseError {
     public fn unknown_flag(name: Text, candidates: &List<Text>) -> ParseError {
         let mut e = ParseError {
             kind: ParseErrorKind.UnknownFlag,
-            field: Some(name.clone()),
-            value: None,
+            field: Maybe.Some(name.clone()),
+            value: Maybe.None,
             message: Text.from(f"unknown flag '{name}'"),
             diagnostics: List.new(),
         };
@@ -240,8 +240,8 @@ implement ParseError {
     public fn unknown_subcommand(name: Text, candidates: &List<Text>) -> ParseError {
         let mut e = ParseError {
             kind: ParseErrorKind.UnknownSubcommand,
-            field: Some(name.clone()),
-            value: None,
+            field: Maybe.Some(name.clone()),
+            value: Maybe.None,
             message: Text.from(f"unknown subcommand '{name}'"),
             diagnostics: List.new(),
         };
@@ -253,8 +253,8 @@ implement ParseError {
     public fn missing_required(field: Text) -> ParseError {
         ParseError {
             kind: ParseErrorKind.MissingRequired,
-            field: Some(field.clone()),
-            value: None,
+            field: Maybe.Some(field.clone()),
+            value: Maybe.None,
             message: Text.from(f"missing required value for '{field}'"),
             diagnostics: List.new(),
         }
@@ -264,8 +264,8 @@ implement ParseError {
     public fn missing_value(flag: Text) -> ParseError {
         ParseError {
             kind: ParseErrorKind.MissingValue,
-            field: Some(flag.clone()),
-            value: None,
+            field: Maybe.Some(flag.clone()),
+            value: Maybe.None,
             message: Text.from(f"flag '{flag}' requires a value"),
             diagnostics: List.new(),
         }
@@ -275,8 +275,8 @@ implement ParseError {
     public fn invalid_value(value: Text, expected: Text) -> ParseError {
         ParseError {
             kind: ParseErrorKind.InvalidValue,
-            field: None,
-            value: Some(value.clone()),
+            field: Maybe.None,
+            value: Maybe.Some(value.clone()),
             message: Text.from(f"invalid value '{value}': expected {expected}"),
             diagnostics: List.new(),
         }
@@ -286,8 +286,8 @@ implement ParseError {
     public fn duplicate_flag(name: Text) -> ParseError {
         ParseError {
             kind: ParseErrorKind.DuplicateFlag,
-            field: Some(name.clone()),
-            value: None,
+            field: Maybe.Some(name.clone()),
+            value: Maybe.None,
             message: Text.from(f"flag '{name}' specified more than once"),
             diagnostics: List.new(),
         }
@@ -297,8 +297,8 @@ implement ParseError {
     public fn refinement_failed(field: Text, value: Text, predicate: Text) -> ParseError {
         let mut e = ParseError {
             kind: ParseErrorKind.RefinementFailed,
-            field: Some(field.clone()),
-            value: Some(value.clone()),
+            field: Maybe.Some(field.clone()),
+            value: Maybe.Some(value.clone()),
             message: Text.from(f"value '{value}' for '{field}' fails predicate"),
             diagnostics: List.new(),
         };
@@ -310,8 +310,8 @@ implement ParseError {
     public fn mutex_conflict(group: Text, members: List<Text>) -> ParseError {
         let mut e = ParseError {
             kind: ParseErrorKind.MutexConflict,
-            field: Some(group.clone()),
-            value: None,
+            field: Maybe.Some(group.clone()),
+            value: Maybe.None,
             message: Text.from(f"conflicting flags in group '{group}'"),
             diagnostics: List.new(),
         };
@@ -323,8 +323,8 @@ implement ParseError {
     public fn requires_missing(flag: Text, requires: Text) -> ParseError {
         ParseError {
             kind: ParseErrorKind.RequiresMissing,
-            field: Some(flag.clone()),
-            value: None,
+            field: Maybe.Some(flag.clone()),
+            value: Maybe.None,
             message: Text.from(
                 f"flag '{flag}' requires '{requires}' to also be specified"
             ),
