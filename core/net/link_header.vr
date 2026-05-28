@@ -236,14 +236,14 @@ public fn find_rel<'a>(list: &'a List<LinkEntry>, rel: &str) -> Maybe<&'a LinkEn
             let (name, value) = &entry.params[j];
             if bytes_eq_ci(name.as_bytes(), b"rel") {
                 if rel_matches(value.as_bytes(), rel.as_bytes()) {
-                    return Some(entry);
+                    return Maybe.Some(entry);
                 }
             }
             j = j + 1;
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn rel_matches(value: &[Byte], needle: &[Byte]) -> Bool {

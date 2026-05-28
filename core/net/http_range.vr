@@ -229,8 +229,8 @@ public fn resolve_and_merge(
     let mut i: Int = 0;
     while i < rs.specs.len() {
         match resolve_one(&rs.specs[i], total_length) {
-            Some(r) => resolved.push(r),
-            None    => {},
+            Maybe.Some(r) => resolved.push(r),
+            Maybe.None    => {},
         }
         i = i + 1;
     }
@@ -266,18 +266,18 @@ public fn resolve_and_merge(
 fn resolve_one(spec: &RangeSpec, total: UInt64) -> Maybe<ResolvedRange> {
     match spec {
         RangeSpec.Closed { start, end } => {
-            if *start >= total { return None; }
+            if *start >= total { return Maybe.None; }
             let clamped_end = if *end >= total { total - 1_u64 } else { *end };
-            Some(ResolvedRange { start: *start, end: clamped_end })
+            Maybe.Some(ResolvedRange { start: *start, end: clamped_end })
         },
         RangeSpec.Prefix { start } => {
-            if *start >= total { return None; }
-            Some(ResolvedRange { start: *start, end: total - 1_u64 })
+            if *start >= total { return Maybe.None; }
+            Maybe.Some(ResolvedRange { start: *start, end: total - 1_u64 })
         },
         RangeSpec.Suffix { length } => {
-            if *length == 0_u64 { return None; }
+            if *length == 0_u64 { return Maybe.None; }
             let take = if *length >= total { total } else { *length };
-            Some(ResolvedRange { start: total - take, end: total - 1_u64 })
+            Maybe.Some(ResolvedRange { start: total - take, end: total - 1_u64 })
         },
     }
 }
