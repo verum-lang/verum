@@ -154,7 +154,17 @@ implement Sha1 {
             } else {
                 (b ^ c ^ d, 0xCA62C1D6_u32)
             };
-            let temp = rotl32(a, 5).wrapping_add(f).wrapping_add(e).wrapping_add(k).wrapping_add(w[t]);
+            // Break the chained .wrapping_add into separate let-bindings
+            // to bypass the VBC method-dispatch defect (WS-6): chained
+            // .wrapping_add(...) calls on UInt32 misdispatch through
+            // SkipWhileIter, producing "method 'UInt32.wrapping_add' not
+            // found" + dispatch retry loop (manifests as stack-overflow
+            // at depth 16384).
+            let t1 = rotl32(a, 5);
+            let t2 = t1.wrapping_add(f);
+            let t3 = t2.wrapping_add(e);
+            let t4 = t3.wrapping_add(k);
+            let temp = t4.wrapping_add(w[t]);
             e = d;
             d = c;
             c = rotl32(b, 30);
