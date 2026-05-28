@@ -1,0 +1,127 @@
+// =============================================================================
+// core-tests/security/sigstore/types/unit_test.vr
+// =============================================================================
+//
+// `core/security/sigstore/types.vr` — Sigstore type surface.
+// =============================================================================
+
+mount core.security.sigstore.types.{
+    REKOR_PUBLIC_URL, FULCIO_PUBLIC_URL, SIGSTORE_PUBLIC_OIDC_ISSUER,
+    REKOR_PRODUCTION_KEY_ID, EntryKind,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Public Sigstore URLs
+// =============================================================================
+
+@test
+fn test_rekor_public_url_canonical_value() {
+    assert_eq(REKOR_PUBLIC_URL, "https://rekor.sigstore.dev");
+}
+
+@test
+fn test_fulcio_public_url_canonical_value() {
+    assert_eq(FULCIO_PUBLIC_URL, "https://fulcio.sigstore.dev");
+}
+
+@test
+fn test_sigstore_public_oidc_issuer_canonical_value() {
+    assert_eq(SIGSTORE_PUBLIC_OIDC_ISSUER, "https://oauth2.sigstore.dev/auth");
+}
+
+@test
+fn test_rekor_production_key_id_canonical_value() {
+    assert_eq(REKOR_PRODUCTION_KEY_ID, "c0d23d6ad406973f9559f3ba2d1ca01f84147d8ffc5b8445c224f98b9591801d");
+}
+
+// =============================================================================
+// Section 2: URL distinctness
+// =============================================================================
+
+@test
+fn test_sigstore_urls_pairwise_distinct() {
+    assert(REKOR_PUBLIC_URL != FULCIO_PUBLIC_URL);
+    assert(FULCIO_PUBLIC_URL != SIGSTORE_PUBLIC_OIDC_ISSUER);
+    assert(REKOR_PUBLIC_URL != SIGSTORE_PUBLIC_OIDC_ISSUER);
+}
+
+// =============================================================================
+// Section 3: EntryKind 4-variant ADT
+// =============================================================================
+
+@test
+fn test_entry_kind_hashed_rekord_variant() {
+    let k: EntryKind = EntryKind.HashedRekord;
+    assert(k is EntryKind.HashedRekord);
+}
+
+@test
+fn test_entry_kind_intoto_variant() {
+    let k: EntryKind = EntryKind.Intoto;
+    assert(k is EntryKind.Intoto);
+}
+
+@test
+fn test_entry_kind_dsse_variant() {
+    let k: EntryKind = EntryKind.Dsse;
+    assert(k is EntryKind.Dsse);
+}
+
+@test
+fn test_entry_kind_other_variant() {
+    let k: EntryKind = EntryKind.Other("custom-kind".to_text());
+    assert(k is EntryKind.Other);
+}
+
+// =============================================================================
+// Section 4: EntryKind pairwise disjointness
+// =============================================================================
+
+@test
+fn test_entry_kind_hashed_rekord_disjoint() {
+    let k: EntryKind = EntryKind.HashedRekord;
+    assert(!(k is EntryKind.Intoto));
+    assert(!(k is EntryKind.Dsse));
+    assert(!(k is EntryKind.Other));
+}
+
+@test
+fn test_entry_kind_intoto_disjoint() {
+    let k: EntryKind = EntryKind.Intoto;
+    assert(!(k is EntryKind.HashedRekord));
+    assert(!(k is EntryKind.Dsse));
+    assert(!(k is EntryKind.Other));
+}
+
+@test
+fn test_entry_kind_dsse_disjoint() {
+    let k: EntryKind = EntryKind.Dsse;
+    assert(!(k is EntryKind.HashedRekord));
+    assert(!(k is EntryKind.Intoto));
+    assert(!(k is EntryKind.Other));
+}
+
+@test
+fn test_entry_kind_other_disjoint() {
+    let k: EntryKind = EntryKind.Other("x".to_text());
+    assert(!(k is EntryKind.HashedRekord));
+    assert(!(k is EntryKind.Intoto));
+    assert(!(k is EntryKind.Dsse));
+}
+
+// =============================================================================
+// Section 5: EntryKind payload preservation
+// =============================================================================
+
+@test
+fn test_entry_kind_other_payload_round_trip() {
+    let k: EntryKind = EntryKind.Other("xtype".to_text());
+    match k {
+        EntryKind.Other(s) => assert_eq(s, "xtype"),
+        _ => panic("expected Other"),
+    }
+}
+
+fn main() {}
