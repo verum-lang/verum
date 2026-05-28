@@ -1,0 +1,259 @@
+// =============================================================================
+// core-tests/encoding/value/unit_test.vr
+// =============================================================================
+//
+// `core/encoding/value.vr` — Universal Value type for cross-codec
+// conversion (CBOR / BSON / MessagePack interop).
+//
+// Pure-data surface tested here:
+//   * Value 12-variant ADT (VNull / VBool / VInt / VFloat / VText /
+//     VBytes / VArray / VMap / VTimestamp / VUuid / VDecimal /
+//     VExtension)
+//   * ConvertError 6-variant ADT
+//   * Variant disjointness + scalar payload preservation
+//
+// Compound payloads (VArray<Value>, VMap<(Text,Value)>, VExtension
+// record) are deferred behind the recursive-ADT + field-destructure
+// defect classes.
+// =============================================================================
+
+mount core.encoding.value.{Value, ConvertError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Value scalar-variant construction (8 of 12)
+// =============================================================================
+
+@test
+fn test_value_vnull_variant() {
+    let v: Value = Value.VNull;
+    assert(v is Value.VNull);
+}
+
+@test
+fn test_value_vbool_variant() {
+    let v: Value = Value.VBool(true);
+    assert(v is Value.VBool);
+}
+
+@test
+fn test_value_vint_variant() {
+    let v: Value = Value.VInt(42);
+    assert(v is Value.VInt);
+}
+
+@test
+fn test_value_vfloat_variant() {
+    let v: Value = Value.VFloat(3.14);
+    assert(v is Value.VFloat);
+}
+
+@test
+fn test_value_vtext_variant() {
+    let v: Value = Value.VText("hello".to_text());
+    assert(v is Value.VText);
+}
+
+@test
+fn test_value_vtimestamp_variant() {
+    let v: Value = Value.VTimestamp(1716902400000);
+    assert(v is Value.VTimestamp);
+}
+
+@test
+fn test_value_vuuid_variant() {
+    let mut bytes: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 16 { bytes.push(0_u8); i = i + 1; }
+    let v: Value = Value.VUuid(bytes);
+    assert(v is Value.VUuid);
+}
+
+@test
+fn test_value_vdecimal_variant() {
+    let mut bytes: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 16 { bytes.push(0_u8); i = i + 1; }
+    let v: Value = Value.VDecimal(bytes);
+    assert(v is Value.VDecimal);
+}
+
+// =============================================================================
+// Section 2: Variant pairwise disjointness — scalar variants
+// =============================================================================
+
+@test
+fn test_value_vnull_disjoint_from_others() {
+    let v: Value = Value.VNull;
+    assert(!(v is Value.VBool));
+    assert(!(v is Value.VInt));
+    assert(!(v is Value.VFloat));
+    assert(!(v is Value.VText));
+    assert(!(v is Value.VTimestamp));
+}
+
+@test
+fn test_value_vbool_disjoint_from_others() {
+    let v: Value = Value.VBool(false);
+    assert(!(v is Value.VNull));
+    assert(!(v is Value.VInt));
+    assert(!(v is Value.VFloat));
+    assert(!(v is Value.VText));
+}
+
+@test
+fn test_value_vint_disjoint_from_vfloat() {
+    let v: Value = Value.VInt(0);
+    assert(!(v is Value.VNull));
+    assert(!(v is Value.VBool));
+    assert(!(v is Value.VFloat));
+    assert(!(v is Value.VText));
+}
+
+@test
+fn test_value_vtext_disjoint_from_others() {
+    let v: Value = Value.VText("".to_text());
+    assert(!(v is Value.VNull));
+    assert(!(v is Value.VBool));
+    assert(!(v is Value.VInt));
+    assert(!(v is Value.VFloat));
+}
+
+// =============================================================================
+// Section 3: Payload preservation — scalar carriers
+// =============================================================================
+
+@test
+fn test_value_vbool_payload_round_trip() {
+    let v: Value = Value.VBool(true);
+    match v {
+        Value.VBool(b) => assert_eq(b, true),
+        _ => panic("expected VBool"),
+    }
+}
+
+@test
+fn test_value_vint_payload_round_trip() {
+    let v: Value = Value.VInt(-9223372036854775807);
+    match v {
+        Value.VInt(n) => assert_eq(n, -9223372036854775807),
+        _ => panic("expected VInt"),
+    }
+}
+
+@test
+fn test_value_vtimestamp_payload_round_trip() {
+    let v: Value = Value.VTimestamp(1716902400000);
+    match v {
+        Value.VTimestamp(ms) => assert_eq(ms, 1716902400000),
+        _ => panic("expected VTimestamp"),
+    }
+}
+
+// =============================================================================
+// Section 4: ConvertError scalar-variant construction
+// =============================================================================
+
+@test
+fn test_convert_error_unsupported_variant() {
+    let e: ConvertError = ConvertError.CeUnsupportedVariant("VTimestamp".to_text());
+    assert(e is ConvertError.CeUnsupportedVariant);
+}
+
+@test
+fn test_convert_error_bytes_not_uuid_variant() {
+    let e: ConvertError = ConvertError.CeBytesNotUuid(15);
+    assert(e is ConvertError.CeBytesNotUuid);
+}
+
+@test
+fn test_convert_error_bytes_not_decimal_variant() {
+    let e: ConvertError = ConvertError.CeBytesNotDecimal(17);
+    assert(e is ConvertError.CeBytesNotDecimal);
+}
+
+@test
+fn test_convert_error_map_key_not_text_variant() {
+    let e: ConvertError = ConvertError.CeMapKeyNotText;
+    assert(e is ConvertError.CeMapKeyNotText);
+}
+
+@test
+fn test_convert_error_extension_unsupported_variant() {
+    let e: ConvertError = ConvertError.CeExtensionUnsupported(255);
+    assert(e is ConvertError.CeExtensionUnsupported);
+}
+
+// =============================================================================
+// Section 5: ConvertError pairwise disjointness — scalar variants
+// =============================================================================
+
+@test
+fn test_convert_error_map_key_not_text_disjoint() {
+    let e: ConvertError = ConvertError.CeMapKeyNotText;
+    assert(!(e is ConvertError.CeUnsupportedVariant));
+    assert(!(e is ConvertError.CeBytesNotUuid));
+    assert(!(e is ConvertError.CeBytesNotDecimal));
+    assert(!(e is ConvertError.CeExtensionUnsupported));
+}
+
+@test
+fn test_convert_error_unsupported_variant_disjoint() {
+    let e: ConvertError = ConvertError.CeUnsupportedVariant("x".to_text());
+    assert(!(e is ConvertError.CeBytesNotUuid));
+    assert(!(e is ConvertError.CeBytesNotDecimal));
+    assert(!(e is ConvertError.CeMapKeyNotText));
+    assert(!(e is ConvertError.CeExtensionUnsupported));
+}
+
+@test
+fn test_convert_error_bytes_not_uuid_disjoint() {
+    let e: ConvertError = ConvertError.CeBytesNotUuid(8);
+    assert(!(e is ConvertError.CeUnsupportedVariant));
+    assert(!(e is ConvertError.CeBytesNotDecimal));
+    assert(!(e is ConvertError.CeMapKeyNotText));
+    assert(!(e is ConvertError.CeExtensionUnsupported));
+}
+
+@test
+fn test_convert_error_extension_unsupported_disjoint() {
+    let e: ConvertError = ConvertError.CeExtensionUnsupported(1);
+    assert(!(e is ConvertError.CeUnsupportedVariant));
+    assert(!(e is ConvertError.CeBytesNotUuid));
+    assert(!(e is ConvertError.CeBytesNotDecimal));
+    assert(!(e is ConvertError.CeMapKeyNotText));
+}
+
+// =============================================================================
+// Section 6: ConvertError scalar payload preservation
+// =============================================================================
+
+@test
+fn test_convert_error_unsupported_variant_payload_round_trip() {
+    let e: ConvertError = ConvertError.CeUnsupportedVariant("VExtension".to_text());
+    match e {
+        ConvertError.CeUnsupportedVariant(s) => assert_eq(s, "VExtension"),
+        _ => panic("expected CeUnsupportedVariant"),
+    }
+}
+
+@test
+fn test_convert_error_bytes_not_uuid_payload_round_trip() {
+    let e: ConvertError = ConvertError.CeBytesNotUuid(15);
+    match e {
+        ConvertError.CeBytesNotUuid(n) => assert_eq(n, 15),
+        _ => panic("expected CeBytesNotUuid"),
+    }
+}
+
+@test
+fn test_convert_error_extension_unsupported_payload_round_trip() {
+    let e: ConvertError = ConvertError.CeExtensionUnsupported(0xC0);
+    match e {
+        ConvertError.CeExtensionUnsupported(t) => assert_eq(t, 0xC0),
+        _ => panic("expected CeExtensionUnsupported"),
+    }
+}
+
+fn main() {}
