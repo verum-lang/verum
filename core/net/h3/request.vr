@@ -188,20 +188,20 @@ fn format_status(code: UInt16) -> Text {
 // =============================================================================
 
 public fn parse_request_from_fields(fields: &List<QpackHeaderField>, body: List<Byte>) -> Maybe<H3Request> {
-    let mut method:    Maybe<Text> = None;
-    let mut scheme:    Maybe<Text> = None;
-    let mut authority: Maybe<Text> = None;
-    let mut path:      Maybe<Text> = None;
+    let mut method:    Maybe<Text> = Maybe.None;
+    let mut scheme:    Maybe<Text> = Maybe.None;
+    let mut authority: Maybe<Text> = Maybe.None;
+    let mut path:      Maybe<Text> = Maybe.None;
     let mut headers:   List<QpackHeaderField> = [];
 
     let mut i: Int = 0;
     while i < fields.len() {
         let f = &fields[i];
         let n = f.name.as_bytes();
-        if n == b":method"    { method    = Some(f.value.clone()); }
-        else if n == b":scheme"    { scheme    = Some(f.value.clone()); }
-        else if n == b":authority" { authority = Some(f.value.clone()); }
-        else if n == b":path"      { path      = Some(f.value.clone()); }
+        if n == b":method"    { method    = Maybe.Some(f.value.clone()); }
+        else if n == b":scheme"    { scheme    = Maybe.Some(f.value.clone()); }
+        else if n == b":authority" { authority = Maybe.Some(f.value.clone()); }
+        else if n == b":path"      { path      = Maybe.Some(f.value.clone()); }
         else if n.len() > 0 && n[0] == (':' as Byte) {
             // Unknown pseudo-header — silently skip (would be
             // HTTP_MESSAGE_ERROR in a strict validator).
@@ -212,24 +212,24 @@ public fn parse_request_from_fields(fields: &List<QpackHeaderField>, body: List<
     }
 
     match (method, scheme, authority, path) {
-        (Some(m), Some(s), Some(a), Some(p)) => Some(H3Request {
+        (Maybe.Some(m), Maybe.Some(s), Maybe.Some(a), Maybe.Some(p)) => Maybe.Some(H3Request {
             method: H3Method.from_text(&m),
             scheme: s, authority: a, path: p,
             headers: headers, body: body,
         }),
-        _ => None,
+        _ => Maybe.None,
     }
 }
 
 public fn parse_response_from_fields(fields: &List<QpackHeaderField>, body: List<Byte>) -> Maybe<H3Response> {
-    let mut status_text: Maybe<Text> = None;
+    let mut status_text: Maybe<Text> = Maybe.None;
     let mut headers:     List<QpackHeaderField> = [];
     let mut i: Int = 0;
     while i < fields.len() {
         let f = &fields[i];
         let n = f.name.as_bytes();
         if n == b":status" {
-            status_text = Some(f.value.clone());
+            status_text = Maybe.Some(f.value.clone());
         } else if n.len() > 0 && n[0] == (':' as Byte) {
             // Unknown response pseudo-header.
         } else {
@@ -238,25 +238,25 @@ public fn parse_response_from_fields(fields: &List<QpackHeaderField>, body: List
         i = i + 1;
     }
     match status_text {
-        Some(t) => {
+        Maybe.Some(t) => {
             let code = parse_status_code(&t)?;
-            Some(H3Response {
+            Maybe.Some(H3Response {
                 status: code, headers: headers, body: body, trailers: [],
             })
         },
-        None => None,
+        Maybe.None => Maybe.None,
     }
 }
 
 fn parse_status_code(t: &Text) -> Maybe<UInt16> {
     let b = t.as_bytes();
-    if b.len() != 3 { return None; }
+    if b.len() != 3 { return Maybe.None; }
     let mut v: UInt16 = 0_u16;
     let mut i: Int = 0;
     while i < 3 {
-        if b[i] < ('0' as Byte) || b[i] > ('9' as Byte) { return None; }
+        if b[i] < ('0' as Byte) || b[i] > ('9' as Byte) { return Maybe.None; }
         v = v * 10_u16 + ((b[i] - ('0' as Byte)) as UInt16);
         i = i + 1;
     }
-    Some(v)
+    Maybe.Some(v)
 }
