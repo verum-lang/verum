@@ -54,14 +54,14 @@ fn regression_map_get_returns_some_for_existing_key() {
     let _ = m.insert(1, 100);
     let _ = m.insert(2, 200);
     let v = m.get(&1);
-    assert_eq(v, Some(100));
+    assert_eq(v, Maybe.Some(100));
 }
 
 @test
 fn regression_map_get_returns_none_for_absent_key() {
     let mut m: Map<Int, Int> = Map.new();
     let _ = m.insert(1, 100);
-    assert_eq(m.get(&99), None);
+    assert_eq(m.get(&99), Maybe.None);
 }
 
 // =============================================================================

@@ -4,8 +4,8 @@
 //
 // Algebraic laws over `core.encoding.base64`:
 //
-//   §1  Round-trip: ∀b. decode(encode(b)) == Ok(b)
-//   §2  Round-trip URL: ∀b. decode_url(encode_url(b)) == Ok(b)
+//   §1  Round-trip: ∀b. decode(encode(b)) == Result.Ok(b)
+//   §2  Round-trip URL: ∀b. decode_url(encode_url(b)) == Result.Ok(b)
 //   §3  Output length: encode of N bytes = ceil(N/3)*4 chars (with padding)
 //   §4  URL encoding has no '+' / '/' (uses '-' / '_' instead)
 //   §5  URL encoding has no padding chars '='
@@ -27,8 +27,8 @@ fn property_round_trip_empty() {
     let input: [Byte; 0] = [];
     let encoded = encode(&input);
     match decode(&encoded) {
-        Ok(decoded) => assert_eq(decoded.len(), 0),
-        Err(_) => panic("empty round-trip should succeed"),
+        Result.Ok(decoded) => assert_eq(decoded.len(), 0),
+        Result.Err(_) => panic("empty round-trip should succeed"),
     }
 }
 
@@ -37,11 +37,11 @@ fn property_round_trip_single_byte() {
     let input: [Byte; 1] = [0x42_u8];
     let encoded = encode(&input);
     match decode(&encoded) {
-        Ok(decoded) => {
+        Result.Ok(decoded) => {
             assert_eq(decoded.len(), 1);
             assert_eq(decoded[0], 0x42_u8);
         },
-        Err(_) => panic("round-trip should succeed"),
+        Result.Err(_) => panic("round-trip should succeed"),
     }
 }
 
@@ -50,13 +50,13 @@ fn property_round_trip_three_bytes() {
     let input: [Byte; 3] = [0xCA_u8, 0xFE_u8, 0xBA_u8];
     let encoded = encode(&input);
     match decode(&encoded) {
-        Ok(decoded) => {
+        Result.Ok(decoded) => {
             assert_eq(decoded.len(), 3);
             assert_eq(decoded[0], 0xCA_u8);
             assert_eq(decoded[1], 0xFE_u8);
             assert_eq(decoded[2], 0xBA_u8);
         },
-        Err(_) => panic("3-byte round-trip should succeed"),
+        Result.Err(_) => panic("3-byte round-trip should succeed"),
     }
 }
 
@@ -65,11 +65,11 @@ fn property_round_trip_six_bytes() {
     let input: [Byte; 6] = [0x66_u8, 0x6F_u8, 0x6F_u8, 0x62_u8, 0x61_u8, 0x72_u8];
     let encoded = encode(&input);
     match decode(&encoded) {
-        Ok(decoded) => {
+        Result.Ok(decoded) => {
             assert_eq(decoded.len(), 6);
             assert_eq(decoded[5], 0x72_u8);
         },
-        Err(_) => panic("6-byte round-trip should succeed"),
+        Result.Err(_) => panic("6-byte round-trip should succeed"),
     }
 }
 
@@ -78,7 +78,7 @@ fn property_round_trip_all_zeros() {
     let input: [Byte; 9] = [0_u8; 9];
     let encoded = encode(&input);
     match decode(&encoded) {
-        Ok(decoded) => {
+        Result.Ok(decoded) => {
             assert_eq(decoded.len(), 9);
             let mut i = 0;
             while i < 9 {
@@ -86,7 +86,7 @@ fn property_round_trip_all_zeros() {
                 i = i + 1;
             }
         },
-        Err(_) => panic("all-zeros round-trip should succeed"),
+        Result.Err(_) => panic("all-zeros round-trip should succeed"),
     }
 }
 
@@ -99,8 +99,8 @@ fn property_round_trip_url_empty() {
     let input: [Byte; 0] = [];
     let encoded = encode_url(&input);
     match decode_url(&encoded) {
-        Ok(decoded) => assert_eq(decoded.len(), 0),
-        Err(_) => panic("url empty round-trip should succeed"),
+        Result.Ok(decoded) => assert_eq(decoded.len(), 0),
+        Result.Err(_) => panic("url empty round-trip should succeed"),
     }
 }
 
@@ -109,11 +109,11 @@ fn property_round_trip_url_three_bytes() {
     let input: [Byte; 3] = [0xCA_u8, 0xFE_u8, 0xBA_u8];
     let encoded = encode_url(&input);
     match decode_url(&encoded) {
-        Ok(decoded) => {
+        Result.Ok(decoded) => {
             assert_eq(decoded.len(), 3);
             assert_eq(decoded[0], 0xCA_u8);
         },
-        Err(_) => panic("url 3-byte round-trip should succeed"),
+        Result.Err(_) => panic("url 3-byte round-trip should succeed"),
     }
 }
 

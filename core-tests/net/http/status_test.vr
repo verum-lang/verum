@@ -14,14 +14,14 @@
 //     remove / contains / len / is_empty + case-insensitive lookup
 //     per RFC 7230 §3.2.
 //   * Request / Response shape via .new factory.
-//   * SameSite 3-variant (Strict / Lax / None).
+//   * SameSite 3-variant (Strict / Lax / Maybe.None).
 //   * Cookie ctor surface.
 // =============================================================================
 
 mount core.net.http.{
     Method, StatusCode, Version, Headers, Request, Response, Cookie, SameSite
 };
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: StatusCode — construction + code accessor
@@ -324,7 +324,7 @@ fn test_headers_set_one_grows_len() {
 }
 
 // =============================================================================
-// Section 10: Headers — get returns Some/None
+// Section 10: Headers — get returns Some/Maybe.None
 // =============================================================================
 
 @test
@@ -335,8 +335,8 @@ fn test_headers_get_set_value_some() {
     h.set(&k, &v);
     let probe = "content-type".clone();
     match h.get(&probe) {
-        Some(_) => assert(true),
-        None => panic("expected Some"),
+        Maybe.Some(_) => assert(true),
+        Maybe.None => panic("expected Some"),
     }
 }
 
@@ -345,8 +345,8 @@ fn test_headers_get_missing_none() {
     let h = Headers.new();
     let probe = "X-Missing".clone();
     match h.get(&probe) {
-        Some(_) => panic("expected None"),
-        None => assert(true),
+        Maybe.Some(_) => panic("expected Maybe.None"),
+        Maybe.None => assert(true),
     }
 }
 
@@ -362,8 +362,8 @@ fn test_headers_get_case_insensitive_lower() {
     h.set(&k, &v);
     let probe = "content-type".clone();
     match h.get(&probe) {
-        Some(_) => assert(true),
-        None => panic("case-insensitive lookup must succeed"),
+        Maybe.Some(_) => assert(true),
+        Maybe.None => panic("case-insensitive lookup must succeed"),
     }
 }
 
@@ -375,8 +375,8 @@ fn test_headers_get_case_insensitive_upper() {
     h.set(&k, &v);
     let probe = "CONTENT-TYPE".clone();
     match h.get(&probe) {
-        Some(_) => assert(true),
-        None => panic("uppercase lookup must succeed"),
+        Maybe.Some(_) => assert(true),
+        Maybe.None => panic("uppercase lookup must succeed"),
     }
 }
 

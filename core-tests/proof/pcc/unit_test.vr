@@ -22,7 +22,7 @@ mount core.proof.pcc.{
     goal_hash, proof_certificate, empty_bundle, bundle_add,
     bundle_lookup, bundle_size,
 };
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: goal_hash + GoalHash field
@@ -213,7 +213,7 @@ fn test_bundle_lookup_missing_returns_none() {
     let b = empty_bundle("v".clone(), "s".clone());
     let r = bundle_lookup(&b, "missing".clone());
     match r {
-        Maybe.Some(_) => panic("expected None for missing digest"),
+        Maybe.Some(_) => panic("expected Maybe.None for missing digest"),
         Maybe.None => assert(true),
     }
 }
@@ -237,7 +237,7 @@ fn test_bundle_lookup_finds_added_certificate() {
             assert_eq(cert.solver, "z3");
             assert_eq(cert.duration_ms, 50);
         },
-        Maybe.None => panic("expected Some(certificate)"),
+        Maybe.None => panic("expected Maybe.Some(certificate)"),
     }
 }
 

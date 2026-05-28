@@ -55,8 +55,8 @@ fn regression_is_file_root_returns_false() {
 fn regression_metadata_nonexistent_returns_err() {
     let p = Path.new(&Text.from("/nonexistent-path-12345/foo.txt"));
     match metadata(&p) {
-        Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
-        Ok(_) => assert(false),
+        Result.Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
+        Result.Ok(_) => assert(false),
     }
 }
 
@@ -68,8 +68,8 @@ fn regression_metadata_nonexistent_returns_err() {
 @test
 fn regression_current_dir_returns_ok() {
     match current_dir() {
-        Ok(_) => {}
-        Err(_) => assert(false),
+        Result.Ok(_) => {}
+        Result.Err(_) => assert(false),
     }
 }
 

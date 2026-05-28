@@ -25,8 +25,8 @@ fn integration_read_file_none_branch_is_taken_for_missing() {
     let path: Text = "/tmp/__verum_integration_read_missing_8273645__";
     let observed: Maybe<Text> = read_file(path);
     let tag: Int = match observed {
-        Some(_) => 1,
-        None => 0,
+        Maybe.Some(_) => 1,
+        Maybe.None => 0,
     };
     assert_eq(tag, 0);
 }
@@ -101,8 +101,8 @@ fn integration_write_read_round_trip_ascii() {
     assert(wrote);
     let read_back = read_file(path);
     let observed = match read_back {
-        Some(s) => s,
-        None => panic("write succeeded but read returned None"),
+        Maybe.Some(s) => s,
+        Maybe.None => panic("write succeeded but read returned Maybe.None"),
     };
     assert_eq(observed, content);
     let _ = delete_file(path);
@@ -134,8 +134,8 @@ fn integration_append_extends_existing_content() {
     let appended_twice = append_file(path, "ghi");
     assert(appended_twice);
     let observed = match read_file(path) {
-        Some(s) => s,
-        None => panic("read after append returned None"),
+        Maybe.Some(s) => s,
+        Maybe.None => panic("read after append returned Maybe.None"),
     };
     assert_eq(observed, "abcdefghi");
     let _ = delete_file(path);

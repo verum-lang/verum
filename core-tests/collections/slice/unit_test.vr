@@ -60,7 +60,7 @@ fn test_slice_is_empty_false_on_one_element() {
 fn test_slice_first_some_on_nonempty() {
     let xs: List<Int> = [10, 20, 30];
     let s: &[Int] = xs.as_slice();
-    assert_eq(s.first(), Some(&10));
+    assert_eq(s.first(), Maybe.Some(&10));
 }
 
 @test
@@ -68,14 +68,14 @@ fn test_slice_first_none_on_empty() {
     let xs: List<Int> = [];
     let s: &[Int] = xs.as_slice();
     let f: Maybe<&Int> = s.first();
-    assert(f is None);
+    assert(f is Maybe.None);
 }
 
 @test
 fn test_slice_last_some_on_nonempty() {
     let xs: List<Int> = [10, 20, 30];
     let s: &[Int] = xs.as_slice();
-    assert_eq(s.last(), Some(&30));
+    assert_eq(s.last(), Maybe.Some(&30));
 }
 
 @test
@@ -83,7 +83,7 @@ fn test_slice_last_none_on_empty() {
     let xs: List<Int> = [];
     let s: &[Int] = xs.as_slice();
     let l: Maybe<&Int> = s.last();
-    assert(l is None);
+    assert(l is Maybe.None);
 }
 
 // =============================================================================
@@ -94,9 +94,9 @@ fn test_slice_last_none_on_empty() {
 fn test_slice_get_in_bounds() {
     let xs: List<Int> = [10, 20, 30];
     let s: &[Int] = xs.as_slice();
-    assert_eq(s.get(0), Some(&10));
-    assert_eq(s.get(1), Some(&20));
-    assert_eq(s.get(2), Some(&30));
+    assert_eq(s.get(0), Maybe.Some(&10));
+    assert_eq(s.get(1), Maybe.Some(&20));
+    assert_eq(s.get(2), Maybe.Some(&30));
 }
 
 @test
@@ -104,7 +104,7 @@ fn test_slice_get_negative_returns_none() {
     let xs: List<Int> = [10, 20, 30];
     let s: &[Int] = xs.as_slice();
     let v: Maybe<&Int> = s.get(-1);
-    assert(v is None);
+    assert(v is Maybe.None);
 }
 
 @test
@@ -112,7 +112,7 @@ fn test_slice_get_past_end_returns_none() {
     let xs: List<Int> = [10, 20, 30];
     let s: &[Int] = xs.as_slice();
     let v: Maybe<&Int> = s.get(99);
-    assert(v is None);
+    assert(v is Maybe.None);
 }
 
 @test
@@ -120,7 +120,7 @@ fn test_slice_get_on_empty_returns_none() {
     let xs: List<Int> = [];
     let s: &[Int] = xs.as_slice();
     let v: Maybe<&Int> = s.get(0);
-    assert(v is None);
+    assert(v is Maybe.None);
 }
 
 // =============================================================================
@@ -133,9 +133,9 @@ fn test_slice_subrange_middle() {
     let s: &[Int] = xs.as_slice();
     let sub: &[Int] = s.slice(1, 4);
     assert_eq(sub.len(), 3);
-    assert_eq(sub.get(0), Some(&20));
-    assert_eq(sub.get(1), Some(&30));
-    assert_eq(sub.get(2), Some(&40));
+    assert_eq(sub.get(0), Maybe.Some(&20));
+    assert_eq(sub.get(1), Maybe.Some(&30));
+    assert_eq(sub.get(2), Maybe.Some(&40));
 }
 
 @test
@@ -229,28 +229,28 @@ fn test_slice_contains_last_element() {
 fn test_slice_min_single() {
     let xs: List<Int> = [42];
     let s: &[Int] = xs.as_slice();
-    assert_eq(s.min(), Some(&42));
+    assert_eq(s.min(), Maybe.Some(&42));
 }
 
 @test
 fn test_slice_max_single() {
     let xs: List<Int> = [42];
     let s: &[Int] = xs.as_slice();
-    assert_eq(s.max(), Some(&42));
+    assert_eq(s.max(), Maybe.Some(&42));
 }
 
 @test
 fn test_slice_min_many() {
     let xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
     let s: &[Int] = xs.as_slice();
-    assert_eq(s.min(), Some(&1));
+    assert_eq(s.min(), Maybe.Some(&1));
 }
 
 @test
 fn test_slice_max_many() {
     let xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
     let s: &[Int] = xs.as_slice();
-    assert_eq(s.max(), Some(&9));
+    assert_eq(s.max(), Maybe.Some(&9));
 }
 
 @test
@@ -258,7 +258,7 @@ fn test_slice_min_empty_none() {
     let xs: List<Int> = [];
     let s: &[Int] = xs.as_slice();
     let m: Maybe<&Int> = s.min();
-    assert(m is None);
+    assert(m is Maybe.None);
 }
 
 @test
@@ -266,7 +266,7 @@ fn test_slice_max_empty_none() {
     let xs: List<Int> = [];
     let s: &[Int] = xs.as_slice();
     let m: Maybe<&Int> = s.max();
-    assert(m is None);
+    assert(m is Maybe.None);
 }
 
 // =============================================================================
@@ -281,8 +281,8 @@ fn test_slice_iter_sum() {
     let mut sum = 0;
     loop {
         match iter.next() {
-            Some(x) => { sum = sum + *x; },
-            None => break,
+            Maybe.Some(x) => { sum = sum + *x; },
+            Maybe.None => break,
         }
     }
     assert_eq(sum, 60);
@@ -294,7 +294,7 @@ fn test_slice_iter_empty() {
     let s: &[Int] = xs.as_slice();
     let mut iter = s.iter();
     let n: Maybe<&Int> = iter.next();
-    assert(n is None);
+    assert(n is Maybe.None);
 }
 
 @test
@@ -305,8 +305,8 @@ fn test_slice_iter_count_elements() {
     let mut count = 0;
     loop {
         match iter.next() {
-            Some(_) => { count = count + 1; },
-            None => break,
+            Maybe.Some(_) => { count = count + 1; },
+            Maybe.None => break,
         }
     }
     assert_eq(count, 5);
@@ -321,39 +321,39 @@ fn test_slice_iter_count_elements() {
 fn test_slice_index_of_first_match() {
     let xs: List<Int> = [10, 20, 30, 20, 10];
     let s: &[Int] = xs.as_slice();
-    assert_eq(s.index_of(&20), Some(1));
-    assert_eq(s.index_of(&10), Some(0));
-    assert_eq(s.index_of(&30), Some(2));
+    assert_eq(s.index_of(&20), Maybe.Some(1));
+    assert_eq(s.index_of(&10), Maybe.Some(0));
+    assert_eq(s.index_of(&30), Maybe.Some(2));
 }
 
 @test
 fn test_slice_index_of_absent_is_none() {
     let xs: List<Int> = [1, 2, 3];
     let s: &[Int] = xs.as_slice();
-    assert_eq(s.index_of(&99), None);
+    assert_eq(s.index_of(&99), Maybe.None);
 }
 
 @test
 fn test_slice_index_of_on_empty_is_none() {
     let xs: List<Int> = [];
     let s: &[Int] = xs.as_slice();
-    assert_eq(s.index_of(&1), None);
+    assert_eq(s.index_of(&1), Maybe.None);
 }
 
 @test
 fn test_slice_rindex_of_last_match() {
     let xs: List<Int> = [10, 20, 30, 20, 10];
     let s: &[Int] = xs.as_slice();
-    assert_eq(s.rindex_of(&20), Some(3));
-    assert_eq(s.rindex_of(&10), Some(4));
-    assert_eq(s.rindex_of(&30), Some(2));
+    assert_eq(s.rindex_of(&20), Maybe.Some(3));
+    assert_eq(s.rindex_of(&10), Maybe.Some(4));
+    assert_eq(s.rindex_of(&30), Maybe.Some(2));
 }
 
 @test
 fn test_slice_rindex_of_absent_is_none() {
     let xs: List<Int> = [1, 2, 3];
     let s: &[Int] = xs.as_slice();
-    assert_eq(s.rindex_of(&7), None);
+    assert_eq(s.rindex_of(&7), Maybe.None);
 }
 
 // =============================================================================
@@ -396,11 +396,11 @@ fn test_slice_get_zero_eq_first() {
     // (via *) should match. Direct equality on the Maybe-of-ref vs
     // Maybe-of-value differs by shape, so we destructure and compare.
     match f {
-        Some(fv) => match g0 {
-            Some(gv) => assert_eq(*fv, gv),
-            None => panic("get(0) must be Some on non-empty"),
+        Maybe.Some(fv) => match g0 {
+            Maybe.Some(gv) => assert_eq(*fv, gv),
+            Maybe.None => panic("get(0) must be Some on non-empty"),
         },
-        None => panic("first() must be Some on non-empty"),
+        Maybe.None => panic("first() must be Some on non-empty"),
     }
 }
 
@@ -411,11 +411,11 @@ fn test_slice_get_last_idx_eq_last() {
     let l = s.last();
     let g = s.get(s.len() - 1);
     match l {
-        Some(lv) => match g {
-            Some(gv) => assert_eq(*lv, gv),
-            None => panic("get(last) must be Some on non-empty"),
+        Maybe.Some(lv) => match g {
+            Maybe.Some(gv) => assert_eq(*lv, gv),
+            Maybe.None => panic("get(last) must be Some on non-empty"),
         },
-        None => panic("last() must be Some on non-empty"),
+        Maybe.None => panic("last() must be Some on non-empty"),
     }
 }
 

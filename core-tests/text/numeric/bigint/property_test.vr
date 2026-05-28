@@ -185,12 +185,12 @@ fn law_div_rem_reconstruction() {
     let a = bi(17);
     let b = bi(5);
     match a.div_rem(&b) {
-        Ok((q, r)) => {
+        Result.Ok((q, r)) => {
             // 17 = 3 * 5 + 2; q*b + r should equal a
             let reconstructed = q.mul(&b).add(&r);
             assert(reconstructed.eq(&a));
         },
-        Err(_) => panic("div_rem must succeed for non-zero divisor"),
+        Result.Err(_) => panic("div_rem must succeed for non-zero divisor"),
     };
 }
 

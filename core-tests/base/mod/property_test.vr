@@ -68,20 +68,20 @@ fn test_bytes_concat_length_additive() {
 @test
 fn test_text_result_ok_is_transparent() {
     let v = 42;
-    let r: TextResult<Int> = Ok(v);
+    let r: TextResult<Int> = Result.Ok(v);
     assert_eq(r.unwrap(), v);
 }
 
 @test
 fn test_text_result_err_carries_message() {
     let msg = "parse error".to_text();
-    let r: TextResult<Int> = Err(msg.clone());
+    let r: TextResult<Int> = Result.Err(msg.clone());
     assert_eq(r.unwrap_err(), msg);
 }
 
 @test
 fn test_std_result_ok_not_err() {
-    let r: StdResult<Int> = Ok(1);
+    let r: StdResult<Int> = Result.Ok(1);
     assert(r.is_ok());
     assert(!r.is_err());
 }

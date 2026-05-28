@@ -11,7 +11,7 @@
 
 mount core.async.backoff.{Backoff, BackoffStrategy};
 mount core.time.duration.{Duration};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // §A  `core.sys.common.random_bytes` not registered in VBC dispatch
@@ -59,8 +59,8 @@ fn regression_backoff_next_delay_returns_base_on_first_call() {
     );
     let d = b.next_delay();
     match d {
-        Some(dur) => assert_eq(dur.as_millis(), 100),
-        None => assert(false),
+        Maybe.Some(dur) => assert_eq(dur.as_millis(), 100),
+        Maybe.None => assert(false),
     }
 }
 
@@ -74,9 +74,9 @@ fn regression_backoff_next_delay_doubles_each_call() {
     let d1 = b.next_delay();
     let d2 = b.next_delay();
     let d3 = b.next_delay();
-    match d1 { Some(d) => assert_eq(d.as_millis(), 100), None => assert(false) }
-    match d2 { Some(d) => assert_eq(d.as_millis(), 200), None => assert(false) }
-    match d3 { Some(d) => assert_eq(d.as_millis(), 400), None => assert(false) }
+    match d1 { Maybe.Some(d) => assert_eq(d.as_millis(), 100), Maybe.None => assert(false) }
+    match d2 { Maybe.Some(d) => assert_eq(d.as_millis(), 200), Maybe.None => assert(false) }
+    match d3 { Maybe.Some(d) => assert_eq(d.as_millis(), 400), Maybe.None => assert(false) }
 }
 
 // Un-@ignore'd 2026-05-28 — passes under --interp post round-13b/14b.
@@ -92,8 +92,8 @@ fn regression_backoff_caps_at_ceiling() {
     let _ = b.next_delay();
     let d = b.next_delay();
     match d {
-        Some(dur) => assert_eq(dur.as_millis(), 1000),
-        None => assert(false),
+        Maybe.Some(dur) => assert_eq(dur.as_millis(), 1000),
+        Maybe.None => assert(false),
     }
 }
 

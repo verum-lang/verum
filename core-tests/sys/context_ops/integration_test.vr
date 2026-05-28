@@ -56,11 +56,11 @@ fn integration_tls_counter_round_trips_through_maybe() {
 
     let observed: Maybe<Int> = {
         let v = counter_get();
-        if v > 0 { Some(v) } else { None }
+        if v > 0 { Maybe.Some(v) } else { Maybe.None }
     };
     match observed {
-        Some(n) => assert_eq(n, 2),
-        None => panic("counter must have advanced past 0"),
+        Maybe.Some(n) => assert_eq(n, 2),
+        Maybe.None => panic("counter must have advanced past 0"),
     }
 }
 

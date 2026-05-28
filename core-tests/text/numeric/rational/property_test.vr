@@ -58,11 +58,11 @@ fn law_neg_involution() {
 fn law_reciprocal_round_trip() {
     let a = rt(3);
     match a.reciprocal() {
-        Ok(r) => match r.reciprocal() {
-            Ok(rr) => assert(rr.eq(&a)),
-            Err(_) => panic("reciprocal must succeed for non-zero arg"),
+        Result.Ok(r) => match r.reciprocal() {
+            Result.Ok(rr) => assert(rr.eq(&a)),
+            Result.Err(_) => panic("reciprocal must succeed for non-zero arg"),
         },
-        Err(_) => panic("reciprocal(3) must succeed"),
+        Result.Err(_) => panic("reciprocal(3) must succeed"),
     };
 }
 
@@ -70,8 +70,8 @@ fn law_reciprocal_round_trip() {
 fn law_reciprocal_zero_fails() {
     let zero = Rational.zero();
     match zero.reciprocal() {
-        Ok(_) => panic("reciprocal(0) must Err"),
-        Err(_) => (),
+        Result.Ok(_) => panic("reciprocal(0) must Err"),
+        Result.Err(_) => (),
     };
 }
 
@@ -80,8 +80,8 @@ fn law_div_by_zero_fails() {
     let a = rt(10);
     let zero = Rational.zero();
     match a.div(&zero) {
-        Ok(_) => panic("div by zero must Err"),
-        Err(_) => (),
+        Result.Ok(_) => panic("div by zero must Err"),
+        Result.Err(_) => (),
     };
 }
 

@@ -103,28 +103,28 @@ fn integration_retry_backoff_iterate_and_match() {
 
 @test
 fn integration_retry_first_attempt_success() {
-    let r: Result<Int, Text> = retry(3, || { Ok(42) });
+    let r: Result<Int, Text> = retry(3, || { Result.Ok(42) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 42);
 }
 
 @test
 fn integration_retry_immediate_first_attempt_success() {
-    let r: Result<Int, Text> = retry_immediate(3, || { Ok(99) });
+    let r: Result<Int, Text> = retry_immediate(3, || { Result.Ok(99) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 99);
 }
 
 @test
 fn integration_retry_jittered_first_attempt_success() {
-    let r: Result<Int, Text> = retry_jittered(3, 50, || { Ok(7) });
+    let r: Result<Int, Text> = retry_jittered(3, 50, || { Result.Ok(7) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 7);
 }
 
 @test
 fn integration_retry_linear_first_attempt_success() {
-    let r: Result<Int, Text> = retry_linear(3, 50, || { Ok(13) });
+    let r: Result<Int, Text> = retry_linear(3, 50, || { Result.Ok(13) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 13);
 }
@@ -132,7 +132,7 @@ fn integration_retry_linear_first_attempt_success() {
 @test
 fn integration_retry_with_strategy_first_attempt_success() {
     let opts: RetryOptions<Text> = RetryOptions.simple(3);
-    let r: Result<Int, Text> = retry_with_strategy(|| { Ok(100) }, opts);
+    let r: Result<Int, Text> = retry_with_strategy(|| { Result.Ok(100) }, opts);
     assert(r.is_ok());
     assert_eq(r.unwrap(), 100);
 }
@@ -143,14 +143,14 @@ fn integration_retry_with_strategy_first_attempt_success() {
 
 @test
 fn integration_retry_returns_first_attempt_text_value() {
-    let r: Result<Text, Text> = retry(3, || { Ok("done".to_text()) });
+    let r: Result<Text, Text> = retry(3, || { Result.Ok("done".to_text()) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), "done".to_text());
 }
 
 @test
 fn integration_retry_returns_first_attempt_list_value() {
-    let r: Result<List<Int>, Text> = retry(3, || { Ok([1, 2, 3]) });
+    let r: Result<List<Int>, Text> = retry(3, || { Result.Ok([1, 2, 3]) });
     assert(r.is_ok());
     assert_eq(r.unwrap().len(), 3);
 }

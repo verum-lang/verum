@@ -222,7 +222,7 @@ fn test_attribute_set_get_missing_returns_none() {
     let missing = "missing".clone();
     let got = s.get(&missing);
     match got {
-        Maybe.Some(_) => panic("expected None"),
+        Maybe.Some(_) => panic("expected Maybe.None"),
         Maybe.None => assert(true),
     }
 }

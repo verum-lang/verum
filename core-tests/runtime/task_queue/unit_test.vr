@@ -91,7 +91,7 @@ fn test_steal_result_is_empty_false_on_retry() {
 }
 
 // =============================================================================
-// Section 3: StealResult.into_option — Some on Success, None on Empty / Retry
+// Section 3: StealResult.into_option — Some on Success, Maybe.None on Empty / Retry
 // =============================================================================
 
 @test

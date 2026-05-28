@@ -208,12 +208,12 @@ fn regression_display_does_not_break_primitives() {
 // REGRESSION (task #11, 2026-05-15): protocol default-method monomorphisation
 // `Self → concrete-type` substitution.  `extract_type_name` /
 // `extract_type_name_from_ast` mis-handled `PathSegment::SelfValue`:
-// the first returned `None` (only matched `PathSegment::Name`), the
+// the first returned `Maybe.None` (only matched `PathSegment::Name`), the
 // second fell through to `format!("{}", path)` which renders Self as
 // lowercase "self" (the Path Display impl).  `substitute_self_in_type_name`
 // then never matched — every `register_impl_function` for a default
 // method materialised onto a user type recorded `param_type_names =
-// ["self"]` (literal lowercase) and `return_type_name = None`.
+// ["self"]` (literal lowercase) and `return_type_name = Maybe.None`.
 // Downstream `let m = a.max(b); m.<field>` lost the receiver type at
 // `extract_expr_type_name`'s MethodCall arm and fell through to
 // `resolve_field_index`'s scan-all-types path, picking the wrong

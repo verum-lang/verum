@@ -11,7 +11,7 @@
 //   * TlsVersion 4-variant + as_str + wire_version + is_secure
 //     (Tls12/Tls13 only).
 //   * KeyType 3-variant + as_str (Rsa / Ec / Ed25519).
-//   * CertVerifyMode 3-variant (Full / None / Custom).
+//   * CertVerifyMode 3-variant (Full / Maybe.None / Custom).
 //   * Certificate record (der_data: List<Byte>).
 //   * PrivateKey record (der_data + key_type).
 // =============================================================================

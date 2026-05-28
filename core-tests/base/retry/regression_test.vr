@@ -44,9 +44,9 @@ fn regression_pin_retry_succeeds_after_failures() {
     let r: Result<Int, Text> = retry(5, || {
         counter = counter + 1;
         if counter < 3 {
-            Err("transient".to_text())
+            Result.Err("transient".to_text())
         } else {
-            Ok(99)
+            Result.Ok(99)
         }
     });
     assert(r.is_ok());
@@ -60,7 +60,7 @@ fn regression_pin_retry_exhausts_returns_last_err() {
     let mut counter: Int = 0;
     let r: Result<Int, Text> = retry(3, || {
         counter = counter + 1;
-        Err("always".to_text())
+        Result.Err("always".to_text())
     });
     assert(r.is_err());
     assert_eq(counter, 3);
@@ -74,14 +74,14 @@ fn regression_pin_retry_aborts_on_permanent_error() {
         .with_should_retry(|e: &Text| { *e == "transient".to_text() });
     let r: Result<Int, Text> = retry_with_strategy(|| {
         counter = counter + 1;
-        Err("permanent".to_text())
+        Result.Err("permanent".to_text())
     }, opts);
     assert(r.is_err());
     assert_eq(counter, 1);
 }
 
 // =============================================================================
-// REGRESSION §B: RetryBackoff is a 3-variant ADT (None / Linear /
+// REGRESSION §B: RetryBackoff is a 3-variant ADT (Maybe.None / Linear /
 // Exponential). A defect that re-ordered or merged any variant would
 // silently change every consumer's match dispatch.
 // =============================================================================
@@ -126,14 +126,14 @@ fn regression_retry_options_simple_round_trip() {
 
 @test
 fn regression_retry_first_attempt_returns_exact_value() {
-    let r: Result<Int, Text> = retry(3, || { Ok(123_456) });
+    let r: Result<Int, Text> = retry(3, || { Result.Ok(123_456) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 123_456);
 }
 
 @test
 fn regression_retry_immediate_first_attempt_returns_exact_value() {
-    let r: Result<Int, Text> = retry_immediate(3, || { Ok(7_777) });
+    let r: Result<Int, Text> = retry_immediate(3, || { Result.Ok(7_777) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 7_777);
 }

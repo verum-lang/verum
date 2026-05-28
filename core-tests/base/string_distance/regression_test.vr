@@ -82,8 +82,8 @@ fn regression_levenshtein_empty_string_axioms() {
 
 // =============================================================================
 // REGRESSION §E: Levenshtein-bounded must early-stop above the
-// threshold. The function returns `Maybe<Int>` — `Some(d)` when
-// `d <= threshold`, `None` otherwise. A defect that returned the
+// threshold. The function returns `Maybe<Int>` — `Maybe.Some(d)` when
+// `d <= threshold`, `Maybe.None` otherwise. A defect that returned the
 // raw distance regardless would silently defeat the bounded optimisation.
 // =============================================================================
 
@@ -91,7 +91,7 @@ fn regression_levenshtein_empty_string_axioms() {
 fn regression_levenshtein_bounded_returns_none_above_threshold() {
     let a = "kitten".to_text();
     let b = "sitting".to_text();
-    // True distance is 3; bounded at 1 must return None.
+    // True distance is 3; bounded at 1 must return Maybe.None.
     let r = levenshtein_bounded(a.as_bytes(), b.as_bytes(), 1);
     assert(r.is_none());
 }

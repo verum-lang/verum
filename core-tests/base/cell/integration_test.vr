@@ -48,7 +48,7 @@ fn test_refcell_accumulate_via_borrow_mut() {
     }
     let r = acc.borrow();
     assert_eq(r.len(), 3);
-    assert_eq((*r).get(0), Some(1));
+    assert_eq((*r).get(0), Maybe.Some(1));
 }
 
 @test
@@ -117,8 +117,8 @@ fn test_lazy_cell_expensive_computation_memoised() {
     });
     let v = &*computed;
     assert_eq(v.len(), 10);
-    assert_eq(v.get(3), Some(9));    // 3^2 = 9
-    assert_eq(v.get(9), Some(81));   // 9^2 = 81
+    assert_eq(v.get(3), Maybe.Some(9));    // 3^2 = 9
+    assert_eq(v.get(9), Maybe.Some(81));   // 9^2 = 81
     // Second access returns same memoised result
     assert_eq((&*computed).len(), 10);
 }

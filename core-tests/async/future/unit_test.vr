@@ -19,7 +19,7 @@ mount core.async.future.{
     Join2, Select2, Join3, SelectResult,
     ready, pending, lazy, join, select, join3,
 };
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: ReadyFuture construction

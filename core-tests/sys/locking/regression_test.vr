@@ -34,14 +34,14 @@ fn regression_file_lock_kind_exclusive_canonical() {
 
 @test
 fn regression_lock_error_conflict_carries_maybe_pid() {
-    let e = LockError.Conflict(Some(42));
+    let e = LockError.Conflict(Maybe.Some(42));
     let pid: Maybe<Int> = match e {
         LockError.Conflict(p) => p,
         LockError.IoError(_) => panic("wrong arm"),
     };
     match pid {
-        Some(p) => assert_eq(p, 42),
-        None => panic("Some expected"),
+        Maybe.Some(p) => assert_eq(p, 42),
+        Maybe.None => panic("Some expected"),
     }
 }
 

@@ -50,7 +50,7 @@ fn test_ttl_with_defaults_is_empty() {
 fn test_ttl_get_absent_returns_none() {
     let mut c: TtlCache<Int, Int> = TtlCache.with_defaults();
     let v: Maybe<&Int> = c.get(&999);
-    assert(v is None);
+    assert(v is Maybe.None);
 }
 
 @test

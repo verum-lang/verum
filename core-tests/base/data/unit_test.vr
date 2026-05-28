@@ -331,8 +331,8 @@ fn test_as_bool_from_bool() {
     let result = d.as_bool();
 
     match result {
-        Some(b) => assert(b),
-        None => panic("expected Some"),
+        Maybe.Some(b) => assert(b),
+        Maybe.None => panic("expected Some"),
     }
 }
 
@@ -342,8 +342,8 @@ fn test_as_bool_from_bool_false() {
     let result = d.as_bool();
 
     match result {
-        Some(b) => assert(!b),
-        None => panic("expected Some"),
+        Maybe.Some(b) => assert(!b),
+        Maybe.None => panic("expected Some"),
     }
 }
 
@@ -365,8 +365,8 @@ fn test_as_int_from_int() {
     let result = d.as_int();
 
     match result {
-        Some(i) => assert_eq(i, 42),
-        None => panic("expected Some"),
+        Maybe.Some(i) => assert_eq(i, 42),
+        Maybe.None => panic("expected Some"),
     }
 }
 
@@ -388,8 +388,8 @@ fn test_as_float_from_float() {
     let result = d.as_float();
 
     match result {
-        Some(f) => assert(f > 3.13 && f < 3.15),
-        None => panic("expected Some"),
+        Maybe.Some(f) => assert(f > 3.13 && f < 3.15),
+        Maybe.None => panic("expected Some"),
     }
 }
 
@@ -400,8 +400,8 @@ fn test_as_float_from_int_coercion() {
     let result = d.as_float();
 
     match result {
-        Some(f) => assert_eq(f, 42.0),
-        None => panic("expected Some with coercion"),
+        Maybe.Some(f) => assert_eq(f, 42.0),
+        Maybe.None => panic("expected Some with coercion"),
     }
 }
 
@@ -422,8 +422,8 @@ fn test_as_text_from_text() {
     let result = d.as_text();
 
     match result {
-        Some(s) => assert_eq(s, "hello"),
-        None => panic("expected Some"),
+        Maybe.Some(s) => assert_eq(s, "hello"),
+        Maybe.None => panic("expected Some"),
     }
 }
 
@@ -433,8 +433,8 @@ fn test_as_text_empty_string() {
     let result = d.as_text();
 
     match result {
-        Some(s) => assert_eq(s.len(), 0),
-        None => panic("expected Some"),
+        Maybe.Some(s) => assert_eq(s.len(), 0),
+        Maybe.None => panic("expected Some"),
     }
 }
 
@@ -456,8 +456,8 @@ fn test_as_array_from_array() {
 
     let result = d.as_array();
     match result {
-        Some(a) => assert_eq(a.len(), 2),
-        None => panic("expected Some"),
+        Maybe.Some(a) => assert_eq(a.len(), 2),
+        Maybe.None => panic("expected Some"),
     }
 }
 
@@ -472,10 +472,10 @@ fn test_as_array_mut() {
     let mut d = Data.Array([Data.Int(1)]);
 
     match d.as_array_mut() {
-        Some(arr) => {
+        Maybe.Some(arr) => {
             arr.push(Data.Int(2));
         }
-        None => panic("expected Some"),
+        Maybe.None => panic("expected Some"),
     }
 
     assert_eq(d.len(), 2);
@@ -489,8 +489,8 @@ fn test_as_object_from_object() {
 
     let result = d.as_object();
     match result {
-        Some(o) => assert_eq(o.len(), 1),
-        None => panic("expected Some"),
+        Maybe.Some(o) => assert_eq(o.len(), 1),
+        Maybe.None => panic("expected Some"),
     }
 }
 
@@ -505,10 +505,10 @@ fn test_as_object_mut() {
     let mut d = Data.empty_object();
 
     match d.as_object_mut() {
-        Some(obj) => {
+        Maybe.Some(obj) => {
             obj.insert("new_key", Data.Bool(true));
         }
-        None => panic("expected Some"),
+        Maybe.None => panic("expected Some"),
     }
 
     assert(d.contains_key("new_key"));
@@ -525,13 +525,13 @@ fn test_get_existing_field() {
     let d = Data.Object(obj);
 
     match d.get("name") {
-        Some(value) => {
+        Maybe.Some(value) => {
             match value {
                 Data.Text(ref s) => assert_eq(*s, "John"),
                 _ => panic("expected Text"),
             }
         }
-        None => panic("expected Some"),
+        Maybe.None => panic("expected Some"),
     }
 }
 
@@ -555,15 +555,15 @@ fn test_get_mut() {
     let _ = d.set("value", Data.Int(10));
 
     match d.get_mut("value") {
-        Some(value) => {
+        Maybe.Some(value) => {
             *value = Data.Int(20);
         }
-        None => panic("expected Some"),
+        Maybe.None => panic("expected Some"),
     }
 
     // Verify modification
     match d.get("value") {
-        Some(Data.Int(i)) => assert_eq(*i, 20),
+        Maybe.Some(Data.Int(i)) => assert_eq(*i, 20),
         _ => panic("expected Int(20)"),
     }
 }
@@ -617,7 +617,7 @@ fn test_set_overwrites() {
     let _ = d.set("key", Data.Int(2));
 
     match d.get("key") {
-        Some(Data.Int(i)) => assert_eq(*i, 2),
+        Maybe.Some(Data.Int(i)) => assert_eq(*i, 2),
         _ => panic("expected Int(2)"),
     }
 }
@@ -656,7 +656,7 @@ fn test_at_valid_index() {
     let d = Data.Array([Data.Int(10), Data.Int(20), Data.Int(30)]);
 
     match d.at(1) {
-        Some(Data.Int(i)) => assert_eq(*i, 20),
+        Maybe.Some(Data.Int(i)) => assert_eq(*i, 20),
         _ => panic("expected Int(20)"),
     }
 }
@@ -666,7 +666,7 @@ fn test_at_first_index() {
     let d = Data.Array([Data.Text("first")]);
 
     match d.at(0) {
-        Some(Data.Text(ref s)) => assert_eq(*s, "first"),
+        Maybe.Some(Data.Text(ref s)) => assert_eq(*s, "first"),
         _ => panic("expected Text"),
     }
 }
@@ -697,14 +697,14 @@ fn test_at_mut() {
     let mut d = Data.Array([Data.Int(1), Data.Int(2)]);
 
     match d.at_mut(0) {
-        Some(elem) => {
+        Maybe.Some(elem) => {
             *elem = Data.Int(100);
         }
-        None => panic("expected Some"),
+        Maybe.None => panic("expected Some"),
     }
 
     match d.at(0) {
-        Some(Data.Int(i)) => assert_eq(*i, 100),
+        Maybe.Some(Data.Int(i)) => assert_eq(*i, 100),
         _ => panic("expected Int(100)"),
     }
 }
@@ -732,7 +732,7 @@ fn test_pop_from_array() {
 
     let popped = d.pop();
     match popped {
-        Some(Data.Int(i)) => assert_eq(i, 2),
+        Maybe.Some(Data.Int(i)) => assert_eq(i, 2),
         _ => panic("expected Int(2)"),
     }
 
@@ -849,7 +849,7 @@ fn test_path_single_level() {
     let _ = d.set("name", Data.Text("Alice"));
 
     match d.path("name") {
-        Some(Data.Text(ref s)) => assert_eq(*s, "Alice"),
+        Maybe.Some(Data.Text(ref s)) => assert_eq(*s, "Alice"),
         _ => panic("expected Text"),
     }
 }
@@ -869,7 +869,7 @@ fn test_path_nested() {
     let d = Data.Object(root);
 
     match d.path("user.profile.name") {
-        Some(Data.Text(ref s)) => assert_eq(*s, "Bob"),
+        Maybe.Some(Data.Text(ref s)) => assert_eq(*s, "Bob"),
         _ => panic("expected Text"),
     }
 }
@@ -887,7 +887,7 @@ fn test_path_array_index() {
     let d = Data.Object(root);
 
     match d.path("items.1") {
-        Some(Data.Int(i)) => assert_eq(*i, 20),
+        Maybe.Some(Data.Int(i)) => assert_eq(*i, 20),
         _ => panic("expected Int(20)"),
     }
 }
@@ -990,8 +990,8 @@ fn test_to_number_from_int() {
     let d = Data.Int(42);
 
     match d.to_number() {
-        Some(f) => assert_eq(f, 42.0),
-        None => panic("expected Some"),
+        Maybe.Some(f) => assert_eq(f, 42.0),
+        Maybe.None => panic("expected Some"),
     }
 }
 
@@ -1000,8 +1000,8 @@ fn test_to_number_from_float() {
     let d = Data.Float(3.5);
 
     match d.to_number() {
-        Some(f) => assert_eq(f, 3.5),
-        None => panic("expected Some"),
+        Maybe.Some(f) => assert_eq(f, 3.5),
+        Maybe.None => panic("expected Some"),
     }
 }
 
@@ -1010,8 +1010,8 @@ fn test_to_number_from_text() {
     let d = Data.Text("123.5");
 
     match d.to_number() {
-        Some(f) => assert_eq(f, 123.5),
-        None => panic("expected Some from numeric string"),
+        Maybe.Some(f) => assert_eq(f, 123.5),
+        Maybe.None => panic("expected Some from numeric string"),
     }
 }
 
@@ -1081,7 +1081,7 @@ fn test_index_by_text() {
     // Use .get() method instead of index syntax - Index protocol may not be fully supported
     let result: Maybe<Data> = d.get("key");
     match result {
-        Some(Data.Int(i)) => assert_eq(i, 100),
+        Maybe.Some(Data.Int(i)) => assert_eq(i, 100),
         _ => panic("expected Int(100)"),
     }
 }
@@ -1102,7 +1102,7 @@ fn test_index_by_int() {
     // Use .at() method instead of index syntax
     let result: Maybe<Data> = d.at(0);
     match result {
-        Some(Data.Text(s)) => assert_eq(s, "a"),
+        Maybe.Some(Data.Text(s)) => assert_eq(s, "a"),
         _ => panic("expected Text"),
     }
 }
@@ -1133,7 +1133,7 @@ fn test_clone_bool() {
     let d = Data.Bool(true);
     let cloned = d.clone();
 
-    assert_eq(cloned.as_bool(), Some(true));
+    assert_eq(cloned.as_bool(), Maybe.Some(true));
 }
 
 @test
@@ -1141,7 +1141,7 @@ fn test_clone_int() {
     let d = Data.Int(42);
     let cloned = d.clone();
 
-    assert_eq(cloned.as_int(), Some(42));
+    assert_eq(cloned.as_int(), Maybe.Some(42));
 }
 
 @test
@@ -1149,7 +1149,7 @@ fn test_clone_text() {
     let d = Data.Text("original");
     let cloned = d.clone();
 
-    assert_eq(cloned.as_text(), Some("original"));
+    assert_eq(cloned.as_text(), Maybe.Some("original"));
 }
 
 @test
@@ -1397,7 +1397,7 @@ fn test_builder_nested() {
         .build();
 
     match outer.path("inner.nested") {
-        Some(Data.Bool(b)) => assert(*b),
+        Maybe.Some(Data.Bool(b)) => assert(*b),
         _ => panic("expected Bool(true)"),
     }
 }
@@ -1426,7 +1426,7 @@ fn test_deep_nesting() {
         .build();
 
     match root.path("level1.level2.level3.value") {
-        Some(Data.Int(i)) => assert_eq(*i, 42),
+        Maybe.Some(Data.Int(i)) => assert_eq(*i, 42),
         _ => panic("expected Int(42)"),
     }
 }
@@ -1449,13 +1449,13 @@ fn test_mixed_array_object() {
 
     // Access nested: arr[0].id
     match arr.at(0) {
-        Some(item) => {
+        Maybe.Some(item) => {
             match item.get("id") {
-                Some(Data.Int(i)) => assert_eq(*i, 1),
+                Maybe.Some(Data.Int(i)) => assert_eq(*i, 1),
                 _ => panic("expected Int"),
             }
         }
-        None => panic("expected item"),
+        Maybe.None => panic("expected item"),
     }
 }
 
@@ -1476,24 +1476,24 @@ fn test_unicode_text() {
     let d = Data.Text("こんにちは世界 🌍");
 
     match d.as_text() {
-        Some(s) => {
+        Maybe.Some(s) => {
             assert(s.contains("こんにちは"));
             assert(s.contains("🌍"));
         }
-        None => panic("expected Some"),
+        Maybe.None => panic("expected Some"),
     }
 }
 
 @test
 fn test_very_large_int() {
     let d = Data.Int(Int.MAX);
-    assert_eq(d.as_int(), Some(Int.MAX));
+    assert_eq(d.as_int(), Maybe.Some(Int.MAX));
 }
 
 @test
 fn test_very_small_int() {
     let d = Data.Int(Int.MIN);
-    assert_eq(d.as_int(), Some(Int.MIN));
+    assert_eq(d.as_int(), Maybe.Some(Int.MIN));
 }
 
 @test
@@ -1513,12 +1513,12 @@ fn test_special_floats() {
 fn test_mutate_array_element() {
     let mut d = Data.Array([Data.Int(1), Data.Int(2), Data.Int(3)]);
 
-    if let Some(elem) = d.at_mut(1) {
+    if let Maybe.Some(elem) = d.at_mut(1) {
         *elem = Data.Int(200);
     }
 
     match d.at(1) {
-        Some(Data.Int(i)) => assert_eq(*i, 200),
+        Maybe.Some(Data.Int(i)) => assert_eq(*i, 200),
         _ => panic("expected Int(200)"),
     }
 }
@@ -1528,12 +1528,12 @@ fn test_mutate_object_field() {
     let mut d = Data.empty_object();
     let _ = d.set("count", Data.Int(0));
 
-    if let Some(val) = d.get_mut("count") {
+    if let Maybe.Some(val) = d.get_mut("count") {
         *val = Data.Int(100);
     }
 
     match d.get("count") {
-        Some(Data.Int(i)) => assert_eq(*i, 100),
+        Maybe.Some(Data.Int(i)) => assert_eq(*i, 100),
         _ => panic("expected Int(100)"),
     }
 }
@@ -1547,13 +1547,13 @@ fn test_add_to_nested_array() {
     let _ = outer.set("items", inner);
 
     // Access and modify nested array
-    if let Some(arr) = outer.get_mut("items") {
+    if let Maybe.Some(arr) = outer.get_mut("items") {
         let _ = arr.push(Data.Int(2));
     }
 
     match outer.get("items") {
-        Some(arr) => assert_eq(arr.len(), 2),
-        None => panic("expected array"),
+        Maybe.Some(arr) => assert_eq(arr.len(), 2),
+        Maybe.None => panic("expected array"),
     }
 }
 

@@ -45,7 +45,7 @@ fn regression_multiset_from_counts_undefined() {
 // §B — Multiset.iter() yields no elements
 //
 // Every algebraic operation (union / intersection / sum / difference)
-// uses the `let mut iter = other.iter(); while let Some((k,v)) =
+// uses the `let mut iter = other.iter(); while let Maybe.Some((k,v)) =
 // iter.next()` pattern.  At runtime the loop body never runs — the
 // iter is empty on the first call.  `is_subset` follows the same
 // pattern but the with-empty / cardinality early-exit makes its
@@ -139,7 +139,7 @@ fn regression_multiset_iter_yields_elements() {
     m.insert_n(2, 5);
     let mut iter = m.iter();
     let mut total_visited = 0;
-    while let Some((_k, _v)) = iter.next() {
+    while let Maybe.Some((_k, _v)) = iter.next() {
         total_visited = total_visited + 1;
     }
     // 2 distinct elements MUST be visited.

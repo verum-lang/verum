@@ -25,7 +25,7 @@
 
 mount core.net.url.{Url, UrlError, UrlErrorKind, percent_encode, percent_decode, MAX_URL_LENGTH_BYTES};
 mount core.base.result.{Result, Ok, Err};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: percent_encode ∘ percent_decode = identity — alphanumerics
@@ -128,8 +128,8 @@ fn prop_percent_decode_safe_space() {
     let s = "%20".clone();
     let want = " ".clone();
     match percent_decode(&s) {
-        Ok(d) => assert(d == want),
-        Err(_) => panic("%20 must decode to space"),
+        Result.Ok(d) => assert(d == want),
+        Result.Err(_) => panic("%20 must decode to space"),
     }
 }
 
@@ -138,8 +138,8 @@ fn prop_percent_decode_safe_slash() {
     let s = "%2F".clone();
     let want = "/".clone();
     match percent_decode(&s) {
-        Ok(d) => assert(d == want),
-        Err(_) => panic("%2F must decode to /"),
+        Result.Ok(d) => assert(d == want),
+        Result.Err(_) => panic("%2F must decode to /"),
     }
 }
 
@@ -148,8 +148,8 @@ fn prop_percent_decode_safe_percent_itself() {
     let s = "%25".clone();
     let want = "%".clone();
     match percent_decode(&s) {
-        Ok(d) => assert(d == want),
-        Err(_) => panic("%25 must decode to %"),
+        Result.Ok(d) => assert(d == want),
+        Result.Err(_) => panic("%25 must decode to %"),
     }
 }
 
@@ -304,8 +304,8 @@ fn prop_url_parse_scheme_lowercased_https() {
     let s = "HTTPS://example.com/".clone();
     let want = "https".clone();
     match Url.parse(&s) {
-        Ok(u) => assert(u.scheme == want),
-        Err(_) => panic("HTTPS:// should parse"),
+        Result.Ok(u) => assert(u.scheme == want),
+        Result.Err(_) => panic("HTTPS:// should parse"),
     }
 }
 
@@ -314,8 +314,8 @@ fn prop_url_parse_scheme_lowercased_http_mixed() {
     let s = "HtTp://example.com/".clone();
     let want = "http".clone();
     match Url.parse(&s) {
-        Ok(u) => assert(u.scheme == want),
-        Err(_) => panic("HtTp:// should parse"),
+        Result.Ok(u) => assert(u.scheme == want),
+        Result.Err(_) => panic("HtTp:// should parse"),
     }
 }
 
@@ -324,8 +324,8 @@ fn prop_url_parse_scheme_lowercased_ftp_caps() {
     let s = "FTP://server/".clone();
     let want = "ftp".clone();
     match Url.parse(&s) {
-        Ok(u) => assert(u.scheme == want),
-        Err(_) => panic("FTP:// should parse"),
+        Result.Ok(u) => assert(u.scheme == want),
+        Result.Err(_) => panic("FTP:// should parse"),
     }
 }
 
@@ -343,15 +343,15 @@ fn prop_url_parse_empty_returns_err() {
 // preservation in `extract_expr_type_name` MethodCall arm. Pre-fix
 // `Url.parse(&s)` returned bare `Result` without composing
 // `return_type_inner = ["Url", "UrlError"]`; downstream `compile_match`
-// scrutinee_type lost the `<Url, UrlError>` instantiation; `Err(e)`
+// scrutinee_type lost the `<Url, UrlError>` instantiation; `Result.Err(e)`
 // payload couldn't bind `e: UrlError`; `e.kind` field-access fell to
 // global field-intern → wrong byte offset → comparison failed.
 @test
 fn prop_url_parse_empty_error_kind_missing_scheme() {
     let s = "".clone();
     match Url.parse(&s) {
-        Ok(_) => panic("empty input must reject"),
-        Err(e) => assert(e.kind == UrlErrorKind.MissingScheme),
+        Result.Ok(_) => panic("empty input must reject"),
+        Result.Err(e) => assert(e.kind == UrlErrorKind.MissingScheme),
     }
 }
 
@@ -388,7 +388,7 @@ fn prop_url_parse_oversized_input_kind_url_too_long() {
     big.push_str(&filler);
     big.push_str(&suffix);
     match Url.parse(&big) {
-        Ok(_) => panic("URL > MAX_URL_LENGTH_BYTES must reject"),
-        Err(e) => assert(e.kind == UrlErrorKind.UrlTooLong),
+        Result.Ok(_) => panic("URL > MAX_URL_LENGTH_BYTES must reject"),
+        Result.Err(e) => assert(e.kind == UrlErrorKind.UrlTooLong),
     }
 }

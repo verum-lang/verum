@@ -131,19 +131,19 @@ fn test_file_size_returns_negative_for_missing_path() {
 }
 
 // =============================================================================
-// Section 5: read_file — None on missing
+// Section 5: read_file — Maybe.None on missing
 // =============================================================================
 
 @test
 fn test_read_file_returns_none_for_missing_path() {
     // The wrapper falls through to the open-probe when
     // `__file_read_to_string_raw` returns "" — for a truly missing
-    // path the open then fails, yielding None.
+    // path the open then fails, yielding Maybe.None.
     let p: Text = "/tmp/__verum_test_read_missing_98273645__";
     let r = read_file(p);
     match r {
-        Some(_) => panic("missing path must read to None"),
-        None => {}
+        Maybe.Some(_) => panic("missing path must read to Maybe.None"),
+        Maybe.None => {}
     }
 }
 

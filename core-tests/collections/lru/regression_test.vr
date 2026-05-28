@@ -20,7 +20,7 @@ fn pass_guard_lru_new_is_empty_capacity_preserved() {
 fn pass_guard_lru_insert_get_round_trip() {
     let mut c: LruCache<Int, Int> = LruCache.new(4);
     c.insert(1, 100);
-    assert_eq(c.get(&1), Some(100));
+    assert_eq(c.get(&1), Maybe.Some(100));
 }
 
 @test
@@ -30,9 +30,9 @@ fn pass_guard_lru_evict_oldest_at_capacity() {
     c.insert(2, 200);
     c.insert(3, 300);    // evicts 1
     let v1: Maybe<Int> = c.get(&1);
-    assert(v1 is None);
-    assert_eq(c.get(&2), Some(200));
-    assert_eq(c.get(&3), Some(300));
+    assert(v1 is Maybe.None);
+    assert_eq(c.get(&2), Maybe.Some(200));
+    assert_eq(c.get(&3), Maybe.Some(300));
 }
 
 @test
@@ -42,9 +42,9 @@ fn pass_guard_lru_touch_on_get_changes_lru_order() {
     c.insert(2, 200);
     let _ = c.get(&1);   // touch 1 → 2 is LRU
     c.insert(3, 300);    // evicts 2
-    assert_eq(c.get(&1), Some(100));
+    assert_eq(c.get(&1), Maybe.Some(100));
     let v2: Maybe<Int> = c.get(&2);
-    assert(v2 is None);
+    assert(v2 is Maybe.None);
 }
 
 @test

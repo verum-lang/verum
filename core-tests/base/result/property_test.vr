@@ -30,19 +30,19 @@ mount core.collections.list.List;
 
 @test
 fn law_map_identity_on_ok() {
-    let r: Result<Int, Text> = Ok(42);
+    let r: Result<Int, Text> = Result.Ok(42);
     assert_eq(r.map(|x| x), r);
 }
 
 @test
 fn law_map_identity_on_err() {
-    let r: Result<Int, Text> = Err("e");
+    let r: Result<Int, Text> = Result.Err("e");
     assert_eq(r.map(|x| x), r);
 }
 
 @test
 fn law_map_composition_on_ok() {
-    let r: Result<Int, Text> = Ok(5);
+    let r: Result<Int, Text> = Result.Ok(5);
     let lhs = r.map(|x| x + 1).map(|x| x * 2);
     let rhs = r.map(|x| (x + 1) * 2);
     assert_eq(lhs, rhs);
@@ -55,19 +55,19 @@ fn law_map_composition_on_ok() {
 
 @test
 fn law_map_err_identity_on_err() {
-    let r: Result<Int, Text> = Err("boom");
+    let r: Result<Int, Text> = Result.Err("boom");
     assert_eq(r.map_err(|e| e), r);
 }
 
 @test
 fn law_map_err_passes_ok_through_unchanged() {
-    let r: Result<Int, Text> = Ok(7);
+    let r: Result<Int, Text> = Result.Ok(7);
     assert_eq(r.map_err(|e| f"wrapped: {e}"), r);   // Ok unchanged
 }
 
 @test
 fn law_map_err_composition_on_err() {
-    let r: Result<Int, Int> = Err(5);
+    let r: Result<Int, Int> = Result.Err(5);
     let lhs = r.map_err(|e| e + 1).map_err(|e| e * 2);
     let rhs = r.map_err(|e| (e + 1) * 2);
     assert_eq(lhs, rhs);
@@ -80,30 +80,30 @@ fn law_map_err_composition_on_err() {
 
 @test
 fn law_monad_left_identity() {
-    fn f(n: Int) -> Result<Int, Text> { Ok(n * 2) }
-    let lhs: Result<Int, Text> = Ok(5).and_then(f);
+    fn f(n: Int) -> Result<Int, Text> { Result.Ok(n * 2) }
+    let lhs: Result<Int, Text> = Result.Ok(5).and_then(f);
     let rhs = f(5);
     assert_eq(lhs, rhs);
 }
 
 @test
 fn law_monad_right_identity_on_ok() {
-    let r: Result<Int, Text> = Ok(7);
+    let r: Result<Int, Text> = Result.Ok(7);
     assert_eq(r.and_then(Ok), r);
 }
 
 @test
 fn law_monad_right_identity_on_err() {
-    let r: Result<Int, Text> = Err("x");
+    let r: Result<Int, Text> = Result.Err("x");
     assert_eq(r.and_then(Ok), r);
 }
 
 @test
 fn law_monad_associativity() {
-    fn f(n: Int) -> Result<Int, Text> { Ok(n + 1) }
-    fn g(n: Int) -> Result<Int, Text> { Ok(n * 3) }
+    fn f(n: Int) -> Result<Int, Text> { Result.Ok(n + 1) }
+    fn g(n: Int) -> Result<Int, Text> { Result.Ok(n * 3) }
 
-    let r: Result<Int, Text> = Ok(2);
+    let r: Result<Int, Text> = Result.Ok(2);
     let lhs = r.and_then(f).and_then(g);
     let rhs = r.and_then(|x| f(x).and_then(g));
     assert_eq(lhs, rhs);
@@ -115,16 +115,16 @@ fn law_monad_associativity() {
 
 @test
 fn law_eq_reflexive() {
-    let cases: List<Result<Int, Text>> = [Ok(0), Ok(1), Err("a"), Err("b")];
+    let cases: List<Result<Int, Text>> = [Result.Ok(0), Result.Ok(1), Result.Err("a"), Result.Err("b")];
     for r in cases.iter() { assert_eq(*r, *r); }
 }
 
 @test
 fn law_eq_symmetric() {
     let pairs: List<(Result<Int, Text>, Result<Int, Text>)> = [
-        (Ok(1), Ok(1)),
-        (Ok(1), Err("e")),
-        (Err("e"), Err("e")),
+        (Result.Ok(1), Result.Ok(1)),
+        (Result.Ok(1), Result.Err("e")),
+        (Result.Err("e"), Result.Err("e")),
     ];
     for p in pairs.iter() {
         let (a, b) = *p;
@@ -134,16 +134,16 @@ fn law_eq_symmetric() {
 
 @test
 fn law_eq_transitive() {
-    let r1: Result<Int, Text> = Ok(7);
-    let r2: Result<Int, Text> = Ok(7);
-    let r3: Result<Int, Text> = Ok(7);
+    let r1: Result<Int, Text> = Result.Ok(7);
+    let r2: Result<Int, Text> = Result.Ok(7);
+    let r3: Result<Int, Text> = Result.Ok(7);
     if (r1 == r2) && (r2 == r3) { assert(r1 == r3); }
 }
 
 @test
 fn law_eq_distinguishes_ok_from_err() {
-    let ok: Result<Int, Text> = Ok(0);
-    let err: Result<Int, Text> = Err("");
+    let ok: Result<Int, Text> = Result.Ok(0);
+    let err: Result<Int, Text> = Result.Err("");
     assert(ok != err);
 }
 
@@ -155,12 +155,12 @@ fn law_eq_distinguishes_ok_from_err() {
 fn law_ord_compares_inner_when_same_variant() {
     // Verum doesn't have Rust-style turbofish; use annotated let bindings
     // so the bidirectional Call arm + my fix at task #5 §3.1 routes
-    // Ok(i)/Err(s) to the correct Result.Ok / Result.Err variant.
-    let a: Result<Int, Text> = Ok(1);
-    let b: Result<Int, Text> = Ok(2);
+    // Result.Ok(i)/Result.Err(s) to the correct Result.Ok / Result.Err variant.
+    let a: Result<Int, Text> = Result.Ok(1);
+    let b: Result<Int, Text> = Result.Ok(2);
     assert(a < b);
-    let c: Result<Int, Text> = Err("a");
-    let d: Result<Int, Text> = Err("b");
+    let c: Result<Int, Text> = Result.Err("a");
+    let d: Result<Int, Text> = Result.Err("b");
     assert(c < d);
 }
 
@@ -170,30 +170,30 @@ fn law_ord_compares_inner_when_same_variant() {
 
 @test
 fn law_and_short_circuits_on_left_err() {
-    let lhs: Result<Int, Text> = Err("e");
-    let rhs: Result<Int, Text> = Ok(99);
-    assert_eq(lhs.and(rhs), Err("e"));
+    let lhs: Result<Int, Text> = Result.Err("e");
+    let rhs: Result<Int, Text> = Result.Ok(99);
+    assert_eq(lhs.and(rhs), Result.Err("e"));
 }
 
 @test
 fn law_and_passes_right_when_left_ok() {
-    let lhs: Result<Int, Text> = Ok(1);
-    let rhs: Result<Int, Text> = Ok(2);
-    assert_eq(lhs.and(rhs), Ok(2));
+    let lhs: Result<Int, Text> = Result.Ok(1);
+    let rhs: Result<Int, Text> = Result.Ok(2);
+    assert_eq(lhs.and(rhs), Result.Ok(2));
 }
 
 @test
 fn law_or_returns_left_if_ok() {
-    let lhs: Result<Int, Text> = Ok(1);
-    let rhs: Result<Int, Text> = Ok(2);
-    assert_eq(lhs.or(rhs), Ok(1));
+    let lhs: Result<Int, Text> = Result.Ok(1);
+    let rhs: Result<Int, Text> = Result.Ok(2);
+    assert_eq(lhs.or(rhs), Result.Ok(1));
 }
 
 @test
 fn law_or_returns_right_if_left_err() {
-    let lhs: Result<Int, Text> = Err("e");
-    let rhs: Result<Int, Text> = Ok(2);
-    assert_eq(lhs.or(rhs), Ok(2));
+    let lhs: Result<Int, Text> = Result.Err("e");
+    let rhs: Result<Int, Text> = Result.Ok(2);
+    assert_eq(lhs.or(rhs), Result.Ok(2));
 }
 
 // =============================================================================
@@ -202,26 +202,26 @@ fn law_or_returns_right_if_left_err() {
 
 @test
 fn law_ok_projection_some_on_ok() {
-    let r: Result<Int, Text> = Ok(42);
-    assert_eq(r.ok(), Some(42));
+    let r: Result<Int, Text> = Result.Ok(42);
+    assert_eq(r.ok(), Maybe.Some(42));
 }
 
 @test
 fn law_ok_projection_none_on_err() {
-    let r: Result<Int, Text> = Err("e");
+    let r: Result<Int, Text> = Result.Err("e");
     assert(r.ok().is_none());
 }
 
 @test
 fn law_err_projection_none_on_ok() {
-    let r: Result<Int, Text> = Ok(42);
+    let r: Result<Int, Text> = Result.Ok(42);
     assert(r.err().is_none());
 }
 
 @test
 fn law_err_projection_some_on_err() {
-    let r: Result<Int, Text> = Err("e");
-    assert_eq(r.err(), Some("e"));
+    let r: Result<Int, Text> = Result.Err("e");
+    assert_eq(r.err(), Maybe.Some("e"));
 }
 
 // =============================================================================
@@ -230,17 +230,17 @@ fn law_err_projection_some_on_err() {
 
 fn double_via_q(r: Result<Int, Text>) -> Result<Int, Text> {
     let v = r?;
-    Ok(v * 2)
+    Result.Ok(v * 2)
 }
 
 @test
 fn law_q_on_ok_unwraps() {
-    assert_eq(double_via_q(Ok(7)), Ok(14));
+    assert_eq(double_via_q(Result.Ok(7)), Result.Ok(14));
 }
 
 @test
 fn law_q_on_err_propagates() {
-    assert_eq(double_via_q(Err("x")), Err("x"));
+    assert_eq(double_via_q(Result.Err("x")), Result.Err("x"));
 }
 
 // =============================================================================
@@ -249,14 +249,14 @@ fn law_q_on_err_propagates() {
 
 @test
 fn law_unwrap_or_picks_default_on_err() {
-    let r: Result<Int, Text> = Err("x");
+    let r: Result<Int, Text> = Result.Err("x");
     assert_eq(r.unwrap_or(99), 99);
 }
 
 @test
 fn law_unwrap_or_else_lazy() {
     let mut closure_called = false;
-    let r: Result<Int, Text> = Ok(7);
+    let r: Result<Int, Text> = Result.Ok(7);
     let _ = r.unwrap_or_else(|_| {
         closure_called = true;
         99
@@ -266,7 +266,7 @@ fn law_unwrap_or_else_lazy() {
 
 @test
 fn law_unwrap_or_default_uses_int_default() {
-    let r: Result<Int, Text> = Err("x");
+    let r: Result<Int, Text> = Result.Err("x");
     assert_eq(r.unwrap_or_default(), 0);  // Int.default
 }
 
@@ -276,33 +276,33 @@ fn law_unwrap_or_default_uses_int_default() {
 
 @property
 fn prop_ok_then_unwrap_round_trip(n: Int) {
-    let r: Result<Int, Text> = Ok(n);
+    let r: Result<Int, Text> = Result.Ok(n);
     assert_eq(r.unwrap(), n);
 }
 
 @property
 fn prop_map_preserves_ok_count(n: Int) {
-    let r: Result<Int, Text> = Ok(n);
+    let r: Result<Int, Text> = Result.Ok(n);
     assert(r.map(|x| x + 1).is_ok());
 }
 
 @property
 fn prop_q_on_ok_succeeds(n: Int) {
     fn body(n: Int) -> Result<Int, Text> {
-        let r: Result<Int, Text> = Ok(n);
+        let r: Result<Int, Text> = Result.Ok(n);
         let v = r?;
-        Ok(v)
+        Result.Ok(v)
     }
-    assert_eq(body(n), Ok(n));
+    assert_eq(body(n), Result.Ok(n));
 }
 
 // =============================================================================
 // §L  @test_case — variant truth table.
 // =============================================================================
 
-@test_case(Ok(1),  true,  false)
-@test_case(Ok(0),  true,  false)
-@test_case(Err("e"), false, true)
+@test_case(Result.Ok(1),  true,  false)
+@test_case(Result.Ok(0),  true,  false)
+@test_case(Result.Err("e"), false, true)
 fn parametrised_is_ok_is_err_truth_table(
     r: Result<Int, Text>,
     expected_ok: Bool,
@@ -312,8 +312,8 @@ fn parametrised_is_ok_is_err_truth_table(
     assert_eq(r.is_err(), expected_err);
 }
 
-@test_case(Ok(1),     1,    99)    // unwrap_or returns Ok payload
-@test_case(Err("x"),  99,   99)    // unwrap_or returns the default
+@test_case(Result.Ok(1),     1,    99)    // unwrap_or returns Ok payload
+@test_case(Result.Err("x"),  99,   99)    // unwrap_or returns the default
 fn parametrised_unwrap_or_truth_table(
     r: Result<Int, Text>,
     expected: Int,

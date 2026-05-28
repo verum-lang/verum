@@ -31,14 +31,14 @@ fn law_sequential_instants_non_decreasing() {
 }
 
 // =============================================================================
-// §B  duration_since antisymmetry: if b > a then a.duration_since(b) = None
+// §B  duration_since antisymmetry: if b > a then a.duration_since(b) = Maybe.None
 // =============================================================================
 
 @test
 fn law_duration_since_none_when_earlier_is_later() {
     let a = Instant.now();
     let b = a + Duration.nanos(1);
-    // a is before b, so a.duration_since(b) should be None
+    // a is before b, so a.duration_since(b) should be Maybe.None
     assert(a.duration_since(b).is_none());
 }
 

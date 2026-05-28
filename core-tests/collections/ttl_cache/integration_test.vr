@@ -43,7 +43,7 @@ fn int_ttl_defaults_read_only_round_trip() {
 
     // Read-only ops on an empty cache must be no-ops.
     let v: Maybe<&Int> = c.get(&1);
-    assert(v is None);
+    assert(v is Maybe.None);
 
     let r = c.remove(&1);
     assert(!r);

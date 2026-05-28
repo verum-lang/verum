@@ -3,7 +3,7 @@
 // =============================================================================
 
 mount core.async.cancellation.{CancelReason};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -33,18 +33,18 @@ fn integration_cancellation_user_facing_tag() {
 fn integration_cancellation_aborted_message_to_maybe() {
     fn abort_message(r: CancelReason) -> Maybe<Text> {
         match r {
-            CancelReason.Aborted(msg) => Some(msg),
-            _ => None,
+            CancelReason.Aborted(msg) => Maybe.Some(msg),
+            _ => Maybe.None,
         }
     }
-    assert_eq(abort_message(CancelReason.Aborted("network-down")), Some("network-down"));
+    assert_eq(abort_message(CancelReason.Aborted("network-down")), Maybe.Some("network-down"));
     match abort_message(CancelReason.Cancelled) {
-        Some(_) => assert(false),
-        None => assert(true),
+        Maybe.Some(_) => assert(false),
+        Maybe.None => assert(true),
     }
     match abort_message(CancelReason.ParentCancelled) {
-        Some(_) => assert(false),
-        None => assert(true),
+        Maybe.Some(_) => assert(false),
+        Maybe.None => assert(true),
     }
 }
 

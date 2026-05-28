@@ -89,7 +89,7 @@ fn test_log_record_fields_keys_accessible() {
     let rec = LogRecord.new(LogLevel.Info, "auth", fields);
     let user_field = rec.fields.iter().find(|(k, _)| *k == "user");
     assert(user_field.is_some());
-    assert_eq(user_field.map(|(_, v)| v.clone()), Some("alice".to_text()));
+    assert_eq(user_field.map(|(_, v)| v.clone()), Maybe.Some("alice".to_text()));
 }
 
 @test

@@ -23,11 +23,11 @@ fn integration_tcp_connect_sweep_collects_none_count() {
     for p in ports.iter() {
         let r = RawTcpStream.connect("127.0.0.1", *p);
         match r {
-            Some(_) => {}
-            None => { none_count = none_count + 1; }
+            Maybe.Some(_) => {}
+            Maybe.None => { none_count = none_count + 1; }
         }
     }
-    // All 5 unroutable — None count = 5.
+    // All 5 unroutable — Maybe.None count = 5.
     assert_eq(none_count, 5);
 }
 

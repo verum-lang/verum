@@ -26,7 +26,7 @@ mount core.text.format.{
     format_debug, format_display,
     format_hex, format_binary, format_octal,
 };
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
@@ -94,8 +94,8 @@ fn guard_format_spec_default_invariants() {
     assert(!s.alternate);
     assert(s.align is TextAlignment.Left);
     assert(s.sign is Sign.Minus);
-    assert(s.width is None);
-    assert(s.precision is None);
+    assert(s.width is Maybe.None);
+    assert(s.precision is Maybe.None);
 }
 
 @test

@@ -14,7 +14,7 @@ mount core.time.duration.{Duration};
 // `now.add_duration(...)`.  Neither method exists on `Instant`; the
 // inherent impl declares `checked_add(&self, Duration) -> Maybe<Instant>`
 // (instant.vr:179).  Source fix landed in this branch — both call
-// sites now use `match now.checked_add(ttl) { Some(t) => t, None =>
+// sites now use `match now.checked_add(ttl) { Maybe.Some(t) => t, Maybe.None =>
 // fallback }`.
 //
 // Until a fresh `cargo build --release` rebuilds the precompiled
@@ -34,8 +34,8 @@ fn regression_ttl_insert_routes_through_checked_add() {
     let mut c: TtlCache<Int, Int> = TtlCache.new(cfg);
     c.insert(1, 100);
     match c.get(&1) {
-        Some(v) => { assert_eq(*v, 100); },
-        None    => { panic("insert/get within TTL must round-trip"); },
+        Maybe.Some(v) => { assert_eq(*v, 100); },
+        Maybe.None    => { panic("insert/get within TTL must round-trip"); },
     }
 }
 
@@ -48,7 +48,7 @@ fn regression_ttl_insert_with_ttl_uses_override() {
     let mut c: TtlCache<Int, Int> = TtlCache.new(cfg);
     c.insert_with_ttl(1, 100, Duration.from_secs(7200));
     let v: Maybe<&Int> = c.get(&1);
-    assert(v is Some(_));
+    assert(v is Maybe.Some(_));
 }
 
 @test
@@ -62,7 +62,7 @@ fn regression_ttl_capacity_eviction_drops_lru() {
     c.insert(2, 200);
     c.insert(3, 300);
     let v1: Maybe<&Int> = c.get(&1);
-    assert(v1 is None);
+    assert(v1 is Maybe.None);
     let s = c.stats();
     assert_eq(s.evicted, 1_u64);
 }

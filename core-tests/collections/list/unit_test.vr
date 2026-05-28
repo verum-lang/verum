@@ -58,9 +58,9 @@ fn test_list_array_literal_preserves_length() {
 @test
 fn test_list_array_literal_preserves_order() {
     let xs: List<Int> = [10, 20, 30];
-    assert_eq(xs.get(0), Some(10));
-    assert_eq(xs.get(1), Some(20));
-    assert_eq(xs.get(2), Some(30));
+    assert_eq(xs.get(0), Maybe.Some(10));
+    assert_eq(xs.get(1), Maybe.Some(20));
+    assert_eq(xs.get(2), Maybe.Some(30));
 }
 
 @test
@@ -91,9 +91,9 @@ fn test_list_push_preserves_order() {
     xs.push(10);
     xs.push(20);
     xs.push(30);
-    assert_eq(xs.get(0), Some(10));
-    assert_eq(xs.get(1), Some(20));
-    assert_eq(xs.get(2), Some(30));
+    assert_eq(xs.get(0), Maybe.Some(10));
+    assert_eq(xs.get(1), Maybe.Some(20));
+    assert_eq(xs.get(2), Maybe.Some(30));
 }
 
 @test
@@ -111,16 +111,16 @@ fn test_list_push_grows_capacity() {
 @test
 fn test_list_pop_from_empty_returns_none() {
     let mut xs: List<Int> = List.new();
-    assert_eq(xs.pop(), None);
+    assert_eq(xs.pop(), Maybe.None);
 }
 
 @test
 fn test_list_pop_returns_last_pushed() {
     let mut xs: List<Int> = [10, 20, 30];
-    assert_eq(xs.pop(), Some(30));
-    assert_eq(xs.pop(), Some(20));
-    assert_eq(xs.pop(), Some(10));
-    assert_eq(xs.pop(), None);
+    assert_eq(xs.pop(), Maybe.Some(30));
+    assert_eq(xs.pop(), Maybe.Some(20));
+    assert_eq(xs.pop(), Maybe.Some(10));
+    assert_eq(xs.pop(), Maybe.None);
 }
 
 @test
@@ -137,46 +137,46 @@ fn test_list_pop_decrements_len() {
 @test
 fn test_list_get_in_bounds_returns_some() {
     let xs: List<Int> = [100, 200, 300];
-    assert_eq(xs.get(0), Some(100));
-    assert_eq(xs.get(1), Some(200));
-    assert_eq(xs.get(2), Some(300));
+    assert_eq(xs.get(0), Maybe.Some(100));
+    assert_eq(xs.get(1), Maybe.Some(200));
+    assert_eq(xs.get(2), Maybe.Some(300));
 }
 
 @test
 fn test_list_get_out_of_bounds_returns_none() {
     let xs: List<Int> = [1, 2, 3];
-    assert_eq(xs.get(3), None);
-    assert_eq(xs.get(100), None);
+    assert_eq(xs.get(3), Maybe.None);
+    assert_eq(xs.get(100), Maybe.None);
 }
 
 @test
 fn test_list_get_negative_index_returns_none() {
     let xs: List<Int> = [1, 2, 3];
-    assert_eq(xs.get(-1), None);
+    assert_eq(xs.get(-1), Maybe.None);
 }
 
 @test
 fn test_list_first_of_non_empty() {
     let xs: List<Int> = [7, 8, 9];
-    assert_eq(xs.first(), Some(7));
+    assert_eq(xs.first(), Maybe.Some(7));
 }
 
 @test
 fn test_list_first_of_empty_is_none() {
     let xs: List<Int> = List.new();
-    assert_eq(xs.first(), None);
+    assert_eq(xs.first(), Maybe.None);
 }
 
 @test
 fn test_list_last_of_non_empty() {
     let xs: List<Int> = [7, 8, 9];
-    assert_eq(xs.last(), Some(9));
+    assert_eq(xs.last(), Maybe.Some(9));
 }
 
 @test
 fn test_list_last_of_empty_is_none() {
     let xs: List<Int> = List.new();
-    assert_eq(xs.last(), None);
+    assert_eq(xs.last(), Maybe.None);
 }
 
 @test
@@ -200,7 +200,7 @@ fn test_list_is_not_empty_after_push() {
 fn test_list_set_overwrites_in_place() {
     let mut xs: List<Int> = [1, 2, 3];
     xs.set(1, 42);
-    assert_eq(xs.get(1), Some(42));
+    assert_eq(xs.get(1), Maybe.Some(42));
     assert_eq(xs.len(), 3);
 }
 
@@ -208,16 +208,16 @@ fn test_list_set_overwrites_in_place() {
 fn test_list_swap_exchanges_two_indices() {
     let mut xs: List<Int> = [10, 20, 30];
     xs.swap(0, 2);
-    assert_eq(xs.get(0), Some(30));
-    assert_eq(xs.get(2), Some(10));
-    assert_eq(xs.get(1), Some(20));
+    assert_eq(xs.get(0), Maybe.Some(30));
+    assert_eq(xs.get(2), Maybe.Some(10));
+    assert_eq(xs.get(1), Maybe.Some(20));
 }
 
 @test
 fn test_list_swap_same_index_is_noop() {
     let mut xs: List<Int> = [1, 2, 3];
     xs.swap(1, 1);
-    assert_eq(xs.get(1), Some(2));
+    assert_eq(xs.get(1), Maybe.Some(2));
 }
 
 @test
@@ -233,9 +233,9 @@ fn test_list_truncate_shorter_than_len_drops_tail() {
     let mut xs: List<Int> = [1, 2, 3, 4, 5];
     xs.truncate(3);
     assert_eq(xs.len(), 3);
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(2), Some(3));
-    assert_eq(xs.get(3), None);
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(2), Maybe.Some(3));
+    assert_eq(xs.get(3), Maybe.None);
 }
 
 @test
@@ -260,19 +260,19 @@ fn test_list_truncate_to_zero_clears() {
 fn test_list_reverse_odd_length() {
     let mut xs: List<Int> = [1, 2, 3, 4, 5];
     xs.reverse();
-    assert_eq(xs.get(0), Some(5));
-    assert_eq(xs.get(1), Some(4));
-    assert_eq(xs.get(2), Some(3));
-    assert_eq(xs.get(3), Some(2));
-    assert_eq(xs.get(4), Some(1));
+    assert_eq(xs.get(0), Maybe.Some(5));
+    assert_eq(xs.get(1), Maybe.Some(4));
+    assert_eq(xs.get(2), Maybe.Some(3));
+    assert_eq(xs.get(3), Maybe.Some(2));
+    assert_eq(xs.get(4), Maybe.Some(1));
 }
 
 @test
 fn test_list_reverse_even_length() {
     let mut xs: List<Int> = [1, 2, 3, 4];
     xs.reverse();
-    assert_eq(xs.get(0), Some(4));
-    assert_eq(xs.get(3), Some(1));
+    assert_eq(xs.get(0), Maybe.Some(4));
+    assert_eq(xs.get(3), Maybe.Some(1));
 }
 
 @test
@@ -287,8 +287,8 @@ fn test_list_reverse_involution() {
     let mut xs: List<Int> = [1, 2, 3, 4, 5];
     xs.reverse();
     xs.reverse();
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(4), Some(5));
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(4), Maybe.Some(5));
 }
 
 @test
@@ -296,9 +296,9 @@ fn test_list_insert_at_start_shifts_right() {
     let mut xs: List<Int> = [2, 3, 4];
     xs.insert(0, 1);
     assert_eq(xs.len(), 4);
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(1), Some(2));
-    assert_eq(xs.get(3), Some(4));
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(1), Maybe.Some(2));
+    assert_eq(xs.get(3), Maybe.Some(4));
 }
 
 @test
@@ -306,17 +306,17 @@ fn test_list_insert_at_end_is_push() {
     let mut xs: List<Int> = [1, 2, 3];
     xs.insert(3, 4);
     assert_eq(xs.len(), 4);
-    assert_eq(xs.get(3), Some(4));
+    assert_eq(xs.get(3), Maybe.Some(4));
 }
 
 @test
 fn test_list_insert_in_middle_preserves_order() {
     let mut xs: List<Int> = [10, 30, 40];
     xs.insert(1, 20);
-    assert_eq(xs.get(0), Some(10));
-    assert_eq(xs.get(1), Some(20));
-    assert_eq(xs.get(2), Some(30));
-    assert_eq(xs.get(3), Some(40));
+    assert_eq(xs.get(0), Maybe.Some(10));
+    assert_eq(xs.get(1), Maybe.Some(20));
+    assert_eq(xs.get(2), Maybe.Some(30));
+    assert_eq(xs.get(3), Maybe.Some(40));
 }
 
 @test
@@ -325,8 +325,8 @@ fn test_list_remove_first_shifts_left() {
     let removed = xs.remove(0);
     assert_eq(removed, 1);
     assert_eq(xs.len(), 3);
-    assert_eq(xs.get(0), Some(2));
-    assert_eq(xs.get(2), Some(4));
+    assert_eq(xs.get(0), Maybe.Some(2));
+    assert_eq(xs.get(2), Maybe.Some(4));
 }
 
 @test
@@ -335,7 +335,7 @@ fn test_list_remove_middle_shifts_left() {
     let removed = xs.remove(2);
     assert_eq(removed, 3);
     assert_eq(xs.len(), 3);
-    assert_eq(xs.get(2), Some(4));
+    assert_eq(xs.get(2), Maybe.Some(4));
 }
 
 @test
@@ -345,7 +345,7 @@ fn test_list_swap_remove_returns_and_replaces_with_last() {
     assert_eq(removed, 2);
     assert_eq(xs.len(), 3);
     // Slot 1 now holds what was the last element.
-    assert_eq(xs.get(1), Some(4));
+    assert_eq(xs.get(1), Maybe.Some(4));
 }
 
 // =============================================================================
@@ -379,10 +379,10 @@ fn test_list_contains_in_empty_is_false() {
 fn test_list_sort_ascending() {
     let mut xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
     xs.sort();
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(1), Some(1));
-    assert_eq(xs.get(2), Some(2));
-    assert_eq(xs.get(7), Some(9));
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(1), Maybe.Some(1));
+    assert_eq(xs.get(2), Maybe.Some(2));
+    assert_eq(xs.get(7), Maybe.Some(9));
 }
 
 @test
@@ -396,23 +396,23 @@ fn test_list_sort_empty_is_noop() {
 fn test_list_sort_singleton_is_noop() {
     let mut xs: List<Int> = [42];
     xs.sort();
-    assert_eq(xs.get(0), Some(42));
+    assert_eq(xs.get(0), Maybe.Some(42));
 }
 
 @test
 fn test_list_sort_already_sorted_is_idempotent() {
     let mut xs: List<Int> = [1, 2, 3, 4, 5];
     xs.sort();
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(4), Some(5));
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(4), Maybe.Some(5));
 }
 
 @test
 fn test_list_sort_reverse_input() {
     let mut xs: List<Int> = [5, 4, 3, 2, 1];
     xs.sort();
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(4), Some(5));
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(4), Maybe.Some(5));
 }
 
 // =============================================================================
@@ -465,8 +465,8 @@ fn test_list_retain_drops_non_matching() {
     let mut xs: List<Int> = [1, 2, 3, 4, 5];
     xs.retain(|x| *x % 2 == 0);
     assert_eq(xs.len(), 2);
-    assert_eq(xs.get(0), Some(2));
-    assert_eq(xs.get(1), Some(4));
+    assert_eq(xs.get(0), Maybe.Some(2));
+    assert_eq(xs.get(1), Maybe.Some(4));
 }
 
 @test
@@ -488,9 +488,9 @@ fn test_list_resize_grow_pads_with_value() {
     let mut xs: List<Int> = [1, 2];
     xs.resize(5, 0);
     assert_eq(xs.len(), 5);
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(2), Some(0));
-    assert_eq(xs.get(4), Some(0));
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(2), Maybe.Some(0));
+    assert_eq(xs.get(4), Maybe.Some(0));
 }
 
 @test
@@ -498,8 +498,8 @@ fn test_list_resize_shrink_truncates() {
     let mut xs: List<Int> = [1, 2, 3, 4, 5];
     xs.resize(2, 0);
     assert_eq(xs.len(), 2);
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(1), Some(2));
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(1), Maybe.Some(2));
 }
 
 @test
@@ -507,23 +507,23 @@ fn test_list_resize_same_len_is_noop() {
     let mut xs: List<Int> = [1, 2, 3];
     xs.resize(3, 0);
     assert_eq(xs.len(), 3);
-    assert_eq(xs.get(2), Some(3));
+    assert_eq(xs.get(2), Maybe.Some(3));
 }
 
 @test
 fn test_list_rotate_left_basic() {
     let mut xs: List<Int> = [1, 2, 3, 4, 5];
     xs.rotate_left(2);
-    assert_eq(xs.get(0), Some(3));
-    assert_eq(xs.get(4), Some(2));
+    assert_eq(xs.get(0), Maybe.Some(3));
+    assert_eq(xs.get(4), Maybe.Some(2));
 }
 
 @test
 fn test_list_rotate_left_zero_is_noop() {
     let mut xs: List<Int> = [1, 2, 3];
     xs.rotate_left(0);
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(2), Some(3));
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(2), Maybe.Some(3));
 }
 
 @test
@@ -532,10 +532,10 @@ fn test_list_dedup_consecutive_duplicates() {
     xs.dedup();
     // Dedup keeps the first of each consecutive run.
     assert_eq(xs.len(), 4);
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(1), Some(2));
-    assert_eq(xs.get(2), Some(3));
-    assert_eq(xs.get(3), Some(1));
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(1), Maybe.Some(2));
+    assert_eq(xs.get(2), Maybe.Some(3));
+    assert_eq(xs.get(3), Maybe.Some(1));
 }
 
 @test
@@ -550,7 +550,7 @@ fn test_list_dedup_all_same_collapses_to_one() {
     let mut xs: List<Int> = [7, 7, 7, 7, 7];
     xs.dedup();
     assert_eq(xs.len(), 1);
-    assert_eq(xs.get(0), Some(7));
+    assert_eq(xs.get(0), Maybe.Some(7));
 }
 
 // =============================================================================
@@ -560,49 +560,49 @@ fn test_list_dedup_all_same_collapses_to_one() {
 @test
 fn test_list_position_returns_first_match() {
     let xs: List<Int> = [10, 20, 30, 20, 10];
-    assert_eq(xs.position(&20), Some(1));
-    assert_eq(xs.position(&10), Some(0));
-    assert_eq(xs.position(&30), Some(2));
+    assert_eq(xs.position(&20), Maybe.Some(1));
+    assert_eq(xs.position(&10), Maybe.Some(0));
+    assert_eq(xs.position(&30), Maybe.Some(2));
 }
 
 @test
 fn test_list_position_missing_returns_none() {
     let xs: List<Int> = [10, 20, 30];
-    assert_eq(xs.position(&99), None);
+    assert_eq(xs.position(&99), Maybe.None);
 }
 
 @test
 fn test_list_position_in_empty_is_none() {
     let xs: List<Int> = [];
-    assert_eq(xs.position(&1), None);
+    assert_eq(xs.position(&1), Maybe.None);
 }
 
 @test
 fn test_list_index_of_returns_first_match() {
     let xs: List<Int> = [5, 10, 15, 10, 5];
-    assert_eq(xs.index_of(&10), Some(1));
-    assert_eq(xs.index_of(&5), Some(0));
-    assert_eq(xs.index_of(&15), Some(2));
+    assert_eq(xs.index_of(&10), Maybe.Some(1));
+    assert_eq(xs.index_of(&5), Maybe.Some(0));
+    assert_eq(xs.index_of(&15), Maybe.Some(2));
 }
 
 @test
 fn test_list_index_of_missing_returns_none() {
     let xs: List<Int> = [1, 2, 3];
-    assert_eq(xs.index_of(&42), None);
+    assert_eq(xs.index_of(&42), Maybe.None);
 }
 
 @test
 fn test_list_rposition_returns_last_match() {
     let xs: List<Int> = [10, 20, 30, 20, 10];
-    assert_eq(xs.rposition(&20), Some(3));
-    assert_eq(xs.rposition(&10), Some(4));
-    assert_eq(xs.rposition(&30), Some(2));
+    assert_eq(xs.rposition(&20), Maybe.Some(3));
+    assert_eq(xs.rposition(&10), Maybe.Some(4));
+    assert_eq(xs.rposition(&30), Maybe.Some(2));
 }
 
 @test
 fn test_list_rposition_missing_returns_none() {
     let xs: List<Int> = [1, 2, 3];
-    assert_eq(xs.rposition(&7), None);
+    assert_eq(xs.rposition(&7), Maybe.None);
 }
 
 // =============================================================================
@@ -612,7 +612,7 @@ fn test_list_rposition_missing_returns_none() {
 @test
 fn test_list_pop_front_returns_first_element() {
     let mut xs: List<Int> = [10, 20, 30];
-    assert_eq(xs.pop_front(), Some(10));
+    assert_eq(xs.pop_front(), Maybe.Some(10));
     assert_eq(xs.len(), 2);
 }
 
@@ -620,22 +620,22 @@ fn test_list_pop_front_returns_first_element() {
 fn test_list_pop_front_shifts_remaining_left() {
     let mut xs: List<Int> = [1, 2, 3, 4];
     xs.pop_front();
-    assert_eq(xs.get(0), Some(2));
-    assert_eq(xs.get(1), Some(3));
-    assert_eq(xs.get(2), Some(4));
+    assert_eq(xs.get(0), Maybe.Some(2));
+    assert_eq(xs.get(1), Maybe.Some(3));
+    assert_eq(xs.get(2), Maybe.Some(4));
 }
 
 @test
 fn test_list_pop_front_on_empty_returns_none() {
     let mut xs: List<Int> = [];
-    assert_eq(xs.pop_front(), None);
+    assert_eq(xs.pop_front(), Maybe.None);
     assert_eq(xs.len(), 0);
 }
 
 @test
 fn test_list_pop_front_singleton_empties() {
     let mut xs: List<Int> = [42];
-    assert_eq(xs.pop_front(), Some(42));
+    assert_eq(xs.pop_front(), Maybe.Some(42));
     assert(xs.is_empty());
 }
 
@@ -649,9 +649,9 @@ fn test_list_extend_from_slice_appends_in_order() {
     let src: List<Int> = [3, 4, 5];
     xs.extend_from_slice(src.as_slice());
     assert_eq(xs.len(), 5);
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(2), Some(3));
-    assert_eq(xs.get(4), Some(5));
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(2), Maybe.Some(3));
+    assert_eq(xs.get(4), Maybe.Some(5));
 }
 
 @test
@@ -668,7 +668,7 @@ fn test_list_append_moves_other_to_self() {
     let mut ys: List<Int> = [3, 4, 5];
     xs.append(&mut ys);
     assert_eq(xs.len(), 5);
-    assert_eq(xs.get(4), Some(5));
+    assert_eq(xs.get(4), Maybe.Some(5));
     // Per std contract, `other` is emptied after append.
     assert_eq(ys.len(), 0);
 }
@@ -691,8 +691,8 @@ fn test_list_split_off_at_zero_moves_all() {
     let tail = xs.split_off(0);
     assert_eq(xs.len(), 0);
     assert_eq(tail.len(), 3);
-    assert_eq(tail.get(0), Some(1));
-    assert_eq(tail.get(2), Some(3));
+    assert_eq(tail.get(0), Maybe.Some(1));
+    assert_eq(tail.get(2), Maybe.Some(3));
 }
 
 @test
@@ -708,11 +708,11 @@ fn test_list_split_off_middle_partitions() {
     let mut xs: List<Int> = [1, 2, 3, 4, 5];
     let tail = xs.split_off(2);
     assert_eq(xs.len(), 2);
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(1), Some(2));
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(1), Maybe.Some(2));
     assert_eq(tail.len(), 3);
-    assert_eq(tail.get(0), Some(3));
-    assert_eq(tail.get(2), Some(5));
+    assert_eq(tail.get(0), Maybe.Some(3));
+    assert_eq(tail.get(2), Maybe.Some(5));
 }
 
 // =============================================================================
@@ -724,18 +724,18 @@ fn test_list_rotate_right_basic() {
     let mut xs: List<Int> = [1, 2, 3, 4, 5];
     xs.rotate_right(2);
     // Last 2 elements move to front: [4, 5, 1, 2, 3]
-    assert_eq(xs.get(0), Some(4));
-    assert_eq(xs.get(1), Some(5));
-    assert_eq(xs.get(2), Some(1));
-    assert_eq(xs.get(4), Some(3));
+    assert_eq(xs.get(0), Maybe.Some(4));
+    assert_eq(xs.get(1), Maybe.Some(5));
+    assert_eq(xs.get(2), Maybe.Some(1));
+    assert_eq(xs.get(4), Maybe.Some(3));
 }
 
 @test
 fn test_list_rotate_right_zero_is_noop() {
     let mut xs: List<Int> = [1, 2, 3];
     xs.rotate_right(0);
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(2), Some(3));
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(2), Maybe.Some(3));
 }
 
 @test
@@ -743,8 +743,8 @@ fn test_list_rotate_right_then_left_is_identity() {
     let mut xs: List<Int> = [1, 2, 3, 4, 5];
     xs.rotate_right(2);
     xs.rotate_left(2);
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(4), Some(5));
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(4), Maybe.Some(5));
 }
 
 // =============================================================================
@@ -852,19 +852,19 @@ fn test_list_ends_with_longer_than_self_is_false() {
 @test
 fn test_list_position_by_returns_first_index() {
     let xs: List<Int> = [1, 2, 3, 4];
-    assert_eq(xs.position_by(|x| *x >= 3), Some(2));
+    assert_eq(xs.position_by(|x| *x >= 3), Maybe.Some(2));
 }
 
 @test
 fn test_list_position_by_no_match_returns_none() {
     let xs: List<Int> = [1, 2, 3];
-    assert_eq(xs.position_by(|x| *x > 100), None);
+    assert_eq(xs.position_by(|x| *x > 100), Maybe.None);
 }
 
 @test
 fn test_list_position_by_on_empty_is_none() {
     let xs: List<Int> = [];
-    assert_eq(xs.position_by(|x| *x > 0), None);
+    assert_eq(xs.position_by(|x| *x > 0), Maybe.None);
 }
 
 // =============================================================================
@@ -1007,8 +1007,8 @@ fn test_list_shrink_to_fit_reduces_capacity_to_len() {
     assert(xs.capacity() <= 64);
     assert_eq(xs.len(), 3);
     // Values preserved.
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(2), Some(3));
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(2), Maybe.Some(3));
 }
 
 @ignore
@@ -1018,7 +1018,7 @@ fn test_list_shrink_to_min_capacity() {
     xs.push(1);
     xs.shrink_to(16);
     assert(xs.capacity() <= 64);
-    assert_eq(xs.get(0), Some(1));
+    assert_eq(xs.get(0), Maybe.Some(1));
 }
 
 // =============================================================================
@@ -1099,7 +1099,7 @@ fn test_list_try_push_succeeds_under_normal_growth() {
     let r = xs.try_push(42);
     assert(r.is_ok());
     assert_eq(xs.len(), 1);
-    assert_eq(xs.get(0), Some(42));
+    assert_eq(xs.get(0), Maybe.Some(42));
 }
 
 // =============================================================================
@@ -1110,37 +1110,37 @@ fn test_list_try_push_succeeds_under_normal_growth() {
 fn test_list_get_mut_in_bounds_returns_some() {
     let mut xs: List<Int> = [10, 20, 30];
     let v = xs.get_mut(1);
-    assert_eq(v, Some(20));
+    assert_eq(v, Maybe.Some(20));
 }
 
 @test
 fn test_list_get_mut_out_of_bounds_returns_none() {
     let mut xs: List<Int> = [1, 2, 3];
-    assert_eq(xs.get_mut(99), None);
+    assert_eq(xs.get_mut(99), Maybe.None);
 }
 
 @test
 fn test_list_first_mut_of_non_empty() {
     let mut xs: List<Int> = [10, 20, 30];
-    assert_eq(xs.first_mut(), Some(10));
+    assert_eq(xs.first_mut(), Maybe.Some(10));
 }
 
 @test
 fn test_list_first_mut_of_empty_is_none() {
     let mut xs: List<Int> = [];
-    assert_eq(xs.first_mut(), None);
+    assert_eq(xs.first_mut(), Maybe.None);
 }
 
 @test
 fn test_list_last_mut_of_non_empty() {
     let mut xs: List<Int> = [10, 20, 30];
-    assert_eq(xs.last_mut(), Some(30));
+    assert_eq(xs.last_mut(), Maybe.Some(30));
 }
 
 @test
 fn test_list_last_mut_of_empty_is_none() {
     let mut xs: List<Int> = [];
-    assert_eq(xs.last_mut(), None);
+    assert_eq(xs.last_mut(), Maybe.None);
 }
 
 // =============================================================================
@@ -1162,10 +1162,10 @@ fn test_list_sort_unstable_ascending() {
     let mut xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
     xs.sort_unstable();
     // Sorted order regardless of stability.
-    assert_eq(xs.get(0), Some(1));
-    assert_eq(xs.get(1), Some(1));
-    assert_eq(xs.get(2), Some(2));
-    assert_eq(xs.get(7), Some(9));
+    assert_eq(xs.get(0), Maybe.Some(1));
+    assert_eq(xs.get(1), Maybe.Some(1));
+    assert_eq(xs.get(2), Maybe.Some(2));
+    assert_eq(xs.get(7), Maybe.Some(9));
 }
 
 @test
@@ -1179,7 +1179,7 @@ fn test_list_sort_unstable_empty_is_noop() {
 fn test_list_sort_unstable_singleton_is_noop() {
     let mut xs: List<Int> = [42];
     xs.sort_unstable();
-    assert_eq(xs.get(0), Some(42));
+    assert_eq(xs.get(0), Maybe.Some(42));
 }
 
 // `sorted()` calls `self.clone().sort()` — pinned @ignore because the
@@ -1191,11 +1191,11 @@ fn test_list_sorted_returns_new_sorted_list() {
     let xs: List<Int> = [3, 1, 2];
     let ys = xs.sorted();
     // Original unchanged.
-    assert_eq(xs.get(0), Some(3));
+    assert_eq(xs.get(0), Maybe.Some(3));
     // New list sorted.
-    assert_eq(ys.get(0), Some(1));
-    assert_eq(ys.get(1), Some(2));
-    assert_eq(ys.get(2), Some(3));
+    assert_eq(ys.get(0), Maybe.Some(1));
+    assert_eq(ys.get(1), Maybe.Some(2));
+    assert_eq(ys.get(2), Maybe.Some(3));
 }
 
 // =============================================================================
@@ -1210,8 +1210,8 @@ fn test_list_chunks_of_2_partitions_evenly() {
     let xs: List<Int> = [1, 2, 3, 4];
     let cs = xs.chunks(2);
     assert_eq(cs.len(), 2);
-    assert_eq(cs.get(0).map(|c| c.len()), Some(2));
-    assert_eq(cs.get(1).map(|c| c.len()), Some(2));
+    assert_eq(cs.get(0).map(|c| c.len()), Maybe.Some(2));
+    assert_eq(cs.get(1).map(|c| c.len()), Maybe.Some(2));
 }
 
 @test
@@ -1220,7 +1220,7 @@ fn test_list_chunks_with_remainder() {
     let cs = xs.chunks(2);
     assert_eq(cs.len(), 3);
     // Last chunk has 1 elem.
-    assert_eq(cs.get(2).map(|c| c.len()), Some(1));
+    assert_eq(cs.get(2).map(|c| c.len()), Maybe.Some(1));
 }
 
 @test
@@ -1228,7 +1228,7 @@ fn test_list_chunks_size_larger_than_len_yields_one() {
     let xs: List<Int> = [1, 2];
     let cs = xs.chunks(5);
     assert_eq(cs.len(), 1);
-    assert_eq(cs.get(0).map(|c| c.len()), Some(2));
+    assert_eq(cs.get(0).map(|c| c.len()), Maybe.Some(2));
 }
 
 @test
@@ -1266,8 +1266,8 @@ fn test_list_partition_by_separates_by_predicate() {
     let (evens, odds) = xs.partition_by(|x| *x % 2 == 0);
     assert_eq(evens.len(), 3);
     assert_eq(odds.len(), 3);
-    assert_eq(evens.get(0), Some(2));
-    assert_eq(odds.get(0), Some(1));
+    assert_eq(evens.get(0), Maybe.Some(2));
+    assert_eq(odds.get(0), Maybe.Some(1));
 }
 
 @test

@@ -61,15 +61,15 @@ fn integration_fs_event_kind_exhaustive_dispatch() {
 
 @test
 fn integration_fs_event_kind_via_maybe_some() {
-    let opt: Maybe<FsEventKind> = Some(FsEventKind.Deleted);
+    let opt: Maybe<FsEventKind> = Maybe.Some(FsEventKind.Deleted);
     match opt {
-        Some(k) => {
+        Maybe.Some(k) => {
             match k {
                 FsEventKind.Deleted => assert(true),
                 _ => assert(false),
             }
         }
-        None => assert(false),
+        Maybe.None => assert(false),
     };
 }
 

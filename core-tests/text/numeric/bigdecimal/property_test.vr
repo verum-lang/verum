@@ -24,7 +24,7 @@ fn law_add_commutativity() {
     let a = bd(3);
     let b = bd(7);
     match (a.add(&b), b.add(&a)) {
-        (Ok(ab), Ok(ba)) => assert(ab.eq(&ba)),
+        (Result.Ok(ab), Result.Ok(ba)) => assert(ab.eq(&ba)),
         _ => panic("add must succeed"),
     };
 }
@@ -35,8 +35,8 @@ fn law_add_zero_identity() {
     let a = bd(42);
     let zero = BigDecimal.zero();
     match a.add(&zero) {
-        Ok(r) => assert(r.eq(&a)),
-        Err(_) => panic("a + 0 must succeed"),
+        Result.Ok(r) => assert(r.eq(&a)),
+        Result.Err(_) => panic("a + 0 must succeed"),
     };
 }
 
@@ -46,7 +46,7 @@ fn law_mul_commutativity() {
     let a = bd(3);
     let b = bd(7);
     match (a.mul(&b), b.mul(&a)) {
-        (Ok(ab), Ok(ba)) => assert(ab.eq(&ba)),
+        (Result.Ok(ab), Result.Ok(ba)) => assert(ab.eq(&ba)),
         _ => panic("mul must succeed"),
     };
 }
@@ -57,8 +57,8 @@ fn law_mul_one_identity() {
     let a = bd(42);
     let one = BigDecimal.one();
     match a.mul(&one) {
-        Ok(r) => assert(r.eq(&a)),
-        Err(_) => panic("a * 1 must succeed"),
+        Result.Ok(r) => assert(r.eq(&a)),
+        Result.Err(_) => panic("a * 1 must succeed"),
     };
 }
 

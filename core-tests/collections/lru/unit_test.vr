@@ -45,7 +45,7 @@ fn test_lru_new_negative_capacity_clamps_to_one() {
 fn test_lru_insert_new_returns_none() {
     let mut c: LruCache<Int, Int> = LruCache.new(4);
     let prev = c.insert(1, 100);
-    assert(prev is None);
+    assert(prev is Maybe.None);
     assert_eq(c.len(), 1);
 }
 
@@ -54,7 +54,7 @@ fn test_lru_insert_existing_returns_prior_value() {
     let mut c: LruCache<Int, Int> = LruCache.new(4);
     c.insert(1, 100);
     let prev = c.insert(1, 200);
-    assert_eq(prev, Some(100));
+    assert_eq(prev, Maybe.Some(100));
     assert_eq(c.len(), 1);
 }
 
@@ -67,14 +67,14 @@ fn test_lru_get_present_returns_some() {
     let mut c: LruCache<Int, Int> = LruCache.new(4);
     c.insert(1, 100);
     let v = c.get(&1);
-    assert_eq(v, Some(100));
+    assert_eq(v, Maybe.Some(100));
 }
 
 @test
 fn test_lru_get_absent_returns_none() {
     let mut c: LruCache<Int, Int> = LruCache.new(4);
     let v: Maybe<Int> = c.get(&999);
-    assert(v is None);
+    assert(v is Maybe.None);
 }
 
 @test
@@ -82,7 +82,7 @@ fn test_lru_peek_present_returns_some() {
     let mut c: LruCache<Int, Int> = LruCache.new(4);
     c.insert(1, 100);
     let v = c.peek(&1);
-    assert_eq(v, Some(100));
+    assert_eq(v, Maybe.Some(100));
 }
 
 @test
@@ -107,7 +107,7 @@ fn test_lru_remove_present_returns_value() {
     let mut c: LruCache<Int, Int> = LruCache.new(4);
     c.insert(1, 100);
     let r = c.remove(&1);
-    assert_eq(r, Some(100));
+    assert_eq(r, Maybe.Some(100));
     assert_eq(c.len(), 0);
 }
 
@@ -115,7 +115,7 @@ fn test_lru_remove_present_returns_value() {
 fn test_lru_remove_absent_returns_none() {
     let mut c: LruCache<Int, Int> = LruCache.new(4);
     let r: Maybe<Int> = c.remove(&999);
-    assert(r is None);
+    assert(r is Maybe.None);
 }
 
 // =============================================================================
@@ -153,9 +153,9 @@ fn test_lru_eviction_at_capacity_drops_oldest() {
     c.insert(3, 300);    // evicts 1
     assert_eq(c.len(), 2);
     let v1: Maybe<Int> = c.get(&1);
-    assert(v1 is None);
-    assert_eq(c.get(&2), Some(200));
-    assert_eq(c.get(&3), Some(300));
+    assert(v1 is Maybe.None);
+    assert_eq(c.get(&2), Maybe.Some(200));
+    assert_eq(c.get(&3), Maybe.Some(300));
 }
 
 @test
@@ -165,10 +165,10 @@ fn test_lru_eviction_does_not_drop_recently_accessed() {
     c.insert(2, 200);
     let _ = c.get(&1);   // touch 1 → 2 is now LRU
     c.insert(3, 300);    // evicts 2 (LRU)
-    assert_eq(c.get(&1), Some(100));
+    assert_eq(c.get(&1), Maybe.Some(100));
     let v2: Maybe<Int> = c.get(&2);
-    assert(v2 is None);
-    assert_eq(c.get(&3), Some(300));
+    assert(v2 is Maybe.None);
+    assert_eq(c.get(&3), Maybe.Some(300));
 }
 
 // =============================================================================
@@ -226,7 +226,7 @@ fn test_lru_peek_does_not_touch_order() {
     let _ = c.peek(&1);   // peek 1, but order should still have 1 as LRU
     c.insert(3, 300);     // should evict 1, not 2
     let v1: Maybe<Int> = c.get(&1);
-    assert(v1 is None);
-    assert_eq(c.get(&2), Some(200));
-    assert_eq(c.get(&3), Some(300));
+    assert(v1 is Maybe.None);
+    assert_eq(c.get(&2), Maybe.Some(200));
+    assert_eq(c.get(&3), Maybe.Some(300));
 }

@@ -130,8 +130,8 @@ fn test_round_trip_empty() {
     let input: [Byte; 0] = [];
     let encoded = encode(&input);
     match decode(&encoded) {
-        Ok(decoded) => assert_eq(decoded.len(), 0),
-        Err(_) => panic("empty round-trip should succeed"),
+        Result.Ok(decoded) => assert_eq(decoded.len(), 0),
+        Result.Err(_) => panic("empty round-trip should succeed"),
     }
 }
 
@@ -140,11 +140,11 @@ fn test_round_trip_single_byte() {
     let input: [Byte; 1] = [0x42_u8];
     let encoded = encode(&input);
     match decode(&encoded) {
-        Ok(decoded) => {
+        Result.Ok(decoded) => {
             assert_eq(decoded.len(), 1);
             assert_eq(decoded[0], 0x42_u8);
         },
-        Err(_) => panic("1-byte round-trip should succeed"),
+        Result.Err(_) => panic("1-byte round-trip should succeed"),
     }
 }
 
@@ -153,13 +153,13 @@ fn test_round_trip_three_bytes() {
     let input: [Byte; 3] = [0xCA_u8, 0xFE_u8, 0xBA_u8];
     let encoded = encode(&input);
     match decode(&encoded) {
-        Ok(decoded) => {
+        Result.Ok(decoded) => {
             assert_eq(decoded.len(), 3);
             assert_eq(decoded[0], 0xCA_u8);
             assert_eq(decoded[1], 0xFE_u8);
             assert_eq(decoded[2], 0xBA_u8);
         },
-        Err(_) => panic("3-byte round-trip should succeed"),
+        Result.Err(_) => panic("3-byte round-trip should succeed"),
     }
 }
 
@@ -168,7 +168,7 @@ fn test_round_trip_five_bytes() {
     let input: [Byte; 5] = [0xFF_u8; 5];
     let encoded = encode(&input);
     match decode(&encoded) {
-        Ok(decoded) => {
+        Result.Ok(decoded) => {
             assert_eq(decoded.len(), 5);
             let mut i = 0;
             while i < 5 {
@@ -176,7 +176,7 @@ fn test_round_trip_five_bytes() {
                 i = i + 1;
             }
         },
-        Err(_) => panic("5-byte all-ones round-trip should succeed"),
+        Result.Err(_) => panic("5-byte all-ones round-trip should succeed"),
     }
 }
 
@@ -192,11 +192,11 @@ fn test_decode_lowercase_my() {
         0x3D_u8, 0x3D_u8, 0x3D_u8, 0x3D_u8,
     ];
     match decode(&input) {
-        Ok(decoded) => {
+        Result.Ok(decoded) => {
             assert_eq(decoded.len(), 1);
             assert_eq(decoded[0], 0x66_u8); // 'f'
         },
-        Err(_) => panic("lowercase 'my======' should decode to 'f'"),
+        Result.Err(_) => panic("lowercase 'my======' should decode to 'f'"),
     }
 }
 
@@ -209,11 +209,11 @@ fn test_decode_no_pad_two_chars() {
     // "MY" (no padding) should decode to "f"
     let input: [Byte; 2] = [0x4D_u8, 0x59_u8];
     match decode_no_pad(&input) {
-        Ok(decoded) => {
+        Result.Ok(decoded) => {
             assert_eq(decoded.len(), 1);
             assert_eq(decoded[0], 0x66_u8); // 'f'
         },
-        Err(_) => panic("'MY' (no padding) should decode to 'f'"),
+        Result.Err(_) => panic("'MY' (no padding) should decode to 'f'"),
     }
 }
 
@@ -229,8 +229,8 @@ fn test_decode_invalid_character_exclaim() {
         0x3D_u8, 0x3D_u8, 0x3D_u8, 0x3D_u8,
     ];
     match decode(&input) {
-        Ok(_) => panic("'!' is not base32"),
-        Err(e) => assert(e is Base32Error.InvalidCharacter),
+        Result.Ok(_) => panic("'!' is not base32"),
+        Result.Err(e) => assert(e is Base32Error.InvalidCharacter),
     }
 }
 
@@ -239,7 +239,7 @@ fn test_decode_invalid_length_3() {
     // Length 3 — not a multiple of 8 for padded base32
     let input: [Byte; 3] = [0x4D_u8, 0x59_u8, 0x3D_u8];
     match decode(&input) {
-        Ok(_) => panic("length-3 input should fail"),
-        Err(e) => assert(e is Base32Error.InvalidLength),
+        Result.Ok(_) => panic("length-3 input should fail"),
+        Result.Err(e) => assert(e is Base32Error.InvalidLength),
     }
 }

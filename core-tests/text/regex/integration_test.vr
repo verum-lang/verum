@@ -13,7 +13,7 @@
 // =============================================================================
 
 mount core.text.{Text, Regex};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -101,11 +101,11 @@ fn integration_replace_all_chain() {
 fn integration_captures_extract_named_value() {
     let r = Regex.new("user=(\\w+)").unwrap();
     match r.captures("auth: user=alice; role=admin") {
-        Some(groups) => {
+        Maybe.Some(groups) => {
             assert(groups.len() >= 2);
             assert_eq(groups[1], "alice");
         }
-        None => panic("user= present"),
+        Maybe.None => panic("user= present"),
     }
 }
 

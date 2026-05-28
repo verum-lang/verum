@@ -22,7 +22,7 @@ mount core.async.intrinsics.{
 mount core.async.poll.{Poll};
 mount core.async.future.{Future, ready, ReadyFuture};
 mount core.async.waker.{Context, noop_waker};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: Executor handle — construction + introspection
@@ -52,12 +52,12 @@ fn test_intrinsics_executor_in_async_context_outside_runtime_is_false() {
 
 @test
 fn test_intrinsics_executor_current_outside_runtime_is_none() {
-    // The flip side: Executor.current() returns None outside an
+    // The flip side: Executor.current() returns Maybe.None outside an
     // executor.  Maintaining this invariant means callers can safely
     // probe for an executor without crashing.
     match Executor.current() {
-        Some(_) => assert(false),
-        None => assert(true),
+        Maybe.Some(_) => assert(false),
+        Maybe.None => assert(true),
     }
 }
 
@@ -69,8 +69,8 @@ fn test_intrinsics_executor_current_outside_runtime_is_none() {
 fn test_intrinsics_future_poll_sync_ready_future_returns_some_value() {
     let mut f = ready(42);
     match future_poll_sync(&mut f) {
-        Some(v) => assert_eq(v, 42),
-        None => assert(false),
+        Maybe.Some(v) => assert_eq(v, 42),
+        Maybe.None => assert(false),
     }
 }
 
@@ -78,8 +78,8 @@ fn test_intrinsics_future_poll_sync_ready_future_returns_some_value() {
 fn test_intrinsics_future_poll_sync_ready_text_payload() {
     let mut f: ReadyFuture<Text> = ready("hello");
     match future_poll_sync(&mut f) {
-        Some(v) => assert_eq(v, "hello"),
-        None => assert(false),
+        Maybe.Some(v) => assert_eq(v, "hello"),
+        Maybe.None => assert(false),
     }
 }
 
@@ -87,8 +87,8 @@ fn test_intrinsics_future_poll_sync_ready_text_payload() {
 fn test_intrinsics_future_poll_sync_ready_bool_payload() {
     let mut f: ReadyFuture<Bool> = ready(true);
     match future_poll_sync(&mut f) {
-        Some(v) => assert_eq(v, true),
-        None => assert(false),
+        Maybe.Some(v) => assert_eq(v, true),
+        Maybe.None => assert(false),
     }
 }
 

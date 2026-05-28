@@ -7,7 +7,7 @@
 // =============================================================================
 
 mount core.io.path.{Path, PathBuf, Component, MAIN_SEPARATOR, normalize};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -197,8 +197,8 @@ fn regression_text_starts_with_char_empty_text() {
 fn regression_path_file_name_with_trailing_separator() {
     let p = Path.new(&Text.from("/home/user/"));
     match p.file_name() {
-        Some(name) => assert_eq(name, Text.from("user")),
-        None => assert(false),
+        Maybe.Some(name) => assert_eq(name, Text.from("user")),
+        Maybe.None => assert(false),
     }
 }
 

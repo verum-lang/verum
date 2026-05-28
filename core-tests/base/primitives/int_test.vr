@@ -265,63 +265,63 @@ fn test_int_pow() {
 @test
 fn test_int_checked_add() {
     // Normal cases
-    assert_eq(5.checked_add(3), Some(8));
-    assert_eq(0.checked_add(0), Some(0));
-    assert_eq((-5).checked_add(3), Some(-2));
-    assert_eq((-5).checked_add(-3), Some(-8));
+    assert_eq(5.checked_add(3), Maybe.Some(8));
+    assert_eq(0.checked_add(0), Maybe.Some(0));
+    assert_eq((-5).checked_add(3), Maybe.Some(-2));
+    assert_eq((-5).checked_add(-3), Maybe.Some(-8));
 
     // Overflow detection
-    assert_eq(Int.max_value().checked_add(1), None);
-    assert_eq(Int.max_value().checked_add(Int.max_value()), None);
+    assert_eq(Int.max_value().checked_add(1), Maybe.None);
+    assert_eq(Int.max_value().checked_add(Int.max_value()), Maybe.None);
 
     // Underflow detection
-    assert_eq(Int.min_value().checked_add(-1), None);
+    assert_eq(Int.min_value().checked_add(-1), Maybe.None);
 }
 
 @test
 fn test_int_checked_sub() {
     // Normal cases
-    assert_eq(5.checked_sub(3), Some(2));
-    assert_eq(3.checked_sub(5), Some(-2));
-    assert_eq(0.checked_sub(0), Some(0));
+    assert_eq(5.checked_sub(3), Maybe.Some(2));
+    assert_eq(3.checked_sub(5), Maybe.Some(-2));
+    assert_eq(0.checked_sub(0), Maybe.Some(0));
 
     // Overflow detection (subtracting negative causes positive overflow)
-    assert_eq(Int.max_value().checked_sub(-1), None);
+    assert_eq(Int.max_value().checked_sub(-1), Maybe.None);
 
     // Underflow detection
-    assert_eq(Int.min_value().checked_sub(1), None);
+    assert_eq(Int.min_value().checked_sub(1), Maybe.None);
 }
 
 @test
 fn test_int_checked_mul() {
     // Normal cases
-    assert_eq(5.checked_mul(3), Some(15));
-    assert_eq((-5).checked_mul(3), Some(-15));
-    assert_eq((-5).checked_mul(-3), Some(15));
-    assert_eq(0.checked_mul(Int.max_value()), Some(0));
+    assert_eq(5.checked_mul(3), Maybe.Some(15));
+    assert_eq((-5).checked_mul(3), Maybe.Some(-15));
+    assert_eq((-5).checked_mul(-3), Maybe.Some(15));
+    assert_eq(0.checked_mul(Int.max_value()), Maybe.Some(0));
 
     // Overflow detection
-    assert_eq(Int.max_value().checked_mul(2), None);
-    assert_eq(Int.max_value().checked_mul(Int.max_value()), None);
+    assert_eq(Int.max_value().checked_mul(2), Maybe.None);
+    assert_eq(Int.max_value().checked_mul(Int.max_value()), Maybe.None);
 
     // Large multiplication that would overflow
     let big = 1000000000;
-    assert_eq(big.checked_mul(big), Some(1000000000000000000));
-    assert_eq((big * 10).checked_mul(big * 10), None);  // 10^20 overflows
+    assert_eq(big.checked_mul(big), Maybe.Some(1000000000000000000));
+    assert_eq((big * 10).checked_mul(big * 10), Maybe.None);  // 10^20 overflows
 }
 
 @test
 fn test_int_checked_div() {
     // Normal cases
-    assert_eq(10.checked_div(2), Some(5));
-    assert_eq(10.checked_div(3), Some(3));  // Truncates
-    assert_eq((-10).checked_div(3), Some(-3));
-    assert_eq(0.checked_div(5), Some(0));
+    assert_eq(10.checked_div(2), Maybe.Some(5));
+    assert_eq(10.checked_div(3), Maybe.Some(3));  // Truncates
+    assert_eq((-10).checked_div(3), Maybe.Some(-3));
+    assert_eq(0.checked_div(5), Maybe.Some(0));
 
     // Division by zero
-    assert_eq(10.checked_div(0), None);
-    assert_eq(0.checked_div(0), None);
-    assert_eq((-10).checked_div(0), None);
+    assert_eq(10.checked_div(0), Maybe.None);
+    assert_eq(0.checked_div(0), Maybe.None);
+    assert_eq((-10).checked_div(0), Maybe.None);
 }
 
 // =============================================================================

@@ -19,12 +19,12 @@ fn property_peek_is_max_over_pushed_values() {
     let mut i = 0;
     while i < values.len() {
         match values.get(i) {
-            Some(v) => h.push(v),
-            None => {},
+            Maybe.Some(v) => h.push(v),
+            Maybe.None => {},
         }
         i = i + 1;
     }
-    assert_eq(h.peek(), Some(9));
+    assert_eq(h.peek(), Maybe.Some(9));
 }
 
 // =============================================================================
@@ -38,8 +38,8 @@ fn property_pop_sequence_is_non_increasing() {
     let mut i = 0;
     while i < values.len() {
         match values.get(i) {
-            Some(v) => h.push(v),
-            None => {},
+            Maybe.Some(v) => h.push(v),
+            Maybe.None => {},
         }
         i = i + 1;
     }
@@ -47,7 +47,7 @@ fn property_pop_sequence_is_non_increasing() {
     while !h.is_empty() {
         let cur = h.pop();
         match (prev, cur) {
-            (Some(a), Some(b)) => assert(a >= b),
+            (Maybe.Some(a), Maybe.Some(b)) => assert(a >= b),
             _ => assert(false),
         }
         prev = cur;
@@ -86,8 +86,8 @@ fn property_into_sorted_list_is_monotone_non_decreasing() {
     let mut i = 0;
     while i < values.len() {
         match values.get(i) {
-            Some(v) => h.push(v),
-            None => {},
+            Maybe.Some(v) => h.push(v),
+            Maybe.None => {},
         }
         i = i + 1;
     }

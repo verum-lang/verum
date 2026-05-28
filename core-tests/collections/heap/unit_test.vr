@@ -36,7 +36,7 @@ fn test_heap_new_is_empty() {
 @test
 fn test_heap_new_peek_is_none() {
     let h: BinaryHeap<Int> = BinaryHeap.new();
-    assert_eq(h.peek(), None);
+    assert_eq(h.peek(), Maybe.None);
 }
 
 // =============================================================================
@@ -48,7 +48,7 @@ fn test_heap_push_one_element_peek_returns_it() {
     let mut h: BinaryHeap<Int> = BinaryHeap.new();
     h.push(42);
     assert_eq(h.len(), 1);
-    assert_eq(h.peek(), Some(42));
+    assert_eq(h.peek(), Maybe.Some(42));
 }
 
 @test
@@ -60,7 +60,7 @@ fn test_heap_push_ascending_yields_max_on_top() {
     h.push(4);
     h.push(5);
     // Max-heap: top is the largest pushed.
-    assert_eq(h.peek(), Some(5));
+    assert_eq(h.peek(), Maybe.Some(5));
 }
 
 @test
@@ -71,7 +71,7 @@ fn test_heap_push_descending_yields_max_on_top() {
     h.push(3);
     h.push(2);
     h.push(1);
-    assert_eq(h.peek(), Some(5));
+    assert_eq(h.peek(), Maybe.Some(5));
 }
 
 @test
@@ -85,7 +85,7 @@ fn test_heap_push_mixed_yields_max_on_top() {
     h.push(9);
     h.push(2);
     h.push(6);
-    assert_eq(h.peek(), Some(9));
+    assert_eq(h.peek(), Maybe.Some(9));
 }
 
 // =============================================================================
@@ -100,12 +100,12 @@ fn test_heap_pop_returns_max_first() {
     h.push(4);
     h.push(1);
     h.push(5);
-    assert_eq(h.pop(), Some(5));
-    assert_eq(h.pop(), Some(4));
-    assert_eq(h.pop(), Some(3));
-    assert_eq(h.pop(), Some(1));
-    assert_eq(h.pop(), Some(1));
-    assert_eq(h.pop(), None);
+    assert_eq(h.pop(), Maybe.Some(5));
+    assert_eq(h.pop(), Maybe.Some(4));
+    assert_eq(h.pop(), Maybe.Some(3));
+    assert_eq(h.pop(), Maybe.Some(1));
+    assert_eq(h.pop(), Maybe.Some(1));
+    assert_eq(h.pop(), Maybe.None);
 }
 
 @test
@@ -121,7 +121,7 @@ fn test_heap_pop_decrements_len() {
 @test
 fn test_heap_pop_from_empty_is_none() {
     let mut h: BinaryHeap<Int> = BinaryHeap.new();
-    assert_eq(h.pop(), None);
+    assert_eq(h.pop(), Maybe.None);
 }
 
 // =============================================================================
@@ -147,7 +147,7 @@ fn test_heap_clear_then_push_starts_fresh() {
     h.clear();
     h.push(99);
     assert_eq(h.len(), 1);
-    assert_eq(h.peek(), Some(99));
+    assert_eq(h.peek(), Maybe.Some(99));
 }
 
 // =============================================================================
@@ -167,10 +167,10 @@ fn test_heap_into_sorted_list_ascending() {
     h.push(6);
     let sorted = h.into_sorted_list();
     assert_eq(sorted.len(), 8);
-    assert_eq(sorted.get(0), Some(1));
-    assert_eq(sorted.get(1), Some(1));
-    assert_eq(sorted.get(2), Some(2));
-    assert_eq(sorted.get(7), Some(9));
+    assert_eq(sorted.get(0), Maybe.Some(1));
+    assert_eq(sorted.get(1), Maybe.Some(1));
+    assert_eq(sorted.get(2), Maybe.Some(2));
+    assert_eq(sorted.get(7), Maybe.Some(9));
 }
 
 // =============================================================================
@@ -192,7 +192,7 @@ fn test_heap_with_capacity_then_fill_preserves_max_invariant() {
     h.push(9);
     h.push(3);
     // Max-heap → peek returns greatest.
-    assert_eq(h.peek(), Some(9));
+    assert_eq(h.peek(), Maybe.Some(9));
 }
 
 // =============================================================================
@@ -212,7 +212,7 @@ fn test_heap_push_pop_returns_value_when_value_is_largest() {
     // Pushing 100 → it's the new max → pop returns it; heap stays {1,2,3}.
     let out = h.push_pop(100);
     assert_eq(out, 100);
-    assert_eq(h.peek(), Some(3));
+    assert_eq(h.peek(), Maybe.Some(3));
     assert_eq(h.len(), 3);
 }
 
@@ -229,7 +229,7 @@ fn test_heap_push_pop_returns_current_max_when_value_is_smaller() {
     let out = h.push_pop(5);
     assert_eq(out, 30);
     assert_eq(h.len(), 3);
-    assert_eq(h.peek(), Some(20));
+    assert_eq(h.peek(), Maybe.Some(20));
 }
 
 @test
@@ -245,7 +245,7 @@ fn test_heap_push_pop_on_empty_returns_value() {
 // Section 8: replace — pop-then-push compound
 //
 //   `replace(v)` pops the current max (returns it as Maybe) and pushes v.
-//   On an empty heap returns None and v is still pushed.
+//   On an empty heap returns Maybe.None and v is still pushed.
 // =============================================================================
 
 // replace(v): migrated from raw ptr_read/write on as_mut_slice() to
@@ -260,9 +260,9 @@ fn test_heap_replace_returns_previous_max() {
     h.push(10);
     h.push(20);
     let old: Maybe<Int> = h.replace(99);
-    assert_eq(old, Some(20));
+    assert_eq(old, Maybe.Some(20));
     // New max is 99.
-    assert_eq(h.peek(), Some(99));
+    assert_eq(h.peek(), Maybe.Some(99));
     assert_eq(h.len(), 2);
 }
 
@@ -270,8 +270,8 @@ fn test_heap_replace_returns_previous_max() {
 fn test_heap_replace_on_empty_returns_none() {
     let mut h: BinaryHeap<Int> = BinaryHeap.new();
     let old: Maybe<Int> = h.replace(7);
-    assert_eq(old, None);
-    assert_eq(h.peek(), Some(7));
+    assert_eq(old, Maybe.None);
+    assert_eq(h.peek(), Maybe.Some(7));
     assert_eq(h.len(), 1);
 }
 
@@ -284,7 +284,7 @@ fn test_heap_try_push_succeeds() {
     let mut h: BinaryHeap<Int> = BinaryHeap.new();
     let r = h.try_push(42);
     assert(r.is_ok());
-    assert_eq(h.peek(), Some(42));
+    assert_eq(h.peek(), Maybe.Some(42));
 }
 
 // =============================================================================
@@ -295,16 +295,16 @@ fn test_heap_try_push_succeeds() {
 fn test_heap_singleton_pop_then_empty() {
     let mut h: BinaryHeap<Int> = BinaryHeap.new();
     h.push(99);
-    assert_eq(h.pop(), Some(99));
+    assert_eq(h.pop(), Maybe.Some(99));
     assert(h.is_empty());
-    assert_eq(h.pop(), None);
+    assert_eq(h.pop(), Maybe.None);
 }
 
 @test
 fn test_heap_singleton_peek_returns_value() {
     let mut h: BinaryHeap<Int> = BinaryHeap.new();
     h.push(42);
-    assert_eq(h.peek(), Some(42));
+    assert_eq(h.peek(), Maybe.Some(42));
 }
 
 // =============================================================================
@@ -320,12 +320,12 @@ fn test_heap_inserted_in_increasing_order_drains_descending() {
         i = i + 1;
     }
     // Drain — should be 5, 4, 3, 2, 1.
-    assert_eq(h.pop(), Some(5));
-    assert_eq(h.pop(), Some(4));
-    assert_eq(h.pop(), Some(3));
-    assert_eq(h.pop(), Some(2));
-    assert_eq(h.pop(), Some(1));
-    assert_eq(h.pop(), None);
+    assert_eq(h.pop(), Maybe.Some(5));
+    assert_eq(h.pop(), Maybe.Some(4));
+    assert_eq(h.pop(), Maybe.Some(3));
+    assert_eq(h.pop(), Maybe.Some(2));
+    assert_eq(h.pop(), Maybe.Some(1));
+    assert_eq(h.pop(), Maybe.None);
 }
 
 @test
@@ -336,11 +336,11 @@ fn test_heap_inserted_in_decreasing_order_drains_descending() {
         h.push(i);
         i = i - 1;
     }
-    assert_eq(h.pop(), Some(5));
-    assert_eq(h.pop(), Some(4));
-    assert_eq(h.pop(), Some(3));
-    assert_eq(h.pop(), Some(2));
-    assert_eq(h.pop(), Some(1));
+    assert_eq(h.pop(), Maybe.Some(5));
+    assert_eq(h.pop(), Maybe.Some(4));
+    assert_eq(h.pop(), Maybe.Some(3));
+    assert_eq(h.pop(), Maybe.Some(2));
+    assert_eq(h.pop(), Maybe.Some(1));
 }
 
 @test
@@ -350,9 +350,9 @@ fn test_heap_duplicates_preserved_in_drain() {
     h.push(3);
     h.push(3);
     assert_eq(h.len(), 3);
-    assert_eq(h.pop(), Some(3));
-    assert_eq(h.pop(), Some(3));
-    assert_eq(h.pop(), Some(3));
+    assert_eq(h.pop(), Maybe.Some(3));
+    assert_eq(h.pop(), Maybe.Some(3));
+    assert_eq(h.pop(), Maybe.Some(3));
     assert(h.is_empty());
 }
 
@@ -388,7 +388,7 @@ fn test_heap_to_list_does_not_consume_heap() {
     h.push(10);
     let _ = h.to_list();
     // Heap is unchanged: peek still returns max.
-    assert_eq(h.peek(), Some(10));
+    assert_eq(h.peek(), Maybe.Some(10));
     assert_eq(h.len(), 2);
 }
 
@@ -427,7 +427,7 @@ fn test_heap_clear_allows_subsequent_push() {
     h.push(2);
     h.clear();
     h.push(99);
-    assert_eq(h.peek(), Some(99));
+    assert_eq(h.peek(), Maybe.Some(99));
 }
 
 // =============================================================================
@@ -444,7 +444,7 @@ fn test_heap_16_elements_drain_descending() {
     }
     let mut expected = 16;
     while expected >= 1 {
-        assert_eq(h.pop(), Some(expected));
+        assert_eq(h.pop(), Maybe.Some(expected));
         expected = expected - 1;
     }
     assert(h.is_empty());

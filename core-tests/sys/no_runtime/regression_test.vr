@@ -25,14 +25,14 @@ fn regression_sync_channel_send_full_preserves_existing() {
     assert(!second);
     // Recv must return the FIRST value (1), not the rejected `99`.
     match c.recv() {
-        Some(v) => assert_eq(v, 1),
-        None    => assert(false),
+        Maybe.Some(v) => assert_eq(v, 1),
+        Maybe.None    => assert(false),
     };
 }
 
 // =============================================================================
 // REGRESSION 2: SyncChannel.recv on Full must transition the channel back
-// to Empty — pre-fix shape where `recv` returned `Some(v)` without
+// to Empty — pre-fix shape where `recv` returned `Maybe.Some(v)` without
 // clearing the state would yield a second-recv of the same value.
 // =============================================================================
 
@@ -43,10 +43,10 @@ fn regression_sync_channel_recv_clears_state() {
     let _ = c.recv();
     // After one recv, channel must be Empty.
     assert(c.is_empty());
-    // Second recv must yield None.
+    // Second recv must yield Maybe.None.
     match c.recv() {
-        Some(_) => assert(false),
-        None    => assert(true),
+        Maybe.Some(_) => assert(false),
+        Maybe.None    => assert(true),
     };
 }
 

@@ -179,28 +179,28 @@ fn test_signal_from_raw_known_codes_round_trip() {
     for c in codes.iter() {
         let (n, expected) = *c;
         match Signal.from_raw(n) {
-            Some(s) => assert(s.eq(&expected)),
-            None => assert(false),
+            Maybe.Some(s) => assert(s.eq(&expected)),
+            Maybe.None => assert(false),
         };
     }
 }
 
 @test
 fn test_signal_from_raw_unknown_yields_none() {
-    // Signal numbers outside the supported set return None — pinning
-    // both the structural "unknown → None" property and the boundary
+    // Signal numbers outside the supported set return Maybe.None — pinning
+    // both the structural "unknown → Maybe.None" property and the boundary
     // at the high end.
     match Signal.from_raw(0) {
-        None => assert(true),
-        Some(_) => assert(false),
+        Maybe.None => assert(true),
+        Maybe.Some(_) => assert(false),
     };
     match Signal.from_raw(99) {
-        None => assert(true),
-        Some(_) => assert(false),
+        Maybe.None => assert(true),
+        Maybe.Some(_) => assert(false),
     };
     match Signal.from_raw(-1) {
-        None => assert(true),
-        Some(_) => assert(false),
+        Maybe.None => assert(true),
+        Maybe.Some(_) => assert(false),
     };
 }
 

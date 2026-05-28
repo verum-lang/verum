@@ -38,8 +38,8 @@ fn guard_mod_pow_basic() {
     // 2^10 mod 1000 = 1024 mod 1000 = 24
     let r = mod_pow(&bi(2), &bi(10), &bi(1000));
     match r {
-        Ok(v) => assert_eq(v.to_text(), "24"),
-        Err(_) => panic("mod_pow(2, 10, 1000) must succeed"),
+        Result.Ok(v) => assert_eq(v.to_text(), "24"),
+        Result.Err(_) => panic("mod_pow(2, 10, 1000) must succeed"),
     };
 }
 
@@ -48,8 +48,8 @@ fn guard_mod_inverse_small_prime() {
     // 3 * 5 = 15 ≡ 1 (mod 7), so 5 is mod_inverse(3, 7)
     let r = mod_inverse(&bi(3), &bi(7));
     match r {
-        Ok(v) => assert_eq(v.to_text(), "5"),
-        Err(_) => panic("mod_inverse(3, 7) must succeed"),
+        Result.Ok(v) => assert_eq(v.to_text(), "5"),
+        Result.Err(_) => panic("mod_inverse(3, 7) must succeed"),
     };
 }
 

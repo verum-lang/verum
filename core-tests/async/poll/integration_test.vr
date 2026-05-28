@@ -8,7 +8,7 @@
 // =============================================================================
 
 mount core.async.poll.{Poll};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
 
@@ -37,7 +37,7 @@ fn integration_poll_maybe_roundtrip_pending() {
 
 @test
 fn integration_maybe_poll_roundtrip_some() {
-    let m: Maybe<Int> = Some(7);
+    let m: Maybe<Int> = Maybe.Some(7);
     let p: Poll<Int> = Poll.from(m);
     let back: Maybe<Int> = p.ready();
     assert_eq(m, back);
@@ -45,7 +45,7 @@ fn integration_maybe_poll_roundtrip_some() {
 
 @test
 fn integration_maybe_poll_roundtrip_none() {
-    let m: Maybe<Int> = None;
+    let m: Maybe<Int> = Maybe.None;
     let p: Poll<Int> = Poll.from(m);
     let back: Maybe<Int> = p.ready();
     assert_eq(m, back);
@@ -70,7 +70,7 @@ fn integration_poll_result_ok_chain() {
     let p: Poll<Result<Int, Text>> = Poll.ready_ok(10);
     let mid: Poll<Result<Int, Text>> = p.map_ok(|x| x + 1);
     let after: Poll<Result<Int, Text>> = mid.map_ok(|x| x * 2);
-    assert_eq(after, Poll.Ready(Ok(22)));
+    assert_eq(after, Poll.Ready(Result.Ok(22)));
 }
 
 // map_ok / map_err on Poll<Result<T,E>> are dispatched via a
@@ -81,7 +81,7 @@ fn integration_poll_result_ok_chain() {
 
 fn poll_result_err_text(q: Poll<Result<Int, Text>>) -> Text {
     match q {
-        Poll.Ready(Err(e)) => e,
+        Poll.Ready(Result.Err(e)) => e,
         _ => "<unexpected>",
     }
 }
@@ -170,13 +170,13 @@ fn integration_poll_of_maybe_nested_match() {
     // helpers with the same arity collide on dispatch.
     fn classify_pm(p: Poll<Maybe<Int>>) -> Text {
         match p {
-            Poll.Ready(Some(_)) => "ready-some",
-            Poll.Ready(None) => "ready-none",
+            Poll.Ready(Maybe.Some(_)) => "ready-some",
+            Poll.Ready(Maybe.None) => "ready-none",
             Poll.Pending => "pending",
         }
     }
-    assert_eq(classify_pm(Poll.Ready(Some(5))), "ready-some");
-    assert_eq(classify_pm(Poll.Ready(None)), "ready-none");
+    assert_eq(classify_pm(Poll.Ready(Maybe.Some(5))), "ready-some");
+    assert_eq(classify_pm(Poll.Ready(Maybe.None)), "ready-none");
     assert_eq(classify_pm(Poll.Pending), "pending");
 }
 
@@ -184,13 +184,13 @@ fn integration_poll_of_maybe_nested_match() {
 fn integration_poll_of_result_nested_match() {
     fn classify_pr(p: Poll<Result<Int, Text>>) -> Text {
         match p {
-            Poll.Ready(Ok(_)) => "ready-ok",
-            Poll.Ready(Err(_)) => "ready-err",
+            Poll.Ready(Result.Ok(_)) => "ready-ok",
+            Poll.Ready(Result.Err(_)) => "ready-err",
             Poll.Pending => "pending",
         }
     }
-    assert_eq(classify_pr(Poll.Ready(Ok(1))), "ready-ok");
-    assert_eq(classify_pr(Poll.Ready(Err("e"))), "ready-err");
+    assert_eq(classify_pr(Poll.Ready(Result.Ok(1))), "ready-ok");
+    assert_eq(classify_pr(Poll.Ready(Result.Err("e"))), "ready-err");
     assert_eq(classify_pr(Poll.Pending), "pending");
 }
 
@@ -215,10 +215,10 @@ fn integration_debug_list_of_polls() {
 
 @test
 fn integration_debug_poll_of_maybe() {
-    let p: Poll<Maybe<Int>> = Poll.Ready(Some(7));
+    let p: Poll<Maybe<Int>> = Poll.Ready(Maybe.Some(7));
     let s = f"{p:?}";
     assert(s.contains("Ready"));
-    assert(s.contains("Some(7)"));
+    assert(s.contains("Maybe.Some(7)"));
 }
 
 // =============================================================================

@@ -4,7 +4,7 @@
 //
 // Tests for saturating, wrapping, and checked arithmetic on Int/Float.
 // Pins the overflow contract: saturating → MAX/MIN, wrapping → modular,
-// checked → None on overflow. Also covers Float edge cases.
+// checked → Maybe.None on overflow. Also covers Float edge cases.
 // =============================================================================
 
 mount core.prelude.*;
@@ -74,7 +74,7 @@ fn test_wrapping_neg_of_min_is_min() {
 }
 
 // =============================================================================
-// Section 3: Checked arithmetic — None on overflow
+// Section 3: Checked arithmetic — Maybe.None on overflow
 // =============================================================================
 
 @test
@@ -99,7 +99,7 @@ fn test_checked_div_by_zero_returns_none() {
 
 @test
 fn test_checked_sub_normal_returns_some() {
-    assert_eq((10 as Int).checked_sub(3), Some(7));
+    assert_eq((10 as Int).checked_sub(3), Maybe.Some(7));
 }
 
 @test

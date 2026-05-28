@@ -12,7 +12,7 @@
 
 mount core.net.cidr.{Cidr, CidrSet, CidrError};
 mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr, AddrParseError};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: Direct Cidr variant construction (sans parser)
@@ -269,8 +269,8 @@ fn test_cidr_set_matching_returns_some() {
     let mut set = CidrSet.new();
     set.add(Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 });
     match set.matching(&IpAddr.v4(10_u8, 1_u8, 1_u8, 1_u8)) {
-        Some(_) => assert(true),
-        None => panic("expected matching block"),
+        Maybe.Some(_) => assert(true),
+        Maybe.None => panic("expected matching block"),
     }
 }
 
@@ -278,8 +278,8 @@ fn test_cidr_set_matching_returns_some() {
 fn test_cidr_set_matching_returns_none() {
     let set = CidrSet.new();
     match set.matching(&IpAddr.v4(127_u8, 0_u8, 0_u8, 1_u8)) {
-        Some(_) => panic("expected no match on empty set"),
-        None => assert(true),
+        Maybe.Some(_) => panic("expected no match on empty set"),
+        Maybe.None => assert(true),
     }
 }
 

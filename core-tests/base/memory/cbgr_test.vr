@@ -8,7 +8,7 @@
 // Ordering, protocols are from core.base.
 // Low-level memory functions from mem module.
 // NOTE: These imports document the API surface being tested.
-// The prelude provides: Heap, Shared, Maybe, Some, None, Result, Ok, Err
+// The prelude provides: Heap, Shared, Maybe, Some, Maybe.None, Result, Ok, Err
 // Additional types imported explicitly:
 
 // Explicitly import memory functions to avoid shadowing by iterator transducers
@@ -96,8 +96,8 @@ fn test_heap_try_new_success() {
     assert(result.is_ok());
 
     match result {
-        Ok(boxed) => assert_eq(*boxed, 42),
-        Err(_) => panic("Unexpected allocation failure"),
+        Result.Ok(boxed) => assert_eq(*boxed, 42),
+        Result.Err(_) => panic("Unexpected allocation failure"),
     }
 }
 
@@ -341,10 +341,10 @@ fn test_shared_get_mut_when_unique() {
     assert(shared.is_unique());
 
     match shared.get_mut() {
-        Some(ptr) => {
+        Maybe.Some(ptr) => {
             *ptr = 100;
         }
-        None => panic("Expected Some from get_mut on unique Shared"),
+        Maybe.None => panic("Expected Some from get_mut on unique Shared"),
     }
 
     assert_eq(*shared, 100);
@@ -355,7 +355,7 @@ fn test_shared_get_mut_when_not_unique() {
     let mut shared1 = Shared.new(42);
     let _shared2 = shared1.clone();
 
-    // Should return None when not unique
+    // Should return Maybe.None when not unique
     assert(shared1.get_mut().is_none());
 }
 
@@ -383,8 +383,8 @@ fn test_shared_try_unwrap_success() {
     assert(shared.is_unique());
 
     match shared.try_unwrap() {
-        Ok(value) => assert_eq(value, 42),
-        Err(_) => panic("Expected Ok from try_unwrap on unique Shared"),
+        Result.Ok(value) => assert_eq(value, 42),
+        Result.Err(_) => panic("Expected Ok from try_unwrap on unique Shared"),
     }
 }
 
@@ -394,8 +394,8 @@ fn test_shared_try_unwrap_failure() {
     let _shared2 = shared1.clone();
 
     match shared1.try_unwrap() {
-        Ok(_) => panic("Expected Err from try_unwrap on non-unique Shared"),
-        Err(returned) => {
+        Result.Ok(_) => panic("Expected Err from try_unwrap on non-unique Shared"),
+        Result.Err(returned) => {
             // Should return the Shared back
             assert_eq(*returned, 42);
         }
@@ -443,11 +443,11 @@ fn test_weak_upgrade_when_alive() {
     let weak = shared.downgrade();
 
     match weak.upgrade() {
-        Some(upgraded) => {
+        Maybe.Some(upgraded) => {
             assert_eq(*upgraded, 42);
             assert_eq(shared.strong_count(), 2);  // Now two strong refs
         }
-        None => panic("Expected Some from upgrade on alive Weak"),
+        Maybe.None => panic("Expected Some from upgrade on alive Weak"),
     }
 }
 
@@ -788,20 +788,20 @@ fn test_nested_heap_allocations() {
 
 @test
 fn test_linked_list_nodes() {
-    let node3 = Heap.new(Node { value: 3, next: None });
-    let node2 = Heap.new(Node { value: 2, next: Some(node3) });
-    let node1 = Heap.new(Node { value: 1, next: Some(node2) });
+    let node3 = Heap.new(Node { value: 3, next: Maybe.None });
+    let node2 = Heap.new(Node { value: 2, next: Maybe.Some(node3) });
+    let node1 = Heap.new(Node { value: 1, next: Maybe.Some(node2) });
 
     assert_eq(node1.value, 1);
     match &node1.next {
-        Some(n2) => {
+        Maybe.Some(n2) => {
             assert_eq(n2.value, 2);
             match &n2.next {
-                Some(n3) => assert_eq(n3.value, 3),
-                None => panic("Expected node3"),
+                Maybe.Some(n3) => assert_eq(n3.value, 3),
+                Maybe.None => panic("Expected node3"),
             }
         }
-        None => panic("Expected node2"),
+        Maybe.None => panic("Expected node2"),
     }
 }
 

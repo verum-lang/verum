@@ -19,7 +19,7 @@
 // =============================================================================
 
 mount core.text.{Text, ParseError};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.collections.list.List;
@@ -70,8 +70,8 @@ fn integration_text_list_filter_by_predicate() {
 fn integration_parse_int_returns_ok() {
     let s: Text = "123";
     match s.parse_int() {
-        Ok(n) => assert_eq(n, 123),
-        Err(_) => panic("expected Ok(123)"),
+        Result.Ok(n) => assert_eq(n, 123),
+        Result.Err(_) => panic("expected Result.Ok(123)"),
     }
 }
 
@@ -79,8 +79,8 @@ fn integration_parse_int_returns_ok() {
 fn integration_parse_int_returns_err_for_invalid() {
     let s: Text = "12x3";
     match s.parse_int() {
-        Ok(_) => panic("'12x3' must be Err"),
-        Err(_) => {},
+        Result.Ok(_) => panic("'12x3' must be Err"),
+        Result.Err(_) => {},
     }
 }
 
@@ -97,8 +97,8 @@ fn integration_parse_int_through_try_to_int_consistent_with_result() {
         let r = (*p).0.parse_int();
         let m = (*p).0.try_to_int();
         match r {
-            Ok(_) => assert((*p).1 && m is Some),
-            Err(_) => assert(!(*p).1 && m is None),
+            Result.Ok(_) => assert((*p).1 && m is Some),
+            Result.Err(_) => assert(!(*p).1 && m is Maybe.None),
         }
     }
 }
@@ -230,19 +230,19 @@ fn integration_text_in_match_with_eq_guard() {
 
 @test
 fn integration_maybe_text_some_unwrap() {
-    let m: Maybe<Text> = Some("hello".clone());
+    let m: Maybe<Text> = Maybe.Some("hello".clone());
     match m {
-        Some(t) => assert_eq(t, "hello"),
-        None => panic("Some branch"),
+        Maybe.Some(t) => assert_eq(t, "hello"),
+        Maybe.None => panic("Some branch"),
     }
 }
 
 @test
 fn integration_maybe_text_none() {
-    let m: Maybe<Text> = None;
+    let m: Maybe<Text> = Maybe.None;
     match m {
-        Some(_) => panic("None branch"),
-        None => {},
+        Maybe.Some(_) => panic("Maybe.None branch"),
+        Maybe.None => {},
     }
 }
 

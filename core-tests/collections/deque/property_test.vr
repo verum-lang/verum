@@ -24,10 +24,10 @@ fn property_push_back_pop_front_is_fifo() {
     }
     let mut expected = 1;
     while expected <= 10 {
-        assert_eq(d.pop_front(), Some(expected));
+        assert_eq(d.pop_front(), Maybe.Some(expected));
         expected = expected + 1;
     }
-    assert_eq(d.pop_front(), None);
+    assert_eq(d.pop_front(), Maybe.None);
 }
 
 // =============================================================================
@@ -44,10 +44,10 @@ fn property_push_back_pop_back_is_lifo() {
     }
     let mut expected = 10;
     while expected >= 1 {
-        assert_eq(d.pop_back(), Some(expected));
+        assert_eq(d.pop_back(), Maybe.Some(expected));
         expected = expected - 1;
     }
-    assert_eq(d.pop_back(), None);
+    assert_eq(d.pop_back(), Maybe.None);
 }
 
 // =============================================================================
@@ -64,10 +64,10 @@ fn property_push_front_pop_front_is_lifo() {
     }
     let mut expected = 10;
     while expected >= 1 {
-        assert_eq(d.pop_front(), Some(expected));
+        assert_eq(d.pop_front(), Maybe.Some(expected));
         expected = expected - 1;
     }
-    assert_eq(d.pop_front(), None);
+    assert_eq(d.pop_front(), Maybe.None);
 }
 
 // =============================================================================
@@ -86,7 +86,7 @@ fn property_push_front_pop_back_is_fifo() {
     // pop_back yields the original first-pushed = 1, then 2, then 3, ...
     let mut expected = 1;
     while expected <= 10 {
-        assert_eq(d.pop_back(), Some(expected));
+        assert_eq(d.pop_back(), Maybe.Some(expected));
         expected = expected + 1;
     }
 }
@@ -110,8 +110,8 @@ fn property_pop_front_decreases_len_or_returns_none() {
         prev_len = d.len();
     }
     assert_eq(d.len(), 0);
-    assert_eq(d.pop_front(), None);
-    assert_eq(d.pop_front(), None);
+    assert_eq(d.pop_front(), Maybe.None);
+    assert_eq(d.pop_front(), Maybe.None);
 }
 
 @test
@@ -139,8 +139,8 @@ fn property_pop_back_decreases_len_or_returns_none() {
 fn property_front_eq_back_when_len_one() {
     let mut d: Deque<Int> = Deque.new();
     d.push_back(42);
-    assert_eq(d.front(), Some(42));
-    assert_eq(d.back(), Some(42));
+    assert_eq(d.front(), Maybe.Some(42));
+    assert_eq(d.back(), Maybe.Some(42));
     assert_eq(d.front(), d.back());
 }
 

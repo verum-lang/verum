@@ -5,7 +5,7 @@
 // Algebraic invariants for `core.async.intrinsics`.
 //
 //   §A — Executor.current() and Executor.in_async_context() always
-//        agree (None ⇔ false, Some ⇔ true).
+//        agree (Maybe.None ⇔ false, Some ⇔ true).
 //   §B — future_poll_sync on a ReadyFuture is *idempotent* across
 //        repeated polls of separate ReadyFuture instances of the
 //        same payload.
@@ -19,7 +19,7 @@ mount core.async.intrinsics.{
 mount core.async.poll.{Poll};
 mount core.async.future.{ready, ReadyFuture};
 mount core.async.waker.{Context, noop_waker};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -31,8 +31,8 @@ fn property_intrinsics_executor_current_in_async_context_coherent() {
     let in_ctx = Executor.in_async_context();
     let cur    = Executor.current();
     match cur {
-        Some(_) => assert_eq(in_ctx, true),
-        None    => assert_eq(in_ctx, false),
+        Maybe.Some(_) => assert_eq(in_ctx, true),
+        Maybe.None    => assert_eq(in_ctx, false),
     }
 }
 
@@ -46,8 +46,8 @@ fn property_intrinsics_future_poll_sync_ready_int_round_trip_exhaustive() {
     for v in payloads.iter() {
         let mut f = ready(*v);
         match future_poll_sync(&mut f) {
-            Some(x) => assert_eq(x, *v),
-            None => assert(false),
+            Maybe.Some(x) => assert_eq(x, *v),
+            Maybe.None => assert(false),
         }
     }
 }
@@ -58,8 +58,8 @@ fn property_intrinsics_future_poll_sync_ready_text_round_trip_exhaustive() {
     for v in payloads.iter() {
         let mut f: ReadyFuture<Text> = ready((*v).clone());
         match future_poll_sync(&mut f) {
-            Some(x) => assert_eq(x, *v),
-            None => assert(false),
+            Maybe.Some(x) => assert_eq(x, *v),
+            Maybe.None => assert(false),
         }
     }
 }

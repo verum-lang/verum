@@ -15,7 +15,7 @@ mount core.async.future.{
     ready, pending, lazy, join, select, join3,
 };
 mount core.async.poll.{Poll};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -85,7 +85,7 @@ fn regression_future_and_then_chains() {
 //   → `ReadyFuture.poll`) triggers a separate dispatch defect when
 //   crossing nested generic combinators.  The poll body internally
 //   destructures `if let Poll.Ready(v) = fut.poll(cx)` — the generic-
-//   Future receiver `fut` is bound via `if let Some(ref mut fut) = self.fut1`
+//   Future receiver `fut` is bound via `if let Maybe.Some(ref mut fut) = self.fut1`
 //   to a `&mut Fut1` which the runtime then mis-dispatches into
 //   `Deque.pop_front` (manifests at runtime as
 //   `method 'Deque.pop_front' not found on receiver of runtime kind Int`).

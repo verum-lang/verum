@@ -15,7 +15,7 @@
 
 mount core.tracing.resource.{Resource};
 mount core.tracing.attribute.{AttributeValue, AttributeSet};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // §1 merge identity from left: merge(empty, r) preserves r
@@ -90,7 +90,7 @@ fn property_merge_both_missing_stays_none() {
     let b = Resource.empty();
     let m = a.merge(&b);
     match m.schema_url() {
-        Maybe.Some(_) => panic("expected None"),
+        Maybe.Some(_) => panic("expected Maybe.None"),
         Maybe.None => assert(true),
     }
 }

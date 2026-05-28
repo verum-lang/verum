@@ -49,8 +49,8 @@ fn regression_fsync_err_branch_takes_correct_shape() {
     // Destructure the Err branch — this fails to compile if the
     // shape silently drifts to e.g. Result<Bool, OSError>.
     match r {
-        Ok(()) => panic("expected Err"),
-        Err(_e) => {}
+        Result.Ok(()) => panic("expected Err"),
+        Result.Err(_e) => {}
     }
 }
 

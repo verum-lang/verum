@@ -68,15 +68,15 @@ fn law_slice_get_at_each_index_matches_iter() {
     let mut i = 0;
     loop {
         match iter.next() {
-            Some(x) => {
+            Maybe.Some(x) => {
                 let g: Maybe<&Int> = s.get(i);
                 match g {
-                    Some(y) => { assert_eq(*x, *y); },
-                    None => { panic("iter outpaced get"); },
+                    Maybe.Some(y) => { assert_eq(*x, *y); },
+                    Maybe.None => { panic("iter outpaced get"); },
                 }
                 i = i + 1;
             },
-            None => break,
+            Maybe.None => break,
         }
     }
     assert_eq(i, s.len());
@@ -85,8 +85,8 @@ fn law_slice_get_at_each_index_matches_iter() {
 // =============================================================================
 // Law: min and max relationship
 //   min(s) <= max(s) for non-empty s
-//   min(s) is None iff s is empty
-//   max(s) is None iff s is empty
+//   min(s) is Maybe.None iff s is empty
+//   max(s) is Maybe.None iff s is empty
 // =============================================================================
 
 @test
@@ -103,15 +103,15 @@ fn law_slice_min_le_max() {
         let xs: List<Int> = cases[i].clone();
         let s: &[Int] = xs.as_slice();
         match s.min() {
-            Some(mn) => {
+            Maybe.Some(mn) => {
                 match s.max() {
-                    Some(mx) => { assert(*mn <= *mx); },
-                    None => { panic("max None while min Some"); },
+                    Maybe.Some(mx) => { assert(*mn <= *mx); },
+                    Maybe.None => { panic("max Maybe.None while min Some"); },
                 }
             },
-            None => {
+            Maybe.None => {
                 let mx_check: Maybe<&Int> = s.max();
-                assert(mx_check is None);
+                assert(mx_check is Maybe.None);
             },
         }
         i = i + 1;
@@ -123,12 +123,12 @@ fn law_slice_min_none_iff_empty() {
     let empty: List<Int> = [];
     let s_empty: &[Int] = empty.as_slice();
     let m_e: Maybe<&Int> = s_empty.min();
-    assert(m_e is None);
+    assert(m_e is Maybe.None);
 
     let nonempty: List<Int> = [1];
     let s_one: &[Int] = nonempty.as_slice();
     let m_one: Maybe<&Int> = s_one.min();
-    assert(m_one is Some(_));
+    assert(m_one is Maybe.Some(_));
 }
 
 // =============================================================================
@@ -144,8 +144,8 @@ fn law_slice_contains_iff_iter_finds() {
     let mut iter = s.iter();
     loop {
         match iter.next() {
-            Some(x) => { assert(s.contains(x)); },
-            None => break,
+            Maybe.Some(x) => { assert(s.contains(x)); },
+            Maybe.None => break,
         }
     }
 
@@ -173,15 +173,15 @@ fn law_slice_first_eq_get_zero() {
         let f: Maybe<&Int> = s.first();
         let g: Maybe<&Int> = s.get(0);
         match f {
-            Some(a) => {
+            Maybe.Some(a) => {
                 match g {
-                    Some(b) => { assert_eq(*a, *b); },
-                    None => { panic("first Some but get(0) None"); },
+                    Maybe.Some(b) => { assert_eq(*a, *b); },
+                    Maybe.None => { panic("first Some but get(0) Maybe.None"); },
                 }
             },
-            None => {
+            Maybe.None => {
                 let chk: Maybe<&Int> = g;
-                assert(chk is None);
+                assert(chk is Maybe.None);
             },
         }
         i = i + 1;
@@ -195,13 +195,13 @@ fn law_slice_last_eq_get_last_idx() {
     let l: Maybe<&Int> = s.last();
     let g: Maybe<&Int> = s.get(s.len() - 1);
     match l {
-        Some(a) => {
+        Maybe.Some(a) => {
             match g {
-                Some(b) => { assert_eq(*a, *b); },
-                None => { panic("last/get last_idx mismatch"); },
+                Maybe.Some(b) => { assert_eq(*a, *b); },
+                Maybe.None => { panic("last/get last_idx mismatch"); },
             }
         },
-        None => { panic("non-empty slice but last None"); },
+        Maybe.None => { panic("non-empty slice but last Maybe.None"); },
     }
 }
 

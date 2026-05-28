@@ -24,7 +24,7 @@
 // =============================================================================
 
 mount core.text.char.{GeneralCategory, AnyChar, CharRange, char_any_of, any_of, char_range};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // -----------------------------------------------------------------------------
@@ -152,13 +152,13 @@ fn property_to_ascii_uppercase_identity_on_non_letters() {
 fn property_digit_round_trip_radix10() {
     for n in range(0, 10) {
         match Char.from_digit(n, 10) {
-            Some(c) => {
+            Maybe.Some(c) => {
                 match c.to_digit(10) {
-                    Some(back) => assert_eq(back, n),
-                    None => panic("round-trip to_digit must succeed"),
+                    Maybe.Some(back) => assert_eq(back, n),
+                    Maybe.None => panic("round-trip to_digit must succeed"),
                 }
             }
-            None => panic("from_digit must succeed for n in [0,10)"),
+            Maybe.None => panic("from_digit must succeed for n in [0,10)"),
         }
     }
 }
@@ -168,13 +168,13 @@ fn property_digit_round_trip_radix10() {
 fn property_digit_round_trip_radix16_pinned() {
     for n in range(0, 16) {
         match Char.from_digit(n, 16) {
-            Some(c) => {
+            Maybe.Some(c) => {
                 match c.to_digit(16) {
-                    Some(back) => assert_eq(back, n),
-                    None => panic("round-trip to_digit hex must succeed"),
+                    Maybe.Some(back) => assert_eq(back, n),
+                    Maybe.None => panic("round-trip to_digit hex must succeed"),
                 }
             }
-            None => panic("from_digit must succeed for n in [0,16)"),
+            Maybe.None => panic("from_digit must succeed for n in [0,16)"),
         }
     }
 }
@@ -190,8 +190,8 @@ fn property_is_digit_iff_to_digit_some() {
         let predicate = (*c).is_digit(16);
         let opt = (*c).to_digit(16);
         match opt {
-            Some(_) => assert(predicate),
-            None => assert(!predicate),
+            Maybe.Some(_) => assert(predicate),
+            Maybe.None => assert(!predicate),
         }
     }
 }

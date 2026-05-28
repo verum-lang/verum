@@ -57,11 +57,11 @@ fn test_raw_udp_socket_field_round_trip() {
 @test
 fn test_tcp_connect_unroutable_returns_none() {
     // Port 1 on localhost is virtually guaranteed to refuse connection
-    // under any sane bootstrap. The wrapper returns None for fd < 0.
+    // under any sane bootstrap. The wrapper returns Maybe.None for fd < 0.
     let result = RawTcpStream.connect("127.0.0.1", 1);
     match result {
-        Some(_) => panic("unroutable connect must yield None"),
-        None => {}
+        Maybe.Some(_) => panic("unroutable connect must yield Maybe.None"),
+        Maybe.None => {}
     }
 }
 

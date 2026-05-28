@@ -8,7 +8,7 @@
 //        nested Future chains)
 //   §B — IntrinsicsYieldNow inside a manual poll-loop, modelling the
 //        two-step cooperative-yield contract
-//   §C — Executor.current's "is None outside runtime" plus a Maybe
+//   §C — Executor.current's "is Maybe.None outside runtime" plus a Maybe
 //        chain conversion
 // =============================================================================
 
@@ -18,7 +18,7 @@ mount core.async.intrinsics.{
 mount core.async.poll.{Poll};
 mount core.async.future.{ready, ReadyFuture};
 mount core.async.waker.{Context, noop_waker};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -32,8 +32,8 @@ fn integration_intrinsics_future_poll_sync_multiple_round_trips() {
     for v in ints.iter() {
         let mut f = ready(*v);
         match future_poll_sync(&mut f) {
-            Some(x) => total = total + x,
-            None => assert(false),
+            Maybe.Some(x) => total = total + x,
+            Maybe.None => assert(false),
         }
     }
     assert_eq(total, 15);
@@ -72,10 +72,10 @@ fn integration_intrinsics_yield_now_manual_poll_loop_completes() {
 @test
 fn integration_intrinsics_executor_current_maybe_chain() {
     let exec_handle: Maybe<Int> = match Executor.current() {
-        Some(e) => Some(e.handle),
-        None    => None,
+        Maybe.Some(e) => Maybe.Some(e.handle),
+        Maybe.None    => Maybe.None,
     };
-    // Outside an executor, exec_handle must be None.  Materialising
+    // Outside an executor, exec_handle must be Maybe.None.  Materialising
     // it through `is_none()` exercises the Maybe<Int> dispatch path.
     assert(exec_handle.is_none());
 }

@@ -8,7 +8,7 @@
 //   * ExecutionTier 4-variant (Tier0_Full / Tier1_Epoch / Tier2_Gen /
 //     Tier3_Unchecked) + .overhead_ns + .requires_generation + .requires_epoch
 //   * EnvIsolationLevel 3-variant (Shared / SendOnly / Full)
-//   * CpuAffinity 3-variant (None / Auto / Explicit)
+//   * CpuAffinity 3-variant (Maybe.None / Auto / Explicit)
 //   * EnvTaskId record + .main + parent_id field
 // =============================================================================
 

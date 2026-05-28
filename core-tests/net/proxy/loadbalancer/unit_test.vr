@@ -12,7 +12,7 @@
 //   * Upstream record field preservation + Clone + Eq.
 //   * UpstreamEntry construction + healthy() default-true invariant.
 //   * LbPool.new construction across all 3 strategies.
-//   * LbPool.pick(empty pool) returns None — pinned LB-1.
+//   * LbPool.pick(empty pool) returns Maybe.None — pinned LB-1.
 // =============================================================================
 
 mount core.net.proxy.loadbalancer.{LoadBalancer, UpstreamEntry, LbPool};
@@ -146,7 +146,7 @@ fn test_loadbalancer_pool_new_weighted_least_conn() {
 }
 
 // =============================================================================
-// Section 6: LB-1 — empty pool always returns None
+// Section 6: LB-1 — empty pool always returns Maybe.None
 // =============================================================================
 
 @test
@@ -159,7 +159,7 @@ fn test_loadbalancer_pool_empty_returns_none_round_robin() {
 @test
 fn test_loadbalancer_pool_empty_returns_none_random_negative_salt() {
     // Random pick takes (-salt) % n when salt < 0 (line 124). Empty
-    // pool still returns None without reaching the % operation.
+    // pool still returns Maybe.None without reaching the % operation.
     let upstreams: List<Upstream> = List.new();
     let p = LbPool.new(LoadBalancer.Random, upstreams);
     assert(p.pick(-99).is_none());

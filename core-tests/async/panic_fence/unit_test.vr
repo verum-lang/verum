@@ -8,19 +8,19 @@
 // IntrinsicPanicInfo>`.
 //
 // The fence has three observable behaviours we pin:
-//   §1 panic_safe(f) constructs a PanicFence wrapping `Some(f)`
-//   §2 Polling the fence on a Ready inner returns Ready(Ok(value))
+//   §1 panic_safe(f) constructs a PanicFence wrapping `Maybe.Some(f)`
+//   §2 Polling the fence on a Ready inner returns Ready(Result.Ok(value))
 //   §3 Polling the fence after Ready panics (lifecycle invariant)
 //
 // `catch_unwind` semantics — converting a runtime panic into
-// `Err(IntrinsicPanicInfo)` — are exercised in integration tests.
+// `Result.Err(IntrinsicPanicInfo)` — are exercised in integration tests.
 // =============================================================================
 
 mount core.async.panic_fence.{PanicFence, panic_safe};
 mount core.async.future.{ready, ReadyFuture};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context, noop_waker};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: panic_safe constructor
@@ -39,20 +39,20 @@ fn test_panic_fence_safe_constructs_fence_with_inner_some() {
 fn test_panic_fence_record_literal_construction() {
     // The struct is public — record-literal construction must work
     // directly, not just via the panic_safe factory.
-    let f: PanicFence<ReadyFuture<Int>> = PanicFence { inner: Some(ready(7)) };
+    let f: PanicFence<ReadyFuture<Int>> = PanicFence { inner: Maybe.Some(ready(7)) };
     assert(f.inner.is_some());
 }
 
 @test
 fn test_panic_fence_record_literal_with_none_inner() {
-    // After Ready/panic the fence's invariant is `inner = None` —
+    // After Ready/panic the fence's invariant is `inner = Maybe.None` —
     // construct that state directly to confirm the field is settable.
-    let f: PanicFence<ReadyFuture<Int>> = PanicFence { inner: None };
+    let f: PanicFence<ReadyFuture<Int>> = PanicFence { inner: Maybe.None };
     assert(f.inner.is_none());
 }
 
 // =============================================================================
-// Section 2: Ready inner → Ready(Ok(value))
+// Section 2: Ready inner → Ready(Result.Ok(value))
 // =============================================================================
 
 @test
@@ -61,8 +61,8 @@ fn test_panic_fence_poll_ready_inner_yields_ready_ok() {
     let waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     match fence.poll(&mut cx) {
-        Poll.Ready(Ok(v)) => assert_eq(v, 42),
-        Poll.Ready(Err(_)) => assert(false),
+        Poll.Ready(Result.Ok(v)) => assert_eq(v, 42),
+        Poll.Ready(Result.Err(_)) => assert(false),
         Poll.Pending => assert(false),
     }
 }
@@ -73,8 +73,8 @@ fn test_panic_fence_poll_ready_text_payload() {
     let waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     match fence.poll(&mut cx) {
-        Poll.Ready(Ok(v)) => assert_eq(v, "hello"),
-        Poll.Ready(Err(_)) => assert(false),
+        Poll.Ready(Result.Ok(v)) => assert_eq(v, "hello"),
+        Poll.Ready(Result.Err(_)) => assert(false),
         Poll.Pending => assert(false),
     }
 }
@@ -83,11 +83,11 @@ fn test_panic_fence_poll_ready_text_payload() {
 // Section 3: Inner field is consumed by Ready resolution
 //
 //   After a Ready poll the fence's inner-field invariant flips to
-//   None — the implementation `take`s the inner out of Maybe before
+//   Maybe.None — the implementation `take`s the inner out of Maybe before
 //   poll, and only puts it back on Pending.  This is the lifecycle
 //   invariant documented in core/async/panic_fence.vr §poll.
 //
-//   The strict "inner == None after Ready" assertion is pinned in
+//   The strict "inner == Maybe.None after Ready" assertion is pinned in
 //   regression_test.vr — the lifecycle invariant currently relies on
 //   `Maybe.take()` mutating self through a `Maybe<F>` generic field,
 //   which surfaces a known mutation-through-&mut-self defect.  The
@@ -101,8 +101,8 @@ fn test_panic_fence_poll_ready_completes_observably() {
     let waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     let outcome = match fence.poll(&mut cx) {
-        Poll.Ready(Ok(_)) => 1,
-        Poll.Ready(Err(_)) => 2,
+        Poll.Ready(Result.Ok(_)) => 1,
+        Poll.Ready(Result.Err(_)) => 2,
         Poll.Pending => 3,
     };
     assert_eq(outcome, 1);

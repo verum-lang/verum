@@ -45,10 +45,10 @@ fn regression_hll_add_then_estimate_at_least_one() {
 fn regression_hll_merge_precision_mismatch() {
     let a = HyperLogLog.new(10);
     let b = HyperLogLog.new(12);
-    // Distinct precisions cannot merge — should return Err(PrecisionMismatch).
+    // Distinct precisions cannot merge — should return Result.Err(PrecisionMismatch).
     let mut a_mut = a;
     let r = a_mut.merge(&b);
-    assert(r is Err(_));
+    assert(r is Result.Err(_));
 }
 
 // =============================================================================

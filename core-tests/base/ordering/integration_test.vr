@@ -5,7 +5,7 @@
 // Coverage:
 //   §1  Int.cmp returns Ordering         (primitive Ord protocol contract)
 //   §2  Float / Bool / Char / Text cmp   (other primitive Ord impls)
-//   §3  Maybe<T>.cmp                     (None < Some, Some compares inner)
+//   §3  Maybe<T>.cmp                     (Maybe.None < Some, Some compares inner)
 //   §4  Ordering used to drive sort      (manual bubble + comparator)
 //   §5  Lexicographic chain via .then()  (idiomatic multi-key sort key)
 //   §6  Lexicographic chain via .then_with() (lazy evaluation guarantee)
@@ -15,7 +15,7 @@
 // =============================================================================
 
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // -----------------------------------------------------------------------------
@@ -72,29 +72,29 @@ fn integration_text_cmp_returns_ordering() {
 }
 
 // -----------------------------------------------------------------------------
-// §3  Maybe<T>.cmp: None < Some, Some compares the inner value.
+// §3  Maybe<T>.cmp: Maybe.None < Some, Some compares the inner value.
 // -----------------------------------------------------------------------------
 
 @test
 fn integration_maybe_cmp_none_less_than_some() {
-    let none: Maybe<Int> = None;
-    let some = Some(0);
+    let none: Maybe<Int> = Maybe.None;
+    let some = Maybe.Some(0);
     assert_eq(none.cmp(&some), Less);
     assert_eq(some.cmp(&none), Greater);
 }
 
 @test
 fn integration_maybe_cmp_none_equals_none() {
-    let a: Maybe<Int> = None;
-    let b: Maybe<Int> = None;
+    let a: Maybe<Int> = Maybe.None;
+    let b: Maybe<Int> = Maybe.None;
     assert_eq(a.cmp(&b), Equal);
 }
 
 @test
 fn integration_maybe_cmp_some_compares_inner() {
-    assert_eq(Some(1).cmp(&Some(2)), Less);
-    assert_eq(Some(2).cmp(&Some(1)), Greater);
-    assert_eq(Some(5).cmp(&Some(5)), Equal);
+    assert_eq(Maybe.Some(1).cmp(&Maybe.Some(2)), Less);
+    assert_eq(Maybe.Some(2).cmp(&Maybe.Some(1)), Greater);
+    assert_eq(Maybe.Some(5).cmp(&Maybe.Some(5)), Equal);
 }
 
 // -----------------------------------------------------------------------------
@@ -278,7 +278,7 @@ fn integration_three_way_partition_preserves_count() {
 
 fn binary_search_int(arr: &List<Int>, target: Int) -> Maybe<Int> {
     if arr.len() == 0 {
-        return None;
+        return Maybe.None;
     }
     let mut low: Int = 0;
     let mut high: Int = arr.len() - 1;
@@ -288,35 +288,35 @@ fn binary_search_int(arr: &List<Int>, target: Int) -> Maybe<Int> {
         match arr[mid].cmp(&target) {
             Less => low = mid + 1,
             Greater => {
-                if mid == 0 { return None; }
+                if mid == 0 { return Maybe.None; }
                 high = mid - 1;
             }
-            Equal => return Some(mid),
+            Equal => return Maybe.Some(mid),
         }
     }
-    None
+    Maybe.None
 }
 
 @test
 fn integration_binary_search_finds_element() {
     let arr: List<Int> = [1, 3, 5, 7, 9, 11, 13];
-    assert_eq(binary_search_int(&arr, 7), Some(3));
-    assert_eq(binary_search_int(&arr, 1), Some(0));
-    assert_eq(binary_search_int(&arr, 13), Some(6));
+    assert_eq(binary_search_int(&arr, 7), Maybe.Some(3));
+    assert_eq(binary_search_int(&arr, 1), Maybe.Some(0));
+    assert_eq(binary_search_int(&arr, 13), Maybe.Some(6));
 }
 
 @test
 fn integration_binary_search_reports_missing() {
     let arr: List<Int> = [1, 3, 5, 7, 9, 11, 13];
-    assert_eq(binary_search_int(&arr, 6), None);
-    assert_eq(binary_search_int(&arr, 0), None);
-    assert_eq(binary_search_int(&arr, 100), None);
+    assert_eq(binary_search_int(&arr, 6), Maybe.None);
+    assert_eq(binary_search_int(&arr, 0), Maybe.None);
+    assert_eq(binary_search_int(&arr, 100), Maybe.None);
 }
 
 @test
 fn integration_binary_search_empty_input() {
     let arr: List<Int> = [];
-    assert_eq(binary_search_int(&arr, 42), None);
+    assert_eq(binary_search_int(&arr, 42), Maybe.None);
 }
 
 // =============================================================================

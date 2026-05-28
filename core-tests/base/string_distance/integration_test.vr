@@ -126,9 +126,9 @@ fn integration_all_algorithms_agree_on_identical_strings() {
 fn integration_levenshtein_bounded_stops_or_returns_correct() {
     let a = "aaaaaa".to_text();
     let b = "bbbbbb".to_text();
-    // Full distance is 6; bounded at 2 should return None (early stop).
+    // Full distance is 6; bounded at 2 should return Maybe.None (early stop).
     let bounded = levenshtein_bounded(a.as_bytes(), b.as_bytes(), 2);
-    // Acceptable: either None (early-stop) OR Some(d <= 6) (no early stop).
+    // Acceptable: either Maybe.None (early-stop) OR Maybe.Some(d <= 6) (no early stop).
     if bounded.is_some() {
         assert(bounded.unwrap() <= 6);
     }

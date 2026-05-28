@@ -168,7 +168,7 @@ fn test_alpha_eq_restrict_rename_bound() {
 
 // SURFACED DEFECT: alpha_eq on (νx) free1.0 vs (νy) free2.0 returns
 // true when it should return false. The free names `free1` / `free2`
-// fall to `(None, None) => a == b` which should yield false but the
+// fall to `(Maybe.None, Maybe.None) => a == b` which should yield false but the
 // outer Restrict-binder env-extend may be incorrectly treating them
 // as bound. Same task #17/#39 root suspected on `name_eq_under_env`
 // resolution. Pinned for investigation.

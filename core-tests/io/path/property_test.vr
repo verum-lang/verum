@@ -6,7 +6,7 @@
 // =============================================================================
 
 mount core.io.path.{Path, PathBuf, Component, MAIN_SEPARATOR, normalize};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -153,16 +153,16 @@ fn law_path_parent_join_filename_recovers_path() {
     for s in paths.iter() {
         let p = Path.new(s);
         match p.parent() {
-            Some(parent) => {
+            Maybe.Some(parent) => {
                 match p.file_name() {
-                    Some(name) => {
+                    Maybe.Some(name) => {
                         let rejoined = parent.join_str(&name);
                         assert_eq(rejoined.to_text(), *s);
                     }
-                    None => assert(false),
+                    Maybe.None => assert(false),
                 }
             }
-            None => assert(false),
+            Maybe.None => assert(false),
         }
     }
 }
@@ -183,7 +183,7 @@ fn law_path_stem_extension_recovers_file_name() {
     for s in paths.iter() {
         let p = Path.new(s);
         match (p.file_stem(), p.extension(), p.file_name()) {
-            (Some(stem), Some(ext), Some(name)) => {
+            (Maybe.Some(stem), Maybe.Some(ext), Maybe.Some(name)) => {
                 let reconstructed = f"{stem}.{ext}";
                 assert_eq(reconstructed, name);
             }

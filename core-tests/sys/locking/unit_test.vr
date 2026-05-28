@@ -70,12 +70,12 @@ fn test_lock_region_zero_length() {
 
 @test
 fn test_lock_error_conflict_with_pid() {
-    let e = LockError.Conflict(Some(12345));
+    let e = LockError.Conflict(Maybe.Some(12345));
     match e {
         LockError.Conflict(pid) => {
             match pid {
-                Some(p) => assert_eq(p, 12345),
-                None => panic("expected Some(pid)"),
+                Maybe.Some(p) => assert_eq(p, 12345),
+                Maybe.None => panic("expected Maybe.Some(pid)"),
             }
         }
         LockError.IoError(_) => panic("expected Conflict, got IoError"),
@@ -84,12 +84,12 @@ fn test_lock_error_conflict_with_pid() {
 
 @test
 fn test_lock_error_conflict_with_none_owner() {
-    let e = LockError.Conflict(None);
+    let e = LockError.Conflict(Maybe.None);
     match e {
         LockError.Conflict(pid) => {
             match pid {
-                Some(_) => panic("expected None owner"),
-                None => {}
+                Maybe.Some(_) => panic("expected Maybe.None owner"),
+                Maybe.None => {}
             }
         }
         LockError.IoError(_) => panic("expected Conflict, got IoError"),

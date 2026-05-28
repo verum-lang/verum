@@ -7,9 +7,9 @@
 // §A — task #11 — `Maybe.take()` mutation through &mut self does
 // not flow back into a generic record field (`PanicFence<F>.inner:
 // Maybe<F>`).  The lifecycle invariant of `panic_fence` is "after
-// Ready, inner is None", and the stdlib body achieves it via
+// Ready, inner is Maybe.None", and the stdlib body achieves it via
 // `self.inner.take()` at the top of poll.  Today the mutation
-// does not persist, so the next poll observes the stale `Some(f)`
+// does not persist, so the next poll observes the stale `Maybe.Some(f)`
 // and would re-poll a completed future.  Tracked as task #11.
 //
 // =============================================================================
@@ -18,7 +18,7 @@ mount core.async.panic_fence.{PanicFence, panic_safe};
 mount core.async.future.{ready, ReadyFuture};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context, noop_waker};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // §A — task #11 CLOSED — Maybe.take() mutation through &mut self
@@ -73,7 +73,7 @@ fn regression_panic_fence_inner_is_none_after_ready_poll() {
     let waker = noop_waker();
     let mut cx = Context.from_waker(&waker);
     match fence.poll(&mut cx) {
-        Poll.Ready(Ok(_)) => {},
+        Poll.Ready(Result.Ok(_)) => {},
         _ => assert(false),
     }
     assert(fence.inner.is_none());

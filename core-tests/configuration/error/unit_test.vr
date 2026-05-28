@@ -23,7 +23,7 @@ mount core.configuration.error.{
     format_id_ini, format_id_properties, format_id_hcl, format_id_hocon,
     format_id_nestedtext, format_id_kdl, format_id_cue, format_id_dhall,
 };
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: format_id_* canonical IDs
@@ -291,7 +291,7 @@ fn test_config_err_default_path_is_none() {
         "bad indent".clone(),
     );
     match e.path {
-        Maybe.Some(_) => panic("expected default path = None"),
+        Maybe.Some(_) => panic("expected default path = Maybe.None"),
         Maybe.None => assert(true),
     }
 }
@@ -309,7 +309,7 @@ fn test_with_path_attaches_path_string() {
     let with_p = with_path(base, "server.host".clone());
     match with_p.path {
         Maybe.Some(p) => assert_eq(p, "server.host"),
-        Maybe.None => panic("expected Some(path)"),
+        Maybe.None => panic("expected Maybe.Some(path)"),
     }
 }
 

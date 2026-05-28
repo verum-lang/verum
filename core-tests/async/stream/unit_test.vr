@@ -51,7 +51,7 @@ fn test_stream_from_fn_constructs_with_terminating_predicate() {
     let mut count = 0;
     let _ = stream_from_fn(|| {
         count = count + 1;
-        if count > 3 { None } else { Some(count) }
+        if count > 3 { Maybe.None } else { Maybe.Some(count) }
     });
     // Lazy construction — no items pulled yet.
     assert(count == 0);

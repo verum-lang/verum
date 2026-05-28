@@ -51,8 +51,8 @@ fn regression_pin_take_resets_to_default() {
 
 @test
 fn regression_prelude_reexports_maybe_result_ordering() {
-    let _: Maybe<Int> = Some(42);
-    let _: Result<Int, Text> = Ok(7);
+    let _: Maybe<Int> = Maybe.Some(42);
+    let _: Result<Int, Text> = Result.Ok(7);
     let o: Ordering = Less;
     match o {
         Ordering.Less    => {},
@@ -107,9 +107,9 @@ fn regression_bytes_alias_is_list_of_byte() {
 
 @test
 fn regression_text_result_alias_is_result_with_text_error() {
-    let r: TextResult<Int> = Ok(42);
+    let r: TextResult<Int> = Result.Ok(42);
     assert(r.is_ok());
-    let e: TextResult<Int> = Err("error".to_text());
+    let e: TextResult<Int> = Result.Err("error".to_text());
     assert(e.is_err());
 }
 

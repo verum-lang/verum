@@ -21,14 +21,14 @@ mount core.async.stream.{
 };
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context, noop_context};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
 // Section A: Poll-loop drain → List<T> via manual driver
 //
 //   Treat Stream as the producer; drain into List using `poll_next`
-//   in a loop until the first Poll.Ready(None).  This is the
+//   in a loop until the first Poll.Ready(Maybe.None).  This is the
 //   reference shape every higher-level `.collect()` will reduce to.
 // =============================================================================
 
@@ -42,8 +42,8 @@ fn integration_drain_stream_once_into_list() {
     while !done && safety < 10 {
         let p = s.poll_next(&mut cx);
         match p {
-            Poll.Ready(Some(v)) => out.push(v),
-            Poll.Ready(None) => done = true,
+            Poll.Ready(Maybe.Some(v)) => out.push(v),
+            Poll.Ready(Maybe.None) => done = true,
             Poll.Pending => done = true,
         }
         safety = safety + 1;
@@ -62,8 +62,8 @@ fn integration_drain_stream_empty_into_list_is_empty() {
     while !done && safety < 10 {
         let p = s.poll_next(&mut cx);
         match p {
-            Poll.Ready(Some(v)) => out.push(v),
-            Poll.Ready(None) => done = true,
+            Poll.Ready(Maybe.Some(v)) => out.push(v),
+            Poll.Ready(Maybe.None) => done = true,
             Poll.Pending => done = true,
         }
         safety = safety + 1;
@@ -81,8 +81,8 @@ fn integration_drain_stream_repeat_n_collects_exact_count() {
     while !done && safety < 20 {
         let p = s.poll_next(&mut cx);
         match p {
-            Poll.Ready(Some(v)) => out.push(v),
-            Poll.Ready(None) => done = true,
+            Poll.Ready(Maybe.Some(v)) => out.push(v),
+            Poll.Ready(Maybe.None) => done = true,
             Poll.Pending => done = true,
         }
         safety = safety + 1;
@@ -110,9 +110,9 @@ fn integration_stream_from_fn_drains_captured_list() {
         if idx < src.len() {
             let v = src[idx];
             idx = idx + 1;
-            Some(v)
+            Maybe.Some(v)
         } else {
-            None
+            Maybe.None
         }
     });
     let mut cx = noop_context();
@@ -122,8 +122,8 @@ fn integration_stream_from_fn_drains_captured_list() {
     while !done && safety < 20 {
         let p = s.poll_next(&mut cx);
         match p {
-            Poll.Ready(Some(v)) => out.push(v),
-            Poll.Ready(None) => done = true,
+            Poll.Ready(Maybe.Some(v)) => out.push(v),
+            Poll.Ready(Maybe.None) => done = true,
             Poll.Pending => done = true,
         }
         safety = safety + 1;
@@ -148,7 +148,7 @@ fn integration_size_hint_upper_bound_matches_drain_count_for_repeat_n() {
     let mut s = stream_repeat_n("a", 6);
     let (lo, hi) = s.size_hint();
     assert_eq(lo, 6);
-    assert_eq(hi, Some(6));
+    assert_eq(hi, Maybe.Some(6));
 
     let mut cx = noop_context();
     let mut drained = 0;
@@ -157,8 +157,8 @@ fn integration_size_hint_upper_bound_matches_drain_count_for_repeat_n() {
     while !done && safety < 20 {
         let p = s.poll_next(&mut cx);
         match p {
-            Poll.Ready(Some(_)) => drained = drained + 1,
-            Poll.Ready(None) => done = true,
+            Poll.Ready(Maybe.Some(_)) => drained = drained + 1,
+            Poll.Ready(Maybe.None) => done = true,
             Poll.Pending => done = true,
         }
         safety = safety + 1;
@@ -183,22 +183,22 @@ fn integration_list_of_polled_maybes_from_streams() {
 
     let m1: Maybe<Int> = match s1.poll_next(&mut cx) {
         Poll.Ready(v) => v,
-        Poll.Pending => None,
+        Poll.Pending => Maybe.None,
     };
     let m2: Maybe<Int> = match s2.poll_next(&mut cx) {
         Poll.Ready(v) => v,
-        Poll.Pending => None,
+        Poll.Pending => Maybe.None,
     };
     let m3: Maybe<Int> = match s3.poll_next(&mut cx) {
         Poll.Ready(v) => v,
-        Poll.Pending => None,
+        Poll.Pending => Maybe.None,
     };
 
     let polled: List<Maybe<Int>> = [m1, m2, m3];
     assert_eq(polled.len(), 3);
-    assert_eq(polled[0], Some(1));
-    assert_eq(polled[1], None);
-    assert_eq(polled[2], Some(3));
+    assert_eq(polled[0], Maybe.Some(1));
+    assert_eq(polled[1], Maybe.None);
+    assert_eq(polled[2], Maybe.Some(3));
 }
 
 fn main() {}

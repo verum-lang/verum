@@ -5,7 +5,7 @@
 // Algebraic laws for `core.async.poll.Poll<T>`. The Poll type is a
 // 2-state algebra (Ready(T) | Pending) that, restricted to its
 // observable surface, is structurally identical to `Maybe<T>` —
-// `Ready ↔ Some`, `Pending ↔ None`. Every law below is proved
+// `Ready ↔ Some`, `Pending ↔ Maybe.None`. Every law below is proved
 // exhaustively over a representative `Int` payload domain when the
 // law involves an `Int` carrier, and over a small sample of payloads
 // otherwise. The `Pending` case is the absorbing element for
@@ -13,7 +13,7 @@
 // =============================================================================
 
 mount core.async.poll.{Poll};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
 
@@ -121,8 +121,8 @@ fn property_poll_unwrap_or_pending_returns_default_exhaustive() {
 // =============================================================================
 // Section D: `ready()` ↔ Maybe isomorphism
 //
-//   M1.  Ready(v).ready() == Some(v)
-//   M2.  Pending.ready()  == None
+//   M1.  Ready(v).ready() == Maybe.Some(v)
+//   M2.  Pending.ready()  == Maybe.None
 //   M3.  Poll.from(p.ready()) == p     (round-trip via Maybe)
 // =============================================================================
 
@@ -131,8 +131,8 @@ fn property_poll_ready_maybe_isomorphism_exhaustive() {
     for p in poll_int_domain().iter() {
         let m: Maybe<Int> = (*p).ready();
         match *p {
-            Poll.Ready(v) => assert_eq(m, Some(v)),
-            Poll.Pending => assert_eq(m, None),
+            Poll.Ready(v) => assert_eq(m, Maybe.Some(v)),
+            Poll.Pending => assert_eq(m, Maybe.None),
         }
     }
 }
@@ -235,8 +235,8 @@ fn property_poll_clone_preserves_equality_exhaustive() {
 // =============================================================================
 // Section H: `map_ok` / `map_err` on Poll<Result<T, E>>
 //
-//   R1.  Ready(Ok(t)).map_ok(f)  == Ready(Ok(f(t)))
-//   R2.  Ready(Err(e)).map_ok(f) == Ready(Err(e))
+//   R1.  Ready(Result.Ok(t)).map_ok(f)  == Ready(Result.Ok(f(t)))
+//   R2.  Ready(Result.Err(e)).map_ok(f) == Ready(Result.Err(e))
 //   R3.  Pending.map_ok(f)       == Pending
 //   R4.  Symmetric set for map_err.
 // =============================================================================
@@ -244,9 +244,9 @@ fn property_poll_clone_preserves_equality_exhaustive() {
 @test
 fn property_poll_map_ok_only_affects_ok_branch_exhaustive() {
     for v in int_domain().iter() {
-        let p: Poll<Result<Int, Text>> = Poll.Ready(Ok(*v));
+        let p: Poll<Result<Int, Text>> = Poll.Ready(Result.Ok(*v));
         let q = p.map_ok(|x| x * 3);
-        assert_eq(q, Poll.Ready(Ok(*v * 3)));
+        assert_eq(q, Poll.Ready(Result.Ok(*v * 3)));
     }
 }
 
@@ -256,7 +256,7 @@ fn property_poll_map_ok_only_affects_ok_branch_exhaustive() {
 
 fn err_payload_text(q: Poll<Result<Int, Text>>) -> Text {
     match q {
-        Poll.Ready(Err(e)) => e,
+        Poll.Ready(Result.Err(e)) => e,
         _ => "<unexpected>",
     }
 }
@@ -265,7 +265,7 @@ fn err_payload_text(q: Poll<Result<Int, Text>>) -> Text {
 fn property_poll_map_ok_preserves_err_exhaustive() {
     let errs: List<Text> = ["", "x", "long error message"];
     for e in errs.iter() {
-        let p: Poll<Result<Int, Text>> = Poll.Ready(Err((*e).clone()));
+        let p: Poll<Result<Int, Text>> = Poll.Ready(Result.Err((*e).clone()));
         assert_eq(err_payload_text(p), (*e).clone());
     }
 }
@@ -274,7 +274,7 @@ fn property_poll_map_ok_preserves_err_exhaustive() {
 fn property_poll_map_err_only_affects_err_branch_exhaustive() {
     let errs: List<Text> = ["", "x", "fail"];
     for e in errs.iter() {
-        let p: Poll<Result<Int, Text>> = Poll.Ready(Err((*e).clone()));
+        let p: Poll<Result<Int, Text>> = Poll.Ready(Result.Err((*e).clone()));
         assert_eq(err_payload_text(p), (*e).clone());
     }
 }
@@ -282,9 +282,9 @@ fn property_poll_map_err_only_affects_err_branch_exhaustive() {
 @test
 fn property_poll_map_err_preserves_ok_exhaustive() {
     for v in int_domain().iter() {
-        let p: Poll<Result<Int, Text>> = Poll.Ready(Ok(*v));
+        let p: Poll<Result<Int, Text>> = Poll.Ready(Result.Ok(*v));
         let q = p.map_err(|s: Text| s.len());
-        assert_eq(q, Poll.Ready(Ok(*v)));
+        assert_eq(q, Poll.Ready(Result.Ok(*v)));
     }
 }
 

@@ -52,7 +52,7 @@ fn regression_list_from_array_literal_undefined_function() {
 fn regression_list_of_undefined_function() {
     let xs: List<Int> = List.of(42);
     assert_eq(xs.len(), 1);
-    assert_eq(xs.get(0), Some(42));
+    assert_eq(xs.get(0), Maybe.Some(42));
 }
 
 // CLOSED 2026-05-24 — same as above.
@@ -60,7 +60,7 @@ fn regression_list_of_undefined_function() {
 fn regression_list_from_elem_undefined_function() {
     let xs: List<Int> = List.from_elem(7, 4);
     assert_eq(xs.len(), 4);
-    assert_eq(xs.get(0), Some(7));
+    assert_eq(xs.get(0), Maybe.Some(7));
 }
 
 // =============================================================================
@@ -101,8 +101,8 @@ fn regression_list_retain_through_stdlib_body() {
     let mut xs: List<Int> = [1, 2, 3, 4, 5];
     xs.retain(|x| *x % 2 == 0);
     assert_eq(xs.len(), 2);
-    assert_eq(xs.get(0), Some(2));
-    assert_eq(xs.get(1), Some(4));
+    assert_eq(xs.get(0), Maybe.Some(2));
+    assert_eq(xs.get(1), Maybe.Some(4));
 }
 
 @test
@@ -111,7 +111,7 @@ fn regression_list_resize_through_stdlib_body() {
     let mut xs: List<Int> = [1, 2];
     xs.resize(5, 0);
     assert_eq(xs.len(), 5);
-    assert_eq(xs.get(4), Some(0));
+    assert_eq(xs.get(4), Maybe.Some(0));
 }
 
 @test
@@ -125,8 +125,8 @@ fn regression_list_dedup_through_stdlib_body() {
 fn regression_list_rotate_left_through_stdlib_body() {
     let mut xs: List<Int> = [1, 2, 3, 4, 5];
     xs.rotate_left(2);
-    assert_eq(xs.get(0), Some(3));
-    assert_eq(xs.get(4), Some(2));
+    assert_eq(xs.get(0), Maybe.Some(3));
+    assert_eq(xs.get(4), Maybe.Some(2));
 }
 
 // =============================================================================
@@ -147,8 +147,8 @@ fn regression_list_fill_value_clone_dispatch() {
     // the source value. Not a layout issue.
     let mut xs: List<Int> = [1, 2, 3, 4];
     xs.fill(0);
-    assert_eq(xs.get(0), Some(0));
-    assert_eq(xs.get(3), Some(0));
+    assert_eq(xs.get(0), Maybe.Some(0));
+    assert_eq(xs.get(3), Maybe.Some(0));
 }
 
 @ignore
@@ -170,8 +170,8 @@ fn regression_list_sort_by_closure_via_deref_compare() {
     // `&T` references that compare addresses, not values.
     let mut xs: List<Int> = [3, 1, 2];
     xs.sort_by(|a, b| (*b).cmp(a));
-    assert_eq(xs.get(0), Some(3));
-    assert_eq(xs.get(2), Some(1));
+    assert_eq(xs.get(0), Maybe.Some(3));
+    assert_eq(xs.get(2), Maybe.Some(1));
 }
 
 // =============================================================================

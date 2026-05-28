@@ -14,21 +14,21 @@ mount core.sys.init.InitError;
 
 fn fake_init(succeed: Bool) -> Result<Int, InitError> {
     if succeed {
-        Ok(42)
+        Result.Ok(42)
     } else {
-        Err(InitError.AllocatorFailed { reason: "synthetic-test-fail" })
+        Result.Err(InitError.AllocatorFailed { reason: "synthetic-test-fail" })
     }
 }
 
 @test
 fn integration_init_error_routes_through_result() {
     match fake_init(true) {
-        Ok(n) => assert_eq(n, 42),
-        Err(_) => panic("succeed branch must yield Ok"),
+        Result.Ok(n) => assert_eq(n, 42),
+        Result.Err(_) => panic("succeed branch must yield Ok"),
     }
     match fake_init(false) {
-        Ok(_) => panic("fail branch must yield Err"),
-        Err(e) => assert_eq(e.message(), "Allocator initialization failed: synthetic-test-fail"),
+        Result.Ok(_) => panic("fail branch must yield Err"),
+        Result.Err(e) => assert_eq(e.message(), "Allocator initialization failed: synthetic-test-fail"),
     }
 }
 

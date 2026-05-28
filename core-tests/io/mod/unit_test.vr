@@ -45,7 +45,7 @@ fn test_io_seekfrom_reexported() {
 
 @test
 fn test_io_result_reexported() {
-    let r: IoResult<Int> = Ok(7);
+    let r: IoResult<Int> = Result.Ok(7);
     assert_eq(r.unwrap(), 7);
 }
 

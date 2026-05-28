@@ -27,7 +27,7 @@
 
 mount core.text.{Text, Utf8Error, Utf16Error, ParseError};
 mount core.text.{Chars, ByteIter, CharIndices, Lines};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.base.protocols.{Hash, DefaultHasher};
@@ -38,43 +38,43 @@ mount core.collections.list.List;
 // =============================================================================
 //
 // Chars is `Iterator<Item = Char>`. The protocol requires:
-//   1. `next()` returns Some(item) until exhausted, then None forever.
+//   1. `next()` returns Maybe.Some(item) until exhausted, then Maybe.None forever.
 //   2. The sequence of yielded items reconstructs the source exactly.
 //   3. `size_hint()` brackets the remaining count.
-//   4. After exhaustion, `next()` continues returning None (FusedIterator).
+//   4. After exhaustion, `next()` continues returning Maybe.None (FusedIterator).
 // =============================================================================
 
 @test
 fn iterator_chars_next_yields_in_order() {
     let s: Text = "abc";
     let mut it: Chars = s.chars();
-    // First, second, third, then None.
+    // First, second, third, then Maybe.None.
     let a = it.next();
     let b = it.next();
     let c = it.next();
     let d = it.next();
-    match a { Some(ch) => assert_eq(ch, 'a'), None => panic("expected 'a'") };
-    match b { Some(ch) => assert_eq(ch, 'b'), None => panic("expected 'b'") };
-    match c { Some(ch) => assert_eq(ch, 'c'), None => panic("expected 'c'") };
-    match d { Some(_) => panic("expected None"), None => () };
+    match a { Maybe.Some(ch) => assert_eq(ch, 'a'), Maybe.None => panic("expected 'a'") };
+    match b { Maybe.Some(ch) => assert_eq(ch, 'b'), Maybe.None => panic("expected 'b'") };
+    match c { Maybe.Some(ch) => assert_eq(ch, 'c'), Maybe.None => panic("expected 'c'") };
+    match d { Maybe.Some(_) => panic("expected Maybe.None"), Maybe.None => () };
 }
 
 @test
 fn iterator_chars_empty_next_is_none() {
     let s: Text = "";
     let mut it: Chars = s.chars();
-    match it.next() { Some(_) => panic("empty must yield None"), None => () };
+    match it.next() { Maybe.Some(_) => panic("empty must yield Maybe.None"), Maybe.None => () };
 }
 
 @test
 fn iterator_chars_fused_after_exhaustion() {
-    // Calling next() past end MUST keep returning None — FusedIterator.
+    // Calling next() past end MUST keep returning Maybe.None — FusedIterator.
     let s: Text = "x";
     let mut it: Chars = s.chars();
     let _ = it.next();
-    match it.next() { Some(_) => panic("must be None"), None => () };
-    match it.next() { Some(_) => panic("still must be None"), None => () };
-    match it.next() { Some(_) => panic("still None"), None => () };
+    match it.next() { Maybe.Some(_) => panic("must be Maybe.None"), Maybe.None => () };
+    match it.next() { Maybe.Some(_) => panic("still must be Maybe.None"), Maybe.None => () };
+    match it.next() { Maybe.Some(_) => panic("still Maybe.None"), Maybe.None => () };
 }
 
 @test
@@ -98,17 +98,17 @@ fn iterator_bytes_next_matches_as_bytes() {
     let b0 = it.next();
     let b1 = it.next();
     let b2 = it.next();
-    match b0 { Some(x) => assert_eq(x as Int, 65), None => panic("expected 0x41") };
-    match b1 { Some(x) => assert_eq(x as Int, 66), None => panic("expected 0x42") };
-    match b2 { Some(_) => panic("expected None"), None => () };
+    match b0 { Maybe.Some(x) => assert_eq(x as Int, 65), Maybe.None => panic("expected 0x41") };
+    match b1 { Maybe.Some(x) => assert_eq(x as Int, 66), Maybe.None => panic("expected 0x42") };
+    match b2 { Maybe.Some(_) => panic("expected Maybe.None"), Maybe.None => () };
 }
 
 @test
 fn iterator_bytes_fused_after_exhaustion() {
     let s: Text = "";
     let mut it: ByteIter = s.bytes();
-    match it.next() { Some(_) => panic("empty must yield None"), None => () };
-    match it.next() { Some(_) => panic("still None"), None => () };
+    match it.next() { Maybe.Some(_) => panic("empty must yield Maybe.None"), Maybe.None => () };
+    match it.next() { Maybe.Some(_) => panic("still Maybe.None"), Maybe.None => () };
 }
 
 // =============================================================================
@@ -118,8 +118,8 @@ fn iterator_bytes_fused_after_exhaustion() {
 @test
 fn iterator_char_indices_pairs_are_aligned() {
     // ASCII: byte index == char index because each code point is 1 byte.
-    // Use the flat Some(pair) destructure (then nested tuple unpacking)
-    // form rather than Some((i, ch)) — the AOT typechecker treats the
+    // Use the flat Maybe.Some(pair) destructure (then nested tuple unpacking)
+    // form rather than Maybe.Some((i, ch)) — the AOT typechecker treats the
     // latter as a refinement that other arms don't match.
     let s: Text = "xyz";
     let mut it: CharIndices = s.char_indices();
@@ -128,18 +128,18 @@ fn iterator_char_indices_pairs_are_aligned() {
     let p2 = it.next();
     let p3 = it.next();
     match p0 {
-        Some(pair) => { assert_eq(pair.0, 0); assert_eq(pair.1, 'x'); },
-        None => panic("expected (0,'x')"),
+        Maybe.Some(pair) => { assert_eq(pair.0, 0); assert_eq(pair.1, 'x'); },
+        Maybe.None => panic("expected (0,'x')"),
     };
     match p1 {
-        Some(pair) => { assert_eq(pair.0, 1); assert_eq(pair.1, 'y'); },
-        None => panic("expected (1,'y')"),
+        Maybe.Some(pair) => { assert_eq(pair.0, 1); assert_eq(pair.1, 'y'); },
+        Maybe.None => panic("expected (1,'y')"),
     };
     match p2 {
-        Some(pair) => { assert_eq(pair.0, 2); assert_eq(pair.1, 'z'); },
-        None => panic("expected (2,'z')"),
+        Maybe.Some(pair) => { assert_eq(pair.0, 2); assert_eq(pair.1, 'z'); },
+        Maybe.None => panic("expected (2,'z')"),
     };
-    match p3 { Some(_) => panic("expected None"), None => () };
+    match p3 { Maybe.Some(_) => panic("expected Maybe.None"), Maybe.None => () };
 }
 
 // =============================================================================
@@ -154,17 +154,17 @@ fn iterator_lines_strips_trailing_newline() {
     let l1 = it.next();
     let l2 = it.next();
     let l3 = it.next();
-    match l0 { Some(t) => assert_eq(t, "a"), None => panic("a") };
-    match l1 { Some(t) => assert_eq(t, "b"), None => panic("b") };
-    match l2 { Some(t) => assert_eq(t, "c"), None => panic("c") };
-    match l3 { Some(_) => panic("expected None"), None => () };
+    match l0 { Maybe.Some(t) => assert_eq(t, "a"), Maybe.None => panic("a") };
+    match l1 { Maybe.Some(t) => assert_eq(t, "b"), Maybe.None => panic("b") };
+    match l2 { Maybe.Some(t) => assert_eq(t, "c"), Maybe.None => panic("c") };
+    match l3 { Maybe.Some(_) => panic("expected Maybe.None"), Maybe.None => () };
 }
 
 @test
 fn iterator_lines_empty_text_yields_nothing() {
     let s: Text = "";
     let mut it: Lines = s.lines();
-    match it.next() { Some(_) => panic("empty Lines must yield nothing"), None => () };
+    match it.next() { Maybe.Some(_) => panic("empty Lines must yield nothing"), Maybe.None => () };
 }
 
 @test
@@ -175,8 +175,8 @@ fn iterator_lines_trailing_newline_does_not_emit_empty() {
     let mut it: Lines = s.lines();
     let l0 = it.next();
     let l1 = it.next();
-    match l0 { Some(t) => assert_eq(t, "a"), None => panic("a") };
-    match l1 { Some(_) => panic("trailing newline must not yield empty"), None => () };
+    match l0 { Maybe.Some(t) => assert_eq(t, "a"), Maybe.None => panic("a") };
+    match l1 { Maybe.Some(_) => panic("trailing newline must not yield empty"), Maybe.None => () };
 }
 
 // =============================================================================
@@ -387,8 +387,8 @@ fn as_ref_yields_byte_slice_view() {
 fn from_str_int_round_trip() {
     let r: Result<Int, ParseError> = Int.from_str(&"123");
     match r {
-        Ok(n) => assert_eq(n, 123),
-        Err(_) => panic("'123' must parse to 123"),
+        Result.Ok(n) => assert_eq(n, 123),
+        Result.Err(_) => panic("'123' must parse to 123"),
     };
 }
 
@@ -396,8 +396,8 @@ fn from_str_int_round_trip() {
 fn from_str_int_negative() {
     let r: Result<Int, ParseError> = Int.from_str(&"-42");
     match r {
-        Ok(n) => assert_eq(n, -42),
-        Err(_) => panic("'-42' must parse to -42"),
+        Result.Ok(n) => assert_eq(n, -42),
+        Result.Err(_) => panic("'-42' must parse to -42"),
     };
 }
 
@@ -405,8 +405,8 @@ fn from_str_int_negative() {
 fn from_str_int_invalid_returns_err() {
     let r: Result<Int, ParseError> = Int.from_str(&"xyz");
     match r {
-        Ok(_) => panic("'xyz' must NOT parse"),
-        Err(_) => (),
+        Result.Ok(_) => panic("'xyz' must NOT parse"),
+        Result.Err(_) => (),
     };
 }
 
@@ -414,8 +414,8 @@ fn from_str_int_invalid_returns_err() {
 fn from_str_bool_true() {
     let r: Result<Bool, ParseError> = Bool.from_str(&"true");
     match r {
-        Ok(b) => assert(b),
-        Err(_) => panic("'true' must parse"),
+        Result.Ok(b) => assert(b),
+        Result.Err(_) => panic("'true' must parse"),
     };
 }
 
@@ -423,8 +423,8 @@ fn from_str_bool_true() {
 fn from_str_bool_false() {
     let r: Result<Bool, ParseError> = Bool.from_str(&"false");
     match r {
-        Ok(b) => assert(!b),
-        Err(_) => panic("'false' must parse"),
+        Result.Ok(b) => assert(!b),
+        Result.Err(_) => panic("'false' must parse"),
     };
 }
 
@@ -432,8 +432,8 @@ fn from_str_bool_false() {
 fn from_str_bool_invalid_returns_err() {
     let r: Result<Bool, ParseError> = Bool.from_str(&"yes");
     match r {
-        Ok(_) => panic("'yes' must NOT parse to Bool"),
-        Err(_) => (),
+        Result.Ok(_) => panic("'yes' must NOT parse to Bool"),
+        Result.Err(_) => (),
     };
 }
 
@@ -441,8 +441,8 @@ fn from_str_bool_invalid_returns_err() {
 fn from_str_text_is_identity() {
     let r: Result<Text, ParseError> = Text.from_str(&"verum");
     match r {
-        Ok(t) => assert_eq(t, "verum"),
-        Err(_) => panic("Text.from_str must be Ok for any Text"),
+        Result.Ok(t) => assert_eq(t, "verum"),
+        Result.Err(_) => panic("Text.from_str must be Ok for any Text"),
     };
 }
 
@@ -454,8 +454,8 @@ fn from_str_text_is_identity() {
 fn try_with_capacity_zero_returns_empty() {
     let r: Result<Text, _> = Text.try_with_capacity(0);
     match r {
-        Ok(t) => { assert(t.is_empty()); assert_eq(t.len(), 0); },
-        Err(_) => panic("try_with_capacity(0) must succeed"),
+        Result.Ok(t) => { assert(t.is_empty()); assert_eq(t.len(), 0); },
+        Result.Err(_) => panic("try_with_capacity(0) must succeed"),
     };
 }
 
@@ -469,12 +469,12 @@ fn try_with_capacity_positive_returns_empty_with_room() {
     // `cap` field — see task #5 close-out.
     let r: Result<Text, _> = Text.try_with_capacity(64);
     match r {
-        Ok(t) => {
+        Result.Ok(t) => {
             assert(t.is_empty());
             assert_eq(t.len(), 0);
             assert(t.capacity() >= 64);
         },
-        Err(_) => panic("try_with_capacity(64) must succeed"),
+        Result.Err(_) => panic("try_with_capacity(64) must succeed"),
     };
 }
 
@@ -486,21 +486,21 @@ fn try_with_capacity_positive_returns_empty_with_room() {
 fn byte_index_of_char_ascii_zero() {
     let s: Text = "abc";
     let r: Maybe<Int> = s.byte_index_of_char(0);
-    match r { Some(i) => assert_eq(i, 0), None => panic("0 must map to byte 0") };
+    match r { Maybe.Some(i) => assert_eq(i, 0), Maybe.None => panic("0 must map to byte 0") };
 }
 
 @test
 fn byte_index_of_char_ascii_mid() {
     let s: Text = "abc";
     let r: Maybe<Int> = s.byte_index_of_char(2);
-    match r { Some(i) => assert_eq(i, 2), None => panic("2 must map to byte 2") };
+    match r { Maybe.Some(i) => assert_eq(i, 2), Maybe.None => panic("2 must map to byte 2") };
 }
 
 @test
 fn byte_index_of_char_out_of_range_is_none() {
     let s: Text = "abc";
     let r: Maybe<Int> = s.byte_index_of_char(9);
-    match r { Some(_) => panic("out-of-range must be None"), None => () };
+    match r { Maybe.Some(_) => panic("out-of-range must be Maybe.None"), Maybe.None => () };
 }
 
 // =============================================================================
@@ -513,8 +513,8 @@ fn utf16_round_trip_ascii() {
     let units = s.encode_utf16();
     let r: Result<Text, Utf16Error> = Text.from_utf16(&units);
     match r {
-        Ok(t) => assert_eq(t, s),
-        Err(_) => panic("ASCII must round-trip through UTF-16"),
+        Result.Ok(t) => assert_eq(t, s),
+        Result.Err(_) => panic("ASCII must round-trip through UTF-16"),
     };
 }
 
@@ -706,10 +706,10 @@ fn clear_empties_buffer() {
 @test
 fn pop_returns_last_char_or_none() {
     let mut t: Text = "ab";
-    match t.pop() { Some(ch) => assert_eq(ch, 'b'), None => panic("expected 'b'") };
+    match t.pop() { Maybe.Some(ch) => assert_eq(ch, 'b'), Maybe.None => panic("expected 'b'") };
     assert_eq(t, "a");
-    match t.pop() { Some(ch) => assert_eq(ch, 'a'), None => panic("expected 'a'") };
-    match t.pop() { Some(_) => panic("expected None"), None => () };
+    match t.pop() { Maybe.Some(ch) => assert_eq(ch, 'a'), Maybe.None => panic("expected 'a'") };
+    match t.pop() { Maybe.Some(_) => panic("expected Maybe.None"), Maybe.None => () };
 }
 
 // =============================================================================
@@ -893,8 +893,8 @@ fn from_int_round_trip() {
     let s: Text = Text.from_int(n);
     let parsed = s.parse_int();
     match parsed {
-        Ok(m) => assert_eq(m, n),
-        Err(_) => panic("Int -> Text -> Int must round-trip"),
+        Result.Ok(m) => assert_eq(m, n),
+        Result.Err(_) => panic("Int -> Text -> Int must round-trip"),
     };
 }
 
@@ -1069,8 +1069,8 @@ fn rfind_returns_last_match_position() {
     let s: Text = "abcabc";
     let r: Maybe<Int> = s.rfind(&"abc");
     match r {
-        Some(i) => assert_eq(i, 3),
-        None => panic("rfind('abc') in 'abcabc' must be Some(3)"),
+        Maybe.Some(i) => assert_eq(i, 3),
+        Maybe.None => panic("rfind('abc') in 'abcabc' must be Maybe.Some(3)"),
     };
 }
 
@@ -1079,8 +1079,8 @@ fn rfind_returns_first_when_only_one_match() {
     let s: Text = "abc";
     let r: Maybe<Int> = s.rfind(&"abc");
     match r {
-        Some(i) => assert_eq(i, 0),
-        None => panic("rfind('abc') in 'abc' must be Some(0)"),
+        Maybe.Some(i) => assert_eq(i, 0),
+        Maybe.None => panic("rfind('abc') in 'abc' must be Maybe.Some(0)"),
     };
 }
 
@@ -1089,8 +1089,8 @@ fn rfind_absent_returns_none() {
     let s: Text = "hello";
     let r: Maybe<Int> = s.rfind(&"xyz");
     match r {
-        Some(_) => panic("rfind absent must be None"),
-        None => (),
+        Maybe.Some(_) => panic("rfind absent must be Maybe.None"),
+        Maybe.None => (),
     };
 }
 

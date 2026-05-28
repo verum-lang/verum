@@ -202,13 +202,13 @@ implement Describable for MyError {
 
 implement ErrorSource for MyError {
     fn source(&self) -> Maybe<&dyn Describable> {
-        None
+        Maybe.None
     }
 }
 
 implement ErrorProtocol for MyError {
     // message() default is description(); we accept default.
-    // backtrace() default is None; we accept default.
+    // backtrace() default is Maybe.None; we accept default.
 }
 
 @test
@@ -249,7 +249,7 @@ implement Describable for ChainedError {
 
 implement ErrorSource for ChainedError {
     fn source(&self) -> Maybe<&dyn Describable> {
-        Some(&self.inner as &dyn Describable)
+        Maybe.Some(&self.inner as &dyn Describable)
     }
 }
 

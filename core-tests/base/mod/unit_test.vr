@@ -26,13 +26,13 @@ mount core.collections.list.List;
 
 @test
 fn test_prelude_reexports_maybe() {
-    let m: Maybe<Int> = Some(42);
+    let m: Maybe<Int> = Maybe.Some(42);
     assert(m.is_some());
 }
 
 @test
 fn test_prelude_reexports_result() {
-    let r: Result<Int, Text> = Ok(7);
+    let r: Result<Int, Text> = Result.Ok(7);
     assert(r.is_ok());
 }
 
@@ -70,10 +70,10 @@ fn test_bytes_alias_is_list_byte_compatible() {
 
 @test
 fn test_text_result_alias() {
-    let r: TextResult<Int> = Ok(42);
+    let r: TextResult<Int> = Result.Ok(42);
     assert(r.is_ok());
 
-    let e: TextResult<Int> = Err("error message");
+    let e: TextResult<Int> = Result.Err("error message");
     assert(e.is_err());
 }
 

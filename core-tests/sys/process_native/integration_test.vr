@@ -72,26 +72,26 @@ fn integration_spawn_result_collect_open_stdout_fds() {
 @test
 fn integration_spawn_result_ok_branch_propagates_pid() {
     // Mimic native_spawn's Result<SpawnResult, Text> shape.
-    let ok: Result<SpawnResult, Text> = Ok(SpawnResult {
+    let ok: Result<SpawnResult, Text> = Result.Ok(SpawnResult {
         pid: 9999,
         stdin_fd: -1,
         stdout_fd: -1,
         stderr_fd: -1,
     });
     match ok {
-        Ok(r) => {
+        Result.Ok(r) => {
             assert_eq(r.pid, 9999);
         }
-        Err(_) => assert(false),
+        Result.Err(_) => assert(false),
     };
 }
 
 @test
 fn integration_spawn_result_err_branch_carries_text() {
-    let err: Result<SpawnResult, Text> = Err("fork() failed: EAGAIN".clone());
+    let err: Result<SpawnResult, Text> = Result.Err("fork() failed: EAGAIN".clone());
     match err {
-        Ok(_)    => assert(false),
-        Err(msg) => assert_eq(msg, "fork() failed: EAGAIN".clone()),
+        Result.Ok(_)    => assert(false),
+        Result.Err(msg) => assert_eq(msg, "fork() failed: EAGAIN".clone()),
     };
 }
 
@@ -144,18 +144,18 @@ fn integration_capture_mode_dispatch_table() {
 @test
 fn integration_spawn_result_via_maybe_some_branch() {
     // Wrap SpawnResult in Maybe; pattern-match through both arms.
-    let opt: Maybe<SpawnResult> = Some(SpawnResult {
+    let opt: Maybe<SpawnResult> = Maybe.Some(SpawnResult {
         pid: 1234,
         stdin_fd: -1,
         stdout_fd: 7,
         stderr_fd: -1,
     });
     match opt {
-        Some(r) => {
+        Maybe.Some(r) => {
             assert_eq(r.pid, 1234);
             assert_eq(r.stdout_fd, 7);
         }
-        None => assert(false),
+        Maybe.None => assert(false),
     };
 }
 

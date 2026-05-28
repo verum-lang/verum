@@ -142,7 +142,7 @@ fn test_usize_non_negative() {
 fn test_usize_as_array_index() {
     let lst: List<Int> = [10, 20, 30, 40];
     let idx: USize = 2;
-    assert_eq(lst.get(idx as Int), Some(30));
+    assert_eq(lst.get(idx as Int), Maybe.Some(30));
 }
 
 @test

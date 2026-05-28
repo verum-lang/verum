@@ -101,28 +101,28 @@ fn law_retry_options_linear_preserves_max_attempts() {
 
 @test
 fn law_retry_first_attempt_success_returns_value() {
-    let r: Result<Int, Text> = retry(5, || { Ok(42) });
+    let r: Result<Int, Text> = retry(5, || { Result.Ok(42) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 42);
 }
 
 @test
 fn law_retry_immediate_first_attempt_success() {
-    let r: Result<Int, Text> = retry_immediate(5, || { Ok(99) });
+    let r: Result<Int, Text> = retry_immediate(5, || { Result.Ok(99) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 99);
 }
 
 @test
 fn law_retry_jittered_first_attempt_success() {
-    let r: Result<Int, Text> = retry_jittered(3, 100, || { Ok(7) });
+    let r: Result<Int, Text> = retry_jittered(3, 100, || { Result.Ok(7) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 7);
 }
 
 @test
 fn law_retry_linear_first_attempt_success() {
-    let r: Result<Int, Text> = retry_linear(3, 50, || { Ok(13) });
+    let r: Result<Int, Text> = retry_linear(3, 50, || { Result.Ok(13) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 13);
 }

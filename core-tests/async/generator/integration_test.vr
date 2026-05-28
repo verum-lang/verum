@@ -29,11 +29,11 @@ fn integration_successors_powers_of_two() {
 
 @test
 fn integration_from_fn_finite_producer() {
-    // generator_from_fn(|| Maybe<T>) — None terminates.
+    // generator_from_fn(|| Maybe<T>) — Maybe.None terminates.
     let mut produced = 0;
     let _ = generator_from_fn(|| {
         produced = produced + 1;
-        if produced > 3 { None } else { Some(produced) }
+        if produced > 3 { Maybe.None } else { Maybe.Some(produced) }
     });
     // We can't easily drive iteration here without `for`; pin
     // that construction itself doesn't panic and the function

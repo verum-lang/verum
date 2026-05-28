@@ -18,7 +18,7 @@ mount core.text.case_fold.{
     fold_text_ascii, compare_ascii_nocase, equal_ascii_nocase,
 };
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================

@@ -121,7 +121,7 @@ fn regression_quic_ack_frame_with_ecn_round_trip() {
     // RFC 9000 §19.3: ACK with ECN counts (type 0x03 variant). Codec
     // round-trip gated on harness.
     let ranges: List<AckRange> = [];
-    let ecn = Some(EcnCounts { ect0: 0_u64, ect1: 0_u64, ce: 0_u64 });
+    let ecn = Maybe.Some(EcnCounts { ect0: 0_u64, ect1: 0_u64, ce: 0_u64 });
     let f = QuicFrame.AckFrame {
         largest_acked: 100_u64,
         ack_delay: 0_u64,

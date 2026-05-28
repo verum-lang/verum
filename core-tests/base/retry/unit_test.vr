@@ -90,35 +90,35 @@ fn test_retry_options_with_should_retry_preserves_max_attempts() {
 
 @test
 fn test_retry_succeeds_on_first_attempt_returns_value() {
-    let r: Result<Int, Text> = retry(3, || { Ok(42) });
+    let r: Result<Int, Text> = retry(3, || { Result.Ok(42) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 42);
 }
 
 @test
 fn test_retry_succeeds_on_first_attempt_with_one_max() {
-    let r: Result<Int, Text> = retry(1, || { Ok(7) });
+    let r: Result<Int, Text> = retry(1, || { Result.Ok(7) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 7);
 }
 
 @test
 fn test_retry_immediate_succeeds_on_first_attempt() {
-    let r: Result<Int, Text> = retry_immediate(3, || { Ok(99) });
+    let r: Result<Int, Text> = retry_immediate(3, || { Result.Ok(99) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 99);
 }
 
 @test
 fn test_retry_jittered_succeeds_on_first_attempt() {
-    let r: Result<Int, Text> = retry_jittered(2, 100, || { Ok(11) });
+    let r: Result<Int, Text> = retry_jittered(2, 100, || { Result.Ok(11) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 11);
 }
 
 @test
 fn test_retry_linear_succeeds_on_first_attempt() {
-    let r: Result<Int, Text> = retry_linear(3, 50, || { Ok(13) });
+    let r: Result<Int, Text> = retry_linear(3, 50, || { Result.Ok(13) });
     assert(r.is_ok());
     assert_eq(r.unwrap(), 13);
 }

@@ -8,9 +8,9 @@
 //
 // Pinned regressions:
 //   §A  `delegate_capability` previously used an obfuscated bit-twiddle
-//       `Some(req & !CAP_DELEGATE | (req & CAP_DELEGATE))` that was
-//       algebraically equivalent to `Some(req)`.  The current form
-//       returns `Some(requested)` directly — pin the actual semantics
+//       `Maybe.Some(req & !CAP_DELEGATE | (req & CAP_DELEGATE))` that was
+//       algebraically equivalent to `Maybe.Some(req)`.  The current form
+//       returns `Maybe.Some(requested)` directly — pin the actual semantics
 //       to defend against re-introduction of the obfuscated form.
 //       audit.md §3.1.
 //   §B  pack_epoch_caps had been written as `(caps as UInt32) * 65536 |
@@ -43,7 +43,7 @@ mount core.mem.capability.{
 };
 
 // -----------------------------------------------------------------------------
-// §A — delegate returns Some(requested) when parent dominates
+// §A — delegate returns Maybe.Some(requested) when parent dominates
 // -----------------------------------------------------------------------------
 
 @test

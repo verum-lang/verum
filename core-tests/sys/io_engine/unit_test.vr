@@ -159,8 +159,8 @@ fn test_fd_positive_is_valid() {
 fn test_fd_try_as_valid_for_invalid_returns_none() {
     let f = Fd.INVALID;
     match f.try_as_valid() {
-        Some(_) => panic("INVALID must NOT convert to ValidFd"),
-        None => {}
+        Maybe.Some(_) => panic("INVALID must NOT convert to ValidFd"),
+        Maybe.None => {}
     }
 }
 
@@ -168,8 +168,8 @@ fn test_fd_try_as_valid_for_invalid_returns_none() {
 fn test_fd_try_as_valid_for_valid_returns_some() {
     let f = Fd(7 as Int32);
     match f.try_as_valid() {
-        Some(_) => {},
-        None => panic("valid fd must convert to Some(ValidFd)"),
+        Maybe.Some(_) => {},
+        Maybe.None => panic("valid fd must convert to Maybe.Some(ValidFd)"),
     }
 }
 

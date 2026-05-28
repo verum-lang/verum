@@ -60,17 +60,17 @@ fn test_toposort_empty_graph_yields_empty_order() {
     let g: TopoGraph<Int> = TopoGraph.new();
     let r = g.toposort();
     match r {
-        Ok(out) => assert_eq(out.len(), 0),
-        Err(_)  => panic("empty graph must topo-sort to empty list"),
+        Result.Ok(out) => assert_eq(out.len(), 0),
+        Result.Err(_)  => panic("empty graph must topo-sort to empty list"),
     }
 }
 
 // =============================================================================
 // Section 4: toposort on isolated nodes — pinned in regression_test.vr.
-//      The `match self.in_deg.get(n) { Some/None }` pattern inside
-//      toposort returns Err(Cycle) for graphs that have no cycles,
+//      The `match self.in_deg.get(n) { Some/Maybe.None }` pattern inside
+//      toposort returns Result.Err(Cycle) for graphs that have no cycles,
 //      because Map.get returns V (not Maybe<V>) and the match never
-//      sees a `Some(0)` branch — so `in_deg_local` is never populated
+//      sees a `Maybe.Some(0)` branch — so `in_deg_local` is never populated
 //      with the correct in-degree, no node ever has in_deg == 0,
 //      and the queue stays empty.
 // =============================================================================

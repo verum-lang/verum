@@ -21,8 +21,8 @@ fn int_slice_list_as_slice_iter_sum() {
     let mut iter = s.iter();
     loop {
         match iter.next() {
-            Some(v) => { total = total + *v; },
-            None => break,
+            Maybe.Some(v) => { total = total + *v; },
+            Maybe.None => break,
         }
     }
     assert_eq(total, 15);
@@ -41,14 +41,14 @@ fn int_slice_subrange_round_trip() {
     let mut collected: List<Int> = [];
     loop {
         match iter.next() {
-            Some(v) => { collected.push(*v); },
-            None => break,
+            Maybe.Some(v) => { collected.push(*v); },
+            Maybe.None => break,
         }
     }
     assert_eq(collected.len(), 3);
-    assert_eq(collected.get(0), Some(20));
-    assert_eq(collected.get(1), Some(30));
-    assert_eq(collected.get(2), Some(40));
+    assert_eq(collected.get(0), Maybe.Some(20));
+    assert_eq(collected.get(1), Maybe.Some(30));
+    assert_eq(collected.get(2), Maybe.Some(40));
 }
 
 // =============================================================================
@@ -77,7 +77,7 @@ fn int_slice_empty_chain_is_empty() {
     assert(sub.is_empty());
     let mut iter = sub.iter();
     let n: Maybe<&Int> = iter.next();
-    assert(n is None);
+    assert(n is Maybe.None);
 }
 
 // =============================================================================
@@ -96,8 +96,8 @@ fn int_slice_contains_filters_list_to_subset() {
     let mut iter = u.iter();
     loop {
         match iter.next() {
-            Some(v) => { if f.contains(v) { kept = kept + 1; } },
-            None => break,
+            Maybe.Some(v) => { if f.contains(v) { kept = kept + 1; } },
+            Maybe.None => break,
         }
     }
     assert_eq(kept, 3);

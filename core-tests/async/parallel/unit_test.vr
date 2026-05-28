@@ -10,7 +10,7 @@
 //
 // Coverage:
 //   - parallel_map         : T → U mapping over a List<T>
-//   - parallel_filter_map  : T → Maybe<U> mapping that drops None
+//   - parallel_filter_map  : T → Maybe<U> mapping that drops Maybe.None
 //   - parallel_for_each    : T → () side-effect sink
 //   - parallel_reduce      : T → T → T fold returning Maybe<T>
 //   - parallel_scan_exclusive : Blelloch exclusive prefix scan
@@ -27,7 +27,7 @@ mount core.async.parallel.{
     parallel_map, parallel_filter_map, parallel_for_each,
     parallel_reduce, parallel_scan_exclusive,
 };
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -99,7 +99,7 @@ fn test_parallel_map_worker_count_negative_does_not_skip_items() {
 fn test_parallel_filter_map_keeps_some_drops_none() {
     let xs: List<Int> = [1, 2, 3, 4, 5];
     let ys = parallel_filter_map(xs, 2, |x| {
-        if x % 2 == 0 { Some(x * 10) } else { None }
+        if x % 2 == 0 { Maybe.Some(x * 10) } else { Maybe.None }
     });
     assert_eq(ys.len(), 2);
     assert_eq(ys[0], 20);
@@ -110,7 +110,7 @@ fn test_parallel_filter_map_keeps_some_drops_none() {
 fn test_parallel_filter_map_all_some_acts_like_map() {
     let xs: List<Int> = [1, 2, 3];
     let mapped = parallel_map((xs).clone(), 1, |x| x + 100);
-    let kept   = parallel_filter_map(xs, 1, |x| Some(x + 100));
+    let kept   = parallel_filter_map(xs, 1, |x| Maybe.Some(x + 100));
     assert_eq(kept.len(), mapped.len());
     assert_eq(kept[0], mapped[0]);
     assert_eq(kept[1], mapped[1]);
@@ -120,7 +120,7 @@ fn test_parallel_filter_map_all_some_acts_like_map() {
 @test
 fn test_parallel_filter_map_all_none_yields_empty() {
     let xs: List<Int> = [1, 2, 3];
-    let ys: List<Int> = parallel_filter_map(xs, 1, |_x| None);
+    let ys: List<Int> = parallel_filter_map(xs, 1, |_x| Maybe.None);
     assert_eq(ys.len(), 0);
 }
 
@@ -128,7 +128,7 @@ fn test_parallel_filter_map_all_none_yields_empty() {
 fn test_parallel_filter_map_preserves_order_of_kept_items() {
     let xs: List<Int> = [5, 1, 4, 1, 3, 2];
     let ys = parallel_filter_map(xs, 4, |x| {
-        if x > 2 { Some(x) } else { None }
+        if x > 2 { Maybe.Some(x) } else { Maybe.None }
     });
     assert_eq(ys.len(), 3);
     assert_eq(ys[0], 5);
@@ -139,7 +139,7 @@ fn test_parallel_filter_map_preserves_order_of_kept_items() {
 @test
 fn test_parallel_filter_map_empty_input() {
     let xs: List<Int> = [];
-    let ys: List<Int> = parallel_filter_map(xs, 1, |x| Some(x));
+    let ys: List<Int> = parallel_filter_map(xs, 1, |x| Maybe.Some(x));
     assert_eq(ys.len(), 0);
 }
 
@@ -181,8 +181,8 @@ fn test_parallel_for_each_observes_values_in_order() {
 fn test_parallel_reduce_sum() {
     let xs: List<Int> = [1, 2, 3, 4, 5];
     match parallel_reduce(xs, 4, |a, b| a + b) {
-        Some(s) => assert_eq(s, 15),
-        None => assert(false),
+        Maybe.Some(s) => assert_eq(s, 15),
+        Maybe.None => assert(false),
     }
 }
 
@@ -190,8 +190,8 @@ fn test_parallel_reduce_sum() {
 fn test_parallel_reduce_max() {
     let xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
     match parallel_reduce(xs, 4, |a, b| if a > b { a } else { b }) {
-        Some(m) => assert_eq(m, 9),
-        None => assert(false),
+        Maybe.Some(m) => assert_eq(m, 9),
+        Maybe.None => assert(false),
     }
 }
 
@@ -199,8 +199,8 @@ fn test_parallel_reduce_max() {
 fn test_parallel_reduce_empty_input_returns_none() {
     let xs: List<Int> = [];
     match parallel_reduce(xs, 4, |a, b| a + b) {
-        Some(_) => assert(false),
-        None => assert(true),
+        Maybe.Some(_) => assert(false),
+        Maybe.None => assert(true),
     }
 }
 
@@ -208,8 +208,8 @@ fn test_parallel_reduce_empty_input_returns_none() {
 fn test_parallel_reduce_singleton_returns_only_element() {
     let xs: List<Int> = [42];
     match parallel_reduce(xs, 4, |a, b| a + b) {
-        Some(v) => assert_eq(v, 42),
-        None => assert(false),
+        Maybe.Some(v) => assert_eq(v, 42),
+        Maybe.None => assert(false),
     }
 }
 
@@ -217,8 +217,8 @@ fn test_parallel_reduce_singleton_returns_only_element() {
 fn test_parallel_reduce_two_elements() {
     let xs: List<Int> = [10, 32];
     match parallel_reduce(xs, 4, |a, b| a + b) {
-        Some(v) => assert_eq(v, 42),
-        None => assert(false),
+        Maybe.Some(v) => assert_eq(v, 42),
+        Maybe.None => assert(false),
     }
 }
 

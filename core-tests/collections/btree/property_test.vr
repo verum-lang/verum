@@ -22,7 +22,7 @@ fn law_btreemap_new_is_empty() {
 }
 
 // =============================================================================
-// Law: get on absent key is None across multiple probes
+// Law: get on absent key is Maybe.None across multiple probes
 // =============================================================================
 
 @test
@@ -31,7 +31,7 @@ fn law_btreemap_empty_get_is_always_none() {
     let mut i = 0;
     while i < 10 {
         let v: Maybe<Int> = m.get(&i);
-        assert(v is None);
+        assert(v is Maybe.None);
         i = i + 1;
     }
 }
@@ -51,7 +51,7 @@ fn law_btreemap_empty_contains_is_always_false() {
 }
 
 // =============================================================================
-// Law: remove on empty is None and idempotent
+// Law: remove on empty is Maybe.None and idempotent
 // =============================================================================
 
 @test
@@ -59,8 +59,8 @@ fn law_btreemap_empty_remove_idempotent() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
     let r1 = m.remove(&1);
     let r2 = m.remove(&1);
-    assert(r1 is None);
-    assert(r2 is None);
+    assert(r1 is Maybe.None);
+    assert(r2 is Maybe.None);
     assert(m.is_empty());
 }
 

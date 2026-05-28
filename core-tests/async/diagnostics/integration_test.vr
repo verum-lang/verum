@@ -4,7 +4,7 @@
 
 mount core.async.diagnostics.{TaskLifecycleState};
 mount core.collections.list.List;
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section A: List<TaskLifecycleState> — task-state distribution
@@ -54,17 +54,17 @@ fn integration_diagnostics_state_histogram() {
 // =============================================================================
 // Section B: TaskLifecycleState ↔ Maybe interop — "what should I show?"
 //
-//   UI filter: collapse non-active states to None.
+//   UI filter: collapse non-active states to Maybe.None.
 // =============================================================================
 
 @test
 fn integration_diagnostics_active_filter() {
     fn filter_active(s: TaskLifecycleState) -> Maybe<TaskLifecycleState> {
         match s {
-            TaskLifecycleState.Pending => Some(s),
-            TaskLifecycleState.Running => Some(s),
-            TaskLifecycleState.Parked  => Some(s),
-            _ => None,
+            TaskLifecycleState.Pending => Maybe.Some(s),
+            TaskLifecycleState.Running => Maybe.Some(s),
+            TaskLifecycleState.Parked  => Maybe.Some(s),
+            _ => Maybe.None,
         }
     }
     let active: List<TaskLifecycleState> = [
@@ -79,14 +79,14 @@ fn integration_diagnostics_active_filter() {
     ];
     for s in active.iter() {
         match filter_active(*s) {
-            Some(_) => assert(true),
-            None => assert(false),
+            Maybe.Some(_) => assert(true),
+            Maybe.None => assert(false),
         }
     }
     for s in terminal.iter() {
         match filter_active(*s) {
-            Some(_) => assert(false),
-            None => assert(true),
+            Maybe.Some(_) => assert(false),
+            Maybe.None => assert(true),
         }
     }
 }

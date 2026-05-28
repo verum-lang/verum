@@ -12,7 +12,7 @@ mount core.async.parallel.{
     parallel_map, parallel_filter_map, parallel_for_each,
     parallel_reduce, parallel_scan_exclusive,
 };
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -24,13 +24,13 @@ fn integration_parallel_map_filter_reduce_pipeline() {
     let xs: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     let squared   = parallel_map(xs, 4, |x| x * x);
     let evens_only = parallel_filter_map((squared).clone(), 4, |y| {
-        if y % 2 == 0 { Some(y) } else { None }
+        if y % 2 == 0 { Maybe.Some(y) } else { Maybe.None }
     });
     let total = parallel_reduce(evens_only, 4, |a, b| a + b);
     // sum of squares of even inputs: 4 + 16 + 36 + 64 + 100 = 220
     match total {
-        Some(s) => assert_eq(s, 220),
-        None => assert(false),
+        Maybe.Some(s) => assert_eq(s, 220),
+        Maybe.None => assert(false),
     }
 }
 
@@ -80,7 +80,7 @@ fn integration_parallel_empty_input_is_idempotent() {
     let mapped = parallel_map((xs).clone(), 4, |x| x + 1);
     assert_eq(mapped.len(), 0);
 
-    let filtered = parallel_filter_map((xs).clone(), 4, |x| Some(x));
+    let filtered = parallel_filter_map((xs).clone(), 4, |x| Maybe.Some(x));
     assert_eq(filtered.len(), 0);
 
     let mut visited: Int = 0;
@@ -88,8 +88,8 @@ fn integration_parallel_empty_input_is_idempotent() {
     assert_eq(visited, 0);
 
     match parallel_reduce((xs).clone(), 4, |a, b| a + b) {
-        Some(_) => assert(false),
-        None => assert(true),
+        Maybe.Some(_) => assert(false),
+        Maybe.None => assert(true),
     }
 
     let scanned = parallel_scan_exclusive((xs).clone(), 0, |a, b| a + b);

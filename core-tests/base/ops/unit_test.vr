@@ -323,7 +323,7 @@ fn test_map_sequence() {
 /// Test Try implementation for Maybe - Some case
 @test
 fn test_try_maybe_some() {
-    let maybe: Maybe<Int> = Some(42);
+    let maybe: Maybe<Int> = Maybe.Some(42);
 
     match maybe.branch() {
         Continue(v) => assert_eq(v, 42),
@@ -331,15 +331,15 @@ fn test_try_maybe_some() {
     }
 }
 
-/// Test Try implementation for Maybe - None case
+/// Test Try implementation for Maybe - Maybe.None case
 @test
 fn test_try_maybe_none() {
-    let maybe: Maybe<Int> = None;
+    let maybe: Maybe<Int> = Maybe.None;
 
     match maybe.branch() {
         Continue(_) => panic("Expected Break"),
         Break(residual) => {
-            // residual is Maybe<Never> which must be None
+            // residual is Maybe<Never> which must be Maybe.None
             assert(residual.is_none());
         }
     }
@@ -363,8 +363,8 @@ fn test_maybe_question_mark_semantics() {
         m.branch()
     }
 
-    let some_val = Some(100);
-    let none_val: Maybe<Int> = None;
+    let some_val = Maybe.Some(100);
+    let none_val: Maybe<Int> = Maybe.None;
 
     match simulate_question_mark(some_val) {
         Continue(v) => assert_eq(v, 100),
@@ -384,7 +384,7 @@ fn test_maybe_question_mark_semantics() {
 /// Test Try implementation for Result - Ok case
 @test
 fn test_try_result_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
 
     match result.branch() {
         Continue(v) => assert_eq(v, 42),
@@ -395,15 +395,15 @@ fn test_try_result_ok() {
 /// Test Try implementation for Result - Err case
 @test
 fn test_try_result_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
 
     match result.branch() {
         Continue(_) => panic("Expected Break"),
         Break(residual) => {
             // residual is Result<Never, Text> which must be Err
             match residual {
-                Err(e) => assert_eq(e, "error"),
-                Ok(_) => panic("Residual should be Err"),
+                Result.Err(e) => assert_eq(e, "error"),
+                Result.Ok(_) => panic("Residual should be Err"),
             }
         }
     }
@@ -424,8 +424,8 @@ fn test_result_question_mark_semantics() {
         r.branch()
     }
 
-    let ok_val: Result<Int, Text> = Ok(100);
-    let err_val: Result<Int, Text> = Err("failure");
+    let ok_val: Result<Int, Text> = Result.Ok(100);
+    let err_val: Result<Int, Text> = Result.Err("failure");
 
     match simulate_question_mark(ok_val) {
         Continue(v) => assert_eq(v, 100),
@@ -445,11 +445,11 @@ fn test_result_question_mark_semantics() {
 /// Test FromResidual for Maybe<T> from Maybe<Never>
 @test
 fn test_from_residual_maybe() {
-    // When ? on None, the residual is Maybe<Never> (which is None)
+    // When ? on Maybe.None, the residual is Maybe<Never> (which is Maybe.None)
     // FromResidual converts this to Maybe<T> for any T
     // (use direct construction since from_residual method resolution
     //  conflicts between Result and Maybe variant types)
-    let result: Maybe<Int> = None;
+    let result: Maybe<Int> = Maybe.None;
     assert(result.is_none());
 }
 
@@ -458,7 +458,7 @@ fn test_from_residual_maybe() {
 fn test_from_residual_result_same_error() {
     // Direct construction of error result
     // (from_residual method resolution conflicts between variant types)
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
 
     assert(result.is_err());
     assert_eq(result.unwrap_err(), "error");
@@ -468,17 +468,17 @@ fn test_from_residual_result_same_error() {
 @test
 fn test_from_residual_error_propagation() {
     fn inner() -> Result<Int, Text> {
-        Err("inner error")
+        Result.Err("inner error")
     }
 
     fn outer() -> Result<Text, Text> {
         // Manual ? simulation: match on result and propagate error
         let result = inner();
         if result.is_err() {
-            Err(result.unwrap_err())
+            Result.Err(result.unwrap_err())
         } else {
             let val = result.unwrap();
-            Ok(f"Got: {val}")
+            Result.Ok(f"Got: {val}")
         }
     }
 
@@ -497,30 +497,30 @@ fn test_never_as_marker() {
     // Never is uninhabited - we can't create a value of type Never
     // But we can use it in type positions
 
-    // A Maybe<Never> can only be None
-    let m: Maybe<Never> = None;
+    // A Maybe<Never> can only be Maybe.None
+    let m: Maybe<Never> = Maybe.None;
     assert(m.is_none());
 
     // A Result<Never, E> can only be Err
-    let r: Result<Never, Text> = Err("error");
+    let r: Result<Never, Text> = Result.Err("error");
     assert(r.is_err());
 }
 
 /// Test Never in residual types
 @test
 fn test_never_in_residuals() {
-    // The residual type Maybe<Never> indicates "this is always None"
+    // The residual type Maybe<Never> indicates "this is always Maybe.None"
     // The residual type Result<Never, E> indicates "this is always Err"
 
     // This is useful for type-level guarantees in the Try protocol
     type MaybeResidual<T> is Maybe<Never>;
     type ResultResidual<E> is Result<Never, E>;
 
-    let maybe_res: MaybeResidual<Int> = None;
+    let maybe_res: MaybeResidual<Int> = Maybe.None;
     assert(maybe_res.is_none());
 
     // Result<Never, E> requires explicit type for Never
-    let result_res: Result<Never, Int> = Err(404);
+    let result_res: Result<Never, Int> = Result.Err(404);
     assert(result_res.is_err());
 }
 
@@ -568,12 +568,12 @@ fn test_control_flow_same_types() {
 /// Test ControlFlow with nested types
 @test
 fn test_control_flow_nested_types() {
-    let cf: ControlFlow<Maybe<Text>, Result<Int, Text>> = Continue(Ok(42));
+    let cf: ControlFlow<Maybe<Text>, Result<Int, Text>> = Continue(Result.Ok(42));
     assert(cf.is_continue());
 
     match cf.continue_value() {
-        Ok(v) => assert_eq(v, 42),
-        Err(_) => panic("Expected Ok"),
+        Result.Ok(v) => assert_eq(v, 42),
+        Result.Err(_) => panic("Expected Ok"),
     }
 }
 
@@ -596,36 +596,36 @@ fn test_control_flow_function_types() {
 
 /// Test simulating a chain of ? operations
 @test
-@ignore("Nested-if-else chained Result simulation returns Err where it should return Ok(25). Likely chained-function-return type-tracking defect — pinned in regression_test.vr §A.")
+@ignore("Nested-if-else chained Result simulation returns Err where it should return Result.Ok(25). Likely chained-function-return type-tracking defect — pinned in regression_test.vr §A.")
 fn test_try_chain_simulation() {
     fn step1() -> Result<Int, Text> {
-        Ok(10)
+        Result.Ok(10)
     }
 
     fn step2(x: Int) -> Result<Int, Text> {
-        Ok(x * 2)
+        Result.Ok(x * 2)
     }
 
     fn step3(x: Int) -> Result<Int, Text> {
         if x > 15 {
-            Ok(x + 5)
+            Result.Ok(x + 5)
         } else {
-            Err("Too small")
+            Result.Err("Too small")
         }
     }
 
     // Simulating: step1()?.pipe(step2)?.pipe(step3)?
     fn chain() -> Result<Int, Text> {
         let r1 = step1();
-        if r1.is_err() { Err(r1.unwrap_err()) } else {
+        if r1.is_err() { Result.Err(r1.unwrap_err()) } else {
         let v1 = r1.unwrap();
         let r2 = step2(v1);
-        if r2.is_err() { Err(r2.unwrap_err()) } else {
+        if r2.is_err() { Result.Err(r2.unwrap_err()) } else {
         let v2 = r2.unwrap();
         let r3 = step3(v2);
-        if r3.is_err() { Err(r3.unwrap_err()) } else {
+        if r3.is_err() { Result.Err(r3.unwrap_err()) } else {
         let v3 = r3.unwrap();
-        Ok(v3)
+        Result.Ok(v3)
         }}}
     }
 
@@ -638,28 +638,28 @@ fn test_try_chain_simulation() {
 @test
 fn test_try_chain_failure_middle() {
     fn step1() -> Maybe<Int> {
-        Some(10)
+        Maybe.Some(10)
     }
 
     fn step2(_x: Int) -> Maybe<Int> {
-        None  // Failure here
+        Maybe.None  // Failure here
     }
 
     fn step3(x: Int) -> Maybe<Int> {
-        Some(x + 100)
+        Maybe.Some(x + 100)
     }
 
     fn chain() -> Maybe<Int> {
         let r1 = step1();
-        if r1.is_none() { None } else {
+        if r1.is_none() { Maybe.None } else {
         let v1 = r1.unwrap();
         let r2 = step2(v1);
-        if r2.is_none() { None } else {
+        if r2.is_none() { Maybe.None } else {
         let v2 = r2.unwrap();
         let r3 = step3(v2);
-        if r3.is_none() { None } else {
+        if r3.is_none() { Maybe.None } else {
         let v3 = r3.unwrap();
-        Some(v3)
+        Maybe.Some(v3)
         }}}
     }
 
@@ -736,15 +736,15 @@ fn test_try_roundtrip_success() {
     }
 }
 
-/// Test that None value can be propagated as failure
+/// Test that Maybe.None value can be propagated as failure
 @test
 fn test_try_residual_convertible() {
-    // A None value represents failure that can be propagated
-    let none_maybe: Maybe<Int> = None;
+    // A Maybe.None value represents failure that can be propagated
+    let none_maybe: Maybe<Int> = Maybe.None;
     assert(none_maybe.is_none());
 
     // Directly construct the converted result
-    let converted: Maybe<Int> = None;
+    let converted: Maybe<Int> = Maybe.None;
     assert(converted.is_none());
 }
 
@@ -762,16 +762,16 @@ fn test_from_residual_error_conversion() {
     fn convert_error<T>(result: Result<T, InnerError>, ctx: Text) -> Result<T, OuterError> {
         if result.is_err() {
             let inner = result.unwrap_err();
-            Err(OuterError {
+            Result.Err(OuterError {
                 code: inner.code,
                 context: ctx,
             })
         } else {
-            Ok(result.unwrap())
+            Result.Ok(result.unwrap())
         }
     }
 
-    let inner_result: Result<Int, InnerError> = Err(InnerError { code: 404 });
+    let inner_result: Result<Int, InnerError> = Result.Err(InnerError { code: 404 });
     let outer_result = convert_error(inner_result, "in function foo");
 
     assert(outer_result.is_err());
@@ -847,13 +847,13 @@ fn test_control_flow_pattern_matching() {
 /// Test nested pattern matching
 @test
 fn test_control_flow_nested_pattern_matching() {
-    let cf: ControlFlow<Result<Int, Text>, Maybe<Int>> = Continue(Some(42));
+    let cf: ControlFlow<Result<Int, Text>, Maybe<Int>> = Continue(Maybe.Some(42));
 
     match cf {
-        Continue(Some(v)) => assert_eq(v, 42),
-        Continue(None) => panic("Expected Some"),
-        Break(Ok(_)) => panic("Expected Continue"),
-        Break(Err(_)) => panic("Expected Continue"),
+        Continue(Maybe.Some(v)) => assert_eq(v, 42),
+        Continue(Maybe.None) => panic("Expected Some"),
+        Break(Result.Ok(_)) => panic("Expected Continue"),
+        Break(Result.Err(_)) => panic("Expected Continue"),
     }
 }
 
@@ -872,15 +872,15 @@ fn test_try_async_pattern() {
         match ar {
             Pending => Break(Pending),
             Ready(result) => match result {
-                Ok(v) => Continue(v),
-                Err(e) => Break(Ready(Err(e))),
+                Result.Ok(v) => Continue(v),
+                Result.Err(e) => Break(Ready(Result.Err(e))),
             },
         }
     }
 
     let pending: AsyncResult<Int, Text> = Pending;
-    let ready_ok: AsyncResult<Int, Text> = Ready(Ok(42));
-    let ready_err: AsyncResult<Int, Text> = Ready(Err("error"));
+    let ready_ok: AsyncResult<Int, Text> = Ready(Result.Ok(42));
+    let ready_err: AsyncResult<Int, Text> = Ready(Result.Err("error"));
 
     match poll(pending) {
         Break(Pending) => { /* Expected */ }
@@ -893,7 +893,7 @@ fn test_try_async_pattern() {
     }
 
     match poll(ready_err) {
-        Break(Ready(Err(e))) => assert_eq(e, "error"),
+        Break(Ready(Result.Err(e))) => assert_eq(e, "error"),
         _ => panic("Expected error break"),
     }
 }
@@ -910,27 +910,27 @@ fn test_parsing_pipeline() {
     }
 
     fn validate_positive(n: Int) -> Maybe<Int> {
-        if n > 0 { Some(n) } else { None }
+        if n > 0 { Maybe.Some(n) } else { Maybe.None }
     }
 
     fn double(n: Int) -> Maybe<Int> {
-        Some(n * 2)
+        Maybe.Some(n * 2)
     }
 
     fn parse_and_process(input: Text) -> Maybe<Int> {
         let r1 = parse_int(input);
-        if r1.is_none() { None } else {
+        if r1.is_none() { Maybe.None } else {
         let n = r1.unwrap();
         let r2 = validate_positive(n);
-        if r2.is_none() { None } else {
+        if r2.is_none() { Maybe.None } else {
         let valid = r2.unwrap();
         double(valid)
         }}
     }
 
-    assert_eq(parse_and_process("42"), Some(84));
-    assert_eq(parse_and_process("-5"), None);  // Fails validation
-    assert_eq(parse_and_process("abc"), None); // Fails parsing
+    assert_eq(parse_and_process("42"), Maybe.Some(84));
+    assert_eq(parse_and_process("-5"), Maybe.None);  // Fails validation
+    assert_eq(parse_and_process("abc"), Maybe.None); // Fails parsing
 }
 
 /// Test configuration loading with Try semantics
@@ -940,9 +940,9 @@ fn test_config_loading() {
 
     fn read_config_file(path: Text) -> Result<Text, ConfigError> {
         if path == "valid.txt" {
-            Ok("key=value")
+            Result.Ok("key=value")
         } else {
-            Err(IoError(f"File not found: {path}"))
+            Result.Err(IoError(f"File not found: {path}"))
         }
     }
 
@@ -952,33 +952,33 @@ fn test_config_loading() {
             if parts.len() == 2 {
                 let mut map = Map.new();
                 map.insert(parts[0], parts[1]);
-                Ok(map)
+                Result.Ok(map)
             } else {
-                Err(ParseError("Invalid format"))
+                Result.Err(ParseError("Invalid format"))
             }
         } else {
-            Err(ParseError("Missing ="))
+            Result.Err(ParseError("Missing ="))
         }
     }
 
     fn validate_config(config: Map<Text, Text>) -> Result<Map<Text, Text>, ConfigError> {
         if config.contains_key("key") {
-            Ok(config)
+            Result.Ok(config)
         } else {
-            Err(ValidationError("Missing 'key'"))
+            Result.Err(ValidationError("Missing 'key'"))
         }
     }
 
     fn load_config(path: Text) -> Result<Map<Text, Text>, ConfigError> {
         let r1 = read_config_file(path);
-        if r1.is_err() { Err(r1.unwrap_err()) } else {
+        if r1.is_err() { Result.Err(r1.unwrap_err()) } else {
         let content = r1.unwrap();
         let r2 = parse_config(content);
-        if r2.is_err() { Err(r2.unwrap_err()) } else {
+        if r2.is_err() { Result.Err(r2.unwrap_err()) } else {
         let parsed = r2.unwrap();
         let r3 = validate_config(parsed);
-        if r3.is_err() { Err(r3.unwrap_err()) } else {
-        Ok(r3.unwrap())
+        if r3.is_err() { Result.Err(r3.unwrap_err()) } else {
+        Result.Ok(r3.unwrap())
         }}}
     }
 
@@ -1075,20 +1075,20 @@ fn test_try_result_error_type_flexibility() {
     type DetailedErr is { msg: Text, location: Text };
 
     fn inner_fn() -> Result<Int, SimpleErr> {
-        Err(SimpleErr { msg: "failed" })
+        Result.Err(SimpleErr { msg: "failed" })
     }
 
     fn outer_fn() -> Result<Int, DetailedErr> {
         let result = inner_fn();
         match result.branch() {
-            Continue(v) => Ok(v),
+            Continue(v) => Result.Ok(v),
             Break(residual) => {
                 match residual {
-                    Err(simple) => Err(DetailedErr {
+                    Result.Err(simple) => Result.Err(DetailedErr {
                         msg: simple.msg,
                         location: "outer_fn",
                     }),
-                    Ok(_) => unreachable(),
+                    Result.Ok(_) => unreachable(),
                 }
             }
         }
@@ -1111,20 +1111,20 @@ fn test_from_residual_maybe_to_result_pattern() {
     // Pattern where we want to convert Maybe failures into Result errors
 
     fn maybe_operation() -> Maybe<Int> {
-        None
+        Maybe.None
     }
 
     fn result_wrapper() -> Result<Int, Text> {
         let maybe_val = maybe_operation();
         match maybe_val.branch() {
-            Continue(v) => Ok(v),
-            Break(_) => Err("Maybe was None"),
+            Continue(v) => Result.Ok(v),
+            Break(_) => Result.Err("Maybe was Maybe.None"),
         }
     }
 
     let result = result_wrapper();
     assert(result.is_err());
-    assert_eq(result.unwrap_err(), "Maybe was None");
+    assert_eq(result.unwrap_err(), "Maybe was Maybe.None");
 }
 
 /// Test Try with nested ControlFlow
@@ -1165,8 +1165,8 @@ fn test_never_in_generic_containers() {
     let mapped: List<Int> = empty_list.iter().map(|_: &Never| 42).collect();
     assert_eq(mapped.len(), 0);
 
-    // Maybe<List<Never>> can be None or Some([])
-    let maybe_empty: Maybe<List<Never>> = Some([]);
+    // Maybe<List<Never>> can be Maybe.None or Maybe.Some([])
+    let maybe_empty: Maybe<List<Never>> = Maybe.Some([]);
     assert(maybe_empty.is_some());
     assert_eq(maybe_empty.unwrap().len(), 0);
 }

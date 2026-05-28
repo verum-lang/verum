@@ -16,9 +16,9 @@
 //     * After .new(), .is_empty() ≡ true.
 //     * .send on empty ⇒ returns true, transitions to Full.
 //     * .send on Full ⇒ returns false, state preserved.
-//     * .recv on Empty ⇒ None, state preserved.
-//     * .recv on Full(v) ⇒ Some(v), transitions to Empty.
-//     * Round-trip identity: send(v) then recv yields Some(v).
+//     * .recv on Empty ⇒ Maybe.None, state preserved.
+//     * .recv on Full(v) ⇒ Maybe.Some(v), transitions to Empty.
+//     * Round-trip identity: send(v) then recv yields Maybe.Some(v).
 //     * Two-step state machine: Empty ⇄ Full(_).
 //
 //   NoOpMutex:
@@ -105,8 +105,8 @@ fn law_sync_channel_send_on_full_fails() {
 fn law_sync_channel_recv_empty_is_none() {
     let mut c: SyncChannel<Int> = SyncChannel.new();
     match c.recv() {
-        Some(_) => assert(false),
-        None    => assert(true),
+        Maybe.Some(_) => assert(false),
+        Maybe.None    => assert(true),
     };
 }
 
@@ -117,8 +117,8 @@ fn law_sync_channel_round_trip_identity_int() {
         let mut c: SyncChannel<Int> = SyncChannel.new();
         let _ = c.send(*v);
         match c.recv() {
-            Some(r) => assert_eq(r, *v),
-            None    => assert(false),
+            Maybe.Some(r) => assert_eq(r, *v),
+            Maybe.None    => assert(false),
         };
     }
 }

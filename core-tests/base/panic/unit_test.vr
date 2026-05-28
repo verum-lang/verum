@@ -118,7 +118,7 @@ fn test_panic_info_with_location() {
     let loc = Location.new("error.vr", 99, 5);
     let info = PanicInfo {
         message: "something went wrong",
-        location: Some(loc),
+        location: Maybe.Some(loc),
     };
 
     assert_eq(info.message(), &"something went wrong");
@@ -129,7 +129,7 @@ fn test_panic_info_with_location() {
 fn test_panic_info_without_location() {
     let info = PanicInfo {
         message: "panic without location",
-        location: None,
+        location: Maybe.None,
     };
 
     assert_eq(info.message(), &"panic without location");
@@ -140,7 +140,7 @@ fn test_panic_info_without_location() {
 fn test_panic_info_message_accessor() {
     let info = PanicInfo {
         message: "test message",
-        location: None,
+        location: Maybe.None,
     };
 
     let msg: &Text = info.message();
@@ -152,16 +152,16 @@ fn test_panic_info_location_accessor() {
     let loc = Location.new("file.vr", 10, 20);
     let info = PanicInfo {
         message: "test",
-        location: Some(loc),
+        location: Maybe.Some(loc),
     };
 
     let loc_ref = info.location();
     match loc_ref {
-        Some(l) => {
+        Maybe.Some(l) => {
             assert_eq(l.line, 10);
             assert_eq(l.column, 20);
         }
-        None => panic("expected Some location"),
+        Maybe.None => panic("expected Some location"),
     }
 }
 
@@ -174,7 +174,7 @@ fn test_panic_info_debug_with_location() {
     let loc = Location.new("crash.vr", 50, 8);
     let info = PanicInfo {
         message: "crash reason",
-        location: Some(loc),
+        location: Maybe.Some(loc),
     };
 
     let mut buffer = Text.new();
@@ -193,7 +193,7 @@ fn test_panic_info_debug_with_location() {
 fn test_panic_info_debug_without_location() {
     let info = PanicInfo {
         message: "no location",
-        location: None,
+        location: Maybe.None,
     };
 
     let mut buffer = Text.new();
@@ -294,32 +294,32 @@ fn test_assert_ne_text() {
 }
 
 // =============================================================================
-// Section 8: Assert Some/None Tests
+// Section 8: Assert Some/Maybe.None Tests
 // =============================================================================
 
 @test
 fn test_assert_some_returns_value() {
-    let maybe: Maybe<Int> = Some(42);
+    let maybe: Maybe<Int> = Maybe.Some(42);
     let value = assert_some(maybe);
     assert_eq(value, 42);
 }
 
 @test
 fn test_assert_some_with_message() {
-    let maybe: Maybe<Text> = Some("hello");
+    let maybe: Maybe<Text> = Maybe.Some("hello");
     let value = assert_some(maybe, "should have value");
     assert_eq(value, "hello");
 }
 
 @test
 fn test_assert_none_passes() {
-    let maybe: Maybe<Int> = None;
+    let maybe: Maybe<Int> = Maybe.None;
     assert_none(maybe);
 }
 
 @test
 fn test_assert_none_with_message() {
-    let maybe: Maybe<Text> = None;
+    let maybe: Maybe<Text> = Maybe.None;
     assert_none(maybe, "should be empty");
 }
 
@@ -329,28 +329,28 @@ fn test_assert_none_with_message() {
 
 @test
 fn test_assert_ok_returns_value() {
-    let result: Result<Int, Text> = Ok(100);
+    let result: Result<Int, Text> = Result.Ok(100);
     let value = assert_ok(result);
     assert_eq(value, 100);
 }
 
 @test
 fn test_assert_ok_with_message() {
-    let result: Result<Text, Int> = Ok("success");
+    let result: Result<Text, Int> = Result.Ok("success");
     let value = assert_ok(result, "operation should succeed");
     assert_eq(value, "success");
 }
 
 @test
 fn test_assert_err_returns_error() {
-    let result: Result<Int, Text> = Err("error message");
+    let result: Result<Int, Text> = Result.Err("error message");
     let error = assert_err(result);
     assert_eq(error, "error message");
 }
 
 @test
 fn test_assert_err_with_message() {
-    let result: Result<Text, Int> = Err(404);
+    let result: Result<Text, Int> = Result.Err(404);
     let error = assert_err(result, "should be error");
     assert_eq(error, 404);
 }
@@ -501,20 +501,20 @@ fn test_dbg_with_various_types() {
 @test
 fn test_catch_result_type() {
     // CatchResult<T> is Result<T, PanicInfo>
-    let success: CatchResult<Int> = Ok(42);
-    let failure: CatchResult<Int> = Err(PanicInfo {
+    let success: CatchResult<Int> = Result.Ok(42);
+    let failure: CatchResult<Int> = Result.Err(PanicInfo {
         message: "caught panic",
-        location: None,
+        location: Maybe.None,
     });
 
     match success {
-        Ok(v) => assert_eq(v, 42),
-        Err(_) => panic("expected Ok"),
+        Result.Ok(v) => assert_eq(v, 42),
+        Result.Err(_) => panic("expected Ok"),
     }
 
     match failure {
-        Ok(_) => panic("expected Err"),
-        Err(info) => assert_eq(info.message, "caught panic"),
+        Result.Ok(_) => panic("expected Err"),
+        Result.Err(info) => assert_eq(info.message, "caught panic"),
     }
 }
 
@@ -582,7 +582,7 @@ fn test_assert_ne_with_generics() {
 
 @test
 fn test_assert_some_with_complex_type() {
-    let maybe: Maybe<List<Int>> = Some([1, 2, 3]);
+    let maybe: Maybe<List<Int>> = Maybe.Some([1, 2, 3]);
     let value = assert_some(maybe);
     assert_eq(value.len(), 3);
 }
@@ -591,7 +591,7 @@ fn test_assert_some_with_complex_type() {
 fn test_assert_ok_with_complex_error() {
     type CustomError is { code: Int, message: Text };
 
-    let result: Result<Int, CustomError> = Ok(200);
+    let result: Result<Int, CustomError> = Result.Ok(200);
     let value = assert_ok(result);
     assert_eq(value, 200);
 }
@@ -620,25 +620,25 @@ fn test_assert_ne_default_message() {
 
 @test
 fn test_assert_some_default_message() {
-    let maybe: Maybe<Int> = Some(1);
+    let maybe: Maybe<Int> = Maybe.Some(1);
     let _ = assert_some(maybe);
 }
 
 @test
 fn test_assert_none_default_message() {
-    let maybe: Maybe<Int> = None;
+    let maybe: Maybe<Int> = Maybe.None;
     assert_none(maybe);
 }
 
 @test
 fn test_assert_ok_default_message() {
-    let result: Result<Int, Text> = Ok(1);
+    let result: Result<Int, Text> = Result.Ok(1);
     let _ = assert_ok(result);
 }
 
 @test
 fn test_assert_err_default_message() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let _ = assert_err(result);
 }
 
@@ -703,7 +703,7 @@ fn test_location_large_values() {
 fn test_panic_info_empty_message() {
     let info = PanicInfo {
         message: "",
-        location: None,
+        location: Maybe.None,
     };
 
     assert_eq(info.message().len(), 0);
@@ -714,7 +714,7 @@ fn test_panic_info_long_message() {
     let long_msg = "x".repeat(1000);
     let info = PanicInfo {
         message: long_msg.clone(),
-        location: None,
+        location: Maybe.None,
     };
 
     assert_eq(info.message().len(), 1000);
@@ -724,7 +724,7 @@ fn test_panic_info_long_message() {
 fn test_panic_info_unicode_message() {
     let info = PanicInfo {
         message: "Ошибка: что-то пошло не так 🔥",
-        location: None,
+        location: Maybe.None,
     };
 
     assert(info.message().contains("Ошибка"));
@@ -772,7 +772,7 @@ fn test_multiple_assertions() {
 @test
 fn test_assert_result_chain() {
     fn get_value() -> Result<Int, Text> {
-        Ok(42)
+        Result.Ok(42)
     }
 
     let value = assert_ok(get_value());
@@ -783,7 +783,7 @@ fn test_assert_result_chain() {
 @test
 fn test_assert_maybe_chain() {
     fn find_item() -> Maybe<Text> {
-        Some("found")
+        Maybe.Some("found")
     }
 
     let item = assert_some(find_item());
@@ -828,12 +828,12 @@ fn test_panic_hook_receives_info() {
 fn test_panic_hook_location_access() {
     fn location_hook(info: &PanicInfo) {
         match info.location() {
-            Some(loc) => {
+            Maybe.Some(loc) => {
                 let _f = &loc.file;
                 let _l = loc.line;
                 let _c = loc.column;
             }
-            None => {}
+            Maybe.None => {}
         }
     }
 
@@ -846,11 +846,11 @@ fn test_panic_hook_location_access() {
 
 @test
 fn test_catch_result_ok_pattern() {
-    let result: CatchResult<Int> = Ok(100);
+    let result: CatchResult<Int> = Result.Ok(100);
 
     let value = match result {
-        Ok(v) => v,
-        Err(_) => 0,
+        Result.Ok(v) => v,
+        Result.Err(_) => 0,
     };
 
     assert_eq(value, 100);
@@ -860,13 +860,13 @@ fn test_catch_result_ok_pattern() {
 fn test_catch_result_err_pattern() {
     let info = PanicInfo {
         message: "test panic",
-        location: None,
+        location: Maybe.None,
     };
-    let result: CatchResult<Int> = Err(info);
+    let result: CatchResult<Int> = Result.Err(info);
 
     let msg = match result {
-        Ok(_) => "no panic",
-        Err(info) => info.message,
+        Result.Ok(_) => "no panic",
+        Result.Err(info) => info.message,
     };
 
     assert_eq(msg, "test panic");
@@ -876,17 +876,17 @@ fn test_catch_result_err_pattern() {
 fn test_catch_result_with_complex_type() {
     type ComplexResult is { data: List<Int>, success: Bool };
 
-    let result: CatchResult<ComplexResult> = Ok(ComplexResult {
+    let result: CatchResult<ComplexResult> = Result.Ok(ComplexResult {
         data: [1, 2, 3],
         success: true,
     });
 
     match result {
-        Ok(r) => {
+        Result.Ok(r) => {
             assert_eq(r.data.len(), 3);
             assert(r.success);
         }
-        Err(_) => panic("expected Ok"),
+        Result.Err(_) => panic("expected Ok"),
     }
 }
 
@@ -896,21 +896,21 @@ fn test_catch_result_with_complex_type() {
 
 @test
 fn test_assert_some_type_inference() {
-    let maybe = Some(42); // Type inferred as Maybe<Int>
+    let maybe = Maybe.Some(42); // Type inferred as Maybe<Int>
     let value = assert_some(maybe);
     let _: Int = value; // Verify inferred type
 }
 
 @test
 fn test_assert_ok_type_inference() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let value = assert_ok(result);
     let _: Int = value;
 }
 
 @test
 fn test_assert_err_type_inference() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let error = assert_err(result);
     let _: Text = error;
 }
@@ -947,7 +947,7 @@ fn test_assert_combination() {
         value
     }
 
-    let v = validate_result(Ok(42));
+    let v = validate_result(Result.Ok(42));
     assert_eq(v, 42);
 }
 

@@ -6,7 +6,7 @@
 // =============================================================================
 
 mount core.io.path.{Path, PathBuf, Component};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -60,14 +60,14 @@ fn integration_path_join_str() {
 fn integration_path_extension_match_classifier() {
     fn classify(p: &Path) -> Text {
         match p.extension() {
-            Some(ext) => {
+            Maybe.Some(ext) => {
                 if ext == Text.from("txt") { Text.from("plain") }
                 else if ext == Text.from("md") { Text.from("markdown") }
                 else if ext == Text.from("rs") { Text.from("rust") }
                 else if ext == Text.from("vr") { Text.from("verum") }
                 else { Text.from("other") }
             }
-            None => Text.from("none"),
+            Maybe.None => Text.from("none"),
         }
     }
 

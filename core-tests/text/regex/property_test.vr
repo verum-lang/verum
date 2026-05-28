@@ -18,7 +18,7 @@
 // =============================================================================
 
 mount core.text.{Text, Regex};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -52,8 +52,8 @@ fn property_is_match_iff_find_some() {
         let im = r.is_match((*c).0.clone());
         let f = r.find((*c).0.clone());
         match f {
-            Some(_) => assert(im),
-            None => assert(!im),
+            Maybe.Some(_) => assert(im),
+            Maybe.None => assert(!im),
         }
     }
 }
@@ -164,11 +164,11 @@ fn property_literal_is_match_iff_text_contains() {
 fn property_captures_whole_match_at_zero() {
     let r = Regex.new("(\\w+)").unwrap();
     match r.captures("hello world") {
-        Some(g) => {
+        Maybe.Some(g) => {
             assert(g.len() >= 1);
             assert_eq(g[0], "hello");
         }
-        None => panic("word captured"),
+        Maybe.None => panic("word captured"),
     }
 }
 

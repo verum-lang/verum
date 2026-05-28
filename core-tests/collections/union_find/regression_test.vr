@@ -41,7 +41,7 @@ fn regression_uf_generic_make_idempotent_on_duplicate_key() {
 // §B  Generic UnionFind<T> — component_size on a registered key.
 //
 //   Defect class: union_find.vr:212 / 230 use
-//   `match self.size.get(&x) { Some(n) => *n, None => 1 }` — but
+//   `match self.size.get(&x) { Maybe.Some(n) => *n, Maybe.None => 1 }` — but
 //   `Map.get` returns V (lossy 0-on-miss), NOT `Maybe<V>`.  The match is
 //   typecheck-lenient-skipped and the runtime panics with
 //   "Maybe.is_some not found on Int" or returns wrong values.
@@ -149,7 +149,7 @@ fn regression_text_literal_eq_method_two_literals() {
 // =============================================================================
 // §F  Generic UnionFind<Int> — same_set / find after union.
 //
-//   `find(&T)` body matches `self.parent.get(x)` against `Some/None` patterns,
+//   `find(&T)` body matches `self.parent.get(x)` against `Some/Maybe.None` patterns,
 //   but `Map.get` returns `V` (Int).  At runtime the dispatch panics, often
 //   with a confusing surface error like "method 'List.sort' not found on
 //   Int" because the type-confusion cascades through the calling code.

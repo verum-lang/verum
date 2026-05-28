@@ -10,7 +10,7 @@
 //   audit.md              — variant tags, From-conversion, drift surfaces
 //
 // Coverage:
-// - Result<T, E> type definition (Ok(T) | Err(E))
+// - Result<T, E> type definition (Result.Ok(T) | Result.Err(E))
 // - Predicates (is_ok, is_err, is_ok_and, is_err_and)
 // - Conversion to Maybe (ok, err)
 // - Unwrapping (unwrap, expect, unwrap_or, unwrap_or_else, unwrap_or_default)
@@ -47,7 +47,7 @@ mount core.base.result.{
 // "keeps core/base/result.vr foundation-clean"). Mount explicitly from
 // there.
 mount core.base.retry.{RetryBackoff, RetryOptions};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.collections.list.{List};
 
@@ -58,21 +58,21 @@ mount core.collections.list.{List};
 /// Test Ok construction
 @test
 fn test_ok_construction() {
-    let ok: Result<Int, Text> = Ok(42);
+    let ok: Result<Int, Text> = Result.Ok(42);
     assert(ok.is_ok());
 }
 
 /// Test Err construction
 @test
 fn test_err_construction() {
-    let err: Result<Int, Text> = Err("error");
+    let err: Result<Int, Text> = Result.Err("error");
     assert(err.is_err());
 }
 
 /// Test Ok with zero value
 @test
 fn test_ok_zero_value() {
-    let ok: Result<Int, Text> = Ok(0);
+    let ok: Result<Int, Text> = Result.Ok(0);
     assert(ok.is_ok());
     assert_eq(ok.unwrap(), 0);
 }
@@ -80,7 +80,7 @@ fn test_ok_zero_value() {
 /// Test Ok with empty string
 @test
 fn test_ok_empty_string() {
-    let ok: Result<Text, Int> = Ok("");
+    let ok: Result<Text, Int> = Result.Ok("");
     assert(ok.is_ok());
     assert_eq(ok.unwrap(), "");
 }
@@ -88,7 +88,7 @@ fn test_ok_empty_string() {
 /// Test nested Result
 @test
 fn test_nested_result() {
-    let nested: Result<Result<Int, Text>, Bool> = Ok(Ok(42));
+    let nested: Result<Result<Int, Text>, Bool> = Result.Ok(Result.Ok(42));
     assert(nested.is_ok());
     let inner = nested.unwrap();
     assert(inner.is_ok());
@@ -102,7 +102,7 @@ fn test_nested_result() {
 /// Test is_ok on Ok
 @test
 fn test_is_ok_on_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     assert(result.is_ok());
     assert_eq(result.is_ok(), true);
 }
@@ -110,7 +110,7 @@ fn test_is_ok_on_ok() {
 /// Test is_ok on Err
 @test
 fn test_is_ok_on_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     assert(!result.is_ok());
     assert_eq(result.is_ok(), false);
 }
@@ -118,7 +118,7 @@ fn test_is_ok_on_err() {
 /// Test is_err on Err
 @test
 fn test_is_err_on_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     assert(result.is_err());
     assert_eq(result.is_err(), true);
 }
@@ -126,7 +126,7 @@ fn test_is_err_on_err() {
 /// Test is_err on Ok
 @test
 fn test_is_err_on_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     assert(!result.is_err());
     assert_eq(result.is_err(), false);
 }
@@ -134,8 +134,8 @@ fn test_is_err_on_ok() {
 /// Test predicates are mutually exclusive
 @test
 fn test_predicates_mutually_exclusive() {
-    let ok: Result<Int, Text> = Ok(42);
-    let err: Result<Int, Text> = Err("error");
+    let ok: Result<Int, Text> = Result.Ok(42);
+    let err: Result<Int, Text> = Result.Err("error");
 
     assert(ok.is_ok() != ok.is_err());
     assert(err.is_ok() != err.is_err());
@@ -144,42 +144,42 @@ fn test_predicates_mutually_exclusive() {
 /// Test is_ok_and with predicate
 @test
 fn test_is_ok_and_true() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     assert(result.is_ok_and(|v| v > 10));
 }
 
 /// Test is_ok_and with failing predicate
 @test
 fn test_is_ok_and_false() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     assert(!result.is_ok_and(|v| v > 100));
 }
 
 /// Test is_ok_and on Err
 @test
 fn test_is_ok_and_on_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     assert(!result.is_ok_and(|v| v > 0));
 }
 
 /// Test is_err_and with predicate
 @test
 fn test_is_err_and_true() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     assert(result.is_err_and(|e| e.len() > 0));
 }
 
 /// Test is_err_and with failing predicate
 @test
 fn test_is_err_and_false() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     assert(!result.is_err_and(|e| e.is_empty()));
 }
 
 /// Test is_err_and on Ok
 @test
 fn test_is_err_and_on_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     assert(!result.is_err_and(|_| true));
 }
 
@@ -190,7 +190,7 @@ fn test_is_err_and_on_ok() {
 /// Test ok() on Ok
 @test
 fn test_ok_conversion_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let maybe = result.ok();
     assert(maybe.is_some());
     assert_eq(maybe.unwrap(), 42);
@@ -199,7 +199,7 @@ fn test_ok_conversion_ok() {
 /// Test ok() on Err
 @test
 fn test_ok_conversion_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let maybe = result.ok();
     assert(maybe.is_none());
 }
@@ -207,7 +207,7 @@ fn test_ok_conversion_err() {
 /// Test err() on Err
 @test
 fn test_err_conversion_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let maybe = result.err();
     assert(maybe.is_some());
     assert_eq(maybe.unwrap(), "error");
@@ -216,7 +216,7 @@ fn test_err_conversion_err() {
 /// Test err() on Ok
 @test
 fn test_err_conversion_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let maybe = result.err();
     assert(maybe.is_none());
 }
@@ -228,42 +228,42 @@ fn test_err_conversion_ok() {
 /// Test unwrap on Ok
 @test
 fn test_unwrap_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     assert_eq(result.unwrap(), 42);
 }
 
 /// Test unwrap_err on Err
 @test
 fn test_unwrap_err_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     assert_eq(result.unwrap_err(), "error");
 }
 
 /// Test expect on Ok
 @test
 fn test_expect_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     assert_eq(result.expect("should have value"), 42);
 }
 
 /// Test unwrap_or with Ok
 @test
 fn test_unwrap_or_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     assert_eq(result.unwrap_or(100), 42);
 }
 
 /// Test unwrap_or with Err
 @test
 fn test_unwrap_or_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     assert_eq(result.unwrap_or(100), 100);
 }
 
 /// Test unwrap_or_else with Ok
 @test
 fn test_unwrap_or_else_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let value = result.unwrap_or_else(|e| e.len());
     assert_eq(value, 42);
 }
@@ -271,7 +271,7 @@ fn test_unwrap_or_else_ok() {
 /// Test unwrap_or_else with Err
 @test
 fn test_unwrap_or_else_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let value = result.unwrap_or_else(|e| e.len());
     assert_eq(value, 5);  // "error".len() = 5
 }
@@ -279,7 +279,7 @@ fn test_unwrap_or_else_err() {
 /// Test unwrap_or_else closure not called for Ok
 @test
 fn test_unwrap_or_else_not_called_for_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let mut called = false;
     let _ = result.unwrap_or_else(|_| {
         called = true;
@@ -291,14 +291,14 @@ fn test_unwrap_or_else_not_called_for_ok() {
 /// Test unwrap_or_default with Ok
 @test
 fn test_unwrap_or_default_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     assert_eq(result.unwrap_or_default(), 42);
 }
 
 /// Test unwrap_or_default with Err
 @test
 fn test_unwrap_or_default_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     assert_eq(result.unwrap_or_default(), 0);  // Int default is 0
 }
 
@@ -309,7 +309,7 @@ fn test_unwrap_or_default_err() {
 /// Test map on Ok
 @test
 fn test_map_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let doubled = result.map(|v| v * 2);
     assert_eq(doubled.unwrap(), 84);
 }
@@ -317,7 +317,7 @@ fn test_map_ok() {
 /// Test map on Err
 @test
 fn test_map_err_result() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let doubled = result.map(|v| v * 2);
     assert(doubled.is_err());
     assert_eq(doubled.unwrap_err(), "error");
@@ -326,7 +326,7 @@ fn test_map_err_result() {
 /// Test map closure not called for Err
 @test
 fn test_map_not_called_for_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let mut called = false;
     let _ = result.map(|v| {
         called = true;
@@ -338,7 +338,7 @@ fn test_map_not_called_for_err() {
 /// Test map_err on Err
 @test
 fn test_map_err_on_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let mapped = result.map_err(|e| e.len());
     assert_eq(mapped.unwrap_err(), 5);
 }
@@ -346,7 +346,7 @@ fn test_map_err_on_err() {
 /// Test map_err on Ok
 @test
 fn test_map_err_on_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let mapped = result.map_err(|e| e.len());
     assert_eq(mapped.unwrap(), 42);
 }
@@ -354,7 +354,7 @@ fn test_map_err_on_ok() {
 /// Test map_or on Ok
 @test
 fn test_map_or_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let value = result.map_or(0, |v| v * 2);
     assert_eq(value, 84);
 }
@@ -362,7 +362,7 @@ fn test_map_or_ok() {
 /// Test map_or on Err
 @test
 fn test_map_or_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let value = result.map_or(0, |v| v * 2);
     assert_eq(value, 0);
 }
@@ -370,7 +370,7 @@ fn test_map_or_err() {
 /// Test map_or_else on Ok
 @test
 fn test_map_or_else_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let value = result.map_or_else(|e| e.len(), |v| v * 2);
     assert_eq(value, 84);
 }
@@ -378,7 +378,7 @@ fn test_map_or_else_ok() {
 /// Test map_or_else on Err
 @test
 fn test_map_or_else_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let value = result.map_or_else(|e| e.len(), |v| v * 2);
     assert_eq(value, 5);
 }
@@ -386,24 +386,24 @@ fn test_map_or_else_err() {
 /// Test and_then on Ok returning Ok
 @test
 fn test_and_then_ok_ok() {
-    let result: Result<Int, Text> = Ok(42);
-    let chained = result.and_then(|v| Ok(v * 2));
+    let result: Result<Int, Text> = Result.Ok(42);
+    let chained = result.and_then(|v| Result.Ok(v * 2));
     assert_eq(chained.unwrap(), 84);
 }
 
 /// Test and_then on Ok returning Err
 @test
 fn test_and_then_ok_err() {
-    let result: Result<Int, Text> = Ok(42);
-    let chained = result.and_then(|_| Err("failed") as Result<Int, Text>);
+    let result: Result<Int, Text> = Result.Ok(42);
+    let chained = result.and_then(|_| Result.Err("failed") as Result<Int, Text>);
     assert(chained.is_err());
 }
 
 /// Test and_then on Err
 @test
 fn test_and_then_err() {
-    let result: Result<Int, Text> = Err("error");
-    let chained = result.and_then(|v| Ok(v * 2));
+    let result: Result<Int, Text> = Result.Err("error");
+    let chained = result.and_then(|v| Result.Ok(v * 2));
     assert(chained.is_err());
     assert_eq(chained.unwrap_err(), "error");
 }
@@ -411,27 +411,27 @@ fn test_and_then_err() {
 /// Test and_then chaining
 @test
 fn test_and_then_chaining() {
-    let result: Result<Int, Text> = Ok(10);
+    let result: Result<Int, Text> = Result.Ok(10);
     let chained = result
-        .and_then(|v| Ok(v + 5))
-        .and_then(|v| Ok(v * 2))
-        .and_then(|v| Ok(v - 10));
+        .and_then(|v| Result.Ok(v + 5))
+        .and_then(|v| Result.Ok(v * 2))
+        .and_then(|v| Result.Ok(v - 10));
     assert_eq(chained.unwrap(), 20);  // ((10 + 5) * 2) - 10 = 20
 }
 
 /// Test or_else on Err
 @test
 fn test_or_else_err() {
-    let result: Result<Int, Text> = Err("error");
-    let recovered = result.or_else(|e| Ok(e.len() as Int));
+    let result: Result<Int, Text> = Result.Err("error");
+    let recovered = result.or_else(|e| Result.Ok(e.len() as Int));
     assert_eq(recovered.unwrap(), 5);
 }
 
 /// Test or_else on Ok
 @test
 fn test_or_else_ok() {
-    let result: Result<Int, Text> = Ok(42);
-    let recovered = result.or_else(|e| Ok(e.len() as Int));
+    let result: Result<Int, Text> = Result.Ok(42);
+    let recovered = result.or_else(|e| Result.Ok(e.len() as Int));
     assert_eq(recovered.unwrap(), 42);
 }
 
@@ -442,64 +442,64 @@ fn test_or_else_ok() {
 /// Test and with Ok and Ok
 @test
 fn test_and_ok_ok() {
-    let a: Result<Int, Text> = Ok(1);
-    let b: Result<Int, Text> = Ok(2);
+    let a: Result<Int, Text> = Result.Ok(1);
+    let b: Result<Int, Text> = Result.Ok(2);
     assert_eq(a.and(b).unwrap(), 2);
 }
 
 /// Test and with Ok and Err
 @test
 fn test_and_ok_err() {
-    let a: Result<Int, Text> = Ok(1);
-    let b: Result<Int, Text> = Err("error");
+    let a: Result<Int, Text> = Result.Ok(1);
+    let b: Result<Int, Text> = Result.Err("error");
     assert(a.and(b).is_err());
 }
 
 /// Test and with Err and Ok
 @test
 fn test_and_err_ok() {
-    let a: Result<Int, Text> = Err("error");
-    let b: Result<Int, Text> = Ok(2);
+    let a: Result<Int, Text> = Result.Err("error");
+    let b: Result<Int, Text> = Result.Ok(2);
     assert(a.and(b).is_err());
 }
 
 /// Test and with Err and Err
 @test
 fn test_and_err_err() {
-    let a: Result<Int, Text> = Err("first");
-    let b: Result<Int, Text> = Err("second");
+    let a: Result<Int, Text> = Result.Err("first");
+    let b: Result<Int, Text> = Result.Err("second");
     assert_eq(a.and(b).unwrap_err(), "first");  // First error preserved
 }
 
 /// Test or with Ok and Ok
 @test
 fn test_or_ok_ok() {
-    let a: Result<Int, Text> = Ok(1);
-    let b: Result<Int, Int> = Ok(2);
+    let a: Result<Int, Text> = Result.Ok(1);
+    let b: Result<Int, Int> = Result.Ok(2);
     assert_eq(a.or(b).unwrap(), 1);  // First Ok wins
 }
 
 /// Test or with Ok and Err
 @test
 fn test_or_ok_err() {
-    let a: Result<Int, Text> = Ok(1);
-    let b: Result<Int, Int> = Err(100);
+    let a: Result<Int, Text> = Result.Ok(1);
+    let b: Result<Int, Int> = Result.Err(100);
     assert_eq(a.or(b).unwrap(), 1);
 }
 
 /// Test or with Err and Ok
 @test
 fn test_or_err_ok() {
-    let a: Result<Int, Text> = Err("error");
-    let b: Result<Int, Int> = Ok(2);
+    let a: Result<Int, Text> = Result.Err("error");
+    let b: Result<Int, Int> = Result.Ok(2);
     assert_eq(a.or(b).unwrap(), 2);
 }
 
 /// Test or with Err and Err
 @test
 fn test_or_err_err() {
-    let a: Result<Int, Text> = Err("first");
-    let b: Result<Int, Int> = Err(100);
+    let a: Result<Int, Text> = Result.Err("first");
+    let b: Result<Int, Int> = Result.Err(100);
     assert_eq(a.or(b).unwrap_err(), 100);  // Second error
 }
 
@@ -510,7 +510,7 @@ fn test_or_err_err() {
 /// Test as_ref on Ok
 @test
 fn test_as_ref_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let ref_result = result.as_ref();
     assert(ref_result.is_ok());
     assert_eq(*ref_result.unwrap(), 42);
@@ -519,7 +519,7 @@ fn test_as_ref_ok() {
 /// Test as_ref on Err
 @test
 fn test_as_ref_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let ref_result = result.as_ref();
     assert(ref_result.is_err());
     assert_eq(*ref_result.unwrap_err(), "error");
@@ -528,7 +528,7 @@ fn test_as_ref_err() {
 /// Test as_mut on Ok
 @test
 fn test_as_mut_ok() {
-    let mut result: Result<Int, Text> = Ok(42);
+    let mut result: Result<Int, Text> = Result.Ok(42);
     let ref_result = result.as_mut();
     *ref_result.unwrap() = 100;
     assert_eq(result.unwrap(), 100);
@@ -537,7 +537,7 @@ fn test_as_mut_ok() {
 /// Test as_mut on Err
 @test
 fn test_as_mut_err() {
-    let mut result: Result<Int, Text> = Err("error");
+    let mut result: Result<Int, Text> = Result.Err("error");
     let ref_result = result.as_mut();
     assert(ref_result.is_err());
 }
@@ -550,7 +550,7 @@ fn test_as_mut_err() {
 @test
 fn test_inspect_ok() {
     let mut inspected = false;
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let returned = result.inspect(|v| {
         inspected = true;
         assert_eq(*v, 42);
@@ -563,7 +563,7 @@ fn test_inspect_ok() {
 @test
 fn test_inspect_err_result() {
     let mut inspected = false;
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let _ = result.inspect(|_| {
         inspected = true;
     });
@@ -574,7 +574,7 @@ fn test_inspect_err_result() {
 @test
 fn test_inspect_err_on_err() {
     let mut inspected = false;
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let _ = result.inspect_err(|e| {
         inspected = true;
         assert_eq(*e, "error");
@@ -586,7 +586,7 @@ fn test_inspect_err_on_err() {
 @test
 fn test_inspect_err_on_ok() {
     let mut inspected = false;
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let _ = result.inspect_err(|_| {
         inspected = true;
     });
@@ -597,7 +597,7 @@ fn test_inspect_err_on_ok() {
 @test
 fn test_tap() {
     let mut tapped = false;
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let _ = result.tap(|_| { tapped = true; });
     assert(tapped);
 }
@@ -606,7 +606,7 @@ fn test_tap() {
 @test
 fn test_tap_err() {
     let mut tapped = false;
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let _ = result.tap_err(|_| { tapped = true; });
     assert(tapped);
 }
@@ -616,7 +616,7 @@ fn test_tap_err() {
 fn test_tap_both_ok() {
     let mut on_ok_called = false;
     let mut on_err_called = false;
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let _ = result.tap_both(
         |_| { on_ok_called = true; },
         |_| { on_err_called = true; }
@@ -630,7 +630,7 @@ fn test_tap_both_ok() {
 fn test_tap_both_err() {
     let mut on_ok_called = false;
     let mut on_err_called = false;
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let _ = result.tap_both(
         |_| { on_ok_called = true; },
         |_| { on_err_called = true; }
@@ -646,7 +646,7 @@ fn test_tap_both_err() {
 /// Test iter on Ok
 @test
 fn test_iter_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let mut iter = result.iter();
     let first = iter.next();
     assert(first.is_some());
@@ -657,7 +657,7 @@ fn test_iter_ok() {
 /// Test iter on Err
 @test
 fn test_iter_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let mut iter = result.iter();
     assert(iter.next().is_none());
 }
@@ -665,7 +665,7 @@ fn test_iter_err() {
 /// Test iter_mut on Ok
 @test
 fn test_iter_mut_ok() {
-    let mut result: Result<Int, Text> = Ok(42);
+    let mut result: Result<Int, Text> = Result.Ok(42);
     let mut iter = result.iter_mut();
     let first = iter.next();
     *first.unwrap() = 100;
@@ -675,7 +675,7 @@ fn test_iter_mut_ok() {
 /// Test into_iter on Ok
 @test
 fn test_into_iter_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let mut iter = result.into_iter();
     assert_eq(iter.next().unwrap(), 42);
 }
@@ -683,7 +683,7 @@ fn test_into_iter_ok() {
 /// Test ResultIter size_hint
 @test
 fn test_result_iter_size_hint() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let iter = result.iter();
     let (lower, upper) = iter.size_hint();
     assert_eq(lower, 1);
@@ -697,40 +697,40 @@ fn test_result_iter_size_hint() {
 /// Test Eq: Ok equals Ok with same value
 @test
 fn test_eq_ok_ok() {
-    let a: Result<Int, Text> = Ok(42);
-    let b: Result<Int, Text> = Ok(42);
+    let a: Result<Int, Text> = Result.Ok(42);
+    let b: Result<Int, Text> = Result.Ok(42);
     assert(a == b);
 }
 
 /// Test Eq: Ok not equal Ok with different value
 @test
 fn test_eq_ok_different() {
-    let a: Result<Int, Text> = Ok(42);
-    let b: Result<Int, Text> = Ok(100);
+    let a: Result<Int, Text> = Result.Ok(42);
+    let b: Result<Int, Text> = Result.Ok(100);
     assert(a != b);
 }
 
 /// Test Eq: Err equals Err with same error
 @test
 fn test_eq_err_err() {
-    let a: Result<Int, Text> = Err("error");
-    let b: Result<Int, Text> = Err("error");
+    let a: Result<Int, Text> = Result.Err("error");
+    let b: Result<Int, Text> = Result.Err("error");
     assert(a == b);
 }
 
 /// Test Eq: Ok not equal Err
 @test
 fn test_eq_ok_err() {
-    let a: Result<Int, Text> = Ok(42);
-    let b: Result<Int, Text> = Err("error");
+    let a: Result<Int, Text> = Result.Ok(42);
+    let b: Result<Int, Text> = Result.Err("error");
     assert(a != b);
 }
 
 /// Test Ord: Ok greater than Err
 @test
 fn test_ord_ok_err() {
-    let a: Result<Int, Text> = Ok(42);
-    let b: Result<Int, Text> = Err("error");
+    let a: Result<Int, Text> = Result.Ok(42);
+    let b: Result<Int, Text> = Result.Err("error");
     assert_eq(a.cmp(&b), Greater);
     assert(a > b);
 }
@@ -738,8 +738,8 @@ fn test_ord_ok_err() {
 /// Test Ord: Err less than Ok
 @test
 fn test_ord_err_ok() {
-    let a: Result<Int, Text> = Err("error");
-    let b: Result<Int, Text> = Ok(42);
+    let a: Result<Int, Text> = Result.Err("error");
+    let b: Result<Int, Text> = Result.Ok(42);
     assert_eq(a.cmp(&b), Less);
     assert(a < b);
 }
@@ -747,15 +747,15 @@ fn test_ord_err_ok() {
 /// Test Ord: Ok compared by value
 @test
 fn test_ord_ok_ok() {
-    let a: Result<Int, Text> = Ok(10);
-    let b: Result<Int, Text> = Ok(20);
+    let a: Result<Int, Text> = Result.Ok(10);
+    let b: Result<Int, Text> = Result.Ok(20);
     assert(a < b);
 }
 
 /// Test Clone for Ok
 @test
 fn test_clone_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let cloned = result.clone();
     assert_eq(cloned.unwrap(), 42);
 }
@@ -763,7 +763,7 @@ fn test_clone_ok() {
 /// Test Clone for Err
 @test
 fn test_clone_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let cloned = result.clone();
     assert_eq(cloned.unwrap_err(), "error");
 }
@@ -771,15 +771,15 @@ fn test_clone_err() {
 /// Test Debug for Ok
 @test
 fn test_debug_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let debug_str = f"{result:?}";
-    assert_eq(debug_str, "Ok(42)");
+    assert_eq(debug_str, "Result.Ok(42)");
 }
 
 /// Test Debug for Err
 @test
 fn test_debug_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let debug_str = f"{result:?}";
     assert(debug_str.contains("Err"));
 }
@@ -818,31 +818,31 @@ fn test_error_clone() {
 /// Test ? operator extracts value from Ok
 @test
 fn test_try_operator_ok() -> Result<Int, Text> {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let value = result?;
-    Ok(value * 2)
+    Result.Ok(value * 2)
 }
 
 /// Test ? operator early returns on Err
 @test
 fn test_try_operator_err() -> Result<Int, Text> {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let value = result?;  // Should early return here
-    Ok(value * 2)
+    Result.Ok(value * 2)
 }
 
 /// Test ? operator chaining
 fn chain_operations(a: Int, b: Int) -> Result<Int, Text> {
     let x = validate_positive(a)?;
     let y = validate_positive(b)?;
-    Ok(x + y)
+    Result.Ok(x + y)
 }
 
 fn validate_positive(n: Int) -> Result<Int, Text> {
     if n >= 0 {
-        Ok(n)
+        Result.Ok(n)
     } else {
-        Err("negative number")
+        Result.Err("negative number")
     }
 }
 
@@ -871,7 +871,7 @@ fn test_try_chaining_second_err() {
 /// Test recover on Err
 @test
 fn test_recover_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let recovered = result.recover(100);
     assert_eq(recovered.unwrap(), 100);
 }
@@ -879,7 +879,7 @@ fn test_recover_err() {
 /// Test recover on Ok
 @test
 fn test_recover_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let recovered = result.recover(100);
     assert_eq(recovered.unwrap(), 42);
 }
@@ -887,7 +887,7 @@ fn test_recover_ok() {
 /// Test recover_with on Err
 @test
 fn test_recover_with_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let recovered = result.recover_with(|e| e.len() as Int);
     assert_eq(recovered.unwrap(), 5);
 }
@@ -895,7 +895,7 @@ fn test_recover_with_err() {
 /// Test recover_with on Ok
 @test
 fn test_recover_with_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let recovered = result.recover_with(|_| 100);
     assert_eq(recovered.unwrap(), 42);
 }
@@ -907,42 +907,42 @@ fn test_recover_with_ok() {
 /// Test contains on Ok with matching value
 @test
 fn test_contains_match() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     assert(result.contains(&42));
 }
 
 /// Test contains on Ok with non-matching value
 @test
 fn test_contains_no_match() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     assert(!result.contains(&100));
 }
 
 /// Test contains on Err
 @test
 fn test_contains_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     assert(!result.contains(&42));
 }
 
 /// Test contains_err on Err with matching error
 @test
 fn test_contains_err_match() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     assert(result.contains_err(&"error"));
 }
 
 /// Test contains_err on Err with non-matching error
 @test
 fn test_contains_err_no_match() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     assert(!result.contains_err(&"other"));
 }
 
 /// Test contains_err on Ok
 @test
 fn test_contains_err_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     assert(!result.contains_err(&"error"));
 }
 
@@ -953,7 +953,7 @@ fn test_contains_err_ok() {
 /// Test flip on Ok
 @test
 fn test_flip_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let flipped: Result<Text, Int> = result.flip();
     assert(flipped.is_err());
     assert_eq(flipped.unwrap_err(), 42);
@@ -962,7 +962,7 @@ fn test_flip_ok() {
 /// Test flip on Err
 @test
 fn test_flip_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let flipped: Result<Text, Int> = result.flip();
     assert(flipped.is_ok());
     assert_eq(flipped.unwrap(), "error");
@@ -971,7 +971,7 @@ fn test_flip_err() {
 /// Test flip roundtrip
 @test
 fn test_flip_roundtrip() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let double_flipped = result.flip().flip();
     assert_eq(double_flipped.unwrap(), 42);
 }
@@ -983,7 +983,7 @@ fn test_flip_roundtrip() {
 /// Test context on Err
 @test
 fn test_context_err() {
-    let result: Result<Int, Text> = Err("base error");
+    let result: Result<Int, Text> = Result.Err("base error");
     let with_context = result.context("Failed to process");
     assert(with_context.is_err());
     let err = with_context.unwrap_err();
@@ -996,7 +996,7 @@ fn test_context_err() {
 /// Test context on Ok
 @test
 fn test_context_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let with_context = result.context("Should not apply");
     assert_eq(with_context.unwrap(), 42);
 }
@@ -1005,7 +1005,7 @@ fn test_context_ok() {
 @test
 fn test_with_context_lazy() {
     let mut called = false;
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let _ = result.with_context(|| {
         called = true;
         "context"
@@ -1029,7 +1029,7 @@ fn test_context_error_methods() {
 /// Test fold on Ok
 @test
 fn test_fold_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let message = result.fold(
         |v| f"Success: {v}",
         |e| f"Error: {e}"
@@ -1040,7 +1040,7 @@ fn test_fold_ok() {
 /// Test fold on Err
 @test
 fn test_fold_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let message = result.fold(
         |v| f"Success: {v}",
         |e| f"Error: {e}"
@@ -1353,7 +1353,7 @@ fn test_validated_zip_with_both_invalid() {
 /// Test Validated.from_result
 @test
 fn test_validated_from_result_ok() {
-    let result: Result<Int, Text> = Ok(42);
+    let result: Result<Int, Text> = Result.Ok(42);
     let v = Validated.from_result(result);
     assert(v.is_valid());
 }
@@ -1361,7 +1361,7 @@ fn test_validated_from_result_ok() {
 /// Test Validated.from_result on Err
 @test
 fn test_validated_from_result_err() {
-    let result: Result<Int, Text> = Err("error");
+    let result: Result<Int, Text> = Result.Err("error");
     let v = Validated.from_result(result);
     assert(v.is_invalid());
 }
@@ -1445,11 +1445,11 @@ fn test_validate_all_some_invalid() {
 /// Test Result in parsing scenario
 fn parse_int(s: &Text) -> Result<Int, Text> {
     if s == "42" {
-        Ok(42)
+        Result.Ok(42)
     } else if s == "100" {
-        Ok(100)
+        Result.Ok(100)
     } else {
-        Err(f"invalid number: {s}")
+        Result.Err(f"invalid number: {s}")
     }
 }
 
@@ -1462,10 +1462,10 @@ fn test_result_parsing_scenario() {
 /// Test chained transformations
 @test
 fn test_result_chain_transformations() {
-    let result: Result<Int, Text> = Ok(10);
+    let result: Result<Int, Text> = Result.Ok(10);
     let final_result = result
         .map(|v| v * 2)           // 20
-        .and_then(|v| if v > 15 { Ok(v + 5) } else { Err("too small") })  // Ok(25)
+        .and_then(|v| if v > 15 { Result.Ok(v + 5) } else { Result.Err("too small") })  // Result.Ok(25)
         .map(|v| v.to_string());  // "25"
 
     assert_eq(final_result.unwrap(), "25");
@@ -1474,10 +1474,10 @@ fn test_result_chain_transformations() {
 /// Test error recovery chain
 @test
 fn test_error_recovery_chain() {
-    let result: Result<Int, Text> = Err("primary error");
+    let result: Result<Int, Text> = Result.Err("primary error");
     let recovered = result
-        .or_else(|_| Err("secondary error") as Result<Int, Text>)
-        .or_else(|_| Ok(0));  // Final fallback
+        .or_else(|_| Result.Err("secondary error") as Result<Int, Text>)
+        .or_else(|_| Result.Ok(0));  // Final fallback
 
     assert_eq(recovered.unwrap(), 0);
 }

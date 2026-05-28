@@ -366,6 +366,6 @@ fn property_int_same_set_iff_find_equal() {
 
 // The post-union same_set / union-return-value invariants for the generic
 // path are pinned in regression_test.vr. They surface a runtime dispatch
-// failure when find() hits the `match map.get(...) { Some/None }` body.
+// failure when find() hits the `match map.get(...) { Some/Maybe.None }` body.
 
 fn main() {}

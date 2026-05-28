@@ -15,7 +15,7 @@
 
 mount core.text.{Text};
 mount core.text.builder.{TextBuilder};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
 
@@ -98,8 +98,8 @@ fn integration_build_digit_sequence_parse_int() {
     b.push(&"2");
     let s = b.build();
     match s.parse_int() {
-        Ok(n) => assert_eq(n, 42),
-        Err(_) => panic("digit-built '42' must parse to 42"),
+        Result.Ok(n) => assert_eq(n, 42),
+        Result.Err(_) => panic("digit-built '42' must parse to 42"),
     }
 }
 

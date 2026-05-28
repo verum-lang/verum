@@ -7,12 +7,12 @@
 // `noop_context()` driver.  Property laws here are formulated as:
 //
 //   * `size_hint` lower-bound is **monotonically non-increasing**
-//     across successive `poll_next` calls that yield `Some(_)`.
-//   * After `Poll.Ready(None)` the stream stays at `(0, _)` — exhaustion
+//     across successive `poll_next` calls that yield `Maybe.Some(_)`.
+//   * After `Poll.Ready(Maybe.None)` the stream stays at `(0, _)` — exhaustion
 //     is a sticky terminal state at the protocol level.
-//   * Factory size_hint contract: `stream_empty` is `(0, Some(0))`,
-//     `stream_once` starts at `(1, Some(1))`, `stream_repeat_n(_, n)`
-//     starts at `(n, Some(n))`, `stream_repeat(_)` is `(Int.MAX, None)`.
+//   * Factory size_hint contract: `stream_empty` is `(0, Maybe.Some(0))`,
+//     `stream_once` starts at `(1, Maybe.Some(1))`, `stream_repeat_n(_, n)`
+//     starts at `(n, Maybe.Some(n))`, `stream_repeat(_)` is `(Int.MAX, Maybe.None)`.
 //
 // Every property uses the synchronous noop-poll driver — no executor
 // or async runtime involvement.  This isolates Stream-contract laws
@@ -26,12 +26,12 @@ mount core.async.stream.{
 };
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context, noop_context};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section A: stream_empty<T> size_hint law
 //
-//   `stream_empty()` must report `(0, Some(0))` from the first call
+//   `stream_empty()` must report `(0, Maybe.Some(0))` from the first call
 //   and forever after — no payload, no transitions.
 // =============================================================================
 
@@ -40,14 +40,14 @@ fn property_stream_empty_size_hint_is_zero_zero() {
     let s: StreamEmpty<Int> = stream_empty();
     let (lo, hi) = s.size_hint();
     assert_eq(lo, 0);
-    assert_eq(hi, Some(0));
+    assert_eq(hi, Maybe.Some(0));
 }
 
 // =============================================================================
 // Section B: stream_once<T> size_hint shrink-to-zero law
 //
-//   Initially (1, Some(1)).  After one Poll.Ready(Some(_)), the
-//   internal `Maybe<T>` is `None` → size_hint drops to (0, Some(0)).
+//   Initially (1, Maybe.Some(1)).  After one Poll.Ready(Maybe.Some(_)), the
+//   internal `Maybe<T>` is `Maybe.None` → size_hint drops to (0, Maybe.Some(0)).
 // =============================================================================
 
 @test
@@ -55,7 +55,7 @@ fn property_stream_once_size_hint_starts_at_one() {
     let s = stream_once(42);
     let (lo, hi) = s.size_hint();
     assert_eq(lo, 1);
-    assert_eq(hi, Some(1));
+    assert_eq(hi, Maybe.Some(1));
 }
 
 @test
@@ -65,14 +65,14 @@ fn property_stream_once_size_hint_drops_after_consumption() {
     let _first = s.poll_next(&mut cx);
     let (lo, hi) = s.size_hint();
     assert_eq(lo, 0);
-    assert_eq(hi, Some(0));
+    assert_eq(hi, Maybe.Some(0));
 }
 
 // =============================================================================
 // Section C: stream_repeat_n<T> size_hint countdown law
 //
-//   `stream_repeat_n(_, n).size_hint()` is `(n, Some(n))`; after `k`
-//   yielding polls it's `(n − k, Some(n − k))` for 0 ≤ k ≤ n.
+//   `stream_repeat_n(_, n).size_hint()` is `(n, Maybe.Some(n))`; after `k`
+//   yielding polls it's `(n − k, Maybe.Some(n − k))` for 0 ≤ k ≤ n.
 // =============================================================================
 
 @test
@@ -84,25 +84,25 @@ fn property_stream_repeat_n_size_hint_at_construction_matches_n() {
 
     let (lo_z, hi_z) = s_zero.size_hint();
     assert_eq(lo_z, 0);
-    assert_eq(hi_z, Some(0));
+    assert_eq(hi_z, Maybe.Some(0));
 
     let (lo_1, hi_1) = s_one.size_hint();
     assert_eq(lo_1, 1);
-    assert_eq(hi_1, Some(1));
+    assert_eq(hi_1, Maybe.Some(1));
 
     let (lo_3, hi_3) = s_three.size_hint();
     assert_eq(lo_3, 3);
-    assert_eq(hi_3, Some(3));
+    assert_eq(hi_3, Maybe.Some(3));
 
     let (lo_10, hi_10) = s_ten.size_hint();
     assert_eq(lo_10, 10);
-    assert_eq(hi_10, Some(10));
+    assert_eq(hi_10, Maybe.Some(10));
 }
 
 // =============================================================================
 // Section D: stream_empty<T> poll-next exhaustion stickiness
 //
-//   Every poll_next on stream_empty MUST return Poll.Ready(None) —
+//   Every poll_next on stream_empty MUST return Poll.Ready(Maybe.None) —
 //   no waker registration, no transition state.
 // =============================================================================
 
@@ -112,8 +112,8 @@ fn property_stream_empty_poll_next_returns_ready_none() {
     let mut cx = noop_context();
     let result = s.poll_next(&mut cx);
     match result {
-        Poll.Ready(None) => assert(true),
-        _ => panic("stream_empty must yield Poll.Ready(None) on first poll"),
+        Poll.Ready(Maybe.None) => assert(true),
+        _ => panic("stream_empty must yield Poll.Ready(Maybe.None) on first poll"),
     }
 }
 
@@ -125,8 +125,8 @@ fn property_stream_empty_repeated_polls_stay_none() {
     while i < 5 {
         let result = s.poll_next(&mut cx);
         match result {
-            Poll.Ready(None) => {}
-            _ => panic("stream_empty must remain Poll.Ready(None) on repeated polls"),
+            Poll.Ready(Maybe.None) => {}
+            _ => panic("stream_empty must remain Poll.Ready(Maybe.None) on repeated polls"),
         }
         i = i + 1;
     }
@@ -135,8 +135,8 @@ fn property_stream_empty_repeated_polls_stay_none() {
 // =============================================================================
 // Section E: stream_once<T> single-yield then-exhausted law
 //
-//   Poll-loop on stream_once(v): first poll yields Poll.Ready(Some(v)),
-//   subsequent polls yield Poll.Ready(None) forever.
+//   Poll-loop on stream_once(v): first poll yields Poll.Ready(Maybe.Some(v)),
+//   subsequent polls yield Poll.Ready(Maybe.None) forever.
 // =============================================================================
 
 @test
@@ -146,27 +146,27 @@ fn property_stream_once_yields_value_then_none() {
 
     let first = s.poll_next(&mut cx);
     match first {
-        Poll.Ready(Some(v)) => assert_eq(v, 42),
-        _ => panic("stream_once first poll must yield Poll.Ready(Some(value))"),
+        Poll.Ready(Maybe.Some(v)) => assert_eq(v, 42),
+        _ => panic("stream_once first poll must yield Poll.Ready(Maybe.Some(value))"),
     }
 
     let second = s.poll_next(&mut cx);
     match second {
-        Poll.Ready(None) => assert(true),
-        _ => panic("stream_once second poll must yield Poll.Ready(None)"),
+        Poll.Ready(Maybe.None) => assert(true),
+        _ => panic("stream_once second poll must yield Poll.Ready(Maybe.None)"),
     }
 
     let third = s.poll_next(&mut cx);
     match third {
-        Poll.Ready(None) => assert(true),
-        _ => panic("stream_once third poll must stay Poll.Ready(None)"),
+        Poll.Ready(Maybe.None) => assert(true),
+        _ => panic("stream_once third poll must stay Poll.Ready(Maybe.None)"),
     }
 }
 
 // =============================================================================
 // Section F: stream_repeat_n<T> exact-count law
 //
-//   stream_repeat_n(v, n).poll_loop yields v exactly n times then None.
+//   stream_repeat_n(v, n).poll_loop yields v exactly n times then Maybe.None.
 //   This is the most operational of the laws — exercises the
 //   `remaining` countdown in the stream impl.
 // =============================================================================
@@ -177,8 +177,8 @@ fn property_stream_repeat_n_yields_exactly_n_items_n_eq_zero() {
     let mut cx = noop_context();
     let result = s.poll_next(&mut cx);
     match result {
-        Poll.Ready(None) => assert(true),
-        _ => panic("stream_repeat_n(_, 0) must yield Poll.Ready(None) immediately"),
+        Poll.Ready(Maybe.None) => assert(true),
+        _ => panic("stream_repeat_n(_, 0) must yield Poll.Ready(Maybe.None) immediately"),
     }
 }
 
@@ -191,12 +191,12 @@ fn property_stream_repeat_n_yields_exactly_n_items_n_eq_three() {
     while !done {
         let result = s.poll_next(&mut cx);
         match result {
-            Poll.Ready(Some(v)) => {
+            Poll.Ready(Maybe.Some(v)) => {
                 assert_eq(v, 7);
                 yielded = yielded + 1;
                 if yielded > 5 { done = true; }  // safety guard
             }
-            Poll.Ready(None) => done = true,
+            Poll.Ready(Maybe.None) => done = true,
             Poll.Pending => done = true,
         }
     }
@@ -207,7 +207,7 @@ fn property_stream_repeat_n_yields_exactly_n_items_n_eq_three() {
 // Section G: stream_from_fn<T, F> termination follows the generator
 //
 //   The closure-driven stream yields values until the generator
-//   returns None — at that point poll_next stays at Poll.Ready(None).
+//   returns Maybe.None — at that point poll_next stays at Poll.Ready(Maybe.None).
 // =============================================================================
 
 @test
@@ -215,29 +215,29 @@ fn property_stream_from_fn_follows_generator_termination() {
     let mut counter = 0;
     let mut s = stream_from_fn(|| {
         counter = counter + 1;
-        if counter <= 3 { Some(counter * 10) } else { None }
+        if counter <= 3 { Maybe.Some(counter * 10) } else { Maybe.None }
     });
     let mut cx = noop_context();
 
     let p1 = s.poll_next(&mut cx);
     match p1 {
-        Poll.Ready(Some(v)) => assert_eq(v, 10),
-        _ => panic("first poll must yield Some(10)"),
+        Poll.Ready(Maybe.Some(v)) => assert_eq(v, 10),
+        _ => panic("first poll must yield Maybe.Some(10)"),
     }
     let p2 = s.poll_next(&mut cx);
     match p2 {
-        Poll.Ready(Some(v)) => assert_eq(v, 20),
-        _ => panic("second poll must yield Some(20)"),
+        Poll.Ready(Maybe.Some(v)) => assert_eq(v, 20),
+        _ => panic("second poll must yield Maybe.Some(20)"),
     }
     let p3 = s.poll_next(&mut cx);
     match p3 {
-        Poll.Ready(Some(v)) => assert_eq(v, 30),
-        _ => panic("third poll must yield Some(30)"),
+        Poll.Ready(Maybe.Some(v)) => assert_eq(v, 30),
+        _ => panic("third poll must yield Maybe.Some(30)"),
     }
     let p4 = s.poll_next(&mut cx);
     match p4 {
-        Poll.Ready(None) => assert(true),
-        _ => panic("fourth poll must yield None when generator exhausts"),
+        Poll.Ready(Maybe.None) => assert(true),
+        _ => panic("fourth poll must yield Maybe.None when generator exhausts"),
     }
 }
 
@@ -245,7 +245,7 @@ fn property_stream_from_fn_follows_generator_termination() {
 // Section H: Size_hint monotonicity invariant
 //
 //   For ANY stream impl, the lower bound returned by size_hint() can
-//   only decrease (or stay equal) after a Poll.Ready(Some(_)) — it
+//   only decrease (or stay equal) after a Poll.Ready(Maybe.Some(_)) — it
 //   cannot suddenly grow.  This is the protocol-level monotonicity
 //   contract that combinators MUST respect.
 // =============================================================================

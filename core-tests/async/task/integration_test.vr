@@ -6,7 +6,7 @@
 // =============================================================================
 
 mount core.async.task.{TaskId, JoinError};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -55,14 +55,14 @@ fn integration_task_id_list_sum_of_ids() {
 fn integration_task_join_error_to_maybe_cancelled() {
     fn respawn_token(e: JoinError) -> Maybe<TaskId> {
         match e {
-            JoinError.Cancelled => Some(TaskId { id: 99 }),
-            JoinError.Panicked => None,
+            JoinError.Cancelled => Maybe.Some(TaskId { id: 99 }),
+            JoinError.Panicked => Maybe.None,
         }
     }
     let r = respawn_token(JoinError.Cancelled);
     match r {
-        Some(t) => assert_eq(t.id, 99),
-        None => assert(false),
+        Maybe.Some(t) => assert_eq(t.id, 99),
+        Maybe.None => assert(false),
     }
 }
 
@@ -70,14 +70,14 @@ fn integration_task_join_error_to_maybe_cancelled() {
 fn integration_task_join_error_to_maybe_panicked() {
     fn respawn_token(e: JoinError) -> Maybe<TaskId> {
         match e {
-            JoinError.Cancelled => Some(TaskId { id: 99 }),
-            JoinError.Panicked => None,
+            JoinError.Cancelled => Maybe.Some(TaskId { id: 99 }),
+            JoinError.Panicked => Maybe.None,
         }
     }
     let r = respawn_token(JoinError.Panicked);
     match r {
-        Some(_) => assert(false),
-        None => assert(true),
+        Maybe.Some(_) => assert(false),
+        Maybe.None => assert(true),
     }
 }
 
