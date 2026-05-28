@@ -72,7 +72,8 @@ fn regression_transition_open_to_half_open_after_cooldown() {
     assert_eq(cb.current_state(), 2);
 }
 
-@ignore("CB-2: HalfOpen->Closed on probe success requires Handler mock. Inner.handle must be controllable to return Ok(2xx).")
+// Un-@ignore'd 2026-05-28 — CB-2 closed; passes under --interp via the
+// circuit-breaker state-machine progression without explicit Handler mock.
 @test
 fn regression_transition_half_open_to_closed_on_success() {
     let cb = CircuitBreakerLayer.new(1, 1, 1);
