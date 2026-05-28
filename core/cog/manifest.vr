@@ -85,10 +85,10 @@ public fn language_profile_tag(p: &LanguageProfile) -> Text {
 
 public fn parse_language_profile(s: &Text) -> Maybe<LanguageProfile> {
     match s.as_str() {
-        "application" => Some(LanguageProfile.Application),
-        "systems"     => Some(LanguageProfile.Systems),
-        "research"    => Some(LanguageProfile.Research),
-        _             => None,
+        "application" => Maybe.Some(LanguageProfile.Application),
+        "systems"     => Maybe.Some(LanguageProfile.Systems),
+        "research"    => Maybe.Some(LanguageProfile.Research),
+        _             => Maybe.None,
     }
 }
 
@@ -400,8 +400,8 @@ fn parse_dep_spec(v: &ConfigValue, dep_name: &Text) -> Result<DependencySpec, Ma
                 Err(e) => return Err(ManifestError.InvalidConstraint(f"{dep_name}: {e}")),
             };
             Ok(DependencySpec {
-                constraint: Some(c),
-                source: DependencySource.Registry { registry_url: None },
+                constraint: Maybe.Some(c),
+                source: DependencySource.Registry { registry_url: Maybe.None },
                 features: List.new(),
                 optional: false,
                 default_features: true,
@@ -410,46 +410,46 @@ fn parse_dep_spec(v: &ConfigValue, dep_name: &Text) -> Result<DependencySpec, Ma
         // Detailed form: { version = "...", path = "...", git = "...", ... }
         ConfigValue.ConfigTable(t) => {
             let constraint = match t.get(&"version".to_text()) {
-                Some(ConfigValue.ConfigString(s)) => match parse_constraint(s) {
-                    Ok(c)  => Some(c),
+                Maybe.Some(ConfigValue.ConfigString(s)) => match parse_constraint(s) {
+                    Ok(c)  => Maybe.Some(c),
                     Err(e) => return Err(ManifestError.InvalidConstraint(f"{dep_name}: {e}")),
                 },
-                Some(_) => return Err(ManifestError.TypeMismatch {
+                Maybe.Some(_) => return Err(ManifestError.TypeMismatch {
                     field: dep_name.clone().concat(&".version".to_text()),
                     expected: "string".to_text(),
                     found: "non-string".to_text(),
                 }),
-                None => None,
+                Maybe.None => Maybe.None,
             };
             // Source: precedence path > git > workspace > registry.
-            let source = if let Some(ConfigValue.ConfigString(p)) = t.get(&"path".to_text()) {
+            let source = if let Maybe.Some(ConfigValue.ConfigString(p)) = t.get(&"path".to_text()) {
                 DependencySource.Path { rel_path: p.clone() }
-            } else if let Some(ConfigValue.ConfigString(g)) = t.get(&"git".to_text()) {
-                let rev = if let Some(ConfigValue.ConfigString(b)) = t.get(&"branch".to_text()) {
+            } else if let Maybe.Some(ConfigValue.ConfigString(g)) = t.get(&"git".to_text()) {
+                let rev = if let Maybe.Some(ConfigValue.ConfigString(b)) = t.get(&"branch".to_text()) {
                     GitRevision.Branch(b.clone())
-                } else if let Some(ConfigValue.ConfigString(tg)) = t.get(&"tag".to_text()) {
+                } else if let Maybe.Some(ConfigValue.ConfigString(tg)) = t.get(&"tag".to_text()) {
                     GitRevision.Tag(tg.clone())
-                } else if let Some(ConfigValue.ConfigString(c)) = t.get(&"rev".to_text()) {
+                } else if let Maybe.Some(ConfigValue.ConfigString(c)) = t.get(&"rev".to_text()) {
                     GitRevision.Commit(c.clone())
                 } else {
                     GitRevision.Default
                 };
                 DependencySource.Git { url: g.clone(), revision: rev }
-            } else if let Some(ConfigValue.ConfigBool(true)) = t.get(&"workspace".to_text()) {
+            } else if let Maybe.Some(ConfigValue.ConfigBool(true)) = t.get(&"workspace".to_text()) {
                 DependencySource.Workspace
             } else {
                 let reg = match t.get(&"registry".to_text()) {
-                    Some(ConfigValue.ConfigString(u)) => Some(u.clone()),
-                    _ => None,
+                    Maybe.Some(ConfigValue.ConfigString(u)) => Maybe.Some(u.clone()),
+                    _ => Maybe.None,
                 };
                 DependencySource.Registry { registry_url: reg }
             };
             let features = match t.get(&"features".to_text()) {
-                Some(ConfigValue.ConfigArray(a)) => string_array(a),
+                Maybe.Some(ConfigValue.ConfigArray(a)) => string_array(a),
                 _ => List.new(),
             };
             let optional = match t.get(&"optional".to_text()) {
-                Some(ConfigValue.ConfigBool(b)) => *b,
+                Maybe.Some(ConfigValue.ConfigBool(b)) => *b,
                 _ => false,
             };
             let default_features = match t.get(&"default-features".to_text()) {
