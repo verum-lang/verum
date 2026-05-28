@@ -1,0 +1,90 @@
+// =============================================================================
+// core-tests/security/sigstore/verify/unit_test.vr
+// =============================================================================
+//
+// `core/security/sigstore/verify.vr` — Sigstore identity matcher ADT.
+// =============================================================================
+
+mount core.security.sigstore.verify.IdentityMatcher;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: IdentityMatcher 3-variant ADT
+// =============================================================================
+
+@test
+fn test_identity_matcher_exact_variant() {
+    let m: IdentityMatcher = IdentityMatcher.Exact("alice@example.com".to_text());
+    assert(m is IdentityMatcher.Exact);
+}
+
+@test
+fn test_identity_matcher_glob_variant() {
+    let m: IdentityMatcher = IdentityMatcher.Glob("*@example.com".to_text());
+    assert(m is IdentityMatcher.Glob);
+}
+
+@test
+fn test_identity_matcher_domain_variant() {
+    let m: IdentityMatcher = IdentityMatcher.Domain("example.com".to_text());
+    assert(m is IdentityMatcher.Domain);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_identity_matcher_exact_disjoint() {
+    let m: IdentityMatcher = IdentityMatcher.Exact("x".to_text());
+    assert(!(m is IdentityMatcher.Glob));
+    assert(!(m is IdentityMatcher.Domain));
+}
+
+@test
+fn test_identity_matcher_glob_disjoint() {
+    let m: IdentityMatcher = IdentityMatcher.Glob("*".to_text());
+    assert(!(m is IdentityMatcher.Exact));
+    assert(!(m is IdentityMatcher.Domain));
+}
+
+@test
+fn test_identity_matcher_domain_disjoint() {
+    let m: IdentityMatcher = IdentityMatcher.Domain("x".to_text());
+    assert(!(m is IdentityMatcher.Exact));
+    assert(!(m is IdentityMatcher.Glob));
+}
+
+// =============================================================================
+// Section 3: Payload preservation
+// =============================================================================
+
+@test
+fn test_identity_matcher_exact_payload_round_trip() {
+    let m: IdentityMatcher = IdentityMatcher.Exact("alice@example.com".to_text());
+    match m {
+        IdentityMatcher.Exact(s) => assert_eq(s, "alice@example.com"),
+        _ => panic("expected Exact"),
+    }
+}
+
+@test
+fn test_identity_matcher_glob_payload_round_trip() {
+    let m: IdentityMatcher = IdentityMatcher.Glob("*@cncf.io".to_text());
+    match m {
+        IdentityMatcher.Glob(s) => assert_eq(s, "*@cncf.io"),
+        _ => panic("expected Glob"),
+    }
+}
+
+@test
+fn test_identity_matcher_domain_payload_round_trip() {
+    let m: IdentityMatcher = IdentityMatcher.Domain("cncf.io".to_text());
+    match m {
+        IdentityMatcher.Domain(s) => assert_eq(s, "cncf.io"),
+        _ => panic("expected Domain"),
+    }
+}
+
+fn main() {}
