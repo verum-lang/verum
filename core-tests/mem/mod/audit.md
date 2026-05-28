@@ -212,6 +212,24 @@ umbrella-mount dispatch, not bare-name dispatch.
    source-module identity in their function-id key, so a same-name
    impl-block method on an unrelated type cannot shadow them.
 
+**Attempted fix 2026-05-28** (reverted): A targeted method-vs-free-fn
+shadow filter was added to `type_aware_lookup` in
+`crates/verum_vbc/src/codegen/expressions.rs:4556` — when the
+type-based disambiguation fails to pick exactly one candidate (typically
+because the call-site arg types are all-None for const-path args),
+filter `arity_matches` to remove candidates whose first param is named
+`"self"`. The fix did NOT close the test surface — after rebuild and
+re-test, `test_reexport_has_capability_call_pinned_by_collision` still
+fails with `NullPointerAt at AllocationHeader.load_capabilities`.
+
+The dispatcher must therefore be selecting `AllocationHeader.has_capability`
+via a different codepath — possibly the umbrella re-export aliasing
+`core.mem.has_capability` to the method, or the bare-name fallback
+`lookup_function_with_arity_in_scope` picking up the method before
+`type_aware_lookup` runs.  Fundamental fix requires deeper investigation
+of the function registration + alias-table interaction during stdlib
+precompile — multi-day VBC codegen work.
+
 **Sister defects in the same class** (out of scope here; tracked
 across `memory/`):
 
