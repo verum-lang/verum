@@ -95,8 +95,8 @@ public fn parse_accept(header: &Text) -> List<MediaRangeSpec> {
         let seg = trim_ws(segs[i].as_slice());
         if seg.len() == 0 { i = i + 1; continue; }
         match parse_media_range(&seg) {
-            Some(m) => out.push(m),
-            None    => {},
+            Maybe.Some(m) => out.push(m),
+            Maybe.None    => {},
         }
         i = i + 1;
     }
@@ -133,11 +133,11 @@ fn parse_coded(header: &Text) -> List<CodedPreference> {
 fn parse_media_range(seg: &List<Byte>) -> Maybe<MediaRangeSpec> {
     // "type/subtype" followed by optional ";" params.
     let parts = split_semicolons(seg.as_slice());
-    if parts.len() == 0 { return None; }
+    if parts.len() == 0 { return Maybe.None; }
     let (t, s) = split_slash(trim_ws(parts[0].as_slice()).as_slice());
-    if t.len() == 0 || s.len() == 0 { return None; }
+    if t.len() == 0 || s.len() == 0 { return Maybe.None; }
     let q = q_from_params(&parts, 1);
-    Some(MediaRangeSpec {
+    Maybe.Some(MediaRangeSpec {
         type_main: Text.from_utf8_unchecked(t.as_slice()),
         subtype:   Text.from_utf8_unchecked(s.as_slice()),
         q:         q,
@@ -211,7 +211,7 @@ public fn select_best_media(
         }
         i = i + 1;
     }
-    if best_idx < 0 { None } else { Some(offers[best_idx].clone()) }
+    if best_idx < 0 { Maybe.None } else { Maybe.Some(offers[best_idx].clone()) }
 }
 
 /// Best coded variant (encoding / language). Identity / "*"
@@ -233,7 +233,7 @@ public fn select_best_coding(
         }
         i = i + 1;
     }
-    if best_idx < 0 { None } else { Some(offers[best_idx].clone()) }
+    if best_idx < 0 { Maybe.None } else { Maybe.Some(offers[best_idx].clone()) }
 }
 
 // =============================================================================
