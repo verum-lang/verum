@@ -218,7 +218,7 @@ implement Iterator for StdinLines {
     fn next(&mut self) -> Maybe<IoResult<Text>> {
         let mut line = Text.new();
         match self.stdin.read_line(&mut line) {
-            Ok(0) => None,
+            Ok(0) => Maybe.None,
             Ok(_) => {
                 // Remove trailing newline
                 if line.ends_with("\n") {
@@ -227,9 +227,9 @@ implement Iterator for StdinLines {
                         line.pop();
                     }
                 }
-                Some(Ok(line))
+                Maybe.Some(Ok(line))
             }
-            Err(e) => Some(Err(e)),
+            Err(e) => Maybe.Some(Err(e)),
         }
     }
 }

@@ -314,9 +314,9 @@ implement<R: Read> BufReader<R> {
             if self.buffer_len() == 0 {
                 let n = self.fill_buf_internal()?;
                 if n == 0 {
-                    if bytes.is_empty() { return Result.Ok(None); }
+                    if bytes.is_empty() { return Result.Ok(Maybe.None); }
                     return match Text.from_utf8(bytes) {
-                        Result.Ok(t)  => Ok(Some(t)),
+                        Result.Ok(t)  => Ok(Maybe.Some(t)),
                         Result.Err(_) => Err(IoError.new(IoErrorKind.InvalidData)),
                     };
                 }
@@ -334,7 +334,7 @@ implement<R: Read> BufReader<R> {
             self.pos = i;
             if found {
                 return match Text.from_utf8(bytes) {
-                    Result.Ok(t)  => Ok(Some(t)),
+                    Result.Ok(t)  => Ok(Maybe.Some(t)),
                     Result.Err(_) => Err(IoError.new(IoErrorKind.InvalidData)),
                 };
             }
@@ -586,10 +586,10 @@ implement<W: Write> LineWriter<W> {
 implement<W: Write> Write for LineWriter<W> {
     fn write(&mut self, buf: &[Byte]) -> IoResult<Int> {
         // Find last newline in buffer
-        let mut last_newline: Maybe<Int> = None;
+        let mut last_newline: Maybe<Int> = Maybe.None;
         for i in (0..buf.len()).rev() {
             if buf[i] == 10 {  // '\n'
-                last_newline = Some(i);
+                last_newline = Maybe.Some(i);
                 break;
             }
         }
