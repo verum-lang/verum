@@ -302,12 +302,15 @@ fn compress_block(h: &mut [UInt32; 8], block: &[Byte]) {
              | (block[t * 4 + 3] as UInt32);
         t = t + 1;
     }
-    // Extend to W[16..64] — FIPS step 1.
+    // Extend to W[16..64] — FIPS step 1. Break the chained
+    // .wrapping_add into sequential let-bindings (WS-6 fix family):
+    // chained UInt32.wrapping_add misdispatches through SkipWhileIter
+    // in the VBC codegen, producing method-not-found + retry loop.
     while t < 64 {
-        w[t] = small_sigma1(w[t - 2])
-            .wrapping_add(w[t - 7])
-            .wrapping_add(small_sigma0(w[t - 15]))
-            .wrapping_add(w[t - 16]);
+        let s1 = small_sigma1(w[t - 2]);
+        let s2 = s1.wrapping_add(w[t - 7]);
+        let s3 = s2.wrapping_add(small_sigma0(w[t - 15]));
+        w[t] = s3.wrapping_add(w[t - 16]);
         t = t + 1;
     }
 
@@ -322,12 +325,13 @@ fn compress_block(h: &mut [UInt32; 8], block: &[Byte]) {
     let mut hh = h[7];
 
     // Round loop — FIPS step 3. 64 rounds.
+    // Break chained .wrapping_add (WS-6 fix family).
     t = 0;
     while t < 64 {
-        let t1 = hh.wrapping_add(big_sigma1(e))
-                   .wrapping_add(ch(e, f, g))
-                   .wrapping_add(K[t])
-                   .wrapping_add(w[t]);
+        let m1 = hh.wrapping_add(big_sigma1(e));
+        let m2 = m1.wrapping_add(ch(e, f, g));
+        let m3 = m2.wrapping_add(K[t]);
+        let t1 = m3.wrapping_add(w[t]);
         let t2 = big_sigma0(a).wrapping_add(maj(a, b, c));
         hh = g;
         g = f;
