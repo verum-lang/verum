@@ -1,0 +1,74 @@
+// =============================================================================
+// core-tests/metrics/exporter/unit_test.vr
+// =============================================================================
+//
+// `core/metrics/exporter.vr` — metrics exporter result surface.
+// =============================================================================
+
+mount core.metrics.exporter.ExportResult;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: ExportResult 2-variant ADT
+// =============================================================================
+
+@test
+fn test_export_result_success_variant() {
+    let r: ExportResult = ExportResult.Success;
+    assert(r is ExportResult.Success);
+}
+
+@test
+fn test_export_result_failure_variant() {
+    let r: ExportResult = ExportResult.Failure("network down".to_text());
+    assert(r is ExportResult.Failure);
+}
+
+@test
+fn test_export_result_success_disjoint_failure() {
+    let r: ExportResult = ExportResult.Success;
+    assert(!(r is ExportResult.Failure));
+}
+
+@test
+fn test_export_result_failure_disjoint_success() {
+    let r: ExportResult = ExportResult.Failure("io".to_text());
+    assert(!(r is ExportResult.Success));
+}
+
+// =============================================================================
+// Section 2: Failure payload preservation
+// =============================================================================
+
+@test
+fn test_export_result_failure_payload_round_trip() {
+    let r: ExportResult = ExportResult.Failure("write 503".to_text());
+    match r {
+        ExportResult.Failure(reason) => assert_eq(reason, "write 503"),
+        ExportResult.Success         => panic("expected Failure"),
+    }
+}
+
+// =============================================================================
+// Section 3: Match-coverage law
+// =============================================================================
+
+fn describe(r: &ExportResult) -> Text {
+    match r {
+        ExportResult.Success    => "success".to_text(),
+        ExportResult.Failure(_) => "failure".to_text(),
+    }
+}
+
+@test
+fn test_export_result_describe_success() {
+    assert_eq(describe(&ExportResult.Success), "success");
+}
+
+@test
+fn test_export_result_describe_failure() {
+    assert_eq(describe(&ExportResult.Failure("x".to_text())), "failure");
+}
+
+fn main() {}
