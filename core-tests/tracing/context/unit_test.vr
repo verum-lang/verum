@@ -1,0 +1,62 @@
+// =============================================================================
+// core-tests/tracing/context/unit_test.vr
+// =============================================================================
+//
+// `core/tracing/context.vr` — W3C TraceContext data surface.
+// =============================================================================
+
+mount core.tracing.context.{
+    TRACESTATE_MAX_MEMBERS, TRACESTATE_MAX_KEY_LEN, TRACESTATE_MAX_VALUE_LEN,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: TraceState size limits
+//
+//   W3C TraceContext §3.2.2.3 limits — these are MUST per spec.
+// =============================================================================
+
+@test
+fn test_tracestate_max_members_canonical_value() {
+    // W3C TraceContext §3.2.2.3 — Up to 32 members per Tracestate.
+    assert_eq(TRACESTATE_MAX_MEMBERS, 32);
+}
+
+@test
+fn test_tracestate_max_key_len_canonical_value() {
+    // W3C TraceContext §3.2.2.2 — keys MUST be ≤ 256 chars.
+    assert_eq(TRACESTATE_MAX_KEY_LEN, 256);
+}
+
+@test
+fn test_tracestate_max_value_len_canonical_value() {
+    // W3C TraceContext §3.2.2.2 — values MUST be ≤ 256 chars.
+    assert_eq(TRACESTATE_MAX_VALUE_LEN, 256);
+}
+
+// =============================================================================
+// Section 2: Width invariants
+// =============================================================================
+
+@test
+fn test_tracestate_max_key_len_eq_value_len() {
+    // W3C 256 cap applies symmetrically to key + value.
+    assert_eq(TRACESTATE_MAX_KEY_LEN, TRACESTATE_MAX_VALUE_LEN);
+}
+
+@test
+fn test_tracestate_limits_positive() {
+    assert(TRACESTATE_MAX_MEMBERS > 0);
+    assert(TRACESTATE_MAX_KEY_LEN > 0);
+    assert(TRACESTATE_MAX_VALUE_LEN > 0);
+}
+
+@test
+fn test_tracestate_max_members_much_smaller_than_key_len() {
+    // 32 members vs 256-char fields — design intent: a small population
+    // of variably-sized members.
+    assert(TRACESTATE_MAX_MEMBERS < TRACESTATE_MAX_KEY_LEN);
+}
+
+fn main() {}

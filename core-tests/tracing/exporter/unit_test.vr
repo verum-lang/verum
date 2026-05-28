@@ -1,0 +1,74 @@
+// =============================================================================
+// core-tests/tracing/exporter/unit_test.vr
+// =============================================================================
+//
+// `core/tracing/exporter.vr` — OpenTelemetry SpanExporter surface.
+// =============================================================================
+
+mount core.tracing.exporter.TraceExportResult;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: TraceExportResult 2-variant ADT
+// =============================================================================
+
+@test
+fn test_trace_export_result_success_variant() {
+    let r: TraceExportResult = TraceExportResult.Success;
+    assert(r is TraceExportResult.Success);
+}
+
+@test
+fn test_trace_export_result_failure_variant() {
+    let r: TraceExportResult = TraceExportResult.Failure("network timeout".to_text());
+    assert(r is TraceExportResult.Failure);
+}
+
+@test
+fn test_trace_export_result_success_disjoint_failure() {
+    let r: TraceExportResult = TraceExportResult.Success;
+    assert(!(r is TraceExportResult.Failure));
+}
+
+@test
+fn test_trace_export_result_failure_disjoint_success() {
+    let r: TraceExportResult = TraceExportResult.Failure("io".to_text());
+    assert(!(r is TraceExportResult.Success));
+}
+
+// =============================================================================
+// Section 2: Failure payload preservation
+// =============================================================================
+
+@test
+fn test_trace_export_result_failure_payload_round_trip() {
+    let r: TraceExportResult = TraceExportResult.Failure("connection refused".to_text());
+    match r {
+        TraceExportResult.Failure(reason) => assert_eq(reason, "connection refused"),
+        TraceExportResult.Success         => panic("expected Failure"),
+    }
+}
+
+// =============================================================================
+// Section 3: Match exhaustiveness
+// =============================================================================
+
+fn describe(r: &TraceExportResult) -> Text {
+    match r {
+        TraceExportResult.Success     => "success".to_text(),
+        TraceExportResult.Failure(_)  => "failure".to_text(),
+    }
+}
+
+@test
+fn test_trace_export_result_describe_success() {
+    assert_eq(describe(&TraceExportResult.Success), "success");
+}
+
+@test
+fn test_trace_export_result_describe_failure() {
+    assert_eq(describe(&TraceExportResult.Failure("x".to_text())), "failure");
+}
+
+fn main() {}
