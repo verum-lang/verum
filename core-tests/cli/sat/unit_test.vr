@@ -1,0 +1,164 @@
+// =============================================================================
+// core-tests/cli/sat/unit_test.vr
+// =============================================================================
+//
+// `core/cli/sat.vr` — propositional SAT solver for CLI conflict checks.
+// =============================================================================
+
+mount core.cli.sat.{
+    BoolFormula, EvalResult, SatResult,
+    lit_true, lit_false, var,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: BoolFormula scalar variants — True / False
+// =============================================================================
+
+@test
+fn test_bool_formula_true_variant() {
+    let f: BoolFormula = BoolFormula.True;
+    assert(f is BoolFormula.True);
+}
+
+@test
+fn test_bool_formula_false_variant() {
+    let f: BoolFormula = BoolFormula.False;
+    assert(f is BoolFormula.False);
+}
+
+@test
+fn test_bool_formula_var_variant() {
+    let f: BoolFormula = BoolFormula.Var("x".to_text());
+    assert(f is BoolFormula.Var);
+}
+
+// =============================================================================
+// Section 2: Convenience constructors
+// =============================================================================
+
+@test
+fn test_lit_true_returns_true_variant() {
+    let f: BoolFormula = lit_true();
+    assert(f is BoolFormula.True);
+}
+
+@test
+fn test_lit_false_returns_false_variant() {
+    let f: BoolFormula = lit_false();
+    assert(f is BoolFormula.False);
+}
+
+@test
+fn test_var_returns_var_variant() {
+    let f: BoolFormula = var("p".to_text());
+    assert(f is BoolFormula.Var);
+}
+
+// =============================================================================
+// Section 3: True / False / Var pairwise disjointness
+// =============================================================================
+
+@test
+fn test_bool_formula_true_disjoint_from_false() {
+    let t: BoolFormula = BoolFormula.True;
+    let f: BoolFormula = BoolFormula.False;
+    assert(!(t is BoolFormula.False));
+    assert(!(f is BoolFormula.True));
+}
+
+@test
+fn test_bool_formula_var_disjoint_from_const() {
+    let v: BoolFormula = BoolFormula.Var("q".to_text());
+    assert(!(v is BoolFormula.True));
+    assert(!(v is BoolFormula.False));
+}
+
+// =============================================================================
+// Section 4: EvalResult ADT
+// =============================================================================
+
+@test
+fn test_eval_result_definite_true_variant() {
+    let e: EvalResult = EvalResult.Definite(true);
+    assert(e is EvalResult.Definite);
+}
+
+@test
+fn test_eval_result_definite_false_variant() {
+    let e: EvalResult = EvalResult.Definite(false);
+    assert(e is EvalResult.Definite);
+}
+
+@test
+fn test_eval_result_unknown_variant() {
+    let e: EvalResult = EvalResult.Unknown;
+    assert(e is EvalResult.Unknown);
+}
+
+@test
+fn test_eval_result_definite_disjoint_unknown() {
+    let d: EvalResult = EvalResult.Definite(true);
+    assert(!(d is EvalResult.Unknown));
+}
+
+@test
+fn test_eval_result_unknown_disjoint_definite() {
+    let u: EvalResult = EvalResult.Unknown;
+    assert(!(u is EvalResult.Definite));
+}
+
+// =============================================================================
+// Section 5: EvalResult payload preservation
+// =============================================================================
+
+@test
+fn test_eval_result_definite_true_payload_round_trip() {
+    let e: EvalResult = EvalResult.Definite(true);
+    match e {
+        EvalResult.Definite(b) => assert_eq(b, true),
+        EvalResult.Unknown     => panic("expected Definite"),
+    }
+}
+
+@test
+fn test_eval_result_definite_false_payload_round_trip() {
+    let e: EvalResult = EvalResult.Definite(false);
+    match e {
+        EvalResult.Definite(b) => assert_eq(b, false),
+        EvalResult.Unknown     => panic("expected Definite"),
+    }
+}
+
+// =============================================================================
+// Section 6: SatResult ADT
+// =============================================================================
+
+@test
+fn test_sat_result_unsat_variant() {
+    let r: SatResult = SatResult.Unsat;
+    assert(r is SatResult.Unsat);
+}
+
+@test
+fn test_sat_result_sat_variant_empty_model() {
+    let empty: Map<Text, Bool> = Map.new();
+    let r: SatResult = SatResult.Sat(empty);
+    assert(r is SatResult.Sat);
+}
+
+@test
+fn test_sat_result_unsat_disjoint_sat() {
+    let r: SatResult = SatResult.Unsat;
+    assert(!(r is SatResult.Sat));
+}
+
+@test
+fn test_sat_result_sat_disjoint_unsat() {
+    let empty: Map<Text, Bool> = Map.new();
+    let r: SatResult = SatResult.Sat(empty);
+    assert(!(r is SatResult.Unsat));
+}
+
+fn main() {}
