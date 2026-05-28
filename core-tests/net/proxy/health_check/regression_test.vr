@@ -71,7 +71,6 @@ fn regression_active_checker_tick_marks_unhealthy_after_threshold() {
     assert(!s.is_healthy());
 }
 
-@ignore("HC-1: ActiveHealthChecker.run cancellation via stop() requires an async runtime harness — the loop spawns into a nursery and exits on cancel atomic.")
 @test
 fn regression_active_checker_run_exits_on_stop() {
     // Spawn run() into a nursery, call stop(), assert the loop exits
