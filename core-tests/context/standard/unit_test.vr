@@ -20,7 +20,7 @@
 
 mount core.context.standard.{ContextLogLevel, ContextLogRecord, Row, QueryResult, AuthUser};
 mount core.collections.list.List;
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: ContextLogLevel variant construction
@@ -280,12 +280,12 @@ fn test_auth_user_display_contains_name_and_id() {
 fn test_row_get_index_in_range() {
     let r = Row {
         columns: ["name".clone(), "email".clone()],
-        values: [Some("alice".clone()), Some("a@b".clone())],
+        values: [Maybe.Some("alice".clone()), Maybe.Some("a@b".clone())],
     };
     let v0 = r.get_index(0);
     match v0 {
-        Some(s) => assert_eq(*s, "alice"),
-        None => panic("expected Some(alice)"),
+        Maybe.Some(s) => assert_eq(*s, "alice"),
+        Maybe.None => panic("expected Maybe.Some(alice)"),
     }
 }
 
@@ -293,12 +293,12 @@ fn test_row_get_index_in_range() {
 fn test_row_get_index_out_of_range_returns_none() {
     let r = Row {
         columns: ["name".clone()],
-        values: [Some("alice".clone())],
+        values: [Maybe.Some("alice".clone())],
     };
     let v = r.get_index(99);
     match v {
-        Some(_) => panic("expected None for out-of-range index"),
-        None => assert(true),
+        Maybe.Some(_) => panic("expected Maybe.None for out-of-range index"),
+        Maybe.None => assert(true),
     }
 }
 
@@ -306,12 +306,12 @@ fn test_row_get_index_out_of_range_returns_none() {
 fn test_row_get_index_negative_returns_none() {
     let r = Row {
         columns: ["x".clone()],
-        values: [Some("y".clone())],
+        values: [Maybe.Some("y".clone())],
     };
     let v = r.get_index(-1);
     match v {
-        Some(_) => panic("expected None for negative index"),
-        None => assert(true),
+        Maybe.Some(_) => panic("expected Maybe.None for negative index"),
+        Maybe.None => assert(true),
     }
 }
 

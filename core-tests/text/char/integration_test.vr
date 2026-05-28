@@ -16,7 +16,7 @@
 
 mount core.text.{Text};
 mount core.text.char.{GeneralCategory, char_any_of, char_range};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================

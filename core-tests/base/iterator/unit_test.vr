@@ -23,39 +23,39 @@ mount core.base.ordering.{Ordering, Less, Equal, Greater};
 fn test_iterator_next_basic() {
     let mut iter = range(0, 5);
 
-    assert_eq(iter.next(), Some(0));
-    assert_eq(iter.next(), Some(1));
-    assert_eq(iter.next(), Some(2));
-    assert_eq(iter.next(), Some(3));
-    assert_eq(iter.next(), Some(4));
-    assert_eq(iter.next(), None);
+    assert_eq(iter.next(), Maybe.Some(0));
+    assert_eq(iter.next(), Maybe.Some(1));
+    assert_eq(iter.next(), Maybe.Some(2));
+    assert_eq(iter.next(), Maybe.Some(3));
+    assert_eq(iter.next(), Maybe.Some(4));
+    assert_eq(iter.next(), Maybe.None);
 }
 
-/// Test that iterator returns None after exhaustion
+/// Test that iterator returns Maybe.None after exhaustion
 @test
 fn test_iterator_exhaustion() {
     let mut iter = range(0, 2);
 
-    assert_eq(iter.next(), Some(0));
-    assert_eq(iter.next(), Some(1));
-    assert_eq(iter.next(), None);
-    // Continued calls should also return None
-    assert_eq(iter.next(), None);
-    assert_eq(iter.next(), None);
+    assert_eq(iter.next(), Maybe.Some(0));
+    assert_eq(iter.next(), Maybe.Some(1));
+    assert_eq(iter.next(), Maybe.None);
+    // Continued calls should also return Maybe.None
+    assert_eq(iter.next(), Maybe.None);
+    assert_eq(iter.next(), Maybe.None);
 }
 
 /// Test empty iterator
 @test
 fn test_iterator_empty_range() {
     let mut iter = range(5, 5);  // Empty range
-    assert_eq(iter.next(), None);
+    assert_eq(iter.next(), Maybe.None);
 }
 
 /// Test iterator with negative range (empty)
 @test
 fn test_iterator_negative_range() {
     let mut iter = range(10, 5);  // end < start, should be empty
-    assert_eq(iter.next(), None);
+    assert_eq(iter.next(), Maybe.None);
 }
 
 // =============================================================================
@@ -68,7 +68,7 @@ fn test_size_hint_range() {
     let iter = range(0, 10);
     let (lower, upper) = iter.size_hint();
     assert_eq(lower, 10);
-    assert_eq(upper, Some(10));
+    assert_eq(upper, Maybe.Some(10));
 }
 
 /// Test size_hint for empty range
@@ -77,7 +77,7 @@ fn test_size_hint_empty() {
     let iter = range(5, 5);
     let (lower, upper) = iter.size_hint();
     assert_eq(lower, 0);
-    assert_eq(upper, Some(0));
+    assert_eq(upper, Maybe.Some(0));
 }
 
 /// Test size_hint updates during iteration
@@ -85,11 +85,11 @@ fn test_size_hint_empty() {
 fn test_size_hint_updates() {
     let mut iter = range(0, 5);
 
-    assert_eq(iter.size_hint(), (5, Some(5)));
+    assert_eq(iter.size_hint(), (5, Maybe.Some(5)));
     iter.next();
-    assert_eq(iter.size_hint(), (4, Some(4)));
+    assert_eq(iter.size_hint(), (4, Maybe.Some(4)));
     iter.next();
-    assert_eq(iter.size_hint(), (3, Some(3)));
+    assert_eq(iter.size_hint(), (3, Maybe.Some(3)));
 }
 
 /// Test size_hint for infinite iterator
@@ -98,7 +98,7 @@ fn test_size_hint_infinite() {
     let iter = count_from(0);
     let (lower, upper) = iter.size_hint();
     assert_eq(lower, Int.max_value());
-    assert_eq(upper, None);
+    assert_eq(upper, Maybe.None);
 }
 
 // =============================================================================
@@ -123,44 +123,44 @@ fn test_count_empty() {
 @test
 fn test_last_basic() {
     let iter = range(0, 5);
-    assert_eq(iter.last(), Some(4));
+    assert_eq(iter.last(), Maybe.Some(4));
 }
 
 /// Test last on empty iterator
 @test
 fn test_last_empty() {
     let iter = range(0, 0);
-    assert_eq(iter.last(), None);
+    assert_eq(iter.last(), Maybe.None);
 }
 
 /// Test last on single element
 @test
 fn test_last_single() {
     let iter = once(42);
-    assert_eq(iter.last(), Some(42));
+    assert_eq(iter.last(), Maybe.Some(42));
 }
 
 /// Test nth returns correct element
 @test
 fn test_nth_basic() {
     let mut iter = range(0, 10);
-    assert_eq(iter.nth(0), Some(0));
-    assert_eq(iter.nth(0), Some(1));  // nth consumes elements before it
-    assert_eq(iter.nth(2), Some(4));  // Skip 2, 3, return 4
+    assert_eq(iter.nth(0), Maybe.Some(0));
+    assert_eq(iter.nth(0), Maybe.Some(1));  // nth consumes elements before it
+    assert_eq(iter.nth(2), Maybe.Some(4));  // Skip 2, 3, return 4
 }
 
-/// Test nth past end returns None
+/// Test nth past end returns Maybe.None
 @test
 fn test_nth_past_end() {
     let mut iter = range(0, 5);
-    assert_eq(iter.nth(10), None);
+    assert_eq(iter.nth(10), Maybe.None);
 }
 
 /// Test nth on empty iterator
 @test
 fn test_nth_empty() {
     let mut iter = range(0, 0);
-    assert_eq(iter.nth(0), None);
+    assert_eq(iter.nth(0), Maybe.None);
 }
 
 // =============================================================================
@@ -171,23 +171,23 @@ fn test_nth_empty() {
 @test
 fn test_advance_by_basic() {
     let mut iter = range(0, 10);
-    assert_eq(iter.advance_by(3), Ok(()));
-    assert_eq(iter.next(), Some(3));
+    assert_eq(iter.advance_by(3), Result.Ok(()));
+    assert_eq(iter.next(), Maybe.Some(3));
 }
 
 /// Test advance_by with insufficient elements
 @test
 fn test_advance_by_insufficient() {
     let mut iter = range(0, 5);
-    assert_eq(iter.advance_by(10), Err(5));  // Only advanced 5 before exhaustion
+    assert_eq(iter.advance_by(10), Result.Err(5));  // Only advanced 5 before exhaustion
 }
 
 /// Test advance_by zero
 @test
 fn test_advance_by_zero() {
     let mut iter = range(0, 5);
-    assert_eq(iter.advance_by(0), Ok(()));
-    assert_eq(iter.next(), Some(0));
+    assert_eq(iter.advance_by(0), Result.Ok(()));
+    assert_eq(iter.next(), Maybe.Some(0));
 }
 
 // =============================================================================
@@ -206,7 +206,7 @@ fn test_map_basic() {
 @test
 fn test_map_size_hint() {
     let iter = range(0, 10).map(|x| x + 1);
-    assert_eq(iter.size_hint(), (10, Some(10)));
+    assert_eq(iter.size_hint(), (10, Maybe.Some(10)));
 }
 
 /// Test map with type conversion
@@ -276,19 +276,19 @@ fn test_filter_empty() {
 fn test_filter_map_basic() {
     let iter = range(0, 10).filter_map(|x| {
         if x % 2 == 0 {
-            Some(x * 10)
+            Maybe.Some(x * 10)
         } else {
-            None
+            Maybe.None
         }
     });
     let result: List<Int> = iter.collect();
     assert_eq(result, [0, 20, 40, 60, 80]);
 }
 
-/// Test filter_map all None
+/// Test filter_map all Maybe.None
 @test
 fn test_filter_map_all_none() {
-    let iter = range(0, 5).filter_map(|_| -> Maybe<Int> { None });
+    let iter = range(0, 5).filter_map(|_| -> Maybe<Int> { Maybe.None });
     let result: List<Int> = iter.collect();
     assert_eq(result, []);
 }
@@ -296,7 +296,7 @@ fn test_filter_map_all_none() {
 /// Test filter_map all Some
 @test
 fn test_filter_map_all_some() {
-    let iter = range(0, 3).filter_map(|x| Some(x + 100));
+    let iter = range(0, 3).filter_map(|x| Maybe.Some(x + 100));
     let result: List<Int> = iter.collect();
     assert_eq(result, [100, 101, 102]);
 }
@@ -362,10 +362,10 @@ fn test_take_zero() {
 @test
 fn test_take_size_hint() {
     let iter = range(0, 100).take(5);
-    assert_eq(iter.size_hint(), (5, Some(5)));
+    assert_eq(iter.size_hint(), (5, Maybe.Some(5)));
 
     let iter2 = range(0, 3).take(10);
-    assert_eq(iter2.size_hint(), (3, Some(3)));
+    assert_eq(iter2.size_hint(), (3, Maybe.Some(3)));
 }
 
 // =============================================================================
@@ -538,7 +538,7 @@ fn test_zip_with_empty() {
 @test
 fn test_zip_size_hint() {
     let iter = range(0, 10).zip(range(0, 5));
-    assert_eq(iter.size_hint(), (5, Some(5)));
+    assert_eq(iter.size_hint(), (5, Maybe.Some(5)));
 }
 
 // =============================================================================
@@ -571,7 +571,7 @@ fn test_enumerate_empty() {
 @test
 fn test_enumerate_size_hint() {
     let iter = range(0, 10).enumerate();
-    assert_eq(iter.size_hint(), (10, Some(10)));
+    assert_eq(iter.size_hint(), (10, Maybe.Some(10)));
 }
 
 // =============================================================================
@@ -583,11 +583,11 @@ fn test_enumerate_size_hint() {
 fn test_peekable_basic() {
     let mut iter = range(0, 5).peekable();
 
-    assert_eq(iter.peek(), Some(&0));
-    assert_eq(iter.peek(), Some(&0));  // Doesn't consume
-    assert_eq(iter.next(), Some(0));
-    assert_eq(iter.peek(), Some(&1));
-    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.peek(), Maybe.Some(&0));
+    assert_eq(iter.peek(), Maybe.Some(&0));  // Doesn't consume
+    assert_eq(iter.next(), Maybe.Some(0));
+    assert_eq(iter.peek(), Maybe.Some(&1));
+    assert_eq(iter.next(), Maybe.Some(1));
 }
 
 /// Test peekable exhaustion
@@ -595,10 +595,10 @@ fn test_peekable_basic() {
 fn test_peekable_exhaustion() {
     let mut iter = range(0, 2).peekable();
 
-    assert_eq(iter.next(), Some(0));
-    assert_eq(iter.next(), Some(1));
-    assert_eq(iter.peek(), None);
-    assert_eq(iter.next(), None);
+    assert_eq(iter.next(), Maybe.Some(0));
+    assert_eq(iter.next(), Maybe.Some(1));
+    assert_eq(iter.peek(), Maybe.None);
+    assert_eq(iter.next(), Maybe.None);
 }
 
 /// Test peek_mut allows mutation
@@ -606,12 +606,12 @@ fn test_peekable_exhaustion() {
 fn test_peekable_peek_mut() {
     let mut iter = range(0, 3).peekable();
 
-    if let Some(x) = iter.peek_mut() {
+    if let Maybe.Some(x) = iter.peek_mut() {
         *x = 100;
     }
 
-    assert_eq(iter.next(), Some(100));
-    assert_eq(iter.next(), Some(1));
+    assert_eq(iter.next(), Maybe.Some(100));
+    assert_eq(iter.next(), Maybe.Some(1));
 }
 
 // =============================================================================
@@ -746,18 +746,18 @@ fn test_inspect_no_modification() {
 // Section 21: Transforming Adapters - fuse
 // =============================================================================
 
-/// Test fuse ensures None forever after first None
+/// Test fuse ensures Maybe.None forever after first Maybe.None
 @test
 fn test_fuse_basic() {
-    // Create an iterator that might return Some after None
+    // Create an iterator that might return Some after Maybe.None
     // (simulated with a custom implementation)
     let mut fused = range(0, 2).fuse();
 
-    assert_eq(fused.next(), Some(0));
-    assert_eq(fused.next(), Some(1));
-    assert_eq(fused.next(), None);
-    assert_eq(fused.next(), None);
-    assert_eq(fused.next(), None);
+    assert_eq(fused.next(), Maybe.Some(0));
+    assert_eq(fused.next(), Maybe.Some(1));
+    assert_eq(fused.next(), Maybe.None);
+    assert_eq(fused.next(), Maybe.None);
+    assert_eq(fused.next(), Maybe.None);
 }
 
 // =============================================================================
@@ -820,21 +820,21 @@ fn test_fold_order() {
 @test
 fn test_reduce_basic() {
     let product = range(1, 6).reduce(|a, b| a * b);
-    assert_eq(product, Some(120));  // 1*2*3*4*5
+    assert_eq(product, Maybe.Some(120));  // 1*2*3*4*5
 }
 
 /// Test reduce on empty iterator
 @test
 fn test_reduce_empty() {
     let result = range(0, 0).reduce(|a, b| a + b);
-    assert_eq(result, None);
+    assert_eq(result, Maybe.None);
 }
 
 /// Test reduce on single element
 @test
 fn test_reduce_single() {
     let result = once(42).reduce(|a, b| a + b);
-    assert_eq(result, Some(42));
+    assert_eq(result, Maybe.Some(42));
 }
 
 /// Test reduce finds max
@@ -843,7 +843,7 @@ fn test_reduce_max() {
     let max_val = [3, 1, 4, 1, 5, 9].iter().map(|x| *x).reduce(|a, b| {
         if a > b { a } else { b }
     });
-    assert_eq(max_val, Some(9));
+    assert_eq(max_val, Maybe.Some(9));
 }
 
 // =============================================================================
@@ -853,8 +853,8 @@ fn test_reduce_max() {
 /// Test try_fold succeeds
 @test
 fn test_try_fold_success() {
-    let result = range(1, 5).try_fold(0, |acc, x| Ok(acc + x));
-    assert_eq(result, Ok(10));
+    let result = range(1, 5).try_fold(0, |acc, x| Result.Ok(acc + x));
+    assert_eq(result, Result.Ok(10));
 }
 
 /// Test try_fold short circuits on error
@@ -862,19 +862,19 @@ fn test_try_fold_success() {
 fn test_try_fold_error() {
     let result = range(0, 10).try_fold(0, |acc, x| {
         if x == 5 {
-            Err("hit 5")
+            Result.Err("hit 5")
         } else {
-            Ok(acc + x)
+            Result.Ok(acc + x)
         }
     });
-    assert_eq(result, Err("hit 5"));
+    assert_eq(result, Result.Err("hit 5"));
 }
 
 /// Test try_fold empty iterator
 @test
 fn test_try_fold_empty() {
-    let result = range(0, 0).try_fold(100, |acc, x| Ok(acc + x));
-    assert_eq(result, Ok(100));
+    let result = range(0, 0).try_fold(100, |acc, x| Result.Ok(acc + x));
+    assert_eq(result, Result.Ok(100));
 }
 
 // =============================================================================
@@ -886,7 +886,7 @@ fn test_try_fold_empty() {
 fn test_scan_running_sum() {
     let iter = [1, 2, 3, 4].iter().scan(0, |state, x| {
         *state = *state + **x;
-        Some(*state)
+        Maybe.Some(*state)
     });
     let result: List<Int> = iter.collect();
     assert_eq(result, [1, 3, 6, 10]);
@@ -898,9 +898,9 @@ fn test_scan_early_termination() {
     let iter = range(0, 100).scan(0, |state, x| {
         *state = *state + x;
         if *state > 10 {
-            None
+            Maybe.None
         } else {
-            Some(*state)
+            Maybe.Some(*state)
         }
     });
     let result: List<Int> = iter.collect();
@@ -989,28 +989,28 @@ fn test_any_short_circuit() {
 @test
 fn test_find_found() {
     let result = range(0, 10).find(|x| *x > 5);
-    assert_eq(result, Some(6));
+    assert_eq(result, Maybe.Some(6));
 }
 
-/// Test find returns None when not found
+/// Test find returns Maybe.None when not found
 @test
 fn test_find_not_found() {
     let result = range(0, 10).find(|x| *x > 100);
-    assert_eq(result, None);
+    assert_eq(result, Maybe.None);
 }
 
 /// Test find on empty iterator
 @test
 fn test_find_empty() {
     let result = range(0, 0).find(|_| true);
-    assert_eq(result, None);
+    assert_eq(result, Maybe.None);
 }
 
 /// Test find gets first, not just any
 @test
 fn test_find_first() {
     let result = [3, 1, 4, 1, 5].iter().find(|x| **x == 1);
-    assert_eq(result, Some(&1));  // The first 1
+    assert_eq(result, Maybe.Some(&1));  // The first 1
 }
 
 // =============================================================================
@@ -1022,15 +1022,15 @@ fn test_find_first() {
 //     let result = ["a", "42", "b"].iter().find_map(|s| {
 //         (*s).parse_int().ok()
 //     });
-//     assert_eq(result, Some(42));
+//     assert_eq(result, Maybe.Some(42));
 // }
 
-// /// Test find_map returns None when all fail
+// /// Test find_map returns Maybe.None when all fail
 // fn test_find_map_not_found() {
 //     let result = ["a", "b", "c"].iter().find_map(|s| {
 //         (*s).parse_int().ok()
 //     });
-//     assert_eq(result, None);
+//     assert_eq(result, Maybe.None);
 // }
 
 // =============================================================================
@@ -1041,21 +1041,21 @@ fn test_find_first() {
 @test
 fn test_position_found() {
     let result = range(10, 20).position(|x| *x == 15);
-    assert_eq(result, Some(5));
+    assert_eq(result, Maybe.Some(5));
 }
 
-/// Test position returns None when not found
+/// Test position returns Maybe.None when not found
 @test
 fn test_position_not_found() {
     let result = range(0, 10).position(|x| *x == 100);
-    assert_eq(result, None);
+    assert_eq(result, Maybe.None);
 }
 
 /// Test position on empty
 @test
 fn test_position_empty() {
     let result = range(0, 0).position(|_| true);
-    assert_eq(result, None);
+    assert_eq(result, Maybe.None);
 }
 
 // =============================================================================
@@ -1116,35 +1116,35 @@ fn test_product_with_zero() {
 @test
 fn test_max_basic() {
     let result = [3, 1, 4, 1, 5, 9, 2, 6].iter().map(|x| *x).max();
-    assert_eq(result, Some(9));
+    assert_eq(result, Maybe.Some(9));
 }
 
 /// Test max on empty
 @test
 fn test_max_empty() {
     let result = range(0, 0).max();
-    assert_eq(result, None);
+    assert_eq(result, Maybe.None);
 }
 
 /// Test max single element
 @test
 fn test_max_single() {
     let result = once(42).max();
-    assert_eq(result, Some(42));
+    assert_eq(result, Maybe.Some(42));
 }
 
 /// Test min finds minimum
 @test
 fn test_min_basic() {
     let result = [3, 1, 4, 1, 5, 9, 2, 6].iter().map(|x| *x).min();
-    assert_eq(result, Some(1));
+    assert_eq(result, Maybe.Some(1));
 }
 
 /// Test min on empty
 @test
 fn test_min_empty() {
     let result = range(0, 0).min();
-    assert_eq(result, None);
+    assert_eq(result, Maybe.None);
 }
 
 /// Test max_by_key
@@ -1152,7 +1152,7 @@ fn test_min_empty() {
 fn test_max_by_key() {
     let items = [(1, "a"), (5, "b"), (3, "c")];
     let result = items.iter().max_by_key(|item| item.0);
-    assert_eq(result.map(|r| r.0), Some(5));
+    assert_eq(result.map(|r| r.0), Maybe.Some(5));
 }
 
 /// Test min_by_key
@@ -1160,7 +1160,7 @@ fn test_max_by_key() {
 fn test_min_by_key() {
     let items = [(1, "a"), (5, "b"), (3, "c")];
     let result = items.iter().min_by_key(|item| item.0);
-    assert_eq(result.map(|r| r.0), Some(1));
+    assert_eq(result.map(|r| r.0), Maybe.Some(1));
 }
 
 // =============================================================================
@@ -1295,12 +1295,12 @@ fn test_for_each_empty() {
 fn test_next_back_basic() {
     let mut iter = range(0, 5);
 
-    assert_eq(iter.next_back(), Some(4));
-    assert_eq(iter.next_back(), Some(3));
-    assert_eq(iter.next_back(), Some(2));
-    assert_eq(iter.next_back(), Some(1));
-    assert_eq(iter.next_back(), Some(0));
-    assert_eq(iter.next_back(), None);
+    assert_eq(iter.next_back(), Maybe.Some(4));
+    assert_eq(iter.next_back(), Maybe.Some(3));
+    assert_eq(iter.next_back(), Maybe.Some(2));
+    assert_eq(iter.next_back(), Maybe.Some(1));
+    assert_eq(iter.next_back(), Maybe.Some(0));
+    assert_eq(iter.next_back(), Maybe.None);
 }
 
 /// Test mixing next and next_back
@@ -1308,28 +1308,28 @@ fn test_next_back_basic() {
 fn test_next_and_next_back_mixed() {
     let mut iter = range(0, 5);
 
-    assert_eq(iter.next(), Some(0));
-    assert_eq(iter.next_back(), Some(4));
-    assert_eq(iter.next(), Some(1));
-    assert_eq(iter.next_back(), Some(3));
-    assert_eq(iter.next(), Some(2));
-    assert_eq(iter.next(), None);
-    assert_eq(iter.next_back(), None);
+    assert_eq(iter.next(), Maybe.Some(0));
+    assert_eq(iter.next_back(), Maybe.Some(4));
+    assert_eq(iter.next(), Maybe.Some(1));
+    assert_eq(iter.next_back(), Maybe.Some(3));
+    assert_eq(iter.next(), Maybe.Some(2));
+    assert_eq(iter.next(), Maybe.None);
+    assert_eq(iter.next_back(), Maybe.None);
 }
 
 /// Test advance_back_by
 @test
 fn test_advance_back_by_basic() {
     let mut iter = range(0, 10);
-    assert_eq(iter.advance_back_by(3), Ok(()));
-    assert_eq(iter.next_back(), Some(6));
+    assert_eq(iter.advance_back_by(3), Result.Ok(()));
+    assert_eq(iter.next_back(), Maybe.Some(6));
 }
 
 /// Test nth_back
 @test
 fn test_nth_back_basic() {
     let mut iter = range(0, 10);
-    assert_eq(iter.nth_back(2), Some(7));  // Skip 9, 8, return 7
+    assert_eq(iter.nth_back(2), Maybe.Some(7));  // Skip 9, 8, return 7
 }
 
 /// Test rfold folds from back
@@ -1377,7 +1377,7 @@ fn test_rev_rev() {
 @test
 fn test_rev_size_hint() {
     let iter = range(0, 10).rev();
-    assert_eq(iter.size_hint(), (10, Some(10)));
+    assert_eq(iter.size_hint(), (10, Maybe.Some(10)));
 }
 
 // =============================================================================
@@ -1417,7 +1417,7 @@ fn test_range_exact_size() {
     let iter = range(0, 100);
     let (lower, upper) = iter.size_hint();
     assert_eq(lower, 100);
-    assert_eq(upper, Some(100));
+    assert_eq(upper, Maybe.Some(100));
 }
 
 // =============================================================================
@@ -1510,7 +1510,7 @@ fn test_repeat_n_zero() {
 @test
 fn test_repeat_n_size_hint() {
     let iter = repeat_n(1, 10);
-    assert_eq(iter.size_hint(), (10, Some(10)));
+    assert_eq(iter.size_hint(), (10, Maybe.Some(10)));
 }
 
 // =============================================================================
@@ -1528,20 +1528,20 @@ fn test_once_basic() {
 @test
 fn test_once_exhaustion() {
     let mut iter = once(42);
-    assert_eq(iter.next(), Some(42));
-    assert_eq(iter.next(), None);
-    assert_eq(iter.next(), None);
+    assert_eq(iter.next(), Maybe.Some(42));
+    assert_eq(iter.next(), Maybe.None);
+    assert_eq(iter.next(), Maybe.None);
 }
 
 /// Test once size hint
 @test
 fn test_once_size_hint() {
     let iter = once(42);
-    assert_eq(iter.size_hint(), (1, Some(1)));
+    assert_eq(iter.size_hint(), (1, Maybe.Some(1)));
 
     let mut iter2 = once(42);
     iter2.next();
-    assert_eq(iter2.size_hint(), (0, Some(0)));
+    assert_eq(iter2.size_hint(), (0, Maybe.Some(0)));
 }
 
 // =============================================================================
@@ -1555,19 +1555,19 @@ fn test_empty_basic() {
     assert_eq(result, []);
 }
 
-/// Test empty next always None
+/// Test empty next always Maybe.None
 @test
 fn test_empty_always_none() {
     let mut iter: Empty<Int> = empty();
-    assert_eq(iter.next(), None);
-    assert_eq(iter.next(), None);
+    assert_eq(iter.next(), Maybe.None);
+    assert_eq(iter.next(), Maybe.None);
 }
 
 /// Test empty size hint
 @test
 fn test_empty_size_hint() {
     let iter: Empty<Int> = empty();
-    assert_eq(iter.size_hint(), (0, Some(0)));
+    assert_eq(iter.size_hint(), (0, Maybe.Some(0)));
 }
 
 // =============================================================================
@@ -1581,9 +1581,9 @@ fn test_from_fn_basic() {
     let iter = from_fn(|| {
         if n < 5 {
             n = n + 1;
-            Some(n * 10)
+            Maybe.Some(n * 10)
         } else {
-            None
+            Maybe.None
         }
     });
     let result: List<Int> = iter.collect();
@@ -1597,9 +1597,9 @@ fn test_from_fn_finite() {
     let iter = from_fn(|| {
         if count > 0 {
             count = count - 1;
-            Some(count)
+            Maybe.Some(count)
         } else {
-            None
+            Maybe.None
         }
     });
     let result: List<Int> = iter.collect();
@@ -1618,10 +1618,10 @@ fn test_unfold_basic() {
         let a = (*state).0;
         let b = (*state).1;
         if a > 100 {
-            None
+            Maybe.None
         } else {
             *state = (b, a + b);
-            Some(a)
+            Maybe.Some(a)
         }
     });
     let result: List<Int> = iter.collect();
@@ -1633,11 +1633,11 @@ fn test_unfold_basic() {
 fn test_unfold_powers() {
     let iter = unfold(1, |state| {
         if *state > 1000 {
-            None
+            Maybe.None
         } else {
             let val = *state;
             *state = *state * 2;
-            Some(val)
+            Maybe.Some(val)
         }
     });
     let result: List<Int> = iter.collect();
@@ -1651,18 +1651,18 @@ fn test_unfold_powers() {
 /// Test successors generates chain
 @test
 fn test_successors_basic() {
-    let iter = successors(Some(1), |x| {
+    let iter = successors(Maybe.Some(1), |x| {
         let next = *x * 2;
-        if next > 100 { None } else { Some(next) }
+        if next > 100 { Maybe.None } else { Maybe.Some(next) }
     });
     let result: List<Int> = iter.collect();
     assert_eq(result, [1, 2, 4, 8, 16, 32, 64]);
 }
 
-/// Test successors with None start
+/// Test successors with Maybe.None start
 @test
 fn test_successors_none_start() {
-    let iter: Successors<Int, fn(&Int) -> Maybe<Int>> = successors(None, |x| Some(*x + 1));
+    let iter: Successors<Int, fn(&Int) -> Maybe<Int>> = successors(Maybe.None, |x| Maybe.Some(*x + 1));
     let result: List<Int> = iter.collect();
     assert_eq(result, []);
 }
@@ -1685,7 +1685,7 @@ fn test_range_uint64_size_hint() {
     let iter: Range<UInt64> = Range { current: 10u64, end: 20u64 };
     let (lower, upper) = iter.size_hint();
     assert_eq(lower, 10);
-    assert_eq(upper, Some(10));
+    assert_eq(upper, Maybe.Some(10));
 }
 
 // =============================================================================
@@ -2109,7 +2109,7 @@ fn test_pattern_pairs() {
 fn test_pattern_early_search() {
     let large_data = range(0, 1000000);
     let found = large_data.find(|x| *x == 42);
-    assert_eq(found, Some(42));
+    assert_eq(found, Maybe.Some(42));
 }
 
 /// Test data processing pipeline

@@ -53,17 +53,17 @@ fn integration_umbrella_os_error_list_iteration() {
 @test
 fn integration_umbrella_fd_maybe_funnel() {
     fn open_funnel(rv: Fd) -> Maybe<Fd> {
-        if rv.0 < (0 as Int32) { None } else { Some(rv) }
+        if rv.0 < (0 as Int32) { Maybe.None } else { Maybe.Some(rv) }
     }
     let ok  = open_funnel(Fd(7 as Int32));
     let err = open_funnel(Fd(-1 as Int32));
     match ok {
-        Some(fd) => assert_eq(fd.0, 7 as Int32),
-        None     => assert(false),
+        Maybe.Some(fd) => assert_eq(fd.0, 7 as Int32),
+        Maybe.None     => assert(false),
     };
     match err {
-        Some(_) => assert(false),
-        None    => assert(true),
+        Maybe.Some(_) => assert(false),
+        Maybe.None    => assert(true),
     };
 }
 
@@ -73,16 +73,16 @@ fn integration_umbrella_fd_maybe_funnel() {
 
 @test
 fn integration_umbrella_timespec_via_result() {
-    let r: Result<TimeSpec, OSError> = Ok(TimeSpec {
+    let r: Result<TimeSpec, OSError> = Result.Ok(TimeSpec {
         tv_sec:  3 as Int64,
         tv_nsec: 500_000_000 as Int64,
     });
     match r {
-        Ok(ts) => {
+        Result.Ok(ts) => {
             assert_eq(ts.tv_sec, 3 as Int64);
             assert_eq(ts.tv_nsec, 500_000_000 as Int64);
         }
-        Err(_) => assert(false),
+        Result.Err(_) => assert(false),
     };
 }
 
@@ -123,15 +123,15 @@ fn integration_umbrella_memory_flags_text_segment() {
 
 @test
 fn integration_umbrella_init_error_via_maybe_some() {
-    let opt: Maybe<InitError> = Some(InitError.AlreadyInitialized);
+    let opt: Maybe<InitError> = Maybe.Some(InitError.AlreadyInitialized);
     match opt {
-        Some(e) => {
+        Maybe.Some(e) => {
             match e {
                 InitError.AlreadyInitialized => assert(true),
                 _ => assert(false),
             }
         }
-        None => assert(false),
+        Maybe.None => assert(false),
     };
 }
 

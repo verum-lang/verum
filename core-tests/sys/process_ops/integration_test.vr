@@ -23,13 +23,13 @@ fn integration_exit_status_via_maybe_funnel() {
     for c in codes.iter() {
         let s = ProcessExitStatus { code: *c };
         let maybe: Maybe<Int> = if s.success() {
-            Some(s.code())
+            Maybe.Some(s.code())
         } else {
-            None
+            Maybe.None
         };
         match maybe {
-            Some(_) => { succ_count = succ_count + 1; }
-            None => {}
+            Maybe.Some(_) => { succ_count = succ_count + 1; }
+            Maybe.None => {}
         }
     }
     // Only code=0 succeeds → 1 hit.

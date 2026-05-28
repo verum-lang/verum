@@ -17,7 +17,7 @@ mount core.net.content_negotiation.{
     CodedPreference
 };
 mount core.collections.List;
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // CONNEG-1 — parse_* / select_* SIGSEGV during precompile cascade
@@ -66,11 +66,11 @@ fn regression_select_best_media_exact_match() {
     offers.push("application/json".clone());
     offers.push("text/html".clone());
     match select_best_media(&prefs, &offers) {
-        Some(pick) => {
+        Maybe.Some(pick) => {
             let want = "application/json".clone();
             assert(pick == want);
         }
-        None => panic("expected match"),
+        Maybe.None => panic("expected match"),
     }
 }
 
@@ -83,11 +83,11 @@ fn regression_select_best_coding_q_zero_rejects() {
     offers.push("gzip".clone());
     offers.push("br".clone());
     match select_best_coding(&prefs, &offers) {
-        Some(pick) => {
+        Maybe.Some(pick) => {
             let want = "br".clone();
             assert(pick == want);
         }
-        None => panic("br should be selected"),
+        Maybe.None => panic("br should be selected"),
     }
 }
 
@@ -98,7 +98,7 @@ fn regression_select_best_media_no_match_none() {
     let mut offers: List<Text> = [];
     offers.push("application/json".clone());
     match select_best_media(&prefs, &offers) {
-        Some(_) => panic("no acceptable offer"),
-        None => assert(true),
+        Maybe.Some(_) => panic("no acceptable offer"),
+        Maybe.None => assert(true),
     }
 }

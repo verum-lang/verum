@@ -302,20 +302,20 @@ fn integration_endianness_pattern_match_exhaustive() {
 
 @test
 fn integration_endianness_via_maybe_pattern() {
-    // Route Endianness through Maybe; confirm the Some / None arms reach
+    // Route Endianness through Maybe; confirm the Some / Maybe.None arms reach
     // pattern-match for every variant.
     let maybes: List<Maybe<Endianness>> = [
-        Some(Endianness.Little),
-        Some(Endianness.Big),
-        Some(Endianness.Native),
-        None,
+        Maybe.Some(Endianness.Little),
+        Maybe.Some(Endianness.Big),
+        Maybe.Some(Endianness.Native),
+        Maybe.None,
     ];
     let mut some_count: Int = 0;
     let mut none_count: Int = 0;
     for m in maybes.iter() {
         match m {
-            Some(_) => some_count = some_count + 1,
-            None    => none_count = none_count + 1,
+            Maybe.Some(_) => some_count = some_count + 1,
+            Maybe.None    => none_count = none_count + 1,
         };
     }
     assert_eq(some_count, 3);

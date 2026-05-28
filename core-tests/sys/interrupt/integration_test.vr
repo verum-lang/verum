@@ -58,10 +58,10 @@ fn integration_list_of_interrupt_cells_polymorphic_construction() {
 
 @test
 fn integration_is_active_via_maybe_some_branch() {
-    let state: Maybe<Bool> = Some(CriticalSection.is_active());
+    let state: Maybe<Bool> = Maybe.Some(CriticalSection.is_active());
     match state {
-        Some(_) => assert(true),
-        None    => assert(false),
+        Maybe.Some(_) => assert(true),
+        Maybe.None    => assert(false),
     };
 }
 

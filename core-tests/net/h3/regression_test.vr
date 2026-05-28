@@ -130,8 +130,8 @@ fn regression_h3_encode_decode_data_frame_round_trip() {
     let mut buf: List<Byte> = [];
     encode_frame(&f, &mut buf);
     match decode_frame(buf.as_slice(), 0) {
-        Ok((decoded, _)) => assert(decoded is H3Frame.DataFrame),
-        Err(_) => panic("DATA frame round-trip failed"),
+        Result.Ok((decoded, _)) => assert(decoded is H3Frame.DataFrame),
+        Result.Err(_) => panic("DATA frame round-trip failed"),
     }
 }
 
@@ -142,13 +142,13 @@ fn regression_h3_encode_decode_goaway_round_trip() {
     let mut buf: List<Byte> = [];
     encode_frame(&f, &mut buf);
     match decode_frame(buf.as_slice(), 0) {
-        Ok((decoded, _)) => {
+        Result.Ok((decoded, _)) => {
             match decoded {
                 H3Frame.GoawayFrame(id) => assert_eq(id, 42_u64),
                 _ => panic("expected GoawayFrame after round-trip"),
             }
         },
-        Err(_) => panic("GOAWAY frame round-trip failed"),
+        Result.Err(_) => panic("GOAWAY frame round-trip failed"),
     }
 }
 
@@ -159,8 +159,8 @@ fn regression_h3_encode_decode_stream_type_control_round_trip() {
     let mut buf: List<Byte> = [];
     encode_stream_type(&st, &mut buf);
     match decode_stream_type(buf.as_slice()) {
-        Ok((decoded, _)) => assert(decoded is UniStreamType.ControlStream),
-        Err(_) => panic("Control stream-type round-trip failed"),
+        Result.Ok((decoded, _)) => assert(decoded is UniStreamType.ControlStream),
+        Result.Err(_) => panic("Control stream-type round-trip failed"),
     }
 }
 

@@ -9,7 +9,7 @@
 //   * CidrSet insertion ordering doesn't affect contains result
 //   * Cross-family CidrSet: v4 + v6 prefixes coexist without false positives
 //   * num_addresses lattice: prefix-len monotone in count
-//   * matching returns the contained prefix (Some) or None
+//   * matching returns the contained prefix (Some) or Maybe.None
 //   * CidrError disjointness across distinct failure modes
 //
 // All tests construct `Cidr` variants directly via record literals — the
@@ -18,7 +18,7 @@
 
 mount core.net.cidr.{Cidr, CidrSet, CidrError};
 mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: Cidr.V4 contains lattice — full /24 sweep
@@ -116,7 +116,7 @@ fn integration_cidr_v4_num_addresses_monotone_in_prefix_len() {
 }
 
 // =============================================================================
-// Section 5: CidrSet.matching returns the longest prefix or None
+// Section 5: CidrSet.matching returns the longest prefix or Maybe.None
 // =============================================================================
 
 @test
@@ -125,8 +125,8 @@ fn integration_cidr_set_matching_returns_some_for_member() {
     set.insert(Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 });
     let m = set.matching(&IpAddr.v4(10_u8, 1_u8, 2_u8, 3_u8));
     match m {
-        Some(_) => assert(true),
-        None => panic("10.1.2.3 must match 10.0.0.0/8"),
+        Maybe.Some(_) => assert(true),
+        Maybe.None => panic("10.1.2.3 must match 10.0.0.0/8"),
     }
 }
 
@@ -136,8 +136,8 @@ fn integration_cidr_set_matching_returns_none_for_non_member() {
     set.insert(Cidr.V4 { addr: Ipv4Addr.new(10_u8, 0_u8, 0_u8, 0_u8), prefix_len: 8 });
     let m = set.matching(&IpAddr.v4(11_u8, 0_u8, 0_u8, 0_u8));
     match m {
-        Some(_) => panic("11.0.0.0 must NOT match 10.0.0.0/8"),
-        None => assert(true),
+        Maybe.Some(_) => panic("11.0.0.0 must NOT match 10.0.0.0/8"),
+        Maybe.None => assert(true),
     }
 }
 

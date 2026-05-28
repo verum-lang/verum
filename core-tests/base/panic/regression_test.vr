@@ -103,7 +103,7 @@ fn regression_panic_info_with_location_round_trip() {
     let loc = Location.new("error.vr".to_text(), 99, 5);
     let info = PanicInfo {
         message: "something went wrong".to_text(),
-        location: Some(loc),
+        location: Maybe.Some(loc),
     };
     assert_eq(info.message(), &"something went wrong".to_text());
     assert(info.location().is_some());
@@ -113,7 +113,7 @@ fn regression_panic_info_with_location_round_trip() {
 fn regression_panic_info_without_location_round_trip() {
     let info = PanicInfo {
         message: "no location captured".to_text(),
-        location: None,
+        location: Maybe.None,
     };
     assert_eq(info.message(), &"no location captured".to_text());
     assert(info.location().is_none());
@@ -128,7 +128,7 @@ fn regression_panic_info_without_location_round_trip() {
 fn regression_panic_info_two_field_record_layout() {
     let info = PanicInfo {
         message: "x".to_text(),
-        location: None,
+        location: Maybe.None,
     };
     // Direct field access.
     assert_eq(info.message, "x".to_text());

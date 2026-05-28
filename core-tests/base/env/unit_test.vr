@@ -73,10 +73,10 @@ fn test_args_count_consistency() {
 // =============================================================================
 
 @test
-// @ignore: arg(0) returns None even when args_count() > 0 under the
+// @ignore: arg(0) returns Maybe.None even when args_count() > 0 under the
 // `--interp` test harness — process-argv plumbing inconsistency
 // between args_count and arg(i). Pinned in regression_test.vr §A.
-@ignore("arg(0) returns None even when args_count() > 0 — argv plumbing inconsistency.")
+@ignore("arg(0) returns Maybe.None even when args_count() > 0 — argv plumbing inconsistency.")
 fn test_arg_first() {
     let first = arg(0);
     assert(first.is_some(), "first argument should exist");
@@ -84,25 +84,25 @@ fn test_arg_first() {
 
 @test
 fn test_arg_negative_index() {
-    // Negative index should return None
+    // Negative index should return Maybe.None
     let result = arg(-1);
-    assert(result.is_none(), "negative index should return None");
+    assert(result.is_none(), "negative index should return Maybe.None");
 }
 
 @test
 fn test_arg_large_index() {
-    // Index beyond args count should return None
+    // Index beyond args count should return Maybe.None
     let count = args_count();
     let result = arg(count + 100);
-    assert(result.is_none(), "index beyond count should return None");
+    assert(result.is_none(), "index beyond count should return Maybe.None");
 }
 
 @test
 fn test_arg_exact_boundary() {
-    // Index exactly at count should return None
+    // Index exactly at count should return Maybe.None
     let count = args_count();
     let result = arg(count);
-    assert(result.is_none(), "index at exact count should return None");
+    assert(result.is_none(), "index at exact count should return Maybe.None");
 }
 
 @test
@@ -133,16 +133,16 @@ fn test_args_matches_count() {
 }
 
 @test
-@ignore("Same argv plumbing inconsistency as test_arg_first — arg(0) returns None under --interp harness.")
+@ignore("Same argv plumbing inconsistency as test_arg_first — arg(0) returns Maybe.None under --interp harness.")
 fn test_args_first_matches_arg_zero() {
     let all_args = args();
     let first_arg = arg(0);
 
     match first_arg {
-        Some(expected) => {
+        Maybe.Some(expected) => {
             assert_eq(all_args[0], expected);
         }
-        None => panic("arg(0) should return Some"),
+        Maybe.None => panic("arg(0) should return Some"),
     }
 }
 
@@ -165,8 +165,8 @@ fn test_args_os_size_hint() {
     assert(upper.is_some(), "upper bound should be known");
 
     match upper {
-        Some(u) => assert_eq(lower, u, "exact size should be known"),
-        None => panic("upper bound should be Some"),
+        Maybe.Some(u) => assert_eq(lower, u, "exact size should be known"),
+        Maybe.None => panic("upper bound should be Some"),
     }
 }
 
@@ -207,9 +207,9 @@ fn test_args_iterator_exhaustion() {
         let _ = iter.next();
     }
 
-    // Next call should return None
+    // Next call should return Maybe.None
     let extra = iter.next();
-    assert(extra.is_none(), "exhausted iterator should return None");
+    assert(extra.is_none(), "exhausted iterator should return Maybe.None");
 }
 
 // =============================================================================
@@ -222,17 +222,17 @@ fn test_var_not_present() {
     let result = var(&"__VERUM_TEST_DEFINITELY_NOT_SET_12345__");
 
     match result {
-        Ok(_) => panic("should return Err for non-existent var"),
-        Err(VarError.NotPresent) => {}, // Expected
-        Err(_) => panic("expected NotPresent error"),
+        Result.Ok(_) => panic("should return Err for non-existent var"),
+        Result.Err(VarError.NotPresent) => {}, // Expected
+        Result.Err(_) => panic("expected NotPresent error"),
     }
 }
 
 @test
 fn test_var_opt_not_present() {
-    // Non-existent variable should return None
+    // Non-existent variable should return Maybe.None
     let result = var_opt(&"__VERUM_TEST_DEFINITELY_NOT_SET_54321__");
-    assert(result.is_none(), "non-existent var should return None");
+    assert(result.is_none(), "non-existent var should return Maybe.None");
 }
 
 @test
@@ -248,15 +248,15 @@ fn test_var_empty_key() {
 
 @test
 fn test_home_dir_function() {
-    // home_dir should return Some or None, not panic
+    // home_dir should return Some or Maybe.None, not panic
     let home = home_dir();
     // We can't assert it exists on all systems, just that it doesn't panic
 
     match home {
-        Some(dir) => {
+        Maybe.Some(dir) => {
             assert(dir.len() > 0, "home dir should not be empty");
         }
-        None => {
+        Maybe.None => {
             // Acceptable on some systems
         }
     }
@@ -264,15 +264,15 @@ fn test_home_dir_function() {
 
 @test
 fn test_user_function() {
-    // user() should return username or None
+    // user() should return username or Maybe.None
     let username = user();
     // Can't assert on all systems, just verify no panic
 
     match username {
-        Some(name) => {
+        Maybe.Some(name) => {
             assert(name.len() > 0, "username should not be empty");
         }
-        None => {
+        Maybe.None => {
             // Acceptable
         }
     }
@@ -302,14 +302,14 @@ fn test_temp_dir_fallback() {
 
 @test
 fn test_shell_function() {
-    // shell() should return shell path or None
+    // shell() should return shell path or Maybe.None
     let sh = shell();
 
     match sh {
-        Some(s) => {
+        Maybe.Some(s) => {
             assert(s.len() > 0, "shell path should not be empty");
         }
-        None => {
+        Maybe.None => {
             // Acceptable on some systems
         }
     }
@@ -317,14 +317,14 @@ fn test_shell_function() {
 
 @test
 fn test_locale_function() {
-    // locale() should return locale or None
+    // locale() should return locale or Maybe.None
     let loc = locale();
 
     match loc {
-        Some(l) => {
+        Maybe.Some(l) => {
             assert(l.len() > 0, "locale should not be empty");
         }
-        None => {
+        Maybe.None => {
             // Acceptable on some systems
         }
     }
@@ -483,7 +483,7 @@ fn test_args_iterator_partial_consumption() {
     let original_count = args_count();
 
     assert_eq(lower, original_count - 1);
-    assert_eq(upper, Some(original_count - 1));
+    assert_eq(upper, Maybe.Some(original_count - 1));
 }
 
 // =============================================================================
@@ -495,10 +495,10 @@ fn test_arg_program_name_not_empty() {
     let program = arg(0);
 
     match program {
-        Some(name) => {
+        Maybe.Some(name) => {
             assert(name.len() > 0, "program name should not be empty");
         }
-        None => panic("program name should exist"),
+        Maybe.None => panic("program name should exist"),
     }
 }
 
@@ -623,8 +623,8 @@ fn test_iterate_with_index() {
         // Index should match position
         let direct = arg(i as Int);
         match direct {
-            Some(d) => assert_eq(a, d),
-            None => panic("mismatch in iteration"),
+            Maybe.Some(d) => assert_eq(a, d),
+            Maybe.None => panic("mismatch in iteration"),
         }
     }
 }
@@ -641,11 +641,11 @@ fn test_var_result_ok_path() {
 
     // Either Ok or Err is valid
     match result {
-        Ok(value) => {
+        Result.Ok(value) => {
             // Value should be usable
             let _ = value.len();
         }
-        Err(_) => {
+        Result.Err(_) => {
             // PATH not set is unusual but valid
         }
     }
@@ -656,10 +656,10 @@ fn test_var_opt_maybe_some_path() {
     let maybe: Maybe<Text> = var_opt(&"PATH");
 
     match maybe {
-        Some(value) => {
+        Maybe.Some(value) => {
             let _ = value.len();
         }
-        None => {
+        Maybe.None => {
             // Valid
         }
     }
@@ -821,7 +821,7 @@ fn test_arg_string_ownership() {
 
     // Each call returns owned Text
     match (a1, a2) {
-        (Some(s1), Some(s2)) => {
+        (Maybe.Some(s1), Maybe.Some(s2)) => {
             assert_eq(s1, s2);
             // Modifying one shouldn't affect the other
         }
@@ -845,7 +845,7 @@ fn test_var_string_ownership() {
 
     // Each call returns owned Text
     match (v1, v2) {
-        (Some(s1), Some(s2)) => {
+        (Maybe.Some(s1), Maybe.Some(s2)) => {
             assert_eq(s1, s2);
         }
         _ => {

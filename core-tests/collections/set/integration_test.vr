@@ -22,8 +22,8 @@ fn integration_set_deduplicates_stream() {
     let mut i = 0;
     while i < stream.len() {
         match stream.get(i) {
-            Some(v) => { let _ = s.insert(v); },
-            None => {},
+            Maybe.Some(v) => { let _ = s.insert(v); },
+            Maybe.None => {},
         }
         i = i + 1;
     }

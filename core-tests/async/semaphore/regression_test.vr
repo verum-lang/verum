@@ -13,7 +13,7 @@
 // =============================================================================
 
 mount core.async.semaphore.{AsyncSemaphore, SemaphoreError};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // §A — task #12 — AsyncSemaphore.new null-derefs through AtomicInt.swap
@@ -95,8 +95,8 @@ fn regression_semaphore_new_negative_clamps_to_zero() {
 fn regression_semaphore_try_acquire_when_available_returns_some() {
     let s = AsyncSemaphore.new(1);
     match s.try_acquire() {
-        Some(_) => assert(true),
-        None => assert(false),
+        Maybe.Some(_) => assert(true),
+        Maybe.None => assert(false),
     }
 }
 
@@ -104,8 +104,8 @@ fn regression_semaphore_try_acquire_when_available_returns_some() {
 fn regression_semaphore_try_acquire_when_saturated_returns_none() {
     let s = AsyncSemaphore.new(0);
     match s.try_acquire() {
-        Some(_) => assert(false),
-        None => assert(true),
+        Maybe.Some(_) => assert(false),
+        Maybe.None => assert(true),
     }
 }
 
@@ -130,8 +130,8 @@ fn regression_semaphore_close_makes_try_acquire_return_none() {
     let s = AsyncSemaphore.new(10);
     s.close();
     match s.try_acquire() {
-        Some(_) => assert(false),
-        None => assert(true),
+        Maybe.Some(_) => assert(false),
+        Maybe.None => assert(true),
     }
 }
 

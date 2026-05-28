@@ -111,8 +111,8 @@ fn test_sync_channel_send_when_full_returns_false() {
 fn test_sync_channel_recv_empty_yields_none() {
     let mut c: SyncChannel<Int> = SyncChannel.new();
     match c.recv() {
-        Some(_) => assert(false),
-        None    => assert(true),
+        Maybe.Some(_) => assert(false),
+        Maybe.None    => assert(true),
     };
 }
 
@@ -121,8 +121,8 @@ fn test_sync_channel_send_recv_round_trip_int() {
     let mut c: SyncChannel<Int> = SyncChannel.new();
     let _ = c.send(7);
     match c.recv() {
-        Some(v) => assert_eq(v, 7),
-        None    => assert(false),
+        Maybe.Some(v) => assert_eq(v, 7),
+        Maybe.None    => assert(false),
     };
     // After recv, channel is empty again.
     assert(c.is_empty());
@@ -133,8 +133,8 @@ fn test_sync_channel_send_recv_round_trip_text() {
     let mut c: SyncChannel<Text> = SyncChannel.new();
     let _ = c.send("payload".clone());
     match c.recv() {
-        Some(v) => assert_eq(v, "payload".clone()),
-        None    => assert(false),
+        Maybe.Some(v) => assert_eq(v, "payload".clone()),
+        Maybe.None    => assert(false),
     };
 }
 
@@ -145,8 +145,8 @@ fn test_sync_channel_send_recv_send_recv_cycle() {
     let _ = c.recv();
     let _ = c.send(2);
     match c.recv() {
-        Some(v) => assert_eq(v, 2),
-        None    => assert(false),
+        Maybe.Some(v) => assert_eq(v, 2),
+        Maybe.None    => assert(false),
     };
 }
 

@@ -21,7 +21,7 @@
 // =============================================================================
 
 mount core.net.http.{Method, StatusCode, Version};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: Method round-trip — from_str(as_str()) == M
@@ -31,8 +31,8 @@ mount core.base.maybe.{Maybe, Some, None};
 fn prop_method_round_trip_get() {
     let s = Method.Get.as_str();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Get),
-        None => panic("from_str(Get.as_str()) must succeed"),
+        Maybe.Some(m) => assert(m is Method.Get),
+        Maybe.None => panic("from_str(Get.as_str()) must succeed"),
     }
 }
 
@@ -40,8 +40,8 @@ fn prop_method_round_trip_get() {
 fn prop_method_round_trip_head() {
     let s = Method.Head.as_str();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Head),
-        None => panic("from_str(Head.as_str()) must succeed"),
+        Maybe.Some(m) => assert(m is Method.Head),
+        Maybe.None => panic("from_str(Head.as_str()) must succeed"),
     }
 }
 
@@ -49,8 +49,8 @@ fn prop_method_round_trip_head() {
 fn prop_method_round_trip_post() {
     let s = Method.Post.as_str();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Post),
-        None => panic("from_str(Post.as_str()) must succeed"),
+        Maybe.Some(m) => assert(m is Method.Post),
+        Maybe.None => panic("from_str(Post.as_str()) must succeed"),
     }
 }
 
@@ -58,8 +58,8 @@ fn prop_method_round_trip_post() {
 fn prop_method_round_trip_put() {
     let s = Method.Put.as_str();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Put),
-        None => panic("from_str(Put.as_str()) must succeed"),
+        Maybe.Some(m) => assert(m is Method.Put),
+        Maybe.None => panic("from_str(Put.as_str()) must succeed"),
     }
 }
 
@@ -67,8 +67,8 @@ fn prop_method_round_trip_put() {
 fn prop_method_round_trip_delete() {
     let s = Method.Delete.as_str();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Delete),
-        None => panic("from_str(Delete.as_str()) must succeed"),
+        Maybe.Some(m) => assert(m is Method.Delete),
+        Maybe.None => panic("from_str(Delete.as_str()) must succeed"),
     }
 }
 
@@ -76,8 +76,8 @@ fn prop_method_round_trip_delete() {
 fn prop_method_round_trip_connect() {
     let s = Method.Connect.as_str();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Connect),
-        None => panic("from_str(Connect.as_str()) must succeed"),
+        Maybe.Some(m) => assert(m is Method.Connect),
+        Maybe.None => panic("from_str(Connect.as_str()) must succeed"),
     }
 }
 
@@ -85,8 +85,8 @@ fn prop_method_round_trip_connect() {
 fn prop_method_round_trip_options() {
     let s = Method.Options.as_str();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Options),
-        None => panic("from_str(Options.as_str()) must succeed"),
+        Maybe.Some(m) => assert(m is Method.Options),
+        Maybe.None => panic("from_str(Options.as_str()) must succeed"),
     }
 }
 
@@ -94,8 +94,8 @@ fn prop_method_round_trip_options() {
 fn prop_method_round_trip_trace() {
     let s = Method.Trace.as_str();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Trace),
-        None => panic("from_str(Trace.as_str()) must succeed"),
+        Maybe.Some(m) => assert(m is Method.Trace),
+        Maybe.None => panic("from_str(Trace.as_str()) must succeed"),
     }
 }
 
@@ -103,8 +103,8 @@ fn prop_method_round_trip_trace() {
 fn prop_method_round_trip_patch() {
     let s = Method.Patch.as_str();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Patch),
-        None => panic("from_str(Patch.as_str()) must succeed"),
+        Maybe.Some(m) => assert(m is Method.Patch),
+        Maybe.None => panic("from_str(Patch.as_str()) must succeed"),
     }
 }
 
@@ -116,8 +116,8 @@ fn prop_method_round_trip_patch() {
 fn prop_method_from_str_lowercase_get() {
     let s = "get".clone();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Get),
-        None => panic("'get' lowercase should parse to Get"),
+        Maybe.Some(m) => assert(m is Method.Get),
+        Maybe.None => panic("'get' lowercase should parse to Get"),
     }
 }
 
@@ -125,8 +125,8 @@ fn prop_method_from_str_lowercase_get() {
 fn prop_method_from_str_uppercase_get() {
     let s = "GET".clone();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Get),
-        None => panic("'GET' uppercase should parse to Get"),
+        Maybe.Some(m) => assert(m is Method.Get),
+        Maybe.None => panic("'GET' uppercase should parse to Get"),
     }
 }
 
@@ -134,8 +134,8 @@ fn prop_method_from_str_uppercase_get() {
 fn prop_method_from_str_mixed_case_get() {
     let s = "GeT".clone();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Get),
-        None => panic("'GeT' mixed case should parse to Get"),
+        Maybe.Some(m) => assert(m is Method.Get),
+        Maybe.None => panic("'GeT' mixed case should parse to Get"),
     }
 }
 
@@ -143,8 +143,8 @@ fn prop_method_from_str_mixed_case_get() {
 fn prop_method_from_str_lowercase_delete() {
     let s = "delete".clone();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Delete),
-        None => panic("'delete' lowercase should parse to Delete"),
+        Maybe.Some(m) => assert(m is Method.Delete),
+        Maybe.None => panic("'delete' lowercase should parse to Delete"),
     }
 }
 
@@ -152,8 +152,8 @@ fn prop_method_from_str_lowercase_delete() {
 fn prop_method_from_str_mixed_case_options() {
     let s = "OpTiOnS".clone();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Options),
-        None => panic("'OpTiOnS' mixed case should parse to Options"),
+        Maybe.Some(m) => assert(m is Method.Options),
+        Maybe.None => panic("'OpTiOnS' mixed case should parse to Options"),
     }
 }
 

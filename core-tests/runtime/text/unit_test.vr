@@ -55,7 +55,7 @@ fn test_text_parse_int_callable() {
     assert(true);
 }
 
-@ignore  // §A — stub returns None for valid input
+@ignore  // §A — stub returns Maybe.None for valid input
 @test
 fn test_text_parse_int_decimal_positive() {
     let m = text_parse_int(&"42");
@@ -71,17 +71,17 @@ fn test_text_parse_int_decimal_zero() {
 
 @test
 fn test_text_parse_int_invalid_text_is_none() {
-    // Stub returns None for everything; coincidentally matches the
+    // Stub returns Maybe.None for everything; coincidentally matches the
     // expected behaviour for invalid input.  Test passes today and
     // continues to pass post-§A.
     let m = text_parse_int(&"not_a_number");
-    assert(m is Maybe.None, "text_parse_int garbage should be None");
+    assert(m is Maybe.None, "text_parse_int garbage should be Maybe.None");
 }
 
 @test
 fn test_text_parse_int_empty_is_none() {
     let m = text_parse_int(&"");
-    assert(m is Maybe.None, "text_parse_int empty should be None");
+    assert(m is Maybe.None, "text_parse_int empty should be Maybe.None");
 }
 
 // =============================================================================
@@ -105,7 +105,7 @@ fn test_text_parse_float_decimal() {
 @test
 fn test_text_parse_float_invalid_is_none() {
     let m = text_parse_float(&"xyz");
-    assert(m is Maybe.None, "text_parse_float garbage should be None");
+    assert(m is Maybe.None, "text_parse_float garbage should be Maybe.None");
 }
 
 // =============================================================================

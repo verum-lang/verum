@@ -107,7 +107,7 @@ fn regression_sys_context_error_match_arms_route_correctly() {
     // is intentional per `interpreter/dispatch_table/handlers/cbgr.rs`
     // `handle_deref` line ~244; auto-unwrapping single-field variants
     // would silently break `match *self` for sum types like IpAddr).
-    // `assert_eq(*Some(0), 0)` therefore compares the Maybe heap
+    // `assert_eq(*Maybe.Some(0), 0)` therefore compares the Maybe heap
     // variant against `Int 0` and always fails.
     assert_eq(tags[0], 0);
     assert_eq(tags[1], 1);

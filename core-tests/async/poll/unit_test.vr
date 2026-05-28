@@ -18,7 +18,7 @@
 // =============================================================================
 
 mount core.async.poll.{Poll};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
@@ -162,14 +162,14 @@ fn test_poll_unwrap_or_default_unused_on_ready() {
 fn test_poll_ready_to_maybe_some() {
     let p: Poll<Int> = Poll.Ready(8);
     let m: Maybe<Int> = p.ready();
-    assert_eq(m, Some(8));
+    assert_eq(m, Maybe.Some(8));
 }
 
 @test
 fn test_poll_ready_to_maybe_none() {
     let p: Poll<Int> = Poll.Pending;
     let m: Maybe<Int> = p.ready();
-    assert_eq(m, None);
+    assert_eq(m, Maybe.None);
 }
 
 // =============================================================================
@@ -179,13 +179,13 @@ fn test_poll_ready_to_maybe_none() {
 @test
 fn test_poll_ready_ok_constructor() {
     let p: Poll<Result<Int, Text>> = Poll.ready_ok(42);
-    assert_eq(p, Poll.Ready(Ok(42)));
+    assert_eq(p, Poll.Ready(Result.Ok(42)));
 }
 
 @test
 fn test_poll_ready_err_constructor() {
     let p: Poll<Result<Int, Text>> = Poll.ready_err("boom");
-    assert_eq(p, Poll.Ready(Err("boom")));
+    assert_eq(p, Poll.Ready(Result.Err("boom")));
 }
 
 // =============================================================================
@@ -194,9 +194,9 @@ fn test_poll_ready_err_constructor() {
 
 @test
 fn test_poll_map_ok_on_ready_ok() {
-    let p: Poll<Result<Int, Text>> = Poll.Ready(Ok(3));
+    let p: Poll<Result<Int, Text>> = Poll.Ready(Result.Ok(3));
     let q = p.map_ok(|x| x + 10);
-    assert_eq(q, Poll.Ready(Ok(13)));
+    assert_eq(q, Poll.Ready(Result.Ok(13)));
 }
 
 @test
@@ -204,10 +204,10 @@ fn test_poll_map_ok_preserves_err() {
     // map_ok on Poll<Result<T,E>> is gated by task #22 (constrained-
     // implement-block dispatch no-op).  Pin the round-trip without
     // invoking the broken dispatcher.
-    let p: Poll<Result<Int, Text>> = Poll.Ready(Err("e"));
+    let p: Poll<Result<Int, Text>> = Poll.Ready(Result.Err("e"));
     fn err_payload(q: Poll<Result<Int, Text>>) -> Text {
         match q {
-            Poll.Ready(Err(e)) => e,
+            Poll.Ready(Result.Err(e)) => e,
             _ => "<unexpected>",
         }
     }
@@ -230,13 +230,13 @@ fn test_poll_map_err_on_ready_err() {
     // map_err lives in `implement<T, E> Poll<Result<T, E>>` — the
     // constrained-implement-block method dispatch is partially
     // broken in the Tier-0 interpreter (closure body not invoked on
-    // Ready(Err(_)) variant), pinned as task #22. Until that lands,
+    // Ready(Result.Err(_)) variant), pinned as task #22. Until that lands,
     // exercise the path without crossing the broken dispatcher: pin
-    // the round-trip of `Poll.Ready(Err(e))` through pattern-match.
-    let p: Poll<Result<Int, Int>> = Poll.Ready(Err(7));
+    // the round-trip of `Poll.Ready(Result.Err(e))` through pattern-match.
+    let p: Poll<Result<Int, Int>> = Poll.Ready(Result.Err(7));
     fn extract_err(q: Poll<Result<Int, Int>>) -> Int {
         match q {
-            Poll.Ready(Err(e)) => e,
+            Poll.Ready(Result.Err(e)) => e,
             _ => -1,
         }
     }
@@ -245,9 +245,9 @@ fn test_poll_map_err_on_ready_err() {
 
 @test
 fn test_poll_map_err_preserves_ok() {
-    let p: Poll<Result<Int, Text>> = Poll.Ready(Ok(5));
+    let p: Poll<Result<Int, Text>> = Poll.Ready(Result.Ok(5));
     let q = p.map_err(|e: Text| e.len());
-    assert_eq(q, Poll.Ready(Ok(5)));
+    assert_eq(q, Poll.Ready(Result.Ok(5)));
 }
 
 @test
@@ -363,14 +363,14 @@ fn test_poll_debug_pending() {
 
 @test
 fn test_poll_from_some_becomes_ready() {
-    let m: Maybe<Int> = Some(11);
+    let m: Maybe<Int> = Maybe.Some(11);
     let p: Poll<Int> = Poll.from(m);
     assert_eq(p, Poll.Ready(11));
 }
 
 @test
 fn test_poll_from_none_becomes_pending() {
-    let m: Maybe<Int> = None;
+    let m: Maybe<Int> = Maybe.None;
     let p: Poll<Int> = Poll.from(m);
     assert(p is Poll.Pending);
 }

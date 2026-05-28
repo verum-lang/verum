@@ -31,7 +31,7 @@ fn regression_heap_from_list_heapifies_in_place() {
     let xs: List<Int> = [3, 1, 4, 1, 5, 9];
     let h: BinaryHeap<Int> = BinaryHeap.from_list(xs);
     assert_eq(h.len(), 6);
-    assert_eq(h.peek(), Some(9));
+    assert_eq(h.peek(), Maybe.Some(9));
 }
 
 // =============================================================================
@@ -48,7 +48,7 @@ fn regression_heap_wrapper_field_resolves_to_inner_list() {
     let _ = h.pop();
     h.push(10);
     h.push(2);
-    assert_eq(h.peek(), Some(10));
+    assert_eq(h.peek(), Maybe.Some(10));
 }
 
 // =============================================================================

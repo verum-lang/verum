@@ -66,7 +66,7 @@ fn test_retry_budget_refill_resets_to_ceiling() {
 //           max_attempts: max_attempts,
 //           backoff_base_ms: 50,
 //           backoff_max_ms: 5_000,
-//           budget: None,
+//           budget: Maybe.None,
 //           non_idempotent_policy: NonIdempotentPolicy.Disabled,
 //       }
 //   }

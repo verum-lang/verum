@@ -35,14 +35,14 @@ fn test_btreemap_new_is_empty() {
 }
 
 // =============================================================================
-// Section 2: Queries on empty BTreeMap — None / false fall-throughs
+// Section 2: Queries on empty BTreeMap — Maybe.None / false fall-throughs
 // =============================================================================
 
 @test
 fn test_btreemap_get_absent_returns_none() {
     let m: BTreeMap<Int, Int> = BTreeMap.new();
     let v: Maybe<Int> = m.get(&999);
-    assert(v is None);
+    assert(v is Maybe.None);
 }
 
 @test
@@ -55,7 +55,7 @@ fn test_btreemap_contains_key_absent_returns_false() {
 fn test_btreemap_remove_absent_returns_none() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
     let r: Maybe<Int> = m.remove(&999);
-    assert(r is None);
+    assert(r is Maybe.None);
 }
 
 @test

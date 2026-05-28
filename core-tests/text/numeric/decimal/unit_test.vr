@@ -24,7 +24,7 @@ mount core.text.numeric.decimal.{
     HalfEven, HalfUp, HalfDown, Truncate,
     parse_decimal,
 };
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
@@ -78,35 +78,35 @@ fn test_from_int_zero() {
 @test
 fn test_from_parts_valid() {
     match Decimal.from_parts(123, 2) {
-        Ok(d) => {
+        Result.Ok(d) => {
             assert_eq(d.coefficient, 123);
             assert_eq(d.scale, 2);
         }
-        Err(_) => panic("scale 2 must be valid"),
+        Result.Err(_) => panic("scale 2 must be valid"),
     }
 }
 
 @test
 fn test_from_parts_max_scale() {
     match Decimal.from_parts(0, MAX_SCALE) {
-        Ok(d) => assert_eq(d.scale, MAX_SCALE),
-        Err(_) => panic("MAX_SCALE must be valid"),
+        Result.Ok(d) => assert_eq(d.scale, MAX_SCALE),
+        Result.Err(_) => panic("MAX_SCALE must be valid"),
     }
 }
 
 @test
 fn test_from_parts_negative_scale_rejected() {
     match Decimal.from_parts(0, -1) {
-        Ok(_) => panic("negative scale must be Err"),
-        Err(e) => assert(e is DecimalError.ScaleOutOfRange),
+        Result.Ok(_) => panic("negative scale must be Err"),
+        Result.Err(e) => assert(e is DecimalError.ScaleOutOfRange),
     }
 }
 
 @test
 fn test_from_parts_above_max_rejected() {
     match Decimal.from_parts(0, MAX_SCALE + 1) {
-        Ok(_) => panic("scale > MAX_SCALE must be Err"),
-        Err(e) => assert(e is DecimalError.ScaleOutOfRange),
+        Result.Ok(_) => panic("scale > MAX_SCALE must be Err"),
+        Result.Err(e) => assert(e is DecimalError.ScaleOutOfRange),
     }
 }
 
@@ -193,11 +193,11 @@ fn test_add_same_scale() {
     let a = Decimal.from_int(2);
     let b = Decimal.from_int(3);
     match a.add(&b) {
-        Ok(d) => {
+        Result.Ok(d) => {
             assert_eq(d.coefficient, 5);
             assert_eq(d.scale, 0);
         }
-        Err(_) => panic("simple add must succeed"),
+        Result.Err(_) => panic("simple add must succeed"),
     }
 }
 
@@ -206,8 +206,8 @@ fn test_add_zero_left_identity() {
     let z = Decimal.zero();
     let d = Decimal.from_int(7);
     match z.add(&d) {
-        Ok(r) => assert_eq(r.coefficient, 7),
-        Err(_) => panic("zero is left identity"),
+        Result.Ok(r) => assert_eq(r.coefficient, 7),
+        Result.Err(_) => panic("zero is left identity"),
     }
 }
 
@@ -216,8 +216,8 @@ fn test_add_negative_to_positive() {
     let a = Decimal.from_int(5);
     let b = Decimal.from_int(-3);
     match a.add(&b) {
-        Ok(r) => assert_eq(r.coefficient, 2),
-        Err(_) => panic("5 + -3 = 2"),
+        Result.Ok(r) => assert_eq(r.coefficient, 2),
+        Result.Err(_) => panic("5 + -3 = 2"),
     }
 }
 
@@ -230,8 +230,8 @@ fn test_sub_same_scale() {
     let a = Decimal.from_int(7);
     let b = Decimal.from_int(3);
     match a.sub(&b) {
-        Ok(d) => assert_eq(d.coefficient, 4),
-        Err(_) => panic("7 - 3 = 4"),
+        Result.Ok(d) => assert_eq(d.coefficient, 4),
+        Result.Err(_) => panic("7 - 3 = 4"),
     }
 }
 
@@ -239,8 +239,8 @@ fn test_sub_same_scale() {
 fn test_sub_self_yields_zero_coef() {
     let a = Decimal.from_int(5);
     match a.sub(&a) {
-        Ok(d) => assert_eq(d.coefficient, 0),
-        Err(_) => panic("5 - 5 = 0"),
+        Result.Ok(d) => assert_eq(d.coefficient, 0),
+        Result.Err(_) => panic("5 - 5 = 0"),
     }
 }
 
@@ -253,11 +253,11 @@ fn test_mul_simple() {
     let a = Decimal.from_int(3);
     let b = Decimal.from_int(4);
     match a.mul(&b) {
-        Ok(d) => {
+        Result.Ok(d) => {
             assert_eq(d.coefficient, 12);
             assert_eq(d.scale, 0);
         }
-        Err(_) => panic("3 * 4 = 12"),
+        Result.Err(_) => panic("3 * 4 = 12"),
     }
 }
 
@@ -266,8 +266,8 @@ fn test_mul_by_zero_yields_zero() {
     let a = Decimal.from_int(7);
     let z = Decimal.zero();
     match a.mul(&z) {
-        Ok(d) => assert_eq(d.coefficient, 0),
-        Err(_) => panic("x * 0 = 0"),
+        Result.Ok(d) => assert_eq(d.coefficient, 0),
+        Result.Err(_) => panic("x * 0 = 0"),
     }
 }
 
@@ -276,8 +276,8 @@ fn test_mul_by_one_identity() {
     let a = Decimal.from_int(7);
     let o = Decimal.one();
     match a.mul(&o) {
-        Ok(d) => assert_eq(d.coefficient, 7),
-        Err(_) => panic("x * 1 = x"),
+        Result.Ok(d) => assert_eq(d.coefficient, 7),
+        Result.Err(_) => panic("x * 1 = x"),
     }
 }
 
@@ -290,8 +290,8 @@ fn test_div_by_zero_returns_div_by_zero() {
     let a = Decimal.from_int(5);
     let z = Decimal.zero();
     match a.div(&z, 2, RoundingMode.HalfEven) {
-        Ok(_) => panic("div by zero must Err"),
-        Err(e) => assert(e is DecimalError.DivByZero),
+        Result.Ok(_) => panic("div by zero must Err"),
+        Result.Err(e) => assert(e is DecimalError.DivByZero),
     }
 }
 
@@ -300,8 +300,8 @@ fn test_div_simple_exact() {
     let a = Decimal.from_int(10);
     let b = Decimal.from_int(2);
     match a.div(&b, 0, RoundingMode.HalfEven) {
-        Ok(d) => assert_eq(d.coefficient, 5),
-        Err(_) => panic("10 / 2 = 5"),
+        Result.Ok(d) => assert_eq(d.coefficient, 5),
+        Result.Err(_) => panic("10 / 2 = 5"),
     }
 }
 
@@ -310,8 +310,8 @@ fn test_div_negative_precision_rejected() {
     let a = Decimal.from_int(1);
     let b = Decimal.from_int(2);
     match a.div(&b, -1, RoundingMode.HalfEven) {
-        Ok(_) => panic("negative precision must Err"),
-        Err(e) => assert(e is DecimalError.ScaleOutOfRange),
+        Result.Ok(_) => panic("negative precision must Err"),
+        Result.Err(e) => assert(e is DecimalError.ScaleOutOfRange),
     }
 }
 
@@ -322,49 +322,49 @@ fn test_div_negative_precision_rejected() {
 @test
 fn test_parse_simple_int() {
     match parse_decimal(&"42") {
-        Ok(d) => {
+        Result.Ok(d) => {
             assert_eq(d.coefficient, 42);
             assert_eq(d.scale, 0);
         }
-        Err(_) => panic("'42' parses"),
+        Result.Err(_) => panic("'42' parses"),
     }
 }
 
 @test
 fn test_parse_decimal_point() {
     match parse_decimal(&"3.14") {
-        Ok(d) => {
+        Result.Ok(d) => {
             assert_eq(d.coefficient, 314);
             assert_eq(d.scale, 2);
         }
-        Err(_) => panic("'3.14' parses"),
+        Result.Err(_) => panic("'3.14' parses"),
     }
 }
 
 @test
 fn test_parse_negative() {
     match parse_decimal(&"-1.5") {
-        Ok(d) => {
+        Result.Ok(d) => {
             assert_eq(d.coefficient, -15);
             assert_eq(d.scale, 1);
         }
-        Err(_) => panic("'-1.5' parses"),
+        Result.Err(_) => panic("'-1.5' parses"),
     }
 }
 
 @test
 fn test_parse_empty_returns_err() {
     match parse_decimal(&"") {
-        Ok(_) => panic("empty must Err"),
-        Err(e) => assert(e is DecimalError.ParseEmpty),
+        Result.Ok(_) => panic("empty must Err"),
+        Result.Err(e) => assert(e is DecimalError.ParseEmpty),
     }
 }
 
 @test
 fn test_parse_garbage_returns_err() {
     match parse_decimal(&"abc") {
-        Ok(_) => panic("garbage must Err"),
-        Err(_) => {},
+        Result.Ok(_) => panic("garbage must Err"),
+        Result.Err(_) => {},
     }
 }
 

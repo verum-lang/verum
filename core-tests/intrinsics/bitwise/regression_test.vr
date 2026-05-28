@@ -89,7 +89,7 @@ fn regression_popcnt_u64_basic() {
 // with the broken `core/math/bits.vr::rotl` bodyless decl that previously
 // shadowed it.  Root cause was an arity-mismatched `@intrinsic("llvm.fshl.i64")`
 // annotation on a 2-arg `rotl(x, n)` declaration — `llvm.fshl.iN` is 3-arg
-// funnel-shift, so `lookup_intrinsic` returned None and the dispatcher fell
+// funnel-shift, so `lookup_intrinsic` returned Maybe.None and the dispatcher fell
 // through to the empty body → `Value::default() = Unit`.  Bare-name
 // resolution picked this stub first-wins.  Fixed in `core/math/bits.vr`
 // (re-annotated to canonical 2-arg `@intrinsic("rotate_left|rotate_right")`)

@@ -11,7 +11,7 @@
 // =============================================================================
 
 mount core.net.http.{Method};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: Method 9-variant construction
@@ -110,8 +110,8 @@ fn test_as_str_patch() { assert_eq(Method.Patch.as_str(), "PATCH"); }
 fn test_from_str_get() {
     let s = "GET".clone();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Get),
-        None => panic("GET should parse"),
+        Maybe.Some(m) => assert(m is Method.Get),
+        Maybe.None => panic("GET should parse"),
     }
 }
 
@@ -119,8 +119,8 @@ fn test_from_str_get() {
 fn test_from_str_lowercase_post() {
     let s = "post".clone();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Post),
-        None => panic("'post' (lowercase) should parse"),
+        Maybe.Some(m) => assert(m is Method.Post),
+        Maybe.None => panic("'post' (lowercase) should parse"),
     }
 }
 
@@ -128,8 +128,8 @@ fn test_from_str_lowercase_post() {
 fn test_from_str_mixed_case_patch() {
     let s = "PaTcH".clone();
     match Method.from_str(&s) {
-        Some(m) => assert(m is Method.Patch),
-        None => panic("'PaTcH' (mixed-case) should parse"),
+        Maybe.Some(m) => assert(m is Method.Patch),
+        Maybe.None => panic("'PaTcH' (mixed-case) should parse"),
     }
 }
 
@@ -137,8 +137,8 @@ fn test_from_str_mixed_case_patch() {
 fn test_from_str_unknown_returns_none() {
     let s = "BREW".clone();
     match Method.from_str(&s) {
-        Some(_) => panic("'BREW' is not RFC 7231 method"),
-        None => assert(true),
+        Maybe.Some(_) => panic("'BREW' is not RFC 7231 method"),
+        Maybe.None => assert(true),
     }
 }
 
@@ -146,8 +146,8 @@ fn test_from_str_unknown_returns_none() {
 fn test_from_str_empty_returns_none() {
     let s = "".clone();
     match Method.from_str(&s) {
-        Some(_) => panic("empty string should fail"),
-        None => assert(true),
+        Maybe.Some(_) => panic("empty string should fail"),
+        Maybe.None => assert(true),
     }
 }
 

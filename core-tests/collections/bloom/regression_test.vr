@@ -104,11 +104,11 @@ fn regression_bloom_clear_resets_admitted_counter() {
 }
 
 // CLOSED 2026-05-17 — BloomFilter.try_with_target correctly returns
-// `Err(_)` on invalid fp_rate.
+// `Result.Err(_)` on invalid fp_rate.
 @test
 fn regression_bloom_try_with_target_invalid_fp_rate() {
     let r = BloomFilter.try_with_target(1024, 0);
-    assert(r is Err(_));
+    assert(r is Result.Err(_));
 }
 
 // =============================================================================

@@ -14,7 +14,7 @@
 
 mount core.base.protocols.*;
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
 
@@ -355,11 +355,11 @@ fn test_partial_ord_incomparable() {
         fn partial_cmp(&self, other: &MaybeFloat) -> Maybe<Ordering> {
             match (self, other) {
                 (Valid(a), Valid(b)) => {
-                    if *a < *b { Some(Less) }
-                    else if *a > *b { Some(Greater) }
-                    else { Some(Equal) }
+                    if *a < *b { Maybe.Some(Less) }
+                    else if *a > *b { Maybe.Some(Greater) }
+                    else { Maybe.Some(Equal) }
                 }
-                _ => None,  // Invalid is incomparable
+                _ => Maybe.None,  // Invalid is incomparable
             }
         }
     }
@@ -368,13 +368,13 @@ fn test_partial_ord_incomparable() {
     let v2 = Valid(2.0);
     let inv = Invalid;
 
-    assert_eq(v1.partial_cmp(&v2), Some(Less));
-    assert_eq(v2.partial_cmp(&v1), Some(Greater));
-    assert_eq(v1.partial_cmp(&inv), None);
-    assert_eq(inv.partial_cmp(&v1), None);
+    assert_eq(v1.partial_cmp(&v2), Maybe.Some(Less));
+    assert_eq(v2.partial_cmp(&v1), Maybe.Some(Greater));
+    assert_eq(v1.partial_cmp(&inv), Maybe.None);
+    assert_eq(inv.partial_cmp(&v1), Maybe.None);
 }
 
-/// Test PartialOrd default lt handles None
+/// Test PartialOrd default lt handles Maybe.None
 @test
 fn test_partial_ord_lt_with_none() {
     type MaybeVal is Val(Int) | NoVal;
@@ -392,8 +392,8 @@ fn test_partial_ord_lt_with_none() {
     implement PartialOrd for MaybeVal {
         fn partial_cmp(&self, other: &MaybeVal) -> Maybe<Ordering> {
             match (self, other) {
-                (Val(a), Val(b)) => Some(Ordering.from_int(*a - *b)),
-                _ => None,
+                (Val(a), Val(b)) => Maybe.Some(Ordering.from_int(*a - *b)),
+                _ => Maybe.None,
             }
         }
     }
@@ -828,9 +828,9 @@ fn test_try_from_protocol() {
 
         fn try_from(value: Int) -> Result<Percentage, Text> {
             if value >= 0 && value <= 100 {
-                Ok(Percentage { value: value })
+                Result.Ok(Percentage { value: value })
             } else {
-                Err(f"Value {value} is not a valid percentage")
+                Result.Err(f"Value {value} is not a valid percentage")
             }
         }
     }

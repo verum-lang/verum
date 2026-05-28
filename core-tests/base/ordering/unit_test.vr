@@ -11,7 +11,7 @@
 // =============================================================================
 
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -793,10 +793,10 @@ fn test_binary_search_with_ordering() {
             match cmp {
                 Less => low = mid + 1,
                 Greater => high = mid - 1,
-                Equal => return Some(mid),
+                Equal => return Maybe.Some(mid),
             }
         }
-        None
+        Maybe.None
     }
 
     fn compare_int(a: Int, b: Int) -> Ordering {
@@ -807,11 +807,11 @@ fn test_binary_search_with_ordering() {
 
     let arr = [1, 3, 5, 7, 9, 11, 13];
 
-    assert_eq(binary_search(&arr, 7), Some(3));
-    assert_eq(binary_search(&arr, 1), Some(0));
-    assert_eq(binary_search(&arr, 13), Some(6));
-    assert_eq(binary_search(&arr, 6), None);
-    assert_eq(binary_search(&arr, 0), None);
+    assert_eq(binary_search(&arr, 7), Maybe.Some(3));
+    assert_eq(binary_search(&arr, 1), Maybe.Some(0));
+    assert_eq(binary_search(&arr, 13), Maybe.Some(6));
+    assert_eq(binary_search(&arr, 6), Maybe.None);
+    assert_eq(binary_search(&arr, 0), Maybe.None);
 }
 
 // =============================================================================

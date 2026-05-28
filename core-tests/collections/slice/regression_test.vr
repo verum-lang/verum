@@ -116,7 +116,7 @@ fn regression_slice_position_misdispatches_to_iterator_predicate_form() {
     let xs: List<Int> = [10, 20, 30];
     let s: &[Int] = xs.as_slice();
     let p: Maybe<Int> = s.index_of(&20);
-    assert_eq(p, Some(1));
+    assert_eq(p, Maybe.Some(1));
 }
 
 // REGRESSION (§C.2): same shape for `rposition(&value)` —
@@ -126,7 +126,7 @@ fn regression_slice_rposition_misdispatches() {
     let xs: List<Int> = [10, 20, 30, 20];
     let s: &[Int] = xs.as_slice();
     let p: Maybe<Int> = s.rindex_of(&20);
-    assert_eq(p, Some(3));
+    assert_eq(p, Maybe.Some(3));
 }
 
 // =============================================================================
@@ -152,8 +152,8 @@ fn regression_slice_chunks_next_dispatch_panic() {
     let mut count = 0;
     loop {
         match iter.next() {
-            Some(_) => { count = count + 1; },
-            None => break,
+            Maybe.Some(_) => { count = count + 1; },
+            Maybe.None => break,
         }
     }
     assert_eq(count, 3);
@@ -169,8 +169,8 @@ fn regression_slice_windows_next_dispatch_panic() {
     let mut count = 0;
     loop {
         match iter.next() {
-            Some(_) => { count = count + 1; },
-            None => break,
+            Maybe.Some(_) => { count = count + 1; },
+            Maybe.None => break,
         }
     }
     assert_eq(count, 3);
@@ -186,8 +186,8 @@ fn regression_slice_windows_next_dispatch_panic() {
 // source-level workaround `c5fb630f9` (delegate to binary_search_by
 // with an inline closure). However the closure body still
 // mis-dereferences the &Int comparison, yielding wrong Ordering
-// results — `binary_search(&5)` on `[1,3,5,7,9]` returns `Err(_)`
-// instead of `Ok(2)`.  Kept as @ignore until the closure's
+// results — `binary_search(&5)` on `[1,3,5,7,9]` returns `Result.Err(_)`
+// instead of `Result.Ok(2)`.  Kept as @ignore until the closure's
 // `*v < *target` deref protocol-resolves correctly for Int.
 @ignore
 @test
@@ -195,7 +195,7 @@ fn regression_slice_binary_search_compiler_sigbus() {
     let xs: List<Int> = [1, 3, 5, 7, 9];
     let s: &[Int] = xs.as_slice();
     let r: Result<Int, Int> = s.binary_search(&5);
-    assert(r is Ok(_));
+    assert(r is Result.Ok(_));
 }
 
 // REGRESSION (§D.3): `contains(&v)` on a sub-slice obtained via
@@ -205,7 +205,7 @@ fn regression_slice_binary_search_compiler_sigbus() {
 // result, and `contains`'s body-level `*item == *value` deref shapes
 // don't agree on what the underlying value is.
 //
-// Reproducer: `xs = [5, 3, 8, 1, 7, 2, 9, 4]; s.min() = Some(&1);
+// Reproducer: `xs = [5, 3, 8, 1, 7, 2, 9, 4]; s.min() = Maybe.Some(&1);
 // (lhs, rhs) = s.split_at(4); lhs.contains(&1) = false`.
 // Closing §A.1 / §B together is expected to close this transitively.
 @ignore
@@ -232,17 +232,17 @@ fn pass_guard_slice_len_first_last() {
     let xs: List<Int> = [10, 20, 30];
     let s: &[Int] = xs.as_slice();
     assert_eq(s.len(), 3);
-    assert_eq(s.first(), Some(&10));
-    assert_eq(s.last(), Some(&30));
+    assert_eq(s.first(), Maybe.Some(&10));
+    assert_eq(s.last(), Maybe.Some(&30));
 }
 
 @test
 fn pass_guard_slice_get_bounded() {
     let xs: List<Int> = [10, 20, 30];
     let s: &[Int] = xs.as_slice();
-    assert_eq(s.get(0), Some(&10));
+    assert_eq(s.get(0), Maybe.Some(&10));
     let v: Maybe<&Int> = s.get(99);
-    assert(v is None);
+    assert(v is Maybe.None);
 }
 
 @test
@@ -260,8 +260,8 @@ fn pass_guard_slice_subrange_and_split_at() {
 fn pass_guard_slice_min_max_contains() {
     let xs: List<Int> = [3, 1, 4, 1, 5, 9, 2, 6];
     let s: &[Int] = xs.as_slice();
-    assert_eq(s.min(), Some(&1));
-    assert_eq(s.max(), Some(&9));
+    assert_eq(s.min(), Maybe.Some(&1));
+    assert_eq(s.max(), Maybe.Some(&9));
     assert(s.contains(&5));
     assert(!s.contains(&999));
 }
@@ -274,8 +274,8 @@ fn pass_guard_slice_iter_basic_round_trip() {
     let mut total = 0;
     loop {
         match iter.next() {
-            Some(v) => { total = total + *v; },
-            None => break,
+            Maybe.Some(v) => { total = total + *v; },
+            Maybe.None => break,
         }
     }
     assert_eq(total, 60);

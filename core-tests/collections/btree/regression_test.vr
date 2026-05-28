@@ -19,7 +19,7 @@ mount core.collections.btree.{BTreeMap};
 //    exceeds object data size 0"
 //
 // Hypothesis: the failure is in `Maybe.as_mut()` / `Maybe.as_ref()`
-// on a `Some(Heap<BTreeNode<K,V>>)` payload, OR in the BTreeNode
+// on a `Maybe.Some(Heap<BTreeNode<K,V>>)` payload, OR in the BTreeNode
 // generic-K-V substitution during tree traversal.  The 0-data
 // object is likely the Heap<BTreeNode> auto-deref reading from a
 // receiver whose monomorphised TypeDescriptor has 0 fields (generic
@@ -36,7 +36,7 @@ fn regression_btreemap_insert_returns_prior_on_replacement() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
     m.insert(1, 100);
     let prev = m.insert(1, 200);
-    assert_eq(prev, Some(100));
+    assert_eq(prev, Maybe.Some(100));
 }
 
 // Un-@ignore'd 2026-05-28 — passes under --interp post round-13b /
@@ -46,7 +46,7 @@ fn regression_btreemap_insert_returns_prior_on_replacement() {
 fn regression_btreemap_get_present_returns_some() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
     m.insert(1, 100);
-    assert_eq(m.get(&1), Some(100));
+    assert_eq(m.get(&1), Maybe.Some(100));
 }
 
 // Un-@ignore'd 2026-05-28 — passes under --interp.
@@ -63,7 +63,7 @@ fn regression_btreemap_remove_present_returns_value() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
     m.insert(1, 100);
     let r = m.remove(&1);
-    assert_eq(r, Some(100));
+    assert_eq(r, Maybe.Some(100));
 }
 
 @ignore
@@ -84,8 +84,8 @@ fn regression_btreemap_first_key_value_returns_min() {
     m.insert(1, 10);
     m.insert(3, 30);
     match m.first_key_value() {
-        Some((k, _)) => { assert_eq(*k, 1); },
-        None         => { panic("first_key_value None"); },
+        Maybe.Some((k, _)) => { assert_eq(*k, 1); },
+        Maybe.None         => { panic("first_key_value Maybe.None"); },
     }
 }
 
@@ -96,8 +96,8 @@ fn regression_btreemap_last_key_value_returns_max() {
     m.insert(5, 50);
     m.insert(1, 10);
     match m.last_key_value() {
-        Some((k, _)) => { assert_eq(*k, 5); },
-        None         => { panic("last_key_value None"); },
+        Maybe.Some((k, _)) => { assert_eq(*k, 5); },
+        Maybe.None         => { panic("last_key_value Maybe.None"); },
     }
 }
 
@@ -108,11 +108,11 @@ fn regression_btreemap_pop_first_yields_min() {
     m.insert(5, 50);
     m.insert(1, 10);
     match m.pop_first() {
-        Some((k, v)) => {
+        Maybe.Some((k, v)) => {
             assert_eq(k, 1);
             assert_eq(v, 10);
         },
-        None => { panic("pop_first None"); },
+        Maybe.None => { panic("pop_first Maybe.None"); },
     }
 }
 
@@ -123,11 +123,11 @@ fn regression_btreemap_pop_last_yields_max() {
     m.insert(5, 50);
     m.insert(1, 10);
     match m.pop_last() {
-        Some((k, v)) => {
+        Maybe.Some((k, v)) => {
             assert_eq(k, 5);
             assert_eq(v, 50);
         },
-        None => { panic("pop_last None"); },
+        Maybe.None => { panic("pop_last Maybe.None"); },
     }
 }
 
@@ -152,12 +152,12 @@ fn regression_btreemap_get_or_default_present() {
 
 // =============================================================================
 // §B — Empty-state pop_first_on_empty / first_last_none_on_empty
-// dispatch panic on Maybe<(&K,&V)>'s `is None` check
+// dispatch panic on Maybe<(&K,&V)>'s `is Maybe.None` check
 //
 // `match m.first_key_value() { ... }` on an empty BTreeMap panics
 // with "method 'deref' not found on receiver of runtime kind `Float`"
 // — suggests the empty-state implementation returns a sentinel that
-// the Maybe<(&K,&V)>::deref / is-None dispatch doesn't recognise.
+// the Maybe<(&K,&V)>::deref / is-Maybe.None dispatch doesn't recognise.
 //
 // Likely cascades from §A.
 // =============================================================================
@@ -168,7 +168,7 @@ fn regression_btreemap_get_or_default_present() {
 fn regression_btreemap_pop_first_on_empty_returns_none() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
     let r: Maybe<(Int, Int)> = m.pop_first();
-    assert(r is None);
+    assert(r is Maybe.None);
 }
 
 // Un-@ignore'd 2026-05-28 — passes under --interp.
@@ -177,8 +177,8 @@ fn regression_btreemap_first_last_none_on_empty() {
     let m: BTreeMap<Int, Int> = BTreeMap.new();
     let f: Maybe<(&Int, &Int)> = m.first_key_value();
     let l: Maybe<(&Int, &Int)> = m.last_key_value();
-    assert(f is None);
-    assert(l is None);
+    assert(f is Maybe.None);
+    assert(l is Maybe.None);
 }
 
 // =============================================================================
@@ -200,7 +200,7 @@ fn pass_guard_btreemap_new_is_empty() {
 fn pass_guard_btreemap_get_absent_returns_none() {
     let m: BTreeMap<Int, Int> = BTreeMap.new();
     let v: Maybe<Int> = m.get(&1);
-    assert(v is None);
+    assert(v is Maybe.None);
 }
 
 @test
@@ -213,7 +213,7 @@ fn pass_guard_btreemap_contains_key_absent_returns_false() {
 fn pass_guard_btreemap_remove_absent_returns_none() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
     let r: Maybe<Int> = m.remove(&1);
-    assert(r is None);
+    assert(r is Maybe.None);
 }
 
 @test

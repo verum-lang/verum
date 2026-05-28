@@ -55,15 +55,15 @@ fn integration_file_lock_kind_exhaustive_dispatch() {
 
 @test
 fn integration_file_lock_kind_via_maybe_some_pattern() {
-    let opt: Maybe<FileLockKind> = Some(FileLockKind.Exclusive);
+    let opt: Maybe<FileLockKind> = Maybe.Some(FileLockKind.Exclusive);
     match opt {
-        Some(k) => {
+        Maybe.Some(k) => {
             match k {
                 FileLockKind.Exclusive => assert(true),
                 FileLockKind.Shared    => assert(false),
             }
         }
-        None => assert(false),
+        Maybe.None => assert(false),
     };
 }
 
@@ -118,15 +118,15 @@ fn integration_lock_error_dispatch_table() {
         match e {
             LockError.Conflict(holder) => {
                 match holder {
-                    Some(p) => ErrorOutcome.ConflictWithPid(*p),
-                    None    => ErrorOutcome.ConflictUnknownOwner,
+                    Maybe.Some(p) => ErrorOutcome.ConflictWithPid(*p),
+                    Maybe.None    => ErrorOutcome.ConflictUnknownOwner,
                 }
             }
             LockError.IoError(_) => ErrorOutcome.IoFailed,
         }
     }
-    let with_pid    = classify(&LockError.Conflict(Some(12345)));
-    let no_owner    = classify(&LockError.Conflict(None));
+    let with_pid    = classify(&LockError.Conflict(Maybe.Some(12345)));
+    let no_owner    = classify(&LockError.Conflict(Maybe.None));
     // We don't construct an IoError here — OSError construction is
     // platform-side; the dispatch arm is type-checked.
     let mut with_pid_pid: Int = 0;

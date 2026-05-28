@@ -13,7 +13,7 @@ fn law_trie_empty_invariants() {
     assert_eq(t.len(), 0);
 }
 
-// Law: get on absent key always None across multiple distinct keys.
+// Law: get on absent key always Maybe.None across multiple distinct keys.
 @test
 fn law_trie_empty_get_always_none() {
     let t: Trie<Int> = Trie.new();
@@ -22,7 +22,7 @@ fn law_trie_empty_get_always_none() {
     while i < keys.len() {
         let k = keys[i];
         let v: Maybe<Int> = t.get(&k);
-        assert(v is None);
+        assert(v is Maybe.None);
         i = i + 1;
     }
 }

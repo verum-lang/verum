@@ -62,7 +62,7 @@ fn regression_upstream_eq_ignores_name_and_weight() {
 fn regression_acquire_returns_lease() {
     let _pool = UpstreamPool.default();
     let _u = Upstream.new("http".clone(), "127.0.0.1".clone(), 65535);
-    // pool.acquire(&u).await should return Ok(ConnectionLease).
+    // pool.acquire(&u).await should return Result.Ok(ConnectionLease).
     assert(false);
 }
 

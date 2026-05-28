@@ -7,7 +7,7 @@
 mount core.async.stream.{stream_once, stream_empty, interval};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context, noop_context};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 @test
 fn regression_stream_empty_construct_does_not_panic() {
@@ -35,19 +35,19 @@ fn regression_interval_zero_period_construct() {
 
 // =============================================================================
 // REGRESSION: `stream_once(v).poll_next(&mut cx)` returned
-//   Poll.Pending instead of Poll.Ready(Some(v)) — root cause was
+//   Poll.Pending instead of Poll.Ready(Maybe.Some(v)) — root cause was
 //   `Maybe.take` in `core/base/maybe.vr`'s body
 //     ```
 //     let old = *self;
-//     *self = None;
+//     *self = Maybe.None;
 //     old
 //     ```
 //   The Tier-0 interpreter binds `old` to the same heap variant
-//   slot as `*self`, so the `*self = None` write clobbered both
+//   slot as `*self`, so the `*self = Maybe.None` write clobbered both
 //   `*self` AND `old`.  `StreamOnce.poll_next` calls
 //   `Poll.Ready(self.value.take())` — the take returned an aliased
-//   None, so the entire poll yielded `Poll.Ready(None)`.  Worse,
-//   the outer `Poll.Ready(None)` somehow folded back to `Pending`
+//   Maybe.None, so the entire poll yielded `Poll.Ready(Maybe.None)`.  Worse,
+//   the outer `Poll.Ready(Maybe.None)` somehow folded back to `Pending`
 //   (the Default for Poll<T>) in the match scrutinee path — the
 //   visible failure mode at the test layer.
 //
@@ -57,7 +57,7 @@ fn regression_interval_zero_period_construct() {
 //      FRESH variant with the original (tag, fc, payload[]) BEFORE
 //      writing `(0, 0)` to the original.  The clone is structurally
 //      independent of `*self`, so the returned value carries the
-//      pre-take payload while `*self` correctly observes None.
+//      pre-take payload while `*self` correctly observes Maybe.None.
 //   2. Same file, dispatch entry around line 890 — added
 //      `INTRINSIC_PREFERRED_VARIANT_METHODS` short-circuit list
 //      forcing intrinsic dispatch for `take` even when a qualified
@@ -68,7 +68,7 @@ fn regression_interval_zero_period_construct() {
 //      synthetic ids (`>= 0x8000`) AND well-known typed ids
 //      (`TypeId::MAYBE = 515`, `TypeId::RESULT = 516`).  Pre-fix the
 //      well-known typed Maybe was rejected (515 < 0x8000), so the
-//      intrinsic dispatcher returned `Ok(None)` and the user-side
+//      intrinsic dispatcher returned `Result.Ok(Maybe.None)` and the user-side
 //      body ran.
 // Closed via the three-part fix above 2026-05-24.
 // =============================================================================
@@ -79,26 +79,26 @@ fn regression_stream_once_poll_yields_ready_some_payload() {
     let mut cx = noop_context();
     let p = s.poll_next(&mut cx);
     match p {
-        Poll.Ready(Some(v)) => assert_eq(v, 42),
-        Poll.Ready(None) => panic("stream_once first poll yielded Ready(None) — pre-fix Maybe.take aliasing regression"),
+        Poll.Ready(Maybe.Some(v)) => assert_eq(v, 42),
+        Poll.Ready(Maybe.None) => panic("stream_once first poll yielded Ready(Maybe.None) — pre-fix Maybe.take aliasing regression"),
         Poll.Pending => panic("stream_once first poll yielded Pending — pre-fix variant-dispatch fallthrough regression"),
     }
 }
 
 @test
 fn regression_maybe_take_returns_pre_take_value() {
-    let mut m: Maybe<Int> = Some(42);
+    let mut m: Maybe<Int> = Maybe.Some(42);
     let taken = m.take();
     match taken {
-        Some(v) => assert_eq(v, 42),
-        None => panic("Maybe.take returned None — pre-fix in-place mutation aliasing regression"),
+        Maybe.Some(v) => assert_eq(v, 42),
+        Maybe.None => panic("Maybe.take returned Maybe.None — pre-fix in-place mutation aliasing regression"),
     }
     assert(m.is_none());
 }
 
 @test
 fn regression_maybe_take_on_none_returns_none() {
-    let mut m: Maybe<Int> = None;
+    let mut m: Maybe<Int> = Maybe.None;
     let taken = m.take();
     assert(taken.is_none());
     assert(m.is_none());

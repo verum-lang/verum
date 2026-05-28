@@ -881,13 +881,13 @@ fn test_float_partial_cmp() {
     let a = 5.0;
     let b = 3.0;
 
-    assert_eq(a.partial_cmp(&b), Some(Greater));
-    assert_eq(b.partial_cmp(&a), Some(Less));
-    assert_eq(a.partial_cmp(&a), Some(Equal));
+    assert_eq(a.partial_cmp(&b), Maybe.Some(Greater));
+    assert_eq(b.partial_cmp(&a), Maybe.Some(Less));
+    assert_eq(a.partial_cmp(&a), Maybe.Some(Equal));
 
     // NaN
-    assert_eq(Float.nan().partial_cmp(&0.0), None);
-    assert_eq((0.0).partial_cmp(&Float.nan()), None);
+    assert_eq(Float.nan().partial_cmp(&0.0), Maybe.None);
+    assert_eq((0.0).partial_cmp(&Float.nan()), Maybe.None);
 }
 
 @test

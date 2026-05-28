@@ -9,7 +9,7 @@
 
 mount core.base.protocols.*;
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
 
@@ -154,27 +154,27 @@ fn regression_ord_total_order_equal_pair() {
 }
 
 // =============================================================================
-// REGRESSION §H: Maybe.cmp via the Ord protocol — None < Some(x),
-// Some(a).cmp(Some(b)) follows inner Ord.
+// REGRESSION §H: Maybe.cmp via the Ord protocol — Maybe.None < Maybe.Some(x),
+// Maybe.Some(a).cmp(Maybe.Some(b)) follows inner Ord.
 // =============================================================================
 
 @test
 fn regression_maybe_cmp_none_less_than_some() {
-    let n: Maybe<Int> = None;
-    let s: Maybe<Int> = Some(5);
+    let n: Maybe<Int> = Maybe.None;
+    let s: Maybe<Int> = Maybe.Some(5);
     match n.cmp(&s) {
         Ordering.Less => {},
-        _ => panic("expected None < Some"),
+        _ => panic("expected Maybe.None < Some"),
     }
 }
 
 @test
 fn regression_maybe_cmp_inner_ord_for_some_pair() {
-    let a: Maybe<Int> = Some(3);
-    let b: Maybe<Int> = Some(7);
+    let a: Maybe<Int> = Maybe.Some(3);
+    let b: Maybe<Int> = Maybe.Some(7);
     match a.cmp(&b) {
         Ordering.Less => {},
-        _ => panic("expected Some(3) < Some(7)"),
+        _ => panic("expected Maybe.Some(3) < Maybe.Some(7)"),
     }
 }
 

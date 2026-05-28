@@ -16,7 +16,7 @@
 mount core.async.parallel.{
     parallel_map, parallel_filter_map, parallel_reduce, parallel_scan_exclusive,
 };
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -56,7 +56,7 @@ fn property_parallel_map_relation_per_index_addition() {
 fn property_parallel_filter_map_is_subset_of_map() {
     let xs: List<Int> = [1, 2, 3, 4, 5, 6];
     let filtered = parallel_filter_map((xs).clone(), 4, |x| {
-        if x > 3 { Some(x * 10) } else { None }
+        if x > 3 { Maybe.Some(x * 10) } else { Maybe.None }
     });
     // every output element must equal some f(input) where the
     // predicate held; the order must be preserved.
@@ -73,14 +73,14 @@ fn property_parallel_filter_map_is_subset_of_map() {
 @test
 fn property_parallel_reduce_equals_left_fold() {
     fn left_fold_sum(xs: List<Int>) -> Maybe<Int> {
-        if xs.len() == 0 { return None; }
+        if xs.len() == 0 { return Maybe.None; }
         let mut acc = xs[0];
         let mut i: Int = 1;
         while i < xs.len() {
             acc = acc + xs[i];
             i = i + 1;
         }
-        Some(acc)
+        Maybe.Some(acc)
     }
 
     let cases: List<List<Int>> = [
@@ -93,8 +93,8 @@ fn property_parallel_reduce_equals_left_fold() {
         let lf = left_fold_sum((*xs).clone());
         let pr = parallel_reduce((*xs).clone(), 4, |a, b| a + b);
         match (lf, pr) {
-            (None, None) => assert(true),
-            (Some(a), Some(b)) => assert_eq(a, b),
+            (Maybe.None, Maybe.None) => assert(true),
+            (Maybe.Some(a), Maybe.Some(b)) => assert_eq(a, b),
             _ => assert(false),
         }
     }
@@ -200,8 +200,8 @@ fn property_parallel_reduce_worker_count_invariant() {
     for w in workers.iter() {
         let got = parallel_reduce((xs).clone(), *w, |a, b| a + b);
         match (ref_result, got) {
-            (Some(a), Some(b)) => assert_eq(a, b),
-            (None, None) => assert(true),
+            (Maybe.Some(a), Maybe.Some(b)) => assert_eq(a, b),
+            (Maybe.None, Maybe.None) => assert(true),
             _ => assert(false),
         }
     }

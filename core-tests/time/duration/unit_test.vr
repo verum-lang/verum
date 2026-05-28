@@ -237,7 +237,7 @@ fn test_checked_sub_exact() {
 @test
 fn test_checked_sub_signed_negative_result() {
     // Signed Duration: checked_sub returns Some on negative result;
-    // None only on Int64 underflow boundary.
+    // Maybe.None only on Int64 underflow boundary.
     let a = Duration.secs(1);
     let b = Duration.secs(5);
     let r = a.checked_sub(b);
@@ -371,7 +371,7 @@ fn test_duration_zero_eq_to_self() {
 fn test_checked_add_at_max_value_returns_none() {
     let a = Duration.from_nanos(Int.max_value());
     let b = Duration.nanos(1);
-    // a + 1ns wraps signed Int64 → overflow detected → None
+    // a + 1ns wraps signed Int64 → overflow detected → Maybe.None
     assert(a.checked_add(b).is_none(),
         "checked_add must surface overflow at Int.max_value boundary");
 }

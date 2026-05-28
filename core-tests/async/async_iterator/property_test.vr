@@ -7,10 +7,10 @@
 // The protocol's runtime behaviour is governed by 3 cornerstone
 // invariants:
 //
-//   * **Fused exhaustion stickiness** — after `next()` returns `None`,
-//     every subsequent `next()` MUST also return `None`.
+//   * **Fused exhaustion stickiness** — after `next()` returns `Maybe.None`,
+//     every subsequent `next()` MUST also return `Maybe.None`.
 //   * **size_hint default coherence** — the default `size_hint`
-//     returns `(0, None)`, meaning lower bound 0 and unknown upper
+//     returns `(0, Maybe.None)`, meaning lower bound 0 and unknown upper
 //     bound; this is the most-permissive default that any concrete
 //     impl can tighten.
 //   * **IntoAsyncIterator self-conversion identity** — for any

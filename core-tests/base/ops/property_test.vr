@@ -129,7 +129,7 @@ fn law_maybe_try_from_output_branch_continue() {
 
 @test
 fn law_maybe_try_branch_none_is_break() {
-    let m: Maybe<Int> = None;
+    let m: Maybe<Int> = Maybe.None;
     assert(m.branch().is_break());
 }
 
@@ -148,7 +148,7 @@ fn law_result_try_from_output_branch_continue() {
 
 @test
 fn law_result_try_branch_err_is_break() {
-    let r: Result<Int, Text> = Err("boom");
+    let r: Result<Int, Text> = Result.Err("boom");
     assert(r.branch().is_break());
 }
 
@@ -163,7 +163,7 @@ fn law_result_try_branch_err_is_break() {
 
 @test
 fn law_result_from_residual_preserves_err_payload() {
-    fn produce_residual() -> Result<Never, Text> { Err("payload") }
+    fn produce_residual() -> Result<Never, Text> { Result.Err("payload") }
     let r: Result<Int, Text> = Result.from_residual(produce_residual());
     assert(r.is_err());
     assert_eq(r.unwrap_err(), "payload");
@@ -171,7 +171,7 @@ fn law_result_from_residual_preserves_err_payload() {
 
 @test
 fn law_maybe_from_residual_collapses_to_none() {
-    fn produce_residual() -> Maybe<Never> { None }
+    fn produce_residual() -> Maybe<Never> { Maybe.None }
     let m: Maybe<Int> = Maybe.from_residual(produce_residual());
     assert(m.is_none());
 }
@@ -235,9 +235,9 @@ fn prop_map_continue_composition_int(n: Int) {
 // =============================================================================
 
 /// Maybe<Int>'s branch result by variant.
-@test_case(Some(1),  true,  false)
-@test_case(Some(0),  true,  false)
-@test_case(None,     false, true)
+@test_case(Maybe.Some(1),  true,  false)
+@test_case(Maybe.Some(0),  true,  false)
+@test_case(Maybe.None,     false, true)
 fn parametrised_maybe_branch_classification(
     m: Maybe<Int>,
     expected_continue: Bool,
@@ -249,9 +249,9 @@ fn parametrised_maybe_branch_classification(
 }
 
 /// Result<Int, Text>'s branch result by variant.
-@test_case(Ok(1),         true,  false)
-@test_case(Ok(0),         true,  false)
-@test_case(Err("x"),      false, true)
+@test_case(Result.Ok(1),         true,  false)
+@test_case(Result.Ok(0),         true,  false)
+@test_case(Result.Err("x"),      false, true)
 fn parametrised_result_branch_classification(
     r: Result<Int, Text>,
     expected_continue: Bool,

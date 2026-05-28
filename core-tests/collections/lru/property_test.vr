@@ -52,7 +52,7 @@ fn law_lru_insert_remove_inverse() {
     c.insert(1, 100);
     assert_eq(c.len(), 1);
     let v = c.remove(&1);
-    assert_eq(v, Some(100));
+    assert_eq(v, Maybe.Some(100));
     assert_eq(c.len(), 0);
 }
 
@@ -122,11 +122,11 @@ fn law_lru_contains_iff_get_some() {
 
     assert(c.contains(&1));
     let v1: Maybe<Int> = c.peek(&1);
-    assert(v1 is Some(_));
+    assert(v1 is Maybe.Some(_));
 
     assert(!c.contains(&999));
     let v2: Maybe<Int> = c.peek(&999);
-    assert(v2 is None);
+    assert(v2 is Maybe.None);
 }
 
 // =============================================================================
@@ -140,7 +140,7 @@ fn law_lru_insert_same_value_idempotent_on_len() {
     let len_after_1 = c.len();
     c.insert(1, 100);   // same key, same value
     assert_eq(c.len(), len_after_1);
-    assert_eq(c.get(&1), Some(100));
+    assert_eq(c.get(&1), Maybe.Some(100));
 }
 
 // =============================================================================
@@ -150,7 +150,7 @@ fn law_lru_insert_same_value_idempotent_on_len() {
 @test
 fn law_lru_insert_prior_value_roundtrip() {
     let mut c: LruCache<Int, Int> = LruCache.new(4);
-    assert(c.insert(1, 100) is None);    // first insert
-    assert_eq(c.insert(1, 200), Some(100));  // overwrite returns prior
-    assert_eq(c.insert(1, 300), Some(200));  // again
+    assert(c.insert(1, 100) is Maybe.None);    // first insert
+    assert_eq(c.insert(1, 200), Maybe.Some(100));  // overwrite returns prior
+    assert_eq(c.insert(1, 300), Maybe.Some(200));  // again
 }

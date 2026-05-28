@@ -9,8 +9,8 @@
 //   * RuntimeRetryConfig record
 //   * RecoveryRetryPolicy record + .new/.should_retry/.reset
 //   * RetryPredicate 3-variant (AllErrors / TransientOnly / Custom)
-//   * RecoveryBackoffStrategy 4-variant (Fixed / Linear / Exponential / None)
-//   * JitterConfig 4-variant (None / Proportional / Fixed / Full)
+//   * RecoveryBackoffStrategy 4-variant (Fixed / Linear / Exponential / Maybe.None)
+//   * JitterConfig 4-variant (Maybe.None / Proportional / Fixed / Full)
 //   * RecoveryCircuitState 3-variant + .to_u8 / .from_u8 round-trip
 //   * RecoveryCircuitBreakerConfig record
 //   * ErrorPredicate 3-variant

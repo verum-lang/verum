@@ -18,15 +18,15 @@ mount core.collections.list.List;
 // =============================================================================
 // REGRESSION §A (@ignore'd): argv plumbing inconsistency under
 // `--interp` harness. `args_count()` returns > 0 but `arg(0)` returns
-// None. The two accessors should be consistent — either both
-// indicate "no argv" (count=0, arg(i)=None) or both indicate "argv
-// present" (count>0, arg(0)=Some(program_name)).
+// Maybe.None. The two accessors should be consistent — either both
+// indicate "no argv" (count=0, arg(i)=Maybe.None) or both indicate "argv
+// present" (count>0, arg(0)=Maybe.Some(program_name)).
 //
 // Workaround in tests: avoid asserting on arg(i) when running under
 // `--interp` without explicit argv setup. Pin here.
 // =============================================================================
 
-@ignore("arg(0) returns None when args_count() > 0 under --interp harness — argv plumbing inconsistency.")
+@ignore("arg(0) returns Maybe.None when args_count() > 0 under --interp harness — argv plumbing inconsistency.")
 @test
 fn regression_pin_arg_zero_consistent_with_args_count() {
     let count = args_count();
@@ -51,7 +51,7 @@ fn regression_args_count_non_negative() {
 }
 
 // =============================================================================
-// REGRESSION §C: `arg(i)` returns None for negative or out-of-range
+// REGRESSION §C: `arg(i)` returns Maybe.None for negative or out-of-range
 // indices regardless of args_count. A defect that wrapped to a
 // positive index modulo size would silently produce wrong values.
 // =============================================================================
@@ -69,7 +69,7 @@ fn regression_arg_large_index_is_none() {
 }
 
 // =============================================================================
-// REGRESSION §D: `var_opt` for a non-existent key returns None. A
+// REGRESSION §D: `var_opt` for a non-existent key returns Maybe.None. A
 // defect that returned an empty string or panic would silently break
 // optional-config patterns.
 // =============================================================================
@@ -82,7 +82,7 @@ fn regression_var_opt_returns_none_for_missing_key() {
 }
 
 // =============================================================================
-// REGRESSION §E: `var` for a non-existent key returns Err(NotPresent).
+// REGRESSION §E: `var` for a non-existent key returns Result.Err(NotPresent).
 // =============================================================================
 
 @test
@@ -91,11 +91,11 @@ fn regression_var_returns_err_not_present_for_missing_key() {
     let r = var(&key);
     assert(r.is_err());
     match r {
-        Err(e) => match e {
+        Result.Err(e) => match e {
             VarError.NotPresent => {},
             _ => {},   // accept any VarError variant — not all imps fix NotPresent
         },
-        Ok(_) => panic("missing key should return Err"),
+        Result.Ok(_) => panic("missing key should return Err"),
     }
 }
 

@@ -14,7 +14,7 @@
 
 mount core.base.protocols.*;
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
 mount core.collections.map.Map;
@@ -64,10 +64,10 @@ fn integration_map_insert_lookup_roundtrip() {
     m.insert("two", 2);
     m.insert("three", 3);
 
-    assert_eq(m.get("one"), Some(1));
-    assert_eq(m.get("two"), Some(2));
-    assert_eq(m.get("three"), Some(3));
-    assert_eq(m.get("four"), None);
+    assert_eq(m.get("one"), Maybe.Some(1));
+    assert_eq(m.get("two"), Maybe.Some(2));
+    assert_eq(m.get("three"), Maybe.Some(3));
+    assert_eq(m.get("four"), Maybe.None);
 }
 
 @test
@@ -75,7 +75,7 @@ fn integration_map_overwrites_on_duplicate_key() {
     let mut m: Map<Text, Int> = Map.new();
     m.insert("k", 1);
     m.insert("k", 99);
-    assert_eq(m.get("k"), Some(99));
+    assert_eq(m.get("k"), Maybe.Some(99));
     assert_eq(m.len(), 1);
 }
 

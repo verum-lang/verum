@@ -135,37 +135,37 @@ fn test_memory_region_contains_in_list() {
             // be written explicitly.  Match-and-bind is the canonical
             // unwrap pattern in `core/`.
             match regions.get(i as USize) {
-                Some(r) => {
+                Maybe.Some(r) => {
                     if r.contains(addr) {
-                        return Some(i as USize);
+                        return Maybe.Some(i as USize);
                     }
                 }
-                None => {}
+                Maybe.None => {}
             };
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     match region_of(&regions, 0x500 as USize) {
-        Some(i) => assert_eq(i, 0 as USize),
-        None => assert(false),
+        Maybe.Some(i) => assert_eq(i, 0 as USize),
+        Maybe.None => assert(false),
     };
     match region_of(&regions, 0x1500 as USize) {
-        Some(i) => assert_eq(i, 1 as USize),
-        None => assert(false),
+        Maybe.Some(i) => assert_eq(i, 1 as USize),
+        Maybe.None => assert(false),
     };
     match region_of(&regions, 0x2800 as USize) {
-        Some(i) => assert_eq(i, 2 as USize),
-        None => assert(false),
+        Maybe.Some(i) => assert_eq(i, 2 as USize),
+        Maybe.None => assert(false),
     };
     match region_of(&regions, 0x3FFF as USize) {
-        Some(i) => assert_eq(i, 3 as USize),
-        None => assert(false),
+        Maybe.Some(i) => assert_eq(i, 3 as USize),
+        Maybe.None => assert(false),
     };
     match region_of(&regions, 0x4000 as USize) {
-        None => assert(true),
-        Some(_) => assert(false),
+        Maybe.None => assert(true),
+        Maybe.Some(_) => assert(false),
     };
 }
 

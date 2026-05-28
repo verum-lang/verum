@@ -61,7 +61,7 @@ fn test_level_error_passes_only_error() {
         r.level.severity() >= min.severity()
     }).collect();
     assert_eq(emitted.len(), 1);
-    assert_eq(emitted.get(0).map(|r| r.message), Some("e".to_text()));
+    assert_eq(emitted.get(0).map(|r| r.message), Maybe.Some("e".to_text()));
 }
 
 // =============================================================================
@@ -78,7 +78,7 @@ fn test_log_record_fields_preserved() {
     assert_eq(rec.fields.len(), 2);
     let uid = rec.fields.iter().find(|(k, _)| *k == "user_id");
     assert(uid.is_some());
-    assert_eq(uid.map(|(_, v)| v.clone()), Some("42".to_text()));
+    assert_eq(uid.map(|(_, v)| v.clone()), Maybe.Some("42".to_text()));
 }
 
 @test

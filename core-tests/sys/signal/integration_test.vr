@@ -80,19 +80,19 @@ fn test_signal_error_via_result_chain() {
     // Uncatchable" pattern.
     fn try_register(sig: Signal) -> Result<(), SignalError> {
         if !sig.is_catchable() {
-            Err(SignalError.Uncatchable(sig))
+            Result.Err(SignalError.Uncatchable(sig))
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
 
     match try_register(Signal.Int) {
-        Ok(()) => assert(true),
-        Err(_) => assert(false),
+        Result.Ok(()) => assert(true),
+        Result.Err(_) => assert(false),
     };
     match try_register(Signal.Kill) {
-        Ok(()) => assert(false),
-        Err(e) => {
+        Result.Ok(()) => assert(false),
+        Result.Err(e) => {
             match e {
                 SignalError.Uncatchable(s) => assert(s.eq(&Signal.Kill)),
                 _ => assert(false),
@@ -100,8 +100,8 @@ fn test_signal_error_via_result_chain() {
         }
     };
     match try_register(Signal.Stop) {
-        Ok(()) => assert(false),
-        Err(e) => {
+        Result.Ok(()) => assert(false),
+        Result.Err(e) => {
             match e {
                 SignalError.Uncatchable(s) => assert(s.eq(&Signal.Stop)),
                 _ => assert(false),
@@ -117,17 +117,17 @@ fn test_signal_error_partition_list() {
     let signals: List<Signal> = [Signal.Int, Signal.Kill, Signal.Term, Signal.Stop, Signal.Hup];
     fn try_register(sig: Signal) -> Result<(), SignalError> {
         if !sig.is_catchable() {
-            Err(SignalError.Uncatchable(sig))
+            Result.Err(SignalError.Uncatchable(sig))
         } else {
-            Ok(())
+            Result.Ok(())
         }
     }
     let mut ok_count: Int = 0;
     let mut err_count: Int = 0;
     for sig in signals.iter() {
         match try_register(*sig) {
-            Ok(()) => ok_count = ok_count + 1,
-            Err(_) => err_count = err_count + 1,
+            Result.Ok(()) => ok_count = ok_count + 1,
+            Result.Err(_) => err_count = err_count + 1,
         };
     }
     // 3 catchable (Int, Term, Hup) and 2 uncatchable (Kill, Stop).

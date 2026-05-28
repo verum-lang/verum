@@ -157,7 +157,7 @@ implement Describable for LeafErr {
     fn description(&self) -> Text { self.msg.clone() }
 }
 implement ErrorSource for LeafErr {
-    fn source(&self) -> Maybe<&dyn Describable> { None }
+    fn source(&self) -> Maybe<&dyn Describable> { Maybe.None }
 }
 
 @test

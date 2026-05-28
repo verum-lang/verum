@@ -44,10 +44,10 @@ fn diag_b_user_built_err_wrapped_pattern_match() {
         position: 7,
         message: "test".clone(),
     };
-    let r: Result<Int, UrlError> = Err(e);
+    let r: Result<Int, UrlError> = Result.Err(e);
     match r {
-        Ok(_) => panic("expected Err"),
-        Err(unwrapped) => assert_eq(unwrapped.position, 7),
+        Result.Ok(_) => panic("expected Err"),
+        Result.Err(unwrapped) => assert_eq(unwrapped.position, 7),
     }
 }
 
@@ -60,8 +60,8 @@ fn diag_c_explicit_annotation_url_parse_empty() {
     let s = "".clone();
     let r: Result<Url, UrlError> = Url.parse(&s);
     match r {
-        Ok(_) => panic("empty must reject"),
-        Err(e) => assert_eq(e.position, 0),
+        Result.Ok(_) => panic("empty must reject"),
+        Result.Err(e) => assert_eq(e.position, 0),
     }
 }
 
@@ -78,8 +78,8 @@ fn diag_d_url_parse_oversized_position_field() {
     big.push_str(&filler);
     big.push_str(&suffix);
     match Url.parse(&big) {
-        Ok(_) => panic("oversized must reject"),
-        Err(e) => assert_eq(e.position, MAX_URL_LENGTH_BYTES),
+        Result.Ok(_) => panic("oversized must reject"),
+        Result.Err(e) => assert_eq(e.position, MAX_URL_LENGTH_BYTES),
     }
 }
 
@@ -91,8 +91,8 @@ fn diag_d_url_parse_oversized_position_field() {
 fn diag_e_url_parse_empty_kind_via_is() {
     let s = "".clone();
     match Url.parse(&s) {
-        Ok(_) => panic("empty must reject"),
-        Err(e) => {
+        Result.Ok(_) => panic("empty must reject"),
+        Result.Err(e) => {
             if !(e.kind is UrlErrorKind.MissingScheme) {
                 panic("e.kind did not match MissingScheme");
             }

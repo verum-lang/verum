@@ -20,7 +20,7 @@ fn regression_trie_insert_get_round_trip() {
     let mut t: Trie<Int> = Trie.new();
     let k: [Byte; 3] = [1, 2, 3];
     let _ = t.insert(&k, 100);
-    assert_eq(t.get(&k), Some(100));
+    assert_eq(t.get(&k), Maybe.Some(100));
 }
 
 @ignore
@@ -30,7 +30,7 @@ fn regression_trie_remove_present_returns_value() {
     let k: [Byte; 3] = [1, 2, 3];
     let _ = t.insert(&k, 100);
     let r = t.remove(&k);
-    assert_eq(r, Some(100));
+    assert_eq(r, Maybe.Some(100));
 }
 
 // CLOSED 2026-05-26 (Map.get_mut added in commit 997f53352)
@@ -39,7 +39,7 @@ fn regression_trie_remove_absent_returns_none_via_map_get_mut() {
     let mut t: Trie<Int> = Trie.new();
     let k: [Byte; 3] = [1, 2, 3];
     let r: Maybe<Int> = t.remove(&k);
-    assert(r is None);
+    assert(r is Maybe.None);
 }
 
 // =============================================================================
@@ -58,7 +58,7 @@ fn pass_guard_trie_empty_get_returns_none() {
     let t: Trie<Int> = Trie.new();
     let k: [Byte; 1] = [42];
     let v: Maybe<Int> = t.get(&k);
-    assert(v is None);
+    assert(v is Maybe.None);
 }
 
 @test

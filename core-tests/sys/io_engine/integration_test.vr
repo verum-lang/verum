@@ -110,22 +110,22 @@ fn integration_engine_duration_zero_to_timespec_is_zero_zero() {
 
 @test
 fn integration_fd_open_failure_funnel_via_maybe() {
-    // Mimic open(2): negative => failure → None; non-negative ⇒
-    // Some(fd).
+    // Mimic open(2): negative => failure → Maybe.None; non-negative ⇒
+    // Maybe.Some(fd).
     fn open_funnel(rv: Fd) -> Maybe<Fd> {
-        if rv.is_valid() { Some(rv) } else { None }
+        if rv.is_valid() { Maybe.Some(rv) } else { Maybe.None }
     }
     // Success: descriptor 7.
     let ok = open_funnel(Fd(7 as Int32));
     match ok {
-        Some(fd) => assert_eq(fd.0, 7 as Int32),
-        None     => assert(false),
+        Maybe.Some(fd) => assert_eq(fd.0, 7 as Int32),
+        Maybe.None     => assert(false),
     };
     // Failure: -1 sentinel.
     let err = open_funnel(Fd.INVALID);
     match err {
-        Some(_) => assert(false),
-        None    => assert(true),
+        Maybe.Some(_) => assert(false),
+        Maybe.None    => assert(true),
     };
 }
 
@@ -186,13 +186,13 @@ fn integration_engine_duration_list_max_via_fold() {
 
 @test
 fn integration_timespec_in_maybe_pattern_match() {
-    let maybe_ts: Maybe<TimeSpec> = Some(TimeSpec { tv_sec: 5 as Int64, tv_nsec: 250_000_000 as Int64 });
+    let maybe_ts: Maybe<TimeSpec> = Maybe.Some(TimeSpec { tv_sec: 5 as Int64, tv_nsec: 250_000_000 as Int64 });
     match maybe_ts {
-        Some(ts) => {
+        Maybe.Some(ts) => {
             assert_eq(ts.tv_sec, 5 as Int64);
             assert_eq(ts.tv_nsec, 250_000_000 as Int64);
         }
-        None => assert(false),
+        Maybe.None => assert(false),
     };
 }
 

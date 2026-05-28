@@ -12,7 +12,7 @@
 mount core.context.error.{ContextError, NotFound, NotProvided, TypeMismatch, CircularDependency, ScopeViolation};
 mount core.collections.list.List;
 mount core.base.result.{Result, Ok, Err};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: Result<T, ContextError> roundtrip
@@ -22,8 +22,8 @@ mount core.base.maybe.{Maybe, Some, None};
 fn integration_result_ok_carries_value() {
     let r: Result<Int, ContextError> = Result.Ok(42);
     match r {
-        Ok(n) => assert_eq(n, 42),
-        Err(_) => panic("expected Ok(42)"),
+        Result.Ok(n) => assert_eq(n, 42),
+        Result.Err(_) => panic("expected Result.Ok(42)"),
     }
 }
 
@@ -32,8 +32,8 @@ fn integration_result_err_carries_context_error() {
     let err = ContextError.NotFound { context_name: "Database".clone() };
     let r: Result<Int, ContextError> = Result.Err(err);
     match r {
-        Ok(_) => panic("expected Err"),
-        Err(e) => {
+        Result.Ok(_) => panic("expected Err"),
+        Result.Err(e) => {
             assert(e is ContextError.NotFound);
             let msg = e.message();
             assert(msg.contains("Database"));
@@ -47,21 +47,21 @@ fn integration_result_err_carries_context_error() {
 
 @test
 fn integration_maybe_some_context_error() {
-    let opt: Maybe<ContextError> = Some(ContextError.NotFound {
+    let opt: Maybe<ContextError> = Maybe.Some(ContextError.NotFound {
         context_name: "Logger".clone(),
     });
     match opt {
-        Some(e) => assert(e is ContextError.NotFound),
-        None => panic("expected Some"),
+        Maybe.Some(e) => assert(e is ContextError.NotFound),
+        Maybe.None => panic("expected Some"),
     }
 }
 
 @test
 fn integration_maybe_none_no_error() {
-    let opt: Maybe<ContextError> = None;
+    let opt: Maybe<ContextError> = Maybe.None;
     match opt {
-        Some(_) => panic("expected None"),
-        None => assert(true),
+        Maybe.Some(_) => panic("expected Maybe.None"),
+        Maybe.None => assert(true),
     }
 }
 

@@ -14,7 +14,7 @@
 // =============================================================================
 
 mount core.term.style.color.{Rgb, Hsl, Color, Lab};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: Rgb.new
@@ -53,12 +53,12 @@ fn test_rgb_from_hex_with_pound_prefix() {
     let s = "#FF8800".clone();
     let r = Rgb.from_hex(&s);
     match r {
-        Some(c) => {
+        Maybe.Some(c) => {
             assert_eq(c.r, 0xFF_u8);
             assert_eq(c.g, 0x88_u8);
             assert_eq(c.b, 0x00_u8);
         },
-        None => panic("'#FF8800' should parse"),
+        Maybe.None => panic("'#FF8800' should parse"),
     }
 }
 
@@ -67,12 +67,12 @@ fn test_rgb_from_hex_without_prefix() {
     let s = "00FF00".clone();
     let r = Rgb.from_hex(&s);
     match r {
-        Some(c) => {
+        Maybe.Some(c) => {
             assert_eq(c.r, 0_u8);
             assert_eq(c.g, 0xFF_u8);
             assert_eq(c.b, 0_u8);
         },
-        None => panic("'00FF00' should parse"),
+        Maybe.None => panic("'00FF00' should parse"),
     }
 }
 
@@ -81,12 +81,12 @@ fn test_rgb_from_hex_black() {
     let s = "000000".clone();
     let r = Rgb.from_hex(&s);
     match r {
-        Some(c) => {
+        Maybe.Some(c) => {
             assert_eq(c.r, 0_u8);
             assert_eq(c.g, 0_u8);
             assert_eq(c.b, 0_u8);
         },
-        None => panic("black should parse"),
+        Maybe.None => panic("black should parse"),
     }
 }
 
@@ -95,8 +95,8 @@ fn test_rgb_from_hex_white() {
     let s = "FFFFFF".clone();
     let r = Rgb.from_hex(&s);
     match r {
-        Some(c) => assert_eq(c.r, 0xFF_u8),
-        None => panic("white should parse"),
+        Maybe.Some(c) => assert_eq(c.r, 0xFF_u8),
+        Maybe.None => panic("white should parse"),
     }
 }
 
@@ -109,8 +109,8 @@ fn test_rgb_from_hex_too_short() {
     let s = "FF".clone();
     let r = Rgb.from_hex(&s);
     match r {
-        Some(_) => panic("2-char hex should fail"),
-        None => assert(true),
+        Maybe.Some(_) => panic("2-char hex should fail"),
+        Maybe.None => assert(true),
     }
 }
 
@@ -119,8 +119,8 @@ fn test_rgb_from_hex_too_long() {
     let s = "FF8800AA".clone();
     let r = Rgb.from_hex(&s);
     match r {
-        Some(_) => panic("8-char hex should fail"),
-        None => assert(true),
+        Maybe.Some(_) => panic("8-char hex should fail"),
+        Maybe.None => assert(true),
     }
 }
 
@@ -129,8 +129,8 @@ fn test_rgb_from_hex_invalid_char() {
     let s = "GGGGGG".clone();
     let r = Rgb.from_hex(&s);
     match r {
-        Some(_) => panic("'GGGGGG' is not hex"),
-        None => assert(true),
+        Maybe.Some(_) => panic("'GGGGGG' is not hex"),
+        Maybe.None => assert(true),
     }
 }
 

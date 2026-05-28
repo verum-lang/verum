@@ -9,7 +9,7 @@
 // meta/span audit §3.1):
 //
 //   * TypeUrl 8 canonical Envoy v3 type URLs (constants only)
-//   * AdsAuth 3-variant (None / MutualTls / Bearer)
+//   * AdsAuth 3-variant (Maybe.None / MutualTls / Bearer)
 // =============================================================================
 
 mount core.mesh.xds.types.{TypeUrl, AdsAuth};

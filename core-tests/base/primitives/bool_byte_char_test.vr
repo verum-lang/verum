@@ -371,13 +371,13 @@ fn test_byte_to_int() {
 
 @test
 fn test_byte_checked_add() {
-    assert_eq((100 as Byte).checked_add(50 as Byte), Some(150 as Byte));
-    assert_eq((0 as Byte).checked_add(0 as Byte), Some(0 as Byte));
-    assert_eq((255 as Byte).checked_add(0 as Byte), Some(255 as Byte));
+    assert_eq((100 as Byte).checked_add(50 as Byte), Maybe.Some(150 as Byte));
+    assert_eq((0 as Byte).checked_add(0 as Byte), Maybe.Some(0 as Byte));
+    assert_eq((255 as Byte).checked_add(0 as Byte), Maybe.Some(255 as Byte));
 
     // Overflow
-    assert_eq((255 as Byte).checked_add(1 as Byte), None);
-    assert_eq((200 as Byte).checked_add(100 as Byte), None);
+    assert_eq((255 as Byte).checked_add(1 as Byte), Maybe.None);
+    assert_eq((200 as Byte).checked_add(100 as Byte), Maybe.None);
 }
 
 @test
@@ -630,56 +630,56 @@ fn test_char_is_digit() {
 @test
 fn test_char_to_digit() {
     // Base 10
-    assert_eq('0'.to_digit(10), Some(0));
-    assert_eq('5'.to_digit(10), Some(5));
-    assert_eq('9'.to_digit(10), Some(9));
-    assert_eq('a'.to_digit(10), None);
+    assert_eq('0'.to_digit(10), Maybe.Some(0));
+    assert_eq('5'.to_digit(10), Maybe.Some(5));
+    assert_eq('9'.to_digit(10), Maybe.Some(9));
+    assert_eq('a'.to_digit(10), Maybe.None);
 
     // Base 16
-    assert_eq('a'.to_digit(16), Some(10));
-    assert_eq('f'.to_digit(16), Some(15));
-    assert_eq('A'.to_digit(16), Some(10));
-    assert_eq('F'.to_digit(16), Some(15));
-    assert_eq('g'.to_digit(16), None);
+    assert_eq('a'.to_digit(16), Maybe.Some(10));
+    assert_eq('f'.to_digit(16), Maybe.Some(15));
+    assert_eq('A'.to_digit(16), Maybe.Some(10));
+    assert_eq('F'.to_digit(16), Maybe.Some(15));
+    assert_eq('g'.to_digit(16), Maybe.None);
 
     // Base 2
-    assert_eq('0'.to_digit(2), Some(0));
-    assert_eq('1'.to_digit(2), Some(1));
-    assert_eq('2'.to_digit(2), None);
+    assert_eq('0'.to_digit(2), Maybe.Some(0));
+    assert_eq('1'.to_digit(2), Maybe.Some(1));
+    assert_eq('2'.to_digit(2), Maybe.None);
 }
 
 @test
 fn test_char_from_digit() {
     // Base 10
-    assert_eq(Char.from_digit(0, 10), Some('0'));
-    assert_eq(Char.from_digit(5, 10), Some('5'));
-    assert_eq(Char.from_digit(9, 10), Some('9'));
-    assert_eq(Char.from_digit(10, 10), None);
+    assert_eq(Char.from_digit(0, 10), Maybe.Some('0'));
+    assert_eq(Char.from_digit(5, 10), Maybe.Some('5'));
+    assert_eq(Char.from_digit(9, 10), Maybe.Some('9'));
+    assert_eq(Char.from_digit(10, 10), Maybe.None);
 
     // Base 16 — Char.from_digit returns LOWERCASE letters for digits
     // 10..=35, matching the canonical contract pinned at
     // `core/text/char.vr::from_digit` and the standard `from_digit`
     // convention shared with Rust / Swift / Python.  Callers that need
     // uppercase should call `.to_ascii_uppercase()` on the result.
-    assert_eq(Char.from_digit(0, 16), Some('0'));
-    assert_eq(Char.from_digit(10, 16), Some('a'));
-    assert_eq(Char.from_digit(15, 16), Some('f'));
-    assert_eq(Char.from_digit(16, 16), None);
+    assert_eq(Char.from_digit(0, 16), Maybe.Some('0'));
+    assert_eq(Char.from_digit(10, 16), Maybe.Some('a'));
+    assert_eq(Char.from_digit(15, 16), Maybe.Some('f'));
+    assert_eq(Char.from_digit(16, 16), Maybe.None);
 }
 
 @test
 fn test_char_digit_roundtrip() {
-    // For valid digits: from_digit(to_digit(c, r), r) == Some(uppercase(c))
+    // For valid digits: from_digit(to_digit(c, r), r) == Maybe.Some(uppercase(c))
     let chars = ['0', '1', '5', '9', 'a', 'f'];
     let mut i = 0;
     while i < 6 {
         let c = chars[i];
         match c.to_digit(16) {
-            Some(d) => {
+            Maybe.Some(d) => {
                 let result = Char.from_digit(d, 16);
                 assert(result.is_some());
             }
-            None => {}
+            Maybe.None => {}
         }
         i = i + 1;
     }

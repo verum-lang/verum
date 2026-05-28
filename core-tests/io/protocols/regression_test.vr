@@ -18,7 +18,7 @@ mount core.io.protocols.{
     empty_reader, repeat_byte, sink,
 };
 mount core.io.buffer.{Cursor, BufferCursor};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
 
@@ -228,13 +228,13 @@ fn regression_chain_reads_across_boundary() {
 @test
 fn regression_question_mark_preserves_kind() {
     fn helper() -> IoResult<Int> {
-        let r: IoResult<Int> = Err(StreamError.new(IoErrorKind.NotFound));
+        let r: IoResult<Int> = Result.Err(StreamError.new(IoErrorKind.NotFound));
         let _v = r?;
-        Ok(0)
+        Result.Ok(0)
     }
     match helper() {
-        Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
-        Ok(_) => assert(false),
+        Result.Err(e) => assert_eq(e.kind(), IoErrorKind.NotFound),
+        Result.Ok(_) => assert(false),
     }
 }
 

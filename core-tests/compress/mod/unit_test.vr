@@ -13,7 +13,7 @@
 // =============================================================================
 
 mount core.compress.{Algorithm, CompressError};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: Algorithm variant construction
@@ -110,8 +110,8 @@ fn test_from_content_encoding_gzip() {
     let s = "gzip".clone();
     let r = Algorithm.from_content_encoding(&s);
     match r {
-        Some(a) => assert(a is Algorithm.Gzip),
-        None => panic("gzip should parse"),
+        Maybe.Some(a) => assert(a is Algorithm.Gzip),
+        Maybe.None => panic("gzip should parse"),
     }
 }
 
@@ -120,8 +120,8 @@ fn test_from_content_encoding_br_is_brotli() {
     let s = "br".clone();
     let r = Algorithm.from_content_encoding(&s);
     match r {
-        Some(a) => assert(a is Algorithm.Brotli),
-        None => panic("br should parse to Brotli"),
+        Maybe.Some(a) => assert(a is Algorithm.Brotli),
+        Maybe.None => panic("br should parse to Brotli"),
     }
 }
 
@@ -130,8 +130,8 @@ fn test_from_content_encoding_case_insensitive_gzip() {
     let s = "GZIP".clone();
     let r = Algorithm.from_content_encoding(&s);
     match r {
-        Some(a) => assert(a is Algorithm.Gzip),
-        None => panic("GZIP should parse (case-insensitive)"),
+        Maybe.Some(a) => assert(a is Algorithm.Gzip),
+        Maybe.None => panic("GZIP should parse (case-insensitive)"),
     }
 }
 
@@ -140,8 +140,8 @@ fn test_from_content_encoding_unknown_returns_none() {
     let s = "xz".clone();
     let r = Algorithm.from_content_encoding(&s);
     match r {
-        Some(_) => panic("'xz' is not a known content-encoding"),
-        None => assert(true),
+        Maybe.Some(_) => panic("'xz' is not a known content-encoding"),
+        Maybe.None => assert(true),
     }
 }
 
@@ -150,8 +150,8 @@ fn test_from_content_encoding_identity() {
     let s = "identity".clone();
     let r = Algorithm.from_content_encoding(&s);
     match r {
-        Some(a) => assert(a is Algorithm.Identity),
-        None => panic("identity should parse"),
+        Maybe.Some(a) => assert(a is Algorithm.Identity),
+        Maybe.None => panic("identity should parse"),
     }
 }
 

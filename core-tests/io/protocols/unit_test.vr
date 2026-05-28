@@ -15,7 +15,7 @@
 mount core.io.protocols.{
     StreamError, IoErrorKind, IoResult, SeekFrom,
 };
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
 
@@ -148,8 +148,8 @@ fn test_stream_error_with_message() {
     let e = StreamError.with_message(IoErrorKind.InvalidInput, "bad arg");
     assert_eq(e.kind(), IoErrorKind.InvalidInput);
     match e.message() {
-        Some(m) => assert_eq(*m, "bad arg"),
-        None => assert(false),
+        Maybe.Some(m) => assert_eq(*m, "bad arg"),
+        Maybe.None => assert(false),
     }
 }
 
@@ -158,8 +158,8 @@ fn test_stream_error_other_constructor() {
     let e = StreamError.Other("something failed");
     assert_eq(e.kind(), IoErrorKind.Other);
     match e.message() {
-        Some(m) => assert_eq(*m, "something failed"),
-        None => assert(false),
+        Maybe.Some(m) => assert_eq(*m, "something failed"),
+        Maybe.None => assert(false),
     }
 }
 
@@ -388,14 +388,14 @@ fn test_seekfrom_clone_preserves_payload() {
 
 @test
 fn test_io_result_ok() {
-    let r: IoResult<Int> = Ok(42);
+    let r: IoResult<Int> = Result.Ok(42);
     assert(r.is_ok());
     assert_eq(r.unwrap(), 42);
 }
 
 @test
 fn test_io_result_err() {
-    let r: IoResult<Int> = Err(StreamError.new(IoErrorKind.NotFound));
+    let r: IoResult<Int> = Result.Err(StreamError.new(IoErrorKind.NotFound));
     assert(r.is_err());
 }
 
@@ -408,9 +408,9 @@ fn test_io_result_propagates_via_question_mark() {
     // between test functions that masks the alias-resolved kind
     // recovery; pinned for separate investigation.)
     fn helper() -> IoResult<Int> {
-        let r: IoResult<Int> = Err(StreamError.new(IoErrorKind.BrokenPipe));
+        let r: IoResult<Int> = Result.Err(StreamError.new(IoErrorKind.BrokenPipe));
         let v = r?;
-        Ok(v + 1)
+        Result.Ok(v + 1)
     }
     let r = helper();
     assert(r.is_err());
@@ -419,9 +419,9 @@ fn test_io_result_propagates_via_question_mark() {
 @test
 fn test_io_result_ok_path_question_mark() {
     fn helper() -> IoResult<Int> {
-        let r: IoResult<Int> = Ok(10);
+        let r: IoResult<Int> = Result.Ok(10);
         let v = r?;
-        Ok(v * 2)
+        Result.Ok(v * 2)
     }
     let r = helper();
     assert(r.is_ok());

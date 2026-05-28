@@ -15,7 +15,7 @@ mount core.net.http_cache.{
     parse as cc_parse, current_age, freshness_lifetime_sec, decide,
     CacheControl, CacheControlError, AgeInputs, DecisionInputs, CacheDecision
 };
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // HTTPCACHE-1 — parse / current_age / freshness / decide SIGSEGV
@@ -33,8 +33,8 @@ fn regression_parse_max_age() {
     let s = "max-age=3600".clone();
     let cc = cc_parse(&s);
     match cc.max_age {
-        Some(v) => assert_eq(v, 3600_u64),
-        None => panic("expected max_age"),
+        Maybe.Some(v) => assert_eq(v, 3600_u64),
+        Maybe.None => panic("expected max_age"),
     }
 }
 
@@ -65,9 +65,9 @@ fn regression_freshness_max_age_wins_for_browser() {
     let s = "max-age=600".clone();
     let cc = cc_parse(&s);
     // browser cache (shared=false) — max-age wins
-    match freshness_lifetime_sec(&cc, None, 1_700_000_000_u64, false) {
-        Some(v) => assert_eq(v, 600_u64),
-        None => panic("expected freshness"),
+    match freshness_lifetime_sec(&cc, Maybe.None, 1_700_000_000_u64, false) {
+        Maybe.Some(v) => assert_eq(v, 600_u64),
+        Maybe.None => panic("expected freshness"),
     }
 }
 
@@ -85,7 +85,7 @@ fn regression_decide_no_store_must_not_cache() {
     let di = DecisionInputs {
         resp_cc: cc,
         age: ai,
-        expires_unix: None,
+        expires_unix: Maybe.None,
         shared_cache: false,
         upstream_error: false,
     };

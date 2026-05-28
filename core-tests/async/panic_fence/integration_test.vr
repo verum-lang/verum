@@ -5,7 +5,7 @@
 // Cross-stdlib integration for `core.async.panic_fence`.
 //
 //   §A — Fence wrapping a Future that succeeds → outer Result is
-//        Ok(value); downstream pattern match converts to a tag.
+//        Result.Ok(value); downstream pattern match converts to a tag.
 //   §B — Fence's outer Result composes with `?`-style mapping over
 //        a List of independent fenced futures.
 //
@@ -18,7 +18,7 @@ mount core.async.panic_fence.{PanicFence, panic_safe};
 mount core.async.future.{ready, ReadyFuture};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context, noop_waker};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -31,8 +31,8 @@ fn integration_panic_fence_outcome_to_tag_ready_ok() {
         let waker = noop_waker();
         let mut cx = Context.from_waker(&waker);
         match fence.poll(&mut cx) {
-            Poll.Ready(Ok(_)) => "ok",
-            Poll.Ready(Err(_)) => "panicked",
+            Poll.Ready(Result.Ok(_)) => "ok",
+            Poll.Ready(Result.Err(_)) => "panicked",
             Poll.Pending => "pending",
         }
     }
@@ -53,8 +53,8 @@ fn integration_panic_fence_list_of_fenced_ready_futures_sums_values() {
         let waker = noop_waker();
         let mut cx = Context.from_waker(&waker);
         match fence.poll(&mut cx) {
-            Poll.Ready(Ok(x)) => total = total + x,
-            Poll.Ready(Err(_)) => assert(false),
+            Poll.Ready(Result.Ok(x)) => total = total + x,
+            Poll.Ready(Result.Err(_)) => assert(false),
             Poll.Pending => assert(false),
         }
     }

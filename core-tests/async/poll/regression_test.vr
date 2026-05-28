@@ -10,7 +10,7 @@
 // =============================================================================
 
 mount core.async.poll.{Poll};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // §A  Variant-name auto-derive uses the global tag-scan fallback
@@ -77,7 +77,7 @@ fn regression_local_two_variant_sum_debug_uses_local_names() {
 //   Original defect: `core/async/poll.vr` carried two From impls:
 //
 //     implement<T> From<T>        for Poll<T> { ... -> Ready(t)   }
-//     implement<T> From<Maybe<T>> for Poll<T> { Some/None routes  }
+//     implement<T> From<Maybe<T>> for Poll<T> { Some/Maybe.None routes  }
 //
 //   The first was a blanket convenience that overlapped the second
 //   under any substitution `T = Maybe<U>` — and the impl-coherence
@@ -89,7 +89,7 @@ fn regression_local_two_variant_sum_debug_uses_local_names() {
 //   `Poll.Ready(t)` is more expressive about the wrap-up-in-Ready
 //   intent and carries no coherence hazard.  The remaining
 //   `From<Maybe<T>>` impl is the unambiguous semantic conversion:
-//   Some -> Ready, None -> Pending. No stdlib call sites used the
+//   Some -> Ready, Maybe.None -> Pending. No stdlib call sites used the
 //   blanket form (grep `Poll\.from\(` across `core/`).
 //
 //   Guardrails below confirm the structural fix: `Poll.from(maybe_v)`
@@ -100,14 +100,14 @@ fn regression_local_two_variant_sum_debug_uses_local_names() {
 
 @test
 fn regression_poll_from_maybe_some_routes_to_ready() {
-    let m: Maybe<Int> = Some(99);
+    let m: Maybe<Int> = Maybe.Some(99);
     let p: Poll<Int> = Poll.from(m);
     assert_eq(p, Poll.Ready(99));
 }
 
 @test
 fn regression_poll_from_maybe_none_routes_to_pending() {
-    let m: Maybe<Int> = None;
+    let m: Maybe<Int> = Maybe.None;
     let p: Poll<Int> = Poll.from(m);
     assert(p is Poll.Pending);
 }
@@ -182,7 +182,7 @@ fn regression_poll_chained_map_pending_absorbs() {
 //     (ii)  `extract_expr_type_name`'s hardcoded MAYBE list replaced
 //           with a type-honest function-registry walk by short name —
 //           if exactly one declared `*.<method>` has a known
-//           return type, use it; otherwise return None (let the
+//           return type, use it; otherwise return Maybe.None (let the
 //           caller's fallback kick in) rather than mis-categorising.
 //     (iii) `determine_method_return_type_prefix` extended with a
 //           structural fallback that hands inner_receiver to

@@ -6,7 +6,7 @@
 //
 // Active pins (3) — current correct behaviour:
 //
-//   * Empty LbPool.pick returns None regardless of strategy / salt.
+//   * Empty LbPool.pick returns Maybe.None regardless of strategy / salt.
 //   * Upstream.with_weight overrides default weight=1 monotonically.
 //   * LoadBalancer 3-variant disjointness (re-pinned at module level).
 //
@@ -25,7 +25,7 @@ mount core.collections.list.{List};
 @test
 fn regression_lb_pool_empty_returns_none() {
     // LB-1: line 110 of loadbalancer.vr — empty pool short-circuits with
-    // None. Drift here would surface as div-by-zero (% 0) panics in the
+    // Maybe.None. Drift here would surface as div-by-zero (% 0) panics in the
     // upstream-selection path.
     let upstreams: List<Upstream> = List.new();
     let p = LbPool.new(LoadBalancer.RoundRobin, upstreams);

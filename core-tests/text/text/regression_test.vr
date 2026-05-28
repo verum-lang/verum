@@ -24,9 +24,9 @@
 //   §M  Text.from_utf8 / from_utf8_lossy — Utf8Error not raised on invalid input
 //   §N  Text.into_bytes — List.extend_from_slice missing
 //   §O  Text.from_int / parse_int round-trip — function-id collision symptom
-//   §P  Text.split_once / strip_prefix / strip_suffix — None when match exists
+//   §P  Text.split_once / strip_prefix / strip_suffix — Maybe.None when match exists
 //   §Q  Text.capitalize / to_title_case / swapcase — case helpers no-op or wrong
-//   §R  count_matches — interpreter panic "Expected int, got Some(3)"
+//   §R  count_matches — interpreter panic "Expected int, got Maybe.Some(3)"
 //
 // Convention: a regression test is `@ignore`d while the defect is open
 // AND has a pin in audit.md. When a fix lands, remove `@ignore` and let the
@@ -34,7 +34,7 @@
 // =============================================================================
 
 mount core.text.{Text, Utf8Error, ParseError};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.collections.list.List;
@@ -51,8 +51,8 @@ mount core.collections.list.List;
 @test
 fn regression_a_rfind_basic_pinned() {
     match "ababab".rfind(&"ab") {
-        Some(i) => assert_eq(i, 4),
-        None => panic("rfind('ab') in 'ababab' must be Some(4)"),
+        Maybe.Some(i) => assert_eq(i, 4),
+        Maybe.None => panic("rfind('ab') in 'ababab' must be Maybe.Some(4)"),
     }
 }
 
@@ -142,16 +142,16 @@ fn regression_e_clear_static_text_pinned() {
 
 // =============================================================================
 // §F — Text.find returns wrong byte index (audit.md §F)
-// REGRESSION: `find(&"ell")` in `"hello"` should return Some(1). Empirically
-// returns None or a wrong index. The KMP failure-table preprocessing likely
+// REGRESSION: `find(&"ell")` in `"hello"` should return Maybe.Some(1). Empirically
+// returns Maybe.None or a wrong index. The KMP failure-table preprocessing likely
 // returns wrong results — `kmp_failure_table` / `kmp_find` interaction.
 // =============================================================================
 
 @test
 fn regression_f_find_returns_correct_index_pinned() {
     match "hello".find(&"ell") {
-        Some(i) => assert_eq(i, 1),
-        None => panic("find('ell') in 'hello' must be Some(1)"),
+        Maybe.Some(i) => assert_eq(i, 1),
+        Maybe.None => panic("find('ell') in 'hello' must be Maybe.Some(1)"),
     }
 }
 
@@ -171,7 +171,7 @@ fn regression_g_contains_present_pinned() {
 // (Text.find KMP indexing) closed via commit f8d70e6ef.  Both aliases
 // (`index_of`, `find_char`) delegate to `find`, so the upstream close
 // flips them green automatically.  Verified 2026-05-16:
-// `"hello".index_of(&"ll")` returns `Some(2)`.  Active guard going
+// `"hello".index_of(&"ll")` returns `Maybe.Some(2)`.  Active guard going
 // forward — re-introduction of the find-byte-index defect surfaces
 // here immediately.
 // =============================================================================
@@ -179,8 +179,8 @@ fn regression_g_contains_present_pinned() {
 @test
 fn regression_h_index_of_alias_pinned() {
     match "hello".index_of(&"ll") {
-        Some(i) => assert_eq(i, 2),
-        None => panic("index_of('ll') in 'hello' must be Some(2)"),
+        Maybe.Some(i) => assert_eq(i, 2),
+        Maybe.None => panic("index_of('ll') in 'hello' must be Maybe.Some(2)"),
     }
 }
 
@@ -188,16 +188,16 @@ fn regression_h_index_of_alias_pinned() {
 fn regression_h_index_of_empty_needle_pinned() {
     // Empty needle convention: should match at position 0.
     match "hello".index_of(&"") {
-        Some(i) => assert_eq(i, 0),
-        None => panic("index_of('') in 'hello' must be Some(0)"),
+        Maybe.Some(i) => assert_eq(i, 0),
+        Maybe.None => panic("index_of('') in 'hello' must be Maybe.Some(0)"),
     }
 }
 
 @test
 fn regression_h_index_of_absent_returns_none_pinned() {
     match "hello".index_of(&"world") {
-        Some(_) => panic("index_of('world') in 'hello' must be None"),
-        None => {},
+        Maybe.Some(_) => panic("index_of('world') in 'hello' must be Maybe.None"),
+        Maybe.None => {},
     }
 }
 
@@ -205,8 +205,8 @@ fn regression_h_index_of_absent_returns_none_pinned() {
 fn regression_h_index_of_first_occurrence_pinned() {
     // Multiple occurrences — must return the FIRST byte offset.
     match "ababab".index_of(&"ab") {
-        Some(i) => assert_eq(i, 0),
-        None => panic("index_of('ab') in 'ababab' must be Some(0)"),
+        Maybe.Some(i) => assert_eq(i, 0),
+        Maybe.None => panic("index_of('ab') in 'ababab' must be Maybe.Some(0)"),
     }
 }
 
@@ -284,8 +284,8 @@ fn regression_l_replace_pinned() {
 
 // =============================================================================
 // §M — from_utf8 not raising Utf8Error on invalid input (audit.md §M)
-// REGRESSION: `Text.from_utf8(invalid_bytes)` returns `Ok(...)` instead of
-// `Err(Utf8Error)`. The `utf8_validate` helper at the top of text.vr returns
+// REGRESSION: `Text.from_utf8(invalid_bytes)` returns `Result.Ok(...)` instead of
+// `Result.Err(Utf8Error)`. The `utf8_validate` helper at the top of text.vr returns
 // the wrong Bool, OR the Result wiring at the call site swallows the Err.
 // =============================================================================
 
@@ -293,8 +293,8 @@ fn regression_l_replace_pinned() {
 fn regression_m_from_utf8_invalid_returns_err_pinned() {
     let bytes: List<Byte> = [0xC0 as Byte, 0x20 as Byte];
     match Text.from_utf8(&bytes) {
-        Ok(_) => panic("invalid UTF-8 must be Err"),
-        Err(_) => {},
+        Result.Ok(_) => panic("invalid UTF-8 must be Err"),
+        Result.Err(_) => {},
     }
 }
 
@@ -366,20 +366,20 @@ fn regression_o_from_int_pinned() {
 }
 
 // =============================================================================
-// §P — split_once / strip_prefix / strip_suffix return None when match exists
+// §P — split_once / strip_prefix / strip_suffix return Maybe.None when match exists
 //      (audit.md §P)
-// REGRESSION: `"key=value".split_once(&"=")` returns None. Same root as §F
+// REGRESSION: `"key=value".split_once(&"=")` returns Maybe.None. Same root as §F
 // (find returns wrong index) since split_once delegates to find.
 // =============================================================================
 
 @test
 fn regression_p_split_once_pinned() {
     match "key=value".split_once(&"=") {
-        Some(pair) => {
+        Maybe.Some(pair) => {
             assert_eq(pair.0, "key");
             assert_eq(pair.1, "value");
         }
-        None => panic("split_once('=') must be Some on 'key=value'"),
+        Maybe.None => panic("split_once('=') must be Some on 'key=value'"),
     }
 }
 
@@ -396,7 +396,7 @@ fn regression_q_capitalize_pinned() {
 // =============================================================================
 // §R — count_matches triggers internal compiler error (audit.md §R)
 // REGRESSION: `count_matches` triggers an *internal compiler error*
-// ("Expected int, got Some(3)") at compile time. This is a type-inference
+// ("Expected int, got Maybe.Some(3)") at compile time. This is a type-inference
 // regression in the typechecker, not a stdlib defect — code that mentions
 // `count_matches` cannot even compile.
 // =============================================================================
@@ -421,8 +421,8 @@ fn regression_r_count_matches_compile_pinned() {
 @test
 fn guard_find_via_borrowed_needle() {
     match "hello".find(&"ell") {
-        Some(i) => assert_eq(i, 1),
-        None => panic("extract_string CBGR-deref regression — find(&\"ell\") in \"hello\" must be Some(1)"),
+        Maybe.Some(i) => assert_eq(i, 1),
+        Maybe.None => panic("extract_string CBGR-deref regression — find(&\"ell\") in \"hello\" must be Maybe.Some(1)"),
     }
 }
 
@@ -442,11 +442,11 @@ fn guard_contains_starts_ends_with_via_borrowed_needle() {
 @test
 fn guard_split_once_via_borrowed_separator() {
     match "key=value".split_once(&"=") {
-        Some(pair) => {
+        Maybe.Some(pair) => {
             assert_eq(pair.0, "key");
             assert_eq(pair.1, "value");
         }
-        None => panic("split_once must find '='"),
+        Maybe.None => panic("split_once must find '='"),
     }
 }
 
@@ -541,8 +541,8 @@ fn regression_with_capacity_reports_capacity() {
 fn regression_try_with_capacity_reports_capacity() {
     let r: Result<Text, _> = Text.try_with_capacity(64);
     match r {
-        Ok(t) => assert(t.capacity() >= 64),
-        Err(_) => panic("try_with_capacity(64) must succeed"),
+        Result.Ok(t) => assert(t.capacity() >= 64),
+        Result.Err(_) => panic("try_with_capacity(64) must succeed"),
     };
 }
 
@@ -723,7 +723,7 @@ fn regression_w_char_method_on_ref_direct_dispatch() {
 // =============================================================================
 // §X — Result<Bool, Text> destructure (CLOSED 2026-05-16)
 // Cross-payload-type variant-arm routing: the previous defect class kept
-// surfacing as Ok(Bool) taking the Err arm because the destructure path
+// surfacing as Result.Ok(Bool) taking the Err arm because the destructure path
 // resolved payload type from the first-registered variant rather than the
 // expected scrutinee type (closed by task #5 §3.1 — bidirectional variant
 // constructor resolution, commit 6cac007b1). These three tests pin all
@@ -733,28 +733,28 @@ fn regression_w_char_method_on_ref_direct_dispatch() {
 
 @test
 fn regression_x_result_int_ok_destructure() {
-    let r: Result<Int, Text> = Ok(42);
+    let r: Result<Int, Text> = Result.Ok(42);
     match r {
-        Ok(n) => assert_eq(n, 42),
-        Err(_) => panic("Int Ok must take Ok arm"),
+        Result.Ok(n) => assert_eq(n, 42),
+        Result.Err(_) => panic("Int Ok must take Ok arm"),
     }
 }
 
 @test
 fn regression_x_result_bool_ok_true_destructure() {
-    let r: Result<Bool, Text> = Ok(true);
+    let r: Result<Bool, Text> = Result.Ok(true);
     match r {
-        Ok(b) => assert(b),
-        Err(_) => panic("Bool Ok(true) must take Ok arm"),
+        Result.Ok(b) => assert(b),
+        Result.Err(_) => panic("Bool Result.Ok(true) must take Ok arm"),
     }
 }
 
 @test
 fn regression_x_result_bool_ok_false_destructure() {
-    let r: Result<Bool, Text> = Ok(false);
+    let r: Result<Bool, Text> = Result.Ok(false);
     match r {
-        Ok(b) => assert(!b),
-        Err(_) => panic("Bool Ok(false) must take Ok arm"),
+        Result.Ok(b) => assert(!b),
+        Result.Err(_) => panic("Bool Result.Ok(false) must take Ok arm"),
     }
 }
 

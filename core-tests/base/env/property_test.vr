@@ -7,9 +7,9 @@
 //
 // Laws verified:
 //   §A  set_var followed by var returns the same value (round-trip)
-//   §B  remove_var followed by var_opt returns None
+//   §B  remove_var followed by var_opt returns Maybe.None
 //   §C  args_count == args().len() (consistency between forms)
-//   §D  var on a never-set variable returns None (or VarError)
+//   §D  var on a never-set variable returns Maybe.None (or VarError)
 //   §E  set_var twice keeps the latest value (last-write-wins)
 //
 // Note: env tests TOUCH global state (the OS env), so cleanup is
@@ -59,7 +59,7 @@ fn law_args_count_matches_args_len() {
 }
 
 // =============================================================================
-// §D  var on never-set returns None / VarError.
+// §D  var on never-set returns Maybe.None / VarError.
 // =============================================================================
 
 @test

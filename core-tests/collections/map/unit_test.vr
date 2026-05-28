@@ -208,31 +208,31 @@ fn test_map_get_returns_some_for_present_key() {
     let _ = m.insert(1, 100);
     let _ = m.insert(2, 200);
     let _ = m.insert(3, 300);
-    assert_eq(m.get(&1), Some(100));
-    assert_eq(m.get(&2), Some(200));
-    assert_eq(m.get(&3), Some(300));
+    assert_eq(m.get(&1), Maybe.Some(100));
+    assert_eq(m.get(&2), Maybe.Some(200));
+    assert_eq(m.get(&3), Maybe.Some(300));
 }
 
 @test
 fn test_map_get_returns_none_for_absent_key() {
     let mut m: Map<Int, Int> = Map.new();
     let _ = m.insert(1, 100);
-    assert_eq(m.get(&99), None);
+    assert_eq(m.get(&99), Maybe.None);
 }
 
 @test
 fn test_map_get_on_empty_returns_none() {
     let m: Map<Int, Int> = Map.new();
-    assert_eq(m.get(&0), None);
+    assert_eq(m.get(&0), Maybe.None);
 }
 
 @test
 fn test_map_get_after_remove_returns_none() {
     let mut m: Map<Int, Int> = Map.new();
     let _ = m.insert(7, 70);
-    assert_eq(m.get(&7), Some(70));
+    assert_eq(m.get(&7), Maybe.Some(70));
     let _ = m.remove(7);
-    assert_eq(m.get(&7), None);
+    assert_eq(m.get(&7), Maybe.None);
 }
 
 @test
@@ -240,7 +240,7 @@ fn test_map_get_after_overwrite_returns_new_value() {
     let mut m: Map<Int, Int> = Map.new();
     let _ = m.insert(1, 10);
     let _ = m.insert(1, 99);
-    assert_eq(m.get(&1), Some(99));
+    assert_eq(m.get(&1), Maybe.Some(99));
 }
 
 // =============================================================================
@@ -298,8 +298,8 @@ fn test_map_with_capacity_then_fill() {
         i = i + 1;
     }
     assert_eq(m.len(), 8);
-    assert_eq(m.get(&1), Some(10));
-    assert_eq(m.get(&8), Some(80));
+    assert_eq(m.get(&1), Maybe.Some(10));
+    assert_eq(m.get(&8), Maybe.Some(80));
 }
 
 // =============================================================================
@@ -310,7 +310,7 @@ fn test_map_with_capacity_then_fill() {
 fn test_map_insert_returns_none_for_new_key() {
     let mut m: Map<Int, Int> = Map.new();
     let prev: Maybe<Int> = m.insert(1, 100);
-    assert_eq(prev, None);
+    assert_eq(prev, Maybe.None);
 }
 
 @test
@@ -318,8 +318,8 @@ fn test_map_insert_returns_old_value_for_existing_key() {
     let mut m: Map<Int, Int> = Map.new();
     let _ = m.insert(1, 100);
     let prev: Maybe<Int> = m.insert(1, 200);
-    assert_eq(prev, Some(100));
-    assert_eq(m.get(&1), Some(200));
+    assert_eq(prev, Maybe.Some(100));
+    assert_eq(m.get(&1), Maybe.Some(200));
 }
 
 @test
@@ -328,7 +328,7 @@ fn test_map_insert_after_remove_treats_as_new() {
     let _ = m.insert(7, 70);
     let _ = m.remove(7);
     let prev: Maybe<Int> = m.insert(7, 71);
-    assert_eq(prev, None);
+    assert_eq(prev, Maybe.None);
 }
 
 // =============================================================================
@@ -340,14 +340,14 @@ fn test_map_remove_returns_some_for_present_key() {
     let mut m: Map<Int, Int> = Map.new();
     let _ = m.insert(1, 100);
     let removed: Maybe<Int> = m.remove(1);
-    assert_eq(removed, Some(100));
+    assert_eq(removed, Maybe.Some(100));
 }
 
 @test
 fn test_map_remove_returns_none_for_absent_key() {
     let mut m: Map<Int, Int> = Map.new();
     let removed: Maybe<Int> = m.remove(99);
-    assert_eq(removed, None);
+    assert_eq(removed, Maybe.None);
 }
 
 @test
@@ -377,9 +377,9 @@ fn test_map_many_keys_preserved_under_growth() {
     }
     assert_eq(m.len(), 32);
     // Spot-check first / middle / last.
-    assert_eq(m.get(&0), Some(0));
-    assert_eq(m.get(&15), Some(105));
-    assert_eq(m.get(&31), Some(217));
+    assert_eq(m.get(&0), Maybe.Some(0));
+    assert_eq(m.get(&15), Maybe.Some(105));
+    assert_eq(m.get(&31), Maybe.Some(217));
 }
 
 @test
@@ -398,11 +398,11 @@ fn test_map_many_keys_then_remove_half_preserves_remainder() {
     }
     assert_eq(m.len(), 8);
     // Odd keys still present.
-    assert_eq(m.get(&1), Some(3));
-    assert_eq(m.get(&15), Some(45));
+    assert_eq(m.get(&1), Maybe.Some(3));
+    assert_eq(m.get(&15), Maybe.Some(45));
     // Even keys removed.
-    assert_eq(m.get(&0), None);
-    assert_eq(m.get(&14), None);
+    assert_eq(m.get(&0), Maybe.None);
+    assert_eq(m.get(&14), Maybe.None);
 }
 
 // =============================================================================

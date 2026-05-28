@@ -10,7 +10,7 @@
 //   §2  Default invariants:
 //        - TextAlignment.default() = Left
 //        - Sign.default()          = Minus
-//        - FormatSpec.default()    = (' ', Left, Minus, None, None, false, None)
+//        - FormatSpec.default()    = (' ', Left, Minus, Maybe.None, Maybe.None, false, Maybe.None)
 //   §3  WriteErrorKind Eq is an equivalence relation
 //   §4  FormatSpec builder methods compose: with_width then with_precision
 //   §5  Display(format_display(x)) = f"{x}" for x : Int
@@ -24,7 +24,7 @@ mount core.text.format.{
     TextAlignment, Sign, FormatSpec,
     format_debug, format_display,
 };
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -103,8 +103,8 @@ fn property_format_spec_default_is_zero_pad_none() {
     assert_eq(d.fill, ' ');
     assert(d.align is TextAlignment.Left);
     assert(d.sign is Sign.Minus);
-    assert(d.width is None);
-    assert(d.precision is None);
+    assert(d.width is Maybe.None);
+    assert(d.precision is Maybe.None);
     assert(!d.alternate);
 }
 
@@ -158,12 +158,12 @@ fn property_write_error_kind_transitive() {
 fn property_format_spec_with_width_and_precision_compose() {
     let s = FormatSpec.default().with_width(10).with_precision(3);
     match s.width {
-        Some(w) => assert_eq(w, 10),
-        None => panic("width should be 10"),
+        Maybe.Some(w) => assert_eq(w, 10),
+        Maybe.None => panic("width should be 10"),
     }
     match s.precision {
-        Some(p) => assert_eq(p, 3),
-        None => panic("precision should be 3"),
+        Maybe.Some(p) => assert_eq(p, 3),
+        Maybe.None => panic("precision should be 3"),
     }
 }
 

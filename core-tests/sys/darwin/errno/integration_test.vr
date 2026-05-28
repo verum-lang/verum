@@ -95,19 +95,19 @@ fn integration_errno_dispatch_to_error_class() {
 fn integration_errno_syscall_return_funnel() {
     // The canonical "syscall returned -1 with errno X" funnel.
     fn syscall_funnel(rv: Int, errno: Int) -> Maybe<Int> {
-        if rv >= 0 { Some(rv) } else { None }
+        if rv >= 0 { Maybe.Some(rv) } else { Maybe.None }
     }
     // Success: syscall returned 1024 bytes read.
     let ok = syscall_funnel(1024, 0);
     match ok {
-        Some(n) => assert_eq(n, 1024),
-        None    => assert(false),
+        Maybe.Some(n) => assert_eq(n, 1024),
+        Maybe.None    => assert(false),
     };
     // Error: syscall returned -1 with EAGAIN.
     let err = syscall_funnel(-1, EAGAIN);
     match err {
-        Some(_) => assert(false),
-        None    => assert(true),
+        Maybe.Some(_) => assert(false),
+        Maybe.None    => assert(true),
     };
 }
 
@@ -141,20 +141,20 @@ fn integration_errno_retry_loop_counts_attempts() {
 fn integration_errno_permission_funnel_through_result() {
     fn funnel(code: Int) -> Result<Int, Text> {
         if is_permission_error(code) {
-            Err("permission denied".clone())
+            Result.Err("permission denied".clone())
         } else {
-            Ok(code)
+            Result.Ok(code)
         }
     }
     let allowed: Result<Int, Text> = funnel(ENOENT);
     let denied:  Result<Int, Text> = funnel(EACCES);
     match allowed {
-        Ok(c)  => assert_eq(c, ENOENT),
-        Err(_) => assert(false),
+        Result.Ok(c)  => assert_eq(c, ENOENT),
+        Result.Err(_) => assert(false),
     };
     match denied {
-        Ok(_)  => assert(false),
-        Err(msg) => assert_eq(msg, "permission denied".clone()),
+        Result.Ok(_)  => assert(false),
+        Result.Err(msg) => assert_eq(msg, "permission denied".clone()),
     };
 }
 

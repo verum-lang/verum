@@ -19,23 +19,23 @@ mount core.prelude.*;
 @test
 fn integration_list_of_maybe_propagates_some_and_none() {
     let mut xs: List<Maybe<Int>> = List.new();
-    xs.push(Some(1));
-    xs.push(None);
-    xs.push(Some(3));
+    xs.push(Maybe.Some(1));
+    xs.push(Maybe.None);
+    xs.push(Maybe.Some(3));
     assert_eq(xs.len(), 3);
-    assert_eq(xs.get(0), Some(Some(1)));
-    assert_eq(xs.get(1), Some(None));
-    assert_eq(xs.get(2), Some(Some(3)));
+    assert_eq(xs.get(0), Maybe.Some(Maybe.Some(1)));
+    assert_eq(xs.get(1), Maybe.Some(Maybe.None));
+    assert_eq(xs.get(2), Maybe.Some(Maybe.Some(3)));
 }
 
 @test
 fn integration_list_first_threads_through_maybe() {
-    // first() on a non-empty list returns Some(head).
+    // first() on a non-empty list returns Maybe.Some(head).
     let xs: List<Int> = [42];
-    assert_eq(xs.first(), Some(42));
-    // first() on an empty list returns None.
+    assert_eq(xs.first(), Maybe.Some(42));
+    // first() on an empty list returns Maybe.None.
     let empty: List<Int> = List.new();
-    assert_eq(empty.first(), None);
+    assert_eq(empty.first(), Maybe.None);
 }
 
 // =============================================================================
@@ -53,9 +53,9 @@ fn integration_nested_list_preserves_inner_lengths() {
     outer.push(inner_c);
     assert_eq(outer.len(), 3);
     // Inner lengths preserved through the outer push.
-    assert_eq(outer.get(0).map(|x| x.len()), Some(3));
-    assert_eq(outer.get(1).map(|x| x.len()), Some(2));
-    assert_eq(outer.get(2).map(|x| x.len()), Some(0));
+    assert_eq(outer.get(0).map(|x| x.len()), Maybe.Some(3));
+    assert_eq(outer.get(1).map(|x| x.len()), Maybe.Some(2));
+    assert_eq(outer.get(2).map(|x| x.len()), Maybe.Some(0));
 }
 
 // =============================================================================
@@ -84,14 +84,14 @@ fn integration_with_capacity_avoids_realloc_within_hint() {
 fn integration_sort_plus_first_extracts_minimum() {
     let mut xs: List<Int> = [7, 3, 9, 1, 5, 8, 2];
     xs.sort();
-    assert_eq(xs.first(), Some(1));
+    assert_eq(xs.first(), Maybe.Some(1));
 }
 
 @test
 fn integration_sort_plus_last_extracts_maximum() {
     let mut xs: List<Int> = [7, 3, 9, 1, 5, 8, 2];
     xs.sort();
-    assert_eq(xs.last(), Some(9));
+    assert_eq(xs.last(), Maybe.Some(9));
 }
 
 // =============================================================================
@@ -103,14 +103,14 @@ fn integration_insert_at_idx_shifts_only_tail() {
     let mut xs: List<Int> = [10, 20, 30, 40, 50];
     xs.insert(2, 99);
     // Head untouched.
-    assert_eq(xs.get(0), Some(10));
-    assert_eq(xs.get(1), Some(20));
+    assert_eq(xs.get(0), Maybe.Some(10));
+    assert_eq(xs.get(1), Maybe.Some(20));
     // New element at idx.
-    assert_eq(xs.get(2), Some(99));
+    assert_eq(xs.get(2), Maybe.Some(99));
     // Tail shifted right.
-    assert_eq(xs.get(3), Some(30));
-    assert_eq(xs.get(4), Some(40));
-    assert_eq(xs.get(5), Some(50));
+    assert_eq(xs.get(3), Maybe.Some(30));
+    assert_eq(xs.get(4), Maybe.Some(40));
+    assert_eq(xs.get(5), Maybe.Some(50));
     assert_eq(xs.len(), 6);
 }
 
@@ -125,9 +125,9 @@ fn integration_drain_via_pop_to_empty() {
     let _ = xs.pop();
     let _ = xs.pop();
     assert(xs.is_empty());
-    assert_eq(xs.first(), None);
-    assert_eq(xs.last(), None);
-    assert_eq(xs.get(0), None);
+    assert_eq(xs.first(), Maybe.None);
+    assert_eq(xs.last(), Maybe.None);
+    assert_eq(xs.get(0), Maybe.None);
 }
 
 // =============================================================================

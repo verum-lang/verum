@@ -29,9 +29,9 @@ mount core.base.ordering.{Less, Equal, Greater};
 // `.to_ascii_uppercase()`.
 @test
 fn regression_char_from_digit_returns_lowercase_pinned() {
-    assert_eq(Char.from_digit(10, 16), Some('a'));
-    assert_eq(Char.from_digit(15, 16), Some('f'));
-    assert_eq(Char.from_digit(35, 36), Some('z'));
+    assert_eq(Char.from_digit(10, 16), Maybe.Some('a'));
+    assert_eq(Char.from_digit(15, 16), Maybe.Some('f'));
+    assert_eq(Char.from_digit(35, 36), Maybe.Some('z'));
     assert_eq(Char.from_digit(11, 16).unwrap().to_ascii_uppercase(), 'B');
 }
 
@@ -74,12 +74,12 @@ fn regression_as_byte_cast_wrapping_add_uses_u8_modulo_pinned() {
 }
 
 // Cast-as-receiver, `checked_add` — must overflow at u8::MAX.
-// Pre-fix returned Some(256) (Int.checked_add no overflow until i64::MAX).
+// Pre-fix returned Maybe.Some(256) (Int.checked_add no overflow until i64::MAX).
 @test
 fn regression_as_byte_cast_checked_add_overflows_at_u8_max_pinned() {
-    assert_eq((100 as Byte).checked_add(50 as Byte), Some(150 as Byte));
-    assert_eq((255 as Byte).checked_add(1 as Byte), None);
-    assert_eq((200 as Byte).checked_add(100 as Byte), None);
+    assert_eq((100 as Byte).checked_add(50 as Byte), Maybe.Some(150 as Byte));
+    assert_eq((255 as Byte).checked_add(1 as Byte), Maybe.None);
+    assert_eq((200 as Byte).checked_add(100 as Byte), Maybe.None);
 }
 
 // Cast-as-receiver, `saturating_add` — must saturate at u8::MAX.
@@ -120,7 +120,7 @@ fn regression_as_byte_cast_saturating_add_saturates_at_u8_max_pinned() {
 // `dispatch_primitive_method` because UInt8 (and its aliases U8/u8/I8/i8/
 // UInt16/U16/u16/Int16/I16/i16/I32/i32/U64/u64/Int64/I64/i64/UInt128/U128/
 // u128/Int128/I128/i128/USize/UIntSize/Usize/usize/ISize/IntSize/Isize/
-// isize) was missing from the allowlist.  The gate returned `Ok(None)`
+// isize) was missing from the allowlist.  The gate returned `Result.Ok(Maybe.None)`
 // before the width-prefix normaliser at the same function could rewrite
 // `UInt8.<method>` to `byte$<method>`.
 //
@@ -168,7 +168,7 @@ fn regression_byte_alias_dispatch_through_normaliser_pinned() {
 // `<EnumType>.<Variant>.<method>()` shape) panicked at codegen with
 // `undefined variable: <EnumType>` because `try_flatten_module_path`
 // at `crates/verum_vbc/src/codegen/expressions.rs:15188` intentionally
-// returns `None` when the single-segment base is a known type name
+// returns `Maybe.None` when the single-segment base is a known type name
 // (`is_type_name(&ident.name)` gate).  The fallthrough then tried to
 // compile `<EnumType>` as a Value expression — which fails because
 // type names are not bindings.

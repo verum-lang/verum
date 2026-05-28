@@ -30,8 +30,8 @@ fn law_full_fsync_invalid_fd_always_err() {
     for fd in fds.iter() {
         let r = full_fsync(FileDesc(*fd));
         match r {
-            Ok(()) => panic("full_fsync on invalid fd must NOT succeed"),
-            Err(_) => {}
+            Result.Ok(()) => panic("full_fsync on invalid fd must NOT succeed"),
+            Result.Err(_) => {}
         }
     }
 }
@@ -42,8 +42,8 @@ fn law_data_only_fsync_invalid_fd_always_err() {
     for fd in fds.iter() {
         let r = data_only_fsync(FileDesc(*fd));
         match r {
-            Ok(()) => panic("data_only_fsync on invalid fd must NOT succeed"),
-            Err(_) => {}
+            Result.Ok(()) => panic("data_only_fsync on invalid fd must NOT succeed"),
+            Result.Err(_) => {}
         }
     }
 }
@@ -56,12 +56,12 @@ fn law_full_and_data_fsync_agree_on_invalid_fd() {
     let a = full_fsync(bad);
     let b = data_only_fsync(bad);
     let a_is_err = match a {
-        Ok(()) => false,
-        Err(_) => true,
+        Result.Ok(()) => false,
+        Result.Err(_) => true,
     };
     let b_is_err = match b {
-        Ok(()) => false,
-        Err(_) => true,
+        Result.Ok(()) => false,
+        Result.Err(_) => true,
     };
     assert_eq(a_is_err, b_is_err);
 }

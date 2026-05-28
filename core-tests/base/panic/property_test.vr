@@ -86,27 +86,27 @@ fn law_assert_ne_passes_on_inequality() {
 
 @test
 fn law_assert_some_returns_inner_value() {
-    let v: Int = assert_some(Some(42));
+    let v: Int = assert_some(Maybe.Some(42));
     assert_eq(v, 42);
 }
 
 @test
 fn law_assert_some_panics_on_none() {
     assert_panics(|| {
-        let _: Int = assert_some(None);
+        let _: Int = assert_some(Maybe.None);
     });
 }
 
 @test
 fn law_assert_none_passes_on_none() {
-    let m: Maybe<Int> = None;
+    let m: Maybe<Int> = Maybe.None;
     assert_none(m);                          // must not panic
 }
 
 @test
 fn law_assert_none_panics_on_some() {
     assert_panics(|| {
-        let m: Maybe<Int> = Some(1);
+        let m: Maybe<Int> = Maybe.Some(1);
         assert_none(m);
     });
 }
@@ -117,7 +117,7 @@ fn law_assert_none_panics_on_some() {
 
 @test
 fn law_assert_ok_returns_inner_value() {
-    let r: Result<Int, Text> = Ok(7);
+    let r: Result<Int, Text> = Result.Ok(7);
     let v = assert_ok(r);
     assert_eq(v, 7);
 }
@@ -125,14 +125,14 @@ fn law_assert_ok_returns_inner_value() {
 @test
 fn law_assert_ok_panics_on_err() {
     assert_panics(|| {
-        let r: Result<Int, Text> = Err("x");
+        let r: Result<Int, Text> = Result.Err("x");
         let _ = assert_ok(r);
     });
 }
 
 @test
 fn law_assert_err_returns_inner_error() {
-    let r: Result<Int, Text> = Err("boom");
+    let r: Result<Int, Text> = Result.Err("boom");
     let e = assert_err(r);
     assert_eq(e, "boom");
 }
@@ -140,7 +140,7 @@ fn law_assert_err_returns_inner_error() {
 @test
 fn law_assert_err_panics_on_ok() {
     assert_panics(|| {
-        let r: Result<Int, Text> = Ok(1);
+        let r: Result<Int, Text> = Result.Ok(1);
         let _ = assert_err(r);
     });
 }

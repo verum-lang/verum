@@ -59,8 +59,8 @@ fn integration_crt2_two_system() {
     // solution: x ≡ 8 (mod 15)
     let r = crt2(&bi(2), &bi(3), &bi(3), &bi(5));
     match r {
-        Ok(x) => assert_eq(x.to_text(), "8"),
-        Err(_) => panic("crt2 must succeed for coprime moduli"),
+        Result.Ok(x) => assert_eq(x.to_text(), "8"),
+        Result.Err(_) => panic("crt2 must succeed for coprime moduli"),
     };
 }
 
@@ -71,8 +71,8 @@ fn integration_crt_three_system() {
     let residues: List<BigInt> = [bi(2), bi(3), bi(2)];
     let moduli: List<BigInt> = [bi(3), bi(5), bi(7)];
     match crt(&residues, &moduli) {
-        Ok(x) => assert_eq(x.to_text(), "23"),
-        Err(_) => panic("crt must succeed for coprime moduli"),
+        Result.Ok(x) => assert_eq(x.to_text(), "23"),
+        Result.Err(_) => panic("crt must succeed for coprime moduli"),
     };
 }
 
@@ -113,8 +113,8 @@ fn integration_fermat_little_theorem_p7() {
     // a = 3, gcd(3, 7) = 1
     let a = bi(3);
     match mod_pow(&a, &p_minus_1, &p) {
-        Ok(r) => assert_eq(r.to_text(), "1"),
-        Err(_) => panic("mod_pow(3, 6, 7) must succeed"),
+        Result.Ok(r) => assert_eq(r.to_text(), "1"),
+        Result.Err(_) => panic("mod_pow(3, 6, 7) must succeed"),
     };
 }
 
@@ -124,8 +124,8 @@ fn integration_fermat_little_theorem_p11() {
     let p_minus_1 = p.sub(&bi(1));
     let a = bi(2);
     match mod_pow(&a, &p_minus_1, &p) {
-        Ok(r) => assert_eq(r.to_text(), "1"),
-        Err(_) => panic("mod_pow(2, 10, 11) must succeed"),
+        Result.Ok(r) => assert_eq(r.to_text(), "1"),
+        Result.Err(_) => panic("mod_pow(2, 10, 11) must succeed"),
     };
 }
 

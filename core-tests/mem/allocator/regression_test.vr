@@ -5,7 +5,7 @@
 // Pinned regressions for `core.mem.allocator` static-shape surface.
 //
 //   §A  align_up(0, a) = 0 for any a > 0 — pin the zero-base case.
-//   §B  size_class_index(LARGE_THRESHOLD + 1) returns None.
+//   §B  size_class_index(LARGE_THRESHOLD + 1) returns Maybe.None.
 //   §C  size_class_index round-trip is exact (no off-by-one).
 //   §D  SIZE_CLASS_COUNT = 11 (basic-tier mimalloc).
 // =============================================================================

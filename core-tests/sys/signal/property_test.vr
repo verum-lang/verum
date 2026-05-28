@@ -73,8 +73,8 @@ fn law_signal_from_raw_to_raw_round_trip_for_invariant_signals() {
     for s in invariant.iter() {
         let raw = (*s).to_raw();
         match Signal.from_raw(raw) {
-            Some(recovered) => assert(recovered.eq(s)),
-            None => assert(false),
+            Maybe.Some(recovered) => assert(recovered.eq(s)),
+            Maybe.None => assert(false),
         };
     }
 }

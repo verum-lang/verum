@@ -20,7 +20,7 @@ mount core.async.timer.{
 mount core.async.future.{ready, ReadyFuture};
 mount core.time.{Duration};
 mount core.time.instant.{Instant};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -53,24 +53,24 @@ fn integration_timer_delay_wraps_future() {
 fn integration_timer_timeout_error_inside_result_classification() {
     fn tag(r: Result<Int, TimeoutError>) -> Text {
         match r {
-            Ok(_) => "ok",
-            Err(_) => "timed_out",
+            Result.Ok(_) => "ok",
+            Result.Err(_) => "timed_out",
         }
     }
-    assert_eq(tag(Ok(42)), "ok");
-    assert_eq(tag(Err(TimeoutError {})), "timed_out");
+    assert_eq(tag(Result.Ok(42)), "ok");
+    assert_eq(tag(Result.Err(TimeoutError {})), "timed_out");
 }
 
 @test
 fn integration_timer_timeout_error_to_maybe() {
     fn to_maybe(r: Result<Int, TimeoutError>) -> Maybe<Int> {
         match r {
-            Ok(v) => Some(v),
-            Err(_) => None,
+            Result.Ok(v) => Maybe.Some(v),
+            Result.Err(_) => Maybe.None,
         }
     }
-    assert_eq(to_maybe(Ok(99)), Some(99));
-    let none = to_maybe(Err(TimeoutError {}));
+    assert_eq(to_maybe(Result.Ok(99)), Maybe.Some(99));
+    let none = to_maybe(Result.Err(TimeoutError {}));
     assert(none.is_none());
 }
 
@@ -81,7 +81,7 @@ fn integration_timer_timeout_error_to_maybe() {
 @test
 fn integration_timer_debounce_trigger_then_reset_round_trip() {
     let mut d = Debounce.new(Duration.from_secs(1));
-    // initial state: settled, deadline None
+    // initial state: settled, deadline Maybe.None
     assert(d.is_settled());
     assert(d.deadline.is_none());
 
@@ -89,7 +89,7 @@ fn integration_timer_debounce_trigger_then_reset_round_trip() {
     d.trigger();
     assert(d.deadline.is_some());
 
-    // reset: deadline back to None and settled true
+    // reset: deadline back to Maybe.None and settled true
     d.reset();
     assert(d.deadline.is_none());
     assert(d.is_settled());
@@ -106,7 +106,7 @@ fn integration_timer_throttle_full_state_walk() {
     // Second try within the window: refused.
     assert(!t.try_acquire());
 
-    // Reset clears last_allowed back to None.
+    // Reset clears last_allowed back to Maybe.None.
     t.reset();
     assert(t.last_allowed.is_none());
 

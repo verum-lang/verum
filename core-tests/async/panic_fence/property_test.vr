@@ -5,8 +5,8 @@
 // Property tests for `core.async.panic_fence`.
 //
 //   §A — panic_safe(ready(v)) is *non-destructive* over payloads:
-//        the value observed at Poll.Ready(Ok(v)) equals v.
-//   §B — record-literal construction of PanicFence with Some/None
+//        the value observed at Poll.Ready(Result.Ok(v)) equals v.
+//   §B — record-literal construction of PanicFence with Some/Maybe.None
 //        is the identity on the inner Maybe (round-trip).
 // =============================================================================
 
@@ -14,7 +14,7 @@ mount core.async.panic_fence.{PanicFence, panic_safe};
 mount core.async.future.{ready, ReadyFuture};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context, noop_waker};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -29,8 +29,8 @@ fn property_panic_fence_int_payload_round_trip() {
         let waker = noop_waker();
         let mut cx = Context.from_waker(&waker);
         match fence.poll(&mut cx) {
-            Poll.Ready(Ok(x)) => assert_eq(x, *v),
-            Poll.Ready(Err(_)) => assert(false),
+            Poll.Ready(Result.Ok(x)) => assert_eq(x, *v),
+            Poll.Ready(Result.Err(_)) => assert(false),
             Poll.Pending => assert(false),
         }
     }
@@ -44,8 +44,8 @@ fn property_panic_fence_text_payload_round_trip() {
         let waker = noop_waker();
         let mut cx = Context.from_waker(&waker);
         match fence.poll(&mut cx) {
-            Poll.Ready(Ok(x)) => assert_eq(x, *v),
-            Poll.Ready(Err(_)) => assert(false),
+            Poll.Ready(Result.Ok(x)) => assert_eq(x, *v),
+            Poll.Ready(Result.Err(_)) => assert(false),
             Poll.Pending => assert(false),
         }
     }
@@ -57,13 +57,13 @@ fn property_panic_fence_text_payload_round_trip() {
 
 @test
 fn property_panic_fence_record_literal_with_some_inner_round_trip() {
-    let f: PanicFence<ReadyFuture<Int>> = PanicFence { inner: Some(ready(42)) };
+    let f: PanicFence<ReadyFuture<Int>> = PanicFence { inner: Maybe.Some(ready(42)) };
     assert(f.inner.is_some());
 }
 
 @test
 fn property_panic_fence_record_literal_with_none_inner_round_trip() {
-    let f: PanicFence<ReadyFuture<Int>> = PanicFence { inner: None };
+    let f: PanicFence<ReadyFuture<Int>> = PanicFence { inner: Maybe.None };
     assert(f.inner.is_none());
 }
 

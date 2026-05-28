@@ -17,7 +17,7 @@ mount core.net.http_parser.{
     HttpParseError, ParseProgress, HeaderView, HttpParser,
     ChunkedDecoder, ChunkProgress
 };
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: HttpParseError — variant construction + Eq
@@ -166,7 +166,7 @@ fn test_parse_progress_need_more_construction() {
 fn test_parse_progress_done_with_body_len() {
     let p = ParseProgress.Done {
         consumed: 256,
-        body_len: Some(1024),
+        body_len: Maybe.Some(1024),
         body_start: 256,
     };
     assert(p is ParseProgress.Done);
@@ -176,7 +176,7 @@ fn test_parse_progress_done_with_body_len() {
 fn test_parse_progress_done_chunked_no_body_len() {
     let p = ParseProgress.Done {
         consumed: 256,
-        body_len: None,
+        body_len: Maybe.None,
         body_start: 256,
     };
     assert(p is ParseProgress.Done);
@@ -191,7 +191,7 @@ fn test_parse_progress_error_wraps_parse_error() {
 @test
 fn test_parse_progress_disjoint_need_more_vs_done() {
     let a: ParseProgress = ParseProgress.NeedMore;
-    let b = ParseProgress.Done { consumed: 0, body_len: None, body_start: 0 };
+    let b = ParseProgress.Done { consumed: 0, body_len: Maybe.None, body_start: 0 };
     assert(a is ParseProgress.NeedMore);
     assert(b is ParseProgress.Done);
     assert(!(a is ParseProgress.Done));
@@ -236,8 +236,8 @@ fn test_http_parser_request_factory() {
     let p = HttpParser.request();
     // Initial state — no method yet
     match p.method() {
-        Some(_) => panic("fresh parser should have no method"),
-        None => assert(true),
+        Maybe.Some(_) => panic("fresh parser should have no method"),
+        Maybe.None => assert(true),
     }
 }
 
@@ -246,8 +246,8 @@ fn test_http_parser_response_factory() {
     let p = HttpParser.response();
     // Initial state — no status yet
     match p.status() {
-        Some(_) => panic("fresh parser should have no status"),
-        None => assert(true),
+        Maybe.Some(_) => panic("fresh parser should have no status"),
+        Maybe.None => assert(true),
     }
 }
 
@@ -255,8 +255,8 @@ fn test_http_parser_response_factory() {
 fn test_http_parser_initial_no_content_length() {
     let p = HttpParser.request();
     match p.content_length() {
-        Some(_) => panic("fresh parser should have no content_length"),
-        None => assert(true),
+        Maybe.Some(_) => panic("fresh parser should have no content_length"),
+        Maybe.None => assert(true),
     }
 }
 

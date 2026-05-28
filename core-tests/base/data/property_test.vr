@@ -207,7 +207,7 @@ fn test_nan_to_json_is_error_or_null() {
     let d = Data.Float(Float.NAN);
     // NaN is not representable in JSON — either errors or serialises as null
     let serialised = d.to_json();
-    assert(serialised.is_err() || serialised == Ok("null".to_text()),
+    assert(serialised.is_err() || serialised == Result.Ok("null".to_text()),
         "NaN must serialise as error or null, not a valid float");
 }
 
@@ -215,7 +215,7 @@ fn test_nan_to_json_is_error_or_null() {
 fn test_positive_inf_to_json_is_error_or_null() {
     let d = Data.Float(Float.INFINITY);
     let serialised = d.to_json();
-    assert(serialised.is_err() || serialised == Ok("null".to_text()),
+    assert(serialised.is_err() || serialised == Result.Ok("null".to_text()),
         "+Inf must serialise as error or null");
 }
 
@@ -223,7 +223,7 @@ fn test_positive_inf_to_json_is_error_or_null() {
 fn test_negative_inf_to_json_is_error_or_null() {
     let d = Data.Float(Float.NEG_INFINITY);
     let serialised = d.to_json();
-    assert(serialised.is_err() || serialised == Ok("null".to_text()),
+    assert(serialised.is_err() || serialised == Result.Ok("null".to_text()),
         "-Inf must serialise as error or null");
 }
 

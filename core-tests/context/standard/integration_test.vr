@@ -7,7 +7,7 @@
 
 mount core.context.standard.{ContextLogLevel, AuthUser, Row, QueryResult};
 mount core.collections.list.List;
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: ContextLogLevel inside List
@@ -50,23 +50,23 @@ fn integration_log_level_in_list_severity_iteration() {
 
 @test
 fn integration_log_level_some_unwrap() {
-    let m: Maybe<ContextLogLevel> = Some(ContextLogLevel.Warn);
+    let m: Maybe<ContextLogLevel> = Maybe.Some(ContextLogLevel.Warn);
     match m {
-        Some(l) => {
+        Maybe.Some(l) => {
             assert(l is ContextLogLevel.Warn);
             assert_eq(l.severity(), 3);
         },
-        None => panic("expected Some"),
+        Maybe.None => panic("expected Some"),
     }
 }
 
 @test
 fn integration_log_level_none_default_to_info() {
     // Common pattern: get level from config or default to Info.
-    let configured: Maybe<ContextLogLevel> = None;
+    let configured: Maybe<ContextLogLevel> = Maybe.None;
     let actual = match configured {
-        Some(l) => l,
-        None => ContextLogLevel.Info,
+        Maybe.Some(l) => l,
+        Maybe.None => ContextLogLevel.Info,
     };
     assert(actual is ContextLogLevel.Info);
 }
@@ -107,11 +107,11 @@ fn integration_auth_user_role_check_decides_action() {
 fn integration_query_result_with_multiple_rows() {
     let r1 = Row {
         columns: ["id".clone(), "name".clone()],
-        values: [Some("1".clone()), Some("alice".clone())],
+        values: [Maybe.Some("1".clone()), Maybe.Some("alice".clone())],
     };
     let r2 = Row {
         columns: ["id".clone(), "name".clone()],
-        values: [Some("2".clone()), Some("bob".clone())],
+        values: [Maybe.Some("2".clone()), Maybe.Some("bob".clone())],
     };
     let qr = QueryResult {
         rows: [r1, r2],

@@ -4,7 +4,7 @@
 
 
 mount core.base.primitives.*;
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
@@ -23,33 +23,33 @@ mount core.base.result.{Result, Ok, Err};
 // =============================================================================
 
 fn get_result_ok() -> Result<Int, Text> {
-    Ok(42)
+    Result.Ok(42)
 }
 
 fn get_result_err() -> Result<Int, Text> {
-    Err("error")
+    Result.Err("error")
 }
 
 fn use_question_mark_result() -> Result<Int, Text> {
     let x = get_result_ok()?;
-    Ok(x + 1)
+    Result.Ok(x + 1)
 }
 
 fn propagate_error_result() -> Result<Int, Text> {
     let x = get_result_err()?;
-    Ok(x + 1)
+    Result.Ok(x + 1)
 }
 
 @test
 fn test_question_mark_basic_result() {
     match use_question_mark_result() {
-        Ok(v) => assert_eq(v, 43),
-        Err(_) => assert(false),
+        Result.Ok(v) => assert_eq(v, 43),
+        Result.Err(_) => assert(false),
     }
 
     match propagate_error_result() {
-        Ok(_) => assert(false),
-        Err(e) => assert_eq(e, "error"),
+        Result.Ok(_) => assert(false),
+        Result.Err(e) => assert_eq(e, "error"),
     }
 }
 
@@ -58,53 +58,53 @@ fn test_question_mark_basic_result() {
 // =============================================================================
 
 fn get_maybe_some() -> Maybe<Int> {
-    Some(100)
+    Maybe.Some(100)
 }
 
 fn get_maybe_none() -> Maybe<Int> {
-    None
+    Maybe.None
 }
 
 fn use_question_mark_maybe() -> Maybe<Int> {
     let x = get_maybe_some()?;
-    Some(x + 1)
+    Maybe.Some(x + 1)
 }
 
 fn propagate_none_maybe() -> Maybe<Int> {
     let x = get_maybe_none()?;
-    Some(x + 1)
+    Maybe.Some(x + 1)
 }
 
 @test
 fn test_question_mark_basic_maybe() {
     match use_question_mark_maybe() {
-        Some(v) => assert_eq(v, 101),
-        None => assert(false),
+        Maybe.Some(v) => assert_eq(v, 101),
+        Maybe.None => assert(false),
     }
 
-    assert(propagate_none_maybe() is None);
+    assert(propagate_none_maybe() is Maybe.None);
 }
 
 // =============================================================================
 // Section 3: Chained ? Operators
 // =============================================================================
 
-fn step1() -> Result<Int, Text> { Ok(10) }
-fn step2(x: Int) -> Result<Int, Text> { Ok(x * 2) }
-fn step3(x: Int) -> Result<Int, Text> { Ok(x + 5) }
+fn step1() -> Result<Int, Text> { Result.Ok(10) }
+fn step2(x: Int) -> Result<Int, Text> { Result.Ok(x * 2) }
+fn step3(x: Int) -> Result<Int, Text> { Result.Ok(x + 5) }
 
 fn chained_result() -> Result<Int, Text> {
     let a = step1()?;
     let b = step2(a)?;
     let c = step3(b)?;
-    Ok(c)
+    Result.Ok(c)
 }
 
 @test
 fn test_chained_question_marks() {
     match chained_result() {
-        Ok(v) => assert_eq(v, 25), // 10 * 2 + 5 = 25
-        Err(_) => assert(false),
+        Result.Ok(v) => assert_eq(v, 25), // 10 * 2 + 5 = 25
+        Result.Err(_) => assert(false),
     }
 }
 
@@ -112,19 +112,19 @@ fn test_chained_question_marks() {
 // Section 4: ? Operator in Expressions
 // =============================================================================
 
-fn get_a() -> Result<Int, Text> { Ok(10) }
-fn get_b() -> Result<Int, Text> { Ok(5) }
+fn get_a() -> Result<Int, Text> { Result.Ok(10) }
+fn get_b() -> Result<Int, Text> { Result.Ok(5) }
 
 fn question_in_expr() -> Result<Int, Text> {
     let result = get_a()? + get_b()?;
-    Ok(result)
+    Result.Ok(result)
 }
 
 @test
 fn test_question_in_expression() {
     match question_in_expr() {
-        Ok(v) => assert_eq(v, 15),
-        Err(_) => assert(false),
+        Result.Ok(v) => assert_eq(v, 15),
+        Result.Err(_) => assert(false),
     }
 }
 
@@ -133,20 +133,20 @@ fn test_question_in_expression() {
 // =============================================================================
 
 fn parse_int(s: &Text) -> Maybe<Int> {
-    // Simulated parsing - return Some for valid, None for invalid
+    // Simulated parsing - return Some for valid, Maybe.None for invalid
     if *s == "42" {
-        Some(42)
+        Maybe.Some(42)
     } else if *s == "100" {
-        Some(100)
+        Maybe.Some(100)
     } else {
-        None
+        Maybe.None
     }
 }
 
 fn sum_parsed(s1: &Text, s2: &Text) -> Maybe<Int> {
     let a = parse_int(s1)?;
     let b = parse_int(s2)?;
-    Some(a + b)
+    Maybe.Some(a + b)
 }
 
 @test
@@ -155,12 +155,12 @@ fn test_question_with_methods() {
     let s2: Text = "100";
 
     match sum_parsed(&s1, &s2) {
-        Some(v) => assert_eq(v, 142),
-        None => assert(false),
+        Maybe.Some(v) => assert_eq(v, 142),
+        Maybe.None => assert(false),
     }
 
     let bad: Text = "invalid";
-    assert(sum_parsed(&s1, &bad) is None);
+    assert(sum_parsed(&s1, &bad) is Maybe.None);
 }
 
 // =============================================================================
@@ -175,14 +175,14 @@ fn infer_through_question() -> Result<Int, Text> {
     let y = step2(x)?;  // y should be inferred as Int
     assert_eq(y, 20);
 
-    Ok(y)
+    Result.Ok(y)
 }
 
 @test
 fn test_type_inference_through_question() {
     match infer_through_question() {
-        Ok(v) => assert_eq(v, 20),
-        Err(_) => assert(false),
+        Result.Ok(v) => assert_eq(v, 20),
+        Result.Err(_) => assert(false),
     }
 }
 
@@ -196,14 +196,14 @@ fn multi_step() -> Result<Int, Text> {
     let b = step2(a)?; // Result<Int, Text>
     let c = step3(b)?; // Result<Int, Text>
     // All error types are Text, so this should work
-    Ok(c)
+    Result.Ok(c)
 }
 
 @test
 fn test_error_type_unification() {
     match multi_step() {
-        Ok(v) => assert_eq(v, 25),
-        Err(_) => assert(false),
+        Result.Ok(v) => assert_eq(v, 25),
+        Result.Err(_) => assert(false),
     }
 }
 
@@ -212,20 +212,20 @@ fn test_error_type_unification() {
 // =============================================================================
 
 fn get_nested_result() -> Result<Result<Int, Text>, Text> {
-    Ok(Ok(42))
+    Result.Ok(Result.Ok(42))
 }
 
 fn use_nested() -> Result<Int, Text> {
     let inner = get_nested_result()?;  // unwraps outer Result
     let value = inner?;                 // unwraps inner Result
-    Ok(value)
+    Result.Ok(value)
 }
 
 @test
 fn test_nested_question_operator() {
     match use_nested() {
-        Ok(v) => assert_eq(v, 42),
-        Err(_) => assert(false),
+        Result.Ok(v) => assert_eq(v, 42),
+        Result.Err(_) => assert(false),
     }
 }
 
@@ -238,52 +238,52 @@ fn test_question_in_closure() {
     // Closure that uses ? operator should work
     let process_value = |r: Result<Int, Text>| -> Result<Int, Text> {
         let v = r?;
-        Ok(v * 2)
+        Result.Ok(v * 2)
     };
 
-    match process_value(Ok(21)) {
-        Ok(v) => assert_eq(v, 42),
-        Err(_) => assert(false),
+    match process_value(Result.Ok(21)) {
+        Result.Ok(v) => assert_eq(v, 42),
+        Result.Err(_) => assert(false),
     }
 
-    match process_value(Err("error")) {
-        Ok(_) => assert(false),
-        Err(e) => assert_eq(e, "error"),
+    match process_value(Result.Err("error")) {
+        Result.Ok(_) => assert(false),
+        Result.Err(e) => assert_eq(e, "error"),
     }
 }
 
 // =============================================================================
 // Section 10: Try Block with ? (Explicit Ok wrapping)
 // =============================================================================
-// NOTE: try blocks require explicit Ok() wrapping currently
+// NOTE: try blocks require explicit Result.Ok() wrapping currently
 
 @test
 fn test_try_block_with_question() {
     let result: Result<Int, Text> = try {
         let a = step1()?;
         let b = step2(a)?;
-        Ok(b)  // Explicit Ok wrapping
+        Result.Ok(b)  // Explicit Ok wrapping
     };
 
     match result {
-        Ok(v) => assert_eq(v, 20),
-        Err(_) => assert(false),
+        Result.Ok(v) => assert_eq(v, 20),
+        Result.Err(_) => assert(false),
     }
 }
 
 @test
 fn test_try_block_error_propagation() {
-    fn failing() -> Result<Int, Text> { Err("fail") }
+    fn failing() -> Result<Int, Text> { Result.Err("fail") }
 
     let result: Result<Int, Text> = try {
         let a = step1()?;
         let _ = failing()?;  // This should propagate the error
-        Ok(a)
+        Result.Ok(a)
     };
 
     match result {
-        Ok(_) => assert(false),
-        Err(e) => assert_eq(e, "fail"),
+        Result.Ok(_) => assert(false),
+        Result.Err(e) => assert_eq(e, "fail"),
     }
 }
 
@@ -293,21 +293,21 @@ fn test_try_block_error_propagation() {
 
 fn early_return_on_error(should_fail: Bool) -> Result<Int, Text> {
     if should_fail {
-        let _: Int = Err("early fail")?;  // Early return
+        let _: Int = Result.Err("early fail")?;  // Early return
     }
-    Ok(42)
+    Result.Ok(42)
 }
 
 @test
 fn test_early_return_pattern() {
     match early_return_on_error(false) {
-        Ok(v) => assert_eq(v, 42),
-        Err(_) => assert(false),
+        Result.Ok(v) => assert_eq(v, 42),
+        Result.Err(_) => assert(false),
     }
 
     match early_return_on_error(true) {
-        Ok(_) => assert(false),
-        Err(e) => assert_eq(e, "early fail"),
+        Result.Ok(_) => assert(false),
+        Result.Err(e) => assert_eq(e, "early fail"),
     }
 }
 
@@ -319,14 +319,14 @@ fn double(x: Int) -> Int { x * 2 }
 
 fn use_in_function_arg() -> Result<Int, Text> {
     let result = double(step1()?);  // ? used in function argument
-    Ok(result)
+    Result.Ok(result)
 }
 
 @test
 fn test_question_in_function_arg() {
     match use_in_function_arg() {
-        Ok(v) => assert_eq(v, 20),
-        Err(_) => assert(false),
+        Result.Ok(v) => assert_eq(v, 20),
+        Result.Err(_) => assert(false),
     }
 }
 

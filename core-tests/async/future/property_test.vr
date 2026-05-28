@@ -11,7 +11,7 @@
 // =============================================================================
 
 mount core.async.future.{SelectResult};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section A: SelectResult variant-identity partition

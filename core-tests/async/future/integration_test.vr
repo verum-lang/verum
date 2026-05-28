@@ -9,7 +9,7 @@
 // =============================================================================
 
 mount core.async.future.{SelectResult};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section A: SelectResult interop with Maybe
@@ -23,40 +23,40 @@ mount core.base.maybe.{Maybe, Some, None};
 fn integration_future_select_result_to_maybe_left_left() {
     let r: SelectResult<Int, Text> = SelectResult.Left(7);
     let m: Maybe<Int> = match r {
-        SelectResult.Left(v) => Some(v),
-        SelectResult.Right(_) => None,
+        SelectResult.Left(v) => Maybe.Some(v),
+        SelectResult.Right(_) => Maybe.None,
     };
-    assert_eq(m, Some(7));
+    assert_eq(m, Maybe.Some(7));
 }
 
 @test
 fn integration_future_select_result_to_maybe_left_right() {
     let r: SelectResult<Int, Text> = SelectResult.Right("won");
     let m: Maybe<Int> = match r {
-        SelectResult.Left(v) => Some(v),
-        SelectResult.Right(_) => None,
+        SelectResult.Left(v) => Maybe.Some(v),
+        SelectResult.Right(_) => Maybe.None,
     };
-    assert_eq(m, None);
+    assert_eq(m, Maybe.None);
 }
 
 @test
 fn integration_future_select_result_to_maybe_right_right() {
     let r: SelectResult<Text, Int> = SelectResult.Right(99);
     let m: Maybe<Int> = match r {
-        SelectResult.Left(_) => None,
-        SelectResult.Right(v) => Some(v),
+        SelectResult.Left(_) => Maybe.None,
+        SelectResult.Right(v) => Maybe.Some(v),
     };
-    assert_eq(m, Some(99));
+    assert_eq(m, Maybe.Some(99));
 }
 
 @test
 fn integration_future_select_result_to_maybe_right_left() {
     let r: SelectResult<Text, Int> = SelectResult.Left("first");
     let m: Maybe<Int> = match r {
-        SelectResult.Left(_) => None,
-        SelectResult.Right(v) => Some(v),
+        SelectResult.Left(_) => Maybe.None,
+        SelectResult.Right(v) => Maybe.Some(v),
     };
-    assert_eq(m, None);
+    assert_eq(m, Maybe.None);
 }
 
 // =============================================================================

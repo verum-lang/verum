@@ -83,32 +83,32 @@ fn integration_cfd_collection_of_standard_descriptors() {
 @test
 fn integration_cssize_read_return_value_funnel() {
     // The POSIX read(2) result is CSSize: >= 0 on success (bytes
-    // read), -1 on failure. Funnel through Maybe<USize>: Some(n) on
-    // success, None on error.
+    // read), -1 on failure. Funnel through Maybe<USize>: Maybe.Some(n) on
+    // success, Maybe.None on error.
     fn read_funnel(rv: CSSize) -> Maybe<USize> {
         if rv.0 < 0 {
-            None
+            Maybe.None
         } else {
-            Some(rv.0 as USize)
+            Maybe.Some(rv.0 as USize)
         }
     }
     // Success: 1024 bytes read.
     let ok = read_funnel(CSSize(1024));
     match ok {
-        Some(n) => assert_eq(n, 1024 as USize),
-        None    => assert(false),
+        Maybe.Some(n) => assert_eq(n, 1024 as USize),
+        Maybe.None    => assert(false),
     };
     // Error: -1 sentinel.
     let err = read_funnel(CSSize(-1));
     match err {
-        Some(_) => assert(false),
-        None    => assert(true),
+        Maybe.Some(_) => assert(false),
+        Maybe.None    => assert(true),
     };
     // Edge: zero bytes (EOF).
     let eof = read_funnel(CSSize(0));
     match eof {
-        Some(n) => assert_eq(n, 0 as USize),
-        None    => assert(false),
+        Maybe.Some(n) => assert_eq(n, 0 as USize),
+        Maybe.None    => assert(false),
     };
 }
 

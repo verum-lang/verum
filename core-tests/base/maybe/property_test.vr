@@ -7,7 +7,7 @@
 //   - functor laws (identity, composition)
 //   - monad laws (left/right identity, associativity)
 //   - Eq is an equivalence relation
-//   - Ord is a total order with `None < Some`
+//   - Ord is a total order with `Maybe.None < Some`
 //   - combinators (and/or/xor/zip) form their respective algebras
 //
 // Tests are mostly @test using example witnesses (Maybe<Int> domain),
@@ -26,21 +26,21 @@ mount core.collections.list.List;
 
 @test
 fn law_functor_identity_on_some() {
-    let m: Maybe<Int> = Some(42);
+    let m: Maybe<Int> = Maybe.Some(42);
     let mapped = m.map(|x| x);
     assert_eq(mapped, m);
 }
 
 @test
 fn law_functor_identity_on_none() {
-    let m: Maybe<Int> = None;
+    let m: Maybe<Int> = Maybe.None;
     let mapped = m.map(|x| x);
     assert_eq(mapped, m);
 }
 
 @test
 fn law_functor_composition_on_some() {
-    let m: Maybe<Int> = Some(10);
+    let m: Maybe<Int> = Maybe.Some(10);
     let lhs = m.map(|x| x + 1).map(|x| x * 2);
     let rhs = m.map(|x| (x + 1) * 2);
     assert_eq(lhs, rhs);
@@ -49,7 +49,7 @@ fn law_functor_composition_on_some() {
 
 @test
 fn law_functor_composition_on_none() {
-    let m: Maybe<Int> = None;
+    let m: Maybe<Int> = Maybe.None;
     let lhs = m.map(|x| x + 1).map(|x| x * 2);
     let rhs = m.map(|x| (x + 1) * 2);
     assert_eq(lhs, rhs);
@@ -59,39 +59,39 @@ fn law_functor_composition_on_none() {
 // =============================================================================
 // §B  Monad laws on Maybe.and_then (the `bind` operation).
 //
-//   left identity:   Some(x).and_then(f) == f(x)
+//   left identity:   Maybe.Some(x).and_then(f) == f(x)
 //   right identity:  m.and_then(Some)    == m   (η is the constructor)
 //   associativity:   m.and_then(f).and_then(g) == m.and_then(|x| f(x).and_then(g))
 // =============================================================================
 
 @test
 fn law_monad_left_identity() {
-    fn f(n: Int) -> Maybe<Int> { Some(n * 2) }
-    let lhs = Some(5).and_then(f);
+    fn f(n: Int) -> Maybe<Int> { Maybe.Some(n * 2) }
+    let lhs = Maybe.Some(5).and_then(f);
     let rhs = f(5);
     assert_eq(lhs, rhs);
 }
 
 @test
 fn law_monad_right_identity_on_some() {
-    let m: Maybe<Int> = Some(7);
+    let m: Maybe<Int> = Maybe.Some(7);
     let bound = m.and_then(Some);
     assert_eq(m, bound);
 }
 
 @test
 fn law_monad_right_identity_on_none() {
-    let m: Maybe<Int> = None;
+    let m: Maybe<Int> = Maybe.None;
     let bound = m.and_then(Some);
     assert_eq(m, bound);
 }
 
 @test
 fn law_monad_associativity() {
-    fn f(n: Int) -> Maybe<Int> { Some(n + 1) }
-    fn g(n: Int) -> Maybe<Int> { Some(n * 3) }
+    fn f(n: Int) -> Maybe<Int> { Maybe.Some(n + 1) }
+    fn g(n: Int) -> Maybe<Int> { Maybe.Some(n * 3) }
 
-    let m: Maybe<Int> = Some(2);
+    let m: Maybe<Int> = Maybe.Some(2);
     let lhs = m.and_then(f).and_then(g);
     let rhs = m.and_then(|x| f(x).and_then(g));
     assert_eq(lhs, rhs);
@@ -104,7 +104,7 @@ fn law_monad_associativity() {
 
 @test
 fn law_eq_reflexive_on_maybe() {
-    let cases: List<Maybe<Int>> = [None, Some(0), Some(1), Some(-42)];
+    let cases: List<Maybe<Int>> = [Maybe.None, Maybe.Some(0), Maybe.Some(1), Maybe.Some(-42)];
     for m in cases.iter() {
         assert_eq(*m, *m);
     }
@@ -113,10 +113,10 @@ fn law_eq_reflexive_on_maybe() {
 @test
 fn law_eq_symmetric_on_maybe() {
     let pairs: List<(Maybe<Int>, Maybe<Int>)> = [
-        (None, None),
-        (Some(1), Some(1)),
-        (None, Some(1)),
-        (Some(1), Some(2)),
+        (Maybe.None, Maybe.None),
+        (Maybe.Some(1), Maybe.Some(1)),
+        (Maybe.None, Maybe.Some(1)),
+        (Maybe.Some(1), Maybe.Some(2)),
     ];
     for p in pairs.iter() {
         let (a, b) = *p;
@@ -127,9 +127,9 @@ fn law_eq_symmetric_on_maybe() {
 @test
 fn law_eq_transitive_on_maybe() {
     let triples: List<(Maybe<Int>, Maybe<Int>, Maybe<Int>)> = [
-        (None, None, None),
-        (Some(7), Some(7), Some(7)),
-        (None, Some(1), Some(1)),
+        (Maybe.None, Maybe.None, Maybe.None),
+        (Maybe.Some(7), Maybe.Some(7), Maybe.Some(7)),
+        (Maybe.None, Maybe.Some(1), Maybe.Some(1)),
     ];
     for t in triples.iter() {
         let (a, b, c) = *t;
@@ -138,15 +138,15 @@ fn law_eq_transitive_on_maybe() {
 }
 
 // =============================================================================
-// §D  Ord total-order axioms with `None < Some(_)`.
+// §D  Ord total-order axioms with `Maybe.None < Maybe.Some(_)`.
 // =============================================================================
 
 @test
 fn law_ord_none_less_than_any_some() {
     let cases: List<Int> = [Int.MIN, -1, 0, 1, Int.MAX];
-    let none: Maybe<Int> = None;
+    let none: Maybe<Int> = Maybe.None;
     for v in cases.iter() {
-        let some_v = Some(*v);
+        let some_v = Maybe.Some(*v);
         assert(none < some_v);
         assert(some_v > none);
     }
@@ -154,9 +154,9 @@ fn law_ord_none_less_than_any_some() {
 
 @test
 fn law_ord_some_compares_inner() {
-    assert(Some(1) < Some(2));
-    assert(Some(2) > Some(1));
-    assert(Some(5) == Some(5));
+    assert(Maybe.Some(1) < Maybe.Some(2));
+    assert(Maybe.Some(2) > Maybe.Some(1));
+    assert(Maybe.Some(5) == Maybe.Some(5));
 }
 
 // =============================================================================
@@ -165,57 +165,57 @@ fn law_ord_some_compares_inner() {
 
 @test
 fn law_and_short_circuits_on_left_none() {
-    // None.and(x) == None
-    let n: Maybe<Int> = None;
-    let s = Some(99);
+    // Maybe.None.and(x) == Maybe.None
+    let n: Maybe<Int> = Maybe.None;
+    let s = Maybe.Some(99);
     assert(n.and(s).is_none());
 }
 
 @test
 fn law_and_passes_right_when_left_some() {
     // Some.and(x) == x
-    let lhs: Maybe<Int> = Some(1);
-    assert_eq(lhs.and(Some(2)), Some(2));
-    let rhs_none: Maybe<Int> = None;
+    let lhs: Maybe<Int> = Maybe.Some(1);
+    assert_eq(lhs.and(Maybe.Some(2)), Maybe.Some(2));
+    let rhs_none: Maybe<Int> = Maybe.None;
     assert(lhs.and(rhs_none).is_none());
 }
 
 @test
 fn law_or_returns_left_if_some() {
     // Some.or(_) == Some
-    let lhs: Maybe<Int> = Some(1);
-    let rhs: Maybe<Int> = Some(2);
-    assert_eq(lhs.or(rhs), Some(1));
+    let lhs: Maybe<Int> = Maybe.Some(1);
+    let rhs: Maybe<Int> = Maybe.Some(2);
+    assert_eq(lhs.or(rhs), Maybe.Some(1));
 }
 
 @test
 fn law_or_returns_right_if_left_none() {
-    let lhs: Maybe<Int> = None;
-    let rhs: Maybe<Int> = Some(2);
-    assert_eq(lhs.or(rhs), Some(2));
+    let lhs: Maybe<Int> = Maybe.None;
+    let rhs: Maybe<Int> = Maybe.Some(2);
+    assert_eq(lhs.or(rhs), Maybe.Some(2));
 }
 
 @test
 fn law_xor_truth_table() {
-    let s1: Maybe<Int> = Some(1);
-    let s2: Maybe<Int> = Some(2);
-    let n: Maybe<Int> = None;
+    let s1: Maybe<Int> = Maybe.Some(1);
+    let s2: Maybe<Int> = Maybe.Some(2);
+    let n: Maybe<Int> = Maybe.None;
 
-    // Some.xor(Some) = None
+    // Some.xor(Some) = Maybe.None
     assert(s1.xor(s2).is_none());
-    // Some.xor(None) = Some
-    assert_eq(s1.xor(n), Some(1));
-    // None.xor(Some) = Some
-    assert_eq(n.xor(s2), Some(2));
-    // None.xor(None) = None
-    let n2: Maybe<Int> = None;
+    // Some.xor(Maybe.None) = Some
+    assert_eq(s1.xor(n), Maybe.Some(1));
+    // Maybe.None.xor(Some) = Some
+    assert_eq(n.xor(s2), Maybe.Some(2));
+    // Maybe.None.xor(Maybe.None) = Maybe.None
+    let n2: Maybe<Int> = Maybe.None;
     assert(n.xor(n2).is_none());
 }
 
 @test
 fn law_zip_some_some_pairs() {
-    let a: Maybe<Int> = Some(1);
-    let b: Maybe<Text> = Some("x");
+    let a: Maybe<Int> = Maybe.Some(1);
+    let b: Maybe<Text> = Maybe.Some("x");
     let z = a.zip(b);
     assert(z.is_some());
     let (ai, bs) = z.unwrap();
@@ -225,8 +225,8 @@ fn law_zip_some_some_pairs() {
 
 @test
 fn law_zip_with_none_left_is_none() {
-    let a: Maybe<Int> = None;
-    let b: Maybe<Int> = Some(2);
+    let a: Maybe<Int> = Maybe.None;
+    let b: Maybe<Int> = Maybe.Some(2);
     assert(a.zip(b).is_none());
 }
 
@@ -234,50 +234,50 @@ fn law_zip_with_none_left_is_none() {
 // §F  filter: idempotence + and-relation.
 //   m.filter(p).filter(p) == m.filter(p)
 //   m.filter(|_| true)    == m
-//   m.filter(|_| false) is None when m is Some, None when m is None
+//   m.filter(|_| false) is Maybe.None when m is Some, Maybe.None when m is Maybe.None
 // =============================================================================
 
 @test
 fn law_filter_idempotent() {
-    let m: Maybe<Int> = Some(42);
+    let m: Maybe<Int> = Maybe.Some(42);
     let p = |x: Int| -> Bool { x > 10 };
     assert_eq(m.filter(p).filter(p), m.filter(p));
 }
 
 @test
 fn law_filter_true_predicate_is_identity() {
-    let m: Maybe<Int> = Some(7);
+    let m: Maybe<Int> = Maybe.Some(7);
     assert_eq(m.filter(|_| true), m);
 }
 
 @test
 fn law_filter_false_predicate_drops_some() {
-    let m: Maybe<Int> = Some(7);
+    let m: Maybe<Int> = Maybe.Some(7);
     assert(m.filter(|_| false).is_none());
 }
 
 // =============================================================================
 // §G  flatten: collapses one level of nesting.
-//   Some(Some(x)).flatten() == Some(x)
-//   Some(None).flatten()    == None
-//   None.flatten()          == None
+//   Maybe.Some(Maybe.Some(x)).flatten() == Maybe.Some(x)
+//   Maybe.Some(Maybe.None).flatten()    == Maybe.None
+//   Maybe.None.flatten()          == Maybe.None
 // =============================================================================
 
 @test
 fn law_flatten_some_some() {
-    let nested: Maybe<Maybe<Int>> = Some(Some(42));
-    assert_eq(nested.flatten(), Some(42));
+    let nested: Maybe<Maybe<Int>> = Maybe.Some(Maybe.Some(42));
+    assert_eq(nested.flatten(), Maybe.Some(42));
 }
 
 @test
 fn law_flatten_some_none() {
-    let nested: Maybe<Maybe<Int>> = Some(None);
+    let nested: Maybe<Maybe<Int>> = Maybe.Some(Maybe.None);
     assert(nested.flatten().is_none());
 }
 
 @test
 fn law_flatten_none() {
-    let nested: Maybe<Maybe<Int>> = None;
+    let nested: Maybe<Maybe<Int>> = Maybe.None;
     assert(nested.flatten().is_none());
 }
 
@@ -287,27 +287,27 @@ fn law_flatten_none() {
 
 @property
 fn prop_some_then_unwrap_round_trip(n: Int) {
-    let m = Some(n);
+    let m = Maybe.Some(n);
     assert_eq(m.unwrap(), n);
 }
 
 @property
 fn prop_unwrap_or_default_on_none_returns_default(_marker: Int) {
-    let n: Maybe<Int> = None;
+    let n: Maybe<Int> = Maybe.None;
     assert_eq(n.unwrap_or_default(), 0);  // Int.default = 0
 }
 
 @property
 fn prop_map_preserves_some_count(n: Int) {
-    // For all n, Some(n).map(f).is_some() is always true.
-    let m: Maybe<Int> = Some(n);
+    // For all n, Maybe.Some(n).map(f).is_some() is always true.
+    let m: Maybe<Int> = Maybe.Some(n);
     assert(m.map(|x| x + 1).is_some());
 }
 
 @property
 fn prop_filter_predicate_consistency(n: Int) {
     // m.filter(p).is_some() implies p was true on the inner value.
-    let m: Maybe<Int> = Some(n);
+    let m: Maybe<Int> = Maybe.Some(n);
     let filtered = m.filter(|x| x > 0);
     if filtered.is_some() { assert(n > 0); }
 }
@@ -316,14 +316,14 @@ fn prop_filter_predicate_consistency(n: Int) {
 // §I  @test_case — variant truth table.
 // =============================================================================
 
-@test_case(Some(1), false)
-@test_case(None,    true)
+@test_case(Maybe.Some(1), false)
+@test_case(Maybe.None,    true)
 fn parametrised_is_none_truth_table(m: Maybe<Int>, expected_none: Bool) {
     assert_eq(m.is_none(), expected_none);
 }
 
-@test_case(Some(1), true)
-@test_case(None,    false)
+@test_case(Maybe.Some(1), true)
+@test_case(Maybe.None,    false)
 fn parametrised_is_some_truth_table(m: Maybe<Int>, expected_some: Bool) {
     assert_eq(m.is_some(), expected_some);
 }

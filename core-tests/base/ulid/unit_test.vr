@@ -146,11 +146,11 @@ fn test_error_invalid_length_payload() {
     let r = parse(&s);
     assert(r.is_err());
     match r {
-        Err(e) => match e {
+        Result.Err(e) => match e {
             UlidError.InvalidLength(n) => assert_eq(n, 3),
             UlidError.InvalidCharacter(_) => panic("expected InvalidLength"),
         },
-        Ok(_) => panic("expected Err"),
+        Result.Ok(_) => panic("expected Err"),
     }
 }
 
@@ -164,11 +164,11 @@ fn test_error_invalid_character_payload_is_offending_byte() {
     let r = parse(&s);
     assert(r.is_err());
     match r {
-        Err(e) => match e {
+        Result.Err(e) => match e {
             UlidError.InvalidCharacter(b) => assert_eq(b, 0x21_u8),   // '!'
             UlidError.InvalidLength(_) => panic("expected InvalidCharacter"),
         },
-        Ok(_) => panic("expected Err"),
+        Result.Ok(_) => panic("expected Err"),
     }
 }
 

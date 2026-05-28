@@ -233,7 +233,7 @@ fn test_use_after_free_error_record_construction() {
 //     `func_info.return_type_name` to `variable_type_names[__temp_r{dst}]`.
 //   * `compile_let` (statements.rs:285) — verify annotation-driven
 //     `variable_type_names[var]` is consulted by downstream
-//     `compile_field_access` for `resolve_field_index(Some(tn), ...)`.
+//     `compile_field_access` for `resolve_field_index(Maybe.Some(tn), ...)`.
 //   * `populate_types_from_archive` (mod.rs:4320) — verify the
 //     archive's TypeDescriptor `simple_name` is the bare type name
 //     and `type_field_layouts` is keyed accordingly.

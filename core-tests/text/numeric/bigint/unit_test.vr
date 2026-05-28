@@ -21,7 +21,7 @@ mount core.text.numeric.bigint.{
     BigInt, BigIntError, BIGINT_BASE, BIGINT_DIGITS_PER_CHUNK,
     parse_bigint,
 };
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 
@@ -253,8 +253,8 @@ fn test_div_rem_by_zero_returns_err() {
     let a = BigInt.from_int(10);
     let z = BigInt.zero();
     match a.div_rem(&z) {
-        Ok(_) => panic("div by zero must Err"),
-        Err(e) => assert(e is BigIntError.DivByZero),
+        Result.Ok(_) => panic("div by zero must Err"),
+        Result.Err(e) => assert(e is BigIntError.DivByZero),
     }
 }
 
@@ -263,11 +263,11 @@ fn test_div_rem_simple_exact() {
     let a = BigInt.from_int(10);
     let b = BigInt.from_int(2);
     match a.div_rem(&b) {
-        Ok(pair) => {
+        Result.Ok(pair) => {
             assert_eq(pair.0.digits[0], 5);
             assert(pair.1.is_zero());
         }
-        Err(_) => panic("10 / 2 = (5, 0)"),
+        Result.Err(_) => panic("10 / 2 = (5, 0)"),
     }
 }
 
@@ -276,11 +276,11 @@ fn test_div_rem_with_remainder() {
     let a = BigInt.from_int(7);
     let b = BigInt.from_int(3);
     match a.div_rem(&b) {
-        Ok(pair) => {
+        Result.Ok(pair) => {
             assert_eq(pair.0.digits[0], 2);
             assert_eq(pair.1.digits[0], 1);
         }
-        Err(_) => panic("7 / 3 = (2, 1)"),
+        Result.Err(_) => panic("7 / 3 = (2, 1)"),
     }
 }
 
@@ -291,43 +291,43 @@ fn test_div_rem_with_remainder() {
 @test
 fn test_parse_simple_int() {
     match parse_bigint(&"42") {
-        Ok(b) => assert_eq(b.digits[0], 42),
-        Err(_) => panic("'42' parses"),
+        Result.Ok(b) => assert_eq(b.digits[0], 42),
+        Result.Err(_) => panic("'42' parses"),
     }
 }
 
 @test
 fn test_parse_negative() {
     match parse_bigint(&"-7") {
-        Ok(b) => {
+        Result.Ok(b) => {
             assert(b.sign);
             assert_eq(b.digits[0], 7);
         }
-        Err(_) => panic("'-7' parses"),
+        Result.Err(_) => panic("'-7' parses"),
     }
 }
 
 @test
 fn test_parse_zero() {
     match parse_bigint(&"0") {
-        Ok(b) => assert(b.is_zero()),
-        Err(_) => panic("'0' parses"),
+        Result.Ok(b) => assert(b.is_zero()),
+        Result.Err(_) => panic("'0' parses"),
     }
 }
 
 @test
 fn test_parse_empty_returns_err() {
     match parse_bigint(&"") {
-        Ok(_) => panic("empty must Err"),
-        Err(e) => assert(e is BigIntError.ParseEmpty),
+        Result.Ok(_) => panic("empty must Err"),
+        Result.Err(e) => assert(e is BigIntError.ParseEmpty),
     }
 }
 
 @test
 fn test_parse_garbage_returns_err() {
     match parse_bigint(&"abc") {
-        Ok(_) => panic("garbage must Err"),
-        Err(_) => {},
+        Result.Ok(_) => panic("garbage must Err"),
+        Result.Err(_) => {},
     }
 }
 

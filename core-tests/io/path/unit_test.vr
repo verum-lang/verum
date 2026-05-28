@@ -6,7 +6,7 @@
 // =============================================================================
 
 mount core.io.path.{Path, PathBuf, Component, MAIN_SEPARATOR};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.collections.list.List;
 
 // =============================================================================
@@ -96,8 +96,8 @@ fn test_path_has_root_matches_is_absolute() {
 fn test_path_parent_typical() {
     let p = Path.new(&Text.from("/home/user/file.txt"));
     match p.parent() {
-        Some(parent) => assert_eq(parent.as_str(), &Text.from("/home/user")),
-        None => assert(false),
+        Maybe.Some(parent) => assert_eq(parent.as_str(), &Text.from("/home/user")),
+        Maybe.None => assert(false),
     }
 }
 
@@ -105,8 +105,8 @@ fn test_path_parent_typical() {
 fn test_path_parent_one_level() {
     let p = Path.new(&Text.from("/home/user"));
     match p.parent() {
-        Some(parent) => assert_eq(parent.as_str(), &Text.from("/home")),
-        None => assert(false),
+        Maybe.Some(parent) => assert_eq(parent.as_str(), &Text.from("/home")),
+        Maybe.None => assert(false),
     }
 }
 
@@ -136,8 +136,8 @@ fn test_path_parent_empty_is_none() {
 fn test_path_file_name_typical() {
     let p = Path.new(&Text.from("/home/user/file.txt"));
     match p.file_name() {
-        Some(name) => assert_eq(name, Text.from("file.txt")),
-        None => assert(false),
+        Maybe.Some(name) => assert_eq(name, Text.from("file.txt")),
+        Maybe.None => assert(false),
     }
 }
 
@@ -145,8 +145,8 @@ fn test_path_file_name_typical() {
 fn test_path_file_name_trailing_separator() {
     let p = Path.new(&Text.from("/home/user/"));
     match p.file_name() {
-        Some(name) => assert_eq(name, Text.from("user")),
-        None => assert(false),
+        Maybe.Some(name) => assert_eq(name, Text.from("user")),
+        Maybe.None => assert(false),
     }
 }
 
@@ -154,8 +154,8 @@ fn test_path_file_name_trailing_separator() {
 fn test_path_file_name_single_segment() {
     let p = Path.new(&Text.from("file.txt"));
     match p.file_name() {
-        Some(name) => assert_eq(name, Text.from("file.txt")),
-        None => assert(false),
+        Maybe.Some(name) => assert_eq(name, Text.from("file.txt")),
+        Maybe.None => assert(false),
     }
 }
 
@@ -179,8 +179,8 @@ fn test_path_file_name_only_separators_is_none() {
 fn test_path_file_stem_typical() {
     let p = Path.new(&Text.from("/home/user/file.txt"));
     match p.file_stem() {
-        Some(stem) => assert_eq(stem, Text.from("file")),
-        None => assert(false),
+        Maybe.Some(stem) => assert_eq(stem, Text.from("file")),
+        Maybe.None => assert(false),
     }
 }
 
@@ -188,8 +188,8 @@ fn test_path_file_stem_typical() {
 fn test_path_file_stem_no_extension() {
     let p = Path.new(&Text.from("/home/user/README"));
     match p.file_stem() {
-        Some(stem) => assert_eq(stem, Text.from("README")),
-        None => assert(false),
+        Maybe.Some(stem) => assert_eq(stem, Text.from("README")),
+        Maybe.None => assert(false),
     }
 }
 
@@ -198,8 +198,8 @@ fn test_path_file_stem_leading_dot_keeps_dot() {
     // ".hidden" is the stem (no extension recognised because dot is at idx 0)
     let p = Path.new(&Text.from("/home/.hidden"));
     match p.file_stem() {
-        Some(stem) => assert_eq(stem, Text.from(".hidden")),
-        None => assert(false),
+        Maybe.Some(stem) => assert_eq(stem, Text.from(".hidden")),
+        Maybe.None => assert(false),
     }
 }
 
@@ -208,8 +208,8 @@ fn test_path_file_stem_double_extension_keeps_first() {
     // "file.tar.gz" → stem = "file.tar", extension = "gz"
     let p = Path.new(&Text.from("/home/file.tar.gz"));
     match p.file_stem() {
-        Some(stem) => assert_eq(stem, Text.from("file.tar")),
-        None => assert(false),
+        Maybe.Some(stem) => assert_eq(stem, Text.from("file.tar")),
+        Maybe.None => assert(false),
     }
 }
 
@@ -221,8 +221,8 @@ fn test_path_file_stem_double_extension_keeps_first() {
 fn test_path_extension_typical() {
     let p = Path.new(&Text.from("/home/user/file.txt"));
     match p.extension() {
-        Some(ext) => assert_eq(ext, Text.from("txt")),
-        None => assert(false),
+        Maybe.Some(ext) => assert_eq(ext, Text.from("txt")),
+        Maybe.None => assert(false),
     }
 }
 
@@ -234,7 +234,7 @@ fn test_path_extension_no_dot_is_none() {
 
 @test
 fn test_path_extension_leading_dot_is_none() {
-    // ".hidden" → extension is None because dot is at position 0
+    // ".hidden" → extension is Maybe.None because dot is at position 0
     let p = Path.new(&Text.from("/home/.hidden"));
     assert(p.extension().is_none());
 }
@@ -244,8 +244,8 @@ fn test_path_extension_double_ext_returns_last() {
     // "file.tar.gz" → extension = "gz"
     let p = Path.new(&Text.from("/home/file.tar.gz"));
     match p.extension() {
-        Some(ext) => assert_eq(ext, Text.from("gz")),
-        None => assert(false),
+        Maybe.Some(ext) => assert_eq(ext, Text.from("gz")),
+        Maybe.None => assert(false),
     }
 }
 
@@ -289,8 +289,8 @@ fn test_path_strip_prefix_matches() {
     let p = Path.new(&Text.from("/home/user/file.txt"));
     let prefix = Path.new(&Text.from("/home"));
     match p.strip_prefix(&prefix) {
-        Some(rest) => assert_eq(rest.as_str(), &Text.from("user/file.txt")),
-        None => assert(false),
+        Maybe.Some(rest) => assert_eq(rest.as_str(), &Text.from("user/file.txt")),
+        Maybe.None => assert(false),
     }
 }
 

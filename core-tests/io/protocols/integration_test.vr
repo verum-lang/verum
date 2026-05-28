@@ -16,7 +16,7 @@
 // =============================================================================
 
 mount core.io.protocols.{StreamError, IoErrorKind, IoResult, SeekFrom};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
 
@@ -26,25 +26,25 @@ mount core.collections.list.List;
 
 @test
 fn integration_io_result_map_on_ok() {
-    let r: IoResult<Int> = Ok(10);
+    let r: IoResult<Int> = Result.Ok(10);
     let r2 = r.map(|x| x * 2);
     assert_eq(r2.unwrap(), 20);
 }
 
 @test
 fn integration_io_result_map_on_err() {
-    let r: IoResult<Int> = Err(StreamError.new(IoErrorKind.NotFound));
+    let r: IoResult<Int> = Result.Err(StreamError.new(IoErrorKind.NotFound));
     let r2: IoResult<Int> = r.map(|x| x * 2);
     assert(r2.is_err());
 }
 
 @test
 fn integration_io_result_map_err_transforms_error() {
-    let r: IoResult<Int> = Err(StreamError.new(IoErrorKind.NotFound));
+    let r: IoResult<Int> = Result.Err(StreamError.new(IoErrorKind.NotFound));
     let r2: Result<Int, IoErrorKind> = r.map_err(|e| e.kind());
     match r2 {
-        Err(k) => assert_eq(k, IoErrorKind.NotFound),
-        Ok(_) => assert(false),
+        Result.Err(k) => assert_eq(k, IoErrorKind.NotFound),
+        Result.Ok(_) => assert(false),
     }
 }
 
@@ -71,19 +71,19 @@ fn integration_pattern_match_kind_to_error_message() {
 @test
 fn integration_kind_inside_stream_error_via_question_mark() {
     fn make_error(k: IoErrorKind) -> IoResult<Int> {
-        Err(StreamError.new(k))
+        Result.Err(StreamError.new(k))
     }
 
     fn caller() -> IoResult<Text> {
         let _ = make_error(IoErrorKind.BrokenPipe)?;
-        Ok("never reached")
+        Result.Ok("never reached")
     }
 
     match caller() {
-        Err(e) => {
+        Result.Err(e) => {
             assert_eq(e.kind(), IoErrorKind.BrokenPipe);
         }
-        Ok(_) => assert(false),
+        Result.Ok(_) => assert(false),
     }
 }
 
@@ -94,16 +94,16 @@ fn integration_kind_inside_stream_error_via_question_mark() {
 @test
 fn integration_seekfrom_in_maybe() {
     let positions: List<Maybe<SeekFrom>> = [
-        Some(SeekFrom.Start(0)),
-        None,
-        Some(SeekFrom.End(-1)),
-        Some(SeekFrom.Current(10)),
+        Maybe.Some(SeekFrom.Start(0)),
+        Maybe.None,
+        Maybe.Some(SeekFrom.End(-1)),
+        Maybe.Some(SeekFrom.Current(10)),
     ];
     let mut some_count: Int = 0;
     for p in positions.iter() {
         match p {
-            Some(_) => some_count = some_count + 1,
-            None => {}
+            Maybe.Some(_) => some_count = some_count + 1,
+            Maybe.None => {}
         }
     }
     assert_eq(some_count, 3);
@@ -139,28 +139,28 @@ fn integration_seekfrom_in_list_pattern_match() {
 @test
 fn integration_stream_error_propagates_through_nested_call() {
     fn level_a() -> IoResult<Int> {
-        Err(StreamError.with_message(IoErrorKind.PermissionDenied, "denied at A"))
+        Result.Err(StreamError.with_message(IoErrorKind.PermissionDenied, "denied at A"))
     }
 
     fn level_b() -> IoResult<Int> {
         let v = level_a()?;
-        Ok(v + 1)
+        Result.Ok(v + 1)
     }
 
     fn level_c() -> IoResult<Int> {
         let v = level_b()?;
-        Ok(v * 2)
+        Result.Ok(v * 2)
     }
 
     match level_c() {
-        Err(e) => {
+        Result.Err(e) => {
             assert_eq(e.kind(), IoErrorKind.PermissionDenied);
             match e.message() {
-                Some(m) => assert_eq(*m, "denied at A"),
-                None => assert(false),
+                Maybe.Some(m) => assert_eq(*m, "denied at A"),
+                Maybe.None => assert(false),
             }
         }
-        Ok(_) => assert(false),
+        Result.Ok(_) => assert(false),
     }
 }
 

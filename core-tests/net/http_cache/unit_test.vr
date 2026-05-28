@@ -26,7 +26,7 @@ mount core.net.http_cache.{
     CacheControl, CacheControlError, MAX_CACHE_CONTROL_DIRECTIVES,
     AgeInputs, DecisionInputs, CacheDecision
 };
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 
 // =============================================================================
 // Section 1: CacheControl — 16-field record construction
@@ -37,9 +37,9 @@ fn fresh_cc() -> CacheControl {
         no_cache: false, no_store: false, no_transform: false,
         public_: false, private_: false, immutable: false,
         must_revalidate: false, proxy_revalidate: false, must_understand: false,
-        max_age: None, s_maxage: None,
-        stale_while_revalidate: None, stale_if_error: None,
-        max_stale: None, min_fresh: None, only_if_cached: false,
+        max_age: Maybe.None, s_maxage: Maybe.None,
+        stale_while_revalidate: Maybe.None, stale_if_error: Maybe.None,
+        max_stale: Maybe.None, min_fresh: Maybe.None, only_if_cached: false,
     }
 }
 
@@ -51,8 +51,8 @@ fn test_cache_control_all_defaults_false_none() {
     assert(!cc.public_);
     assert(!cc.private_);
     assert(!cc.immutable);
-    assert(cc.max_age is None);
-    assert(cc.s_maxage is None);
+    assert(cc.max_age is Maybe.None);
+    assert(cc.s_maxage is Maybe.None);
 }
 
 @test
@@ -66,21 +66,21 @@ fn test_cache_control_set_no_store() {
 @test
 fn test_cache_control_set_max_age() {
     let mut cc = fresh_cc();
-    cc.max_age = Some(3600_u64);
+    cc.max_age = Maybe.Some(3600_u64);
     match cc.max_age {
-        Some(v) => assert_eq(v, 3600_u64),
-        None => panic("max_age should be Some"),
+        Maybe.Some(v) => assert_eq(v, 3600_u64),
+        Maybe.None => panic("max_age should be Some"),
     }
 }
 
 @test
 fn test_cache_control_set_s_maxage_overrides_for_shared() {
     let mut cc = fresh_cc();
-    cc.max_age = Some(3600_u64);
-    cc.s_maxage = Some(7200_u64);
+    cc.max_age = Maybe.Some(3600_u64);
+    cc.s_maxage = Maybe.Some(7200_u64);
     match cc.s_maxage {
-        Some(v) => assert_eq(v, 7200_u64),
-        None => panic("s_maxage should be Some"),
+        Maybe.Some(v) => assert_eq(v, 7200_u64),
+        Maybe.None => panic("s_maxage should be Some"),
     }
 }
 
@@ -88,7 +88,7 @@ fn test_cache_control_set_s_maxage_overrides_for_shared() {
 fn test_cache_control_immutable_flag() {
     let mut cc = fresh_cc();
     cc.immutable = true;
-    cc.max_age = Some(31536000_u64); // 1 year
+    cc.max_age = Maybe.Some(31536000_u64); // 1 year
     assert(cc.immutable);
 }
 
@@ -121,15 +121,15 @@ fn test_cache_control_only_if_cached_request_directive() {
 @test
 fn test_cache_control_stale_directives() {
     let mut cc = fresh_cc();
-    cc.stale_while_revalidate = Some(60_u64);
-    cc.stale_if_error = Some(300_u64);
+    cc.stale_while_revalidate = Maybe.Some(60_u64);
+    cc.stale_if_error = Maybe.Some(300_u64);
     match cc.stale_while_revalidate {
-        Some(v) => assert_eq(v, 60_u64),
-        None => panic("stale_while_revalidate should be Some"),
+        Maybe.Some(v) => assert_eq(v, 60_u64),
+        Maybe.None => panic("stale_while_revalidate should be Some"),
     }
     match cc.stale_if_error {
-        Some(v) => assert_eq(v, 300_u64),
-        None => panic("stale_if_error should be Some"),
+        Maybe.Some(v) => assert_eq(v, 300_u64),
+        Maybe.None => panic("stale_if_error should be Some"),
     }
 }
 
@@ -215,7 +215,7 @@ fn test_decision_inputs_construction() {
     let di = DecisionInputs {
         resp_cc: fresh_cc(),
         age: ai,
-        expires_unix: None,
+        expires_unix: Maybe.None,
         shared_cache: true,
         upstream_error: false,
     };

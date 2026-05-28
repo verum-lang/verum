@@ -9,7 +9,7 @@
 // 3 commits:
 //
 //   * f649312c6 — closure-free `parse_int().ok_or_else()` → `match
-//     Maybe.Some/None` (eliminated closure desugaring through `?`).
+//     Maybe.Some/Maybe.None` (eliminated closure desugaring through `?`).
 //   * be64f4e1e — `slice_text` byte-by-byte push instead of
 //     `extend_from_slice(&src[start..end])` (eliminated List-payload
 //     intrinsic dispatch chain).
@@ -39,8 +39,8 @@ mount core.base.result.{Result, Ok, Err};
 fn regression_parse_v4_8() {
     let s = "10.0.0.0/8".clone();
     match cidr_parse(&s) {
-        Ok(c) => assert_eq(c.prefix_len(), 8),
-        Err(_) => panic("expected Ok"),
+        Result.Ok(c) => assert_eq(c.prefix_len(), 8),
+        Result.Err(_) => panic("expected Ok"),
     }
 }
 
@@ -48,8 +48,8 @@ fn regression_parse_v4_8() {
 fn regression_parse_v6_32() {
     let s = "2001:db8::/32".clone();
     match cidr_parse(&s) {
-        Ok(c) => assert_eq(c.prefix_len(), 32),
-        Err(_) => panic("expected Ok"),
+        Result.Ok(c) => assert_eq(c.prefix_len(), 32),
+        Result.Err(_) => panic("expected Ok"),
     }
 }
 
@@ -67,8 +67,8 @@ fn regression_set_add_text_v4() {
 fn regression_parse_invalid_prefix_len() {
     let s = "10.0.0.0/33".clone();
     match cidr_parse(&s) {
-        Ok(_) => panic("/33 must reject"),
-        Err(e) => assert(e == CidrError.InvalidPrefixLen(33)),
+        Result.Ok(_) => panic("/33 must reject"),
+        Result.Err(e) => assert(e == CidrError.InvalidPrefixLen(33)),
     }
 }
 
@@ -76,7 +76,7 @@ fn regression_parse_invalid_prefix_len() {
 fn regression_parse_no_slash() {
     let s = "10.0.0.0".clone();
     match cidr_parse(&s) {
-        Ok(_) => panic("missing slash must reject"),
-        Err(_) => assert(true),
+        Result.Ok(_) => panic("missing slash must reject"),
+        Result.Err(_) => assert(true),
     }
 }

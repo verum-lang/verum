@@ -20,7 +20,7 @@
 // =============================================================================
 
 mount core.text.{Text, Regex};
-mount core.base.maybe.{Maybe, Some, None};
+mount core.base.maybe.{Maybe, Some, Maybe.None};
 mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
 
@@ -31,24 +31,24 @@ mount core.collections.list.List;
 @test
 fn test_new_returns_ok() {
     match Regex.new("abc") {
-        Ok(_) => {},
-        Err(_) => panic("Regex.new('abc') should be Ok"),
+        Result.Ok(_) => {},
+        Result.Err(_) => panic("Regex.new('abc') should be Ok"),
     }
 }
 
 @test
 fn test_new_empty_pattern_returns_ok() {
     match Regex.new("") {
-        Ok(_) => {},
-        Err(_) => panic("Regex.new('') should be Ok"),
+        Result.Ok(_) => {},
+        Result.Err(_) => panic("Regex.new('') should be Ok"),
     }
 }
 
 @test
 fn test_new_complex_pattern_returns_ok() {
     match Regex.new("[a-z]+\\d{2,5}") {
-        Ok(_) => {},
-        Err(_) => panic("complex pattern should compile"),
+        Result.Ok(_) => {},
+        Result.Err(_) => panic("complex pattern should compile"),
     }
 }
 
@@ -127,8 +127,8 @@ fn test_is_match_class_digit() {
 fn test_find_present() {
     let r = Regex.new("ll").unwrap();
     match r.find("hello") {
-        Some(m) => assert_eq(m, "ll"),
-        None => panic("'ll' present"),
+        Maybe.Some(m) => assert_eq(m, "ll"),
+        Maybe.None => panic("'ll' present"),
     }
 }
 
@@ -136,8 +136,8 @@ fn test_find_present() {
 fn test_find_absent() {
     let r = Regex.new("xyz").unwrap();
     match r.find("hello") {
-        Some(_) => panic("'xyz' absent"),
-        None => {},
+        Maybe.Some(_) => panic("'xyz' absent"),
+        Maybe.None => {},
     }
 }
 
@@ -145,8 +145,8 @@ fn test_find_absent() {
 fn test_find_first_only() {
     let r = Regex.new("ab").unwrap();
     match r.find("ab cd ab") {
-        Some(m) => assert_eq(m, "ab"),
-        None => panic("present"),
+        Maybe.Some(m) => assert_eq(m, "ab"),
+        Maybe.None => panic("present"),
     }
 }
 
@@ -154,8 +154,8 @@ fn test_find_first_only() {
 fn test_find_digits() {
     let r = Regex.new("\\d+").unwrap();
     match r.find("abc 42 def 99") {
-        Some(m) => assert_eq(m, "42"),
-        None => panic("digits present"),
+        Maybe.Some(m) => assert_eq(m, "42"),
+        Maybe.None => panic("digits present"),
     }
 }
 
@@ -274,12 +274,12 @@ fn test_split_whitespace_pattern() {
 fn test_captures_one_group() {
     let r = Regex.new("(\\d+)").unwrap();
     match r.captures("abc 42 def") {
-        Some(groups) => {
+        Maybe.Some(groups) => {
             assert(groups.len() >= 2);
             assert_eq(groups[0], "42");  // whole match
             assert_eq(groups[1], "42");  // first group
         }
-        None => panic("digits captured"),
+        Maybe.None => panic("digits captured"),
     }
 }
 
@@ -287,13 +287,13 @@ fn test_captures_one_group() {
 fn test_captures_two_groups() {
     let r = Regex.new("(\\w+)-(\\d+)").unwrap();
     match r.captures("test-123 ignored") {
-        Some(groups) => {
+        Maybe.Some(groups) => {
             assert(groups.len() >= 3);
             assert_eq(groups[0], "test-123");
             assert_eq(groups[1], "test");
             assert_eq(groups[2], "123");
         }
-        None => panic("name-num captured"),
+        Maybe.None => panic("name-num captured"),
     }
 }
 
@@ -301,8 +301,8 @@ fn test_captures_two_groups() {
 fn test_captures_no_match_is_none() {
     let r = Regex.new("(xyz)").unwrap();
     match r.captures("hello") {
-        Some(_) => panic("no match"),
-        None => {},
+        Maybe.Some(_) => panic("no match"),
+        Maybe.None => {},
     }
 }
 

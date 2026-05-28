@@ -53,7 +53,7 @@ type Point is { x: Float, y: Float };
 
 implement Serialize for Point {
     fn serialize<S: Serializer>(&self, serializer: S) -> SerdeResult<S.Output> {
-        let mut map = serializer.serialize_map(Some(2))?;
+        let mut map = serializer.serialize_map(Maybe.Some(2))?;
         map.serialize_entry("x", self.x)?;
         map.serialize_entry("y", self.y)?;
         map.end()
@@ -74,14 +74,14 @@ fn test_user_type_implements_serialize_protocol() {
 
 @test
 fn test_serde_result_ok_is_transparent() {
-    let r: SerdeResult<Int> = Ok(42);
+    let r: SerdeResult<Int> = Result.Ok(42);
     assert(r.is_ok());
     assert_eq(r.unwrap(), 42);
 }
 
 @test
 fn test_serde_result_err_carries_serde_error() {
-    let r: SerdeResult<Int> = Err(SerdeError.new("bad".to_text()));
+    let r: SerdeResult<Int> = Result.Err(SerdeError.new("bad".to_text()));
     assert(r.is_err());
     assert(r.unwrap_err().message().contains("bad"));
 }

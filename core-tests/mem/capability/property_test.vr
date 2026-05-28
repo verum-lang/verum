@@ -18,7 +18,7 @@
 //   §E  has_capability(x, k) ⇔ has_all_capabilities(x, k) for single-bit k
 //   §F  pack/unpack round-trip is identity for any (epoch, caps) ∈ UInt16²
 //   §G  delegate_capability respects monotonic-attenuation:
-//         delegate(p, r) = Some(r) ⇒ r ⊆ p
+//         delegate(p, r) = Maybe.Some(r) ⇒ r ⊆ p
 //   §H  revoke_capability is monotone: revoke(x, k) ⊆ x  (no bit gained)
 //   §I  De Morgan: !(a | b) == !a & !b within the 8-bit universe
 //   §J  validate_write ⇒ has CAP_WRITE  AND  has CAP_MUTABLE  (conjunctive)
