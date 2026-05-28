@@ -1,0 +1,155 @@
+// =============================================================================
+// core-tests/cli/permissions/unit_test.vr
+// =============================================================================
+//
+// `core/cli/permissions.vr` — coarse-grained permission tags.
+// =============================================================================
+
+mount core.cli.permissions.Permission;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Permission scalar variants
+// =============================================================================
+
+@test
+fn test_permission_no_perm_variant() {
+    let p: Permission = Permission.NoPerm;
+    assert(p is Permission.NoPerm);
+}
+
+@test
+fn test_permission_filesystem_read_variant() {
+    let p: Permission = Permission.FilesystemRead;
+    assert(p is Permission.FilesystemRead);
+}
+
+@test
+fn test_permission_filesystem_write_variant() {
+    let p: Permission = Permission.FilesystemWrite;
+    assert(p is Permission.FilesystemWrite);
+}
+
+@test
+fn test_permission_network_outbound_variant() {
+    let p: Permission = Permission.NetworkOutbound;
+    assert(p is Permission.NetworkOutbound);
+}
+
+@test
+fn test_permission_network_inbound_variant() {
+    let p: Permission = Permission.NetworkInbound;
+    assert(p is Permission.NetworkInbound);
+}
+
+@test
+fn test_permission_process_spawn_variant() {
+    let p: Permission = Permission.ProcessSpawn;
+    assert(p is Permission.ProcessSpawn);
+}
+
+@test
+fn test_permission_env_read_variant() {
+    let p: Permission = Permission.EnvRead;
+    assert(p is Permission.EnvRead);
+}
+
+@test
+fn test_permission_env_write_variant() {
+    let p: Permission = Permission.EnvWrite;
+    assert(p is Permission.EnvWrite);
+}
+
+// =============================================================================
+// Section 2: Permission carrier variant
+// =============================================================================
+
+@test
+fn test_permission_raw_syscall_variant() {
+    let p: Permission = Permission.RawSyscall("openat".to_text());
+    assert(p is Permission.RawSyscall);
+}
+
+// =============================================================================
+// Section 3: Pairwise disjointness — selected pairs
+// =============================================================================
+
+@test
+fn test_permission_filesystem_read_vs_write_disjoint() {
+    let r: Permission = Permission.FilesystemRead;
+    let w: Permission = Permission.FilesystemWrite;
+    assert(!(r is Permission.FilesystemWrite));
+    assert(!(w is Permission.FilesystemRead));
+}
+
+@test
+fn test_permission_network_in_vs_out_disjoint() {
+    let i: Permission = Permission.NetworkInbound;
+    let o: Permission = Permission.NetworkOutbound;
+    assert(!(i is Permission.NetworkOutbound));
+    assert(!(o is Permission.NetworkInbound));
+}
+
+@test
+fn test_permission_no_perm_disjoint_from_all() {
+    let p: Permission = Permission.NoPerm;
+    assert(!(p is Permission.FilesystemRead));
+    assert(!(p is Permission.NetworkOutbound));
+    assert(!(p is Permission.ProcessSpawn));
+    assert(!(p is Permission.RawSyscall));
+}
+
+// =============================================================================
+// Section 4: Canonical name() dispatch
+// =============================================================================
+
+@test
+fn test_permission_no_perm_name_is_none() {
+    let p: Permission = Permission.NoPerm;
+    assert_eq(p.name(), "none");
+}
+
+@test
+fn test_permission_filesystem_read_name_is_fs_read() {
+    let p: Permission = Permission.FilesystemRead;
+    assert_eq(p.name(), "fs:read");
+}
+
+@test
+fn test_permission_filesystem_write_name_is_fs_write() {
+    let p: Permission = Permission.FilesystemWrite;
+    assert_eq(p.name(), "fs:write");
+}
+
+@test
+fn test_permission_network_outbound_name_is_net_out() {
+    let p: Permission = Permission.NetworkOutbound;
+    assert_eq(p.name(), "net:out");
+}
+
+@test
+fn test_permission_network_inbound_name_is_net_in() {
+    let p: Permission = Permission.NetworkInbound;
+    assert_eq(p.name(), "net:in");
+}
+
+@test
+fn test_permission_process_spawn_name_is_proc_spawn() {
+    let p: Permission = Permission.ProcessSpawn;
+    assert_eq(p.name(), "proc:spawn");
+}
+
+@test
+fn test_permission_env_read_name_is_env_read() {
+    let p: Permission = Permission.EnvRead;
+    assert_eq(p.name(), "env:read");
+}
+
+@test
+fn test_permission_env_write_name_is_env_write() {
+    let p: Permission = Permission.EnvWrite;
+    assert_eq(p.name(), "env:write");
+}
+
+fn main() {}
