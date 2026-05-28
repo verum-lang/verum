@@ -1,0 +1,122 @@
+// =============================================================================
+// core-tests/encoding/jcs/unit_test.vr
+// =============================================================================
+//
+// `core/encoding/jcs.vr` — RFC 8785 JSON Canonicalization Scheme.
+//
+// Pure-data surface tested here:
+//   * JcsError 2-variant ADT
+//       - JsonParseFailed(JsonError)
+//       - UnsupportedValue(Text)
+//   * Variant disjointness via `is`-pattern testing
+//   * Payload round-trip for UnsupportedValue
+//
+// The canonicalize_value / canonicalize_str surfaces produce Text via
+// the json.vr stringification path which trips the same lenient-stub
+// cascade as other Text builders — pinned at audit.md §A pending the
+// VBC codegen fix.
+// =============================================================================
+
+mount core.encoding.jcs.{JcsError};
+mount core.encoding.json.{JsonError, JsonErrorKind};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: JcsError 2-variant construction
+// =============================================================================
+
+fn mk_json_err(kind: JsonErrorKind, msg: Text) -> JsonError {
+    JsonError {
+        kind: kind,
+        line: 1,
+        column: 1,
+        message: msg,
+    }
+}
+
+@test
+fn test_jcs_error_json_parse_failed_variant() {
+    let inner = mk_json_err(JsonErrorKind.UnexpectedEof, "EOF".to_text());
+    let e: JcsError = JcsError.JsonParseFailed(inner);
+    assert(e is JcsError.JsonParseFailed);
+}
+
+@test
+fn test_jcs_error_unsupported_value_variant() {
+    let e: JcsError = JcsError.UnsupportedValue("NaN".to_text());
+    assert(e is JcsError.UnsupportedValue);
+}
+
+// =============================================================================
+// Section 2: Variant pairwise disjointness
+// =============================================================================
+
+@test
+fn test_jcs_error_json_parse_failed_not_unsupported() {
+    let inner = mk_json_err(JsonErrorKind.UnexpectedChar, "x".to_text());
+    let e: JcsError = JcsError.JsonParseFailed(inner);
+    assert(!(e is JcsError.UnsupportedValue));
+}
+
+@test
+fn test_jcs_error_unsupported_value_not_json_parse_failed() {
+    let e: JcsError = JcsError.UnsupportedValue("Infinity".to_text());
+    assert(!(e is JcsError.JsonParseFailed));
+}
+
+// =============================================================================
+// Section 3: Match exhaustiveness
+//
+//   `describe(e: &JcsError) -> Text` must reach exactly one arm per
+//   variant.
+// =============================================================================
+
+fn describe(e: &JcsError) -> Text {
+    match e {
+        JcsError.JsonParseFailed(_)  => "parse-failed".to_text(),
+        JcsError.UnsupportedValue(_) => "unsupported".to_text(),
+    }
+}
+
+@test
+fn test_jcs_error_describe_json_parse_failed() {
+    let inner = mk_json_err(JsonErrorKind.InvalidEscape, "\\q".to_text());
+    let e: JcsError = JcsError.JsonParseFailed(inner);
+    assert_eq(describe(&e), "parse-failed");
+}
+
+@test
+fn test_jcs_error_describe_unsupported_value() {
+    let e: JcsError = JcsError.UnsupportedValue("-Inf".to_text());
+    assert_eq(describe(&e), "unsupported");
+}
+
+// =============================================================================
+// Section 4: Payload preservation
+// =============================================================================
+
+@test
+fn test_jcs_error_unsupported_value_payload_round_trip() {
+    let pinned = "NaN literal not allowed in JCS".to_text();
+    let e: JcsError = JcsError.UnsupportedValue(pinned);
+    match e {
+        JcsError.UnsupportedValue(s) => assert_eq(s, "NaN literal not allowed in JCS"),
+        _ => panic("expected UnsupportedValue"),
+    }
+}
+
+@ignore("Nested record-field access through match-binding (inner_err.kind) trips the field-index resolver — sister of [[btree_pattern_match_ref_generic_class]]. Workaround: bind via typed local + re-deref.")
+@test
+fn test_jcs_error_json_parse_failed_payload_kind_round_trip() {
+    let inner = mk_json_err(JsonErrorKind.TrailingGarbage, "extra".to_text());
+    let e: JcsError = JcsError.JsonParseFailed(inner);
+    match e {
+        JcsError.JsonParseFailed(inner_err) => {
+            assert(inner_err.kind is JsonErrorKind.TrailingGarbage);
+        },
+        _ => panic("expected JsonParseFailed"),
+    }
+}
+
+fn main() {}
