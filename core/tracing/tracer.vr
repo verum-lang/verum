@@ -134,7 +134,7 @@ implement Tracer for SdkTracer {
             _ => false,
         };
         let flags = TraceFlags.default().with_sampled(sampled);
-        let parent_span_id = if parent.is_valid() { Some(*parent.span_id()) } else { None };
+        let parent_span_id = if parent.is_valid() { Maybe.Some(*parent.span_id()) } else { Maybe.None };
 
         let context = SpanContext.new(
             trace_id, span_id, flags, result.trace_state().clone(), false,
@@ -146,7 +146,7 @@ implement Tracer for SdkTracer {
             parent_span_id: parent_span_id,
             kind: kind,
             start_time: Instant.now(),
-            end_time: None,
+            end_time: Maybe.None,
             attributes: attributes,
             events: List.new(),
             links: links,
@@ -180,7 +180,7 @@ public type TracerProvider is {
 implement TracerProvider {
     public fn builder() -> TracerProviderBuilder {
         TracerProviderBuilder {
-            sampler: None,
+            sampler: Maybe.None,
             processors: List.new(),
             resource: Resource.empty(),
         }
@@ -248,7 +248,7 @@ public type TracerProviderBuilder is {
 
 implement TracerProviderBuilder {
     public fn with_sampler(mut self, sampler: Heap<dyn Sampler>) -> TracerProviderBuilder {
-        self.sampler = Some(sampler); self
+        self.sampler = Maybe.Some(sampler); self
     }
     public fn with_resource(mut self, resource: Resource) -> TracerProviderBuilder {
         self.resource = resource; self
