@@ -14,28 +14,24 @@ mount core.base.result.{Result, Ok, Err};
 // Section 1: CoseAlg 4-variant ADT construction
 // =============================================================================
 
-@ignore("Cross-module CoseAlg record-return field-access OOB at PC=48 (sister of [[enactment_field_access_oob_2026-05-24]] — codegen loses 4-variant ADT layout, defaults to 8-byte scalar). Multi-day VBC fix.")
 @test
 fn test_cose_alg_eddsa_variant() {
     let a: CoseAlg = CoseAlg.EdDSA;
     assert(a is CoseAlg.EdDSA);
 }
 
-@ignore("Cross-module CoseAlg record-return field-access OOB at PC=48 (sister of [[enactment_field_access_oob_2026-05-24]] — codegen loses 4-variant ADT layout, defaults to 8-byte scalar). Multi-day VBC fix.")
 @test
 fn test_cose_alg_hs256_variant() {
     let a: CoseAlg = CoseAlg.HS256;
     assert(a is CoseAlg.HS256);
 }
 
-@ignore("Cross-module CoseAlg record-return field-access OOB at PC=48 (sister of [[enactment_field_access_oob_2026-05-24]] — codegen loses 4-variant ADT layout, defaults to 8-byte scalar). Multi-day VBC fix.")
 @test
 fn test_cose_alg_hs384_variant() {
     let a: CoseAlg = CoseAlg.HS384;
     assert(a is CoseAlg.HS384);
 }
 
-@ignore("Cross-module CoseAlg record-return field-access OOB at PC=48 (sister of [[enactment_field_access_oob_2026-05-24]] — codegen loses 4-variant ADT layout, defaults to 8-byte scalar). Multi-day VBC fix.")
 @test
 fn test_cose_alg_hs512_variant() {
     let a: CoseAlg = CoseAlg.HS512;
@@ -46,7 +42,6 @@ fn test_cose_alg_hs512_variant() {
 // Section 2: CoseAlg pairwise disjointness
 // =============================================================================
 
-@ignore("Cross-module CoseAlg record-return field-access OOB at PC=48 (sister of [[enactment_field_access_oob_2026-05-24]] — codegen loses 4-variant ADT layout, defaults to 8-byte scalar). Multi-day VBC fix.")
 @test
 fn test_cose_alg_eddsa_disjoint() {
     let a: CoseAlg = CoseAlg.EdDSA;
@@ -55,7 +50,6 @@ fn test_cose_alg_eddsa_disjoint() {
     assert(!(a is CoseAlg.HS512));
 }
 
-@ignore("Cross-module CoseAlg record-return field-access OOB at PC=48 (sister of [[enactment_field_access_oob_2026-05-24]] — codegen loses 4-variant ADT layout, defaults to 8-byte scalar). Multi-day VBC fix.")
 @test
 fn test_cose_alg_hs_family_disjoint() {
     let a: CoseAlg = CoseAlg.HS256;
