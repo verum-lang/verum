@@ -1,0 +1,104 @@
+// =============================================================================
+// core-tests/security/hash/murmur3/unit_test.vr
+// =============================================================================
+//
+// `core/security/hash/murmur3.vr` — MurmurHash3 (Austin Appleby).
+//
+// Tested:
+//   * Murmur3Hash128 record construction + accessors
+//   * Direct construction preserves high/low halves
+// =============================================================================
+
+mount core.security.hash.murmur3.Murmur3Hash128;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Murmur3Hash128 record construction
+// =============================================================================
+
+@test
+fn test_murmur3_hash128_zero_construction() {
+    let h: Murmur3Hash128 = Murmur3Hash128 { high: 0_u64, low: 0_u64 };
+    assert_eq(h.high, 0_u64);
+    assert_eq(h.low, 0_u64);
+}
+
+@test
+fn test_murmur3_hash128_high_only_construction() {
+    let h: Murmur3Hash128 = Murmur3Hash128 {
+        high: 0xCAFEBABEDEADBEEF_u64,
+        low: 0_u64,
+    };
+    assert_eq(h.high, 0xCAFEBABEDEADBEEF_u64);
+    assert_eq(h.low, 0_u64);
+}
+
+@test
+fn test_murmur3_hash128_low_only_construction() {
+    let h: Murmur3Hash128 = Murmur3Hash128 {
+        high: 0_u64,
+        low: 0x0123456789ABCDEF_u64,
+    };
+    assert_eq(h.high, 0_u64);
+    assert_eq(h.low, 0x0123456789ABCDEF_u64);
+}
+
+@test
+fn test_murmur3_hash128_both_halves_construction() {
+    let h: Murmur3Hash128 = Murmur3Hash128 {
+        high: 0xFFFFFFFFFFFFFFFF_u64,
+        low:  0x0000000000000000_u64,
+    };
+    assert_eq(h.high, 0xFFFFFFFFFFFFFFFF_u64);
+    assert_eq(h.low, 0_u64);
+}
+
+// =============================================================================
+// Section 2: Field independence
+//
+//   high and low are independent UInt64 halves of the 128-bit digest.
+//   Modifying one must not affect the other.
+// =============================================================================
+
+@test
+fn test_murmur3_hash128_halves_independent_pattern_a() {
+    let h: Murmur3Hash128 = Murmur3Hash128 {
+        high: 1_u64,
+        low: 2_u64,
+    };
+    assert(h.high != h.low);
+    assert_eq(h.high, 1_u64);
+    assert_eq(h.low, 2_u64);
+}
+
+@test
+fn test_murmur3_hash128_halves_independent_pattern_b() {
+    let h: Murmur3Hash128 = Murmur3Hash128 {
+        high: 0xABCDEF0123456789_u64,
+        low:  0x123456789ABCDEF0_u64,
+    };
+    assert(h.high != h.low);
+}
+
+// =============================================================================
+// Section 3: Multiple constructions disjoint
+// =============================================================================
+
+@test
+fn test_murmur3_hash128_pair_distinct_high_distinguishes() {
+    let a: Murmur3Hash128 = Murmur3Hash128 { high: 1_u64, low: 0_u64 };
+    let b: Murmur3Hash128 = Murmur3Hash128 { high: 2_u64, low: 0_u64 };
+    assert(a.high != b.high);
+    assert_eq(a.low, b.low);
+}
+
+@test
+fn test_murmur3_hash128_pair_distinct_low_distinguishes() {
+    let a: Murmur3Hash128 = Murmur3Hash128 { high: 0_u64, low: 1_u64 };
+    let b: Murmur3Hash128 = Murmur3Hash128 { high: 0_u64, low: 2_u64 };
+    assert_eq(a.high, b.high);
+    assert(a.low != b.low);
+}
+
+fn main() {}
