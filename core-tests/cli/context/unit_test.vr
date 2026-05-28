@@ -1,0 +1,130 @@
+// =============================================================================
+// core-tests/cli/context/unit_test.vr
+// =============================================================================
+//
+// `core/cli/context.vr` — CLI lifecycle hook outcomes.
+// =============================================================================
+
+mount core.cli.context.HookOutcome;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: HookOutcome 3-variant ADT
+// =============================================================================
+
+@test
+fn test_hook_outcome_continue_variant() {
+    let h: HookOutcome = HookOutcome.HookContinue;
+    assert(h is HookOutcome.HookContinue);
+}
+
+@test
+fn test_hook_outcome_skip_variant() {
+    let h: HookOutcome = HookOutcome.HookSkip;
+    assert(h is HookOutcome.HookSkip);
+}
+
+@test
+fn test_hook_outcome_abort_variant() {
+    let h: HookOutcome = HookOutcome.HookAbort(1);
+    assert(h is HookOutcome.HookAbort);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_hook_outcome_continue_disjoint() {
+    let h: HookOutcome = HookOutcome.HookContinue;
+    assert(!(h is HookOutcome.HookSkip));
+    assert(!(h is HookOutcome.HookAbort));
+}
+
+@test
+fn test_hook_outcome_skip_disjoint() {
+    let h: HookOutcome = HookOutcome.HookSkip;
+    assert(!(h is HookOutcome.HookContinue));
+    assert(!(h is HookOutcome.HookAbort));
+}
+
+@test
+fn test_hook_outcome_abort_disjoint() {
+    let h: HookOutcome = HookOutcome.HookAbort(0);
+    assert(!(h is HookOutcome.HookContinue));
+    assert(!(h is HookOutcome.HookSkip));
+}
+
+// =============================================================================
+// Section 3: HookAbort payload preservation
+// =============================================================================
+
+@test
+fn test_hook_outcome_abort_payload_zero() {
+    let h: HookOutcome = HookOutcome.HookAbort(0);
+    match h {
+        HookOutcome.HookAbort(code) => assert_eq(code, 0),
+        _ => panic("expected HookAbort"),
+    }
+}
+
+@test
+fn test_hook_outcome_abort_payload_canonical_exit_codes() {
+    // POSIX canonical: 0 success, 1 generic error, 2 usage,
+    // 130 SIGINT (128+SIGINT), 143 SIGTERM (128+SIGTERM).
+    let success: HookOutcome = HookOutcome.HookAbort(0);
+    let generic: HookOutcome = HookOutcome.HookAbort(1);
+    let usage:   HookOutcome = HookOutcome.HookAbort(2);
+    match success {
+        HookOutcome.HookAbort(c) => assert_eq(c, 0),
+        _ => panic("expected HookAbort"),
+    }
+    match generic {
+        HookOutcome.HookAbort(c) => assert_eq(c, 1),
+        _ => panic("expected HookAbort"),
+    }
+    match usage {
+        HookOutcome.HookAbort(c) => assert_eq(c, 2),
+        _ => panic("expected HookAbort"),
+    }
+}
+
+@test
+fn test_hook_outcome_abort_negative_code_preserved() {
+    // Negative exit codes are unusual but technically allowed.
+    let h: HookOutcome = HookOutcome.HookAbort(-1);
+    match h {
+        HookOutcome.HookAbort(c) => assert_eq(c, -1),
+        _ => panic("expected HookAbort"),
+    }
+}
+
+// =============================================================================
+// Section 4: Match-coverage law
+// =============================================================================
+
+fn describe(h: &HookOutcome) -> Text {
+    match h {
+        HookOutcome.HookContinue   => "continue".to_text(),
+        HookOutcome.HookSkip       => "skip".to_text(),
+        HookOutcome.HookAbort(_)   => "abort".to_text(),
+    }
+}
+
+@test
+fn test_hook_outcome_describe_continue() {
+    assert_eq(describe(&HookOutcome.HookContinue), "continue");
+}
+
+@test
+fn test_hook_outcome_describe_skip() {
+    assert_eq(describe(&HookOutcome.HookSkip), "skip");
+}
+
+@test
+fn test_hook_outcome_describe_abort() {
+    assert_eq(describe(&HookOutcome.HookAbort(42)), "abort");
+}
+
+fn main() {}
