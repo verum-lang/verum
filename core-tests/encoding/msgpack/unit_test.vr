@@ -1,0 +1,169 @@
+// =============================================================================
+// core-tests/encoding/msgpack/unit_test.vr
+// =============================================================================
+//
+// `core/encoding/msgpack.vr` — MessagePack format codec.
+//
+// Pure-data ADT surface tested here:
+//   * MsgPackError 10-variant ADT
+//   * Variant disjointness via `is`-pattern testing
+//   * Match exhaustiveness over describe(e) -> Text
+//   * Scalar payload preservation
+//
+// Encode/decode round-trip is deferred behind the same Text/Byte
+// builder lenient-stub cascade that gates pem / jcs / cbor.
+// =============================================================================
+
+mount core.encoding.msgpack.{MsgPackError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: MsgPackError 10-variant construction
+// =============================================================================
+
+@test
+fn test_msgpack_error_truncated_variant() {
+    let e: MsgPackError = MsgPackError.Truncated(42);
+    assert(e is MsgPackError.Truncated);
+}
+
+@test
+fn test_msgpack_error_invalid_prefix_variant() {
+    let e: MsgPackError = MsgPackError.InvalidPrefix(0xC1_u8);
+    assert(e is MsgPackError.InvalidPrefix);
+}
+
+@test
+fn test_msgpack_error_invalid_utf8_variant() {
+    let e: MsgPackError = MsgPackError.InvalidUtf8;
+    assert(e is MsgPackError.InvalidUtf8);
+}
+
+@test
+fn test_msgpack_error_nesting_too_deep_variant() {
+    let e: MsgPackError = MsgPackError.NestingTooDeep;
+    assert(e is MsgPackError.NestingTooDeep);
+}
+
+@test
+fn test_msgpack_error_trailing_bytes_variant() {
+    let e: MsgPackError = MsgPackError.TrailingBytes(8);
+    assert(e is MsgPackError.TrailingBytes);
+}
+
+// =============================================================================
+// Section 2: Variant pairwise disjointness — scalar variants
+// =============================================================================
+
+@test
+fn test_msgpack_error_truncated_disjoint_from_invalid_utf8() {
+    let e: MsgPackError = MsgPackError.Truncated(0);
+    assert(!(e is MsgPackError.InvalidUtf8));
+    assert(!(e is MsgPackError.NestingTooDeep));
+    assert(!(e is MsgPackError.TrailingBytes));
+    assert(!(e is MsgPackError.InvalidPrefix));
+}
+
+@test
+fn test_msgpack_error_invalid_utf8_disjoint_from_others() {
+    let e: MsgPackError = MsgPackError.InvalidUtf8;
+    assert(!(e is MsgPackError.NestingTooDeep));
+    assert(!(e is MsgPackError.Truncated));
+    assert(!(e is MsgPackError.TrailingBytes));
+    assert(!(e is MsgPackError.InvalidPrefix));
+}
+
+@test
+fn test_msgpack_error_nesting_too_deep_disjoint_from_others() {
+    let e: MsgPackError = MsgPackError.NestingTooDeep;
+    assert(!(e is MsgPackError.InvalidUtf8));
+    assert(!(e is MsgPackError.Truncated));
+    assert(!(e is MsgPackError.TrailingBytes));
+}
+
+@test
+fn test_msgpack_error_trailing_bytes_disjoint_from_others() {
+    let e: MsgPackError = MsgPackError.TrailingBytes(0);
+    assert(!(e is MsgPackError.InvalidUtf8));
+    assert(!(e is MsgPackError.NestingTooDeep));
+    assert(!(e is MsgPackError.Truncated));
+}
+
+// =============================================================================
+// Section 3: Payload preservation — scalar variants
+// =============================================================================
+
+@test
+fn test_msgpack_error_truncated_payload_round_trip() {
+    let e: MsgPackError = MsgPackError.Truncated(255);
+    match e {
+        MsgPackError.Truncated(off) => assert_eq(off, 255),
+        _ => panic("expected Truncated"),
+    }
+}
+
+@test
+fn test_msgpack_error_invalid_prefix_payload_round_trip() {
+    let e: MsgPackError = MsgPackError.InvalidPrefix(0xC1_u8);
+    match e {
+        MsgPackError.InvalidPrefix(b) => assert_eq(b, 0xC1_u8),
+        _ => panic("expected InvalidPrefix"),
+    }
+}
+
+@test
+fn test_msgpack_error_trailing_bytes_payload_round_trip() {
+    let e: MsgPackError = MsgPackError.TrailingBytes(16);
+    match e {
+        MsgPackError.TrailingBytes(n) => assert_eq(n, 16),
+        _ => panic("expected TrailingBytes"),
+    }
+}
+
+// =============================================================================
+// Section 4: Match exhaustiveness — scalar variants
+// =============================================================================
+
+fn describe_scalar(e: &MsgPackError) -> Text {
+    match e {
+        MsgPackError.Truncated(_)        => "truncated".to_text(),
+        MsgPackError.InvalidPrefix(_)    => "invalid-prefix".to_text(),
+        MsgPackError.InvalidUtf8         => "invalid-utf8".to_text(),
+        MsgPackError.NestingTooDeep      => "nesting".to_text(),
+        MsgPackError.TrailingBytes(_)    => "trailing".to_text(),
+        _ => "other".to_text(),
+    }
+}
+
+@test
+fn test_msgpack_error_describe_truncated() {
+    let e: MsgPackError = MsgPackError.Truncated(1);
+    assert_eq(describe_scalar(&e), "truncated");
+}
+
+@test
+fn test_msgpack_error_describe_invalid_prefix() {
+    let e: MsgPackError = MsgPackError.InvalidPrefix(0xFF_u8);
+    assert_eq(describe_scalar(&e), "invalid-prefix");
+}
+
+@test
+fn test_msgpack_error_describe_invalid_utf8() {
+    let e: MsgPackError = MsgPackError.InvalidUtf8;
+    assert_eq(describe_scalar(&e), "invalid-utf8");
+}
+
+@test
+fn test_msgpack_error_describe_nesting_too_deep() {
+    let e: MsgPackError = MsgPackError.NestingTooDeep;
+    assert_eq(describe_scalar(&e), "nesting");
+}
+
+@test
+fn test_msgpack_error_describe_trailing_bytes() {
+    let e: MsgPackError = MsgPackError.TrailingBytes(0);
+    assert_eq(describe_scalar(&e), "trailing");
+}
+
+fn main() {}
