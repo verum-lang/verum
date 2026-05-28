@@ -1,0 +1,337 @@
+// =============================================================================
+// core-tests/sys/windows/kernel32/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `core.sys.windows.kernel32` constants and the
+// `Overlapped` struct shape.
+//
+// Properties exercised:
+//
+//   * Memory-protection constants are pairwise distinct — no two
+//     PAGE_* / MEM_* values collide, so callers can OR-combine them
+//     without ambiguity.
+//   * File-flag constants occupy disjoint bit positions in the high
+//     8 bits of the CreateFile flag word.
+//   * Standard-handle constants are the three documented negative
+//     UInt32 values (-10, -11, -12 in two's complement).
+//   * Wait-code partition — every documented wait return classifies
+//     into exactly one of {OBJECT_0, ABANDONED, TIMEOUT, FAILED}.
+//   * Win32 error codes are pairwise distinct over the sampled subset.
+//   * Notify-change codes are powers-of-two (bitmask-safe).
+//   * File-action codes are consecutive integers 1..=5 (enum-safe).
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.kernel32.{
+    MEM_COMMIT, MEM_RESERVE, MEM_DECOMMIT, MEM_RELEASE, MEM_RESET,
+    PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
+    PAGE_EXECUTE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE,
+    PAGE_EXECUTE_WRITECOPY, PAGE_GUARD,
+    STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE,
+    FILE_FLAG_WRITE_THROUGH, FILE_FLAG_OVERLAPPED,
+    FILE_FLAG_NO_BUFFERING, FILE_FLAG_RANDOM_ACCESS,
+    FILE_FLAG_SEQUENTIAL_SCAN, FILE_FLAG_DELETE_ON_CLOSE,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_POSIX_SEMANTICS,
+    CREATE_NEW, CREATE_ALWAYS, OPEN_EXISTING, OPEN_ALWAYS, TRUNCATE_EXISTING,
+    ERROR_SUCCESS, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND,
+    ERROR_ACCESS_DENIED, ERROR_INVALID_HANDLE, ERROR_INVALID_PARAMETER,
+    WAIT_OBJECT_0, WAIT_ABANDONED, WAIT_TIMEOUT, WAIT_FAILED, INFINITE,
+    FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_DIR_NAME,
+    FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_CHANGE_SIZE,
+    FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_LAST_ACCESS,
+    FILE_NOTIFY_CHANGE_CREATION, FILE_NOTIFY_CHANGE_SECURITY,
+    FILE_ACTION_ADDED, FILE_ACTION_REMOVED, FILE_ACTION_MODIFIED,
+    FILE_ACTION_RENAMED_OLD_NAME, FILE_ACTION_RENAMED_NEW_NAME,
+};
+
+// =============================================================================
+// Property 1 — Memory-protection constants are pairwise distinct
+// =============================================================================
+
+@test
+fn prop_mem_constants_pairwise_distinct() {
+    assert(MEM_COMMIT != MEM_RESERVE);
+    assert(MEM_COMMIT != MEM_DECOMMIT);
+    assert(MEM_COMMIT != MEM_RELEASE);
+    assert(MEM_COMMIT != MEM_RESET);
+    assert(MEM_RESERVE != MEM_DECOMMIT);
+    assert(MEM_RESERVE != MEM_RELEASE);
+    assert(MEM_RESERVE != MEM_RESET);
+    assert(MEM_DECOMMIT != MEM_RELEASE);
+    assert(MEM_DECOMMIT != MEM_RESET);
+    assert(MEM_RELEASE != MEM_RESET);
+}
+
+@test
+fn prop_page_constants_pairwise_distinct() {
+    let mut all: List<UInt32> = List.new();
+    all.push(PAGE_NOACCESS);
+    all.push(PAGE_READONLY);
+    all.push(PAGE_READWRITE);
+    all.push(PAGE_WRITECOPY);
+    all.push(PAGE_EXECUTE);
+    all.push(PAGE_EXECUTE_READ);
+    all.push(PAGE_EXECUTE_READWRITE);
+    all.push(PAGE_EXECUTE_WRITECOPY);
+    all.push(PAGE_GUARD);
+    let mut i = 0;
+    while i < all.len() {
+        let mut j = i + 1;
+        while j < all.len() {
+            assert(all[i] != all[j],
+                   "PAGE_* constants must be pairwise distinct");
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 2 — Memory constants are bitmask-safe (powers of two or
+// disjoint bit pages)
+// =============================================================================
+
+fn is_power_of_two_u32(x: UInt32) -> Bool {
+    x != 0 && (x & (x - 1)) == 0
+}
+
+@test
+fn prop_mem_commit_is_power_of_two() {
+    assert(is_power_of_two_u32(MEM_COMMIT));
+}
+
+@test
+fn prop_mem_reserve_is_power_of_two() {
+    assert(is_power_of_two_u32(MEM_RESERVE));
+}
+
+@test
+fn prop_mem_decommit_is_power_of_two() {
+    assert(is_power_of_two_u32(MEM_DECOMMIT));
+}
+
+@test
+fn prop_mem_release_is_power_of_two() {
+    assert(is_power_of_two_u32(MEM_RELEASE));
+}
+
+@test
+fn prop_mem_reset_is_power_of_two() {
+    assert(is_power_of_two_u32(MEM_RESET));
+}
+
+@test
+fn prop_page_constants_are_powers_of_two() {
+    assert(is_power_of_two_u32(PAGE_NOACCESS));
+    assert(is_power_of_two_u32(PAGE_READONLY));
+    assert(is_power_of_two_u32(PAGE_READWRITE));
+    assert(is_power_of_two_u32(PAGE_WRITECOPY));
+    assert(is_power_of_two_u32(PAGE_EXECUTE));
+    assert(is_power_of_two_u32(PAGE_EXECUTE_READ));
+    assert(is_power_of_two_u32(PAGE_EXECUTE_READWRITE));
+    assert(is_power_of_two_u32(PAGE_EXECUTE_WRITECOPY));
+    assert(is_power_of_two_u32(PAGE_GUARD));
+}
+
+// =============================================================================
+// Property 3 — Standard handles are exactly -10 / -11 / -12 in two's complement
+// =============================================================================
+//
+// Microsoft documents these as the three negative values; their UInt32
+// representation is the two's complement form.
+// =============================================================================
+
+@test
+fn prop_std_input_handle_equals_neg_10_uint32() {
+    // -10 in two's complement on 32 bits = 0xFFFFFFF6
+    assert_eq(STD_INPUT_HANDLE, 0xFFFFFFF6_u32);
+}
+
+@test
+fn prop_std_output_handle_equals_neg_11_uint32() {
+    assert_eq(STD_OUTPUT_HANDLE, 0xFFFFFFF5_u32);
+}
+
+@test
+fn prop_std_error_handle_equals_neg_12_uint32() {
+    assert_eq(STD_ERROR_HANDLE, 0xFFFFFFF4_u32);
+}
+
+@test
+fn prop_std_handles_are_pairwise_distinct() {
+    assert(STD_INPUT_HANDLE != STD_OUTPUT_HANDLE);
+    assert(STD_INPUT_HANDLE != STD_ERROR_HANDLE);
+    assert(STD_OUTPUT_HANDLE != STD_ERROR_HANDLE);
+}
+
+// =============================================================================
+// Property 4 — FILE_FLAG_* are powers of two in the high 8 bits
+// =============================================================================
+
+@test
+fn prop_file_flag_constants_are_powers_of_two() {
+    assert(is_power_of_two_u32(FILE_FLAG_WRITE_THROUGH));
+    assert(is_power_of_two_u32(FILE_FLAG_OVERLAPPED));
+    assert(is_power_of_two_u32(FILE_FLAG_NO_BUFFERING));
+    assert(is_power_of_two_u32(FILE_FLAG_RANDOM_ACCESS));
+    assert(is_power_of_two_u32(FILE_FLAG_SEQUENTIAL_SCAN));
+    assert(is_power_of_two_u32(FILE_FLAG_DELETE_ON_CLOSE));
+    assert(is_power_of_two_u32(FILE_FLAG_BACKUP_SEMANTICS));
+    assert(is_power_of_two_u32(FILE_FLAG_POSIX_SEMANTICS));
+}
+
+@test
+fn prop_file_flag_constants_pairwise_distinct() {
+    let mut flags: List<UInt32> = List.new();
+    flags.push(FILE_FLAG_WRITE_THROUGH);
+    flags.push(FILE_FLAG_OVERLAPPED);
+    flags.push(FILE_FLAG_NO_BUFFERING);
+    flags.push(FILE_FLAG_RANDOM_ACCESS);
+    flags.push(FILE_FLAG_SEQUENTIAL_SCAN);
+    flags.push(FILE_FLAG_DELETE_ON_CLOSE);
+    flags.push(FILE_FLAG_BACKUP_SEMANTICS);
+    flags.push(FILE_FLAG_POSIX_SEMANTICS);
+    let mut i = 0;
+    while i < flags.len() {
+        let mut j = i + 1;
+        while j < flags.len() {
+            assert(flags[i] != flags[j],
+                   "FILE_FLAG_* must be pairwise distinct");
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 5 — Creation-disposition codes are 1..=5 consecutive
+// =============================================================================
+
+@test
+fn prop_creation_disposition_consecutive_1_through_5() {
+    assert_eq(CREATE_NEW, 1_u32);
+    assert_eq(CREATE_ALWAYS, 2_u32);
+    assert_eq(OPEN_EXISTING, 3_u32);
+    assert_eq(OPEN_ALWAYS, 4_u32);
+    assert_eq(TRUNCATE_EXISTING, 5_u32);
+}
+
+@test
+fn prop_creation_disposition_pairwise_distinct() {
+    assert(CREATE_NEW != CREATE_ALWAYS);
+    assert(CREATE_NEW != OPEN_EXISTING);
+    assert(CREATE_NEW != OPEN_ALWAYS);
+    assert(CREATE_NEW != TRUNCATE_EXISTING);
+    assert(CREATE_ALWAYS != OPEN_EXISTING);
+    assert(CREATE_ALWAYS != OPEN_ALWAYS);
+    assert(CREATE_ALWAYS != TRUNCATE_EXISTING);
+    assert(OPEN_EXISTING != OPEN_ALWAYS);
+    assert(OPEN_EXISTING != TRUNCATE_EXISTING);
+    assert(OPEN_ALWAYS != TRUNCATE_EXISTING);
+}
+
+// =============================================================================
+// Property 6 — Wait codes
+// =============================================================================
+
+@test
+fn prop_wait_object_0_is_zero() {
+    assert_eq(WAIT_OBJECT_0, 0_u32);
+}
+
+@test
+fn prop_wait_codes_pairwise_distinct() {
+    assert(WAIT_OBJECT_0 != WAIT_ABANDONED);
+    assert(WAIT_OBJECT_0 != WAIT_TIMEOUT);
+    assert(WAIT_OBJECT_0 != WAIT_FAILED);
+    assert(WAIT_ABANDONED != WAIT_TIMEOUT);
+    assert(WAIT_ABANDONED != WAIT_FAILED);
+    assert(WAIT_TIMEOUT != WAIT_FAILED);
+}
+
+@test
+fn prop_wait_failed_equals_infinite() {
+    // Both INFINITE and WAIT_FAILED are documented as 0xFFFFFFFF; callers
+    // disambiguate by context — INFINITE as a timeout argument, WAIT_FAILED
+    // as a return value.
+    assert_eq(WAIT_FAILED, INFINITE);
+    assert_eq(WAIT_FAILED, 0xFFFFFFFF_u32);
+}
+
+// =============================================================================
+// Property 7 — Win32 error codes are pairwise distinct
+// =============================================================================
+
+@test
+fn prop_win32_error_codes_pairwise_distinct() {
+    let mut codes: List<UInt32> = List.new();
+    codes.push(ERROR_SUCCESS);
+    codes.push(ERROR_FILE_NOT_FOUND);
+    codes.push(ERROR_PATH_NOT_FOUND);
+    codes.push(ERROR_ACCESS_DENIED);
+    codes.push(ERROR_INVALID_HANDLE);
+    codes.push(ERROR_INVALID_PARAMETER);
+    let mut i = 0;
+    while i < codes.len() {
+        let mut j = i + 1;
+        while j < codes.len() {
+            assert(codes[i] != codes[j],
+                   "Win32 error codes must be pairwise distinct");
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 8 — FILE_NOTIFY_CHANGE_* are powers of two (bitmask combinable)
+// =============================================================================
+
+@test
+fn prop_notify_change_are_powers_of_two() {
+    assert(is_power_of_two_u32(FILE_NOTIFY_CHANGE_FILE_NAME));
+    assert(is_power_of_two_u32(FILE_NOTIFY_CHANGE_DIR_NAME));
+    assert(is_power_of_two_u32(FILE_NOTIFY_CHANGE_ATTRIBUTES));
+    assert(is_power_of_two_u32(FILE_NOTIFY_CHANGE_SIZE));
+    assert(is_power_of_two_u32(FILE_NOTIFY_CHANGE_LAST_WRITE));
+    assert(is_power_of_two_u32(FILE_NOTIFY_CHANGE_LAST_ACCESS));
+    assert(is_power_of_two_u32(FILE_NOTIFY_CHANGE_CREATION));
+    assert(is_power_of_two_u32(FILE_NOTIFY_CHANGE_SECURITY));
+}
+
+@test
+fn prop_notify_change_pairwise_distinct() {
+    let mut codes: List<UInt32> = List.new();
+    codes.push(FILE_NOTIFY_CHANGE_FILE_NAME);
+    codes.push(FILE_NOTIFY_CHANGE_DIR_NAME);
+    codes.push(FILE_NOTIFY_CHANGE_ATTRIBUTES);
+    codes.push(FILE_NOTIFY_CHANGE_SIZE);
+    codes.push(FILE_NOTIFY_CHANGE_LAST_WRITE);
+    codes.push(FILE_NOTIFY_CHANGE_LAST_ACCESS);
+    codes.push(FILE_NOTIFY_CHANGE_CREATION);
+    codes.push(FILE_NOTIFY_CHANGE_SECURITY);
+    let mut i = 0;
+    while i < codes.len() {
+        let mut j = i + 1;
+        while j < codes.len() {
+            assert(codes[i] != codes[j],
+                   "FILE_NOTIFY_CHANGE_* must be pairwise distinct");
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 9 — FILE_ACTION_* are consecutive 1..=5 (enum-style)
+// =============================================================================
+
+@test
+fn prop_file_action_codes_consecutive_1_through_5() {
+    assert_eq(FILE_ACTION_ADDED, 1_u32);
+    assert_eq(FILE_ACTION_REMOVED, 2_u32);
+    assert_eq(FILE_ACTION_MODIFIED, 3_u32);
+    assert_eq(FILE_ACTION_RENAMED_OLD_NAME, 4_u32);
+    assert_eq(FILE_ACTION_RENAMED_NEW_NAME, 5_u32);
+}

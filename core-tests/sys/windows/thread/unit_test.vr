@@ -1,0 +1,168 @@
+// =============================================================================
+// core-tests/sys/windows/thread/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.windows.thread` — Windows thread + sync primitive
+// module.  Pins WindowsThreadError ADT, Once state constants, and stack-size
+// default.  Kernel-facing operations (spawn/join/mutex/condvar/futex) cannot
+// be exercised on a non-Windows host.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.thread.{
+    WindowsThreadError,
+    DEFAULT_THREAD_STACK_SIZE,
+    ONCE_INIT, ONCE_RUNNING, ONCE_COMPLETE,
+};
+
+// =============================================================================
+// Section 1 — DEFAULT_THREAD_STACK_SIZE pin
+// =============================================================================
+
+@test
+fn test_default_thread_stack_size_is_1mb() {
+    assert_eq(DEFAULT_THREAD_STACK_SIZE, 1048576_usize);
+}
+
+// =============================================================================
+// Section 2 — Once state constants
+// =============================================================================
+
+@test
+fn test_once_init_is_zero() {
+    assert_eq(ONCE_INIT, 0_u32);
+}
+
+@test
+fn test_once_running_is_one() {
+    assert_eq(ONCE_RUNNING, 1_u32);
+}
+
+@test
+fn test_once_complete_is_two() {
+    assert_eq(ONCE_COMPLETE, 2_u32);
+}
+
+@test
+fn test_once_states_pairwise_distinct() {
+    assert(ONCE_INIT != ONCE_RUNNING);
+    assert(ONCE_INIT != ONCE_COMPLETE);
+    assert(ONCE_RUNNING != ONCE_COMPLETE);
+}
+
+// =============================================================================
+// Section 3 — WindowsThreadError variant construction
+// =============================================================================
+
+@test
+fn test_thread_error_create_failed_payload() {
+    let e = WindowsThreadError.CreateFailed { code: 8_u32 };
+    match e {
+        WindowsThreadError.CreateFailed { code } => assert_eq(code, 8_u32),
+        _ => panic("expected CreateFailed"),
+    };
+}
+
+@test
+fn test_thread_error_join_failed_payload() {
+    let e = WindowsThreadError.JoinFailed { code: 6_u32 };
+    match e {
+        WindowsThreadError.JoinFailed { code } => assert_eq(code, 6_u32),
+        _ => panic("expected JoinFailed"),
+    };
+}
+
+@test
+fn test_thread_error_suspend_failed_payload() {
+    let e = WindowsThreadError.SuspendFailed { code: 5_u32 };
+    match e {
+        WindowsThreadError.SuspendFailed { code } => assert_eq(code, 5_u32),
+        _ => panic("expected SuspendFailed"),
+    };
+}
+
+@test
+fn test_thread_error_resume_failed_payload() {
+    let e = WindowsThreadError.ResumeFailed { code: 1_u32 };
+    match e {
+        WindowsThreadError.ResumeFailed { code } => assert_eq(code, 1_u32),
+        _ => panic("expected ResumeFailed"),
+    };
+}
+
+@test
+fn test_thread_error_mutex_init_failed_payload() {
+    let e = WindowsThreadError.MutexInitFailed { code: 87_u32 };
+    match e {
+        WindowsThreadError.MutexInitFailed { code } => assert_eq(code, 87_u32),
+        _ => panic("expected MutexInitFailed"),
+    };
+}
+
+@test
+fn test_thread_error_mutex_lock_failed_payload() {
+    let e = WindowsThreadError.MutexLockFailed { code: 258_u32 };
+    match e {
+        WindowsThreadError.MutexLockFailed { code } => assert_eq(code, 258_u32),
+        _ => panic("expected MutexLockFailed"),
+    };
+}
+
+@test
+fn test_thread_error_cond_init_failed_payload() {
+    let e = WindowsThreadError.CondInitFailed { code: 8_u32 };
+    match e {
+        WindowsThreadError.CondInitFailed { code } => assert_eq(code, 8_u32),
+        _ => panic("expected CondInitFailed"),
+    };
+}
+
+@test
+fn test_thread_error_cond_wait_failed_payload() {
+    let e = WindowsThreadError.CondWaitFailed { code: 1460_u32 };
+    match e {
+        WindowsThreadError.CondWaitFailed { code } => assert_eq(code, 1460_u32),
+        _ => panic("expected CondWaitFailed"),
+    };
+}
+
+@test
+fn test_thread_error_tls_init_failed_constructs() {
+    let e = WindowsThreadError.TlsInitFailed;
+    assert(e is WindowsThreadError.TlsInitFailed);
+}
+
+@test
+fn test_thread_error_already_joined_constructs() {
+    let e = WindowsThreadError.AlreadyJoined;
+    assert(e is WindowsThreadError.AlreadyJoined);
+}
+
+@test
+fn test_thread_error_already_detached_constructs() {
+    let e = WindowsThreadError.AlreadyDetached;
+    assert(e is WindowsThreadError.AlreadyDetached);
+}
+
+// =============================================================================
+// Section 4 — WindowsThreadError.message() textual stability
+// =============================================================================
+
+@test
+fn test_thread_error_message_tls_init_failed() {
+    let e = WindowsThreadError.TlsInitFailed;
+    assert_eq(e.message(), "Failed to initialize TLS for new thread");
+}
+
+@test
+fn test_thread_error_message_already_joined() {
+    let e = WindowsThreadError.AlreadyJoined;
+    assert_eq(e.message(), "WindowsThread has already been joined");
+}
+
+@test
+fn test_thread_error_message_already_detached() {
+    let e = WindowsThreadError.AlreadyDetached;
+    assert_eq(e.message(), "WindowsThread has already been detached");
+}

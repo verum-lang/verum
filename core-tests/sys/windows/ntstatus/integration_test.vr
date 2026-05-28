@@ -1,0 +1,264 @@
+// =============================================================================
+// core-tests/sys/windows/ntstatus/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib scenarios that mirror how NTSTATUS funnels into the rest
+// of the standard library — Result wrappers, retry loops, and the funnel
+// from `ntdll.dll` callers into typed-error surfaces.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.ntstatus.{
+    NtStatus,
+    STATUS_SUCCESS, STATUS_PENDING, STATUS_TIMEOUT,
+    STATUS_INVALID_HANDLE, STATUS_ACCESS_DENIED, STATUS_NO_MEMORY,
+    STATUS_OBJECT_NAME_NOT_FOUND, STATUS_OBJECT_PATH_NOT_FOUND,
+    STATUS_NO_SUCH_FILE, STATUS_NOT_FOUND,
+    STATUS_CANCELLED, STATUS_BUFFER_TOO_SMALL,
+    nt_success, nt_error,
+    is_retryable, is_not_found, is_access_denied,
+};
+
+// =============================================================================
+// Scenario 1 — NTSTATUS funneled through Result<T, NtStatus>
+// =============================================================================
+//
+// Every ntdll/kernel32 wrapper that surfaces a typed result builds on
+// `nt_success` to decide Ok/Err. This scenario replicates the pattern
+// for a synthetic syscall.
+// =============================================================================
+
+fn syscall_returning_status(s: NtStatus) -> Result<Int, NtStatus> {
+    if nt_success(s) {
+        Ok(42)
+    } else {
+        Err(s)
+    }
+}
+
+@test
+fn integration_syscall_success_yields_ok() {
+    let r = syscall_returning_status(STATUS_SUCCESS);
+    assert(r.is_ok());
+    assert_eq(r.unwrap(), 42);
+}
+
+@test
+fn integration_syscall_pending_is_success_domain() {
+    // STATUS_PENDING (0x00000103) is Success-severity by NT convention —
+    // callers MUST recognise it as a valid Ok in async paths.
+    let r = syscall_returning_status(STATUS_PENDING);
+    assert(r.is_ok());
+}
+
+@test
+fn integration_syscall_error_yields_err() {
+    let r = syscall_returning_status(STATUS_INVALID_HANDLE);
+    assert(r.is_err());
+    match r {
+        Ok(_) => panic("expected Err"),
+        Err(s) => assert_eq(s.0, STATUS_INVALID_HANDLE.0),
+    };
+}
+
+// =============================================================================
+// Scenario 2 — Retry-loop coordinator driven by `is_retryable`
+// =============================================================================
+//
+// Async ntdll wrappers (e.g. NtReadFile that returns STATUS_PENDING) loop
+// on `is_retryable`. This scenario pins the loop-termination contract.
+// =============================================================================
+
+fn classify_status_for_retry_loop(s: NtStatus) -> Text {
+    if is_retryable(s) {
+        "retry"
+    } else if nt_success(s) {
+        "done"
+    } else {
+        "fail"
+    }
+}
+
+@test
+fn integration_retry_loop_classifies_pending_as_retry() {
+    assert_eq(classify_status_for_retry_loop(STATUS_PENDING), "retry");
+}
+
+@test
+fn integration_retry_loop_classifies_success_as_done() {
+    assert_eq(classify_status_for_retry_loop(STATUS_SUCCESS), "done");
+}
+
+@test
+fn integration_retry_loop_classifies_error_as_fail() {
+    assert_eq(classify_status_for_retry_loop(STATUS_INVALID_HANDLE), "fail");
+    assert_eq(classify_status_for_retry_loop(STATUS_NO_MEMORY), "fail");
+}
+
+// =============================================================================
+// Scenario 3 — Path-resolution dispatch table funnels NTSTATUS to
+//              a typed error class
+// =============================================================================
+
+type PathError is
+    | NotFound
+    | AccessDenied
+    | BufferTooSmall
+    | Cancelled
+    | Other;
+
+fn classify_path_error(s: NtStatus) -> PathError {
+    if is_not_found(s) {
+        PathError.NotFound
+    } else if is_access_denied(s) {
+        PathError.AccessDenied
+    } else if s.0 == STATUS_BUFFER_TOO_SMALL.0 {
+        PathError.BufferTooSmall
+    } else if s.0 == STATUS_CANCELLED.0 {
+        PathError.Cancelled
+    } else {
+        PathError.Other
+    }
+}
+
+@test
+fn integration_path_error_classifies_object_name_not_found() {
+    let r = classify_path_error(STATUS_OBJECT_NAME_NOT_FOUND);
+    assert(r is PathError.NotFound);
+}
+
+@test
+fn integration_path_error_classifies_no_such_file() {
+    let r = classify_path_error(STATUS_NO_SUCH_FILE);
+    assert(r is PathError.NotFound);
+}
+
+@test
+fn integration_path_error_classifies_object_path_not_found() {
+    let r = classify_path_error(STATUS_OBJECT_PATH_NOT_FOUND);
+    assert(r is PathError.NotFound);
+}
+
+@test
+fn integration_path_error_classifies_not_found() {
+    let r = classify_path_error(STATUS_NOT_FOUND);
+    assert(r is PathError.NotFound);
+}
+
+@test
+fn integration_path_error_classifies_access_denied() {
+    let r = classify_path_error(STATUS_ACCESS_DENIED);
+    assert(r is PathError.AccessDenied);
+}
+
+@test
+fn integration_path_error_classifies_buffer_too_small() {
+    let r = classify_path_error(STATUS_BUFFER_TOO_SMALL);
+    assert(r is PathError.BufferTooSmall);
+}
+
+@test
+fn integration_path_error_classifies_cancelled() {
+    let r = classify_path_error(STATUS_CANCELLED);
+    assert(r is PathError.Cancelled);
+}
+
+@test
+fn integration_path_error_classifies_unknown_as_other() {
+    let r = classify_path_error(STATUS_NO_MEMORY);
+    assert(r is PathError.Other);
+}
+
+// =============================================================================
+// Scenario 4 — List<NtStatus> error funnel: classify-and-partition
+// =============================================================================
+//
+// The retry-coordinator pattern that ntdll-wrapping code uses to process a
+// batch of completion callbacks. We mirror that here to lock the
+// classifier semantics under iteration.
+// =============================================================================
+
+fn count_errors_in_batch(statuses: List<NtStatus>) -> Int {
+    let mut n = 0;
+    let mut i = 0;
+    while i < statuses.len() {
+        if nt_error(statuses[i]) {
+            n = n + 1;
+        }
+        i = i + 1;
+    }
+    n
+}
+
+@test
+fn integration_count_errors_in_mixed_batch() {
+    let mut batch: List<NtStatus> = List.new();
+    batch.push(STATUS_SUCCESS);
+    batch.push(STATUS_INVALID_HANDLE);
+    batch.push(STATUS_PENDING);
+    batch.push(STATUS_ACCESS_DENIED);
+    batch.push(STATUS_NO_MEMORY);
+    batch.push(STATUS_TIMEOUT);
+    // SUCCESS / PENDING / TIMEOUT all Success-domain; remaining 3 are errors.
+    assert_eq(count_errors_in_batch(batch), 3);
+}
+
+@test
+fn integration_count_errors_in_pure_success_batch() {
+    let mut batch: List<NtStatus> = List.new();
+    batch.push(STATUS_SUCCESS);
+    batch.push(STATUS_PENDING);
+    batch.push(STATUS_TIMEOUT);
+    assert_eq(count_errors_in_batch(batch), 0);
+}
+
+@test
+fn integration_count_errors_in_pure_error_batch() {
+    let mut batch: List<NtStatus> = List.new();
+    batch.push(STATUS_INVALID_HANDLE);
+    batch.push(STATUS_ACCESS_DENIED);
+    batch.push(STATUS_NO_MEMORY);
+    batch.push(STATUS_CANCELLED);
+    assert_eq(count_errors_in_batch(batch), 4);
+}
+
+// =============================================================================
+// Scenario 5 — Maybe<NtStatus> for optional status reporting
+// =============================================================================
+
+fn first_error(statuses: List<NtStatus>) -> Maybe<NtStatus> {
+    let mut i = 0;
+    while i < statuses.len() {
+        if nt_error(statuses[i]) {
+            return Maybe.Some(statuses[i]);
+        }
+        i = i + 1;
+    }
+    Maybe.None
+}
+
+@test
+fn integration_first_error_returns_first_error_in_batch() {
+    let mut batch: List<NtStatus> = List.new();
+    batch.push(STATUS_SUCCESS);
+    batch.push(STATUS_PENDING);
+    batch.push(STATUS_INVALID_HANDLE);
+    batch.push(STATUS_ACCESS_DENIED);
+    let r = first_error(batch);
+    assert(r.is_some());
+    match r {
+        Maybe.Some(s) => assert_eq(s.0, STATUS_INVALID_HANDLE.0),
+        Maybe.None => panic("expected Some"),
+    };
+}
+
+@test
+fn integration_first_error_returns_none_when_all_success() {
+    let mut batch: List<NtStatus> = List.new();
+    batch.push(STATUS_SUCCESS);
+    batch.push(STATUS_PENDING);
+    batch.push(STATUS_TIMEOUT);
+    let r = first_error(batch);
+    assert(r.is_none());
+}

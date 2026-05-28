@@ -17658,6 +17658,34 @@ impl VbcCodegen {
             }
 
             // Same type or unknown source: pass through (runtime will handle)
+            //
+            // DEFECT NOTE — sign drift across UInt32 → Int32 cast.
+            //   The discriminant-only passthrough below collapses every
+            //   integer width / signedness to one arm, so a value like
+            //   `0x80000005_u32 as Int32` flows through with the bit
+            //   pattern preserved but the SIGNED interpretation drifts:
+            //   subsequent `< 0` / `>= 0` evaluate against a positive
+            //   48-bit Int payload and return the wrong answer.
+            //
+            //   A naïve `shl (48 - bits) ; shr (48 - bits)` sign-extension
+            //   sequence here interacts badly with the NaN-box Int tag
+            //   bits during left-shift and corrupts the runtime value
+            //   representation — that approach was tried, surfaced as a
+            //   precompiler hang, and reverted in favour of the more
+            //   conservative passthrough.  See
+            //   `core-tests/sys/windows/ntstatus/audit.md §A` for the
+            //   regression chain and the stdlib bit-extract workaround
+            //   that closes every affected caller (`is_success` reads
+            //   bit 31 directly).  A proper fix requires either:
+            //     (a) a dedicated `SignExtendBits { dst, src, width }`
+            //         VBC opcode that the interpreter implements via
+            //         masked sign-extension on the bare i64 payload, OR
+            //     (b) a comparison-operator rewrite that consults the
+            //         operand's static type-name and emits unsigned-vs-
+            //         signed comparison opcodes (mirroring the `>>` →
+            //         `Ushr` precedent at line ~2471).
+            //   Tracked as the fundamental VBC fix backing
+            //   regression_test §A.
             (Some(src), target)
                 if std::mem::discriminant(&src) == std::mem::discriminant(target) =>
             {

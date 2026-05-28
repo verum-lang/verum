@@ -1,0 +1,272 @@
+// =============================================================================
+// core-tests/sys/windows/ntdll/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.windows.ntdll` — NT Native API FFI binding
+// module.  The FFI signatures (`NtCreateFile`, `NtReadFile`, …) cannot
+// run on a non-Windows host, but the constant + type-shape surface IS
+// portable and is what we pin here.
+//
+// API surface tested:
+//
+//   Types:     Handle (newtype Int) — NULL / INVALID / is_valid / raw
+//              LargeInteger (newtype Int64), ULargeInteger (newtype UInt64)
+//   Constants: OBJ_* (object attribute flags)
+//              GENERIC_*  (access masks)
+//              FILE_*     (file access masks)
+//              FILE_SUPERSEDE / FILE_OPEN / FILE_CREATE / FILE_OPEN_IF
+//
+// Reference: Microsoft DDK ntddk.h, ntifs.h, winnt.h.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.ntdll.{
+    Handle,
+    OBJ_INHERIT, OBJ_PERMANENT, OBJ_EXCLUSIVE, OBJ_CASE_INSENSITIVE,
+    OBJ_OPENIF, OBJ_OPENLINK, OBJ_KERNEL_HANDLE, OBJ_FORCE_ACCESS_CHECK,
+    OBJ_VALID_ATTRIBUTES,
+    GENERIC_READ, GENERIC_WRITE, GENERIC_EXECUTE, GENERIC_ALL,
+    DELETE, READ_CONTROL, WRITE_DAC, WRITE_OWNER, SYNCHRONIZE,
+    FILE_READ_DATA, FILE_WRITE_DATA, FILE_APPEND_DATA, FILE_READ_EA,
+    FILE_WRITE_EA, FILE_EXECUTE, FILE_DELETE_CHILD, FILE_READ_ATTRIBUTES,
+    FILE_WRITE_ATTRIBUTES, FILE_ALL_ACCESS,
+    FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_GENERIC_EXECUTE,
+    FILE_SUPERSEDE, FILE_OPEN, FILE_CREATE, FILE_OPEN_IF,
+};
+
+// =============================================================================
+// Section 1 — Handle type-shape
+// =============================================================================
+
+@test
+fn test_handle_null_raw_is_zero() {
+    assert_eq(Handle.NULL.raw(), 0);
+}
+
+@test
+fn test_handle_invalid_raw_is_neg_one() {
+    assert_eq(Handle.INVALID.raw(), -1);
+}
+
+@test
+fn test_handle_null_is_not_valid() {
+    assert(!Handle.NULL.is_valid());
+}
+
+@test
+fn test_handle_invalid_is_not_valid() {
+    assert(!Handle.INVALID.is_valid());
+}
+
+@test
+fn test_handle_arbitrary_nonzero_is_valid() {
+    let h = Handle(42);
+    assert(h.is_valid());
+}
+
+@test
+fn test_handle_raw_round_trips_through_newtype() {
+    let h = Handle(0xCAFEBABE);
+    assert_eq(h.raw(), 0xCAFEBABE);
+}
+
+@test
+fn test_handle_distinct_null_invalid() {
+    assert(Handle.NULL.raw() != Handle.INVALID.raw());
+}
+
+// =============================================================================
+// Section 2 — OBJ_* object attribute flags (winnt.h / ntdef.h)
+// =============================================================================
+
+@test
+fn test_obj_inherit_value() {
+    assert_eq(OBJ_INHERIT, 0x00000002_u32);
+}
+
+@test
+fn test_obj_permanent_value() {
+    assert_eq(OBJ_PERMANENT, 0x00000010_u32);
+}
+
+@test
+fn test_obj_exclusive_value() {
+    assert_eq(OBJ_EXCLUSIVE, 0x00000020_u32);
+}
+
+@test
+fn test_obj_case_insensitive_value() {
+    assert_eq(OBJ_CASE_INSENSITIVE, 0x00000040_u32);
+}
+
+@test
+fn test_obj_openif_value() {
+    assert_eq(OBJ_OPENIF, 0x00000080_u32);
+}
+
+@test
+fn test_obj_openlink_value() {
+    assert_eq(OBJ_OPENLINK, 0x00000100_u32);
+}
+
+@test
+fn test_obj_kernel_handle_value() {
+    assert_eq(OBJ_KERNEL_HANDLE, 0x00000200_u32);
+}
+
+@test
+fn test_obj_force_access_check_value() {
+    assert_eq(OBJ_FORCE_ACCESS_CHECK, 0x00000400_u32);
+}
+
+@test
+fn test_obj_valid_attributes_value() {
+    // 0x000007F2 — the union of all valid OBJ_* flag bits.
+    assert_eq(OBJ_VALID_ATTRIBUTES, 0x000007F2_u32);
+}
+
+// =============================================================================
+// Section 3 — GENERIC_* access masks (winnt.h)
+// =============================================================================
+
+@test
+fn test_generic_read_value() {
+    assert_eq(GENERIC_READ, 0x80000000_u32);
+}
+
+@test
+fn test_generic_write_value() {
+    assert_eq(GENERIC_WRITE, 0x40000000_u32);
+}
+
+@test
+fn test_generic_execute_value() {
+    assert_eq(GENERIC_EXECUTE, 0x20000000_u32);
+}
+
+@test
+fn test_generic_all_value() {
+    assert_eq(GENERIC_ALL, 0x10000000_u32);
+}
+
+// =============================================================================
+// Section 4 — Standard rights (winnt.h)
+// =============================================================================
+
+@test
+fn test_delete_value() {
+    assert_eq(DELETE, 0x00010000_u32);
+}
+
+@test
+fn test_read_control_value() {
+    assert_eq(READ_CONTROL, 0x00020000_u32);
+}
+
+@test
+fn test_write_dac_value() {
+    assert_eq(WRITE_DAC, 0x00040000_u32);
+}
+
+@test
+fn test_write_owner_value() {
+    assert_eq(WRITE_OWNER, 0x00080000_u32);
+}
+
+@test
+fn test_synchronize_value() {
+    assert_eq(SYNCHRONIZE, 0x00100000_u32);
+}
+
+// =============================================================================
+// Section 5 — FILE_* fine-grained file access rights (winnt.h / ntifs.h)
+// =============================================================================
+
+@test
+fn test_file_read_data_value() {
+    assert_eq(FILE_READ_DATA, 0x0001_u32);
+}
+
+@test
+fn test_file_write_data_value() {
+    assert_eq(FILE_WRITE_DATA, 0x0002_u32);
+}
+
+@test
+fn test_file_append_data_value() {
+    assert_eq(FILE_APPEND_DATA, 0x0004_u32);
+}
+
+@test
+fn test_file_read_ea_value() {
+    assert_eq(FILE_READ_EA, 0x0008_u32);
+}
+
+@test
+fn test_file_write_ea_value() {
+    assert_eq(FILE_WRITE_EA, 0x0010_u32);
+}
+
+@test
+fn test_file_execute_value() {
+    assert_eq(FILE_EXECUTE, 0x0020_u32);
+}
+
+@test
+fn test_file_delete_child_value() {
+    assert_eq(FILE_DELETE_CHILD, 0x0040_u32);
+}
+
+@test
+fn test_file_read_attributes_value() {
+    assert_eq(FILE_READ_ATTRIBUTES, 0x0080_u32);
+}
+
+@test
+fn test_file_write_attributes_value() {
+    assert_eq(FILE_WRITE_ATTRIBUTES, 0x0100_u32);
+}
+
+@test
+fn test_file_all_access_value() {
+    assert_eq(FILE_ALL_ACCESS, 0x001F01FF_u32);
+}
+
+@test
+fn test_file_generic_read_value() {
+    assert_eq(FILE_GENERIC_READ, 0x00120089_u32);
+}
+
+@test
+fn test_file_generic_write_value() {
+    assert_eq(FILE_GENERIC_WRITE, 0x00120116_u32);
+}
+
+@test
+fn test_file_generic_execute_value() {
+    assert_eq(FILE_GENERIC_EXECUTE, 0x001200A0_u32);
+}
+
+// =============================================================================
+// Section 6 — FILE_* NtCreateFile disposition codes
+// =============================================================================
+
+@test
+fn test_file_supersede_value() {
+    assert_eq(FILE_SUPERSEDE, 0_u32);
+}
+
+@test
+fn test_file_open_value() {
+    assert_eq(FILE_OPEN, 1_u32);
+}
+
+@test
+fn test_file_create_value() {
+    assert_eq(FILE_CREATE, 2_u32);
+}
+
+@test
+fn test_file_open_if_value() {
+    assert_eq(FILE_OPEN_IF, 3_u32);
+}

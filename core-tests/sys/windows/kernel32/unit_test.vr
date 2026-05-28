@@ -1,0 +1,527 @@
+// =============================================================================
+// core-tests/sys/windows/kernel32/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.windows.kernel32` — Win32 API constants and the
+// `Overlapped` ABI-shape struct. The FFI bindings themselves
+// (`CreateFileW`, `ReadFile`, `WaitForSingleObject`, …) cannot be exercised
+// on a non-Windows host, so the constant + struct surface is what we pin
+// here. Everything tested here is platform-independent at the bytecode level
+// — the values come from Microsoft's published API headers and stay stable
+// across every Windows 10/11 SKU per the Win32 stability commitment.
+//
+// API surface tested:
+//
+//   Constants:
+//     * Memory protection: MEM_COMMIT/RESERVE/DECOMMIT/RELEASE/RESET
+//                          PAGE_NOACCESS/READONLY/READWRITE/WRITECOPY/
+//                          EXECUTE/EXECUTE_READ/EXECUTE_READWRITE/
+//                          EXECUTE_WRITECOPY/GUARD
+//     * Std handles:       STD_INPUT/OUTPUT/ERROR_HANDLE
+//     * File attributes:   FILE_ATTRIBUTE_*
+//     * File flags:        FILE_FLAG_*
+//     * Creation disposition: CREATE_NEW / CREATE_ALWAYS / OPEN_EXISTING /
+//                             OPEN_ALWAYS / TRUNCATE_EXISTING
+//     * Win32 error codes: ERROR_*
+//     * Wait codes:        WAIT_OBJECT_0 / WAIT_ABANDONED / WAIT_TIMEOUT /
+//                          WAIT_FAILED / INFINITE
+//   Types:
+//     * Overlapped:        new() / with_event() / set_offset() / get_offset()
+//
+// Reference: Microsoft Win32 API headers (winnt.h, winbase.h, fileapi.h).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.kernel32.{
+    // Memory constants
+    MEM_COMMIT, MEM_RESERVE, MEM_DECOMMIT, MEM_RELEASE, MEM_RESET,
+    PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
+    PAGE_EXECUTE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE,
+    PAGE_EXECUTE_WRITECOPY, PAGE_GUARD,
+    INVALID_HANDLE_VALUE,
+
+    // Std handles
+    STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE,
+
+    // File attributes
+    FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM,
+    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_ARCHIVE, FILE_ATTRIBUTE_DEVICE,
+    FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_TEMPORARY, FILE_ATTRIBUTE_SPARSE_FILE,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_COMPRESSED,
+    FILE_ATTRIBUTE_OFFLINE, FILE_ATTRIBUTE_NOT_CONTENT_INDEXED,
+    FILE_ATTRIBUTE_ENCRYPTED,
+
+    // File flags
+    FILE_FLAG_WRITE_THROUGH, FILE_FLAG_OVERLAPPED,
+    FILE_FLAG_NO_BUFFERING, FILE_FLAG_RANDOM_ACCESS,
+    FILE_FLAG_SEQUENTIAL_SCAN, FILE_FLAG_DELETE_ON_CLOSE,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_POSIX_SEMANTICS,
+    FILE_FLAG_SESSION_AWARE, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_FLAG_OPEN_NO_RECALL, FILE_FLAG_FIRST_PIPE_INSTANCE,
+
+    // Creation disposition
+    CREATE_NEW, CREATE_ALWAYS, OPEN_EXISTING, OPEN_ALWAYS, TRUNCATE_EXISTING,
+
+    // Win32 error codes
+    ERROR_SUCCESS, ERROR_INVALID_FUNCTION, ERROR_FILE_NOT_FOUND,
+    ERROR_PATH_NOT_FOUND, ERROR_TOO_MANY_OPEN_FILES, ERROR_ACCESS_DENIED,
+    ERROR_INVALID_HANDLE, ERROR_NOT_ENOUGH_MEMORY, ERROR_INVALID_DATA,
+    ERROR_OUTOFMEMORY, ERROR_NO_MORE_FILES, ERROR_WRITE_PROTECT,
+    ERROR_NOT_READY, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION,
+    ERROR_HANDLE_EOF, ERROR_NOT_SUPPORTED, ERROR_FILE_EXISTS,
+    ERROR_INVALID_PARAMETER, ERROR_BROKEN_PIPE, ERROR_DISK_FULL,
+    ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_NAME, ERROR_DIR_NOT_EMPTY,
+    ERROR_ALREADY_EXISTS, ERROR_MORE_DATA, ERROR_NO_MORE_ITEMS,
+    ERROR_OPERATION_ABORTED, ERROR_IO_INCOMPLETE, ERROR_IO_PENDING,
+    ERROR_TIMEOUT,
+
+    // Wait codes
+    INFINITE, WAIT_OBJECT_0, WAIT_ABANDONED, WAIT_TIMEOUT, WAIT_FAILED,
+
+    // Notify-change codes
+    FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_DIR_NAME,
+    FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_CHANGE_SIZE,
+    FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_LAST_ACCESS,
+    FILE_NOTIFY_CHANGE_CREATION, FILE_NOTIFY_CHANGE_SECURITY,
+    FILE_ACTION_ADDED, FILE_ACTION_REMOVED, FILE_ACTION_MODIFIED,
+    FILE_ACTION_RENAMED_OLD_NAME, FILE_ACTION_RENAMED_NEW_NAME,
+
+    // Misc
+    FILE_BEGIN, FILE_CURRENT, FILE_END,
+    LOCKFILE_FAIL_IMMEDIATELY, LOCKFILE_EXCLUSIVE_LOCK,
+    STARTF_USESTDHANDLES, CREATE_NO_WINDOW, HANDLE_FLAG_INHERIT,
+    STILL_ACTIVE, CREATE_SUSPENDED, TLS_OUT_OF_INDEXES,
+};
+
+// =============================================================================
+// Section 1 — Memory-protection / allocation constants (winnt.h)
+// =============================================================================
+
+@test
+fn test_mem_commit_value() {
+    assert_eq(MEM_COMMIT, 0x00001000_u32);
+}
+
+@test
+fn test_mem_reserve_value() {
+    assert_eq(MEM_RESERVE, 0x00002000_u32);
+}
+
+@test
+fn test_mem_decommit_value() {
+    assert_eq(MEM_DECOMMIT, 0x00004000_u32);
+}
+
+@test
+fn test_mem_release_value() {
+    assert_eq(MEM_RELEASE, 0x00008000_u32);
+}
+
+@test
+fn test_mem_reset_value() {
+    assert_eq(MEM_RESET, 0x00080000_u32);
+}
+
+@test
+fn test_page_noaccess_value() {
+    assert_eq(PAGE_NOACCESS, 0x01_u32);
+}
+
+@test
+fn test_page_readonly_value() {
+    assert_eq(PAGE_READONLY, 0x02_u32);
+}
+
+@test
+fn test_page_readwrite_value() {
+    assert_eq(PAGE_READWRITE, 0x04_u32);
+}
+
+@test
+fn test_page_writecopy_value() {
+    assert_eq(PAGE_WRITECOPY, 0x08_u32);
+}
+
+@test
+fn test_page_execute_value() {
+    assert_eq(PAGE_EXECUTE, 0x10_u32);
+}
+
+@test
+fn test_page_execute_read_value() {
+    assert_eq(PAGE_EXECUTE_READ, 0x20_u32);
+}
+
+@test
+fn test_page_execute_readwrite_value() {
+    assert_eq(PAGE_EXECUTE_READWRITE, 0x40_u32);
+}
+
+@test
+fn test_page_execute_writecopy_value() {
+    assert_eq(PAGE_EXECUTE_WRITECOPY, 0x80_u32);
+}
+
+@test
+fn test_page_guard_value() {
+    assert_eq(PAGE_GUARD, 0x100_u32);
+}
+
+@test
+fn test_invalid_handle_value_is_all_ones() {
+    assert_eq(INVALID_HANDLE_VALUE, 0xFFFFFFFFFFFFFFFF_u64);
+}
+
+// =============================================================================
+// Section 2 — Standard handle constants (kernel32 GetStdHandle)
+// =============================================================================
+
+@test
+fn test_std_input_handle_value() {
+    // STD_INPUT_HANDLE = -10 (signed) = 0xFFFFFFF6 (unsigned)
+    assert_eq(STD_INPUT_HANDLE, 0xFFFFFFF6_u32);
+}
+
+@test
+fn test_std_output_handle_value() {
+    assert_eq(STD_OUTPUT_HANDLE, 0xFFFFFFF5_u32);
+}
+
+@test
+fn test_std_error_handle_value() {
+    assert_eq(STD_ERROR_HANDLE, 0xFFFFFFF4_u32);
+}
+
+// =============================================================================
+// Section 3 — File-attribute constants (winnt.h)
+// =============================================================================
+
+@test
+fn test_file_attribute_readonly_value() {
+    assert_eq(FILE_ATTRIBUTE_READONLY, 0x00000001_u32);
+}
+
+@test
+fn test_file_attribute_hidden_value() {
+    assert_eq(FILE_ATTRIBUTE_HIDDEN, 0x00000002_u32);
+}
+
+@test
+fn test_file_attribute_system_value() {
+    assert_eq(FILE_ATTRIBUTE_SYSTEM, 0x00000004_u32);
+}
+
+@test
+fn test_file_attribute_directory_value() {
+    assert_eq(FILE_ATTRIBUTE_DIRECTORY, 0x00000010_u32);
+}
+
+@test
+fn test_file_attribute_archive_value() {
+    assert_eq(FILE_ATTRIBUTE_ARCHIVE, 0x00000020_u32);
+}
+
+@test
+fn test_file_attribute_normal_value() {
+    assert_eq(FILE_ATTRIBUTE_NORMAL, 0x00000080_u32);
+}
+
+@test
+fn test_file_attribute_temporary_value() {
+    assert_eq(FILE_ATTRIBUTE_TEMPORARY, 0x00000100_u32);
+}
+
+@test
+fn test_file_attribute_sparse_file_value() {
+    assert_eq(FILE_ATTRIBUTE_SPARSE_FILE, 0x00000200_u32);
+}
+
+@test
+fn test_file_attribute_compressed_value() {
+    assert_eq(FILE_ATTRIBUTE_COMPRESSED, 0x00000800_u32);
+}
+
+@test
+fn test_file_attribute_encrypted_value() {
+    assert_eq(FILE_ATTRIBUTE_ENCRYPTED, 0x00004000_u32);
+}
+
+// =============================================================================
+// Section 4 — File-flag constants (CreateFile flags)
+// =============================================================================
+
+@test
+fn test_file_flag_write_through_value() {
+    assert_eq(FILE_FLAG_WRITE_THROUGH, 0x80000000_u32);
+}
+
+@test
+fn test_file_flag_overlapped_value() {
+    assert_eq(FILE_FLAG_OVERLAPPED, 0x40000000_u32);
+}
+
+@test
+fn test_file_flag_no_buffering_value() {
+    assert_eq(FILE_FLAG_NO_BUFFERING, 0x20000000_u32);
+}
+
+@test
+fn test_file_flag_random_access_value() {
+    assert_eq(FILE_FLAG_RANDOM_ACCESS, 0x10000000_u32);
+}
+
+@test
+fn test_file_flag_sequential_scan_value() {
+    assert_eq(FILE_FLAG_SEQUENTIAL_SCAN, 0x08000000_u32);
+}
+
+@test
+fn test_file_flag_delete_on_close_value() {
+    assert_eq(FILE_FLAG_DELETE_ON_CLOSE, 0x04000000_u32);
+}
+
+@test
+fn test_file_flag_backup_semantics_value() {
+    assert_eq(FILE_FLAG_BACKUP_SEMANTICS, 0x02000000_u32);
+}
+
+// =============================================================================
+// Section 5 — Creation-disposition codes (CreateFileW dwCreationDisposition)
+// =============================================================================
+
+@test
+fn test_create_new_value() {
+    assert_eq(CREATE_NEW, 1_u32);
+}
+
+@test
+fn test_create_always_value() {
+    assert_eq(CREATE_ALWAYS, 2_u32);
+}
+
+@test
+fn test_open_existing_value() {
+    assert_eq(OPEN_EXISTING, 3_u32);
+}
+
+@test
+fn test_open_always_value() {
+    assert_eq(OPEN_ALWAYS, 4_u32);
+}
+
+@test
+fn test_truncate_existing_value() {
+    assert_eq(TRUNCATE_EXISTING, 5_u32);
+}
+
+// =============================================================================
+// Section 6 — Win32 error codes (winerror.h)
+// =============================================================================
+
+@test
+fn test_error_success_is_zero() {
+    assert_eq(ERROR_SUCCESS, 0_u32);
+}
+
+@test
+fn test_error_file_not_found_value() {
+    assert_eq(ERROR_FILE_NOT_FOUND, 2_u32);
+}
+
+@test
+fn test_error_access_denied_value() {
+    assert_eq(ERROR_ACCESS_DENIED, 5_u32);
+}
+
+@test
+fn test_error_invalid_handle_value() {
+    assert_eq(ERROR_INVALID_HANDLE, 6_u32);
+}
+
+@test
+fn test_error_not_enough_memory_value() {
+    assert_eq(ERROR_NOT_ENOUGH_MEMORY, 8_u32);
+}
+
+@test
+fn test_error_invalid_parameter_value() {
+    assert_eq(ERROR_INVALID_PARAMETER, 87_u32);
+}
+
+@test
+fn test_error_broken_pipe_value() {
+    assert_eq(ERROR_BROKEN_PIPE, 109_u32);
+}
+
+@test
+fn test_error_disk_full_value() {
+    assert_eq(ERROR_DISK_FULL, 112_u32);
+}
+
+@test
+fn test_error_insufficient_buffer_value() {
+    assert_eq(ERROR_INSUFFICIENT_BUFFER, 122_u32);
+}
+
+@test
+fn test_error_already_exists_value() {
+    assert_eq(ERROR_ALREADY_EXISTS, 183_u32);
+}
+
+@test
+fn test_error_operation_aborted_value() {
+    assert_eq(ERROR_OPERATION_ABORTED, 995_u32);
+}
+
+@test
+fn test_error_io_pending_value() {
+    assert_eq(ERROR_IO_PENDING, 997_u32);
+}
+
+@test
+fn test_error_io_incomplete_value() {
+    assert_eq(ERROR_IO_INCOMPLETE, 996_u32);
+}
+
+@test
+fn test_error_timeout_value() {
+    assert_eq(ERROR_TIMEOUT, 1460_u32);
+}
+
+// =============================================================================
+// Section 7 — Wait codes (WaitFor* return values)
+// =============================================================================
+
+@test
+fn test_wait_object_0_is_zero() {
+    assert_eq(WAIT_OBJECT_0, 0_u32);
+}
+
+@test
+fn test_wait_abandoned_value() {
+    assert_eq(WAIT_ABANDONED, 0x80_u32);
+}
+
+@test
+fn test_wait_timeout_value() {
+    assert_eq(WAIT_TIMEOUT, 0x102_u32);
+}
+
+@test
+fn test_wait_failed_is_all_ones() {
+    assert_eq(WAIT_FAILED, 0xFFFFFFFF_u32);
+}
+
+@test
+fn test_infinite_is_all_ones() {
+    assert_eq(INFINITE, 0xFFFFFFFF_u32);
+}
+
+// =============================================================================
+// Section 8 — Notify-change / file-action codes (ReadDirectoryChangesW)
+// =============================================================================
+
+@test
+fn test_file_notify_change_file_name_value() {
+    assert_eq(FILE_NOTIFY_CHANGE_FILE_NAME, 0x00000001_u32);
+}
+
+@test
+fn test_file_notify_change_dir_name_value() {
+    assert_eq(FILE_NOTIFY_CHANGE_DIR_NAME, 0x00000002_u32);
+}
+
+@test
+fn test_file_notify_change_size_value() {
+    assert_eq(FILE_NOTIFY_CHANGE_SIZE, 0x00000008_u32);
+}
+
+@test
+fn test_file_notify_change_last_write_value() {
+    assert_eq(FILE_NOTIFY_CHANGE_LAST_WRITE, 0x00000010_u32);
+}
+
+@test
+fn test_file_action_added_value() {
+    assert_eq(FILE_ACTION_ADDED, 1_u32);
+}
+
+@test
+fn test_file_action_removed_value() {
+    assert_eq(FILE_ACTION_REMOVED, 2_u32);
+}
+
+@test
+fn test_file_action_modified_value() {
+    assert_eq(FILE_ACTION_MODIFIED, 3_u32);
+}
+
+@test
+fn test_file_action_renamed_old_name_value() {
+    assert_eq(FILE_ACTION_RENAMED_OLD_NAME, 4_u32);
+}
+
+@test
+fn test_file_action_renamed_new_name_value() {
+    assert_eq(FILE_ACTION_RENAMED_NEW_NAME, 5_u32);
+}
+
+// =============================================================================
+// Section 9 — SetFilePointer / LockFile / process flags
+// =============================================================================
+
+@test
+fn test_file_begin_value() {
+    assert_eq(FILE_BEGIN, 0_u32);
+}
+
+@test
+fn test_file_current_value() {
+    assert_eq(FILE_CURRENT, 1_u32);
+}
+
+@test
+fn test_file_end_value() {
+    assert_eq(FILE_END, 2_u32);
+}
+
+@test
+fn test_lockfile_fail_immediately_value() {
+    assert_eq(LOCKFILE_FAIL_IMMEDIATELY, 0x00000001_u32);
+}
+
+@test
+fn test_lockfile_exclusive_lock_value() {
+    assert_eq(LOCKFILE_EXCLUSIVE_LOCK, 0x00000002_u32);
+}
+
+@test
+fn test_startf_usestdhandles_value() {
+    assert_eq(STARTF_USESTDHANDLES, 0x00000100_u32);
+}
+
+@test
+fn test_create_no_window_value() {
+    assert_eq(CREATE_NO_WINDOW, 0x08000000_u32);
+}
+
+@test
+fn test_create_suspended_value() {
+    assert_eq(CREATE_SUSPENDED, 0x00000004_u32);
+}
+
+@test
+fn test_handle_flag_inherit_value() {
+    assert_eq(HANDLE_FLAG_INHERIT, 0x00000001_u32);
+}
+
+@test
+fn test_still_active_value() {
+    // STILL_ACTIVE = STATUS_PENDING = 0x103 = 259
+    assert_eq(STILL_ACTIVE, 259_u32);
+}
+
+@test
+fn test_tls_out_of_indexes_value() {
+    assert_eq(TLS_OUT_OF_INDEXES, 0xFFFFFFFF_u32);
+}

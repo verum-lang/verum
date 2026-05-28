@@ -1,0 +1,153 @@
+// =============================================================================
+// core-tests/sys/windows/tls/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.windows.tls` — Windows TLS bootstrap module that
+// provides the thread-control-block (TCB) layout and the context-slot
+// machinery used by the V-LLSI runtime kernel.
+//
+// API surface tested:
+//
+//   Constants: MAX_CONTEXT_SLOTS, CONTEXT_STACK_DEPTH, TCB_MAGIC,
+//              DEFAULT_STACK_SIZE, GUARD_PAGE_SIZE
+//   Type:      WindowsTlsError ADT (8 variants)
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.tls.{
+    MAX_CONTEXT_SLOTS, CONTEXT_STACK_DEPTH, TCB_MAGIC,
+    DEFAULT_STACK_SIZE, GUARD_PAGE_SIZE,
+    WindowsTlsError,
+};
+
+// =============================================================================
+// Section 1 — Pinned constants
+// =============================================================================
+
+@test
+fn test_max_context_slots_is_256() {
+    // Matches the Linux + Darwin implementations — the 256-slot ceiling is
+    // a cross-platform invariant of the V-LLSI context-system bootstrap.
+    assert_eq(MAX_CONTEXT_SLOTS, 256);
+}
+
+@test
+fn test_context_stack_depth_is_8() {
+    // 8-deep push/pop stack per context slot — also a cross-platform
+    // invariant matching Linux/Darwin.
+    assert_eq(CONTEXT_STACK_DEPTH, 8);
+}
+
+@test
+fn test_tcb_magic_value() {
+    // 0x5645525_5_4D5F_5443 — "VERUM_TC" packed as little-endian ASCII.
+    // Used by the bootstrap kernel to validate that a `&TCB` actually
+    // points at a TCB and not arbitrary memory.
+    assert_eq(TCB_MAGIC, 0x5645525545_4D5F_5443_u64);
+}
+
+@test
+fn test_default_stack_size_is_1mb() {
+    assert_eq(DEFAULT_STACK_SIZE, 1024 * 1024);
+}
+
+@test
+fn test_guard_page_size_is_4kb() {
+    assert_eq(GUARD_PAGE_SIZE, 4096);
+}
+
+// =============================================================================
+// Section 2 — WindowsTlsError ADT
+// =============================================================================
+
+@test
+fn test_tls_error_not_initialized_constructs() {
+    let e = WindowsTlsError.NotInitialized;
+    assert(e is WindowsTlsError.NotInitialized);
+}
+
+@test
+fn test_tls_error_already_initialized_constructs() {
+    let e = WindowsTlsError.AlreadyInitialized;
+    assert(e is WindowsTlsError.AlreadyInitialized);
+}
+
+@test
+fn test_tls_error_allocation_failed_payload() {
+    let e = WindowsTlsError.AllocationFailed { code: 8_u32, size: 1024_usize };
+    match e {
+        WindowsTlsError.AllocationFailed { code, size } => {
+            assert_eq(code, 8_u32);
+            assert_eq(size, 1024_usize);
+        },
+        _ => panic("expected AllocationFailed"),
+    };
+}
+
+@test
+fn test_tls_error_invalid_slot_payload() {
+    let e = WindowsTlsError.InvalidSlot { slot: 999 };
+    match e {
+        WindowsTlsError.InvalidSlot { slot } => assert_eq(slot, 999),
+        _ => panic("expected InvalidSlot"),
+    };
+}
+
+@test
+fn test_tls_error_stack_overflow_payload() {
+    let e = WindowsTlsError.StackOverflow { slot: 7 };
+    match e {
+        WindowsTlsError.StackOverflow { slot } => assert_eq(slot, 7),
+        _ => panic("expected StackOverflow"),
+    };
+}
+
+@test
+fn test_tls_error_stack_underflow_payload() {
+    let e = WindowsTlsError.StackUnderflow { slot: 3 };
+    match e {
+        WindowsTlsError.StackUnderflow { slot } => assert_eq(slot, 3),
+        _ => panic("expected StackUnderflow"),
+    };
+}
+
+@test
+fn test_tls_error_invalid_tcb_constructs() {
+    let e = WindowsTlsError.InvalidTcb;
+    assert(e is WindowsTlsError.InvalidTcb);
+}
+
+@test
+fn test_tls_error_tls_index_exhausted_constructs() {
+    let e = WindowsTlsError.TlsIndexExhausted;
+    assert(e is WindowsTlsError.TlsIndexExhausted);
+}
+
+// =============================================================================
+// Section 3 — Display / Debug output (textual stability)
+// =============================================================================
+
+@test
+fn test_tls_error_display_not_initialized() {
+    let e = WindowsTlsError.NotInitialized;
+    assert_eq(f"{e}", "Windows TLS: not initialized");
+}
+
+@test
+fn test_tls_error_display_already_initialized() {
+    let e = WindowsTlsError.AlreadyInitialized;
+    assert_eq(f"{e}", "Windows TLS: already initialized");
+}
+
+@test
+fn test_tls_error_display_invalid_tcb() {
+    let e = WindowsTlsError.InvalidTcb;
+    assert_eq(f"{e}", "Windows TLS: invalid thread-control block");
+}
+
+@test
+fn test_tls_error_display_tls_index_exhausted() {
+    let e = WindowsTlsError.TlsIndexExhausted;
+    assert_eq(f"{e}", "Windows TLS: TLS index exhausted");
+}

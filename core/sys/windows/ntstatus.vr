@@ -29,10 +29,17 @@ module sys.windows.ntstatus;
 public type NtStatus is (Int32);
 
 implement NtStatus {
-    /// Check if status indicates success (severity = 0)
+    /// Check if status indicates success (severity = 0 or 1, per NT_SUCCESS
+    /// convention: a status is "successful" iff its high bit is clear).
+    ///
+    /// Implemented as the bit-31 extraction `((self.0 as UInt32) >> 31) == 0`
+    /// rather than the signed comparison `self.0 >= 0` so we never depend on
+    /// VBC's signed-comparison decoding of an Int32 whose bit pattern came
+    /// from a `0xCxxxxxxx_u32 as Int32` cast — see
+    /// `core-tests/sys/windows/ntstatus/regression_test.vr` §A.
     @inline
     public fn is_success(&self) -> Bool {
-        self.0 >= 0
+        ((self.0 as UInt32) >> 31) == 0
     }
 
     /// Check if status indicates information (severity = 1)

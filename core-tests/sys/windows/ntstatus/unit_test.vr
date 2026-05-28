@@ -1,0 +1,517 @@
+// =============================================================================
+// core-tests/sys/windows/ntstatus/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.windows.ntstatus` — NT status codes and severity
+// helpers used by every wrapper around `ntdll.dll`. The NTSTATUS layout is
+// fixed by the Win32 ABI:
+//
+//   Bits 31-30 — severity   (0=Success, 1=Info, 2=Warning, 3=Error)
+//   Bit  29    — customer
+//   Bit  28    — reserved
+//   Bits 27-16 — facility
+//   Bits 15-0  — code
+//
+// API surface tested here:
+//
+//   Types:      NtStatus(Int32)
+//   Methods:    is_success / is_information / is_warning / is_error,
+//               code / facility / status_code / to_win32_error / name
+//   Constants:  ~50 NTSTATUS code constants (success / info / warn / error)
+//   Helpers:    nt_success / nt_error / nt_warning / nt_information,
+//               is_retryable / is_not_found / is_access_denied
+//
+// What we DO pin:
+//   * Canonical NTSTATUS values — every constant matches its ntstatus.h
+//     counterpart at the bit level.
+//   * Severity-bit dispatch — `is_*` predicates classify by bits 31-30 only.
+//   * `name` lookups for the documented arms; unknown values return
+//     `"STATUS_UNKNOWN"`.
+//   * Classifier helpers (retryable / not-found / access-denied) match
+//     exactly the set the implementation enumerates.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.ntstatus.{
+    NtStatus,
+    STATUS_SUCCESS, STATUS_PENDING, STATUS_REPARSE, STATUS_MORE_ENTRIES,
+    STATUS_TIMEOUT, STATUS_ALERTED,
+    STATUS_OBJECT_NAME_EXISTS, STATUS_THREAD_WAS_SUSPENDED,
+    STATUS_BUFFER_OVERFLOW, STATUS_NO_MORE_FILES, STATUS_NO_MORE_ENTRIES,
+    STATUS_UNSUCCESSFUL, STATUS_NOT_IMPLEMENTED, STATUS_INVALID_INFO_CLASS,
+    STATUS_INFO_LENGTH_MISMATCH, STATUS_ACCESS_VIOLATION,
+    STATUS_INVALID_HANDLE, STATUS_INVALID_PARAMETER, STATUS_NO_SUCH_FILE,
+    STATUS_END_OF_FILE, STATUS_NO_MEMORY, STATUS_ACCESS_DENIED,
+    STATUS_BUFFER_TOO_SMALL, STATUS_OBJECT_NAME_NOT_FOUND,
+    STATUS_OBJECT_PATH_NOT_FOUND, STATUS_NOT_SUPPORTED,
+    STATUS_NOT_FOUND, STATUS_CANCELLED, STATUS_INTEGER_OVERFLOW,
+    STATUS_DISK_FULL, STATUS_DIRECTORY_NOT_EMPTY,
+    STATUS_CONNECTION_DISCONNECTED, STATUS_CONNECTION_RESET,
+    STATUS_INSUFFICIENT_RESOURCES,
+    nt_success, nt_error, nt_warning, nt_information,
+    is_retryable, is_not_found, is_access_denied,
+};
+
+// =============================================================================
+// Section 1 — Severity bit decoding (canonical NTSTATUS layout)
+// =============================================================================
+
+@test
+fn test_status_success_is_zero() {
+    assert_eq(STATUS_SUCCESS.code(), 0_i32);
+}
+
+@test
+fn test_status_success_is_success() {
+    assert(STATUS_SUCCESS.is_success());
+}
+
+@test
+fn test_status_pending_is_success_severity() {
+    // 0x00000103 — severity bits 31-30 = 00 → Success domain
+    assert(STATUS_PENDING.is_success());
+}
+
+@test
+fn test_status_timeout_is_success_severity() {
+    // 0x00000102 — severity bits 31-30 = 00 → Success domain
+    assert(STATUS_TIMEOUT.is_success());
+}
+
+@test
+fn test_status_reparse_is_success_severity() {
+    assert(STATUS_REPARSE.is_success());
+}
+
+@test
+fn test_status_more_entries_is_success_severity() {
+    assert(STATUS_MORE_ENTRIES.is_success());
+}
+
+@test
+fn test_status_alerted_is_success_severity() {
+    assert(STATUS_ALERTED.is_success());
+}
+
+@test
+fn test_status_object_name_exists_is_information() {
+    // 0x40000000 — severity bits 31-30 = 01 → Information domain
+    assert(STATUS_OBJECT_NAME_EXISTS.is_information());
+    // NT_SUCCESS convention: NT_SUCCESS(s) := (s >= 0). Information codes
+    // are below the sign bit, so they ARE NT_SUCCESS-true. The severity
+    // dispatch is the partition into Success / Info / Warn / Error;
+    // NT_SUCCESS is the high-bit shortcut covering Success ∪ Information.
+    assert(STATUS_OBJECT_NAME_EXISTS.is_success());
+    assert(!STATUS_OBJECT_NAME_EXISTS.is_warning());
+    assert(!STATUS_OBJECT_NAME_EXISTS.is_error());
+}
+
+@test
+fn test_status_thread_was_suspended_is_information() {
+    assert(STATUS_THREAD_WAS_SUSPENDED.is_information());
+    // Same as above — Information is NT_SUCCESS-true.
+    assert(STATUS_THREAD_WAS_SUSPENDED.is_success());
+}
+
+@test
+fn test_status_buffer_overflow_is_warning() {
+    // 0x80000005 — severity bits 31-30 = 10 → Warning domain
+    assert(STATUS_BUFFER_OVERFLOW.is_warning());
+    assert(!STATUS_BUFFER_OVERFLOW.is_success());
+    assert(!STATUS_BUFFER_OVERFLOW.is_information());
+    assert(!STATUS_BUFFER_OVERFLOW.is_error());
+}
+
+@test
+fn test_status_no_more_files_is_warning() {
+    assert(STATUS_NO_MORE_FILES.is_warning());
+}
+
+@test
+fn test_status_no_more_entries_is_warning() {
+    assert(STATUS_NO_MORE_ENTRIES.is_warning());
+}
+
+@test
+fn test_status_unsuccessful_is_error() {
+    // 0xC0000001 — severity bits 31-30 = 11 → Error domain
+    assert(STATUS_UNSUCCESSFUL.is_error());
+    assert(!STATUS_UNSUCCESSFUL.is_success());
+}
+
+@test
+fn test_status_invalid_handle_is_error() {
+    assert(STATUS_INVALID_HANDLE.is_error());
+}
+
+@test
+fn test_status_access_violation_is_error() {
+    assert(STATUS_ACCESS_VIOLATION.is_error());
+}
+
+@test
+fn test_status_access_denied_is_error() {
+    assert(STATUS_ACCESS_DENIED.is_error());
+}
+
+@test
+fn test_status_no_memory_is_error() {
+    assert(STATUS_NO_MEMORY.is_error());
+}
+
+@test
+fn test_status_invalid_parameter_is_error() {
+    assert(STATUS_INVALID_PARAMETER.is_error());
+}
+
+// =============================================================================
+// Section 2 — Canonical NTSTATUS constant values
+// =============================================================================
+
+@test
+fn test_status_success_value() {
+    assert_eq(STATUS_SUCCESS.0, 0x00000000_i32);
+}
+
+@test
+fn test_status_pending_value() {
+    assert_eq(STATUS_PENDING.0, 0x00000103_i32);
+}
+
+@test
+fn test_status_timeout_value() {
+    assert_eq(STATUS_TIMEOUT.0, 0x00000102_i32);
+}
+
+@test
+fn test_status_alerted_value() {
+    assert_eq(STATUS_ALERTED.0, 0x00000101_i32);
+}
+
+@test
+fn test_status_reparse_value() {
+    assert_eq(STATUS_REPARSE.0, 0x00000104_i32);
+}
+
+@test
+fn test_status_more_entries_value() {
+    assert_eq(STATUS_MORE_ENTRIES.0, 0x00000105_i32);
+}
+
+@test
+fn test_status_buffer_overflow_value() {
+    assert_eq(STATUS_BUFFER_OVERFLOW.0, 0x80000005_i32);
+}
+
+@test
+fn test_status_no_more_files_value() {
+    assert_eq(STATUS_NO_MORE_FILES.0, 0x80000006_i32);
+}
+
+@test
+fn test_status_unsuccessful_value() {
+    assert_eq(STATUS_UNSUCCESSFUL.0, 0xC0000001_i32);
+}
+
+@test
+fn test_status_not_implemented_value() {
+    assert_eq(STATUS_NOT_IMPLEMENTED.0, 0xC0000002_i32);
+}
+
+@test
+fn test_status_access_violation_value() {
+    assert_eq(STATUS_ACCESS_VIOLATION.0, 0xC0000005_i32);
+}
+
+@test
+fn test_status_invalid_handle_value() {
+    assert_eq(STATUS_INVALID_HANDLE.0, 0xC0000008_i32);
+}
+
+@test
+fn test_status_invalid_parameter_value() {
+    assert_eq(STATUS_INVALID_PARAMETER.0, 0xC000000D_i32);
+}
+
+@test
+fn test_status_no_such_file_value() {
+    assert_eq(STATUS_NO_SUCH_FILE.0, 0xC000000F_i32);
+}
+
+@test
+fn test_status_end_of_file_value() {
+    assert_eq(STATUS_END_OF_FILE.0, 0xC0000011_i32);
+}
+
+@test
+fn test_status_no_memory_value() {
+    assert_eq(STATUS_NO_MEMORY.0, 0xC0000017_i32);
+}
+
+@test
+fn test_status_access_denied_value() {
+    assert_eq(STATUS_ACCESS_DENIED.0, 0xC0000022_i32);
+}
+
+@test
+fn test_status_buffer_too_small_value() {
+    assert_eq(STATUS_BUFFER_TOO_SMALL.0, 0xC0000023_i32);
+}
+
+@test
+fn test_status_object_name_not_found_value() {
+    assert_eq(STATUS_OBJECT_NAME_NOT_FOUND.0, 0xC0000034_i32);
+}
+
+@test
+fn test_status_object_path_not_found_value() {
+    assert_eq(STATUS_OBJECT_PATH_NOT_FOUND.0, 0xC000003A_i32);
+}
+
+@test
+fn test_status_not_supported_value() {
+    assert_eq(STATUS_NOT_SUPPORTED.0, 0xC00000BB_i32);
+}
+
+@test
+fn test_status_cancelled_value() {
+    assert_eq(STATUS_CANCELLED.0, 0xC0000120_i32);
+}
+
+@test
+fn test_status_not_found_value() {
+    assert_eq(STATUS_NOT_FOUND.0, 0xC0000225_i32);
+}
+
+@test
+fn test_status_disk_full_value() {
+    assert_eq(STATUS_DISK_FULL.0, 0xC00000A3_i32);
+}
+
+@test
+fn test_status_directory_not_empty_value() {
+    assert_eq(STATUS_DIRECTORY_NOT_EMPTY.0, 0xC0000101_i32);
+}
+
+@test
+fn test_status_connection_disconnected_value() {
+    assert_eq(STATUS_CONNECTION_DISCONNECTED.0, 0xC000020C_i32);
+}
+
+@test
+fn test_status_connection_reset_value() {
+    assert_eq(STATUS_CONNECTION_RESET.0, 0xC000020D_i32);
+}
+
+@test
+fn test_status_insufficient_resources_value() {
+    assert_eq(STATUS_INSUFFICIENT_RESOURCES.0, 0xC000009A_i32);
+}
+
+@test
+fn test_status_integer_overflow_value() {
+    assert_eq(STATUS_INTEGER_OVERFLOW.0, 0xC0000095_i32);
+}
+
+// =============================================================================
+// Section 3 — facility / status_code field extraction
+// =============================================================================
+
+@test
+fn test_facility_of_success_is_zero() {
+    assert_eq(STATUS_SUCCESS.facility(), 0_u16);
+}
+
+@test
+fn test_facility_of_invalid_handle_is_zero() {
+    // 0xC0000008 — facility bits 27-16 = 0x000 (NULL/default)
+    assert_eq(STATUS_INVALID_HANDLE.facility(), 0_u16);
+}
+
+@test
+fn test_status_code_of_invalid_handle_is_eight() {
+    // 0xC0000008 — low 16 bits = 0x0008
+    assert_eq(STATUS_INVALID_HANDLE.status_code(), 8_u16);
+}
+
+@test
+fn test_status_code_of_object_name_not_found() {
+    // 0xC0000034 — low 16 bits = 0x0034 = 52
+    assert_eq(STATUS_OBJECT_NAME_NOT_FOUND.status_code(), 0x0034_u16);
+}
+
+@test
+fn test_status_code_of_pending() {
+    // 0x00000103 — low 16 bits = 0x0103 = 259
+    assert_eq(STATUS_PENDING.status_code(), 0x0103_u16);
+}
+
+// =============================================================================
+// Section 4 — to_win32_error conversion
+// =============================================================================
+
+@test
+fn test_to_win32_error_success_is_zero() {
+    assert_eq(STATUS_SUCCESS.to_win32_error(), 0_u32);
+}
+
+@test
+fn test_to_win32_error_error_keeps_low_16_bits() {
+    // 0xC0000008 -> 0x00000008 (low 16 bits, per simplified conversion path)
+    assert_eq(STATUS_INVALID_HANDLE.to_win32_error(), 0x0008_u32);
+}
+
+@test
+fn test_to_win32_error_invalid_parameter_keeps_low_16_bits() {
+    // 0xC000000D -> 0x0000000D
+    assert_eq(STATUS_INVALID_PARAMETER.to_win32_error(), 0x000D_u32);
+}
+
+// =============================================================================
+// Section 5 — name() lookup table
+// =============================================================================
+
+@test
+fn test_name_status_success() {
+    assert_eq(STATUS_SUCCESS.name(), "STATUS_SUCCESS");
+}
+
+@test
+fn test_name_status_pending() {
+    assert_eq(STATUS_PENDING.name(), "STATUS_PENDING");
+}
+
+@test
+fn test_name_status_invalid_handle() {
+    assert_eq(STATUS_INVALID_HANDLE.name(), "STATUS_INVALID_HANDLE");
+}
+
+@test
+fn test_name_status_access_denied() {
+    assert_eq(STATUS_ACCESS_DENIED.name(), "STATUS_ACCESS_DENIED");
+}
+
+@test
+fn test_name_status_no_memory() {
+    assert_eq(STATUS_NO_MEMORY.name(), "STATUS_NO_MEMORY");
+}
+
+@test
+fn test_name_unknown_returns_status_unknown() {
+    let unknown_status = NtStatus(0xDEAD_BEEF_u32 as Int32);
+    assert_eq(unknown_status.name(), "STATUS_UNKNOWN");
+}
+
+@test
+fn test_name_status_not_found() {
+    assert_eq(STATUS_NOT_FOUND.name(), "STATUS_NOT_FOUND");
+}
+
+@test
+fn test_name_status_buffer_overflow() {
+    assert_eq(STATUS_BUFFER_OVERFLOW.name(), "STATUS_BUFFER_OVERFLOW");
+}
+
+// =============================================================================
+// Section 6 — Top-level helper predicates (nt_success / nt_error / ...)
+// =============================================================================
+
+@test
+fn test_nt_success_for_success_arm() {
+    assert(nt_success(STATUS_SUCCESS));
+    assert(nt_success(STATUS_PENDING));
+    assert(nt_success(STATUS_TIMEOUT));
+}
+
+@test
+fn test_nt_success_for_error_arm_is_false() {
+    assert(!nt_success(STATUS_INVALID_HANDLE));
+    assert(!nt_success(STATUS_NO_MEMORY));
+}
+
+@test
+fn test_nt_error_for_error_arms() {
+    assert(nt_error(STATUS_INVALID_HANDLE));
+    assert(nt_error(STATUS_ACCESS_DENIED));
+    assert(nt_error(STATUS_NO_MEMORY));
+}
+
+@test
+fn test_nt_error_for_success_arm_is_false() {
+    assert(!nt_error(STATUS_SUCCESS));
+    assert(!nt_error(STATUS_PENDING));
+}
+
+@test
+fn test_nt_warning_for_warning_arms() {
+    assert(nt_warning(STATUS_BUFFER_OVERFLOW));
+    assert(nt_warning(STATUS_NO_MORE_FILES));
+}
+
+@test
+fn test_nt_warning_for_error_arm_is_false() {
+    assert(!nt_warning(STATUS_INVALID_HANDLE));
+}
+
+@test
+fn test_nt_information_for_information_arms() {
+    assert(nt_information(STATUS_OBJECT_NAME_EXISTS));
+    assert(nt_information(STATUS_THREAD_WAS_SUSPENDED));
+}
+
+@test
+fn test_nt_information_for_success_arm_is_false() {
+    assert(!nt_information(STATUS_SUCCESS));
+}
+
+// =============================================================================
+// Section 7 — Classifier helpers
+// =============================================================================
+
+@test
+fn test_is_retryable_only_for_pending() {
+    assert(is_retryable(STATUS_PENDING));
+    assert(!is_retryable(STATUS_SUCCESS));
+    assert(!is_retryable(STATUS_TIMEOUT));
+    assert(!is_retryable(STATUS_INVALID_HANDLE));
+}
+
+@test
+fn test_is_not_found_for_object_name_not_found() {
+    assert(is_not_found(STATUS_OBJECT_NAME_NOT_FOUND));
+}
+
+@test
+fn test_is_not_found_for_no_such_file() {
+    assert(is_not_found(STATUS_NO_SUCH_FILE));
+}
+
+@test
+fn test_is_not_found_for_object_path_not_found() {
+    assert(is_not_found(STATUS_OBJECT_PATH_NOT_FOUND));
+}
+
+@test
+fn test_is_not_found_for_status_not_found() {
+    assert(is_not_found(STATUS_NOT_FOUND));
+}
+
+@test
+fn test_is_not_found_rejects_unrelated_errors() {
+    assert(!is_not_found(STATUS_ACCESS_DENIED));
+    assert(!is_not_found(STATUS_INVALID_HANDLE));
+    assert(!is_not_found(STATUS_NO_MEMORY));
+    assert(!is_not_found(STATUS_SUCCESS));
+}
+
+@test
+fn test_is_access_denied_for_access_denied() {
+    assert(is_access_denied(STATUS_ACCESS_DENIED));
+}
+
+@test
+fn test_is_access_denied_rejects_unrelated_errors() {
+    assert(!is_access_denied(STATUS_INVALID_HANDLE));
+    assert(!is_access_denied(STATUS_OBJECT_NAME_NOT_FOUND));
+    assert(!is_access_denied(STATUS_SUCCESS));
+}
