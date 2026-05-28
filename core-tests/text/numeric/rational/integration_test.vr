@@ -27,7 +27,7 @@ fn integration_from_bigdecimal() {
     let _ = r;
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn integration_compose_arithmetic() {
     // (1/2) + (1/3) = 5/6
