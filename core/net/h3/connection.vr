@@ -158,7 +158,7 @@ implement H3Connection {
             role: H3Role.ClientEnd,
             phase: H3Phase.InitialPhase,
             local_settings: settings,
-            peer_settings:  None,
+            peer_settings:  Maybe.None,
             our_control_stream_id:    0_u64,
             our_qpack_enc_stream_id:  0_u64,
             our_qpack_dec_stream_id:  0_u64,
@@ -179,7 +179,7 @@ implement H3Connection {
             role: H3Role.ServerEnd,
             phase: H3Phase.InitialPhase,
             local_settings: settings,
-            peer_settings:  None,
+            peer_settings:  Maybe.None,
             our_control_stream_id:    0_u64,
             our_qpack_enc_stream_id:  0_u64,
             our_qpack_dec_stream_id:  0_u64,
@@ -267,11 +267,11 @@ implement H3Connection {
             let (sid, _) = &self.inbound_responses[i];
             if *sid == stream_id {
                 let (_, resp) = self.inbound_responses.remove(i);
-                return Some(resp);
+                return Maybe.Some(resp);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     // ==================== server response path ====================
@@ -288,12 +288,12 @@ implement H3Connection {
                     let sid = st.stream_id;
                     let r = request.clone();
                     self.peer_req_streams.remove(j);
-                    return Some((sid, r));
+                    return Maybe.Some((sid, r));
                 },
                 _ => { j = j + 1; },
             }
         }
-        None
+        Maybe.None
     }
 
     /// Server: send a response on the given stream. Closes the stream
