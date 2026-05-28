@@ -12,7 +12,7 @@ mount core.io.process.{Command, Stdio};
 // §A — Command.spawn / Command.output / Command.status — gated by #io-1
 // =============================================================================
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn regression_command_spawn_true_no_panic() {
     let cmd = Command.new(Text.from("/usr/bin/true"));
@@ -34,7 +34,7 @@ fn regression_command_output_echo_captures_stdout() {
     }
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn regression_command_status_true_returns_success() {
     let mut cmd = Command.new(Text.from("/usr/bin/true"));
@@ -44,7 +44,7 @@ fn regression_command_status_true_returns_success() {
     }
 }
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn regression_command_status_false_returns_non_success() {
     let mut cmd = Command.new(Text.from("/usr/bin/false"));
