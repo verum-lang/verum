@@ -1,0 +1,108 @@
+// =============================================================================
+// core-tests/security/merkle/unit_test.vr
+// =============================================================================
+//
+// `core/security/merkle.vr` — Merkle tree error surface.
+// =============================================================================
+
+mount core.security.merkle.MerkleError;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: MerkleError 3-variant ADT
+// =============================================================================
+
+@test
+fn test_merkle_error_empty_tree_variant() {
+    let e: MerkleError = MerkleError.EmptyTree;
+    assert(e is MerkleError.EmptyTree);
+}
+
+@test
+fn test_merkle_error_index_out_of_range_variant() {
+    let e: MerkleError = MerkleError.IndexOutOfRange(100);
+    assert(e is MerkleError.IndexOutOfRange);
+}
+
+@test
+fn test_merkle_error_bad_proof_length_variant() {
+    let e: MerkleError = MerkleError.BadProofLength(7);
+    assert(e is MerkleError.BadProofLength);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_merkle_error_empty_tree_disjoint() {
+    let e: MerkleError = MerkleError.EmptyTree;
+    assert(!(e is MerkleError.IndexOutOfRange));
+    assert(!(e is MerkleError.BadProofLength));
+}
+
+@test
+fn test_merkle_error_index_out_of_range_disjoint() {
+    let e: MerkleError = MerkleError.IndexOutOfRange(0);
+    assert(!(e is MerkleError.EmptyTree));
+    assert(!(e is MerkleError.BadProofLength));
+}
+
+@test
+fn test_merkle_error_bad_proof_length_disjoint() {
+    let e: MerkleError = MerkleError.BadProofLength(0);
+    assert(!(e is MerkleError.EmptyTree));
+    assert(!(e is MerkleError.IndexOutOfRange));
+}
+
+// =============================================================================
+// Section 3: Payload preservation
+// =============================================================================
+
+@test
+fn test_merkle_error_index_out_of_range_payload_round_trip() {
+    let e: MerkleError = MerkleError.IndexOutOfRange(255);
+    match e {
+        MerkleError.IndexOutOfRange(i) => assert_eq(i, 255),
+        _ => panic("expected IndexOutOfRange"),
+    }
+}
+
+@test
+fn test_merkle_error_bad_proof_length_payload_round_trip() {
+    let e: MerkleError = MerkleError.BadProofLength(42);
+    match e {
+        MerkleError.BadProofLength(n) => assert_eq(n, 42),
+        _ => panic("expected BadProofLength"),
+    }
+}
+
+// =============================================================================
+// Section 4: Match-coverage law
+// =============================================================================
+
+fn describe(e: &MerkleError) -> Text {
+    match e {
+        MerkleError.EmptyTree           => "empty".to_text(),
+        MerkleError.IndexOutOfRange(_)  => "out-of-range".to_text(),
+        MerkleError.BadProofLength(_)   => "bad-proof".to_text(),
+    }
+}
+
+@test
+fn test_merkle_error_describe_empty_tree() {
+    assert_eq(describe(&MerkleError.EmptyTree), "empty");
+}
+
+@test
+fn test_merkle_error_describe_index_out_of_range() {
+    assert_eq(describe(&MerkleError.IndexOutOfRange(0)), "out-of-range");
+}
+
+@test
+fn test_merkle_error_describe_bad_proof_length() {
+    assert_eq(describe(&MerkleError.BadProofLength(0)), "bad-proof");
+}
+
+fn main() {}
