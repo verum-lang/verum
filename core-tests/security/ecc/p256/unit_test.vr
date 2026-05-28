@@ -1,0 +1,80 @@
+// =============================================================================
+// core-tests/security/ecc/p256/unit_test.vr
+// =============================================================================
+//
+// `core/security/ecc/p256.vr` — NIST P-256 / secp256r1 ECDH + ECDSA
+// (FIPS 186-4, SEC 2).
+// =============================================================================
+
+mount core.security.ecc.p256.{
+    PRIVATE_KEY_SIZE, PUBLIC_KEY_UNCOMPRESSED_SIZE,
+    PUBLIC_KEY_COMPRESSED_SIZE, SHARED_SECRET_SIZE, SIGNATURE_SIZE,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: P-256 canonical sizes
+// =============================================================================
+
+@test
+fn test_p256_private_key_size_canonical_value() {
+    // 256-bit (32-byte) scalar.
+    assert_eq(PRIVATE_KEY_SIZE, 32);
+}
+
+@test
+fn test_p256_public_key_uncompressed_size_canonical_value() {
+    // SEC 1 §2.3.3 — 0x04 prefix + 32-byte X + 32-byte Y = 65 bytes.
+    assert_eq(PUBLIC_KEY_UNCOMPRESSED_SIZE, 65);
+}
+
+@test
+fn test_p256_public_key_compressed_size_canonical_value() {
+    // SEC 1 §2.3.3 — 0x02/0x03 prefix + 32-byte X = 33 bytes.
+    assert_eq(PUBLIC_KEY_COMPRESSED_SIZE, 33);
+}
+
+@test
+fn test_p256_shared_secret_size_canonical_value() {
+    // ECDH outputs the 32-byte X-coordinate of the shared point.
+    assert_eq(SHARED_SECRET_SIZE, 32);
+}
+
+@test
+fn test_p256_signature_size_canonical_value() {
+    // (r, s) = 32 + 32 = 64 bytes (raw form, not DER).
+    assert_eq(SIGNATURE_SIZE, 64);
+}
+
+// =============================================================================
+// Section 2: Width invariants
+// =============================================================================
+
+@test
+fn test_p256_uncompressed_is_compressed_plus_y() {
+    // Uncompressed adds an extra 32-byte Y coordinate.
+    assert_eq(PUBLIC_KEY_UNCOMPRESSED_SIZE, PUBLIC_KEY_COMPRESSED_SIZE + 32);
+}
+
+@test
+fn test_p256_private_equals_shared_secret_width() {
+    assert_eq(PRIVATE_KEY_SIZE, SHARED_SECRET_SIZE);
+}
+
+@test
+fn test_p256_signature_is_twice_private_key() {
+    // (r, s) sized like (x, y) — same bit width as scalar.
+    assert_eq(SIGNATURE_SIZE, PRIVATE_KEY_SIZE * 2);
+}
+
+@test
+fn test_p256_constants_positive() {
+    assert(PRIVATE_KEY_SIZE > 0);
+    assert(PUBLIC_KEY_UNCOMPRESSED_SIZE > 0);
+    assert(PUBLIC_KEY_COMPRESSED_SIZE > 0);
+    assert(SHARED_SECRET_SIZE > 0);
+    assert(SIGNATURE_SIZE > 0);
+}
+
+fn main() {}
