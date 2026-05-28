@@ -1,0 +1,46 @@
+// =============================================================================
+// core-tests/sys/linux/syscall/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.syscall.{
+    TIOCGWINSZ, FD_CLOEXEC, O_NONBLOCK,
+    FUTEX_WAIT_PRIVATE, FORK_FLAGS,
+};
+
+// REGRESSION: TIOCGWINSZ = 0x5413 — terminal-size ioctl. Pre-fix bug
+// class: terminal-size queries rely on this exact value; drift would
+// silently set the window size to garbage.
+@test
+fn regression_tiocgwinsz_canonical() {
+    assert_eq(TIOCGWINSZ, 0x5413);
+}
+
+// REGRESSION: FD_CLOEXEC = 1 — single-bit flag for F_SETFD.
+@test
+fn regression_fd_cloexec_one() {
+    assert_eq(FD_CLOEXEC, 1);
+}
+
+// REGRESSION: O_NONBLOCK octal literal 0o4000 = decimal 2048.
+@test
+fn regression_o_nonblock_octal_4000() {
+    assert_eq(O_NONBLOCK, 0o4000);
+    assert_eq(O_NONBLOCK, 2048);
+}
+
+// REGRESSION: FUTEX_WAIT_PRIVATE = 128 — process-local futex wait.
+// Pre-fix bug class: dropping the PRIVATE bit silently makes the
+// futex inter-process, breaking thread-local synchronisation.
+@test
+fn regression_futex_wait_private_one_twentyeight() {
+    assert_eq(FUTEX_WAIT_PRIVATE, 128);
+}
+
+// REGRESSION: FORK_FLAGS = 17 (SIGCHLD only) — bare fork(2) emulation.
+@test
+fn regression_fork_flags_seventeen() {
+    assert_eq(FORK_FLAGS, 17);
+}
+
+fn main() {}

@@ -1,0 +1,48 @@
+// =============================================================================
+// core-tests/sys/darwin/thread/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.thread.{
+    DarwinThreadError,
+    ONCE_INIT, ONCE_RUNNING, ONCE_COMPLETE,
+};
+
+// =============================================================================
+// REGRESSION 1: ONCE_INIT = 0 is the universal "not yet started" sentinel.
+// =============================================================================
+
+@test
+fn regression_once_init_is_falsy_zero() {
+    // ONCE_INIT must be zero so the pthread_once initialiser uses the
+    // canonical static `[0; ...]` zero-fill.
+    assert_eq(ONCE_INIT, 0 as UInt32);
+}
+
+// =============================================================================
+// REGRESSION 2: ONCE_COMPLETE > ONCE_RUNNING > ONCE_INIT — the lifecycle
+// is strictly monotone-increasing. Atomic CAS code depends on this
+// ordering for state transitions.
+// =============================================================================
+
+@test
+fn regression_once_lifecycle_monotone_increasing() {
+    assert(ONCE_INIT < ONCE_RUNNING);
+    assert(ONCE_RUNNING < ONCE_COMPLETE);
+}
+
+// =============================================================================
+// REGRESSION 3: DarwinThreadError.Eq must compare payload codes
+// (not just variant tags) — pre-fix bug class would treat all
+// `CreateFailed { code: _ }` as equal regardless of the code.
+// =============================================================================
+
+@test
+fn regression_thread_error_eq_payload_sensitive() {
+    let a = DarwinThreadError.CreateFailed { code: 1 };
+    let b = DarwinThreadError.CreateFailed { code: 2 };
+    // Same variant, different codes — must NOT compare equal.
+    assert(!a.eq(&b));
+}
+
+fn main() {}

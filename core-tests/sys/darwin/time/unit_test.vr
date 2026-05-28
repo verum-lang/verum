@@ -1,0 +1,69 @@
+// =============================================================================
+// core-tests/sys/darwin/time/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.darwin.time` — duration / instant / clock
+// constants and accessors for macOS.
+//
+// API surface tested here:
+//   Clock IDs: CLOCK_REALTIME_ID / CLOCK_MONOTONIC_ID / CLOCK_MONOTONIC_RAW_ID
+//              / CLOCK_PROCESS_CPUTIME / CLOCK_THREAD_CPUTIME
+//   Types: DarwinDuration / DarwinInstant / DarwinStopwatch /
+//          DarwinPerfCounter / DarwinDeadlineTimer
+//
+// What we DO NOT test from in-process:
+//   * Live clock readers (monotonic_nanos / realtime_nanos / sleep_*) —
+//     these touch the OS clock; behavior is timing-sensitive and runs
+//     in `vcs/specs/L2-standard/`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.time.{
+    CLOCK_REALTIME_ID,
+    CLOCK_MONOTONIC_ID,
+    CLOCK_MONOTONIC_RAW_ID,
+    CLOCK_PROCESS_CPUTIME,
+    CLOCK_THREAD_CPUTIME,
+};
+
+// =============================================================================
+// Section 1: Clock IDs — canonical Darwin values
+// =============================================================================
+
+@test
+fn test_clock_realtime_id_is_zero() {
+    assert_eq(CLOCK_REALTIME_ID, 0);
+}
+
+@test
+fn test_clock_monotonic_id_is_six() {
+    // CLOCK_MONOTONIC = 6 on Darwin (vs Linux's 1).
+    assert_eq(CLOCK_MONOTONIC_ID, 6);
+}
+
+@test
+fn test_clock_monotonic_raw_id_is_four() {
+    assert_eq(CLOCK_MONOTONIC_RAW_ID, 4);
+}
+
+@test
+fn test_clock_process_cputime_is_twelve() {
+    assert_eq(CLOCK_PROCESS_CPUTIME, 12);
+}
+
+@test
+fn test_clock_thread_cputime_is_sixteen() {
+    assert_eq(CLOCK_THREAD_CPUTIME, 16);
+}
+
+@test
+fn test_clock_ids_pairwise_distinct() {
+    assert(CLOCK_REALTIME_ID != CLOCK_MONOTONIC_ID);
+    assert(CLOCK_MONOTONIC_ID != CLOCK_MONOTONIC_RAW_ID);
+    assert(CLOCK_PROCESS_CPUTIME != CLOCK_THREAD_CPUTIME);
+    assert(CLOCK_REALTIME_ID != CLOCK_PROCESS_CPUTIME);
+    assert(CLOCK_REALTIME_ID != CLOCK_THREAD_CPUTIME);
+    assert(CLOCK_MONOTONIC_ID != CLOCK_THREAD_CPUTIME);
+}
+
+fn main() {}

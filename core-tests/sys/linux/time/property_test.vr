@@ -1,0 +1,48 @@
+// =============================================================================
+// core-tests/sys/linux/time/property_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.time.{
+    CLOCK_REALTIME, CLOCK_MONOTONIC,
+    CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID,
+    CLOCK_MONOTONIC_RAW, CLOCK_REALTIME_COARSE,
+    CLOCK_MONOTONIC_COARSE, CLOCK_BOOTTIME,
+    CLOCK_REALTIME_ALARM, CLOCK_BOOTTIME_ALARM, CLOCK_TAI,
+};
+
+@test
+fn law_linux_clock_ids_form_zero_to_eleven() {
+    // The 11 clock IDs span values 0..=9 + 11 (10 is a gap).
+    let ids: List<Int> = [
+        CLOCK_REALTIME, CLOCK_MONOTONIC,
+        CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID,
+        CLOCK_MONOTONIC_RAW, CLOCK_REALTIME_COARSE,
+        CLOCK_MONOTONIC_COARSE, CLOCK_BOOTTIME,
+        CLOCK_REALTIME_ALARM, CLOCK_BOOTTIME_ALARM, CLOCK_TAI,
+    ];
+    for id in ids.iter() {
+        assert(*id >= 0);
+        assert(*id <= 11);
+    }
+}
+
+@test
+fn law_linux_clock_count_eleven() {
+    let ids: List<Int> = [
+        CLOCK_REALTIME, CLOCK_MONOTONIC,
+        CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID,
+        CLOCK_MONOTONIC_RAW, CLOCK_REALTIME_COARSE,
+        CLOCK_MONOTONIC_COARSE, CLOCK_BOOTTIME,
+        CLOCK_REALTIME_ALARM, CLOCK_BOOTTIME_ALARM, CLOCK_TAI,
+    ];
+    assert_eq(ids.len(), 11);
+}
+
+@test
+fn law_linux_clock_monotonic_diverges_from_darwin() {
+    // Linux CLOCK_MONOTONIC = 1 vs Darwin's 6.
+    assert_eq(CLOCK_MONOTONIC, 1);
+}
+
+fn main() {}

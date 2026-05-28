@@ -1,0 +1,147 @@
+// =============================================================================
+// core-tests/sys/darwin/thread/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.darwin.thread` — pthread-backed thread
+// primitives and ONCE_* constants.
+//
+// API surface tested here:
+//   DarwinThreadError 10-variant — CreateFailed / JoinFailed / DetachFailed /
+//     MutexInitFailed / MutexLockFailed / CondInitFailed / CondWaitFailed /
+//     TlsInitFailed / AlreadyJoined / AlreadyDetached.
+//   ONCE_INIT / ONCE_RUNNING / ONCE_COMPLETE — three-state once-init lifecycle.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.thread.{
+    DarwinThreadError,
+    ONCE_INIT, ONCE_RUNNING, ONCE_COMPLETE,
+};
+
+// =============================================================================
+// Section 1: ONCE_* lifecycle constants
+// =============================================================================
+
+@test
+fn test_once_init_is_zero() {
+    assert_eq(ONCE_INIT, 0 as UInt32);
+}
+
+@test
+fn test_once_running_is_one() {
+    assert_eq(ONCE_RUNNING, 1 as UInt32);
+}
+
+@test
+fn test_once_complete_is_two() {
+    assert_eq(ONCE_COMPLETE, 2 as UInt32);
+}
+
+@test
+fn test_once_states_pairwise_distinct() {
+    assert(ONCE_INIT != ONCE_RUNNING);
+    assert(ONCE_RUNNING != ONCE_COMPLETE);
+    assert(ONCE_INIT != ONCE_COMPLETE);
+}
+
+// =============================================================================
+// Section 2: DarwinThreadError — payload variant constructors
+// =============================================================================
+
+@test
+fn test_thread_error_create_failed_carries_code() {
+    let e = DarwinThreadError.CreateFailed { code: 35 };
+    match e {
+        DarwinThreadError.CreateFailed { code } => assert_eq(code, 35),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_thread_error_join_failed_carries_code() {
+    let e = DarwinThreadError.JoinFailed { code: 22 };
+    match e {
+        DarwinThreadError.JoinFailed { code } => assert_eq(code, 22),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_thread_error_detach_failed_carries_code() {
+    let e = DarwinThreadError.DetachFailed { code: 13 };
+    match e {
+        DarwinThreadError.DetachFailed { code } => assert_eq(code, 13),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_thread_error_mutex_init_failed_carries_code() {
+    let e = DarwinThreadError.MutexInitFailed { code: 11 };
+    match e {
+        DarwinThreadError.MutexInitFailed { code } => assert_eq(code, 11),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_thread_error_cond_wait_failed_carries_code() {
+    let e = DarwinThreadError.CondWaitFailed { code: 4 };
+    match e {
+        DarwinThreadError.CondWaitFailed { code } => assert_eq(code, 4),
+        _ => assert(false),
+    };
+}
+
+// =============================================================================
+// Section 3: DarwinThreadError — unit variants
+// =============================================================================
+
+@test
+fn test_thread_error_tls_init_failed_construction() {
+    let _e: DarwinThreadError = DarwinThreadError.TlsInitFailed;
+}
+
+@test
+fn test_thread_error_already_joined_construction() {
+    let _e: DarwinThreadError = DarwinThreadError.AlreadyJoined;
+}
+
+@test
+fn test_thread_error_already_detached_construction() {
+    let _e: DarwinThreadError = DarwinThreadError.AlreadyDetached;
+}
+
+// =============================================================================
+// Section 4: DarwinThreadError — Eq
+// =============================================================================
+
+@test
+fn test_thread_error_eq_reflexive_already_joined() {
+    let a = DarwinThreadError.AlreadyJoined;
+    let b = DarwinThreadError.AlreadyJoined;
+    assert(a.eq(&b));
+}
+
+@test
+fn test_thread_error_eq_reflexive_create_failed_same_code() {
+    let a = DarwinThreadError.CreateFailed { code: 5 };
+    let b = DarwinThreadError.CreateFailed { code: 5 };
+    assert(a.eq(&b));
+}
+
+@test
+fn test_thread_error_eq_different_codes_unequal() {
+    let a = DarwinThreadError.CreateFailed { code: 5 };
+    let b = DarwinThreadError.CreateFailed { code: 6 };
+    assert(!a.eq(&b));
+}
+
+@test
+fn test_thread_error_eq_different_variants_unequal() {
+    let a = DarwinThreadError.AlreadyJoined;
+    let b = DarwinThreadError.AlreadyDetached;
+    assert(!a.eq(&b));
+}
+
+fn main() {}

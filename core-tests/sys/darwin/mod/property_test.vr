@@ -1,0 +1,84 @@
+// =============================================================================
+// core-tests/sys/darwin/mod/property_test.vr
+// =============================================================================
+// Path-equivalence laws for the `core.sys.darwin` umbrella.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.{
+    O_RDONLY, O_CREAT, MAP_ANON,
+    KERN_SUCCESS, VM_PROT_READ,
+    EAGAIN, EINTR,
+    MAX_CONTEXT_SLOTS, MAX_EVENTS,
+    ONCE_INIT,
+    CLOCK_MONOTONIC_ID,
+};
+
+mount core.sys.darwin.libsystem.{O_RDONLY as LS_O_RDONLY, O_CREAT as LS_O_CREAT, MAP_ANON as LS_MAP_ANON};
+mount core.sys.darwin.mach.{KERN_SUCCESS as M_KERN_SUCCESS, VM_PROT_READ as M_VM_PROT_READ};
+mount core.sys.darwin.errno.{EAGAIN as E_EAGAIN, EINTR as E_EINTR};
+mount core.sys.darwin.tls.{MAX_CONTEXT_SLOTS as T_MAX_CONTEXT_SLOTS};
+mount core.sys.darwin.io.{MAX_EVENTS as I_MAX_EVENTS};
+mount core.sys.darwin.thread.{ONCE_INIT as TH_ONCE_INIT};
+mount core.sys.darwin.time.{CLOCK_MONOTONIC_ID as TM_CLOCK_MONOTONIC_ID};
+
+// =============================================================================
+// Section 1: Path-equivalence — umbrella value == direct-submodule value
+// =============================================================================
+
+@test
+fn law_umbrella_o_rdonly_equals_libsystem_o_rdonly() {
+    assert_eq(O_RDONLY, LS_O_RDONLY);
+}
+
+@test
+fn law_umbrella_o_creat_equals_libsystem_o_creat() {
+    assert_eq(O_CREAT, LS_O_CREAT);
+}
+
+@test
+fn law_umbrella_map_anon_equals_libsystem_map_anon() {
+    assert_eq(MAP_ANON, LS_MAP_ANON);
+}
+
+@test
+fn law_umbrella_kern_success_equals_mach_kern_success() {
+    assert_eq(KERN_SUCCESS.0, M_KERN_SUCCESS.0);
+}
+
+@test
+fn law_umbrella_vm_prot_read_equals_mach_vm_prot_read() {
+    assert_eq(VM_PROT_READ.0, M_VM_PROT_READ.0);
+}
+
+@test
+fn law_umbrella_eagain_equals_errno_eagain() {
+    assert_eq(EAGAIN, E_EAGAIN);
+}
+
+@test
+fn law_umbrella_eintr_equals_errno_eintr() {
+    assert_eq(EINTR, E_EINTR);
+}
+
+@test
+fn law_umbrella_max_context_slots_equals_tls() {
+    assert_eq(MAX_CONTEXT_SLOTS, T_MAX_CONTEXT_SLOTS);
+}
+
+@test
+fn law_umbrella_max_events_equals_io() {
+    assert_eq(MAX_EVENTS, I_MAX_EVENTS);
+}
+
+@test
+fn law_umbrella_once_init_equals_thread() {
+    assert_eq(ONCE_INIT, TH_ONCE_INIT);
+}
+
+@test
+fn law_umbrella_clock_monotonic_id_equals_time() {
+    assert_eq(CLOCK_MONOTONIC_ID, TM_CLOCK_MONOTONIC_ID);
+}
+
+fn main() {}

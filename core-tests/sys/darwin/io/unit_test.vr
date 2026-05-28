@@ -1,0 +1,268 @@
+// =============================================================================
+// core-tests/sys/darwin/io/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.darwin.io` — kqueue-based I/O driver
+// constants + DarwinIoDriverError + DarwinIoOpKind ADTs.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.io.{
+    DarwinIoDriverError,
+    DarwinIoOpKind,
+    DarwinIoToken,
+    DarwinIoOp,
+    DarwinIoCqe,
+    MAX_EVENTS,
+    DEFAULT_TIMEOUT_NS,
+};
+
+// =============================================================================
+// Section 1: Constants
+// =============================================================================
+
+@test
+fn test_max_events_is_256() {
+    assert_eq(MAX_EVENTS, 256);
+}
+
+@test
+fn test_default_timeout_ns_is_one_second() {
+    assert_eq(DEFAULT_TIMEOUT_NS, 1_000_000_000);
+}
+
+// =============================================================================
+// Section 2: DarwinIoOpKind 9-variant
+// =============================================================================
+
+@test
+fn test_io_op_kind_read() {
+    let _: DarwinIoOpKind = DarwinIoOpKind.Read;
+}
+
+@test
+fn test_io_op_kind_write() {
+    let _: DarwinIoOpKind = DarwinIoOpKind.Write;
+}
+
+@test
+fn test_io_op_kind_accept() {
+    let _: DarwinIoOpKind = DarwinIoOpKind.Accept;
+}
+
+@test
+fn test_io_op_kind_connect() {
+    let _: DarwinIoOpKind = DarwinIoOpKind.Connect;
+}
+
+@test
+fn test_io_op_kind_send() {
+    let _: DarwinIoOpKind = DarwinIoOpKind.Send;
+}
+
+@test
+fn test_io_op_kind_recv() {
+    let _: DarwinIoOpKind = DarwinIoOpKind.Recv;
+}
+
+@test
+fn test_io_op_kind_timer() {
+    let _: DarwinIoOpKind = DarwinIoOpKind.Timer;
+}
+
+@test
+fn test_io_op_kind_signal() {
+    let _: DarwinIoOpKind = DarwinIoOpKind.Signal;
+}
+
+@test
+fn test_io_op_kind_user() {
+    let _: DarwinIoOpKind = DarwinIoOpKind.User;
+}
+
+// =============================================================================
+// Section 3: DarwinIoDriverError — unit variants
+// =============================================================================
+
+@test
+fn test_io_error_would_block() {
+    let _: DarwinIoDriverError = DarwinIoDriverError.WouldBlock;
+}
+
+@test
+fn test_io_error_interrupted() {
+    let _: DarwinIoDriverError = DarwinIoDriverError.Interrupted;
+}
+
+@test
+fn test_io_error_already_exists() {
+    let _: DarwinIoDriverError = DarwinIoDriverError.AlreadyExists;
+}
+
+@test
+fn test_io_error_permission_denied() {
+    let _: DarwinIoDriverError = DarwinIoDriverError.PermissionDenied;
+}
+
+@test
+fn test_io_error_connection_refused() {
+    let _: DarwinIoDriverError = DarwinIoDriverError.ConnectionRefused;
+}
+
+@test
+fn test_io_error_broken_pipe() {
+    let _: DarwinIoDriverError = DarwinIoDriverError.BrokenPipe;
+}
+
+@test
+fn test_io_error_timed_out() {
+    let _: DarwinIoDriverError = DarwinIoDriverError.TimedOut;
+}
+
+@test
+fn test_io_error_queue_full() {
+    let _: DarwinIoDriverError = DarwinIoDriverError.QueueFull;
+}
+
+@test
+fn test_io_error_closed() {
+    let _: DarwinIoDriverError = DarwinIoDriverError.Closed;
+}
+
+// =============================================================================
+// Section 4: DarwinIoDriverError — payload variants
+// =============================================================================
+
+@test
+fn test_io_error_not_found_carries_path() {
+    let e = DarwinIoDriverError.NotFound { path: "/tmp/missing".clone() };
+    match e {
+        DarwinIoDriverError.NotFound { path } => assert_eq(path, "/tmp/missing".clone()),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_io_error_invalid_input_carries_reason() {
+    let e = DarwinIoDriverError.InvalidInput { reason: "bad arg".clone() };
+    match e {
+        DarwinIoDriverError.InvalidInput { reason } => assert_eq(reason, "bad arg".clone()),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_io_error_other_carries_code_and_message() {
+    let e = DarwinIoDriverError.Other { code: 99, message: "kqueue failed".clone() };
+    match e {
+        DarwinIoDriverError.Other { code, message } => {
+            assert_eq(code, 99);
+            assert_eq(message, "kqueue failed".clone());
+        }
+        _ => assert(false),
+    };
+}
+
+// =============================================================================
+// Section 5: DarwinIoDriverError — from_errno mapping
+// =============================================================================
+
+@test
+fn test_io_error_from_eagain_yields_would_block() {
+    // EAGAIN (35) → WouldBlock.
+    let e = DarwinIoDriverError.from_errno(35);
+    match e {
+        DarwinIoDriverError.WouldBlock => assert(true),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_io_error_from_eintr_yields_interrupted() {
+    // EINTR (4) → Interrupted.
+    let e = DarwinIoDriverError.from_errno(4);
+    match e {
+        DarwinIoDriverError.Interrupted => assert(true),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_io_error_from_econnrefused_yields_connection_refused() {
+    let e = DarwinIoDriverError.from_errno(61);
+    match e {
+        DarwinIoDriverError.ConnectionRefused => assert(true),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_io_error_from_unknown_errno_yields_other() {
+    let e = DarwinIoDriverError.from_errno(9999);
+    match e {
+        DarwinIoDriverError.Other { code, message } => {
+            assert_eq(code, 9999);
+        }
+        _ => assert(false),
+    };
+}
+
+// =============================================================================
+// Section 6: DarwinIoDriverError — is_retryable
+// =============================================================================
+
+@test
+fn test_io_error_would_block_retryable() {
+    assert(DarwinIoDriverError.WouldBlock.is_retryable());
+}
+
+@test
+fn test_io_error_interrupted_retryable() {
+    assert(DarwinIoDriverError.Interrupted.is_retryable());
+}
+
+@test
+fn test_io_error_others_not_retryable() {
+    assert(!DarwinIoDriverError.BrokenPipe.is_retryable());
+    assert(!DarwinIoDriverError.TimedOut.is_retryable());
+    assert(!DarwinIoDriverError.Closed.is_retryable());
+    assert(!DarwinIoDriverError.PermissionDenied.is_retryable());
+}
+
+// =============================================================================
+// Section 7: DarwinIoToken newtype + DarwinIoOp / DarwinIoCqe records
+// =============================================================================
+
+@test
+fn test_io_token_newtype_round_trip() {
+    let t: DarwinIoToken = DarwinIoToken(42 as UInt64);
+    assert_eq(t.0, 42 as UInt64);
+}
+
+@test
+fn test_io_op_record_construction() {
+    let op = DarwinIoOp {
+        kind: DarwinIoOpKind.Read,
+        fd: 5,
+        token: DarwinIoToken(1234 as UInt64),
+        buf_addr: 0x4000,
+        buf_len: 1024,
+        flags: 0,
+    };
+    assert_eq(op.fd, 5);
+    assert_eq(op.buf_len, 1024);
+    assert_eq(op.token.0, 1234 as UInt64);
+}
+
+@test
+fn test_io_cqe_record_construction() {
+    let cqe = DarwinIoCqe {
+        token: DarwinIoToken(42 as UInt64),
+        result: 256,
+        flags: 0 as UInt32,
+    };
+    assert_eq(cqe.token.0, 42 as UInt64);
+    assert_eq(cqe.result, 256);
+}
+
+fn main() {}

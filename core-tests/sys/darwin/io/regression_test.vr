@@ -1,0 +1,60 @@
+// =============================================================================
+// core-tests/sys/darwin/io/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.io.{DarwinIoDriverError, MAX_EVENTS};
+
+// =============================================================================
+// REGRESSION 1: DarwinIoDriverError.from_errno(35) must map to WouldBlock
+// (NOT to Other or Interrupted) — pre-fix would cause every EAGAIN to
+// fall through to the catch-all and break the canonical retry loop.
+// =============================================================================
+
+@test
+fn regression_from_errno_eagain_to_would_block() {
+    let e = DarwinIoDriverError.from_errno(35);
+    match e {
+        DarwinIoDriverError.WouldBlock => assert(true),
+        _ => assert(false),
+    };
+}
+
+// =============================================================================
+// REGRESSION 2: from_errno(4) → Interrupted (NOT WouldBlock).
+// Pre-fix bug class: confusing EAGAIN/EINTR would route signal-driven
+// retries through the wrong arm.
+// =============================================================================
+
+@test
+fn regression_from_errno_eintr_to_interrupted() {
+    let e = DarwinIoDriverError.from_errno(4);
+    match e {
+        DarwinIoDriverError.Interrupted => assert(true),
+        _ => assert(false),
+    };
+}
+
+// =============================================================================
+// REGRESSION 3: MAX_EVENTS must be 256 — matches the array literal
+// `[KEvent; 256]` in KqueueDriver layout. Pre-fix bug class: drift
+// between constant and array literal would mismatch kevent buffer size.
+// =============================================================================
+
+@test
+fn regression_max_events_matches_kqueue_buffer() {
+    assert_eq(MAX_EVENTS, 256);
+}
+
+// =============================================================================
+// REGRESSION 4: is_retryable must classify EAGAIN-equivalent errors
+// (WouldBlock) as retryable. Pre-fix bug class would make the canonical
+// `while err.is_retryable() { retry }` loop bail on the first EAGAIN.
+// =============================================================================
+
+@test
+fn regression_would_block_retryable() {
+    assert(DarwinIoDriverError.WouldBlock.is_retryable());
+}
+
+fn main() {}

@@ -1,0 +1,175 @@
+// =============================================================================
+// core-tests/sys/darwin/tls/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.darwin.tls` — thread-local storage + V-LLSI
+// context system for macOS.
+//
+// API surface tested here:
+//   Constants: MAX_CONTEXT_SLOTS=256, CONTEXT_STACK_DEPTH=8, TCB_MAGIC,
+//              DEFAULT_STACK_SIZE=1MB, GUARD_PAGE_SIZE=4KB.
+//   SysTlsError 8-variant — NotInitialized / AlreadyInitialized /
+//     AllocationFailed / InvalidSlot / StackOverflow / StackUnderflow /
+//     InvalidTcb / PthreadError.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.tls.{
+    SysTlsError,
+    MAX_CONTEXT_SLOTS,
+    CONTEXT_STACK_DEPTH,
+    TCB_MAGIC,
+    DEFAULT_STACK_SIZE,
+    GUARD_PAGE_SIZE,
+};
+
+// =============================================================================
+// Section 1: Constants
+// =============================================================================
+
+@test
+fn test_max_context_slots_is_256() {
+    assert_eq(MAX_CONTEXT_SLOTS, 256);
+}
+
+@test
+fn test_context_stack_depth_is_8() {
+    assert_eq(CONTEXT_STACK_DEPTH, 8);
+}
+
+@test
+fn test_tcb_magic_is_verum_tc_ascii() {
+    // "VERUM_TC" packed little-endian into UInt64.
+    // V=0x56 E=0x45 R=0x52 U=0x55 M=0x4D _=0x5F T=0x54 C=0x43
+    // → 0x4354_5F4D_5552_4556 (little-endian)
+    // The const value: 0x5645_5255_4D5F_5443 (big-endian style)
+    assert_eq(TCB_MAGIC, 0x5645_5255_4D5F_5443 as UInt64);
+}
+
+@test
+fn test_default_stack_size_is_one_mb() {
+    assert_eq(DEFAULT_STACK_SIZE, 1024 * 1024);
+}
+
+@test
+fn test_guard_page_size_is_four_kb() {
+    assert_eq(GUARD_PAGE_SIZE, 4096);
+}
+
+// =============================================================================
+// Section 2: SysTlsError — variant construction
+// =============================================================================
+
+@test
+fn test_sys_tls_error_not_initialized() {
+    let _e: SysTlsError = SysTlsError.NotInitialized;
+}
+
+@test
+fn test_sys_tls_error_already_initialized() {
+    let _e: SysTlsError = SysTlsError.AlreadyInitialized;
+}
+
+@test
+fn test_sys_tls_error_invalid_tcb() {
+    let _e: SysTlsError = SysTlsError.InvalidTcb;
+}
+
+@test
+fn test_sys_tls_error_allocation_failed_carries_code() {
+    let e = SysTlsError.AllocationFailed { code: 12 };
+    match e {
+        SysTlsError.AllocationFailed { code } => assert_eq(code, 12),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_sys_tls_error_invalid_slot_carries_slot() {
+    let e = SysTlsError.InvalidSlot { slot: 999 };
+    match e {
+        SysTlsError.InvalidSlot { slot } => assert_eq(slot, 999),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_sys_tls_error_stack_overflow_carries_slot() {
+    let e = SysTlsError.StackOverflow { slot: 3 };
+    match e {
+        SysTlsError.StackOverflow { slot } => assert_eq(slot, 3),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_sys_tls_error_stack_underflow_carries_slot() {
+    let e = SysTlsError.StackUnderflow { slot: 5 };
+    match e {
+        SysTlsError.StackUnderflow { slot } => assert_eq(slot, 5),
+        _ => assert(false),
+    };
+}
+
+@test
+fn test_sys_tls_error_pthread_error_carries_code() {
+    let e = SysTlsError.PthreadError { code: 22 };
+    match e {
+        SysTlsError.PthreadError { code } => assert_eq(code, 22),
+        _ => assert(false),
+    };
+}
+
+// =============================================================================
+// Section 3: SysTlsError — Eq
+// =============================================================================
+
+@test
+fn test_sys_tls_error_eq_reflexive_unit() {
+    let a = SysTlsError.NotInitialized;
+    let b = SysTlsError.NotInitialized;
+    assert(a.eq(&b));
+}
+
+@test
+fn test_sys_tls_error_eq_reflexive_payload_same_code() {
+    let a = SysTlsError.InvalidSlot { slot: 7 };
+    let b = SysTlsError.InvalidSlot { slot: 7 };
+    assert(a.eq(&b));
+}
+
+@test
+fn test_sys_tls_error_eq_different_codes_unequal() {
+    let a = SysTlsError.AllocationFailed { code: 1 };
+    let b = SysTlsError.AllocationFailed { code: 2 };
+    assert(!a.eq(&b));
+}
+
+@test
+fn test_sys_tls_error_eq_different_variants_unequal() {
+    let a = SysTlsError.NotInitialized;
+    let b = SysTlsError.AlreadyInitialized;
+    assert(!a.eq(&b));
+}
+
+// =============================================================================
+// Section 4: SysTlsError — is_retryable
+// =============================================================================
+
+@test
+fn test_sys_tls_error_never_retryable() {
+    // TLS errors are catastrophic — never retryable.
+    let errors: List<SysTlsError> = [
+        SysTlsError.NotInitialized,
+        SysTlsError.AlreadyInitialized,
+        SysTlsError.InvalidTcb,
+        SysTlsError.AllocationFailed { code: 12 },
+        SysTlsError.InvalidSlot { slot: 99 },
+        SysTlsError.StackOverflow { slot: 3 },
+    ];
+    for e in errors.iter() {
+        assert(!(*e).is_retryable());
+    }
+}
+
+fn main() {}

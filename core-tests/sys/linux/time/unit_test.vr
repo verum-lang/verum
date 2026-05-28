@@ -1,0 +1,110 @@
+// =============================================================================
+// core-tests/sys/linux/time/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.linux.time` — Linux clock ID constants.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.time.{
+    CLOCK_REALTIME, CLOCK_MONOTONIC,
+    CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID,
+    CLOCK_MONOTONIC_RAW, CLOCK_REALTIME_COARSE,
+    CLOCK_MONOTONIC_COARSE, CLOCK_BOOTTIME,
+    CLOCK_REALTIME_ALARM, CLOCK_BOOTTIME_ALARM, CLOCK_TAI,
+    TIMER_ABSTIME,
+};
+
+// =============================================================================
+// Section 1: Linux clock IDs — canonical kernel values
+// =============================================================================
+
+@test
+fn test_linux_clock_realtime_is_zero() {
+    assert_eq(CLOCK_REALTIME, 0);
+}
+
+@test
+fn test_linux_clock_monotonic_is_one() {
+    // Linux uses CLOCK_MONOTONIC = 1 (vs Darwin's 6).
+    assert_eq(CLOCK_MONOTONIC, 1);
+}
+
+@test
+fn test_linux_clock_process_cputime_is_two() {
+    assert_eq(CLOCK_PROCESS_CPUTIME_ID, 2);
+}
+
+@test
+fn test_linux_clock_thread_cputime_is_three() {
+    assert_eq(CLOCK_THREAD_CPUTIME_ID, 3);
+}
+
+@test
+fn test_linux_clock_monotonic_raw_is_four() {
+    assert_eq(CLOCK_MONOTONIC_RAW, 4);
+}
+
+@test
+fn test_linux_clock_realtime_coarse_is_five() {
+    assert_eq(CLOCK_REALTIME_COARSE, 5);
+}
+
+@test
+fn test_linux_clock_monotonic_coarse_is_six() {
+    assert_eq(CLOCK_MONOTONIC_COARSE, 6);
+}
+
+@test
+fn test_linux_clock_boottime_is_seven() {
+    assert_eq(CLOCK_BOOTTIME, 7);
+}
+
+@test
+fn test_linux_clock_realtime_alarm_is_eight() {
+    assert_eq(CLOCK_REALTIME_ALARM, 8);
+}
+
+@test
+fn test_linux_clock_boottime_alarm_is_nine() {
+    assert_eq(CLOCK_BOOTTIME_ALARM, 9);
+}
+
+@test
+fn test_linux_clock_tai_is_eleven() {
+    assert_eq(CLOCK_TAI, 11);
+}
+
+@test
+fn test_linux_timer_abstime_is_one() {
+    assert_eq(TIMER_ABSTIME, 1);
+}
+
+// =============================================================================
+// Section 2: Distinctness
+// =============================================================================
+
+@test
+fn test_linux_clock_ids_pairwise_distinct() {
+    let ids: List<Int> = [
+        CLOCK_REALTIME, CLOCK_MONOTONIC,
+        CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID,
+        CLOCK_MONOTONIC_RAW, CLOCK_REALTIME_COARSE,
+        CLOCK_MONOTONIC_COARSE, CLOCK_BOOTTIME,
+        CLOCK_REALTIME_ALARM, CLOCK_BOOTTIME_ALARM, CLOCK_TAI,
+    ];
+    let n = ids.len();
+    let mut i: USize = 0 as USize;
+    while i < n {
+        let mut j: USize = i + (1 as USize);
+        while j < n {
+            let a = *ids.get(i).unwrap();
+            let b = *ids.get(j).unwrap();
+            assert(a != b);
+            j = j + (1 as USize);
+        }
+        i = i + (1 as USize);
+    }
+}
+
+fn main() {}

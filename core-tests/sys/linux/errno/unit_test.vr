@@ -1,0 +1,159 @@
+// =============================================================================
+// core-tests/sys/linux/errno/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.linux.errno` — POSIX/Linux error number
+// constants and helper predicates.
+//
+// Reference: `/usr/include/asm-generic/errno-base.h` +
+// `/usr/include/asm-generic/errno.h`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.errno.{
+    EPERM, ENOENT, ESRCH, EINTR, EIO, EBADF, EAGAIN, EWOULDBLOCK,
+    ENOMEM, EACCES, EBUSY, EEXIST, ENOTDIR, EISDIR, EINVAL,
+    EMFILE, ENFILE, ENOTTY, EPIPE,
+    is_retryable, is_connection_error, is_permission_error, is_not_found,
+};
+
+// =============================================================================
+// Section 1: Canonical Linux errno values
+// =============================================================================
+
+@test
+fn test_linux_eperm_is_one() {
+    assert_eq(EPERM, 1);
+}
+
+@test
+fn test_linux_enoent_is_two() {
+    assert_eq(ENOENT, 2);
+}
+
+@test
+fn test_linux_esrch_is_three() {
+    assert_eq(ESRCH, 3);
+}
+
+@test
+fn test_linux_eintr_is_four() {
+    assert_eq(EINTR, 4);
+}
+
+@test
+fn test_linux_eio_is_five() {
+    assert_eq(EIO, 5);
+}
+
+@test
+fn test_linux_ebadf_is_nine() {
+    assert_eq(EBADF, 9);
+}
+
+@test
+fn test_linux_eagain_is_eleven() {
+    // Linux EAGAIN = 11 (DIVERGES from Darwin's 35).
+    assert_eq(EAGAIN, 11);
+}
+
+@test
+fn test_linux_ewouldblock_aliases_eagain() {
+    // Linux ABI convention — same as BSD: EWOULDBLOCK ≡ EAGAIN.
+    assert_eq(EWOULDBLOCK, EAGAIN);
+    assert_eq(EWOULDBLOCK, 11);
+}
+
+@test
+fn test_linux_enomem_is_twelve() {
+    assert_eq(ENOMEM, 12);
+}
+
+@test
+fn test_linux_eacces_is_thirteen() {
+    assert_eq(EACCES, 13);
+}
+
+@test
+fn test_linux_einval_is_twentytwo() {
+    assert_eq(EINVAL, 22);
+}
+
+@test
+fn test_linux_emfile_is_twentyfour() {
+    assert_eq(EMFILE, 24);
+}
+
+@test
+fn test_linux_epipe_is_thirtytwo() {
+    assert_eq(EPIPE, 32);
+}
+
+// =============================================================================
+// Section 2: Predicate — is_retryable
+// =============================================================================
+
+@test
+fn test_linux_is_retryable_eagain_yes() {
+    assert(is_retryable(EAGAIN));
+}
+
+@test
+fn test_linux_is_retryable_eintr_yes() {
+    assert(is_retryable(EINTR));
+}
+
+@test
+fn test_linux_is_retryable_ewouldblock_yes() {
+    assert(is_retryable(EWOULDBLOCK));
+}
+
+@test
+fn test_linux_is_retryable_eperm_no() {
+    assert(!is_retryable(EPERM));
+}
+
+@test
+fn test_linux_is_retryable_zero_no() {
+    assert(!is_retryable(0));
+}
+
+// =============================================================================
+// Section 3: Predicate — is_permission_error
+// =============================================================================
+
+@test
+fn test_linux_is_permission_error_eperm() {
+    assert(is_permission_error(EPERM));
+}
+
+@test
+fn test_linux_is_permission_error_eacces() {
+    assert(is_permission_error(EACCES));
+}
+
+@test
+fn test_linux_is_permission_error_enoent_no() {
+    assert(!is_permission_error(ENOENT));
+}
+
+// =============================================================================
+// Section 4: Predicate — is_not_found
+// =============================================================================
+
+@test
+fn test_linux_is_not_found_enoent() {
+    assert(is_not_found(ENOENT));
+}
+
+@test
+fn test_linux_is_not_found_esrch() {
+    assert(is_not_found(ESRCH));
+}
+
+@test
+fn test_linux_is_not_found_einval_no() {
+    assert(!is_not_found(EINVAL));
+}
+
+fn main() {}

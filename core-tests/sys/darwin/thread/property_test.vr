@@ -1,0 +1,106 @@
+// =============================================================================
+// core-tests/sys/darwin/thread/property_test.vr
+// =============================================================================
+// Algebraic laws for `core.sys.darwin.thread`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.thread.{
+    DarwinThreadError,
+    ONCE_INIT, ONCE_RUNNING, ONCE_COMPLETE,
+};
+
+// =============================================================================
+// Section 1: ONCE_* state machine partition
+// =============================================================================
+
+@test
+fn law_once_states_form_zero_one_two() {
+    let states: List<UInt32> = [ONCE_INIT, ONCE_RUNNING, ONCE_COMPLETE];
+    let mut zero: Bool = false;
+    let mut one:  Bool = false;
+    let mut two:  Bool = false;
+    for s in states.iter() {
+        if *s == (0 as UInt32) { zero = true; }
+        if *s == (1 as UInt32) { one  = true; }
+        if *s == (2 as UInt32) { two  = true; }
+    }
+    assert(zero);
+    assert(one);
+    assert(two);
+}
+
+@test
+fn law_once_states_pairwise_distinct() {
+    let states: List<UInt32> = [ONCE_INIT, ONCE_RUNNING, ONCE_COMPLETE];
+    let n = states.len();
+    let mut i: USize = 0 as USize;
+    while i < n {
+        let mut j: USize = i + (1 as USize);
+        while j < n {
+            let a = *states.get(i).unwrap();
+            let b = *states.get(j).unwrap();
+            assert(a != b);
+            j = j + (1 as USize);
+        }
+        i = i + (1 as USize);
+    }
+}
+
+// =============================================================================
+// Section 2: DarwinThreadError Eq laws
+// =============================================================================
+
+@test
+fn law_thread_error_eq_reflexive_unit_variants() {
+    let units: List<DarwinThreadError> = [
+        DarwinThreadError.TlsInitFailed,
+        DarwinThreadError.AlreadyJoined,
+        DarwinThreadError.AlreadyDetached,
+    ];
+    for e in units.iter() {
+        assert((*e).eq(e));
+    }
+}
+
+@test
+fn law_thread_error_eq_reflexive_payload_variants() {
+    let payloads: List<DarwinThreadError> = [
+        DarwinThreadError.CreateFailed { code: 1 },
+        DarwinThreadError.JoinFailed { code: 22 },
+        DarwinThreadError.MutexInitFailed { code: 99 },
+    ];
+    for e in payloads.iter() {
+        assert((*e).eq(e));
+    }
+}
+
+@test
+fn law_thread_error_eq_payload_code_sensitive() {
+    let codes: List<Int> = [-1, 0, 1, 4, 22, 35, 1000];
+    for c in codes.iter() {
+        let a = DarwinThreadError.CreateFailed { code: *c };
+        let b = DarwinThreadError.CreateFailed { code: *c };
+        assert(a.eq(&b));
+        let c_other = if *c == 0 { 999 } else { 0 };
+        let z = DarwinThreadError.CreateFailed { code: c_other };
+        assert(!a.eq(&z));
+    }
+}
+
+@test
+fn law_thread_error_eq_variant_disjoint() {
+    // Different variant constructors never compare equal.
+    let pairs: List<(DarwinThreadError, DarwinThreadError)> = [
+        (DarwinThreadError.AlreadyJoined, DarwinThreadError.AlreadyDetached),
+        (DarwinThreadError.TlsInitFailed, DarwinThreadError.AlreadyJoined),
+        (DarwinThreadError.AlreadyDetached, DarwinThreadError.TlsInitFailed),
+    ];
+    for p in pairs.iter() {
+        let (a, b) = *p;
+        assert(!a.eq(&b));
+        assert(!b.eq(&a));   // symmetric
+    }
+}
+
+fn main() {}

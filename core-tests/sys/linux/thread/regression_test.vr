@@ -1,0 +1,39 @@
+// =============================================================================
+// core-tests/sys/linux/thread/regression_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.thread.{
+    CLONE_VM, CLONE_THREAD, CLONE_SIGHAND,
+    SIGCHLD, CLONE_THREAD_FLAGS,
+};
+
+// REGRESSION: CLONE_VM = 0x100 — pthreads thread sharing flag.
+// Pre-fix bug class: copy-paste from BSD-style headers would set
+// CLONE_VM to a different value, breaking clone(2) thread creation.
+@test
+fn regression_clone_vm_is_0x100() {
+    assert_eq(CLONE_VM, 0x100);
+}
+
+// REGRESSION: CLONE_THREAD = 0x10000 — thread-group sharing flag.
+@test
+fn regression_clone_thread_is_0x10000() {
+    assert_eq(CLONE_THREAD, 0x10000);
+}
+
+// REGRESSION: SIGCHLD = 17 — Linux value (vs Darwin's 20).
+@test
+fn regression_sigchld_seventeen_not_twenty() {
+    assert_eq(SIGCHLD, 17);
+    assert(SIGCHLD != 20);
+}
+
+// REGRESSION: CLONE_THREAD_FLAGS must include CLONE_THREAD bit
+// (otherwise threads would be created as separate process groups).
+@test
+fn regression_clone_thread_flags_contains_clone_thread_bit() {
+    assert((CLONE_THREAD_FLAGS & CLONE_THREAD) != 0);
+}
+
+fn main() {}

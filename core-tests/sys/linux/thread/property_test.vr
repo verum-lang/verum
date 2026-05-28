@@ -1,0 +1,59 @@
+// =============================================================================
+// core-tests/sys/linux/thread/property_test.vr
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.thread.{
+    CLONE_VM, CLONE_FS, CLONE_FILES, CLONE_SIGHAND,
+    CLONE_THREAD, CLONE_SETTLS, CLONE_SYSVSEM,
+    CLONE_NEWPID, CLONE_NEWNS, CLONE_NEWUSER,
+    CLONE_PARENT_SETTID, CLONE_CHILD_CLEARTID, CLONE_CHILD_SETTID,
+    CLONE_DETACHED,
+};
+
+fn all_clone_flags() -> List<Int> {
+    [
+        CLONE_VM, CLONE_FS, CLONE_FILES, CLONE_SIGHAND,
+        CLONE_THREAD, CLONE_SETTLS, CLONE_SYSVSEM,
+        CLONE_NEWPID, CLONE_NEWNS, CLONE_NEWUSER,
+        CLONE_PARENT_SETTID, CLONE_CHILD_CLEARTID, CLONE_CHILD_SETTID,
+        CLONE_DETACHED,
+    ]
+}
+
+@test
+fn law_clone_flags_all_powers_of_two() {
+    for f in all_clone_flags().iter() {
+        let v = *f;
+        assert(v > 0);
+        assert_eq(v & (v - 1), 0);
+    }
+}
+
+@test
+fn law_clone_flags_pairwise_disjoint() {
+    let flags = all_clone_flags();
+    let n = flags.len();
+    let mut i: USize = 0 as USize;
+    while i < n {
+        let mut j: USize = i + (1 as USize);
+        while j < n {
+            let a = *flags.get(i).unwrap();
+            let b = *flags.get(j).unwrap();
+            assert_eq(a & b, 0);
+            j = j + (1 as USize);
+        }
+        i = i + (1 as USize);
+    }
+}
+
+@test
+fn law_clone_low_flags_consecutive_powers() {
+    // CLONE_VM=0x100, CLONE_FS=0x200, CLONE_FILES=0x400, CLONE_SIGHAND=0x800
+    // — 4 consecutive bits.
+    assert_eq(CLONE_VM * 2, CLONE_FS);
+    assert_eq(CLONE_FS * 2, CLONE_FILES);
+    assert_eq(CLONE_FILES * 2, CLONE_SIGHAND);
+}
+
+fn main() {}

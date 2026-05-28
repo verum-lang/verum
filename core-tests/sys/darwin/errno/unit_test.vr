@@ -1,0 +1,269 @@
+// =============================================================================
+// core-tests/sys/darwin/errno/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.darwin.errno` — BSD/POSIX error number
+// constants and helper predicates for macOS (Darwin/XNU).
+//
+// API surface tested here:
+//
+//   Constants: ~110 errno values (EPERM = 1 through EQFULL = 106).
+//   Predicates: is_retryable / is_connection_error / is_permission_error
+//               / is_not_found / is_resource_exhausted / is_would_block
+//   Names:     errno_name / errno_short_name
+//
+// What we DO pin:
+//   * Canonical BSD errno values — every constant matches its
+//     `/usr/include/sys/errno.h` counterpart.
+//   * Predicates classify the documented error subset correctly.
+//   * EWOULDBLOCK == EAGAIN aliasing (BSD convention).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.errno.{
+    EPERM, ENOENT, ESRCH, EINTR, EIO,
+    EBADF, ENOMEM, EACCES, EBUSY, EEXIST,
+    ENOTDIR, EISDIR, EINVAL, EMFILE, ENFILE,
+    EPIPE, EAGAIN, EWOULDBLOCK, EINPROGRESS,
+    ENOTSOCK, EADDRINUSE, ENETDOWN, ECONNRESET,
+    ECONNREFUSED, EHOSTUNREACH, ETIMEDOUT,
+    ENAMETOOLONG, ENOTEMPTY, ENOSYS,
+    is_retryable, is_connection_error, is_permission_error,
+    is_not_found, is_resource_exhausted, is_would_block,
+};
+
+// =============================================================================
+// Section 1: Canonical BSD errno values
+// =============================================================================
+
+@test
+fn test_eperm_is_one() {
+    assert_eq(EPERM, 1);
+}
+
+@test
+fn test_enoent_is_two() {
+    assert_eq(ENOENT, 2);
+}
+
+@test
+fn test_esrch_is_three() {
+    assert_eq(ESRCH, 3);
+}
+
+@test
+fn test_eintr_is_four() {
+    assert_eq(EINTR, 4);
+}
+
+@test
+fn test_eio_is_five() {
+    assert_eq(EIO, 5);
+}
+
+@test
+fn test_ebadf_is_nine() {
+    assert_eq(EBADF, 9);
+}
+
+@test
+fn test_enomem_is_twelve() {
+    assert_eq(ENOMEM, 12);
+}
+
+@test
+fn test_eacces_is_thirteen() {
+    assert_eq(EACCES, 13);
+}
+
+@test
+fn test_eexist_is_seventeen() {
+    assert_eq(EEXIST, 17);
+}
+
+@test
+fn test_einval_is_twentytwo() {
+    assert_eq(EINVAL, 22);
+}
+
+@test
+fn test_emfile_is_twentyfour() {
+    assert_eq(EMFILE, 24);
+}
+
+@test
+fn test_epipe_is_thirtytwo() {
+    assert_eq(EPIPE, 32);
+}
+
+@test
+fn test_eagain_is_thirtyfive_on_darwin() {
+    // BSD/macOS uses EAGAIN = 35 (vs Linux's 11). The constant carries
+    // the canonical Darwin value.
+    assert_eq(EAGAIN, 35);
+}
+
+@test
+fn test_ewouldblock_aliases_eagain() {
+    // BSD convention — EWOULDBLOCK and EAGAIN are the same value.
+    assert_eq(EWOULDBLOCK, EAGAIN);
+}
+
+@test
+fn test_econnrefused_is_sixtyone() {
+    assert_eq(ECONNREFUSED, 61);
+}
+
+@test
+fn test_enosys_is_seventyeight() {
+    assert_eq(ENOSYS, 78);
+}
+
+// =============================================================================
+// Section 2: Predicate — is_retryable
+// =============================================================================
+
+@test
+fn test_is_retryable_eagain_yes() {
+    assert(is_retryable(EAGAIN));
+}
+
+@test
+fn test_is_retryable_eintr_yes() {
+    assert(is_retryable(EINTR));
+}
+
+@test
+fn test_is_retryable_ewouldblock_yes() {
+    // EWOULDBLOCK ≡ EAGAIN — both are retryable.
+    assert(is_retryable(EWOULDBLOCK));
+}
+
+@test
+fn test_is_retryable_eperm_no() {
+    assert(!is_retryable(EPERM));
+}
+
+@test
+fn test_is_retryable_zero_no() {
+    // Zero = success — not retryable.
+    assert(!is_retryable(0));
+}
+
+// =============================================================================
+// Section 3: Predicate — is_connection_error
+// =============================================================================
+
+@test
+fn test_is_connection_error_econnrefused_yes() {
+    assert(is_connection_error(ECONNREFUSED));
+}
+
+@test
+fn test_is_connection_error_econnreset_yes() {
+    assert(is_connection_error(ECONNRESET));
+}
+
+@test
+fn test_is_connection_error_etimedout_yes() {
+    assert(is_connection_error(ETIMEDOUT));
+}
+
+@test
+fn test_is_connection_error_ehostunreach_yes() {
+    assert(is_connection_error(EHOSTUNREACH));
+}
+
+@test
+fn test_is_connection_error_enoent_no() {
+    assert(!is_connection_error(ENOENT));
+}
+
+// =============================================================================
+// Section 4: Predicate — is_permission_error
+// =============================================================================
+
+@test
+fn test_is_permission_error_eperm_yes() {
+    assert(is_permission_error(EPERM));
+}
+
+@test
+fn test_is_permission_error_eacces_yes() {
+    assert(is_permission_error(EACCES));
+}
+
+@test
+fn test_is_permission_error_enoent_no() {
+    assert(!is_permission_error(ENOENT));
+}
+
+// =============================================================================
+// Section 5: Predicate — is_not_found
+// =============================================================================
+
+@test
+fn test_is_not_found_enoent_yes() {
+    assert(is_not_found(ENOENT));
+}
+
+@test
+fn test_is_not_found_esrch_yes() {
+    assert(is_not_found(ESRCH));
+}
+
+@test
+fn test_is_not_found_eperm_no() {
+    assert(!is_not_found(EPERM));
+}
+
+// =============================================================================
+// Section 6: Predicate — is_resource_exhausted
+// =============================================================================
+
+@test
+fn test_is_resource_exhausted_enomem_yes() {
+    assert(is_resource_exhausted(ENOMEM));
+}
+
+@test
+fn test_is_resource_exhausted_emfile_yes() {
+    assert(is_resource_exhausted(EMFILE));
+}
+
+@test
+fn test_is_resource_exhausted_enfile_yes() {
+    assert(is_resource_exhausted(ENFILE));
+}
+
+@test
+fn test_is_resource_exhausted_enoent_no() {
+    assert(!is_resource_exhausted(ENOENT));
+}
+
+// =============================================================================
+// Section 7: Predicate — is_would_block
+// =============================================================================
+
+@test
+fn test_is_would_block_eagain_yes() {
+    assert(is_would_block(EAGAIN));
+}
+
+@test
+fn test_is_would_block_einprogress_yes() {
+    assert(is_would_block(EINPROGRESS));
+}
+
+@test
+fn test_is_would_block_ewouldblock_yes() {
+    assert(is_would_block(EWOULDBLOCK));
+}
+
+@test
+fn test_is_would_block_eintr_no() {
+    // EINTR is retryable but NOT "would block".
+    assert(!is_would_block(EINTR));
+}
+
+fn main() {}

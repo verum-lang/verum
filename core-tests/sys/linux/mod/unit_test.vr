@@ -1,0 +1,69 @@
+// =============================================================================
+// core-tests/sys/linux/mod/unit_test.vr
+// =============================================================================
+//
+// Umbrella conformance for `core.sys.linux` — re-exports from
+// errno / syscall / arch / auxv / mem / io / thread / time / tls.
+//
+// Pins the umbrella RE-EXPORT contract: every name reachable through
+// `core.sys.linux.X` is byte-identical to the direct submodule path.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.errno.{EAGAIN as L_EAGAIN, ENOENT as L_ENOENT};
+mount core.sys.linux.mem.{MAP_ANON as L_MAP_ANON, PROT_READ as L_PROT_READ};
+mount core.sys.linux.time.{CLOCK_MONOTONIC as L_CLOCK_MONOTONIC};
+mount core.sys.linux.tls.{MAX_CONTEXT_SLOTS as L_MAX_CONTEXT_SLOTS, STACK_GUARD_MAGIC as L_STACK_GUARD_MAGIC};
+
+// =============================================================================
+// Section 1: Linux errno values
+// =============================================================================
+
+@test
+fn test_linux_umbrella_eagain_eleven() {
+    assert_eq(L_EAGAIN, 11);
+}
+
+@test
+fn test_linux_umbrella_enoent_two() {
+    assert_eq(L_ENOENT, 2);
+}
+
+// =============================================================================
+// Section 2: Linux mem flags
+// =============================================================================
+
+@test
+fn test_linux_umbrella_map_anon_0x20() {
+    assert_eq(L_MAP_ANON, 0x20);
+}
+
+@test
+fn test_linux_umbrella_prot_read_one() {
+    assert_eq(L_PROT_READ, 1);
+}
+
+// =============================================================================
+// Section 3: Linux time
+// =============================================================================
+
+@test
+fn test_linux_umbrella_clock_monotonic_one() {
+    assert_eq(L_CLOCK_MONOTONIC, 1);
+}
+
+// =============================================================================
+// Section 4: Linux tls
+// =============================================================================
+
+@test
+fn test_linux_umbrella_max_context_slots_256() {
+    assert_eq(L_MAX_CONTEXT_SLOTS, 256);
+}
+
+@test
+fn test_linux_umbrella_stack_guard_magic() {
+    assert_eq(L_STACK_GUARD_MAGIC, 0xDEAD_BEEF_CAFE_BABE as USize);
+}
+
+fn main() {}

@@ -1,0 +1,131 @@
+// =============================================================================
+// core-tests/sys/linux/errno/property_test.vr
+// =============================================================================
+// Algebraic laws for `core.sys.linux.errno`.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.errno.{
+    EPERM, ENOENT, ESRCH, EINTR, EIO, ENXIO, E2BIG, ENOEXEC, EBADF,
+    ECHILD, EAGAIN, EWOULDBLOCK, ENOMEM, EACCES, EFAULT, ENOTBLK,
+    EBUSY, EEXIST, EXDEV, ENODEV, ENOTDIR, EISDIR, EINVAL,
+    ENFILE, EMFILE, ENOTTY, ETXTBSY, EFBIG, ENOSPC, ESPIPE, EROFS,
+    is_retryable, is_permission_error,
+};
+
+// =============================================================================
+// Section 1: Linux low-POSIX subset 1..=30 — pairwise distinct, consecutive
+// =============================================================================
+
+fn linux_low_codes() -> List<Int> {
+    [
+        EPERM, ENOENT, ESRCH, EINTR, EIO, ENXIO, E2BIG, ENOEXEC, EBADF,
+        ECHILD, EAGAIN, ENOMEM, EACCES, EFAULT, ENOTBLK, EBUSY, EEXIST,
+        EXDEV, ENODEV, ENOTDIR, EISDIR, EINVAL, ENFILE, EMFILE, ENOTTY,
+        ETXTBSY, EFBIG, ENOSPC, ESPIPE, EROFS,
+    ]
+}
+
+@test
+fn law_linux_low_count_thirty() {
+    assert_eq(linux_low_codes().len(), 30);
+}
+
+@test
+fn law_linux_low_in_range_one_to_thirty() {
+    for c in linux_low_codes().iter() {
+        assert(*c >= 1);
+        assert(*c <= 30);
+    }
+}
+
+@test
+fn law_linux_low_pairwise_distinct() {
+    let codes = linux_low_codes();
+    let n = codes.len();
+    let mut i: USize = 0 as USize;
+    while i < n {
+        let mut j: USize = i + (1 as USize);
+        while j < n {
+            let a = *codes.get(i).unwrap();
+            let b = *codes.get(j).unwrap();
+            assert(a != b);
+            j = j + (1 as USize);
+        }
+        i = i + (1 as USize);
+    }
+}
+
+@test
+fn law_linux_low_consecutive_sequence() {
+    // The 30 Linux codes 1..=30 are reachable.
+    let codes = linux_low_codes();
+    let mut seen: List<Bool> = [];
+    let mut i: Int = 0;
+    while i < 31 {
+        seen.push(false);
+        i = i + 1;
+    }
+    for c in codes.iter() {
+        seen[*c as USize] = true;
+    }
+    let mut j: USize = 1 as USize;
+    while j <= (30 as USize) {
+        assert(*seen.get(j).unwrap());
+        j = j + (1 as USize);
+    }
+}
+
+// =============================================================================
+// Section 2: EWOULDBLOCK ≡ EAGAIN — Linux ABI alias
+// =============================================================================
+
+@test
+fn law_linux_ewouldblock_equals_eagain() {
+    assert_eq(EWOULDBLOCK, EAGAIN);
+}
+
+@test
+fn law_linux_eagain_diverges_from_darwin() {
+    // EAGAIN = 11 on Linux, 35 on Darwin. The two platforms agree on
+    // alias-with-EWOULDBLOCK but NOT on the numeric value.
+    assert_eq(EAGAIN, 11);
+}
+
+// =============================================================================
+// Section 3: Predicates — disjointness
+// =============================================================================
+
+@test
+fn law_linux_is_retryable_only_eagain_eintr_ewouldblock() {
+    assert(is_retryable(EAGAIN));
+    assert(is_retryable(EINTR));
+    assert(is_retryable(EWOULDBLOCK));
+    assert(!is_retryable(ENOENT));
+    assert(!is_retryable(EACCES));
+    assert(!is_retryable(EPIPE_dummy()));
+}
+
+fn EPIPE_dummy() -> Int { 32 }
+
+@test
+fn law_linux_is_permission_error_only_eperm_eacces() {
+    assert(is_permission_error(EPERM));
+    assert(is_permission_error(EACCES));
+    assert(!is_permission_error(ENOENT));
+}
+
+// =============================================================================
+// Section 4: Total over Int (no panic on any input)
+// =============================================================================
+
+@test
+fn law_linux_predicates_total() {
+    let inputs: List<Int> = [-1, 0, 1, 100, 10_000, -1_000_000];
+    for v in inputs.iter() {
+        let _: Bool = is_retryable(*v);
+        let _: Bool = is_permission_error(*v);
+    }
+}
+
+fn main() {}

@@ -1,0 +1,99 @@
+// =============================================================================
+// core-tests/sys/linux/thread/unit_test.vr
+// =============================================================================
+// clone(2) CLONE_* flags + SIGCHLD constant.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.linux.thread.{
+    CLONE_VM, CLONE_FS, CLONE_FILES, CLONE_SIGHAND,
+    CLONE_THREAD, CLONE_SETTLS, CLONE_SYSVSEM,
+    CLONE_PARENT_SETTID, CLONE_CHILD_CLEARTID, CLONE_CHILD_SETTID,
+    CLONE_NEWPID, CLONE_NEWNS, CLONE_NEWUSER,
+    CLONE_DETACHED,
+    SIGCHLD,
+    CLONE_THREAD_FLAGS,
+};
+
+@test
+fn test_clone_vm_is_0x100() {
+    assert_eq(CLONE_VM, 0x00000100);
+}
+
+@test
+fn test_clone_fs_is_0x200() {
+    assert_eq(CLONE_FS, 0x00000200);
+}
+
+@test
+fn test_clone_files_is_0x400() {
+    assert_eq(CLONE_FILES, 0x00000400);
+}
+
+@test
+fn test_clone_sighand_is_0x800() {
+    assert_eq(CLONE_SIGHAND, 0x00000800);
+}
+
+@test
+fn test_clone_thread_is_0x10000() {
+    assert_eq(CLONE_THREAD, 0x00010000);
+}
+
+@test
+fn test_clone_settls_is_0x80000() {
+    assert_eq(CLONE_SETTLS, 0x00080000);
+}
+
+@test
+fn test_clone_sysvsem_is_0x40000() {
+    assert_eq(CLONE_SYSVSEM, 0x00040000);
+}
+
+@test
+fn test_clone_parent_settid_is_0x100000() {
+    assert_eq(CLONE_PARENT_SETTID, 0x00100000);
+}
+
+@test
+fn test_clone_child_cleartid_is_0x200000() {
+    assert_eq(CLONE_CHILD_CLEARTID, 0x00200000);
+}
+
+@test
+fn test_clone_child_settid_is_0x1000000() {
+    assert_eq(CLONE_CHILD_SETTID, 0x01000000);
+}
+
+@test
+fn test_clone_newpid_is_0x20000000() {
+    assert_eq(CLONE_NEWPID, 0x20000000);
+}
+
+@test
+fn test_clone_newns_is_0x20000() {
+    assert_eq(CLONE_NEWNS, 0x00020000);
+}
+
+@test
+fn test_clone_newuser_is_0x10000000() {
+    assert_eq(CLONE_NEWUSER, 0x10000000);
+}
+
+@test
+fn test_clone_detached_is_0x400000() {
+    assert_eq(CLONE_DETACHED, 0x00400000);
+}
+
+@test
+fn test_sigchld_is_seventeen() {
+    assert_eq(SIGCHLD, 17);
+}
+
+@test
+fn test_clone_thread_flags_is_composite() {
+    // CLONE_THREAD_FLAGS combines several CLONE_* bits — non-zero.
+    assert(CLONE_THREAD_FLAGS != 0);
+}
+
+fn main() {}

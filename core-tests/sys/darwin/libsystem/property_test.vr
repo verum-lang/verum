@@ -1,0 +1,157 @@
+// =============================================================================
+// core-tests/sys/darwin/libsystem/property_test.vr
+// =============================================================================
+//
+// Algebraic / structural laws for `core.sys.darwin.libsystem` constants.
+//
+// Properties covered:
+//   * PROT_* are single-bit powers of two pairwise disjoint.
+//   * Open-flag OR-composition stays within Int32 (no overflow).
+//   * SEEK_{SET,CUR,END} form the exact set {0, 1, 2}.
+//   * MADV_* identifiers are pairwise distinct.
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.darwin.libsystem.{
+    O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_TRUNC, O_EXCL, O_APPEND,
+    SEEK_SET, SEEK_CUR, SEEK_END,
+    PROT_NONE, PROT_READ, PROT_WRITE, PROT_EXEC,
+    MAP_SHARED, MAP_PRIVATE, MAP_FIXED, MAP_ANON,
+    MADV_NORMAL, MADV_RANDOM, MADV_SEQUENTIAL, MADV_WILLNEED, MADV_DONTNEED,
+    MADV_FREE, MADV_FREE_REUSABLE, MADV_FREE_REUSE,
+};
+
+// =============================================================================
+// Section 1: PROT_* single-bit invariants
+// =============================================================================
+
+@test
+fn law_prot_flags_powers_of_two() {
+    let flags: List<Int> = [PROT_READ, PROT_WRITE, PROT_EXEC];
+    for f in flags.iter() {
+        let v = *f;
+        // Non-zero and `v & (v - 1) == 0` ⇒ power of two.
+        assert(v != 0);
+        assert_eq(v & (v - 1), 0);
+    }
+}
+
+@test
+fn law_prot_flags_pairwise_disjoint() {
+    let flags: List<Int> = [PROT_READ, PROT_WRITE, PROT_EXEC];
+    let n = flags.len();
+    let mut i: USize = 0 as USize;
+    while i < n {
+        let mut j: USize = i + (1 as USize);
+        while j < n {
+            let a = *flags.get(i).unwrap();
+            let b = *flags.get(j).unwrap();
+            assert_eq(a & b, 0);
+            j = j + (1 as USize);
+        }
+        i = i + (1 as USize);
+    }
+}
+
+@test
+fn law_prot_none_is_zero() {
+    assert_eq(PROT_NONE, 0);
+}
+
+@test
+fn law_prot_or_combines_to_disjoint_union() {
+    // OR-ing all three flags yields exactly 7 (1 + 2 + 4).
+    let all_perm = PROT_READ | PROT_WRITE | PROT_EXEC;
+    assert_eq(all_perm, 7);
+}
+
+// =============================================================================
+// Section 2: SEEK_{SET,CUR,END} — exact partition of {0,1,2}
+// =============================================================================
+
+@test
+fn law_seek_whence_partition_zero_one_two() {
+    let whences: List<Int> = [SEEK_SET, SEEK_CUR, SEEK_END];
+    let mut zero: Bool = false;
+    let mut one:  Bool = false;
+    let mut two:  Bool = false;
+    for w in whences.iter() {
+        if *w == 0 { zero = true; }
+        if *w == 1 { one  = true; }
+        if *w == 2 { two  = true; }
+    }
+    assert(zero);
+    assert(one);
+    assert(two);
+}
+
+@test
+fn law_seek_whence_pairwise_distinct() {
+    assert(SEEK_SET != SEEK_CUR);
+    assert(SEEK_CUR != SEEK_END);
+    assert(SEEK_SET != SEEK_END);
+}
+
+// =============================================================================
+// Section 3: Open flags — OR-composition contract
+// =============================================================================
+
+@test
+fn law_open_create_flag_combination_does_not_overflow() {
+    // The canonical "create new file for writing" pattern:
+    // O_WRONLY | O_CREAT | O_TRUNC. Must fit in Int32 — value is
+    // 0x601 (1 + 0x200 + 0x400) under BSD layout.
+    let flags = O_WRONLY | O_CREAT | O_TRUNC;
+    assert_eq(flags, 0x601);
+}
+
+@test
+fn law_open_excl_create_combination() {
+    // The atomic-create-or-fail pattern.
+    let flags = O_WRONLY | O_CREAT | O_EXCL;
+    assert_eq(flags, 0xA01);  // 1 + 0x200 + 0x800
+}
+
+// =============================================================================
+// Section 4: MADV_* identifier distinctness
+// =============================================================================
+
+@test
+fn law_madv_codes_pairwise_distinct() {
+    let codes: List<Int> = [
+        MADV_NORMAL, MADV_RANDOM, MADV_SEQUENTIAL, MADV_WILLNEED,
+        MADV_DONTNEED, MADV_FREE, MADV_FREE_REUSABLE, MADV_FREE_REUSE,
+    ];
+    let n = codes.len();
+    let mut i: USize = 0 as USize;
+    while i < n {
+        let mut j: USize = i + (1 as USize);
+        while j < n {
+            let a = *codes.get(i).unwrap();
+            let b = *codes.get(j).unwrap();
+            assert(a != b);
+            j = j + (1 as USize);
+        }
+        i = i + (1 as USize);
+    }
+}
+
+// =============================================================================
+// Section 5: MAP_* mapping flag invariants
+// =============================================================================
+
+@test
+fn law_map_shared_private_disjoint() {
+    // Exactly one of MAP_SHARED or MAP_PRIVATE must be set; their
+    // bits do not overlap.
+    assert_eq(MAP_SHARED & MAP_PRIVATE, 0);
+}
+
+@test
+fn law_map_fixed_disjoint_from_share_private() {
+    // MAP_FIXED is an orthogonal flag — disjoint from share/private.
+    assert_eq(MAP_FIXED & MAP_SHARED, 0);
+    assert_eq(MAP_FIXED & MAP_PRIVATE, 0);
+}
+
+fn main() {}
