@@ -62,49 +62,42 @@ fn test_permission_scope_time_variant() {
 //   diagnostics are coherent across the FFI boundary.
 // =============================================================================
 
-@ignore("PermissionScope.name() takes self by-value (not &self); method dispatch returns canonical-default-value not the matched arm. Sister of by-value-self method dispatch defect class.")
 @test
 fn test_permission_scope_syscall_name() {
     let s: PermissionScope = PermissionScope.Syscall;
     assert_eq(s.name(), "Syscall");
 }
 
-@ignore("Same by-value-self method-dispatch defect.")
 @test
 fn test_permission_scope_filesystem_name() {
     let s: PermissionScope = PermissionScope.FileSystem;
     assert_eq(s.name(), "FileSystem");
 }
 
-@ignore("Same by-value-self method-dispatch defect.")
 @test
 fn test_permission_scope_network_name() {
     let s: PermissionScope = PermissionScope.Network;
     assert_eq(s.name(), "Network");
 }
 
-@ignore("Same by-value-self method-dispatch defect.")
 @test
 fn test_permission_scope_process_name() {
     let s: PermissionScope = PermissionScope.Process;
     assert_eq(s.name(), "Process");
 }
 
-@ignore("Same by-value-self method-dispatch defect.")
 @test
 fn test_permission_scope_memory_name() {
     let s: PermissionScope = PermissionScope.Memory;
     assert_eq(s.name(), "Memory");
 }
 
-@ignore("Same by-value-self method-dispatch defect.")
 @test
 fn test_permission_scope_cryptography_name() {
     let s: PermissionScope = PermissionScope.Cryptography;
     assert_eq(s.name(), "Cryptography");
 }
 
-@ignore("Same by-value-self method-dispatch defect.")
 @test
 fn test_permission_scope_time_name() {
     let s: PermissionScope = PermissionScope.Time;
