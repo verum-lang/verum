@@ -1,0 +1,217 @@
+// =============================================================================
+// core-tests/encoding/bson/unit_test.vr
+// =============================================================================
+//
+// `core/encoding/bson.vr` — MongoDB BSON wire format.
+//
+// Pure-data surface tested here:
+//   * BSON_* type byte constants
+//   * BsonError 10-variant ADT (scalar + carrier variants)
+//   * Variant disjointness + scalar payload preservation
+//
+// BsonObjectId / BsonBinary / BsonRegex / BsonTimestamp /
+// BsonDocument record types and the BsonValue 18-variant ADT are
+// gated behind the record-destructure + recursive-ADT defect
+// classes; tracked in audit.md.
+// =============================================================================
+
+mount core.encoding.bson.{BsonError};
+mount core.encoding.bson.{
+    BSON_DOUBLE, BSON_STRING, BSON_DOCUMENT, BSON_ARRAY,
+    BSON_BINARY, BSON_UNDEFINED, BSON_OBJECT_ID, BSON_BOOLEAN,
+    BSON_DATETIME, BSON_NULL,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: BSON type-byte constants
+//
+//   MongoDB BSON spec — type byte preceding each element. Pinned per
+//   the canonical 0x01..0x12 numbering (we cover the first 10).
+// =============================================================================
+
+@test
+fn test_bson_double_type_byte() {
+    assert_eq(BSON_DOUBLE, 0x01_u8);
+}
+
+@test
+fn test_bson_string_type_byte() {
+    assert_eq(BSON_STRING, 0x02_u8);
+}
+
+@test
+fn test_bson_document_type_byte() {
+    assert_eq(BSON_DOCUMENT, 0x03_u8);
+}
+
+@test
+fn test_bson_array_type_byte() {
+    assert_eq(BSON_ARRAY, 0x04_u8);
+}
+
+@test
+fn test_bson_binary_type_byte() {
+    assert_eq(BSON_BINARY, 0x05_u8);
+}
+
+@test
+fn test_bson_undefined_type_byte() {
+    // Deprecated but reserved — decoded as Null on the wire.
+    assert_eq(BSON_UNDEFINED, 0x06_u8);
+}
+
+@test
+fn test_bson_object_id_type_byte() {
+    assert_eq(BSON_OBJECT_ID, 0x07_u8);
+}
+
+@test
+fn test_bson_boolean_type_byte() {
+    assert_eq(BSON_BOOLEAN, 0x08_u8);
+}
+
+@test
+fn test_bson_datetime_type_byte() {
+    assert_eq(BSON_DATETIME, 0x09_u8);
+}
+
+@test
+fn test_bson_null_type_byte() {
+    assert_eq(BSON_NULL, 0x0A_u8);
+}
+
+// =============================================================================
+// Section 2: BsonError 10-variant ADT construction
+// =============================================================================
+
+@test
+fn test_bson_error_truncated_variant() {
+    let e: BsonError = BsonError.BsonE_Truncated(42);
+    assert(e is BsonError.BsonE_Truncated);
+}
+
+@test
+fn test_bson_error_bad_type_variant() {
+    let e: BsonError = BsonError.BsonE_BadType(0xFF_u8);
+    assert(e is BsonError.BsonE_BadType);
+}
+
+@test
+fn test_bson_error_bad_length_variant() {
+    let e: BsonError = BsonError.BsonE_BadLength(-1);
+    assert(e is BsonError.BsonE_BadLength);
+}
+
+@test
+fn test_bson_error_bad_utf8_variant() {
+    let e: BsonError = BsonError.BsonE_BadUtf8;
+    assert(e is BsonError.BsonE_BadUtf8);
+}
+
+@test
+fn test_bson_error_nesting_too_deep_variant() {
+    let e: BsonError = BsonError.BsonE_NestingTooDeep;
+    assert(e is BsonError.BsonE_NestingTooDeep);
+}
+
+@test
+fn test_bson_error_too_many_fields_variant() {
+    let e: BsonError = BsonError.BsonE_TooManyFields(1024);
+    assert(e is BsonError.BsonE_TooManyFields);
+}
+
+@test
+fn test_bson_error_document_too_large_variant() {
+    let e: BsonError = BsonError.BsonE_DocumentTooLarge(16777216);
+    assert(e is BsonError.BsonE_DocumentTooLarge);
+}
+
+@test
+fn test_bson_error_bad_decimal128_variant() {
+    let e: BsonError = BsonError.BsonE_BadDecimal128;
+    assert(e is BsonError.BsonE_BadDecimal128);
+}
+
+@test
+fn test_bson_error_trailing_bytes_variant() {
+    let e: BsonError = BsonError.BsonE_TrailingBytes(4);
+    assert(e is BsonError.BsonE_TrailingBytes);
+}
+
+@test
+fn test_bson_error_missing_document_terminator_variant() {
+    let e: BsonError = BsonError.BsonE_MissingDocumentTerminator;
+    assert(e is BsonError.BsonE_MissingDocumentTerminator);
+}
+
+// =============================================================================
+// Section 3: BsonError pairwise disjointness — scalar variants
+// =============================================================================
+
+@test
+fn test_bson_error_bad_utf8_disjoint() {
+    let e: BsonError = BsonError.BsonE_BadUtf8;
+    assert(!(e is BsonError.BsonE_NestingTooDeep));
+    assert(!(e is BsonError.BsonE_BadDecimal128));
+    assert(!(e is BsonError.BsonE_MissingDocumentTerminator));
+    assert(!(e is BsonError.BsonE_Truncated));
+}
+
+@test
+fn test_bson_error_nesting_too_deep_disjoint() {
+    let e: BsonError = BsonError.BsonE_NestingTooDeep;
+    assert(!(e is BsonError.BsonE_BadUtf8));
+    assert(!(e is BsonError.BsonE_BadDecimal128));
+    assert(!(e is BsonError.BsonE_MissingDocumentTerminator));
+}
+
+@test
+fn test_bson_error_bad_decimal128_disjoint() {
+    let e: BsonError = BsonError.BsonE_BadDecimal128;
+    assert(!(e is BsonError.BsonE_BadUtf8));
+    assert(!(e is BsonError.BsonE_NestingTooDeep));
+    assert(!(e is BsonError.BsonE_MissingDocumentTerminator));
+}
+
+@test
+fn test_bson_error_missing_document_terminator_disjoint() {
+    let e: BsonError = BsonError.BsonE_MissingDocumentTerminator;
+    assert(!(e is BsonError.BsonE_BadUtf8));
+    assert(!(e is BsonError.BsonE_NestingTooDeep));
+    assert(!(e is BsonError.BsonE_BadDecimal128));
+}
+
+// =============================================================================
+// Section 4: BsonError scalar payload preservation
+// =============================================================================
+
+@test
+fn test_bson_error_truncated_payload_round_trip() {
+    let e: BsonError = BsonError.BsonE_Truncated(128);
+    match e {
+        BsonError.BsonE_Truncated(off) => assert_eq(off, 128),
+        _ => panic("expected BsonE_Truncated"),
+    }
+}
+
+@test
+fn test_bson_error_bad_type_payload_round_trip() {
+    let e: BsonError = BsonError.BsonE_BadType(0xC0_u8);
+    match e {
+        BsonError.BsonE_BadType(b) => assert_eq(b, 0xC0_u8),
+        _ => panic("expected BsonE_BadType"),
+    }
+}
+
+@test
+fn test_bson_error_document_too_large_payload_round_trip() {
+    let e: BsonError = BsonError.BsonE_DocumentTooLarge(16777217);
+    match e {
+        BsonError.BsonE_DocumentTooLarge(n) => assert_eq(n, 16777217),
+        _ => panic("expected BsonE_DocumentTooLarge"),
+    }
+}
+
+fn main() {}
