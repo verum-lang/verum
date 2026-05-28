@@ -76,11 +76,11 @@ implement Arity {
     /// Maximum number of values this arity accepts (None = unbounded).
     public fn upper_bound(&self) -> Maybe<Int> {
         match self {
-            Arity.Exactly(n) => Some(*n),
-            Arity.AtMost(n) => Some(*n),
-            Arity.AtLeast(_) => None,
-            Arity.Range(_, hi) => Some(*hi),
-            Arity.Unlimited => None,
+            Arity.Exactly(n) => Maybe.Some(*n),
+            Arity.AtMost(n) => Maybe.Some(*n),
+            Arity.AtLeast(_) => Maybe.None,
+            Arity.Range(_, hi) => Maybe.Some(*hi),
+            Arity.Unlimited => Maybe.None,
         }
     }
 
@@ -128,17 +128,17 @@ public type GroupKind is
 implement Group {
     /// Build an exclusive (mutex) group.
     public fn exclusive(name: Text, members: List<Text>) -> Group {
-        Group { name: name, members: members, kind: GroupKind.Exclusive, help: None }
+        Group { name: name, members: members, kind: GroupKind.Exclusive, help: Maybe.None }
     }
 
     /// Build a "exactly one of" required group.
     public fn one_required(name: Text, members: List<Text>) -> Group {
-        Group { name: name, members: members, kind: GroupKind.Required, help: None }
+        Group { name: name, members: members, kind: GroupKind.Required, help: Maybe.None }
     }
 
     /// Attach explanatory help to this group.
     public fn with_help(mut self, help: Text) -> Group {
-        self.help = Some(help);
+        self.help = Maybe.Some(help);
         self
     }
 }
@@ -330,13 +330,13 @@ implement ArgSpec {
         ArgSpec {
             name: name,
             arity: Arity.one(),
-            placeholder: None,
+            placeholder: Maybe.None,
             help: help,
-            long_help: None,
-            default_text: None,
-            env_fallback: None,
-            config_path: None,
-            refinement: None,
+            long_help: Maybe.None,
+            default_text: Maybe.None,
+            env_fallback: Maybe.None,
+            config_path: Maybe.None,
+            refinement: Maybe.None,
             completion: CompletionSource.NoCompletion,
             interactive: InteractivePolicy.OnTty,
             hidden: false,
@@ -391,16 +391,16 @@ implement FlagSpec {
     /// Build a switch flag (no value, default false).
     public fn switch(long: Text, help: Text) -> FlagSpec {
         FlagSpec {
-            long: Some(long),
-            short: None,
+            long: Maybe.Some(long),
+            short: Maybe.None,
             arity: Arity.Exactly(0),
-            placeholder: None,
+            placeholder: Maybe.None,
             help: help,
-            long_help: None,
-            default_text: Some("false"),
-            env_fallback: None,
-            config_path: None,
-            refinement: None,
+            long_help: Maybe.None,
+            default_text: Maybe.Some("false"),
+            env_fallback: Maybe.None,
+            config_path: Maybe.None,
+            refinement: Maybe.None,
             completion: CompletionSource.NoCompletion,
             interactive: InteractivePolicy.Never,
             persistent: false,
@@ -419,13 +419,13 @@ implement FlagSpec {
         let mut f = FlagSpec.switch(long, help);
         f.arity = Arity.one();
         f.kind_hint = "Generic";
-        f.default_text = None;
+        f.default_text = Maybe.None;
         f
     }
 
     /// Attach a short letter.
     public fn short(mut self, ch: Char) -> FlagSpec {
-        self.short = Some(ch);
+        self.short = Maybe.Some(ch);
         self
     }
 
@@ -458,7 +458,7 @@ implement FlagSpec {
 
     /// Bind to an env-variable fallback.
     public fn env(mut self, name: Text) -> FlagSpec {
-        self.env_fallback = Some(name);
+        self.env_fallback = Maybe.Some(name);
         self
     }
 }
