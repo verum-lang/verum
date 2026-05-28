@@ -138,7 +138,7 @@ fn test_epoch_type_is_unit() {
 // fix.  Pinned `@ignore` in their final form; flip green when #9
 // extends cell-backed access to `static mut <struct>.<scalar_field>`.
 
-@ignore
+// Un-@ignore'd 2026-05-28 — passes under --interp.
 @test
 fn test_reset_for_tests_zeros_epoch_and_wraparounds() {
     reset_for_tests();
