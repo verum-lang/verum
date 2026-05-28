@@ -61,7 +61,7 @@ implement TraceId {
     /// for the hex digits; returns None if length is wrong or any byte
     /// is non-hex.
     public fn from_hex(hex: &[Byte]) -> Maybe<TraceId> {
-        if hex.len() != 32 { return None; }
+        if hex.len() != 32 { return Maybe.None; }
         let mut bytes: [UInt8; 16] = [0; 16];
         let mut i = 0;
         while i < 16 {
@@ -70,7 +70,7 @@ implement TraceId {
             bytes[i] = (hi << 4) | lo;
             i = i + 1;
         }
-        Some(TraceId { bytes: bytes })
+        Maybe.Some(TraceId { bytes: bytes })
     }
 
     public fn as_bytes(&self) -> &[UInt8; 16] { &self.bytes }
@@ -115,7 +115,7 @@ implement SpanId {
     }
 
     public fn from_hex(hex: &[Byte]) -> Maybe<SpanId> {
-        if hex.len() != 16 { return None; }
+        if hex.len() != 16 { return Maybe.None; }
         let mut bytes: [UInt8; 8] = [0; 8];
         let mut i = 0;
         while i < 8 {
@@ -124,7 +124,7 @@ implement SpanId {
             bytes[i] = (hi << 4) | lo;
             i = i + 1;
         }
-        Some(SpanId { bytes: bytes })
+        Maybe.Some(SpanId { bytes: bytes })
     }
 
     public fn as_bytes(&self) -> &[UInt8; 8] { &self.bytes }
@@ -187,10 +187,10 @@ fn hex_digit(n: UInt8) -> Char {
 
 @inline
 fn decode_hex_nibble(b: Byte) -> Maybe<UInt8> {
-    if b >= 0x30 && b <= 0x39 { Some((b - 0x30) as UInt8) }
-    else if b >= 0x61 && b <= 0x66 { Some((b - 0x61 + 10) as UInt8) }
-    else if b >= 0x41 && b <= 0x46 { Some((b - 0x41 + 10) as UInt8) }
-    else { None }
+    if b >= 0x30 && b <= 0x39 { Maybe.Some((b - 0x30) as UInt8) }
+    else if b >= 0x61 && b <= 0x66 { Maybe.Some((b - 0x61 + 10) as UInt8) }
+    else if b >= 0x41 && b <= 0x46 { Maybe.Some((b - 0x41 + 10) as UInt8) }
+    else { Maybe.None }
 }
 
 @inline
