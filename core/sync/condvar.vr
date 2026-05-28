@@ -141,7 +141,7 @@ implement Condvar {
         drop(guard);
 
         // Block until seq changes — real OS-level sleep via futex
-        let _ = sys_futex_wait(&self.seq.value, my_seq, None);
+        let _ = sys_futex_wait(&self.seq.value, my_seq, Maybe.None);
 
         self.waiters.fetch_sub(1, MemoryOrdering.SeqCst);
 
@@ -167,7 +167,7 @@ implement Condvar {
         drop(guard);
 
         // Block with timeout — real OS-level sleep
-        let result = sys_futex_wait(&self.seq.value, my_seq, Some(timeout_ns as UInt64));
+        let result = sys_futex_wait(&self.seq.value, my_seq, Maybe.Some(timeout_ns as UInt64));
 
         let timed_out = match result {
             Err(_) => true,   // Timeout or error
