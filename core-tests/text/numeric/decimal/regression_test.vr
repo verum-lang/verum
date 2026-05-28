@@ -20,7 +20,7 @@ mount core.text.numeric.decimal.{
     HalfEven, HalfUp, HalfDown, Truncate,
     parse_decimal,
 };
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================

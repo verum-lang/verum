@@ -221,28 +221,28 @@ fn test_inline_context_storage_new_count_is_zero() {
 @test
 fn test_spawn_config_new_default_name_is_none() {
     let c = SupervisorSpawnConfig.new();
-    assert(c.name is Maybe.None);
+    assert(c.name is None);
 }
 
 @ignore  // §F
 @test
 fn test_spawn_config_new_default_recovery_is_none() {
     let c = SupervisorSpawnConfig.new();
-    assert(c.recovery is Maybe.None);
+    assert(c.recovery is None);
 }
 
 @ignore  // §F
 @test
 fn test_spawn_config_new_default_restart_is_none() {
     let c = SupervisorSpawnConfig.new();
-    assert(c.restart is Maybe.None);
+    assert(c.restart is None);
 }
 
 @ignore  // §F
 @test
 fn test_spawn_config_new_default_isolation_is_none() {
     let c = SupervisorSpawnConfig.new();
-    assert(c.isolation is Maybe.None);
+    assert(c.isolation is None);
 }
 
 @ignore  // §F

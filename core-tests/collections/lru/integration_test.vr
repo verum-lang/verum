@@ -86,13 +86,13 @@ fn int_lru_hit_miss_ratio_tracking() {
 fn int_lru_replace_then_remove() {
     let mut cache: LruCache<Int, Int> = LruCache.new(4);
     let p0 = cache.insert(7, 100);
-    assert(p0 is Maybe.None);
+    assert(p0 is None);
     let p1 = cache.insert(7, 200);
     assert_eq(p1, Maybe.Some(100));
     let r = cache.remove(&7);
     assert_eq(r, Maybe.Some(200));
     let v_after: Maybe<Int> = cache.get(&7);
-    assert(v_after is Maybe.None);
+    assert(v_after is None);
 }
 
 // =============================================================================

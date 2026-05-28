@@ -19,7 +19,7 @@
 // =============================================================================
 
 mount core.text.{Text, ParseError};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.collections.list.List;
@@ -98,7 +98,7 @@ fn integration_parse_int_through_try_to_int_consistent_with_result() {
         let m = (*p).0.try_to_int();
         match r {
             Result.Ok(_) => assert((*p).1 && m is Some),
-            Result.Err(_) => assert(!(*p).1 && m is Maybe.None),
+            Result.Err(_) => assert(!(*p).1 && m is None),
         }
     }
 }

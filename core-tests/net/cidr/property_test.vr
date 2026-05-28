@@ -23,7 +23,7 @@
 
 mount core.net.cidr.{Cidr, CidrSet, CidrError};
 mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr, AddrParseError};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: Contains-lattice monotonicity — IPv4

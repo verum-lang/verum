@@ -6,7 +6,7 @@
 // =============================================================================
 
 mount core.io.fs.{FileType, Permissions};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: FileType — 4 variants (File, Dir, Symlink, Unknown)

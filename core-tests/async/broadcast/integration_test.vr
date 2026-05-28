@@ -3,7 +3,7 @@
 // =============================================================================
 
 mount core.async.broadcast.{BroadcastRecvError, TryRecvResult};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.collections.list.List;
 
 // =============================================================================

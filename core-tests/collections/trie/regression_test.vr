@@ -39,7 +39,7 @@ fn regression_trie_remove_absent_returns_none_via_map_get_mut() {
     let mut t: Trie<Int> = Trie.new();
     let k: [Byte; 3] = [1, 2, 3];
     let r: Maybe<Int> = t.remove(&k);
-    assert(r is Maybe.None);
+    assert(r is None);
 }
 
 // =============================================================================
@@ -58,7 +58,7 @@ fn pass_guard_trie_empty_get_returns_none() {
     let t: Trie<Int> = Trie.new();
     let k: [Byte; 1] = [42];
     let v: Maybe<Int> = t.get(&k);
-    assert(v is Maybe.None);
+    assert(v is None);
 }
 
 @test

@@ -21,7 +21,7 @@
 // =============================================================================
 
 mount core.net.http.{Method, StatusCode, Version};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: Method round-trip — from_str(as_str()) == M

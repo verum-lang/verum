@@ -225,7 +225,7 @@ fn test_env_task_id_main_is_zero() {
 @test
 fn test_env_task_id_main_no_parent() {
     let t = EnvTaskId.main();
-    assert(t.parent_id is Maybe.None);
+    assert(t.parent_id is None);
 }
 
 @ignore
@@ -234,5 +234,5 @@ fn test_env_task_id_construct_with_parent() {
     let parent = EnvTaskId.main();
     let t = EnvTaskId { id: 42_u64, parent_id: Maybe.Some(parent.id) };
     assert(t.id == 42_u64);
-    assert(t.parent_id is Maybe.Some);
+    assert(t.parent_id is Some);
 }

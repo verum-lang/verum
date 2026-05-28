@@ -47,7 +47,7 @@ mount core.base.result.{
 // "keeps core/base/result.vr foundation-clean"). Mount explicitly from
 // there.
 mount core.base.retry.{RetryBackoff, RetryOptions};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.collections.list.{List};
 

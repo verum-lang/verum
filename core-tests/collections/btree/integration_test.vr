@@ -18,11 +18,11 @@ fn int_btreemap_empty_read_only_ops_compose() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
 
     let v: Maybe<Int> = m.get(&1);
-    assert(v is Maybe.None);
+    assert(v is None);
 
     assert(!m.contains_key(&1));
     let r: Maybe<Int> = m.remove(&1);
-    assert(r is Maybe.None);
+    assert(r is None);
 
     assert_eq(m.get_or_default(&1, -1), -1);
     assert(m.is_empty());

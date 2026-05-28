@@ -20,7 +20,7 @@ mount core.async.panic_fence.{PanicFence, panic_safe};
 mount core.async.future.{ready, ReadyFuture};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context, noop_waker};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: panic_safe constructor

@@ -16,7 +16,7 @@ mount core.text.numeric.modular.{
     ModularError, gcd, lcm, ext_gcd, mod_pow, mod_inverse,
 };
 mount core.text.numeric.bigint.{BigInt};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================

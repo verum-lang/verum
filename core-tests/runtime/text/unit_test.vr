@@ -59,14 +59,14 @@ fn test_text_parse_int_callable() {
 @test
 fn test_text_parse_int_decimal_positive() {
     let m = text_parse_int(&"42");
-    assert(m is Maybe.Some, "text_parse_int(\"42\") should be Some");
+    assert(m is Some, "text_parse_int(\"42\") should be Some");
 }
 
 @ignore  // §A
 @test
 fn test_text_parse_int_decimal_zero() {
     let m = text_parse_int(&"0");
-    assert(m is Maybe.Some, "text_parse_int(\"0\") should be Some");
+    assert(m is Some, "text_parse_int(\"0\") should be Some");
 }
 
 @test
@@ -75,13 +75,13 @@ fn test_text_parse_int_invalid_text_is_none() {
     // expected behaviour for invalid input.  Test passes today and
     // continues to pass post-§A.
     let m = text_parse_int(&"not_a_number");
-    assert(m is Maybe.None, "text_parse_int garbage should be Maybe.None");
+    assert(m is None, "text_parse_int garbage should be Maybe.None");
 }
 
 @test
 fn test_text_parse_int_empty_is_none() {
     let m = text_parse_int(&"");
-    assert(m is Maybe.None, "text_parse_int empty should be Maybe.None");
+    assert(m is None, "text_parse_int empty should be Maybe.None");
 }
 
 // =============================================================================
@@ -99,13 +99,13 @@ fn test_text_parse_float_callable() {
 @test
 fn test_text_parse_float_decimal() {
     let m = text_parse_float(&"3.14");
-    assert(m is Maybe.Some, "text_parse_float(\"3.14\") should be Some");
+    assert(m is Some, "text_parse_float(\"3.14\") should be Some");
 }
 
 @test
 fn test_text_parse_float_invalid_is_none() {
     let m = text_parse_float(&"xyz");
-    assert(m is Maybe.None, "text_parse_float garbage should be Maybe.None");
+    assert(m is None, "text_parse_float garbage should be Maybe.None");
 }
 
 // =============================================================================

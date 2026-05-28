@@ -77,7 +77,7 @@ fn int_slice_empty_chain_is_empty() {
     assert(sub.is_empty());
     let mut iter = sub.iter();
     let n: Maybe<&Int> = iter.next();
-    assert(n is Maybe.None);
+    assert(n is None);
 }
 
 // =============================================================================

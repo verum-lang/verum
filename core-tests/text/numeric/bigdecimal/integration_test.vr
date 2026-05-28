@@ -10,7 +10,7 @@
 mount core.text.numeric.bigdecimal.{BigDecimal, parse_bigdecimal};
 mount core.text.numeric.bigint.{BigInt};
 mount core.text.numeric.decimal.{Decimal};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
 @ignore

@@ -9,7 +9,7 @@
 // =============================================================================
 
 mount core.async.future.{SelectResult};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section A: SelectResult interop with Maybe

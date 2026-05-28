@@ -98,19 +98,19 @@ fn test_steal_result_is_empty_false_on_retry() {
 fn test_steal_result_into_option_success_returns_some() {
     let r: StealResult<Int> = StealResult.Success(99);
     let m: Maybe<Int> = r.into_option();
-    assert(m is Maybe.Some);
+    assert(m is Some);
 }
 
 @test
 fn test_steal_result_into_option_empty_returns_none() {
     let r: StealResult<Int> = StealResult.Empty;
     let m: Maybe<Int> = r.into_option();
-    assert(m is Maybe.None);
+    assert(m is None);
 }
 
 @test
 fn test_steal_result_into_option_retry_returns_none() {
     let r: StealResult<Int> = StealResult.Retry;
     let m: Maybe<Int> = r.into_option();
-    assert(m is Maybe.None);
+    assert(m is None);
 }

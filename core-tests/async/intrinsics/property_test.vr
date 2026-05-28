@@ -19,7 +19,7 @@ mount core.async.intrinsics.{
 mount core.async.poll.{Poll};
 mount core.async.future.{ready, ReadyFuture};
 mount core.async.waker.{Context, noop_waker};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.collections.list.List;
 
 // =============================================================================

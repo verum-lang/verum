@@ -1,7 +1,7 @@
 
 
 mount core.base.primitives.*;
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================
@@ -175,7 +175,7 @@ fn test_try_with_maybe_success() {
 @test
 fn test_try_with_maybe_none_propagation() {
     let result = try_with_maybe_helper(false);
-    assert(result is Maybe.None);
+    assert(result is None);
 }
 
 // -----------------------------------------------------------------------------

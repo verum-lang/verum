@@ -98,28 +98,28 @@ fn test_delimiter_pairwise_disjoint() {
 fn test_delimiter_open_parenthesis() {
     let d: Delimiter = Delimiter.Parenthesis;
     let r = d.open();
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_delimiter_close_brace() {
     let d: Delimiter = Delimiter.Brace;
     let r = d.close();
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_delimiter_open_invisible_is_none() {
     let d: Delimiter = Delimiter.Invisible;
     let r = d.open();
-    assert(r is Maybe.None);
+    assert(r is None);
 }
 
 @test
 fn test_delimiter_close_invisible_is_none() {
     let d: Delimiter = Delimiter.Invisible;
     let r = d.close();
-    assert(r is Maybe.None);
+    assert(r is None);
 }
 
 // =============================================================================
@@ -454,14 +454,14 @@ fn test_token_is_ident_returns_false_for_keyword() {
 fn test_token_as_ident_some_for_ident() {
     let t = Token { kind: TokenKind.Ident(Text.from("foo")), span: synthetic_span() };
     let r = t.as_ident();
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_token_as_ident_none_for_literal() {
     let t = Token { kind: TokenKind.Lit(Literal.int(5)), span: synthetic_span() };
     let r = t.as_ident();
-    assert(r is Maybe.None);
+    assert(r is None);
 }
 
 @test
@@ -498,14 +498,14 @@ fn test_token_is_punct_false_for_ident() {
 fn test_token_as_punct_some_for_punct() {
     let t = Token { kind: TokenKind.Punct(';', Spacing.Joint), span: synthetic_span() };
     let r = t.as_punct();
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_token_as_punct_none_for_ident() {
     let t = Token { kind: TokenKind.Ident(Text.from("x")), span: synthetic_span() };
     let r = t.as_punct();
-    assert(r is Maybe.None);
+    assert(r is None);
 }
 
 // =============================================================================
@@ -560,7 +560,7 @@ fn test_token_tree_is_group_for_grouped() {
 fn test_token_tree_as_token_some_for_leaf() {
     let t: TokenTree = TokenTree.Leaf(sample_ident_token());
     let r = t.as_token();
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
@@ -569,7 +569,7 @@ fn test_token_tree_as_group_some_for_grouped() {
     let g = Group { delimiter: Delimiter.Brace, tokens: inner, span: synthetic_span() };
     let t: TokenTree = TokenTree.Grouped(g);
     let r = t.as_group();
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
@@ -578,14 +578,14 @@ fn test_token_tree_as_token_none_for_grouped() {
     let g = Group { delimiter: Delimiter.Parenthesis, tokens: inner, span: synthetic_span() };
     let t: TokenTree = TokenTree.Grouped(g);
     let r = t.as_token();
-    assert(r is Maybe.None);
+    assert(r is None);
 }
 
 @test
 fn test_token_tree_as_group_none_for_leaf() {
     let t: TokenTree = TokenTree.Leaf(sample_ident_token());
     let r = t.as_group();
-    assert(r is Maybe.None);
+    assert(r is None);
 }
 
 // =============================================================================
@@ -612,14 +612,14 @@ fn test_token_stream_first_some_after_push() {
     let leaf: TokenTree = TokenTree.Leaf(sample_ident_token());
     let ts = TokenStream { tokens: List.of(leaf), span: synthetic_span() };
     let r = ts.first();
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_token_stream_first_none_when_empty() {
     let ts = TokenStream { tokens: List.new(), span: synthetic_span() };
     let r = ts.first();
-    assert(r is Maybe.None);
+    assert(r is None);
 }
 
 @test
@@ -627,14 +627,14 @@ fn test_token_stream_last_some_after_push() {
     let leaf: TokenTree = TokenTree.Leaf(sample_ident_token());
     let ts = TokenStream { tokens: List.of(leaf), span: synthetic_span() };
     let r = ts.last();
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_token_stream_last_none_when_empty() {
     let ts = TokenStream { tokens: List.new(), span: synthetic_span() };
     let r = ts.last();
-    assert(r is Maybe.None);
+    assert(r is None);
 }
 
 // =============================================================================

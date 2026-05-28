@@ -108,76 +108,76 @@ fn test_effect_kind_variants_pairwise_disjoint() {
 @test
 fn test_effect_kind_from_ident_pure() {
     let r = DiakrisisEffectKind.from_ident(Text.from("pure"));
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_effect_kind_from_ident_io() {
     let r = DiakrisisEffectKind.from_ident(Text.from("io"));
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_effect_kind_from_ident_state() {
     let r = DiakrisisEffectKind.from_ident(Text.from("state"));
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_effect_kind_from_ident_async() {
     let r = DiakrisisEffectKind.from_ident(Text.from("async"));
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_effect_kind_from_ident_exception_long() {
     let r = DiakrisisEffectKind.from_ident(Text.from("exception"));
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_effect_kind_from_ident_exception_alias_exn() {
     let r = DiakrisisEffectKind.from_ident(Text.from("exn"));
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_effect_kind_from_ident_nondet_long() {
     let r = DiakrisisEffectKind.from_ident(Text.from("nondet"));
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_effect_kind_from_ident_nondet_alias_non_det() {
     let r = DiakrisisEffectKind.from_ident(Text.from("non_det"));
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_effect_kind_from_ident_quantum() {
     let r = DiakrisisEffectKind.from_ident(Text.from("quantum"));
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_effect_kind_from_ident_unknown() {
     let r = DiakrisisEffectKind.from_ident(Text.from("frobnicate"));
-    assert(r is Maybe.None);
+    assert(r is None);
 }
 
 @test
 fn test_effect_kind_from_ident_empty() {
     let r = DiakrisisEffectKind.from_ident(Text.from(""));
-    assert(r is Maybe.None);
+    assert(r is None);
 }
 
 @test
 fn test_effect_kind_from_ident_case_insensitive() {
     // .from_ident calls .to_ascii_lowercase first.
     let r = DiakrisisEffectKind.from_ident(Text.from("PURE"));
-    assert(r is Maybe.Some);
+    assert(r is Some);
     let r2 = DiakrisisEffectKind.from_ident(Text.from("Io"));
-    assert(r2 is Maybe.Some);
+    assert(r2 is Some);
 }
 
 // =============================================================================

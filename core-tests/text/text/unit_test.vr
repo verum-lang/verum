@@ -19,7 +19,7 @@
 
 mount core.text.{Text, Utf8Error, Utf16Error, ParseError};
 mount core.text.{Chars, ByteIter, CharIndices, Lines};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.collections.list.List;
@@ -469,7 +469,7 @@ fn test_find_at_start() {
 fn test_find_empty_needle_is_zero() {
     match "abc".find(&"") {
         Maybe.Some(i) => assert_eq(i, 0),
-        Maybe.None => panic("empty needle convention is Maybe.Some(0)"),
+        Maybe.None => panic("empty needle convention is Some(0)"),
     }
 }
 

@@ -33,7 +33,7 @@ fn test_timer_sleep_new_with_duration_constructs() {
     // receiver (task #15) — work around via from_secs which doesn't
     // multiply through the nanos conversion.
     let s = Sleep.new(Duration.from_secs(1));
-    // deadline is Maybe.None until first poll; duration field is preserved.
+    // deadline is None until first poll; duration field is preserved.
     assert(s.deadline.is_none());
 }
 
@@ -73,7 +73,7 @@ fn test_timer_sleep_until_factory_function() {
 fn test_timer_interval_new_first_tick_deferred() {
     let it = TimerInterval.new(Duration.from_secs(1));
     // The first tick happens after `period` from creation, so the
-    // next_tick is Maybe.None at construction.
+    // next_tick is None at construction.
     assert(it.next_tick.is_none());
 }
 

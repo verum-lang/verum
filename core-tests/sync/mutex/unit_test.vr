@@ -172,33 +172,33 @@ fn test_try_lock_error_variants_disjoint() {
 @test
 fn test_lock_result_ok_constructs() {
     let r: LockResult<Int> = Result.Ok(42);
-    assert(r is Result.Ok);
+    assert(r is Ok);
 }
 
 @test
 fn test_lock_result_err_constructs() {
     let pe: PoisonError<Int> = PoisonError { guard: 99 };
     let r: LockResult<Int> = Result.Err(pe);
-    assert(r is Result.Err);
+    assert(r is Err);
 }
 
 @test
 fn test_try_lock_result_ok_constructs() {
     let r: TryLockResult<Int> = Result.Ok(7);
-    assert(r is Result.Ok);
+    assert(r is Ok);
 }
 
 @test
 fn test_try_lock_result_err_would_block_constructs() {
     let r: TryLockResult<Int> = Result.Err(TryLockError.WouldBlock);
-    assert(r is Result.Err);
+    assert(r is Err);
 }
 
 @test
 fn test_try_lock_result_err_poisoned_constructs() {
     let pe: PoisonError<Int> = PoisonError { guard: 0 };
     let r: TryLockResult<Int> = Result.Err(TryLockError.Poisoned(pe));
-    assert(r is Result.Err);
+    assert(r is Err);
 }
 
 // =============================================================================

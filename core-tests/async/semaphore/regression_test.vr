@@ -13,7 +13,7 @@
 // =============================================================================
 
 mount core.async.semaphore.{AsyncSemaphore, SemaphoreError};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // §A — task #12 — AsyncSemaphore.new null-derefs through AtomicInt.swap

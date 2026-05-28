@@ -11,7 +11,7 @@ mount core.text.numeric.bigdecimal.{
     BigDecimal, BigDecimalError, MAX_SCALE_BIG, parse_bigdecimal,
 };
 mount core.text.numeric.bigint.{BigInt};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
 // =============================================================================

@@ -48,7 +48,7 @@ fn regression_hll_merge_precision_mismatch() {
     // Distinct precisions cannot merge — should return Result.Err(PrecisionMismatch).
     let mut a_mut = a;
     let r = a_mut.merge(&b);
-    assert(r is Result.Err(_));
+    assert(r is Err(_));
 }
 
 // =============================================================================

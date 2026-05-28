@@ -293,7 +293,7 @@ fn test_find() {
     }
 
     let not_found = list.iter().find(|x| **x > 10);
-    assert(not_found is Maybe.None);
+    assert(not_found is None);
 }
 
 // =============================================================================

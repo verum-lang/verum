@@ -6,7 +6,7 @@
 // =============================================================================
 
 mount core.async.task.{TaskId, JoinError};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.collections.list.List;
 
 // =============================================================================

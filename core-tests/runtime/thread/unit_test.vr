@@ -127,10 +127,10 @@ fn test_thread_error_eq_distinguishes_variants() {
 fn test_thread_stack_frame_from_ip_no_symbol() {
     let frame = ThreadStackFrame.from_ip(0x1000_u64);
     assert(frame.ip == 0x1000_u64);
-    assert(frame.symbol is Maybe.None);
-    assert(frame.file is Maybe.None);
-    assert(frame.line is Maybe.None);
-    assert(frame.column is Maybe.None);
+    assert(frame.symbol is None);
+    assert(frame.file is None);
+    assert(frame.line is None);
+    assert(frame.column is None);
 }
 
 @test
@@ -143,10 +143,10 @@ fn test_thread_stack_frame_full_construction() {
         column: Maybe.Some(7),
     };
     assert(frame.ip == 0xDEAD_BEEF_u64);
-    assert(frame.symbol is Maybe.Some);
-    assert(frame.file is Maybe.Some);
-    assert(frame.line is Maybe.Some);
-    assert(frame.column is Maybe.Some);
+    assert(frame.symbol is Some);
+    assert(frame.file is Some);
+    assert(frame.line is Some);
+    assert(frame.column is Some);
 }
 
 @test
@@ -180,22 +180,22 @@ fn test_stack_trace_empty_frames_list_is_empty() {
 @test
 fn test_thread_builder_new_defaults() {
     let b = ThreadBuilder.new();
-    assert(b.name is Maybe.None);
-    assert(b.stack_size is Maybe.None);
+    assert(b.name is None);
+    assert(b.stack_size is None);
 }
 
 @test
 fn test_thread_builder_with_name() {
     let b = ThreadBuilder.new().name("worker-1");
-    assert(b.name is Maybe.Some);
-    assert(b.stack_size is Maybe.None);
+    assert(b.name is Some);
+    assert(b.stack_size is None);
 }
 
 @test
 fn test_thread_builder_with_stack_size() {
     let b = ThreadBuilder.new().stack_size(2 * 1024 * 1024);
-    assert(b.name is Maybe.None);
-    assert(b.stack_size is Maybe.Some);
+    assert(b.name is None);
+    assert(b.stack_size is Some);
 }
 
 @test
@@ -203,8 +203,8 @@ fn test_thread_builder_with_both() {
     let b = ThreadBuilder.new()
         .name("worker-2")
         .stack_size(4 * 1024 * 1024);
-    assert(b.name is Maybe.Some);
-    assert(b.stack_size is Maybe.Some);
+    assert(b.name is Some);
+    assert(b.stack_size is Some);
 }
 
 @test
@@ -212,7 +212,7 @@ fn test_thread_builder_name_overrides() {
     let b = ThreadBuilder.new()
         .name("first")
         .name("second");
-    assert(b.name is Maybe.Some);
+    assert(b.name is Some);
 }
 
 @test
@@ -220,5 +220,5 @@ fn test_thread_builder_stack_size_overrides() {
     let b = ThreadBuilder.new()
         .stack_size(1024)
         .stack_size(2048);
-    assert(b.stack_size is Maybe.Some);
+    assert(b.stack_size is Some);
 }

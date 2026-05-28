@@ -445,7 +445,7 @@ fn test_result_question_mark_semantics() {
 /// Test FromResidual for Maybe<T> from Maybe<Never>
 @test
 fn test_from_residual_maybe() {
-    // When ? on Maybe.None, the residual is Maybe<Never> (which is Maybe.None)
+    // When ? on Maybe.None, the residual is Maybe<Never> (which is None)
     // FromResidual converts this to Maybe<T> for any T
     // (use direct construction since from_residual method resolution
     //  conflicts between Result and Maybe variant types)

@@ -4,7 +4,7 @@
 
 mount core.async.diagnostics.{TaskLifecycleState};
 mount core.collections.list.List;
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section A: List<TaskLifecycleState> — task-state distribution

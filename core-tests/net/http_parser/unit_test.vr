@@ -17,7 +17,7 @@ mount core.net.http_parser.{
     HttpParseError, ParseProgress, HeaderView, HttpParser,
     ChunkedDecoder, ChunkProgress
 };
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: HttpParseError — variant construction + Eq

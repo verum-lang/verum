@@ -25,7 +25,7 @@
 
 mount core.net.url.{Url, UrlError, UrlErrorKind, percent_encode, percent_decode};
 mount core.base.result.{Result, Ok, Err};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // URL-1 — Text.slice pointer-corruption via as_str() / as_bytes()[i]

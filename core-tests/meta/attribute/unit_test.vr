@@ -144,28 +144,28 @@ fn test_meta_attribute_value_is_ident_no() {
 fn test_meta_attribute_value_as_ident_match() {
     let v = MetaAttributeValue.ident(Text.from("Y"));
     let r = v.as_ident();
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_meta_attribute_value_as_ident_miss() {
     let v = MetaAttributeValue.int(1);
     let r = v.as_ident();
-    assert(r is Maybe.None);
+    assert(r is None);
 }
 
 @test
 fn test_meta_attribute_value_as_string_match() {
     let v = MetaAttributeValue.string(Text.from("Z"));
     let r = v.as_string();
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @test
 fn test_meta_attribute_value_as_string_miss() {
     let v = MetaAttributeValue.int(1);
     let r = v.as_string();
-    assert(r is Maybe.None);
+    assert(r is None);
 }
 
 // =============================================================================
@@ -200,7 +200,7 @@ fn test_attribute_arg_named_is_named() {
 fn test_attribute_arg_as_string_pulls_string() {
     let a = AttributeArg.positional(MetaAttributeValue.string(Text.from("linux")));
     let s = a.as_string();
-    assert(s is Maybe.Some);
+    assert(s is Some);
 }
 
 @ignore
@@ -208,7 +208,7 @@ fn test_attribute_arg_as_string_pulls_string() {
 fn test_attribute_arg_as_string_miss() {
     let a = AttributeArg.positional(MetaAttributeValue.int(1));
     let s = a.as_string();
-    assert(s is Maybe.None);
+    assert(s is None);
 }
 
 @ignore
@@ -216,7 +216,7 @@ fn test_attribute_arg_as_string_miss() {
 fn test_attribute_arg_as_int_pulls_int() {
     let a = AttributeArg.positional(MetaAttributeValue.int(42));
     let r = a.as_int();
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @ignore
@@ -224,7 +224,7 @@ fn test_attribute_arg_as_int_pulls_int() {
 fn test_attribute_arg_as_int_miss() {
     let a = AttributeArg.positional(MetaAttributeValue.string(Text.from("x")));
     let r = a.as_int();
-    assert(r is Maybe.None);
+    assert(r is None);
 }
 
 @ignore
@@ -232,7 +232,7 @@ fn test_attribute_arg_as_int_miss() {
 fn test_attribute_arg_as_bool_pulls_bool() {
     let a = AttributeArg.positional(MetaAttributeValue.bool(true));
     let r = a.as_bool();
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 @ignore
@@ -240,7 +240,7 @@ fn test_attribute_arg_as_bool_pulls_bool() {
 fn test_attribute_arg_as_ident_pulls_ident() {
     let a = AttributeArg.positional(MetaAttributeValue.ident(Text.from("X")));
     let r = a.as_ident();
-    assert(r is Maybe.Some);
+    assert(r is Some);
 }
 
 // =============================================================================

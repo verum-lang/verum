@@ -15,7 +15,7 @@
 
 mount core.tracing.resource.{Resource};
 mount core.tracing.attribute.{AttributeValue, AttributeSet};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // §1 merge identity from left: merge(empty, r) preserves r

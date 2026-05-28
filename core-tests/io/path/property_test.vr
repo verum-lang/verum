@@ -6,7 +6,7 @@
 // =============================================================================
 
 mount core.io.path.{Path, PathBuf, Component, MAIN_SEPARATOR, normalize};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.collections.list.List;
 
 // =============================================================================

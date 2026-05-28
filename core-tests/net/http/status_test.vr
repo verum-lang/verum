@@ -21,7 +21,7 @@
 mount core.net.http.{
     Method, StatusCode, Version, Headers, Request, Response, Cookie, SameSite
 };
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: StatusCode — construction + code accessor

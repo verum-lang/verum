@@ -26,7 +26,7 @@ mount core.net.http_cache.{
     CacheControl, CacheControlError, MAX_CACHE_CONTROL_DIRECTIVES,
     AgeInputs, DecisionInputs, CacheDecision
 };
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: CacheControl — 16-field record construction
@@ -51,8 +51,8 @@ fn test_cache_control_all_defaults_false_none() {
     assert(!cc.public_);
     assert(!cc.private_);
     assert(!cc.immutable);
-    assert(cc.max_age is Maybe.None);
-    assert(cc.s_maxage is Maybe.None);
+    assert(cc.max_age is None);
+    assert(cc.s_maxage is None);
 }
 
 @test

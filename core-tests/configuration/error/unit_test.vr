@@ -23,7 +23,7 @@ mount core.configuration.error.{
     format_id_ini, format_id_properties, format_id_hcl, format_id_hocon,
     format_id_nestedtext, format_id_kdl, format_id_cue, format_id_dhall,
 };
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // Section 1: format_id_* canonical IDs

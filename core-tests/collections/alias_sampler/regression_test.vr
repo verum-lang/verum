@@ -22,14 +22,14 @@ mount core.collections.alias_sampler.{AliasSampler, AliasError};
 fn regression_alias_from_weights_uniform_constructible() {
     let weights: [Float; 4] = [0.25, 0.25, 0.25, 0.25];
     let r = AliasSampler.from_weights(&weights);
-    assert(r is Result.Ok(_));
+    assert(r is Ok(_));
 }
 
 @test
 fn regression_alias_from_weights_empty_returns_error() {
     let weights: [Float; 0] = [];
     let r = AliasSampler.from_weights(&weights);
-    assert(r is Result.Err(_));
+    assert(r is Err(_));
 }
 
 @ignore

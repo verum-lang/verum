@@ -22,7 +22,7 @@ fn law_trie_empty_get_always_none() {
     while i < keys.len() {
         let k = keys[i];
         let v: Maybe<Int> = t.get(&k);
-        assert(v is Maybe.None);
+        assert(v is None);
         i = i + 1;
     }
 }

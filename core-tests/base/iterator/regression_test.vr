@@ -65,7 +65,7 @@ fn regression_ok_unit_inferred() {
     // annotated form as the canonical pattern.
     let r: Result<(), Text> = Result.Ok(());
     assert(r is Ok);
-    if r is Result.Ok(_) { /* OK */ } else { assert(false) }
+    if r is Ok(_) { /* OK */ } else { assert(false) }
 }
 
 @test
@@ -108,7 +108,7 @@ fn regression_bare_none_with_annotation() {
     // (first-registered) instead of `Maybe.None`, and the annotated
     // `Maybe<Int>` then failed unification.
     let m: Maybe<Int> = Maybe.None;
-    assert(m is Maybe.None);
+    assert(m is None);
 }
 
 @test
@@ -118,7 +118,7 @@ fn regression_bare_none_in_if_else() {
     let m: Maybe<Int> = if 1 == 1 { Maybe.Some(42) } else { Maybe.None };
     assert(m is Some);
     let n: Maybe<Int> = if 1 == 0 { Maybe.Some(42) } else { Maybe.None };
-    assert(n is Maybe.None);
+    assert(n is None);
 }
 
 @test
@@ -143,8 +143,8 @@ fn regression_bare_none_function_return() {
         if x > 0 { Maybe.Some(x * 2) } else { Maybe.None }
     }
     assert(lookup(5) is Some);
-    assert(lookup(0) is Maybe.None);
-    assert(lookup(-1) is Maybe.None);
+    assert(lookup(0) is None);
+    assert(lookup(-1) is None);
 }
 
 @test

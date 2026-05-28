@@ -42,7 +42,7 @@ fn test_btreemap_new_is_empty() {
 fn test_btreemap_get_absent_returns_none() {
     let m: BTreeMap<Int, Int> = BTreeMap.new();
     let v: Maybe<Int> = m.get(&999);
-    assert(v is Maybe.None);
+    assert(v is None);
 }
 
 @test
@@ -55,7 +55,7 @@ fn test_btreemap_contains_key_absent_returns_false() {
 fn test_btreemap_remove_absent_returns_none() {
     let mut m: BTreeMap<Int, Int> = BTreeMap.new();
     let r: Maybe<Int> = m.remove(&999);
-    assert(r is Maybe.None);
+    assert(r is None);
 }
 
 @test

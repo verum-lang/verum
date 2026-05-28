@@ -253,7 +253,7 @@ fn test_retry_policy_new_initial_state() {
     let p = RecoveryRetryPolicy.new(cfg);
     assert(p.current_attempt == 0);
     assert(p.total_retries == 0);
-    assert(p.last_error is Maybe.None);
+    assert(p.last_error is None);
 }
 
 @test

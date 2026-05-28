@@ -14,7 +14,7 @@
 
 mount core.base.protocols.*;
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 mount core.collections.list.List;
 

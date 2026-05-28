@@ -15,7 +15,7 @@ mount core.net.http_cache.{
     parse as cc_parse, current_age, freshness_lifetime_sec, decide,
     CacheControl, CacheControlError, AgeInputs, DecisionInputs, CacheDecision
 };
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // HTTPCACHE-1 — parse / current_age / freshness / decide SIGSEGV
