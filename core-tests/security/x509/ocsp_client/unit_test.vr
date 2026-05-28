@@ -1,0 +1,76 @@
+// =============================================================================
+// core-tests/security/x509/ocsp_client/unit_test.vr
+// =============================================================================
+//
+// `core/security/x509/ocsp_client.vr` — OCSP (RFC 6960) request/response
+// constants.
+// =============================================================================
+
+mount core.security.x509.ocsp_client.{
+    DEFAULT_FRESHNESS_TOLERANCE_SECONDS,
+    MAX_OCSP_RESPONSE_BYTES,
+    CONTENT_TYPE_OCSP_REQUEST, CONTENT_TYPE_OCSP_RESPONSE,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: OCSP timing + size limits
+// =============================================================================
+
+@test
+fn test_ocsp_default_freshness_tolerance_canonical_value() {
+    // RFC 6960 §3.2.2 — 5-minute (300-second) staleness tolerance.
+    assert_eq(DEFAULT_FRESHNESS_TOLERANCE_SECONDS, 300);
+}
+
+@test
+fn test_ocsp_max_response_bytes_canonical_value() {
+    // 64 KiB OCSP response cap — protection against DoS via huge replies.
+    assert_eq(MAX_OCSP_RESPONSE_BYTES, 64 * 1024);
+}
+
+@test
+fn test_ocsp_max_response_bytes_concrete_value() {
+    assert_eq(MAX_OCSP_RESPONSE_BYTES, 65_536);
+}
+
+// =============================================================================
+// Section 2: HTTP Content-Type strings
+//
+//   RFC 6960 §A.1 — canonical request/response MIME types.
+// =============================================================================
+
+@test
+fn test_ocsp_request_content_type_canonical_value() {
+    assert_eq(CONTENT_TYPE_OCSP_REQUEST, "application/ocsp-request");
+}
+
+@test
+fn test_ocsp_response_content_type_canonical_value() {
+    assert_eq(CONTENT_TYPE_OCSP_RESPONSE, "application/ocsp-response");
+}
+
+@test
+fn test_ocsp_request_and_response_content_types_distinct() {
+    assert(CONTENT_TYPE_OCSP_REQUEST != CONTENT_TYPE_OCSP_RESPONSE);
+}
+
+// =============================================================================
+// Section 3: Bounds
+// =============================================================================
+
+@test
+fn test_ocsp_constants_positive() {
+    assert(DEFAULT_FRESHNESS_TOLERANCE_SECONDS > 0);
+    assert(MAX_OCSP_RESPONSE_BYTES > 0);
+}
+
+@test
+fn test_ocsp_freshness_within_reasonable_bounds() {
+    // ≥1 minute and ≤1 hour — typical OCSP nonce-window range.
+    assert(DEFAULT_FRESHNESS_TOLERANCE_SECONDS >= 60);
+    assert(DEFAULT_FRESHNESS_TOLERANCE_SECONDS <= 3600);
+}
+
+fn main() {}
