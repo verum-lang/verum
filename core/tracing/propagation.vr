@@ -93,15 +93,15 @@ implement TextMapPropagator for W3CTraceContext {
     fn extract(&self, headers: &List<(Text, Text)>) -> SpanContext {
         let tp = find_header(headers, TRACEPARENT_FIELD);
         match tp {
-            None => SpanContext.invalid(),
-            Some(raw) => {
+            Maybe.None => SpanContext.invalid(),
+            Maybe.Some(raw) => {
                 match decode_traceparent(raw.as_bytes()) {
-                    None => SpanContext.invalid(),
-                    Some((trace_id, span_id, flags)) => {
+                    Maybe.None => SpanContext.invalid(),
+                    Maybe.Some((trace_id, span_id, flags)) => {
                         let ts_raw = find_header(headers, TRACESTATE_FIELD);
                         let trace_state = match ts_raw {
-                            Some(r) => decode_tracestate(r.as_bytes()),
-                            None => TraceState.empty(),
+                            Maybe.Some(r) => decode_tracestate(r.as_bytes()),
+                            Maybe.None => TraceState.empty(),
                         };
                         SpanContext.new(trace_id, span_id, flags, trace_state, true)
                     }
@@ -133,8 +133,8 @@ public fn inject_traceparent(context: &SpanContext) -> Text {
 /// Returns invalid context on parse failure.
 public fn extract_traceparent(raw: &Text) -> SpanContext {
     match decode_traceparent(raw.as_bytes()) {
-        None => SpanContext.invalid(),
-        Some((trace_id, span_id, flags)) => {
+        Maybe.None => SpanContext.invalid(),
+        Maybe.Some((trace_id, span_id, flags)) => {
             SpanContext.new(trace_id, span_id, flags, TraceState.empty(), true)
         }
     }
@@ -158,15 +158,15 @@ fn encode_traceparent(context: &SpanContext) -> Text {
 
 fn decode_traceparent(bytes: &[Byte]) -> Maybe<(TraceId, SpanId, TraceFlags)> {
     // Canonical length is exactly 55 bytes: "00-<32>-<16>-<2>".
-    if bytes.len() != 55 { return None; }
-    if bytes[0] != 0x30 || bytes[1] != 0x30 { return None; }
-    if bytes[2] != 0x2D || bytes[35] != 0x2D || bytes[52] != 0x2D { return None; }
+    if bytes.len() != 55 { return Maybe.None; }
+    if bytes[0] != 0x30 || bytes[1] != 0x30 { return Maybe.None; }
+    if bytes[2] != 0x2D || bytes[35] != 0x2D || bytes[52] != 0x2D { return Maybe.None; }
     let trace_id = TraceId.from_hex(&bytes[3..35])?;
     let span_id = SpanId.from_hex(&bytes[36..52])?;
     let flags_byte = decode_byte_hex(bytes[53], bytes[54])?;
     // "00" (invalid version) already rejected implicitly; v1-v255 are
     // reserved and we reject them per spec §3.2.2.2.
-    Some((trace_id, span_id, TraceFlags.new(flags_byte)))
+    Maybe.Some((trace_id, span_id, TraceFlags.new(flags_byte)))
 }
 
 fn encode_tracestate(state: &TraceState) -> Text {
@@ -201,7 +201,7 @@ fn decode_tracestate(bytes: &[Byte]) -> TraceState {
                 let segment = &bytes[start..i];
                 let trimmed = trim_ows(segment);
                 match split_kv(trimmed) {
-                    Some((k, v)) => {
+                    Maybe.Some((k, v)) => {
                         match (Text.from_utf8(k), Text.from_utf8(v)) {
                             (Ok(key), Ok(val)) => {
                                 state = state.with(key, val);
@@ -210,7 +210,7 @@ fn decode_tracestate(bytes: &[Byte]) -> TraceState {
                             _ => {}
                         }
                     }
-                    None => {}
+                    Maybe.None => {}
                 }
             }
             start = i + 1;
@@ -224,11 +224,11 @@ fn find_header(headers: &List<(Text, Text)>, name: &Text) -> Maybe<&Text> {
     let mut i = 0;
     while i < headers.len() {
         if ascii_eq_ci_text(&headers[i].0, name) {
-            return Some(&headers[i].1);
+            return Maybe.Some(&headers[i].1);
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 fn ascii_eq_ci_text(a: &Text, b: &Text) -> Bool {
