@@ -1,0 +1,508 @@
+// =============================================================================
+// core-tests/net/tls13/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core/net/tls13/` data surface:
+//
+//   §A  CipherSuite IANA wire-ID pairwise disjointness (RFC 8446 §B.4 —
+//       5 well-known suites in the 0x1301-0x1305 cluster).
+//   §B  CipherSuite to_u16 / from_u16 round-trip identity.
+//   §C  NamedGroup IANA wire-ID pairwise disjointness (RFC 8446 §4.2.7 —
+//       X25519=0x001D / secp256r1=0x0017 / secp384r1=0x0018 + FFDHE).
+//   §D  NamedGroup to_u16 / from_u16 round-trip identity.
+//   §E  ProtocolVersion field independence + downgrade-sentinel
+//       distinctness (RFC 8446 §4.1.2 / §4.1.3).
+//   §F  AlertLevel + AlertDescription wire-byte injectivity
+//       (RFC 8446 §6.1 + §6.2).
+//   §G  ContentType wire-byte pinning + injectivity (RFC 8446 §5.1 —
+//       Invalid=0 / ChangeCipherSpec=20 / Alert=21 / Handshake=22 /
+//       ApplicationData=23).
+//   §H  TLS extension-type IDs pairwise disjointness (RFC 8446 §4.2 —
+//       supported_versions=0x002B / signature_algorithms=0x000D /
+//       key_share=0x0033).
+//   §I  SignatureScheme to_u16 / from_u16 round-trip + CertificateVerify
+//       gating (RFC 8446 §4.4.3 legacy PKCS1 / SHA-1 rejection).
+//   §J  HashKind / AeadKind tag-len + key-len + iv-len algebra.
+//   §K  Record-layer size constants (MAX_PLAINTEXT_SIZE=16384,
+//       MAX_CIPHERTEXT_SIZE=16640 per RFC 8446 §5.1).
+//   §L  TlsError variant Eq + payload preservation
+//       (InternalError / IoError / RemoteAlert).
+//
+// Live handshake / record-layer seal-open / session resumption surface
+// is gated in `regression_test.vr` (TLS13-1). See `audit.md §3.1`.
+// =============================================================================
+
+mount core.net.tls13.{
+    ProtocolVersion, TLS_1_3, LEGACY_VERSION_TLS_1_2,
+    CipherSuite, HashKind, AeadKind,
+    NamedGroup,
+    AlertLevel, AlertDescription,
+    ContentType,
+    MAX_PLAINTEXT_SIZE, MAX_CIPHERTEXT_SIZE,
+    TlsError
+};
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+mount core.net.tls13.handshake.extension.{
+    EXT_SUPPORTED_GROUPS, EXT_SIGNATURE_ALGORITHMS, EXT_ALPN,
+    EXT_PRE_SHARED_KEY, EXT_EARLY_DATA, EXT_SUPPORTED_VERSIONS,
+    EXT_KEY_SHARE
+};
+
+// =============================================================================
+// §A  CipherSuite IANA wire-ID pairwise disjointness (RFC 8446 §B.4)
+// =============================================================================
+
+@test
+fn prop_tls13_cs_aes128_gcm_vs_aes256_gcm_disjoint() {
+    // 0x1301 vs 0x1302 — adjacent wire IDs.
+    assert(!(CipherSuite.TlsAes128GcmSha256.to_u16() == CipherSuite.TlsAes256GcmSha384.to_u16()));
+}
+
+@test
+fn prop_tls13_cs_chacha20_vs_aes128_gcm_disjoint() {
+    assert(!(CipherSuite.TlsChaCha20Poly1305Sha256.to_u16() == CipherSuite.TlsAes128GcmSha256.to_u16()));
+}
+
+@test
+fn prop_tls13_cs_ccm_vs_ccm8_disjoint() {
+    // 0x1304 vs 0x1305 — adjacent CCM-variant wire IDs.
+    assert(!(CipherSuite.TlsAes128CcmSha256.to_u16() == CipherSuite.TlsAes128Ccm8Sha256.to_u16()));
+}
+
+@test
+fn prop_tls13_cs_full_5_way_pairwise_disjoint() {
+    let a = CipherSuite.TlsAes128GcmSha256.to_u16();
+    let b = CipherSuite.TlsAes256GcmSha384.to_u16();
+    let c = CipherSuite.TlsChaCha20Poly1305Sha256.to_u16();
+    let d = CipherSuite.TlsAes128CcmSha256.to_u16();
+    let e = CipherSuite.TlsAes128Ccm8Sha256.to_u16();
+    assert(!(a == b)); assert(!(a == c)); assert(!(a == d)); assert(!(a == e));
+    assert(!(b == c)); assert(!(b == d)); assert(!(b == e));
+    assert(!(c == d)); assert(!(c == e));
+    assert(!(d == e));
+}
+
+// =============================================================================
+// §B  CipherSuite to_u16 / from_u16 round-trip identity
+// =============================================================================
+
+@test
+fn prop_tls13_cs_round_trip_aes128_gcm() {
+    let id = CipherSuite.TlsAes128GcmSha256.to_u16();
+    let s = CipherSuite.from_u16(id);
+    assert(s is CipherSuite.TlsAes128GcmSha256);
+}
+
+@test
+fn prop_tls13_cs_round_trip_chacha20() {
+    let id = CipherSuite.TlsChaCha20Poly1305Sha256.to_u16();
+    let s = CipherSuite.from_u16(id);
+    assert(s is CipherSuite.TlsChaCha20Poly1305Sha256);
+}
+
+@test
+fn prop_tls13_cs_round_trip_ccm8() {
+    let id = CipherSuite.TlsAes128Ccm8Sha256.to_u16();
+    let s = CipherSuite.from_u16(id);
+    assert(s is CipherSuite.TlsAes128Ccm8Sha256);
+}
+
+@test
+fn prop_tls13_cs_unknown_payload_preserved() {
+    // Unknown(v) fallthrough must preserve the original 16-bit value
+    // through to_u16.
+    let s = CipherSuite.from_u16(0xC0AF_u16); // arbitrary non-1.3 suite
+    assert(s is CipherSuite.Unknown);
+    assert_eq(s.to_u16(), 0xC0AF_u16);
+}
+
+// =============================================================================
+// §C  NamedGroup IANA wire-ID pairwise disjointness (RFC 8446 §4.2.7)
+// =============================================================================
+
+@test
+fn prop_tls13_ng_x25519_vs_secp256r1_disjoint() {
+    // 0x001D vs 0x0017 — both v1 supported.
+    assert(!(NamedGroup.X25519.to_u16() == NamedGroup.Secp256r1.to_u16()));
+}
+
+@test
+fn prop_tls13_ng_secp256r1_vs_secp384r1_disjoint() {
+    // 0x0017 vs 0x0018 — adjacent IANA wire IDs.
+    assert(!(NamedGroup.Secp256r1.to_u16() == NamedGroup.Secp384r1.to_u16()));
+}
+
+@test
+fn prop_tls13_ng_x25519_vs_x448_disjoint() {
+    // 0x001D vs 0x001E — adjacent Edwards-curve IDs.
+    assert(!(NamedGroup.X25519.to_u16() == NamedGroup.X448.to_u16()));
+}
+
+@test
+fn prop_tls13_ng_ffdhe_cluster_disjoint() {
+    // FFDHE2048 (0x0100) / 3072 (0x0101) / 4096 (0x0102) — adjacent.
+    let a = NamedGroup.Ffdhe2048.to_u16();
+    let b = NamedGroup.Ffdhe3072.to_u16();
+    let c = NamedGroup.Ffdhe4096.to_u16();
+    assert(!(a == b));
+    assert(!(b == c));
+    assert(!(a == c));
+}
+
+// =============================================================================
+// §D  NamedGroup to_u16 / from_u16 round-trip
+// =============================================================================
+
+@test
+fn prop_tls13_ng_round_trip_x25519() {
+    let id = NamedGroup.X25519.to_u16();
+    let g = NamedGroup.from_u16(id);
+    assert(g is NamedGroup.X25519);
+}
+
+@test
+fn prop_tls13_ng_round_trip_secp384r1() {
+    let id = NamedGroup.Secp384r1.to_u16();
+    let g = NamedGroup.from_u16(id);
+    assert(g is NamedGroup.Secp384r1);
+}
+
+@test
+fn prop_tls13_ng_unknown_payload_preserved() {
+    let g = NamedGroup.from_u16(0x0204_u16); // ML-KEM-512 hypothetical
+    assert(g is NamedGroup.Unknown);
+    assert_eq(g.to_u16(), 0x0204_u16);
+}
+
+// =============================================================================
+// §E  ProtocolVersion field independence + downgrade sentinel
+// =============================================================================
+
+@test
+fn prop_tls13_pv_tls_1_3_major_minor_independent() {
+    // RFC 8446 §4.2.1: TLS 1.3 carries the actual version in
+    // supported_versions, but legacy_version on the wire stays at
+    // {0x03, 0x03} for compat. Pinned both fields.
+    assert_eq(TLS_1_3.major, 0x03_u8);
+    assert_eq(TLS_1_3.minor, 0x04_u8);
+}
+
+@test
+fn prop_tls13_pv_legacy_disjoint_from_tls_1_3() {
+    // Legacy version {0x03, 0x03} must differ from TLS 1.3 {0x03, 0x04}
+    // in the minor byte.
+    assert_eq(LEGACY_VERSION_TLS_1_2.major, TLS_1_3.major);
+    assert(!(LEGACY_VERSION_TLS_1_2.minor == TLS_1_3.minor));
+}
+
+@test
+fn prop_tls13_pv_construction_field_independent() {
+    let v = ProtocolVersion { major: 0x03_u8, minor: 0x05_u8 };
+    assert_eq(v.major, 0x03_u8);
+    assert_eq(v.minor, 0x05_u8);
+}
+
+// =============================================================================
+// §F  AlertLevel + AlertDescription wire-byte injectivity
+// =============================================================================
+
+@test
+fn prop_tls13_alert_level_warning_vs_fatal_disjoint() {
+    // RFC 8446 §6.1: warning=1, fatal=2.
+    assert(!(AlertLevel.Warning.to_u8() == AlertLevel.Fatal.to_u8()));
+}
+
+@test
+fn prop_tls13_alert_level_fatal_pinned_2() {
+    assert_eq(AlertLevel.Fatal.to_u8(), 2_u8);
+}
+
+@test
+fn prop_tls13_alert_desc_close_notify_pinned_0() {
+    // RFC 8446 §6.2: close_notify=0 — must round-trip cleanly.
+    assert_eq(AlertDescription.CloseNotify.to_u8(), 0_u8);
+}
+
+@test
+fn prop_tls13_alert_desc_handshake_failure_pinned_40() {
+    // RFC 8446 §6.2: handshake_failure=40 — the canonical
+    // no-acceptable-params fatal alert.
+    assert_eq(AlertDescription.HandshakeFailure.to_u8(), 40_u8);
+}
+
+@test
+fn prop_tls13_alert_desc_bad_record_mac_pinned_20() {
+    // RFC 8446 §6.2: bad_record_mac=20.
+    assert_eq(AlertDescription.BadRecordMac.to_u8(), 20_u8);
+}
+
+@test
+fn prop_tls13_alert_desc_close_notify_vs_bad_record_mac_disjoint() {
+    assert(!(AlertDescription.CloseNotify.to_u8() == AlertDescription.BadRecordMac.to_u8()));
+}
+
+@test
+fn prop_tls13_alert_desc_internal_error_pinned_80() {
+    // RFC 8446 §6.2: internal_error=80 — server-side bookkeeping.
+    assert_eq(AlertDescription.InternalError.to_u8(), 80_u8);
+}
+
+// =============================================================================
+// §G  ContentType wire-byte pinning + injectivity (RFC 8446 §5.1)
+// =============================================================================
+
+@test
+fn prop_tls13_ct_invalid_pinned_0() {
+    // RFC 8446 §5.1: invalid=0 — never written; received = fatal alert.
+    assert_eq(ContentType.Invalid.to_u8(), 0_u8);
+}
+
+@test
+fn prop_tls13_ct_handshake_pinned_22() {
+    // RFC 8446 §5.1: handshake=22 — wraps every ClientHello /
+    // ServerHello / Certificate / etc.
+    assert_eq(ContentType.Handshake.to_u8(), 22_u8);
+}
+
+@test
+fn prop_tls13_ct_alert_pinned_21() {
+    // RFC 8446 §5.1: alert=21.
+    assert_eq(ContentType.Alert.to_u8(), 21_u8);
+}
+
+@test
+fn prop_tls13_ct_application_data_pinned_23() {
+    // RFC 8446 §5.1: application_data=23 — every encrypted record
+    // after Finished carries this type tag.
+    assert_eq(ContentType.ApplicationData.to_u8(), 23_u8);
+}
+
+@test
+fn prop_tls13_ct_4_way_pairwise_disjoint() {
+    let i = ContentType.Invalid.to_u8();
+    let a = ContentType.Alert.to_u8();
+    let h = ContentType.Handshake.to_u8();
+    let d = ContentType.ApplicationData.to_u8();
+    assert(!(i == a)); assert(!(i == h)); assert(!(i == d));
+    assert(!(a == h)); assert(!(a == d));
+    assert(!(h == d));
+}
+
+@test
+fn prop_tls13_ct_round_trip_handshake() {
+    let id = ContentType.Handshake.to_u8();
+    let t = ContentType.from_u8(id);
+    assert(t is ContentType.Handshake);
+}
+
+// =============================================================================
+// §H  TLS extension-type IDs pairwise disjointness (RFC 8446 §4.2)
+// =============================================================================
+
+@test
+fn prop_tls13_ext_supported_versions_pinned_0x002B() {
+    // RFC 8446 §4.2.1: supported_versions=43 — the extension that
+    // ACTUALLY carries the TLS 1.3 version negotiation.
+    assert_eq(EXT_SUPPORTED_VERSIONS, 43_u16);
+}
+
+@test
+fn prop_tls13_ext_signature_algorithms_pinned_0x000D() {
+    // RFC 8446 §4.2.3: signature_algorithms=13 — required in
+    // every ClientHello.
+    assert_eq(EXT_SIGNATURE_ALGORITHMS, 13_u16);
+}
+
+@test
+fn prop_tls13_ext_key_share_pinned_0x0033() {
+    // RFC 8446 §4.2.8: key_share=51 — carries the ECDHE / FFDHE
+    // public-key shares.
+    assert_eq(EXT_KEY_SHARE, 51_u16);
+}
+
+@test
+fn prop_tls13_ext_supported_groups_pinned_0x000A() {
+    // RFC 8446 §4.2.7: supported_groups=10.
+    assert_eq(EXT_SUPPORTED_GROUPS, 10_u16);
+}
+
+@test
+fn prop_tls13_ext_alpn_pinned_16() {
+    // RFC 7301 + RFC 8446: ALPN extension=16 — drives h2 / h3
+    // protocol selection.
+    assert_eq(EXT_ALPN, 16_u16);
+}
+
+@test
+fn prop_tls13_ext_pre_shared_key_vs_early_data_disjoint() {
+    // pre_shared_key=41 vs early_data=42 — adjacent PSK-cluster IDs.
+    assert(!(EXT_PRE_SHARED_KEY == EXT_EARLY_DATA));
+}
+
+@test
+fn prop_tls13_ext_signature_algorithms_vs_supported_groups_disjoint() {
+    assert(!(EXT_SIGNATURE_ALGORITHMS == EXT_SUPPORTED_GROUPS));
+}
+
+// =============================================================================
+// §I  SignatureScheme round-trip + CertificateVerify gating
+// =============================================================================
+
+@test
+fn prop_tls13_sig_ed25519_round_trip() {
+    let id = SignatureScheme.Ed25519Scheme.to_u16();
+    let s = SignatureScheme.from_u16(id);
+    assert(s is SignatureScheme.Ed25519Scheme);
+}
+
+@test
+fn prop_tls13_sig_ecdsa_p256_round_trip() {
+    let id = SignatureScheme.EcdsaSecp256r1Sha256.to_u16();
+    let s = SignatureScheme.from_u16(id);
+    assert(s is SignatureScheme.EcdsaSecp256r1Sha256);
+}
+
+@test
+fn prop_tls13_sig_ed25519_pinned_0x0807() {
+    // RFC 8446 §4.2.3: ed25519=0x0807.
+    assert_eq(SignatureScheme.Ed25519Scheme.to_u16(), 0x0807_u16);
+}
+
+@test
+fn prop_tls13_sig_ecdsa_p256_pinned_0x0403() {
+    // RFC 8446 §4.2.3: ecdsa_secp256r1_sha256=0x0403.
+    assert_eq(SignatureScheme.EcdsaSecp256r1Sha256.to_u16(), 0x0403_u16);
+}
+
+@test
+fn prop_tls13_sig_rsa_pss_rsae_sha256_pinned_0x0804() {
+    assert_eq(SignatureScheme.RsaPssRsaeSha256.to_u16(), 0x0804_u16);
+}
+
+@test
+fn prop_tls13_sig_rsa_pkcs1_sha256_not_valid_for_cert_verify() {
+    // RFC 8446 §4.4.3: rsa_pkcs1_sha256 is valid in
+    // signature_algorithms_cert but NOT in signature_algorithms
+    // (used for CertificateVerify signature).
+    assert(!SignatureScheme.RsaPkcs1Sha256.is_valid_for_certificate_verify());
+}
+
+@test
+fn prop_tls13_sig_ed25519_valid_for_cert_verify() {
+    assert(SignatureScheme.Ed25519Scheme.is_valid_for_certificate_verify());
+}
+
+@test
+fn prop_tls13_sig_sha1_legacy_not_valid_for_cert_verify() {
+    // RFC 8446 §4.4.3: SHA-1 must not appear in signature_algorithms.
+    assert(!SignatureScheme.RsaPkcs1Sha1.is_valid_for_certificate_verify());
+    assert(!SignatureScheme.EcdsaSha1.is_valid_for_certificate_verify());
+}
+
+// =============================================================================
+// §J  HashKind / AeadKind algebra
+// =============================================================================
+
+@test
+fn prop_tls13_hash_sha256_vs_sha384_output_len_disjoint() {
+    // SHA-256 (32 bytes) vs SHA-384 (48 bytes) — distinct output sizes.
+    assert(!(HashKind.Sha256.output_len() == HashKind.Sha384.output_len()));
+}
+
+@test
+fn prop_tls13_aead_iv_len_invariant_12() {
+    // RFC 8446 §5.3: every TLS 1.3 AEAD uses a 12-byte IV (per_record_nonce).
+    assert_eq(AeadKind.Aes128Gcm.iv_len(), 12);
+    assert_eq(AeadKind.Aes256Gcm.iv_len(), 12);
+    assert_eq(AeadKind.ChaCha20Poly1305.iv_len(), 12);
+}
+
+@test
+fn prop_tls13_aead_ccm8_tag_len_truncated() {
+    // CCM-8 truncates tag to 8 bytes; CCM (full) keeps 16.
+    assert(!(AeadKind.Aes128Ccm.tag_len() == AeadKind.Aes128Ccm8.tag_len()));
+    assert_eq(AeadKind.Aes128Ccm8.tag_len(), 8);
+}
+
+@test
+fn prop_tls13_aead_aes128_vs_aes256_key_len_disjoint() {
+    // 16-byte vs 32-byte AES keys.
+    assert(!(AeadKind.Aes128Gcm.key_len() == AeadKind.Aes256Gcm.key_len()));
+}
+
+// =============================================================================
+// §K  Record-layer size constants (RFC 8446 §5.1)
+// =============================================================================
+
+@test
+fn prop_tls13_max_plaintext_size_pinned_16384() {
+    // RFC 8446 §5.1: TLSPlaintext.length <= 2^14 = 16384. Drift here
+    // would break interop and possibly enable record-overflow attacks.
+    assert_eq(MAX_PLAINTEXT_SIZE, 16384);
+}
+
+@test
+fn prop_tls13_max_ciphertext_size_pinned_16640() {
+    // RFC 8446 §5.2: TLSCiphertext.length <= 2^14 + 256 = 16640
+    // (plaintext + ContentType + max padding + AEAD tag).
+    assert_eq(MAX_CIPHERTEXT_SIZE, 16640);
+}
+
+@test
+fn prop_tls13_ciphertext_exceeds_plaintext() {
+    // Ciphertext-cap MUST exceed plaintext-cap to accommodate the
+    // ContentType byte + AEAD overhead.
+    assert(MAX_CIPHERTEXT_SIZE > MAX_PLAINTEXT_SIZE);
+}
+
+// =============================================================================
+// §L  TlsError variant Eq + payload preservation
+// =============================================================================
+
+@test
+fn prop_tls13_err_protocol_version_reflexive() {
+    assert(TlsError.ProtocolVersion == TlsError.ProtocolVersion);
+}
+
+@test
+fn prop_tls13_err_handshake_failure_reflexive() {
+    assert(TlsError.HandshakeFailure == TlsError.HandshakeFailure);
+}
+
+@test
+fn prop_tls13_err_bad_record_mac_reflexive() {
+    assert(TlsError.BadRecordMac == TlsError.BadRecordMac);
+}
+
+@test
+fn prop_tls13_err_internal_error_payload_preserved() {
+    let a = TlsError.InternalError("ks lookup failed".clone());
+    let b = TlsError.InternalError("ks lookup failed".clone());
+    assert(a == b);
+}
+
+@test
+fn prop_tls13_err_io_error_payload_preserved() {
+    let a = TlsError.IoError("connection reset".clone());
+    let b = TlsError.IoError("connection reset".clone());
+    assert(a == b);
+}
+
+@test
+fn prop_tls13_err_remote_alert_payload_preserved() {
+    let a = TlsError.RemoteAlert(AlertDescription.HandshakeFailure);
+    let b = TlsError.RemoteAlert(AlertDescription.HandshakeFailure);
+    assert(a == b);
+}
+
+@test
+fn prop_tls13_err_handshake_vs_protocol_version_disjoint() {
+    assert(!(TlsError.HandshakeFailure == TlsError.ProtocolVersion));
+}
+
+@test
+fn prop_tls13_err_internal_vs_io_error_same_payload_disjoint() {
+    let i = TlsError.InternalError("x".clone());
+    let o = TlsError.IoError("x".clone());
+    assert(!(i == o));
+}
