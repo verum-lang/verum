@@ -40,7 +40,7 @@
 module core.configuration.error;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 
 // =============================================================================
 // Format identifier — stable across all configuration modules

@@ -69,7 +69,7 @@
 module core.database.common.pool_supervisor;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount async.duration.Duration;
 mount runtime.supervisor.{

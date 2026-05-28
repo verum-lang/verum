@@ -14,7 +14,7 @@
 module core.database.mysql.config;
 
 mount core.*;
-mount base.{Text, Maybe, Maybe.None, Some};
+mount base.{Text, Maybe, None, Some};
 mount collections.List;
 
 /// MySQL TLS posture per libmysqlclient's `--ssl-mode` taxonomy

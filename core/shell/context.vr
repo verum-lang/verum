@@ -64,7 +64,7 @@ public type PermissionSet is {
     net:        Maybe<List<Text>>,
     env:        Maybe<List<Text>>,
     /// If `true`, deny without an allow-list. Default: false (allow when
-    /// list is Maybe.None) so that legacy scripts run without frontmatter aren't
+    /// list is None) so that legacy scripts run without frontmatter aren't
     /// surprised on first execution.
     strict:     Bool,
 }

@@ -30,7 +30,7 @@
 module core.database.common.query;
 
 mount core.*;
-mount base.{Text, Maybe, Maybe.None, Some};
+mount base.{Text, Maybe, None, Some};
 mount collections.List;
 mount sync.atomic.{AtomicBool, MemoryOrdering};
 mount core.database.common.types.{TypeOid, RowSchema};

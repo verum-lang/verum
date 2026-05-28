@@ -253,11 +253,11 @@ implement Ecvrf {
                 let mut o: [Byte; 64] = [0; 64];
                 let mut i: Int = 0;
                 while i < 64 { o[i] = out[i]; i = i + 1; }
-                Result.Ok(o)
+                Ok(o)
             }
-            VrfVerifyResult.RejectMalformed(why) => Result.Err(InvalidProof(why)),
-            VrfVerifyResult.RejectKey            => Result.Err(InvalidPublicKey),
-            VrfVerifyResult.BackendError        => Result.Err(BackendNotReady),
+            VrfVerifyResult.RejectMalformed(why) => Err(InvalidProof(why)),
+            VrfVerifyResult.RejectKey            => Err(InvalidPublicKey),
+            VrfVerifyResult.BackendError        => Err(BackendNotReady),
         }
     }
 
@@ -266,7 +266,7 @@ implement Ecvrf {
     /// proof and wants to retrieve β cheaply, or when only β is needed
     /// downstream (RFC 9381 §5.2 `proof_to_hash`).
     ///
-    /// Returns Result.Err(InvalidProof) on a malformed proof; this function
+    /// Returns Err(InvalidProof) on a malformed proof; this function
     /// does **not** check the proof's validity against (pk, alpha) —
     /// only structural well-formedness. Use `verify` to authenticate.
     public fn proof_to_hash(proof: &VrfProof) -> Result<VrfOutput, VrfError> {
@@ -275,9 +275,9 @@ implement Ecvrf {
                 let mut o: [Byte; 64] = [0; 64];
                 let mut i: Int = 0;
                 while i < 64 { o[i] = bytes[i]; i = i + 1; }
-                Result.Ok(o)
+                Ok(o)
             }
-            ProofToHashResult.Malformed(why) => Result.Err(InvalidProof(why)),
+            ProofToHashResult.Malformed(why) => Err(InvalidProof(why)),
         }
     }
 
@@ -305,5 +305,5 @@ type VrfVerifyResult is
     | BackendError;
 
 type ProofToHashResult is
-    | Result.Ok([Byte; 64])
+    | Ok([Byte; 64])
     | Malformed(Text);

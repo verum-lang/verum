@@ -45,7 +45,7 @@
 module core.database.postgres.composite_registry;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.postgres.wire.typed.{
     TypedValue, TypedComposite, TypedField,

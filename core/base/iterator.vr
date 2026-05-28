@@ -2462,7 +2462,7 @@ where I.Item: Clone {
     type Item = (I.Item, I.Item);
 
     fn next(&mut self) -> Maybe<(I.Item, I.Item)> {
-        if self.prev is Maybe.None {
+        if self.prev is None {
             Maybe.None
         } else {
             match self.iter.next() {
@@ -2485,7 +2485,7 @@ where I.Item: Clone {
 
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let (lower, upper) = self.iter.size_hint();
-        if self.prev is Maybe.None {
+        if self.prev is None {
             (0, Maybe.Some(0))
         } else {
             // Each next() call produces one pair from (prev, next_element)
@@ -2533,7 +2533,7 @@ implement<A: Iterator, B: Iterator> Iterator for ZipLongestIter<A, B> {
             }
         };
 
-        if left is Maybe.None && right is Maybe.None {
+        if left is None && right is None {
             Maybe.None
         } else {
             Maybe.Some((left, right))

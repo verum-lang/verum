@@ -51,7 +51,7 @@ module core.cog.manifest;
 
 mount core.*;
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount base.semver.{SemVer, parse as parse_semver, format_semver};
 mount base.semver_constraint.{
     SemVerConstraint, parse as parse_constraint,

@@ -56,7 +56,7 @@ module core.database.sqlite.native.l7_api.pragma_api;
 // =============================================================================
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.sqlite.native.l4_vdbe.register.{
     Register, RNull, RInt, RText,

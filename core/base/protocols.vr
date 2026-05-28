@@ -14,7 +14,7 @@
 )
 module core.base.protocols;
 mount core.ordering.{Ordering, Less, Equal, Greater};
-mount core.maybe.{Maybe, Some, Maybe.None};
+mount core.maybe.{Maybe, Some, None};
 mount core.result.{Result, Ok, Err};
 mount core.intrinsics.conversion.int_to_bytes;
 

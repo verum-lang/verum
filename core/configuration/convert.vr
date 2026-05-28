@@ -50,7 +50,7 @@ module core.configuration.convert;
 
 mount core.*;
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount configuration.value.{ConfigValue, type_name};
 mount configuration.error.{ConfigError, ConfigErrorKind, FormatId, config_err};
 mount configuration.format.{ConfigFormat, FormatCapabilities};

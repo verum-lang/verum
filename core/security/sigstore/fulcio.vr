@@ -69,7 +69,7 @@
 module core.security.sigstore.fulcio;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount encoding.json.{
     JsonValue, JsonObject, json_object, json_string, decode,

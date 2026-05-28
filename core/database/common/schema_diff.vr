@@ -49,7 +49,7 @@
 module core.database.common.schema_diff;
 
 mount core.*;
-mount base.{Text, Bool, Maybe, Some, Maybe.None};
+mount base.{Text, Bool, Maybe, Some, None};
 mount collections.List;
 mount core.database.common.schema.{
     SchemaSnapshot, TableSnap, ColumnSnap, IndexSnap, ForeignKeySnap,

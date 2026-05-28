@@ -146,7 +146,7 @@ implement Widget for Notification {
 
         // Position at top-right corner of the area
         let w = self.width.min(area.width);
-        let h = 3 + if self.title is Maybe.Some(_) { 1 } else { 0 };
+        let h = 3 + if self.title is Some(_) { 1 } else { 0 };
         let x = area.x + area.width - w;
         let y = area.y;
         let toast_area = Rect.new(x, y, w, h.min(area.height));

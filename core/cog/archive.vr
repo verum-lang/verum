@@ -58,7 +58,7 @@
 module core.cog.archive;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount collections.{List, Map};
 mount security.hash.sha256.{digest};
 mount encoding.hex.{encode as hex_encode};

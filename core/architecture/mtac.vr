@@ -307,7 +307,7 @@ public fn time_point_precedes(a: TimePoint, b: TimePoint) -> Bool {
 
 /// True iff a decision is fully resolved (chosen value set).
 public fn decision_is_resolved(d: Decision) -> Bool {
-    d.chosen is Maybe.Some(_)
+    d.chosen is Some(_)
 }
 
 // ----- Observer -----

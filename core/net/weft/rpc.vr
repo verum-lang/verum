@@ -203,19 +203,19 @@ public type RpcError is {
 
 implement RpcError {
     public fn new(status: RpcStatus, message: Text) -> RpcError {
-        RpcError { status: status, message: message, details_json: Maybe.None }
+        RpcError { status: status, message: message, details_json: None }
     }
 
     public fn with_details_json(self, details: Text) -> RpcError {
-        RpcError { details_json: Maybe.Some(details), ..self }
+        RpcError { details_json: Some(details), ..self }
     }
 
     /// Render as the Connect error envelope:
     ///  { "code": "<status.name>", "message": "<text>", "details": [...] }
     public fn to_json_envelope(&self) -> Text {
         let details = match &self.details_json {
-            Maybe.Some(d) => f",\"details\":{d}",
-            Maybe.None    => "",
+            Some(d) => f",\"details\":{d}",
+            None    => "",
         };
         // Escape the message — minimal (no U+0000..U+001F other than \n/\t).
         let msg = json_escape(&self.message);
@@ -327,7 +327,7 @@ implement<R: UnaryRpcHandler> Handler for RpcAdapter<R> {
         // Connect requires POST for unary. RFC-compatible check.
         match req.method {
             Method.Post => {}
-            _ => return Result.Err(WeftError.BadRequest("RPC requires POST".into())),
+            _ => return Err(WeftError.BadRequest("RPC requires POST".into())),
         }
         let meta = RpcMeta {
             path: req.path.clone(),
@@ -336,25 +336,25 @@ implement<R: UnaryRpcHandler> Handler for RpcAdapter<R> {
         };
         let body_bytes: List<Byte> = req.body.clone();
         match self.inner.invoke(body_bytes, meta).await {
-            Result.Ok(out_bytes) => {
+            Ok(out_bytes) => {
                 let mut r = resp_with_body_bytes(
                     resp_status(core.net.http.StatusCode.ok()),
                     out_bytes,
                 );
                 r = resp_with_header(r, &"content-type", &self.response_content_type);
-                Result.Ok(r)
+                Ok(r)
             }
-            Result.Err(e) => Result.Ok(e.into_response()),
+            Err(e) => Ok(e.into_response()),
         }
     }
 }
 
 /// Parse the Connect deadline header (`connect-timeout-ms`, RFC-safe
-/// ASCII integer). Absent or malformed → Maybe.None.
+/// ASCII integer). Absent or malformed → None.
 fn parse_connect_timeout(headers: &Headers) -> Maybe<Int> {
     match headers.get(&"connect-timeout-ms") {
-        Maybe.None    => Maybe.None,
-        Maybe.Some(v) => v.parse_int().ok(),
+        None    => None,
+        Some(v) => v.parse_int().ok(),
     }
 }
 

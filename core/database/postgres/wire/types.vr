@@ -17,7 +17,7 @@
 module core.database.postgres.wire.types;
 
 mount core.*;
-mount base.{Maybe, Maybe.None, Some, Text};
+mount base.{Maybe, None, Some, Text};
 
 // -----------------------------------------------------------------------------
 // Frontend (client → server) message tags.

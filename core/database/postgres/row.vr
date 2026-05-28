@@ -65,7 +65,7 @@
 module core.database.postgres.row;
 
 mount core.*;
-mount core.base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Int, Bool};
+mount core.base.{Result, Ok, Err, Maybe, Some, None, Text, Int, Bool};
 mount core.collections.List;
 mount core.database.common.types.{WireValue, WvNull, WvPresent, WireFormat, WfText, WfBinary};
 mount core.database.common.error.{

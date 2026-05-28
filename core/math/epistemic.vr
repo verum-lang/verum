@@ -56,7 +56,7 @@ mount core.math.kan_extension.{
 };
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.base.protocols.{Eq, Ord, PartialOrd};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 
 // =============================================================================
 // 1. EpistemicStatus — ordered lattice of proof strength
@@ -296,7 +296,7 @@ implement Theory {
         let mut result: List<Text> = [];
         while !queue.is_empty() {
             let cur = queue.remove(0);
-            if visited.get(&cur) is Maybe.Some(true) {
+            if visited.get(&cur) is Some(true) {
                 continue;
             }
             visited.insert(cur.clone(), true);

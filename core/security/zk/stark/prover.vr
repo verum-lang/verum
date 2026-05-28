@@ -100,7 +100,7 @@ public fn prove(
     params:        &ProofParams,
 ) -> Result<Proof, ProverError> {
     if public_inputs.len() != air.public_input_arity {
-        return Result.Err(PublicInputArityMismatch {
+        return Err(PublicInputArityMismatch {
             expected: air.public_input_arity,
             got: public_inputs.len(),
         });
@@ -108,7 +108,7 @@ public fn prove(
     let elem_size = air.field.element_size();
     let expected_bytes = air.trace.length * air.trace.width * elem_size;
     if trace.len() != expected_bytes {
-        return Result.Err(TraceShapeMismatch {
+        return Err(TraceShapeMismatch {
             expected: (air.trace.length, air.trace.width),
             got:      (trace.len() / (air.trace.width * elem_size), air.trace.width),
         });
@@ -117,10 +117,10 @@ public fn prove(
         "verum.crypto.stark_prove",
         air, trace, public_inputs, params
     ) {
-        ProveResult.Ok(p)                            => Result.Ok(p),
-        ProveResult.ConstraintFailed(name, row)      => Result.Err(ConstraintFailedAtRow { name, row }),
-        ProveResult.FriFailed(why)                   => Result.Err(FriCommitmentFailed(why)),
-        ProveResult.BackendFailed(why)               => Result.Err(BackendError(why)),
+        ProveResult.Ok(p)                            => Ok(p),
+        ProveResult.ConstraintFailed(name, row)      => Err(ConstraintFailedAtRow { name, row }),
+        ProveResult.FriFailed(why)                   => Err(FriCommitmentFailed(why)),
+        ProveResult.BackendFailed(why)               => Err(BackendError(why)),
     }
 }
 
@@ -129,7 +129,7 @@ public fn prove(
 // =============================================================================
 
 type ProveResult is
-    | Result.Ok(Proof)
+    | Ok(Proof)
     | ConstraintFailed(Text, Int)
     | FriFailed(Text)
     | BackendFailed(Text);

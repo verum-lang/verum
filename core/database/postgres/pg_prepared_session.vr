@@ -39,7 +39,7 @@
 module core.database.postgres.pg_prepared_session;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,

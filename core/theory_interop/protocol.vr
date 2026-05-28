@@ -88,7 +88,7 @@ public type JsonRpcRequest is {
 /// A JSON-RPC 2.0 response envelope.
 ///
 
-/// Exactly one of `result` or `error` is present (the other is Maybe.None).
+/// Exactly one of `result` or `error` is present (the other is None).
 public type JsonRpcResponse is {
     /// Mirrors the request id.
     id:     Int,

@@ -29,7 +29,7 @@ module core.database.sqlite.native.l1_pager.journal.writer;
 
 mount core.*;
 mount collections.List;
-mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount core.sys.common.{FileDesc, OSError, pwrite, full_fsync};
 mount core.database.sqlite.native.l1_pager.journal.wal.{
     Wal, WalHeader, WalChecksum, WalFrameHeader,

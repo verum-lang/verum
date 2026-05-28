@@ -294,8 +294,8 @@ implement SynthesizeContext {
             "verum.crypto.halo2_synth_assign",
             self.handle, cell, value
         ) {
-            true  => Result.Ok(()),
-            false => Result.Err(CircuitError.AssignmentFailed("synthesize.assign".into())),
+            true  => Ok(()),
+            false => Err(CircuitError.AssignmentFailed("synthesize.assign".into())),
         }
     }
 
@@ -306,8 +306,8 @@ implement SynthesizeContext {
             "verum.crypto.halo2_synth_copy",
             self.handle, a, b
         ) {
-            true  => Result.Ok(()),
-            false => Result.Err(CircuitError.AssignmentFailed("synthesize.copy".into())),
+            true  => Ok(()),
+            false => Err(CircuitError.AssignmentFailed("synthesize.copy".into())),
         }
     }
 
@@ -317,8 +317,8 @@ implement SynthesizeContext {
             "verum.crypto.halo2_synth_enable",
             self.handle, selector, row
         ) {
-            true  => Result.Ok(()),
-            false => Result.Err(CircuitError.AssignmentFailed("synthesize.enable".into())),
+            true  => Ok(()),
+            false => Err(CircuitError.AssignmentFailed("synthesize.enable".into())),
         }
     }
 }
@@ -339,14 +339,14 @@ public fn range_constraint(
     bits:       Int,
 ) -> Result<(), CircuitError> {
     if bits <= 0 || bits > 64 {
-        return Result.Err(CircuitError.InvalidGateShape(f"range_constraint: bits={bits}"));
+        return Err(CircuitError.InvalidGateShape(f"range_constraint: bits={bits}"));
     }
     let table = match @intrinsic(
         "verum.crypto.halo2_canonical_range_table",
         bits
     ) {
         TableResult.Ok(cols) => cols,
-        TableResult.Err(why) => return Result.Err(CircuitError.InvalidGateShape(why)),
+        TableResult.Err(why) => return Err(CircuitError.InvalidGateShape(why)),
     };
     cfg.add_lookup(Lookup.new(
         name,
@@ -354,7 +354,7 @@ public fn range_constraint(
         [Constraint.column(advice)],
         table,
     ));
-    Result.Ok(())
+    Ok(())
 }
 
 /// Set-membership proof — `x ∈ {a_0, …, a_{k-1}}`. Implemented as a
@@ -368,7 +368,7 @@ public fn set_membership_constraint(
     table:      Column,    // ColumnType.Fixed pre-loaded with the set
 ) -> Result<(), CircuitError> {
     if table.kind != ColumnType.Fixed {
-        return Result.Err(CircuitError.InvalidGateShape(
+        return Err(CircuitError.InvalidGateShape(
             "set_membership: table must be ColumnType.Fixed".into()));
     }
     cfg.add_lookup(Lookup.new(
@@ -377,7 +377,7 @@ public fn set_membership_constraint(
         [Constraint.column(advice)],
         [table],
     ));
-    Result.Ok(())
+    Ok(())
 }
 
 /// Hash-preimage gate: forces `out == H(in_0, …, in_k)` where H is one
@@ -397,10 +397,10 @@ public fn hash_preimage_constraint(
         name.clone(), selector, inputs, output, hash_name
     ) {
         HashGateResult.Ok(g) => g,
-        HashGateResult.Err(why) => return Result.Err(CircuitError.InvalidGateShape(why)),
+        HashGateResult.Err(why) => return Err(CircuitError.InvalidGateShape(why)),
     };
     cfg.add_gate(gate);
-    Result.Ok(())
+    Ok(())
 }
 
 // =============================================================================
@@ -433,9 +433,9 @@ implement Display for CircuitError {
 // =============================================================================
 
 type TableResult is
-    | Result.Ok(List<Column>)
-    | Result.Err(Text);
+    | Ok(List<Column>)
+    | Err(Text);
 
 type HashGateResult is
-    | Result.Ok(Gate)
-    | Result.Err(Text);
+    | Ok(Gate)
+    | Err(Text);

@@ -56,7 +56,7 @@
 module core.database.mysql.prepared;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 
 mount core.database.common.error.{DbError, AdapterSpecific};

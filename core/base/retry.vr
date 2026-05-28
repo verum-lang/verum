@@ -28,7 +28,7 @@
 module core.base.retry;
 
 mount core.base.result.{Result, Ok, Err};
-mount core.base.maybe.{Maybe, Some, Maybe.None};
+mount core.base.maybe.{Maybe, Some, None};
 mount core.intrinsics.{sleep_ms, random_float};
 
 // =============================================================================
@@ -38,7 +38,7 @@ mount core.intrinsics.{sleep_ms, random_float};
 /// Strategy for calculating delay between retry attempts.
 public type RetryBackoff is
     /// No delay between retries.
-    | Maybe.None
+    | None
     /// Constant delay between retries.
     | Linear { delay_ms: Int }
     /// Exponential backoff: delay doubles each attempt.
@@ -58,7 +58,7 @@ implement RetryBackoff {
     /// Calculate delay for the given attempt number (0-indexed).
     public fn delay_for_attempt(&self, attempt: Int) -> Int {
         match self {
-            Maybe.None => 0,
+            None => 0,
             Linear { delay_ms } => *delay_ms,
             Exponential { initial_ms, max_ms, multiplier } => {
                 let delay = (*initial_ms as Float) * multiplier.pow(attempt as Float);
@@ -162,19 +162,19 @@ public fn retry_with_strategy<T, E: Clone, F: fn() -> Result<T, E>>(
     );
 
     let mut attempt = 0;
-    let mut last_error: Maybe<E> = Maybe.None;
+    let mut last_error: Maybe<E> = None;
 
     while attempt < config.max_attempts {
         match operation() {
-            Result.Ok(v) => return Result.Ok(v),
-            Result.Err(e) => {
+            Ok(v) => return Ok(v),
+            Err(e) => {
                 if attempt + 1 >= config.max_attempts {
-                    return Result.Err(e);
+                    return Err(e);
                 }
                 if !(config.should_retry)(&e) {
-                    return Result.Err(e);
+                    return Err(e);
                 }
-                last_error = Maybe.Some(e.clone());
+                last_error = Some(e.clone());
                 let delay = config.strategy.delay_for_attempt(attempt);
                 sleep_ms(delay);
                 attempt = attempt + 1;
@@ -184,8 +184,8 @@ public fn retry_with_strategy<T, E: Clone, F: fn() -> Result<T, E>>(
 
     // Provably dead given `max_attempts >= 1` (asserted above).
     match last_error {
-        Maybe.Some(e) => Result.Err(e),
-        Maybe.None => panic("retry: invariant violation — loop exited without returning"),
+        Some(e) => Err(e),
+        None => panic("retry: invariant violation — loop exited without returning"),
     }
 }
 

@@ -28,7 +28,7 @@
 module core.database.common.types;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some};
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.intrinsics.runtime.mem_raw.{memcpy, store_byte, load_byte};
 mount core.database.common.error.{DbError, DecodeFault, EncodeFault, AdapterId};

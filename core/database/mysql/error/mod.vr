@@ -12,7 +12,7 @@
 module core.database.mysql.error;
 
 mount core.*;
-mount base.{Text, Maybe, Maybe.None, Some};
+mount base.{Text, Maybe, None, Some};
 mount core.database.common.error.{
     DbError, AdapterId, AdapterSpecific, SqlState,
     ConnectionErrorKind, AuthErrorKind, TimeoutPhase,

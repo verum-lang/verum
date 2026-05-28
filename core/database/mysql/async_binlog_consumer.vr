@@ -67,7 +67,7 @@
 module core.database.mysql.async_binlog_consumer;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.DbError;
 mount core.database.mysql.binlog.{

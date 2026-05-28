@@ -54,7 +54,7 @@
 module core.database.postgres.migrations.store;
 
 mount core.*;
-mount base.{Text, Bool, Maybe, Some, Maybe.None, Result, Ok, Err};
+mount base.{Text, Bool, Maybe, Some, None, Result, Ok, Err};
 mount collections.List;
 mount core.database.common.error.{DbError};
 mount core.database.common.migrations.store.{

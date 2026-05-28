@@ -64,7 +64,7 @@
 module core.security.tuf.types;
 
 mount core.*;
-mount base.{Result, Ok, Err, Maybe, Some, Maybe.None, Text, Bool, Int};
+mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map, Set};
 mount encoding.json.{JsonValue};
 mount time.rfc3339.{Rfc3339Time};

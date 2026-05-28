@@ -22,7 +22,7 @@
 module core.database.mysql.async_typed_database;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text, Maybe, Maybe.None, Some, Bool};
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
 mount collections.List;
 mount core.database.common.error.{DbError, AdapterId, AdMysql};
 mount core.database.common.db_handle.Database;
