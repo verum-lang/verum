@@ -1,0 +1,140 @@
+// =============================================================================
+// core-tests/encoding/jsonb/unit_test.vr
+// =============================================================================
+//
+// `core/encoding/jsonb.vr` — PostgreSQL / SQLite JSONB wire format.
+//
+// Pure-data surface tested here:
+//   * JSONB_VERSION_1 constant
+//   * JsonbValue record construction + accessors (version / as_text /
+//     equals)
+//   * JsonbError 5-variant ADT
+//       - JbeEmpty / JbeUnsupportedVersion(Int) / JbeBadUtf8
+//       - JbeBadJson(JsonError) / JbeBadValue(ConvertError)
+//
+// Wire encode/decode round-trip is deferred behind the same byte-array
+// compile-time class.
+// =============================================================================
+
+mount core.encoding.jsonb.{JSONB_VERSION_1, JsonbValue, JsonbError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: JSONB_VERSION_1 constant
+// =============================================================================
+
+@test
+fn test_jsonb_version_1_constant() {
+    assert_eq(JSONB_VERSION_1, 1);
+}
+
+// =============================================================================
+// Section 2: JsonbValue record construction + accessors
+// =============================================================================
+
+@test
+fn test_jsonb_value_new_constructor() {
+    let v: JsonbValue = JsonbValue.new("{}".to_text());
+    assert_eq(v.version(), 1);
+}
+
+@test
+fn test_jsonb_value_as_text_accessor() {
+    let payload = "{\"a\":1}".to_text();
+    let v: JsonbValue = JsonbValue.new(payload);
+    assert_eq(v.as_text(), "{\"a\":1}");
+}
+
+@test
+fn test_jsonb_value_direct_construction() {
+    let v: JsonbValue = JsonbValue {
+        version: 1,
+        json_text: "null".to_text(),
+    };
+    assert_eq(v.version, 1);
+    assert_eq(v.json_text, "null");
+}
+
+@test
+fn test_jsonb_value_equals_same_payload() {
+    let a: JsonbValue = JsonbValue.new("true".to_text());
+    let b: JsonbValue = JsonbValue.new("true".to_text());
+    assert_eq(a.equals(&b), true);
+}
+
+@test
+fn test_jsonb_value_equals_different_payload() {
+    let a: JsonbValue = JsonbValue.new("true".to_text());
+    let b: JsonbValue = JsonbValue.new("false".to_text());
+    assert_eq(a.equals(&b), false);
+}
+
+@test
+fn test_jsonb_value_equals_different_version() {
+    let a: JsonbValue = JsonbValue { version: 1, json_text: "null".to_text() };
+    let b: JsonbValue = JsonbValue { version: 2, json_text: "null".to_text() };
+    assert_eq(a.equals(&b), false);
+}
+
+// =============================================================================
+// Section 3: JsonbError 5-variant ADT construction
+// =============================================================================
+
+@test
+fn test_jsonb_error_jbe_empty_variant() {
+    let e: JsonbError = JsonbError.JbeEmpty;
+    assert(e is JsonbError.JbeEmpty);
+}
+
+@test
+fn test_jsonb_error_jbe_unsupported_version_variant() {
+    let e: JsonbError = JsonbError.JbeUnsupportedVersion(2);
+    assert(e is JsonbError.JbeUnsupportedVersion);
+}
+
+@test
+fn test_jsonb_error_jbe_bad_utf8_variant() {
+    let e: JsonbError = JsonbError.JbeBadUtf8;
+    assert(e is JsonbError.JbeBadUtf8);
+}
+
+// =============================================================================
+// Section 4: JsonbError pairwise disjointness — scalar variants
+// =============================================================================
+
+@test
+fn test_jsonb_error_jbe_empty_disjoint() {
+    let e: JsonbError = JsonbError.JbeEmpty;
+    assert(!(e is JsonbError.JbeUnsupportedVersion));
+    assert(!(e is JsonbError.JbeBadUtf8));
+}
+
+@test
+fn test_jsonb_error_jbe_unsupported_version_disjoint() {
+    let e: JsonbError = JsonbError.JbeUnsupportedVersion(255);
+    assert(!(e is JsonbError.JbeEmpty));
+    assert(!(e is JsonbError.JbeBadUtf8));
+}
+
+@test
+fn test_jsonb_error_jbe_bad_utf8_disjoint() {
+    let e: JsonbError = JsonbError.JbeBadUtf8;
+    assert(!(e is JsonbError.JbeEmpty));
+    assert(!(e is JsonbError.JbeUnsupportedVersion));
+}
+
+// =============================================================================
+// Section 5: JsonbError scalar payload preservation
+// =============================================================================
+
+@test
+fn test_jsonb_error_jbe_unsupported_version_payload_round_trip() {
+    let e: JsonbError = JsonbError.JbeUnsupportedVersion(7);
+    match e {
+        JsonbError.JbeUnsupportedVersion(v) => assert_eq(v, 7),
+        _ => panic("expected JbeUnsupportedVersion"),
+    }
+}
+
+fn main() {}
