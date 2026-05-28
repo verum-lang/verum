@@ -1,0 +1,93 @@
+// =============================================================================
+// core-tests/security/x509/ext/ext_key_usage/unit_test.vr
+// =============================================================================
+//
+// `core/security/x509/ext/ext_key_usage.vr` — Extended Key Usage (EKU)
+// extension (RFC 5280 §4.2.1.12).
+// =============================================================================
+
+mount core.security.x509.ext.ext_key_usage.ExtKeyUsagePurpose;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: ExtKeyUsagePurpose scalar variants (7)
+// =============================================================================
+
+@test
+fn test_eku_purpose_server_auth_variant() {
+    let p: ExtKeyUsagePurpose = ExtKeyUsagePurpose.ServerAuth;
+    assert(p is ExtKeyUsagePurpose.ServerAuth);
+}
+
+@test
+fn test_eku_purpose_client_auth_variant() {
+    let p: ExtKeyUsagePurpose = ExtKeyUsagePurpose.ClientAuth;
+    assert(p is ExtKeyUsagePurpose.ClientAuth);
+}
+
+@test
+fn test_eku_purpose_code_signing_variant() {
+    let p: ExtKeyUsagePurpose = ExtKeyUsagePurpose.CodeSigning;
+    assert(p is ExtKeyUsagePurpose.CodeSigning);
+}
+
+@test
+fn test_eku_purpose_email_protection_variant() {
+    let p: ExtKeyUsagePurpose = ExtKeyUsagePurpose.EmailProtection;
+    assert(p is ExtKeyUsagePurpose.EmailProtection);
+}
+
+@test
+fn test_eku_purpose_time_stamping_variant() {
+    let p: ExtKeyUsagePurpose = ExtKeyUsagePurpose.TimeStamping;
+    assert(p is ExtKeyUsagePurpose.TimeStamping);
+}
+
+@test
+fn test_eku_purpose_ocsp_signing_variant() {
+    let p: ExtKeyUsagePurpose = ExtKeyUsagePurpose.OcspSigning;
+    assert(p is ExtKeyUsagePurpose.OcspSigning);
+}
+
+@test
+fn test_eku_purpose_any_purpose_variant() {
+    let p: ExtKeyUsagePurpose = ExtKeyUsagePurpose.AnyPurpose;
+    assert(p is ExtKeyUsagePurpose.AnyPurpose);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness — selected
+// =============================================================================
+
+@test
+fn test_eku_purpose_server_auth_disjoint_from_client_auth() {
+    let s: ExtKeyUsagePurpose = ExtKeyUsagePurpose.ServerAuth;
+    let c: ExtKeyUsagePurpose = ExtKeyUsagePurpose.ClientAuth;
+    assert(!(s is ExtKeyUsagePurpose.ClientAuth));
+    assert(!(c is ExtKeyUsagePurpose.ServerAuth));
+}
+
+@test
+fn test_eku_purpose_code_signing_disjoint() {
+    let p: ExtKeyUsagePurpose = ExtKeyUsagePurpose.CodeSigning;
+    assert(!(p is ExtKeyUsagePurpose.ServerAuth));
+    assert(!(p is ExtKeyUsagePurpose.ClientAuth));
+    assert(!(p is ExtKeyUsagePurpose.EmailProtection));
+    assert(!(p is ExtKeyUsagePurpose.TimeStamping));
+    assert(!(p is ExtKeyUsagePurpose.OcspSigning));
+    assert(!(p is ExtKeyUsagePurpose.AnyPurpose));
+}
+
+@test
+fn test_eku_purpose_any_purpose_disjoint_from_specifics() {
+    let p: ExtKeyUsagePurpose = ExtKeyUsagePurpose.AnyPurpose;
+    assert(!(p is ExtKeyUsagePurpose.ServerAuth));
+    assert(!(p is ExtKeyUsagePurpose.ClientAuth));
+    assert(!(p is ExtKeyUsagePurpose.CodeSigning));
+    assert(!(p is ExtKeyUsagePurpose.EmailProtection));
+    assert(!(p is ExtKeyUsagePurpose.TimeStamping));
+    assert(!(p is ExtKeyUsagePurpose.OcspSigning));
+}
+
+fn main() {}
