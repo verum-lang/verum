@@ -1,0 +1,115 @@
+// =============================================================================
+// core-tests/cli/plugin/unit_test.vr
+// =============================================================================
+//
+// `core/cli/plugin.vr` — plugin manifest + registry surface.
+// =============================================================================
+
+mount core.cli.plugin.{PluginManifest, PluginRegistry};
+mount core.cli.spec.CommandSpec;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: PluginManifest record construction
+// =============================================================================
+
+@test
+fn test_plugin_manifest_direct_construction_no_requires() {
+    let empty: List<CommandSpec> = [];
+    let m: PluginManifest = PluginManifest {
+        name: "github.com/foo/bar".to_text(),
+        version: "1.2.3".to_text(),
+        requires: Maybe.None,
+        commands: empty,
+    };
+    assert_eq(m.name, "github.com/foo/bar");
+    assert_eq(m.version, "1.2.3");
+}
+
+@test
+fn test_plugin_manifest_direct_construction_with_requires() {
+    let empty: List<CommandSpec> = [];
+    let m: PluginManifest = PluginManifest {
+        name: "ext".to_text(),
+        version: "0.1.0".to_text(),
+        requires: Maybe.Some(">=2.0".to_text()),
+        commands: empty,
+    };
+    assert_eq(m.name, "ext");
+    assert_eq(m.version, "0.1.0");
+}
+
+@test
+fn test_plugin_manifest_requires_none_field_preserved() {
+    let empty: List<CommandSpec> = [];
+    let m: PluginManifest = PluginManifest {
+        name: "x".to_text(),
+        version: "y".to_text(),
+        requires: Maybe.None,
+        commands: empty,
+    };
+    let r: Maybe<Text> = m.requires;
+    assert(r is Maybe.None);
+}
+
+@test
+fn test_plugin_manifest_requires_some_field_preserved() {
+    let empty: List<CommandSpec> = [];
+    let m: PluginManifest = PluginManifest {
+        name: "x".to_text(),
+        version: "y".to_text(),
+        requires: Maybe.Some("^1.0".to_text()),
+        commands: empty,
+    };
+    let r: Maybe<Text> = m.requires;
+    assert(r is Maybe.Some);
+}
+
+@test
+fn test_plugin_manifest_field_independence() {
+    let empty1: List<CommandSpec> = [];
+    let empty2: List<CommandSpec> = [];
+    let a: PluginManifest = PluginManifest {
+        name: "a".to_text(),
+        version: "1.0".to_text(),
+        requires: Maybe.None,
+        commands: empty1,
+    };
+    let b: PluginManifest = PluginManifest {
+        name: "b".to_text(),
+        version: "2.0".to_text(),
+        requires: Maybe.None,
+        commands: empty2,
+    };
+    assert_eq(a.name, "a");
+    assert_eq(b.name, "b");
+}
+
+// =============================================================================
+// Section 2: PluginRegistry record construction
+// =============================================================================
+
+@test
+fn test_plugin_registry_empty_construction() {
+    let empty: List<PluginManifest> = [];
+    let r: PluginRegistry = PluginRegistry { plugins: empty };
+    assert_eq(r.plugins.len(), 0);
+}
+
+@test
+fn test_plugin_registry_single_plugin() {
+    let empty_cmds: List<CommandSpec> = [];
+    let m: PluginManifest = PluginManifest {
+        name: "demo".to_text(),
+        version: "0.1.0".to_text(),
+        requires: Maybe.None,
+        commands: empty_cmds,
+    };
+    let mut plugins: List<PluginManifest> = [];
+    plugins.push(m);
+    let r: PluginRegistry = PluginRegistry { plugins: plugins };
+    assert_eq(r.plugins.len(), 1);
+}
+
+fn main() {}
