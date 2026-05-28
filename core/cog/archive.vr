@@ -253,11 +253,11 @@ public fn find_module<'a>(archive: &'a CogArchive, name: &Text) -> Maybe<&'a Mod
     let mut i: Int = 0;
     while i < archive.modules.len() {
         if archive.modules[i].name == *name {
-            return Some(&archive.modules[i]);
+            return Maybe.Some(&archive.modules[i]);
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 /// Borrow a module's raw bytecode payload by name.
@@ -265,11 +265,11 @@ public fn module_bytes<'a>(archive: &'a CogArchive, name: &Text) -> Maybe<&'a Li
     let mut i: Int = 0;
     while i < archive.modules.len() {
         if archive.modules[i].name == *name {
-            return Some(&archive.module_data[i]);
+            return Maybe.Some(&archive.module_data[i]);
         }
         i = i + 1;
     }
-    None
+    Maybe.None
 }
 
 /// Total uncompressed bytes across all module payloads.
