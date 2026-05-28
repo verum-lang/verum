@@ -1,0 +1,59 @@
+// =============================================================================
+// core-tests/security/x509/certificate/unit_test.vr
+// =============================================================================
+//
+// `core/security/x509/certificate.vr` — X.509 version tag.
+// =============================================================================
+
+mount core.security.x509.certificate.X509Version;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: X509Version 3-variant ADT
+// =============================================================================
+
+@test
+fn test_x509_version_v1_variant() {
+    let v: X509Version = X509Version.V1;
+    assert(v is X509Version.V1);
+}
+
+@test
+fn test_x509_version_v2_variant() {
+    let v: X509Version = X509Version.V2;
+    assert(v is X509Version.V2);
+}
+
+@test
+fn test_x509_version_v3_variant() {
+    let v: X509Version = X509Version.V3;
+    assert(v is X509Version.V3);
+}
+
+// =============================================================================
+// Section 2: Pairwise disjointness
+// =============================================================================
+
+@test
+fn test_x509_version_v1_disjoint() {
+    let v: X509Version = X509Version.V1;
+    assert(!(v is X509Version.V2));
+    assert(!(v is X509Version.V3));
+}
+
+@test
+fn test_x509_version_v2_disjoint() {
+    let v: X509Version = X509Version.V2;
+    assert(!(v is X509Version.V1));
+    assert(!(v is X509Version.V3));
+}
+
+@test
+fn test_x509_version_v3_disjoint() {
+    let v: X509Version = X509Version.V3;
+    assert(!(v is X509Version.V1));
+    assert(!(v is X509Version.V2));
+}
+
+fn main() {}
