@@ -30,83 +30,41 @@ only used internally.
 
 ## 3. Language-implementation gaps
 
-### §3.1 URL-1 — `Text.slice(a, b).as_str()` corrupts pointer-but-not-length
+### §3.1 URL-1 / URL-7 — Text.slice alias-via-raw-pointer (CLOSED 2026-05-28)
 
-**Stable trigger**: A `Text` value obtained via `Text.slice(start,
-end)` reports the **correct length** through `text.len()` but its
-byte payload through `text.as_bytes()[i]` panics with "Slice
-index out of bounds: index 0 but length is 0" — i.e. the byte
-buffer is empty even though `len() > 0`.
+**Pre-fix trigger**: A `Text` value obtained via `Text.slice(start,
+end)` reported the correct length through `text.len()` but its
+byte payload through `text.as_bytes()[i]` panicked with "Slice
+index out of bounds: index 0 but length is 0" when the slice was
+returned across a stdlib record-field boundary.
 
-Reproduction (passes len, fails byte access):
+**Source-side fix landed 2026-05-27** (commit `fd02ab012`):
+`Text.slice` rewritten from `from_utf8_unchecked(slice_from_raw_parts(
+ptr_offset(self.as_ptr(), start), slice_len))` (alias-via-raw-
+pointer construction) to eager-copy via `with_capacity +
+push_byte` — same canonical pattern as `to_lowercase`.
 
-```verum
-let s = "http://example.com/".clone();
-let u = Url.parse(&s).unwrap();
-assert_eq(u.path.len(), 1);          // ← passes: len=1
-let bytes = u.path.as_bytes();
-assert_eq(bytes[0], 0x2F_u8);        // ← panics: length is 0
-```
+**Post-rebuild validation 2026-05-28** (probe sweep with binary
+that has Text.slice eager-copy fix):
 
-Compare: `assert(u.path == "/".clone())` works because the
-canonical `Text == Text` path goes through structural comparison
-rather than pointer-into-buffer access.
+| Probe | Result |
+|---|---|
+| `s.slice(0, 5)` direct | ✅ |
+| `s.slice(0, 5).as_bytes()[0]` direct | ✅ |
+| `Url.parse(&s).path.len() == 4` | ✅ |
+| `Url.parse(&s).path.as_bytes()[0]` | ✅ |
+| `Url.parse(&s).scheme.len() == 4` | ✅ |
+| `Url.parse(&s).scheme.as_bytes()[0]` | ✅ |
+| `Url.parse(&s).path == "/".clone()` | ✅ |
 
-**Root cause diagnosis 2026-05-28** (post-eager-copy-fix):
+**3 URL regression tests transition from @ignore'd to GREEN**:
+- `regression_url_scheme_as_str_byte_access_corrupted` ✅
+- `regression_url_parse_trailing_slash_path_len_1` ✅
+- `regression_url_parse_trailing_slash_path_eq_slash` ✅
 
-Pre-fix `Text.slice` used `from_utf8_unchecked(slice_from_raw_parts(...))`
-which constructed a Text record aliasing the source pointer. Replaced
-2026-05-27 (commit `fd02ab012`) with eager-copy via `with_capacity +
-push_byte` — same pattern as `to_lowercase`.
-
-**Post-rebuild test matrix** (binary built 2026-05-28 00:05):
-
-| Probe | Result | Diagnosis |
-|---|---|---|
-| `s.slice(0, 5)` direct in test | ✅ PASS | Eager-copy works |
-| `s.slice(0, 5).as_bytes()[0]` direct | ✅ PASS | Slice payload sound |
-| `s.slice(0, 5) == "hello".clone()` direct | ✅ PASS | Eq comparison sound |
-| `Url.parse(&s).unwrap().path.len() == 4` | ❌ FAIL | Cross-module record-field corruption |
-| `Url.parse(&s).unwrap().path == "/foo".clone()` | ❌ FAIL | Same |
-| `Url.parse(&s).unwrap().scheme.as_bytes()[0]` | ❌ FAIL | Same |
-
-**Conclusion**: URL-1 / URL-7 are NOT `Text.slice` aliasing defects.
-They are **cross-module record-field corruption** on the returned
-`Url` struct. Same defect-class family as URL-8 + `e.kind` field-
-read corruption — both manifest as `Url` / `UrlError` fields
-returning corrupted bytes through the VBC cross-module struct-
-return path.
-
-Root cause is in `compile_field_access` (codegen/mod.rs) or
-`resolve_field_index` type-aware path — multi-day VBC codegen
-investigation. Sister defects:
-[[use_after_free_error_field_shift_2026-05-27]] +
-[[btree_pattern_match_ref_generic_class]] +
-[[enactment_field_access_oob_2026-05-24]].
-
-**Workaround discipline applied to conformance suite**: all
-assertions on slice-derived Text used `assert(t == lit.clone())`
-instead of `assert_eq(t.as_str(), "lit")` or `t.as_bytes()[i]`.
-Post-diagnosis above: this workaround was a coincidence — even
-`assert(field == lit)` fails for cross-module record-returned
-Text fields because the field-read itself is corrupted. The
-workaround happened to mask URL-1 because most tests don't
-inspect fields like `u.path`/`u.scheme` for content — only
-constructor + len + Some/None probes.
-
-**Source-side improvement landed 2026-05-27** (commit `fd02ab012`):
-`Text.slice` rewritten as eager-copy `with_capacity + push_byte`.
-This eliminates the alias-via-raw-pointer surface (sound for
-test-site direct use), but doesn't close URL-1 / URL-7 because
-those defects are cross-module-record-field corruption (different
-defect class).
-
-**Fix path for URL-1 / URL-7 remainder**: VBC codegen
-`compile_field_access` for Text-typed record fields returned
-through cross-module Result wrappers. Multi-day work.
-
-**Effort**: 2-3 days VBC codegen + retest. Same fix likely closes
-URL-8 + the sister field-read corruption defects.
+**Residual**: URL-8 (empty-Text parse routes through wrong
+UrlErrorKind) remains pinned — a different defect (UrlError record
+construction, not Text.slice). See §3.4.
 
 ### §3.2 `MAX_URL_LENGTH_BYTES` DoS guard
 
