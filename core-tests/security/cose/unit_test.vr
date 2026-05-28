@@ -1,0 +1,148 @@
+// =============================================================================
+// core-tests/security/cose/unit_test.vr
+// =============================================================================
+//
+// `core/security/cose.vr` — CBOR Object Signing and Encryption
+// (RFC 9052 / RFC 9053).
+// =============================================================================
+
+mount core.security.cose.{CoseAlg, CoseError};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: CoseAlg 4-variant ADT construction
+// =============================================================================
+
+@ignore("Cross-module CoseAlg record-return field-access OOB at PC=48 (sister of [[enactment_field_access_oob_2026-05-24]] — codegen loses 4-variant ADT layout, defaults to 8-byte scalar). Multi-day VBC fix.")
+@test
+fn test_cose_alg_eddsa_variant() {
+    let a: CoseAlg = CoseAlg.EdDSA;
+    assert(a is CoseAlg.EdDSA);
+}
+
+@ignore("Cross-module CoseAlg record-return field-access OOB at PC=48 (sister of [[enactment_field_access_oob_2026-05-24]] — codegen loses 4-variant ADT layout, defaults to 8-byte scalar). Multi-day VBC fix.")
+@test
+fn test_cose_alg_hs256_variant() {
+    let a: CoseAlg = CoseAlg.HS256;
+    assert(a is CoseAlg.HS256);
+}
+
+@ignore("Cross-module CoseAlg record-return field-access OOB at PC=48 (sister of [[enactment_field_access_oob_2026-05-24]] — codegen loses 4-variant ADT layout, defaults to 8-byte scalar). Multi-day VBC fix.")
+@test
+fn test_cose_alg_hs384_variant() {
+    let a: CoseAlg = CoseAlg.HS384;
+    assert(a is CoseAlg.HS384);
+}
+
+@ignore("Cross-module CoseAlg record-return field-access OOB at PC=48 (sister of [[enactment_field_access_oob_2026-05-24]] — codegen loses 4-variant ADT layout, defaults to 8-byte scalar). Multi-day VBC fix.")
+@test
+fn test_cose_alg_hs512_variant() {
+    let a: CoseAlg = CoseAlg.HS512;
+    assert(a is CoseAlg.HS512);
+}
+
+// =============================================================================
+// Section 2: CoseAlg pairwise disjointness
+// =============================================================================
+
+@ignore("Cross-module CoseAlg record-return field-access OOB at PC=48 (sister of [[enactment_field_access_oob_2026-05-24]] — codegen loses 4-variant ADT layout, defaults to 8-byte scalar). Multi-day VBC fix.")
+@test
+fn test_cose_alg_eddsa_disjoint() {
+    let a: CoseAlg = CoseAlg.EdDSA;
+    assert(!(a is CoseAlg.HS256));
+    assert(!(a is CoseAlg.HS384));
+    assert(!(a is CoseAlg.HS512));
+}
+
+@ignore("Cross-module CoseAlg record-return field-access OOB at PC=48 (sister of [[enactment_field_access_oob_2026-05-24]] — codegen loses 4-variant ADT layout, defaults to 8-byte scalar). Multi-day VBC fix.")
+@test
+fn test_cose_alg_hs_family_disjoint() {
+    let a: CoseAlg = CoseAlg.HS256;
+    let b: CoseAlg = CoseAlg.HS384;
+    let c: CoseAlg = CoseAlg.HS512;
+    assert(!(a is CoseAlg.HS384));
+    assert(!(a is CoseAlg.HS512));
+    assert(!(b is CoseAlg.HS256));
+    assert(!(b is CoseAlg.HS512));
+    assert(!(c is CoseAlg.HS256));
+    assert(!(c is CoseAlg.HS384));
+}
+
+// =============================================================================
+// Section 3: CoseError 6-variant ADT construction
+// =============================================================================
+
+@test
+fn test_cose_error_malformed_structure_variant() {
+    let e: CoseError = CoseError.MalformedStructure;
+    assert(e is CoseError.MalformedStructure);
+}
+
+@test
+fn test_cose_error_cbor_decode_variant() {
+    let e: CoseError = CoseError.CborDecode;
+    assert(e is CoseError.CborDecode);
+}
+
+@test
+fn test_cose_error_unsupported_algorithm_variant() {
+    let e: CoseError = CoseError.UnsupportedAlgorithm(-99);
+    assert(e is CoseError.UnsupportedAlgorithm);
+}
+
+@test
+fn test_cose_error_algorithm_mismatch_variant() {
+    let e: CoseError = CoseError.AlgorithmMismatch;
+    assert(e is CoseError.AlgorithmMismatch);
+}
+
+@test
+fn test_cose_error_wrong_key_kind_variant() {
+    let e: CoseError = CoseError.WrongKeyKind;
+    assert(e is CoseError.WrongKeyKind);
+}
+
+@test
+fn test_cose_error_signature_mismatch_variant() {
+    let e: CoseError = CoseError.SignatureMismatch;
+    assert(e is CoseError.SignatureMismatch);
+}
+
+// =============================================================================
+// Section 4: CoseError pairwise disjointness — scalar variants
+// =============================================================================
+
+@test
+fn test_cose_error_signature_mismatch_disjoint() {
+    let e: CoseError = CoseError.SignatureMismatch;
+    assert(!(e is CoseError.MalformedStructure));
+    assert(!(e is CoseError.CborDecode));
+    assert(!(e is CoseError.UnsupportedAlgorithm));
+    assert(!(e is CoseError.AlgorithmMismatch));
+    assert(!(e is CoseError.WrongKeyKind));
+}
+
+@test
+fn test_cose_error_malformed_disjoint() {
+    let e: CoseError = CoseError.MalformedStructure;
+    assert(!(e is CoseError.CborDecode));
+    assert(!(e is CoseError.AlgorithmMismatch));
+    assert(!(e is CoseError.WrongKeyKind));
+    assert(!(e is CoseError.SignatureMismatch));
+}
+
+// =============================================================================
+// Section 5: UnsupportedAlgorithm payload preservation
+// =============================================================================
+
+@test
+fn test_cose_error_unsupported_algorithm_payload_round_trip() {
+    let e: CoseError = CoseError.UnsupportedAlgorithm(-256);
+    match e {
+        CoseError.UnsupportedAlgorithm(id) => assert_eq(id, -256),
+        _ => panic("expected UnsupportedAlgorithm"),
+    }
+}
+
+fn main() {}
