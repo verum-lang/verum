@@ -1,0 +1,170 @@
+// =============================================================================
+// core-tests/sys/windows/ntstatus/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect. Never delete. Each section ties a failure-mode
+// to the source change that closed it (or pins the defect surface for an
+// active investigation).
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.ntstatus.{
+    NtStatus,
+    STATUS_SUCCESS, STATUS_PENDING,
+    STATUS_OBJECT_NAME_EXISTS,
+    STATUS_BUFFER_OVERFLOW, STATUS_NO_MORE_FILES,
+    STATUS_UNSUCCESSFUL, STATUS_INVALID_HANDLE, STATUS_ACCESS_DENIED,
+    STATUS_NO_MEMORY,
+};
+
+// =============================================================================
+// Defect §A — `(self.0 as UInt32 >> 30)` returns 0 for negative Int32
+// =============================================================================
+//
+// First surfaced when `test_status_object_name_exists_is_information` /
+// `..._is_warning` / `..._is_error` all failed with `assertion failed`
+// at PC=45 — three sibling assertions whose body is identical apart
+// from the constant compared against `severity_bits`.
+//
+// The implementation is:
+//
+//   public fn is_information(&self) -> Bool {
+//       (self.0 as UInt32 >> 30) == 1
+//   }
+//
+// For STATUS_OBJECT_NAME_EXISTS = NtStatus(0x40000000), bit 30 is set
+// and the high bit is NOT set, so reinterpreting as UInt32 and shifting
+// right by 30 must yield exactly 1. Yet the predicate returns false.
+//
+// Hypothesis: the VBC interpreter is performing the cast `Int32 → UInt32`
+// as a value-preserving widening that produces a NEGATIVE Int64 (sign
+// extends), then the right shift is arithmetic (preserves sign) rather
+// than logical (zero-fills). Either drift independently violates the
+// documented NTSTATUS layout and corrupts ALL severity dispatch above
+// 0x40000000.
+//
+// These tests pin the defect so the fix locks the bit-cast + logical
+// shift contract end-to-end.
+// =============================================================================
+
+@test
+fn regression_info_severity_high_bit_30() {
+    // 0x40000000 → bits 31-30 = 01 → Information
+    let s = STATUS_OBJECT_NAME_EXISTS;
+    assert(s.is_information(),
+           f"is_information must be true for 0x40000000, got code={s.0}");
+}
+
+@test
+fn regression_warn_severity_high_bit_31_with_30_clear() {
+    // 0x80000005 → bits 31-30 = 10 → Warning
+    let s = STATUS_BUFFER_OVERFLOW;
+    assert(s.is_warning(),
+           f"is_warning must be true for 0x80000005, got code={s.0}");
+}
+
+@test
+fn regression_warn_severity_sibling_no_more_files() {
+    // 0x80000006 → bits 31-30 = 10 → Warning
+    let s = STATUS_NO_MORE_FILES;
+    assert(s.is_warning(),
+           f"is_warning must be true for 0x80000006, got code={s.0}");
+}
+
+@test
+fn regression_error_severity_high_bits_both_set() {
+    // 0xC0000001 → bits 31-30 = 11 → Error
+    let s = STATUS_UNSUCCESSFUL;
+    assert(s.is_error(),
+           f"is_error must be true for 0xC0000001, got code={s.0}");
+}
+
+@test
+fn regression_error_severity_sibling_invalid_handle() {
+    let s = STATUS_INVALID_HANDLE;
+    assert(s.is_error(),
+           f"is_error must be true for 0xC0000008, got code={s.0}");
+}
+
+@test
+fn regression_error_severity_sibling_access_denied() {
+    let s = STATUS_ACCESS_DENIED;
+    assert(s.is_error(),
+           f"is_error must be true for 0xC0000022, got code={s.0}");
+}
+
+@test
+fn regression_error_severity_sibling_no_memory() {
+    let s = STATUS_NO_MEMORY;
+    assert(s.is_error(),
+           f"is_error must be true for 0xC0000017, got code={s.0}");
+}
+
+// =============================================================================
+// Defect §A — minimal repro: bit-cast Int32 → UInt32 must zero-extend
+// =============================================================================
+//
+// Smallest reproduction without going through NTSTATUS at all. If this
+// fails, the defect lives in the codegen `as UInt32` arm for negative
+// Int32; if it passes here but the NTSTATUS surface still fails, the
+// defect lives in the predicate's right-shift arm.
+// =============================================================================
+
+@test
+fn regression_int32_negative_cast_to_uint32_preserves_bit_pattern() {
+    let x: Int32 = 0x80000000_u32 as Int32;  // i32 most-negative
+    let y: UInt32 = x as UInt32;
+    // The bit pattern must round-trip — sign-extension or value-clamp would
+    // violate the language's documented bit-cast semantics.
+    assert_eq(y, 0x80000000_u32);
+}
+
+@test
+fn regression_int32_negative_cast_to_uint32_then_right_shift_is_logical() {
+    let x: Int32 = 0x80000000_u32 as Int32;
+    let y: UInt32 = x as UInt32;
+    // Logical right-shift on UInt32 must zero-fill the high bit. If the
+    // VBC interpreter mis-encodes the shift as arithmetic it produces
+    // 0xFFFFFFFE here and severity-bit extraction fails everywhere.
+    assert_eq(y >> 30, 2_u32);
+}
+
+@test
+fn regression_int32_severity_bits_extraction_for_C0000001() {
+    let x: Int32 = 0xC0000001_u32 as Int32;
+    let y: UInt32 = x as UInt32;
+    assert_eq(y >> 30, 3_u32);
+}
+
+@test
+fn regression_int32_severity_bits_extraction_for_40000000() {
+    let x: Int32 = 0x40000000_i32;
+    let y: UInt32 = x as UInt32;
+    assert_eq(y >> 30, 1_u32);
+}
+
+// =============================================================================
+// Defect §B — STATUS_PENDING is Success-domain by NTSTATUS layout, NOT a
+//             retry signal hidden in an error class
+// =============================================================================
+//
+// Locked in here so subsequent edits to is_success() that read the high
+// bit instead of testing >= 0 don't silently reclassify PENDING/TIMEOUT
+// as errors. Both have bits 31-30 = 00.
+// =============================================================================
+
+@test
+fn regression_status_pending_is_success_domain() {
+    let s = STATUS_PENDING;
+    assert(s.is_success());
+    assert(!s.is_information());
+    assert(!s.is_warning());
+    assert(!s.is_error());
+}
+
+@test
+fn regression_status_success_zero_is_success_domain() {
+    let s = STATUS_SUCCESS;
+    assert(s.is_success());
+}

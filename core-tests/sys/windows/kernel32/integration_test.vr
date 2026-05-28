@@ -1,0 +1,344 @@
+// =============================================================================
+// core-tests/sys/windows/kernel32/integration_test.vr
+// =============================================================================
+//
+// Cross-stdlib scenarios that mirror how kernel32 constants compose into
+// the higher-level Verum surfaces — file-flag OR combinators, page
+// protection escalation, wait-code Result funnels, error-class dispatch.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.kernel32.{
+    FILE_FLAG_OVERLAPPED, FILE_FLAG_NO_BUFFERING,
+    FILE_FLAG_SEQUENTIAL_SCAN, FILE_FLAG_RANDOM_ACCESS,
+    FILE_FLAG_WRITE_THROUGH, FILE_FLAG_DELETE_ON_CLOSE,
+    FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_DIRECTORY,
+    FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_READONLY,
+    PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE,
+    PAGE_EXECUTE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE,
+    CREATE_NEW, CREATE_ALWAYS, OPEN_EXISTING, OPEN_ALWAYS, TRUNCATE_EXISTING,
+    WAIT_OBJECT_0, WAIT_ABANDONED, WAIT_TIMEOUT, WAIT_FAILED, INFINITE,
+    ERROR_SUCCESS, ERROR_FILE_NOT_FOUND, ERROR_ACCESS_DENIED,
+    ERROR_INVALID_HANDLE, ERROR_INVALID_PARAMETER, ERROR_IO_PENDING,
+    ERROR_OPERATION_ABORTED, ERROR_TIMEOUT,
+    FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE,
+    FILE_NOTIFY_CHANGE_SIZE, FILE_NOTIFY_CHANGE_ATTRIBUTES,
+};
+
+// =============================================================================
+// Scenario 1 — File-flag OR combinator (async file open)
+// =============================================================================
+
+fn async_random_access_flags() -> UInt32 {
+    FILE_FLAG_OVERLAPPED | FILE_FLAG_RANDOM_ACCESS
+}
+
+@test
+fn integration_async_random_flags_set_two_bits() {
+    let f = async_random_access_flags();
+    assert((f & FILE_FLAG_OVERLAPPED) != 0_u32);
+    assert((f & FILE_FLAG_RANDOM_ACCESS) != 0_u32);
+}
+
+@test
+fn integration_async_random_flags_do_not_set_other_flags() {
+    let f = async_random_access_flags();
+    assert((f & FILE_FLAG_NO_BUFFERING) == 0_u32);
+    assert((f & FILE_FLAG_SEQUENTIAL_SCAN) == 0_u32);
+    assert((f & FILE_FLAG_WRITE_THROUGH) == 0_u32);
+    assert((f & FILE_FLAG_DELETE_ON_CLOSE) == 0_u32);
+}
+
+// =============================================================================
+// Scenario 2 — Page protection escalation table
+// =============================================================================
+
+type AccessLevel is None | Read | Write | Execute | All;
+
+fn page_protection_for(level: AccessLevel) -> UInt32 {
+    match level {
+        AccessLevel.None => PAGE_NOACCESS,
+        AccessLevel.Read => PAGE_READONLY,
+        AccessLevel.Write => PAGE_READWRITE,
+        AccessLevel.Execute => PAGE_EXECUTE,
+        AccessLevel.All => PAGE_EXECUTE_READWRITE,
+    }
+}
+
+@test
+fn integration_page_protection_for_none() {
+    assert_eq(page_protection_for(AccessLevel.None), PAGE_NOACCESS);
+}
+
+@test
+fn integration_page_protection_for_read() {
+    assert_eq(page_protection_for(AccessLevel.Read), PAGE_READONLY);
+}
+
+@test
+fn integration_page_protection_for_write() {
+    assert_eq(page_protection_for(AccessLevel.Write), PAGE_READWRITE);
+}
+
+@test
+fn integration_page_protection_for_execute() {
+    assert_eq(page_protection_for(AccessLevel.Execute), PAGE_EXECUTE);
+}
+
+@test
+fn integration_page_protection_for_all() {
+    assert_eq(page_protection_for(AccessLevel.All), PAGE_EXECUTE_READWRITE);
+}
+
+// =============================================================================
+// Scenario 3 — Wait-code Result funnel
+// =============================================================================
+
+type WaitOutcome is
+    | Signaled
+    | AbandonedMutex
+    | TimedOut
+    | Failed;
+
+fn classify_wait_result(code: UInt32) -> WaitOutcome {
+    if code == WAIT_OBJECT_0 {
+        WaitOutcome.Signaled
+    } else if code == WAIT_ABANDONED {
+        WaitOutcome.AbandonedMutex
+    } else if code == WAIT_TIMEOUT {
+        WaitOutcome.TimedOut
+    } else {
+        WaitOutcome.Failed
+    }
+}
+
+@test
+fn integration_wait_result_signaled() {
+    let r = classify_wait_result(WAIT_OBJECT_0);
+    assert(r is WaitOutcome.Signaled);
+}
+
+@test
+fn integration_wait_result_abandoned() {
+    let r = classify_wait_result(WAIT_ABANDONED);
+    assert(r is WaitOutcome.AbandonedMutex);
+}
+
+@test
+fn integration_wait_result_timed_out() {
+    let r = classify_wait_result(WAIT_TIMEOUT);
+    assert(r is WaitOutcome.TimedOut);
+}
+
+@test
+fn integration_wait_result_failed_for_invalid() {
+    let r = classify_wait_result(WAIT_FAILED);
+    assert(r is WaitOutcome.Failed);
+}
+
+// =============================================================================
+// Scenario 4 — Win32 error class dispatch table
+// =============================================================================
+
+type Win32ErrorClass is
+    | Ok
+    | NotFound
+    | AccessDenied
+    | InvalidHandle
+    | InvalidParameter
+    | InProgress
+    | Aborted
+    | Timeout
+    | Other;
+
+fn classify_win32_error(code: UInt32) -> Win32ErrorClass {
+    if code == ERROR_SUCCESS {
+        Win32ErrorClass.Ok
+    } else if code == ERROR_FILE_NOT_FOUND {
+        Win32ErrorClass.NotFound
+    } else if code == ERROR_ACCESS_DENIED {
+        Win32ErrorClass.AccessDenied
+    } else if code == ERROR_INVALID_HANDLE {
+        Win32ErrorClass.InvalidHandle
+    } else if code == ERROR_INVALID_PARAMETER {
+        Win32ErrorClass.InvalidParameter
+    } else if code == ERROR_IO_PENDING {
+        Win32ErrorClass.InProgress
+    } else if code == ERROR_OPERATION_ABORTED {
+        Win32ErrorClass.Aborted
+    } else if code == ERROR_TIMEOUT {
+        Win32ErrorClass.Timeout
+    } else {
+        Win32ErrorClass.Other
+    }
+}
+
+@test
+fn integration_classify_win32_error_success() {
+    let r = classify_win32_error(ERROR_SUCCESS);
+    assert(r is Win32ErrorClass.Ok);
+}
+
+@test
+fn integration_classify_win32_error_file_not_found() {
+    let r = classify_win32_error(ERROR_FILE_NOT_FOUND);
+    assert(r is Win32ErrorClass.NotFound);
+}
+
+@test
+fn integration_classify_win32_error_access_denied() {
+    let r = classify_win32_error(ERROR_ACCESS_DENIED);
+    assert(r is Win32ErrorClass.AccessDenied);
+}
+
+@test
+fn integration_classify_win32_error_invalid_handle() {
+    let r = classify_win32_error(ERROR_INVALID_HANDLE);
+    assert(r is Win32ErrorClass.InvalidHandle);
+}
+
+@test
+fn integration_classify_win32_error_in_progress() {
+    let r = classify_win32_error(ERROR_IO_PENDING);
+    assert(r is Win32ErrorClass.InProgress);
+}
+
+@test
+fn integration_classify_win32_error_timeout() {
+    let r = classify_win32_error(ERROR_TIMEOUT);
+    assert(r is Win32ErrorClass.Timeout);
+}
+
+@test
+fn integration_classify_win32_error_unknown_is_other() {
+    let r = classify_win32_error(999999_u32);
+    assert(r is Win32ErrorClass.Other);
+}
+
+// =============================================================================
+// Scenario 5 — Notify-change subscription mask
+// =============================================================================
+
+fn file_metadata_notify_mask() -> UInt32 {
+    FILE_NOTIFY_CHANGE_FILE_NAME
+        | FILE_NOTIFY_CHANGE_LAST_WRITE
+        | FILE_NOTIFY_CHANGE_SIZE
+        | FILE_NOTIFY_CHANGE_ATTRIBUTES
+}
+
+@test
+fn integration_notify_mask_includes_file_name() {
+    let m = file_metadata_notify_mask();
+    assert((m & FILE_NOTIFY_CHANGE_FILE_NAME) != 0_u32);
+}
+
+@test
+fn integration_notify_mask_includes_last_write() {
+    let m = file_metadata_notify_mask();
+    assert((m & FILE_NOTIFY_CHANGE_LAST_WRITE) != 0_u32);
+}
+
+@test
+fn integration_notify_mask_includes_size() {
+    let m = file_metadata_notify_mask();
+    assert((m & FILE_NOTIFY_CHANGE_SIZE) != 0_u32);
+}
+
+@test
+fn integration_notify_mask_includes_attributes() {
+    let m = file_metadata_notify_mask();
+    assert((m & FILE_NOTIFY_CHANGE_ATTRIBUTES) != 0_u32);
+}
+
+// =============================================================================
+// Scenario 6 — Creation-disposition decision tree
+// =============================================================================
+
+type OpenMode is
+    | CreateOnlyIfMissing
+    | ReplaceOrCreate
+    | OpenExistingOrFail
+    | OpenOrCreate
+    | OpenAndTruncate;
+
+fn creation_disposition_for(mode: OpenMode) -> UInt32 {
+    match mode {
+        OpenMode.CreateOnlyIfMissing => CREATE_NEW,
+        OpenMode.ReplaceOrCreate => CREATE_ALWAYS,
+        OpenMode.OpenExistingOrFail => OPEN_EXISTING,
+        OpenMode.OpenOrCreate => OPEN_ALWAYS,
+        OpenMode.OpenAndTruncate => TRUNCATE_EXISTING,
+    }
+}
+
+@test
+fn integration_create_disposition_create_only_if_missing() {
+    assert_eq(creation_disposition_for(OpenMode.CreateOnlyIfMissing), CREATE_NEW);
+}
+
+@test
+fn integration_create_disposition_replace_or_create() {
+    assert_eq(creation_disposition_for(OpenMode.ReplaceOrCreate), CREATE_ALWAYS);
+}
+
+@test
+fn integration_create_disposition_open_existing_or_fail() {
+    assert_eq(creation_disposition_for(OpenMode.OpenExistingOrFail), OPEN_EXISTING);
+}
+
+@test
+fn integration_create_disposition_open_or_create() {
+    assert_eq(creation_disposition_for(OpenMode.OpenOrCreate), OPEN_ALWAYS);
+}
+
+@test
+fn integration_create_disposition_open_and_truncate() {
+    assert_eq(creation_disposition_for(OpenMode.OpenAndTruncate), TRUNCATE_EXISTING);
+}
+
+// =============================================================================
+// Scenario 7 — File attribute composition
+// =============================================================================
+
+fn hidden_directory_attrs() -> UInt32 {
+    FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_HIDDEN
+}
+
+@test
+fn integration_hidden_dir_has_directory_bit() {
+    let a = hidden_directory_attrs();
+    assert((a & FILE_ATTRIBUTE_DIRECTORY) != 0_u32);
+}
+
+@test
+fn integration_hidden_dir_has_hidden_bit() {
+    let a = hidden_directory_attrs();
+    assert((a & FILE_ATTRIBUTE_HIDDEN) != 0_u32);
+}
+
+@test
+fn integration_hidden_dir_does_not_have_normal_bit() {
+    let a = hidden_directory_attrs();
+    assert((a & FILE_ATTRIBUTE_NORMAL) == 0_u32);
+}
+
+@test
+fn integration_hidden_dir_does_not_have_readonly_bit() {
+    let a = hidden_directory_attrs();
+    assert((a & FILE_ATTRIBUTE_READONLY) == 0_u32);
+}
+
+// =============================================================================
+// Scenario 8 — Use INFINITE as wait-timeout argument idiom
+// =============================================================================
+
+fn use_infinite_as_timeout() -> UInt32 {
+    INFINITE
+}
+
+@test
+fn integration_infinite_timeout_argument() {
+    let t = use_infinite_as_timeout();
+    assert_eq(t, 0xFFFFFFFF_u32);
+}

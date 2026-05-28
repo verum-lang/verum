@@ -1,0 +1,105 @@
+// =============================================================================
+// core-tests/sys/windows/kernel32/regression_test.vr
+// =============================================================================
+//
+// One @test per past defect.  Never delete.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.kernel32.{
+    FILE_FLAG_WRITE_THROUGH,
+    FILE_FLAG_OVERLAPPED,
+    MEM_RESET,
+    PAGE_GUARD,
+    STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE,
+    WAIT_FAILED, INFINITE,
+    ERROR_TIMEOUT,
+};
+
+// =============================================================================
+// Defect §A — high-bit UInt32 const round-trip
+// =============================================================================
+//
+// FILE_FLAG_WRITE_THROUGH = 0x80000000 — the only top-bit-set FILE_FLAG_*
+// in kernel32.  Pre-VBC-fix, this constant compared unequal to literals
+// with the same bit pattern because the sign-extension drift through
+// the 48-bit Int payload mis-encoded the value.  See sister defect class
+// pinned by ntstatus §A.
+// =============================================================================
+
+@test
+fn regression_file_flag_write_through_high_bit_set() {
+    assert_eq(FILE_FLAG_WRITE_THROUGH, 0x80000000_u32);
+}
+
+@test
+fn regression_file_flag_overlapped_high_bit_set() {
+    assert_eq(FILE_FLAG_OVERLAPPED, 0x40000000_u32);
+}
+
+@test
+fn regression_std_input_handle_round_trip_negative_uint32() {
+    // STD_INPUT_HANDLE is documented as -10; the UInt32 round-trip
+    // must preserve the two's-complement bit pattern 0xFFFFFFF6.
+    assert_eq(STD_INPUT_HANDLE, 0xFFFFFFF6_u32);
+}
+
+@test
+fn regression_std_output_handle_round_trip_negative_uint32() {
+    assert_eq(STD_OUTPUT_HANDLE, 0xFFFFFFF5_u32);
+}
+
+@test
+fn regression_std_error_handle_round_trip_negative_uint32() {
+    assert_eq(STD_ERROR_HANDLE, 0xFFFFFFF4_u32);
+}
+
+// =============================================================================
+// Defect §B — WAIT_FAILED ≡ INFINITE bit-pattern equality
+// =============================================================================
+//
+// Both are documented as 0xFFFFFFFF.  A future edit that drifts one to
+// something else (e.g. 0xFFFFFFFE for INFINITE) would break every wait-loop
+// caller whose timeout argument and return-value classification share the
+// same sentinel.
+// =============================================================================
+
+@test
+fn regression_wait_failed_equals_infinite() {
+    assert_eq(WAIT_FAILED, INFINITE);
+    assert_eq(WAIT_FAILED, 0xFFFFFFFF_u32);
+}
+
+// =============================================================================
+// Defect §C — ERROR_TIMEOUT value pin (1460)
+// =============================================================================
+//
+// ERROR_TIMEOUT (1460) is far from the small-error cluster (0..=200) and
+// is the easiest to silently mis-type as 1640 / 4160 / etc.  Pin the
+// exact value here so any rename is caught immediately.
+// =============================================================================
+
+@test
+fn regression_error_timeout_is_1460() {
+    assert_eq(ERROR_TIMEOUT, 1460_u32);
+}
+
+// =============================================================================
+// Defect §D — MEM_RESET / PAGE_GUARD bit positions
+// =============================================================================
+//
+// These two constants live ABOVE the normal MEM_* / PAGE_* cluster
+// (MEM_RESET at bit 19 / PAGE_GUARD at bit 8) and are easy to confuse
+// with their sibling-cluster bits.
+// =============================================================================
+
+@test
+fn regression_mem_reset_is_bit_19() {
+    assert_eq(MEM_RESET, 0x00080000_u32);
+}
+
+@test
+fn regression_page_guard_is_bit_8() {
+    assert_eq(PAGE_GUARD, 0x100_u32);
+}

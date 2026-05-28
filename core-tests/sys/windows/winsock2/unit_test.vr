@@ -1,0 +1,224 @@
+// =============================================================================
+// core-tests/sys/windows/winsock2/unit_test.vr
+// =============================================================================
+//
+// Unit tests for `core.sys.windows.winsock2` — Winsock2 FFI module
+// providing POSIX-compatible wrappers for cross-platform `core.net`.
+// Pins all POSIX-name socket constants at their Winsock2 numeric values
+// and the WindowsSockaddrIn / WindowsSockaddrIn6 record shapes.
+//
+// FFI bindings (socket / connect / send / recv / setsockopt / ...) can
+// only run on a Windows host; deferred.
+//
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.winsock2.{
+    // Address families
+    AF_INET, AF_INET6,
+    // Socket types
+    SOCK_STREAM, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_CLOEXEC,
+    // Protocols
+    IPPROTO_TCP, IPPROTO_UDP,
+    // Option levels
+    SOL_SOCKET, SOL_TCP,
+    // Socket options
+    SO_ERROR,
+    // Shutdown modes
+    SHUT_RD, SHUT_WR, SHUT_RDWR,
+    // Message flags
+    MSG_PEEK, MSG_DONTWAIT,
+    // Error sentinels
+    SOCKET_ERROR, INVALID_SOCKET,
+    // Types
+    WindowsSockaddrIn, WindowsSockaddrIn6,
+};
+
+// =============================================================================
+// Section 1 — Address families (POSIX-compat numeric)
+// =============================================================================
+
+@test
+fn test_af_inet_is_2() {
+    assert_eq(AF_INET, 2);
+}
+
+@test
+fn test_af_inet6_is_23_on_windows() {
+    // Windows uses AF_INET6 = 23 (not the Linux value 10).
+    assert_eq(AF_INET6, 23);
+}
+
+// =============================================================================
+// Section 2 — Socket types
+// =============================================================================
+
+@test
+fn test_sock_stream_is_1() {
+    assert_eq(SOCK_STREAM, 1);
+}
+
+@test
+fn test_sock_dgram_is_2() {
+    assert_eq(SOCK_DGRAM, 2);
+}
+
+@test
+fn test_sock_nonblock_is_no_op_on_windows() {
+    // Windows handles non-blocking via ioctlsocket(FIONBIO), not via a
+    // socket() type flag.  SOCK_NONBLOCK MUST be 0 (no-op) for
+    // cross-platform code to compose correctly.
+    assert_eq(SOCK_NONBLOCK, 0);
+}
+
+@test
+fn test_sock_cloexec_is_no_op_on_windows() {
+    // Windows handles inheritance via SetHandleInformation; SOCK_CLOEXEC
+    // MUST be 0 (no-op) for cross-platform code to compose correctly.
+    assert_eq(SOCK_CLOEXEC, 0);
+}
+
+// =============================================================================
+// Section 3 — Protocol numbers (IANA)
+// =============================================================================
+
+@test
+fn test_ipproto_tcp_is_6() {
+    assert_eq(IPPROTO_TCP, 6);
+}
+
+@test
+fn test_ipproto_udp_is_17() {
+    assert_eq(IPPROTO_UDP, 17);
+}
+
+// =============================================================================
+// Section 4 — Socket option levels
+// =============================================================================
+
+@test
+fn test_sol_socket_is_ffff_on_windows() {
+    // Windows uses SOL_SOCKET = 0xFFFF (not the Linux value 1).
+    assert_eq(SOL_SOCKET, 0xFFFF);
+}
+
+@test
+fn test_sol_tcp_equals_ipproto_tcp() {
+    // Cross-platform invariant — SOL_TCP and IPPROTO_TCP are the same
+    // numeric (6) per RFC.
+    assert_eq(SOL_TCP, IPPROTO_TCP);
+}
+
+@test
+fn test_so_error_value() {
+    // Windows-specific value 0x1007 (not the Linux value 4).
+    assert_eq(SO_ERROR, 0x1007);
+}
+
+// =============================================================================
+// Section 5 — Shutdown modes (POSIX-compat)
+// =============================================================================
+
+@test
+fn test_shut_rd_is_zero() {
+    // Maps to Windows SD_RECEIVE.
+    assert_eq(SHUT_RD, 0);
+}
+
+@test
+fn test_shut_wr_is_one() {
+    // Maps to Windows SD_SEND.
+    assert_eq(SHUT_WR, 1);
+}
+
+@test
+fn test_shut_rdwr_is_two() {
+    // Maps to Windows SD_BOTH.
+    assert_eq(SHUT_RDWR, 2);
+}
+
+@test
+fn test_shut_modes_pairwise_distinct() {
+    assert(SHUT_RD != SHUT_WR);
+    assert(SHUT_RD != SHUT_RDWR);
+    assert(SHUT_WR != SHUT_RDWR);
+}
+
+// =============================================================================
+// Section 6 — Message flags
+// =============================================================================
+
+@test
+fn test_msg_peek_is_2_on_windows() {
+    assert_eq(MSG_PEEK, 2);
+}
+
+@test
+fn test_msg_dontwait_is_no_op_on_windows() {
+    // Windows doesn't have MSG_DONTWAIT; non-blocking is via ioctlsocket
+    // FIONBIO.  MUST be 0 for cross-platform code.
+    assert_eq(MSG_DONTWAIT, 0);
+}
+
+// =============================================================================
+// Section 7 — Error sentinels
+// =============================================================================
+
+@test
+fn test_socket_error_is_neg_one() {
+    // POSIX-compat sentinel for return-value error indication.
+    assert_eq(SOCKET_ERROR, -1);
+}
+
+@test
+fn test_invalid_socket_is_all_ones() {
+    // Windows-specific INVALID_SOCKET sentinel — distinct from Linux's
+    // -1 because Windows SOCKETs are unsigned UINT_PTR.
+    assert_eq(INVALID_SOCKET, 0xFFFFFFFFFFFFFFFF_u64);
+}
+
+// =============================================================================
+// Section 8 — WindowsSockaddrIn binary shape (sockaddr_in)
+// =============================================================================
+
+@test
+fn test_sockaddr_in_construction_round_trip() {
+    let sa = WindowsSockaddrIn {
+        family: AF_INET as UInt16,
+        port: 8080_u16,
+        addr: 0x0100007F_u32,   // 127.0.0.1 in network byte order
+        zero: 0_u64,
+    };
+    assert_eq(sa.family, 2_u16);
+    assert_eq(sa.port, 8080_u16);
+    assert_eq(sa.addr, 0x0100007F_u32);
+    assert_eq(sa.zero, 0_u64);
+}
+
+// =============================================================================
+// Section 9 — WindowsSockaddrIn6 binary shape (sockaddr_in6)
+// =============================================================================
+
+@test
+fn test_sockaddr_in6_field_round_trip_via_let() {
+    let mut addr_bytes: List<Byte> = List.new();
+    let mut i = 0;
+    while i < 15 {
+        addr_bytes.push(0_u8);
+        i = i + 1;
+    }
+    addr_bytes.push(1_u8);  // ::1 — only the last byte is 1
+    let sa = WindowsSockaddrIn6 {
+        family: AF_INET6 as UInt16,
+        port: 443_u16,
+        flowinfo: 0_u32,
+        addr: addr_bytes,
+        scope_id: 0_u32,
+    };
+    assert_eq(sa.family, 23_u16);
+    assert_eq(sa.port, 443_u16);
+    assert_eq(sa.flowinfo, 0_u32);
+    assert_eq(sa.scope_id, 0_u32);
+    assert_eq(sa.addr.len(), 16);
+    assert_eq(sa.addr[15], 1_u8);
+}

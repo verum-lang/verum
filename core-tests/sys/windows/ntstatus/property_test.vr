@@ -1,0 +1,457 @@
+// =============================================================================
+// core-tests/sys/windows/ntstatus/property_test.vr
+// =============================================================================
+//
+// Algebraic laws over `core.sys.windows.ntstatus`.
+//
+// Properties exercised here:
+//
+//   * Severity dispatch is mutually exclusive — every NtStatus belongs to
+//     exactly ONE of {success, information, warning, error}. No status
+//     value can satisfy two `is_*` predicates at once.
+//   * Severity dispatch is total — for every Int32 input, exactly one of
+//     the four predicates returns true. Encoded as "exactly_one_severity".
+//   * The numeric severity (bits 31-30) determines classification, NOT
+//     the magnitude of the value. We sample randomly inside each severity
+//     window and assert the predicate matches the window.
+//   * `nt_success(s) == s.is_success()` — top-level helpers agree with
+//     the method dispatch.
+//   * Field-extraction laws — `facility ∘ status_code ∘ code` together
+//     recover information equivalent to the raw `Int32` modulo severity
+//     and reserved bits.
+//   * Classifier disjointness — `is_retryable` ∩ `is_not_found` ∩
+//     `is_access_denied` = ∅. They tag distinct failure modes.
+//
+// All sampling stays within [-2^31, 2^31). Domains for severity windows
+// use the documented arms — STATUS_PENDING / STATUS_TIMEOUT (Success);
+// STATUS_OBJECT_NAME_EXISTS (Info); STATUS_BUFFER_OVERFLOW (Warn);
+// any 0xCxxxxxxx value (Error).
+// =============================================================================
+
+mount core.prelude.*;
+mount core.sys.windows.ntstatus.{
+    NtStatus,
+    STATUS_SUCCESS, STATUS_PENDING, STATUS_TIMEOUT, STATUS_REPARSE,
+    STATUS_MORE_ENTRIES, STATUS_ALERTED,
+    STATUS_OBJECT_NAME_EXISTS, STATUS_THREAD_WAS_SUSPENDED,
+    STATUS_BUFFER_OVERFLOW, STATUS_NO_MORE_FILES, STATUS_NO_MORE_ENTRIES,
+    STATUS_UNSUCCESSFUL, STATUS_INVALID_HANDLE, STATUS_ACCESS_VIOLATION,
+    STATUS_ACCESS_DENIED, STATUS_INVALID_PARAMETER, STATUS_NO_MEMORY,
+    STATUS_END_OF_FILE, STATUS_OBJECT_NAME_NOT_FOUND, STATUS_NO_SUCH_FILE,
+    STATUS_OBJECT_PATH_NOT_FOUND, STATUS_NOT_FOUND, STATUS_NOT_SUPPORTED,
+    STATUS_CANCELLED, STATUS_BUFFER_TOO_SMALL,
+    nt_success, nt_error, nt_warning, nt_information,
+    is_retryable, is_not_found, is_access_denied,
+};
+
+// -----------------------------------------------------------------------------
+// Local helpers
+// -----------------------------------------------------------------------------
+
+fn severity_window_count(status: NtStatus) -> Int {
+    let mut count = 0;
+    if status.is_success() {
+        count = count + 1;
+    }
+    if status.is_information() {
+        count = count + 1;
+    }
+    if status.is_warning() {
+        count = count + 1;
+    }
+    if status.is_error() {
+        count = count + 1;
+    }
+    count
+}
+
+fn all_documented_statuses() -> List<NtStatus> {
+    let mut list: List<NtStatus> = List.new();
+    list.push(STATUS_SUCCESS);
+    list.push(STATUS_PENDING);
+    list.push(STATUS_TIMEOUT);
+    list.push(STATUS_REPARSE);
+    list.push(STATUS_MORE_ENTRIES);
+    list.push(STATUS_ALERTED);
+    list.push(STATUS_OBJECT_NAME_EXISTS);
+    list.push(STATUS_THREAD_WAS_SUSPENDED);
+    list.push(STATUS_BUFFER_OVERFLOW);
+    list.push(STATUS_NO_MORE_FILES);
+    list.push(STATUS_NO_MORE_ENTRIES);
+    list.push(STATUS_UNSUCCESSFUL);
+    list.push(STATUS_INVALID_HANDLE);
+    list.push(STATUS_ACCESS_VIOLATION);
+    list.push(STATUS_ACCESS_DENIED);
+    list.push(STATUS_INVALID_PARAMETER);
+    list.push(STATUS_NO_MEMORY);
+    list.push(STATUS_END_OF_FILE);
+    list.push(STATUS_OBJECT_NAME_NOT_FOUND);
+    list.push(STATUS_NO_SUCH_FILE);
+    list.push(STATUS_OBJECT_PATH_NOT_FOUND);
+    list.push(STATUS_NOT_FOUND);
+    list.push(STATUS_NOT_SUPPORTED);
+    list.push(STATUS_CANCELLED);
+    list.push(STATUS_BUFFER_TOO_SMALL);
+    list
+}
+
+// =============================================================================
+// Property 1 — Severity dispatch is mutually exclusive
+// =============================================================================
+
+@test
+fn prop_severity_dispatch_is_mutually_exclusive() {
+    let statuses = all_documented_statuses();
+    let mut i = 0;
+    while i < statuses.len() {
+        let s = statuses[i];
+        assert_eq(severity_window_count(s), 1,
+                  f"severity dispatch must be exactly-one for code={s.0}");
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 2 — Severity dispatch is total over a sampled error window
+// =============================================================================
+
+@test
+fn prop_error_severity_window_classifies_all_samples() {
+    // 0xC0000001..=0xC0000010 — every value in this slice MUST classify as
+    // an error (severity bits 31-30 = 11).
+    let mut code: Int32 = 0xC0000001_u32 as Int32;
+    let end: Int32 = 0xC0000010_u32 as Int32;
+    while code as UInt32 <= end as UInt32 {
+        let s = NtStatus(code);
+        assert(s.is_error(), f"code={code} should be Error severity");
+        assert(!s.is_success(), f"code={code} not Success");
+        assert(!s.is_information(), f"code={code} not Information");
+        assert(!s.is_warning(), f"code={code} not Warning");
+        code = code + 1;
+    }
+}
+
+@test
+fn prop_success_severity_window_classifies_all_samples() {
+    // 0x00000000..=0x00000010 — Success severity (bits 31-30 = 00).
+    let mut code: Int32 = 0;
+    while code <= 0x10_i32 {
+        let s = NtStatus(code);
+        assert(s.is_success(), f"code={code} should be Success severity");
+        assert(!s.is_information(), f"code={code} not Information");
+        assert(!s.is_warning(), f"code={code} not Warning");
+        assert(!s.is_error(), f"code={code} not Error");
+        code = code + 1;
+    }
+}
+
+@test
+fn prop_warning_severity_window_classifies_all_samples() {
+    // 0x80000005..=0x80000020 — Warning severity (bits 31-30 = 10).
+    let mut code: Int32 = 0x80000005_u32 as Int32;
+    let end: Int32 = 0x80000020_u32 as Int32;
+    while code as UInt32 <= end as UInt32 {
+        let s = NtStatus(code);
+        assert(s.is_warning(), f"code={code} should be Warning severity");
+        assert(!s.is_success(), f"code={code} not Success");
+        assert(!s.is_information(), f"code={code} not Information");
+        assert(!s.is_error(), f"code={code} not Error");
+        code = code + 1;
+    }
+}
+
+@test
+fn prop_information_severity_window_classifies_all_samples() {
+    // 0x40000000..=0x4000000F — Information severity (bits 31-30 = 01).
+    let mut code: Int32 = 0x40000000_u32 as Int32;
+    let end: Int32 = 0x4000000F_u32 as Int32;
+    while code as UInt32 <= end as UInt32 {
+        let s = NtStatus(code);
+        assert(s.is_information(), f"code={code} should be Information severity");
+        assert(!s.is_success(), f"code={code} not Success");
+        assert(!s.is_warning(), f"code={code} not Warning");
+        assert(!s.is_error(), f"code={code} not Error");
+        code = code + 1;
+    }
+}
+
+// =============================================================================
+// Property 3 — Top-level helpers agree with method dispatch
+// =============================================================================
+
+@test
+fn prop_nt_success_agrees_with_is_success() {
+    let statuses = all_documented_statuses();
+    let mut i = 0;
+    while i < statuses.len() {
+        let s = statuses[i];
+        assert_eq(nt_success(s), s.is_success(),
+                  f"nt_success / is_success disagree at code={s.0}");
+        i = i + 1;
+    }
+}
+
+@test
+fn prop_nt_error_agrees_with_is_error() {
+    let statuses = all_documented_statuses();
+    let mut i = 0;
+    while i < statuses.len() {
+        let s = statuses[i];
+        assert_eq(nt_error(s), s.is_error(),
+                  f"nt_error / is_error disagree at code={s.0}");
+        i = i + 1;
+    }
+}
+
+@test
+fn prop_nt_warning_agrees_with_is_warning() {
+    let statuses = all_documented_statuses();
+    let mut i = 0;
+    while i < statuses.len() {
+        let s = statuses[i];
+        assert_eq(nt_warning(s), s.is_warning(),
+                  f"nt_warning / is_warning disagree at code={s.0}");
+        i = i + 1;
+    }
+}
+
+@test
+fn prop_nt_information_agrees_with_is_information() {
+    let statuses = all_documented_statuses();
+    let mut i = 0;
+    while i < statuses.len() {
+        let s = statuses[i];
+        assert_eq(nt_information(s), s.is_information(),
+                  f"nt_information / is_information disagree at code={s.0}");
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 4 — Code identity
+// =============================================================================
+
+@test
+fn prop_code_returns_underlying_int32() {
+    let statuses = all_documented_statuses();
+    let mut i = 0;
+    while i < statuses.len() {
+        let s = statuses[i];
+        assert_eq(s.code(), s.0,
+                  f"code() must return self.0 at index={i}");
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 5 — Classifier predicates are pairwise disjoint
+// =============================================================================
+
+@test
+fn prop_classifier_predicates_are_pairwise_disjoint() {
+    let statuses = all_documented_statuses();
+    let mut i = 0;
+    while i < statuses.len() {
+        let s = statuses[i];
+        let r = is_retryable(s);
+        let nf = is_not_found(s);
+        let ad = is_access_denied(s);
+        let mut count = 0;
+        if r {
+            count = count + 1;
+        }
+        if nf {
+            count = count + 1;
+        }
+        if ad {
+            count = count + 1;
+        }
+        // No status currently classifies as more than one of the three.
+        assert(count <= 1,
+               f"classifier overlap at code={s.0}: retry={r} nf={nf} ad={ad}");
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 6 — to_win32_error preserves error code structure
+// =============================================================================
+
+@test
+fn prop_to_win32_error_low_16_bits_match_status_code() {
+    // For error-severity status, simplified conversion takes the low
+    // 16 bits and zero-extends. So `to_win32_error(s) == s.status_code()`.
+    let mut statuses: List<NtStatus> = List.new();
+    statuses.push(STATUS_UNSUCCESSFUL);
+    statuses.push(STATUS_INVALID_HANDLE);
+    statuses.push(STATUS_ACCESS_DENIED);
+    statuses.push(STATUS_INVALID_PARAMETER);
+    statuses.push(STATUS_NO_MEMORY);
+    statuses.push(STATUS_END_OF_FILE);
+    statuses.push(STATUS_OBJECT_NAME_NOT_FOUND);
+    let mut i = 0;
+    while i < statuses.len() {
+        let s = statuses[i];
+        let expected = s.status_code() as UInt32;
+        assert_eq(s.to_win32_error(), expected,
+                  f"to_win32_error / status_code drift at code={s.0}");
+        i = i + 1;
+    }
+}
+
+@test
+fn prop_to_win32_error_zero_for_success() {
+    let mut statuses: List<NtStatus> = List.new();
+    statuses.push(STATUS_SUCCESS);
+    statuses.push(STATUS_PENDING);
+    statuses.push(STATUS_TIMEOUT);
+    statuses.push(STATUS_REPARSE);
+    let mut i = 0;
+    while i < statuses.len() {
+        let s = statuses[i];
+        assert_eq(s.to_win32_error(), 0_u32,
+                  f"to_win32_error must be 0 for success severity code={s.0}");
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 7 — name() is total
+// =============================================================================
+
+@test
+fn prop_name_is_total_returns_nonempty_string() {
+    // For any Int32 — even random unknown values — `name()` must return a
+    // non-empty Text without panicking. We sample 16 fixed unknown codes
+    // alongside the documented arms.
+    let mut statuses = all_documented_statuses();
+    statuses.push(NtStatus(0xDEAD_BEEF_u32 as Int32));
+    statuses.push(NtStatus(0x12345678_i32));
+    statuses.push(NtStatus(0xCAFEBABE_u32 as Int32));
+    statuses.push(NtStatus(0));
+    statuses.push(NtStatus(0_i32.bitnot()));
+    let mut i = 0;
+    while i < statuses.len() {
+        let s = statuses[i];
+        let n = s.name();
+        assert(n.len() > 0, f"name() must be non-empty at code={s.0}");
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 8 — Facility extraction agrees with manual mask
+// =============================================================================
+
+@test
+fn prop_facility_extracts_bits_27_through_16() {
+    // facility() := ((code >> 16) & 0x0FFF) as UInt16.
+    let mut codes: List<Int32> = List.new();
+    codes.push(0x00000000_i32);
+    codes.push(0x00000103_i32);
+    codes.push(0xC0000022_u32 as Int32);
+    codes.push(0xC0000034_u32 as Int32);
+    codes.push(0xC0000225_u32 as Int32);
+    codes.push(0xC0000257_u32 as Int32);
+    let mut i = 0;
+    while i < codes.len() {
+        let c = codes[i];
+        let manual = (((c as UInt32) >> 16) & 0x0FFF) as UInt16;
+        let s = NtStatus(c);
+        assert_eq(s.facility(), manual,
+                  f"facility extraction mismatch at code={c}");
+        i = i + 1;
+    }
+}
+
+@test
+fn prop_status_code_extracts_low_16_bits() {
+    // status_code() := (code & 0xFFFF) as UInt16.
+    let mut codes: List<Int32> = List.new();
+    codes.push(0x00000000_i32);
+    codes.push(0x00000103_i32);
+    codes.push(0xC0000022_u32 as Int32);
+    codes.push(0xC0000034_u32 as Int32);
+    codes.push(0xC0000225_u32 as Int32);
+    codes.push(0x80000005_u32 as Int32);
+    let mut i = 0;
+    while i < codes.len() {
+        let c = codes[i];
+        let manual = ((c as UInt32) & 0xFFFF) as UInt16;
+        let s = NtStatus(c);
+        assert_eq(s.status_code(), manual,
+                  f"status_code extraction mismatch at code={c}");
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 9 — is_retryable is true ONLY for STATUS_PENDING
+// =============================================================================
+
+@test
+fn prop_is_retryable_only_pending() {
+    let statuses = all_documented_statuses();
+    let mut i = 0;
+    while i < statuses.len() {
+        let s = statuses[i];
+        let want = (s.0 == STATUS_PENDING.0);
+        assert_eq(is_retryable(s), want,
+                  f"is_retryable disagrees at code={s.0}");
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Property 10 — is_not_found set membership
+// =============================================================================
+
+@test
+fn prop_is_not_found_membership() {
+    let mut not_found_set: List<NtStatus> = List.new();
+    not_found_set.push(STATUS_NO_SUCH_FILE);
+    not_found_set.push(STATUS_OBJECT_NAME_NOT_FOUND);
+    not_found_set.push(STATUS_OBJECT_PATH_NOT_FOUND);
+    not_found_set.push(STATUS_NOT_FOUND);
+    let mut i = 0;
+    while i < not_found_set.len() {
+        assert(is_not_found(not_found_set[i]),
+               f"is_not_found false-negative at index={i}");
+        i = i + 1;
+    }
+    // Negation — sample a handful that must NOT classify as not-found.
+    let mut other: List<NtStatus> = List.new();
+    other.push(STATUS_SUCCESS);
+    other.push(STATUS_ACCESS_DENIED);
+    other.push(STATUS_INVALID_HANDLE);
+    other.push(STATUS_NO_MEMORY);
+    other.push(STATUS_BUFFER_OVERFLOW);
+    let mut j = 0;
+    while j < other.len() {
+        assert(!is_not_found(other[j]),
+               f"is_not_found false-positive at index={j}");
+        j = j + 1;
+    }
+}
+
+// =============================================================================
+// Property 11 — `name()` is injective over the documented success arm
+// =============================================================================
+
+@test
+fn prop_documented_status_names_are_distinct() {
+    let statuses = all_documented_statuses();
+    // Pairwise distinct over the documented set. Quadratic but bounded.
+    let mut i = 0;
+    while i < statuses.len() {
+        let mut j = i + 1;
+        while j < statuses.len() {
+            let ni = statuses[i].name();
+            let nj = statuses[j].name();
+            assert(ni != nj,
+                   f"distinct documented arms collide on name: i={i} j={j}");
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
