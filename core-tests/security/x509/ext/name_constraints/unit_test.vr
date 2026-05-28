@@ -1,0 +1,109 @@
+// =============================================================================
+// core-tests/security/x509/ext/name_constraints/unit_test.vr
+// =============================================================================
+//
+// `core/security/x509/ext/name_constraints.vr` — Name Constraints
+// extension (RFC 5280 §4.2.1.10).
+// =============================================================================
+
+mount core.security.x509.ext.name_constraints.{GeneralSubtree, NameConstraints};
+mount core.security.x509.ext.subject_alt_name.GeneralName;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: GeneralSubtree record construction
+// =============================================================================
+
+@test
+fn test_general_subtree_dns_name_construction() {
+    let gs: GeneralSubtree = GeneralSubtree {
+        base: GeneralName.DnsName(".example.com".to_text()),
+    };
+    assert(gs.base is GeneralName.DnsName);
+}
+
+@test
+fn test_general_subtree_uri_construction() {
+    let gs: GeneralSubtree = GeneralSubtree {
+        base: GeneralName.Uri("https://example.com/".to_text()),
+    };
+    assert(gs.base is GeneralName.Uri);
+}
+
+@test
+fn test_general_subtree_rfc822_construction() {
+    let gs: GeneralSubtree = GeneralSubtree {
+        base: GeneralName.Rfc822Name("@example.com".to_text()),
+    };
+    assert(gs.base is GeneralName.Rfc822Name);
+}
+
+// =============================================================================
+// Section 2: NameConstraints record construction
+// =============================================================================
+
+@test
+fn test_name_constraints_empty_construction() {
+    let empty_p: List<GeneralSubtree> = [];
+    let empty_e: List<GeneralSubtree> = [];
+    let nc: NameConstraints = NameConstraints {
+        permitted: empty_p,
+        excluded: empty_e,
+    };
+    assert_eq(nc.permitted.len(), 0);
+    assert_eq(nc.excluded.len(), 0);
+}
+
+@test
+fn test_name_constraints_permitted_only() {
+    let mut p: List<GeneralSubtree> = [];
+    p.push(GeneralSubtree {
+        base: GeneralName.DnsName(".internal".to_text()),
+    });
+    let empty_e: List<GeneralSubtree> = [];
+    let nc: NameConstraints = NameConstraints {
+        permitted: p,
+        excluded: empty_e,
+    };
+    assert_eq(nc.permitted.len(), 1);
+    assert_eq(nc.excluded.len(), 0);
+}
+
+@test
+fn test_name_constraints_excluded_only() {
+    let empty_p: List<GeneralSubtree> = [];
+    let mut e: List<GeneralSubtree> = [];
+    e.push(GeneralSubtree {
+        base: GeneralName.DnsName(".bad-tld".to_text()),
+    });
+    let nc: NameConstraints = NameConstraints {
+        permitted: empty_p,
+        excluded: e,
+    };
+    assert_eq(nc.permitted.len(), 0);
+    assert_eq(nc.excluded.len(), 1);
+}
+
+@test
+fn test_name_constraints_both_lists() {
+    let mut p: List<GeneralSubtree> = [];
+    p.push(GeneralSubtree {
+        base: GeneralName.DnsName(".example.com".to_text()),
+    });
+    p.push(GeneralSubtree {
+        base: GeneralName.DnsName(".internal.example.com".to_text()),
+    });
+    let mut e: List<GeneralSubtree> = [];
+    e.push(GeneralSubtree {
+        base: GeneralName.DnsName(".admin.example.com".to_text()),
+    });
+    let nc: NameConstraints = NameConstraints {
+        permitted: p,
+        excluded: e,
+    };
+    assert_eq(nc.permitted.len(), 2);
+    assert_eq(nc.excluded.len(), 1);
+}
+
+fn main() {}
