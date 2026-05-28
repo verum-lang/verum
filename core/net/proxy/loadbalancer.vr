@@ -107,7 +107,7 @@ implement LbPool {
     /// `mark_acquire` on the returned entry.
     public fn pick(&self, req_salt: Int) -> Maybe<Int> {
         let n = self.entries.len();
-        if n == 0 { return None; }
+        if n == 0 { return Maybe.None; }
         match self.strategy {
             RoundRobin        => self.pick_round_robin(n),
             Random            => self.pick_random(n, req_salt),
@@ -132,16 +132,16 @@ implement LbPool {
         while i < n {
             let idx = (start + i) % n;
             if self.entries[idx].healthy() {
-                return Some(idx);
+                return Maybe.Some(idx);
             }
             i = i + 1;
         }
-        None
+        Maybe.None
     }
 
     fn pick_weighted_least_conn(&self) -> Maybe<Int> {
         let n = self.entries.len();
-        let mut best: Maybe<Int> = None;
+        let mut best: Maybe<Int> = Maybe.None;
         let mut best_score: Int = Int.max_value();
         let mut i: Int = 0;
         while i < n {
@@ -155,7 +155,7 @@ implement LbPool {
             let score = (in_flight * 1000) / weight;
             if score < best_score {
                 best_score = score;
-                best = Some(i);
+                best = Maybe.Some(i);
             }
             i = i + 1;
         }
