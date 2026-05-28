@@ -122,7 +122,7 @@ implement<T> RwLock<T> {
                 // futex_wait checks state.value == state and returns
                 // EAGAIN if it doesn't match (covers the race where
                 // state changes between our load and our wait).
-                let _ = sys_futex_wait(&self.state.value, state, None);
+                let _ = sys_futex_wait(&self.state.value, state, Maybe.None);
             }
         }
     }
@@ -172,7 +172,7 @@ implement<T> RwLock<T> {
                 }
             } else {
                 // Readers or writer present — sleep via futex until state changes
-                let _ = sys_futex_wait(&self.state.value, state, None);
+                let _ = sys_futex_wait(&self.state.value, state, Maybe.None);
             }
         }
     }

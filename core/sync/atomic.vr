@@ -1271,18 +1271,18 @@ implement FutexLock {
             // Linux: SYS_futex syscall, macOS: __ulock_wait
             @cfg(target_os = "linux")
             {
-                let _ = sys_futex_wait(&self.state.value, FUTEX_LOCKED_CONTENDED, None);
+                let _ = sys_futex_wait(&self.state.value, FUTEX_LOCKED_CONTENDED, Maybe.None);
             }
 
             @cfg(target_os = "macos")
             {
-                let _ = sys_futex_wait(&self.state.value, FUTEX_LOCKED_CONTENDED, None);
+                let _ = sys_futex_wait(&self.state.value, FUTEX_LOCKED_CONTENDED, Maybe.None);
             }
 
             // Windows: kernel-assisted sleep via WaitOnAddress
             @cfg(target_os = "windows")
             {
-                let _ = sys_futex_wait(&self.state.value, FUTEX_LOCKED_CONTENDED, None);
+                let _ = sys_futex_wait(&self.state.value, FUTEX_LOCKED_CONTENDED, Maybe.None);
             }
         }
     }

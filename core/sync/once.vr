@@ -411,7 +411,7 @@ implement<T> OnceLock<T> {
     public fn new() -> OnceLock<T> {
         OnceLock {
             once: Once.new(),
-            value: None,
+            value: Maybe.None,
         }
     }
 
@@ -421,7 +421,7 @@ implement<T> OnceLock<T> {
             let v = f();
             unsafe {
                 let ptr = &self.value as *const Maybe<T> as *mut Maybe<T>;
-                *ptr = Some(v);
+                *ptr = Maybe.Some(v);
             }
         });
 
@@ -433,7 +433,7 @@ implement<T> OnceLock<T> {
         if self.once.is_completed() {
             self.value.as_ref()
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -465,7 +465,7 @@ implement<T> OnceLock<T> {
         if self.once.is_completed() {
             self.value.take()
         } else {
-            None
+            Maybe.None
         }
     }
 
@@ -525,7 +525,7 @@ implement<T> OnceLock<T> {
                     Ok(v) => {
                         unsafe {
                             let ptr = &self.value as *const Maybe<T> as *mut Maybe<T>;
-                            *ptr = Some(v);
+                            *ptr = Maybe.Some(v);
                         }
                         self.once.state.store(COMPLETE, MemoryOrdering.Release);
                         return Ok(self.value.as_ref().expect("OnceLock invariant: value must be Some after call_once completed"));
@@ -612,7 +612,7 @@ implement<T> OnceLock<T> {
                 // We won — store value, publish COMPLETE.
                 unsafe {
                     let ptr = &self.value as *const Maybe<T> as *mut Maybe<T>;
-                    *ptr = Some(value);
+                    *ptr = Maybe.Some(value);
                 }
                 self.once.state.store(COMPLETE, MemoryOrdering.Release);
                 return Ok(self.value.as_ref().expect("OnceLock invariant: value must be Some after call_once completed"));

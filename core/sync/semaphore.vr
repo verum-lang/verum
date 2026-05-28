@@ -103,7 +103,7 @@ implement Semaphore {
             // Re-check permits before sleeping (avoid missed wakeup)
             let snap = self.permits.load(MemoryOrdering.Acquire);
             if snap == 0 {
-                let _ = sys_futex_wait(&self.permits.value, 0, None);
+                let _ = sys_futex_wait(&self.permits.value, 0, Maybe.None);
             }
             self.waiters.fetch_sub(1, MemoryOrdering.Relaxed);
         }
@@ -128,7 +128,7 @@ implement Semaphore {
             self.waiters.fetch_add(1, MemoryOrdering.Release);
             let snap = self.permits.load(MemoryOrdering.Acquire);
             if snap < n {
-                let _ = sys_futex_wait(&self.permits.value, snap, None);
+                let _ = sys_futex_wait(&self.permits.value, snap, Maybe.None);
             }
             self.waiters.fetch_sub(1, MemoryOrdering.Relaxed);
         }
