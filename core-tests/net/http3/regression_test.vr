@@ -1,0 +1,158 @@
+// =============================================================================
+// core-tests/net/http3/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN pins for `core/net/http3/`:
+//
+//   * Active pins fix wire-format constants (H3FrameType.to_u64 wire IDs
+//     + SETTINGS parameter IDs + Http3ErrorCode constants). These are
+//     IANA-registered per RFC 9114 §11.2.1 / §7.2.4.1 + RFC 9204 §6 and
+//     consumed by `quic_encode_into` / `quic_decode` at the codec boundary.
+//
+//   * `@ignore`'d pins document the functional surface (encode/decode
+//     round-trips, QPACK encoder/decoder, connection state machine).
+//     See `audit.md §3.1` (HTTP3-1) and `§3.2` (HTTP3-2 — h3 duplication).
+//
+// =============================================================================
+
+mount core.net.http3.frame.{
+    H3FrameType, Http3Frame,
+    H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY,
+    H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
+    H3_SETTINGS_QPACK_BLOCKED_STREAMS,
+    write_varint, read_varint
+};
+mount core.net.http3.error.{Http3Error, Http3ErrorCode};
+
+// =============================================================================
+// Section 1: Active LOCK-IN pins — H3FrameType.to_u64 wire IDs
+// =============================================================================
+//
+// Each pin matches the RFC 9114 §11.2.1 registry value-for-value. The
+// frame loop at `core.net.http3.connection` reads these directly when
+// dispatching incoming frames; drift here would route every received
+// frame to the wrong variant.
+// =============================================================================
+
+@test
+fn regression_http3_frame_type_data_pinned_0x0() {
+    // RFC 9114 §7.2.1: DATA — body chunks.
+    assert_eq(H3FrameType.Data.to_u64(), 0x0_u64);
+}
+
+@test
+fn regression_http3_frame_type_headers_pinned_0x1() {
+    // RFC 9114 §7.2.2: HEADERS — QPACK-encoded field section.
+    assert_eq(H3FrameType.Headers.to_u64(), 0x1_u64);
+}
+
+@test
+fn regression_http3_frame_type_settings_pinned_0x4() {
+    // RFC 9114 §7.2.4: SETTINGS — control-stream-only param negotiation.
+    assert_eq(H3FrameType.Settings.to_u64(), 0x4_u64);
+}
+
+@test
+fn regression_http3_frame_type_goaway_pinned_0x7() {
+    // RFC 9114 §5.2: GOAWAY — graceful shutdown.
+    assert_eq(H3FrameType.GoAway.to_u64(), 0x7_u64);
+}
+
+@test
+fn regression_http3_frame_type_max_push_id_pinned_0xd() {
+    // RFC 9114 §7.2.7: MAX_PUSH_ID — push budget signal.
+    assert_eq(H3FrameType.MaxPushId.to_u64(), 0xD_u64);
+}
+
+// =============================================================================
+// Section 2: Active LOCK-IN pins — SETTINGS parameter IDs (RFC 9114 §7.2.4.1)
+// =============================================================================
+
+@test
+fn regression_http3_setting_qpack_max_pinned_0x01() {
+    assert_eq(H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY, 0x01_u64);
+}
+
+@test
+fn regression_http3_setting_max_field_section_pinned_0x06() {
+    assert_eq(H3_SETTINGS_MAX_FIELD_SECTION_SIZE, 0x06_u64);
+}
+
+@test
+fn regression_http3_setting_qpack_blocked_streams_pinned_0x07() {
+    assert_eq(H3_SETTINGS_QPACK_BLOCKED_STREAMS, 0x07_u64);
+}
+
+// =============================================================================
+// Section 3: Active LOCK-IN pins — Http3ErrorCode RFC 9114 §8.1 constants
+// =============================================================================
+
+@test
+fn regression_http3_error_code_h3_no_error_pinned_0x100() {
+    // RFC 9114 §8.1: H3_NO_ERROR — emitted in GOAWAY for clean shutdown.
+    assert_eq(Http3ErrorCode.H3_NO_ERROR, 0x100_u64);
+}
+
+@test
+fn regression_http3_error_code_qpack_decompression_failed_pinned_0x200() {
+    // RFC 9204 §6: QPACK error codes live in their 0x200 range.
+    assert_eq(Http3ErrorCode.QPACK_DECOMPRESSION_FAILED, 0x200_u64);
+}
+
+// =============================================================================
+// Section 4: @ignore'd functional pins — HTTP3-1 frame codec round-trip
+// =============================================================================
+
+@ignore("HTTP3-1: frame encode/decode round-trip requires harness. See audit.md §3.1.")
+@test
+fn regression_http3_frame_type_from_to_round_trip_all_well_known() {
+    // RFC 9114 §11.2.1: every well-known wire ID must round-trip
+    // through to_u64 ∘ from_u64.
+    let ids: List<UInt64> = [0x0_u64, 0x1_u64, 0x3_u64, 0x4_u64, 0x5_u64, 0x7_u64, 0xD_u64];
+    let mut i: Int = 0;
+    while i < ids.len() {
+        let id = ids[i];
+        let t = H3FrameType.from_u64(id);
+        assert_eq(t.to_u64(), id);
+        i = i + 1;
+    }
+}
+
+@ignore("HTTP3-1: varint encode/decode round-trip requires harness. See audit.md §3.1.")
+@test
+fn regression_http3_varint_round_trip_small_value() {
+    // Deprecated wrappers (write_varint / read_varint) — small value
+    // round-trip via quic_encode_into / quic_decode.
+    let mut buf: List<Byte> = [];
+    write_varint(&mut buf, 42_u64);
+    match read_varint(buf.as_slice(), 0) {
+        Ok((v, _)) => assert_eq(v, 42_u64),
+        Err(_) => panic("varint round-trip failed"),
+    }
+}
+
+@ignore("HTTP3-1: SettingsFrame encode/decode round-trip requires harness. See audit.md §3.1.")
+@test
+fn regression_http3_settings_frame_codec_round_trip() {
+    // SettingsFrame { params: [(QPACK_MAX_TABLE_CAPACITY, 4096)] }
+    // — encoded as varint(0x4) || varint(length) || varint(0x01) || varint(4096).
+    let params: List<(UInt64, UInt64)> = [(H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY, 4096_u64)];
+    let f = Http3Frame.SettingsFrame { params: params };
+    assert(f is Http3Frame.SettingsFrame);
+}
+
+@ignore("HTTP3-2: connection state-machine + QPACK encoder gated on h3+http3 unification. See audit.md §3.2.")
+@test
+fn regression_http3_connection_state_machine_dispatch() {
+    // RFC 9114 §5: client / server connection establishment + SETTINGS
+    // exchange + request/response stream lifecycle. Functional coverage
+    // at L2 specs.
+    assert(true);
+}
+
+@ignore("HTTP3-1: QPACK static-table coverage (RFC 9204 §3.1) deferred. See audit.md §3.3.")
+@test
+fn regression_http3_qpack_static_table_size_99() {
+    // RFC 9204 §3.1 + Appendix A: 99-entry static table.
+    assert(true);
+}

@@ -1,0 +1,93 @@
+// =============================================================================
+// core-tests/net/proxy/retry/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for `core.net.proxy.retry`.
+//
+// Active pins (3) — current correct behaviour:
+//
+//   * RetryLayer.new sets backoff_base_ms=50, backoff_max_ms=5_000.
+//   * RetryLayer.new default policy is NonIdempotentPolicy.Disabled.
+//   * RetryBudget.new(N).try_consume admits exactly N times.
+//
+// Deferred pins (4) — gated on backoff helper publicity + WeftRequest /
+// Handler mocks. See audit §3.5 — backoff formula pin requires
+// public accessor.
+// =============================================================================
+
+mount core.net.proxy.retry.{RetryBudget, RetryLayer, NonIdempotentPolicy};
+
+// =============================================================================
+// Active LOCK-IN pins
+// =============================================================================
+
+@test
+fn regression_retry_layer_default_backoff_constants() {
+    // RT-1: lines 109-112 pin backoff_base_ms=50, backoff_max_ms=5_000.
+    // Drift here would change production retry timing across all
+    // callers without explicit migration.
+    let l = RetryLayer.new(3);
+    assert_eq(l.backoff_base_ms, 50);
+    assert_eq(l.backoff_max_ms, 5_000);
+}
+
+@test
+fn regression_retry_layer_default_policy_disabled() {
+    // RT-3: line 114 — `non_idempotent_policy: Disabled`. The default
+    // forbids retrying POST/PATCH; opting into idempotency-key retry
+    // requires explicit `.with_idempotency_key_retry()`. A regression
+    // that flips the default would silently retry non-idempotent
+    // requests with side effects.
+    let l = RetryLayer.new(1);
+    assert(l.non_idempotent_policy is NonIdempotentPolicy.Disabled);
+}
+
+@test
+fn regression_retry_budget_admits_exactly_ceiling() {
+    // RT-2: lines 64-74 — `try_consume` admits exactly `ceiling` times
+    // then rejects. The `fetch_sub + 1 → if prev > 0` clamp is critical
+    // to prevent budget drift below zero under concurrent contention.
+    let b = RetryBudget.new(3);
+    assert(b.try_consume()); // 3 -> 2
+    assert(b.try_consume()); // 2 -> 1
+    assert(b.try_consume()); // 1 -> 0
+    assert(!b.try_consume()); // 0 -> 0 (restored)
+    // Subsequent consumes still rejected (budget remains at 0).
+    assert(!b.try_consume());
+}
+
+// =============================================================================
+// Deferred — gated on module-public backoff helper + Handler mocks
+// =============================================================================
+
+@ignore("RT-1: backoff_ms_for(attempt) is module-private (line 162). The formula 2^attempt × base capped at max cannot be directly pinned from a user test. Promote to public to land.")
+@test
+fn regression_backoff_formula_capped_at_max() {
+    // For backoff_base_ms=50, backoff_max_ms=5_000:
+    //   attempt=1 -> 100, attempt=2 -> 200, attempt=3 -> 400,
+    //   attempt=4 -> 800, attempt=5 -> 1600, attempt=6 -> 3200,
+    //   attempt=7 -> 5000 (capped), attempt=8 -> 5000 (still capped).
+    let _l = RetryLayer.new(8);
+    assert(false);
+}
+
+@ignore("RT-4: RetryHandler.handle with a mock Handler returning 503 should retry up to max_attempts then surface UpstreamIo error.")
+@test
+fn regression_retry_handler_retries_on_503() {
+    let _l = RetryLayer.new(3);
+    assert(false);
+}
+
+@ignore("RT-4: RetryLayer respects ErrorCategory.is_retryable — Permanent / Client / Security errors must NOT retry even within budget.")
+@test
+fn regression_retry_handler_skips_non_retryable_category() {
+    let _l = RetryLayer.new(3);
+    assert(false);
+}
+
+@ignore("RT-4: with_idempotency_key_retry — POST request carrying `idempotency-key` header retries; same request without header does not.")
+@test
+fn regression_retry_idempotency_key_gates_post_retry() {
+    let _l = RetryLayer.new(3).with_idempotency_key_retry();
+    assert(false);
+}

@@ -1,0 +1,160 @@
+// =============================================================================
+// core-tests/net/proxy/retry/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/proxy/retry.vr` (~283 LOC) — RetryLayer with exponential
+// backoff + budgets + idempotency-key gating.
+//
+// Tests cover the data-surface:
+//
+//   * RetryBudget.new + try_consume monotonicity + refill.
+//   * RetryLayer.new default-constants (50 / 5000 / Disabled).
+//   * RetryLayer builder chain (with_backoff, with_budget,
+//     with_idempotency_key_retry, with_idempotency_header).
+//   * NonIdempotentPolicy 2-variant disjointness.
+//
+// The middleware surface (wrap + RetryHandler.handle) requires a
+// WeftRequest + Handler mock — @ignore'd until harness lands.
+// =============================================================================
+
+mount core.net.proxy.retry.{RetryBudget, RetryLayer, NonIdempotentPolicy};
+
+// =============================================================================
+// Section 1: RetryBudget — construction + try_consume + refill
+// =============================================================================
+
+@test
+fn test_retry_budget_new_ceiling_preserved() {
+    let b = RetryBudget.new(100);
+    assert_eq(b.ceiling, 100);
+}
+
+@test
+fn test_retry_budget_try_consume_within_budget() {
+    let b = RetryBudget.new(3);
+    assert(b.try_consume()); // 3 -> 2
+    assert(b.try_consume()); // 2 -> 1
+    assert(b.try_consume()); // 1 -> 0
+}
+
+@test
+fn test_retry_budget_try_consume_at_zero_returns_false() {
+    let b = RetryBudget.new(1);
+    assert(b.try_consume()); // 1 -> 0
+    // After exhaustion, try_consume restores and returns false.
+    assert(!b.try_consume());
+}
+
+@test
+fn test_retry_budget_refill_resets_to_ceiling() {
+    let b = RetryBudget.new(2);
+    assert(b.try_consume()); // 2 -> 1
+    assert(b.try_consume()); // 1 -> 0
+    b.refill();
+    // After refill, two consumes should succeed again.
+    assert(b.try_consume());
+    assert(b.try_consume());
+}
+
+// =============================================================================
+// Section 2: RetryLayer.new — pinned default constants
+// =============================================================================
+//
+// Lines 108-116 of retry.vr:
+//   public fn new(max_attempts: Int) -> RetryLayer {
+//       RetryLayer {
+//           max_attempts: max_attempts,
+//           backoff_base_ms: 50,
+//           backoff_max_ms: 5_000,
+//           budget: None,
+//           non_idempotent_policy: NonIdempotentPolicy.Disabled,
+//       }
+//   }
+
+@test
+fn test_retry_layer_new_preserves_max_attempts() {
+    let l = RetryLayer.new(3);
+    assert_eq(l.max_attempts, 3);
+}
+
+@test
+fn test_retry_layer_new_default_backoff_base_50() {
+    let l = RetryLayer.new(1);
+    assert_eq(l.backoff_base_ms, 50);
+}
+
+@test
+fn test_retry_layer_new_default_backoff_max_5000() {
+    let l = RetryLayer.new(1);
+    assert_eq(l.backoff_max_ms, 5_000);
+}
+
+@test
+fn test_retry_layer_new_budget_is_none() {
+    let l = RetryLayer.new(1);
+    assert(l.budget.is_none());
+}
+
+@test
+fn test_retry_layer_new_non_idempotent_policy_disabled() {
+    let l = RetryLayer.new(1);
+    assert(l.non_idempotent_policy is NonIdempotentPolicy.Disabled);
+}
+
+// =============================================================================
+// Section 3: RetryLayer builder chain
+// =============================================================================
+
+@test
+fn test_retry_layer_with_backoff_overrides() {
+    let l = RetryLayer.new(3).with_backoff(100, 10_000);
+    assert_eq(l.backoff_base_ms, 100);
+    assert_eq(l.backoff_max_ms, 10_000);
+}
+
+@test
+fn test_retry_layer_with_budget_sets_some() {
+    let b = RetryBudget.new(50);
+    let l = RetryLayer.new(3).with_budget(b);
+    assert(l.budget.is_some());
+}
+
+@test
+fn test_retry_layer_with_idempotency_key_retry_sets_when_keyed() {
+    let l = RetryLayer.new(3).with_idempotency_key_retry();
+    assert(l.non_idempotent_policy is NonIdempotentPolicy.WhenIdempotencyKeyed);
+}
+
+@test
+fn test_retry_layer_with_idempotency_header_sets_when_keyed() {
+    let l = RetryLayer.new(3).with_idempotency_header("X-Stripe-Idempotency-Key".clone());
+    assert(l.non_idempotent_policy is NonIdempotentPolicy.WhenIdempotencyKeyed);
+}
+
+// =============================================================================
+// Section 4: NonIdempotentPolicy — 2-variant disjointness
+// =============================================================================
+
+@test
+fn test_retry_non_idempotent_policy_disabled_construction() {
+    let p: NonIdempotentPolicy = NonIdempotentPolicy.Disabled;
+    assert(p is NonIdempotentPolicy.Disabled);
+}
+
+@test
+fn test_retry_non_idempotent_policy_when_keyed_construction() {
+    let p = NonIdempotentPolicy.WhenIdempotencyKeyed {
+        header_name: "idempotency-key".clone(),
+    };
+    assert(p is NonIdempotentPolicy.WhenIdempotencyKeyed);
+}
+
+@test
+fn test_retry_non_idempotent_policy_disjoint() {
+    let d: NonIdempotentPolicy = NonIdempotentPolicy.Disabled;
+    let w = NonIdempotentPolicy.WhenIdempotencyKeyed {
+        header_name: "idempotency-key".clone(),
+    };
+    assert(!(d is NonIdempotentPolicy.WhenIdempotencyKeyed));
+    assert(!(w is NonIdempotentPolicy.Disabled));
+}

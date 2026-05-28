@@ -1,0 +1,98 @@
+// =============================================================================
+// core-tests/net/proxy/loadbalancer/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for `core.net.proxy.loadbalancer`.
+//
+// Active pins (3) — current correct behaviour:
+//
+//   * Empty LbPool.pick returns None regardless of strategy / salt.
+//   * Upstream.with_weight overrides default weight=1 monotonically.
+//   * LoadBalancer 3-variant disjointness (re-pinned at module level).
+//
+// Deferred pins (4) — gated on UpstreamEntry mock harness (see audit
+// §3.2). Real strategy-selection semantics live at language level.
+// =============================================================================
+
+mount core.net.proxy.loadbalancer.{LoadBalancer, UpstreamEntry, LbPool};
+mount core.net.proxy.upstream_pool.{Upstream};
+mount core.collections.list.{List};
+
+// =============================================================================
+// Active LOCK-IN pins
+// =============================================================================
+
+@test
+fn regression_lb_pool_empty_returns_none() {
+    // LB-1: line 110 of loadbalancer.vr — empty pool short-circuits with
+    // None. Drift here would surface as div-by-zero (% 0) panics in the
+    // upstream-selection path.
+    let upstreams: List<Upstream> = List.new();
+    let p = LbPool.new(LoadBalancer.RoundRobin, upstreams);
+    assert(p.pick(0).is_none());
+}
+
+@test
+fn regression_upstream_with_weight_overrides_default() {
+    // LB-2: weight defaults to 1 (line 80), `.with_weight(N)` replaces.
+    // Drift here would surface as WLC score miscomputation (in_flight ×
+    // 1000 / weight produces 0 if weight uses old value of 1).
+    let u = Upstream.new("http".clone(), "h".clone(), 80);
+    assert_eq(u.weight, 1);
+    let u2 = u.with_weight(50);
+    assert_eq(u2.weight, 50);
+}
+
+@test
+fn regression_loadbalancer_three_variant_disjoint() {
+    // LB-3: all 3 LoadBalancer variants pairwise disjoint. Pinned at
+    // module level so a future merge that collapses variants surfaces
+    // before reaching production.
+    let rr: LoadBalancer = LoadBalancer.RoundRobin;
+    let rn: LoadBalancer = LoadBalancer.Random;
+    let wl: LoadBalancer = LoadBalancer.WeightedLeastConn;
+    assert(!(rr is LoadBalancer.Random));
+    assert(!(rr is LoadBalancer.WeightedLeastConn));
+    assert(!(rn is LoadBalancer.WeightedLeastConn));
+}
+
+// =============================================================================
+// Deferred — gated on UpstreamEntry mock harness
+// =============================================================================
+
+@ignore("LB-2: RoundRobin cycle invariant requires UpstreamEntry mock for healthy()=true. Construct N=3 entries, pick repeatedly, assert indices cycle 0,1,2,0,1,2 modulo cursor.")
+@test
+fn regression_round_robin_cycles_through_indices() {
+    let upstreams: List<Upstream> = List.new();
+    let p = LbPool.new(LoadBalancer.RoundRobin, upstreams);
+    // Three sequential picks should return 0, 1, 2 (modulo n) when all
+    // entries are healthy.
+    assert(p.pick(0).is_some());
+}
+
+@ignore("LB-3: WeightedLeastConn picks the entry with the lowest score=(in_flight*1000)/weight. Requires in_flight atomic manipulation on UpstreamEntry.")
+@test
+fn regression_weighted_least_conn_picks_lowest_score() {
+    let upstreams: List<Upstream> = List.new();
+    let p = LbPool.new(LoadBalancer.WeightedLeastConn, upstreams);
+    // With two entries (weight=1 each), the one with in_flight=0 should
+    // win over the one with in_flight=10.
+    assert(p.pick(0).is_some());
+}
+
+@ignore("LB-2: scan_healthy skips unhealthy entries. With entries [healthy, unhealthy, healthy], RoundRobin picks index 0 then 2.")
+@test
+fn regression_lb_pool_skips_unhealthy_upstreams() {
+    let upstreams: List<Upstream> = List.new();
+    let p = LbPool.new(LoadBalancer.RoundRobin, upstreams);
+    assert(p.pick(0).is_some());
+}
+
+@ignore("LB-3: weight=0 clamp at line 153 (weight < 1 -> 1). With in_flight=5 and weight=0, score=(5*1000)/1=5000 (not div by zero).")
+@test
+fn regression_weighted_least_conn_zero_weight_clamps() {
+    let upstreams: List<Upstream> = List.new();
+    let p = LbPool.new(LoadBalancer.WeightedLeastConn, upstreams);
+    // No divide-by-zero panic even when caller mis-sets weight=0.
+    assert(p.pick(0).is_none());
+}

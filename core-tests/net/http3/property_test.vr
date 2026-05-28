@@ -1,0 +1,366 @@
+// =============================================================================
+// core-tests/net/http3/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core/net/http3/` data surface:
+//
+//   §A  H3FrameType variant pairwise disjointness via `is` pattern
+//       (RFC 9114 §7.2 — 7 well-known + Reserved fallback).
+//   §B  H3FrameType.to_u64 wire-ID injectivity over the 7 well-known
+//       variants (pairwise distinct outputs).
+//   §C  H3FrameType.from_u64 inverse correctness — round-trip for every
+//       well-known ID plus Reserved(v) preserves the raw value.
+//   §D  H3FrameType.Reserved payload preservation.
+//   §E  H3 SETTINGS parameter ID pairwise disjointness (RFC 9114 §7.2.4.1).
+//   §F  Http3Frame variant disjointness — DataFrame / HeadersFrame /
+//       SettingsFrame / GoAwayFrame must not collide.
+//   §G  Http3Frame field independence post-construction — stream_id +
+//       data + push_id round-trip.
+//   §H  Http3Error variant Eq reflexivity (RFC 9114 §8.1 layer).
+//   §I  Http3ErrorCode wire-stable constants + value preservation
+//       (mirrors h3/error.vr — same 0x0100/0x0200 ranges).
+//   §J  Http3FrameType wire ID stability across to_u64/from_u64.
+//
+// Live transport / QPACK / connection state-machine surface is gated
+// in `regression_test.vr` (HTTP3-1 / HTTP3-2). See `audit.md §3.1 / §3.2`.
+// =============================================================================
+
+mount core.net.http3.frame.{
+    H3FrameType, Http3Frame,
+    H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY,
+    H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
+    H3_SETTINGS_QPACK_BLOCKED_STREAMS
+};
+mount core.net.http3.error.{Http3Error, Http3ErrorCode};
+
+// =============================================================================
+// §A  H3FrameType variant pairwise disjointness
+// =============================================================================
+
+@test
+fn prop_http3_frame_type_data_vs_headers_disjoint() {
+    let d = H3FrameType.Data;
+    let h = H3FrameType.Headers;
+    assert(d is H3FrameType.Data);
+    assert(h is H3FrameType.Headers);
+    assert(!(d is H3FrameType.Headers));
+    assert(!(h is H3FrameType.Data));
+}
+
+@test
+fn prop_http3_frame_type_settings_vs_push_promise_disjoint() {
+    let s = H3FrameType.Settings;
+    let p = H3FrameType.PushPromise;
+    assert(s is H3FrameType.Settings);
+    assert(p is H3FrameType.PushPromise);
+    assert(!(s is H3FrameType.PushPromise));
+    assert(!(p is H3FrameType.Settings));
+}
+
+@test
+fn prop_http3_frame_type_go_away_vs_max_push_id_disjoint() {
+    let g = H3FrameType.GoAway;
+    let m = H3FrameType.MaxPushId;
+    assert(g is H3FrameType.GoAway);
+    assert(m is H3FrameType.MaxPushId);
+    assert(!(g is H3FrameType.MaxPushId));
+    assert(!(m is H3FrameType.GoAway));
+}
+
+@test
+fn prop_http3_frame_type_cancel_push_disjoint_from_all() {
+    let c = H3FrameType.CancelPush;
+    assert(c is H3FrameType.CancelPush);
+    assert(!(c is H3FrameType.Data));
+    assert(!(c is H3FrameType.Headers));
+    assert(!(c is H3FrameType.Settings));
+    assert(!(c is H3FrameType.PushPromise));
+    assert(!(c is H3FrameType.GoAway));
+    assert(!(c is H3FrameType.MaxPushId));
+}
+
+@test
+fn prop_http3_frame_type_reserved_disjoint_from_well_known() {
+    let r = H3FrameType.Reserved(0xFF_u64);
+    assert(r is H3FrameType.Reserved);
+    assert(!(r is H3FrameType.Data));
+    assert(!(r is H3FrameType.Headers));
+    assert(!(r is H3FrameType.Settings));
+}
+
+// =============================================================================
+// §B  H3FrameType.to_u64 wire-ID injectivity
+// =============================================================================
+
+@test
+fn prop_http3_frame_type_to_u64_data_vs_headers_distinct() {
+    assert(!(H3FrameType.Data.to_u64() == H3FrameType.Headers.to_u64()));
+}
+
+@test
+fn prop_http3_frame_type_to_u64_cancel_push_vs_settings_distinct() {
+    // CancelPush=0x3 vs Settings=0x4 — adjacent wire IDs.
+    assert(!(H3FrameType.CancelPush.to_u64() == H3FrameType.Settings.to_u64()));
+}
+
+@test
+fn prop_http3_frame_type_to_u64_go_away_vs_max_push_id_distinct() {
+    // GoAway=0x7 vs MaxPushId=0xD — both control-stream-class.
+    assert(!(H3FrameType.GoAway.to_u64() == H3FrameType.MaxPushId.to_u64()));
+}
+
+// =============================================================================
+// §C  H3FrameType.from_u64 inverse correctness
+// =============================================================================
+
+@test
+fn prop_http3_frame_type_round_trip_data() {
+    let id = H3FrameType.Data.to_u64();
+    let t = H3FrameType.from_u64(id);
+    assert(t is H3FrameType.Data);
+}
+
+@test
+fn prop_http3_frame_type_round_trip_settings() {
+    let id = H3FrameType.Settings.to_u64();
+    let t = H3FrameType.from_u64(id);
+    assert(t is H3FrameType.Settings);
+}
+
+@test
+fn prop_http3_frame_type_round_trip_push_promise() {
+    let id = H3FrameType.PushPromise.to_u64();
+    let t = H3FrameType.from_u64(id);
+    assert(t is H3FrameType.PushPromise);
+}
+
+@test
+fn prop_http3_frame_type_round_trip_max_push_id() {
+    let id = H3FrameType.MaxPushId.to_u64();
+    let t = H3FrameType.from_u64(id);
+    assert(t is H3FrameType.MaxPushId);
+}
+
+// =============================================================================
+// §D  H3FrameType.Reserved payload preservation
+// =============================================================================
+
+@test
+fn prop_http3_frame_type_reserved_payload_preserved() {
+    // RFC 8701 GREASE values: 0x1f * N + 0x21. The Reserved variant must
+    // preserve the original wire ID through to_u64.
+    let t = H3FrameType.Reserved(0x21_u64);
+    assert_eq(t.to_u64(), 0x21_u64);
+}
+
+@test
+fn prop_http3_frame_type_reserved_high_value_preserved() {
+    let t = H3FrameType.Reserved(0xDEADBEEF_u64);
+    assert_eq(t.to_u64(), 0xDEADBEEF_u64);
+}
+
+@test
+fn prop_http3_frame_type_reserved_round_trip_unknown_id() {
+    // Unknown wire IDs (0x02, 0x06, 0x08-0xC, 0xE+) should land in
+    // Reserved on from_u64 and preserve their value via to_u64.
+    let t = H3FrameType.from_u64(0x42_u64);
+    assert(t is H3FrameType.Reserved);
+    assert_eq(t.to_u64(), 0x42_u64);
+}
+
+// =============================================================================
+// §E  SETTINGS parameter ID pairwise disjointness (RFC 9114 §7.2.4.1)
+// =============================================================================
+
+@test
+fn prop_http3_setting_qpack_max_vs_max_field_section_disjoint() {
+    assert(!(H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY == H3_SETTINGS_MAX_FIELD_SECTION_SIZE));
+}
+
+@test
+fn prop_http3_setting_max_field_section_vs_blocked_streams_disjoint() {
+    // MAX_FIELD_SECTION_SIZE=0x06 vs QPACK_BLOCKED_STREAMS=0x07 — adjacent.
+    assert(!(H3_SETTINGS_MAX_FIELD_SECTION_SIZE == H3_SETTINGS_QPACK_BLOCKED_STREAMS));
+}
+
+@test
+fn prop_http3_setting_qpack_max_vs_blocked_streams_disjoint() {
+    assert(!(H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY == H3_SETTINGS_QPACK_BLOCKED_STREAMS));
+}
+
+// =============================================================================
+// §F  Http3Frame variant disjointness
+// =============================================================================
+
+@test
+fn prop_http3_frame_data_vs_headers_disjoint() {
+    let body: List<Byte> = [];
+    let d = Http3Frame.DataFrame { stream_id: 0_u64, data: body.clone() };
+    let h = Http3Frame.HeadersFrame { stream_id: 0_u64, encoded_headers: body.clone() };
+    assert(d is Http3Frame.DataFrame);
+    assert(h is Http3Frame.HeadersFrame);
+    assert(!(d is Http3Frame.HeadersFrame));
+    assert(!(h is Http3Frame.DataFrame));
+}
+
+@test
+fn prop_http3_frame_settings_vs_go_away_disjoint() {
+    let params: List<(UInt64, UInt64)> = [];
+    let s = Http3Frame.SettingsFrame { params: params };
+    let g = Http3Frame.GoAwayFrame { stream_id: 0_u64 };
+    assert(s is Http3Frame.SettingsFrame);
+    assert(g is Http3Frame.GoAwayFrame);
+    assert(!(s is Http3Frame.GoAwayFrame));
+    assert(!(g is Http3Frame.SettingsFrame));
+}
+
+@test
+fn prop_http3_frame_cancel_push_vs_max_push_id_disjoint() {
+    let c = Http3Frame.CancelPushFrame { push_id: 0_u64 };
+    let m = Http3Frame.MaxPushIdFrame { push_id: 0_u64 };
+    assert(c is Http3Frame.CancelPushFrame);
+    assert(m is Http3Frame.MaxPushIdFrame);
+    assert(!(c is Http3Frame.MaxPushIdFrame));
+    assert(!(m is Http3Frame.CancelPushFrame));
+}
+
+// =============================================================================
+// §G  Http3Frame field independence post-construction
+// =============================================================================
+
+@test
+fn prop_http3_frame_data_stream_id_preserved() {
+    let body: List<Byte> = [];
+    let f = Http3Frame.DataFrame { stream_id: 0x42_u64, data: body };
+    match f {
+        Http3Frame.DataFrame { stream_id, data: _ } => assert_eq(stream_id, 0x42_u64),
+        _ => panic("expected DataFrame"),
+    }
+}
+
+@test
+fn prop_http3_frame_go_away_stream_id_preserved() {
+    let f = Http3Frame.GoAwayFrame { stream_id: 0xABCD_u64 };
+    match f {
+        Http3Frame.GoAwayFrame { stream_id } => assert_eq(stream_id, 0xABCD_u64),
+        _ => panic("expected GoAwayFrame"),
+    }
+}
+
+@test
+fn prop_http3_frame_cancel_push_push_id_preserved() {
+    let f = Http3Frame.CancelPushFrame { push_id: 99_u64 };
+    match f {
+        Http3Frame.CancelPushFrame { push_id } => assert_eq(push_id, 99_u64),
+        _ => panic("expected CancelPushFrame"),
+    }
+}
+
+@test
+fn prop_http3_frame_unknown_type_id_preserved() {
+    let payload: List<Byte> = [];
+    let f = Http3Frame.UnknownFrame { type_: 0xFF_u64, payload: payload };
+    match f {
+        Http3Frame.UnknownFrame { type_, payload: _ } => assert_eq(type_, 0xFF_u64),
+        _ => panic("expected UnknownFrame"),
+    }
+}
+
+// =============================================================================
+// §H  Http3Error variant Eq reflexivity
+// =============================================================================
+
+@test
+fn prop_http3_error_need_more_reflexive() {
+    assert(Http3Error.NeedMore == Http3Error.NeedMore);
+}
+
+@test
+fn prop_http3_error_closed_reflexive() {
+    assert(Http3Error.Closed == Http3Error.Closed);
+}
+
+@test
+fn prop_http3_error_frame_error_payload_preserved() {
+    let a = Http3Error.FrameError("malformed varint".clone());
+    let b = Http3Error.FrameError("malformed varint".clone());
+    assert(a == b);
+}
+
+@test
+fn prop_http3_error_qpack_error_payload_preserved() {
+    let a = Http3Error.QpackError("table overflow".clone());
+    let b = Http3Error.QpackError("table overflow".clone());
+    assert(a == b);
+}
+
+@test
+fn prop_http3_error_need_more_vs_closed_disjoint() {
+    assert(!(Http3Error.NeedMore == Http3Error.Closed));
+}
+
+@test
+fn prop_http3_error_frame_vs_qpack_same_payload_disjoint() {
+    let f = Http3Error.FrameError("x".clone());
+    let q = Http3Error.QpackError("x".clone());
+    assert(!(f == q));
+}
+
+// =============================================================================
+// §I  Http3ErrorCode wire-stable constants + value preservation
+// =============================================================================
+
+@test
+fn prop_http3_error_code_h3_no_error_pin() {
+    // RFC 9114 §8.1: H3_NO_ERROR = 0x100.
+    assert_eq(Http3ErrorCode.H3_NO_ERROR, 0x100_u64);
+}
+
+@test
+fn prop_http3_error_code_h3_internal_error_pin() {
+    assert_eq(Http3ErrorCode.H3_INTERNAL_ERROR, 0x102_u64);
+}
+
+@test
+fn prop_http3_error_code_qpack_decompression_failed_pin() {
+    // RFC 9204 §6: QPACK_DECOMPRESSION_FAILED = 0x200.
+    assert_eq(Http3ErrorCode.QPACK_DECOMPRESSION_FAILED, 0x200_u64);
+}
+
+@test
+fn prop_http3_error_code_value_round_trip() {
+    let c = Http3ErrorCode.new(0x10A_u64); // H3_MISSING_SETTINGS
+    assert_eq(c.value(), 0x10A_u64);
+}
+
+@test
+fn prop_http3_error_code_eq_distinct_disjoint() {
+    let a = Http3ErrorCode.new(0x100_u64);
+    let b = Http3ErrorCode.new(0x101_u64);
+    assert(!(a == b));
+}
+
+// =============================================================================
+// §J  H3FrameType wire-ID stability under to_u64/from_u64
+// =============================================================================
+
+@test
+fn prop_http3_frame_type_wire_ids_in_canonical_range() {
+    // All well-known frame-type IDs fit in 5 bits per RFC 9114 §7.2.
+    // (Single-varint-byte values, 0x00-0x3F.) Pin them as the low-byte
+    // values they actually use.
+    assert(H3FrameType.Data.to_u64() < 0x40_u64);
+    assert(H3FrameType.Headers.to_u64() < 0x40_u64);
+    assert(H3FrameType.CancelPush.to_u64() < 0x40_u64);
+    assert(H3FrameType.Settings.to_u64() < 0x40_u64);
+    assert(H3FrameType.PushPromise.to_u64() < 0x40_u64);
+    assert(H3FrameType.GoAway.to_u64() < 0x40_u64);
+    assert(H3FrameType.MaxPushId.to_u64() < 0x40_u64);
+}
+
+@test
+fn prop_http3_frame_type_data_is_zero() {
+    // DATA is the canonical first frame type and its wire ID is 0,
+    // both for ergonomic encoding and per RFC 9114 §11.2.1.
+    assert_eq(H3FrameType.Data.to_u64(), 0x0_u64);
+}

@@ -1,0 +1,185 @@
+// =============================================================================
+// core-tests/net/proxy/upstream_pool/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/proxy/upstream_pool.vr` (~310 LOC) — per-origin connection
+// pool.
+//
+// Tests cover the data-surface visible from a user test module:
+//
+//   * Upstream.new field preservation + default weight=1 + label
+//     formatting f"{scheme}://{host}:{port}".
+//   * Upstream.with_weight / .with_name builder overrides.
+//   * Upstream.addr() format pinned to "host:port".
+//   * Upstream.is_tls() true iff scheme == "https".
+//   * Upstream Clone preserves all fields.
+//   * Upstream Eq ignores name + weight (lines 116-122).
+//   * UpstreamPool.default() constructs without panic.
+//
+// Functional surface (acquire / idle_count / Drop release) requires a
+// socket harness — @ignore'd in regression_test.vr.
+// =============================================================================
+
+mount core.net.proxy.upstream_pool.{Upstream, UpstreamPool};
+
+// =============================================================================
+// Section 1: Upstream.new — field preservation + defaults
+// =============================================================================
+
+@test
+fn test_upstream_pool_upstream_new_preserves_scheme() {
+    let u = Upstream.new("http".clone(), "h".clone(), 80);
+    assert(u.scheme == "http");
+}
+
+@test
+fn test_upstream_pool_upstream_new_preserves_host() {
+    let u = Upstream.new("http".clone(), "api.example.com".clone(), 80);
+    assert(u.host == "api.example.com");
+}
+
+@test
+fn test_upstream_pool_upstream_new_preserves_port() {
+    let u = Upstream.new("https".clone(), "h".clone(), 443);
+    assert_eq(u.port, 443);
+}
+
+@test
+fn test_upstream_pool_upstream_new_default_weight_one() {
+    // Line 80 of upstream_pool.vr — Upstream.new sets weight = 1. This
+    // is the default for WLC score computation; drift would silently
+    // change load-balancer behavior.
+    let u = Upstream.new("http".clone(), "h".clone(), 80);
+    assert_eq(u.weight, 1);
+}
+
+@test
+fn test_upstream_pool_upstream_new_label_format() {
+    // Line 74 — label = f"{scheme}://{host}:{port}". The label is
+    // emitted as a metric tag and surfaced in error messages.
+    let u = Upstream.new("https".clone(), "api.example.com".clone(), 443);
+    assert(u.name == "https://api.example.com:443");
+}
+
+// =============================================================================
+// Section 2: Upstream builders — with_weight / with_name
+// =============================================================================
+
+@test
+fn test_upstream_pool_with_weight_overrides_default() {
+    let u = Upstream.new("http".clone(), "h".clone(), 80).with_weight(42);
+    assert_eq(u.weight, 42);
+}
+
+@test
+fn test_upstream_pool_with_weight_preserves_other_fields() {
+    let u = Upstream.new("http".clone(), "h".clone(), 80).with_weight(7);
+    assert(u.scheme == "http");
+    assert(u.host == "h");
+    assert_eq(u.port, 80);
+}
+
+@test
+fn test_upstream_pool_with_name_overrides_label() {
+    let u = Upstream.new("http".clone(), "h".clone(), 80)
+        .with_name("primary-backend".clone());
+    assert(u.name == "primary-backend");
+}
+
+@test
+fn test_upstream_pool_with_name_preserves_other_fields() {
+    let u = Upstream.new("https".clone(), "host".clone(), 443)
+        .with_name("custom".clone());
+    assert(u.scheme == "https");
+    assert(u.host == "host");
+    assert_eq(u.port, 443);
+    assert_eq(u.weight, 1);
+}
+
+// =============================================================================
+// Section 3: Upstream.addr() — "host:port" formatting
+// =============================================================================
+
+@test
+fn test_upstream_pool_addr_simple_host_port() {
+    let u = Upstream.new("http".clone(), "localhost".clone(), 8080);
+    assert(u.addr() == "localhost:8080");
+}
+
+@test
+fn test_upstream_pool_addr_ignores_scheme() {
+    // addr() is for TcpStream.connect — scheme is omitted (TCP layer
+    // doesn't care).
+    let u = Upstream.new("https".clone(), "h".clone(), 443);
+    assert(u.addr() == "h:443");
+}
+
+// =============================================================================
+// Section 4: Upstream.is_tls() — scheme == "https"
+// =============================================================================
+
+@test
+fn test_upstream_pool_is_tls_true_for_https() {
+    let u = Upstream.new("https".clone(), "h".clone(), 443);
+    assert(u.is_tls());
+}
+
+@test
+fn test_upstream_pool_is_tls_false_for_http() {
+    let u = Upstream.new("http".clone(), "h".clone(), 80);
+    assert(!u.is_tls());
+}
+
+// =============================================================================
+// Section 5: Upstream Clone — preserves all fields
+// =============================================================================
+
+@test
+fn test_upstream_pool_clone_preserves_all_fields() {
+    let u = Upstream.new("https".clone(), "h".clone(), 443).with_weight(5);
+    let c = u.clone();
+    assert(c.scheme == "https");
+    assert(c.host == "h");
+    assert_eq(c.port, 443);
+    assert_eq(c.weight, 5);
+}
+
+// =============================================================================
+// Section 6: Upstream Eq — ignores name + weight (lines 116-122)
+// =============================================================================
+
+@test
+fn test_upstream_pool_eq_same_origin() {
+    let a = Upstream.new("http".clone(), "h".clone(), 80);
+    let b = Upstream.new("http".clone(), "h".clone(), 80);
+    assert(a == b);
+}
+
+@test
+fn test_upstream_pool_eq_ignores_weight() {
+    // Per line 117-122, Eq compares only (scheme, host, port).
+    let a = Upstream.new("http".clone(), "h".clone(), 80).with_weight(1);
+    let b = Upstream.new("http".clone(), "h".clone(), 80).with_weight(99);
+    assert(a == b);
+}
+
+@test
+fn test_upstream_pool_eq_ignores_name() {
+    let a = Upstream.new("http".clone(), "h".clone(), 80).with_name("a".clone());
+    let b = Upstream.new("http".clone(), "h".clone(), 80).with_name("b".clone());
+    assert(a == b);
+}
+
+@test
+fn test_upstream_pool_eq_disjoint_on_port() {
+    let a = Upstream.new("http".clone(), "h".clone(), 80);
+    let b = Upstream.new("http".clone(), "h".clone(), 81);
+    assert(!(a == b));
+}
+
+@test
+fn test_upstream_pool_eq_disjoint_on_scheme() {
+    let a = Upstream.new("http".clone(), "h".clone(), 80);
+    let b = Upstream.new("https".clone(), "h".clone(), 80);
+    assert(!(a == b));
+}

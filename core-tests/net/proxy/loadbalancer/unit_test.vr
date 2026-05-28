@@ -1,0 +1,166 @@
+// =============================================================================
+// core-tests/net/proxy/loadbalancer/unit_test.vr — data-surface coverage
+// =============================================================================
+//
+// `core/net/proxy/loadbalancer.vr` (~164 LOC) — request distribution.
+//
+// The umbrella unit_test.vr already pins LoadBalancer 3-variant + 2
+// disjointness checks. This per-submodule suite extends with:
+//
+//   * LoadBalancer 3-variant re-pin (granularity for module filter).
+//   * Pairwise disjointness across all 3 pairs.
+//   * Upstream record field preservation + Clone + Eq.
+//   * UpstreamEntry construction + healthy() default-true invariant.
+//   * LbPool.new construction across all 3 strategies.
+//   * LbPool.pick(empty pool) returns None — pinned LB-1.
+// =============================================================================
+
+mount core.net.proxy.loadbalancer.{LoadBalancer, UpstreamEntry, LbPool};
+mount core.net.proxy.upstream_pool.{Upstream};
+mount core.collections.list.{List};
+
+// =============================================================================
+// Section 1: LoadBalancer — 3-variant construction (per-module re-pin)
+// =============================================================================
+
+@test
+fn test_loadbalancer_round_robin_construction() {
+    let lb: LoadBalancer = LoadBalancer.RoundRobin;
+    assert(lb is LoadBalancer.RoundRobin);
+}
+
+@test
+fn test_loadbalancer_random_construction() {
+    let lb: LoadBalancer = LoadBalancer.Random;
+    assert(lb is LoadBalancer.Random);
+}
+
+@test
+fn test_loadbalancer_weighted_least_conn_construction() {
+    let lb: LoadBalancer = LoadBalancer.WeightedLeastConn;
+    assert(lb is LoadBalancer.WeightedLeastConn);
+}
+
+// =============================================================================
+// Section 2: LoadBalancer — pairwise disjointness (all 3 pairs)
+// =============================================================================
+
+@test
+fn test_loadbalancer_disjoint_round_robin_vs_random() {
+    let a: LoadBalancer = LoadBalancer.RoundRobin;
+    let b: LoadBalancer = LoadBalancer.Random;
+    assert(!(a is LoadBalancer.Random));
+    assert(!(b is LoadBalancer.RoundRobin));
+}
+
+@test
+fn test_loadbalancer_disjoint_round_robin_vs_weighted_least_conn() {
+    let a: LoadBalancer = LoadBalancer.RoundRobin;
+    let b: LoadBalancer = LoadBalancer.WeightedLeastConn;
+    assert(!(a is LoadBalancer.WeightedLeastConn));
+    assert(!(b is LoadBalancer.RoundRobin));
+}
+
+@test
+fn test_loadbalancer_disjoint_random_vs_weighted_least_conn() {
+    let a: LoadBalancer = LoadBalancer.Random;
+    let b: LoadBalancer = LoadBalancer.WeightedLeastConn;
+    assert(!(a is LoadBalancer.WeightedLeastConn));
+    assert(!(b is LoadBalancer.Random));
+}
+
+// =============================================================================
+// Section 3: Upstream — field preservation + Clone + Eq
+// =============================================================================
+
+@test
+fn test_loadbalancer_upstream_new_field_preservation() {
+    let u = Upstream.new("http".clone(), "localhost".clone(), 8080);
+    assert_eq(u.port, 8080);
+    assert_eq(u.weight, 1);
+}
+
+@test
+fn test_loadbalancer_upstream_default_weight_one() {
+    // Upstream.new sets weight = 1 (line 80). Pin the default for WLC
+    // score computation.
+    let u = Upstream.new("https".clone(), "api.example.com".clone(), 443);
+    assert_eq(u.weight, 1);
+}
+
+@test
+fn test_loadbalancer_upstream_with_weight_overrides() {
+    let u = Upstream.new("http".clone(), "h".clone(), 80).with_weight(42);
+    assert_eq(u.weight, 42);
+}
+
+@test
+fn test_loadbalancer_upstream_is_tls_true_for_https() {
+    let u = Upstream.new("https".clone(), "h".clone(), 443);
+    assert(u.is_tls());
+}
+
+@test
+fn test_loadbalancer_upstream_is_tls_false_for_http() {
+    let u = Upstream.new("http".clone(), "h".clone(), 80);
+    assert(!u.is_tls());
+}
+
+// =============================================================================
+// Section 4: UpstreamEntry — construction + default-healthy
+// =============================================================================
+
+@test
+fn test_loadbalancer_upstream_entry_new_healthy_by_default() {
+    let u = Upstream.new("http".clone(), "h".clone(), 80);
+    let e = UpstreamEntry.new(u);
+    assert(e.healthy());
+}
+
+// =============================================================================
+// Section 5: LbPool — construction across all 3 strategies
+// =============================================================================
+
+@test
+fn test_loadbalancer_pool_new_round_robin() {
+    let upstreams: List<Upstream> = List.new();
+    let p = LbPool.new(LoadBalancer.RoundRobin, upstreams);
+    let pick = p.pick(0);
+    assert(pick.is_none());
+}
+
+@test
+fn test_loadbalancer_pool_new_random() {
+    let upstreams: List<Upstream> = List.new();
+    let p = LbPool.new(LoadBalancer.Random, upstreams);
+    let pick = p.pick(7);
+    assert(pick.is_none());
+}
+
+@test
+fn test_loadbalancer_pool_new_weighted_least_conn() {
+    let upstreams: List<Upstream> = List.new();
+    let p = LbPool.new(LoadBalancer.WeightedLeastConn, upstreams);
+    let pick = p.pick(0);
+    assert(pick.is_none());
+}
+
+// =============================================================================
+// Section 6: LB-1 — empty pool always returns None
+// =============================================================================
+
+@test
+fn test_loadbalancer_pool_empty_returns_none_round_robin() {
+    let upstreams: List<Upstream> = List.new();
+    let p = LbPool.new(LoadBalancer.RoundRobin, upstreams);
+    assert(p.pick(123).is_none());
+}
+
+@test
+fn test_loadbalancer_pool_empty_returns_none_random_negative_salt() {
+    // Random pick takes (-salt) % n when salt < 0 (line 124). Empty
+    // pool still returns None without reaching the % operation.
+    let upstreams: List<Upstream> = List.new();
+    let p = LbPool.new(LoadBalancer.Random, upstreams);
+    assert(p.pick(-99).is_none());
+}

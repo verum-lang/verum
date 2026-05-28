@@ -1,0 +1,84 @@
+// =============================================================================
+// core-tests/net/proxy/rate_limit/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN regression pins for `core.net.proxy.rate_limit`.
+//
+// Active pins (3) — current correct behaviour:
+//
+//   * RateDecision 2-variant disjointness.
+//   * TokenBucket.new initial tokens == capacity (initial burst).
+//   * SlidingWindow.new initial current/previous == 0.
+//
+// Deferred pins (3) — gated on Instant fixture (see audit §3.2).
+// Real timing semantics live at language level.
+// =============================================================================
+
+mount core.net.proxy.rate_limit.{
+    RateDecision, TokenBucket, LeakyBucket, SlidingWindow
+};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Active LOCK-IN pins
+// =============================================================================
+
+@test
+fn regression_rate_decision_disjoint() {
+    // RL-1: Admit and NotNow are structurally disjoint. A regression
+    // that collapses them (e.g. via first-wins variant lookup) would
+    // surface as `Admit is RateDecision.NotNow == true` — every
+    // limited request silently admitted.
+    let a: RateDecision = RateDecision.Admit;
+    let n = RateDecision.NotNow(Duration.from_millis(100));
+    assert(a is RateDecision.Admit);
+    assert(n is RateDecision.NotNow);
+    assert(!(a is RateDecision.NotNow));
+    assert(!(n is RateDecision.Admit));
+}
+
+@test
+fn regression_token_bucket_initial_burst_equals_capacity() {
+    // RL-default-2: line 105 — `tokens: capacity`. A fresh bucket can
+    // admit a burst up to capacity without waiting. Drift here would
+    // surface as cold-start admit failures.
+    let tb = TokenBucket.new(100_u64, 10_u64);
+    assert_eq(tb.tokens, 100_u64);
+    assert_eq(tb.tokens, tb.capacity);
+}
+
+@test
+fn regression_sliding_window_initial_counters_zero() {
+    // RL-default-3: line 233 — `current: 0, previous: 0`. A fresh
+    // SlidingWindow starts with no historical credit; first admit at
+    // t=0 is gated entirely on `limit` (not stale `previous`).
+    let sw = SlidingWindow.new(1000_u64, 60_000_u64);
+    assert_eq(sw.current, 0_u64);
+    assert_eq(sw.previous, 0_u64);
+}
+
+// =============================================================================
+// Deferred — gated on Instant fixture / async harness
+// =============================================================================
+
+@ignore("RL-2: TokenBucket.try_admit semantics require a controllable Instant for refill. With capacity=10, rate=10/s, after 10 admits + 1s wait, the 11th should Admit.")
+@test
+fn regression_token_bucket_refills_at_rate() {
+    let _tb = TokenBucket.new(10_u64, 10_u64);
+    // Admit 10 times, sleep 1s, admit 11th → should Admit not NotNow.
+    assert(false);
+}
+
+@ignore("RL-2: LeakyBucket.try_admit drain semantics. After filling to capacity, sleeping `capacity/rate` seconds, then trying again should Admit.")
+@test
+fn regression_leaky_bucket_drains_at_rate() {
+    let _lb = LeakyBucket.new(10_u64, 5_u64);
+    assert(false);
+}
+
+@ignore("RL-2: SlidingWindow rollover at window_ms. After `limit` admits in window N, the (limit+1)th in window N+1 should Admit (no carry-over above weighted prev).")
+@test
+fn regression_sliding_window_rolls_over_at_window_ms() {
+    let _sw = SlidingWindow.new(5_u64, 1_000_u64);
+    assert(false);
+}

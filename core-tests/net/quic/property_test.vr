@@ -1,0 +1,411 @@
+// =============================================================================
+// core-tests/net/quic/property_test.vr
+// =============================================================================
+//
+// Algebraic laws for `core/net/quic/` data surface:
+//
+//   §A  TransportErrorCode wire-constant pairwise disjointness across
+//       the RFC 9000 §20.1 17-code matrix.
+//   §B  TransportErrorCode value preservation (new / value).
+//   §C  CRYPTO_ERROR_BASE structural disjointness — distinct from every
+//       canonical 0x00-0x10 code per RFC 9000 §20.1.
+//   §D  ApplicationErrorCode opaque value preservation + Eq lattice.
+//   §E  QuicError 10-variant Eq reflexivity + payload preservation
+//       (ConnectionRefused / HandshakeFailed / InvalidTransportParameter
+//       carry Text payloads; TransportError / ApplicationError /
+//       StreamReset carry structured records).
+//   §F  QuicError variant pairwise disjointness via `is` pattern.
+//   §G  QUIC version constants — VERSION_NEGOTIATION / VERSION_1 /
+//       VERSION_2 pairwise distinct (RFC 9000 §15 + RFC 9369).
+//   §H  is_supported / is_greased predicate dispatch.
+//   §I  AckRange field independence + EcnCounts field independence
+//       (RFC 9000 §19.3).
+//   §J  StreamFlags 3-bool field independence (RFC 9000 §19.8).
+//   §K  QuicFrame variant disjointness sample — PingFrame /
+//       HandshakeDone / IdleTimeout-class.
+//
+// Live transport surface (handshake, ACK, recovery, congestion control,
+// key updates, multipath) is gated in `regression_test.vr` (QUIC-1).
+// See `audit.md §3.1`.
+// =============================================================================
+
+mount core.net.quic.version.{VERSION_NEGOTIATION, VERSION_1, VERSION_2,
+                              is_supported, is_greased};
+mount core.net.quic.error.{TransportErrorCode, ApplicationErrorCode, QuicError};
+mount core.net.quic.frame.{QuicFrame, AckRange, EcnCounts, StreamFlags, FrameError};
+
+// =============================================================================
+// §A  TransportErrorCode wire-constant pairwise disjointness
+// =============================================================================
+
+@test
+fn prop_quic_transport_err_no_error_vs_internal_disjoint() {
+    // RFC 9000 §20.1: NO_ERROR=0x00 sentinel vs INTERNAL_ERROR=0x01.
+    assert(!(TransportErrorCode.NO_ERROR == TransportErrorCode.INTERNAL_ERROR));
+}
+
+@test
+fn prop_quic_transport_err_flow_vs_stream_limit_disjoint() {
+    // FLOW_CONTROL_ERROR=0x03 vs STREAM_LIMIT_ERROR=0x04 — adjacent.
+    assert(!(TransportErrorCode.FLOW_CONTROL_ERROR == TransportErrorCode.STREAM_LIMIT_ERROR));
+}
+
+@test
+fn prop_quic_transport_err_frame_encoding_vs_transport_param_disjoint() {
+    // FRAME_ENCODING_ERROR=0x07 vs TRANSPORT_PARAMETER_ERROR=0x08 — adjacent.
+    assert(!(TransportErrorCode.FRAME_ENCODING_ERROR == TransportErrorCode.TRANSPORT_PARAMETER_ERROR));
+}
+
+@test
+fn prop_quic_transport_err_protocol_violation_vs_invalid_token_disjoint() {
+    // PROTOCOL_VIOLATION=0x0A vs INVALID_TOKEN=0x0B — adjacent.
+    assert(!(TransportErrorCode.PROTOCOL_VIOLATION == TransportErrorCode.INVALID_TOKEN));
+}
+
+@test
+fn prop_quic_transport_err_aead_limit_vs_no_viable_path_disjoint() {
+    // AEAD_LIMIT_REACHED=0x0F vs NO_VIABLE_PATH=0x10 — high-cluster adjacent.
+    assert(!(TransportErrorCode.AEAD_LIMIT_REACHED == TransportErrorCode.NO_VIABLE_PATH));
+}
+
+@test
+fn prop_quic_transport_err_no_error_disjoint_from_high_cluster() {
+    // NO_ERROR=0x00 must remain distinct from every high-cluster code.
+    assert(!(TransportErrorCode.NO_ERROR == TransportErrorCode.KEY_UPDATE_ERROR));
+    assert(!(TransportErrorCode.NO_ERROR == TransportErrorCode.AEAD_LIMIT_REACHED));
+    assert(!(TransportErrorCode.NO_ERROR == TransportErrorCode.NO_VIABLE_PATH));
+}
+
+// =============================================================================
+// §B  TransportErrorCode value preservation
+// =============================================================================
+
+@test
+fn prop_quic_transport_err_value_round_trip_low() {
+    let c = TransportErrorCode.new(0x05_u64);
+    assert_eq(c.value(), 0x05_u64);
+}
+
+@test
+fn prop_quic_transport_err_value_round_trip_high() {
+    // CRYPTO_ERROR_BASE + TLS alert composite — must preserve full value.
+    let c = TransportErrorCode.new(0x012E_u64); // 0x0100 + 0x2E (alert 46)
+    assert_eq(c.value(), 0x012E_u64);
+}
+
+// =============================================================================
+// §C  CRYPTO_ERROR_BASE structural disjointness
+// =============================================================================
+
+@test
+fn prop_quic_crypto_err_base_disjoint_from_low_codes() {
+    // RFC 9000 §20.1 CRYPTO_ERROR_BASE = 0x0100. Adding a TLS alert code
+    // (0x00-0xFF) places CRYPTO_ERROR in 0x0100-0x01FF, structurally
+    // disjoint from the 0x00-0x10 transport-error range.
+    assert(!(TransportErrorCode.CRYPTO_ERROR_BASE == TransportErrorCode.NO_ERROR));
+    assert(!(TransportErrorCode.CRYPTO_ERROR_BASE == TransportErrorCode.INTERNAL_ERROR));
+    assert(!(TransportErrorCode.CRYPTO_ERROR_BASE == TransportErrorCode.NO_VIABLE_PATH));
+}
+
+@test
+fn prop_quic_crypto_err_base_is_high_bit_marker() {
+    // CRYPTO_ERROR_BASE > 0xFF — fits in 2-byte varint, distinguishes
+    // CRYPTO_ERROR_* from every single-byte canonical code.
+    assert(TransportErrorCode.CRYPTO_ERROR_BASE > 0xFF_u64);
+}
+
+// =============================================================================
+// §D  ApplicationErrorCode opaque value preservation
+// =============================================================================
+
+@test
+fn prop_quic_app_err_low_value_preserved() {
+    let c = ApplicationErrorCode.new(0x42_u64);
+    assert_eq(c.value(), 0x42_u64);
+}
+
+@test
+fn prop_quic_app_err_high_value_preserved() {
+    // QUIC application error codes are opaque 62-bit values; pin the
+    // upper bound preservation under common HTTP/3-style numbering.
+    let c = ApplicationErrorCode.new(0x010C_u64); // H3_REQUEST_CANCELLED
+    assert_eq(c.value(), 0x010C_u64);
+}
+
+@test
+fn prop_quic_app_err_eq_reflexive() {
+    let a = ApplicationErrorCode.new(0x100_u64);
+    let b = ApplicationErrorCode.new(0x100_u64);
+    assert(a == b);
+}
+
+@test
+fn prop_quic_app_err_eq_distinct_disjoint() {
+    let a = ApplicationErrorCode.new(0x100_u64);
+    let b = ApplicationErrorCode.new(0x101_u64);
+    assert(!(a == b));
+}
+
+// =============================================================================
+// §E  QuicError variant Eq reflexivity + payload preservation
+// =============================================================================
+
+@test
+fn prop_quic_error_idle_timeout_reflexive() {
+    assert(QuicError.IdleTimeout == QuicError.IdleTimeout);
+}
+
+@test
+fn prop_quic_error_stateless_reset_reflexive() {
+    assert(QuicError.StatelessReset == QuicError.StatelessReset);
+}
+
+@test
+fn prop_quic_error_version_mismatch_reflexive() {
+    assert(QuicError.VersionMismatch == QuicError.VersionMismatch);
+}
+
+@test
+fn prop_quic_error_closed_reflexive() {
+    assert(QuicError.Closed == QuicError.Closed);
+}
+
+@test
+fn prop_quic_error_connection_refused_payload_preserved() {
+    let a = QuicError.ConnectionRefused("peer rejected".clone());
+    let b = QuicError.ConnectionRefused("peer rejected".clone());
+    assert(a == b);
+}
+
+@test
+fn prop_quic_error_handshake_failed_payload_preserved() {
+    let a = QuicError.HandshakeFailed("TLS alert 40".clone());
+    let b = QuicError.HandshakeFailed("TLS alert 40".clone());
+    assert(a == b);
+}
+
+@test
+fn prop_quic_error_invalid_transport_parameter_payload_preserved() {
+    let a = QuicError.InvalidTransportParameter("missing id 0x04".clone());
+    let b = QuicError.InvalidTransportParameter("missing id 0x04".clone());
+    assert(a == b);
+}
+
+// =============================================================================
+// §F  QuicError variant pairwise disjointness
+// =============================================================================
+
+@test
+fn prop_quic_error_idle_vs_stateless_disjoint() {
+    assert(!(QuicError.IdleTimeout == QuicError.StatelessReset));
+}
+
+@test
+fn prop_quic_error_version_mismatch_vs_closed_disjoint() {
+    assert(!(QuicError.VersionMismatch == QuicError.Closed));
+}
+
+@test
+fn prop_quic_error_connection_refused_vs_handshake_failed_same_payload_disjoint() {
+    // Same Text payload, different variants — must not compare equal.
+    let cr = QuicError.ConnectionRefused("x".clone());
+    let hf = QuicError.HandshakeFailed("x".clone());
+    assert(!(cr == hf));
+}
+
+// =============================================================================
+// §G  QUIC version constants pairwise disjointness (RFC 9000 §15)
+// =============================================================================
+
+@test
+fn prop_quic_version_negotiation_vs_v1_disjoint() {
+    // RFC 9000 §15: VERSION_NEGOTIATION=0x00000000 reserved sentinel
+    // vs VERSION_1=0x00000001.
+    assert(!(VERSION_NEGOTIATION == VERSION_1));
+}
+
+@test
+fn prop_quic_v1_vs_v2_disjoint() {
+    // RFC 9369: VERSION_2=0x6B3343CF distinct from VERSION_1=0x00000001.
+    assert(!(VERSION_1 == VERSION_2));
+}
+
+@test
+fn prop_quic_version_negotiation_vs_v2_disjoint() {
+    assert(!(VERSION_NEGOTIATION == VERSION_2));
+}
+
+// =============================================================================
+// §H  is_supported / is_greased predicate dispatch
+// =============================================================================
+
+@test
+fn prop_quic_v1_is_supported() {
+    // VERSION_1 is the only supported version per stdlib v0.1.
+    assert(is_supported(VERSION_1));
+}
+
+@test
+fn prop_quic_v2_not_supported_v1() {
+    // VERSION_2 (RFC 9369) is recognised but not negotiated in v0.1.
+    assert(!is_supported(VERSION_2));
+}
+
+@test
+fn prop_quic_version_negotiation_not_supported() {
+    assert(!is_supported(VERSION_NEGOTIATION));
+}
+
+@test
+fn prop_quic_greased_version_matches_pattern() {
+    // RFC 8701 GREASE pattern: every nibble equal to 0x0A.
+    // 0x0A0A0A0A — canonical greased example.
+    assert(is_greased(0x0A0A0A0A_u32));
+}
+
+@test
+fn prop_quic_v1_not_greased() {
+    // VERSION_1=0x00000001 — no nibble equals 0x0A.
+    assert(!is_greased(VERSION_1));
+}
+
+// =============================================================================
+// §I  AckRange + EcnCounts field independence (RFC 9000 §19.3)
+// =============================================================================
+
+@test
+fn prop_quic_ack_range_smallest_preserved() {
+    let r = AckRange { smallest: 100_u64, largest: 200_u64 };
+    assert_eq(r.smallest, 100_u64);
+}
+
+@test
+fn prop_quic_ack_range_largest_preserved() {
+    let r = AckRange { smallest: 100_u64, largest: 200_u64 };
+    assert_eq(r.largest, 200_u64);
+}
+
+@test
+fn prop_quic_ack_range_zero_singleton_preserved() {
+    // RFC 9000 §19.3 — single-packet range smallest == largest.
+    let r = AckRange { smallest: 0_u64, largest: 0_u64 };
+    assert_eq(r.smallest, r.largest);
+}
+
+@test
+fn prop_quic_ecn_counts_field_independence() {
+    let e = EcnCounts { ect0: 10_u64, ect1: 20_u64, ce: 30_u64 };
+    assert_eq(e.ect0, 10_u64);
+    assert_eq(e.ect1, 20_u64);
+    assert_eq(e.ce, 30_u64);
+}
+
+// =============================================================================
+// §J  StreamFlags 3-bool field independence (RFC 9000 §19.8)
+// =============================================================================
+
+@test
+fn prop_quic_stream_flags_off_len_fin_independent() {
+    // RFC 9000 §19.8 STREAM type-bits OFF=0x04 / LEN=0x02 / FIN=0x01.
+    let f = StreamFlags { has_offset: true, has_length: false, fin: true };
+    assert(f.has_offset);
+    assert(!f.has_length);
+    assert(f.fin);
+}
+
+@test
+fn prop_quic_stream_flags_all_false_preserved() {
+    let f = StreamFlags { has_offset: false, has_length: false, fin: false };
+    assert(!f.has_offset);
+    assert(!f.has_length);
+    assert(!f.fin);
+}
+
+@test
+fn prop_quic_stream_flags_all_true_preserved() {
+    let f = StreamFlags { has_offset: true, has_length: true, fin: true };
+    assert(f.has_offset);
+    assert(f.has_length);
+    assert(f.fin);
+}
+
+// =============================================================================
+// §K  QuicFrame variant disjointness sample
+// =============================================================================
+
+@test
+fn prop_quic_frame_ping_vs_handshake_done_disjoint() {
+    // PING=0x01 (ack-eliciting probe) vs HANDSHAKE_DONE=0x1E
+    // (server signals handshake complete). Far in the wire-format
+    // catalogue but both nullary — must not collide.
+    let p = QuicFrame.PingFrame;
+    let h = QuicFrame.HandshakeDone;
+    assert(p is QuicFrame.PingFrame);
+    assert(h is QuicFrame.HandshakeDone);
+    assert(!(p is QuicFrame.HandshakeDone));
+    assert(!(h is QuicFrame.PingFrame));
+}
+
+@test
+fn prop_quic_frame_max_data_payload_preserved() {
+    // MAX_DATA=0x10 carries a single varint limit.
+    let f = QuicFrame.MaxData(0x4000_u64);
+    match f {
+        QuicFrame.MaxData(limit) => assert_eq(limit, 0x4000_u64),
+        _ => panic("expected MaxData"),
+    }
+}
+
+@test
+fn prop_quic_frame_retire_connection_id_seq_preserved() {
+    // RETIRE_CONNECTION_ID=0x19 carries sequence_number varint.
+    let f = QuicFrame.RetireConnectionId(7_u64);
+    match f {
+        QuicFrame.RetireConnectionId(seq) => assert_eq(seq, 7_u64),
+        _ => panic("expected RetireConnectionId"),
+    }
+}
+
+@test
+fn prop_quic_frame_padding_run_preserved() {
+    // PADDING=0x00 run aggregation — N x 0x00 bytes coalesce into
+    // one PaddingRun(N) for caller-visible accounting.
+    let f = QuicFrame.PaddingRun(42);
+    match f {
+        QuicFrame.PaddingRun(n) => assert_eq(n, 42),
+        _ => panic("expected PaddingRun"),
+    }
+}
+
+// =============================================================================
+// §L  FrameError variant Eq + InvalidType payload preservation
+// =============================================================================
+
+@test
+fn prop_quic_frame_error_truncated_reflexive() {
+    assert(FrameError.Truncated == FrameError.Truncated);
+}
+
+@test
+fn prop_quic_frame_error_varint_failure_reflexive() {
+    assert(FrameError.VarintFailure == FrameError.VarintFailure);
+}
+
+@test
+fn prop_quic_frame_error_invalid_type_payload_preserved() {
+    let a = FrameError.InvalidType(0xFF_u64);
+    let b = FrameError.InvalidType(0xFF_u64);
+    assert(a == b);
+}
+
+@test
+fn prop_quic_frame_error_invalid_type_distinct_payloads_disjoint() {
+    let a = FrameError.InvalidType(0x42_u64);
+    let b = FrameError.InvalidType(0x43_u64);
+    assert(!(a == b));
+}
+
+@test
+fn prop_quic_frame_error_truncated_vs_varint_failure_disjoint() {
+    assert(!(FrameError.Truncated == FrameError.VarintFailure));
+}
