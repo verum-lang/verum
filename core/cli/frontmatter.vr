@@ -61,10 +61,10 @@ public type Frontmatter is {
 implement Frontmatter {
     public fn empty() -> Frontmatter {
         Frontmatter {
-            name: None,
-            version: None,
-            description: None,
-            requires_verum: None,
+            name: Maybe.None,
+            version: Maybe.None,
+            description: Maybe.None,
+            requires_verum: Maybe.None,
             requires_cogs: List.new(),
             extras: Map.new(),
         }
@@ -167,13 +167,13 @@ fn split_lines(s: &Text) -> List<Text> {
     let mut i: Int = 0;
     while i < s.len() {
         match s.byte_at(i) {
-            Some(b) => {
+            Maybe.Some(b) => {
                 if b == 0x0A {
                     out.push(s.slice(start, i));
                     start = i + 1;
                 }
             },
-            None => break,
+            Maybe.None => break,
         }
         i = i + 1;
     }
@@ -190,8 +190,8 @@ fn split_lines(s: &Text) -> List<Text> {
 fn apply_kv_line(body: &Text, fm: &mut Frontmatter) -> Result<Unit, FrontmatterError> {
     let eq = Text.from("=");
     let eq_idx = match body.find(&eq) {
-        Some(n) => n,
-        None => return Err(FrontmatterError.InvalidLine(0, body.clone())),
+        Maybe.Some(n) => n,
+        Maybe.None => return Err(FrontmatterError.InvalidLine(0, body.clone())),
     };
     let key = body.slice(0, eq_idx).trim();
     let value_raw = body.slice(eq_idx + 1, body.len()).trim();
