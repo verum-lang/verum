@@ -101,7 +101,7 @@ public mount .ops.{
 // From maybe — re-export the type AND its variant constructors so
 // callers can write `Maybe.Some(x)` / `Maybe.None` directly without having to
 // reach for `Maybe.Some` / `Maybe.None`.
-public mount .maybe.{Maybe, Some, Maybe.None};
+public mount .maybe.{Maybe, Some, None};
 
 // From result — same: expose `Ok` / `Err` as bare names alongside
 // the wrapper type, matching idiomatic `Result.Ok(value)` / `Result.Err(error)`
