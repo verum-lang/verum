@@ -430,7 +430,9 @@ fn parse_u64(src: &List<Byte>) -> Result<UInt64, RangeError> {
 }
 
 fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
-    dst.extend_from_slice(src);
+    // EXTSLICE-1 discipline: byte-by-byte push.
+    let mut __i = 0;
+    while __i < src.len() { dst.push(src[__i]); __i = __i + 1; }
 }
 
 fn push_u64(dst: &mut List<Byte>, n: UInt64) {
