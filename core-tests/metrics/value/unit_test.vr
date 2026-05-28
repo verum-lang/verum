@@ -1,0 +1,62 @@
+// =============================================================================
+// core-tests/metrics/value/unit_test.vr
+// =============================================================================
+//
+// `core/metrics/value.vr` — AtomicF64 atomic float storage.
+// =============================================================================
+
+mount core.metrics.value.AtomicF64;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: AtomicF64 direct record construction
+// =============================================================================
+
+@test
+fn test_atomic_f64_zero_construction() {
+    let a: AtomicF64 = AtomicF64 { bits: 0_u64 };
+    assert_eq(a.bits, 0_u64);
+}
+
+@test
+fn test_atomic_f64_nonzero_bits_construction() {
+    // 0x4000000000000000 == 2.0 as IEEE 754 double.
+    let a: AtomicF64 = AtomicF64 { bits: 0x4000000000000000_u64 };
+    assert_eq(a.bits, 0x4000000000000000_u64);
+}
+
+@test
+fn test_atomic_f64_all_ones_construction() {
+    // 0xFFFFFFFFFFFFFFFF maps to NaN in IEEE 754 double.
+    let a: AtomicF64 = AtomicF64 { bits: 0xFFFFFFFFFFFFFFFF_u64 };
+    assert_eq(a.bits, 0xFFFFFFFFFFFFFFFF_u64);
+}
+
+@test
+fn test_atomic_f64_neg_zero_bit_pattern() {
+    // -0.0 == 0x8000000000000000 (sign bit only).
+    let a: AtomicF64 = AtomicF64 { bits: 0x8000000000000000_u64 };
+    assert_eq(a.bits, 0x8000000000000000_u64);
+}
+
+// =============================================================================
+// Section 2: Field independence
+// =============================================================================
+
+@test
+fn test_atomic_f64_field_independence() {
+    let a: AtomicF64 = AtomicF64 { bits: 1_u64 };
+    let b: AtomicF64 = AtomicF64 { bits: 2_u64 };
+    assert_eq(a.bits, 1_u64);
+    assert_eq(b.bits, 2_u64);
+}
+
+@test
+fn test_atomic_f64_distinct_patterns_distinct_bits() {
+    let inf:    AtomicF64 = AtomicF64 { bits: 0x7FF0000000000000_u64 };   // +infinity
+    let neg_inf: AtomicF64 = AtomicF64 { bits: 0xFFF0000000000000_u64 };   // -infinity
+    assert(inf.bits != neg_inf.bits);
+}
+
+fn main() {}
