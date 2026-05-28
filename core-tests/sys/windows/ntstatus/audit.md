@@ -115,6 +115,41 @@ as a positive 48-bit integer and `< 0` legitimately returned false.
 post-rebuild.  Severity dispatch over the entire documented arm set is
 GREEN.
 
+### §A.bis — Method dispatch loses receiver type for `mount X.{CONST}` imports without the type
+
+**Surfaced during isolation probes for §A.**
+
+`mount core.sys.windows.ntstatus.{STATUS_UNSUCCESSFUL}` imports the
+constant value but does NOT bring `NtStatus.is_error` / `is_success` /
+etc. impl-block methods into the caller's method-dispatch namespace.
+At the call site, `STATUS_UNSUCCESSFUL.is_error()` panics with:
+
+```
+method 'NtStatus.is_error' not found on receiver of runtime kind `Int`
+```
+
+The dispatch tries to resolve the method against the runtime type of
+the receiver — for newtype tuples whose declared type isn't in the
+caller's mount-imported namespace, the receiver kind decays to the
+underlying primitive (`Int` for `NtStatus = (Int32)`), and dispatch
+fails to find the method because the impl block is keyed on the named
+newtype, not on `Int`.
+
+**Workaround.** Import the type alongside the constants:
+`mount core.sys.windows.ntstatus.{NtStatus, STATUS_UNSUCCESSFUL}`.
+
+**Fundamental fix surface.** The dispatch table should resolve methods
+via the receiver's static declared type (the const initialiser
+declares it as `NtStatus`), not the runtime-tag of the underlying
+primitive.  This is the same class of defect as receiver-method
+intercepts in `method_dispatch.rs` that key on `is_int()` + bare
+method name and mis-fire for single-field-record-unboxed records (see
+related work in [[duration_single_field_record_unboxing_2026-05-27]]
+and [[btree_pattern_match_ref_generic_class]]).
+
+Tests in this suite import `NtStatus` alongside the const surface as
+the workaround.
+
 ### §B — STATUS_PENDING / STATUS_TIMEOUT are Success-domain by NT convention
 
 **Pinned by.** `regression_status_pending_is_success_domain` /
