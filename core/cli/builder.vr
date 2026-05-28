@@ -51,19 +51,19 @@ implement AppBuilder {
 
     /// Set the version string (printed via `--version`).
     public fn version(mut self, v: Text) -> AppBuilder {
-        self.spec.version = Some(v);
+        self.spec.version = Maybe.Some(v);
         self
     }
 
     /// Set a long-form description.
     public fn long_about(mut self, la: Text) -> AppBuilder {
-        self.spec.long_about = Some(la);
+        self.spec.long_about = Maybe.Some(la);
         self
     }
 
     /// Set the author string.
     public fn author(mut self, a: Text) -> AppBuilder {
-        self.spec.author = Some(a);
+        self.spec.author = Maybe.Some(a);
         self
     }
 
@@ -111,7 +111,7 @@ implement AppBuilder {
 
     /// Append epilogue text (after-help section).
     public fn after_help(mut self, t: Text) -> AppBuilder {
-        self.spec.after_help = Some(t);
+        self.spec.after_help = Maybe.Some(t);
         self
     }
 
@@ -164,36 +164,36 @@ implement ArgBuilder {
     }
 
     public fn placeholder(mut self, p: Text) -> ArgBuilder {
-        self.spec.placeholder = Some(p);
+        self.spec.placeholder = Maybe.Some(p);
         self
     }
 
     public fn long_help(mut self, t: Text) -> ArgBuilder {
-        self.spec.long_help = Some(t);
+        self.spec.long_help = Maybe.Some(t);
         self
     }
 
     public fn default(mut self, v: Text) -> ArgBuilder {
-        self.spec.default_text = Some(v);
+        self.spec.default_text = Maybe.Some(v);
         self.spec.arity = Arity.optional();
         self
     }
 
     public fn env(mut self, name: Text) -> ArgBuilder {
-        self.spec.env_fallback = Some(name);
+        self.spec.env_fallback = Maybe.Some(name);
         self
     }
 
     public fn config(mut self, path: Text) -> ArgBuilder {
-        self.spec.config_path = Some(path);
+        self.spec.config_path = Maybe.Some(path);
         self
     }
 
     public fn refinement(mut self, expr: Text) -> ArgBuilder {
-        self.spec.refinement = Some(RefinementHandle {
+        self.spec.refinement = Maybe.Some(RefinementHandle {
             expression: expr,
-            lower: None,
-            upper: None,
+            lower: Maybe.None,
+            upper: Maybe.None,
         });
         self
     }
@@ -239,7 +239,7 @@ implement FlagBuilder {
     }
 
     public fn short(mut self, c: Char) -> FlagBuilder {
-        self.spec.short = Some(c);
+        self.spec.short = Maybe.Some(c);
         self
     }
 
@@ -249,35 +249,35 @@ implement FlagBuilder {
     }
 
     public fn placeholder(mut self, p: Text) -> FlagBuilder {
-        self.spec.placeholder = Some(p);
+        self.spec.placeholder = Maybe.Some(p);
         self
     }
 
     public fn long_help(mut self, t: Text) -> FlagBuilder {
-        self.spec.long_help = Some(t);
+        self.spec.long_help = Maybe.Some(t);
         self
     }
 
     public fn default(mut self, v: Text) -> FlagBuilder {
-        self.spec.default_text = Some(v);
+        self.spec.default_text = Maybe.Some(v);
         self
     }
 
     public fn env(mut self, name: Text) -> FlagBuilder {
-        self.spec.env_fallback = Some(name);
+        self.spec.env_fallback = Maybe.Some(name);
         self
     }
 
     public fn config(mut self, path: Text) -> FlagBuilder {
-        self.spec.config_path = Some(path);
+        self.spec.config_path = Maybe.Some(path);
         self
     }
 
     public fn refinement(mut self, expr: Text) -> FlagBuilder {
-        self.spec.refinement = Some(RefinementHandle {
+        self.spec.refinement = Maybe.Some(RefinementHandle {
             expression: expr,
-            lower: None,
-            upper: None,
+            lower: Maybe.None,
+            upper: Maybe.None,
         });
         self
     }

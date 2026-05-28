@@ -81,8 +81,8 @@ public fn render(cmd: &CommandSpec, section: Section) -> Text {
     b.push(" ");
     b.push(&Text.from(f"{section.number()}"));
     match &cmd.version {
-        Some(v) => { b.push(" \""); b.push(v); b.push("\""); },
-        None => { b.push(" \"\""); },
+        Maybe.Some(v) => { b.push(" \""); b.push(v); b.push("\""); },
+        Maybe.None => { b.push(" \"\""); },
     }
     b.push(" \"User Commands\"\n");
 
@@ -131,8 +131,8 @@ fn write_synopsis(b: &mut TextBuilder, cmd: &CommandSpec) {
         let a = &cmd.args[i];
         b.push("\\fI");
         match &a.placeholder {
-            Some(p) => b.push(p),
-            None => b.push(&a.name.to_uppercase()),
+            Maybe.Some(p) => b.push(p),
+            Maybe.None => b.push(&a.name.to_uppercase()),
         }
         b.push("\\fR ");
         i = i + 1;
@@ -146,8 +146,8 @@ fn write_synopsis(b: &mut TextBuilder, cmd: &CommandSpec) {
 fn write_description(b: &mut TextBuilder, cmd: &CommandSpec) {
     b.push(".SH DESCRIPTION\n");
     match &cmd.long_about {
-        Some(la) => { b.push(la); b.push("\n"); },
-        None => { b.push(&cmd.about); b.push("\n"); },
+        Maybe.Some(la) => { b.push(la); b.push("\n"); },
+        Maybe.None => { b.push(&cmd.about); b.push("\n"); },
     }
 }
 
@@ -160,28 +160,28 @@ fn write_options(b: &mut TextBuilder, cmd: &CommandSpec) {
         if f.hidden { i = i + 1; continue; }
         b.push(".TP\n");
         match f.short {
-            Some(c) => {
+            Maybe.Some(c) => {
                 b.push("\\fB-");
                 b.push(&Text.from(f"{c}"));
                 b.push("\\fR, ");
             },
-            None => {},
+            Maybe.None => {},
         }
         match &f.long {
-            Some(l) => {
+            Maybe.Some(l) => {
                 b.push("\\fB--");
                 b.push(l);
                 b.push("\\fR");
             },
-            None => {},
+            Maybe.None => {},
         }
         if !f.arity.is_switch() {
             b.push(" \\fI");
             match &f.placeholder {
-                Some(p) => b.push(p),
-                None => match &f.long {
-                    Some(l) => b.push(&l.to_uppercase()),
-                    None => b.push("VALUE"),
+                Maybe.Some(p) => b.push(p),
+                Maybe.None => match &f.long {
+                    Maybe.Some(l) => b.push(&l.to_uppercase()),
+                    Maybe.None => b.push("VALUE"),
                 },
             }
             b.push("\\fR");
@@ -190,13 +190,13 @@ fn write_options(b: &mut TextBuilder, cmd: &CommandSpec) {
         b.push(&f.help);
         b.push("\n");
         match &f.refinement {
-            Some(r) => {
+            Maybe.Some(r) => {
                 b.push(".RS\n");
                 b.push("Constraint: ");
                 b.push(&r.expression);
                 b.push(".\n.RE\n");
             },
-            None => {},
+            Maybe.None => {},
         }
         i = i + 1;
     }
@@ -206,8 +206,8 @@ fn write_options(b: &mut TextBuilder, cmd: &CommandSpec) {
         let a = &cmd.args[j];
         b.push(".TP\n\\fI");
         match &a.placeholder {
-            Some(p) => b.push(p),
-            None => b.push(&a.name.to_uppercase()),
+            Maybe.Some(p) => b.push(p),
+            Maybe.None => b.push(&a.name.to_uppercase()),
         }
         b.push("\\fR\n");
         b.push(&a.help);
@@ -264,18 +264,18 @@ fn write_environment(b: &mut TextBuilder, cmd: &CommandSpec) {
     let mut i: Int = 0;
     while i < cmd.flags.len() {
         match &cmd.flags[i].env_fallback {
-            Some(env) => {
+            Maybe.Some(env) => {
                 b.push(".TP\n\\fB");
                 b.push(env);
                 b.push("\\fR\n");
                 b.push("Fallback for \\fB--");
                 match &cmd.flags[i].long {
-                    Some(l) => b.push(l),
-                    None => b.push("(this flag)"),
+                    Maybe.Some(l) => b.push(l),
+                    Maybe.None => b.push("(this flag)"),
                 }
                 b.push("\\fR.\n");
             },
-            None => {},
+            Maybe.None => {},
         }
         i = i + 1;
     }
@@ -293,11 +293,11 @@ fn write_exit_status(b: &mut TextBuilder) {
 
 fn write_author(b: &mut TextBuilder, cmd: &CommandSpec) {
     match &cmd.author {
-        Some(a) => {
+        Maybe.Some(a) => {
             b.push(".SH AUTHOR\n");
             b.push(a);
             b.push("\n");
         },
-        None => {},
+        Maybe.None => {},
     }
 }
