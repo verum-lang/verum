@@ -1,0 +1,123 @@
+// =============================================================================
+// core-tests/security/x509/crl/unit_test.vr
+// =============================================================================
+//
+// `core/security/x509/crl.vr` — CRL revocation reason codes.
+// =============================================================================
+
+mount core.security.x509.crl.CrlReason;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: CrlReason scalar variants (RFC 5280 §5.3.1)
+// =============================================================================
+
+@test
+fn test_crl_reason_unspecified_variant() {
+    let r: CrlReason = CrlReason.Unspecified;
+    assert(r is CrlReason.Unspecified);
+}
+
+@test
+fn test_crl_reason_key_compromise_variant() {
+    let r: CrlReason = CrlReason.KeyCompromise;
+    assert(r is CrlReason.KeyCompromise);
+}
+
+@test
+fn test_crl_reason_ca_compromise_variant() {
+    let r: CrlReason = CrlReason.CaCompromise;
+    assert(r is CrlReason.CaCompromise);
+}
+
+@test
+fn test_crl_reason_affiliation_changed_variant() {
+    let r: CrlReason = CrlReason.AffiliationChanged;
+    assert(r is CrlReason.AffiliationChanged);
+}
+
+@test
+fn test_crl_reason_superseded_variant() {
+    let r: CrlReason = CrlReason.Superseded;
+    assert(r is CrlReason.Superseded);
+}
+
+@test
+fn test_crl_reason_cessation_of_operation_variant() {
+    let r: CrlReason = CrlReason.CessationOfOperation;
+    assert(r is CrlReason.CessationOfOperation);
+}
+
+@test
+fn test_crl_reason_certificate_hold_variant() {
+    let r: CrlReason = CrlReason.CertificateHold;
+    assert(r is CrlReason.CertificateHold);
+}
+
+@test
+fn test_crl_reason_remove_from_crl_variant() {
+    let r: CrlReason = CrlReason.RemoveFromCrl;
+    assert(r is CrlReason.RemoveFromCrl);
+}
+
+@test
+fn test_crl_reason_privilege_withdrawn_variant() {
+    let r: CrlReason = CrlReason.PrivilegeWithdrawn;
+    assert(r is CrlReason.PrivilegeWithdrawn);
+}
+
+@test
+fn test_crl_reason_aa_compromise_variant() {
+    let r: CrlReason = CrlReason.AaCompromise;
+    assert(r is CrlReason.AaCompromise);
+}
+
+// =============================================================================
+// Section 2: UnknownReason(UInt32) carrier variant
+// =============================================================================
+
+@test
+fn test_crl_reason_unknown_reason_variant() {
+    let r: CrlReason = CrlReason.UnknownReason(255_u32);
+    assert(r is CrlReason.UnknownReason);
+}
+
+@test
+fn test_crl_reason_unknown_reason_payload_round_trip() {
+    let r: CrlReason = CrlReason.UnknownReason(99_u32);
+    match r {
+        CrlReason.UnknownReason(code) => assert_eq(code, 99_u32),
+        _ => panic("expected UnknownReason"),
+    }
+}
+
+// =============================================================================
+// Section 3: Pairwise disjointness — selected
+// =============================================================================
+
+@test
+fn test_crl_reason_unspecified_disjoint_from_key_compromise() {
+    let u: CrlReason = CrlReason.Unspecified;
+    let k: CrlReason = CrlReason.KeyCompromise;
+    assert(!(u is CrlReason.KeyCompromise));
+    assert(!(k is CrlReason.Unspecified));
+}
+
+@test
+fn test_crl_reason_key_vs_ca_compromise_disjoint() {
+    let k: CrlReason = CrlReason.KeyCompromise;
+    let c: CrlReason = CrlReason.CaCompromise;
+    assert(!(k is CrlReason.CaCompromise));
+    assert(!(c is CrlReason.KeyCompromise));
+}
+
+@test
+fn test_crl_reason_unknown_disjoint_from_specifics() {
+    let u: CrlReason = CrlReason.UnknownReason(0_u32);
+    assert(!(u is CrlReason.Unspecified));
+    assert(!(u is CrlReason.KeyCompromise));
+    assert(!(u is CrlReason.CaCompromise));
+}
+
+fn main() {}
