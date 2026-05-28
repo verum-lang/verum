@@ -1,0 +1,96 @@
+// =============================================================================
+// core-tests/security/hash/xxhash/unit_test.vr
+// =============================================================================
+//
+// `core/security/hash/xxhash.vr` — xxHash64 non-cryptographic hash.
+//
+// Tested:
+//   * XxHash64.new(seed) accumulator construction
+//   * Total length starts at 0
+//   * Empty buffer length starts at 0
+//
+// The 32-byte internal partial-block buffer is gated behind the
+// byte-array compile-time class — full one-shot xxh64() round-trip
+// tests deferred.
+// =============================================================================
+
+mount core.security.hash.xxhash.XxHash64;
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Fresh accumulator
+// =============================================================================
+
+@test
+fn test_xxhash64_new_total_len_is_zero() {
+    let h: XxHash64 = XxHash64.new(0_u64);
+    assert_eq(h.total_len, 0_u64);
+}
+
+@test
+fn test_xxhash64_new_buf_len_is_zero() {
+    let h: XxHash64 = XxHash64.new(0_u64);
+    assert_eq(h.buf_len, 0);
+}
+
+@test
+fn test_xxhash64_new_seed_zero_preserves_seed() {
+    let h: XxHash64 = XxHash64.new(0_u64);
+    assert_eq(h.seed, 0_u64);
+}
+
+@test
+fn test_xxhash64_new_seed_nonzero_preserves_seed() {
+    let h: XxHash64 = XxHash64.new(0xCAFEBABEDEADBEEF_u64);
+    assert_eq(h.seed, 0xCAFEBABEDEADBEEF_u64);
+}
+
+// =============================================================================
+// Section 2: Seed-driven internal state
+//
+//   The four internal accumulators v1..v4 are seeded according to the
+//   xxHash64 spec. With seed=0:
+//     v1 = 0 + PRIME64_1 + PRIME64_2 = 0x9E3779B185EBCA87 + 0xC2B2AE3D27D4EB4F
+//        = 0x60EA27EEADC0B5D6 (UInt64 wrap)
+//     v2 = 0 + PRIME64_2 = 0xC2B2AE3D27D4EB4F
+//     v3 = 0 + 0         = 0
+//     v4 = 0 - PRIME64_1 = -0x9E3779B185EBCA87 (UInt64 two's complement)
+//        = 0x61C8864680B583EB + 1 = 0x61C8864680B583EC + ... (wrapping)
+// =============================================================================
+
+@test
+fn test_xxhash64_new_v3_seed_zero_is_zero() {
+    // v3 = seed + 0 = 0 with seed=0.
+    let h: XxHash64 = XxHash64.new(0_u64);
+    assert_eq(h.v3, 0_u64);
+}
+
+@test
+fn test_xxhash64_new_v2_seed_zero_is_prime64_2() {
+    // v2 = seed + PRIME64_2 = 0xC2B2AE3D27D4EB4F with seed=0.
+    let h: XxHash64 = XxHash64.new(0_u64);
+    assert_eq(h.v2, 0xC2B2AE3D27D4EB4F_u64);
+}
+
+// =============================================================================
+// Section 3: Different seeds produce different internal states
+// =============================================================================
+
+@test
+fn test_xxhash64_distinct_seeds_produce_distinct_state() {
+    let a: XxHash64 = XxHash64.new(1_u64);
+    let b: XxHash64 = XxHash64.new(2_u64);
+    assert(a.seed != b.seed);
+    assert(a.v3 != b.v3);   // v3 = seed + 0 = seed, so v3 differs
+}
+
+@test
+fn test_xxhash64_distinct_seeds_share_zero_state_fields() {
+    let a: XxHash64 = XxHash64.new(1_u64);
+    let b: XxHash64 = XxHash64.new(2_u64);
+    assert_eq(a.total_len, b.total_len);   // both 0
+    assert_eq(a.buf_len, b.buf_len);       // both 0
+}
+
+fn main() {}
