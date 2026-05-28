@@ -1,0 +1,49 @@
+// =============================================================================
+// core-tests/security/sigstore/fulcio/unit_test.vr
+// =============================================================================
+//
+// `core/security/sigstore/fulcio.vr` — Fulcio CA client constants.
+// =============================================================================
+
+mount core.security.sigstore.fulcio.{
+    MAX_FULCIO_RESPONSE_BYTES, CONTENT_TYPE_JSON,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: Fulcio client constants
+// =============================================================================
+
+@test
+fn test_fulcio_max_response_bytes_canonical_value() {
+    // 256 KiB Fulcio response cap.
+    assert_eq(MAX_FULCIO_RESPONSE_BYTES, 256 * 1024);
+}
+
+@test
+fn test_fulcio_max_response_bytes_concrete_value() {
+    assert_eq(MAX_FULCIO_RESPONSE_BYTES, 262_144);
+}
+
+@test
+fn test_fulcio_content_type_json_canonical_value() {
+    assert_eq(CONTENT_TYPE_JSON, "application/json");
+}
+
+// =============================================================================
+// Section 2: Bounds
+// =============================================================================
+
+@test
+fn test_fulcio_max_response_positive() {
+    assert(MAX_FULCIO_RESPONSE_BYTES > 0);
+}
+
+@test
+fn test_fulcio_max_response_power_of_two() {
+    let n = MAX_FULCIO_RESPONSE_BYTES;
+    assert_eq(n & (n - 1), 0);
+}
+
+fn main() {}
