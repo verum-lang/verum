@@ -1,0 +1,259 @@
+// =============================================================================
+// core-tests/net/tls13/regression_test.vr
+// =============================================================================
+//
+// LOCK-IN pins for `core/net/tls13/`:
+//
+//   * Active pins fix wire-format identifiers — CipherSuite IANA u16 IDs
+//     (RFC 8446 §B.4), NamedGroup IDs (RFC 8446 §4.2.7), TLS extension
+//     types (RFC 8446 §4.2), ContentType bytes (RFC 8446 §5.1), Alert
+//     wire bytes (RFC 8446 §6), and SignatureScheme IDs (RFC 8446 §4.2.3).
+//     These flow directly into the codec at `record/aead.vr` and
+//     `handshake/codec.vr` — drift here silently breaks TLS 1.3
+//     interoperability against every standards-conformant peer.
+//
+//   * `@ignore`'d pins document the functional surface (handshake state
+//     machine, AeadState seal/open round-trip, session ticket lifecycle,
+//     0-RTT antireplay). See `audit.md §3.1` (TLS13-1) and `§3.2`
+//     (TLS13-2 — RFC 8879 cert compression).
+//
+// =============================================================================
+
+mount core.net.tls13.{
+    ProtocolVersion, TLS_1_3, LEGACY_VERSION_TLS_1_2,
+    CipherSuite, HashKind, AeadKind,
+    NamedGroup,
+    AlertLevel, AlertDescription, AlertRecord,
+    ContentType,
+    MAX_PLAINTEXT_SIZE, MAX_CIPHERTEXT_SIZE,
+    TlsError
+};
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+mount core.net.tls13.handshake.extension.{
+    EXT_SUPPORTED_GROUPS, EXT_SIGNATURE_ALGORITHMS, EXT_ALPN,
+    EXT_SUPPORTED_VERSIONS, EXT_KEY_SHARE,
+    EXT_PRE_SHARED_KEY, EXT_EARLY_DATA, EXT_PSK_KEY_EXCHANGE_MODES
+};
+
+// =============================================================================
+// Section 1: Active LOCK-IN pins — CipherSuite IANA wire IDs (RFC 8446 §B.4)
+// =============================================================================
+//
+// The IANA values 0x1301-0x1305 are the only suites that exist for TLS 1.3.
+// `core.security.aead` reads these wire IDs when dispatching to a concrete
+// AEAD primitive; drift here would mis-route every encrypted record.
+// =============================================================================
+
+@test
+fn regression_tls13_cs_aes128_gcm_pinned_0x1301() {
+    // RFC 8446 §B.4 + RFC 5288: TLS_AES_128_GCM_SHA256 = 0x1301.
+    // Mandatory-to-implement per §9.1.
+    assert_eq(CipherSuite.TlsAes128GcmSha256.to_u16(), 0x1301_u16);
+}
+
+@test
+fn regression_tls13_cs_aes256_gcm_pinned_0x1302() {
+    // RFC 8446 §B.4: TLS_AES_256_GCM_SHA384 = 0x1302.
+    assert_eq(CipherSuite.TlsAes256GcmSha384.to_u16(), 0x1302_u16);
+}
+
+@test
+fn regression_tls13_cs_chacha20_pinned_0x1303() {
+    // RFC 8446 §B.4 + RFC 7539: TLS_CHACHA20_POLY1305_SHA256 = 0x1303.
+    // Mandatory-to-implement per §9.1.
+    assert_eq(CipherSuite.TlsChaCha20Poly1305Sha256.to_u16(), 0x1303_u16);
+}
+
+// =============================================================================
+// Section 2: Active LOCK-IN pins — NamedGroup IANA wire IDs (RFC 8446 §4.2.7)
+// =============================================================================
+
+@test
+fn regression_tls13_ng_x25519_pinned_0x001D() {
+    // RFC 7748 + RFC 8446: x25519 = 0x001D — mandatory-to-implement
+    // per §4.2.7.
+    assert_eq(NamedGroup.X25519.to_u16(), 0x001D_u16);
+}
+
+@test
+fn regression_tls13_ng_secp256r1_pinned_0x0017() {
+    // RFC 8446 §4.2.7: secp256r1 = 0x0017 — mandatory-to-implement
+    // (WebPKI dominant curve).
+    assert_eq(NamedGroup.Secp256r1.to_u16(), 0x0017_u16);
+}
+
+// =============================================================================
+// Section 3: Active LOCK-IN pins — Extension types (RFC 8446 §4.2)
+// =============================================================================
+
+@test
+fn regression_tls13_ext_supported_versions_pinned_43() {
+    // RFC 8446 §4.2.1: supported_versions = 43. THE extension that
+    // carries the actual TLS 1.3 negotiation (since the wire
+    // ProtocolVersion field stays at TLS 1.2 for backwards compat).
+    assert_eq(EXT_SUPPORTED_VERSIONS, 43_u16);
+}
+
+@test
+fn regression_tls13_ext_signature_algorithms_pinned_13() {
+    // RFC 8446 §4.2.3: signature_algorithms = 13. Required in
+    // every ClientHello (except PSK-only handshakes).
+    assert_eq(EXT_SIGNATURE_ALGORITHMS, 13_u16);
+}
+
+@test
+fn regression_tls13_ext_key_share_pinned_51() {
+    // RFC 8446 §4.2.8: key_share = 51. Carries the ECDHE / FFDHE
+    // public-key share material.
+    assert_eq(EXT_KEY_SHARE, 51_u16);
+}
+
+@test
+fn regression_tls13_ext_supported_groups_pinned_10() {
+    // RFC 8446 §4.2.7: supported_groups = 10 (inherited from RFC 4492).
+    assert_eq(EXT_SUPPORTED_GROUPS, 10_u16);
+}
+
+@test
+fn regression_tls13_ext_pre_shared_key_pinned_41() {
+    // RFC 8446 §4.2.11: pre_shared_key = 41.
+    assert_eq(EXT_PRE_SHARED_KEY, 41_u16);
+}
+
+// =============================================================================
+// Section 4: Active LOCK-IN pins — ContentType + Alert wire bytes
+// =============================================================================
+
+@test
+fn regression_tls13_ct_handshake_pinned_22() {
+    // RFC 8446 §5.1: handshake = 22 — every TLS handshake record.
+    assert_eq(ContentType.Handshake.to_u8(), 22_u8);
+}
+
+@test
+fn regression_tls13_ct_application_data_pinned_23() {
+    // RFC 8446 §5.1: application_data = 23 — every encrypted record.
+    assert_eq(ContentType.ApplicationData.to_u8(), 23_u8);
+}
+
+@test
+fn regression_tls13_ct_alert_pinned_21() {
+    // RFC 8446 §5.1: alert = 21.
+    assert_eq(ContentType.Alert.to_u8(), 21_u8);
+}
+
+@test
+fn regression_tls13_alert_fatal_pinned_2() {
+    // RFC 8446 §6: AlertLevel.fatal = 2.
+    assert_eq(AlertLevel.Fatal.to_u8(), 2_u8);
+}
+
+@test
+fn regression_tls13_alert_handshake_failure_pinned_40() {
+    // RFC 8446 §6.2: handshake_failure = 40.
+    assert_eq(AlertDescription.HandshakeFailure.to_u8(), 40_u8);
+}
+
+@test
+fn regression_tls13_alert_close_notify_pinned_0() {
+    // RFC 8446 §6.1: close_notify = 0. Mandatory-emitted before TCP close.
+    assert_eq(AlertDescription.CloseNotify.to_u8(), 0_u8);
+}
+
+// =============================================================================
+// Section 5: Active LOCK-IN pins — SignatureScheme IDs (RFC 8446 §4.2.3)
+// =============================================================================
+
+@test
+fn regression_tls13_sig_ed25519_pinned_0x0807() {
+    // RFC 8446 §4.2.3: ed25519 = 0x0807.
+    assert_eq(SignatureScheme.Ed25519Scheme.to_u16(), 0x0807_u16);
+}
+
+@test
+fn regression_tls13_sig_ecdsa_secp256r1_pinned_0x0403() {
+    // RFC 8446 §4.2.3: ecdsa_secp256r1_sha256 = 0x0403.
+    assert_eq(SignatureScheme.EcdsaSecp256r1Sha256.to_u16(), 0x0403_u16);
+}
+
+// =============================================================================
+// Section 6: Active LOCK-IN pins — ProtocolVersion + record-size constants
+// =============================================================================
+
+@test
+fn regression_tls13_protocol_version_tls13_pinned_0x0304() {
+    // RFC 8446 §4.1.3: TLS 1.3 = ProtocolVersion { 0x03, 0x04 }.
+    // Used only inside the supported_versions extension; the wire
+    // ProtocolVersion field stays at TLS 1.2 for compat.
+    assert_eq(TLS_1_3.major, 0x03_u8);
+    assert_eq(TLS_1_3.minor, 0x04_u8);
+}
+
+@test
+fn regression_tls13_legacy_version_pinned_0x0303() {
+    // RFC 8446 §4.1.2: legacy_version field MUST be 0x0303 (TLS 1.2)
+    // on every TLS 1.3 ClientHello / ServerHello.
+    assert_eq(LEGACY_VERSION_TLS_1_2.major, 0x03_u8);
+    assert_eq(LEGACY_VERSION_TLS_1_2.minor, 0x03_u8);
+}
+
+@test
+fn regression_tls13_max_plaintext_size_pinned_16384() {
+    // RFC 8446 §5.1: TLSPlaintext length cap = 2^14. Drift here
+    // would enable record-overflow attacks AND break interop with
+    // every peer that enforces the spec ceiling.
+    assert_eq(MAX_PLAINTEXT_SIZE, 16384);
+}
+
+@test
+fn regression_tls13_max_ciphertext_size_pinned_16640() {
+    // RFC 8446 §5.2: TLSCiphertext length cap = 2^14 + 256.
+    assert_eq(MAX_CIPHERTEXT_SIZE, 16640);
+}
+
+// =============================================================================
+// Section 7: @ignore'd functional pins — TLS13-1 handshake state machine
+// =============================================================================
+
+@ignore("TLS13-1: AeadState seal/open requires fixture key + harness. See audit.md §3.1.")
+@test
+fn regression_tls13_aead_seal_open_round_trip() {
+    // RFC 8446 §5.2: AeadState.seal + AeadState.open round-trip with
+    // a known traffic-secret derived key + nonce + ContentType.
+    // Functional coverage at L2 specs.
+    assert(true);
+}
+
+@ignore("TLS13-1: HKDF-Expand-Label vectors per RFC 8446 §7.1 deferred. See audit.md §3.1.")
+@test
+fn regression_tls13_hkdf_expand_label_test_vector() {
+    // RFC 8446 §7.1: HKDF-Expand-Label("c hs traffic", ...) vectors
+    // pinned at language level — require landing the test-vector
+    // fixture format.
+    assert(true);
+}
+
+@ignore("TLS13-1: ClientHello → Finished handshake driver requires harness. See audit.md §3.1.")
+@test
+fn regression_tls13_client_hello_to_finished_happy_path() {
+    // RFC 8446 §2: full ClientHello / ServerHello / EncryptedExtensions /
+    // Certificate / CertificateVerify / Finished drive-through.
+    // End-to-end coverage at L2 specs.
+    assert(true);
+}
+
+@ignore("TLS13-1: 0-RTT session-ticket round-trip + antireplay deferred. See audit.md §3.1.")
+@test
+fn regression_tls13_0rtt_session_ticket_round_trip() {
+    // RFC 8446 §4.6.1 + §8: NewSessionTicket → resumption with early_data.
+    // Anti-replay needs the strike-register or single-use cache at L2.
+    assert(true);
+}
+
+@ignore("TLS13-2: RFC 8879 cert-compression Brotli + Zstd round-trip deferred. See audit.md §3.2.")
+@test
+fn regression_tls13_cert_compression_brotli_round_trip() {
+    // RFC 8879: cert_compress.vr ships Brotli + Zstd codec round-trip
+    // gated on test-fixture for compressed-vs-uncompressed cert chain.
+    assert(true);
+}
