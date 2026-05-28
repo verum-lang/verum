@@ -269,7 +269,6 @@ fn test_cbor_round_trip_bool_false() {
     assert(decoded is Ok);
 }
 
-@ignore
 @test
 fn test_cbor_round_trip_text_empty() {
     let v: CborValue = CborValue.CborText(Text.from(""));
@@ -278,7 +277,6 @@ fn test_cbor_round_trip_text_empty() {
     assert(decoded is Ok);
 }
 
-@ignore
 @test
 fn test_cbor_round_trip_text_short() {
     let v: CborValue = CborValue.CborText(Text.from("ok"));
