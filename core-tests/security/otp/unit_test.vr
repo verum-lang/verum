@@ -1,0 +1,155 @@
+// =============================================================================
+// core-tests/security/otp/unit_test.vr
+// =============================================================================
+//
+// `core/security/otp.vr` — One-time-password (TOTP/HOTP) surface
+// (RFC 4226 / RFC 6238).
+// =============================================================================
+
+mount core.security.otp.{
+    OtpHash, OtpError,
+    DEFAULT_STEP_SEC, DEFAULT_DIGITS, MIN_SECRET_BYTES,
+    DEFAULT_SECRET_BYTES, MAX_TOTP_WINDOW,
+};
+mount core.base.maybe.{Maybe, Some, None};
+mount core.base.result.{Result, Ok, Err};
+
+// =============================================================================
+// Section 1: TOTP/HOTP canonical defaults (RFC 6238)
+// =============================================================================
+
+@test
+fn test_otp_default_step_sec_canonical_value() {
+    // RFC 6238 §4 — default step is 30 seconds.
+    assert_eq(DEFAULT_STEP_SEC, 30_u64);
+}
+
+@test
+fn test_otp_default_digits_canonical_value() {
+    // RFC 6238 §5.3 — 6-digit code is the canonical default.
+    assert_eq(DEFAULT_DIGITS, 6);
+}
+
+@test
+fn test_otp_min_secret_bytes_canonical_value() {
+    // RFC 4226 §4 — 128-bit (16-byte) minimum, but RFC 6238 recommends
+    // ≥160 bits (20 bytes) for SHA-1.
+    assert_eq(MIN_SECRET_BYTES, 20);
+}
+
+@test
+fn test_otp_default_secret_bytes_canonical_value() {
+    // 256-bit (32-byte) recommended secret for SHA-256-based TOTP.
+    assert_eq(DEFAULT_SECRET_BYTES, 32);
+}
+
+@test
+fn test_otp_max_totp_window_canonical_value() {
+    // Reasonable max look-back window (in steps).
+    assert_eq(MAX_TOTP_WINDOW, 100);
+}
+
+// =============================================================================
+// Section 2: Width invariants
+// =============================================================================
+
+@test
+fn test_otp_default_secret_at_least_min() {
+    assert(DEFAULT_SECRET_BYTES >= MIN_SECRET_BYTES);
+}
+
+@test
+fn test_otp_constants_positive() {
+    assert(DEFAULT_DIGITS > 0);
+    assert(MIN_SECRET_BYTES > 0);
+    assert(DEFAULT_SECRET_BYTES > 0);
+    assert(MAX_TOTP_WINDOW > 0);
+}
+
+// =============================================================================
+// Section 3: OtpHash 3-variant ADT
+// =============================================================================
+
+@test
+fn test_otp_hash_sha1_variant() {
+    let h: OtpHash = OtpHash.Sha1;
+    assert(h is OtpHash.Sha1);
+}
+
+@test
+fn test_otp_hash_sha256_variant() {
+    let h: OtpHash = OtpHash.Sha256;
+    assert(h is OtpHash.Sha256);
+}
+
+@test
+fn test_otp_hash_sha512_variant() {
+    let h: OtpHash = OtpHash.Sha512;
+    assert(h is OtpHash.Sha512);
+}
+
+@test
+fn test_otp_hash_sha1_disjoint() {
+    let h: OtpHash = OtpHash.Sha1;
+    assert(!(h is OtpHash.Sha256));
+    assert(!(h is OtpHash.Sha512));
+}
+
+@test
+fn test_otp_hash_sha256_disjoint() {
+    let h: OtpHash = OtpHash.Sha256;
+    assert(!(h is OtpHash.Sha1));
+    assert(!(h is OtpHash.Sha512));
+}
+
+@test
+fn test_otp_hash_sha512_disjoint() {
+    let h: OtpHash = OtpHash.Sha512;
+    assert(!(h is OtpHash.Sha1));
+    assert(!(h is OtpHash.Sha256));
+}
+
+// =============================================================================
+// Section 4: OtpError ADT
+// =============================================================================
+
+@test
+fn test_otp_error_invalid_secret_variant() {
+    let e: OtpError = OtpError.InvalidSecret;
+    assert(e is OtpError.InvalidSecret);
+}
+
+@test
+fn test_otp_error_invalid_digits_variant() {
+    let e: OtpError = OtpError.InvalidDigits(99);
+    assert(e is OtpError.InvalidDigits);
+}
+
+@test
+fn test_otp_error_invalid_step_variant() {
+    let e: OtpError = OtpError.InvalidStep;
+    assert(e is OtpError.InvalidStep);
+}
+
+@test
+fn test_otp_error_unsupported_hash_variant() {
+    let e: OtpError = OtpError.UnsupportedHash;
+    assert(e is OtpError.UnsupportedHash);
+}
+
+@test
+fn test_otp_error_base32_decode_variant() {
+    let e: OtpError = OtpError.Base32Decode;
+    assert(e is OtpError.Base32Decode);
+}
+
+@test
+fn test_otp_error_invalid_digits_payload_round_trip() {
+    let e: OtpError = OtpError.InvalidDigits(20);
+    match e {
+        OtpError.InvalidDigits(n) => assert_eq(n, 20),
+        _ => panic("expected InvalidDigits"),
+    }
+}
+
+fn main() {}
